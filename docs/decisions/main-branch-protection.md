@@ -7,7 +7,7 @@
 requirement". The `all-jobs-passed` job in `.github/workflows/checks.yml` still runs the shared action
 `actions/all-jobs-passed`. No protection requires its status.
 Owner ruling r (2026-11-11 16:43 CST) puts `main` in a ruleset. The 19:08 CST ruling removes that ruleset's one check. See Built, not yet live, and Ruled, not yet built.
-`.github/stamp.json` `merge.requiredChecks` is `"protection"`. The `merge` tool reads the check names
+`.github/stamp.json` `merge.requiredChecks` is `"none"` on `main`. That value follows ruling `own-merge-on-lint-pass` (2026-11-15 18:21 CST, decision `merge-practices`), and decision `private-repos-no-ci` defines `"none"`. Under `"none"` the `merge` tool reads no check, from the ruleset or from classic protection. Under `"protection"` it reads the check names
 from `main`'s ruleset first, then from classic branch protection (see Built, not yet live). Changing a repo's protection is the owner's to do, unless a grant covers it (see the
 temporary grant below).
 Built-today lines in this record were not re-read by the edit of 2026-11-12 11:27 CST, nor by the edit of 2026-11-15. No live setting was read.
@@ -36,7 +36,7 @@ Built-today lines in this record were not re-read by the edit of 2026-11-12 11:2
   shivinate7 login: `ssemwal-cdc` has push, not admin. A handed block (commands handed to the owner to run, decision `act-in-place`) opens with `gh auth switch -u shivinate7`. A cloud session acts as `shivinate7` with admin, but the auto-mode classifier refused its direct classic PATCH as a CI bypass. Whether it refuses the ruleset POST or PUT from `protect.py --confirm`, and whether a ruleset write needs admin, is unmeasured.
   The 19:08 CST ruling removes the one check, which the owner set on 2026-10-31 by direct call (waiting-page item 101), not `protect.py`. The coordinator's read-back of that setting showed strict false. No read-back has followed the ruling.
 - Before every merge, read the checks yourself and refuse on red. The `merge` tool reads its checks
-  from the ruleset first, then from classic branch protection (see Built, not yet live).
+  from the ruleset first, then from classic branch protection (see Built, not yet live). Under `"none"` it reads none.
 - Owner ruling, 2026-10-28 (waiting-page item 33 a): a rename of required checks switches branch
   protection in the merge act. The owner switches it, then the batch merges at once.
 - PR #2606, the grant text that adds the ruleset move, is a draft and not merged. Once it merges, a session on the owner's computer runs the move of `main` to the ruleset under the standing grant "Acts the cloud refuses". Until then that grant covers only classic protection.
@@ -53,8 +53,8 @@ Built in `ruleset_names` and `protection_names` (`merge/merge.py`), and in `main
 - Protect script, owner ruling r (2026-11-11 16:43 CST) and its bypass (2026-11-11 16:49 CST, "yes with bypass"). `protect.py` writes the ruled form: active, on the named branch, deletion and non_fast_forward (force-push) blocked, and the Admin role as its one bypass actor, on pull requests only. Its code still writes `all-jobs-passed` as the one required check, which the 19:08 CST ruling removes (builder work). On update it keeps the held ruleset's name, conditions, strict value and other rules.
   - Not set: no pull-request rule, no approval count, no strict policy of its own. Those are planned, not ruled.
   - The Admin role's actor id is 5 (`ADMIN_ROLE_ID`). UNKNOWN: not confirmed against a live ruleset. No ruleset exists on any repo yet. Verify when the sweep applies the first one.
-- `merge.requiredChecks` stays `"protection"` in `.github/stamp.json`. That is the lane's pick, not an owner ruling. The merge tool names the ruleset's checks when it names any, and classic protection's only when it names none. So `"protection"` names one set, never both.
-- `merge/merge.py` refuses a base that names no required check ("no required checks are named for"). With no check required, that refusal stops every merge until the code change lands (builder work, not made by this edit: `hooks/required_check.py` (`REQUIRED_CHECK`), beside `protect.py` and `merge/merge.py`).
+- `merge.requiredChecks` is `"none"` on `main` (see The ruling). `"protection"` is the lane's pick, not an owner ruling. Under `"protection"` the merge tool names the ruleset's checks when it names any, and classic protection's only when it names none. So `"protection"` names one set, never both.
+- Under `"protection"`, `merge/merge.py` refuses a base that names no required check ("no required checks are named for"). That refusal stops every merge until the code change lands (builder work, not made by this edit: `hooks/required_check.py` (`REQUIRED_CHECK`), beside `protect.py` and `merge/merge.py`). Under `"none"` it does not stop.
 
 ## Ruled, not yet built
 

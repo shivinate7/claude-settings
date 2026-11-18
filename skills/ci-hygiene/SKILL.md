@@ -266,7 +266,7 @@ The rollup skips on a draft, and a draft cannot merge (step 11). Read the protec
 `snippets.md`, section 3b.
 
 The branch protection names no required check. `merge.requiredChecks` in
-`.github/stamp.json` says `"protection"`, so `merge` reads the names from there. A pinned list in
+`.github/stamp.json` says `"protection"` for a repo that names its checks there, so `merge` reads the names from there. On claude-settings `main` it says `"none"`, and `merge` reads no names. A pinned list in
 `stamp.json` stops `merge` when it differs from a non-empty list in the ruleset, or in classic protection
 when the ruleset names none, and the refusal names both sets. An empty or unreadable list does not stop
 `merge`: the pinned list stays in force, and an unreadable one is said aloud. A rename edits the protection. A PUT on the protection API replaces the whole rule. It drops any field
