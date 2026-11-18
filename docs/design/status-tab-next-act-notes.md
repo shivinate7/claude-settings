@@ -51,19 +51,19 @@ Deep links: `#s=live|lanes|stale`, `&red=mark|word`, `&why=row|head`, `&w=1440|8
    never blank or "none". The head counts it as "unknown 1".
    Pick: as drawn.
 
-5. **Draft with no live lane** (plan item e). The act line reads "lane round 1, no live lane,
-   owner coordinator, waited 20 hours". The row is not red. It counts under coordinator.
+5. **Draft with no live lane** (plan item e). The act line reads "no live lane, owner
+   coordinator, waited 20 hours" (the build replaces the ledger's "lane round 1"). The row is not red. It counts under coordinator.
    Pick: as drawn.
 
-6. **Lanes not read** (`#s=lanes`). The sessions list is unread, so no draft can read "no live
-   lane". The act line reads "lane round 1, (ring) lane unknown, owner lane". One line under the
-   head gives the reason once. A lane hold is a fact about the whole list, so the states "no live
-   lane" and "lane unknown" never show in one list.
-   Owner: the owner reads "lane", as `pr_next_act` gives it, because the coordinator owns the row
-   only once the build knows that no lane holds it. Other options: "owner unknown", or "owner lane
-   or coordinator".
-   Pick: owner lane. The plan does not say which owner shows here; this is a question for the
-   owner, not blocking.
+6. **Lanes not read** (`#s=lanes`). No lane hold can be told when the sessions list is missing, the
+   repo's GitHub name is unread, a session row was skipped, or the draft has no branch, so no draft
+   can read "no live lane". The act line reads "(ring) lane unknown, owner unknown, waited 20 hours".
+   The reason shows in the span's title and once in a line under the head ("Lane holds unknown: ..."). A cause that
+   lies in the whole list makes every round-1 draft read "lane unknown"; a draft with no branch
+   reads it alone.
+   Owner: the owner reads "unknown", because the coordinator owns the row only once the build knows
+   that no lane holds it, and the ledger's "lane" is the owner of an act the build has replaced.
+   Pick: owner unknown, as the tests pin it.
 
 7. **Acts too old** (`#s=stale`). The ledger's readAt is older than STALE_LIVE_MINUTES (60), or
    missing. Every act reads "act unknown", with no owner, no age and no red. The rows keep REST

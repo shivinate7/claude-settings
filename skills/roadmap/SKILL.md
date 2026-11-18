@@ -117,7 +117,7 @@ GitHub, so the publisher reads them just before the build and passes one file:
   missing, has no `rows` list, or whose `readAt` is not an ISO time, is over `STALE_LIVE_MINUTES` old or is in the future
   makes every act read `act unknown`, and the list head says why once; no other key of the file changes that. A draft
   whose act is `lane round 1` reads `no live lane` (owner coordinator, never red) when the `sessions` list is read and no
-  live lane holds its branch, and `lane unknown` (owner unknown) when there is no `sessions` list or a session row was skipped. The key is optional:
+  live lane holds its branch, and `lane unknown` (owner unknown) when there is no `sessions` list, the repo's GitHub name cannot be read, a session row was skipped, or the draft has no `branch`. The build bakes the reason as the list-head key `laneWhy`, which the page shows in the span's title and the Lane holds line. The key is optional:
   a file without it still renders Live work, with every act unknown.
 - An entry with the wrong shape is counted on the page and in the upkeep list, never dropped. A
   `step` that names no open step goes in the upkeep list.

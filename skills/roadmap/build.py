@@ -170,6 +170,7 @@ import argparse
 import datetime
 import http.client
 import json
+import math
 import os
 import pathlib
 import re
@@ -944,14 +945,21 @@ def live_age_minutes(read):
 
 LEDGER_ACT_UNKNOWN = "act unknown"  # a pull request whose act the build cannot read: never blank, never "none"
 LEDGER_NO_LIVE_LANE = "no live lane"  # a round-1 draft that no live lane holds; the coordinator owns it
-LEDGER_LANE_UNKNOWN = "lane unknown"  # the same draft when the sessions list is unread, so no lane hold can be told
+LEDGER_LANE_UNKNOWN = "lane unknown"  # the same draft when no lane hold can be told: sessions unread or skipped, or the draft has no branch
+LEDGER_ROW_WRONG_SHAPE = "its ledger row has the wrong shape"  # a pull whose row exists but failed ledger_shape_why: the row's own reason, not "no row"
+# live_work's own words for a sessions list it could not read (its body is the one home; it appends them to `why` inline, so these repeat them).
+LANE_WHY_NO_LIST = "unknown (the live file has no sessions list)"
+LANE_WHY_NO_NAME = "unknown (the repo's GitHub name could not be read)"
+LANE_WHY_SKIPPED = "unknown (a session row was skipped)"
+LANE_WHY_NO_BRANCH = "unknown (the draft has no branch)"
 
 
 def ledger_shape_why(row):
     """Why a ledger row is unusable, or None: {number: int, act: text, owner: text, ageHours: number, red: bool, blockedOn: int or null}."""
     if not isinstance(row, dict):
         return "not an object"
-    num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)
+    # JSON reads NaN and Infinity as numbers, and a negative age is no age: each is a wrong shape, so no page prints "waited NaN days".
+    num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0
     if type(row.get("number")) is not int:
         return "number is not an int"
     if not (isinstance(row.get("act"), str) and row["act"].strip() and isinstance(row.get("owner"), str) and row["owner"].strip()):
@@ -964,41 +972,44 @@ def ledger_shape_why(row):
 
 
 def ledger_read(raw):
-    """(rows by pull number, readAt text, why or None, skipped row names) of the live file's `ledger` value: `merge --reviewed --json`
+    """(rows by pull number, readAt text, why or None, skipped row names, numbers of the wrong-shaped rows) of the live file's `ledger` value: `merge --reviewed --json`
     whole, {readAt, rows}. The reason is the ledger's own: it is missing, not an object, has no rows list, or its readAt is not an
     ISO time with a zone, is over STALE_LIVE_MINUTES old, or is in the future. It reads no other key of the live file, so a
-    skipped landedPulls row cannot blank the acts. A row with the wrong shape is left out and named in the skipped list; the first
-    row for a number wins."""
-    skipped = []
+    skipped landedPulls row cannot blank the acts. A row with the wrong shape is left out and named in the skipped list, and its pull number
+    (when it has an int one) in the last value, so that pull reads its own reason; the first row for a number wins."""
+    skipped, wrong = [], set()
     if not isinstance(raw, dict):
-        return {}, None, "unknown (the live file has no ledger, so no act is known)", skipped
+        return {}, None, "unknown (the live file has no ledger, so no act is known)", skipped, wrong
     at = raw.get("readAt")
     if zoned_time(at) is None:
-        return {}, None, "unknown (the ledger's readAt is not an ISO time with a zone: %r)" % (at,), skipped
+        return {}, None, "unknown (the ledger's readAt is not an ISO time with a zone: %r)" % (at,), skipped, wrong
     minutes = live_age_minutes(at)
     if not isinstance(raw.get("rows"), list):
-        return {}, at, "unknown (the ledger has no rows list)", skipped
+        return {}, at, "unknown (the ledger has no rows list)", skipped, wrong
     if minutes > STALE_LIVE_MINUTES:
-        return {}, at, "unknown (the ledger was read %d minutes ago, past the %d-minute limit)" % (minutes, STALE_LIVE_MINUTES), skipped
+        return {}, at, "unknown (the ledger was read %d minutes ago, past the %d-minute limit)" % (minutes, STALE_LIVE_MINUTES), skipped, wrong
     if minutes < -FUTURE_MINUTES:
-        return {}, at, "unknown (the ledger's readAt is in the future)", skipped
+        return {}, at, "unknown (the ledger's readAt is in the future)", skipped, wrong
     rows = {}
     for n, row in enumerate(raw["rows"]):
         if ledger_shape_why(row):
             skipped.append("ledger row %d" % (n + 1))
+            if isinstance(row, dict) and type(row.get("number")) is int:
+                wrong.add(row["number"])
         else:
             rows.setdefault(row["number"], row)
-    return rows, at, None, skipped
+    return rows, at, None, skipped, wrong
 
 
 def live_ledger(path, work):
     """Bake each open pull's next act into `work` (live_work's result), from the live file's `ledger` key (step status-tab-lists-coord-prs).
 
     Every row of work["pulls"] gains `act`, `owner`, `ageHours` and `red`; `work` gains `ledgerAt` (the ledger's readAt, when it is a
-    time) and `ledgerWhy` (None, or why every act reads unknown: said once, for the list head, never on a row). A pull with no ledger
-    row reads act `act unknown`, owner None. A draft whose ledger act is `lane round 1` is the parked mark: with the sessions list read,
+    time), `ledgerWhy` (None, or why every act reads unknown: said once, for the list head, never on a row) and `laneWhy` (None, or why
+    a draft reads `lane unknown`, shaped like ledgerWhy). A pull with no ledger row reads act `act unknown`, owner None; one whose row has
+    the wrong shape reads the same, with `actWhy` naming that. A draft whose ledger act is `lane round 1` is the parked mark: with the sessions list read,
     no live lane holding its branch (live_lane_holds) reads act `no live lane`, owner `coordinator`, never red; with the sessions list
-    unread, or a session row was skipped, it reads act `lane unknown`, owner `unknown`. A ledger row with the wrong shape is added to `skipped`. A live file that gave
+    unread, a session row skipped, or no branch on the draft, it reads act `lane unknown`, owner `unknown`. A ledger row with the wrong shape is added to `skipped`. A live file that gave
     no pulls list (work has no `pulls`) is left alone. The ledger comes from `merge --reviewed --json`; this reads the live file again
     and nothing else: no GitHub read, no process."""
     if "pulls" not in work:
@@ -1007,20 +1018,35 @@ def live_ledger(path, work):
         raw = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         raw = {}
-    rows, at, why, skipped = ledger_read(raw.get("ledger") if isinstance(raw, dict) else None)
+    rows, at, why, skipped, wrong = ledger_read(raw.get("ledger") if isinstance(raw, dict) else None)
     work["ledgerAt"], work["ledgerWhy"] = at if zoned_time(at) else None, why
     work["skipped"] = list(work.get("skipped") or []) + skipped
+    # Why no lane hold can be told, from the sessions list alone: a skipped session row may be the lane that holds a draft, and its tags were never read.
+    if not isinstance(raw.get("sessions") if isinstance(raw, dict) else None, list):
+        list_why = LANE_WHY_NO_LIST
+    elif work.get("laneSessions") is None:  # glossary-ok: the key live_work returns, the name its readers use
+        list_why = LANE_WHY_NO_NAME
+    elif any(x.startswith("session ") for x in work["skipped"]):
+        list_why = LANE_WHY_SKIPPED
+    else:
+        list_why = None
+    work["laneWhy"] = None
     for pull in work["pulls"]:
         row = rows.get(pull["number"])
         if row is None:
             pull.update(act=LEDGER_ACT_UNKNOWN, owner=None, ageHours=None, red=False)
+            if pull["number"] in wrong:
+                pull["actWhy"] = LEDGER_ROW_WRONG_SHAPE
             continue
         pull.update(act=row["act"], owner=row["owner"], ageHours=row["ageHours"], red=row["red"])
         if pull.get("draft") is True and row["act"] == "lane round 1":
-            # A skipped session row may be the lane that holds this draft, and its tags were never read: the hold is unknown, not absent.
-            if work.get("laneSessions") is None or any(x.startswith("session ") for x in work["skipped"]):  # glossary-ok: the key live_work returns, the name its readers use
+            branch = pull.get("branch")
+            no_branch = not (isinstance(branch, str) and branch)  # with no branch no lane's hold can be told, so it is unknown, never absent
+            lane_why = list_why or (LANE_WHY_NO_BRANCH if no_branch else None)
+            if lane_why:
                 pull.update(act=LEDGER_LANE_UNKNOWN, owner="unknown")
-            elif not live_lane_holds(work, pull.get("branch")):
+                work["laneWhy"] = work["laneWhy"] or lane_why
+            elif not live_lane_holds(work, branch):
                 pull.update(act=LEDGER_NO_LIVE_LANE, owner="coordinator", red=False)
     return work
 

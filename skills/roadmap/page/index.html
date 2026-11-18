@@ -1037,21 +1037,22 @@ function unavailable(){
 /* Live work: each thread's state and the open pull requests, and a state tag on each step a thread names. */
 (() => {
 /* Open pull requests with each next act (step status-tab-lists-coord-prs). The build bakes `act`, `owner`, `ageHours` and `red` on each pull from the
-   live file's ledger (build.py live_ledger); this only draws them. A pull with no act reads "act unknown", never blank. The same code is in
-   skills/roadmap/page/index.html: each page is one file with its own script, so the two cannot share it. */
+   live file's ledger (build.py live_ledger); this only draws them. A pull with no act reads "act unknown", never blank. `span` turns milliseconds into
+   "3 hours". The same code is in skills/roadmap/page/index.html: each page is one file with its own script, so the two cannot share it. */
 const PR_RED_GLY = '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6.5" fill="currentColor"/><path d="M7 3.4v4.4" stroke="var(--surface)" stroke-width="1.9" stroke-linecap="round"/><circle cx="7" cy="10.3" r="1.1" fill="var(--surface)"/></svg>';
-function prActs(w, pulls, day) {
+function prActs(w, pulls, day, span) {
   const known = !w.ledgerWhy, ring = '<span class="rg unk" aria-hidden="true"></span>';
-  const hrs = (ms) => { const h = Math.round(Math.abs(ms) / 36e5); if (h < 1) return "under an hour"; if (h < 24) return h + (h === 1 ? " hour" : " hours"); const d = Math.round(h / 24); return d + (d === 1 ? " day" : " days"); };
+  const unwrap = (r) => String(r).replace(/^unknown \(([\s\S]*)\)$/, "$1");
   const missing = (p) => !known || typeof p.act !== "string" || !p.act || p.act === "act unknown";
   const red = (p) => known && !missing(p) && p.red === true;
   const rows = [...pulls.filter(red), ...pulls.filter((p) => !red(p))];
   const owner = (p) => (typeof p.owner === "string" && p.owner ? p.owner : "unknown");
+  const laneWhy = unwrap(w.laneWhy || "the build gave no reason");
   const line = (p) => {
-    if (missing(p)) return `<span class="act"><span class="unk">${ring} act unknown${known ? ": no ledger row for this pull request" : ""}</span></span>`;
+    if (missing(p)) return `<span class="act"><span class="unk">${ring} act unknown${known ? ": " + esc(p.actWhy || "no ledger row for this pull request") : ""}</span></span>`;
     const lane = p.act === "lane unknown", mark = red(p) ? `<span class="tag ic redm" role="img" aria-label="Red" title="Red">${PR_RED_GLY}</span>` : "";
-    const parts = [lane ? `<span class="unk" title="The build had no sessions list.">${ring} lane unknown</span>` : `<b>${esc(p.act)}</b>`, "owner " + esc(owner(p))];
-    if (typeof p.ageHours === "number") parts.push("waited " + hrs(p.ageHours * 36e5));
+    const parts = [lane ? `<span class="unk" title="${esc(laneWhy)}">${ring} lane unknown</span>` : `<b>${esc(p.act)}</b>`, "owner " + esc(owner(p))];
+    if (typeof p.ageHours === "number" && Number.isFinite(p.ageHours) && p.ageHours >= 0) parts.push("waited " + span(p.ageHours * 36e5));
     return `<span class="act">${mark}${parts.join(", ")}</span>`;
   };
   let cts = "";
@@ -1064,8 +1065,8 @@ function prActs(w, pulls, day) {
     cts = `<span class="cts">${nred ? `<span class="rd">${nred} red</span>; ` : ""}${list}</span>`;
   }
   const at = w.ledgerAt ? day(w.ledgerAt) : "";
-  const why = !known ? `<p class="asof unk prwhy">Every act is unknown: ${esc(String(w.ledgerWhy).replace(/^unknown \(([\s\S]*)\)$/, "$1"))}.</p>`
-    : rows.some((p) => p.act === "lane unknown") ? '<p class="asof unk prwhy">Lane holds unknown: the build had no sessions list, so a draft reads "lane unknown".</p>' : "";
+  const why = !known ? `<p class="asof unk prwhy">Every act is unknown: ${esc(unwrap(w.ledgerWhy))}.</p>`
+    : rows.some((p) => p.act === "lane unknown") ? `<p class="asof unk prwhy">Lane holds unknown: ${esc(laneWhy)}, so a draft reads "lane unknown".</p>` : "";
   return {
     head: `<h4 class="prh"><span>Open pull requests</span>${cts}</h4>${why}`,
     asof: !at ? "" : known ? `acts read <span class="num">${esc(at)}</span>` : `<span class="unk">${ring} acts read <span class="num">${esc(at)}</span></span>`,  // no time: the list head's reason says it
@@ -1077,6 +1078,8 @@ function prActs(w, pulls, day) {
   const NAME = {blocked:'Waiting on you', working:'Working', review_ready:'Ready for review', failed:'Failed', stopped:'Stopped', done:'Done'};
   const when = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); };
   const link = (url, text) => /^https?:\/\//.test(url || '') ? `<a href="${esc(url)}" target="_blank" rel="noopener">${text}</a>` : text;
+  // The same text as the waiting page's span(): this page has no copy of it to call (each page is one file).
+  const spanOf = ms => { const h = Math.round(Math.abs(ms) / 36e5); if(h < 1) return 'under an hour'; if(h < 24) return h + (h === 1 ? ' hour' : ' hours'); const d = Math.round(h / 24); return d + (d === 1 ? ' day' : ' days'); };
   if(!Array.isArray(w.pulls)){
     el.innerHTML = `<summary><span class="lh">Live work</span><span class="unk">${esc(w.read || 'unknown (this page was not built by build.py)')}</span></summary>`;
     return;
@@ -1084,7 +1087,7 @@ function prActs(w, pulls, day) {
   const threads = Array.isArray(w.threads) ? w.threads : null;
   const open = (threads || []).filter(t => t.state !== 'done'), done = threads ? threads.length - open.length : 0;
   const counts = Object.keys(NAME).filter(k => k !== 'done').map(k => [k, open.filter(t => t.state === k).length]).filter(([, n]) => n);
-  const pulls = w.pulls || [], branches = w.branches || [], pr = prActs(w, pulls, when);
+  const pulls = w.pulls || [], branches = w.branches || [], pr = prActs(w, pulls, when, spanOf);
   el.innerHTML = `<summary><span class="lh">Live work</span>${counts.map(([k, n]) => `<span class="tag st-${k}">${n} ${esc(NAME[k].toLowerCase())}</span>`).join('')}`
     // The panel loads folded, so a missing threads list must show in the summary, not only in the body.
     + (threads ? '' : `<span class="tag unk">threads unknown</span>`)
