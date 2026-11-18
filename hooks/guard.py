@@ -309,6 +309,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
   config-edit          noted. A write to a project's own settings or hooks. See below.
+  note-form-at-write   noted. A Write, Edit or MultiEdit that adds a line to the old notes file (the debt-notes kind of
+                       lint/layout.json), which lint/check_record_slugs.py refuses at hand-in. Log only: the call is allowed and
+                       prints nothing. The line carries that checker's own refusal text. Cost: a `.md` target reads
+                       lint/layout.json, a match reads the old file once more; no process starts.
+                       (notes-merge-union)
   agent-model-cap   ask. A write to a settings file that sets or changes
                        `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` or the `_FORCE` form.
                        (agent-model-cap)
@@ -7954,6 +7959,11 @@ def judge(payload) -> None:
         if is_project_config(target, cwd):
             record(tool, "noted", "config-edit", target)
     for target in targets:
+        # 7b2. A line added to the old notes file: allowed, and noted in the log only (rule note-form-at-write).
+        noted = note_form_hit(tool, tool_input, target, cwd)
+        if noted:
+            record(tool, "noted", "note-form-at-write", noted)
+    for target in targets:
         # 8. The agent model cap. Rule 7 already refused the config directory's own settings, so
         # only a project-scoped or clone-scoped settings file reaches here. The content read is what
         # the tool would WRITE, so a file that carries the variable name anywhere in that content
@@ -7966,6 +7976,55 @@ def judge(payload) -> None:
                 refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, target),
                        log_path_and_text(target, change))
     scratchpad_owner_write(payload, tool, tool_input, cwd)   # every refusal above passed: refuse an overwrite, else record the writer
+
+
+def note_form_hit(tool: str, tool_input: dict, target: str, cwd: str) -> str:
+    """The log text (the checker's refusal, then the old notes file) when this Write, Edit or MultiEdit adds a line to the
+    old notes file, else "". The file is the debt-notes kind of lint/layout.json at its layout path and its legacy path, the
+    two lint/check_record_slugs.py reads as frozen; the text is that checker's NEW_NOTE_REFUSAL. A line is added when
+    its count after the write is over its count before, blank lines apart: the checker's own test, so a delete, a
+    reorder and a blank line add none. Cost: a `.md` target reads lint/layout.json; a match reads the old file once
+    more. No process starts. Fails open: anything unread returns "".
+    (rule note-form-at-write, decision notes-merge-union)"""
+    if tool not in ("Write", "Edit", "MultiEdit") or not target.lower().endswith(".md"):
+        return ""
+    try:
+        import collections
+        data = _layout_module().layout()
+        legacy = data.get("legacy") or {}
+        old = data["kinds"]["debt-notes"]["path"].strip("/")
+        full = os.path.abspath(_absolute(target, cwd)).replace("\\", "/")
+        rel = next((f for f in dict.fromkeys((old, legacy.get(old, old)))
+                    if full.endswith("/" + f) and os.path.exists(full[:-len(f)] + ".git")), "")
+        if not rel:
+            return ""
+        try:
+            with open(full, encoding="utf-8", errors="replace") as handle:
+                before = handle.read()
+        except FileNotFoundError:
+            before = ""
+        if tool == "Write":
+            after = tool_input.get("content")
+        else:
+            after = before
+            for edit in (tool_input.get("edits") if tool == "MultiEdit" else [tool_input]):
+                was, now = edit.get("old_string"), edit.get("new_string")
+                if not isinstance(was, str) or not isinstance(now, str) or (was and was not in after) or (not was and after):
+                    return ""
+                after = (now if not was else after.replace(was, now, None if edit.get("replace_all") else 1)
+                         ) if True else after
+        if not isinstance(after, str):
+            return ""
+        held = collections.Counter(l.rstrip("\r") for l in before.split("\n") if l.strip())
+        for line in (l.rstrip("\r") for l in after.split("\n") if l.strip()):
+            held[line] -= 1
+            if held[line] < 0:
+                import check_record_slugs
+                notes = data["kinds"]["notes"]["path"].strip("/")
+                return "%s; %s" % (check_record_slugs.NEW_NOTE_REFUSAL % (legacy.get(notes, notes) + "/"), rel)
+    except Exception:
+        return ""
+    return ""
 
 
 def write_targets(tool_input: dict) -> list:

@@ -146,6 +146,8 @@ NOTE_LINE = re.compile(r"^- ([a-z0-9-]+): +\S")  # the one line a note file hold
 DIGITS = re.compile(r"[0-9]+")  # a digits-only slug reads as an old `note:<digits>` ref (hooks/feedback_guard.py)
 NOTE_README = "README.md"  # the note folder's own description: not a note
 CLIP = 60  # characters of a refused line that a message shows
+NEW_NOTE_REFUSAL = "a new or edited note is its own file, %s<slug>.md, as `- <slug>: <text>`"  # %s: the note folder with its slash;
+# the refusal below prints it, and the guard's write-time log (hooks/guard.py note_form_hit) reads it from here
 
 
 def note_dir(root):
@@ -278,8 +280,7 @@ def main(args):
             print("check_record_slugs: FAIL: a note file holds one line `- <slug>: <text>`, its slug the file name: %s"
                   % f)
     for line in new_lines:
-        print("check_record_slugs: FAIL: a new or edited note is its own file, %s<slug>.md, as `- <slug>: <text>`: %s"
-              % (folder, line[:CLIP]))
+        print("check_record_slugs: FAIL: %s: %s" % (NEW_NOTE_REFUSAL % folder, line[:CLIP]))
     for f, how in feel:
         print("check_record_slugs: FAIL: feel-fix debt %s with no device check: %s"
               % ("deleted" if how == "deleted" else "lost its Feel line", f))
