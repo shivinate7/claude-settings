@@ -22,7 +22,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from test_windows_split import CHECKS, MACOS_JOBS, all_jobs, eval_with, yaml_scalar  # noqa: E402  the one home of the checks.yml path
+from test_windows_split import CHECKS, DELTA_CLAUSES, MACOS_JOBS, RECORDS_ONLY_CONDITION, all_jobs, eval_with, yaml_scalar  # noqa: E402  the one home of the checks.yml path
 from all_jobs_passed_rules import (ALL_JOBS_PASSED_USES, all_problems, child_problems, ci_done_problems, needs_of,  # noqa: E402  the one home of the rules
                                    needs_problems, off_problems, scope_if_problems, scope_skips_problems, shape_problems, split_jobs, step_with,
                                    steps_problems, steps_part)
@@ -202,7 +202,7 @@ def planned_nightly_skip(text):
 
 # checks-hooks' header and its job-level if in checks.yml. A case swaps that if line for its own, so the subject is the job's one if.
 HOOKS_HEAD = "  checks-hooks:\n\n    runs-on: ubuntu-latest\n    needs: scope\n"
-HOOKS_IF = "    if: ${{ needs.scope.outputs.records_only_skip != 'true' }}\n"
+HOOKS_IF = "    if: ${{ " + " || ".join((RECORDS_ONLY_CONDITION, *DELTA_CLAUSES["checks-hooks"])) + " }}\n"
 
 
 class PushOffRollup(unittest.TestCase):
@@ -277,7 +277,9 @@ class MacOnceByBatchRollup(unittest.TestCase):
         # Control: a job-level if that reads a scope flag is refused on a needed job that is no macOS job.
         self.assertEqual(self.text.count(HOOKS_HEAD + HOOKS_IF), 1, "checks-hooks' header changed: this case must follow it")
         text = self.text.replace(HOOKS_HEAD + HOOKS_IF, HOOKS_HEAD + "    if: ${{ needs.scope.outputs.checks_macos == 'true' }}\n", 1)
-        self.assertTrue(off_problems(text) or needs_problems(text), "a flag-reading job-level if on an unnamed job passes the rollup rules")
+        # Relative to the real file's own problems: a truthy whole-file result would pass for the wrong cause while the file has any.
+        clean = all_problems(self.text)
+        self.assertTrue([p for p in all_problems(text) if p not in clean], "a flag-reading job-level if on an unnamed job passes the rollup rules")
 
 
 # The macOS jobs run on a schedule and a dispatch only (owner, 01:33 CST Nov 16): no job-level if lets a pull_request start one,

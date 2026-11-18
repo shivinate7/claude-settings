@@ -535,6 +535,13 @@ CONDITIONED_JOBS = ("checks-windows-guard", "checks-windows-guard-2", "checks-wi
 SPLIT_CONDITIONED_JOBS = ("checks-hooks", "checks-rest")
 UNCONDITIONED_JOBS = ("checks",)
 SPEC_JOBS = CONDITIONED_JOBS + SPLIT_CONDITIONED_JOBS + UNCONDITIONED_JOBS
+# The delta skips (ci-scope.sh's skip_comment_delta and skip_record_delta) start a lint job after a records-only skip. Such a job's
+# job-level if is the records-only condition, then the clauses named here, in this order. A clause only runs its job more, so the job
+# still skips on the records-only skip alone. Any other clause, or another order, fails the job-level rules.
+COMMENT_DELTA_CLAUSE = "needs.scope.outputs.skip_comment_delta == 'true'"
+RECORD_DELTA_CLAUSE = "needs.scope.outputs.skip_record_delta == 'true'"
+DELTA_CLAUSES = {"checks": (COMMENT_DELTA_CLAUSE, RECORD_DELTA_CLAUSE), "checks-hooks": (RECORD_DELTA_CLAUSE,),
+                 "checks-rest": (RECORD_DELTA_CLAUSE,)}
 
 
 def scope_named_steps():
@@ -568,6 +575,16 @@ def job_if_without_records(raw):
     if e == RECORDS_ONLY_CONDITION:
         return None
     return drop_condition(e)
+
+
+def delta_clauses_off(name, raw):
+    """`raw` (with its `${{ }}`) with job `name`'s delta clauses taken off, when it is exactly RECORDS_ONLY_CONDITION followed by
+    DELTA_CLAUSES[name], in that order: the records-only condition alone is what the job reads. Any other if, and a job with no
+    delta clauses, comes back as it is."""
+    clauses = DELTA_CLAUSES.get(name)
+    if clauses and unwrap(raw) == " || ".join((RECORDS_ONLY_CONDITION, *clauses)):
+        return RECORDS_ONLY_CONDITION
+    return raw
 
 
 def condition_problem(name, st):
@@ -787,6 +804,7 @@ def job_check_problems(name, job, flag=None):
     (LINT_JOBS) have no scope condition. A lint or scoped job's job-level if, if any, is the draft guard (draft_guard_only).
     The records-only condition may stand alone as a job-level if, or follow a shard's draft guard as `(draft guard) && RECORDS`;
     job_if_without_records takes it off before these rules read the rest. A shard's if with it bare, or unparenthesised, fails.
+    A lint job's named delta clauses (DELTA_CLAUSES) are taken off first, by delta_clauses_off; any other clause fails.
     A scoped job's scope condition G is the one its steps carry (read_scope_condition), every step carries G
     (scope_condition_step_problems), and G keeps the scope condition rules (scope_condition_property_problems). `flag` names
     the scope output for a job whose flag is not its own name (FLAG_OF)."""
@@ -794,7 +812,7 @@ def job_check_problems(name, job, flag=None):
     if not re.fullmatch(r"\[?\s*scope\s*\]?", job["needs"] or ""):
         problems.append(f"{name}: needs is {job['needs']}, want scope")
     expr = job["if"]
-    rest = job_if_without_records(expr)
+    rest = job_if_without_records(delta_clauses_off(name, expr))
     if shard_base(name):
         return problems + ([] if rest == unwrap(SHARD_JOB_IF) or (name in PUSH_OFF_JOBS and push_off_job_if(name, rest)) else [f"{name}: shard job if is {expr}, want {SHARD_JOB_IF}"])
     if name in LINT_JOBS:  # they run on every PR: no scope condition, and a job-level if only when it is the draft guard
@@ -1243,6 +1261,22 @@ class WindowsSplit(unittest.TestCase):
         for label, text in bad.items():
             with self.subTest(defect=label):
                 self.assertTrue(waiting_page_problems(text), label)
+
+    def test_a_lint_job_takes_only_its_named_delta_clauses(self):
+        # Scope first: each named form passes on the real file, so a refusal below is the clause and not a broken helper.
+        # Named failure: a delta clause the job does not name, or the named ones in another order, passes the job-level rules.
+        jobs = all_jobs(self.text)
+        for name in DELTA_CLAUSES:
+            self.assertEqual(job_check_problems(name, jobs[name]), [], f"{name}'s named delta form is refused")
+        records, comment, record = RECORDS_ONLY_CONDITION, COMMENT_DELTA_CLAUSE, RECORD_DELTA_CLAUSE
+        other = "needs.scope.outputs.checks_macos == 'true'"
+        refused = (("checks-hooks", f"{records} || {comment}"), ("checks", f"{records} || {record} || {comment}"),
+                   ("checks", f"{records} || {comment}"), ("checks", f"{records} || {comment} || {record} || {other}"),
+                   ("checks-rest", f"{records} || {comment} || {record}"))
+        for name, expr in refused:
+            with self.subTest(job=name, if_=expr):
+                job = {**jobs[name], "if": "${{ " + expr + " }}"}
+                self.assertTrue(job_check_problems(name, job), f"{name} takes {expr!r}, a form it does not name, and passes")
 
     def test_scope_job_checks_every_other_job(self):
         self.assertEqual(scope_problems(self.text), [])
