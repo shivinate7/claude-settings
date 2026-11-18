@@ -1,5 +1,6 @@
 {
   "added": "2026-11-17T22:00:36-06:00",
+  "closed": "2026-11-18T14:40:30-06:00",
   "context": "Goal: every pull request gets the review depth its kind of change needs, set by one table, with no gap where two rules disagree.\nProblem (rule): no decision says whether rule text is on the list of guard and check paths (the round rules record names that list), so the table has an unset cell and only you can fill it.\nBased on (read): the plan plan on branch lane/pr-template-risk-tiers (docs/plans/pr-template-risk-tiers.md, read from main commit 69ab998832, 21:38 CST Nov 17): the list names guard and check paths; rule text is not on it.\nDeparts from: main \u2014 rule text is on no list and the table cell is unset \u2014 a reading is picked (a or b).\nWaiting on: nothing is stopped; step pr-template-risk-tiers waits on your pick, then a test-author writes the template-check cases and a builder lands them.",
   "home": "step pr-template-risk-tiers",
   "id": "tier-rule-text-is-check",
@@ -26,8 +27,8 @@
   "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
   "recommended": "a",
   "ref": "owner chat 19:45 CST Nov 17 (relayed by the consultant): land the verification article's findings; PR template lines and risk tiers by change",
-  "replied": "2026-11-18T11:56:00-06:00",
-  "reply": "You are right, and the item is wrong. Round 1 runs Haiku at xhigh effort on every change, a guard or check change included (your ruling of 19:45 CST Nov 17, in decision agent-model-cap: its round rows list 'reviewer, round 1 guard' and 'reviewer, round 1 other' as the same row). So neither option changes the first review's model. What the label does change is in your rule roles-review-cap-three (global CLAUDE.md): the net-value test runs only when a guard or check change reaches round 3, and a passing round ends review, so the label never by itself calls for a third round. My earlier line saying it changes only what is owed after was wrong and is removed. I wrote option b (round 1 on Sonnet) against that ruling, and my past-ruling check missed it. My proposal: close this item as moot, and re-ask only the real question, whether a rule-text change owes the net-value test. Say 'close 956' and I do it; I have not closed it.",
+  "replied": "2026-11-18T14:40:30-06:00",
+  "reply": "Closed on your 'none of these' (14:36 CST). The item should have closed itself the moment I found it false, and it should never have been posted: its option b contradicted your ruling that round 1 is the same for every change (decision agent-model-cap). I posted it because my past-ruling check missed it; the fix is draft PR 3666 (step guard-question-checks-past-rulings). I am filing a step so an item found false closes itself (page-item-closes-when-found-false).",
   "repo": "shivinate7/claude-settings",
   "short": "Tier table: is a rule-text change a check?",
   "shown": [
@@ -42,7 +43,7 @@
       "label": "Rule text is a check: first review on the stronger model, one round"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "Does a pull request that changes only rule text (CLAUDE.md, decisions) count as a guard or check change, so its first review runs on the stronger model?",
   "why": "a keeps the list as written and costs less; b spends the stronger model on every rule edit. Recommended by triage, not owner-typed."
 }

@@ -1,0 +1,14 @@
+{
+ "id": "page-item-closes-when-found-false",
+ "title": "A page item found false closes itself the same turn, with a reply naming the record that shows it false",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 14:36 CST Nov 18 on item 956: it should have been closed automatically once found false, and should never have been posted. Triage 11 found it false at 11:56 CST and left it open until the owner answered 'none of these'.",
+ "source": "owner page comment 14:36 CST Nov 18 (thread 817a973d-d3a1-4890-8e17-ff9af1c3ce0a)",
+ "note": "Two halves. (1) Never posted: draft PR 3666 (step guard-question-checks-past-rulings) widens the past-ruling check to owner-ruling sentences. (2) Closed when found false: a rule for the page writer, and ideally a check, that an item whose premise a session has found false is closed in the same turn with a reply naming the record. Prior-work search first. Mistake it stops: an owner is asked a question whose own record shows it moot. Not built: the check for (2).",
+ "updatedAt": "2026-11-18T14:41:32-06:00"
+}

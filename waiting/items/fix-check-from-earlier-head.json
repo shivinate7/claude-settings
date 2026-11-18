@@ -1,5 +1,6 @@
 {
   "added": "2026-11-17T19:57:23-06:00",
+  "closed": "2026-11-18T14:40:41-06:00",
   "context": "Goal: pull requests #2906, #2904 and #2778 get their review records posted and merge.\nProblem (rule): the merge tool refuses a fix check that starts at an earlier reviewed head when lane commits come after it, because decision pr-review-record says a fix check starts at that head, never at a later commit, so changing it is your call.\nBased on (measured): the lane's record for #2906 at 66363ce4 is refused; draft PR #3637 has 2 red cases for the change; tests ReviewFixAfterMainMerge (d) and (h) pin the current rule (consultant, 19:58 CST Nov 17, not re-run by triage).\nDeparts from: pr-review-record's fix-check order \u2014 a fix check may start at any earlier reviewed head that is an ancestor of the live head.\nWaiting on: nothing stopped; draft PR #3637 stays a draft and nothing else waits on it.",
   "home": "decision pr-review-record; draft PR #3637",
   "id": "fix-check-from-earlier-head",
@@ -32,8 +33,8 @@
   "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
   "recommended": "b",
   "ref": "consultant message 19:58 CST Nov 17",
-  "replied": "2026-11-18T02:05:00Z",
-  "reply": "Read at 20:05 CST Nov 17 by triage 11; still open, pick again below. On your two points. (1) Keeping heads current: a lane's head goes stale when the lane pushes commits after a review, not only when main moves, so fresher checkouts would not remove the case; your ruling on item 925 d (lanes bring main in only on conflict; merged as PR 3628) also keeps them from refreshing. Consultant, 20:04 CST (a test-author's read, not re-run by triage): pull request #2906's head holds the lane's own commits after the reviewed head c22393aac, so it went stale from its own later commits, not a main move; #2904 and #2778 are unread, so unknown. (2) Your 'fine with A if no problem': the one problem the consultant named is that A changes what the shared merge tool accepts, which he reads as against your ruling that a repo changes to fit a shared tool, never the tool to fit a repo. I think that ruling is about repos, not lanes of this same repo, so it may not apply; that is your call. The cost of A itself is one fix check covering more than one fix. Pick a if you read the ruling as not covering this; pick b to keep the rule as written.",
+  "replied": "2026-11-18T14:40:41-06:00",
+  "reply": "Closed on your pick a (14:40 CST). This item was already built: draft PR 3637 merged at 01:06:44 CST Nov 18 (merge commit 9ac3c66527a4) under your earlier pick of a (step fix-check-chains-from-descendant, done), and I left the item open by mistake. On the root cause you name: no step covers 'a lane pushes commits after a review' as a whole. Pieces exist: reviewed-head-push-ask (the guard asks before a push past a reviewed head, doing), ready-records-push-keeps-record-head (doing), and round-one-reset (ready). I have asked the consultant whether it belongs in the next goal.",
   "repo": "shivinate7/claude-settings",
   "short": "Fix check from an earlier reviewed head",
   "shown": [
@@ -48,7 +49,7 @@
       "label": "Keep the rule: each of the three lanes restarts at round 1 on its live head"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "May a fix check start at an earlier reviewed head, so three stuck pull requests merge without restarting review?",
   "why": "b keeps the merge tool as ruled, and a widens what the shared tool accepts; the price of b is three extra review rounds. Recommended by the consultant after his correction, not owner-typed."
 }

@@ -1,5 +1,6 @@
 {
   "added": "2026-11-18T13:27:21-06:00",
+  "closed": "2026-11-18T14:40:30-06:00",
   "context": "Goal: after a merge, the idle-lane report never ends in a bare \"unknown\" with no command that fixes it.\nProblem (goal): the draft PR 3667 (the change that sweeps idle sessions after each merge) prints \"Fix what it names, then read the live file again\", which names a step and not a command, and a fresh list that mixes lane lines with an unknown lane exits cleanly with no line owed; only you can say whether that meets your goal line that the idle-lanes report never ends in a bare \"unknown\" with no command that fixes it.\nBased on (read): the coordinator's reading of merge/merge.py lines 6816-6832 and 6883 on the PR's latest version, which passed its second review, relayed 13:26 CST Nov 18.\nDeparts from: main \u2014 the post-merge report may end in an unknown with no fixing command \u2014 the built text names the step, and option a also adds a command and an owed line for the mixed case.\nWaiting on: nothing is stopped; the coordinator proceeds on its own reading, and a builder lands your pick on draft PR 3667 or in a follow-up step.",
   "home": "step archive-sweep-runs-per-merge",
   "id": "idle-lanes-unknown-names-command",
@@ -26,6 +27,8 @@
   "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
   "recommended": "a",
   "ref": "coordinator relay 13:26 CST Nov 18: reviewer notes on draft PR 3667 and the goal line 2 question",
+  "replied": "2026-11-18T14:40:30-06:00",
+  "reply": "Closed on your pick a (14:36 CST). The coordinator lands it on draft PR 3667: the owed line names `merge --idle-lanes --live FILE` for each unknown, and a fresh list that mixes lane lines with an unknown owes a line instead of exiting 0. Filed on step archive-sweep-runs-per-merge.",
   "repo": "shivinate7/claude-settings",
   "short": "Idle-lanes unknown: name the command?",
   "shown": [
@@ -40,7 +43,7 @@
       "label": "Accept the built text now and file the command and the mixed case as a follow-up"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "Should the idle-lanes report name the command that fixes an unknown?",
   "why": "Your goal line says an unknown always comes with a fixing command; a closes both gaps while the lane is still open, and b ships sooner but leaves them. Recommended by triage, not owner-typed."
 }

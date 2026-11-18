@@ -34,6 +34,8 @@
   "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
   "recommended": "c",
   "ref": "owner chat 19:45 CST Nov 17 (relayed by the consultant): land the verification article's findings",
+  "replied": "2026-11-18T14:40:30-06:00",
+  "reply": "You are right that c is a bandaid. The larger problem: a check can be loosened in the same change that is judged by it, so the check proves nothing about itself. Choosing a copy to run (a, b or c) only moves where the hole sits. My proposal, not yet a ruling, and unmeasured: judge a changed check by outcome. A lane that changes a check must show the check still fails the defect it was built for (the red run on its fixture, rule verification-trust-guard-after-red), and a changed check gets a reviewer who reads its diff first (rule roles-review-cap-three already puts a guard or check change under the net-value test). That needs no copy rule, fails no honest lane that re-points a test, and catches a loosened check by its behavior. Cost: each check needs a recorded failing fixture; I have not counted how many lack one. Say 'a holistic fix' and I turn it into a step and re-ask a smaller question; I have not changed the item's options.",
   "repo": "shivinate7/claude-settings",
   "short": "Lane lint: judge changed checks by main's copy?",
   "shown": [

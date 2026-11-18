@@ -1,0 +1,14 @@
+{
+ "id": "live-file-refresh-one-command",
+ "title": "One command refreshes roadmap/live/live.json (open PRs, sessions, readAt) and pushes it, run on demand, with no timer",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 14:36 CST Nov 18, via the consultant: the session list in roadmap/live/live.json goes stale 60 minutes after its readAt (13:05 CST) because triage refreshes it by hand, and nothing mechanizes the refresh. Consultant asked at 14:36 CST whether a step existed; none did (triage 11 read the steps naming the live file: none covers the refresh).",
+ "source": "owner 14:36 CST Nov 18 via the consultant; triage 11 search of roadmap/data/steps at 14:37 CST",
+ "note": "Today: roadmap/livework/README.md lists a by-hand recipe (page list_pull_requests, page list_sessions, run pulls_add.py, sess_map.py, make_live.py). It costs about 20 MCP page reads and fills the reader's context, so refreshes happened rarely and the file went stale. Wanted: one script, `roadmap/livework/refresh.py`, that does steps 1 to 4 and the push, run on demand by whoever needs a fresh file (a runner before `merge --idle-lanes`, triage before a page republish). Rule outcomes-mechanize-rules: no timer or watcher unless its record shows it costs less than it saves; reads happen inside a process already running (for example after a merge, where the merge tool already reads PRs). Open question for a prior-work search: the session list comes from the session service, which the merge tool cannot call; the script may need a session to run it. Prior-work search first (steps merge-runs-idle-lanes, idle-lanes-names-live-source, triage-fills-landed-pulls). A background agent refreshed the file at 14:3x CST Nov 18 by the by-hand recipe: result on this step when it reports. 14:38 CST Nov 18: a background agent refreshed the file by the by-hand recipe (commit 3d585f91d9 on roadmap): readAt 14:38:00 CST, 466 pull rows, 2,304 session rows, no duplicates; stale at 15:38 CST. Counts are the agent's, not re-read by triage against REST. The recipe took 84 tool calls.",
+ "updatedAt": "2026-11-18T14:41:32-06:00"
+}
