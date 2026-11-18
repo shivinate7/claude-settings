@@ -5,6 +5,7 @@
 # Why stderr: a pipe on stdout (`verdict ... | grep`) hides the line, and the background output file keeps stderr. A quiet verdict over 300 s then draws a false STALL (decision stall-watch, "Tools that are quiet by design"). Why the file too: `2>&1 | grep` or `2>/dev/null` hides stderr as well, and the stall watch reads that file.
 # Exit 0 is FAIL if the output holds a runner marker, no test ran, or a test run read no test count (a test success marker at a line start, or `xcodebuild test` or `swift test` as typed), else SKIP (`SKIP <cmd>, N skipped (<secs>s)`, exit 0) if N > 0 tests skipped, else PASS.
 # N is the larger of two counts: the sum of the runner summaries in the run (`skipped=N`, `N skipped`, node's `# skipped N` and `ℹ skipped N`), and the lines that start `SKIP `, `SKIPPED` or `SKIP:`. A summary line `SKIP: N check` is not one of them, so it never counts on top of its cases. XCTest `Executed N tests, with M tests skipped` lines nest (class, bundle, All tests), so their max is one term of the sum. Colour codes (SGR) are ignored. A count of 10 or more digits reads as 10**9. A count of 0 is PASS. Why: a test that always skips must not read as a pass.
+# Exit 0 is also FAIL (`cut`) if a line starts with pytest's session header and no line starts with its summary: the run stopped early.
 # A run with no $VERDICT_LOG deletes verdict-*.log files older than 1 day from the temp folder: regular files whose first line is our own header only; errors skipped.
 # Killed by signal N: exit 128+N. Ctrl-C: exit 130. Windows: bin/verdict.cmd.
 import os, re, shutil, subprocess, sys, tempfile, time
@@ -32,6 +33,8 @@ def test_argv(argv):  # read from the argv as typed, before which() rewrites arg
 HUGE = 10 ** 9  # the count for a run of 10 or more digits; any such count still means skips
 def count(digits): return int(digits) if len(digits) < 10 else HUGE
 SKIP_LINE = re.compile(rb"^(?:" + SGR + rb")*SKIP(?:" + SGR + rb")*(?: |PED|:(?! *\d+ check(?:s|\(s\))?(?![A-Za-z])))", re.M)  # a runner may print one such line per skip, with or without a summary; `SKIP: <case>` counts, a `SKIP: N check` summary does not
+PY_START = re.compile(rb"^(?:" + SGR + rb")*={3,}[^\n]*test session starts", re.M)  # pytest's session header; at a line start only, so a quoted one is no header
+PY_SUMMARY = re.compile(rb"^(?:" + SGR + rb")*={3,}[^\n]* in \d[\d.]*s\b[^\n]*={3,}", re.M)  # pytest's summary line: bars around "<counts> in <N>s"
 TAIL = 1 << 20  # read at most the last 1 MiB of this run's output for the excerpt
 def prune(folder, own):
     try:
@@ -91,7 +94,7 @@ def main(argv):
         f.flush(); end = f.tell()
     secs = f"{time.time() - t:.1f}s"
     if rc < 0: note, rc = f" killed by signal {-rc}", 128 - rc
-    fail = zero = ran = marked = False; lines = []
+    fail = zero = ran = marked = started = summed = False; lines = []
     summaries, xct, marks = {}, {}, {}  # absolute byte offset of a match -> its count; a match in the chunk overlap is read twice, counted once
     try:
         with open(log, "rb") as f:
@@ -111,6 +114,8 @@ def main(argv):
                         else: summaries[pos + m.start()] = count(m.group(2) or m.group(3) or m.group(4))
                 for m in SKIP_LINE.finditer(raw):
                     if pos == start or m.start(): marks[pos + m.start()] = 1
+                started = started or any(pos == start or m.start() for m in PY_START.finditer(raw))  # a later chunk's index 0 may be mid-line
+                summed = summed or any(pos == start or m.start() for m in PY_SUMMARY.finditer(raw))
                 fail = fail or "** TEST FAILED **" in buf or "** BUILD FAILED **" in buf or bool(ST_FAILED.search(buf))
                 if not marked: marked = any(pos == start or m.start() for m in TEST_OK.finditer(raw))  # a later chunk's index 0 may be mid-line; the previous chunk holds that line whole
                 for a, b in EXEC.findall(buf): n = a or b; zero, ran = zero or n == "0", ran or n != "0"
@@ -124,6 +129,7 @@ def main(argv):
         if fail: rc, note = 1, " runner failure marker"
         elif zero and not ran: rc, note = 1, " no tests ran"
         elif not (zero or ran) and (marked or by_argv): rc, note = 1, " no test count"
+        elif started and not summed: rc, note = 1, " cut before the pytest summary"
         else:
             skips = max(sum(summaries.values()) + max(xct.values(), default=0), len(marks))
             if skips: print(f"SKIP {name}, {skips} skipped ({secs})")
