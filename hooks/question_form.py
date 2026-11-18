@@ -1807,6 +1807,15 @@ def rework_off_page_hit(data) -> str:
 # id="itemFields">. That block is the one list: this code reads it and holds no copy.
 ITEM_FIELDS_SEAM = "GUARD_ITEM_FIELDS_PAGE"
 ITEM_FIELDS_PAGE_PARTS = ("skills", "waiting-page", "page.html")
+
+
+def __getattr__(name):
+    """ITEM_FIELDS_PAGE, the page's path, derived from the parts on each read: use_hooks_home moves the install
+    root after import, so a path computed once would go stale. The parts are the one copy of the list."""
+    if name == "ITEM_FIELDS_PAGE":
+        return install_path(*ITEM_FIELDS_PAGE_PARTS)
+    raise AttributeError("module " + repr(__name__) + " has no attribute " + repr(name))
+
 ITEM_FIELD_REASON = ("The waiting page draws only the top-level item fields that its itemFields block "
                      "lists (skills/waiting-page/page.html). Draw the field on the page and add it to "
                      "that block, or leave it out of the write. An update may remove a stored field "
