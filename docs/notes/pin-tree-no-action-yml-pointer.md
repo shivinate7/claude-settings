@@ -1,0 +1,1 @@
+- pin-tree-no-action-yml-pointer: a pinned tree that holds bin/ste-changed but no actions/ste-lint/action.yml makes that copy fall back to the pointer clone (find_root in bin/ste-changed), so it lints with the pointer's files, not the pin's. Decision: lanes-run-no-full-ci-job (the lane-check decision). Fix: none until a pin like that exists.

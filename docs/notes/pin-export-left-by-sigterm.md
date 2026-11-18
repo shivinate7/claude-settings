@@ -1,0 +1,1 @@
+- pin-export-left-by-sigterm: a SIGTERM to ci-job skips drop_pin_trees and leaves pin_tree's export in TMPDIR, about 24 MB per run (bin/ci-job header now names SIGTERM with SIGKILL). Decision: lanes-run-no-full-ci-job (the lane-check decision). Fix: a SIGTERM handler, as PR 1938 had; not ported.

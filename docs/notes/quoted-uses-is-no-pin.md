@@ -1,0 +1,1 @@
+- quoted-uses-is-no-pin: a quoted `uses: "owner/claude-settings/actions/x@ref"` does not match ci-job's pin pattern (SETTINGS_PIN), so the step runs the local copy under --step and --lint. Named in decision lanes-run-no-full-ci-job (the lane-check decision). Fix: none, since no workflow in the repo quotes a pin.

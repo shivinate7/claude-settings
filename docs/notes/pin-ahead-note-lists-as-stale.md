@@ -1,0 +1,1 @@
+- pin-ahead-note-lists-as-stale: under --lint a pin ahead of the stable head prints a line with the pin-note marker, and merge's PASS comment (merge/merge.py, the pin-note read) lists it as stale. The line itself says "Nothing to move". Decision: action-pins-follow-sessions. Fix: none until a lane reads it wrong.
