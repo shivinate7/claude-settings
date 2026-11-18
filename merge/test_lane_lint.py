@@ -509,8 +509,9 @@ class LaneFixture(CiJobStub, tm.CloudSession):
         self.sweep_mock = sweep_patch.start()
         self.addCleanup(sweep_patch.stop)
 
-    def record_sweep(self, root, confirm, restore_log_path, mode="full", attended=False):
+    def record_sweep(self, root, confirm, restore_log_path, mode="full", attended=False, own_lock_rule=True):
         """The stand-in for janitor/sweep.py's sweep_repo: it records the call with where stdout stands, and reaps nothing. -> sweep_repo's result shape.
+        `own_lock_rule` is sweep_repo's keyword, which run_safe_sweep passes; the stand-in takes it and reads no lock.
         The same stand-in as test_merge.py's, kept here so the lane lint cases do not depend on that module's fixture."""
         out = sys.stdout
         self.sweep_runs.append({"root": root, "confirm": confirm, "mode": mode, "attended": attended,
@@ -6156,20 +6157,24 @@ class LaneLintDiskFloor(LaneFixture):
         self.assertEqual(self.lint_calls(), [], "the refused lane lint ran the lint anyway: " + text)
 
     @contextlib.contextmanager
-    def floor_disk(self, free_gib, freed_gib=0.0, raises=None):
+    def floor_disk(self, free_gib, freed_gib=0.0, raises=None, refused=None):
         """A drive of DISK_GIB GiB with `free_gib` free, read through shutil.disk_usage. Each sweep the block runs frees `freed_gib` more, so the
-        lint's re-read sees what the sweep reclaimed. `raises` is an error each sweep raises before it frees anything. Yields the state dict,
-        whose "free" key holds the reading now."""
+        lint's re-read sees what the sweep reclaimed. `raises` is an error each sweep raises before it frees anything. `refused` is the reason each
+        sweep returns as a refusal, which frees nothing. Yields the state dict, whose "free" key holds the reading now."""
         state = {"free": free_gib}
 
         def usage(path):
             return types.SimpleNamespace(total=int(DISK_GIB * GIB), used=int((DISK_GIB - state["free"]) * GIB), free=int(state["free"] * GIB))
 
-        def sweep_then_record(root, confirm, restore_log_path, mode="full", attended=False):
+        def sweep_then_record(root, confirm, restore_log_path, mode="full", attended=False, own_lock_rule=True):
             if raises is not None:
                 raise raises
+            result = self.record_sweep(root, confirm, restore_log_path, mode, attended, own_lock_rule=own_lock_rule)
+            if refused is not None:
+                result["refused"] = refused
+                return result
             state["free"] += freed_gib
-            return self.record_sweep(root, confirm, restore_log_path, mode, attended)
+            return result
 
         previous = self.sweep_mock.side_effect
         self.sweep_mock.side_effect = sweep_then_record
@@ -6258,6 +6263,28 @@ class LaneLintDiskFloor(LaneFixture):
         self.assertRegex(text, r"sweep\.py --root \S+ --confirm", "the refusal does not name the sweep command: " + text)
         self.assertEqual(adds, [], "the refused lane lint made a worktree before it refused: %r" % (adds,))
         self.assertEqual(self.lint_calls(), [], "the refused lane lint ran the lint anyway: " + text)
+
+    def refusal_of_a_sweep_that_did_not_run(self, **failure):
+        """The refusal of a floor hit whose safe sweep did not run. `failure` is floor_disk's `raises` or `refused`. The sweep runs once, and the
+        lint runs no lint and makes no worktree. -> the refusal's text."""
+        self.use_ci_job(PASSING, 0)
+        with self.floor_disk(free_gib=REFUSE_GIB, **failure), self.worktree_adds() as adds:
+            rc, text = self.run_lane("--lane-lint", "7", cloud=True)
+        self.assertEqual(self.sweep_mock.call_count, 1, "scope first: the lane lint did not run the sweep once under the floor: " + text)
+        self.assertEqual(rc, 1, "the lane lint went ahead with %s GiB free, under the floor, after a sweep that did not run: %s" % (REFUSE_GIB, text))
+        self.assertEqual(adds, [], "the refused lane lint made a worktree before it refused: %r" % (adds,))
+        self.assertEqual(self.lint_calls(), [], "the refused lane lint ran the lint anyway: " + text)
+        return text
+
+    def test_a_floor_refusal_after_a_sweep_that_raises_says_it_did_not_run_and_never_freed_zero(self):
+        text = self.refusal_of_a_sweep_that_did_not_run(raises=RuntimeError("the sweep broke"))
+        self.assertIn("did not run or refused", text, "the refusal does not say the sweep did not run or refused: " + text)
+        self.assertNotIn("freed 0.0 GiB", text, "the refusal says a sweep that raised freed 0.0 GiB: " + text)
+
+    def test_a_floor_refusal_after_a_sweep_that_refuses_says_it_did_not_run_and_never_freed_zero(self):
+        text = self.refusal_of_a_sweep_that_did_not_run(refused="no-default-base")
+        self.assertIn("did not run or refused", text, "the refusal does not say the sweep did not run or refused: " + text)
+        self.assertNotIn("freed 0.0 GiB", text, "the refusal says a sweep that refused freed 0.0 GiB: " + text)
 
     def test_a_lane_lint_above_the_floor_runs_no_sweep(self):  # the control: the drive is not under its floor, so no sweep has a reason to run
         self.use_ci_job(PASSING, 0)

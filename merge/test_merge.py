@@ -562,8 +562,9 @@ class Env(unittest.TestCase):
         """How many times `needle` appears in each run's output, in run order: the claim run, then the merge run."""
         return [t.count(needle) for t in self.run_texts]
 
-    def record_sweep(self, root, confirm, restore_log_path, mode="full", attended=False):
-        """The stand-in for janitor/sweep.py's sweep_repo: it records the call with where stdout stands, and reaps nothing. -> sweep_repo's result shape."""
+    def record_sweep(self, root, confirm, restore_log_path, mode="full", attended=False, own_lock_rule=True):
+        """The stand-in for janitor/sweep.py's sweep_repo: it records the call with where stdout stands, and reaps nothing. -> sweep_repo's result shape.
+        `own_lock_rule` is sweep_repo's keyword, which run_safe_sweep passes; the stand-in takes it and reads no lock."""
         out = sys.stdout
         run = {"root": root, "confirm": confirm, "mode": mode, "attended": attended,
                "stdout_at": len(out.getvalue()) if hasattr(out, "getvalue") else None}
@@ -2126,7 +2127,7 @@ class PerLaneMerge(Env):
         put_base_config(self, complete_config())
         self.main_moves()
 
-        def refuse(root, confirm, restore_log_path, mode="full", attended=False):
+        def refuse(root, confirm, restore_log_path, mode="full", attended=False, own_lock_rule=True):
             return {"root": root, "refused": "no-default-base"}  # a refusal names its reason; it runs nothing
 
         self.sweep_mock.side_effect = refuse
