@@ -143,9 +143,12 @@ class FakeHost:
     built = True
     own_number = 7  # the lane's own PR: pr() serves its head from the branch; the lane-lint cases name it 7
 
+    def now(self):
+        # A method, not an instance attribute: a subclass that moves its own clock (LagHost) overrides it.
+        return FAKE_NOW  # Host.now: reviewed_read reads it, so an age is the same on every run
+
     def __init__(self, root, other, branch="feat"):
         self.root, self.other, self.branch = root, other, branch
-        self.now = lambda: FAKE_NOW  # Host.now: reviewed_read reads it, so an age is the same on every run
         self.checks, self.refuse, self.on_wait, self.on_claim = (True, ""), None, None, None  # on_claim: fires once after the claim push, wait or no wait
         self.head_override, self.mergeable = None, "MERGEABLE"
         self.pr_state = "OPEN"
