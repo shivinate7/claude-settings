@@ -899,6 +899,8 @@ COLLECT_BARS = "=" * 30 + " 3 tests collected in 0.01s " + "=" * 30 + "\n"  # --
 COLLECT_QUIET = "3 tests collected in 0.01s\n"  # the same summary with -q: no bars
 NO_TESTS_BARS = "=" * 30 + " no tests ran in 0.01s " + "=" * 30 + "\n"  # the summary of a run that collected nothing, in bars
 NO_TESTS_QUIET = "no tests ran in 0.01s\n"  # the same summary with -q: no bars
+FILTERED_BARS = "=" * 30 + " 3/103 tests collected (100 deselected) in 0.09s " + "=" * 30 + "\n"  # --collect-only under -k: a filtered count, in bars
+FILTERED_QUIET = "3/103 tests collected (100 deselected) in 0.09s\n"  # the same summary with -q: no bars
 HANG_GUARD = 20  # seconds before a verdict counts as hung; a linear scan of one 1 MiB line finishes far below it
 
 
@@ -915,7 +917,8 @@ class CutStream(unittest.TestCase):
     Rule: the argv is pytest's (`pytest`, or `python -m pytest`), the argv has `-q` or the output has pytest's header
     (`=` bars around `test session starts` at a line start), and no line starts with pytest's summary: `=` bars around
     ` in <N>s`, or the bare `<counts> in <N>s` that `-q` prints. A `--collect-only` run ends `N tests collected in <N>s`,
-    and an empty run ends `no tests ran in <N>s`: both count as summaries. Where the header sits does not matter. Colour codes
+    an empty run ends `no tests ran in <N>s`, and a filtered one ends `N/M tests collected (K deselected) in <N>s`. All
+    of these count as summaries. Where the header sits does not matter. Colour codes
     are ignored. A pytest run with neither `-q` nor a header is never cut. A run that is not pytest is never cut, even
     when it prints pytest's header or progress lines, so `print('noisy')` reads PASS. A header quoted mid-line is no
     header. Other runners are not covered."""
@@ -1007,6 +1010,14 @@ class CutStream(unittest.TestCase):
             self.assert_pass(self.pytest_case(PYTEST_START + "collected 0 items\n" + NO_TESTS_BARS))
         with self.subTest(verbosity="quiet"):
             self.assert_pass(self.pytest_case(NO_TESTS_QUIET, args=("-q",)))
+
+    def test_filtered_collect_summary_is_pass(self):
+        """A filtered `--collect-only` ends `N/M tests collected (K deselected) in Ns`. That is a complete run, in bars or with `-q`."""
+        for form in ("module", "bare"):
+            with self.subTest(form=form, verbosity="default"):
+                self.assert_pass(self.pytest_case(PYTEST_START + COLLECT_ITEMS + FILTERED_BARS, args=("--collect-only",), form=form))
+            with self.subTest(form=form, verbosity="quiet"):
+                self.assert_pass(self.pytest_case(COLLECT_IDS + FILTERED_QUIET, args=("--collect-only", "-q"), form=form))
 
     def test_header_first_in_a_later_chunk_still_cuts(self):
         body = PROGRESS * 1100 + PYTEST_START + PROGRESS * 3  # 1,100 progress lines first, so the header is past the first chunk
