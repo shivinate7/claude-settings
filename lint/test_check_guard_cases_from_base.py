@@ -30,16 +30,18 @@ The fixtures. setUpModule builds four fixture trees, one commit pair each, over 
 copies it, the one home of that copy. The copy is whole because the runner's sections share globals (ROOT, OWNED) that
 only the real suite defines. One section file, s99101-guard-cases-fixture.py, sits on top of it in each tree. The check
 of each tree and two listings of the green head run once, in parallel, and each case reads its own lines:
-- red tree: each red case reads RED for its name, and the tree exits 1.
+- red tree: each red case reads RED for its name, and the tree exits 1. Its flip group (three cases on one payload, one of
+  them flipped from deny to allow) and its removed group (two cases on one payload, one removed) read RED too.
 - green tree: each control reads no RED for its names, and the tree exits 0. Its listing pins the keys of two cases that
-  differ only by a fixed epoch, and of a deny and an allow case that share one payload.
+  differ only by a fixed epoch, and of a deny and an allow case that share one payload. Its rename group (two cases on one
+  payload, one renamed) reads green.
 - moved tree: the base ref is a commit that moved on after the branch point, and the head is the branch point's tree.
   Its extra case is the base's only, so the check must read the fork, not the base ref's newest.
 - unknown tree: its base holds two section files with one number, so the base list cannot be read.
 - listing pair: two listings of the green head's folder give equal keys.
-Each tree's cases have distinct payloads, so no case of one tree matches a case of another. The one shared payload is
-the green tree's deny and allow pair, which is meant to share one. The two epochs are past values (2020 and 2022), outside
-the check's clock window for any run made after 2022.
+Payloads are distinct across the trees. Within a tree, only the three groups above and the green tree's deny and allow
+pair share a payload, on purpose. The two epochs are past values (2020 and 2022), outside the check's clock window for
+any run made after 2022.
 """
 import json
 import os
@@ -175,6 +177,9 @@ KILL_OWN = 'sh("fixture kill own", "kill -9 " + str(OWNED.pid), "deny", "fixture
 KILL_LIVE = 'sh("fixture kill live", "kill -9 " + str(os.getppid()), "deny", "fixture-kill", %s)' % KILL_CWD
 CLOCK = ['sh("fixture clock", "touch " + ROOT + "/clock-" + repr(time.time()), "deny", "fixture-rule")']
 
+# The groups. Cases on one payload share a key, so the check matches them by name. A payload that holds two verdicts
+# gets one key per verdict. The flip group turns one deny case allow, beside a deny peer and an allow case that stay.
+# The removed group drops one of two deny cases. The rename group (green tree) renames one of two deny cases.
 RED_BASE = section_text([
     case("fixture flip", "deny", "fixture-rule", "flip"),
     case("fixture to ask", "deny", "fixture-rule", "to-ask"),
@@ -182,6 +187,11 @@ RED_BASE = section_text([
     case("fixture removed", "deny", "fixture-rule", "removed"),
     case("fixture unwaived", "deny", "fixture-rule", "unwaived"),
     case("fixture stays", "deny", "fixture-rule", "stays"),
+    case("fixture group flip", "deny", "fixture-rule", "group-flip"),
+    case("fixture group kept", "deny", "fixture-rule", "group-flip"),
+    case("fixture group allow", "allow", None, "group-flip"),
+    case("fixture group removed", "deny", "fixture-rule", "group-removed"),
+    case("fixture group stays", "deny", "fixture-rule", "group-removed"),
 ], [KILL_OWN, KILL_LIVE])
 RED_HEAD = section_text([
     case("fixture flip", "allow", None, "flip"),
@@ -189,6 +199,10 @@ RED_HEAD = section_text([
     case("fixture kept", "deny", "fixture-rule", "kept"),
     case("fixture unwaived", "allow", None, "unwaived"),
     case("fixture stays", "deny", "fixture-rule", "stays"),
+    case("fixture group flip", "allow", None, "group-flip"),
+    case("fixture group kept", "deny", "fixture-rule", "group-flip"),
+    case("fixture group allow", "allow", None, "group-flip"),
+    case("fixture group stays", "deny", "fixture-rule", "group-removed"),
 ], [KILL_LIVE])
 RED_MESSAGE = "Loosen some cases\n\nGuard-case-loosened: fixture stays"
 
@@ -211,6 +225,8 @@ GREEN_BASE = section_text([
     case("fixture waived", "deny", "fixture-rule", "waived"),
     *EPOCH,
     *SHARED,
+    case("fixture group rename old", "deny", "fixture-rule", "group-rename"),
+    case("fixture group peer", "deny", "fixture-rule", "group-rename"),
 ], [*CLOCK, KILL_OWN, KILL_LIVE])
 GREEN_HEAD = section_text([
     case("fixture tighten", "deny", "fixture-rule", "tighten"),
@@ -220,6 +236,8 @@ GREEN_HEAD = section_text([
     case("fixture waived", "allow", None, "waived"),
     *EPOCH,
     *SHARED,
+    case("fixture group rename new", "deny", "fixture-rule", "group-rename"),
+    case("fixture group peer", "deny", "fixture-rule", "group-rename"),
 ], [*CLOCK, KILL_OWN, KILL_LIVE])
 GREEN_MESSAGE = "Tighten some cases, rename one and loosen one with its trailer\n\nGuard-case-loosened: fixture waived"
 
@@ -357,6 +375,11 @@ class GuardCasesFromBase(unittest.TestCase):
         """Control, red on red-all: the name changes and the payload and verdict stay, so the key still matches."""
         self.assert_green("green", "fixture rename old", "fixture rename new")
 
+    def test_group_rename_passes(self):
+        """Control, red on red-all: one of two cases on a payload is renamed, and its peer stays. The rename reads green,
+        so a check that flags every unmatched case of a group fails here."""
+        self.assert_green("green", "fixture group rename old", "fixture group peer")
+
     def test_loosening_with_exact_trailer_passes(self):
         """Control, red on red-all: the green control beside test_refuse_to_allow_flip_reads_red. The same flip, with
         its exact trailer, reads green."""
@@ -365,6 +388,16 @@ class GuardCasesFromBase(unittest.TestCase):
     def test_trailer_naming_another_case_still_reads_red(self):
         """Red on pass-all. The flip has no trailer of its own: a trailer that names another, unchanged case waives nothing."""
         self.assert_red("red", "fixture unwaived")
+
+    def test_group_refuse_flip_reads_red(self):
+        """Red with no stand-in: the flipped case's base key still holds its deny peer on the head, so the check matches
+        the flipped case to that peer, reads a rename, and no RED names the flip."""
+        self.assert_red("red", "fixture group flip")
+
+    def test_group_refuse_removed_reads_red(self):
+        """Red with no stand-in: the removed case's base key still holds its peer on the head, so the check matches the
+        removed case to that peer, reads a rename, and no RED names the removal."""
+        self.assert_red("red", "fixture group removed")
 
     def test_unreadable_list_prints_unknown(self):
         """Red on pass-all and on red-all: neither prints an UNKNOWN line. The base holds two section files with
