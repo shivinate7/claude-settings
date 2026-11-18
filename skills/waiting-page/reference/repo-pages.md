@@ -43,7 +43,8 @@ The Status tab draws each phase id that its steps use, and a step with no phase 
 
 1. Build the roadmap block: `python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --block --out <block file>`
    (add `--live <file>` as the skill roadmap says). The live file's pull rows carry `createdAt` (GitHub's
-   `created_at`), `held` and `reviewLog`. A pull is `held` when the batch runner's hand-in or hold list names it.
+   `created_at`), `held` and `reviewLog`. Only the joint line (`stale_draft_pull`) reads `createdAt`.
+   A pull is `held` when the batch runner's hand-in or hold list names it.
    A pull is `reviewLog` when it has a posted review log. Both are JSON bools, omitted when false or unknown.
    Its item rows carry `lane` when the page item has one. Its `landedPulls` rows are the pull requests
    closed in the last 14 days with the default branch as base, each with `number`, `branch`, `head` and `merged`, and `replacedBy` on a pull the tool closed as replaced (the number in its newest pointer comment, `Replaced by #N`). Exit 1 with `todo step with an open PR`

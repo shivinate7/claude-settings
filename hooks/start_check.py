@@ -25,7 +25,7 @@ import json
 import os
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 
 LANE_TAG = "cs-build:lane"
 LANE_AND_OWNER = (
