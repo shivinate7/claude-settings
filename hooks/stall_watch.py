@@ -1234,7 +1234,14 @@ def stop():
     except Exception:  # guard-hooks-fail-closed: a failed check prints nothing and does not block
         pass
     if out:
-        print(json.dumps(out))
+        # Imported here: the --hook path runs on every tool call and needs none of report_guard.
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+        try:
+            import report_guard  # the one home of the Stop output and its correction line
+        except Exception:  # no lint folder beside this hook, or a broken report_guard: the block still prints, without the correction tail
+            print(json.dumps(out))
+        else:
+            report_guard.emit_stop(out)
     return 0
 
 

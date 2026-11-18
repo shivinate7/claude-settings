@@ -57,7 +57,7 @@ for _tool in ("Agent",):
 
 # ---- Step-up (rule roles-third-round-steps-up, decision agent-model-cap). The brief's fixed form
 # "Round N of 3" steps a reviewer up: the second needs sonnet, the third sonnet or opus. The
-# same form steps a builder up: the third needs opus, the first two stay on sonnet. The old
+# builder's marker steps nothing up. The builder row pins sonnet, so its third round needs no step-up. The old
 # builder form "Try N of 3" still counts until note try-marker-sunset.
 # A reviewer on the last step-up ("Round N of 3" with N = 3) passes the step-up on opus, and the Opus ceiling
 # below refuses it unless an owner override lifts it (item 127 pick a, Nov 1 17:25 CST). The middle step-up stays sonnet only.
@@ -86,7 +86,7 @@ add("floor step-up: reviewer Round 3 of 3 with model inherit is denied", "deny",
 add("floor step-up: reviewer Round 2 of 3 on claude-sonnet-5-5 is allowed", "allow",
     tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="claude-sonnet-5-5",
     subagent_type="reviewer")
-add("floor step-up: builder Try 3 of 3 on sonnet is denied", "deny", STEP_UP,
+add("floor step-up: builder Try 3 of 3 on sonnet is allowed (its row is sonnet, item 893)", "allow",
     tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="sonnet", subagent_type="builder")
 add("floor step-up: builder Try 3 of 3 on opus is allowed (standing grant)", "allow",
     tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="opus", subagent_type="builder")
@@ -114,9 +114,9 @@ add("floor step-up: builder Try 2 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Try 2 of 3. Continue the fix.", model="sonnet", subagent_type="builder")
 # The builder marker is the `Round N of 3` line (plan o13 group 9: a review and its fix is a round).
 # The old `Try N of 3` line still counts until the try-marker-sunset note removes it.
-add("floor step-up: builder Round 3 of 3 on sonnet is denied", "deny", STEP_UP,
+add("floor step-up: builder Round 3 of 3 on sonnet is allowed (its row is sonnet, item 893)", "allow",
     tool="Agent", prompt="Round 3 of 3. Finish the fix.", model="sonnet", subagent_type="builder")
-add("floor step-up: builder Round 3 of 3 with no model is denied", "deny", STEP_UP,
+add("floor step-up: builder Round 3 of 3 with no model is allowed (the pin runs sonnet, item 893)", "allow",
     tool="Agent", prompt="Round 3 of 3. Finish the fix.", subagent_type="builder")
 add("floor step-up: builder Round 3 of 3 on opus is allowed (standing grant)", "allow",
     tool="Agent", prompt="Round 3 of 3. Finish the fix.", model="opus", subagent_type="builder")
@@ -204,21 +204,21 @@ for _name, _verdict, _script in (
          _step_flow("'Round 2 of 3. Re-check the diff.'", "agentType: 'reviewer', model: 'sonnet'")),
         ("reviewer Round 3 on haiku", "deny",
          _step_flow("'Round 3 of 3. Re-check.'", "agentType: 'reviewer', model: 'haiku'")),
-        ("builder Try 3 on sonnet", "deny",
+        ("builder Try 3 on sonnet, its own row", "allow",
          _step_flow('"Try 3 of 3. Finish the fix."', 'agentType: "builder", model: "sonnet"')),
         ("builder Try 3 on opus", "allow",
          _step_flow('"Try 3 of 3. Finish the fix."', 'agentType: "builder", model: "opus"')),
-        ("builder Round 3 on sonnet", "deny",
+        ("builder Round 3 on sonnet, its own row", "allow",
          _step_flow('"Round 3 of 3. Finish the fix."', 'agentType: "builder", model: "sonnet"')),
-        ("builder Round 3 with no model", "deny",
+        ("builder Round 3 with no model, the pin runs sonnet", "allow",
          _step_flow("'Round 3 of 3. Finish the fix.'", "agentType: 'builder'")),
         ("builder Round 3 on opus", "allow",
          _step_flow('"Round 3 of 3. Finish the fix."', 'agentType: "builder", model: "opus"')),
-        ("builder Round 3 after a role word on line one, on sonnet", "deny",
+        ("builder Round 3 after a role word on line one, on sonnet", "allow",
          _step_flow("'Builder, Round 3 of 3. Finish the fix.'", "agentType: 'builder', model: 'sonnet'")),
         ("builder Round 3 after a role word on line one, on opus", "allow",
          _step_flow("'Builder, Round 3 of 3. Finish the fix.'", "agentType: 'builder', model: 'opus'")),
-        ("builder Round 3 as a prompt key on sonnet", "deny",
+        ("builder Round 3 as a prompt key on sonnet", "allow",
          "await agent({prompt: 'Round 3 of 3. Finish.', agentType: 'builder', model: 'sonnet'})"),
         ("builder Round 2 on sonnet", "allow",
          _step_flow("'Round 2 of 3. Continue the fix.'", "agentType: 'builder', model: 'sonnet'")),
@@ -404,7 +404,7 @@ add("first-line marker: builder on opus with a role word before Round 3 of 3 on 
     "allow", tool="Agent", prompt=FIRST_LINE_BRIEF, model="opus", subagent_type="builder")
 add("first-line marker: builder on opus with blank lines ahead of that first line is allowed",
     "allow", tool="Agent", prompt="\n \t\n" + FIRST_LINE_BRIEF, model="opus", subagent_type="builder")
-add("first-line marker: the same brief on sonnet is denied by the step-up", "deny", STEP_UP,
+add("first-line marker: the same brief on sonnet is allowed (its row is sonnet, item 893)", "allow",
     tool="Agent", prompt=FIRST_LINE_BRIEF, model="sonnet", subagent_type="builder")
 for _label, _first in (("a role word and a dash", "Builder — Round 3 of 3"),
                        ("bold markup", "**Round 3 of 3**"),
