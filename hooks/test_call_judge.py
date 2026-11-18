@@ -428,7 +428,7 @@ def good_page_item(mark=PAGE_MARK, **over):
     in the prompt. `over` replaces fields, for a case that changes one. Its options carry ids and `shown` (see
     with_frozen_fields), so a case that replaces `options` gets a matching `shown` too."""
     context = "\n".join((GOAL_LINE, PROBLEM_LINE, *BASED_LINES, DEPARTS_LINE, WAITING_LINE))
-    item = {"kind": "decision", "title": "Ship the change today?", "status": "open", "context": context,
+    item = {"n": 928, "kind": "decision", "title": "Ship the change today?", "status": "open", "context": context,
             "recommended": "a", "why": "A ships the change today, and nothing else waits on it.",
             "options": [{"key": "a", "label": "Ship it", "gain": "The change lands today. " + mark,
                          "lose": "Nobody reads it first."},
@@ -451,7 +451,7 @@ TASK_FLAG = '{"ok": false, "reason": "a step that replaces text quotes the whole
 def good_task_item(step=GOOD_TASK_STEP, **over):
     """A task item that passes question_form.item_hit: its Why yours line in `context`, and one step. `over`
     replaces fields, for a case that changes one."""
-    item = {"kind": "task", "title": "Set the guard skip", "status": "open", "context": TASK_WHY, "steps": [step]}
+    item = {"n": 928, "kind": "task", "title": "Set the guard skip", "status": "open", "context": TASK_WHY, "steps": [step]}
     item.update(over)
     return item
 

@@ -172,6 +172,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     check as `multi` and `ranked` (see "Update a repo's pages"). An older page draws none of the six. A page published before the `recommended` change reads only `pick`, so it shows no star for `recommended`: after the change merges, the writer republishes the page.
   - The page draws only the top-level fields that its `itemFields` block lists (`page.html`). A write that names another
     top-level field is refused (guard rule `item-field-rendered`), and a stored item that carries one shows a warning on its card.
+    The same rule refuses a `set` with no `n` and any write whose `n` is not a number (929, not "929"): the page cannot let the owner answer such an item.
     To add a field, draw it on the page and add its name to that block. A key inside `options` or `steps` is not judged. `shown` is in the block; an option's `id` and `note` sit inside `options`, so they are not listed.
     When the page is current, it saves `optionId` in an answer, and it draws an option's `note`. It lists `shown` in its item fields and draws nothing from it. An older page does none of these. Run `stale_pages.py` before you write `shown`, an option `note` or `optionId`.
     An update removes a stored field with `{"__delete__": true}`.
