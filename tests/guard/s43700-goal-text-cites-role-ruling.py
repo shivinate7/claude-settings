@@ -1,15 +1,20 @@
 # section 43700
 FAMILY = "goal-text-cites-role-ruling"
 #
-# Rule goal-text-cites-role-ruling. A send_message, a SendMessage, an Agent spawn or a create_session whose text (its
-# message, or its prompt) states a limit on a session's role is refused unless the same sentence or the same line names
-# a ruling or a decision id.
+# Rule goal-text-cites-role-ruling. A send_message, a SendMessage, an Agent spawn, a Task spawn or a create_session whose
+# text (its message, or its prompt) states a limit on a session's role is refused unless the same sentence or the same
+# line names a ruling or a decision id.
 #
-#   A limit   a role, then cannot, can't, can not, won't, may not, must not or isn't allowed to, then merge, push or mark
-#             ready. A send to another session may state it in the second person: You cannot merge.
+#   A limit   a role, then cannot, can't, can not, won't, may not, must not, should not, does not, mustn't, isn't allowed
+#             to or is not permitted to, then merge, push or mark ready. Words may sit between mark and ready (mark its own
+#             PR ready). A send, or a create_session prompt, reads the second person (You cannot merge.) as a limit on its
+#             reader.
 #   A role    triage (also a triage session), the batch runner, runner <n> or runner #<n>, the coordinator, a lane or lanes
 #             (lane <n> or lane <slug> too), the consultant or the arbiter (GLOSSARY.md).
 #   A cite    an id in backticks, or the word ruling or decision with an id after it. An id is a hyphenated slug.
+#   A pass    a conditional (If you cannot push, stop and report.) in a send or a create_session prompt, an Agent
+#             prompt's second person (You must not push.), and a limit that states its measured cause after a colon or
+#             because (The lane cannot push: the cloud proxy returns 403.).
 #
 # The case it stops: a goal text told triage that triage cannot merge, with no ruling cited. Decision `draft-until-reviewed`
 # (ruling Q2: each session merges its own pull requests) makes that limit wrong.
@@ -35,13 +40,14 @@ GTR_LONG_LIMIT = "PR 12 is green.\nRunner 10 is idle.\nTriage cannot merge; hand
 # reaches this rule and no other: a sonnet model clears the model floor, and the Explore type is no builder.
 GTR_PROMPT_FIELDS = {
     "Agent": {"subagent_type": "Explore", "description": "goal text", "model": "sonnet"},
+    "Task": {"subagent_type": "Explore", "description": "goal text", "model": "sonnet"},
     CREATE_SESSION_CALL: {"model": "sonnet"},
 }
 
 
 def _gtr_fields(tool, message):
     """The tool_input of a send or a spawn. SendMessage names its receiver in `to`, the MCP send in `session_id`, and an
-    Agent spawn or a create_session carries its goal text in `prompt`."""
+    Agent or Task spawn or a create_session carries its goal text in `prompt`."""
     if tool == SENDMESSAGE_TOOL:
         return {"to": "triage", "message": message}
     if tool in GTR_PROMPT_FIELDS:
@@ -110,15 +116,33 @@ gtr_refuse("won't, in place of cannot, is refused for triage", "Triage won't mer
 gtr_refuse("isn't allowed to, in place of may not, is refused for triage", "Triage isn't allowed to merge.")
 gtr_refuse("a second-person limit sent to another session is refused", "You cannot merge this PR until CI is green.")
 
+# ---- Refused: a verb or a negation the second version missed. A mark ready with words between, should not, does not,
+# mustn't and is not permitted to. Each reads allow on the current code.
+gtr_refuse("a mark ready with its own before the object is refused", "The lane cannot mark its own PR ready.")
+gtr_refuse("a mark ready with the lane PR as its object is refused", "Triage cannot mark the lane PR ready.")
+gtr_refuse("a mark ready with your before the object is refused for plural lanes", "lanes cannot mark your PR ready.")
+gtr_refuse("should not is refused for triage", "Triage should not merge.")
+gtr_refuse("mustn't is refused for triage", "Triage mustn't merge.")
+gtr_refuse("does not is refused for triage", "Triage does not merge.")
+gtr_refuse("is not permitted to is refused for triage", "Triage is not permitted to merge.")
+
 # ---- Refused: the same limit in a spawn prompt or a session start. The step covers any goal or brief a session writes for
 # another session or agent, so an Agent prompt and a create_session prompt are judged as a send is.
 gtr_refuse("the incident text in an Agent prompt is refused", "Triage cannot merge; hand to runner 10.", tool="Agent")
 gtr_refuse("the incident text in a create_session prompt is refused", "Triage cannot merge; hand to runner 10.",
          tool=CREATE_SESSION_CALL)
+gtr_refuse("the incident text in a Task prompt is refused", "Triage cannot merge; hand to runner 10.", tool="Task")
 # Controls: the same two calls with no limit pass, so a red above is the limit and not the call.
 gtr_allow("an Agent prompt with no limit is allowed", "Explore the page and list its states.", tool="Agent")
 gtr_allow("a create_session prompt with no limit is allowed", "Explore the page and list its states.",
           tool=CREATE_SESSION_CALL)
+gtr_allow("a Task prompt with no limit is allowed", "Explore the page and list its states.", tool="Task")
+# Pinned controls, green on the current code. They hold the lines the new cases draw: the incident text is refused in a
+# SendMessage too, and a second-person limit in a create_session prompt is refused, since only a conditional passes there.
+gtr_refuse("the incident text in a SendMessage is refused", "Triage cannot merge; hand to runner 10.",
+           tool=SENDMESSAGE_TOOL)
+gtr_refuse("a second-person limit in a create_session prompt is refused", "You cannot merge this PR.",
+           tool=CREATE_SESSION_CALL)
 
 # ---- Allowed: a limit quoted as text, which is not a statement. Owner words, a blockquote, a refusal text in a report, a
 # code span and a fenced block, and an inner line of a fenced block.
@@ -148,6 +172,29 @@ gtr_allow("a limit whose sentence wraps onto a line that holds the cite is allow
           "Triage cannot merge the lane PR, which\ndecision draft-until-reviewed covers.")
 gtr_allow("SendMessage: a limit with a decision id in its sentence is allowed",
           "Triage cannot merge (decision draft-until-reviewed).", tool=SENDMESSAGE_TOOL)
+
+# ---- Allowed: a conditional with you, an Agent prompt's second person, and a limit that states its measured cause.
+# Each reads refuse on the current code, so each is red here. A conditional passes in a send and a create_session prompt.
+gtr_allow("a conditional with you is allowed in a send_message", "If you cannot push, stop and report.")
+gtr_allow("a conditional with you is allowed in a SendMessage", "If you cannot push, stop and report.",
+          tool=SENDMESSAGE_TOOL)
+gtr_allow("a conditional with you is allowed in a create_session prompt", "If you cannot push, stop and report.",
+          tool=CREATE_SESSION_CALL)
+gtr_allow("a conditional with you can't merge is allowed in an Agent prompt",
+          "If a conflict means you can't merge main cleanly, stop and report.", tool="Agent")
+gtr_allow("a conditional with you, reporting under Input Needed, is allowed in an Agent prompt",
+          "If you cannot push, stop and report under Input Needed.", tool="Agent")
+gtr_allow("a second-person must not push is allowed in an Agent prompt", "You must not push.", tool="Agent")
+gtr_allow("a second-person cannot merge is allowed in an Agent prompt", "You cannot merge this PR.", tool="Agent")
+gtr_allow("a reviewer brief with a second-person must not push is allowed in an Agent prompt",
+          "You are a reviewer. You must not push, stage or commit.", tool="Agent")
+gtr_allow("a limit with a colon cause is allowed in a send_message", "The lane cannot push: the cloud proxy returns 403.")
+gtr_allow("a limit with a colon cause is allowed in a SendMessage", "Runner 10 cannot merge PR 12 yet: CI is red.",
+          tool=SENDMESSAGE_TOOL)
+gtr_allow("a limit with a because cause is allowed in a send_message",
+          "Runner 10 cannot merge PR 12 yet because CI is red.")
+gtr_allow("a limit with a colon cause is allowed in an Agent prompt", "The lane cannot push: the cloud proxy returns 403.",
+          tool="Agent")
 
 # ---- Allowed: a limit that is no role limit. A passive names no act by a role, and a first-person limit names no role.
 gtr_allow("a passive limit, which names no act by a role, is allowed", "Triage cannot be merged by anyone.")
