@@ -1,14 +1,14 @@
 {
-  "id": "round1-haiku-xhigh",
-  "title": "Round-1 reviewers run Haiku at xhigh for every change, guard or check included",
-  "status": "blocked",
-  "repo": "shivinate7/claude-settings",
-  "phase": "next",
-  "lane": "",
-  "owner": "consultant",
-  "blockedBy": [],
-  "why": "Owner, 19:45 CST Nov 17, relayed by the consultant: round-1 reviewers on Haiku are intended; run them at xhigh for every change, guard or check included.",
-  "source": "owner chat via the consultant, 19:45 CST Nov 17 (inbox fb-1945-1)",
-  "note": "Waits on the consultant landing the change in decision agent-model-cap. Triage reads the decision's round rows from main and files the merge. Proof: the round rows on main. Not built by triage. Read by triage 11 at 22:31 CST Nov 17 (origin/main b58eb9848, 22:05 CST): docs/decisions/agent-model-cap.md line 30 still says round 1 runs haiku only on a change with no guard or check and sonnet on a guard or check change, so the owner's 19:45 CST change is not on main. Wake: that line reads haiku for every round 1, then triage files the merge. Consultant 22:33 CST Nov 17 (relayed, message to triage 11): the change is PR #3642 (branch round1-reviewer-haiku; fix check PASS at a828ceffb3). Its lint is blocked by a file clash with #3603 (third-try-sonnet), which merges main now; #3642 lints and merges after #3603. Wake: #3642 merged by REST, then triage reads agent-model-cap line 30 on main and files the merge.",
-  "updatedAt": "2026-11-17T22:34:34-06:00"
+ "id": "round1-haiku-xhigh",
+ "title": "Round-1 reviewers run Haiku at xhigh for every change, guard or check included",
+ "status": "done",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "consultant",
+ "blockedBy": [],
+ "why": "Owner, 19:45 CST Nov 17, relayed by the consultant: round-1 reviewers on Haiku are intended; run them at xhigh for every change, guard or check included.",
+ "source": "owner chat via the consultant, 19:45 CST Nov 17 (inbox fb-1945-1)",
+ "note": "Waits on the consultant landing the change in decision agent-model-cap. Triage reads the decision's round rows from main and files the merge. Proof: the round rows on main. Not built by triage. Read by triage 11 at 22:31 CST Nov 17 (origin/main b58eb9848, 22:05 CST): docs/decisions/agent-model-cap.md line 30 still says round 1 runs haiku only on a change with no guard or check and sonnet on a guard or check change, so the owner's 19:45 CST change is not on main. Wake: that line reads haiku for every round 1, then triage files the merge. Consultant 22:33 CST Nov 17 (relayed, message to triage 11): the change is PR #3642 (branch round1-reviewer-haiku; fix check PASS at a828ceffb3). Its lint is blocked by a file clash with #3603 (third-try-sonnet), which merges main now; #3642 lints and merges after #3603. Wake: #3642 merged by REST, then triage reads agent-model-cap line 30 on main and files the merge. Nov 18: PR 3642 merged 07:25:12 CST, merge commit 760e3591da, merged by shivinate7 (REST: merged true, head b9e8e5d6bc2e). Main's agent-model-cap line 30 now reads haiku at xhigh on round 1 of every change, a guard or check change included (owner ruling 19:45 CST Nov 17); at 1833b7307bd0 it read haiku only for a change with no guard or check. Matched by the consultant's relay and by the PR's commits 6253ff80a5 and 60feb6ae3b editing that line. Not read here: the live guard follows the row.",
+ "updatedAt": "2026-11-17T22:34:34-06:00"
 }
