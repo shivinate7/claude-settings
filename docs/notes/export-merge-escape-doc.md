@@ -1,0 +1,1 @@
+- export-merge-escape-doc: the `--merge` docstring in export_page.py does not say designData.json is written with each less-than sign escaped; a test pins it, but no case covers a backslash right before the sign (a probe passed).

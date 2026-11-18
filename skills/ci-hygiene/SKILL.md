@@ -158,10 +158,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    PASS fix verifier, a merge whose second parent is not on main. The first fix verifier on a log with
    no Fix check line meets no merge-shape test, so the verifier's read is the check there. The lane never works around the refusal. A FAIL starts a
    new lane at round 1.
-   **A lane that is only behind main is not named.** Only a conflict names a lane (owner, 2026-11-17 14:20 CST,
-   page item 925 `main-in-once-before-lint`, pick d). Once #3481 (carry the lane lint across a clean merge of main)
-   and #3552 (lane lint merges main into a lane head behind it and pushes the merge on a pass) are on main, the merge
-   tool does one main-in at merge time and keeps the green run (rule d, decision `merge-needs-current-base`).
+   **Lanes bring main in only on conflict; the merge tool does one main-in at merge time and keeps the green run
+   (needs #3481 and #3552 on main)** (owner, 2026-11-17 14:20 CST, page item 925 `main-in-once-before-lint`,
+   pick d; rule d, decision `merge-needs-current-base`).
    Coordinator's reading, not the owner's: until both are on main, rule d is not in force and ruling
    `own-923-c-ready-lanes-bring-main-in` stands.
    Until the cutover, every repo except degen and home batches across sessions too (`git-integration-branch-merge`).

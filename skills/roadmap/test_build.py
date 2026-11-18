@@ -192,6 +192,17 @@ def make_repo(root, steps=None, meta=None):
     return repo
 
 
+def single_branch_clone(root, repo, name, *branches):
+    """(origin, clone): a bare origin under `root` holding `branches` of `repo`, and a --single-branch clone of its main.
+    origin takes each branch by a fetch into the bare, never a push, so no case pushes main by path."""
+    origin = pathlib.Path(root) / (name + ".git")
+    git(root, "init", "-q", "--bare", str(origin))
+    git(origin, "fetch", "-q", str(repo), *("%s:%s" % (b, b) for b in branches))
+    clone = pathlib.Path(root) / name
+    subprocess.run(["git", "clone", "-q", "--single-branch", "--branch", "main", origin.as_uri(), str(clone)], check=True)
+    return origin, clone
+
+
 def setUpModule():
     global RUN_FOLDER
     RUN_FOLDER = _test_temp.run_folder()
@@ -226,6 +237,12 @@ class Fixture(unittest.TestCase):
 
     def write_step(self, sid, step):
         (self.data / "steps" / (sid + ".json")).write_text(json.dumps(step), encoding="utf-8")
+
+    def commit_step(self, sid, **fields):
+        """Write a step on the record branch and commit it, where a build from main reads it. A field set to _ABSENT is left out."""
+        self.write_step(sid, {k: v for k, v in dict(STEP, **fields).items() if v is not _ABSENT})
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "step " + sid)
 
     def on_main(self):
         git(self.repo, "checkout", "-q", "main")
@@ -656,12 +673,6 @@ class UpkeepFixture(Fixture):
         super().setUp()
         self.use_origin(self.SLUG)
         self.origin_set = set()  # branches whose refs/remotes/origin/ ref a case set, dropped or broke
-
-    def commit_step(self, sid, **fields):
-        """Write a step on the record branch and commit it, where a build from main reads it. A field set to _ABSENT is left out."""
-        self.write_step(sid, {k: v for k, v in dict(STEP, **fields).items() if v is not _ABSENT})
-        git(self.repo, "add", "-A")
-        git(self.repo, "commit", "-q", "-m", "step " + sid)
 
     def publish(self, sessions=None, pulls=(), threads=(), read_at=None, items=None, landed=None):
         """Write the --live file. threads=_ABSENT leaves the threads key out. The sessions, items and landedPulls keys
@@ -2099,6 +2110,7 @@ class ReadyNotStarted(ReadyFixture):
 
     def test_steps_unknown_prints_one_unknown_ready_line(self):
         self.on_main()
+        git(self.repo, "remote", "remove", "origin")  # the fixture's GitHub origin cannot be asked here; with none, the branch is simply absent
         code, out = run_build("--repo", str(self.repo), "--record-branch", "no-such-branch", "--out", str(self.out))
         self.assertIn(code, (0, None), out)
         self.assertEqual(self.ready_lines(out), ["ready not started: unknown (steps unknown)"],
@@ -2304,6 +2316,7 @@ class ReadyNextAct(ReadyFixture):
 
     def test_the_count_line_reads_unknown_when_the_steps_are_unknown(self):
         self.on_main()
+        git(self.repo, "remote", "remove", "origin")  # the fixture's GitHub origin cannot be asked here; with none, the branch is simply absent
         _, out = run_build("--repo", str(self.repo), "--record-branch", "no-such-branch", "--out", str(self.out))
         self.assertEqual(count_lines(out), [ready_line("count unknown", why="unknown (steps unknown)")],
                          "with no steps, the count is unknown, never 0")
@@ -3807,10 +3820,10 @@ class StaleDraftRestRead(UpkeepFixture):
         self.publish(sessions=[], pulls=[self.live_pull(1001, "garbled-time")])
         real_git = build.git
 
-        def garbled(repo, *args, stdin=None):
+        def garbled(repo, *args, stdin=None, err=None):
             if args[:1] == ("log",) and "refs/remotes/origin/garbled-time" in args:
                 return "not a time\n"
-            return real_git(repo, *args, stdin=stdin)
+            return real_git(repo, *args, stdin=stdin, err=err)
 
         with mock.patch.object(build, "git", garbled):
             count, detail = self.row(self.out_with_live(), self.DRAFT)
@@ -4711,6 +4724,130 @@ class ForkRecord(Fixture):
         self.assertIn(self.MAIN_TITLE, page)
 
 
+class SingleBranchOrigin(Fixture):
+    """--block in a checkout cloned --single-branch on main. Its fetch line maps main alone, so origin/roadmap never
+    exists there, and a plain `git fetch origin roadmap` would leave the steps in FETCH_HEAD only. The build must read
+    origin's record branch by the explicit refspec, so the steps reach the block."""
+    STEPS = {"s1": dict(STEP, title="Only on origin")}
+    MISSING = "0123456789012345678901234567890123456789"  # a commit no object store holds
+
+    def clone_origin(self, name, *branches):
+        """(origin, clone): see single_branch_clone."""
+        return single_branch_clone(self.tmp.name, self.repo, name, *branches)
+
+    def has_ref(self, repo, ref):
+        return subprocess.run(["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", ref],
+                              capture_output=True).returncode == 0
+
+    def assert_single_branch(self, clone):
+        """The scope every case relies on: the clone maps main alone, and holds neither origin/roadmap nor a local roadmap."""
+        self.assertEqual(git(clone, "config", "--get", "remote.origin.fetch").strip(),
+                         "+refs/heads/main:refs/remotes/origin/main", "the clone is not single-branch on main")
+        self.assertFalse(self.has_ref(clone, "refs/remotes/origin/roadmap"), "the clone already holds origin/roadmap")
+        self.assertFalse(self.has_ref(clone, "refs/heads/roadmap"), "the clone holds a local roadmap branch")
+
+    def block(self, clone):
+        """(block text, output) of a --block build of `clone`, which must write the file."""
+        code, out = run_build("--repo", str(clone), "--block", "--out", str(self.out))
+        self.assertIn(code, (0, None), out)
+        return self.out.read_text(encoding="utf-8"), out
+
+    def steps_read(self, block):
+        return next(p for p in baked(block, "window.ROADMAP_BUILD = ")["panels"] if p["name"] == "Steps")["read"]
+
+    def test_block_bakes_the_steps_of_origins_record_branch(self):
+        origin, clone = self.clone_origin("with-roadmap", "main", "roadmap")
+        self.assert_single_branch(clone)
+        self.assertTrue(self.has_ref(origin, "refs/heads/roadmap"), "origin lacks the record branch the case needs")
+        block, out = self.block(clone)
+        data = baked(block, "window.ROADMAP_DATA = ")
+        self.assertIsNotNone(data, "the block baked null: origin's roadmap branch was never fetched\n" + out)
+        self.assertIn("s1", data["steps"], "the block lacks origin's step s1")
+        self.assertEqual(data["steps"]["s1"]["title"], "Only on origin")
+
+    def test_a_second_build_reads_a_step_origin_gained_after_the_first(self):
+        # The first build leaves origin/roadmap behind. The second build must ask origin again, or it reads that stale ref.
+        origin, clone = self.clone_origin("second-build", "main", "roadmap")
+        self.assert_single_branch(clone)
+        first, out = self.block(clone)
+        self.assertIsNotNone(baked(first, "window.ROADMAP_DATA = "), "the first build baked null:\n" + out)
+        self.assertTrue(self.has_ref(clone, "refs/remotes/origin/roadmap"), "the first build left no origin/roadmap behind")
+        self.assertEqual(git(self.repo, "rev-parse", "--abbrev-ref", "HEAD").strip(), "roadmap", "the fixture repo is not on roadmap")
+        self.commit_step("s2", title="Added after the first build")
+        git(origin, "fetch", "-q", str(self.repo), "roadmap:roadmap")
+        self.assertIn("roadmap/data/steps/s2.json", git(origin, "ls-tree", "-r", "--name-only", "refs/heads/roadmap"),
+                      "origin lacks step s2 on its record branch")
+        self.assertNotIn("roadmap/data/steps/s2.json", git(clone, "ls-tree", "-r", "--name-only", "refs/remotes/origin/roadmap"),
+                         "the clone's origin/roadmap already holds s2, so a stale read would pass")
+        second, out = self.block(clone)
+        data = baked(second, "window.ROADMAP_DATA = ")
+        self.assertIsNotNone(data, "the second build baked null:\n" + out)
+        self.assertIn("s2", data["steps"], "the second build did not read origin's step s2, added after the first build\n" + out)
+        self.assertEqual(data["steps"]["s2"]["title"], "Added after the first build")
+
+    def test_block_leaves_origin_roadmap_as_a_remote_tracking_ref(self):
+        origin, clone = self.clone_origin("tracking", "main", "roadmap")
+        self.assert_single_branch(clone)
+        self.block(clone)
+        self.assertTrue(self.has_ref(clone, "refs/remotes/origin/roadmap"),
+                        "the build read origin's roadmap without fetching it into origin/roadmap")
+
+    def test_origin_without_the_record_branch_still_bakes_null_and_says_so(self):
+        origin, clone = self.clone_origin("without-roadmap", "main")
+        self.assert_single_branch(clone)
+        self.assertFalse(self.has_ref(origin, "refs/heads/roadmap"), "origin holds the record branch the case must lack")
+        block, out = self.block(clone)
+        self.assertIsNone(baked(block, "window.ROADMAP_DATA = "), out)
+        read = self.steps_read(block)
+        self.assertTrue(read.startswith("unknown"), read)
+        self.assertIn("roadmap", read, read)
+
+    def test_no_origin_remote_and_no_record_branch_bakes_null_as_before(self):
+        self.on_main()
+        git(self.repo, "branch", "-D", "roadmap")
+        self.assertEqual(git(self.repo, "remote").strip(), "", "the fixture repo has an origin remote")
+        block, out = self.block(self.repo)
+        self.assertIsNone(baked(block, "window.ROADMAP_DATA = "), out)
+        read = self.steps_read(block)
+        self.assertTrue(read.startswith("unknown"), read)
+        self.assertIn("roadmap", read, read)
+
+    def test_origin_record_branch_whose_fetch_fails_writes_no_block(self):
+        origin, clone = self.clone_origin("unfetchable", "main", "roadmap")
+        self.assert_single_branch(clone)
+        (origin / "refs" / "heads" / "roadmap").write_text(self.MISSING + "\n", encoding="utf-8")
+        self.assertIn("refs/heads/roadmap", git(clone, "ls-remote", str(origin)), "origin does not list its record branch")
+        fetch = subprocess.run(["git", "-C", str(clone), "fetch", str(origin),
+                                "+refs/heads/roadmap:refs/remotes/origin/roadmap"], capture_output=True, text=True)
+        self.assertNotEqual(fetch.returncode, 0, "the explicit fetch succeeds, so this case does not stand for a failed fetch")
+        code, out = run_build("--repo", str(clone), "--block", "--out", str(self.out))
+        self.assertNotIn(code, (0, None), "the build exited 0 with origin's record branch unread:\n" + out)
+        self.assertFalse(self.out.exists(), "a block was written though origin's record branch was not read")
+
+    def test_unreachable_origin_with_no_record_branch_exits_nonzero_and_writes_no_block(self):
+        _, clone = self.clone_origin("gone", "main")
+        self.assert_single_branch(clone)
+        missing = pathlib.Path(self.tmp.name) / "missing.git"
+        git(clone, "remote", "set-url", "origin", str(missing))
+        self.assertFalse(missing.exists(), "the origin path exists, so origin is reachable")
+        code, out = run_build("--repo", str(clone), "--block", "--out", str(self.out))
+        self.assertNotIn(code, (0, None), "the build exited 0 though origin could not be asked:\n" + out)
+        self.assertFalse(self.out.exists(), "a block was written though origin could not be asked")
+
+    def test_a_git_that_cannot_read_origin_exits_nonzero_and_writes_no_block(self):
+        # Only "No such remote" (git exit 2) means there is no origin. Any other failure to read the remote is not
+        # "no origin": a block baked then would say the repo has no roadmap.
+        _, clone = self.clone_origin("unreadable", "main")
+        self.assert_single_branch(clone)
+        config = clone / ".git" / "config"
+        config.write_text(config.read_text(encoding="utf-8") + "not a config line\n", encoding="utf-8")
+        probe = subprocess.run(["git", "-C", str(clone), "remote", "get-url", "origin"], capture_output=True, text=True)
+        self.assertNotIn(probe.returncode, (0, 2), "git still reads origin, so this is not a failed read: " + probe.stderr)
+        code, out = run_build("--repo", str(clone), "--block", "--out", str(self.out))
+        self.assertNotIn(code, (0, None), "the build exited 0 though git could not read origin, so the block says no roadmap:\n" + out)
+        self.assertFalse(self.out.exists(), "a block was written though git could not read origin")
+
+
 class MockupFiles(UpkeepFixture):
     """The mockup check of the build. Only open steps are judged. A step's note, why or ask that cites an item by its
     mockup id (item<N>-<letter>, a whole token) needs a `mockups` entry, {"<id>": "<path>"}. The one mockup home is the
@@ -4786,11 +4923,11 @@ class MockupFiles(UpkeepFixture):
         type read passes its refs on stdin. Empty output means the path is absent, and None means the read failed."""
         real = build.git
 
-        def read(repo, *args, stdin=None):
+        def read(repo, *args, stdin=None, err=None):
             named = any("refs/remotes/origin/" in arg for arg in args) or "refs/remotes/origin/" in (stdin or "")
             if args and named and (verbs is None or args[0] in verbs):
                 return None
-            return real(repo, *args, stdin=stdin)
+            return real(repo, *args, stdin=stdin, err=err)
         return mock.patch.object(build, "git", read)
 
     def check_starts(self, expect=(1,)):

@@ -11,18 +11,24 @@
 #     lint_ruling_kind (Ruling kind check: a path under docs/decisions/, and the rule files CLAUDE.md and output-styles/shiv-stylisms.md),
 #     lint_comment_narration (Comment narration check: any non-.md path; the checker reads no .md file).
 #   lint/layout.py, lint/layout.json and .claude/layout-extras.json set all four: each lint finds its record folders through them.
+#   per doc group (DOCS; the steps that read a .md file take the scope condition of the groups they read, and no doc flag turns a job on):
+#     doc_decisions (docs/decisions/), doc_rules (CLAUDE.md, .claude/CLAUDE.md, output-styles/), doc_skills (skills/), doc_agents (agents/*.md),
+#     doc_glossary (GLOSSARY.md, README.md), doc_map (docs/map/), doc_other (the rest of docs/, and mods/<mod>/README.md),
+#     doc_any (every .md path, so a path in no group sets this flag only). A deleted or moved .md path counts through its old name (--no-renames).
 #   checks_windows_rest_2 repeats checks_windows_rest's value (R62). No job reads it: checks-windows-rest-2 runs every step on a ready pull_request, so the output is kept only for the tests that derive it.
+#   windows_guard (the checks-windows-guard shards): a path that matches a glob of .github/guard-inputs.txt, an added file under a landed dir, or a change to this script, the workflow or that list; read in its own pass over the diff, so a .md input counts, and a path the table names nowhere does not set it.
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event; false on a records-only skip.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
 # BASE_SHA, HEAD_REF, GREEN_HEAD (optional: the sha green-head.sh prints, the pull request's newest earlier fully green head; a push may carry one too), PR_HEAD
-# (optional: the pull request's head sha; HEAD when unset). GREEN_HEAD turns the 13 job and suite flags off on a pull request or a push when it is an
+# (optional: the pull request's head sha; HEAD when unset). GREEN_HEAD turns the 14 job and suite flags off on a pull request or a push when it is an
 # ancestor of PR_HEAD and the delta from it to PR_HEAD is docs/records.md alone; the lint flags keep their whole-PR values and mutation_report is false. Any unreadable read: no skip.
 # The last output line, records_only_skip=true|false, is true exactly in that case.
 set -u
 JOBS="checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos pointer_windows"
 LINTS="lint_red_run lint_plan_refuter lint_ruling_kind lint_comment_narration"
-ALL="$JOBS checks_guard code mods guard sweep shoot $LINTS"
+DOCS="doc_decisions doc_rules doc_skills doc_agents doc_glossary doc_map doc_other doc_any"
+ALL="$JOBS checks_guard code mods guard sweep shoot $LINTS $DOCS"
 range=""
 [ "${EVENT:-}" = pull_request ] && [ -n "${BASE_SHA:-}" ] && range="$BASE_SHA...HEAD"
 on=" "
@@ -71,7 +77,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       # bin/duo-fold: macOS only (bash 3.2 script for the iPhone Duo). Its suite runs in the shell-macos job.
       bin/duo-fold|lint/test_duo_fold.sh) on="$on $S code " ;;
       # bin/shoot: its suite installs Playwright and Chromium, so only these paths run it.
-      bin/shoot|lint/test_shoot.mjs|testing/skip-locally-fail-in-ci.mjs) on="$on code shoot " ;;
+      bin/shoot|lint/test_shoot.mjs|testing/skip-locally-fail-in-ci.mjs|testing/page_session_role_sort.test.mjs) on="$on code shoot " ;;
       # actions/playwright-setup has four callers: checks-shoot and checks-waiting-page (shoot), checks-guard and checks-guard-2 (checks_guard). Both guard jobs also
       # install the Playwright that .github/shoot pins (package-dir), so that dir takes this arm too. Set checks_guard
       # directly: the guard flag would also start the guard suites, which this action does not touch. A .md edit runs none of the four jobs.
@@ -86,7 +92,8 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       actions/stamp/*.md) ;;
       actions/stamp/*) on="$on $R $Z $X $M code " ;;
       # Mod tests: the mod-tests.sh step in checks, checks-windows and checks-macos reads mods/.
-      mods/*) on="$on $W $X mods " ;;
+      # A non-.md path also sets `code`: the whole-tree readers (retired names, retired repo, glossary, hook catalog) run on `code` or a doc flag.
+      mods/*) on="$on $W $X mods "; case "$f" in *.md) ;; *) on="$on code " ;; esac ;;
       install.ps1|install.test.ps1|install-no-gap.test.ps1|install-bin-eol.test.ps1|install-set.test.ps1) on="$on $P code " ;;
       # decision-watch.test.mjs imports lint/test_scanner_traps.mjs, so the mod-tests.sh step runs it too.
       lint/test_scanner_traps.mjs) on="$on $W $X mods code " ;;
@@ -141,22 +148,68 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       # Every other path that is not .md: the red-run check and the narration check read it.
       *) on="$on lint_red_run lint_comment_narration " ;;
     esac
+    # The doc groups: one doc_<group> flag per group of .md paths, read by the steps that read a .md file (lint/test_checks_step_scope.py
+    # DOC_STEPS). This is a fourth case, so the flags each path sets above stay as they are. No doc flag turns a job on. Every .md sets
+    # doc_any; a path no group arm names sets doc_any only. An empty arm keeps a nested path out of its parent's group (bash's `*` matches `/`).
+    # A name in upper-case .MD takes the catch-all arm above, which sets every flag. A path that is not .md sets no doc flag.
+    case "$f" in
+      *.md)
+        on="$on doc_any "
+        case "$f" in
+          docs/decisions/*) on="$on doc_decisions " ;;
+          CLAUDE.md|.claude/CLAUDE.md|output-styles/*) on="$on doc_rules " ;;
+          skills/*) on="$on doc_skills " ;;
+          agents/*/*.md) ;;
+          agents/*.md) on="$on doc_agents " ;;
+          GLOSSARY.md|README.md) on="$on doc_glossary " ;;
+          docs/map/*) on="$on doc_map " ;;
+          docs/*) on="$on doc_other " ;;
+          mods/*/*/*.md) ;;
+          mods/*/README.md) on="$on doc_other " ;;
+        esac ;;
+    esac
   done <<< "$files"
+  # windows_guard has its own pass: the case table above skips a .md path, and an input such as agents/builder.md is one. The list is
+  # .github/guard-inputs.txt (the one list); an unreadable or empty list turns the flag on.
+  globs=$(sed 's/#.*//; s/[[:space:]]//g' .github/guard-inputs.txt 2>/dev/null | grep -v '^$')
+  # The pass reads the diff NUL-separated: git quotes a non-ASCII name in the newline form, and the quoted text matches no glob.
+  # A second read that gives no path (a failed read) turns the flag on.
+  if [ -z "$globs" ]; then
+    on="$on windows_guard "
+  else
+    n=0
+    while IFS= read -r -d '' f; do
+      n=$((n + 1))
+      case "$f" in .github/guard-inputs.txt|.github/scripts/ci-scope.sh|.github/scripts/green-head.sh|.github/workflows/checks.yml|.gitattributes) on="$on windows_guard "; continue ;; esac
+      while IFS= read -r g; do
+        # shellcheck disable=SC2254  # the list's globs are the case patterns
+        case "$f" in $g) on="$on windows_guard "; break ;; esac
+      done <<< "$globs"
+    done < <(git diff --name-only --no-renames -z "$range" 2>/dev/null)
+    [ "$n" -gt 0 ] || on="$on windows_guard "
+  fi
   # A new file under a landed dir (landed-dirs.txt, the one list) changes what test_install_src and
   # the guard suite see. An unreadable or empty list turns everything on.
   dirs=$(sed 's/#.*//; s/[[:space:]]//g; s#/$##' landed-dirs.txt 2>/dev/null | grep -v '^$' | paste -sd'|' -)
   if [ -z "$dirs" ]; then
-    on="$on $ALL "
+    on="$on $ALL windows_guard "
   else
     if added=$(git diff --name-only --diff-filter=A --no-renames "$range" 2>/dev/null); then
       whole_read=1
-      grep -Eq "^($dirs)/" <<< "$added" && on="$on $W $S code guard "
+      grep -Eq "^($dirs)/" <<< "$added" && on="$on $W $S code guard windows_guard "
+      # windows_guard alone reads the added names NUL-separated: the newline form quotes a non-ASCII name, which matches no
+      # landed dir. A failed read turns the flag on.
+      if added_z=$(set -o pipefail; git diff --name-only --diff-filter=A --no-renames -z "$range" 2>/dev/null | tr '\0' '\n'); then
+        grep -Eq "^($dirs)/" <<< "$added_z" && on="$on windows_guard "
+      else
+        on="$on windows_guard "
+      fi
     else
-      on="$on $ALL "
+      on="$on $ALL windows_guard "
     fi
   fi
 else
-  on=" $ALL "
+  on=" $ALL windows_guard "
 fi
 # checks_guard: the checks-guard job runs the guard suite, which needs both flags (the old step if). The playwright-setup arm above also sets it directly.
 case "$on" in *" code "*) case "$on" in *" guard "*) on="$on checks_guard " ;; esac ;; esac
@@ -178,14 +231,14 @@ if { [ "$whole_read" = 1 ] || [ "${EVENT:-}" = push ]; } && [[ "${GREEN_HEAD:-}"
    delta=$(git diff --name-only --no-renames "$GREEN_HEAD" "$end" 2>/dev/null) && [ "$delta" = docs/records.md ]; then
   kept=" "
   for t in $on; do
-    case " $JOBS checks_guard code mods guard sweep shoot " in *" $t "*) ;; *) kept="$kept$t " ;; esac
+    case " $JOBS checks_guard code mods guard sweep shoot windows_guard " in *" $t "*) ;; *) kept="$kept$t " ;; esac
   done
   on="$kept"
   skip=true
   echo "CI scope: records-only push after green head $GREEN_HEAD"
 fi
 echo "CI scope: event=${EVENT:-} range=${range:-none} on=$on"
-for n in $ALL; do
+for n in $ALL windows_guard; do
   case "$on" in *" $n "*) v=true ;; *) v=false ;; esac
   echo "$n=$v" >> "$GITHUB_OUTPUT"
   # checks-windows-rest-2 is the second half of the rest suites (R62). Its output repeats the rest flag; no job reads it (the job runs every step on a ready pull_request).
@@ -199,5 +252,5 @@ case "${EVENT:-}" in
 esac
 [ "$skip" = true ] && v=false
 echo "mutation_report=$v" >> "$GITHUB_OUTPUT"
-# records_only_skip: true exactly when the records-only shortcut above forced the 13 flags off; checks.yml reads it in job-level `if:` to skip the test jobs themselves.
+# records_only_skip: true exactly when the records-only shortcut above forced the 14 flags off; checks.yml reads it in job-level `if:` to skip the test jobs themselves.
 echo "records_only_skip=$skip" >> "$GITHUB_OUTPUT"

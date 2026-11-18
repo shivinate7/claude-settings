@@ -1,0 +1,1 @@
+- unexported-var-heredoc-write: (#1186 round 2) an unexported `F=` before a quoted python heredoc is read as a write, though the child shell sees `$F` empty. Rare false alarm, from code reading.

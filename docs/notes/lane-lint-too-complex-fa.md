@@ -1,0 +1,1 @@
+- lane-lint-too-complex-fa: the lane lint is refused as "too complex" in isolated sessions.

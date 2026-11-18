@@ -1,0 +1,1 @@
+- mhct-docs-no-whole-ci: (#2443) skills/ci-hygiene/SKILL.md and skills/project-ops/templates/brief.md still say lanes run no whole CI job.

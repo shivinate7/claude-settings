@@ -1,0 +1,1 @@
+- gh-reopen-cloud-allowed: gh pr reopen, gh pr update-branch and gh issue reopen pass in the cloud. Fix: add them to the cloud write list.

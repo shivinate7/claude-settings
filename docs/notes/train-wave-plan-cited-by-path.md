@@ -1,0 +1,1 @@
+- train-wave-plan-cited-by-path: the train bullet names `plans/wave-plan-2026-11-13.md`, which lives on the record branch, by path, not by id (rule `git-cite-by-id`). Decision: session-tiers.

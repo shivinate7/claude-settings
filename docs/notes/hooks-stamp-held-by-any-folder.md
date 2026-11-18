@@ -1,0 +1,1 @@
+- hooks-stamp-held-by-any-folder: install.sh's live-hooks stamp (~/.claude/state/hooks-source-sha) is held back by any failed folder landing (such as ~/.claude/agents/builder.md being a folder), not only the hooks folder, so hooks can be current while every start says "N commits behind". Fix: gate the stamp on the hooks folder's landing only.

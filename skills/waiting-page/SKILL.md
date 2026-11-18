@@ -68,10 +68,14 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     A ruling is never in a tier and never counts as open. It keeps `owner`, `n`, `title` and `options`:
     the card names the ruled option from `options`. Write a ruling only on a page that `stale_pages.py` reports
     current (see "Update a repo's pages"). An older page hides closed items, so the ruling would not show.
+  - `stops` (a list of strings, each once) names what the answer stops: `"lane <slug>"`, `"PR #<n>"` or `"step <id>"`. `holds` carries each entry's slug (the entry
+    "step merge-queue" needs the slug "merge-queue" in `holds`; a PR needs "#<n>" or "PR <n>"), and `stops` needs `holds`. The writer refuses a write that sets `stops` without `holds`, or with a
+    `stops` entry that `holds` does not name. It does not see a later reword of `holds` alone (debt `stops-holds-reword-gap`). Blocking sorts by the count; the card shows "stops N". A group counts each entry once across its members.
+    An update that sets `stops` carries `holds` too.
   - `rank` (an integer, lower first) orders items inside a tier. Only the page's writer sets it
-    (see "The writer"). It never moves an item to another tier. An item with no `rank` follows the
+    (see "The writer"). It never moves an item to another tier. In Blocking, `rank` follows `stops`. An item with no `rank` follows the
     ranked items, newest first. A group sits together at its best member's `rank`. Inside a tier,
-    new items come first, then seen ones, each part in that order. Seen: the item is open, has no
+    new items come first, then seen ones, each part in that order. Inside each tier, one sub-group per repo, this repo first. Seen: the item is open, has no
     `answers/<id>`, and was `added` before the owner's last Send (the newest `answers/<id>.at` or
     `lastAnswer.at` on any item, closed ones too). A group is seen only when every member is; a ruling is
     never seen. The page works this out once at load and keeps it; a reload works it out again. A seen card keeps every answer part open (options, or steps, command and links; the ready
@@ -97,8 +101,8 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     whose text uses the word port for another meaning. Such an item needs a line in `context` that starts
     "Departs from: <file>:<symbol> — <what changes>" and never has `holds`. The writer refuses it otherwise
     (guard rule `port-question`). The existing app answers every other question: read it, never ask.
-  - `widens: true` on an option marks one that widens what a shared tool accepts: a second accepted form,
-    an allow-list entry or a per-repo exception. Its card shows "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo": a repo
+  - `widens: true` on an option marks one that widens what a shared tool accepts, so that one repo's differing form passes (item 734 (widening means one repo)):
+    a second accepted form, an allow-list entry or a per-repo exception. A change to the shared tool that every repo gets alike, with no repo named as its reason, is never marked. Its card shows "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo": a repo
     that differs from a shared format changes to match it. `recommended` never names such an option, and a list `recommended` never holds its key (the old name `pick` is read the same way). The writer refuses
     it (guard rule `uniform-pick`). An update that sets `recommended` carries `options` again: the guard cannot see the stored field.
   - An option may carry `links` (a list of `{label, url}`): its card shows them, and each opens in a new tab. An option that
@@ -228,6 +232,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   `checked` (what the items were measured against), `parked` (a list of
   `{id, ref, note}`: `id` is a slug of 32 characters or fewer, unique in the list, that you set; a line with no `id` has its acts off) and `identity` (`{name, mark, brand, face, icon}`). The field `woke` is optional.
   - `woke` is the ISO UTC time of the writer's previous wake, with a trailing `Z`. Only the writer writes it. At a comment wake the writer runs `--unread` ("Read the answers"), then writes `woke` at the end of that wake. With no `woke`: the first run; every answer with no receipt is listed. An answer still in its 10 s wait may be listed once. The cost is one message with no answer text.
+  - `repo` (`owner/name`) is this page's repo, which the page sorts first inside each tier. With none, the page takes the repo whose name part matches `name`.
   - `name` is the repo's name. It shows on the colour bar and in the tab title.
   - `mark` is one letter for the bar. It defaults to the first letter of `name`.
   - `brand` is one hex colour, such as `#f47820`. The page derives every colour from it and
@@ -331,7 +336,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
      `request_computer_folder`), and name that outcome in the line. The writer refuses a task without it. A capability reason in the line ends with `(route <id>)` or `(measured <YYYY-MM-DD>, <check and result>)`; the writer refuses it otherwise.
      Carry `kind: task` again on a `context` update: the guard cannot see the stored field.
    - Fill `holds` (never on a port item) whenever a lane, a merge or a PR waits on the answer. Never guess an urgency:
-     with nothing waiting, leave `holds` out.
+     with nothing waiting, leave `holds` out. List each lane, PR or step it names in `stops`.
    - Fill `by` when something reads the answer at a set time.
    - Set `group` on an item that relates to an open one, and write `groups/<slug>` with a `title`
      and a one-sentence `why`. Set `group` on both items.

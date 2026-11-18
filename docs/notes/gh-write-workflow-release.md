@@ -1,0 +1,1 @@
+- gh-write-workflow-release: `gh workflow run` and `gh release create` stay allowed in cloud (`gh run rerun` stays allowed on purpose, for batch runners). Fix: add both to the cloud write list.

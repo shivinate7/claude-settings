@@ -8,4 +8,4 @@
 ## Ruling
 
 - Owner page item 840 a, `own-840-a-ready-merges-main-skip-page-commits`, saved 2026-11-14 19:56:45 CST. It makes `merge <pr> --ready` push a merge of main, and the review record skip page-only commits.
-- Coordinator pick b, 2026-11-14 21:00 CST. It accepts this gap and its remedy: send the yes again after `--ready`. Undoable. Options not taken, since each widens the merge tool: a, teach the relayed-yes read to skip a clean merge; c, no merge at `--ready` for a PR with a relayed yes.
+- Coordinator pick b, 2026-11-14 21:00 CST. It accepts this gap and its remedy: send the yes again after `--ready`. Undoable. Options not taken: a, teach the relayed-yes read to skip a clean merge; c, no merge at `--ready` for a PR with a relayed yes. Each is a tool-wide change, not widening. Widening means one repo's differing form made to pass (item 734 (widening means one repo), owner 14:19 CST Nov 17).

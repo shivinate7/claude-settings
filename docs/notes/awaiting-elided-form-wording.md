@@ -1,0 +1,1 @@
+- awaiting-elided-form-wording: `stale_pages.py` AWAITING_ELIDED (~line 849) matches only "N comment(s) elided"; the tool also prints "[1 other comment elided" and "[11 other comments elided". Both still read unknown through the generic shape branch, but the message says "unknown shape" and the tests cover only the first form. Reader: the #3449 lane.

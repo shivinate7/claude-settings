@@ -1,0 +1,1 @@
+- stall-watch-bare-import: hooks/stall_watch.py's bare `import own_session` is safe from any working directory, but dies if own_session.py is not beside it during an install window, against the file's own rule a few lines below.

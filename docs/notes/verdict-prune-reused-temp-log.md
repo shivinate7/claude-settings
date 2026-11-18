@@ -1,0 +1,1 @@
+- verdict-prune-reused-temp-log: a caller that reuses a VERDICT_LOG named verdict-*.log inside the temp folder can lose it to another run's prune once it is 1 day idle (bin/verdict prune). Decision: none Fix: none — rare and harmless. Until: 2026-11-21
