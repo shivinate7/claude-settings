@@ -6120,6 +6120,83 @@ class LaneLintDiskFloor(LaneFixture):
         self.assertEqual(adds, [], "the lane lint made a tree under the full temp folder before it refused: %r" % (adds,))
         self.assertEqual(self.lint_calls(), [], "the refused lane lint ran the lint anyway: " + text)
 
+    # The cases below load merge.py as a fresh process does: from a copy of the repo's tree, after the case sets the config dir. A fix may
+    # read CLAUDE_CONFIG_DIR at import or at the refusal, and both cases still hold. launch.py runs merge.py from a temp tree it deletes at the end.
+
+    def merge_tree_copy(self):
+        """A copy of this repo's tree in a temp folder of this run, laid out as launch.py lays its tree (merge-fresh-*/tree). -> the tree's path.
+        The copy has no .git, no .claude (other checkouts) and no bytecode. The case deletes the folder."""
+        folder = tempfile.mkdtemp(prefix="merge-fresh-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, folder, True)
+        tree = os.path.join(folder, "tree")
+        shutil.copytree(REPO, tree, ignore=shutil.ignore_patterns(".git", ".claude", "__pycache__"))
+        self.assertTrue(os.path.isfile(os.path.join(tree, "merge", "merge.py")), "the copied tree holds no merge/merge.py: " + tree)
+        return tree
+
+    def load_merge_from(self, tree):
+        """merge.py as a fresh process loads it from `tree`: its __file__ is in `tree`, and the import runs now. sys.path is put back, because
+        merge.py puts its own hooks folder first on it."""
+        saved = list(sys.path)
+        try:
+            spec = importlib.util.spec_from_file_location("merge_from_tree_" + uuid.uuid4().hex, os.path.join(tree, "merge", "merge.py"))
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        finally:
+            sys.path[:] = saved
+        return module
+
+    def refusal_from(self, module):
+        """The refusal of `module`'s refuse_full_disk on a drive with REFUSE_GIB free: the call lane_lint makes first. -> the refusal's text."""
+        self.assertLess(REFUSE_GIB, full_floor_gib(DISK_GIB), "the case reads %s GiB, not under the full floor; it proves nothing" % REFUSE_GIB)
+        with self.disk_reading(free_gib=REFUSE_GIB), self.assertRaises(module.Stop) as caught:
+            module.refuse_full_disk(self.co)
+        return str(caught.exception)
+
+    @staticmethod
+    def named_sweep(text):
+        """The sweep the refusal names: the path before `--root` in `python3 <sweep> --root <root> --confirm`, unquoted. None when it names none."""
+        match = re.search(r"python3 ('[^']*'|\S+) --root", text)
+        return shlex.split(match.group(1))[0] if match else None
+
+    @staticmethod
+    def landed_sweep_in(config):
+        """Put the landed sweep in the config dir `config`, where the install lands janitor/. -> its path."""
+        landed = os.path.join(config, "janitor", "sweep.py")
+        tm.put(landed, "# the landed sweep, a fixture of this case\n")
+        return landed
+
+    def assert_names_landed_sweep(self, text, landed, tree):
+        """The refusal names `landed`, and that file is still there once the run's tree is deleted."""
+        named = self.named_sweep(text)
+        self.assertIsNotNone(named, "the disk refusal names no sweep: " + text)
+        self.assertEqual(os.path.realpath(named), os.path.realpath(landed),
+                         "the refusal names %s, not the landed sweep %s (the path comes from merge.py's own __file__)" % (named, landed))
+        shutil.rmtree(tree, True)  # launch.py's finally: the run's tree is gone when the run ends
+        self.assertTrue(os.path.isfile(named), "the sweep the refusal names is gone once the run's tree is deleted: " + named)
+
+    def test_a_refusal_from_a_temp_tree_names_the_landed_sweep_under_the_config_dir(self):
+        """The refusal names the landed sweep, not a file in the temp tree that launch.py deletes when the run ends."""
+        landed = self.landed_sweep_in(self.cfg)
+        tree = self.merge_tree_copy()
+        self.assertEqual(os.environ.get("CLAUDE_CONFIG_DIR"), self.cfg, "the case does not set the config dir it names")  # scope first
+        module = self.load_merge_from(tree)
+        self.assertTrue(self.under(module.__file__, tree), "merge.py did not load from the temp tree: %s" % module.__file__)
+        self.assert_names_landed_sweep(self.refusal_from(module), landed, tree)
+
+    def test_with_no_config_dir_the_refusal_from_a_temp_tree_names_the_landed_sweep_under_home_claude(self):
+        """The default config dir is ~/.claude, which install.sh and janitor/GUIDE.md use. HOME and USERPROFILE point at a fixture home, so the
+        case never reads the real one."""
+        home = tempfile.mkdtemp(prefix="home-", dir=RUN_FOLDER)
+        landed = self.landed_sweep_in(os.path.join(home, ".claude"))
+        tree = self.merge_tree_copy()
+        with unittest.mock.patch.dict(os.environ, {"HOME": home, "USERPROFILE": home}):
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            self.assertEqual(os.path.realpath(os.path.expanduser("~")), os.path.realpath(home), "the case would read the real home")  # scope first
+            module = self.load_merge_from(tree)
+            self.assertTrue(self.under(module.__file__, tree), "merge.py did not load from the temp tree: %s" % module.__file__)
+            text = self.refusal_from(module)
+        self.assert_names_landed_sweep(text, landed, tree)
+
 
 if __name__ == "__main__":
     unittest.main()
