@@ -18111,9 +18111,11 @@ class ReviewFixFlag(ReviewEnv):
                 self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (REVIEW_OLD_HEAD, "reviewer", model, "PASS"))
 
 class ReviewFixBase(ReviewEnv):
-    """`--fix-check BASE:...` with --review-record refuses unless BASE is the head of the newest review record already on the pull request, and
-    that record has no fix check line, or its fix check passed (owner, page item 741: a fix check after a passing one is accepted). The
-    earlier records come from review_comments, which PullsHost serves from its comment list, oldest first. A refusal exits 2 and prints no record."""
+    """`--fix-check BASE:...` with --review-record refuses unless BASE is the head of an earlier record on the pull request. That record must parse,
+    and have no fix check line or a passing one (owner, page item 741: a fix check after a passing one is accepted). The newest record must parse
+    too, since an unreadable one may hold a FAILed fix check. An older record's head starts the fix check only when the new record posts that
+    record's rounds as they are. The earlier records come from review_comments, which PullsHost serves from its comment list, oldest first. A
+    refusal exits 2 and prints no record."""
 
     EARLIER_HEAD = "1e" * 20  # a head that an earlier record reviewed, and that is not the newest record's
     OTHER_HEAD = "2e" * 20  # a head that no record reviewed
@@ -18134,18 +18136,17 @@ class ReviewFixBase(ReviewEnv):
         self.assertEqual(rc, 0, "a base that is the newest record's head was refused:\n" + out + err)
         self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
 
-    def test_a_base_that_is_not_the_head_of_the_newest_earlier_record_is_refused(self):
-        # only the newest record's head counts, so a head that just an older record reviewed is refused as well as a head no record reviewed
+    def test_a_base_no_record_names_is_refused_beside_an_older_record_head(self):
+        # the start must be a head that a parseable record names, so a head no record reviewed is refused with an older record beside the newest one.
+        # The head that the older record names is taken in, by the case below.
         older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
         newest = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
-        for base in (self.OTHER_HEAD, self.EARLIER_HEAD):
-            with self.subTest(base=base):
-                rc, out, err = self.review_with_base(base, self.record_host(older, newest))
-                self.assert_refused(rc, out, err)
+        rc, out, err = self.review_with_base(self.OTHER_HEAD, self.record_host(older, newest))
+        self.assert_refused(rc, out, err)
 
     def test_a_base_an_older_record_names_is_accepted_when_the_newest_record_names_another_head(self):
-        # The start may be any head that a parseable record on this pull request names, not only the newest record's (the brief's rule for
-        # --fix-check). The control is the newest record's own head, which stays accepted beside it. A hand-written body and a tool-made one both count.
+        # The start may be any head that a parseable record on this pull request names, not only the newest record's (the --fix-check rule in the
+        # review-record decision). The control is the newest record's own head, which stays accepted beside it. A hand-written body and a tool-made one both count.
         for label, body in (("hand-written", record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS)),
                             ("tool-made, with its footer", record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS) + REVIEW_FOOTER)):
             with self.subTest(body=label):
@@ -18239,7 +18240,7 @@ class ReviewFixBase(ReviewEnv):
         self.assertNotIn(REVIEW_MARKER, out, "a failed comments read still printed a record")
 
     def test_a_malformed_newest_earlier_record_refuses_the_base(self):
-        # the newest record does not parse, so it cannot name a head, and the base is refused even when an older record has that head
+        # the newest record does not parse, so the tool cannot read whether it holds a FAILed fix check on that head: the base is refused even when an older record names it
         older = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
         malformed = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, kind="bogus"))
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, malformed))
@@ -18769,7 +18770,7 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
 
     def test_a_fix_verifier_started_at_a_plain_commit_above_the_reviewed_head_is_refused(self):
         # The head is one plain commit on `plain`, so it descends from `plain` and from the reviewed head. Control: the fix check started at the
-        # reviewed head is accepted. The start must be the newest record's Head, so a start at `plain` is refused, with the start refusal's text.
+        # reviewed head is accepted. `plain` is the Head of no record, so a start there is refused although the head descends from it, with the start refusal's text.
         fx = self.real_commits()
         prior = self.prior_text(fx)
         head = self.chained_head(fx, fx.plain, "chain.txt")
@@ -18778,7 +18779,7 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
         self.assertEqual(rc, 0, "control: a fix check started at the reviewed head was refused:\n" + out + err)
         rc, out, err = self.run_fix_after_prior(fx, prior, head, base=fx.plain)
         self.assertEqual(rc, 2, "a fix check started at plain, a commit above the reviewed head, was accepted:\n" + out + err)
-        self.assertIn("the reviewed head must be the Head of the newest earlier review log", err, "the refusal is not the start refusal:\n" + err)
+        self.assertIn("the reviewed head must be the Head of", err, "the refusal is not the start refusal:\n" + err)
         self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
         self.assertNotIn("Traceback", err)
 
@@ -18954,7 +18955,7 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
         self.assert_refused_start(rc, out, err, "a fix verifier on a head that does not descend from the newest reviewed head was not refused")
 
     def test_a_fix_verifier_from_the_head_an_older_record_names_is_accepted_when_the_newest_record_names_another_head(self):
-        # The start is a head that an older record names with a sonnet PASS fix check, while the newest record names another head (the brief's rule
+        # The start is a head that an older record names with a sonnet PASS fix check, while the newest record names another head (the --fix-check rule
         # for --fix-check). The head is a plain commit above that start, so git's ancestry holds. Two controls stay refused: a head no record names,
         # and a head off main that does not descend from the named head.
         fx = self.real_commits()
