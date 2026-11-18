@@ -11,7 +11,8 @@ FAMILY = "note-form-at-write"
 # checker counts the old file as frozen before any red case relies on it.
 #
 # Red cases: a write that adds a line, by Write, Edit or MultiEdit, into an empty file, a one-line file and a 200-line
-# file. Each adds exactly one line, so each writes exactly one noted line. Controls: a delete, a blank line, a reorder,
+# file. Each adds one line, so each writes one noted line. A replace_all Edit adds two lines and still writes one noted
+# line: the guard logs only the first line it adds. Controls: a delete, a blank line, a reorder,
 # a new note file and a debt record. Each passes silently, and writes no noted line for RULE.
 
 import layout as lint_layout  # noqa: E402  the one home of where each kind lives (lint/layout.py)
@@ -162,6 +163,11 @@ note_check("note-form-at-write: an Edit that rewords a note in place is logged n
            "one", "Edit",
            lambda repo: {"file_path": old_file(repo), "old_string": "- nt-base: base note\n",
                          "new_string": "- nt-base: base note, reworded\n"}, adds=True)
+note_check("note-form-at-write: an Edit with replace_all that adds two note lines is logged noted once, not refused",
+           "one", "Edit",
+           lambda repo: {"file_path": old_file(repo), "old_string": "- nt-other: other note\n",
+                         "new_string": "- nt-other: other note\n- nt-replace-one: a new note\n- nt-replace-two: a new note\n",
+                         "replace_all": True}, adds=True)
 note_check("note-form-at-write: a MultiEdit that adds a note line to the old notes file is logged noted, not refused",
            "one", "MultiEdit",
            lambda repo: {"file_path": old_file(repo), "edits": [
