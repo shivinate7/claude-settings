@@ -1,5 +1,6 @@
 {
   "added": "2026-11-18T14:50:59-06:00",
+  "closed": "2026-11-18T14:53:08-06:00",
   "context": "Goal: no lane leaves the shared checkout /home/user/claude-settings (the pointer checkout, the copy every session reads) off its recorded head.\nProblem (rule): a lane's shell stood in that checkout and committed a merge on its detached head (from its old head to a new merge commit, on no branch, nothing pushed); the guard rule other-checkout (writes land only in your own checkout) refused the lane's `git switch -C main origin/main` from its worktree, so undoing it needs your override, a tool the lane's rules reserve for you, or no undo at all.\nBased on (read): the lane's refusal text, relayed verbatim by the coordinator at 14:50 CST; the guard that stops a move of the shared checkout off main (rule pointer-head) never ran (not read by triage).\nBased on (ruling): decision recovery-independent-of-state allows a move back to main with no override, but it does not cover a move made from inside a worktree, which other-checkout refuses first.\nDeparts from: main \u2014 no session can move the shared checkout's head from a worktree \u2014 options b and c let one move through; a changes nothing.\nWaiting on: only the lane's pointer checkout; the lane's real work is in its worktree; the coordinator relays your answer to the lane. Unverified: whether this commit moves the guard's head for other sessions (the coordinator says its own guard reads a different copy of the rules than the shared checkout; triage did not measure this).",
   "home": "step pointer-checkout-refuses-git-writes; lane ci-cancel-on-close-v2",
   "kind": "decision",
@@ -33,6 +34,8 @@
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), for lane ci-cancel-on-close-v2",
   "recommended": "a",
   "ref": "coordinator message 14:50 CST Nov 18, relaying lane ci-cancel-on-close-v2 (verbatim result 14:49 CST)",
+  "replied": "2026-11-18T14:53:08-06:00",
+  "reply": "Closed by triage at 14:53 CST without your pick, under your ruling own-goal-dont-wait-on-me (2026-11-14 20:18 CST): 'Nothing can't be undone don't wait on me.' Every option is undoable, so the session took option a (leave it; the coordinator's pick): the lane works in its own worktree, nothing is pushed, and no guard is let through. Say so here if you want b or c instead.",
   "repo": "shivinate7/claude-settings",
   "short": "Shared checkout head moved: undo?",
   "shown": [
@@ -52,7 +55,7 @@
       "label": "Type `override` for one act so the lane's worktree session runs `git -C /home/user/claude-settings switch -C main origin/main`"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "A lane's merge moved the shared checkout's head to a commit on no branch: undo it, or leave it?",
   "why": "a costs nothing and the harm is unverified; b and c undo a head move that may not matter. Recommended by the coordinator, not owner-typed."
 }
