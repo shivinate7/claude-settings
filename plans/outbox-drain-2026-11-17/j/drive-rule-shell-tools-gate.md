@@ -1,1 +1,0 @@
-- drive-rule-shell-tools-gate: sim-lease-gaps 16:22 CST Nov 12: Lane lane-sim-hold-path via coordinator 16:24 CST Nov 12 (#2937 handed to runner 10 at 08b635ee5): the drive-rule stack (#1599, #1692, #2033, #2061) gate must test SHELL_COMMAND_TOOLS, since the guard now judges the Monitor tool's command like Bash.

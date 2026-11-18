@@ -1,1 +1,1 @@
-- bash-apply-wrote-tests: builder-bash-test-write 14:37 CST Nov 12: Evidence (lane timing-tests #2933, via coordinator 14:36 CST Nov 12): a builder wrote test files through git apply before guard builder-test-edit refused it.
+- bash-apply-wrote-tests: builder-bash-test-write 14:37 CST Nov 12: Evidence (lane timing-tests #2933, through coordinator 14:36 CST Nov 12): a builder wrote test files through git apply before guard builder-test-edit refused it.

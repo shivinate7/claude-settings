@@ -1,1 +1,1 @@
-- shoot-truncates-body-scroller: shoot-job-cap 16:13 CST Nov 12: lane fan-prose-unmapped-5 via coordinator 16:13 CST Nov 12: bin/shoot truncates the body scroller (a page whose scroll sits on an inner element is cut off).
+- shoot-truncates-body-scroller: shoot-job-cap 16:13 CST Nov 12: lane fan-prose-unmapped-5 through coordinator 16:13 CST Nov 12: bin/shoot truncates the body scroller (a page whose scroll sits on an inner element is cut off).
