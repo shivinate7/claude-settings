@@ -178,6 +178,7 @@ FAMILIES = {
     "workflow-args": "a Workflow call whose args is, or holds as an array or object value, a placeholder (an all-caps word with an underscore, or __X__) is refused, naming it and the fix; an absent, empty or real args passes, and so does a short all-caps word or a sentence with an env var name",
     "sections": "the section files: a set the loader refuses (no section file, two files with one number, a name whose number disagrees with its header, a log check appended after the LOG_CHECKS_EXTRA join) stops a run before any case",
     "fg-bash-while-bg": "a foreground Bash call that can run long (a test, lint, merge, build or install, or a time limit over 60000 ms) is refused while this session's background command or agent runs; the run_in_background form, a quick read and a call with no background work pass",
+    "review-record": "a PR comment whose first line is the review marker: refused when merge/merge.py parse_review refuses its body (review-record-form), and when a 40-hex sha on its Head or Fix check line does not resolve in the call's checkout (review-record-sha); the add and update comment tools, a body with no marker, and a check that cannot run pass",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
