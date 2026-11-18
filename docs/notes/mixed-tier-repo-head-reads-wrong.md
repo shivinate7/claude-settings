@@ -1,1 +1,0 @@
-- mixed-tier-repo-head-reads-wrong: in a tier that holds named repos and repo-less items, the repo-less head reads "T this repo", which can look like a repo named T. Found by the design reviewer in the waiting-page-sorting lane. Decision: roles-findings-are-debts-or-notes.
