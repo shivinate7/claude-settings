@@ -19,7 +19,7 @@
 #   Windows-only paths (R62, R63, goal v11 F1 and F2): a pull request starts a Windows job only when its own flag is set. A path in the list
 #   WINDOWS_ONLY_GLOBS (below, emitted as the output windows_only_globs) sets the whole Windows set: checks_windows, checks_windows_merge,
 #   checks_windows_rest, checks_windows_rest_2, checks_windows_sweep and pointer_windows. hooks/test_install_windows.sh keeps checks_windows.
-#   No other arm for hooks/, merge/merge.py, settings.json, install.sh or the catch-all sets the Windows set. A new file under a landed dir other than hooks/ sets checks_windows.
+#   No other arm for hooks/, merge/merge.py, settings.json, install.sh or the catch-all sets the Windows set. A new file under a landed dir other than hooks/ and lint/ sets checks_windows.
 #   The daily run on main runs the whole Windows set and the slow legs (the Windows guard shards and the guard mutation shards), which run on no pull request.
 #   windows_guard (the checks-windows-guard shards): a path that matches a glob of .github/guard-inputs.txt, an added file under a landed dir, or a change to this script, the workflow or that list; read in its own pass over the diff, so a .md input counts, and a path the table names nowhere does not set it.
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event; false on a records-only skip.
@@ -218,8 +218,8 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       # landed dir. A failed read turns the flag on.
       if added_z=$(set -o pipefail; git diff --name-only --diff-filter=A --no-renames -z "$range" 2>/dev/null | tr '\0' '\n'); then
         grep -Eq "^($dirs)/" <<< "$added_z" && on="$on windows_guard "
-        # The Windows job reads the same names, minus hooks/: hooks/ is not a Windows-only path (R62, R63).
-        grep -Eq "^($dirs)/" <<< "$(grep -v '^hooks/' <<< "$added_z")" && on="$on $W "
+        # The Windows job reads the same names, minus hooks/ and lint/: neither is a Windows-only path (R62, R63).
+        grep -Eq "^($dirs)/" <<< "$(grep -v -e '^hooks/' -e '^lint/' <<< "$added_z")" && on="$on $W "
       else
         on="$on $W windows_guard "
       fi
