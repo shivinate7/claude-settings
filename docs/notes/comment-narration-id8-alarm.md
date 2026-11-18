@@ -1,0 +1,1 @@
+- comment-narration-id8-alarm: lint/check_comment_narration.py read an example id8 in a docstring as a commit hash (possible false alarm).

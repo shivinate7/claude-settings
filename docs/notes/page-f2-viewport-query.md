@@ -1,0 +1,1 @@
+- page-f2-viewport-query: The F2 fix uses a viewport media query at 521 px, but rule ux-component-reads-its-box wants a container query. The waiting part already uses 520 px viewport queries throughout. Moving it to container queries is a later step (PR #2559 re-check).

@@ -1,0 +1,1 @@
+- doc-cites-of-literal-unpinned: No check pins the five doc cites of the literal 'Fix check'.

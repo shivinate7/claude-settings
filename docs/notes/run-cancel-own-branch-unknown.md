@@ -1,0 +1,1 @@
+- run-cancel-own-branch-unknown: Unmeasured whether the classifier allows a cancel of a run on the session's own pushed branch. No such refusal is on record (route_rows.json row run-cancel-gh-api-cloud) (#1983 round 3; decision auto-mode-owner-acts).
