@@ -27,6 +27,7 @@ Each entry keeps `$defaults`, the classifier's built-in exceptions.
 | "Consultant Relayed Merge Yes" (`settings.json` `autoMode.allow`) | The same command and head form as "Relayed Merge Yes", by a session tagged `cs-build:batch-runner`, for the one pull request that a session tagged `cs-build:consultant` named when it relayed the owner's yes, directly or through a session tagged `cs-build:triage` that forwards what the consultant relayed, under every merge check | this record |
 | "Batch Runner Merge" (`settings.json` `autoMode.allow`) | `~/.claude/bin/merge <pr> --confirm --head <sha>` by a session tagged `cs-build:batch-runner`, for a pull request its coordinator named in a merge go, under the coordinator's standing grant and every merge check | this record |
 | "Merge Review Record" (`settings.json` `autoMode.allow`) | `merge <pr> --review-record` or `merge --review-record <pr>`, as `merge` or `~/.claude/bin/merge`, with only the record flags, by a session tagged `cs-build:lane`: it prints the review record and posts and merges nothing | this record |
+| "Main Installer" (`settings.json` `autoMode.allow`) | The install from main in one exact form: `cd /root/claude-settings-main && CLAUDE_SETTINGS_REF=main ~/.claude/bin/verdict bash /root/claude-settings-main/merge/install_from_main.sh`. No bare form, other env var, ref, script, argument or chaining | this record |
 | "Session Installer" (`settings.json` `autoMode.allow`) | The session-start installer in three exact forms: `curl -fsSL <stable install.sh URL> \| CS_HOOK_INPUT="{}" bash -s -- --cloud`, and from a claude-settings checkout `bash install.sh` and `powershell -ExecutionPolicy Bypass -File .\install.ps1`. No env var, chaining, extra argument, other URL or ref | this record |
 | `mcp__claude-code-remote__add_repo` (`settings.json` `permissions.allow`) | Attach a GitHub repo to the session | this record |
 | `mcp__claude-code-remote__archive_session` (`settings.json` `permissions.allow`) | Archive a session in the owner's account | this record |
@@ -77,6 +78,17 @@ The entry now quotes the `--head <sha>` form: `~/.claude/bin/merge <pr> --confir
 ### Merge Review Record
 
 Owner, 2026-11-14 14:59 CST, page item 839, pick a: allow a lane session to print the review record. Incident: auto mode refused the call as "Undermining Oversight" at least 7 times in lane sessions (PRs 3226, 3411 and 3407). The lane then posts the printed text itself as a pull request comment (decision `pr-review-record`). The grant text said main has no entry for it. That was wrong for the bare form: main's "Merge Tool Read Checks" already allows `merge <pr> --review-record`. The new entry is for lane sessions only, tagged `cs-build:lane`, and names the record flags the printed text takes. The cause of the denial is unmeasured. Only a live classifier proves the entry works. The next lane record post after this merges tells.
+
+### Merge Tool Read Checks
+
+Owner, 2026-11-15 11:30 CST, page item 863 (pick-lane-lint-allow-entry), pick b, typed on the waiting page: "Amend settings.json autoMode.allow entry "Merge Tool Read Checks" now, without the refusal words". The option's own how: "The entry is widened to let a lane run merge --lane-lint in the background, at once." The option carried the widening label ("a repo changes to fit a shared tool, never the tool to fit a repo"). The owner chose it knowingly. The grant covers that entry and that act only. Ruling id: `own-lane-lint-allow-b`.
+
+The entry now has two changes.
+
+- It names the background run. A lane may run `verdict merge --lane-lint <pr|commit|ref>`, or the same with full paths, in the background, because the call only reads and posts that one comment. The Never covers sentence is byte-identical.
+- It drops its Incident sentence: `Incident: refused once as "Merge Without Review" (runner 9, q_max, 2026-11-07 23:31 CST).` That sentence was the only place the entry quoted a refusal name. The coordinator's brief read the option's "without the refusal words" as "drop them". The option means widen now, without waiting for the exact words. The drop stays as a harmless trim: whether it matters to the classifier is unmeasured. The incident now lives only in this paragraph. `docs/plans/grant-reaches-lanes.md` holds the earlier runner 8 refusal of 2026-11-01.
+
+The classifier refusal of a background lane lint is coordinator-reported (brief, 2026-11-15 11:46 CST) and unmeasured here. A second guard, the check-timeout hook, denied the call when its background time limit sat under 3900000 ms. This entry cannot lift that hook. Only a live classifier proves the entry works: the next background lane lint after this merges tells. The entry's "merges nothing" claim is false for a lint PASS on a batch integration PR (`merge/merge.py` calls `close_replaced` and `reopen_dropped`). Owner item 863 did not name that, so it is an open owner question. `hooks/test_auto_mode_allow.py` (class `MergeToolReadChecksIsAllowed`) pins the dropped words once and the background form, and reads the other limits from the entry.
 
 ### Relayed Merge Yes
 
@@ -191,6 +203,16 @@ Other classifier refusals that day: unknown. The coordinator's transcript could 
 
 Kind: process
 Home: rule:parallelism-keep-going
+
+### Main Installer
+
+Owner, 2026-11-17 10:00 CST, typed in the chat of lane rebase-wave-1b: `(a) you add a permission rule for that command for sure`. Incident: the classifier refused `CLAUDE_SETTINGS_REF=main ~/.claude/bin/verdict bash /root/claude-settings-main/merge/install_from_main.sh` in lane rebase-wave-1b at 15:59 CST on 2026-11-16, as Undermining Oversight (the lane's summary quotes the script path as `merge/install_from_main.sh`; the absolute form is the coordinator's). On 2026-11-17 lanes of five repos reported the same refusal in their own summaries (lane count unmeasured). The coordinator's order of 09:56 CST names the line after `cd /root/claude-settings-main &&`, and the entry allows only that form: the script takes its clone from the working directory, so the bare line run in another repo would pin and fast-forward that repo, which the owner did not name. Finding: the refusal comes from the auto-mode classifier, which reads `autoMode.allow`, not `permissions.allow`. The owner's own deny rule `Edit(~/.claude/settings.json)` blocks a direct edit of the installed file, so the rule is an entry in this repo's `settings.json`, installed by the next refresh.
+
+Why the act is allowed: `merge/install_from_main.sh` fetches origin, fast-forwards local main, moves the pinned checkout `<clone>-live`, prunes old pinned trees and rewrites `~/.claude` from the pin, and a second run restores that state. With `CLAUDE_SETTINGS_REF=main` it installs local main whatever its CI state; that is the recovery path the owner named, not the green-only `stable` path. The script path is absolute because the coordinator's order names it that way; `/root/claude-settings-main` is the clone on the cloud host. Known limit: the separate guard `other-checkout` (it refuses a `cd` into another clone of the repo) still denies this line in a session whose home is a claude-settings checkout or worktree, so a lane standing there needs the owner's `override` for that one act (measured with `python3 hooks/probe.py` by the round 2 reviewer, one host only). The entry unblocks lanes of other repos. The Session Installer entry never covers it (its Never covers names `CLAUDE_SETTINGS_REF` and `main`), so this entry is its own, for the one line the coordinator named.
+
+`hooks/test_auto_mode_allow.py` (`MainInstallerIsAllowed`) checks the one entry, its one quoted command (the `cd` form, never the bare line), that nothing follows it, the owner and incident times, and each refused act. It went red on main's `settings.json` (the Red-run trailers of the commits give the counts) and green on this change.
+
+Departs from: main, whose `settings.json` has no entry for this command.
 
 ### Session Installer
 

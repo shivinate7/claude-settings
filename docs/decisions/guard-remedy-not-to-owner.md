@@ -168,14 +168,32 @@ Text: `HOLD_REASON`. Decision `session-tiers` (the duties of the triage session,
 
 ### Cite-gloss guard (landed turns)
 
-Text: inline, in the main check.
+Text: inline, in `plain_form_reasons`. Rule `speak-cite-id-plus-gloss` (an id carries a plain name on first use).
 
-- A record id appears with no short gloss after it. Write the id, then a few plain words that say what it is, like "D12, short titles for records".
+- An id appears with no short gloss: a record id like `D12`, a `#N` of 3 to 5 digits, or a session ref like `s02747:941`. Write the id, then a few plain words that say what it is, like "D12, short titles for records" or "#2015, check-tail filter".
+- For a `#N` or a session ref, two words that start with a letter must follow the id. "(env -vC, want ask)" is no gloss, and neither is "#2015's own rows".
+- A `#N` needs no gloss right after "PR", "PRs", "pull request", "issue", "commit", "by" or "via", or anywhere in the Done item, where a PR is cited as `#N`.
+- "in #N" passes only after a listed past participle, like "built in #1300", which the mistake guard asks for. "Rows in #1300" still needs a gloss. `PR_WORD_BEFORE_RE` holds the list.
+
+### Time guard (landed turns)
+
+Text: `PLAIN_TIME_REASON`. Rule `style-time-central-24h` (times are US Central, 24-hour, with the zone).
+
+- A clock time carries UTC, GMT or a trailing Z, like "20:34:33 UTC". Give the time in US Central on the 24-hour clock with CST or CDT, like "14:34 CST". Read it with `~/.claude/bin/now-central`.
+- Times in code spans, fences and URLs are not checked. "UTC-06:00", an offset, is no time.
+
+### Contradiction guard (landed turns)
+
+Text: `PLAIN_CONTRADICTION_REASON`. Rule `output-bring-decisions-as-question` (a choice for the owner is a question with options).
+
+- Deviations says "Contradiction:", "Contradiction —" (a dash), or "pick neither" or "choose neither" in any tense, like "picked neither" or "chose neither". Input Needed holds no question: no sentence ending in "?" and no pick with options.
+- "Contradiction: resolved", "Contradiction: settled", "Contradiction: none" and "No contradiction:" claim no open choice, so they pass. "Contradiction: none of" is still a claim.
+- Add the question to Input Needed, with options and a recommendation, or drop the Contradiction line from Deviations.
 
 ## Shared tails
 
-- Every refusal, except a notes fix (R14; not built; step `notes-fix-no-owner-line`), opens with the owner line from `owner_line()`, which cites this record, and ends with ` (rule reports-order-of-labels)`. That rule says the report's four labels go in order: Done, Deviations, Input Needed, Next. On the rewrite after a refusal, a triage hold alone has no tail.
-- Correction rule, no text in any refusal: after any refusal but a missing report, post only the corrected lines, as a short correction, and post none for a fix to a session's own notes (not built; step `notes-fix-no-owner-line`; see the ruling). Never send the report again. The owner has read the report before a refusal lands, so a resent report doubles it. A missing report asks for the report itself, and its reply carries every other fix too.
+- Every refusal, except a notes fix (R14; not built; step `notes-fix-no-owner-line`), opens with the owner line from `owner_line()`, which cites this record, and ends with ` (rule reports-order-of-labels)`, then, from a reply guard, the correction line below. That rule says the report's four labels go in order: Done, Deviations, Input Needed, Next. On the rewrite after a refusal, a triage hold gets the tail too.
+- Correction rule: every refusal of a reply but a missing report ends with one shared line, "Post only the missing or corrected lines. Do not resend the reply." (owner, 2026-11-17 09:30 CST). `report_guard.emit_stop` writes it, so each reply guard that prints through it carries the line, and a new guard needs no work. The correction line is not the owner line, so a session's own notes refusal still carries it, and the notes fix (not built; step `notes-fix-no-owner-line`; see the ruling) drops only the owner line. The owner has read the report before a refusal lands, so a resent report doubles it. A missing report asks for the report itself, and its reply carries every other fix too, so it gets no line.
 - The system message notes (`NO_PAGE_NOTE`, the hand-off guard's UNKNOWN lines and the route flags) and the stderr lines are not refusals. They never stop a reply, and they fall outside this record.
 
 Kind: process
