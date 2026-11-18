@@ -3510,7 +3510,9 @@ def landed_sweep():
 
 def run_safe_sweep(root):
     """The one safe janitor sweep, run in this process on `root`: janitor/sweep.py sweep_repo in "fast" mode with confirm on and attended off. Fast
-    mode judges worktrees only, with no fetch, and reaps only a clean, unlocked, idle tree already in the default branch, so it asks nothing.
+    mode judges worktrees only, with no fetch, and reaps only a clean, idle tree already in the default branch that no lock holds, so it asks
+    nothing. A tree its caller's own agent lock holds is kept too (own_lock_rule=False turns off the sweep's own-lock reap), since this process
+    still reads it.
     Both triggers call it, so the sweep has one home: the lane lint's full disk floor (refuse_full_disk) and the confirm that just merged
     (confirm). Cost (decision machine-load-brake, rule outcomes-mechanize-rules): one sweep per successful merge and one per floor hit. It starts
     no timer and no long-lived process. A sweep that cannot run or refuses never stops the caller: one line on stderr, and -> None.
@@ -3520,7 +3522,7 @@ def run_safe_sweep(root):
         if janitor not in sys.path:
             sys.path.append(janitor)
         import sweep  # here, not at the top: only a merge or a full disk needs it
-        result = sweep.sweep_repo(root, True, sweep.default_restore_log_path(), "fast", False)
+        result = sweep.sweep_repo(root, True, sweep.default_restore_log_path(), "fast", False, own_lock_rule=False)
     except Exception as e:
         print(f"merge: the safe sweep did not run: {type(e).__name__}: {' '.join(str(e).split())[:200]}", file=sys.stderr)
         return None
@@ -3536,15 +3538,15 @@ def refuse_full_disk(root):
     never refuses here. The floor holds in a cloud session too. A drive that cannot be read prints one line that says so; the other is still checked,
     and the lint goes ahead when none is full.
     A full drive runs the safe sweep once (run_safe_sweep), reads the drives again, and refuses only if one is still under the floor. The refusal
-    names the GiB the sweep freed. Cost: one sweep per floor hit, and two disk reads of two drives."""
+    names the GiB the sweep freed on the drive that was full, or says the sweep did not run or refused. Cost: one sweep per floor hit, and two disk reads of two drives."""
     import guard as hook_guard  # here, not at the top: it loads the whole guard set, and only the lane lint and the review record need it
     def temp_read():
         usage = shutil.disk_usage(tempfile.gettempdir())
         return usage.free / hook_guard.GIB, usage.total / hook_guard.GIB
     def read_drives():
-        """-> (the full drives as text, a drive was unread, each drive's free GiB or None)."""
-        full, unknown, frees = [], False, []
-        for read in (hook_guard._read_disk, temp_read):
+        """-> (the full drives as text, a drive was unread, each drive's free GiB or None, the positions of the full drives in that list)."""
+        full, unknown, frees, full_at = [], False, [], []
+        for at, read in enumerate((hook_guard._read_disk, temp_read)):
             try:
                 free, total = read()
             except Exception:
@@ -3552,18 +3554,23 @@ def refuse_full_disk(root):
                 frees.append(None)
                 continue
             frees.append(free)
-            full += [t for t in hook_guard.load_full({"disk_free_gb": free, "disk_total_gb": total}) if t not in full]  # one drive under both folders is named once
-        return full, unknown, frees
-    full, unknown, before = read_drives()
-    freed = 0.0
+            named = hook_guard.load_full({"disk_free_gb": free, "disk_total_gb": total})
+            if named:
+                full_at.append(at)
+            full += [t for t in named if t not in full]  # one drive under both folders is named once
+        return full, unknown, frees, full_at
+    full, unknown, before, full_at = read_drives()
+    freed, swept = 0.0, True
     if full:
-        run_safe_sweep(root)
-        full, unknown, after = read_drives()
-        freed = max([a - b for a, b in zip(after, before) if a is not None and b is not None] + [0.0])
+        swept = run_safe_sweep(root) is not None  # None: the sweep did not run or refused, so the refusal says that and never "freed 0.0 GiB"
+        full, unknown, after, _ = read_drives()
+        # Only a drive that read full before the sweep counts: the other drive's free space moves with other work, not with this sweep.
+        freed = max([after[i] - before[i] for i in full_at if after[i] is not None and before[i] is not None] + [0.0])
     if unknown:
         print("merge: the free disk read as unknown, so the lane lint goes ahead" if not full else "merge: a free disk read as unknown", file=sys.stderr)
     if full:
-        raise Stop(f"the lane lint makes a full checkout, and the machine is full ({', '.join(full)}) after the safe sweep freed {freed:.1f} GiB. Free space first: "
+        after_sweep = f"after the safe sweep freed {freed:.1f} GiB" if swept else "and the safe sweep did not run or refused, so it freed nothing"
+        raise Stop(f"the lane lint makes a full checkout, and the machine is full ({', '.join(full)}) {after_sweep}. Free space first: "
                    f"`python3 {shlex.quote(landed_sweep())} --root {shlex.quote(str(root))} --confirm` "
                    "(decision machine-load-brake, the lane lint refuses at the full disk floor in a cloud session too).")
 
