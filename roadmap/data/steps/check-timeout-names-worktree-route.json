@@ -1,0 +1,14 @@
+{
+ "id": "check-timeout-names-worktree-route",
+ "title": "When guard check-timeout refuses a foreground long run in a worktree-isolated session, its refusal names the route 'hand the head to runner 10 for lint'",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Coordinator relay 14:50 CST Nov 18, from the consultant's read at 14:50 CST. Today lane ci-cancel-on-close-v2 (PR 3216, 14:48 CST) could run its lane lint neither foreground nor background.",
+ "source": "coordinator relay 14:50 CST Nov 18 (consultant's read 14:50 CST)",
+ "note": "The consultant found the text 'too complex to verify that it stays inside the worktree' in no claude-settings guard (git grep on main: only two notes, docs/notes/scratch-heredoc-js-refused.md and three-handins-wait-3269.md, both Nov 13). It is the Claude Code harness's own worktree check, so it is not fixable here; our part is the refusal text of guard check-timeout. Fold those two notes in as incidents, plus today's lane. Test-author first. Prior-work search first. Not verified by triage.",
+ "updatedAt": "2026-11-18T14:54:12-06:00"
+}
