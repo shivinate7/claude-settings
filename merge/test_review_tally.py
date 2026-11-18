@@ -26,7 +26,7 @@ and whether an unparseable record with no first-round line counts as unknown.
 Printed contract, which the builder matches and parse_tally reads:
     before the split                          a section header: `before the split`, `after the split`, or `all`
     round N, haiku: PASS 37, FAIL 146         one line per round and model in each section
-    first-round FAIL, then second round: PASS 1, FAIL 0, none 0
+    follow-up of the first-round FAILs        the line FOLLOW_LINE matches: PASS 1, FAIL 0, none 0
     unknown: 0
 
 Each case calls merge.main with the GitHub half faked by test_merge's PullsHost. The first assert of each case checks the exit code, so
