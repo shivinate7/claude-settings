@@ -1,9 +1,9 @@
 {
-  "title": "The batch runner gets a list of lanes it can archive",
-  "phase": "now",
-  "status": "done",
-  "order": 103.31,
-  "why": "Owner, 11:32 CST Nov 6: finished lanes stay open. Decision session-tiers also says \"The cloud cannot close a pull request\", which is stale: batch runners close PRs through the GitHub MCP tool.",
-  "note": "Done: #1312 merged in batch #1365 at 16:36 CST Nov 6.\nNov 6 11:38 CST (owner chat, via coordinator): page item 274 a, \"A is fine the batch runner keeps archiving more automatically\". The lane rewrites decision session-tiers: the batch runner archives from the worked-out list after each merge, and the topic test goes.\nNov 6 11:35 CST (coordinator): lane [ended:lane:-idle-lane-archive] builds a command that lists archivable lanes for the batch runner, and rewrites that stale sentence in decision session-tiers.",
-  "updatedAt": "2026-11-06T22:42:00Z"
+ "title": "The batch runner gets a list of lanes it can archive",
+ "phase": "now",
+ "status": "done",
+ "order": 103.31,
+ "why": "Owner, 11:32 CST Nov 6: finished lanes stay open. Decision session-tiers also says \"The cloud cannot close a pull request\", which is stale: batch runners close PRs through the GitHub MCP tool.",
+ "note": "Done: #1312 merged in batch #1365 at 16:36 CST Nov 6.\nNov 6 11:38 CST (owner chat, via coordinator): page item 274 a, \"A is fine the batch runner keeps archiving more automatically\". The lane rewrites decision session-tiers: the batch runner archives from the worked-out list after each merge, and the topic test goes.\nNov 6 11:35 CST (coordinator): lane [ended:lane:-idle-lane-archive] builds a command that lists archivable lanes for the batch runner, and rewrites that stale sentence in decision session-tiers. Owner 14:20 CST Nov 18 typed `override 15m` in the coordinator's chat (page item 973, answered, valid to 14:35 CST): the coordinator archived ten lanes under it, each result SESSION_STATUS_ARCHIVED. Process-only: a one-time override covering no other act.",
+ "updatedAt": "2026-11-18T14:23:38-06:00"
 }

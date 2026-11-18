@@ -1,0 +1,14 @@
+{
+ "id": "red-run-archive-exempt",
+ "title": "The red-run hook lets an archive push through, judged on the destination ref",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Coordinator 14:23 CST Nov 18, from the consultant's read at 14:19 CST (decision text only, no probe run): the coordinator's archive pushes were refused at 02:22 CST Nov 18 by hook `red-run`.",
+ "source": "coordinator relay 14:23 CST Nov 18 (consultant's read 14:19 CST)",
+ "note": "Fix: exempt a push whose destination ref starts with refs/heads/archive/, judged on the destination. Failing test first: an archive push of an old lane that is red on today's hook; control: a normal push of the same range stays refused. Home: docs/decisions/red-run-trailer-on-test-commits.md item 5, limit line 35, item 9. Prior-work search first. Mistake it stops: an unmerged lane cannot be saved before it is deleted (rule shared-trees-archive-then-delete). Harm: lost work or manual overrides.",
+ "updatedAt": "2026-11-18T14:23:38-06:00"
+}

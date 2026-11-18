@@ -1,0 +1,14 @@
+{
+ "id": "lane-close-reads-branch-pr",
+ "title": "Hook lane-closes-after-records finds a lane's PR from its branch when the lane has no cs-step tag",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Coordinator 14:23 CST Nov 18, from the consultant's read at 14:19 CST: seven lanes were refused for archive from 08:xx to 14:13 CST Nov 18 (an owner `override 15m` at 14:20 CST let ten through).",
+ "source": "coordinator relay 14:23 CST Nov 18 (consultant's read 14:19 CST)",
+ "note": "Fix: when a lane has no `cs-step` tag, the hook reads the lane's PR from its branch by REST and passes when that PR is merged, or closed with a named replacing PR that is merged; never tag by guess. Prior-work search first. Also open: a possible pre-archive check for the coordinator route (branch pushed or merged, PRs merged or closed, step landed, evidence printed per lane), asked by the owner at 14:21 CST; the coordinator awaits the consultant's read, file it as its own step if built.",
+ "updatedAt": "2026-11-18T14:23:38-06:00"
+}
