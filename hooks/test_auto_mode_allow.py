@@ -66,7 +66,10 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   `--review-record` and `--lane-lint` (read from merge/merge.py's argparse), "takes no lock", the PASS and
   ref-or-commit comment rules, and both tool names. Its Never covers names each act in READ_CHECKS_REFUSED.
   No word in READ_CHECKS_DROPPED appears outside that sentence. Outside it, the entry also names `--lane-lint`
-  run in the background through `verdict`, read from READ_CHECKS_BACKGROUND.
+  run in the background through `verdict`, read from READ_CHECKS_BACKGROUND. Its lint sentences also name the
+  push a PASS may make (one merge commit of main to the PR's own branch, a plain push, never a force push, when
+  the PR head is in the caller's checkout), and no sentence says the lint merges nothing (ruling own-lane-lint-push-a).
+  The "### Merge Tool Read Checks" section of the decision names that ruling and page item 951.
 AUTO_MODE_SETTINGS names another settings file to read (default: this repo's settings.json), so the
 same cases run against a copy with a clause removed and show red there.
 """
@@ -204,6 +207,25 @@ READ_CHECKS_BACKGROUND = (("background", r"(?i)\bbackground\b"),
                           ("the verdict wrapper", r"`verdict merge --lane-lint(?![\w-])"),
                           ("the verdict wrapper with full paths",
                            r"`~/\.claude/bin/verdict ~/\.claude/bin/merge --lane-lint(?![\w-])"))
+# The lint push a PASS may make (merge/merge.py lane_lint; ruling own-lane-lint-push-a). READ_CHECKS_PUSH_WORDS must share
+# one sentence outside the Never covers clause; each READ_CHECKS_PUSH_TERMS and READ_CHECKS_LINT_CLAIMS entry is named there too.
+READ_CHECKS_PUSH_WORDS = ("--lane-lint", "pushes", "merge commit", "own branch")
+READ_CHECKS_PUSH_TERMS = (("a plain push", r"(?i)\bplain push\b"),
+                          ("never a force push", r"(?i)\bnever\b[^.]*\bforce[- ]push\b"),
+                          ("the PR head in the caller's checkout", r"(?i)\bthe PR head is in the caller.s checkout\b"))
+READ_CHECKS_LINT_CLAIMS = (("merges no pull request", r"(?i)\bmerges no pull request\b"),)
+# The claim the push retires: the entry says the call "only reads and posts that one comment".
+READ_CHECKS_RETIRED = (("only reads and posts that one comment", r"(?i)\bonly reads and posts that one comment\b"),)
+# The read-only pair keeps its claim: one sentence names both read flags and says they only read and print.
+READ_CHECKS_READ_ONLY = ("--reviewed", "--review-record", "only read and print")
+# The Never covers sentence, unchanged. never_covers() returns it without its final period.
+READ_CHECKS_NEVER = ("Never covers a call that also carries `--confirm`, `--base-red-ok`, `--undo-check-unknown-ok`, "
+                     "any other flag that lifts a check, or `gh pr merge`")
+# The decision's section for the entry, and what that section names (ruling own-lane-lint-push-a, page item 951).
+DECISION = os.path.join(REPO_ROOT, "docs", "decisions", "auto-mode-owner-acts.md")
+DECISION_SECTION = "### Merge Tool Read Checks"
+DECISION_NAMES = (("ruling id own-lane-lint-push-a", r"`own-lane-lint-push-a`"),
+                  ("page item 951", r"\bpage item 951(?!\d)"))
 # The Covers text names the session that started this one, and the no-act report it lets through.
 MESSAGE_TARGET = (("the session that started this one", "the session that started this one"),)
 MESSAGE_REPORT = (("asks for no act", "asks for no act"), ("pull request number", "pull request number"),
@@ -387,6 +409,23 @@ def outside_never_covers(entry):
     """The entry's text with its 'Never covers' sentence removed, wherever that sentence sits."""
     found = never_covers_match(entry)
     return entry[:found.start()] + entry[found.end():] if found else (entry or "")
+
+
+def sentences(text):
+    """The sentences of a text, split at a period that ends one (a period then a space or the end), as never_covers_match splits.
+    A semicolon does not split, so a clause after one stays with its subject."""
+    return [s.strip() for s in re.split(r"\.(?:\s|$)", text or "") if s.strip()]
+
+
+def decision_section(heading):
+    """The lines under one heading line of the decision file, up to the next '## ' or '### ' line, or None when no line is that heading."""
+    with open(DECISION, encoding="utf-8") as handle:
+        lines = handle.read().splitlines()
+    if heading not in lines:
+        return None
+    start = lines.index(heading) + 1
+    end = next((i for i in range(start, len(lines)) if lines[i].startswith(("## ", "### "))), len(lines))
+    return "\n".join(lines[start:end])
 
 
 def unnamed_terms(clause, terms):
@@ -906,6 +945,66 @@ class MergeToolReadChecksIsAllowed(unittest.TestCase):
         hits = [e for e in auto_mode().get("allow", []) if e.startswith(MERGE_TOOL_READ)]
         self.assertEqual(len(hits), 1, "need exactly one '%s' entry in autoMode.allow, found %d"
                          % (MERGE_TOOL_READ, len(hits)))
+
+    def test_lint_names_the_push_of_one_merge_commit_to_the_own_branch(self):
+        entry = allow_entry(MERGE_TOOL_READ)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % MERGE_TOOL_READ)
+        found = [s for s in sentences(outside_never_covers(entry))
+                 if all(word in s.lower() for word in READ_CHECKS_PUSH_WORDS)]
+        self.assertTrue(found, "no sentence outside Never covers says --lane-lint pushes one merge commit to the own branch")
+
+    def test_lint_push_is_a_plain_push_never_forced_when_the_head_is_in_the_checkout(self):
+        entry = allow_entry(MERGE_TOOL_READ)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % MERGE_TOOL_READ)
+        outside = outside_never_covers(entry)
+        for name, pattern in READ_CHECKS_PUSH_TERMS:
+            with self.subTest(term=name):
+                self.assertRegex(outside, pattern, "the '%s' entry does not name %s outside its Never covers sentence"
+                                 % (MERGE_TOOL_READ, name))
+
+    def test_lint_says_it_merges_no_pull_request(self):
+        entry = allow_entry(MERGE_TOOL_READ)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % MERGE_TOOL_READ)
+        outside = outside_never_covers(entry)
+        for name, pattern in READ_CHECKS_LINT_CLAIMS:
+            with self.subTest(claim=name):
+                self.assertRegex(outside, pattern, "the '%s' entry does not say %s outside its Never covers sentence"
+                                 % (MERGE_TOOL_READ, name))
+
+    def test_drops_the_only_reads_and_posts_claim(self):
+        entry = allow_entry(MERGE_TOOL_READ)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % MERGE_TOOL_READ)
+        outside = outside_never_covers(entry)
+        for name, pattern in READ_CHECKS_RETIRED:
+            with self.subTest(claim=name):
+                self.assertNotRegex(outside, pattern, "the '%s' entry still says the call %s"
+                                    % (MERGE_TOOL_READ, name))
+
+    def test_merges_nothing_is_said_only_of_the_read_flags(self):
+        entry = allow_entry(MERGE_TOOL_READ)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % MERGE_TOOL_READ)
+        bad = [s for s in sentences(outside_never_covers(entry))
+               if re.search(r"(?i)\bmerges?\s+nothing\b", s) and not ("--reviewed" in s and "lint" not in s.lower())]
+        self.assertFalse(bad, "a sentence says the call merges nothing but names no --reviewed, or names the lint: %r" % bad[:1])
+
+    def test_read_only_pair_still_only_reads_and_prints(self):
+        entry = allow_entry(MERGE_TOOL_READ)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % MERGE_TOOL_READ)
+        found = [s for s in sentences(outside_never_covers(entry)) if all(term in s for term in READ_CHECKS_READ_ONLY)]
+        self.assertTrue(found, "no sentence names --reviewed and --review-record as only read and print")
+
+    def test_never_covers_sentence_is_unchanged(self):
+        entry = allow_entry(MERGE_TOOL_READ)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % MERGE_TOOL_READ)
+        self.assertEqual(never_covers(entry), READ_CHECKS_NEVER,
+                         "the Never covers sentence of the '%s' entry changed" % MERGE_TOOL_READ)
+
+    def test_decision_section_names_the_ruling_and_item(self):
+        section = decision_section(DECISION_SECTION)
+        self.assertIsNotNone(section, "the decision file has no '%s' section" % DECISION_SECTION)
+        for name, pattern in DECISION_NAMES:
+            with self.subTest(name=name):
+                self.assertRegex(section, pattern, "the '%s' section does not name the %s" % (DECISION_SECTION, name))
 
 
 class OwnerPrHousekeepingIsAllowed(unittest.TestCase):
