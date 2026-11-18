@@ -2109,7 +2109,7 @@ UNVETTED_LINE = re.compile(r"^[ \t>*+-]*Unvetted:[ \t]*\S", re.I | re.M)
 UNREADABLE = "unreadable"
 CLOSED_ITEMS = "closed page items"
 INDEX_CAP, STEP_TOP, STEP_GIT_TIMEOUT, RULED_TOP = 800, 30, 10, 8
-RULING_EXTRA_CAP = 1200  # the most a record's ruling section adds past INDEX_CAP, as owner ruling sentences
+RULING_EXTRA_CAP = 600  # the most a record's ruling section adds past INDEX_CAP, as owner ruling sentences
 RULING_HEADING = re.compile(r"^##[ \t]+The ruling[ \t]*$", re.I | re.M)
 RULING_WORDS = re.compile(r"ruling|owner|shiv", re.I)
 SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
@@ -2140,9 +2140,10 @@ def _ruling_text(body) -> str:
     if match:
         section = body[match.end():]
         nxt = re.search(r"^##[ \t]", section, re.M)
-        text = " ".join((section[:nxt.start()] if nxt else section).split())
+        section = section[:nxt.start()] if nxt else section
+        text = " ".join(section.split())
         if text:
-            extra = _owner_sentences(text)
+            extra = _owner_sentences(section)
             return text[:INDEX_CAP] + (" " + extra if extra else "")
     lines = body.splitlines()
     if lines and lines[0].startswith("#"):
@@ -2150,27 +2151,46 @@ def _ruling_text(body) -> str:
     return " ".join(" ".join(lines).split())[:INDEX_CAP]
 
 
-def _owner_sentences(text) -> str:
-    """The sentences of `text` that end past INDEX_CAP and carry a ruling word (RULING_WORDS), joined with a space in
-    their order, at most RULING_EXTRA_CAP characters in all, the space before them included. When they do not all
-    fit, the newest date stamp wins (a later ruling sits late in a long section), then document order; a sentence
-    that does not fit is skipped. "" when none."""
-    if len(text) <= INDEX_CAP:
-        return ""
+def _units(section):
+    """The sentences of `section`, white space collapsed, in order. A markdown table row (a line that starts with
+    `|`) is one unit of its own, so a row that holds the ruling words is kept alone and not run on with its table.
+    The units joined by one space are the section collapsed."""
+    units, paragraph = [], []
+
+    def flush():
+        if paragraph:
+            units.extend(SENTENCE_SPLIT.split(" ".join(" ".join(paragraph).split())))
+            paragraph.clear()
+
+    for line in section.splitlines():
+        if line.lstrip().startswith("|"):
+            flush()
+            units.append(" ".join(line.split()))
+        elif line.strip():
+            paragraph.append(line)
+    flush()
+    return units
+
+
+def _owner_sentences(section) -> str:
+    """The units of `section` (see _units) that end past INDEX_CAP and carry a ruling word (RULING_WORDS), joined
+    with a space, at most RULING_EXTRA_CAP characters in all, the space before them included. When they do not all
+    fit, the one with the newest date stamp comes first, then the rest in document order (a later ruling sits late
+    in a long section); a unit that does not fit is skipped. The kept ones read in document order. "" when none."""
     found, pos = [], 0
-    for sentence in SENTENCE_SPLIT.split(text):
-        end = pos + len(sentence)
+    for unit in _units(section):
+        end = pos + len(unit)
         pos = end + 1
-        if end > INDEX_CAP and RULING_WORDS.search(sentence):
-            stamps = DATE_STAMP.findall(sentence)
-            found.append((len(found), max(stamps) if stamps else "", sentence))
+        if end > INDEX_CAP and RULING_WORDS.search(unit):
+            stamps = DATE_STAMP.findall(unit)
+            found.append((len(found), max(stamps) if stamps else "", unit))
     picked, size = [], 1
-    for index, _stamp, sentence in sorted(found, key=lambda item: item[1], reverse=True):  # stable: ties keep order
-        cost = len(sentence) + bool(picked)
+    for index, _stamp, unit in sorted(found, key=lambda item: item[1], reverse=True):  # stable: ties keep order
+        cost = len(unit) + bool(picked)
         if size + cost <= RULING_EXTRA_CAP:
             size += cost
-            picked.append((index, sentence))
-    return " ".join(sentence for _index, sentence in sorted(picked))
+            picked.append((index, unit))
+    return " ".join(unit for _index, unit in sorted(picked))
 
 
 def _record_index(root, folder, unknown, label, seen):
