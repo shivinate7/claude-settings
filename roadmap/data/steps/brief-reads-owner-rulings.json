@@ -6,6 +6,8 @@
   "owner": "coordinator",
   "status": "doing",
   "order": 871,
-  "updatedAt": "2026-11-12T14:00:48-06:00",
-  "lane": "session_013NEJL16gZbEWWpzAFUa6zA"
+  "updatedAt": "2026-11-17T22:01:56-06:00",
+  "lane": "session_013NEJL16gZbEWWpzAFUa6zA",
+  "pr": 3262,
+  "repo": "shivinate7/claude-settings"
 }

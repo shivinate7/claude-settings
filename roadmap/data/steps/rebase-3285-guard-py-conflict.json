@@ -1,14 +1,14 @@
 {
- "id": "rebase-3285-guard-py-conflict",
- "title": "PR #3285 is brought up to date on hooks/guard.py, so it can join the next combined PR",
- "status": "doing",
- "repo": "shivinate7/claude-settings",
- "phase": "next",
- "lane": "session_013NEJL1cLmoJwGPfFHtCQJU",
- "owner": "coordinator",
- "blockedBy": [],
- "why": "Left out of combined PR #3418 by name (g1 via the coordinator 15:09 CST Nov 14; triage read nothing): #3285 conflicts main alone in hooks/guard.py. Triage has no step on the record that names #3285; the coordinator names the step it builds when it starts a lane. First act of a lane: merge main into the PR, resolve hooks/guard.py by reading both sides, run the PR's own checks, hand it in; do not drop it. LANE STARTED 15:14 CST Nov 14 (coordinator 15:13): lane session_013NEJL1cLmoJwGPfFHtCQJU (PR #3285, branch lane-step-dup-check-v6; the lane names that PR's own step in its hand-in). Same rules: checks that no live session holds the branch (stops if the last push is under 2 h), merges main only, hands in; no review chain until the coordinator says. STATE 16:15 CST Nov 14 (coordinator 16:15, from the #3285 lane; the coordinator did not read the commits): #3285 pushed head 6dec35f564ef (a merge, a fixture commit re-pointing two stale lane titles in tests/guard/s42900 and s42910, a merge); its lane runs the fix verifier now on the coordinator's go. Commit 78aeb0b4 carries the wrong Claude-Session id (step commit-trailer-own-session-id). CLASH WATCH 17:34 CST Nov 14 (coordinator 17:33, relayed): #3352 touched hooks/guard.py, and both #3223 and #3285 touch it, so they may now clash; runner 10 reads that at their ready step; unknown until then.",
- "source": "coordinator 15:09 CST Nov 14 (g1's list)",
- "note": "Filed 15:11 CST Nov 14 by triage. Tracker: the coordinator. Step of the PR unknown.",
- "updatedAt": "2026-11-14T17:34:00-06:00"
+  "id": "rebase-3285-guard-py-conflict",
+  "title": "PR #3285 is brought up to date on hooks/guard.py, so it can join the next combined PR",
+  "status": "doing",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "session_013NEJL1cLmoJwGPfFHtCQJU",
+  "owner": "coordinator",
+  "blockedBy": [],
+  "why": "Left out of combined PR #3418 by name (g1 via the coordinator 15:09 CST Nov 14; triage read nothing): #3285 conflicts main alone in hooks/guard.py. Triage has no step on the record that names #3285; the coordinator names the step it builds when it starts a lane. First act of a lane: merge main into the PR, resolve hooks/guard.py by reading both sides, run the PR's own checks, hand it in; do not drop it. LANE STARTED 15:14 CST Nov 14 (coordinator 15:13): lane session_013NEJL1cLmoJwGPfFHtCQJU (PR #3285, branch lane-step-dup-check-v6; the lane names that PR's own step in its hand-in). Same rules: checks that no live session holds the branch (stops if the last push is under 2 h), merges main only, hands in; no review chain until the coordinator says. STATE 16:15 CST Nov 14 (coordinator 16:15, from the #3285 lane; the coordinator did not read the commits): #3285 pushed head 6dec35f564ef (a merge, a fixture commit re-pointing two stale lane titles in tests/guard/s42900 and s42910, a merge); its lane runs the fix verifier now on the coordinator's go. Commit 78aeb0b4 carries the wrong Claude-Session id (step commit-trailer-own-session-id). CLASH WATCH 17:34 CST Nov 14 (coordinator 17:33, relayed): #3352 touched hooks/guard.py, and both #3223 and #3285 touch it, so they may now clash; runner 10 reads that at their ready step; unknown until then.",
+  "source": "coordinator 15:09 CST Nov 14 (g1's list)",
+  "note": "Filed 15:11 CST Nov 14 by triage. Tracker: the coordinator. Step of the PR unknown. PR class (triage 11, 22:01 CST Nov 17): none; no PR text names this step.",
+  "updatedAt": "2026-11-17T22:01:56-06:00"
 }

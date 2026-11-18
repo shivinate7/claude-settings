@@ -1,14 +1,14 @@
 {
- "id": "ready-guard-accepts-none",
- "title": "The records-page ready guard accepts the merge value none for required CI checks, so a ready mark on a private repo is not refused",
- "status": "doing",
- "repo": "shivinate7/claude-settings",
- "phase": "now",
- "owner": "consultant",
- "blockedBy": [],
- "why": "On 01:41 CST Nov 17 the guard that checks the records page before a ready mark refused every session's mark on the revert PR #3607, saying that main's merge settings hold the value none for the required CI checks and that this value is not valid (coordinator relay of the consultant's 01:40 CST report). Your Nov 16 ruling is that private repos merge with no CI run, so none is the valid value there. The refusing guard's code was not found by triage 9 (see step revert-has-no-pushing-role).",
- "source": "Consultant message to triage 9, 09:11 CST Nov 17 ('also in progress here: ready-guard-accepts-none (records-page-ready refuses requiredChecks \"none\")'; relayed, not read by triage 9). Searched steps at 09:10 CST: records-page-ready-reads-pr-repo and revert-has-no-pushing-role are different steps. Filed by triage 9.",
- "note": "Doing, consultant (relay, 09:11 CST Nov 17); no PR read by triage 9 yet. Ask: the records-page-ready check treats requiredChecks none as a valid value, red then green. Open: whether the guard refused the mark on the value none alone, or on another cause, is unmeasured. The #3607 merge (03:07:11 CST) went through the merge tool and did not hit this guard.",
- "updatedAt": "2026-11-17T09:10:40-06:00",
- "order": 240
+  "id": "ready-guard-accepts-none",
+  "title": "The records-page ready guard accepts the merge value none for required CI checks, so a ready mark on a private repo is not refused",
+  "status": "doing",
+  "repo": "shivinate7/claude-settings",
+  "phase": "now",
+  "owner": "consultant",
+  "blockedBy": [],
+  "why": "On 01:41 CST Nov 17 the guard that checks the records page before a ready mark refused every session's mark on the revert PR #3607, saying that main's merge settings hold the value none for the required CI checks and that this value is not valid (coordinator relay of the consultant's 01:40 CST report). Your Nov 16 ruling is that private repos merge with no CI run, so none is the valid value there. The refusing guard's code was not found by triage 9 (see step revert-has-no-pushing-role).",
+  "source": "Consultant message to triage 9, 09:11 CST Nov 17 ('also in progress here: ready-guard-accepts-none (records-page-ready refuses requiredChecks \"none\")'; relayed, not read by triage 9). Searched steps at 09:10 CST: records-page-ready-reads-pr-repo and revert-has-no-pushing-role are different steps. Filed by triage 9.",
+  "note": "Doing, consultant (relay, 09:11 CST Nov 17); no PR read by triage 9 yet. Ask: the records-page-ready check treats requiredChecks none as a valid value, red then green. Open: whether the guard refused the mark on the value none alone, or on another cause, is unmeasured. The #3607 merge (03:07:11 CST) went through the merge tool and did not hit this guard. PR class (triage 11, 22:01 CST Nov 17): none; no PR text names this step.",
+  "updatedAt": "2026-11-17T22:01:56-06:00",
+  "order": 240
 }

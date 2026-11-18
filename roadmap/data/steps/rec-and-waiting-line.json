@@ -8,7 +8,7 @@
   "owner": "triage",
   "blockedBy": [],
   "why": "12:36 CST Nov 15 (coordinator, relayed; its pick, none owner-typed, undoable): NEW step, lane 18 (from the inventory), started 12:29-12:31 CST, session session_013NEJKzou271fTrKEETxw3q. Guard or check: yes. Screens: yes (page.html, so a designer before and a design reviewer after). Files: hooks/question_form.py, hooks/test_question_form*.py, skills/waiting-page/SKILL.md, page.html.",
-  "note": "Each page item shows its recommendation visibly and a plain 'waiting on' line. Guard or check: yes. Screens: yes. Files: hooks/question_form.py, hooks/test_question_form*.py, skills/waiting-page/SKILL.md, page.html.",
-  "updatedAt": "2026-11-15T12:40:00-06:00",
+  "note": "Each page item shows its recommendation visibly and a plain 'waiting on' line. Guard or check: yes. Screens: yes. Files: hooks/question_form.py, hooks/test_question_form*.py, skills/waiting-page/SKILL.md, page.html. PR class (triage 11, 22:01 CST Nov 17): none; no PR text names this step.",
+  "updatedAt": "2026-11-17T22:01:56-06:00",
   "order": -300
 }

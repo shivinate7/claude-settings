@@ -1,14 +1,14 @@
 {
- "id": "green-hook-skips-draft-run",
- "title": "A CI status line never calls a draft run or a run with skipped required jobs green",
- "status": "doing",
- "repo": "shivinate7/claude-settings",
- "phase": "next",
- "lane": "session_013NEJL2RSxowu3Q9ypQGB7G",
- "owner": "triage",
- "blockedBy": [],
- "why": "A reader trusts the green line and merges an untested head; the merge tool's own checks should still refuse. SAMPLE 17:33 CST Nov 14 (runner 11, 17:31 CST, its own mistake; relayed; triage read none; n=1 for this form): it read degen #711's `ci-done` check row as green at 17:26 CST while its `all-jobs-passed` row was red. `ci-done` is a successful job even when the rollup fails (its comment says \"checks (failure), all-jobs-passed (failure)\"). It told the coordinator CI was green. Runner 11's words: the hook line \"CI green on <sha>: no failing jobs\" (hooks/ci_wake.py:318, found by triage) also fired while jobs were still queued. Guard proposed by runner 11, and the home is this step (one record per question; a status line that reads green when the rollup is not): a hook or tool line that prints the `all-jobs-passed` conclusion by name for a PR head, so no session infers green from `ci-done` or from the \"CI green\" line; a head with all-jobs-passed red or queued prints no green line. First act of its lane: read what ci_wake.py counts around line 318 and whether it counts queued jobs (unread by triage). Runner 11 now reads `all-jobs-passed` by name (its own practice change; no guard stops the mistake today). Rule: building-mistake-names-its-guard.",
- "source": "coordinator 12:16 CST Nov 12, from batch runner 10 at 12:15 CST on #2814",
- "note": "A PostToolUse hook on update_pull_request printed \"CI green on d783a41: no failing jobs\" when the only run on that head was the draft run (27 jobs skipped, 1 success); the ready run had not started. Fix: a run whose required jobs were skipped, or a draft run, never reads green; say \"no ready run yet\". Red first. Lane started 12:16 CST, before this step was filed (coordinator pick, page item 585).",
- "updatedAt": "2026-11-14T17:33:00-06:00"
+  "id": "green-hook-skips-draft-run",
+  "title": "A CI status line never calls a draft run or a run with skipped required jobs green",
+  "status": "doing",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "session_013NEJL2RSxowu3Q9ypQGB7G",
+  "owner": "triage",
+  "blockedBy": [],
+  "why": "A reader trusts the green line and merges an untested head; the merge tool's own checks should still refuse. SAMPLE 17:33 CST Nov 14 (runner 11, 17:31 CST, its own mistake; relayed; triage read none; n=1 for this form): it read degen #711's `ci-done` check row as green at 17:26 CST while its `all-jobs-passed` row was red. `ci-done` is a successful job even when the rollup fails (its comment says \"checks (failure), all-jobs-passed (failure)\"). It told the coordinator CI was green. Runner 11's words: the hook line \"CI green on <sha>: no failing jobs\" (hooks/ci_wake.py:318, found by triage) also fired while jobs were still queued. Guard proposed by runner 11, and the home is this step (one record per question; a status line that reads green when the rollup is not): a hook or tool line that prints the `all-jobs-passed` conclusion by name for a PR head, so no session infers green from `ci-done` or from the \"CI green\" line; a head with all-jobs-passed red or queued prints no green line. First act of its lane: read what ci_wake.py counts around line 318 and whether it counts queued jobs (unread by triage). Runner 11 now reads `all-jobs-passed` by name (its own practice change; no guard stops the mistake today). Rule: building-mistake-names-its-guard.",
+  "source": "coordinator 12:16 CST Nov 12, from batch runner 10 at 12:15 CST on #2814",
+  "note": "A PostToolUse hook on update_pull_request printed \"CI green on d783a41: no failing jobs\" when the only run on that head was the draft run (27 jobs skipped, 1 success); the ready run had not started. Fix: a run whose required jobs were skipped, or a draft run, never reads green; say \"no ready run yet\". Red first. Lane started 12:16 CST, before this step was filed (coordinator pick, page item 585). PR class (triage 11, REST 22:01 CST Nov 17): closed-unmerged #2843; the step is still doing with no live PR.",
+  "updatedAt": "2026-11-17T22:01:56-06:00"
 }

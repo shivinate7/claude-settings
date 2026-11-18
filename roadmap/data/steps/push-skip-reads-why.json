@@ -1,13 +1,13 @@
 {
- "id": "push-skip-reads-why",
- "title": "Why 4 of the last 5 main push runs ran in full: push-skip logged only skip=false (measure first, guard or check)",
- "status": "doing",
- "repo": "shivinate7/claude-settings",
- "phase": "now",
- "owner": "coordinator",
- "blockedBy": [],
- "why": "Found by the audit on step ci-checks-to-subagents-audit (coordinator's Explore agent a511629e8439eaf22, 11:29 CST Nov 15; relayed, not read by triage): 4 of the last 5 main push runs ran in full, 30 to 45 min each; push-skip logged only `skip=false`, so the reason is unread. Coordinator started lane push-skip-reads-why: its pick, undoable, not owner-typed. Guard or check: yes. Measure first, reply before building. Related steps: push-skip-proven-tree, push-skip-partial-run-record.",
- "source": "Coordinator 11:29 CST Nov 15 (relayed; not read by triage)",
- "note": "Doing. Lane push-skip-reads-why started by the coordinator (relayed 11:29 CST; lane id not relayed). Guard or check: yes. Measure first and reply before building. Cause unmeasured. Filed 11:30 CST Nov 15.",
- "updatedAt": "2026-11-15T11:30:00-06:00"
+  "id": "push-skip-reads-why",
+  "title": "Why 4 of the last 5 main push runs ran in full: push-skip logged only skip=false (measure first, guard or check)",
+  "status": "doing",
+  "repo": "shivinate7/claude-settings",
+  "phase": "now",
+  "owner": "coordinator",
+  "blockedBy": [],
+  "why": "Found by the audit on step ci-checks-to-subagents-audit (coordinator's Explore agent a511629e8439eaf22, 11:29 CST Nov 15; relayed, not read by triage): 4 of the last 5 main push runs ran in full, 30 to 45 min each; push-skip logged only `skip=false`, so the reason is unread. Coordinator started lane push-skip-reads-why: its pick, undoable, not owner-typed. Guard or check: yes. Measure first, reply before building. Related steps: push-skip-proven-tree, push-skip-partial-run-record.",
+  "source": "Coordinator 11:29 CST Nov 15 (relayed; not read by triage)",
+  "note": "Doing. Lane push-skip-reads-why started by the coordinator (relayed 11:29 CST; lane id not relayed). Guard or check: yes. Measure first and reply before building. Cause unmeasured. Filed 11:30 CST Nov 15. PR class (triage 11, 22:01 CST Nov 17): none; no PR text names this step.",
+  "updatedAt": "2026-11-17T22:01:56-06:00"
 }

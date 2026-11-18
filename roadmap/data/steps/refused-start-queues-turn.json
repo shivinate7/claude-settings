@@ -1,14 +1,14 @@
 {
- "id": "refused-start-queues-turn",
- "title": "A session start refused on another session's turn queues for the next owner turn",
- "status": "doing",
- "repo": "shivinate7/claude-settings",
- "phase": "next",
- "lane": "session_013NEJKznoYUeBBqE9awQhSg",
- "owner": "triage",
- "blockedBy": [],
- "why": "Degen ledger D27: a start refused on a turn another session began lands on an idle lane instead of waiting for the owner.\n\nGitHub REST read 00:08 CST Nov 15 (Degen feedback status pass, triage fork; no diff read): its PR #3085 is an open draft.",
- "source": "retrospective 21:38 CST Nov 12; plans/degen-report-2026-11-12.md (restart-plan 4b915b4d), row D27",
- "note": "When a session start is refused on a turn another session began, the coordinator queues it for the next owner turn, not an idle lane. Borrowing lanes is already ruled (session-tiers.md:143,179). Lane 23:25 CST Nov 12: read D27 as a record rule; one bullet rewritten in docs/decisions/lanes-start-as-agents.md, PR 3085, no test (the app refuses the start, no hook sees it). Triage 23:26 CST: right reading; one incident, so a record rule now and a guard or coordinator check only if it repeats (rule building-guard-needs-incident).",
- "updatedAt": "2026-11-12T23:26:59-06:00"
+  "id": "refused-start-queues-turn",
+  "title": "A session start refused on another session's turn queues for the next owner turn",
+  "status": "doing",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "session_013NEJKznoYUeBBqE9awQhSg",
+  "owner": "triage",
+  "blockedBy": [],
+  "why": "Degen ledger D27: a start refused on a turn another session began lands on an idle lane instead of waiting for the owner.\n\nGitHub REST read 00:08 CST Nov 15 (Degen feedback status pass, triage fork; no diff read): its PR #3085 is an open draft.",
+  "source": "retrospective 21:38 CST Nov 12; plans/degen-report-2026-11-12.md (restart-plan 4b915b4d), row D27",
+  "note": "When a session start is refused on a turn another session began, the coordinator queues it for the next owner turn, not an idle lane. Borrowing lanes is already ruled (session-tiers.md:143,179). Lane 23:25 CST Nov 12: read D27 as a record rule; one bullet rewritten in docs/decisions/lanes-start-as-agents.md, PR 3085, no test (the app refuses the start, no hook sees it). Triage 23:26 CST: right reading; one incident, so a record rule now and a guard or coordinator check only if it repeats (rule building-guard-needs-incident). PR class (triage 11, REST 22:01 CST Nov 17): closed-unmerged #3085; the step is still doing with no live PR.",
+  "updatedAt": "2026-11-17T22:01:56-06:00"
 }

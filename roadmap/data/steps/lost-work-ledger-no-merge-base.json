@@ -1,11 +1,11 @@
 {
   "title": "The lost-PR ledger writes even when a state-f branch shares no history with main",
   "why": "merge --ledger stops with unsorted: unknown-read and writes nothing, because 13 state-f branches have no merge base with main (git diff ...: no merge base). The ledger publish is blocked by it.",
-  "note": "Filed by triage 11, 14:08 CST Nov 17. Prior work: lost-work-sweep (#3528), lost-work-f-skip-record-branch (#3605, skips record branches by name only). Found by a builder run: rows brief/align-watchers, dead-pr-waits-place, handoff/dropped-start-alarm, handoff/precommit-secrets-symlinks, handoff/small-text-skips-designer, merge-lock/stable, merge-notes/commit-refuses-conflict-markers, merge-notes/notes-fix-large-1, merge-notes/notes-fix-page, restart-plan, rulings-store-parses, updatedat-not-future, worktree-agent-a14b2fddf62c05643. Fix: a no-merge-base branch gets a files value instead of an unknown read; any other failed read still stops the ledger. Lane: test-author first (branch lane/ledger-no-merge-base-tests), then builder, then review (program logic). Verdicts file: origin branch backlog-drain-ledger docs/plans/backlog-drain/verdicts.txt. Ledger ledger-build needs about 10 min of fetching.",
+  "note": "Filed by triage 11, 14:08 CST Nov 17. Prior work: lost-work-sweep (#3528), lost-work-f-skip-record-branch (#3605, skips record branches by name only). Found by a builder run: rows brief/align-watchers, dead-pr-waits-place, handoff/dropped-start-alarm, handoff/precommit-secrets-symlinks, handoff/small-text-skips-designer, merge-lock/stable, merge-notes/commit-refuses-conflict-markers, merge-notes/notes-fix-large-1, merge-notes/notes-fix-page, restart-plan, rulings-store-parses, updatedat-not-future, worktree-agent-a14b2fddf62c05643. Fix: a no-merge-base branch gets a files value instead of an unknown read; any other failed read still stops the ledger. Lane: test-author first (branch lane/ledger-no-merge-base-tests), then builder, then review (program logic). Verdicts file: origin branch backlog-drain-ledger docs/plans/backlog-drain/verdicts.txt. Ledger ledger-build needs about 10 min of fetching. PR class (triage 11, 22:01 CST Nov 17): none; the saved match run did not cover this step.",
   "phase": "now",
   "owner": "triage",
   "lane": "",
   "status": "doing",
   "order": 942,
-  "updatedAt": "2026-11-17T13:51:51-06:00"
+  "updatedAt": "2026-11-17T22:01:56-06:00"
 }

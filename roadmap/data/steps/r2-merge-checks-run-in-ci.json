@@ -1,14 +1,14 @@
 {
- "id": "r2-merge-checks-run-in-ci",
- "title": "r2: merge checks run in CI (express, from the unlanded ledger)",
- "status": "doing",
- "repo": "shivinate7/claude-settings",
- "phase": "next",
- "lane": "session_013NEJL1N8ka7rSDKNoCyriZ",
- "owner": "triage",
- "blockedBy": [],
- "why": "Express lane from the unlanded ledger; detail is in the ledger row.",
- "source": "coordinator 12:44 CST Nov 13, retrospective unlanded ledger (branch restart-plan, commit 2c0b173e, plans/unlanded-ledger-2026-11-13.md)",
- "note": "Doing, express lane started from the retrospective's unlanded ledger. The ledger row holds the detail; this step was created by triage from the lane's name, with no brief text of its own yet. Lane session_013NEJL1N8ka7rSDKNoCyriZ. 23:40 CST Nov 14: slice 1 merged as #3251 (23:38:08 CST, merge commit 59ad9b461457; REST by triage); the lane starts its notes PR (coordinator 23:39). Later slices open, status stays doing.",
- "updatedAt": "2026-11-13T12:43:41-06:00"
+  "id": "r2-merge-checks-run-in-ci",
+  "title": "r2: merge checks run in CI (express, from the unlanded ledger)",
+  "status": "doing",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "session_013NEJL1N8ka7rSDKNoCyriZ",
+  "owner": "triage",
+  "blockedBy": [],
+  "why": "Express lane from the unlanded ledger; detail is in the ledger row.",
+  "source": "coordinator 12:44 CST Nov 13, retrospective unlanded ledger (branch restart-plan, commit 2c0b173e, plans/unlanded-ledger-2026-11-13.md)",
+  "note": "Doing, express lane started from the retrospective's unlanded ledger. The ledger row holds the detail; this step was created by triage from the lane's name, with no brief text of its own yet. Lane session_013NEJL1N8ka7rSDKNoCyriZ. 23:40 CST Nov 14: slice 1 merged as #3251 (23:38:08 CST, merge commit 59ad9b461457; REST by triage); the lane starts its notes PR (coordinator 23:39). Later slices open, status stays doing. PR class (triage 11, 22:01 CST Nov 17): unsure; candidate #3251 (merged) from the saved match run, not confirmed.",
+  "updatedAt": "2026-11-17T22:01:56-06:00"
 }

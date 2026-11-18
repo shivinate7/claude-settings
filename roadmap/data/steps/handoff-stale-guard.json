@@ -1,14 +1,14 @@
 {
- "id": "handoff-stale-guard",
- "title": "Handoff stale-guard: why the Stop nudge bucket stays -1 after a compaction, and a Stop refusal when a merge, ruling relay or role change landed after the handoff's last write (guard or check)",
- "priority": "now",
- "status": "doing",
- "repo": "shivinate7/claude-settings",
- "phase": "now",
- "owner": "coordinator",
- "blockedBy": [],
- "why": "Coordinator 11:25 CST Nov 15 (relayed; not read by triage): started on the consultant's order of 11:24 CST. The owner's issue was raised through runner 10 at 11:20 CST: why the Stop nudge bucket stays -1 after a compaction, plus a Stop refusal when a merge, ruling relay or role change landed after the handoff's last write. Guard or check: yes. Sonnet, round 1. Lane id not relayed. Cause and size: unmeasured by triage. Related step: cloud-precompact-handoff-stale (not read for this filing).\n\n11:28 CST Nov 15 (coordinator, relayed; not read by triage): lane handoff-stale-guard started. The same message started `stable-refresh-local` (see step stable-refresh-mid-session).",
- "source": "Coordinator 11:25 CST Nov 15 (relayed; not read by triage)",
- "note": "Doing. Lane started 11:25 CST Nov 15 by the coordinator (relayed, not read by triage); lane id not relayed. Guard or check: yes. Sonnet round 1. Filed 11:28 CST Nov 15.",
- "updatedAt": "2026-11-15T11:30:00-06:00"
+  "id": "handoff-stale-guard",
+  "title": "Handoff stale-guard: why the Stop nudge bucket stays -1 after a compaction, and a Stop refusal when a merge, ruling relay or role change landed after the handoff's last write (guard or check)",
+  "priority": "now",
+  "status": "doing",
+  "repo": "shivinate7/claude-settings",
+  "phase": "now",
+  "owner": "coordinator",
+  "blockedBy": [],
+  "why": "Coordinator 11:25 CST Nov 15 (relayed; not read by triage): started on the consultant's order of 11:24 CST. The owner's issue was raised through runner 10 at 11:20 CST: why the Stop nudge bucket stays -1 after a compaction, plus a Stop refusal when a merge, ruling relay or role change landed after the handoff's last write. Guard or check: yes. Sonnet, round 1. Lane id not relayed. Cause and size: unmeasured by triage. Related step: cloud-precompact-handoff-stale (not read for this filing).\n\n11:28 CST Nov 15 (coordinator, relayed; not read by triage): lane handoff-stale-guard started. The same message started `stable-refresh-local` (see step stable-refresh-mid-session).",
+  "source": "Coordinator 11:25 CST Nov 15 (relayed; not read by triage)",
+  "note": "Doing. Lane started 11:25 CST Nov 15 by the coordinator (relayed, not read by triage); lane id not relayed. Guard or check: yes. Sonnet round 1. Filed 11:28 CST Nov 15. PR class (triage 11, 22:01 CST Nov 17): none; no PR text names this step.",
+  "updatedAt": "2026-11-17T22:01:56-06:00"
 }

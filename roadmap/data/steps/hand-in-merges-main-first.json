@@ -8,7 +8,7 @@
   "owner": "triage",
   "blockedBy": [],
   "why": "12:43 CST Nov 15 (coordinator, relayed; its pick, none owner-typed, undoable; triage read no lane): NEW step, lane session_013NEJL1uUQEETTstgfB51pW started, doing now. Guard or check: yes. Triage's reading: a hand-in is refused or flagged when the PR has not merged main first (reading from the name; the brief was not read by triage).",
-  "note": "A lane merges main into its PR before it hands the PR in. Guard or check: yes. Lane session_013NEJL1uUQEETTstgfB51pW.",
+  "note": "A lane merges main into its PR before it hands the PR in. Guard or check: yes. Lane session_013NEJL1uUQEETTstgfB51pW. PR class (triage 11, 22:01 CST Nov 17): unsure; candidate #3552 (open) from the saved match run, not confirmed.",
   "order": -300,
-  "updatedAt": "2026-11-15T12:50:00-06:00"
+  "updatedAt": "2026-11-17T22:01:56-06:00"
 }
