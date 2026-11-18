@@ -57,7 +57,10 @@ the root cannot be read, or nothing listed but some file unread, so the result i
 With `--gate` the listing is the same, but the exit is 1 only when a sleep or an elapsed-assert is listed,
 2 when only an unread file remains, and 0 when nothing else is listed: a wait-cap or a test-cap is a hang
 guard the owner keeps (item 345), so it never fails the gate.
-An `.elapsed` attribute read in an assert is an elapsed-assert. A file of any size is read.
+Python only: an `.elapsed` attribute in an assert is an elapsed-assert, also inside a helper call under a bound
+(`to_ms(r.elapsed) < 100`, `assertLess(to_ms(r.elapsed), 100)`). An exact `==` or `assertEqual` on it is a value
+check, so it is not listed. JS and Swift list no `.elapsed` read, only a clock call or a name that holds one.
+A file over 8 MiB is not scanned and is listed unread.
 Cost: one `git ls-files` (or one folder walk outside a git tree) and one read of each test file. No
 process stays running.
 """
@@ -75,6 +78,7 @@ from bisect import bisect_right
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
+MAX_BYTES = 8 * 1024 * 1024
 CATEGORIES = ("sleep", "elapsed-assert", "test-cap", "wait-cap")
 GATE_FAILS = ("sleep", "elapsed-assert")  # the categories --gate fails on, besides an unread file
 WALK_SKIP = {".git", "node_modules", ".build", "DerivedData", "venv", ".venv"}
@@ -526,6 +530,10 @@ PY_COMPARED = {"assertTrue": 1, "assertFalse": 1, "assertIsNone": 1, "assertIsNo
                                  "assertTupleEqual", "assertSequenceEqual", "assertMultiLineEqual")}}
 
 
+PY_EXACT = {"assertEqual"}  # an assert of one exact value, never a bound on a clock
+PY_ORDERED = {"assertLess", "assertLessEqual", "assertGreater", "assertGreaterEqual"}
+
+
 def assert_parts(call, name):
     """The nodes of an assert call that hold the asserted value: no message argument, no `msg=`."""
     count = PY_COMPARED.get(name)
@@ -557,35 +565,48 @@ def scan_python(text):
     def is_clock(node):
         return isinstance(node, ast.Call) and bool(names_of(node) & PY_CLOCKS)
 
-    def holds_clock(node, tainted, durations=False):
+    def is_elapsed(node):
+        return isinstance(node, ast.Attribute) and node.attr == "elapsed" and isinstance(node.ctx, ast.Load)
+
+    def holds_clock(node, tainted, durations=False, elapsed=True, bound=False):
         """True when node reads a clock call or a tainted name. The arguments of a call count only when that
         call is a pass-through, or, with `durations` (an asserted value), when they hold a difference with a
-        clock in it. A lambda reads what it returns."""
+        clock in it. A lambda reads what it returns. An `.elapsed` attribute is a measured duration, except
+        under an exact `==` (`elapsed` False): that checks one value and bounds no clock. Under an ordering
+        compare (`bound`), an `.elapsed` inside a helper call's arguments is a bound on a duration too."""
         if isinstance(node, ast.Lambda):
-            return holds_clock(node.body, tainted, durations)
+            return holds_clock(node.body, tainted, durations, elapsed, bound)
+        if isinstance(node, ast.Compare):
+            ordered = any(isinstance(o, (ast.Lt, ast.LtE, ast.Gt, ast.GtE)) for o in node.ops)
+            exact = all(isinstance(o, ast.Eq) for o in node.ops)
+            return any(holds_clock(c, tainted, durations, elapsed and not exact, bound or ordered)
+                       for c in [node.left] + node.comparators)
         if isinstance(node, ast.Call):
             if is_clock(node):
                 return True
             args = node.args + [k.value for k in node.keywords]
             if names_of(node) & PY_PASS_THROUGH:
-                return any(holds_clock(p, tainted, durations) for p in [node.func] + args)
-            return holds_clock(node.func, tainted, durations) or (
-                durations and any(holds_difference(p, tainted) for p in args))
+                return any(holds_clock(p, tainted, durations, elapsed, bound) for p in [node.func] + args)
+            return holds_clock(node.func, tainted, durations, elapsed, bound) or (
+                durations and any(holds_difference(p, tainted, elapsed, bound) for p in args))
         if isinstance(node, ast.Name):
             return isinstance(node.ctx, ast.Load) and node.id in tainted
-        if isinstance(node, ast.Attribute) and node.attr == "elapsed" and isinstance(node.ctx, ast.Load):
+        if elapsed and is_elapsed(node):
             return True  # a result's measured duration, such as `run_child().elapsed`
-        return any(holds_clock(c, tainted, durations) for c in ast.iter_child_nodes(node))
+        return any(holds_clock(c, tainted, durations, elapsed, bound) for c in ast.iter_child_nodes(node))
 
-    def holds_difference(node, tainted):
-        """True when node, an input to a call, holds `a - b` with a clock or a tainted name in a or b: a
-        measured duration, not an injected clock. A lambda's body is not searched."""
+    def holds_difference(node, tainted, elapsed=True, bound=False):
+        """True when node, an input to a call, holds `a - b` with a clock or a tainted name in a or b, or,
+        under a bound, an `.elapsed` attribute: a measured duration, not an injected clock. A lambda's body
+        is not searched."""
         if isinstance(node, ast.Lambda):
             return False
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Sub) and (
-                holds_clock(node.left, tainted, True) or holds_clock(node.right, tainted, True)):
+        if bound and elapsed and is_elapsed(node):
             return True
-        return any(holds_difference(c, tainted) for c in ast.iter_child_nodes(node))
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Sub) and (
+                holds_clock(node.left, tainted, True, elapsed) or holds_clock(node.right, tainted, True, elapsed)):
+            return True
+        return any(holds_difference(c, tainted, elapsed, bound) for c in ast.iter_child_nodes(node))
 
     scopes = {}
 
@@ -647,7 +668,9 @@ def scan_python(text):
                 found.add((n.lineno, "elapsed-assert"))
             elif isinstance(n, ast.Call):
                 name = n.func.attr if isinstance(n.func, ast.Attribute) else getattr(n.func, "id", "")
-                if name.startswith("assert") and any(holds_clock(x, tainted, True) for x in assert_parts(n, name)):
+                if name.startswith("assert") and any(
+                        holds_clock(x, tainted, True, name not in PY_EXACT, name in PY_ORDERED)
+                        for x in assert_parts(n, name)):
                     found.add((n.lineno, "elapsed-assert"))
     return found, python_kept(text)
 
@@ -1202,6 +1225,8 @@ def scan_file(root, rel, kind):
     try:
         if not os.path.isfile(path):
             return None, "not a regular file", set()
+        if os.path.getsize(path) > MAX_BYTES:
+            return None, f"over {MAX_BYTES} bytes", set()
         with open(path, "rb") as f:
             data = f.read()
     except OSError as e:
