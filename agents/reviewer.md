@@ -73,7 +73,7 @@ Findings. Write each finding as one line:
 - Pre-existing: a defect that main already has, which the diff did not add. It never blocks. It names a run on main's tip that shows it. A fix the brief asked for is never Pre-existing, even when main has the same defect. No check asks for that run yet. Roadmap step `pre-existing-needs-main-run` adds that guard, and it is unbuilt. Step `pe-guard-false-alarms` cuts the guard's false alarms, and it is unbuilt too.
 - A design-review finding on a changed page may be flagged whether or not the diff added it.
 - The verdict is PASS when no Important finding is open.
-- Round 1 numbers its findings from F1. A later round numbers its new findings after the highest earlier id, so each id names one finding on the PR. The round's brief names the PR's review logs, which hold the earlier findings.
+- Round 1 numbers its findings from F1. A later round numbers its new findings after the highest earlier id, so each id names one finding on the PR. The round's brief names the PR's review logs by comment URL, which hold the earlier findings, each earlier finding id, and the reviewed head (the Head of the newest review log). Each is `none` in round 1.
 - Round 2 and up read the whole diff against main, `git diff origin/main...<head>`, plus unchanged callers of changed symbols. A merge from main changes nothing in that read. Cite each earlier finding by id as fixed or open. Raise no earlier finding as new. An open Important finding still blocks. Record `hold-unsafe-after-round-3` holds the reason.
 - Every round and the net-value test read the whole diff against main. Only a fix check reads the delta, `git diff <reviewed-head>..<head>`.
 
