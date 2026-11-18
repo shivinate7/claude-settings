@@ -486,10 +486,10 @@ class RecordSlugsTests(unittest.TestCase):
         return subprocess.run(["git", "-C", self.tree, *args], capture_output=True, text=True, check=True).stdout
 
     def remedy_names_note_folder(self, out):
-        """A refusal line names the note folder, and no line that names the folder also names the frozen file."""
-        lines = out.splitlines()
-        self.assertTrue(any(NOTE_DIR + "/" in line for line in lines), out)
-        self.assertFalse(any(NOTE_DIR + "/" in line and OLD_NOTES in line for line in lines), out)
+        """A refusal names the note folder, and no line of its output names the frozen notes file: the remedy is the
+        note form only."""
+        self.assertTrue(any(NOTE_DIR + "/" in line for line in out.splitlines()), out)
+        self.assertNotIn(OLD_NOTES, out, "a refusal names the frozen notes file")
 
     def test_added_line_in_the_frozen_notes_file_is_refused(self):
         lines = self.frozen_base()
@@ -579,7 +579,6 @@ class RecordSlugsTests(unittest.TestCase):
         rules = [line for line in out.splitlines() if line.startswith("check_record_slugs: note rule: ")]
         self.assertTrue(any(NOTE_DIR + "/" in line and NOTE_FORM in line for line in rules), out)
         self.remedy_names_note_folder(out)
-        self.assertNotIn(OLD_NOTES, out)
 
     def test_note_file_without_a_slug_line_is_refused(self):
         self.roll_out()
@@ -719,7 +718,6 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertEqual(rc, 1, out)
         self.assertEqual(flagged(out), [NOTE % "1"], out)
         self.remedy_names_note_folder(out)
-        self.assertNotIn(OLD_NOTES, out)
 
     def test_slug_with_digits_and_letters_passes(self):
         self.roll_out()
