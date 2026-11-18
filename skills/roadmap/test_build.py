@@ -2099,6 +2099,7 @@ class ReadyNotStarted(ReadyFixture):
 
     def test_steps_unknown_prints_one_unknown_ready_line(self):
         self.on_main()
+        git(self.repo, "remote", "remove", "origin")  # the fixture's GitHub origin cannot be asked here; with none, the branch is simply absent
         code, out = run_build("--repo", str(self.repo), "--record-branch", "no-such-branch", "--out", str(self.out))
         self.assertIn(code, (0, None), out)
         self.assertEqual(self.ready_lines(out), ["ready not started: unknown (steps unknown)"],
