@@ -640,7 +640,7 @@ class SpawnBriefHead(BriefCase):
 
     def test_spawn_brief_from_the_block_passes_the_real_guard_with_each_marker(self):
         block = self.block()
-        # A round 1 guard or check reviewer runs the `1 guard` row, haiku (owner ruling 2026-11-17 19:45 CST).
+        # A guard-marked reviewer runs the round-1 model, per decision `agent-model-cap`; a sonnet spawn with only that marker is refused.
         for marker, model in (("Guard or check: yes", "haiku"), ("Fix check", "sonnet"), ("Round 2 of 3", "sonnet")):
             with self.subTest(marker=marker, model=model):
                 reason = guard_reason(self.config, spawn_brief(block, marker), model=model)
