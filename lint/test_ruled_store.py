@@ -543,6 +543,21 @@ class ScopeTests(unittest.TestCase):
         self.assertTrue(ruled_store.in_scope(refused, public),
                         "a ruling whose scope check_entry refuses left the store's scope in a public repo")
 
+    def test_a_repos_that_is_not_a_list_is_refused(self):
+        listed = fixture.entry("listed", scope={"repos": ["example-owner/example-repo"]})
+        self.assertEqual(ruled_store.check_entry(listed), [], "scope control: a list of repo names has a problem")
+        problems = ruled_store.check_entry(fixture.entry("text-repos", scope={"repos": "oops"}))
+        self.assertEqual(len(problems), 1, "a text repos: want one problem, got %r" % problems)
+        self.assertTrue(names(problems[0], "repos"), "the problem does not name repos: %r" % problems[0])
+
+    def test_a_repos_list_with_a_non_text_item_is_refused(self):
+        listed = fixture.entry("listed", scope={"repos": ["example-owner/example-repo"]})
+        self.assertEqual(ruled_store.check_entry(listed), [], "scope control: a list of repo names has a problem")
+        numbered = fixture.entry("number-repo", scope={"repos": ["example-owner/example-repo", 7]})
+        problems = ruled_store.check_entry(numbered)
+        self.assertEqual(len(problems), 1, "a non-text repos item: want one problem, got %r" % problems)
+        self.assertTrue(names(problems[0], "repos"), "the problem does not name repos: %r" % problems[0])
+
 
 class SessionLinesTests(RepoCase):
     def test_no_store_and_no_open_entry_print_nothing(self):
