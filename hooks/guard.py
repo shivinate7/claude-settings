@@ -259,6 +259,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        deny. A SendMessage whose `to` is a string starting `session_`: that is no agent name, and the
                        hand-off could go missing. A missing or non-string `to`, an agent name, @parent and the
                        mcp__claude-code-remote__send_message tool pass. An override lifts it.
+  goal-text-cites-role-ruling
+                       deny. A send_message or SendMessage whose text states a limit on a session's role (a role, then
+                       cannot, can't, can not, may not or must not, then merge, push or mark ready) with no ruling or
+                       decision id in the same sentence or line. Quoted text and code spans pass. An override lifts it.
+                       (goal-text-cites-role-ruling)
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   gh-write-cloud       deny. In a cloud session, a gh write: `gh pr` create, merge, comment, edit, close, review or
                        ready; `gh issue` create, comment, edit or close; `gh api` with a write method, or with a field
@@ -599,7 +604,7 @@ if sys.path[:1] != [_HERE]:
 
 # The rule families in import order: each one imports only guard_core and the families before it.
 _FAMILY_MODULES = ("guard_branch_worktree", "guard_shared_tree", "guard_pointer",
-                   "guard_push_delete", "guard_merge", "guard_frozen", "guard_env",
+                   "guard_push_delete", "guard_merge", "guard_role_limit", "guard_frozen", "guard_env",
                    "guard_kill", "guard_argv", "guard_stream", "guard_rm_var", "guard_mask_script", "guard_wsl")
 # guard.py and each guard_*.py the installer copies carry `INSTALL_ID = "<id>"`, one value per install
 # run, stamped at copy time in place of the whole commented placeholder line below. A file with no such line is a placeholder
@@ -701,6 +706,8 @@ while True:
             BRIEF_ID_REASON, BRIEF_TOPIC_REASON, STEP_DUP_REASON,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
+        _loading = "guard_role_limit"
+        from guard_role_limit import ROLE_LIMIT_REASON, role_limit_hit
         _loading = "guard_frozen"
         from guard_frozen import (
             FROZEN_REASON, MUTATING_COMMAND, _holds_frozen, _resolve_vars, _shell_write_hit, interpreter_may_write,
@@ -7683,6 +7690,11 @@ def judge(payload) -> None:
         target = tool_input.get("to")
         if isinstance(target, str) and target.startswith("session_"):
             refuse(tool, "deny", "sendmessage-session-id", SENDMESSAGE_REASON, target[:120])
+
+    # A send_message or SendMessage that states a limit on a session's role with no ruling cited (rule goal-text-cites-role-ruling).
+    limited = role_limit_hit(tool, tool_input)
+    if limited:
+        refuse(tool, "deny", "goal-text-cites-role-ruling", ROLE_LIMIT_REASON, limited)
 
     # A send_message whose header stamp is off the clock (rule message-time-matches-clock).
     stamped = stamp_hit(tool, tool_input)
