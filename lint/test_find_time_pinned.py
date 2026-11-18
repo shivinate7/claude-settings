@@ -1660,6 +1660,163 @@ class KeepMarkerOutputTest(FinderCase):
         self.assertIn("kept 50", out_lines[-1], "the summary does not count all 50 kept lines")
 
 
+# ---- gate mode: --gate fails on a sleep, an elapsed-assert or an unread file only ---------------------
+
+class GateModeTest(FinderCase):
+    """--gate fails on a sleep, an elapsed-assert or an unread file. It does not fail on a wait-cap or a
+    test-cap. The flag is new, so an unknown flag prints nothing. Each gate run asserts the listing first,
+    which names that cause and keeps every red a failure, never a crash."""
+
+    def gated(self):
+        proc = run(self.root, "--gate", "--json")
+        self.assertTrue(proc.stdout.strip(),
+                        "--gate printed no listing (exit %d, stderr %r): the flag is not recognised"
+                        % (proc.returncode, proc.stderr[-200:]))
+        return proc.returncode, json.loads(proc.stdout)
+
+    def put_cap_only(self):
+        text = src(
+            "import pytest",
+            "import subprocess",
+            "",
+            "@pytest.mark.timeout(30)",
+            "def test_waits(p, cmd):",
+            "    subprocess.run(cmd, timeout=5)",
+            "    p.wait(timeout=3)",
+        )
+        self.put("tests/test_caps_only.py", text)
+        return text
+
+    def test_gate_fails_on_a_sleep(self):
+        text = src("import time", "", "def test_wait():", "    time.sleep(1)")
+        self.put("tests/test_wait.py", text)
+        _, plain = self.report()
+        sleep_row = ("tests/test_wait.py", lineno(text, "time.sleep(1)"), "sleep")
+        self.assertIn(sleep_row, self.rows(plain), "scope: the sleep is not listed without --gate")
+        code, out = self.gated()
+        self.assertNotEqual(code, 0, "--gate exits 0 on a sleep")
+        self.assertIn(sleep_row, self.rows(out), "--gate does not list the sleep")
+
+    def test_gate_fails_on_an_elapsed_assert(self):
+        text = src(
+            "import time",
+            "",
+            "def test_budget():",
+            "    t0 = time.monotonic()",
+            "    assert time.monotonic() - t0 < 1",
+        )
+        self.put("tests/test_budget.py", text)
+        _, plain = self.report()
+        row = ("tests/test_budget.py", lineno(text, "assert time.monotonic() - t0 < 1"), "elapsed-assert")
+        self.assertIn(row, self.rows(plain), "scope: the elapsed-assert is not listed without --gate")
+        code, out = self.gated()
+        self.assertNotEqual(code, 0, "--gate exits 0 on an elapsed-assert")
+        self.assertIn(row, self.rows(out), "--gate does not list the elapsed-assert")
+
+    def test_gate_fails_on_an_unread_file(self):
+        self.put("tests/test_bad.py", "def broken(:\n    pass\n")
+        plain = json.loads(run(self.root, "--json").stdout)
+        self.assertEqual([u["path"] for u in plain["unread"]], ["tests/test_bad.py"],
+                         "scope: the file is not listed unread without --gate")
+        code, out = self.gated()
+        self.assertNotEqual(code, 0, "--gate exits 0 on an unread file")
+        self.assertEqual([u["path"] for u in out["unread"]], ["tests/test_bad.py"],
+                         "--gate does not list the unread file")
+
+    def test_gate_passes_when_only_wait_caps_and_test_caps_are_listed(self):
+        self.put_cap_only()
+        _, plain = self.report()
+        self.assertEqual({cat for _, _, cat in self.rows(plain)}, {"wait-cap", "test-cap"},
+                         "scope: the caps are not listed without --gate")
+        code, _ = self.gated()
+        self.assertEqual(code, 0, "--gate fails on a wait-cap or a test-cap (exit %d)" % code)
+
+    def test_without_the_gate_a_cap_only_fixture_still_exits_1(self):
+        text = self.put_cap_only()
+        code, out = self.report()
+        self.assertEqual(code, 1, "without --gate a wait-cap or a test-cap exits %d, not 1" % code)
+        self.assertEqual(self.rows(out), pinned(
+            "tests/test_caps_only.py", text,
+            ("@pytest.mark.timeout(30)", "test-cap"), ("subprocess.run(cmd, timeout=5)", "wait-cap"),
+            ("p.wait(timeout=3)", "wait-cap"),
+        ))
+
+
+# ---- an assertLess on a result's .elapsed is an elapsed-assert (lint/test_wait_pid.py has four) --------
+
+class AssertLessElapsedTest(FinderCase):
+    def test_assertless_on_an_elapsed_attribute_is_an_elapsed_assert(self):
+        text = src(
+            "import unittest",
+            "",
+            "class WaitTest(unittest.TestCase):",
+            "    def test_returns_at_once(self):",
+            "        r = run_child()",
+            "        self.assertLess(r.elapsed, 5)",
+            "",
+            "    def test_message_after_the_bound(self):",
+            "        r = run_child()",
+            "        self.assertLess(r.elapsed, 5, \"did not return at once\")",
+            "",
+            "    def test_other_name_and_bound(self):",
+            "        result = run_child()",
+            "        self.assertLess(result.elapsed, 10)",
+        )
+        self.put("tests/test_wait_elapsed.py", text)
+        code, out = self.report()
+        self.assertEqual(out["unread"], [], "scope: the fixture was not read")
+        self.assertEqual(self.rows(out), pinned(
+            "tests/test_wait_elapsed.py", text,
+            ("self.assertLess(r.elapsed, 5)", "elapsed-assert"),
+            ("did not return at once", "elapsed-assert"),
+            ("self.assertLess(result.elapsed, 10)", "elapsed-assert"),
+        ), "an assertLess on a result's .elapsed is not listed as elapsed-assert")
+
+    def test_assertless_on_a_count_or_an_elapsed_message_is_clean(self):
+        text = src(
+            "import time",
+            "import unittest",
+            "",
+            "class CleanTest(unittest.TestCase):",
+            "    def test_count(self):",
+            "        r = run_child()",
+            "        self.assertLess(r.count, 5)",
+            "",
+            "    def test_elapsed_only_in_the_message(self):",
+            "        r = run_child()",
+            "        self.assertLess(len(r.out), 5, \"elapsed %s\" % r.elapsed)",
+            "",
+            "    def test_scope_sleep(self):",
+            "        time.sleep(1)",
+        )
+        self.put("tests/test_wait_clean.py", text)
+        code, out = self.report()
+        sleep_row = ("tests/test_wait_clean.py", lineno(text, "time.sleep(1)"), "sleep")
+        self.assertIn(sleep_row, self.rows(out), "scope: the fixture's sleep is not listed, so it was not scanned")
+        self.assertEqual({row for row in self.rows(out) if row[2] == "elapsed-assert"}, set(),
+                         "an assertLess on r.count or on a message is listed as elapsed-assert")
+
+
+# ---- a file over 1 MB is read, not listed unread ----------------------------------------------------
+
+class BigFileTest(FinderCase):
+    def test_a_file_over_one_megabyte_is_read_and_its_late_sleep_is_listed(self):
+        # About 1.75 MB. merge/test_merge.py is the real file over the 1 MB limit, at 1.7 MB. The sleep sits
+        # past the first megabyte, so a read that stops there misses it.
+        pad = ["# " + "p" * 97 for _ in range(1_750_000 // 100)]  # 100 bytes a line, newline included
+        text = src("import time", *pad, "", "def test_late():", "    time.sleep(1)")
+        size = len(text.encode("utf-8"))
+        self.assertTrue(1_000_000 < size < 2_000_000, "scope: the fixture is %d bytes, not 1 MB to 2 MB" % size)
+        self.put("tests/test_big.py", text)
+        proc = run(self.root, "--json")
+        out = json.loads(proc.stdout)
+        self.assertEqual(out["unread"], [], "a file over 1 MB is listed unread, not read")
+        self.assertEqual(self.rows(out), pinned(
+            "tests/test_big.py", text, ("time.sleep(1)", "sleep"),
+        ), "the sleep past the 1 MB mark is not listed")
+        self.assertEqual(proc.returncode, 1, proc.stdout[-200:])
+
+
 if __name__ == "__main__":
     try:
         unittest.main()
