@@ -15335,7 +15335,7 @@ class MergeRoleCheck(CloudSession):
 OWN_SESSION_LINK ="https://claude.ai/code/session_" + ROLE_SESSION[len("cse_"):]  # the link a session's pull request ends with: session_<x> for cse_<x> (hooks/override.py remote_session_id)
 OWN_PR_BODY = "Small edit.\n\n" + OWN_SESSION_LINK + "\n"
 OTHER_PR_BODY = "Small edit.\n\nhttps://claude.ai/code/session_another_session\n"
-CARRIED_BODY = OTHER_PR_BODY + "Carried by: " + OWN_SESSION_LINK + "\n"  # another session's pull request, carried here by a line that names this session (owner pick, 2026-11-18 10:29 CST, option a)
+CARRIED_BODY = OTHER_PR_BODY + "Carried by: " + OWN_SESSION_LINK + "\n"  # another session's pull request, carried here by a line that names this session (owner pick a, standing-merges-stragglers)
 CARRIED_ELSEWHERE_BODY = OTHER_PR_BODY + "Carried by: https://claude.ai/code/session_third_session\n"  # the same, with the carry line naming a third session
 BARE_MENTION_BODY = "Small edit, raised in " + OWN_SESSION_LINK + ".\n\nhttps://claude.ai/code/session_another_session\n"  # this session's link named in the text, with no carry line; the closing link is another session's
 
@@ -15343,7 +15343,7 @@ class StandingMergeRole(CloudSession):
     """Ruling own-tiny-fixes-b: a standing session (a coordinator, a triage or a consultant, decision session-tiers)
     records the `standing` merge role and merges a pull request through the merge tool, on green. The gate sits after the pull request
     read and before the lock or any claim. The pull request is this session's when its body names this session's link anywhere: its closing link,
-    a `Carried by:` line that a carrying session adds (owner pick, 2026-11-18 10:29 CST, option a), or any other mention. The owner's messages of 2026-11-18
+    a `Carried by:` line that a carrying session adds (owner pick a, standing-merges-stragglers), or any other mention. The owner's messages of
     10:27 CST say a straggling pull request may be merged under any standing session's purview, by whichever route is faster, and that the
     batch runner, consultant, triage or coordinator may merge one whose opening lane ended. A body that names another session's link only,
     or no link, is refused. CI is green. A docs-only pull request with no guard path needs no
@@ -15443,8 +15443,8 @@ class StandingMergeRole(CloudSession):
         self.own_pr([("docs/notes.md", "modified", 1)], body="Small edit.\n")
         self.assert_standing_refused()
 
-    # ---- a carried pull request: a `Carried by:` line naming this session stands for its own link (owner pick, 2026-11-18 10:29 CST, option a;
-    # the owner's messages of 2026-11-18 10:27 CST, straggling pull requests merged by whichever standing session is faster)
+    # ---- a carried pull request: a `Carried by:` line naming this session stands for its own link (owner pick a, standing-merges-stragglers;
+    # the owner's messages of 10:27 CST, straggling pull requests merged by whichever standing session is faster)
     def assert_carried_scope(self, body):
         """P7, the scope before the gate reads it: `body` holds a carry line for this session, and its closing link is another session's, so a
         pass comes from the carry line. Read from the strings, not from the gate's own reader, so the verdict stays the gate's."""
@@ -15452,7 +15452,7 @@ class StandingMergeRole(CloudSession):
         self.assertNotIn(OWN_SESSION_LINK, OTHER_PR_BODY, "the case's closing link is this session's, so the pass is not the carry line's")
 
     def test_carried_docs_pr_merges_under_standing(self):
-        # owner pick, 2026-11-18 10:29 CST, option a: a carry line naming this session passes as the session's own closing link does
+        # owner pick a, standing-merges-stragglers: a carry line naming this session passes as the session's own closing link does
         self.commit_feat({"docs/notes.md": "Notes.\n"})
         self.own_pr([("docs/notes.md", "modified", 1)], body=CARRIED_BODY)
         self.assert_carried_scope(CARRIED_BODY)
