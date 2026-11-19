@@ -21,7 +21,8 @@ TK_REMEDY = "send the pick to triage as a taken-pick card"  # the phrase the ref
 TK_TURN_ONE = "Owner: pick the icons for the page."
 TK_TURN_TWO = "Owner: and the colours too."
 TK_DIR = os.path.join(ROOT, "takenpick")
-TK_LINES = ("lane-no-writer", "writer-earlier-turn", "writer-same-turn", "to-writer", "no-marker", "unread-writer", "code-error")
+TK_LINES = ("lane-no-writer", "writer-earlier-turn", "writer-same-turn", "writer-undelivered", "writer-no-marker",
+            "writer-sidechain", "to-writer", "no-marker", "unread-writer", "code-error")
 
 
 def tk_path(name):
@@ -35,10 +36,15 @@ def tk_page_read(tool_id, writer):
             role_result(tool_id, json.dumps({"id": "page", "writer": writer}))]
 
 
-def tk_send(tool_id, target, text):
-    """One paired, delivered send_message to `target`: a send the turn already made."""
-    return [role_use(tool_id, TK_SEND, {"session_id": target, "message": text}),
-            role_result(tool_id, '{"status":"delivered"}')]
+def tk_send(tool_id, target, text, result='{"status":"delivered"}', sidechain=False):
+    """One paired send_message to `target`, with its result text (delivered unless `result` says otherwise): a send the
+    turn already made. `sidechain` marks the send as an agent's record, which the rule does not count."""
+    use = role_use(tool_id, TK_SEND, {"session_id": target, "message": text})
+    if sidechain:
+        line = json.loads(use)
+        line["isSidechain"] = True
+        use = json.dumps(line)
+    return [use, role_result(tool_id, result)]
 
 
 # The coordinator's own record, the writer's read, and the records of the lane and the writer, which the transcript must hold
@@ -56,6 +62,12 @@ TK_LINES_BY_NAME = {
     "writer-earlier-turn": TK_HEAD + tk_send("s1", TK_WRITER, TK_PICK) + [role_said(TK_TURN_TWO)],
     # The writer got the same pick in this turn, so the lane send passes.
     "writer-same-turn": TK_HEAD + tk_send("s1", TK_WRITER, TK_PICK),
+    # The writer's send this turn was not delivered: the writer got no card, so the lane send has nothing behind it.
+    "writer-undelivered": TK_HEAD + tk_send("s1", TK_WRITER, TK_PICK, result='{"status":"error"}'),
+    # The writer's send this turn carries no Coordinator pick line, so it is no card for the pick.
+    "writer-no-marker": TK_HEAD + tk_send("s1", TK_WRITER, "Status: the icons are done."),
+    # The writer's send is an agent's record, which does not count as the coordinator's card.
+    "writer-sidechain": TK_HEAD + tk_send("s1", TK_WRITER, TK_PICK, sidechain=True),
     "to-writer": TK_HEAD,
     "no-marker": TK_HEAD,
     # The coordinator read no page at all, so no writer is named for the pick to reach.
@@ -122,6 +134,15 @@ tk_allow("a create_session whose prompt has a Coordinator pick line passes when 
 # UNREAD WRITER. A transcript with no page read names no writer, so the pick has nowhere to reach: the rule refuses it.
 tk_refuse("a coordinator pick sent to a lane from a transcript with no page read is refused, and the remedy names the taken-pick card",
           "unread-writer", TK_PICK)
+
+# THE CARD MUST COUNT. The lane send passes only on a writer send this turn that the cloud delivered, that carries the
+# Coordinator pick line, and that is not an agent's record. Each of the three refusals below drops one of those tests.
+tk_refuse("a coordinator pick sent to a lane is refused when the writer's send this turn was not delivered",
+          "writer-undelivered", TK_PICK)
+tk_refuse("a coordinator pick sent to a lane is refused when the writer's send this turn carries no Coordinator pick line",
+          "writer-no-marker", TK_PICK)
+tk_refuse("a coordinator pick sent to a lane is refused when the writer's send this turn is an agent's record",
+          "writer-sidechain", TK_PICK)
 
 # FAIL OPEN, SAID ON STDERR. A transcript that cannot be read, or a code error inside the rule, allows, and says so on
 # stderr. Today the rule returns with no line at all.
