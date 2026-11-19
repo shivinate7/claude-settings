@@ -55,7 +55,7 @@ CHECK_STEP = "Project-ops roles check"
 FIXTURE_STEP = "Project-ops roles fixture suite"
 
 sys.path.insert(0, HERE)
-from all_jobs_passed_rules import all_jobs  # noqa: E402  one home for the checks.yml step parser
+from all_jobs_passed_rules import RECORDS_ONLY_CONDITION, all_jobs, unwrap  # noqa: E402  one home for the checks.yml step parser and the records-only clause
 from check_skill_model_rows import live_lines  # noqa: E402  one home for fences and multi-line HTML comments
 import layout  # noqa: E402  one home of where records live (lint/layout.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
@@ -521,10 +521,12 @@ class CiWiring(unittest.TestCase):
         self.assertNotIn("if", step, "an if: condition lets a skipped check read as passing")
 
     def test_checks_job_runs_the_fixture_suite(self):
-        # Pins one checks-job step that runs this suite. An if: condition could skip it and read as passing.
+        # Pins one checks-job step that runs this suite. An if: other than the records-only clause could skip it and read as passing.
+        # No if:, or the records-only clause alone (ruling own-830-c, owner 2026-11-14 15:02 CST, confirmed 2026-11-18 18:54 CST).
         step = self.step(FIXTURE_STEP)
         self.assertEqual(step.get("run"), "python3 lint/test_check_project_ops_roles.py")
-        self.assertNotIn("if", step, "an if: condition lets a skipped suite read as passing")
+        self.assertIn(unwrap(step.get("if")), (None, f"success() && {RECORDS_ONLY_CONDITION}"),
+                      "an if: other than the records-only clause lets a skipped suite read as passing: %r" % step.get("if"))
 
 
 class RealRepo(Fixture):

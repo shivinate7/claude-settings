@@ -444,8 +444,9 @@ FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "check
 # The records-only skip (ci-scope.sh's records_only_skip output, read as needs.scope.outputs.records_only_skip) turns off some
 # run steps. A step that takes the condition ends in it: `(E) && RECORDS_ONLY_CONDITION`, or `success() && RECORDS_ONLY_CONDITION` when it has no if:. Which steps take it:
 #   CONDITIONED_JOBS: every run step. A static trace found the Windows guard suite reads no records page.
-#   SPLIT_CONDITIONED_JOBS: only the run steps named by scope_named_steps(), each with the scope condition as its if:. Its doc steps take none.
-#   UNCONDITIONED_JOBS: no run step.
+#   SPLIT_CONDITIONED_JOBS: only the run steps named by scope_named_steps(), each with the scope condition as its if:.
+#   UNCONDITIONED_JOBS: no run step has to take it. Any step that reads a .md file may take it on top of its own scope, since
+#     ruling own-830-c (owner, 2026-11-14 15:02 CST, confirmed 2026-11-18 18:54 CST) lets it skip on a records-only push.
 CONDITIONED_JOBS = ("checks-windows-guard", "checks-windows-guard-2", "checks-windows-guard-3", "checks-windows-merge",
               "checks-windows-merge-2", "checks-windows-merge-3", "checks-windows-merge-4", "checks-windows-merge-5",
               "checks-windows-rest", "checks-windows-rest-2")
@@ -465,7 +466,7 @@ WRONG_DELTA_FORMS = (("checks-hooks", f"{RECORDS_ONLY_CONDITION} || {COMMENT_DEL
 def scope_named_steps():
     """The step names that take the condition in SPLIT_CONDITIONED_JOBS: NO_MD and NAMES_ONLY of lint/test_checks_step_scope.py, the
     one home of those lists. Imported here, not at the top, because that module imports this one. A doc step is not named:
-    a records-only push still runs the steps that read a .md file (decision records-index-at-merge)."""
+    it takes its own scope condition, and may take the records-only clause on top (ruling own-830-c, see SPLIT_CONDITIONED_JOBS)."""
     from test_checks_step_scope import NAMES_ONLY, NO_MD
     return set(NO_MD) | set(NAMES_ONLY)
 
@@ -493,24 +494,16 @@ def condition_problem(name, st):
     return f"{name} / {st.get('name') or st.get('run')}: the if: is not `(E) && {RECORDS_ONLY_CONDITION}` (or `success() && {RECORDS_ONLY_CONDITION}` with no if:): {raw!r}"
 
 
-def md_reader_steps():
-    """The steps that read a .md file at run time, or are not audited yet (fail safe): DOC_STEPS and MUST_STAY_UNSCOPED of
-    lint/test_checks_step_scope.py, the one home of those lists. Imported here, not at the top, because that module imports this one."""
-    from test_checks_step_scope import DOC_STEPS, MUST_STAY_UNSCOPED
-    return set(DOC_STEPS) | set(MUST_STAY_UNSCOPED)
-
-
 def condition_spec_problem(name, st):
     """None when run step `st` of job `name` has the condition the spec gives it, else the problem, named. A step the spec does not
-    condition has no condition, but takes the records-only clause alone when it is a suite that reads no .md file (md_reader_steps).
+    condition may carry the records-only clause in condition_problem's form, and no other condition. That covers a step that reads a
+    .md file, since ruling own-830-c (owner, 2026-11-14 15:02 CST, confirmed 2026-11-18 18:54 CST) lets it skip on a records-only push.
     A step it conditions has condition_problem's form, and never `success() && RECORDS_ONLY_CONDITION` alone, which drops its scope."""
     label = st.get("name") or st.get("run")
     raw = unwrap(st.get("if"))
     if name in UNCONDITIONED_JOBS or (name in SPLIT_CONDITIONED_JOBS and label not in scope_named_steps()):
         if RECORDS_ONLY_CONDITION in (st.get("if") or ""):
-            if label not in md_reader_steps() and condition_problem(name, st) is None:
-                return None
-            return f"{name} / {label}: the if: carries the records-only condition, which the spec does not give this step: {raw!r}"
+            return condition_problem(name, st)
         return None
     if raw == f"success() && {RECORDS_ONLY_CONDITION}":
         return f"{name} / {label}: the if: is the records-only condition alone, so the scope condition is dropped: {raw!r}"

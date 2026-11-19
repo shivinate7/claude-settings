@@ -2,11 +2,12 @@
 
 ci-scope.sh sets `code` false for a change that touches only .md files. A step that reads no .md file takes the scope condition
 `needs.scope.outputs.code == 'true' || github.event_name != 'pull_request'`, so a docs-only pull request skips it. A
-step that reads a .md file stays unscoped. The step lists are the audit of main's checks.yml when this was written, by step name.
+step that reads a .md file stays unscoped, but may take the records-only clause on top (ruling own-830-c, owner 2026-11-14 15:02 CST,
+confirmed 2026-11-18 18:54 CST). The step lists are the audit of main's checks.yml when this was written, by step name.
 
 Pinned here:
   1. each NO-MD and NAMES-ONLY step carries the scope condition, exactly.
-  2. each MUST-STAY-UNSCOPED step has no scope output in its `if:`, and each PR-only step keeps its own `if:`.
+  2. each MUST-STAY-UNSCOPED step has no scope output in its `if:` but the records-only clause, and each PR-only step keeps its own `if:`.
   3. each MAIN_STEPS name is a step of the checks job (no rename or drop), and a step outside MAIN_STEPS reads no scope output.
   4. a docs-only pull request leaves `code` false, skips each scoped step, and leaves STE lint running.
      The fail-safe flags are not repeated: lint/test_ci_scope.py pins them in Scope.test_push_schedule_and_dispatch_run_everything_even_for_docs,
@@ -14,7 +15,8 @@ Pinned here:
   5. the entry file of each scoped step names no tracked .md file, unless ALLOWED lists that name with a reason.
   6. no file a scoped step reaches within TRANSITIVE_DEPTH hops reads test_guard.py or a tracked .md file
      (TRANSITIVE_MD_READERS), unless TRANSITIVE_ALLOWED lists that name for the file with a reason.
-  7. each doc step (DOC_STEPS) carries the scope condition of its doc groups, one constant per group set, and the .md names
+  7. each doc step (DOC_STEPS) carries the scope condition of its doc groups, with or without the records-only clause on top,
+     one constant per group set, and the .md names
      its entry names are under a doc flag its `if:` reads (ALLOWED names aside).
   8. a docs-only change runs exactly the doc steps that list its group, or `any`, with no other step's change.
 
@@ -162,6 +164,7 @@ NAMES_ONLY = [
 ]
 
 # The audit's MUST-STAY-UNSCOPED steps: each reads a .md file at run time, or is not audited yet (fail safe), so each stays unscoped.
+# Each may take the records-only clause alone (ruling own-830-c, 2026-11-14 15:02 CST, confirmed 2026-11-18 18:54 CST).
 # The doc steps are not listed here: DOC_STEPS below gives each one the scope condition of the doc groups it reads.
 MUST_STAY_UNSCOPED = [
     'Skill model rows check',
@@ -179,7 +182,7 @@ MUST_STAY_UNSCOPED = [
     'Checks step scope suite',  # names tracked .md files as data; a docs-only rename would turn main red if it carried the scope condition
     'Scratchpad owner fixture suite',  # runs test_guard.py, whose section files read skills/impeccable/SKILL.md
     'Guard wrappers fixture suite',  # runs test_guard.py through drive_test_guard
-    'Skill model rows fixture suite',  # its checks job step has no `if:` (test_check_skill_model_rows.py pins it)
+    'Skill model rows fixture suite',  # its `if:` is the records-only clause alone (test_check_skill_model_rows.py pins it)
     'Project-ops roles check',  # reads the session-tiers record and the project-ops templates at run time (audit hook, run-time open)
     'Project-ops roles fixture suite',  # its real-repo case reads the same record and templates at run time
     'Reply judge fixture suite',  # reads CLAUDE.md at run time (hooks/test_reply_judge.py), so a CLAUDE.md-only pull request must run it
@@ -812,11 +815,14 @@ class ScopeConditionOnNoMdSteps(ChecksStepBase):
 
 class UnscopedAndPrOnlySteps(ChecksStepBase):
     def test_each_must_stay_unscoped_step_reads_no_scope_output(self):
+        # The records-only clause is allowed on these steps (ruling own-830-c, 2026-11-14 15:02 CST, confirmed 2026-11-18 18:54 CST),
+        # so it is taken off first. Its form (it gates the whole if) is pinned by test_windows_split's condition_problems.
         steps = self.steps()
         for name in MUST_STAY_UNSCOPED:
             with self.subTest(step=name):
-                expr = if_of(self.named(steps, name)) or ""
-                self.assertNotIn("needs.scope.outputs", expr, "step %r reads a scope output in its if: %r" % (name, expr))
+                got = if_of(self.named(steps, name))
+                expr = drop_condition(unwrap(got)) or ""
+                self.assertNotIn("needs.scope.outputs", expr, "step %r reads a scope output in its if: %r" % (name, got))
 
     def test_each_pr_only_step_keeps_its_pull_request_if(self):
         steps = self.steps()
@@ -1059,13 +1065,16 @@ class WholeTreeReadersOnAModsChange(ChecksStepBase):
 
 
 class DocStepScopeConditions(ChecksStepBase):
-    # A records-only push still runs each doc step, since each reads a .md file (decision records-index-at-merge).
+    # A doc step may skip on a records-only push (ruling own-830-c, 2026-11-14 15:02 CST, confirmed 2026-11-18 18:54 CST), so the
+    # records-only clause may sit on top of its scope. The scope itself must still be there, so a step that drops it stays red.
     def test_each_doc_step_carries_the_scope_condition_of_its_groups(self):
         steps = self.steps()
         for name, groups in DOC_STEPS.items():
             with self.subTest(step=name):
                 got = if_of(self.named(steps, name))
-                self.assertEqual(got, expected_if(groups), "step %r: if is %r, want the scope condition of %s alone" % (name, got, groups))
+                scope = drop_condition(unwrap(got))
+                self.assertEqual(scope, SCOPE_OF[frozenset(groups)],
+                                 "step %r: if is %r, want the scope condition of %s, with or without the records-only clause" % (name, got, groups))
 
     def test_each_doc_step_group_set_has_one_constant_built_from_its_groups(self):
         for groups in sorted({tuple(g) for g in DOC_STEPS.values()}):
