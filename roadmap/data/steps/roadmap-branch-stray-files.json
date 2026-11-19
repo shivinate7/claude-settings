@@ -1,0 +1,14 @@
+{
+ "id": "roadmap-branch-stray-files",
+ "title": "Decide what to do with artifacts/ and .gitignore on the record branch",
+ "priority": "next",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "triage",
+ "blockedBy": [],
+ "updatedAt": "2026-11-19T04:14:21Z",
+ "why": "Commit 57b1989 (triage 11, Nov 18) added .claude/settings.json (hooks off, model opus), .gitignore, artifacts/ and 36 lines of CLAUDE.md to a one-step commit. The settings file was removed at the owner's yes (22:14 CST Nov 18) because it made /goal refuse. The rest is unread by me.",
+ "source": "owner 22:13 CST Nov 18 asked whether roadmap should hold these; triage 12",
+ "note": "Todo. Read what, if anything, reads artifacts/ and .gitignore on this branch; keep what is used, delete the rest. Add a check that the record branch holds no .claude/settings.json (restart-plan hole H4)."
+}
