@@ -1,9 +1,9 @@
 # section 43700
-# The owner's word lifts the model floor for an Agent, Task, Workflow or lane-start spawn (rule agent-model-floor,
-# guard step 9). Owner, 2026-11-18 19:03 CST: "if i say haiku it should work, there shouldnt be any guards on a FLOOR".
+# The owner's model name lifts the model floor for an Agent, Task, Workflow or lane-start spawn (rule agent-model-floor,
+# guard step 9). Owner, 19:03 CST: "if i say haiku it should work, there shouldnt be any guards on a FLOOR".
 # When the owner's latest typed turn names the spawn's model as a whole word, and no negation precedes the name, a
 # spawn on that model passes the floor. The word never lifts the Opus ceiling (agent-model-cap). With no owner word the
-# refusal stands. A spawn that names no model stays on the default, Sonnet, and the owner's word never changes it.
+# refusal stands. A spawn that names no model stays on the default, Sonnet, and the owner's model name never changes it.
 #
 # A red allow case has a Sonnet twin on the same transcript, so the floor is the only thing that separates them. A red
 # deny case has a word that must not count: a negated name, a name inside a pasted block, or an Opus name. Each control
@@ -107,7 +107,7 @@ add("owner-model-word: an Agent spawn on haiku whose transcript is missing is re
 add("owner-model-word: an Agent spawn on haiku whose transcript is empty is refused", "deny",
     "agent-model-floor", tool="Agent", prompt="do it", model="haiku", transcript=OMW_EMPTY)
 
-# ---- The default holds. A spawn that names no model is judged as today, and the owner's word does not give it haiku.
+# ---- The default holds. A spawn that names no model is judged as today, and the owner's model name does not give it haiku.
 add("owner-model-word: an Agent spawn with no model is allowed as today, with no owner word", "allow",
     tool="Agent", prompt="do it", transcript=OMW_PLAIN, silent=True)
 add("owner-model-word: an Agent spawn with no model stays on the default when the owner names haiku", "allow",
@@ -136,14 +136,14 @@ add("owner-model-word: control, an Agent spawn on haiku is refused when the owne
     "a straight apostrophe", "deny", "agent-model-floor", tool="Agent", prompt="do it", model="haiku",
     transcript=OMW_STRAIGHT_DONT)
 
-# ---- A haiku word inside a pasted block is not the owner's word: the owner typed only the sentence before the block.
+# ---- A haiku word inside a pasted block is not the owner's model name: the owner typed only the sentence before the block.
 OMW_PASTED = omw_file("owner-pasted-haiku", [omw_user("Read this log and say what failed.\n<pasted_content>\n"
                                                       "Run the model audit on haiku.\n</pasted_content>"),
                                              omw_asst("Reading it.")])
 add("owner-model-word: an Agent spawn on haiku is refused when the only haiku word in the owner's latest turn is in a "
     "pasted block", "deny", "agent-model-floor", tool="Agent", prompt="do it", model="haiku", transcript=OMW_PASTED)
 
-# ---- The Opus ceiling is not the floor. The owner's word never lifts it, so an Opus spawn is refused whatever the latest
+# ---- The Opus ceiling is not the floor. The owner's model name never lifts it, so an Opus spawn is refused whatever the latest
 # turn says. A question that names opus is not a grant, and a turn that names opus is not one either.
 OMW_WHY_OPUS = omw_file("owner-why-opus", [omw_user("Why did the opus spawn get refused?"),
                                            omw_asst("The Opus ceiling refused it.")])
@@ -176,7 +176,7 @@ add("owner-model-word: twin, an Agent spawn on sonnet is allowed after the same 
 # ---- Clause and negation reach. A negation reaches only to the end of its own clause (MODEL_CLAUSE_BREAK, guard.py), and
 # a negation that governs another word does not refuse the name: `Not sonnet but haiku`, `Skip the checks and run it on
 # haiku`. `instead` negates nothing when it does not stand before the name. A name written in full (claude-haiku-4-5) or with
-# a point (haiku-4.5) is the owner's word for haiku. The clause case is green on the old code: it pins the clause break, and a
+# a point (haiku-4.5) is the owner's model name for haiku. The clause case is green on the old code: it pins the clause break, and a
 # mutant whose MODEL_CLAUSE_BREAK matches nothing turns it red. The other allows are red on the old code, each with a Sonnet
 # twin. The two controls are negations that do govern the name, so they stay refused.
 OMW_CLAUSE_DONT = omw_file("owner-dont-clause-then-haiku", [omw_user("Don't overthink it. Use haiku."), omw_asst("Ok.")])

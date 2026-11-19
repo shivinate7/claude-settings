@@ -5,8 +5,8 @@ import shared_names  # the lane tag and the Grant reader: the one home, hooks/sh
 # PreToolUse: a PreToolUse matcher that covers it makes the desktop app show the "Allow Claude to start the session?"
 # card on every start, even in Bypass (anthropics/claude-code#103832). The start checks run after the call instead.
 # The one PostToolUse command that settings.json names for start_session runs the handoff-unread read and flags no
-# model: a Haiku start prints nothing, by the owner's ruling of 2026-11-18 19:03 CST (no guard on the model floor),
-# because a started session cannot read the owner's word. A bad start prints PostToolUse additionalContext that tells
+# model: a Haiku start prints nothing (no guard on the model floor),
+# because a started session cannot read the owner's model name. A bad start prints PostToolUse additionalContext that tells
 # the calling session to stop the new session with interrupt_session or archive_session. A start that passes prints
 # nothing. A silence case also runs the same start with an unread handoff, so a dead hook cannot pass as silent.
 # Each case runs the hook file that command names, as the harness runs it: the payload on stdin, the config folder in
@@ -412,7 +412,7 @@ def audit_json_list_silent_exit0():
     return audit_text_silent("[1, 2]", audit_folder("json-list"))
 
 
-def audit_gate_silent(name, response):
+def audit_silent_case(name, response):
     """(ok, note): a start whose response is not a started session is silent, though its handoff is unread. The same
     handoff flags a started response first, so the silence comes from the response gate and not from a dead hook."""
     ok, note = audit_expect("sonnet", audit_folder(name + "-started"), unread_handoff_setup, True, AUDIT_STOP_LINE,
@@ -427,7 +427,7 @@ def audit_gate_silent(name, response):
 
 def audit_number_response_silent():
     # A tool_response that is neither text, a content list nor a dict cannot be read, so the audit says nothing.
-    return audit_gate_silent("num-response", 42)
+    return audit_silent_case("num-response", 42)
 
 
 def audit_import_failure_silent_exit0():
@@ -446,16 +446,16 @@ def audit_import_failure_silent_exit0():
 
 
 def audit_is_error_silent():
-    return audit_gate_silent("is-error",
+    return audit_silent_case("is-error",
                              {"is_error": True, "content": [{"type": "text", "text": "no such repo"}]})
 
 
 def audit_isError_silent():
-    return audit_gate_silent("isError", {"isError": True, "result": "no such repo"})
+    return audit_silent_case("isError", {"isError": True, "result": "no such repo"})
 
 
 def audit_refused_silent():
-    return audit_gate_silent("deny", {"deny": "refused"})
+    return audit_silent_case("deny", {"deny": "refused"})
 
 
 for _label, _check in (
