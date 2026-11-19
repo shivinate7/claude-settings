@@ -1496,14 +1496,28 @@ class RecordsOnlyEveryJob(unittest.TestCase):
                         self.assertTrue(job_runs(expr, got, event),
                                         f"{job} does not start on a comment-only {event} run, so its lint steps do not run; its job-level if is {expr}")
 
-    # A python test suite is a command that runs `python3 <path>/test_<name>.py`. A lint step (check_*.py) is no suite, so it may run.
-    SUITE_CMD = re.compile(r"\bpython3?\s+(?:\S*/)?test_[\w.-]*\.py\b")
+    # A suite step runs a test file with python, node or bash: `python3 <path>/test_<name>.py`, `node <path>/test_<name>.mjs`,
+    # `node --test <path>/<name>.test.mjs` or `bash <path>/test_<name>.sh`. A lint (check_*.py, map-check.sh), a mod runner
+    # (mod-tests.sh) and a mutation script (mutate_sweep.py) are no suite, so they may run on any delta.
+    SUITE_CMD = re.compile(r"\b(?:python3?|node|bash)\s+(?:--test\s+)?(?:\S*/)?(?:test_[\w.-]*|[\w.-]+\.test)\.(?:py|mjs|sh)\b")
     # The three lint jobs. A comment-only run starts `checks` (its lint steps read the text), and the two others start only on a
     # record-folder run; the cases below check every suite step in all three.
     SUITE_JOBS = ("checks", "checks-hooks", "checks-rest")
 
-    def python_suite_steps(self, text, job):
-        """(name, if) of each step of `job` that runs a python test suite, in file order. A comment line is no command. A block
+    # Control: the pattern reads each runner form the lint jobs use, and no lint, mod or mutation step.
+    def test_the_suite_pattern_reads_each_runner_form_and_no_lint_mod_or_mutation_step(self):
+        for line in ("python3 janitor/test_sweep.py", "node actions/stamp/test_stamp.mjs", "node lint/test_scanner_traps.mjs",
+                     "bash actions/stamp/test_action.sh", "/bin/bash lint/test_ios_ship.sh",
+                     "node --test testing/skip-locally-fail-in-ci.test.mjs"):
+            with self.subTest(line=line):
+                self.assertIsNotNone(self.SUITE_CMD.search(line), f"the pattern misses a suite command: {line}")
+        for line in ("python3 lint/check_red_run.py", "bash .github/scripts/map-check.sh", "bash .github/scripts/mod-tests.sh",
+                     "python3 janitor/mutate_sweep.py", "npm ci --ignore-scripts --no-audit --no-fund"):
+            with self.subTest(line=line):
+                self.assertIsNone(self.SUITE_CMD.search(line), f"the pattern reads a non-suite command as a suite: {line}")
+
+    def suite_steps(self, text, job):
+        """(name, if) of each step of `job` that runs a test suite, in file order. A comment line is no command. A block
         scalar's body is read through run_body, so a suite named in a multi-line run still counts."""
         found = []
         for step in step_blocks(job_block(text, job)):
@@ -1512,11 +1526,11 @@ class RecordsOnlyEveryJob(unittest.TestCase):
                 found.append((step_key(step, "name"), step_key(step, "if")))
         return found
 
-    # Named failure: a python test suite runs on a comment-only run. The check is per step, because `checks` starts on this run
+    # Named failure: a suite step runs on a comment-only run. The check is per step, because `checks` starts on this run
     # and its lint steps must still run. Scope first: the delta is asserted before any step is judged. lib/tidy.py matches no
     # case arm of ci-scope.sh, so the fail-safe arm sets every doc flag on it; hooks/tidy.py sets none. Both are checked, since
     # the rule covers any comment-only delta.
-    def test_a_comment_only_run_runs_no_python_suite_step_in_the_lint_jobs(self):
+    def test_a_comment_only_run_runs_no_suite_step_in_the_lint_jobs(self):
         text = self.workflow()
         for path in ("hooks/tidy.py", PY_PATH):
             for event in self.EVENTS:
@@ -1527,14 +1541,41 @@ class RecordsOnlyEveryJob(unittest.TestCase):
                     self.assertEqual(facts.get("delta"), [path], f"scope: the delta from GREEN_HEAD is not the one .py file: {facts}")
                     for job in self.SUITE_JOBS:
                         with self.subTest(job=job):
-                            steps = self.python_suite_steps(text, job)
-                            self.assertTrue(steps, f"the fixture: {job} holds no python suite step")
+                            steps = self.suite_steps(text, job)
+                            self.assertTrue(steps, f"the fixture: {job} holds no suite step")
                             expr = job_if(text, job)
                             for name, cond in steps:
                                 with self.subTest(step=name):
                                     runs = job_runs(expr, got, event) and step_runs(cond, got, event)
-                                    self.assertFalse(runs, f"{job} / {name} runs a python suite on a comment-only {event} run of {path}; "
+                                    self.assertFalse(runs, f"{job} / {name} runs a suite on a comment-only {event} run of {path}; "
                                                            f"its job if is {expr or 'absent'}, its step if is {cond or 'absent'}")
+
+    # Named failure: a suite step runs on a record-folder-only delta. Scope first: the delta and the skip are asserted, and each
+    # job must start on the run, or its steps would pass by not running. Only then is each suite step's if: read.
+    def test_a_records_folder_delta_runs_no_suite_step_in_the_lint_jobs(self):
+        text = self.workflow()
+        for folder in RecordsFolderDelta.FOLDERS:
+            for event in self.EVENTS:
+                with self.subTest(folder=folder, event=event):
+                    facts = {}
+                    got = run([folder], green=self.CODE, event=event, facts=facts)
+                    self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+                    self.assertEqual(facts.get("delta"), [folder], f"scope: the delta from GREEN_HEAD is not {folder} alone: {facts}")
+                    self.assertEqual(got.get("records_only_skip"), "true", f"scope: {folder} is no records-only skip: {got}")
+                    self.assertEqual(got.get("skip_record_delta"), "true", f"scope: {folder} is no record-folder skip: {got}")
+                    for job in self.SUITE_JOBS:
+                        with self.subTest(job=job):
+                            expr = job_if(text, job)
+                            self.assertTrue(job_runs(expr, got, event),
+                                            f"scope: {job} is off on a record-folder {event} run, so its suite steps pass by not "
+                                            f"running; its job if is {expr or 'absent'}")
+                            steps = self.suite_steps(text, job)
+                            self.assertTrue(steps, f"the fixture: {job} holds no suite step")
+                            for name, cond in steps:
+                                with self.subTest(step=name):
+                                    self.assertFalse(step_runs(cond, got, event),
+                                                     f"{job} / {name} runs a suite on a record-folder {event} run of {folder}; "
+                                                     f"its step if is {cond or 'absent'}")
 
     # Named failure: a suite job starts on a docs/decisions-only run. The jobs that read the decision steps are left out here.
     def test_a_decisions_only_run_starts_no_suite_job(self):
