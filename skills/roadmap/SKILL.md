@@ -121,11 +121,13 @@ GitHub, so the publisher reads them just before the build and passes one file:
   a file without it still renders Live work, with every act unknown.
 - An entry with the wrong shape is counted on the page and in the upkeep list, never dropped. A
   `step` that names no open step goes in the upkeep list.
-- A live file whose `readAt` is over 60 minutes old (`STALE_LIVE_MINUTES`) is rebuilt in the build's own process
-  (`rebuild_stale_live`): `readAt` becomes now, `pulls` become the open pull requests of the repo the build names
+- A live file whose `readAt` is over 60 minutes old (`STALE_LIVE_MINUTES`) is rebuilt in the page build's own process
+  only (`rebuild_stale_live`, asked for by `build.main`; `merge --reviewed --live` and `--idle-lanes` read the file as
+  it is and never rebuild): `readAt` becomes now, `pulls` become the open pull requests of the repo the build names
   (`--repo`), and `sessions` come from the `session-rows` reader (none is wired yet, so a rebuild fails until one is).
-  A pull still open keeps its `held`, `reviewLog`, `checks` and `url`; `threads`, `branches`, `items`, `landedPulls`,
-  `ledger` and any other key stay as they were. A session row stays unless archived; an archived row stays only when an
+  A pull still open keeps its `held`, `reviewLog` and `url`, and its `checks` only when its old row's `head` equals the
+  head the fetch reads now (both present). `ledger` is kept as it was. `threads`, `branches`, `items` and `landedPulls`
+  are not carried: they are absent from the rebuilt file and read as a missing key (unknown). A session row stays unless archived; an archived row stays only when an
   open pull's footer link or a live step's lane names it. That reader must return every page of `list_sessions` or
   a reason, because the rebuild stamps `readAt` now and a cut-short list would pass as complete. When the rebuild
   cannot run, the file is left as it was and the reading says `stale` with the file's age in minutes, never current.
@@ -394,8 +396,8 @@ The red line, the stalled lines and the ready lines read the live file and steps
 already reads. They add no process, file, timer or log. The publisher's `createdAt` per pull row comes from the
 GitHub list call it already makes. The stale-draft row makes its own REST calls (N // 100 + 1 per build run) and one local
 `git log` per stale-looking draft. It writes no file, starts no timer and keeps no log.
-A stale live file adds one rebuild per build run (one `session-rows` reader call, N // 100 + 1 GitHub calls and one
-file write, the live file itself); a fresh one adds none. No timer, thread or log.
+A stale live file adds one rebuild per page build run (one `session-rows` reader call, N // 100 + 1 GitHub calls and one
+file write, the live file itself); a fresh one adds none, and a merge lane read or `--idle-lanes` run adds none whatever the age. No timer, thread or log.
 The `ledger` costs the publisher one `merge --reviewed --json` run per publish (its gh calls are in decision pr-ledger, Cost); the build
 reads the live file a second time for it and adds no GitHub read, process, file, timer or log.
 The `landedPulls` rows cost the publisher one more GitHub list call (closed pulls) per publish. The closed-pull wait row runs

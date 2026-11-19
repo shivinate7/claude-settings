@@ -774,7 +774,7 @@ def session_row_ok(row):
             and (row.get("tags") is None or isinstance(row["tags"], list)))
 
 
-def live_work(path, steps, slug=None):
+def live_work(path, steps, slug=None, rebuild=False):
     """window.ROADMAP_BUILD.live: the publisher's threads, pull requests and branches, or why unknown.
 
     Shape: {"readAt": ISO, "threads"?: [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
@@ -791,9 +791,10 @@ def live_work(path, steps, slug=None):
     `staleWhy` says why the live reading is unknown, or None. `pullWhy` says why the todo-with-open-PR line reads
     unknown, or None; it reads only readAt and the pulls list, never the sessions.
     A live file with no sessions list still renders Live work.
-    A file whose readAt is over STALE_LIVE_MINUTES old is first rebuilt in-process (rebuild_stale_live: readAt now, the
-    open pulls of `slug` and the kept sessions, with the old file's triage keys carried over; a failed rebuild leaves
-    the file and reads stale with its age). `ageMinutes` is the readAt's age in whole minutes at this read, or None
+    With `rebuild` true (only build.main passes it), a file whose readAt is over STALE_LIVE_MINUTES old is first rebuilt
+    in-process (rebuild_stale_live: readAt now, the open pulls of `slug` and the kept sessions, the pull marks and the
+    ledger carried over; a failed rebuild leaves the file and reads stale with its age). Without it (merge's lane read,
+    --idle-lanes) the file is read as it is: no fetch, no write, and a stale file reads stale with its age. `ageMinutes` is the readAt's age in whole minutes at this read, or None
     (also for a readAt ahead of the clock), for the page's Live work panel.
     "items" (optional, the waiting page's rows `{"n", "status", "home", "lane"?, "owner"?}`) feeds the page-ruling upkeep
     row, the stalled items and the lanes-to-archive row: `pageItems` holds the rows, or None with `itemsWhy` saying why
@@ -819,7 +820,7 @@ def live_work(path, steps, slug=None):
     """
     if not path:
         return {"read": "unknown (no --live file: the publisher writes it from the project threads and GitHub)"}
-    rebuild_why = rebuild_stale_live(path, steps, slug)
+    rebuild_why = rebuild_stale_live(path, steps, slug) if rebuild else None
     try:
         raw = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as err:
@@ -1191,7 +1192,7 @@ def main(argv=None):
     slug, found = github_slug(repo, extra), homes(repo)
     info["records"] = records(repo, found, slug, args.main_branch)
     info["health"] = health(repo, extra, where, slug, args.main_branch)
-    info["live"] = live_ledger(args.live, live_work(args.live, data["steps"] if data else None, slug))
+    info["live"] = live_ledger(args.live, live_work(args.live, data["steps"] if data else None, slug, rebuild=True))
     marks = add_marks(marks, pull_landed_marks(repo, ref, data["steps"] if data else None, info["live"]))
     info["landed"] = marks
     info["stalled"] = (stalled(data["steps"], marks, info["live"]) if data else
@@ -1605,10 +1606,12 @@ def live_fetch(slug):
 def rebuilt_live(fetched, steps, old=None):
     """The live file's new value from a live_fetch result: readAt now, the open pulls, and the sessions to keep. A
     session row stays unless it is archived; an archived row stays only when an open pull's footer (its last
-    claude.ai/code link) or a live step's lane (running_under) names it. `old` is the file being replaced: each of its
-    keys that the fetch does not give (threads, branches, items, landedPulls, ledger and any other triage key) is carried
-    over, and a pull still open keeps its old row's LIVE_PULL_TRIAGE_KEYS (held, reviewLog, checks, url). Raises
-    ValueError on a result of the wrong shape."""
+    claude.ai/code link) or a live step's lane (running_under) names it. `old` is the file being replaced. Of it, a
+    rebuild keeps the pull marks of each pull still open, by pull number (held, reviewLog, url), `checks` only when the
+    old row's `head` and the fetched head are both present and equal (checks reads one head commit), and the `ledger`
+    key as it is (it has its own readAt). Nothing else is carried: threads, items, branches and landedPulls are the
+    publisher's reading of a past moment, so they are absent and read as a missing key (unknown). Raises ValueError on a
+    result of the wrong shape."""
     fetched = fetched if isinstance(fetched, dict) else {}
     sessions, pulls = fetched.get("sessions"), fetched.get("pulls")
     if not isinstance(sessions, list) or not isinstance(pulls, list):
@@ -1629,9 +1632,12 @@ def rebuilt_live(fetched, steps, old=None):
     rows = []
     for p in sorted(pulls, key=lambda p: p["number"]):
         row = {k: p[k] for k in LIVE_PULL_KEYS if p.get(k) is not None}
-        row.update({k: before[p["number"]][k] for k in LIVE_PULL_TRIAGE_KEYS if k in before.get(p["number"], {})})
+        mark = before.get(p["number"], {})
+        # checks is CI's reading of one head commit: carry it only for the head the old row recorded.
+        same_head = isinstance(mark.get("head"), str) and mark["head"] == p.get("head")
+        row.update({k: mark[k] for k in LIVE_PULL_TRIAGE_KEYS if k in mark and (k != "checks" or same_head)})
         rows.append(row)
-    value = {k: v for k, v in old.items() if k not in ("readAt", "pulls", "sessions")}
+    value = {"ledger": old["ledger"]} if "ledger" in old else {}
     value.update({"readAt": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "pulls": rows,
                   "sessions": [r for r in sessions if r.get("session_status") != ARCHIVED_SESSION or held(r["id"])]})
     return value
@@ -1640,8 +1646,8 @@ def rebuilt_live(fetched, steps, old=None):
 def rebuild_stale_live(path, steps, slug=None):
     """None, or why the live file at `path` is stale and could not be rebuilt. A file whose readAt is a time with a zone
     and over STALE_LIVE_MINUTES old is rebuilt once, in this process, from live_fetch(slug) and rebuilt_live: the new
-    value replaces the file and keeps its other keys (the `ledger` key carries its own readAt, so it still reads stale
-    until the publisher runs again). A file no older than the limit, or one whose readAt cannot be read, is left alone,
+    value replaces the file and keeps only the pull marks and the `ledger` key (which carries its own readAt, so it still
+    reads stale until the publisher runs again). A file no older than the limit, or one whose readAt cannot be read, is left alone,
     the caller's own reasons covering it. A failed fetch leaves the file as it was. No timer, no thread, no process but
     the fetch's own reads."""
     try:

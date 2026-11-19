@@ -83,7 +83,7 @@
                           under normal review); nothing is sent to a lane. c: no review log, the lane completed or review ready, its newest thread
                           (pr N) over 12 h old; a lane row with no status_bucket enum name reads unknown. d: the lane is archived. e: the head ref
                           names a doing step whose lane is absent or archived. A lane read that cannot run prints `lost-work #N unknown: WHY; owner
-                          coordinator` and exits 1. Cost: the live file and the record branch, read once; git reads for a state-a candidate; no gh call.
+                          coordinator` and exits 1. Cost: the live file and the record branch, read once, as the file is (a stale file is never rebuilt here: it reads unknown with its age); git reads for a state-a candidate; no gh call.
                           State f's git reads: a `git fetch` of all branches into refs/lost-work/*, a fetch of refs/pull/*/head, three for-each-ref
                           reads, one rev-list over the pull request heads, and one rev-list for each candidate branch.
   merge --reviewed --live FILE --ledger [--out FILE] --verdicts FILE [--subsumed FILE]
