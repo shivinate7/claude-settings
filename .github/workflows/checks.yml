@@ -373,6 +373,9 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_all_jobs_passed.py
 
+      - name: Cancel-on-close workflow and script fixture suite
+        run: python3 lint/test_cancel_on_close.py
+
       - name: Scope detector fixture suite
         if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_ci_scope.py
@@ -1150,6 +1153,10 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_review_policy.py
 
+      - name: Merge tool review tally fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 merge/test_review_tally.py
+
       - name: Merge launcher fixture suite (bin/merge)
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_cmd.py
@@ -1344,6 +1351,10 @@ jobs:
           GUARD_CHROMIUM: "1"
           GUARD_SHARD: 2/2
         run: python3 hooks/test_guard.py
+
+      - name: Protected-path suite
+        if: ${{ needs.scope.outputs.checks_guard == 'true' || github.event_name != 'pull_request' }}
+        run: python3 hooks/test_guard_protected.py
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)

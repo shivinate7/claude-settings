@@ -51,10 +51,15 @@ names a waiting page, so the item checks and the workflow check run on a real pa
 pointer checkout: its CLAUDE.md names it, and it holds the role table and an agents folder with one role
 file, so the role checks read real files. fixture_proof asserts
 that each fixture reaches its check, so a moved key or path fails by name instead of leaving the fuzz blind.
+annotation_proof asserts that value_for gives an int to an int-annotated parameter, so the int inputs are real.
 
 The self-test feeds a raising check, a silent exit and a real refusal through the same harness. A
 sweep case proves the shared run-folder sweep (lint/_test_temp.py) removes an old sibling and keeps
 a new one.
+
+Quoted text is data (quoted_data_property): a deny text inside the quotes of echo, printf, grep -e or git commit -m
+reads as the same sink reads with neutral words, and under bash -c the same text still asks. The draws are seeded
+(QUOTED_SEED) and print the seed, the draw and both verdicts on a failure.
 """
 
 import ast
@@ -377,7 +382,7 @@ def value_for(fn, name, param, rng, text, env, state):
         return [text]
     if name in PATH_NAMES:
         return text if rng.random() < 0.3 else env.cwd
-    if annotation == "int":
+    if param.annotation is int or annotation == "int":   # a real int, or its string form (postponed annotations)
         return rng.randint(0, 3)
     if annotation == "dict":
         return state("payload")
@@ -651,6 +656,29 @@ def fixture_proof():
     return problems
 
 
+def annotation_proof():
+    """[problem] for each probe value_for answers with a non-int. The probe is cap_safe's own `limit`, read from its
+    signature, so a moved annotation fails here by name. The string form "int" is a control: value_for already reads it
+    as an int, so it holds on the old harness too."""
+    real = inspect.signature(guard_core.cap_safe).parameters["limit"]
+    if real.annotation is not int:   # the scope: the probe must be the int parameter it names
+        return ["cap_safe's limit is no longer annotated int (%r), so the int probe reads another parameter"
+                % (real.annotation,)]
+    problems = []
+    rng = random.Random("%s:annotation" % SEED)
+    env = Env(rng, "Bash", "x")
+    probes = (("an int annotation", real), ('the string annotation "int"', real.replace(annotation="int")))
+    for label, param in probes:
+        values = [value_for(guard_core.cap_safe, "limit", param, rng, "x", env, lambda key: None) for _ in range(20)]
+        wrong = sorted({type(value).__name__ for value in values if type(value) is not int})
+        if wrong:
+            problems.append("value_for gives %s for cap_safe's limit under %s, not an int"
+                            % (" and ".join(wrong), label))
+        elif 0 not in values:   # the empty limit is drawn too
+            problems.append("value_for never draws the empty limit 0 for cap_safe's limit under %s" % label)
+    return problems
+
+
 # ------------------------------------------------------------------ the dispatch, read from the AST
 
 _TREES, _SYMBOLS = {}, {}
@@ -859,6 +887,81 @@ def family_list_is_whole():
     return files - {"guard_core"} == set(guard._FAMILY_MODULES)
 
 
+# ---- quoted text is data. A deny text inside the quotes of a data sink (echo, printf, grep -e, git commit -m) gets the verdict the same sink
+# gets with neutral words in those quotes, and the same text under `bash -c` still asks. The draws are seeded (QUOTED_SEED) and run in
+# this process under the isolation above. The traps are the three building-scanner-respects-strings names: a comment opener in the text,
+# a multi-line quote, and a lone quote.
+QUOTED_SEED = "quoted-data-sinks"
+QUOTED_COUNT = 60  # seeded draws
+QUOTED_SINKS = ("echo {q}", "printf '%s\\n' {q}", "grep -e {q} notes.txt", "git commit -m {q}")
+QUOTED_REFUSE = ("git push -f origin main", "git push --force origin main")  # each asks as a bare command; quoted_data_property checks that first
+QUOTED_NEUTRAL = ("notes about the release", "a short line of text")
+QUOTED_TRAPS = (("", ""), ("http://a.test/ ", ""), ("/* not a comment ", " */"), ("# not a comment ", ""),
+                ("first line\nmiddle line\n", "\nlast line "), ("Don't ", ""), ("", " don't"))
+REFUSALS = ("ask", "deny")
+
+def quoted(text, style):
+    """`text` in shell quotes: single quotes as they are, or double quotes with \\, $, backtick, " and ! escaped."""
+    if style == "single":
+        if "'" in text:
+            raise ValueError("a single-quoted draw holds a single quote")
+        return "'" + text + "'"
+    for ch in ("\\", "$", "`", '"', "!"):
+        text = text.replace(ch, "\\" + ch)
+    return '"' + text + '"'
+
+def shell_decision(command):
+    """-> what judge_shell decides for a Bash call of `command`: "allow" when it returns, the permissionDecision it prints (deny or ask), "exit"
+    when it exits with none printed, or "raised: ..." when it raises."""
+    out = io.StringIO()
+    exited = False
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            guard.judge_shell("Bash", command, CHECKOUT)
+    except SystemExit:
+        exited = True
+    except Exception as exc:
+        return "raised: " + describe(exc)
+    decision = None
+    for line in out.getvalue().splitlines():
+        try:
+            found = json.loads(line)
+        except ValueError:
+            continue
+        hook = found.get("hookSpecificOutput") if isinstance(found, dict) else None
+        if isinstance(hook, dict) and "permissionDecision" in hook:
+            decision = hook["permissionDecision"]
+    if decision is not None:
+        return decision
+    return "exit" if exited else "allow"
+
+def quoted_data_property():
+    """-> the number of failing rows. Scope first: each deny text asks as a bare command and under `bash -c`. Then each seeded draw: the sink with
+    the deny text reads as the sink with the neutral text does, and that neutral sink allows."""
+    failing = 0
+    for text in QUOTED_REFUSE:
+        for command in (text, "bash -c " + quoted(text, "single")):
+            got = shell_decision(command)
+            if got not in REFUSALS:
+                failing += 1
+                print("FAIL [quoted-data] scope: %r reads %s, not ask or deny" % (command, got))
+    rng = random.Random("%s:%s" % (SEED, QUOTED_SEED))
+    for k in range(QUOTED_COUNT):
+        sink = rng.choice(QUOTED_SINKS)
+        deny = rng.choice(QUOTED_REFUSE)
+        neutral = rng.choice(QUOTED_NEUTRAL)
+        before, after = rng.choice(QUOTED_TRAPS)
+        style = "double" if "'" in before + after else rng.choice(("single", "double"))
+        refuse_cmd = sink.format(q=quoted(before + deny + after, style))
+        neutral_cmd = sink.format(q=quoted(before + neutral + after, style))
+        want, got = shell_decision(neutral_cmd), shell_decision(refuse_cmd)
+        if want != "allow" or got != want:
+            failing += 1
+            print("FAIL [quoted-data] seed %r, draw %d: %r reads %s, and its neutral twin %r reads %s (want allow, and equal)"
+                  % (QUOTED_SEED, k, refuse_cmd, got, neutral_cmd, want))
+    print("quoted-data: %d seeded draws and %d scope checks, %d failing rows" % (QUOTED_COUNT, 2 * len(QUOTED_REFUSE), failing))
+    return failing
+
 def main():
     started = time.monotonic()
     try:
@@ -868,6 +971,9 @@ def main():
         problems = fixture_proof()
         for problem in problems:
             print("FAIL fixture: %s" % problem)   # the fuzz still runs, so each family's own rows show too
+        for problem in annotation_proof():
+            print("FAIL annotation: %s" % problem)   # the fuzz still runs, so the rows it names show too
+            problems.append(problem)
         if not family_list_is_whole():
             print("FAIL the guard_*.py files and guard._FAMILY_MODULES differ: a family module is not fuzzed")
             return 1
@@ -905,6 +1011,7 @@ def main():
                     failures = run_checks(root_checks, COUNT, tools, unpinned)
                 report(failures, unpinned)
                 failing += len(failures)
+        failing += quoted_data_property()
         elapsed = time.monotonic() - started
         print("checks-never-raise: %d direct checks and judge, %d tools, %d env shapes, %d root-reading checks also run "
               "with the root unpinned, %d inputs each per pass (%d random + %d edge), %d failing rows, %.1f s"
