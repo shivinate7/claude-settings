@@ -928,6 +928,32 @@ class MainLineDrop:
         r.sh("add", "-A")
         r.sh("commit", "-q", "-m", msg, date=date)
 
+    LINE = "main line: added by main after the cut"
+
+    def octopus_of(self, carrier, merged, drop=False):
+        """Builds the merge on a fresh repo from cut_feat. side-a and side-b each add their own file, cut from feat. Main then
+        adds LINE to app.txt. The carrier, one of feat, side-a and side-b, merges main. feat then takes `merged` in one merge
+        commit. Two names in `merged` make an octopus. With `drop`, the commit is amended to set app.txt back to BODY, so the
+        carrier's line is dropped. -> (the head sha, the carrier's sha)."""
+        self.cut_feat("feat adds its own file", feat_txt="feat\n")
+        r = self.r
+        for name in ("side-a", "side-b"):
+            r.sh("checkout", "-q", "-b", name, "feat")
+            r.put(name + ".txt", name + "\n")
+            r.commit(name + " adds its own file")
+            r.sh("checkout", "-q", "feat")
+        self.main_commit("main adds a line", self.T1, app_txt=BODY + self.LINE + "\n")
+        r.sh("checkout", "-q", carrier)
+        r.sh("merge", "-q", "--no-edit", "--no-ff", "main")
+        carried = r.sh("rev-parse", carrier)
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "-q", "--no-ff", "-m", "Merge %s into feat" % " and ".join(merged), *merged)
+        if drop:
+            r.put("app.txt", BODY)
+            r.sh("add", "-A")
+            r.sh("commit", "-q", "--amend", "--no-edit")
+        return r.sh("rev-parse", "HEAD"), carried
+
 
 class OwnHistory(MainLineDrop, unittest.TestCase):
     """A line the branch alone added is the branch's work. Removing it later, or in a merge, is no loss."""
@@ -3029,6 +3055,14 @@ class RetireCite(unittest.TestCase):
         self.assertIn(RUN_URL, flagged.urls, "the close with the finding did not read its own cited run")
 
 
+def octopus_verdict(repo_dir, head):
+    """(problem lines, notes) that check() gives for an octopus head. An UNKNOWN fails the case as an assert, with its reason."""
+    try:
+        return C.check(repo_dir, "origin/main", head)
+    except C.Unknown as e:
+        raise AssertionError("check() answers UNKNOWN for the octopus merge %s, not a verdict: %s" % (head[:9], e))
+
+
 class RevivedNote(unittest.TestCase):
     """A note the branch deleted must not come back when a merge brings the base in. The notes file merges by union (the
     real `.gitattributes` line), so a merge that conflicts at the file's end keeps the base's copy with no clash. Each of the
@@ -3303,21 +3337,19 @@ class RevivedNote(unittest.TestCase):
         self.start(union=True)
         self.merge_main()
         head = self.octopus()
-        e = self.unknown_of(head)
-        self.assertIsNotNone(e, "premise: check() reads the octopus merge as UNKNOWN")
-        self.assert_refused(getattr(e, "problems", None) or [])
+        problems, _ = octopus_verdict(self.r.dir, head)
+        self.assert_refused(problems)
 
-    def test_an_octopus_unknown_for_a_revived_note_carries_its_notes_as_a_list(self):
+    def test_an_octopus_verdict_carries_its_notes_as_a_list(self):
         self.start(union=True)
         self.merge_main()
         head = self.octopus()
-        e = self.unknown_of(head)
-        self.assertIsNotNone(e, "premise: check() reads the octopus merge as UNKNOWN")
-        self.assertIsInstance(getattr(e, "notes", None), list,
-                              "the UNKNOWN for the octopus merge carries no .notes list: %r" % (getattr(e, "notes", None),))
+        _, notes = octopus_verdict(self.r.dir, head)
+        self.assertIsInstance(notes, list, "the verdict for the octopus merge carries no notes list: %r" % (notes,))
 
     def test_the_merge_refusal_for_an_octopus_finding_carries_the_complete_remedy(self):
-        """The other refusal of merge.undo_check: an Unknown that carries findings. It prints the same remedy and proof command."""
+        """The refusal of merge.undo_check for an octopus merge that revives a note: the finding, then the complete remedy and
+        its proof command. The octopus is read, so the refusal does not say the history could not be read."""
         import merge
         self.start(union=True)
         self.merge_main()
@@ -3325,36 +3357,36 @@ class RevivedNote(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(merge.Stop) as cm:
             merge.undo_check(self.r.dir, "origin/main")
         text = str(cm.exception)
-        self.assertIn("could not read the whole history", text, "premise: the refusal is the octopus Unknown that carries findings")
+        self.assertIn("retired-note", text, "premise: the refusal names the revived note")
+        self.assertIn(self.retire[:7], text, "premise: the refusal names the commit that deleted the note")
+        self.assertNotIn("could not read the whole history", text, "the refusal for an octopus merge says the history was not read: %r" % text)
         block = printed_message(text)
         self.assertIsNotNone(block, "the octopus refusal prints no commit message between the marker lines: %r" % text)
         self.assertIn("app.txt -- the owner wants Card back", read_back(block), "git reads no Drops-lines trailer from the octopus refusal's message")
         self.assertIn(PROOF, text, "the octopus refusal does not print the proof command: %r" % text)
 
-    def test_main_prints_the_finding_then_unknown_and_exits_1_without_strict(self):
+    def test_main_prints_the_finding_and_no_unknown_for_an_octopus_merge(self):
         self.start(union=True)
         self.merge_main()
         head = self.octopus()
         rc, lines = self.main_on(head)
         self.assertEqual(rc, 1, "main() exits 0 on an octopus merge that hides a revived note: %r" % lines)
-        fail = [i for i, l in enumerate(lines) if "FAIL" in l and "retired-note" in l and self.retire[:7] in l]
-        unknown = [i for i, l in enumerate(lines) if "UNKNOWN" in l]
+        fail = [l for l in lines if "FAIL" in l and "retired-note" in l and self.retire[:7] in l]
         self.assertTrue(fail, "main() printed no FAIL line for retired-note: %r" % lines)
-        self.assertTrue(unknown, "main() printed no UNKNOWN line: %r" % lines)
-        self.assertLess(fail[0], unknown[0], "main() printed UNKNOWN before the FAIL line: %r" % lines)
+        unknown = [l for l in lines if "UNKNOWN" in l]
+        self.assertFalse(unknown, "main() prints UNKNOWN for an octopus merge it can read: %r" % lines)
 
-    def test_an_octopus_merge_with_no_finding_stays_a_plain_unknown(self):  # control
+    def test_a_clean_octopus_merge_passes(self):
         self.start(union=True, retire=False)
         self.merge_main()
         head = self.octopus()
-        e = self.unknown_of(head)
-        self.assertIsNotNone(e, "premise: check() reads the octopus merge as UNKNOWN")
-        self.assertFalse(getattr(e, "problems", None), "an octopus merge with no finding carries findings: %r" % (getattr(e, "problems", None),))
+        problems, _ = octopus_verdict(self.r.dir, head)
+        self.assertEqual(problems, [], "a clean octopus merge is refused: %r" % problems)
         rc, lines = self.main_on(head)
-        self.assertEqual(rc, 0, "an UNKNOWN with no finding exits 1 without --strict: %r" % lines)
-        self.assertTrue(any("UNKNOWN" in l for l in lines), "main() printed no UNKNOWN line: %r" % lines)
+        self.assertEqual(rc, 0, "main() exits 1 on a clean octopus merge, without --strict: %r" % lines)
+        self.assertFalse([l for l in lines if "UNKNOWN" in l], "main() prints UNKNOWN for a clean octopus merge: %r" % lines)
         rc, lines = self.main_on(head, "--strict")
-        self.assertEqual(rc, 1, "--strict does not exit 1 on an UNKNOWN: %r" % lines)
+        self.assertEqual(rc, 0, "--strict exits 1 on a clean octopus merge: %r" % lines)
 
     def test_another_unknown_from_the_history_read_carries_no_findings(self):  # control
         self.start(union=True)
@@ -3403,6 +3435,57 @@ class RevivedNote(unittest.TestCase):
         self.assertEqual(self.body(head), [self.UNTOUCHED, self.SIBLING, self.SIBLING_NEW],
                          "premise: the head holds the sibling and the new note, not the deleted one")
         self.assertEqual(self.r.verdict(), [], "a deleted non-slug note flagged a different note that shares its first 40 characters")
+
+
+class OctopusDrop(MainLineDrop, unittest.TestCase):
+    """An octopus merge that drops a line is FAIL, whichever parent holds the line. Only the carrier holds it, so each
+    parent position gets its own case. The two-parent cases share the fixture. They pass on the old code. That shows the
+    drop is real, and that the FAIL text names the parent the way a dropped line does."""
+
+    CARRIERS = ("feat", "side-a", "side-b")  # parents ^1, ^2 and ^3 of the octopus
+
+    def parent_count(self, rev):
+        return len(self.r.sh("rev-list", "--parents", "-n", "1", rev).split()) - 1
+
+    def assert_dropped(self, head, carried):
+        """Premise: the carrier's app.txt holds the line, and the merge's app.txt does not."""
+        self.assertIn(self.LINE, self.r.sh("show", carried + ":app.txt"), "premise: parent %s does not hold the line" % carried[:9])
+        self.assertNotIn(self.LINE, self.r.sh("show", head + ":app.txt"), "premise: merge %s still holds the line" % head[:9])
+
+    def assert_drops(self, problems, carried, head):
+        """One FAIL names the line the merge drops and the parent that held it, by that parent's sha."""
+        named = [p for p in problems if "drops" in p and carried[:9] in p and self.LINE in p]
+        self.assertTrue(named, "merge %s drops the line parent %s holds, and no finding names it: %r" % (head[:9], carried[:9], problems))
+
+    def test_an_octopus_that_drops_a_line_from_any_parent_is_refused(self):
+        for carrier in self.CARRIERS:
+            with self.subTest(carrier=carrier):
+                head, carried = self.octopus_of(carrier, ("side-a", "side-b"), drop=True)
+                self.assertEqual(self.parent_count(head), 3, "premise: the head is an octopus merge of three parents")
+                self.assert_dropped(head, carried)
+                problems, _ = octopus_verdict(self.r.dir, head)
+                self.assert_drops(problems, carried, head)
+
+    def test_a_clean_octopus_merge_passes_whichever_parent_holds_the_line(self):
+        for carrier in self.CARRIERS:
+            with self.subTest(carrier=carrier):
+                head, _ = self.octopus_of(carrier, ("side-a", "side-b"))
+                self.assertEqual(self.parent_count(head), 3, "premise: the head is an octopus merge of three parents")
+                problems, _ = octopus_verdict(self.r.dir, head)
+                self.assertEqual(problems, [], "a clean octopus merge with %s holding the line is refused: %r" % (carrier, problems))
+
+    def test_a_two_parent_merge_that_drops_a_line_is_refused(self):  # control
+        for carrier in ("feat", "side-a"):
+            with self.subTest(carrier=carrier):
+                head, carried = self.octopus_of(carrier, ("side-a",), drop=True)
+                self.assertEqual(self.parent_count(head), 2, "premise: the head is a merge of two parents")
+                self.assert_dropped(head, carried)
+                self.assert_drops(self.r.verdict(head), carried, head)
+
+    def test_a_clean_two_parent_merge_passes(self):  # control
+        head, _ = self.octopus_of("side-a", ("side-a",))
+        self.assertEqual(self.parent_count(head), 2, "premise: the head is a merge of two parents")
+        self.assertEqual(self.r.verdict(head), [], "a clean two-parent merge that carries the line is refused")
 
 
 class DefaultBase(unittest.TestCase):
