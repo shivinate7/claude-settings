@@ -974,7 +974,7 @@ class UpkeepFixture(Fixture):
         self.assertEqual(trailers, "", "main holds a Step trailer, so the case would not show the landedPulls read")
 
 
-# The build clock that the cases which fix it read (test-practices P5). LiveRefresh and StaleInProgress share it.
+# The build clock that LiveRefresh's cases fix (test-practices P5).
 BUILD_NOW = "2026-11-18T20:00:00Z"
 
 
