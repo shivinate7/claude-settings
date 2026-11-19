@@ -1169,7 +1169,7 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=(), payload=Non
     cwd) allow."""
     if "worktree" not in segments[number]:
         return ""   # early exit: resolving variables re-reads every earlier segment, so it runs only for a segment that holds the word `worktree`
-    read = _segment_with_vars(segments, number)
+    read = _segment_with_vars(segments, number, ends)
     tokens = segment_tokens(read)
     index = resolve_command(tokens) if tokens else None
     if index is None or basename(tokens[index]) not in ("git", "git.exe"):
