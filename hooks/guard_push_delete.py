@@ -10,7 +10,7 @@ import stat
 
 import guard_core
 from guard_core import (
-    CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move, _segment_cd_target,
+    ASSIGNMENT, CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move, _segment_cd_target,
     _segment_git_c_target, shell_abs, CONTRACTION, quote_advance, _git_subcommand_index,
     _SHELLS, _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, inner_commands,
     is_powershell, norm, resolve_command, segment_tokens, split_segments,
@@ -122,11 +122,45 @@ class _QuotedText:
 PUSH_QUOTED = _QuotedText()
 
 
+SHELL_VARIABLE = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))")
+
+
+def _assigned_variables(segments, stop: str) -> dict:
+    """The shell variables a command assigns in a segment of its own (`W=path`, `export W=path`) before the
+    first segment whose text is `stop`. A segment with a command word after its assignments sets the
+    variable for that command only, so it is no assignment here. A variable assigned two different values
+    in the command is dropped: its value at one push is unknown."""
+    found, clashed = {}, set()
+    for other in segments:
+        if other == stop:
+            break
+        words = segment_tokens(other)
+        if not words:
+            continue
+        if words[0] == "export":
+            words = words[1:]
+        if not words or not all(ASSIGNMENT.match(word) for word in words):
+            continue
+        for word in words:
+            name, _, value = word.partition("=")
+            if found.setdefault(name, value) != value:
+                clashed.add(name)
+    return {name: value for name, value in found.items() if name not in clashed}
+
+
+def _with_assigned(path: str, assigned: dict) -> str:
+    """`path` with each `$NAME` or `${NAME}` that the command assigned replaced by its value. A name the
+    command did not assign stays, for the shell's own environment to read."""
+    return SHELL_VARIABLE.sub(
+        lambda found: assigned.get(found.group(1) or found.group(2), found.group(0)), path)
+
+
 def push_target(segment: str, cmd: str, cwd: str):
     """(directory, config overrides) a `git push` in this segment runs against.
 
     The directory is the segment's own `git -C <dir>`, else the command's last `cd`, else the
-    session's cwd. A segment that cannot be read gives ('', {}): a directory that does not
+    session's cwd. A variable the command assigned in an earlier segment is read as its value in
+    either folder. A segment that cannot be read gives ('', {}): a directory that does not
     exist, which the verdict reads as unknown, and unknown asks.
     """
     tokens = segment_tokens(segment)
@@ -134,13 +168,15 @@ def push_target(segment: str, cmd: str, cwd: str):
         return "", {}
     # The last `cd` only: `_run_dir` would also take the first `git -C` of ANY segment.
     run_dir = cwd
-    for other in split_segments(_strip_heredoc_bodies_unconditionally(cmd)):
+    segments = split_segments(_strip_heredoc_bodies_unconditionally(cmd))
+    assigned = _assigned_variables(segments, segment)
+    for other in segments:
         words = segment_tokens(other)
         cd = _segment_cd_target(words) if words else None
         if cd is not None:
-            run_dir = _absolute(cd, run_dir)
+            run_dir = _absolute(_with_assigned(cd, assigned), run_dir)
     git_c = _segment_git_c_target(tokens)
-    where = _absolute(git_c, run_dir) if git_c is not None else run_dir
+    where = _absolute(_with_assigned(git_c, assigned), run_dir) if git_c is not None else run_dir
     overrides = {}
     index = resolve_command(tokens)
     cursor = index + 1 if index is not None else len(tokens)

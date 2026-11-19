@@ -718,7 +718,7 @@ while True:
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, OCTOPUS_PUSH_STALE, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, LANE_READY_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit, lane_ready_hit, lane_mcp_ready_hit, self_role_child_hit, self_role_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, PRIOR_WORK_REASON, prior_work_lane_hit, prior_work_named, stamp_hit, step_dup_hit, step_pr_hit, target_roster_hit, trust_card_hit, written_time_hit,
+            DEFAULT_RECORD_BRANCH, record_reason, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, PRIOR_WORK_REASON, prior_work_lane_hit, prior_work_named, stamp_hit, step_dup_hit, step_pr_hit, target_roster_hit, trust_card_hit, written_time_hit,
             BRIEF_ID_REASON, BRIEF_TOPIC_REASON, STEP_DUP_REASON,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
@@ -5541,7 +5541,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # every pushed commit's paths (and one `git symbolic-ref` when no cs-step tag names the slug); a triage push, any other session's push and a push to another branch read no diff.
     matched = record_writer_hit(stripped, cwd, transcript, record_branch_of, read_verb, session_id)
     if matched:
-        refuse(tool, "deny", "roadmap-one-writer", RECORD_REASON, matched)
+        refuse(tool, "deny", "roadmap-one-writer", record_reason(matched), matched)
 
     # 6b. A pull request opened without --draft.
     for text, _in_message in _substitutions(stripped)[0]:

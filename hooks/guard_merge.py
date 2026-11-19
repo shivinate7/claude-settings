@@ -2074,6 +2074,30 @@ RECORD_REASON = (
     + RECORD_CITE
 )
 
+# A push whose folder still holds a variable or a substitution after the command's own assignments are read: the
+# folder is the shell's to know, so the push's repo and record branch are unknown, whoever the session is.
+RECORD_FOLDER_MATCH = "git push to the record branch through an unreadable folder: "
+RECORD_FOLDER_REASON = (
+    "roadmap-one-writer: this push to the record branch runs in a folder this guard cannot read, because it holds "
+    "{names} that the command does not assign. The push's repo and record branch are unknown, so no session's "
+    "role is judged. Write the folder as a literal path, or assign the variable earlier in the same command "
+    "(`W=<folder>; git -C \"$W\" push ...`), then retry."
+)
+UNREAD_FOLDER = re.compile(r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|\$\(|`")
+
+
+def _unread_folder_names(where: str) -> str:
+    """The variables and substitutions still in the folder WHERE, comma-joined, else ''."""
+    names = dict.fromkeys(UNREAD_FOLDER.findall(where or ""))
+    return ", ".join("a command substitution" if name in ("$(", "`") else name for name in names)
+
+
+def record_reason(matched: str) -> str:
+    """The refusal text for a record_writer_hit result, with its names filled in."""
+    if matched.startswith(RECORD_FOLDER_MATCH):
+        return RECORD_FOLDER_REASON.format(names=matched[len(RECORD_FOLDER_MATCH):])
+    return RECORD_REASON
+
 
 def _own_proved_tags(transcript: str):
     """The tags of the own newest get_session record when no set_session_tags call follows it, else None.
@@ -2251,6 +2275,9 @@ def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of
             destinations = push_destinations(args, where, overrides)
             if not {record, DEFAULT_RECORD_BRANCH} & set(destinations):
                 continue
+            unread = _unread_folder_names(where)
+            if unread and DEFAULT_RECORD_BRANCH in destinations:
+                return RECORD_FOLDER_MATCH + unread
             if _own_role_proved(transcript, RECORD_WRITER_TIER, session_id, root):  # glossary-ok: RECORD_WRITER_TIER is the existing name
                 continue
             tags = _own_proved_tags(transcript)
