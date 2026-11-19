@@ -571,13 +571,20 @@ def pull_landed_marks(repo, ref, steps, work, with_done=False):
     return {k: v for k, v in marks.items() if v}
 
 
+def carried_pulls(work):
+    """The pull numbers that carry a step on: open pulls (work["pulls"]) and merged landedPulls rows. A `replacedBy` that
+    names one of these has a live successor; one closed unmerged, or in neither list, replaces nothing."""
+    rows = (work or {}).get("landedPulls") or []
+    return {p["number"] for p in (work or {}).get("pulls") or []} | {r["number"] for r in rows if r.get("merged") is True}
+
+
 def superseded_marks(steps, work):
     """{step: ["#N", ...]} from the landedPulls rows closed unmerged with a `replacedBy` pull number, matched by the row's branch (the step id or
     lane/<id>) whatever the step's status: the replacing pull carries the step on, so the lane may be archived. The replacement must be an open
     pull (work["pulls"]) or a merged landedPulls row; one closed unmerged, or in neither list, replaces nothing, so the lane waits. Only idle_lanes
     reads these. The landed upkeep rows never do, because the work is not on main yet: a step set to done from one would read landed too soon."""
     rows = (work or {}).get("landedPulls") or []
-    carried = {p["number"] for p in (work or {}).get("pulls") or []} | {r["number"] for r in rows if r.get("merged") is True}
+    carried = carried_pulls(work)
     marks = {}
     for row in sorted(rows, key=lambda r: r["number"]):
         if row.get("merged") is True or type(row.get("replacedBy")) is not int or row["replacedBy"] not in carried:
@@ -1785,11 +1792,12 @@ def stalled_items(work):
 
 def closed_unmerged(work, sid):
     """The latest landedPulls row for step `sid`'s lane branch (lane_head_refs) that closed unmerged (`merged` false) and
-    has no open successor, else None. An open pull on a lane ref would hold the step, so it never reaches here; a row
-    whose `replacedBy` is an open pull has a successor and is skipped. The row's `closedAt` gives the date."""
-    refs, opened = lane_head_refs(sid), {p["number"] for p in work["pulls"]}
+    has no successor, else None. An open pull on a lane ref would hold the step, so it never reaches here; a row
+    whose `replacedBy` is an open or merged pull (carried_pulls) has a successor and is skipped. The row's `closedAt`
+    gives the date."""
+    refs, carried = lane_head_refs(sid), carried_pulls(work)
     rows = [r for r in work.get("landedPulls") or []
-            if r.get("merged") is False and r["branch"] in refs and r.get("replacedBy") not in opened]
+            if r.get("merged") is False and r["branch"] in refs and r.get("replacedBy") not in carried]
     return max(rows, key=lambda r: zoned_time(r.get("closedAt")) or datetime.datetime.min.replace(tzinfo=datetime.timezone.utc),
                default=None)
 

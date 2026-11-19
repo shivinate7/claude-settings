@@ -181,7 +181,7 @@ a live session of this repo, or an open pull whose branch is the id or `lane/<id
 bucket is completed or failed has ended and holds no step; an idle or review ready one still does. The tag value is
 read stripped, as idle_lanes reads it. A `cs-topic:` tag never keeps a step live. The page's stalled block lists the ids.
 
-A doing step whose pull request closed unmerged, with no open pull on its lane branch and no open `replacedBy`
+A doing step whose pull request closed unmerged, with no open pull on its lane branch and no open or merged `replacedBy`
 successor, prints the date and the word unmerged: `stalled step: <id> (resume, pause or done; PR #N closed unmerged
 <YYYY-MM-DD>)`. The date is `closedAt` on the step's `landedPulls` row (an ISO time with a zone, from GitHub's
 `closed_at`; triage's live-file brief fills it); with several such rows the latest wins, and a missing or unreadable
