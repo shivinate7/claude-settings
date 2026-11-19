@@ -187,6 +187,8 @@ STALE_DRAFT_HOURS = 12
 PAIR_LINE = "todo step with an open PR"
 # Every stalled line starts with this. An unknown read prints `<STALLED_LINE>: unknown (<why>)` and exits 0.
 STALLED_LINE = "stalled step"
+# The line for a live file past STALE_LIVE_MINUTES while a step is doing; the build exits 1. It never starts with STALLED_LINE.
+STALE_LINE = "live file stale"
 # The upkeep row's label and the start of each printed drift line: `status drift: <id> (hand <x>, derived <y>)`.
 DRIFT_LINE = "status drift"
 # Every ready line starts with this. It never changes the exit code.
@@ -569,13 +571,20 @@ def pull_landed_marks(repo, ref, steps, work, with_done=False):
     return {k: v for k, v in marks.items() if v}
 
 
+def carried_pulls(work):
+    """The pull numbers that carry a step on: open pulls (work["pulls"]) and merged landedPulls rows. A `replacedBy` that
+    names one of these has a live successor; one closed unmerged, or in neither list, replaces nothing."""
+    rows = (work or {}).get("landedPulls") or []
+    return {p["number"] for p in (work or {}).get("pulls") or []} | {r["number"] for r in rows if r.get("merged") is True}
+
+
 def superseded_marks(steps, work):
     """{step: ["#N", ...]} from the landedPulls rows closed unmerged with a `replacedBy` pull number, matched by the row's branch (the step id or
     lane/<id>) whatever the step's status: the replacing pull carries the step on, so the lane may be archived. The replacement must be an open
     pull (work["pulls"]) or a merged landedPulls row; one closed unmerged, or in neither list, replaces nothing, so the lane waits. Only idle_lanes
     reads these. The landed upkeep rows never do, because the work is not on main yet: a step set to done from one would read landed too soon."""
     rows = (work or {}).get("landedPulls") or []
-    carried = {p["number"] for p in (work or {}).get("pulls") or []} | {r["number"] for r in rows if r.get("merged") is True}
+    carried = carried_pulls(work)
     marks = {}
     for row in sorted(rows, key=lambda r: r["number"]):
         if row.get("merged") is True or type(row.get("replacedBy")) is not int or row["replacedBy"] not in carried:
@@ -774,7 +783,7 @@ def session_row_ok(row):
             and (row.get("tags") is None or isinstance(row["tags"], list)))
 
 
-def live_work(path, steps, slug=None):
+def live_work(path, steps, slug=None, rebuild=False):
     """window.ROADMAP_BUILD.live: the publisher's threads, pull requests and branches, or why unknown.
 
     Shape: {"readAt": ISO, "threads"?: [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
@@ -791,6 +800,11 @@ def live_work(path, steps, slug=None):
     `staleWhy` says why the live reading is unknown, or None. `pullWhy` says why the todo-with-open-PR line reads
     unknown, or None; it reads only readAt and the pulls list, never the sessions.
     A live file with no sessions list still renders Live work.
+    With `rebuild` true (only build.main passes it), a file whose readAt is over STALE_LIVE_MINUTES old is first rebuilt
+    in-process (rebuild_stale_live: readAt now, the open pulls of `slug` and the kept sessions, the pull marks and the
+    ledger carried over; a failed rebuild leaves the file and reads stale with its age). Without it (merge's lane read,
+    --idle-lanes) the file is read as it is: no fetch, no write, and a stale file reads stale with its age. `ageMinutes` is the readAt's age in whole minutes at this read, or None
+    (also for a readAt ahead of the clock), for the page's Live work panel.
     "items" (optional, the waiting page's rows `{"n", "status", "home", "lane"?, "owner"?}`) feeds the page-ruling upkeep
     row, the stalled items and the lanes-to-archive row: `pageItems` holds the rows, or None with `itemsWhy` saying why
     they read unknown. `lane` is where the item's answer went (text, or null for none) and `owner` is the session that
@@ -815,6 +829,7 @@ def live_work(path, steps, slug=None):
     """
     if not path:
         return {"read": "unknown (no --live file: the publisher writes it from the project threads and GitHub)"}
+    rebuild_why = rebuild_stale_live(path, steps, slug) if rebuild else None
     try:
         raw = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as err:
@@ -871,6 +886,7 @@ def live_work(path, steps, slug=None):
             strays.append("%s (%s)" % (sid, row["title"]))
     threads.sort(key=lambda r: (STATES.index(r["state"]), r.get("title")))
     why, session_steps, live_steps, live_rows, lane_rows = [], [], [], {}, None  # the first reason wins
+    age = None  # whole minutes since readAt, for the page's Live work panel
     lane_tags = []  # the cs-topic: and cs-build: tags of the same live sessions, for lane_live
     if read.startswith("unknown"):
         why.append(read)
@@ -878,10 +894,14 @@ def live_work(path, steps, slug=None):
         minutes = live_age_minutes(read)
         if minutes is None:
             why.append("unknown (the live file's readAt has no time zone: %r)" % (read,))
-        elif minutes > STALE_LIVE_MINUTES:
-            why.append("unknown (the live file was read %d minutes ago; read it again)" % minutes)
-        elif minutes < -FUTURE_MINUTES:
-            why.append("unknown (the live file's readAt is in the future)")
+        else:
+            if minutes >= 0:
+                age = minutes  # a readAt ahead of the clock has no age, never a negative one
+            if minutes > STALE_LIVE_MINUTES:
+                why.append("unknown (the live file was read %d minutes ago and is stale; %s)"
+                           % (minutes, ("the rebuild failed: " + rebuild_why) if rebuild_why else "it was not rebuilt"))
+            elif minutes < -FUTURE_MINUTES:
+                why.append("unknown (the live file's readAt is in the future)")
     read_why = why[0] if why else None  # the page-ruling row takes the readAt reasons only, never the sessions ones
     pull_why = read_why  # the red pair line reads readAt and pulls only, never sessions
     if not isinstance(raw.get("sessions"), list):
@@ -931,7 +951,7 @@ def live_work(path, steps, slug=None):
         # a publisher that does not send `lane` reads unknown in stalled_items, never "no lane".
         page_items = [dict({"n": r["n"], "status": r["status"], "home": r["home"]},
                            **{k: r[k] for k in ("lane", "owner") if k in r}) for r in raw["items"]]
-    return {"read": read, "threads": threads if has_threads else None,
+    return {"read": read, "ageMinutes": age, "threads": threads if has_threads else None,
             "threadsWhy": None if has_threads else THREADS_MISSING_WHY, "pulls": sorted(pulls, key=lambda r: r["number"]),
             "branches": branches, "skipped": skipped, "strays": strays,
             "sessionSteps": session_steps, "liveSteps": live_steps, "liveRows": live_rows, "laneTags": lane_tags, "staleWhy": stale_why, "pullWhy": pull_why,
@@ -1181,11 +1201,11 @@ def main(argv=None):
     slug, found = github_slug(repo, extra), homes(repo)
     info["records"] = records(repo, found, slug, args.main_branch)
     info["health"] = health(repo, extra, where, slug, args.main_branch)
-    info["live"] = live_ledger(args.live, live_work(args.live, data["steps"] if data else None, slug))
+    info["live"] = live_ledger(args.live, live_work(args.live, data["steps"] if data else None, slug, rebuild=True))
     marks = add_marks(marks, pull_landed_marks(repo, ref, data["steps"] if data else None, info["live"]))
     info["landed"] = marks
     info["stalled"] = (stalled(data["steps"], marks, info["live"]) if data else
-                       {"why": "unknown (steps unknown)", "steps": None, "paused": [], "badPause": [],
+                       {"why": "unknown (steps unknown)", "steps": None, "paused": [], "badPause": [], "stale": None,
                         "items": None, "itemsWhy": "unknown (steps unknown)"})
     info["panels"].append({"name": "Live work", "home": "project threads and GitHub" if args.live else None,
                            "read": info["live"]["read"]})
@@ -1219,7 +1239,7 @@ def main(argv=None):
     lines = ready_lines(info["ready"])
     if lines:
         print("\n".join(lines))
-    if pairs or misses or info["stalled"]["steps"] or info["stalled"]["items"] or over_limit(info["ready"]):
+    if pairs or misses or info["stalled"]["steps"] or info["stalled"]["items"] or info["stalled"]["stale"] is not None or over_limit(info["ready"]):
         raise SystemExit(1)
 
 
@@ -1475,8 +1495,8 @@ def pull_shape_why(row):
 
 
 def open_pulls_rest(slug):
-    """([{number, title, branch, head_repo, draft, updated_at}], None) for every open pull of `slug`, or (None, why).
-    head_repo is head.repo.full_name, None when GitHub gives no head repo (a deleted fork).
+    """([{number, title, branch, head_repo, draft, updated_at, body, created_at, sha}], None) for every open pull of
+    `slug`, or (None, why). head_repo is head.repo.full_name, None when GitHub gives no head repo (a deleted fork).
 
     Reads GitHub's pulls list a page at a time (a manual page loop: the list is complete or the read is unknown, never a
     partial list). A full page is followed by one more, so N open pulls cost N // 100 + 1 calls, at most REST_PAGE_CAP.
@@ -1510,7 +1530,11 @@ def open_pulls_rest(slug):
             full_name = head_repo.get("full_name") if isinstance(head_repo, dict) else None
             rows.append({"number": row["number"], "title": row.get("title") if isinstance(row.get("title"), str) else "",
                          "branch": row["head"]["ref"], "head_repo": full_name if isinstance(full_name, str) else None,
-                         "draft": row["draft"], "updated_at": zoned_time(row["updated_at"])})
+                         "draft": row["draft"], "updated_at": zoned_time(row["updated_at"]),
+                         # The live file's rebuild (live_fetch) reads these three; the stale-draft readers do not.
+                         "body": row.get("body") if isinstance(row.get("body"), str) else "",
+                         "created_at": row.get("created_at") if isinstance(row.get("created_at"), str) else None,
+                         "sha": row["head"].get("sha") if isinstance(row["head"].get("sha"), str) else None})
         if len(body) < REST_PAGE_SIZE:
             return rows, None
         left = headers.get("X-RateLimit-Remaining") if headers is not None else None
@@ -1546,6 +1570,111 @@ def read_sessions_source(name):
                                               and all(isinstance(k, str) for k in ids) for sid, ids in rows.items()):
         return None, bad
     return rows, None
+
+
+# The reader of the sessions the live file's rebuild keeps (live_fetch). Unlike the lane readers above, it returns the
+# list_sessions rows themselves, (rows, None) or (None, why), so the rebuilt file can hold their status and tags. No
+# reader is wired yet (owner page item 894), so a rebuild reads stale until one is registered under this name.
+# The reader must return every page of list_sessions, or (None, why). The rebuild stamps readAt now, so a list cut short
+# (a page cap, a failed later page) would pass as complete: its missing lanes would read as no live lane and their
+# drafts as stale, under a fresh timestamp. A truncated list is therefore refused at the reader, as open_pulls_rest
+# refuses one for the pulls.
+SESSION_ROWS_SOURCE = "session-rows"
+FOOTER_SESSION = re.compile(r"https://claude\.ai/code/(session_\w+)")
+# The pull keys the rebuild writes from GitHub, then the keys triage writes that GitHub does not give, which a rebuild
+# carries forward per pull number. Why this is not make_live.py (roadmap/livework/ on the record branch, which writes
+# the same pull keys from pulls.json and sess_map.json): it is a hand-run script of that branch, which shares no
+# history with this one, so build.py cannot import it. This list is the one home on this branch; the page reads the
+# same names.
+LIVE_PULL_KEYS = ("number", "title", "branch", "draft", "createdAt", "head")
+LIVE_PULL_TRIAGE_KEYS = ("held", "reviewLog", "checks", "url")
+
+
+def live_fetch(slug):
+    """{"sessions": list_sessions rows, "pulls": open pull requests of `slug`} for the live file's rebuild, or raises.
+    Each pull is {number, title, body, branch, draft, createdAt, head}. `slug` is the repo the build names (live_work's
+    argument, from --repo or the caller's checkout), never the folder the process runs in. The sessions come from the
+    reader registered under SESSION_ROWS_SOURCE and are read first, so a run with no reader reaches no network. Cost:
+    one reader call and N // 100 + 1 GitHub calls."""
+    reader = SESSION_SOURCES.get(SESSION_ROWS_SOURCE)
+    if reader is None:
+        raise RuntimeError("no list_sessions reader is wired (SESSION_SOURCES has no %s)" % SESSION_ROWS_SOURCE)
+    rows, why = reader()
+    if why is not None or not isinstance(rows, list):
+        raise RuntimeError(why or "the %s reader returned no rows" % SESSION_ROWS_SOURCE)
+    if not slug:
+        raise RuntimeError("the repo's GitHub name could not be read")
+    pulls, why = open_pulls_rest(slug)
+    if why:
+        raise RuntimeError(unknown_inner(why))
+    return {"sessions": rows, "pulls": [
+        {"number": p["number"], "title": p["title"], "body": p["body"], "branch": p["branch"], "draft": p["draft"],
+         "createdAt": p["created_at"], "head": p["sha"]} for p in pulls]}
+
+
+def rebuilt_live(fetched, steps, old=None):
+    """The live file's new value from a live_fetch result: readAt now, the open pulls, and the sessions to keep. A
+    session row stays unless it is archived; an archived row stays only when an open pull's footer (its last
+    claude.ai/code link) or a live step's lane (running_under) names it. `old` is the file being replaced. Of it, a
+    rebuild keeps the pull marks of each pull still open, by pull number (held, reviewLog, url), `checks` only when the
+    old row's `head` and the fetched head are both present and equal (checks reads one head commit), and the `ledger`
+    key as it is (it has its own readAt). Nothing else is carried: threads, items, branches and landedPulls are the
+    publisher's reading of a past moment, so they are absent and read as a missing key (unknown). Raises ValueError on a
+    result of the wrong shape."""
+    fetched = fetched if isinstance(fetched, dict) else {}
+    sessions, pulls = fetched.get("sessions"), fetched.get("pulls")
+    if not isinstance(sessions, list) or not isinstance(pulls, list):
+        raise ValueError("the fetch gave no sessions list and pulls list")
+    sessions_ok = all(isinstance(r, dict) and isinstance(r.get("id"), str) for r in sessions)
+    pulls_ok = all(isinstance(p, dict) and type(p.get("number")) is int and isinstance(p.get("title"), str) for p in pulls)
+    if not (sessions_ok and pulls_ok):
+        raise ValueError("the fetch gave a session or pull row of the wrong shape")
+    named = set()
+    for p in pulls:
+        found = FOOTER_SESSION.findall(p.get("body") if isinstance(p.get("body"), str) else "")
+        if found:
+            named.add(found[-1])
+    held = lambda sid: sid in named or any(isinstance(d, dict) and running_under(d, sid) for d in (steps or {}).values())
+    old = old if isinstance(old, dict) else {}
+    before = {r["number"]: r for r in old["pulls"] if isinstance(r, dict) and type(r.get("number")) is int} \
+        if isinstance(old.get("pulls"), list) else {}
+    rows = []
+    for p in sorted(pulls, key=lambda p: p["number"]):
+        row = {k: p[k] for k in LIVE_PULL_KEYS if p.get(k) is not None}
+        mark = before.get(p["number"], {})
+        # checks is CI's reading of one head commit: carry it only for the head the old row recorded.
+        same_head = isinstance(mark.get("head"), str) and mark["head"] == p.get("head")
+        row.update({k: mark[k] for k in LIVE_PULL_TRIAGE_KEYS if k in mark and (k != "checks" or same_head)})
+        rows.append(row)
+    value = {"ledger": old["ledger"]} if "ledger" in old else {}
+    value.update({"readAt": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "pulls": rows,
+                  "sessions": [r for r in sessions if r.get("session_status") != ARCHIVED_SESSION or held(r["id"])]})
+    return value
+
+
+def rebuild_stale_live(path, steps, slug=None):
+    """None, or why the live file at `path` is stale and could not be rebuilt. A file whose readAt is a time with a zone
+    and over STALE_LIVE_MINUTES old is rebuilt once, in this process, from live_fetch(slug) and rebuilt_live: the new
+    value replaces the file and keeps only the pull marks and the `ledger` key (which carries its own readAt, so it still
+    reads stale until the publisher runs again). A file no older than the limit, or one whose readAt cannot be read, is left alone,
+    the caller's own reasons covering it. A failed fetch leaves the file as it was. No timer, no thread, no process but
+    the fetch's own reads."""
+    try:
+        raw = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+        at = zoned_time(raw.get("readAt"))
+    except (OSError, ValueError, AttributeError):
+        return None
+    if at is None or live_age_minutes(raw["readAt"]) <= STALE_LIVE_MINUTES:
+        return None
+    try:
+        value = rebuilt_live(live_fetch(slug), steps, raw)
+        target = pathlib.Path(path)
+        temp = target.with_name(target.name + ".tmp")
+        temp.write_text(json.dumps(value), encoding="utf-8")
+        os.replace(temp, target)
+    except Exception as err:  # the fetch is outside code and the write is disk: whatever fails reads stale, never stops the build
+        return str(err) or type(err).__name__
+    return None
 
 
 def unknown_inner(why):
@@ -1781,13 +1910,47 @@ def stalled_items(work):
             if r["status"] != "closed" and r["lane"] and not lane_live(work, r["lane"], item=True)], None
 
 
+def closed_unmerged(work, sid):
+    """The latest landedPulls row for step `sid`'s lane branch (lane_head_refs) that closed unmerged (`merged` false) and
+    has no successor, else None. An open pull on a lane ref would hold the step, so it never reaches here; a row
+    whose `replacedBy` is an open or merged pull (carried_pulls) has a successor and is skipped. The row's `closedAt`
+    gives the date."""
+    refs, carried = lane_head_refs(sid), carried_pulls(work)
+    rows = [r for r in work.get("landedPulls") or []
+            if r.get("merged") is False and r["branch"] in refs and r.get("replacedBy") not in carried]
+    return max(rows, key=lambda r: zoned_time(r.get("closedAt")) or datetime.datetime.min.replace(tzinfo=datetime.timezone.utc),
+               default=None)
+
+
+def closed_note(row):
+    """`PR #N closed unmerged <date>` for a closed-unmerged row; the date is closedAt's own, or `(date unknown)`."""
+    at = zoned_time(row.get("closedAt"))
+    return "PR #%d closed unmerged %s" % (row["number"], at.date().isoformat() if at else "(date unknown)")
+
+
+def stale_live_minutes(steps, work):
+    """The live file's age in whole minutes when it is past STALE_LIVE_MINUTES and an open step is doing or active
+    without a valid `paused` field (a stale file cannot show that step's lane); else None. A step already disposed of,
+    a fresh file, and an unreadable readAt give None."""
+    if not work or zoned_time(work.get("read")) is None:
+        return None
+    age = live_age_minutes(work["read"])
+    if age is None or age <= STALE_LIVE_MINUTES:
+        return None
+    if not any(d.get("status") in LIVE_STATUS and ("paused" not in d or pause_why(d)) for _, d in open_steps(steps)):
+        return None
+    return age
+
+
 def stalled(steps, marks, work):
-    """The page's stalled block: {"why", "steps", "paused", "badPause", "items", "itemsWhy"}.
-    `steps` is a list of next_act entries plus "fix", or None only when `why` says the live read is unknown, never [].
+    """The page's stalled block: {"why", "steps", "paused", "badPause", "items", "itemsWhy", "stale"}. `stale` is
+    stale_live_minutes, or None.
+    `steps` is a list of next_act entries plus "fix" (and "closed", a closed-unmerged PR's note, when `fix` is "todo" and
+    closed_unmerged finds one), or None only when `why` says the live read is unknown, never [].
     A step with a valid `paused` field moves to `paused` (ids); a wrong-shaped one stays stalled and is listed in
     `badPause`. `items` is the open waiting-page items whose lane has no live work, or None with `itemsWhy`."""
     why, rows = laneless(open_steps(steps), marks, work)
-    out = {"why": why, "steps": None if why else [], "paused": [], "badPause": []}
+    out = {"why": why, "steps": None if why else [], "paused": [], "badPause": [], "stale": stale_live_minutes(steps, work)}
     read = None if why else live_read(work)
     for k, fix in rows:
         if "paused" in steps[k]:
@@ -1796,7 +1959,11 @@ def stalled(steps, marks, work):
                 out["paused"].append(k)
                 continue
             out["badPause"].append({"id": k, "why": bad})
-        out["steps"].append(dict(next_act(k, steps[k], fix, read), fix=fix))
+        entry = dict(next_act(k, steps[k], fix, read), fix=fix)
+        closed = closed_unmerged(work, k) if fix == "todo" else None
+        if closed:
+            entry["closed"] = closed_note(closed)
+        out["steps"].append(entry)
     out["items"], out["itemsWhy"] = stalled_items(work)
     return out
 
@@ -1808,7 +1975,11 @@ def stalled_lines(block):
     if block["steps"] is None:
         out.append("%s: %s" % (STALLED_LINE, block["why"]))
     for s in block["steps"] or []:
-        out.append("%s: %s (%s)" % (STALLED_LINE, s["id"], fix_act(s["fix"])))
+        out.append("%s: %s (%s%s)" % (STALLED_LINE, s["id"], fix_act(s["fix"]), "; " + s["closed"] if s.get("closed") else ""))
+    if block.get("stale") is not None:
+        # Not a STALLED_LINE entry: triage's Stop hold reads `stalled step: <id> (`, and a stale file names no one step.
+        out.append("%s: the live file was read %d minutes ago (limit %d); it cannot show whether a doing step has a lane, "
+                   "so read it again" % (STALE_LINE, block["stale"], STALE_LIVE_MINUTES))
     if block["items"] is None:
         out.append("%s: items %s" % (STALLED_LINE, block["itemsWhy"]))
     for i in block["items"] or []:

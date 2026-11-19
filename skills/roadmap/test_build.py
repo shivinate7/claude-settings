@@ -19,6 +19,7 @@ import subprocess
 import sys
 import shutil
 import tempfile
+import threading
 import unittest
 import urllib.error
 import urllib.parse
@@ -34,6 +35,9 @@ import build  # noqa: E402
 import layout  # noqa: E402  the waiting page and record branch readers (lint/layout.py)
 import shared_names  # noqa: E402  the one home of the tag names (hooks/shared_names.py), on the path build set
 import guard_merge  # noqa: E402  the guard's lane-form rule (_on_lane_form), which the ready-pull case reads (hooks/guard_merge.py)
+
+# The rebuild's real fetch, kept before Fixture.setUp swaps in its mock, so a LiveRefresh case can run the fetch itself.
+REAL_LIVE_FETCH = getattr(build, "live_fetch", None)
 
 # Made in setUpModule, not at import, so a helper that imports make_repo leaks no folder.
 RUN_FOLDER = None
@@ -237,6 +241,11 @@ class Fixture(unittest.TestCase):
         seam = mock.patch.object(build, "rest_get", create=True, return_value=([], headers_of()))
         self.rest_get = seam.start()
         self.addCleanup(seam.stop)
+        # The one home of the live file's rebuild fetch (build.live_fetch, no argument): no case reads a session API or the
+        # network. A case that rebuilds sets the return value or side effect it needs. create=True covers a build without it.
+        fetch = mock.patch.object(build, "live_fetch", create=True, side_effect=RuntimeError("no session API in a test"))
+        self.live_fetch = fetch.start()
+        self.addCleanup(fetch.stop)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -674,6 +683,10 @@ class UpkeepFixture(Fixture):
     REPO = "cs-repo:" + SLUG
     # git's empty tree: every repo holds it, so a commit or ref on it needs no file of its own.
     EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+    # The build's clock for the stale cases (test-practices P5). A read 120 minutes before NOW is past STALE_LIVE_MINUTES.
+    NOW = "2026-11-18T19:00:00Z"
+    STALE_READ = "2026-11-18T17:00:00Z"
+    FRESH_READ = "2026-11-18T18:55:00Z"
 
     def setUp(self):
         super().setUp()
@@ -702,6 +715,11 @@ class UpkeepFixture(Fixture):
     def out_with_live(self, expect=(0, None)):
         _, out = self.build_from_main("--live", str(self.live), expect=expect)
         return out
+
+    def clocked_build(self, *extra, expect):
+        """build_from_main with the build's clock fixed at NOW, so a live file's age is exact (test-practices P5)."""
+        with mock.patch.object(build, "datetime", fixed_clock(self.NOW)):
+            return self.build_from_main(*extra, expect=expect)
 
     # argparse's refusal of a flag the build does not know: exit 2, with this text in the output.
     NO_SOURCE_FLAG = "unrecognized arguments"
@@ -772,15 +790,19 @@ class UpkeepFixture(Fixture):
             row["createdAt"] = created
         return row
 
-    def rest_draft(self, number, branch, updated_min=780, title=None, created_min=None, draft=True, head_repo=_OWN_REPO):
+    def rest_draft(self, number, branch, updated_min=780, title=None, created_min=None, draft=True, head_repo=_OWN_REPO,
+                   sha=None):
         """A pulls row as GitHub's list call returns it, the shape the REST read takes. updated_min and created_min
         are minutes before now. The default 780 (13 h) is stale; created_min is left out when None. head.repo is the
         head repo as GitHub gives it: the base repo's full name by default, another full name for a fork's pull, and
-        null (head_repo=None) for a head repo GitHub no longer has, such as a deleted fork."""
+        null (head_repo=None) for a head repo GitHub no longer has, such as a deleted fork. head.sha is the head commit,
+        left out when sha is None, so a row with no head commit reads as one."""
         full_name = self.SLUG if head_repo is _OWN_REPO else head_repo
         row = {"number": number, "title": title or "lane " + branch, "draft": draft,
                "head": {"ref": branch, "repo": None if full_name is None else {"full_name": full_name}},
                "updated_at": iso_ago(updated_min)}
+        if sha is not None:
+            row["head"]["sha"] = sha
         if created_min is not None:
             row["created_at"] = iso_ago(created_min)
         return row
@@ -952,6 +974,15 @@ class UpkeepFixture(Fixture):
         self.assertEqual(trailers, "", "main holds a Step trailer, so the case would not show the landedPulls read")
 
 
+# The build clock that LiveRefresh's cases fix (test-practices P5).
+BUILD_NOW = "2026-11-18T20:00:00Z"
+
+
+def readat_before(now_iso, minutes):
+    """The readAt `minutes` before `now_iso`, in the form the publisher writes."""
+    return (read_time(now_iso) - datetime.timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def fixed_clock(now_iso):
     """A stand-in for build's datetime module whose datetime.now() reads `now_iso`, an ISO time with a zone. Every other
     name is the real module's, so only the build's clock is synthetic (test-practices P5). build.py reads the clock as
@@ -970,6 +1001,373 @@ def fixed_clock(now_iso):
             return getattr(datetime, name)
 
     return Stand()
+
+
+def read_time(text):
+    """The instant an ISO readAt names, or None when the text names none (an unknown reason, say)."""
+    try:
+        return datetime.datetime.fromisoformat(str(text).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+class LiveRefresh(UpkeepFixture):
+    """A stale live file rebuilds in-process (step live-file-refresh-one-command), and only the page bake does it:
+    build.main with --live passes live_work the rebuild flag, and the other readers (merge's lane read, --idle-lanes)
+    read the file as it is. A file older than build.STALE_LIVE_MINUTES is rebuilt once from build.live_fetch(slug), which
+    takes the repo's GitHub name and returns {"sessions": the list_sessions rows, "pulls": the open pull requests as REST
+    gives them (number, title, body, head sha)}, and raises when it cannot read. The rebuilt file keeps the pull marks
+    (held, reviewLog, url, and checks only for the head the old row recorded), the sessions, and no other list: threads,
+    items, branches and landedPulls are not carried, so they read unknown after a rebuild. A file no older than the limit
+    is never fetched. A failed fetch leaves the file as it was, and the reader says stale with the file's age, never
+    current. The rebuilt sessions keep every row that is not archived, and an archived row only when an open pull
+    request's footer or a live step's lane names it. The cases drive the page bake (build.main with --live) through the
+    seam Fixture.setUp installs, except the flag case, which calls live_work directly. The build's clock is fixed at
+    FIXED_NOW for the class (test-practices P5)."""
+
+    FIXED_NOW = BUILD_NOW
+    ARCHIVED = build.ARCHIVED_SESSION
+    ROWS_READER = "session-rows"  # the registry name live_fetch reads its sessions from
+    OLD_HEAD = "1" * 40  # the head commit a live row recorded before its pull moved
+    NEW_HEAD = "2" * 40  # the head commit GitHub reads for the pull now
+
+    def setUp(self):
+        super().setUp()
+        clock = mock.patch.object(build, "datetime", fixed_clock(self.FIXED_NOW))
+        clock.start()
+        self.addCleanup(clock.stop)
+        self.live_fetch.side_effect = None
+        self.live_fetch.return_value = {"sessions": [], "pulls": []}
+
+    def ago(self, minutes):
+        """The readAt `minutes` before FIXED_NOW, in the form the publisher writes."""
+        return readat_before(self.FIXED_NOW, minutes)
+
+    def write_file(self, read_at, sessions=(), pulls=()):
+        self.write_live({"readAt": read_at, "threads": [], "pulls": list(pulls), "sessions": list(sessions)})
+
+    def open_pull(self, number, body=""):
+        """An open pull request as the fetch returns it: the number, the title and the body, whose footer is its last link."""
+        return {"number": number, "title": "lane %d" % number, "body": body}
+
+    def marks(self, number, checks="pass"):
+        """The triage marks of pull `number` as the old file holds them: held, reviewLog, checks and url."""
+        return {"held": True, "reviewLog": True, "checks": checks,
+                "url": "https://github.com/owner/fixture/pull/%d" % number}
+
+    def read_of(self, page):
+        return self.panel(page)["read"]
+
+    def file_value(self):
+        return json.loads(self.live.read_text(encoding="utf-8"))
+
+    def use_real_fetch(self):
+        """Put the real rebuild fetch in place of Fixture's mock. Its sessions come from a stub session-rows reader that
+        holds no rows, and its pulls from the REST pages a case serves (serve_pulls), so the rebuild runs offline."""
+        fetch = mock.patch.object(build, "live_fetch", REAL_LIVE_FETCH)
+        reader = self.register_source(self.ROWS_READER, lambda: ([], None))
+        for patch in (fetch, reader):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def fixed_rest_draft(self, number, branch, updated_min=780, sha=None):
+        """A REST pulls row for an open draft, updated `updated_min` before FIXED_NOW (780 min is 13 h, so stale), whose
+        branch commit is dated the same. The commit is set on origin first, so serve_pulls never dates it by the real clock.
+        sha is the head commit the row names (see rest_draft)."""
+        self.origin_commit(branch, self.ago(updated_min))
+        row = self.rest_draft(number, branch, updated_min, sha=sha)
+        row["updated_at"] = self.ago(updated_min)
+        return row
+
+    def spawns_of(self, run):
+        """(threads started, programs started) while run() runs: each Thread.start, and each process a subprocess.Popen
+        starts, by its program name. The caller reads git as the one program a rebuild may start."""
+        started, threads = [], []
+        real_popen, real_start = subprocess.Popen, threading.Thread.start
+
+        class Recording(real_popen):
+            def __init__(self, args, *rest, **kwargs):
+                started.append(args)
+                super().__init__(args, *rest, **kwargs)
+
+        def start(thread):
+            threads.append(thread)
+            return real_start(thread)
+
+        with mock.patch.object(subprocess, "Popen", Recording), mock.patch.object(threading.Thread, "start", start):
+            run()
+        programs = [pathlib.Path(a[0] if isinstance(a, (list, tuple)) else str(a).split()[0]).name for a in started]
+        return threads, programs
+
+    def build_in(self, folder, *extra, expect=(0, None)):
+        """build_from_main with the process in `folder`, so a rebuild reads that folder's GitHub name. The folder is left
+        again after the build, so tearDown can remove the temp folder."""
+        before = os.getcwd()
+        os.chdir(str(folder))
+        try:
+            return self.build_from_main(*extra, expect=expect)
+        finally:
+            os.chdir(before)
+
+    def test_a_stale_file_is_rebuilt_once_and_the_reader_sees_the_new_read_at(self):
+        self.write_file(self.ago(build.STALE_LIVE_MINUTES + 1))
+        self.live_fetch.return_value = {"sessions": [], "pulls": [self.open_pull(7)]}
+        page, _ = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.live_fetch.call_count, 1,
+                         "a stale live file was fetched %d times, want one rebuild" % self.live_fetch.call_count)
+        self.assertEqual(read_time(self.read_of(page)), read_time(self.FIXED_NOW),
+                         "the reader does not show the rebuilt readAt: %r" % self.read_of(page))
+        value = self.file_value()
+        self.assertEqual(read_time(value["readAt"]), read_time(self.FIXED_NOW), "the live file keeps its old readAt")
+        self.assertEqual([p["number"] for p in value["pulls"]], [7], "the rebuilt live file does not hold the open pulls")
+
+    def test_a_file_read_within_the_limit_is_not_rebuilt(self):
+        fresh = self.ago(5)
+        self.write_file(fresh)
+        before = self.live.read_bytes()
+        self.live_fetch.return_value = {"sessions": [], "pulls": [self.open_pull(9)]}
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.live_fetch.call_count, 0, "a file read 5 minutes ago was fetched")
+        self.assertEqual(self.live.read_bytes(), before, "a file read 5 minutes ago was rewritten")
+        self.assertEqual(self.read_of(page), fresh, "the reader does not read the fresh file as it is")
+
+    def test_a_live_file_read_25_minutes_ago_has_an_age_of_25_minutes(self):
+        self.write_file(self.ago(25))
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.read_of(page), self.ago(25), "control: the reader does not read the file it was given")
+        live = build_info(page)["live"]
+        self.assertEqual(live.get("ageMinutes"), 25,
+                         "a live file read 25 minutes ago has ageMinutes %r, want 25" % live.get("ageMinutes"))
+
+    def test_a_file_read_exactly_at_the_limit_is_not_rebuilt(self):
+        self.write_file(self.ago(build.STALE_LIVE_MINUTES))
+        self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.live_fetch.call_count, 0,
+                         "a file exactly STALE_LIVE_MINUTES old was fetched, but the limit is only exceeded past it")
+
+    def test_a_failed_rebuild_leaves_the_file_and_the_reader_says_stale_with_its_age(self):
+        stale = self.ago(build.STALE_LIVE_MINUTES + 1)
+        self.write_file(stale)
+        before = self.live.read_bytes()
+        self.live_fetch.side_effect = OSError("the session API cannot be reached from this run")
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.live.read_bytes(), before, "a failed rebuild rewrote the live file")
+        self.assertRegex(out, r"\bstale\b", "a stale live file that could not be rebuilt is not printed as stale")
+        self.assertRegex(out, r"\b%d minutes\b" % (build.STALE_LIVE_MINUTES + 1),
+                         "the reader does not print the stale file's age")
+        self.assertEqual(self.live_fetch.call_count, 1, "the failed rebuild was not tried once")
+
+    def test_the_rebuilt_file_keeps_live_rows_and_only_the_archived_rows_a_pull_or_a_live_lane_names(self):
+        self.commit_step("c1", status="doing", order=1, lane="session_arch_lane")  # a live step names its lane
+        self.commit_step("c2", status="done", order=2, lane="session_arch_done")  # a done step names nothing live
+        rows = [session_row("session_running", "SESSION_STATUS_RUNNING", self.REPO),
+                session_row("session_idle", "SESSION_STATUS_IDLE", self.REPO),
+                {"id": "session_tagless", "session_status": "SESSION_STATUS_IDLE"},  # list_sessions omits tags on a tagless row
+                session_row("session_elsewhere", "SESSION_STATUS_IDLE", "cs-repo:other/elsewhere"),
+                session_row("session_arch_pr", self.ARCHIVED, self.REPO),
+                session_row("session_arch_lane", self.ARCHIVED, self.REPO),
+                session_row("session_arch_done", self.ARCHIVED, self.REPO),
+                session_row("session_arch_bare", self.ARCHIVED, self.REPO)]
+        rows += [session_row("session_old_%02d" % n, self.ARCHIVED, self.REPO) for n in range(25)]
+        kept = {"session_running", "session_idle", "session_tagless", "session_elsewhere", "session_arch_pr", "session_arch_lane"}
+        self.write_file(self.ago(build.STALE_LIVE_MINUTES + 1), sessions=rows)
+        self.live_fetch.return_value = {"sessions": rows, "pulls": [
+            self.open_pull(7, body="Lane work.\n\nhttps://claude.ai/code/session_arch_pr\n")]}
+        self.build_from_main("--live", str(self.live), expect=(0, 1))
+        now = {r["id"] for r in self.file_value()["sessions"]}
+        self.assertEqual(now, kept, "the rebuilt sessions differ: keep %s, drop %s"
+                         % (sorted(kept - now), sorted(now - kept)))
+
+    def test_a_stale_file_rebuilt_with_nothing_open_holds_empty_lists(self):
+        self.write_file(self.ago(build.STALE_LIVE_MINUTES + 1),
+                        sessions=[session_row("session_old", self.ARCHIVED, self.REPO)], pulls=[self.open_pull(3)])
+        self.live_fetch.return_value = {"sessions": [], "pulls": []}
+        page, _ = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.live_fetch.call_count, 1,
+                         "a stale live file was fetched %d times, want one rebuild" % self.live_fetch.call_count)
+        value = self.file_value()
+        self.assertEqual((value["sessions"], value["pulls"]), ([], []),
+                         "the rebuild kept rows or pulls that nothing open holds")
+        self.assertEqual(read_time(self.read_of(page)), read_time(self.FIXED_NOW),
+                         "the reader does not show the rebuilt readAt")
+
+    def test_a_stale_read_starts_no_thread_and_no_process_but_git(self):
+        self.write_file(self.ago(build.STALE_LIVE_MINUTES + 1))
+        threads, programs = self.spawns_of(lambda: self.build_from_main("--live", str(self.live), expect=(0, 1)))
+        self.assertEqual(threads, [], "the stale read started %d thread(s), want none" % len(threads))
+        self.assertEqual(sorted(set(programs) - {"git"}), [],
+                         "the stale read started a process other than git: %r" % programs)
+
+    def test_a_rebuild_through_the_real_fetch_starts_no_thread_and_no_process_but_git(self):
+        # The fetch is the real one here, so a thread or process it starts is counted. The mocked fetch of the case above
+        # would hide one.
+        self.use_real_fetch()
+        self.write_file(self.ago(build.STALE_LIVE_MINUTES + 1))
+        self.serve_pulls([self.fixed_rest_draft(7, "lane-7", 60, sha=self.NEW_HEAD)])
+        threads, programs = self.spawns_of(lambda: self.build_in(self.repo, "--live", str(self.live), expect=(0, 1)))
+        self.assertEqual(read_time(self.file_value()["readAt"]), read_time(BUILD_NOW),
+                         "control: the real fetch did not rebuild the file, so the case proves nothing about the fetch")
+        self.assertEqual(threads, [], "the rebuild through the real fetch started %d thread(s), want none" % len(threads))
+        self.assertEqual(sorted(set(programs) - {"git"}), [],
+                         "the rebuild through the real fetch started a process other than git: %r" % programs)
+
+    def test_a_rebuild_drops_checks_of_a_pull_whose_head_moved_or_was_never_recorded(self):
+        # checks is CI's reading of one head commit, so a rebuild carries it only when the old row's head is the head the
+        # fetch reads now. Three pulls lose it: one whose head moved, one whose old row names no head, and one the fetch
+        # gives no head for. The other marks stay with the pull number, whatever its head.
+        self.use_real_fetch()
+        self.write_live({"readAt": self.ago(build.STALE_LIVE_MINUTES + 1), "threads": [], "sessions": [], "pulls": [
+            dict(self.live_pull(7, "lane-7"), head=self.OLD_HEAD, **self.marks(7)),
+            dict(self.live_pull(9, "lane-9"), **self.marks(9)),
+            dict(self.live_pull(10, "lane-10"), head=self.OLD_HEAD, **self.marks(10))]})
+        self.serve_pulls([self.fixed_rest_draft(7, "lane-7", 60, sha=self.NEW_HEAD),
+                          self.fixed_rest_draft(9, "lane-9", 60, sha=self.NEW_HEAD),
+                          self.fixed_rest_draft(10, "lane-10", 60)])
+        self.build_in(self.repo, "--live", str(self.live), expect=(0, 1))
+        self.assertEqual(read_time(self.file_value()["readAt"]), read_time(BUILD_NOW),
+                         "control: the stale file was not rebuilt, so the case reads no pull rows")
+        rebuilt = {p["number"]: p for p in self.file_value()["pulls"]}
+        for number, why in ((7, "its head moved from the one the old row recorded"),
+                            (9, "the old row names no head"),
+                            (10, "the fetch gives no head")):
+            with self.subTest(pull=number):
+                self.assertIn(number, rebuilt, "the rebuilt file lost pull #%d" % number)
+                self.assertNotIn("checks", rebuilt[number],
+                                 "the rebuilt row for #%d kept checks, though %s" % (number, why))
+                for key in ("held", "reviewLog", "url"):
+                    self.assertIn(key, rebuilt[number], "the rebuilt row for #%d lost its %s mark" % (number, key))
+
+    def test_a_rebuild_keeps_checks_of_a_pull_whose_head_did_not_move(self):
+        self.use_real_fetch()
+        self.write_live({"readAt": self.ago(build.STALE_LIVE_MINUTES + 1), "threads": [], "sessions": [], "pulls": [
+            dict(self.live_pull(8, "lane-8"), head=self.NEW_HEAD, **self.marks(8, checks="fail"))]})
+        self.serve_pulls([self.fixed_rest_draft(8, "lane-8", 60, sha=self.NEW_HEAD)])
+        self.build_in(self.repo, "--live", str(self.live), expect=(0, 1))
+        self.assertEqual(read_time(self.file_value()["readAt"]), read_time(BUILD_NOW),
+                         "control: the stale file was not rebuilt, so the case reads no pull row")
+        row = {p["number"]: p for p in self.file_value()["pulls"]}.get(8, {})
+        self.assertEqual(row.get("checks"), "fail",
+                         "the rebuilt row for #8 lost checks though its head did not move, it reads %r" % row.get("checks"))
+        for key in ("held", "reviewLog", "url"):
+            self.assertEqual(row.get(key), self.marks(8)[key], "the rebuilt row for #8 lost its %s mark" % key)
+
+    def test_a_rebuild_keeps_the_pull_marks_and_carries_none_of_the_four_list_keys(self):
+        # The fetch returns the open pulls and the sessions. Of the old file, a rebuild keeps only the pull marks: held,
+        # reviewLog, url, and checks while the head is the same. threads, items, branches and landedPulls are not carried,
+        # so each reads unknown (branches read no stale row as current).
+        self.use_real_fetch()
+        old = {"readAt": self.ago(300), "sessions": [],  # five hours old: an open item in it must not read as current
+               "threads": [{"title": "Build a", "state": "working", "step": "c1"}],
+               "pulls": [dict(self.live_pull(7, "lane-7"), head=self.NEW_HEAD, **self.marks(7))],
+               "branches": [{"name": "lane-x"}], "items": [{"n": 3, "status": "open", "home": "decisions"}],
+               "landedPulls": [self.pull_row(3, "lane-3", merged=True)]}
+        self.write_live(old)
+        self.serve_pulls([self.fixed_rest_draft(7, "lane-7", 60, sha=self.NEW_HEAD)])
+        page, _ = self.build_in(self.repo, "--live", str(self.live), expect=(0, 1))
+        value = self.file_value()
+        self.assertEqual(read_time(value["readAt"]), read_time(BUILD_NOW),
+                         "control: the stale file was not rebuilt, so the case reads no pull marks")
+        rebuilt = {p["number"]: p for p in value["pulls"]}.get(7, {})
+        for key in ("held", "reviewLog", "checks", "url"):
+            with self.subTest(pull_key=key):
+                self.assertEqual(rebuilt.get(key), old["pulls"][0][key],
+                                 "the rebuilt pulls row for #7 lost its %s key" % key)
+        for key in ("threads", "branches", "items", "landedPulls"):
+            with self.subTest(list_key=key):
+                self.assertNotIn(key, value, "the rebuilt live file still carries its %s key from the old file" % key)
+        live = build_info(page)["live"]
+        with self.subTest(reading="threads"):
+            self.assertIsNone(live.get("threads"), "a rebuilt file with no threads key reads threads %r" % live.get("threads"))
+            self.assertEqual(live.get("threadsWhy"), build.THREADS_MISSING_WHY)
+        with self.subTest(reading="items"):
+            self.assertIsNone(live.get("pageItems"), "a rebuilt file with no items key reads its items as current")
+            self.assertEqual(live.get("itemsWhy"), build.ITEMS_MISSING_WHY)
+        with self.subTest(reading="landedPulls"):
+            self.assertIsNone(live.get("landedPulls"), "a rebuilt file with no landedPulls key reads them as current")
+        with self.subTest(reading="branches"):
+            names = [b.get("name") for b in live.get("branches") or []]
+            self.assertNotIn("lane-x", names, "a branch the old file held reads as current after a rebuild")
+
+    def test_live_work_without_a_rebuild_flag_never_fetches_and_reads_the_stale_file_with_its_age(self):
+        # merge's lane read and --idle-lanes call live_work with no flag. They read the file as it is, with its age.
+        old = self.ago(build.STALE_LIVE_MINUTES + 1)
+        self.write_file(old)
+        before = self.live.read_bytes()
+        self.live_fetch.return_value = {"sessions": [], "pulls": [self.open_pull(7)]}
+        work = build.live_work(str(self.live), {}, self.SLUG)
+        self.assertEqual(self.live_fetch.call_count, 0,
+                         "live_work with no rebuild flag fetched the live file %d time(s)" % self.live_fetch.call_count)
+        self.assertEqual(self.live.read_bytes(), before, "live_work with no rebuild flag rewrote the live file")
+        self.assertEqual(work["read"], old, "live_work with no rebuild flag does not read the file's own readAt")
+        self.assertEqual(work["ageMinutes"], build.STALE_LIVE_MINUTES + 1,
+                         "live_work with no rebuild flag reads the stale file's age as %r" % work["ageMinutes"])
+        self.assertIn("not rebuilt", work["staleWhy"], "the stale reading does not say the file was not rebuilt")
+
+    def test_an_empty_github_name_makes_the_rebuild_fetch_raise_and_the_file_stays_stale(self):
+        self.use_real_fetch()
+        self.serve_pulls([])
+        self.assertEqual(build.live_fetch(self.SLUG)["pulls"], [],
+                         "control: a fetch with a GitHub name does not return its pulls")
+        with self.assertRaises(RuntimeError, msg="a fetch with an empty GitHub name returned rows, not a raise"):
+            build.live_fetch("")
+        self.write_file(self.ago(build.STALE_LIVE_MINUTES + 1))
+        before = self.live.read_bytes()
+        git(self.repo, "remote", "remove", "origin")  # no origin, so the build reads no GitHub name
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.live.read_bytes(), before, "a rebuild with no GitHub name rewrote the live file")
+        self.assertRegex(out, r"\bstale\b", "a stale live file the rebuild could not fetch is not printed as stale")
+
+    def test_a_held_draft_stays_held_through_a_rebuild_and_is_not_listed(self):
+        self.use_real_fetch()
+        self.serve_pulls([self.fixed_rest_draft(1001, "held-draft"), self.fixed_rest_draft(1002, "lone-draft")])
+        held = dict(self.live_pull(1001, "held-draft"), held=True)
+        lone = self.live_pull(1002, "lone-draft")
+        # Control, before any rebuild: a fresh file reads #1001 held, so only #1002 is listed.
+        self.write_file(self.ago(5), pulls=[held, lone])
+        _, out = self.build_in(self.repo, "--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.entries(self.row(out, ReadyAndDraftRows.DRAFT)[1]), ["#1002 (lone-draft)"],
+                         "control: a fresh file does not read the held draft as held")
+        # The probe: the same pulls in a file stale enough to rebuild. The rebuild must keep #1001's held mark.
+        self.write_file(self.ago(build.STALE_LIVE_MINUTES + 1), pulls=[held, lone])
+        _, out = self.build_in(self.repo, "--live", str(self.live), expect=(0, 1))
+        rebuilt = {p["number"]: p for p in self.file_value()["pulls"]}
+        with self.subTest("the rebuilt file keeps the held mark"):
+            self.assertIs(rebuilt.get(1001, {}).get("held"), True,
+                          "the rebuilt live file dropped the held mark of #1001")
+        with self.subTest("the held draft is not listed"):
+            self.assertEqual(self.entries(self.row(out, ReadyAndDraftRows.DRAFT)[1]), ["#1002 (lone-draft)"],
+                             "a held draft is listed as stale after a rebuild")
+
+    def test_the_rebuild_reads_the_pulls_of_the_repo_the_build_names_not_the_folder_it_runs_in(self):
+        self.use_real_fetch()
+        self.write_file(self.ago(build.STALE_LIVE_MINUTES + 1))
+        self.serve_pulls([self.fixed_rest_draft(7, "lane-7", 60)])
+        elsewhere = pathlib.Path(self.tmp.name) / "elsewhere"  # a checkout of another GitHub repo, the folder the build runs in
+        elsewhere.mkdir()
+        git(elsewhere, "init", "-q")
+        git(elsewhere, "remote", "add", "origin", "git@github.com:other/elsewhere.git")
+        self.build_in(elsewhere, "--live", str(self.live), expect=(0, 1))
+        self.assertEqual(read_time(self.file_value()["readAt"]), read_time(BUILD_NOW),
+                         "control: the stale file was not rebuilt, so the case reads no pulls")
+        urls = [request_url(c) for c in self.rest_get.call_args_list]
+        named = {m.group(1) for m in (re.search(r"/repos/([^/]+/[^/]+)/pulls", u) for u in urls) if m}
+        self.assertEqual(sorted(named), [self.SLUG],
+                         "the open-pulls reads named a repo other than the --repo %s the build was given, "
+                         "the folder it ran in" % self.SLUG)
+
+    def test_a_readat_in_the_future_shows_no_negative_age(self):
+        self.write_file(self.ago(5))
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(build_info(page)["live"].get("ageMinutes"), 5,
+                         "control: a readAt 5 minutes old does not show an age of 5 minutes")
+        for minutes_ahead in (3, 60):  # within the FUTURE_MINUTES clock-skew allowance, and past it
+            with self.subTest(minutes_ahead=minutes_ahead):
+                self.write_file(self.ago(-minutes_ahead))
+                page, _ = self.build_from_main("--live", str(self.live))
+                age = build_info(page)["live"].get("ageMinutes")
+                self.assertFalse(isinstance(age, int) and age < 0,
+                                 "the Live work panel shows an age of %r for a readAt %d minutes ahead"
+                                 % (age, minutes_ahead))
 
 
 class LedgerActs(UpkeepFixture):
@@ -1644,13 +2042,14 @@ class StaleInProgress(UpkeepFixture):
 
     def test_read_at_two_hours_old_reads_the_row_unknown(self):
         self.commit_step("c1", status="doing")
-        value = self.publish(sessions=[], read_at=iso_ago(120))
-        page, out = self.build_from_main("--live", str(self.live))
+        # The build clock is fixed, so the file is exactly 120 minutes old and the row names that age exactly.
+        value = self.publish(sessions=[], read_at=readat_before(self.NOW, 120))
+        page, out = self.clocked_build("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.code, 1, "c1 is doing and its live file is two hours old: exit 1, not 0")
         count, entries = self.stale(out)
-        found = re.fullmatch(r"unknown \(the live file was read (\d+) minutes ago; read it again\)", entries)
         self.assertEqual(count, 1)
-        self.assertIsNotNone(found, entries)
-        self.assertIn(int(found.group(1)), range(119, 122))
+        self.assertEqual(entries, "unknown (the live file was read 120 minutes ago and is stale; "
+                                  "the rebuild failed: no session API in a test)")
         self.assertEqual(self.panel(page)["read"], value["readAt"])
 
     def test_read_at_five_minutes_old_lists_normally(self):
@@ -1780,7 +2179,8 @@ class StalledStep(UpkeepFixture):
     stalled until it has a disposition: a valid `paused` field, which triage writes, or status done. A stalled
     step prints `stalled step: <id> (resume, pause or done)`, or `stalled step: <id> (done: landed in #N)` when it
     landed, and the build exits 1 after it writes the page. An unknown live read prints
-    `stalled step: unknown (<why>)`, lists no steps as [], and exits 0."""
+    `stalled step: unknown (<why>)`, lists no steps as [], and exits 0, except a stale live file, which fails a
+    doing step (test_stale_live_file_fails_a_doing_step_and_prints_its_age)."""
 
     PAUSE = {"why": "waits on the owner's call on the batch", "decides": "owner",
              "at": "2026-11-06T11:00:00-06:00", "by": "triage"}
@@ -1884,9 +2284,8 @@ class StalledStep(UpkeepFixture):
 
     def test_unknown_live_read_prints_unknown_with_steps_none_and_exits_0(self):
         self.commit_step("c2", status="doing", order=2)
-        cases = {
+        cases = {  # a stale read is not here: it fails the doing step (test_stale_live_file_fails_a_doing_step_and_prints_its_age)
             "no --live file": None,
-            "readAt two hours old": dict(sessions=[], read_at=iso_ago(120), items=[]),
             "no sessions list": dict(items=[]),
         }
         for name, live in cases.items():
@@ -1900,6 +2299,170 @@ class StalledStep(UpkeepFixture):
                 self.assertIsNone(stalled["steps"], "an unknown read lists no steps, never []")
                 self.assertRegex(out, r"(?m)^stalled step: unknown \(", "the unknown line is missing")
                 self.assertEqual(self.code, 0, "an unknown read exits 0")
+
+    def stale_lines(self, out):
+        """The output lines that say the live file is stale and name its age (120 minutes, or 2 hours)."""
+        return [line for line in out.splitlines()
+                if re.search(r"\bstale\b", line, re.I) and re.search(r"\b(?:120 minutes|2 hours)\b", line)]
+
+    def test_stale_live_file_fails_a_doing_step_and_prints_its_age(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.publish(sessions=[], items=[], read_at=self.STALE_READ)
+        _, out = self.clocked_build("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.code, 1, "a stale live file must fail a doing step: exit 1, not 0 with an unknown line")
+        self.assertTrue(self.stale_lines(out), "no line says the live file is stale and names its age (120 minutes):\n%s" % out)
+
+    def test_stale_live_file_never_reads_a_held_doing_step_as_held(self):
+        self.commit_step("c1", status="doing")
+        cases = {
+            "running lane session": dict(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")]),
+            "open pull on the lane branch": dict(sessions=[], pulls=[self.draft(1001, "lane/c1")]),
+        }
+        for name, live in cases.items():
+            with self.subTest(name):
+                self.publish(items=[], read_at=self.STALE_READ, **live)
+                _, out = self.clocked_build("--live", str(self.live), expect=(0, 1))
+                self.assertEqual(self.code, 1, "a stale live file must not hold c1: exit 1, not 0")
+                self.assertTrue(self.stale_lines(out), "no line says the live file is stale and names its age:\n%s" % out)
+
+    def test_fresh_live_file_holds_the_running_step_and_lists_only_the_other(self):
+        self.commit_step("c1", status="doing")  # control: its live session holds it on a fresh read
+        self.commit_step("c2", status="doing", order=2)
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")],
+                     items=[], read_at=self.FRESH_READ)
+        _, out = self.clocked_build("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.stalled_lines(out), [self.RESUME], "on a fresh read c1 is held, so c2 is the one stalled line")
+        self.assertEqual(self.code, 1, "a stalled step must exit 1")
+        self.assertEqual(self.stale_lines(out), [], "a fresh read prints no stale line")
+
+    def live_file_stale_lines(self, out):
+        """The printed lines that open with the stale line's text, `live file stale: ...` (build.py's STALE_LINE)."""
+        return [line for line in out.splitlines() if line.startswith("live file stale")]
+
+    def test_two_hour_old_live_file_fails_a_doing_step_and_prints_the_stale_line(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.publish(sessions=[], items=[], read_at=self.STALE_READ)  # 120 minutes old on the build's clock
+        _, out = self.clocked_build("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.code, 1, "a live file two hours old fails its doing step: exit 1, not 0")
+        self.assertTrue(self.live_file_stale_lines(out), "no 'live file stale' line for a live file two hours old:\n%s" % out)
+
+    def test_stale_live_file_pause_exception_needs_a_valid_pause(self):
+        cases = {  # name: (paused field, the exit code the stale file gets)
+            "valid pause excepts the step": (self.PAUSE, 0),
+            "bad pause does not except the step": (dict(self.PAUSE, decides="boss"), 1),
+        }
+        for name, (paused, code) in cases.items():
+            with self.subTest(name):
+                git(self.repo, "checkout", "-q", "roadmap")  # a build from main leaves HEAD on main
+                self.commit_step("c2", status="doing", order=2, paused=paused)
+                self.publish(sessions=[], items=[], read_at=self.STALE_READ)
+                _, out = self.clocked_build("--live", str(self.live), expect=(0, 1))
+                self.assertIn("120 minutes", out, "scope: the live file is read as 120 minutes old:\n%s" % out)
+                self.assertEqual(self.code, code, "%s: a stale file exits %d" % (name, code))
+                self.assertEqual(bool(self.live_file_stale_lines(out)), code == 1,
+                                 "%s: the live file stale line prints only when the step is not excepted" % name)
+
+    # Pins a doing step whose PR closed unmerged while its lane session is archived. Its step text cites no PR
+    # number, so only the landedPulls row tells the reader what happened.
+    CLOSED = "ci-linux-windows-once"
+    CLOSED_AT = "2026-11-14T18:00:00Z"  # noon CST, so the date reads the same in UTC and local time
+
+    def closed_line(self, out, step):
+        """The one stalled line for `step`. Fails with a named cause when no line, or more than one, names it."""
+        lines = [line for line in out.splitlines() if line.startswith("stalled step: %s (" % step)]
+        self.assertEqual(len(lines), 1, "expected one stalled line for %s, got %r in:\n%s" % (step, lines, out))
+        return lines[0]
+
+    def publish_closed_pr(self, branch, pulls=(), landed=None):
+        """A live file whose lane session is archived. Its landedPulls are `landed`, else only #3042 closed unmerged on CLOSED_AT."""
+        if landed is None:
+            landed = [self.pull_row(3042, branch, merged=False, closedAt=self.CLOSED_AT)]
+        self.publish(sessions=[self.session_in_repo("session_old01", "SESSION_STATUS_ARCHIVED", "cs-step:" + self.CLOSED)],
+                     items=[], pulls=list(pulls), landed=landed)
+
+    def test_doing_step_whose_pr_closed_unmerged_prints_the_date_and_unmerged(self):
+        self.commit_step(self.CLOSED, status="doing", title="Linux and Windows CI run once", note="Moves CI onto one job.")
+        self.no_trailer_on_main()  # scope: no Step trailer on main, so the step is not read as landed
+        for branch in (self.CLOSED, "lane/" + self.CLOSED):
+            with self.subTest(branch=branch):
+                self.publish_closed_pr(branch)
+                _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+                self.assertEqual(self.stalled_ids(out), [self.CLOSED], "scope: the step with no live lane is stalled")
+                self.assertEqual(self.code, 1, "a stalled step must exit 1")
+                line = self.closed_line(out, self.CLOSED)
+                self.assertIn("2026-11-14", line, "the stalled line must print the PR's closed date: %r" % line)
+                self.assertIn("unmerged", line, "the stalled line must say the PR closed unmerged: %r" % line)
+
+    def test_closed_unmerged_pr_with_an_open_successor_holds_the_step(self):
+        self.commit_step(self.CLOSED, status="doing", title="Linux and Windows CI run once", note="Moves CI onto one job.")
+        self.publish_closed_pr(self.CLOSED, pulls=[self.draft(3050, "lane/" + self.CLOSED)])  # control: a successor holds it
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.stalled_ids(out), [], "an open pull on the lane branch holds the step: no stalled line")
+
+    def test_a_doing_step_with_no_pr_beside_a_closed_one_keeps_the_plain_line(self):
+        self.commit_step(self.CLOSED, status="doing", title="Linux and Windows CI run once", note="Moves CI onto one job.")
+        self.commit_step("c2", status="doing", order=2)  # control: no PR of its own, so its line stays plain
+        self.publish_closed_pr(self.CLOSED)
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertIn(self.RESUME, out.splitlines(), "a step with no PR prints the plain line, with no date and no reason")
+
+    def test_closed_unmerged_pr_whose_merged_replacement_is_not_printed_as_closed_unmerged(self):
+        # A replacement that merged supersedes the closed PR, as superseded_marks reads it. The step is not a closed-unmerged wait.
+        self.commit_step(self.CLOSED, status="doing", title="Linux and Windows CI run once", note="Moves CI onto one job.")
+        self.no_trailer_on_main()  # scope: no Step trailer on main, so the step is not read as landed
+        for branch in (self.CLOSED, "lane/" + self.CLOSED):
+            with self.subTest(branch=branch):
+                self.publish_closed_pr(branch, landed=[
+                    self.pull_row(3042, branch, merged=False, closedAt=self.CLOSED_AT, replacedBy=3051),
+                    self.pull_row(3051, self.CLOSED + "-v2", merged=True)])  # the replacement merged on its own branch
+                _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+                self.assertEqual(self.stalled_ids(out), [self.CLOSED], "scope: the step with no live lane is stalled")
+                self.assertEqual(self.code, 1, "a stalled step must exit 1")
+                line = self.closed_line(out, self.CLOSED)
+                self.assertNotIn("closed unmerged", line, "a PR whose replacement merged is superseded, not closed unmerged: %r" % line)
+
+    def test_closed_unmerged_pr_whose_open_replacement_is_not_printed_as_closed_unmerged(self):
+        # Control: an open successor already hides the closed note on the old build too, so this case stays green.
+        self.commit_step(self.CLOSED, status="doing", title="Linux and Windows CI run once", note="Moves CI onto one job.")
+        self.no_trailer_on_main()  # scope: no Step trailer on main, so the step is not read as landed
+        self.publish_closed_pr(self.CLOSED, pulls=[self.draft(3051, self.CLOSED + "-v2")],
+                               landed=[self.pull_row(3042, self.CLOSED, merged=False, closedAt=self.CLOSED_AT, replacedBy=3051)])
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.stalled_ids(out), [self.CLOSED], "scope: the step with no live lane is stalled")
+        self.assertNotIn("closed unmerged", self.closed_line(out, self.CLOSED), "an open replacement is a successor, so no closed note")
+
+    def test_closed_unmerged_line_prints_the_pr_number_then_unmerged_then_the_closed_date(self):
+        self.commit_step(self.CLOSED, status="doing", title="Linux and Windows CI run once", note="Moves CI onto one job.")
+        self.no_trailer_on_main()  # scope: no Step trailer on main, so the step is not read as landed
+        self.publish_closed_pr(self.CLOSED)
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.stalled_ids(out), [self.CLOSED], "scope: the step with no live lane is stalled")
+        self.assertEqual(self.closed_line(out, self.CLOSED),
+                         "stalled step: %s (resume, pause or done; PR #3042 closed unmerged 2026-11-14)" % self.CLOSED,
+                         "the printed text is the PR number, then closed unmerged, then the closed date")
+
+    def test_closed_unmerged_line_prints_the_row_with_the_latest_closed_date_not_the_number_or_place(self):
+        self.commit_step(self.CLOSED, status="doing", title="Linux and Windows CI run once", note="Moves CI onto one job.")
+        self.no_trailer_on_main()  # scope: no Step trailer on main, so the step is not read as landed
+        self.publish_closed_pr(self.CLOSED, landed=[  # the latest closedAt is #3046, the middle number and the middle row
+            self.pull_row(3042, self.CLOSED, merged=False, closedAt="2026-11-10T18:00:00Z"),
+            self.pull_row(3046, self.CLOSED, merged=False, closedAt="2026-11-14T18:00:00Z"),
+            self.pull_row(3050, self.CLOSED, merged=False, closedAt="2026-11-12T18:00:00Z")])
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.stalled_ids(out), [self.CLOSED], "scope: the step with no live lane is stalled")
+        self.assertEqual(self.closed_line(out, self.CLOSED),
+                         "stalled step: %s (resume, pause or done; PR #3046 closed unmerged 2026-11-14)" % self.CLOSED,
+                         "the printed row is the one with the latest closedAt")
+
+    def test_closed_unmerged_line_says_date_unknown_when_the_row_has_no_closedAt(self):
+        self.commit_step(self.CLOSED, status="doing", title="Linux and Windows CI run once", note="Moves CI onto one job.")
+        self.no_trailer_on_main()  # scope: no Step trailer on main, so the step is not read as landed
+        self.publish_closed_pr(self.CLOSED, landed=[self.pull_row(3042, self.CLOSED, merged=False)])
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.stalled_ids(out), [self.CLOSED], "scope: the step with no live lane is stalled")
+        self.assertEqual(self.closed_line(out, self.CLOSED),
+                         "stalled step: %s (resume, pause or done; PR #3042 closed unmerged (date unknown))" % self.CLOSED,
+                         "a closed-unmerged row with no closedAt prints the text (date unknown)")
 
     def test_landed_feel_fix_without_a_device_trial_is_not_stalled(self):
         self.commit_step("c2", status="doing", order=2)  # control: a plain lane-less step is still stalled
