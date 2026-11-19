@@ -115,7 +115,13 @@
 # (a SIGKILL from merge's timeout reaches only ci-job: it leaves the folder in TMPDIR and may leave verdict children running). Each `not run` line,
 # the summary and each CI step's `start: <name>` line on stderr (before it runs, so a caller sees which CI step is running)
 # are one print.
-import concurrent.futures, os, re, shutil, subprocess, sys, tarfile, tempfile, threading, time
+# Rerun cache: a step that passed is saved under its name, its script, env, shell, directory, base and the repo's path, a hash of the tree it tests (the
+# committed files plus uncommitted and untracked ones, minus ignored ones) and a hash of this file's bytes. A rerun at the same key runs no
+# such step and prints `PASS (cached)` for it. Never saved: an install step, or a step that failed, read unknown or skipped. A saved file
+# that cannot be read is a miss. Cost: per run, one set of git processes (a temp index, add, write-tree) when a step may be cached; per
+# pass, one file of under 1 KB in $XDG_CACHE_HOME (else ~/.cache) /claude-settings/ci-job-pass. A save prunes files unused for 7 days,
+# and the store holds at most 300 files. No timer, no lasting process. CI_JOB_NO_CACHE=1 turns the cache off.
+import concurrent.futures, hashlib, json, os, re, shutil, subprocess, sys, tarfile, tempfile, threading, time
 BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
@@ -609,10 +615,12 @@ def local_action(name, step, ctx, log, dry, ready):
                 state = "would run"
             else:
                 state, detail = run_step(sname, st, False, detail, shell, {**env, "GITHUB_WORKSPACE": top}, cwd, ctx, log)
+                cached = detail.startswith(CACHE_MARK)  # still counts as started; its part of the line says so
+                detail = detail[len(CACHE_MARK):] if cached else detail
                 # verdict names a run's shell and its temp script, which differ on every run: name the step's own lines instead
                 detail = re.sub(r"^(PASS|SKIP|FAIL) .*? (?=(?:rc=\d+ )?\(\d+\.\d+s\))",
                                 lambda m: "%s %s " % (m.group(1), " ; ".join(run_lines(st))), detail, count=1)
-                parts.append("%s: %s" % (sname, detail))
+                parts.append("%s: %s%s" % (sname, "(cached) " if cached else "", detail))
         else:
             parts.append("%s: %s: %s" % (sname, state, detail))
         states.append(state)
@@ -644,7 +652,116 @@ def lint_workers():
     return max(1, min(os.cpu_count() or 1, 4))
 
 
+CACHE_MARK = "(cached) "  # the start of a cached step's line: its caller prints PASS (cached) and drops the mark
+CACHE_FILES, CACHE_DAYS = 300, 7
+TREE_KEYS, TREE_LOCK = {}, threading.Lock()  # the tree hash of each repo, read once per run: every step of a run tests the same tree
+
+
+def cache_folder():
+    base = os.environ.get("XDG_CACHE_HOME") or (os.environ.get("LOCALAPPDATA") if os.name == "nt" else None) \
+        or os.path.join(os.path.expanduser("~"), ".cache")
+    return os.path.join(base, "claude-settings", "ci-job-pass")
+
+
+def tree_key(top):
+    """A hash of the tree under `top`: the committed files, plus every uncommitted and untracked file that .gitignore does not hide.
+    The temp index is a copy of the real one, so the real index is never written. None when git cannot read the tree: nothing is cached."""
+    with TREE_LOCK:
+        if top not in TREE_KEYS:
+            TREE_KEYS[top] = None
+            tmp = tempfile.mkdtemp(prefix="ci-job-index-")
+            try:
+                real = git("rev-parse", "--path-format=absolute", "--git-path", "index", cwd=top)
+                index = os.path.join(tmp, "index")
+                if real and os.path.isfile(real):
+                    shutil.copyfile(real, index)
+                kw = dict(cwd=top, capture_output=True, text=True, env={**os.environ, "GIT_INDEX_FILE": index},
+                          timeout=120, stdin=subprocess.DEVNULL)
+                if _nowindow.run(["git", "add", "-A"], **kw).returncode == 0:
+                    done = _nowindow.run(["git", "write-tree"], **kw)
+                    if done.returncode == 0 and re.fullmatch(r"[0-9a-f]{40,64}", done.stdout.strip()):
+                        TREE_KEYS[top] = done.stdout.strip()
+            except (OSError, subprocess.SubprocessError):
+                pass
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
+        return TREE_KEYS[top]
+
+
+def cache_key(name, install, detail, shell, env, cwd, ctx, suite):
+    """The file name of a step's saved pass, or None when the step is never saved or its tree is unreadable."""
+    top, base, values, pinned = ctx
+    if install or os.environ.get("CI_JOB_NO_CACHE") or not detail:
+        return None
+    tree = tree_key(top)
+    try:
+        with open(os.path.realpath(__file__), "rb") as f:
+            tool = hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return None
+    if tree is None:
+        return None
+    parts = [name, detail, shell[0], cwd or "", str(bool(suite)), str(bool(pinned)), values.get("base", ""),
+             values.get("github.event.pull_request.base.sha", ""), tree, tool, os.path.realpath(top),
+             *("%s=%s" % kv for kv in sorted(env.items()) if kv[0] != "GITHUB_WORKSPACE")]  # GITHUB_WORKSPACE repeats the repo path, which the key holds once
+    return hashlib.sha256("\0".join(parts).encode("utf-8", "replace")).hexdigest()
+
+
+def cache_load(key, name):
+    """The saved one-line verdict of a passed step, or None for a missing, empty, garbled or foreign file."""
+    path = os.path.join(cache_folder(), key)
+    try:
+        with open(path, "rb") as f:
+            saved = json.loads(f.read().decode("utf-8"))
+        if isinstance(saved, dict) and saved.get("key") == key and saved.get("name") == name \
+                and isinstance(saved.get("first"), str) and saved["first"].startswith("PASS "):
+            os.utime(path)  # a hit keeps the file out of the prune
+            return saved["first"]
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def cache_save(key, name, first):
+    """Save a pass: one small file, written whole then renamed. Then prune the store. A failed write loses only the speed-up."""
+    folder = cache_folder()
+    try:
+        os.makedirs(folder, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=".new-", dir=folder)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"key": key, "name": name, "first": first}, f)
+        os.replace(tmp, os.path.join(folder, key))
+        with os.scandir(folder) as it:
+            files = sorted(((e.stat(follow_symlinks=False).st_mtime, e.path) for e in it if e.is_file(follow_symlinks=False)), reverse=True)
+        old = time.time() - CACHE_DAYS * 86400
+        for i, (mtime, path) in enumerate(files):
+            if i >= CACHE_FILES or mtime < old:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+    except OSError:
+        pass
+
+
 def run_step(name, step, install, detail, shell, env, cwd, ctx, log, suite=False):
+    """run_step_uncached behind the rerun cache: a step that passed at the same key returns (PASS, CACHE_MARK + its saved line) and runs
+    nothing; any other step runs and, when it passed, is saved. A hit makes the log file, since a parallel caller appends it."""
+    key = cache_key(name, install, detail, shell, env, cwd, ctx, suite)
+    saved = cache_load(key, name) if key else None
+    if saved:
+        try:
+            open(log, "ab").close()
+        except OSError:
+            pass
+        return "PASS", CACHE_MARK + saved
+    state, first = run_step_uncached(name, step, install, detail, shell, env, cwd, ctx, log, suite)
+    if key and state == "PASS" and first.startswith("PASS "):
+        cache_save(key, name, first)
+    return state, first
+
+
+def run_step_uncached(name, step, install, detail, shell, env, cwd, ctx, log, suite=False):
     """Run one step through bin/verdict, its output appended to `log`: (state, the step's one line). ctx: (top, base,
     values, pinned). A parallel step gets a log of its own, so the reads from its start offset see only its output.
     suite: a CI step picked for its suite line, run whole, with the preamble marker (preamble_marked)."""
@@ -956,6 +1073,8 @@ def main(argv):
                 state, first = run_step(name, step, install, detail, shell, env, cwd, ctx, log, kind[n - 1] == "suite")
             tally["FAIL" if state == "FAIL" else "unknown"] += state not in ("PASS", "SKIP")
             blocker = blocker or (name if install and state == "unknown" else None)
+            if first.startswith(CACHE_MARK):  # a cached pass: the state reads PASS (cached), and counts as PASS above
+                state, first = "PASS (cached)", first[len(CACHE_MARK):]
             print("%-15s %s: %s" % (state, name, first))
     finally:
         if pool:
