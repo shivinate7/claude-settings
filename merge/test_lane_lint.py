@@ -588,6 +588,15 @@ class LaneFixture(CiJobStub, tm.CloudSession):
         self.assertEqual(merge_parents(repo or self.co, lint_head), [self.head(base), head],
                          "the lint ran on %s, not on the merge of origin/%s and the head %s" % (lint_head[:9], base, head[:9]))
 
+    def forget_saved_passes(self, checkout=None):
+        """Delete the saved PASS folder under the clone's git dir of `checkout` (default: the lane checkout), so the next lint runs its job. A lint
+        saves its PASS there (merge.saved_pass_write), so a case that lints one head twice calls this before its second lint."""
+        checkout = checkout or self.co
+        git_dir = os.path.join(checkout, tm.sh(checkout, "git", "rev-parse", "--git-common-dir"))
+        folder = os.path.join(git_dir, merge.SAVED_PASS_FOLDER)
+        if os.path.isdir(folder):
+            shutil.rmtree(folder)
+
     def lint_run(self, *argv, base="main", head=None, cloud=False):
         """Run merge in the lane checkout. -> (rc, stdout and stderr together). The lint must have run once, as
         `checks --lint --base origin/<base>`, detached, on the merge of origin/<base> and the head, and that tree must be gone afterwards."""
@@ -1107,6 +1116,7 @@ class LaneLint(LaneFixture):
         self.use_ci_job(PASSING, 0)
         for target in (sha, "origin/feat"):  # a commit, and a ref that names the same commit
             with self.subTest(target=target):
+                self.forget_saved_passes()
                 rc, text = self.lint_run("--lane-lint", target, head=sha)
                 self.assertEqual(rc, 0, text)
                 self.assertEqual(clock.pauses, [], "a commit or ref target paused: %s" % clock.pauses)
@@ -4585,6 +4595,7 @@ class LaneLintRepoDir(tm.RepoDirRuns, LaneFixture):
         self.use_ci_job(PASSING, 0)
         for argv in self.spellings("--lane-lint", "7"):
             with self.subTest(spelling=argv[0]):
+                self.forget_saved_passes(self.b_co)
                 if os.path.exists(self.log):
                     os.remove(self.log)
                 rc, out, seen = self.run_from(self.co, argv)
@@ -4659,6 +4670,7 @@ class DraftRun(LaneFixture):
                  ("run (windows-latest)", [tm.draft_row("touched"), tm.draft_row("run (windows-latest)", status="in_progress", job=2)]))
         for name, head_rows in cases:
             with self.subTest(job=name):
+                self.forget_saved_passes()
                 rc, out = self.run_case({head: head_rows}, "--lane-lint", "7")
                 self.assertEqual(tm.check_run_reads(self.host.draft_reads), [head], "the lint did not read the live head's draft runs for an unfinished %s:\n%s" % (name, out))
                 self.assertEqual(rc, 1, "an unfinished %s did not refuse the lane (exit %s):\n%s" % (name, rc, out))
@@ -5684,6 +5696,7 @@ class MergedLintTree(LaneFixture):
         self.assertEqual(rc, 0, text)
         self.assertEqual(self.lint_calls()[0]["pr_body_env"], self.host.body, "the caller's PR_BODY reached ci-job beside the PR's own body: " + text)
         os.remove(self.log)
+        self.forget_saved_passes()
         with unittest.mock.patch.dict(os.environ, {"PR_BODY": "another PR's body"}):
             rc, text = self.lint_run("--lane-lint", "feat")
         self.assertEqual(rc, 0, text)
@@ -6122,6 +6135,7 @@ class LaneLintDiskFloor(LaneFixture):
         self.use_ci_job(PASSING, 0)
         for cloud in (True, False):
             with self.subTest(cloud=cloud), self.disk_reading(free_gib=50):
+                self.forget_saved_passes()
                 rc, out = self.lint_run("--lane-lint", "7", cloud=cloud)
                 self.assertEqual(rc, 0, "50 GiB free on a %d GiB drive was refused: %s" % (DISK_GIB, out))
                 self.assertEqual(len(pass_lines(out)), 1, out)
@@ -6160,6 +6174,7 @@ class LaneLintDiskFloor(LaneFixture):
             self.assertTrue(guard.load_full(reading), "the whole-load check does not refuse 99%% memory, so this control proves nothing: %r" % (reading,))
             for cloud in (True, False):
                 with self.subTest(cloud=cloud):
+                    self.forget_saved_passes()
                     rc, out = self.lint_run("--lane-lint", "7", cloud=cloud)
                     self.assertEqual(rc, 0, "99% memory with 50 GiB free on the disk refused the lane lint: " + out)
                     self.assertEqual(len(pass_lines(out)), 1, out)
@@ -6695,6 +6710,18 @@ class LintResumesPassedJobs(LaneFixture):
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.ran(), ran + 1, "a new base sha read the saved result of the old base, so the job did not run: " + out)
         self.assertEqual(self.cached(out), [], "a new base sha printed a cached pass: " + out)
+
+    def test_an_edited_pr_body_at_the_same_head_misses_the_saved_result_and_runs_the_job(self):
+        """The lint hands ci-job the pull request's body as PR_BODY, and the aligned probe reads it. The saved result is keyed without the body,
+        so an edit to the body must run the job again, and the job must read the edited body."""
+        self.host.body = lane_body(OWN, "the body before the edit")
+        self.scope_and_save()
+        self.host.body = lane_body(OWN, "the body after the edit")
+        ran = self.ran()
+        rc, out = self.lint_at(self.DATE_B)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.ran(), ran + 1, "an edited PR body at the same head, base and tool read the saved result, so the job did not run: " + out)
+        self.assertEqual(self.lint_calls()[-1]["pr_body_env"], self.host.body, "the job did not read the edited PR body: " + out)
 
     def test_an_unedited_copy_of_the_tool_finds_the_saved_result_outside_its_tree(self):
         self.scope_and_save()
