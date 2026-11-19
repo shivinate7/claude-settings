@@ -23,6 +23,9 @@ Owner asked at 21:2x CST Nov 18 for triage 11 to be archived and a new triage sp
 ## Row 2 state (builder report, 21:27 CST Nov 18)
 Pushed a50c8f156b to taken-picks-area-build2: guard_merge.py, guard.py, docs/decisions/pick-reaches-page.md, page.html, SKILL.md. Passing: pick-reaches-page 14 of 14, rule audit, glossary, export/grant/stale tests. Red: two page tests (page.test.mjs lines 9428 and 9443) assert /You overturned/; the build says "You overruled", so a test-author re-points them. Unknown: full hooks/test_guard.py (stopped at 4538 of about 10961 cases, no FAIL seen); no mutation test run. Deviation: the decision record said an unread writer fails open; the red test needs a refusal, so the record changed. Then: fix check, design re-review, PR for runner 10.
 
+## Row 4 state (test-author report, 21:28 CST Nov 18)
+Pushed eb3b14376f on handed-in-push-tests5 (tests/guard/s43503-handed-in-push.py, one line in s27664-owner-judge.py). Red on build d2ca8db1e8: 3 of 52 (point 3: ready PR with no review log is allowed; point 1: `git push origin :` and `git push origin HEAD:topic-x :` allowed). Point 2 already green. Hand-in marker inferred: the PR's draft flag (ready means handed in); the "batch" label is the other candidate; owner to confirm, and to say whether comment and compare read refusals stay (the ruling names only the list read). Not run: formal red checkout, mutant, full guard suite. Unknown: `git -c remote.origin.push=HEAD:feat push origin`. Then: builder, round 2 reviewer, PR for runner 10.
+
 ## Owed
 - waiting/ copy export after page writes (since 20:56 CST); step live-rebuild-named-limits after PR 3702 merges; step degen-page-export status; four stalled steps for an owner pick (time-pinned-keep-marker, trial-brief-triage-by-role, usage-brake, wave-88-rebuilds); runner 11 line in project CLAUDE.md; rewrite of /root/.claude/handoffs/53a28352-2d8c-5058-b373-e279385cddcd.md is stale.
 
