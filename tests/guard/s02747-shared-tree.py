@@ -833,6 +833,17 @@ sh("per-file allow: cd to a clean checkout, restore f.txt, then cd shared; the r
    "cd " + slash(SUBJCLEAN) + " && " + VCS + " restore f.txt && cd " + slash(SUBJDIRTY),
    "allow", cwd=NOGIT)
 
+# A CD THAT DOES NOT RUN MOVES NOTHING. The cd after `||` runs only when `true` fails, so the restore
+# runs where the shell already holds. From the dirty shared checkout the restore must deny, though the
+# call names a clean checkout in its cd. From the clean checkout it must not refuse, though the call
+# names the shared checkout in its cd.
+sh("per-file deny: true || cd clean, restore f.txt, then cd shared; the cd never runs, the restore runs in the shared tree",
+   "true || cd " + slash(SUBJCLEAN) + "; " + VCS + " restore f.txt; cd " + slash(SUBJDIRTY),
+   "deny", "shared-tree", cwd=SUBJDIRTY)
+sh("per-file allow: true || cd shared, restore f.txt, then cd clean; the cd never runs, the restore runs in the clean tree",
+   "true || cd " + slash(SUBJDIRTY) + "; " + VCS + " restore f.txt; cd " + slash(SUBJCLEAN),
+   "allow", cwd=SUBJCLEAN)
+
 # HEREDOC BODY WITH A LONE QUOTE, THEN A CD. segment_roots (guard.py ~1228) loses sync when a heredoc
 # body holds a lone quote, and drops every later `cd`. The cwd is in no checkout, so the cd act does
 # not refuse the cd below; the shared-tree rule reads the folder it moves to, and the restore runs in
