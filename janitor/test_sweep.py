@@ -36,6 +36,7 @@ import threading
 import time
 import types
 import unittest
+import uuid
 from datetime import datetime, timezone
 from unittest import mock
 
@@ -10166,6 +10167,182 @@ class OwnAgentLockTests(unittest.TestCase):
                 decision = sweep.decide_worktree(root, entry)
             self.assertTrue(read.called, "the ancestor read was never made")
             self.assertEqual(decision["action"], "keep", "reaped on an unreadable ancestor: %s" % decision["reason"])
+
+
+# ------------------------------------------------ leftover temp folders (janitor/sweep.py)
+#
+# A killed run leaks its folder in the temp folder. Two kinds leak: `mutate_guard_<pid>-<hex>` (the work
+# folder of hooks/mutate_guard.py) and `claude-settings-test-temp/<pid>-<hex>` (the run folder of
+# lint/_test_temp.py). The sweep reaps one only when its owner pid is dead and its mtime is over one hour
+# old. A live owner, or a folder under an hour old, is kept.
+#
+# The owner pid is read from the folder's name, as a run folder's always is. A `mutate_guard_` folder
+# names no owner today, so its name must carry the pid before the sweep can judge it.
+#
+# Each case runs the real sweep as a child process. The child's TMPDIR is a fixture folder inside the
+# case's run folder, so no case reaches the real temp folder. The child's clock starts at the fixture's
+# moment and runs on from there, so the age verdict never reads the real clock. Each keep case also carries
+# a dead, old folder of each kind, which the same run must reap. A keep then cannot pass over a sweep that
+# never ran.
+
+LEFTOVER_RUNNER = """\
+import sys
+import time
+
+sys.path[:0] = [%(hooks)r, %(janitor)r]
+_real_time = time.time
+_offset = %(now)r - _real_time()
+time.time = lambda: _real_time() + _offset  # the child's clock starts at the fixture's moment
+import sweep  # noqa: E402
+
+# The machine's own reads are stubbed, as machine_tiers_stubbed stubs them in the suite's process. An
+# unstubbed --confirm would reap the real machine's dead-rooted servers.
+sweep.find_dead_rooted = lambda *a, **k: []
+sweep.find_loose_processes = lambda *a, **k: []
+sweep.reap_listener = lambda decision: None
+sweep.sim_tier = lambda *a, **k: []
+sys.exit(sweep.main(sys.argv[1:]))
+"""
+
+
+class LeftoverTempFolderTests(unittest.TestCase):
+    OLD_HOURS = 2  # over the one-hour limit, with a wide margin
+    YOUNG_HOURS = 0.25  # under the limit, with a wide margin
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, self.run, True)
+        self.base = os.path.join(self.run, "case")
+        self.temp = os.path.join(self.base, "tmp")  # the child's temp folder: a fixture, never /tmp
+        self.test_temp = os.path.join(self.temp, "claude-settings-test-temp")
+        self.repo = os.path.join(self.base, "repo")
+        self.now = time.time()
+        self.dead_pid = temp_dead_pid()
+        os.makedirs(self.test_temp)
+        make_repo(self.repo, {"README.md": "fixture\n"})
+
+    def live_pid(self):
+        """A pid whose process this case starts and stops, so it stays alive for the whole run."""
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
+        self.addCleanup(self.stop_child, child)
+        return child.pid
+
+    @staticmethod
+    def stop_child(child):
+        child.kill()
+        child.wait(timeout=30)
+
+    def leftover(self, folder, hours):
+        """A folder with one nested file, every mtime `hours` old. A killed run leaves this shape."""
+        write(os.path.join(folder, "work", "scratch.txt"), "left behind\n")
+        stamp = self.now - hours * 3600
+        for dirpath, dirnames, filenames in os.walk(folder):
+            for name in dirnames + filenames:
+                os.utime(os.path.join(dirpath, name), (stamp, stamp))
+            os.utime(dirpath, (stamp, stamp))
+        return folder
+
+    def mutate_guard_leftover(self, owner, hours):
+        return self.leftover(os.path.join(self.temp, "mutate_guard_%d-%s" % (owner, uuid.uuid4().hex[:8])), hours)
+
+    def run_folder_leftover(self, owner, hours):
+        return self.leftover(os.path.join(self.test_temp, "%d-%s" % (owner, uuid.uuid4().hex)), hours)
+
+    def child_env(self):
+        env = dict(os.environ)
+        env.update(TMPDIR=self.temp, TEMP=self.temp, TMP=self.temp, HOME=self.base, USERPROFILE=self.base,
+                   CLAUDE_CONFIG_DIR=os.path.join(self.base, "cfg"),
+                   JANITOR_RUN_LOG=os.path.join(self.base, "run.log"))
+        return env
+
+    def run_sweep(self, *flags):
+        """The real sweep on the fixture repo, in a child process with the fixture temp folder."""
+        runner = os.path.join(self.base, "runner.py")
+        write(runner, LEFTOVER_RUNNER % {"hooks": os.path.join(REPO_ROOT, "hooks"), "janitor": HERE,
+                                         "now": self.now})
+        proc = subprocess.run([sys.executable, runner, "--restore-log", os.path.join(self.base, "restore.log"),
+                               *flags, self.repo], cwd=self.base, env=self.child_env(),
+                              capture_output=True, text=True, timeout=120)
+        # Scope first: a run that crashed, or never reached its summary, says nothing about any folder.
+        self.assertNotIn("Traceback", proc.stderr, "the sweep run crashed\n%s" % self.report(proc))
+        self.assertIn("== summary ==", proc.stdout, "the sweep run never reached its summary\n%s" % self.report(proc))
+        return proc
+
+    @staticmethod
+    def report(proc):
+        return "  exit %s, stderr: %s" % (proc.returncode, proc.stderr.strip()[-400:])
+
+    def assertGone(self, folder, cause, proc):
+        self.assertFalse(os.path.exists(folder), "%s\n  still exists: %s\n%s" % (cause, folder, self.report(proc)))
+
+    def assertKept(self, folder, cause, proc):
+        self.assertTrue(os.path.isdir(folder), "%s\n  was removed: %s\n%s" % (cause, folder, self.report(proc)))
+
+    def test_preview_lists_a_dead_owner_mutate_guard_folder(self):
+        folder = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        proc = self.run_sweep()
+        self.assertIn(os.path.basename(folder), proc.stdout + proc.stderr,
+                      "the preview does not list the dead-owner mutate_guard folder %s\n%s"
+                      % (folder, self.report(proc)))
+        self.assertTrue(os.path.isdir(folder), "a preview without --confirm removed %s" % folder)
+
+    def test_preview_lists_a_dead_owner_run_folder(self):
+        folder = self.run_folder_leftover(self.dead_pid, self.OLD_HOURS)
+        proc = self.run_sweep()
+        self.assertIn(os.path.basename(folder), proc.stdout + proc.stderr,
+                      "the preview does not list the dead-owner run folder %s\n%s" % (folder, self.report(proc)))
+        self.assertTrue(os.path.isdir(folder), "a preview without --confirm removed %s" % folder)
+
+    def test_confirm_removes_a_dead_owner_mutate_guard_folder(self):
+        folder = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        proc = self.run_sweep("--confirm")
+        self.assertGone(folder, "--confirm did not remove the dead-owner mutate_guard folder", proc)
+
+    def test_confirm_removes_a_dead_owner_run_folder(self):
+        folder = self.run_folder_leftover(self.dead_pid, self.OLD_HOURS)
+        proc = self.run_sweep("--confirm")
+        self.assertGone(folder, "--confirm did not remove the dead-owner run folder", proc)
+
+    def test_confirm_keeps_a_live_owner_folder(self):
+        control = [self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS),
+                   self.run_folder_leftover(self.dead_pid, self.OLD_HOURS)]
+        live = self.live_pid()
+        kept = [self.mutate_guard_leftover(live, self.OLD_HOURS), self.run_folder_leftover(live, self.OLD_HOURS)]
+        proc = self.run_sweep("--confirm")
+        for folder in control:
+            self.assertGone(folder, "control: --confirm did not remove a dead-owner folder, so the live-owner "
+                                    "keeps below prove nothing", proc)
+        for folder in kept:
+            self.assertKept(folder, "--confirm removed a live-owner folder", proc)
+
+    def test_confirm_keeps_a_folder_under_an_hour_old(self):
+        control = [self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS),
+                   self.run_folder_leftover(self.dead_pid, self.OLD_HOURS)]
+        young = [self.mutate_guard_leftover(self.dead_pid, self.YOUNG_HOURS),
+                 self.run_folder_leftover(self.dead_pid, self.YOUNG_HOURS)]
+        proc = self.run_sweep("--confirm")
+        for folder in control:
+            self.assertGone(folder, "control: --confirm did not remove a dead-owner folder, so the under-an-hour "
+                                    "keeps below prove nothing", proc)
+        for folder in young:
+            self.assertKept(folder, "--confirm removed a folder under an hour old", proc)
+
+    def test_confirm_reaps_an_incident_sized_leak(self):
+        """Four leaked folders of each kind, all with dead owners: the size of the leak that filled the disk."""
+        folders = [self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS) for _ in range(4)]
+        folders += [self.run_folder_leftover(self.dead_pid, self.OLD_HOURS) for _ in range(4)]
+        proc = self.run_sweep("--confirm")
+        left = [os.path.basename(folder) for folder in folders if os.path.exists(folder)]
+        self.assertFalse(left, "--confirm left %d of %d dead-owner folders\n%s"
+                         % (len(left), len(folders), self.report(proc)))
+
+    def test_the_child_sweep_gets_the_fixture_temp_root(self):
+        """Green on purpose: the child's temp root is the fixture, so the cases above never reach /tmp."""
+        probe = subprocess.run([sys.executable, "-c", "import tempfile; print(tempfile.gettempdir())"],
+                               cwd=self.base, env=self.child_env(), capture_output=True, text=True, timeout=60)
+        self.assertEqual(os.path.realpath(probe.stdout.strip()), os.path.realpath(self.temp),
+                         "the child's temp root is %r, not the fixture %r\n  stderr: %s"
+                         % (probe.stdout.strip(), self.temp, probe.stderr.strip()[-400:]))
 
 
 if __name__ == "__main__":
