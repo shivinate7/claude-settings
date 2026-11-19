@@ -31,6 +31,7 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lin
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  test-temp-standard: teardown removes the run folder (testing/tracked_tree.py)
 from test_ci_scope import run as scope_run  # noqa: E402  the scope script's one harness (lint/test_ci_scope.py)
+import test_ci_scope  # noqa: E402  its RUN_DIR is set in setUpModule below
 
 PIN = "08c6903cd8c0fde910a37f88322edcfb5dd907a8"
 # A minimal checks.yml that passes. Its comment openers sit inside quotes and in a block body, a lone quote sits in
@@ -484,6 +485,9 @@ RUN_FOLDER = None  # set by setUpModule, so a `--workflow` run makes no folder o
 def setUpModule():
     global RUN_FOLDER
     RUN_FOLDER = _test_temp.run_folder()
+    # scope_run makes its scratch repos under test_ci_scope's run folder. That module's teardown removes the folder when it ran
+    # first in this process, so this module points scope_run at its own folder, which tearDownModule below removes.
+    test_ci_scope.RUN_DIR = RUN_FOLDER
 
 
 def tearDownModule():

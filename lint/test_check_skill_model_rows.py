@@ -43,7 +43,7 @@ CHECK_STEP = "Skill model rows check"
 FIXTURE_STEP = "Skill model rows fixture suite"
 
 sys.path.insert(0, HERE)
-from test_windows_split import all_jobs  # noqa: E402  one home for the checks.yml step parser
+from all_jobs_passed_rules import all_jobs  # noqa: E402  one home for the checks.yml step parser
 from check_skill_model_rows import skill_names  # noqa: E402
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)

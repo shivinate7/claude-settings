@@ -40,12 +40,33 @@ sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import workflow_steps as ws  # noqa: E402  the one home of the step parser
 from test_ci_scope import DOC_CASES, DOC_FLAGS, doc_groups, run as scope_run  # noqa: E402  ci-scope.sh run in a temp repo, and the doc groups
+import test_ci_scope  # noqa: E402  its RUN_DIR is set in setUpModule below
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  test-temp-standard: teardown removes the run folder (testing/tracked_tree.py)
+from all_jobs_passed_rules import drop_condition, eval_if, unwrap  # noqa: E402  the one home of the `if:` readers and the records-only clause
 from test_windows_split import (  # noqa: E402  the one home of the `if:` evaluator, the scope conditions and the doc condition builder
     NO_MD_SCOPE_CONDITION, SCOPE_DOC_AGENTS, SCOPE_DOC_ANY, SCOPE_DOC_DECISIONS, SCOPE_DOC_DECISIONS_MAP_OTHER, SCOPE_DOC_DECISIONS_OTHER,
     SCOPE_DOC_DECISIONS_RULES, SCOPE_DOC_DECISIONS_RULES_OTHER, SCOPE_DOC_RULES, SCOPE_DOC_SKILLS, SCOPE_DOC_SKILLS_AGENTS,
-    SCOPE_DOC_SKILLS_DECISIONS, SCOPE_DOC_SKILLS_OTHER, doc_scope_condition, drop_condition, eval_if, run_lines, unwrap, LINUX_SUITES)
+    SCOPE_DOC_SKILLS_DECISIONS, SCOPE_DOC_SKILLS_OTHER, doc_scope_condition, run_lines, LINUX_SUITES)
 
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
+RUN_FOLDER = None  # set by setUpModule
+
+
+def setUpModule():
+    global RUN_FOLDER
+    RUN_FOLDER = _test_temp.run_folder()
+    # scope_run makes its scratch repos under test_ci_scope's run folder. That module's teardown removes the folder when it ran
+    # first in this process, so this module points scope_run at its own folder, which tearDownModule below removes.
+    test_ci_scope.RUN_DIR = RUN_FOLDER
+
+
+def tearDownModule():
+    if RUN_FOLDER and os.path.isdir(RUN_FOLDER):
+        tracked_tree.rm_tree(RUN_FOLDER)
+
+
 WORKFLOW = ".github/workflows/checks.yml"
 JOB = "checks"
 SPLIT_JOBS = ("checks", "checks-hooks", "checks-rest")  # the old checks job split into these three; the rest of CHECKS_SUITE_JOBS were never part of it
@@ -781,13 +802,12 @@ class ChecksStepBase(unittest.TestCase):
 class ScopeConditionOnNoMdSteps(ChecksStepBase):
     def test_each_no_md_and_names_only_step_carries_the_scope_condition(self):
         steps = self.steps()
-        checks = {identity(st) for st in ws.step_blocks(ws.job_block(read_repo(WORKFLOW), JOB))}
         for name in NO_MD + NAMES_ONLY:
             with self.subTest(step=name):
                 got = if_of(self.named(steps, name))
-                # Outside the checks job, the records-only condition may follow the scope condition: `${{ (SCOPE) && RECORDS_ONLY_CONDITION }}`.
-                conditioned_ok = name not in checks and drop_condition(unwrap(got)) == NO_MD_SCOPE_CONDITION
-                self.assertTrue(got == SCOPE_CONDITION or conditioned_ok, "step %r: if is %r, want the scope condition" % (name, got))
+                # The records-only clause may follow the scope condition, `${{ (SCOPE) && RECORDS_ONLY_CONDITION }}`, and no other clause may.
+                # A step that drops its scope condition reads None or the clause alone, so it fails here.
+                self.assertEqual(drop_condition(unwrap(got)), NO_MD_SCOPE_CONDITION, "step %r: if is %r, want the scope condition" % (name, got))
 
 
 class UnscopedAndPrOnlySteps(ChecksStepBase):
@@ -820,8 +840,8 @@ class StepNames(ChecksStepBase):
             if name in MAIN_STEPS:
                 continue
             with self.subTest(step=name):
-                expr = if_of(st) or ""
-                self.assertNotIn("needs.scope.outputs", expr, "unlisted step %r reads a scope output: %r" % (name, expr))
+                expr = drop_condition(unwrap(if_of(st))) or ""  # the records-only clause alone is no scope output; `(X) && RECORDS` still reads X
+                self.assertNotIn("needs.scope.outputs", expr, "unlisted step %r reads a scope output: %r" % (name, if_of(st)))
 
     def test_each_hard_coded_list_names_a_main_step(self):
         for name in NO_MD + NAMES_ONLY + MUST_STAY_UNSCOPED + PR_ONLY + list(DOC_STEPS):

@@ -55,7 +55,7 @@ CHECK_STEP = "Project-ops roles check"
 FIXTURE_STEP = "Project-ops roles fixture suite"
 
 sys.path.insert(0, HERE)
-from test_windows_split import all_jobs  # noqa: E402  one home for the checks.yml step parser
+from all_jobs_passed_rules import all_jobs  # noqa: E402  one home for the checks.yml step parser
 from check_skill_model_rows import live_lines  # noqa: E402  one home for fences and multi-line HTML comments
 import layout  # noqa: E402  one home of where records live (lint/layout.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
