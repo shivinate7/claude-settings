@@ -370,6 +370,14 @@ add("local-tier folder: a push after W is reassigned is judged at the new folder
 add("local-tier folder: a triage session's push through the reassigned folder alone is refused", "deny", rule=RECORD_RULE,
     tool="Bash", command="W=" + slash(PUSHFEAT) + "; " + PUSH_TWICE, cwd=NOGIT, session=LT_SID, env=LT_FOLDER_ENV,
     config=LT_TRIAGE)
+# RED on the old code (c54c58ce13): `$(pwd)` and a backtick folder were read as text, so the folder was no checkout and the
+# triage proof failed. Each names the shell's own folder, PUSHSSH, a triage repo, so the push is allowed.
+add("local-tier folder: a triage session's push through a $(pwd) folder is allowed", "allow",
+    tool="Bash", command=VCS + ' -C "$(pwd)" push origin HEAD:roadmap', cwd=PUSHSSH, session=LT_SID,
+    env=LT_FOLDER_ENV, config=LT_TRIAGE, silent=True)
+add("local-tier folder: a triage session's push through a backtick pwd folder is allowed", "allow",
+    tool="Bash", command=VCS + " -C `pwd` push origin HEAD:roadmap", cwd=PUSHSSH, session=LT_SID,
+    env=LT_FOLDER_ENV, config=LT_TRIAGE, silent=True)
 # RED. Cause: `cd "$W"` runs before `W=` and reads W unset, so the shell stays in the session's folder, PUSHFEAT, which is not
 # this triage session's repo. The old guard reads the later assignment into the cd and judges the push at PUSHSSH.
 add("local-tier folder: a cd to W before W is assigned does not reach the push, which is refused", "deny", rule=RECORD_RULE,
