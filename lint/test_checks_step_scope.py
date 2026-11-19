@@ -485,6 +485,7 @@ MAIN_STEPS = [
 # folder or repo, named in a comment, or a hook's payload: it is not read from the repo. A new name in a scoped entry
 # turns the guard red; so does a listed name the file no longer names.
 ALLOWED = {
+    "hooks/test_agent_brief.py": (["debts/notes.md", "docs/debts/notes.md"], "the old notes file names the brief is compared against, in its text and in a temp cwd; neither file is opened"),
     "hooks/test_call_judge.py": (["README.md", "docs/design/last-answer-notes.md"], "README.md is written into a temp repo; the other name is in comments"),
     "hooks/test_decision_watch.py": (["CLAUDE.md", "decisions/reply-judge-samples-never-refuses.md"], "CLAUDE.md is written into temp repos; the record name is in a comment"),
     "hooks/test_feedback_inbox.py": ([".claude/CLAUDE.md", "CLAUDE.md", "README.md", "docs/debts/notes.md", "docs/notes/README.md", "docs/todo.md"], "fixture repos track or write these names in temp dirs; docs/notes/README.md is written into a temp repo, and the suite never reads the root copy; the frozen notes file is named by the case that checks the home judge refuses it"),
