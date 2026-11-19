@@ -1,0 +1,10 @@
+{
+ "id": "owner-haiku-word-no-floor",
+ "at": "2026-11-18T19:03:00-06:00",
+ "title": "A model the owner names passes the Haiku floor; no guard sits on a floor.",
+ "ruling": "Owner ruling, chat 19:03 CST Nov 18, relayed by the consultant at 21:12 CST (word for word; triage did not read the chat). When the owner says Haiku, it works; no guard stands on a floor. Scope is the consultant's pick, not the owner's: floor only, no Opus lift, lane starts. Home: PR 3688 (step owner-model-word-no-floor-guard).",
+ "quote": "if i say haiku it should work, there shouldnt be any guards on a FLOOR",
+ "source": "Consultant message to triage 21:12 CST Nov 18 (relayed, not verified by triage). Filed 21:11 CST by triage.",
+ "status": "open",
+ "step": "owner-model-word-no-floor-guard"
+}
