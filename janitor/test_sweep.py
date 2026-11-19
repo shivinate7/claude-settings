@@ -787,6 +787,12 @@ class TempSweepTests(unittest.TestCase):
 # folder, process, or run log. `reached` is the positive control: the run got past the simulator
 # tier, so an empty recording means the step did not run, not that the run ended early.
 
+def leftover_temp_stubbed():
+    """The leftover temp-folder step reads the real temp root on every full run. A case that runs a
+    full sweep in this process stubs it, or the case reaches the machine's own temp folders."""
+    return mock.patch.object(sweep, "leftover_temp_tier", return_value=0)
+
+
 @contextlib.contextmanager
 def machine_tiers_stubbed(base):
     """Stubs the full-mode tiers that read the real machine, and points HOME and the run log into
@@ -797,6 +803,7 @@ def machine_tiers_stubbed(base):
         stack.enter_context(mock.patch.object(sweep, "find_dead_rooted", return_value=[]))
         stack.enter_context(mock.patch.object(sweep, "find_loose_processes", return_value=[]))
         stack.enter_context(mock.patch.object(sweep, "reap_listener"))
+        stack.enter_context(leftover_temp_stubbed())
         yield stack.enter_context(mock.patch.object(sweep, "sim_tier", return_value=[]))
 
 
@@ -1755,7 +1762,7 @@ class LooseProcessTests(unittest.TestCase):
         for key, fn in stubs.items():
             setattr(key[0], key[1], fn)
         try:
-            with contextlib.redirect_stdout(io.StringIO()):
+            with contextlib.redirect_stdout(io.StringIO()), leftover_temp_stubbed():
                 sweep.main(["--confirm", "--restore-log", os.path.join(self.home, "log"), repo])
         finally:
             for key, fn in real.items():
@@ -7028,7 +7035,9 @@ class BuildDirReapTests(unittest.TestCase):
         self.fill(os.path.dirname(free), (os.path.basename(free),))
         self.fill(os.path.dirname(live), (os.path.basename(live),))
         self.hold_cwd(live)
-        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg)
+        temp = os.path.join(self.root, "tmp")  # the child's temp root: a fixture, never the machine's
+        os.makedirs(temp, exist_ok=True)
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, TMPDIR=temp, TEMP=temp, TMP=temp)
         result = subprocess.run([sys.executable, JANITOR, primary, "--confirm"], capture_output=True,
                                 text=True, env=env, timeout=120)
         self.assertEqual(result.returncode, 0, "janitor exited %d: %s"
@@ -7248,7 +7257,7 @@ class StrictWorktreeTests(unittest.TestCase):
             return {"root": root, "refused": "opted-out", "branches": [], "worktrees": [],
                     "listeners": [], "pruned": None, "husks": []}
 
-        with mock.patch.object(sweep, "sweep_repo", spy), \
+        with mock.patch.object(sweep, "sweep_repo", spy), leftover_temp_stubbed(), \
                 contextlib.redirect_stdout(io.StringIO()):
             sweep.main(["--root", self.root, "--attended",
                         "--restore-log", os.path.join(ROOT, "unatt.log")])
@@ -7381,7 +7390,7 @@ def _machine_quiet():
     processes). A case here must never signal a process this suite did not start."""
     with mock.patch.object(sweep, "find_dead_rooted", return_value=[]), \
             mock.patch.object(sweep, "find_loose_processes", return_value=[]), \
-            contextlib.redirect_stdout(io.StringIO()):
+            leftover_temp_stubbed(), contextlib.redirect_stdout(io.StringIO()):
         yield
 
 
