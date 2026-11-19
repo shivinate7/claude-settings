@@ -1,0 +1,14 @@
+{
+ "id": "self-role-help-passes",
+ "title": "The role-start guard lets `--help` through and tells a cloud session the true remedy",
+ "priority": "now",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "triage",
+ "blockedBy": [],
+ "updatedAt": "2026-11-19T03:32:00Z",
+ "why": "Coordinator's pick (his, not the owner's), 21:31 CST Nov 18; the owner asked at 21:30 CST to fix this refusal. hooks/guard_merge.py line 1724 refuses any run of the launcher, `--help` included. SELF_ROLE_REASON (lines 1676-1681) tells a cloud session the owner must start a role session from his terminal; that is false for a cloud session (create_session with the cs-build tag works). Joins debt self-role-claim-false-alarms (docs/debts on main).",
+ "source": "coordinator 21:31 CST Nov 18, relayed by triage 12; coordinator's pick, not owner-typed, undoable",
+ "note": "Doing. Coordinator's own subagent builds it; no lane session. Test-author afbd5b64ee3e07ab7 writes red tests on branch self-role-help-passes; builder and reviewer follow; runner 10 merges. Defect read by the coordinator, not re-read by triage."
+}
