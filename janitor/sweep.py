@@ -2087,7 +2087,7 @@ def _on_windows():
     return sys.platform.startswith("win")
 
 
-def temp_tier(confirm):
+def temp_pass(confirm):
     """The Windows temp-folder step: removes the temp folder of a session idle over 24 hours (preview
     without CONFIRM). Windows only. It stops at the sweep deadline. Returns the number of
     failures: folders it could not remove or folders it could not read."""
@@ -2210,7 +2210,7 @@ def find_leftover_temp(temp_root: str, now: float):
     return decisions
 
 
-def leftover_temp_tier(confirm: bool):
+def leftover_temp_pass(confirm: bool):
     """The leftover temp-folder step: removes each dead-owner folder over an hour old (preview
     without CONFIRM). Returns the number of folders it could not remove."""
     print("")
@@ -3744,9 +3744,9 @@ def _sweep_roots(args, roots, restore_log_path, mode):
         print_sim_report(sim_tier(args.confirm), args.confirm)
     failed = 0
     if not session_end and not _past_deadline():  # machine-wide: the scheduled job and a person's run
-        failed += leftover_temp_tier(args.confirm)
+        failed += leftover_temp_pass(args.confirm)
     if not _past_deadline():
-        failed += temp_tier(args.confirm)
+        failed += temp_pass(args.confirm)
     return 1 if failed else 0
 
 
