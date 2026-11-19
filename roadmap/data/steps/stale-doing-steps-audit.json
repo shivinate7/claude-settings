@@ -1,0 +1,14 @@
+{
+ "id": "stale-doing-steps-audit",
+ "title": "Set stale doing steps to done or todo after a REST recheck of each PR",
+ "priority": "now",
+ "status": "done",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "triage",
+ "blockedBy": [],
+ "updatedAt": "2026-11-19T03:31:58Z",
+ "why": "Coordinator's ask to triage 12, 21:29 CST Nov 18, so he can archive lanes whose steps are done. Audit table: plans/step-audit-2026-11-18.md.",
+ "source": "coordinator brief to triage 12, 21:29 CST Nov 18",
+ "note": "Landed: commit 91515b8 set 44 steps done (every PR merged, rechecked by REST 21:30 CST Nov 18) and 3 todo (PR closed unmerged). The coordinator got the provable lane ids in one message. The other 256 doing steps wait."
+}
