@@ -154,6 +154,27 @@ skips_case pass "records-only run: every job the run did not start passes as ski
 skips_case fail "records-only flag not true: the same skipped jobs stay red" "$map_json" "{$RECORDS_NOT_ONLY,$MAC_SKIPPED,$RECORDS_JOBS_SKIPPED,$LINT_OK}"
 skips_case fail "records-only run with a failed needed job: the rollup stays red" "$map_json" "{$RECORDS_ONLY,$MAC_SKIPPED,$RECORDS_JOBS_SKIPPED,\"checks-windows\":{\"result\":\"failure\"},$LINT_OK}"
 skips_case fail "records-only run with the scope job failed: the skipped jobs stay red" "$map_json" "{$RECORDS_SCOPE_FAILED,$MAC_SKIPPED,$RECORDS_JOBS_SKIPPED,$LINT_OK}"
+# (h) A proof-run skip (actions/push-skip/push-skip.py): a pull_request run whose push-skip job read a proof (skip "true" and digits
+# in proof_run) passes each job it skipped. The caller passes SCOPE_SKIPS '{}' (checks.yml), so no map names these jobs. A proven run
+# skips its scope job too. Each control below changes one thing from the proven run.
+PS_PROVEN='"push-skip":{"result":"success","outputs":{"skip":"true","proof_run":"123456789"}}'
+PS_EMPTY='"push-skip":{"result":"success","outputs":{"skip":"true","proof_run":""}}'
+PS_ABSENT='"push-skip":{"result":"success","outputs":{"skip":"true"}}'
+PS_NONNUM='"push-skip":{"result":"success","outputs":{"skip":"true","proof_run":"abc"}}'
+PS_SKIP_FALSE='"push-skip":{"result":"success","outputs":{"skip":"false","proof_run":"123456789"}}'
+PS_FAILED='"push-skip":{"result":"failure","outputs":{"skip":"true","proof_run":"123456789"}}'
+PROOF_SKIPPED='"scope":{"result":"skipped"},"checks":{"result":"skipped"},"checks-hooks":{"result":"skipped"}'
+PROOF_REST='"nightly-skip":{"result":"success","outputs":{"skip":""}},"lint":{"result":"success"}'
+PROOF_FULL_SKIPPED=$(for i in $(seq -w 1 40); do printf '"job-%s":{"result":"skipped"},' "$i"; done)
+skips_case pass "proof run: push-skip read a proof, and every job it skipped passes" '{}' "{$PS_PROVEN,$PROOF_SKIPPED,$PROOF_REST}"
+skips_case pass "proof run, full size: 40 skipped jobs pass on the same proof" '{}' "{$PS_PROVEN,$PROOF_SKIPPED,$PROOF_FULL_SKIPPED$PROOF_REST}"
+skips_case fail "proof run: an empty proof_run stays red" '{}' "{$PS_EMPTY,$PROOF_SKIPPED,$PROOF_REST}"
+skips_case fail "proof run: an absent proof_run stays red" '{}' "{$PS_ABSENT,$PROOF_SKIPPED,$PROOF_REST}"
+skips_case fail "proof run: a non-numeric proof_run stays red" '{}' "{$PS_NONNUM,$PROOF_SKIPPED,$PROOF_REST}"
+skips_case fail "proof run: skip not true stays red" '{}' "{$PS_SKIP_FALSE,$PROOF_SKIPPED,$PROOF_REST}"
+skips_case fail "proof run: a failed push-skip stays red" '{}' "{$PS_FAILED,$PROOF_SKIPPED,$PROOF_REST}"
+skips_case fail "proof run: a failed needed job stays red" '{}' "{$PS_PROVEN,$PROOF_SKIPPED,$PROOF_REST,\"checks-windows\":{\"result\":\"failure\"}}"
+unset_case fail "proof run: SCOPE_SKIPS unset stays red" "{$PS_PROVEN,$PROOF_SKIPPED,$PROOF_REST}"
 # (i) action.yml declares scope-skips as an optional input with default '', and its one step passes it to check.sh as SCOPE_SKIPS.
 inputs_static() { # inputs_static <action.yml>: one line per problem, none when clean
   python3 -I - "$1" <<'PY'
