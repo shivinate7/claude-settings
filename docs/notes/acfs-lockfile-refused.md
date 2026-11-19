@@ -1,0 +1,1 @@
+- acfs-lockfile-refused: (#2334) a lockfile is not a generated page, so package.json named alone refuses package-lock.json.

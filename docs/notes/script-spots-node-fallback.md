@@ -1,0 +1,1 @@
+- script-spots-node-fallback: In hooks/guard_env.py, script_spots reads a node -e script as bare shell text in its whole-script fallback. A shell verb inside quotes is missed, so `node -e "...execSync('cp /tmp/x ' + p)"` and `'tee ' + p` pass where main refuses. No fix yet; the fallback should refuse more, never less (PR #1186).

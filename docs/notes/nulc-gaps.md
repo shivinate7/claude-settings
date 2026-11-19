@@ -1,0 +1,1 @@
+- nulc-gaps: (#1099 no-undo-lane-commits, coordinator 02:03 CST Nov 10) a read before the cloud gate is still invisible to the cost checks; the twin-heavy count direction is unpinned; the local-session cost case cannot go red.

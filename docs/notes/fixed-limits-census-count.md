@@ -1,0 +1,1 @@
+- fixed-limits-census-count: Lane fixed-number-limits-census (coordinator 11:22 CST Nov 12): 63 fixed limits found (R37 said ~45): 7 owner-ruled, 37 decision-only, 19 with no ruling. Sim-lease clash on page item 554 sim-lease-load-measure.

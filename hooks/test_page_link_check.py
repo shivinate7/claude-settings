@@ -24,6 +24,7 @@ sys.path.insert(0, HERE)
 import test_waiting_export as twe  # noqa: E402  the shared fixtures and run_stop (one home)
 from shared_names import MACHINE_TAGS, TASK_NOTIFICATION_TAG  # noqa: E402  the machine notice tags, one home
 import layout  # noqa: E402  the registry and the waiting page id (lint/layout.py)
+import report_guard as RG  # noqa: E402  the one home of the correction tail, CORRECTION_TAIL (lint/report_guard.py)
 
 LINK = "https://claude.ai/artifact/"  # the link form the reason names
 CODE_URL = "https://claude.ai/code/artifact/" + twe.PAGE_ID  # the same artifact, the other URL form
@@ -79,6 +80,7 @@ def expect_link_block(name, p):
     reason = obj.get("reason") or ""
     twe.check(name + ": the reason names no frozen hook or settings file",
               not any(word in reason for word in FROZEN_NAMES), reason)
+    return obj
 
 
 # --------------------------------------------------------------------------- block cases (red on the old code)
@@ -153,6 +155,16 @@ def case_p11_full_size_turn_with_no_link_blocks():
     twe.check("P11 scope: the turn holds %d or more records" % twe.FULL_SIZE, len(records) > twe.FULL_SIZE,
               len(records))
     expect_link_block("P11", twe.run_stop("p11", page_repo("p11"), records))
+
+
+def case_p12_link_refusal_ends_with_the_correction_tail():
+    """P01 read for its ending: the refusal ends with report_guard.CORRECTION_TAIL, the one shared line that every
+    reply refusal but a missing report ends with."""
+    obj = expect_link_block("P12", twe.run_stop("p12", page_repo("p12"), page_turn("Done.")))
+    reason = obj.get("reason") or ""
+    tail = getattr(RG, "CORRECTION_TAIL", "")
+    twe.check("P12: the link refusal ends with report_guard.CORRECTION_TAIL", bool(tail) and reason.endswith(tail),
+              "tail=%r reason=%r" % (tail, reason))
 
 
 # --------------------------------------------------------------------------- pass cases (green on the old code)
@@ -307,6 +319,7 @@ CASES = (
     case_p09_reply_links_an_id_that_only_starts_with_the_page_id_blocks,
     case_p10_queue_page_reply_with_the_old_id_blocks,
     case_p11_full_size_turn_with_no_link_blocks,
+    case_p12_link_refusal_ends_with_the_correction_tail,
     case_g01_reply_with_the_link_passes,
     case_g02_code_form_link_passes,
     case_g03_queue_page_reply_with_its_own_link_passes,

@@ -1,0 +1,1 @@
+- r-item-579-superseded-2844: 09:50 CST Nov 13 (coordinator, retro 09:45): #2844 closes as superseded, since owner item 579 b replaced its four-part form. The lane (session_013NEJL24eof56PM2RAz6pr5) was woken to review and land #2963 and #2999; #2963 was handed in with no review record on Nov 12.

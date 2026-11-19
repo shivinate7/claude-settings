@@ -1,0 +1,1 @@
+- desktop-cannot-reach-cloud: a local desktop session cannot reach the cloud coordinator (send_message: not found; SendMessage refused by guard sendmessage-session-id); its results come back only by owner paste.

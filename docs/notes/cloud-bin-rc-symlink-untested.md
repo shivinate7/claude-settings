@@ -1,0 +1,1 @@
+- cloud-bin-rc-symlink-untested: (#2528 round 3) no test case covers a symlinked rc file or a failed rc write, so a mutant that drops readlink -f passes.

@@ -1,0 +1,1 @@
+- dead-wait-blockedby-unread: skills/roadmap/SKILL.md:299 tells the reader to clear a dead wait by naming the step in blockedBy, but the row never reads blockedBy; it clears only when the text stops matching. The placement end (the step write path refuses a bare #N) is branch dead-pr-waits-place.

@@ -1,0 +1,1 @@
+- asmc-workflow-no-model: (#2486 agent-served-model-check, coordinator 01:33 CST Nov 10; decision agent-model-cap) a Workflow agent() with no model is not judged.

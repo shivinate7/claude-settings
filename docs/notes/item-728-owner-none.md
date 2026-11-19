@@ -1,0 +1,1 @@
+- item-728-owner-none: 12:14 CST Nov 13: item 728 (route 1 now, route 2 after #2980): the owner answered none, "explain the tradeoff more"; the item was rewritten in plain words 12:14 CST Nov 13. Open.

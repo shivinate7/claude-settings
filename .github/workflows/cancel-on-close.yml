@@ -1,0 +1,41 @@
+name: cancel-on-close
+
+# A closed PR leaves its queued and running checks.yml jobs on the runner queue. This workflow cancels them when the
+# PR closes. It is not in checks.yml and not a required check. The script is read from the default branch, never from
+# the PR, so a PR cannot change the script. A same-repo PR author can already write to the repo, and a fork's token is
+# read-only. The script re-reads the PR state and cancels nothing unless the PR is closed.
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+
+# One cancel per PR at a time; a second close waits instead of cancelling a cancel in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # A job's permissions replace the top level, so contents: read is repeated for the checkout.
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: read
+    steps:
+      # The default branch, not the PR's merge commit: the script must come from main.
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Cancel the closed PR's unfinished runs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: python3 .github/scripts/cancel_closed_pr_runs.py "$PR_NUMBER" "$REPO"

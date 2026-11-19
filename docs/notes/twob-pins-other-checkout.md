@@ -1,0 +1,1 @@
+- twob-pins-other-checkout: (#1583) the case "git -C <holder> checkout -B x ... denies by other-checkout" in hooks/test_guard.py pins other-checkout's verdict; it goes stale if other-checkout changes.

@@ -1,0 +1,1 @@
+- lost-lane-draft-3020: 10:05 CST Nov 13: lost lane. Draft #3020 (head bc0b812) was handed in 23:11 CST Nov 12 and was never batched or in the 111 audit. The lane session is idle. Runner 10 was told 10:05 CST Nov 13.

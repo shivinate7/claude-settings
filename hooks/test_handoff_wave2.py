@@ -942,6 +942,21 @@ UNREADABLE_SRC = "\n".join([
 ])
 
 
+# The guard's load brake reads the free space of the home drive (hooks/guard.py _read_disk). On a nearly full drive
+# it refuses every Agent call, which stops these cases before the compaction-audit step they pin. The brake has its
+# own cases (tests/guard/s39497-load-brake.py), so the guard runs here with the drive read as roomy. The launcher runs
+# the guard as __main__ with its own folder first on sys.path, as `python guard.py` does.
+ROOMY_DISK_SRC = "\n".join([
+    "import collections, os, runpy, shutil, sys",
+    "Usage = collections.namedtuple('Usage', 'total used free')",
+    "shutil.disk_usage = lambda path: Usage(total=100 * 2**30, used=20 * 2**30, free=80 * 2**30)",
+    "sys.argv = sys.argv[1:]",
+    "sys.path[0] = os.path.dirname(os.path.abspath(sys.argv[0]))",
+    "runpy.run_path(sys.argv[0], run_name='__main__')",
+    "",
+])
+
+
 def run_unreadable(c, launcher, module, flag):
     """One hook mode whose stdin read raises OSError. Not a JSON error: a failed read."""
     proc = subprocess.run([sys.executable, launcher, module, flag], input="", capture_output=True,
@@ -1145,8 +1160,8 @@ def guard_call(c, sid, tool, tool_input, agent_id=None):
     for name in ENV_DROP:
         env.pop(name, None)
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
-    proc = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True,
-                          text=True, env=env, cwd=c.proj, timeout=120)
+    proc = subprocess.run([sys.executable, "-c", ROOMY_DISK_SRC, GUARD], input=json.dumps(body),
+                          capture_output=True, text=True, env=env, cwd=c.proj, timeout=120)
     out = (proc.stdout or "").strip()
     if proc.returncode != 0:
         return "exit %d" % proc.returncode, tail(proc.stderr)

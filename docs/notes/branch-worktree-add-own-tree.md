@@ -1,0 +1,1 @@
+- branch-worktree-add-own-tree: `git worktree add -f <path> x`, run from the tree that holds x, passes, because the own-tree exclusion fits a checkout but not an add (hooks/guard_branch_worktree.py:249-250). Fix: for the add form, count the call's own tree as a holder. Not a hold. Decision: two-worktrees-one-branch.

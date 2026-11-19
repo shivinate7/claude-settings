@@ -1,0 +1,1 @@
+- page-1533-merge-tree-clean: page-checks-reach-triage 15:41 CST Nov 12: Coordinator 15:41 CST Nov 12: #1533 (a981a03fa) is clean by merge-tree against #2907, #2781, page-filing-check and page-filing-check-tests; it reads no item from the git copy and keeps main's export-freshness check; #2907's backup check on the merged tree finds 0. Nothing clashes with waiting-route-c.

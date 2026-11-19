@@ -1,1 +1,1 @@
-- ps-brace-assignment-passes: the PowerShell command check does not refuse a bash literal-brace assignment `NAME={ word`, and main passes it too; Claude would not write it by mistake (hooks/question_form.py PS_BASH_FORMS). Decision: act-in-place
+- ps-brace-assignment-passes: the PowerShell command check does not refuse a bash literal-brace assignment `NAME={ word`, and main passes it too; Claude would not write it by mistake (hooks/question_form.py PS_BASH_FORMS). Decision: act-in-place Seen: 2026-11-17 x1

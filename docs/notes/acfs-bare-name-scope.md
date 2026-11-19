@@ -1,0 +1,1 @@
+- acfs-bare-name-scope: (#2334 agent-commit-file-scope round 3, coordinator 01:17 CST Nov 10) a bare name with no extension (Makefile, Dockerfile), or a single-word folder with no slash, names nothing in brief scope.

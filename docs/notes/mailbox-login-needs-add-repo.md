@@ -1,0 +1,1 @@
+- mailbox-login-needs-add-repo: A cloud lane needs add_repo (push) on shivinate7/session-mailbox for mailbox login, or mail reads "unknown: auth". PR 2780 was handed to batch runner 10; after it merges, close PR 1366.

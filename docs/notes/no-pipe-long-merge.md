@@ -1,0 +1,1 @@
+- no-pipe-long-merge: Batch runner 10 piped `merge --batch-build` into tail, and the stall watcher ended its wait early, though the build itself finished. Proposed guard: refuse piping a long merge command. No harm, so a note only.

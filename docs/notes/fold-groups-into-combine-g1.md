@@ -1,0 +1,1 @@
+- fold-groups-into-combine-g1: 18:43 CST Nov 13 (coordinator 18:42): all four groups and #3301 fold into one PR (lane combine-g1); wrapper drafts #3301, #3305, #3306, #3307 are being closed by runner 10. #3272 head is 0f114f43b (round 1 FAIL, fix check PASS, both records at head; lint re-run pending).

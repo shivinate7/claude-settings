@@ -1,0 +1,1 @@
+- items-669-670-past-ruling: Triage 18:54 CST Nov 12: items 669 and 670 posted although decisions cull-guard-wrong-refusals and precompact-handoff (item 109 b) settled them. Fifth miss today (651, 662, 671, 669, 670).

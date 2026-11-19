@@ -1,0 +1,1 @@
+- page-row-title-room: on main, at 521-640 px and 100% text, a row title beside a press has 0-6em of room.
