@@ -1502,7 +1502,7 @@ class UnstartedItemsTests(unittest.TestCase):
             with self.subTest(reply=reply):
                 self.assertIsNone(self.verdict(reply, [self.BUILDER]))
 
-    def test_un_red_owner_word_does_not_exempt_a_wait_on_a_pr(self):
+    def test_un_red_grant_does_not_exempt_a_wait_on_a_pr(self):
         self.assert_refused_for_shared_file([
             # Catches: the owner exemption reads any "owner" word, so a PR wait with an owner review after it passes.
             (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge, owner reviews after",
@@ -1555,7 +1555,7 @@ class UnstartedItemsTests(unittest.TestCase):
                 self.assertIsNone(out, "%s: the turn was refused: %r" % (cause, out))
 
     def test_un_shared_path_names_the_shared_file(self):
-        # Control, passes at head: the same wait with no file is refused.
+        # Control: the same wait with no file is refused.
         self.assert_refused_for_shared_file([
             (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge",
              "control: a wait on a PR names no file"),
@@ -1579,7 +1579,7 @@ class UnstartedItemsTests(unittest.TestCase):
         ])
 
     def test_un_none_forms_name_no_waiting_item(self):
-        # Control, passes at head: a plain none with merged after it passes.
+        # Control: a plain none with merged after it passes.
         self.assert_passes_unstarted([
             (self.DONE + "> **Next** Unstarted: none, all merged", "control: a plain none with merged after it"),
         ])
@@ -1593,7 +1593,7 @@ class UnstartedItemsTests(unittest.TestCase):
         ])
 
     def test_un_bullet_under_unstarted_line_names_the_shared_file(self):
-        # Control, passes at head: the same wait on the Unstarted line is refused.
+        # Control: the same wait on the Unstarted line is refused.
         self.assert_refused_for_shared_file([
             (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge",
              "control: the wait on the Unstarted line names no file"),
@@ -1608,7 +1608,7 @@ class UnstartedItemsTests(unittest.TestCase):
         ])
 
     def test_un_landing_wait_without_shared_file_blocks(self):
-        # Control, passes at head: a wait for another lane to land is refused.
+        # Control: a wait for another lane to land is refused.
         self.assert_refused_for_shared_file([
             (self.DONE + "> **Next** Unstarted: lint-stub waits for lane ci-wait-no-ci-repo to land",
              "control: a wait for a lane to land names no file"),
