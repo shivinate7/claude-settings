@@ -71,6 +71,9 @@ Contract the page cases assume (the builder builds to it):
     <name>`, the copy written, exit 2, and no item held for that entry (an unread answers collection holds answered items).
   The picture checks of one run share one time budget. Items not checked when it runs out print
     `checks unknown: time budget spent, <k> item(s) not checked`; --check exits 3; export keeps its copy and its exit code.
+  Taken picks (owner ruling 15 Nov, step page-no-preselected-pick). A closed decision with a `taken` object, on a page with
+    no element id `tier-taken`, is held by --check and by an export: one line `held taken pick <n>: <why>` that names the
+    15 Nov ruling and step page-no-preselected-pick, exit 4. A page with the area, or an item with no `taken`, passes.
   Receipts, the sixth waiting collection: `receipts/<doc_id>.json` (a doc id may hold a dot, `park.colour-pick`) exports,
     is scanned, rebuilds and merges as the other five do, and the live page wins a merge. An export is append-only, as
     for every waiting collection: a receipt the copy holds and the fetch no longer lists stays. An emptied receipts fetch is unknown unless
@@ -3623,6 +3626,91 @@ class WaitingCollectionsHold(WaitingCollectionsRun, PictureChecks):
         self.assertNotIn(292, [n for n, _ in held_lines(r)],
                          "item 292 is held though its answer is read. Output:\n" + shown(r))
         self.assertEqual(r.returncode, 4, "a held item must exit 4. Output:\n" + shown(r))
+
+
+# ------------------------------------------------------- the taken-picks area: the export check, no picture needed
+
+# A built page with no taken-picks area: the seam is this text, not the template, so the cases do not move when the
+# template gains the area. The area is the element with id tier-taken (the mockup's marker), after the open tiers.
+TAKEN_MINIMAL_PAGE = ('<!doctype html><html><head><meta charset="utf-8"><title>Queue</title></head><body>\n'
+                      '<main id="list"><section id="tier-answered"></section></main>\n'
+                      '<script type="application/json" id="designData">{}</script>\n</body></html>\n')
+TAKEN_AREA_PAGE = TAKEN_MINIMAL_PAGE.replace('<main id="list">', '<main id="list"><section id="tier-taken"></section>', 1)
+TAKEN_ID = "taken-panel-colour"
+TAKEN_N = 911
+TAKEN_HELD_PREFIX = "held taken pick %d: " % TAKEN_N  # the line one taken pick with no area prints
+TAKEN_RULING = "15 Nov"  # the owner's ruling the held line names, with its step below
+TAKEN_STEP = "page-no-preselected-pick"
+
+
+ABSENT = object()  # a field set to ABSENT is left out of the item
+
+
+def taken_item(**changes):
+    """A closed decision that a session took for the owner: the `taken` object, no `stands` and no `pick`, and no option
+    preselected. The `closed` time makes it a line on today's page, so the export check runs on a closed item as the
+    owner sees it."""
+    doc = {"id": TAKEN_ID, "n": TAKEN_N, "kind": "decision", "status": "closed", "closed": "2026-11-18T18:00:00-06:00",
+           "added": "2026-11-15T00:23:00-06:00", "title": "Which colour does the panel take?", "short": "Panel colour",
+           "context": "Two colours for the detail panel, one under the scene and one over it.",
+           "why": "The darker one reads at phone width.",
+           "options": [{"key": "a", "label": "Dark", "gain": "Reads well.", "how": "Tap it.", "lose": "Less light."},
+                       {"key": "b", "label": "Light", "gain": "Airy.", "how": "Tap it.", "lose": "Less contrast."}],
+           "taken": {"by": "coordinator", "at": "2026-11-14T17:15:00-06:00", "what": "Dark, the darker colour.",
+                     "changes": "The panel colour changes from the default.", "over": "Light, the lighter colour."}}
+    doc.update(changes)
+    return {key: value for key, value in doc.items() if value is not ABSENT}
+
+
+class TakenArea(Copied):
+    """The export check on a taken pick (owner ruling 15 Nov, step page-no-preselected-pick): a closed decision with a
+    `taken` object is a pick a session took, and the built page must draw it in the taken-picks area (the element with id
+    tier-taken). Not gated: no picture runs, so no node or Chromium is needed."""
+
+    def check(self, items, page_text):
+        """--check on the fetched items and a page file holding `page_text`; the run, with nothing written."""
+        fetched = self.fetch(items=items, answers={}, meta={"page": META})
+        page = write_text(os.path.join(self.tmp.name, "taken-page.html"), page_text)
+        return self.run_cmd("--check", "--fetched", fetched, "--page", page)
+
+    def named_lines(self, r):
+        """The lines the run printed for the taken pick, `held taken pick 911: <why>`."""
+        return [line for line in verdict_lines(r) if line.startswith(TAKEN_HELD_PREFIX)]
+
+    def test_a_taken_pick_with_no_area_on_the_page_holds_the_check_and_names_the_ruling(self):
+        r = self.check({TAKEN_ID: taken_item()}, TAKEN_MINIMAL_PAGE)
+        named = self.named_lines(r)
+        self.assertEqual(len(named), 1, "--check printed no `held taken pick 911: <why>` line for a taken pick the page does "
+                                        "not draw in the taken-picks area (tier-taken). Output:\n" + shown(r))
+        self.assertIn(TAKEN_RULING, named[0], "the held line does not name the owner's 15 Nov ruling. Output:\n" + shown(r))
+        self.assertIn(TAKEN_STEP, named[0], "the held line does not name step page-no-preselected-pick. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 4, "a taken pick with no area must hold the check, exit 4. Output:\n" + shown(r))
+
+    def test_an_export_with_a_taken_pick_and_no_area_holds_the_export(self):
+        fetched = self.fetch(items={TAKEN_ID: taken_item()}, answers={}, meta={"page": META})
+        page = write_text(os.path.join(self.tmp.name, "taken-export.html"), TAKEN_MINIMAL_PAGE)
+        out = self.out()
+        r = self.export(fetched, out, page=page)
+        named = self.named_lines(r)
+        self.assertEqual(len(named), 1, "an export with a taken pick and no taken-picks area printed no `held taken pick 911: "
+                                        "<why>` line. Output:\n" + shown(r))
+        self.assertIn(TAKEN_RULING, named[0], "the export's held line does not name the 15 Nov ruling. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 4, "an export holding a taken pick must exit 4, as a held item does. Output:\n" + shown(r))
+
+    def test_control_the_same_taken_pick_passes_once_the_page_draws_the_area(self):
+        """Control, green on main: with the taken-picks area in the page, the check passes and holds nothing."""
+        r = self.check({TAKEN_ID: taken_item()}, TAKEN_AREA_PAGE)
+        self.assertIn("checks pass", verdict_lines(r), "a taken pick on a page that draws the area did not pass. Output:\n" + shown(r))
+        self.assertEqual(self.named_lines(r), [], "a taken pick held though the page draws the area. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 0, "a clean check must exit 0. Output:\n" + shown(r))
+
+    def test_control_a_closed_item_with_no_taken_object_needs_no_area(self):
+        """Control, green on main: a closed decision that no session took is a line on the page, not a taken pick, so a page
+        with no area passes the check."""
+        r = self.check({TAKEN_ID: taken_item(taken=ABSENT)}, TAKEN_MINIMAL_PAGE)
+        self.assertEqual(self.named_lines(r), [], "a closed item with no taken object was held as a taken pick. Output:\n" + shown(r))
+        self.assertIn("checks pass", verdict_lines(r), "a page with no taken pick did not pass the check. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 0, "a clean check must exit 0. Output:\n" + shown(r))
 
 
 if __name__ == "__main__":
