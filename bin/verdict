@@ -16,7 +16,7 @@ CHUNK, OVERLAP = 1 << 20, 256  # OVERLAP > longest marker
 KEEP = 86400
 HEADER = b"=== verdict run "
 EXEC = re.compile(r"Executed (\d+) tests?|Test run with (\d+) tests?\b.{0,100}?\bpassed after")  # XCTest summary, Swift Testing summary
-UT_RAN = re.compile(rb"^Ran (\d{1,10}) tests? in\b[^\n]*(?:\n(?:[ \t]*\n)*(OK|FAILED|NO TESTS RAN)\b([^\n]*))?", re.M)  # unittest's summary at a line start, with the result line that follows it, if any: a line that quotes it is no count
+UT_RAN = re.compile(rb"^Ran (\d{1,10}) tests? in\b[^\n]*(?:\n(?:[ \t\r]*\n)*(OK|FAILED|NO TESTS RAN)\b([^\n]*))?", re.M)  # unittest's summary at a line start, with the result line that follows it, if any: a line that quotes it is no count
 UT_SKIPS = re.compile(rb"\bskipped=0*[1-9]")  # `OK (skipped=N)`: the run is a skip, which the skip count reports
 ST_FAILED = re.compile(r"Test run with \d+ tests?\b.{0,100}?\bfailed after")  # `swift test` can exit 0 on it; its XCTest line says 0
 SGR = rb"\x1b\[[0-9;]*m"
