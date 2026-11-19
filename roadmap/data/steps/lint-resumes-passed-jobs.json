@@ -1,0 +1,14 @@
+{
+  "id": "lint-resumes-passed-jobs",
+  "title": "A lint that hits its time limit keeps each passed job, so a rerun runs only the rest",
+  "status": "doing",
+  "repo": "shivinate7/claude-settings",
+  "phase": "now",
+  "owner": "consultant",
+  "lane": "session_013NEJKz5AWFJhGvmCUoi6wQ",
+  "blockedBy": [],
+  "why": "Owner 13:10 CST Nov 19: \"how come lints aren't resumeable where they left off if they hit a time limit block\"; 13:12 CST: \"unironically build and land this right now\" (relayed by the consultant).",
+  "source": "Consultant 13:12 CST Nov 19 (relayed, his reading of merge --lane-lint not read by triage 12): it runs every job fresh in a new temp tree and keeps no per-job result; PR 3694 lost about 67 minutes. Shape: store each job's verdict on disk keyed by (head sha, base sha, job name, tool version); a rerun skips a job that passed at the same key and reruns failed, timed-out or never-run jobs. Cost: one small file per job, no watcher.",
+  "note": "Taken by the consultant, who builds it now (owner's word 13:12 CST). Not a triage lane.",
+  "updatedAt": "2026-11-19T19:15:27Z"
+}
