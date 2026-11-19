@@ -1932,6 +1932,23 @@ def case_export_scan_counts_a_claude_artifacts_db_delete_of_items():
           len(found) == 1 and found[0][2] == PAGE_URL, found)
 
 
+def case_export_scan_counts_a_claude_artifacts_db_write_batch_naming_items():
+    """The export scan counts a claude-artifacts db_write batch whose ops name their collections, with no top-level
+    collection, as one export write. Two ops write items and one writes answers, and the batch is still one write.
+    The ArtifactData batch of the same ops is the control, and it counts once on the old code too, so a failure on
+    the claude-artifacts batch names that batch alone."""
+    ops = [{"op": "update", "collection": "items", "doc_id": "disk-cleanup", "data": {"n": 98}},
+           {"op": "update", "collection": "items", "doc_id": "disk-cleanup-2", "data": {"n": 99}},
+           {"op": "set", "collection": "answers", "doc_id": "a-7k2", "data": {"n": 5}}]
+    control = export_writes([used_rec("ArtifactData", tool_input("batch", collection=None, doc_id=None, batch=ops))])
+    check("export scan: control, an ArtifactData batch whose ops name items is one export write to the page",
+          len(control) == 1 and control[0][2] == PAGE_URL, control)
+    found = export_writes([used_rec(CLAUDE_ARTIFACTS + "db_write", tool_input(
+        None, collection=None, doc_id=None, batch=ops))])
+    check("export scan: a claude-artifacts db_write batch whose ops name items is one export write to the page",
+          len(found) == 1 and found[0][2] == PAGE_URL, found)
+
+
 def case_page_claude_artifacts_read_with_action_set_proves_the_filing():
     """A claude-artifacts db_get, db_list or db_query whose input says action "set" is a read: the tool's name carries
     the verb, and the input's action does not override it. After the owner's send, its result returns item 98. The copy
@@ -3103,10 +3120,13 @@ def response_of(docs, form="string", extra=()):
 
 def tool_input(action, collection="answers", doc_id="a-7k2", **extra):
     """The tool_input of an ArtifactData call. doc_id None leaves the key out, as a list does. action None leaves
-    it out too: a claude-artifacts db tool carries its verb in its tool name, not in its input."""
+    it out too: a claude-artifacts db tool carries its verb in its tool name, not in its input. collection None
+    leaves the key out, as a batch names its collections in its ops."""
     obj = {"action": action, "url": PAGE_URL, "collection": collection}
     if action is None:
         del obj["action"]
+    if collection is None:
+        del obj["collection"]
     if doc_id is not None:
         obj["doc_id"] = doc_id
     obj.update(extra)
@@ -5058,6 +5078,7 @@ CASES = (
     case_page_claude_artifacts_db_write_proves_the_send,
     case_export_scan_counts_a_claude_artifacts_db_write_of_items,
     case_export_scan_counts_a_claude_artifacts_db_delete_of_items,
+    case_export_scan_counts_a_claude_artifacts_db_write_batch_naming_items,
     case_page_claude_artifacts_read_with_action_set_proves_the_filing,
     case_page_claude_artifacts_read_with_action_set_does_not_prove_the_send,
     case_page_claude_artifacts_db_write_with_action_get_proves_the_send,
