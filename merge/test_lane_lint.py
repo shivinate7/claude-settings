@@ -6446,5 +6446,48 @@ class LaneLintDiskFloor(LaneFixture):
         self.assert_names_landed_sweep(text, landed, tree)
 
 
+VERDICT_DIR_ENV = "MUTATE_VERDICT_DIR"  # the one name of the folder a mutate leg saves its verdicts in (hooks/test_mutate_shared.py ResumeTests names it too)
+
+
+class MutateLegVerdictDir(unittest.TestCase):
+    """mutate_run_check hands every shard leg one folder for the saved verdicts (MUTATE_VERDICT_DIR). The folder sits outside the lint
+    tree, which drop_worktree removes when the lint ends, and it is the same on each call, so a rerun of a leg that timed out reads
+    what the first run saved. Cost per case: two mutate_run_check calls on the head's three shard jobs, with the mutate command stubbed."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="mutate-leg-dir-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.wt = os.path.join(self.root, "lint-tree")
+        os.makedirs(os.path.join(self.wt, ".github", "workflows"))
+        with open(os.path.join(self.wt, *WORKFLOW_REL.split("/")), "w", encoding="utf-8", newline="\n") as f:
+            f.write(sharded_workflow(shard_jobs()))
+
+    def mutate_legs(self):
+        """One mutate_run_check call on the lint tree, with each mutate leg answered as a clean run. Return the env of each leg, in order."""
+        legs = []
+        real_sh = merge.sh
+
+        def sh_recording_legs(args, *rest, **kwargs):
+            if mutation_test_run(args):
+                legs.append(dict(kwargs.get("env") or {}))
+                return 0, mutate_report(694, 694, 0, 0)
+            return real_sh(args, *rest, **kwargs)
+
+        with unittest.mock.patch.object(merge, "sh", sh_recording_legs), contextlib.redirect_stdout(io.StringIO()):
+            merge.mutate_run_check(self.wt)
+        return legs
+
+    def test_each_shard_leg_gets_one_verdict_folder_outside_the_lint_tree_and_the_same_on_a_rerun(self):
+        first, second = self.mutate_legs(), self.mutate_legs()
+        self.assertEqual(len(first), 3, "precondition: the head's three shard legs did not all start, got %d" % len(first))
+        folders = [leg.get(VERDICT_DIR_ENV) for leg in first + second]
+        self.assertTrue(all(folders), "a shard leg got no %s in its env: %r" % (VERDICT_DIR_ENV, folders))
+        self.assertEqual(len(set(folders)), 1,
+                         "the shard legs and the rerun did not share one verdict folder: %r" % folders)
+        folder, tree = os.path.abspath(folders[0]), os.path.abspath(self.wt)
+        self.assertNotEqual(os.path.commonpath([folder, tree]), tree,
+                            "the verdict folder %s sits inside the lint tree, which drop_worktree removes" % folder)
+
+
 if __name__ == "__main__":
     unittest.main()
