@@ -237,6 +237,18 @@ def control_verdict(code, red, seen=(), ran=None):
     return None
 
 
+def names_required(red, required: str) -> bool:
+    """True when a FAIL line names the mutation's required case, or a distinctive fragment of its name."""
+    return any(required in line for line in red)
+
+
+def clean_verdict(code, red, required: str) -> bool:
+    """True when a result is a verdict a rerun may reuse: a clean SURVIVED (the suite exited 0), or a clean KILLED (a FAIL
+    line names `required`). A signal, a nonzero exit with no FAIL line, and a wrong cause are neither, so a rerun judges
+    the mutant again. It agrees with the clean reads of `report_verdict`."""
+    return code == 0 or names_required(red, required)
+
+
 def report_verdict(label: str, code, red, required: str, seen=()) -> str:
     """Classify and print one mutant's verdict. Returns "survived", "wrong_cause", or "killed".
 
@@ -251,7 +263,7 @@ def report_verdict(label: str, code, red, required: str, seen=()) -> str:
     if code == 0 or not red:
         print("SURVIVED    %-62s %2d red" % (label, len(red)), flush=True)
         return "survived"
-    if not any(required in line for line in red):
+    if not names_required(red, required):
         print("WRONG CAUSE %-62s %2d red, missing %r" % (
             label, len(red), required), flush=True)
         print_saw(list(red) + list(seen))
@@ -482,10 +494,12 @@ def run_mutants(entries, run_one, controls=None, control_of=None, verdict_key=No
         if saved is not None:
             return saved
         result = run_one(entry)
-        _label, _code, _red, _required, skip, *more = result
+        _label, code, red, required, skip, *more = result
         unknown_reason = more[1] if len(more) > 1 else None
-        # Only a green control saves. The pool started this control before this mutant, so the wait ends.
-        if control_of is not None and not skip and not unknown_reason and judged[control_of(entry)].result() is None:
+        # Only a green control saves, and only a clean verdict of it (clean_verdict). The pool started this control
+        # before this mutant, so the wait ends.
+        if (control_of is not None and not skip and not unknown_reason and clean_verdict(code, red, required)
+                and judged[control_of(entry)].result() is None):
             save_verdict(path, result)
         return result
 

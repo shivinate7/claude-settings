@@ -4707,7 +4707,8 @@ def mutation_parts(entry):
 
 # The folders a copied guard reads beside its hooks folder. lay_out and main copy each one from git's own list of its
 # files (`tracked_tree.copy_tracked`), and the saved-verdict key digests the same folders, so the key cannot drift from the copy.
-GUARD_READ_FOLDERS = ("lint", "janitor", "skills")
+# testing/ holds tracked_tree.py, which lays out those copies and which this module imports, so an edit there changes the key too.
+GUARD_READ_FOLDERS = ("lint", "janitor", "skills", "testing")
 # The files a copied guard reads, relative to the checkout: the simulator lease, the merge tool and the CI alarm's events.
 # guard_merge.py loads merge/merge.py (MERGE_TOOL_REL), which reads actions/ci-alarm/events.json (ALARM_EVENTS).
 # lay_out_guard_reads copies them, and the saved-verdict key digests the same files.
@@ -4722,7 +4723,7 @@ def lay_out_guard_reads(root: str) -> None:
     janitor/sweep.py and fails open without it.
     A guard copy gets its own `root`. The override copies sit one folder below `work`, so `main` calls this
     once on `work`. Cost (rule outcomes-mechanize-rules): per guard-family copy, three files (about 275 KB), and
-    `main` makes one more under `work`. The folders copy_tracked lays out add git's list (225 files, about 4.8 MB,
+    `main` makes one more under `work`. The folders copy_tracked lays out add git's list (253 files, about 5.4 MB,
     at this commit) to each copy. They stay until the run ends, when `work` is removed. Without these, arms that
     read them fail on every mutant alike, and the clean-layout control (`run_controls`) reads red."""
     checkout = os.path.dirname(HERE)
@@ -4876,7 +4877,7 @@ def verdict_digest(sources):
     read now so a test can point it elsewhere), then GUARD_READ_FOLDERS and GUARD_READ_FILES under the checkout, the roots
     lay_out copies from. An edit to any of them misses the saved verdicts. Each file is keyed by its path relative to its
     root, never an absolute path, so two checkouts with the same files share verdicts. Cost: a named run reads about 20 MB
-    (502 files under hooks, lint, janitor and skills, plus three files) once, before its first mutant. None when no verdict
+    (511 files under hooks, lint, janitor, skills and testing, plus three files) once, before its first mutant. None when no verdict
     folder is named: nothing is digested, saved or reused."""
     if not os.environ.get(mutate_shared.VERDICT_DIR_ENV):
         return None
