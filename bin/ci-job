@@ -116,14 +116,16 @@
 # the summary and each CI step's `start: <name>` line on stderr (before it runs, so a caller sees which CI step is running)
 # are one print.
 # Rerun cache: a step that passed is saved under its name, its script, the whole environment it runs with (VOLATILE_ENV aside), shell, directory, base
-# and the repo's path, a hash of the tree it tests as it stands when the step starts (the committed files plus uncommitted and untracked ones, minus
-# ignored ones, so a step that follows a writing step keys on what that step wrote) and a hash of the bin/, hooks/ and lint/ trees of this install
-# (never __pycache__ or .pyc). A rerun at the same key runs no such step and prints `PASS (cached)` for it. Never saved: an install step, or a step
+# commit, the HEAD commit (an amend with the same tree misses; the checkout's path is not keyed, so the same commit in another worktree hits), a hash
+# of the tree it tests as it stands when the step starts (the committed files plus uncommitted and untracked ones, minus ignored ones, so a step that
+# follows a writing step keys on what that step wrote) and a hash of the bin/, hooks/ and lint/ trees of this install plus, in this install and the
+# pointer checkout, the actions/ tree and the files bin/ste-changed names in LINT_FILES (never __pycache__ or .pyc). A rerun at the same key runs no
+# such step and prints `PASS (cached)` for it. Never saved: an install step, or a step
 # that failed, read unknown or skipped. A saved file that cannot be read is a miss. A pass ages from its save time: a hit does not refresh it, and
-# it misses 7 days after the save. Cost: per step that may be cached, one set of git processes (a temp index, add, write-tree); per run, one read of the
-# install's three trees; per pass, one file of under 1 KB in $XDG_CACHE_HOME (else ~/.cache) /claude-settings/ci-job-pass. A save prunes files saved
+# it misses 7 days after the save. Cost: per step that may be cached, one set of git processes (a temp index, add, write-tree, rev-parse); per run, one
+# read of those trees; per pass, one file of under 1 KB in $XDG_CACHE_HOME (else ~/.cache) /claude-settings/ci-job-pass. A save prunes files saved
 # over 7 days ago, and the store holds at most 300 files. No timer, no lasting process. CI_JOB_NO_CACHE=1 turns the cache off.
-import concurrent.futures, hashlib, json, os, re, shutil, subprocess, sys, tarfile, tempfile, threading, time
+import ast, concurrent.futures, hashlib, json, os, re, shutil, subprocess, sys, tarfile, tempfile, threading, time
 BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
@@ -656,7 +658,8 @@ def lint_workers():
 
 CACHE_MARK = "(cached) "  # the start of a cached step's line: its caller prints PASS (cached) and drops the mark
 CACHE_FILES, CACHE_DAYS = 300, 7
-VOLATILE_ENV = {"GITHUB_WORKSPACE", "VERDICT_LOG", "CI_JOB_LINT_WORKERS", "CI_JOB_NO_CACHE", "PWD", "OLDPWD", "SHLVL", "_", "COLUMNS", "LINES"}  # a variable that differs between runs and changes no step's result; GITHUB_WORKSPACE repeats the repo path, which the key holds once
+VOLATILE_ENV = {"GITHUB_WORKSPACE", "VERDICT_LOG", "CI_JOB_LINT_WORKERS", "CI_JOB_NO_CACHE", "PWD", "OLDPWD", "SHLVL", "_", "COLUMNS", "LINES",
+               "CLAUDE_CODE_SESSION_ID", "CLAUDE_PID", "TRACEPARENT", "CCR_SPAWN_TIMESTAMP_MS"}  # a variable that differs between runs and changes no step's result; GITHUB_WORKSPACE repeats the repo path, which the key holds once
 TOOL_TREES = ("bin", "hooks", "lint")  # the folders of this install that a step may run or import
 TOOL_KEYS, TOOL_LOCK = {}, threading.Lock()  # the install's hash, read once per run: no step of a run changes the tool
 
@@ -690,22 +693,59 @@ def tree_key(top):
     return None
 
 
+def lint_files():
+    """The files bin/ste-changed names in its LINT_FILES (the files the ste-lint CI step runs), read from its source, never copied here.
+    () when that source cannot be read or holds no such tuple: those files are then not keyed, and bin/ itself still is."""
+    try:
+        with open(os.path.join(BIN, "ste-changed"), encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "LINT_FILES" for t in node.targets):
+                return tuple(v for v in ast.literal_eval(node.value) if isinstance(v, str))
+    except (OSError, SyntaxError, ValueError):
+        pass
+    return ()
+
+
+def tool_roots():
+    """The roots a remote uses: step or the ste-lint step runs files from: this install, then the pointer checkout when there is one."""
+    roots = [os.path.dirname(BIN)]
+    try:
+        from guard_pointer import pointer_checkout  # the one Python reader of the global rules file's @-line
+        roots.append(pointer_checkout())
+    except ImportError:
+        pass
+    return [r for r in dict.fromkeys(os.path.realpath(r) for r in roots if r) if os.path.isdir(r)]
+
+
 def tool_key():
-    """A hash of every file under the bin/, hooks/ and lint/ folders of this install (never __pycache__ or .pyc), each named by its path,
-    or None when one cannot be read. Read once per run. A step may run or import any of them."""
+    """A hash of every file a step may run or import, each named by its path (never __pycache__ or .pyc), or None when one cannot be read: the
+    bin/, hooks/ and lint/ folders of this install, then in this install and the pointer checkout the actions/ folder (a remote uses: step
+    runs its files from there) and the files bin/ste-changed names in LINT_FILES. A file that is absent is left out. Read once per run."""
     with TOOL_LOCK:
         if "key" not in TOOL_KEYS:
-            root, digest = os.path.dirname(BIN), hashlib.sha256()
+            digest = hashlib.sha256()
             try:
-                for tree in TOOL_TREES:
-                    for dirpath, dirs, names in os.walk(os.path.join(root, tree)):
+                root = os.path.dirname(BIN)
+
+                def add(rel, base):
+                    with open(os.path.join(base, rel), "rb") as f:
+                        digest.update(base.encode() + b"\0" + rel.replace(os.sep, "/").encode() + b"\0" + hashlib.sha256(f.read()).digest())
+
+                def add_tree(tree, base):
+                    for dirpath, dirs, names in os.walk(os.path.join(base, tree)):
                         dirs[:] = sorted(d for d in dirs if d != "__pycache__")
                         for fname in sorted(names):
-                            if fname.endswith(".pyc"):
-                                continue
-                            path = os.path.join(dirpath, fname)
-                            with open(path, "rb") as f:
-                                digest.update(os.path.relpath(path, root).replace(os.sep, "/").encode() + b"\0" + hashlib.sha256(f.read()).digest())
+                            if not fname.endswith(".pyc"):
+                                add(os.path.relpath(os.path.join(dirpath, fname), base), base)
+
+                for tree in TOOL_TREES:
+                    add_tree(tree, root)
+                for base in tool_roots():
+                    add_tree("actions", base)
+                    for rel in lint_files():
+                        if os.path.isfile(os.path.join(base, rel)):
+                            add(rel, base)
                 TOOL_KEYS["key"] = digest.hexdigest()
             except OSError:
                 TOOL_KEYS["key"] = None
@@ -723,11 +763,11 @@ def cache_key(name, install, detail, shell, env, cwd, ctx, suite):
     top, base, values, pinned = ctx
     if install or os.environ.get("CI_JOB_NO_CACHE") or not detail:
         return None
-    tree, tool = tree_key(top), tool_key()
-    if tree is None or tool is None:
+    tree, tool, head = tree_key(top), tool_key(), git("rev-parse", "HEAD", cwd=top)  # the commit too: a step may read its message, which an amend changes under one tree
+    if tree is None or tool is None or not head:
         return None
     parts = [name, detail, shell[0], cwd or "", str(bool(suite)), str(bool(pinned)), values.get("base", ""),
-             values.get("github.event.pull_request.base.sha", ""), tree, tool, os.path.realpath(top),
+             values.get("github.event.pull_request.base.sha", ""), head, tree, tool,
              *("%s=%s" % kv for kv in sorted(child_env(env, base, values).items()) if kv[0] not in VOLATILE_ENV)]
     return hashlib.sha256("\0".join(parts).encode("utf-8", "replace")).hexdigest()
 
