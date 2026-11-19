@@ -1,0 +1,14 @@
+{
+ "id": "agent-model-rows-stale",
+ "title": "Agent files and the model-per-role table agree with the rulings on which model each role runs",
+ "priority": "now",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "consultant",
+ "blockedBy": [],
+ "updatedAt": "2026-11-19T04:15:06Z",
+ "why": "Coordinator's pick on the owner's typed ask at 22:13 CST Nov 18 (\"the brief is stalely built message consultant to fix it\"). The coordinator read on main: agents/test-author.md, agents/reviewer.md and agents/record-writer.md say model: haiku, and docs/decisions/agent-model-cap.md line 28 reads \"test-author | haiku | xhigh\". He says CLAUDE.md makes Sonnet the ceiling and hook agent-model-floor refuses a spawn that names haiku, so a spawn with no model field ran Haiku 5.5 (his test-author and round 1 reviewer today).",
+ "source": "coordinator 22:14 CST Nov 18, relayed by triage 12; the coordinator's pick, not owner-typed beyond the quoted ask",
+ "note": "Todo, owner of the fix: the consultant (session_013NEJKz5AWFJhGvmCUoi6wQ, told by the coordinator 22:13 CST). Triage read the three agent files and the table row on main by REST at 22:14 CST: all four say haiku. Not read by triage: the agent-model-floor hook, and the claim that it refuses haiku. Read first: done step round1-haiku-xhigh (round-1 reviewers run Haiku at xhigh by ruling) and step agent-model-unnamed-spawn; Sonnet as a ceiling does not itself forbid Haiku, so the stale part may be the brief, the floor hook or the files. Related: docs/todo.md line 9 (step c201); the consultant decides whether this joins it."
+}
