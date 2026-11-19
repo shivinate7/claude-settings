@@ -5159,12 +5159,16 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         own_folders = index == 0 and not whole_reading
         for number, part in enumerate(text_segments):
             # The command's own segments are read in the folder the shell holds when each runs, so a
-            # `cd` after a destructive segment moves nothing that ran before it. Three things keep
-            # the whole-command reading of `command_root`: a substitution (it runs where the whole
-            # command ends its `cd` chain), a command with a `--work-tree`, `git -C` or `env -C`
-            # (`_run_dir` reads the first `-C` for every segment, as the owner ruled), and a
-            # command with a heredoc (`dir_before_segment` reads a body line as a live segment).
-            here = dir_before_segment(text_segments, number, cwd, text_ends) if own_folders else None
+            # `cd` after a destructive segment moves nothing that ran before it. Four things keep
+            # the whole-command reading of `command_root`: a substitution (it runs where its own
+            # segment stands, which the whole-command root is kept for, as main reads it), a command
+            # with a `--work-tree`, `git -C` or `env -C` (`_run_dir` reads the first `-C` for every
+            # segment, as the owner ruled), a command with a heredoc (`dir_before_segment` reads a
+            # body line as a live segment), and a segment after a `cd` that may not have run.
+            maybe = []
+            here = dir_before_segment(text_segments, number, cwd, text_ends, uncertain=maybe) if own_folders else None
+            if maybe and maybe[0]:
+                here = None
             judged.append((part, here))
     for segment, here in judged:
         if not segment.strip():
