@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cases for hooks/start_check.py, the SessionStart hook. On a startup it flags the session with additionalContext
-when the model is below the floor (decision agent-model-cap) or when the machine is full (decision machine-load-brake).
-It never stops a session: its one line carries no continue key and no stopReason key. Stdlib only. Run it from the
+when the machine is full (decision machine-load-brake). It flags no model: a Haiku start is not flagged (decision
+start-checks-after-call). It never stops a session: its one line carries no continue key and no stopReason key. Stdlib only. Run it from the
 repository root:
 
     python3 hooks/test_start_check.py
@@ -11,9 +11,9 @@ from stdout, the exit code read back. A driver patches the load reading, the clo
 hooks/guard.py, then runs the hook file, so no case reads the real machine load. A case that expects silence first
 checks that the same reading at startup prints one flag, so a hook that never ran cannot pass as silent.
 
-It also covers hooks/start_session_audit.py, the PostToolUse audit of a start_session call. The owner's last typed word
-for haiku lifts the floor for a start (guard.owner_names_model reads the transcript the payload names). The cases here
-pin that neither hook then tells the session to do no work or to stop it.
+It also covers hooks/start_session_audit.py, the PostToolUse audit of a start_session call. It flags a start only when
+the calling session's handoff is unread. The cases here pin that a Haiku start gets no flag for its model in either
+hook, and that the audit's stop text comes only from an unread handoff.
 """
 import collections
 import json
@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.path.join(HERE, "start_check.py")
@@ -32,8 +33,10 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lin
 RUN_FOLDER = _test_temp.run_folder()
 sys.path.insert(0, HERE)
 import guard  # noqa: E402  the one home of the load reading, the cloud check and the model floor (hooks/guard.py)
+import precompact_handoff  # noqa: E402  the one home of the handoff and re-read flag paths
 
 HOOK_WAIT = 120  # a hang guard for the subprocess; no assert reads it
+SESSION = "start-check-cases"  # the session id every payload here carries, and the one whose handoff a case leaves unread
 ABSENT = object()  # a payload with no such key
 FULL = {"memory_pct": 96.0, "disk_free_gb": 50.0, "disk_total_gb": 100.0}
 BUSY = {"memory_pct": 90.0, "disk_free_gb": 50.0, "disk_total_gb": 100.0}
@@ -126,7 +129,7 @@ def run_hook(case, stdin_text, patch=None, cloud=False, hook=HOOK):
 
 
 def payload_text(case, source="startup", model=ABSENT, transcript=ABSENT):
-    body = {"session_id": "start-check-cases", "cwd": os.path.join(case, "cwd"), "hook_event_name": "SessionStart"}
+    body = {"session_id": SESSION, "cwd": os.path.join(case, "cwd"), "hook_event_name": "SessionStart"}
     if source is not ABSENT:
         body["source"] = source
     if model is not ABSENT:
@@ -150,12 +153,33 @@ def owner_transcript(case, text):
 def audit_payload_text(case, model, transcript=ABSENT):
     """A PostToolUse payload for a start_session call that started a session, as the desktop app sends it to
     hooks/start_session_audit.py."""
-    body = {"session_id": "start-check-cases", "cwd": os.path.join(case, "cwd"), "hook_event_name": "PostToolUse",
+    body = {"session_id": SESSION, "cwd": os.path.join(case, "cwd"), "hook_event_name": "PostToolUse",
             "tool_name": "mcp__ccd_session__start_session", "tool_input": {"model": model, "prompt": "Run the audit."},
             "tool_response": "Started session session_newcase01."}
     if transcript is not ABSENT:
         body["transcript_path"] = transcript
     return json.dumps(body)
+
+
+def leave_handoff_unread(case):
+    """The calling session's handoff, unread: the re-read flag and the handoff file, at the paths the handoff module
+    names (precompact_handoff, the one home of them), under the case's config folder. The audit flags only this."""
+    with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": os.path.join(case, "home", ".claude")}):
+        paths = (precompact_handoff.reread_flag_path(SESSION), precompact_handoff.handoff_path(SESSION))
+    for path in paths:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("handoff\n")
+
+
+def audit_run(model, text, unread):
+    """The audit's run on a start on `model`, with the owner's last typed turn `text` in the transcript the payload
+    names, and the calling session's handoff unread or not. The audit reads the handoff, not the turn."""
+    case = new_case()
+    transcript = owner_transcript(case, text)
+    if unread:
+        leave_handoff_unread(case)
+    return run_hook(case, audit_payload_text(case, model, transcript), hook=AUDIT)
 
 
 def flag_of(test, run, cause):
@@ -364,69 +388,74 @@ class CloudSession(unittest.TestCase):
         subject = run_hook(case, payload_text(case), {"reading": FULL}, cloud=True)
         assert_silent(self, subject, "startup on a full reading in a cloud session")
 
-    def test_cloud_session_keeps_the_model_floor_and_skips_the_brake(self):
+    def test_cloud_session_skips_the_brake_on_haiku_too(self):
         case = new_case()
-        run = run_hook(case, payload_text(case, model=HAIKU), {"reading": NORMAL}, cloud=True)
-        context = flag_of(self, run, "cloud startup on model %s" % HAIKU)
-        want = guard.floor_hit(guard.SESSION_TOOL, {"model": HAIKU})
-        self.assertTrue(want, "scope: guard.floor_hit does not name %s below the floor" % HAIKU)
-        assert_flag_facts(self, context, want, MODEL_DECISION, "cloud startup on %s" % HAIKU)
+        scope = run_hook(case, payload_text(case, model=HAIKU), {"reading": FULL})
+        flag_of(self, scope, "scope: non-cloud startup on model %s and a full reading" % HAIKU)
+        subject = run_hook(case, payload_text(case, model=HAIKU), {"reading": FULL}, cloud=True)
+        assert_silent(self, subject, "cloud startup on model %s and a full reading" % HAIKU)
         scope = run_hook(case, payload_text(case, model=SONNET), {"reading": FULL})
         flag_of(self, scope, "scope: non-cloud startup on a full reading with a good model")
         subject = run_hook(case, payload_text(case, model=SONNET), {"reading": FULL}, cloud=True)
         assert_silent(self, subject, "cloud startup on a full reading with a good model")
 
 
-class ModelFloor(unittest.TestCase):
-    def test_haiku_at_startup_flags_once_naming_the_model_and_decision(self):
-        case = new_case()
-        run = run_hook(case, payload_text(case, model=HAIKU), {"reading": NORMAL})
-        context = flag_of(self, run, "startup on model %s" % HAIKU)
-        want = guard.floor_hit(guard.SESSION_TOOL, {"model": HAIKU})
-        self.assertTrue(want, "scope: guard.floor_hit does not name %s below the floor" % HAIKU)
-        assert_flag_facts(self, context, want, MODEL_DECISION, "startup on %s" % HAIKU)
+class HaikuAtStartup(unittest.TestCase):
+    """No model floor at startup, by owner ruling (2026-11-18 19:03 CST): no guard sits on the floor. A Haiku start gets
+    no flag for its model. Each silence has a scope: the same payload on a full reading flags the load, so a hook that
+    never ran cannot pass as silent."""
 
-    def test_each_below_the_floor_spelling_flags(self):
+    def test_haiku_at_startup_is_not_flagged_for_the_model(self):
+        case = new_case()
+        scope = run_hook(case, payload_text(case, model=HAIKU), {"reading": FULL})
+        context = flag_of(self, scope, "scope: startup on model %s and a full reading" % HAIKU)
+        self.assertNotIn(HAIKU, context, "scope: the load flag names the model %s" % HAIKU)
+        run = run_hook(case, payload_text(case, model=HAIKU), {"reading": NORMAL})
+        assert_silent(self, run, "startup on model %s" % HAIKU)
+
+    def test_no_haiku_spelling_is_flagged_for_the_model(self):
         for model in (HAIKU, "haiku", "Claude-Haiku-5-5"):
             with self.subTest(model=model):
                 case = new_case()
+                scope = run_hook(case, payload_text(case, model=model), {"reading": FULL})
+                flag_of(self, scope, "scope: startup on model %s and a full reading" % model)
                 run = run_hook(case, payload_text(case, model=model), {"reading": NORMAL})
-                context = flag_of(self, run, "startup on model %s" % model)
-                self.assertIn(model, context, "startup on model %s: the flag does not name the model" % model)
+                assert_silent(self, run, "startup on model %s" % model)
 
     def test_sonnet_opus_and_no_model_print_nothing(self):
         case = new_case()
-        scope = run_hook(case, payload_text(case, model=HAIKU), {"reading": NORMAL})
-        flag_of(self, scope, "scope: startup on model %s" % HAIKU)
+        scope = run_hook(case, payload_text(case, model=HAIKU), {"reading": FULL})
+        flag_of(self, scope, "scope: startup on model %s and a full reading" % HAIKU)
         for model in (SONNET, OPUS, ABSENT, "", None):
             with self.subTest(model=model):
                 run = run_hook(case, payload_text(case, model=model), {"reading": NORMAL})
                 assert_silent(self, run, "startup on model %r" % (model,))
 
-    def test_the_floor_applies_only_at_startup(self):
+    def test_haiku_is_braked_only_at_startup(self):
         case = new_case()
-        scope = run_hook(case, payload_text(case, model=HAIKU), {"reading": NORMAL})
-        flag_of(self, scope, "scope: startup on model %s" % HAIKU)
+        scope = run_hook(case, payload_text(case, model=HAIKU), {"reading": FULL})
+        flag_of(self, scope, "scope: startup on model %s and a full reading" % HAIKU)
         for source in ("resume", "compact", "clear", "fork"):
             with self.subTest(source=source):
-                run = run_hook(case, payload_text(case, source=source, model=HAIKU), {"reading": NORMAL})
-                assert_silent(self, run, "source %s on model %s" % (source, HAIKU))
+                run = run_hook(case, payload_text(case, source=source, model=HAIKU), {"reading": FULL})
+                assert_silent(self, run, "source %s on model %s and a full reading" % (source, HAIKU))
 
-    def test_a_haiku_startup_on_a_full_machine_gives_one_flag_naming_the_model(self):
-        # The model is checked before the load, so this one flag names the model.
+    def test_a_haiku_startup_on_a_full_machine_gives_one_flag_for_the_load(self):
+        # The load is still braked at startup. The one flag names the reading and the load decision, never the model.
         case = new_case()
         run = run_hook(case, payload_text(case, model=HAIKU), {"reading": FULL})
         context = flag_of(self, run, "startup on model %s and a full reading" % HAIKU)
-        want = guard.floor_hit(guard.SESSION_TOOL, {"model": HAIKU})
-        self.assertTrue(want, "scope: guard.floor_hit does not name %s below the floor" % HAIKU)
-        self.assertIn(want, context, "startup on %s and a full reading: the flag does not name the model" % HAIKU)
-        self.assertIn(MODEL_DECISION, context,
-                      "startup on %s and a full reading: the flag does not name %s" % (HAIKU, MODEL_DECISION))
+        self.assertIn("96.0", context, "startup on %s and a full reading: the flag does not name the reading" % HAIKU)
+        self.assertIn(LOAD_DECISION, context,
+                      "startup on %s and a full reading: the flag does not name %s" % (HAIKU, LOAD_DECISION))
+        self.assertNotIn(HAIKU, context, "startup on %s and a full reading: the flag names the model" % HAIKU)
+        self.assertNotIn(MODEL_DECISION, context,
+                         "startup on %s and a full reading: the flag names %s" % (HAIKU, MODEL_DECISION))
 
 
 class OwnersWordForHaiku(unittest.TestCase):
-    """The owner's last typed turn names haiku, so guard.owner_names_model lifts the floor for this start. The flag must
-    then not tell the session to do no work. The hook reads the transcript its payload names, so each case writes one."""
+    """The owner's last typed turn names haiku or negates it. The start hook reads no model and no turn, so the word
+    changes no flag here: a normal machine stays unflagged. Each case writes the transcript its payload names."""
 
     def test_a_startup_on_haiku_the_owner_named_is_not_told_to_do_no_work(self):
         case = new_case()
@@ -441,21 +470,21 @@ class OwnersWordForHaiku(unittest.TestCase):
                              "startup on %s with the owner's word for haiku: the flag tells the session %r, which the "
                              "owner's word lifts: %r" % (HAIKU, token, context))
 
-    def test_a_startup_on_haiku_with_the_owners_word_negated_keeps_the_no_work_text(self):
+    def test_a_startup_on_haiku_with_the_owners_word_negated_is_not_flagged(self):
         case = new_case()
         transcript = owner_transcript(case, "Don't use haiku.")
         self.assertFalse(guard.owner_names_model({"transcript_path": transcript}, HAIKU),
                          "scope: guard.owner_names_model reads the negated turn \"Don't use haiku.\" as the owner's word")
+        scope = run_hook(case, payload_text(case, model=HAIKU, transcript=transcript), {"reading": FULL})
+        flag_of(self, scope, "scope: startup on %s with the owner's negated word and a full reading" % HAIKU)
         run = run_hook(case, payload_text(case, model=HAIKU, transcript=transcript), {"reading": NORMAL})
-        context = flag_of(self, run, "startup on %s with the owner's negated word for haiku" % HAIKU)
-        want = guard.floor_hit(guard.SESSION_TOOL, {"model": HAIKU})
-        assert_flag_facts(self, context, want, MODEL_DECISION, "startup on %s with the owner's negated word for haiku" % HAIKU)
+        assert_silent(self, run, "startup on %s with the owner's negated word for haiku" % HAIKU)
 
 
 class StartSessionAudit(unittest.TestCase):
-    """hooks/start_session_audit.py, run after a start_session call. A start the owner's word names for haiku is no bad
-    start, so the audit must not tell the caller to stop it. A start with no owner word, or with the word negated, is still
-    a bad start and is still stopped."""
+    """hooks/start_session_audit.py, run after a start_session call. It stops a start only for an unread handoff, so a
+    start on haiku is not told to stop it, with or without the owner's word. Each silence has a scope: the same start with
+    its handoff unread is told to stop it, so a dead audit cannot pass as silent."""
 
     def test_an_audit_of_a_start_on_haiku_the_owner_named_does_not_tell_the_caller_to_stop_it(self):
         case = new_case()
@@ -470,36 +499,36 @@ class StartSessionAudit(unittest.TestCase):
                              "audit of a start on %s the owner named: the text tells the caller %r, which the owner's word "
                              "lifts: %r" % (HAIKU, token, context))
 
-    def test_an_audit_of_a_start_on_haiku_with_no_owner_word_still_tells_the_caller_to_stop_it(self):
-        case = new_case()
-        transcript = owner_transcript(case, "Run the model audit.")
-        self.assertFalse(guard.owner_names_model({"transcript_path": transcript}, HAIKU),
+    def test_an_audit_of_a_start_on_haiku_with_no_grant_does_not_tell_the_caller_to_stop_it(self):
+        premise = owner_transcript(new_case(), "Run the model audit.")
+        self.assertFalse(guard.owner_names_model({"transcript_path": premise}, HAIKU),
                          "scope: guard.owner_names_model reads a turn with no model name as the owner's word for haiku")
-        run = run_hook(case, audit_payload_text(case, HAIKU, transcript), hook=AUDIT)
-        context = audit_text(self, run, "audit of a start on %s with no owner word" % HAIKU)
-        self.assertIn("stop it", context.lower(),
-                      "audit of a start on %s with no owner word: the text does not tell the caller to stop it: %r"
-                      % (HAIKU, context))
-        self.assertIn(HAIKU, context, "audit of a start on %s with no owner word: the text does not name the model" % HAIKU)
+        scope = audit_run(HAIKU, "Run the model audit.", unread=True)
+        flagged = audit_text(self, scope, "scope: audit of a start on %s with an unread handoff" % HAIKU)
+        self.assertIn("stop it", flagged.lower(),
+                      "scope: the audit does not stop a start with an unread handoff: %r" % flagged)
+        run = audit_run(HAIKU, "Run the model audit.", unread=False)
+        self.assertEqual(audit_text(self, run, "audit of a start on %s with no grant" % HAIKU), "",
+                         "audit of a start on %s with no grant printed a flag" % HAIKU)
 
-    def test_an_audit_of_a_start_on_haiku_with_the_owners_word_negated_still_tells_the_caller_to_stop_it(self):
-        case = new_case()
-        transcript = owner_transcript(case, "Don't use haiku.")
-        self.assertFalse(guard.owner_names_model({"transcript_path": transcript}, HAIKU),
+    def test_an_audit_of_a_start_on_haiku_with_the_owners_word_negated_does_not_tell_the_caller_to_stop_it(self):
+        premise = owner_transcript(new_case(), "Don't use haiku.")
+        self.assertFalse(guard.owner_names_model({"transcript_path": premise}, HAIKU),
                          "scope: guard.owner_names_model reads the negated turn \"Don't use haiku.\" as the owner's word")
-        run = run_hook(case, audit_payload_text(case, HAIKU, transcript), hook=AUDIT)
-        context = audit_text(self, run, "audit of a start on %s with the owner's negated word" % HAIKU)
-        self.assertIn("stop it", context.lower(),
-                      "audit of a start on %s with the owner's negated word: the text does not tell the caller to stop it: %r"
-                      % (HAIKU, context))
+        scope = audit_run(HAIKU, "Don't use haiku.", unread=True)
+        flagged = audit_text(self, scope, "scope: audit of a start on %s with an unread handoff" % HAIKU)
+        self.assertIn("stop it", flagged.lower(), "scope: the audit does not stop a start with an unread handoff: %r" % flagged)
+        run = audit_run(HAIKU, "Don't use haiku.", unread=False)
+        self.assertEqual(audit_text(self, run, "audit of a start on %s with the owner's negated word" % HAIKU), "",
+                         "audit of a start on %s with the owner's negated word printed a flag" % HAIKU)
 
     def test_an_audit_of_a_start_on_sonnet_prints_nothing(self):
-        case = new_case()
-        scope = run_hook(case, audit_payload_text(case, HAIKU), hook=AUDIT)
-        flagged = audit_text(self, scope, "scope: audit of a start on %s with no owner word" % HAIKU)
+        scope = audit_run(SONNET, "Run the model audit.", unread=True)
+        flagged = audit_text(self, scope, "scope: audit of a start on %s with an unread handoff" % SONNET)
         self.assertIn("stop it", flagged.lower(),
-                      "scope: the audit does not flag a start on %s, so the silence below proves nothing: %r" % (HAIKU, flagged))
-        subject = run_hook(case, audit_payload_text(case, SONNET), hook=AUDIT)
+                      "scope: the audit does not stop a start on %s with an unread handoff, so the silence below proves "
+                      "nothing: %r" % (SONNET, flagged))
+        subject = audit_run(SONNET, "Run the model audit.", unread=False)
         self.assertEqual(audit_text(self, subject, "audit of a start on %s" % SONNET), "",
                          "audit of a start on %s printed a flag" % SONNET)
 
@@ -518,8 +547,8 @@ class FailOpen(unittest.TestCase):
 
     def test_guard_import_failure_on_a_haiku_startup_fails_open(self):
         case = new_case()
-        scope = run_hook(case, payload_text(case, model=HAIKU), {"reading": NORMAL})
-        flag_of(self, scope, "scope: startup on model %s with guard importable" % HAIKU)
+        scope = run_hook(case, payload_text(case, model=HAIKU), {"reading": FULL})
+        flag_of(self, scope, "scope: startup on model %s and a full reading with guard importable" % HAIKU)
         subject = run_hook(case, payload_text(case, model=HAIKU), {"hide": ["guard"]})
         assert_fails_open(self, subject, "startup on model %s with the guard import failing" % HAIKU)
 
@@ -541,12 +570,17 @@ class CostProof(unittest.TestCase):
         self.assertEqual((listing(case), listing(HERE)), before, "startup on a full reading wrote a file")
 
     def test_a_model_floor_flag_starts_no_process_and_writes_no_file(self):
+        """Cited by decision start-checks-after-call, so the name stays. A Haiku startup reads the load, starts no process
+        and writes no file."""
         case = new_case()
+        scope = run_hook(case, payload_text(case, model=HAIKU), {"reading": FULL})
+        flag_of(self, scope, "scope: startup on model %s and a full reading" % HAIKU)
         before = (listing(case), listing(HERE))
         run = run_hook(case, payload_text(case, model=HAIKU), {"reading": NORMAL})
-        flag_of(self, run, "scope: startup on model %s" % HAIKU)
-        self.assertNotIn("SPAWN", run.err, "a startup below the floor started a process")
-        self.assertEqual((listing(case), listing(HERE)), before, "a startup below the floor wrote a file")
+        assert_silent(self, run, "startup on model %s" % HAIKU)
+        self.assertIn("READ", run.err, "scope: a startup on model %s did not read the load" % HAIKU)
+        self.assertNotIn("SPAWN", run.err, "a startup on model %s started a process" % HAIKU)
+        self.assertEqual((listing(case), listing(HERE)), before, "a startup on model %s wrote a file" % HAIKU)
 
     def test_an_unflagged_startup_reads_the_load_and_starts_no_process(self):
         # No reading is patched, so the hook reads the real load on this machine. A flag, if any, is not asserted.
