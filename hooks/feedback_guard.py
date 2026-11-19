@@ -187,8 +187,8 @@ KINDS = ("ruling", "task", "question", "note", "standing", "page", "repo")
 JOT = re.compile(r"\[(%s)\]\s+->\s+\S" % "|".join(KINDS))
 PAGE_HOME = re.compile(r"page:(\d+)")
 SEND_TOOLS = _transcript.SEND_TOOLS  # the send predicates live in lint/_transcript.py, one home
-CLAUDE_ARTIFACTS = "mcp__claude-artifacts__"  # the claude-artifacts page tools; the verb is the tool name (db_get, db_list, db_query), not an action key
-ARTIFACT_DATA = _transcript.ARTIFACT_DATA + (CLAUDE_ARTIFACTS,)
+ARTIFACT_DATA = _transcript.ARTIFACT_DATA + (_transcript.CLAUDE_ARTIFACTS_DB,)  # read_artifact is no db tool, so it never matches
+_tool_verb = _transcript.tool_verb
 _writes_n = _transcript.writes_n
 _is_n = _transcript.is_n
 REPO_HOME = re.compile(r"repo:([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)")
@@ -806,15 +806,16 @@ def _proves(use, n):
     if name in SEND_TOOLS:
         msg = tool_input.get("message")
         return isinstance(msg, str) and re.search(r"(?<![A-Za-z0-9-])%s(?![A-Za-z0-9-])" % n, msg) is not None
-    return name.startswith(ARTIFACT_DATA) and _read_verb(use) is None and _writes_n(tool_input, n)
+    return name.startswith(ARTIFACT_DATA) and _read_verb(use) is None and _writes_n(tool_input, n, _tool_verb(name))
 
 
 def _read_verb(use):
-    """The read verb (get, list or query) of an ArtifactData action or a claude-artifacts db_<verb> tool name, else None."""
+    """The read verb (get, list or query) of an ArtifactData action or a claude-artifacts db_<verb> tool name, else None.
+    A claude-artifacts tool's name wins over its input's action."""
     name, inp = use.get("name") or "", use.get("input")
-    verb = inp.get("action") if isinstance(inp, dict) else None
-    if verb is None and name.startswith(CLAUDE_ARTIFACTS) and name[len(CLAUDE_ARTIFACTS):].startswith("db_"):
-        verb = name[len(CLAUDE_ARTIFACTS) + 3:]
+    verb = _tool_verb(name)
+    if verb is None:
+        verb = inp.get("action") if isinstance(inp, dict) else None
     return verb if verb in READ_VERBS else None
 
 
@@ -1399,11 +1400,18 @@ def _ts(rec):
     return _transcript.parse_utc_timestamp(rec.get("timestamp"))
 
 
-def _exported_write(inp, collections):
+def _exported_write(inp, collections, tool_verb=None):
     """True when an ArtifactData input writes (set, update, batch or delete) a collection the waiting copy
     exports: named by `collection`, or by a `doc_id` or `path` of the form `<collection>/...`. A batch that
-    names none is counted, since its writes are not read. `delete` is counted here and in no shared list."""
-    verb = inp.get("action", inp.get("op"))
+    names none is counted, since its writes are not read. `delete` is counted here and in no shared list.
+    A claude-artifacts `tool_verb` wins over the input's action: db_write and db_delete count, db_get, db_list
+    and db_query do not."""
+    if tool_verb is not None:
+        if tool_verb not in ("write", "delete"):
+            return False
+        verb = None
+    else:
+        verb = inp.get("action", inp.get("op"))
     if isinstance(verb, str) and verb not in _transcript.WRITE_VERBS + ("delete",):
         return False
     named = [inp["collection"]] if isinstance(inp.get("collection"), str) else [
@@ -1425,7 +1433,7 @@ def _scan_transcript(records, collections):
             if not isinstance(inp, dict) or when is None:
                 continue
             if name.startswith(ARTIFACT_DATA):
-                if _read_verb(use) is None and _exported_write(inp, collections) and isinstance(inp.get("url"), str):
+                if _read_verb(use) is None and _exported_write(inp, collections, _tool_verb(name)) and isinstance(inp.get("url"), str):
                     writes.append((when, use.get("id"), inp["url"]))
             elif name in SHELL_TOOLS and EXPORT_RUN.search(str(inp.get("command", ""))):
                 exports.append((when, use.get("id")))
