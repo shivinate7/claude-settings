@@ -1,4 +1,4 @@
-# section 43500
+# section 43503
 FAMILY = "handed-in-push"  # a push to a pull request's branch (roadmap step handed-in-push-needs-record; decision pr-review-record)
 
 # A Bash `git push` to the branch of an open pull request is refused when the pull request's newest review record is stale
@@ -29,8 +29,8 @@ HIP_CLONE_P = os.path.join(HIP_ROOT, "clone-p")      # live head P, a records-pa
 HIP_CLONE_C = os.path.join(HIP_ROOT, "clone-c")      # live head C, one commit on B (feat-three)
 HIP_CLONE_BK = os.path.join(HIP_ROOT, "clone-bk")    # live head B, with a second remote named backup
 HIP_BACKUP = os.path.join(HIP_ROOT, "backup.git")    # the bare repo backup names: not the repo the pull request lives in
-HIP_STAMP = json.dumps({"defaultBranch": "main", "kinds": [],
-                        "merge": {"method": "merge", "deadlineMinutes": 5, "afterMerge": [], "deleteBranch": True}})
+HIP_MERGE_CONFIG = json.dumps({"defaultBranch": "main", "kinds": [],
+                               "merge": {"method": "merge", "deadlineMinutes": 5, "afterMerge": [], "deleteBranch": True}})
 HIP_DEBT = "# Gap one\n\n- **What.** The check misses one case.\n- **Where.** x\n- **Decision.** none\n- **Retire.** y\n"
 REVIEW_PASS_ONE = [(1, "reviewer", "sonnet", "PASS")]  # the rounds of one record: one PASS round, or one FAIL round
 REVIEW_FAIL_ONE = [(1, "reviewer", "sonnet", "FAIL")]
@@ -97,8 +97,8 @@ def _hip_clone_at(where, sha):
 
 def _hip_comment(i, body):
     """An issue comment on the pull request, in the shape the comment reads answer, numbered and stamped by `i`."""
-    stamp = "2026-11-14T10:%02d:00Z" % i
-    return {"id": 7000 + i, "body": body, "created_at": stamp, "updated_at": stamp,
+    when = "2026-11-14T10:%02d:00Z" % i
+    return {"id": 7000 + i, "body": body, "created_at": when, "updated_at": when,
             "issue_url": "https://api.github.com/repos/y/x/issues/%d" % HIP_PR, "user": {"login": "o"},
             "author_association": "OWNER"}
 
@@ -122,7 +122,7 @@ def _hip_build():
     _hip_git(HIP_SEED, "init", "-q", "-b", "main", ".")
     _hip_git(HIP_SEED, "remote", "add", "origin", HIP_ORIGIN)
     _hip_git(HIP_ROOT, "init", "-q", "--bare", "-b", "main", HIP_BACKUP)
-    base = _hip_commit("base",{".github/stamp.json": HIP_STAMP, "debts/gap-one.md": HIP_DEBT,
+    base = _hip_commit("base",{".github/stamp.json": HIP_MERGE_CONFIG, "debts/gap-one.md": HIP_DEBT,  # glossary-ok: the merge tool's fixed config path, read by hooks/guard_merge.py; the case needs this name
                                 "README.md": "base\n", "feature.txt": "base\n"})
     _hip_git(HIP_SEED, "checkout", "-q", "-B", "feat", "main")
     z = _hip_commit("round one, reviewed", {"feature.txt": "z\n"})
