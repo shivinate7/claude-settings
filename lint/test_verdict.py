@@ -582,9 +582,11 @@ def printing(text, rc=0):
     return "import sys\nsys.stdout.write(%s)\nsys.exit(%d)\n" % (ascii(text), rc)  # ascii: the script file stays ASCII on any locale
 
 
-def unittest_run(skips, fails=0):
-    """Child code: a real unittest run of `skips` skipped tests and `fails` failing ones. Its output goes to stderr."""
-    body = ["import sys, unittest", "class T(unittest.TestCase):", "    def test_ok(self):", "        pass"]
+def unittest_run(skips, fails=0, oks=1):
+    """Child code: a real unittest run of `oks` passing, `skips` skipped and `fails` failing tests. Its output goes to stderr."""
+    body = ["import sys, unittest", "class T(unittest.TestCase):", "    pass"]
+    for i in range(oks):
+        body += ["    def test_ok%d(self):" % i, "        pass"]
     for i in range(skips):
         body += ["    def test_skip_%d(self):" % i, "        self.skipTest('shelved')"]
     for i in range(fails):
@@ -758,12 +760,14 @@ SHIM_SKIP = "the fake is a POSIX shell script; verdict names a Windows .cmd shim
 
 class NoTestCount(unittest.TestCase):
     """A run with no test count is unknown, so it is never PASS (verification-report-unknown-reads).
-    FAIL for a success marker with no count, and for a test command by argv with no count. PASS for a
+    FAIL for a success marker with no count, and for a test command by argv with no count. FAIL for a
+    unittest run that counts zero tests (`Ran 0 tests`), run directly or through sim-test. PASS for a
     run that is no counted test, and for a counted run wherever its count sits."""
     BUILD_OK = "** BUILD SUCCEEDED **"
     ST_PASS = "Test run with 3 tests passed after 0.001 seconds."  # Swift Testing's summary, no XCTest line
     XCT_12 = "Executed 12 tests, with 0 failures (0 unexpected) in 1.2 (1.3) seconds"
     assert_pass = Skips.assert_pass  # one home for the PASS check
+    assert_fail = Skips.assert_fail  # one home for the FAIL check
 
     def run_case(self, code=None, argv=None, shim=None):
         """Run one case with its log in this run's folder. Returns the run and the log's text."""
@@ -884,6 +888,51 @@ class NoTestCount(unittest.TestCase):
                 r, full = self.run_case(argv=["swift", "test", flag], shim=("swift", shim_script("AppTests.testFoo")))
                 self.assertIn("SHIM-RAN", full, "the fake never ran, so this run proves nothing")
                 self.assert_pass(r)
+
+    def test_unittest_zero_count_on_exit0_is_fail_no_tests_ran(self):
+        """A real unittest run of no tests prints `Ran 0 tests` and exits 0. The count is read, so the run is no pass."""
+        r, full = self.run_case(code=unittest_run(skips=0, oks=0))
+        self.assertIn("Ran 0 tests", full, "the unittest run never printed its count, so this run proves nothing")
+        self.assert_fail(r, 1, "no tests ran")
+
+    @unittest.skipIf(os.name == "nt", SHIM_SKIP)
+    def test_unittest_zero_count_through_sim_test_is_fail_no_tests_ran(self):
+        """sim-test --hold -- CMD passes its child's output on, so a zero count reads FAIL under argv sim-test too."""
+        shim = ("sim-test", shim_script("Ran 0 tests in 0.000s", "", "NO TESTS RAN"))
+        r, full = self.run_case(argv=["sim-test", "--hold", "--", "python3", "-m", "unittest"], shim=shim)
+        self.assertIn("SHIM-RAN", full, "the fake never ran, so this run proves nothing")
+        self.assert_fail(r, 1, "no tests ran")
+
+    def test_unittest_zero_count_after_one_mib_of_output_is_fail_no_tests_ran(self):
+        """Full size: the zero count sits past the first 1 MiB chunk, so the whole run is read for it."""
+        code = ("import sys\n"
+                "line = 'x' * 1023 + '\\n'\n"
+                "for _ in range(1100):\n"
+                "    sys.stdout.write(line)\n"
+                "sys.stdout.write('Ran 0 tests in 0.000s\\n\\nNO TESTS RAN\\n')\n")
+        r, full = self.run_case(code=code)
+        self.assertIn("Ran 0 tests", full, "the zero count never reached the log, so this run proves nothing")
+        self.assert_fail(r, 1, "no tests ran")
+
+    def test_unittest_five_tests_ok_stays_pass(self):
+        """Control: a real unittest run of five passing tests counts them and reads PASS."""
+        r, full = self.run_case(code=unittest_run(skips=0, oks=5))
+        self.assertIn("Ran 5 tests", full, "the unittest run never printed its count, so this run proves nothing")
+        self.assert_pass(r)
+
+    @unittest.skipIf(os.name == "nt", SHIM_SKIP)
+    def test_unittest_five_tests_ok_through_sim_test_stays_pass(self):
+        """Control: the same five-test output through sim-test reads PASS."""
+        shim = ("sim-test", shim_script("Ran 5 tests in 0.000s", "", "OK"))
+        r, full = self.run_case(argv=["sim-test", "--hold", "--", "python3", "-m", "unittest"], shim=shim)
+        self.assertIn("SHIM-RAN", full, "the fake never ran, so this run proves nothing")
+        self.assert_pass(r)
+
+    def test_zero_count_quoted_inside_a_line_stays_pass(self):
+        """Control: `Ran 0 tests` quoted inside a line of other text is no count, as an echoed success marker is no marker."""
+        r, full = self.run_case(code=printing("checked the old log: Ran 0 tests in 0.000s\n"))
+        self.assertIn("Ran 0 tests", full, "the quoted text never reached the log, so this run proves nothing")
+        self.assert_pass(r)
 
 
 def tearDownModule():
