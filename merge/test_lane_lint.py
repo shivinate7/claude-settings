@@ -27,10 +27,12 @@ BatchHeadMutation (class BatchHeadMutation) lints a touched lane's head at the b
 in a cloud session with the batch-runner role or with none; the shim's comment list holds the hand-off PASS record. Cost per case: one ci-job stub
 start, and one mutate stub start where the run starts. Its times are unmeasured since the batch-build cases were removed.
 LintResumesPassedJobs (class LintResumesPassedJobs) covers the saved PASS of a job: a rerun at the same key skips it, and every other key or state that is
-not a pass runs the job again. The key is the head sha, the base name and tip ci-job reads, the job name, the PR body and the tool's files (merge.py,
-bin/ci-job, bin/ste-changed, and the hooks and lint modules ci-job imports). Most cases first run scope_and_save, whose rerun must run no job. Saved
-results are pruned: after passes under new tool keys, few remain, and a .part file left by a crash or a kill is gone after the next save.
-Cost per case: at most four stub starts; a tool-copy case copies the repo's tree once; the prune cases make TOOL_KEYS lints (unmeasured).
+not a pass runs the job again. The key is the head sha, the base name and tip ci-job reads, the job name, the PR body, the TREE_CITES env that the
+ste-lint step reads, and the tool's files: merge.py, and every file the checks job runs from the tool's tree (the family cases name them). Most cases
+first run scope_and_save, whose rerun must run no job. Saved results are pruned: after passes under new tool keys, few remain, and a .part file left
+by a crash or a kill is gone after the next save.
+Cost per case: at most four stub starts; a tool-copy case copies the repo's tree once, and a family case once per file (unmeasured); the prune cases
+make TOOL_KEYS lints (unmeasured).
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import ast, atexit, contextlib, importlib.util, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, threading, time, types, unittest, unittest.mock, uuid
@@ -6447,11 +6449,12 @@ class LaneLintDiskFloor(LaneFixture):
 
 class LintResumesPassedJobs(LaneFixture):
     """A job that passes is saved, and a rerun at the same key skips it. The key is the head sha, the base name and tip ci-job reads, the job name,
-    the PR body ci-job reads as PR_BODY, and the bytes of the tool's files: merge.py, bin/ci-job, bin/ste-changed, and the hooks and lint modules
-    ci-job imports. Most cases first run scope_and_save, where head A passes and is saved, and its rerun must run no job. On origin/main that scope
-    fails, since nothing is saved, so the claims after it are read only where the key hits. The prune and .part cases lint their own tool versions.
-    Cost per case: at most four stub starts and one fixture pair; a tool-copy case also copies the repo's tree once; the prune cases make TOOL_KEYS
-    lints (unmeasured). The job name is not varied: `merge --lane-lint` runs one job."""
+    the PR body ci-job reads as PR_BODY, the TREE_CITES env the ste-lint step reads, and the bytes of the tool's files: merge.py, and every file the
+    checks job runs from the tool's tree (the family cases, one per folder: lint/, actions/, hooks/, bin/). Most cases first run scope_and_save, where
+    head A passes and is saved, and its rerun must run no job. On origin/main that scope fails, since nothing is saved, so the claims after it are read
+    only where the key hits. The prune and .part cases lint their own tool versions.
+    Cost per case: at most four stub starts and one fixture pair; a tool-copy case also copies the repo's tree once, and a family case once per file
+    (unmeasured); the prune cases make TOOL_KEYS lints (unmeasured). The job name is not varied: `merge --lane-lint` runs one job."""
 
     DATE_A = "@1700000000 +0000"  # GIT_AUTHOR_DATE and GIT_COMMITTER_DATE of a run's merge commit: two runs of one head then make two commits
     DATE_B = "@1700000600 +0000"
@@ -6592,10 +6595,10 @@ class LintResumesPassedJobs(LaneFixture):
         tm.sh(self.other, "git", "fetch", "-q", "origin")
         return tm.sh(self.other, "git", "merge-tree", "--write-tree", base_sha, head).split()[0]
 
-    def assert_ci_job_reads(self, module, pattern):
-        """Scope: the copy's bin/ci-job, the file merge.CI_JOB names (merge.py), matches `pattern`, so the file a case edits is one the job reads."""
-        with open(os.path.join(os.path.dirname(module.__file__), "..", "bin", "ci-job"), encoding="utf-8") as f:
-            self.assertRegex(f.read(), pattern, "scope: the copy's bin/ci-job does not read the file the case edits")
+    def assert_tool_reads(self, module, pattern, reader=("bin", "ci-job")):
+        """Scope: the copy's `reader` file (path parts under the tree, bin/ci-job by default) matches `pattern`, so the file a case edits is one the checks job reads."""
+        with open(os.path.join(os.path.dirname(module.__file__), "..", *reader), encoding="utf-8") as f:
+            self.assertRegex(f.read(), pattern, "scope: the copy's %s does not read the file the case edits" % "/".join(reader))
 
     def assert_edited_tool_misses(self, module, edited):
         """The lint run by `module`, a tool copy with the file `edited` changed, must miss the saved result and run the job."""
@@ -6604,6 +6607,26 @@ class LintResumesPassedJobs(LaneFixture):
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.ran(), ran + 1, "an edit to %s read the saved result, so the job did not run: %s" % (edited, out))
         self.assertEqual(self.cached(out), [], "an edit to %s printed a cached pass: %s" % (edited, out))
+
+    def assert_family_edits_miss(self, files):
+        """Each (path, extra, reader, pattern) in `files`, the files of one folder the checks job runs: a tool copy with `extra` appended to `path`
+        (under the tree). Scope first: the copy's `reader` matches `pattern`. Then the subject: the lint must miss the saved result of scope_and_save
+        and run the job. Each file is a subTest. The saved result must still exist before each lint, so a miss is a key miss and not a pruned file;
+        that holds for at most SAVED_PASS_KEEP files, since the save prunes the result after that many."""
+        _, saved, _, _ = self.scope_and_save()
+        self.assertEqual(len(saved), 1, "scope: a PASS saved %d new files, want the one result: %s" % (len(saved), sorted(saved)))
+        self.assertLessEqual(len(files), merge.SAVED_PASS_KEEP, "scope: a family of %d files outlives the saved result's prune" % len(files))
+        (result,) = saved
+        for rel, extra, reader, pattern in files:
+            with self.subTest(file=rel):
+                module = self.tool_copy(extra=extra, edited=tuple(rel.split("/")))
+                self.assert_tool_reads(module, pattern, reader)
+                path = os.path.join(os.path.dirname(module.__file__), "..", *rel.split("/"))
+                if rel.endswith(".json"):
+                    with open(path, encoding="utf-8") as f:
+                        json.loads(f.read())  # scope: the edit keeps the file a JSON document, so the lint reads the file it means
+                self.assertTrue(os.path.exists(result), "scope: the saved result was pruned before the lint of %s, so a miss would prove nothing" % rel)
+                self.assert_edited_tool_misses(module, rel)
 
     def pass_under_new_tool_keys(self, count):
         """`count` lints of one head, each by a copy of merge.py with one comment line more than the copy before. Each copy has a new tool key, so each
@@ -6846,20 +6869,65 @@ class LintResumesPassedJobs(LaneFixture):
     def test_an_edit_to_bin_ste_changed_misses_the_saved_result_and_runs_the_job(self):
         self.scope_and_save()
         module = self.tool_copy(extra=self.EDIT, edited=("bin", "ste-changed"))
-        self.assert_ci_job_reads(module, r'"ste-changed"')
+        self.assert_tool_reads(module, r'"ste-changed"')
         self.assert_edited_tool_misses(module, "bin/ste-changed")
 
     def test_an_edit_to_a_hooks_module_that_ci_job_imports_misses_the_saved_result_and_runs_the_job(self):
         self.scope_and_save()
         module = self.tool_copy(extra=self.EDIT, edited=("hooks", "action_pin.py"))
-        self.assert_ci_job_reads(module, r"(?m)^from action_pin import ")
+        self.assert_tool_reads(module, r"(?m)^from action_pin import ")
         self.assert_edited_tool_misses(module, "hooks/action_pin.py")
 
     def test_an_edit_to_a_lint_module_that_ci_job_imports_misses_the_saved_result_and_runs_the_job(self):
         self.scope_and_save()
         module = self.tool_copy(extra=self.EDIT, edited=("lint", "workflow_steps.py"))
-        self.assert_ci_job_reads(module, r"(?m)^from workflow_steps import ")
+        self.assert_tool_reads(module, r"(?m)^from workflow_steps import ")
         self.assert_edited_tool_misses(module, "lint/workflow_steps.py")
+
+    def test_an_edit_to_a_lint_file_the_checks_job_runs_misses_the_saved_result_and_runs_the_job(self):
+        """The lint folder: bin/ste-changed runs these from the tool's tree (its LINT_FILES list). One case per folder, each file a subTest."""
+        self.assert_family_edits_miss([
+            ("lint/ste_lint.py", self.EDIT, ("bin", "ste-changed"), r'"lint/ste_lint\.py"'),
+            ("lint/stale_cites.py", self.EDIT, ("bin", "ste-changed"), r'"lint/stale_cites\.py"'),
+            ("lint/layout.json", b"\n ", ("bin", "ste-changed"), r'"lint/layout\.json"'),
+        ])
+
+    def test_an_edit_to_an_action_file_the_checks_job_runs_misses_the_saved_result_and_runs_the_job(self):
+        """The actions folder: the ste-lint step is run.sh, which bin/ste-changed runs; the code-check step is code_check.py, which bin/ci-job runs."""
+        self.assert_family_edits_miss([
+            ("actions/ste-lint/run.sh", self.EDIT, ("bin", "ste-changed"), r'"actions/ste-lint/run\.sh"'),
+            ("actions/code-check/code_check.py", self.EDIT, ("bin", "ci-job"), r'os\.path\.join\("actions", "code-check", "code_check\.py"\)'),
+        ])
+
+    def test_an_edit_to_a_hooks_file_the_checks_job_runs_misses_the_saved_result_and_runs_the_job(self):
+        """The hooks folder: bin/ste-changed imports git_reads; bin/ci-job runs mutate_guard as the suite selector; guard_pointer is imported
+        inside a function, which the top-level scan of the key does not read."""
+        self.assert_family_edits_miss([
+            ("hooks/git_reads.py", self.EDIT, ("bin", "ste-changed"), r"(?m)^import git_reads\b"),
+            ("hooks/mutate_guard.py", self.EDIT, ("bin", "ci-job"), r'"hooks", "mutate_guard\.py"'),
+            ("hooks/guard_pointer.py", self.EDIT, ("bin", "ci-job"), r"(?m)^\s+from guard_pointer import "),
+        ])
+
+    def test_an_edit_to_bin_verdict_misses_the_saved_result_and_runs_the_job(self):
+        """The bin folder: bin/ci-job runs bin/verdict once per step, by path."""
+        self.assert_family_edits_miss([
+            ("bin/verdict", self.EDIT, ("bin", "ci-job"), r'os\.path\.join\(BIN, "verdict"\)'),
+        ])
+
+    def test_a_pass_saved_with_tree_cites_unset_is_not_reused_with_tree_cites_set_and_runs_the_job(self):
+        """actions/ste-lint/run.sh runs tree mode when TREE_CITES is true, so a PASS saved while it was unset is not the PASS of a run with it set."""
+        self.use_ci_job(PASSING, 0)
+        with unittest.mock.patch.dict(os.environ):
+            os.environ.pop("TREE_CITES", None)
+            self.scope_and_save()  # run 1 saves with TREE_CITES unset, and its rerun at the same key hits
+            with open(os.path.join(REPO, "actions", "ste-lint", "run.sh"), encoding="utf-8") as f:
+                self.assertRegex(f.read(), r"\$\{TREE_CITES:-false\}", "scope: actions/ste-lint/run.sh does not read TREE_CITES")
+            ran = self.ran()
+            os.environ["TREE_CITES"] = "true"
+            rc, out = self.lint_at(self.DATE_B)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.ran(), ran + 1, "a PASS saved with TREE_CITES unset was reused with TREE_CITES=true, so the job did not run: " + out)
+        self.assertEqual(self.cached(out), [], "a PASS saved with TREE_CITES unset printed a cached pass with TREE_CITES=true: " + out)
 
     def test_a_pass_under_a_new_tool_key_keeps_a_small_count_of_saved_results(self):
         self.use_ci_job(PASSING, 0)
