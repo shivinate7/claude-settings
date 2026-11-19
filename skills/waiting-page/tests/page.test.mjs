@@ -10880,3 +10880,76 @@ test("a taken pick's Overrule starts unpressed with Send off, and a press then S
   const a = await sendOne(page, TAKEN);
   assert.deepEqual([a.item, a.choice], [TAKEN.id, "overrule"], "Send did not write choice overrule for the taken pick");
 });
+
+// ---------------------------------------------------------------- the taken-picks area: the two groups and the order (step page-taken-picks-area)
+// The clock is fixed at TAKEN_NOW, so each pick's age is known: a pick under 24 hours old sits in Last 24 hours, an older one in Older.
+const TAKEN_NOW = "2026-11-19T12:00:00-06:00";
+const takenPick = (id, n, at, title) => ({ ...TAKEN, id, n, title, taken: { ...TAKEN.taken, at } });
+const PICK_RECENT = takenPick("taken-recent-border", 921, "2026-11-19T06:00:00-06:00", "Which border does the rail take?");
+const PICK_OLD = takenPick("taken-old-icon", 922, "2026-11-16T12:00:00-06:00", "Which icon did the rail take?");
+// The taken-picks area's groups in page order: each group's name, and the ids of its cards, in the order the page draws them.
+const areaGroups = (page) => page.locator("#tier-taken section.tgrp").evaluateAll((els) => els.map((e) => [
+  e.querySelector(".subhead .nm")?.textContent.trim() ?? "",
+  [...e.querySelectorAll("article.card")].map((c) => c.id.replace(/^item-/, "")),
+]));
+
+test("the taken-picks area: a pick taken within the last 24 hours sits under Last 24 hours", async (t) => {
+  const page = await open(t, { items: [DECISION, PICK_RECENT, PICK_OLD], clock: TAKEN_NOW }); if (!page) return;
+  await mustHave(page, "#tier-taken", "the taken-picks area (the element with id tier-taken)");
+  const groups = await areaGroups(page);
+  const recent = groups.find(([name]) => name === "Last 24 hours");
+  assert.ok(recent, `the taken-picks area has no Last 24 hours group: ${JSON.stringify(groups)}`);
+  assert.deepEqual(recent[1], [PICK_RECENT.id], `the Last 24 hours group holds ${JSON.stringify(recent[1])}, not the pick taken 6 hours before the clock`);
+});
+
+test("the taken-picks area: a pick taken over 24 hours ago sits under Older", async (t) => {
+  const page = await open(t, { items: [DECISION, PICK_RECENT, PICK_OLD], clock: TAKEN_NOW }); if (!page) return;
+  await mustHave(page, "#tier-taken", "the taken-picks area (the element with id tier-taken)");
+  const groups = await areaGroups(page);
+  const older = groups.find(([name]) => name === "Older");
+  assert.ok(older, `the taken-picks area has no Older group: ${JSON.stringify(groups)}`);
+  assert.deepEqual(older[1], [PICK_OLD.id], `the Older group holds ${JSON.stringify(older[1])}, not the pick taken three days before the clock`);
+});
+
+test("the taken-picks area: with only recent picks, no Older group is drawn", async (t) => {
+  const page = await open(t, { items: [DECISION, PICK_RECENT], clock: TAKEN_NOW }); if (!page) return;
+  await mustHave(page, "#tier-taken", "the taken-picks area (the element with id tier-taken)");
+  assert.deepEqual((await areaGroups(page)).map(([name]) => name), ["Last 24 hours"], "with only recent picks the area does not draw exactly one group, Last 24 hours");
+});
+
+test("the taken-picks area: with only older picks, no Last 24 hours group is drawn", async (t) => {
+  const page = await open(t, { items: [DECISION, PICK_OLD], clock: TAKEN_NOW }); if (!page) return;
+  await mustHave(page, "#tier-taken", "the taken-picks area (the element with id tier-taken)");
+  assert.deepEqual((await areaGroups(page)).map(([name]) => name), ["Older"], "with only older picks the area does not draw exactly one group, Older");
+});
+
+// Newest first by taken.at, whatever order the picks came in: the insertion order, the number order and the id order each differ from it.
+const PICK_EARLY = takenPick("taken-a-early-border", 921, "2026-11-19T08:00:00-06:00", "Which border does the panel take?");
+const PICK_LATE = takenPick("taken-b-late-border", 920, "2026-11-19T10:00:00-06:00", "Which border does the footer take?");
+const PICK_MID = takenPick("taken-c-mid-border", 922, "2026-11-19T09:00:00-06:00", "Which border does the rail take?");
+test("the taken-picks area: picks sit newest first by taken.at, whatever order they came in", async (t) => {
+  const page = await open(t, { items: [DECISION, PICK_EARLY, PICK_LATE, PICK_MID], clock: TAKEN_NOW }); if (!page) return;
+  await mustHave(page, "#tier-taken", "the taken-picks area (the element with id tier-taken)");
+  const flat = (await areaGroups(page)).flatMap(([, ids]) => ids);
+  assert.deepEqual(flat, [PICK_LATE.id, PICK_MID.id, PICK_EARLY.id], `the taken-picks area holds ${JSON.stringify(flat)}, not the picks newest first by taken.at`);
+});
+
+// ---------------------------------------------------------------- the taken card's Show the full reason button: a 44px touch target (the 44 px fix)
+// The button is 44px or more on a touch page and stays 32px on a fine one, in both schemes, at a phone and a tablet width.
+for (const width of [390, 820]) for (const scheme of ["light", "dark"]) {
+  test(`the taken card's Show the full reason button is 44px or more on a coarse pointer, and 32px on a fine one, at ${width} wide, ${scheme} scheme`, async (t) => {
+    const page = await open(t, { items: [DECISION, TAKEN], hasTouch: true, scheme, viewport: { width, height: 900 } }); if (!page) return;
+    assert.equal(await coarse(page), true, "the touch page does not match pointer: coarse, so the touch rule is not tested");
+    const more = page.locator(`#b-more-${TAKEN.id}`);
+    await need(more, `the taken card No. ${TAKEN.n} has no Show the full reason button`);
+    const [w, h] = await more.evaluate((e) => { const r = e.getBoundingClientRect(); return [r.width, r.height]; });
+    assert.ok(w >= 44, `the taken card's Show the full reason button is ${w.toFixed(1)}px wide on a coarse pointer, under 44px`);
+    assert.ok(h >= 44, `the taken card's Show the full reason button is ${h.toFixed(1)}px tall on a coarse pointer, under 44px`);
+    const fine = await open(t, { items: [DECISION, TAKEN], scheme, viewport: { width, height: 900 } }); if (!fine) return;
+    assert.equal(await coarse(fine), false, "the fine page matches pointer: coarse, so the fine control is not tested");
+    const fineMore = fine.locator(`#b-more-${TAKEN.id}`);
+    await need(fineMore, `the fine page's taken card No. ${TAKEN.n} has no Show the full reason button`);
+    const fh = await fineMore.evaluate((e) => e.getBoundingClientRect().height);
+    assert.equal(fh, 32, `the taken card's Show the full reason button is ${fh.toFixed(1)}px tall on a fine pointer, not 32px`);
+  });
+}
