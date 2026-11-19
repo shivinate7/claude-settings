@@ -452,7 +452,7 @@ class CiWiring(unittest.TestCase):
     def test_checks_job_runs_the_fixture_suite(self):
         step = self.step(FIXTURE_STEP)
         self.assertEqual(step.get("run"), "python3 lint/test_check_skill_model_rows.py")
-        # No if:, or the records-only clause alone (ruling own-830-c, owner 2026-11-14 15:02 CST, confirmed 2026-11-18 18:54 CST).
+        # No if:, or the records-only clause alone (ruling own-830-c).
         self.assertIn(unwrap(step.get("if")), (None, f"success() && {RECORDS_ONLY_CONDITION}"),
                       "an if: other than the records-only clause lets a skipped suite read as passing: %r" % step.get("if"))
 

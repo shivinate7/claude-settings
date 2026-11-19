@@ -446,7 +446,7 @@ FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "check
 #   CONDITIONED_JOBS: every run step. A static trace found the Windows guard suite reads no records page.
 #   SPLIT_CONDITIONED_JOBS: only the run steps named by scope_named_steps(), each with the scope condition as its if:.
 #   UNCONDITIONED_JOBS: no run step has to take it. Any step that reads a .md file may take it on top of its own scope, since
-#     ruling own-830-c (owner, 2026-11-14 15:02 CST, confirmed 2026-11-18 18:54 CST) lets it skip on a records-only push.
+#     ruling own-830-c lets it skip on a records-only push.
 CONDITIONED_JOBS = ("checks-windows-guard", "checks-windows-guard-2", "checks-windows-guard-3", "checks-windows-merge",
               "checks-windows-merge-2", "checks-windows-merge-3", "checks-windows-merge-4", "checks-windows-merge-5",
               "checks-windows-rest", "checks-windows-rest-2")
@@ -497,7 +497,7 @@ def condition_problem(name, st):
 def condition_spec_problem(name, st):
     """None when run step `st` of job `name` has the condition the spec gives it, else the problem, named. A step the spec does not
     condition may carry the records-only clause in condition_problem's form, and no other condition. That covers a step that reads a
-    .md file, since ruling own-830-c (owner, 2026-11-14 15:02 CST, confirmed 2026-11-18 18:54 CST) lets it skip on a records-only push.
+    .md file, since ruling own-830-c lets it skip on a records-only push.
     A step it conditions has condition_problem's form, and never `success() && RECORDS_ONLY_CONDITION` alone, which drops its scope."""
     label = st.get("name") or st.get("run")
     raw = unwrap(st.get("if"))

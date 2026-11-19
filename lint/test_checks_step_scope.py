@@ -2,8 +2,8 @@
 
 ci-scope.sh sets `code` false for a change that touches only .md files. A step that reads no .md file takes the scope condition
 `needs.scope.outputs.code == 'true' || github.event_name != 'pull_request'`, so a docs-only pull request skips it. A
-step that reads a .md file stays unscoped, but may take the records-only clause on top (ruling own-830-c, owner 2026-11-14 15:02 CST,
-confirmed 2026-11-18 18:54 CST). The step lists are the audit of main's checks.yml when this was written, by step name.
+step that reads a .md file stays unscoped, but may take the records-only clause on top (ruling own-830-c).
+The step lists are the audit of main's checks.yml when this was written, by step name.
 
 Pinned here:
   1. each NO-MD and NAMES-ONLY step carries the scope condition, exactly.
@@ -164,7 +164,7 @@ NAMES_ONLY = [
 ]
 
 # The audit's MUST-STAY-UNSCOPED steps: each reads a .md file at run time, or is not audited yet (fail safe), so each stays unscoped.
-# Each may take the records-only clause alone (ruling own-830-c, 2026-11-14 15:02 CST, confirmed 2026-11-18 18:54 CST).
+# Each may take the records-only clause alone (ruling own-830-c).
 # The doc steps are not listed here: DOC_STEPS below gives each one the scope condition of the doc groups it reads.
 MUST_STAY_UNSCOPED = [
     'Skill model rows check',
@@ -819,7 +819,7 @@ class ScopeConditionOnNoMdSteps(ChecksStepBase):
 
 class UnscopedAndPrOnlySteps(ChecksStepBase):
     def test_each_must_stay_unscoped_step_reads_no_scope_output(self):
-        # The records-only clause is allowed on these steps (ruling own-830-c, 2026-11-14 15:02 CST, confirmed 2026-11-18 18:54 CST),
+        # The records-only clause is allowed on these steps (ruling own-830-c),
         # so it is taken off first. Its form (it gates the whole if) is pinned by test_windows_split's condition_problems.
         steps = self.steps()
         for name in MUST_STAY_UNSCOPED:
@@ -1069,7 +1069,7 @@ class WholeTreeReadersOnAModsChange(ChecksStepBase):
 
 
 class DocStepScopeConditions(ChecksStepBase):
-    # A doc step may skip on a records-only push (ruling own-830-c, 2026-11-14 15:02 CST, confirmed 2026-11-18 18:54 CST), so the
+    # A doc step may skip on a records-only push (ruling own-830-c), so the
     # records-only clause may sit on top of its scope. The scope itself must still be there, so a step that drops it stays red.
     def test_each_doc_step_carries_the_scope_condition_of_its_groups(self):
         steps = self.steps()
