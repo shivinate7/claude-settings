@@ -2640,16 +2640,24 @@ def write_result_texts(tool_input, full: str):
 
 
 def test_shape(text: str):
-    """`(shape, count, clashes)` of a python test file: its `ast` dump with each undecorated test function name and
-    each docstring blanked, the number of distinct undecorated test names (one per class path), and the test names
-    that a non-def statement of the same scope also binds (an assignment, an import, a class attribute, a class,
-    a decorated def). A decorated def named `test` is a fixture or a mark, no test: its name stays in the dump.
+    """`(shape, count, clashes)` of a python test file: its `ast` dump with each test function name and each
+    docstring blanked, the number of distinct test names (one per class path), and the test names that a non-def
+    statement of the same scope also binds (an assignment, an import, a class attribute, a class, a def that is no
+    test). A test is a def named `test` with no decorator or only `pytest.mark` ones. A fixture or any other
+    decorated def is no test: its name stays in the dump.
     A comment is no node. None when the text does not parse."""
     import ast
 
+    def is_mark(deco):
+        # `@pytest.mark.parametrize`, `@pytest.mark.skip(...)`: a mark leaves the def a test.
+        head = deco.func if isinstance(deco, ast.Call) else deco
+        return (isinstance(head, ast.Attribute) and isinstance(head.value, ast.Attribute)
+                and head.value.attr == "mark" and isinstance(head.value.value, ast.Name)
+                and head.value.value.id == "pytest")
+
     def is_test(node):
         return (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test")
-                and not node.decorator_list)
+                and all(is_mark(deco) for deco in node.decorator_list))
 
     def binds(owner):
         # The names the scope's own statements bind: not what a def or a lambda binds inside itself.
