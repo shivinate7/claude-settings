@@ -15,12 +15,12 @@ PROG = "wait-until"
 USAGE = "usage: wait-until TIME [--timeout SECS]  (TIME: ISO-8601 with a zone, such as 2026-11-06T22:48:00Z)"
 def parse_time(text):
     """The epoch seconds of an ISO-8601 instant that carries a zone; exit 2 for anything else."""
+    when = wait_common.parse_instant(text)
+    if when is None:
+        wait_common.die(PROG, "bad time %r, or a time with no zone. %s" % (text, USAGE))
     try:
-        when = datetime.fromisoformat(text[:-1] + "+00:00" if text[-1:] in ("Z", "z") else text)
-        if when.utcoffset() is None:
-            wait_common.die(PROG, "time %r has no zone. %s" % (text, USAGE))
         return when.timestamp()
-    except (ValueError, OverflowError, OSError):
+    except (OverflowError, OSError):
         wait_common.die(PROG, "bad time %r. %s" % (text, USAGE))
 def main(argv):
     text, timeout = wait_common.split_args(PROG, USAGE, argv)
