@@ -65,7 +65,7 @@
 # turn zizmor's offline audits online). Multi-line `run: |` steps run whole. Verdicts: PASS, SKIP (the step ran and skipped tests, exit 0), FAIL, unknown (tool missing, or an expression it
 # cannot read), not run locally (a `uses:` action), skipped (a pull-request step with no base). Under --lint, a step
 # it leaves out prints `not run`, which is no verdict.
-# A step's `if:` reads every needs.scope.outputs flag (== 'true' or != 'false') as true, !cancelled(), always() and success() as true,
+# A step's `if:` reads every needs.scope.outputs flag (== 'true' or != 'false') as true, except records_only_skip, which reads as off because a local run runs every step (!= 'true' reads true, == 'true' reads false); !cancelled(), always() and success() as true,
 # and github.event_name == 'pull_request' as true only with a base. ${{ github.base_ref }} is --base without
 # its remote; ${{ github.event.pull_request.head.sha }} is CI_JOB_HEAD_SHA when it is set and not blank (the lane lint sets it to the
 # pushed head, since its HEAD is a merge commit), else HEAD; ${{ github.event.pull_request.base.sha }} is the commit of --base. No step's env gets
@@ -200,6 +200,8 @@ def condition(text, pr):
         return True
     m = EXPR.fullmatch(text.strip())
     expr = m.group(1) if m else text.strip()
+    expr = re.sub(r"needs\.scope\.outputs\.records_only_skip\s*!=\s*'true'", " T ", expr)  # a lane lint runs every step: the skip flag is off
+    expr = re.sub(r"needs\.scope\.outputs\.records_only_skip\s*==\s*'true'", " F ", expr)
     expr = re.sub(r"needs\.scope\.outputs\.[\w-]+\s*(?:==\s*'true'|!=\s*'false')", " T ", expr)  # a flag reads as true
     expr = re.sub(r"github\.event_name\s*==\s*'pull_request'", " T " if pr else " F ", expr)
     expr = re.sub(r"github\.event_name\s*!=\s*'pull_request'", " F " if pr else " T ", expr)
