@@ -10290,11 +10290,11 @@ class LeftoverTempFolderTests(unittest.TestCase):
     def leftover(self, folder, hours):
         """A folder with one nested file, every mtime `hours` old. A killed run leaves this shape."""
         write(os.path.join(folder, "work", "scratch.txt"), "left behind\n")
-        stamp = self.now - hours * 3600
+        mtime = self.now - hours * 3600
         for dirpath, dirnames, filenames in os.walk(folder):
             for name in dirnames + filenames:
-                os.utime(os.path.join(dirpath, name), (stamp, stamp))
-            os.utime(dirpath, (stamp, stamp))
+                os.utime(os.path.join(dirpath, name), (mtime, mtime))
+            os.utime(dirpath, (mtime, mtime))
         return folder
 
     def mutate_guard_leftover(self, owner, hours):
@@ -10470,8 +10470,8 @@ class LeftoverTempFolderTests(unittest.TestCase):
         name = "mutate_guard_%d-%s" % (self.dead_pid, uuid.uuid4().hex[:8])
         plain = os.path.join(self.temp, name)
         write(plain, "not a folder\n")
-        stamp = self.now - self.OLD_HOURS * 3600
-        os.utime(plain, (stamp, stamp))
+        mtime = self.now - self.OLD_HOURS * 3600
+        os.utime(plain, (mtime, mtime))
         control = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
         proc = self.run_sweep("--confirm")
         self.assertIn("== leftover temp folders ==", proc.stdout,
