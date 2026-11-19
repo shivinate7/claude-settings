@@ -4,7 +4,7 @@
 
 Every session that starts from source `startup` gets one check at its own start. The check is in `hooks/start_check.py`, a SessionStart hook. `settings.json` runs it with matcher `startup`, so it runs on no other source.
 
-The checks flag. They do not stop. `start_check.py` `main` prints one line: SessionStart `additionalContext`. It has no `continue` and no `stopReason`. The one check is the full-machine load brake (decision `machine-load-brake`, the machine-load brake). The model floor is not checked here (decision `agent-model-cap`, the owner's word for a model). The coordinator picked a flag over a stop (08:40 CST, 2026-11-15). The owner has not ruled; owner confirmation is open.
+The check flags. It does not stop. `start_check.py` `main` prints one line: SessionStart `additionalContext`. It has no `continue` and no `stopReason`. The one check is the full-machine load brake (decision `machine-load-brake`, the machine-load brake). The model floor is not checked here (decision `agent-model-cap`, the owner's word for a model). The coordinator picked a flag over a stop (08:40 CST, 2026-11-15). The owner has not ruled; owner confirmation is open.
 
 The flag text tells the session what to do. It addresses a session tagged `cs-build:lane`, read with `get_session` and passing no session_id: that session does no work and tells its parent it started in this state. A session that is not a lane (the owner's own) goes on.
 
