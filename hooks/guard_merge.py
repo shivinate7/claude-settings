@@ -2256,8 +2256,10 @@ def _lane_handoff_holds(args, where: str, overrides, root: str, destination, tag
 
 
 def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb, session_id: str = "") -> str:
-    """Return the matched push when a segment pushes to the checkout's record branch, or to the default
+    """Return the reason text when a segment pushes to the checkout's record branch, or to the default
     name `roadmap`, and the own record proves neither the triage role nor a lane's own handoff push, else ''.
+    The text is "git push to the record branch", or `RECORD_FOLDER_MATCH` plus the unread variable names when
+    the push goes to `roadmap` from a folder the command names with a variable or substitution it does not assign.
     `record_branch_of(root)` reads the checkout's branch (lint/layout.py); a read error means the default.
     `read_verb(subcommand, args)` is guard.py's own test for a dry run, which moves nothing. The proof is
     read only after a push reaches the branch. `session_id` is the hook payload's id, which a local session's

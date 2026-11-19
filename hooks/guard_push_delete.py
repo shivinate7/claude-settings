@@ -90,7 +90,8 @@ def _push_default_branches(cwd: str, remote: str):
 class _QuotedText:
     """A quoted run with a space in it is text (a commit message, an echo), never a push. A quoted
     single word stays: it is a refspec or a remote, and the shell would unquote it. So does the
-    quoted value of `-C`, which is a folder (`-C "$(pwd)"`, `-C "my dir"`): blanking it hides the push.
+    quoted value of `-C`, which is a folder, even with a space in it (`-C "my dir"`, `-C "$(cd sub && pwd)"`):
+    blanking it hides the push. A one-word value such as `-C "$(pwd)"` was never blanked.
 
     `sub(repl, text)` walks the quotes as the shell pairs them: an opening quote closes at its own
     mate, so the gap between two spans (`'%s\\n' "a b"`, `'x' --force 'y'`) is never read as a span.
