@@ -7,8 +7,8 @@
  "phase": "next",
  "owner": "consultant",
  "blockedBy": [],
- "updatedAt": "2026-11-19T06:16:30Z",
+ "updatedAt": "2026-11-19T06:17:47Z",
  "why": "Owner chat 00:14 CST Nov 19 asked whether the merge tool's refusal of the PR 3694 record (\"the head is a merge of a lane commit\") is valid or a fixed bug. Triage read by REST: head 02736c944a of PR 3694 is a two-parent merge of two lane commits (d13b244d53, a32b081ff7), not main, so the carve-out for a clean merge of main (steps carry-forgives-main-merge, grant-line-clean-merge-no-verifier) does not cover it. Owner typed \"approved\" at 00:16 CST on the consultant's offer to fix it (relayed by the consultant).",
  "source": "consultant's offer; owner's word \"approved\" 00:16 CST Nov 19, relayed by the consultant; triage 12",
- "note": "Todo. Builder lane after the merge queue clears (the consultant's plan, his words). Not verified by triage: the refusal's exact text and the rule that fired; the consultant was asked for the full output. Check first whether steps fix-check-after-main-merge and fix-check-merge-forced-test already cover part of this."
+ "note": "Todo. Builder lane after the merge queue clears (the consultant's plan, his words). Refusal read by the consultant, relayed 00:18 CST (not re-run by triage): `merge 3694 --review-record --head 02736c944a... --fix-check 4432ddf11f...:reviewer:sonnet:PASS` at 23:59 CST, merge tool 908e15ad8601: \"A head that is a merge must also be a merge of the base, and the log must read done, with no edit beyond git's merge ... A clean merge of main needs no fix verifier.\" Rule: the merge-head clause, decision pr-review-record lines 82-90. So the refusal is valid as written; the step widens the clause to a merge of two lane commits the verifier read. Check first whether steps fix-check-merge-forced-test and gap-check-merge-rebase (both ready) cover part of this."
 }
