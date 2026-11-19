@@ -142,6 +142,16 @@ class LeaseCase(unittest.TestCase):
     def status(self):
         return self.run_tool("status")
 
+    def assert_waits_then_refused(self, device, needle):
+        before = self.load_reads()
+        r = self.take(device, os.getpid(), wait=2)
+        self.assertEqual(r.returncode, 1, "a %s take at this load is not refused with exit 1" % device)
+        self.assertGreaterEqual(self.load_reads() - before, 2,
+                                "a %s take does not wait: it reads the load once" % device)
+        lines = [line for line in r.stderr.splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1, "the refusal of a %s take is not one stderr line" % device)
+        self.assertIn(needle, lines[0], "the refusal of a %s take does not name the load" % device)
+
     def spawn(self):
         """A live holder: a child process that stays alive until the case ends."""
         p = subprocess.Popen(["sleep", "600"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -193,16 +203,6 @@ class Slots(LeaseCase):
         self.assertEqual(r.stdout.strip(), "", "a refused third duo take prints a slot")
         self.assertGreaterEqual(self.load_reads() - before, 2, "the third duo take does not wait before it is refused")
 
-    def assert_waits_then_refused(self, device, needle):
-        before = self.load_reads()
-        r = self.take(device, os.getpid(), wait=2)
-        self.assertEqual(r.returncode, 1, "a %s take at this load is not refused with exit 1" % device)
-        self.assertGreaterEqual(self.load_reads() - before, 2,
-                                "a %s take does not wait: it reads the load once" % device)
-        lines = [line for line in r.stderr.splitlines() if line.strip()]
-        self.assertEqual(len(lines), 1, "the refusal of a %s take is not one stderr line" % device)
-        self.assertIn(needle, lines[0], "the refusal of a %s take does not name the load" % device)
-
     def test_a_take_waits_then_exits_1_at_a_5_minute_load_of_100(self):
         self.set_load("0.50", "100.00", "0.50")
         for device in ("duo", "pro"):
@@ -237,10 +237,20 @@ class PoolExclusive(LeaseCase):
         pid = self.spawn().pid
         self.assertEqual(grant(self.take("pro", pid)), (0, "pro"), "a pro take with nothing held is not granted pro")
 
-    def test_duo_is_refused_while_pro_is_held(self):
-        first, second = self.spawn(), self.spawn()
-        self.assertEqual(grant(self.take("pro", first.pid)), (0, "pro"), "the pro take is not granted pro")
-        self.assertEqual(self.take("duo", second.pid).returncode, 1, "a duo take is granted while pro is held")
+    def test_duo_is_granted_beside_a_held_pro_when_the_load_brake_allows(self):
+        # Ruling sims-load-brake-only (owner, 21:59 CST Nov 12): no pairing; only the load brake limits a grant.
+        holder, duo = self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("pro", holder.pid)), (0, "pro"), "the pro take is not granted pro")
+        self.assertEqual(grant(self.take("duo", duo.pid)), (0, "1"),
+                         "a duo take beside the held pro is not granted slot 1 at a load the brake allows")
+
+    def test_duo_beside_a_held_pro_is_refused_only_when_the_load_brake_refuses(self):
+        holder = self.spawn()
+        self.assertEqual(grant(self.take("pro", holder.pid)), (0, "pro"), "the pro take is not granted pro")
+        for one, five, needle in (("0.50", "100.00", "100"), ("60.00", "0.50", "60")):
+            with self.subTest(one=one, five=five):
+                self.set_load(one, five, "0.50")
+                self.assert_waits_then_refused("duo", needle)
 
     def test_pro_is_refused_while_a_duo_is_held(self):
         first, second = self.spawn(), self.spawn()
