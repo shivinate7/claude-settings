@@ -148,6 +148,7 @@ FAMILIES = {
     "port-question": "the page writer: a port question carries a Departs from line and holds nothing",
     "page-stale": "the waiting page: a publish of a page behind main's page.html is refused, a republish of main's page with empty designData and roadmap blocks is refused, a page with its own title and empty blocks is allowed, and an allowed publish of a page with live data writes the stamp",
     "uniform-pick": "the page writer: a pick never names an option that widens a shared tool",
+    "pick-reaches-page": "a coordinator's send_message with a Coordinator pick line goes to the page writer in the same turn",
     "press-link": "the page writer: a press in a web app carries a link to the exact page",
     "command-in-item": "the page writer: a task step never sends the owner to a file for a command",
     "gh-login-switch": "the page writer: a gh command in a task switches login first, shivinate7 by default and ssemwal-cdc only for a repo shivinate7 cannot reach",
