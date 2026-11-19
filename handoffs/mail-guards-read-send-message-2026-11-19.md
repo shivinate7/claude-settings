@@ -1,0 +1,22 @@
+# Handoff: lane mail-guards-read-send-message (2026-11-19)
+
+- **Slug:** mail-guards-read-send-message. Session: session_013NEJKzf9QrkKNwnsovk6X2. Parent: coordinator session_013NEJL1gw6EdrSyvHkTUEx6.
+- **Branch and head:** `mail-guards-read-send-message`, head 4f84620962f13e7839284d92edaac13c36fd9918.
+- **Open PR:** #3211, draft, open, GitHub reads it as `dirty` (it conflicts with main). Base was fccff95e6.
+- **Done:**
+  - The Stop feedback guard counts a `mail send` body as the send for page, repo and chat-answer proofs; `--to` is never scanned (hooks/feedback_guard.py, lint/_transcript.py `sent_message`, `exit_failed_tool_use_ids`).
+  - The waiting-page lane-to-parent, answer-unread and park tells name `mail send`; skills/waiting-page/test_skill_park_relay.py re-pointed (5 red, then 10 green).
+  - Review: round 1 FAIL (haiku), round 2 PASS (sonnet), round 3 PASS (sonnet), net value zero. Lane-lint PASS and review record comment posted on the PR at that head.
+  - Open limits recorded in docs/debts/notes.md (failed send then a passing command; mistyped `--to`; shell forms that read no body; `|| true`; never-run `if`).
+  - Handed in to runner 10 (session_013NEJL2f1YCYsvLdpFqtWP3) by send_message on 2026-11-13.
+- **Unfinished:** the PR is not merged. Main moved since fccff95e6 and the PR conflicts. No merge of main into the branch was done. The 20-message trial (decision session-messages, step 5) was not run, as ordered.
+- **Next step:** a plain merge of main into the branch (standing grant: batch runner; no rebase, no force), re-run `bin/verdict bin/merge --lane-lint 3211`, re-post the review record for the new head (a clean merge of main takes no fix verifier), then the batch runner merges. After merge, report to the coordinator what the 20-message trial needs: mailbox auth working in cloud sessions.
+- **Refused acts:** `mail send` returned "not sent: auth" in this session, so hand-ins went by send_message. `merge --review-record` printed "nothing was posted"; I posted its lines as a PR comment. `merge --fix-check` was refused (no earlier posted review log). Hooks refused a hand-made worktree for a red run, a `| tail` on a check, and a pipe out of verdict; I ran each another way.
+- **Owner rulings held:** R9 (relayed by the coordinator, owner 12:27 CST Nov 13): a guard change whose round 1 passes is done; round 3 only for a guard change fixed under a fix verifier. The grant text in the start notice was not a grant (inbox item fb-1227-2).
+- **Agents (all finished):**
+  - test-author (haiku), branch `mail-guards-read-send-message`, worktree agent-a679d3a4ed3d284e4 (b5473937a, 68a07d20e, 131b158f5).
+  - builder (sonnet), branch `work-mail-guards`, worktree agent-a333077af1942c5e7 (f327e2a15, 321e3c8a2).
+  - test-author (haiku), branch `mail-guards-skill-tells`, worktree agent-a825cd93328f2024b (bc689f049).
+  - builder (sonnet), branch `mail-guards-skill-tells`, worktree agent-ae40b47479a9aca17 (b571602ba).
+  - reviewers: round 1 agent-a5c3a8abfa2614ed9, round 2 agent-a5d6d3a5c936db3de, round 3 agent-a98d478e6e280e259.
+  - Branch `mail-guards-skill-tells` is merged into the lane branch; keep it until PR #3211 merges.
