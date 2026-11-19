@@ -327,6 +327,7 @@ jobs:
         run: python3 lint/test_prove_route_judge.py
 
       - name: Guard cases from base fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_guard_cases_from_base.py
 
       # Pull requests only: the range is the merge base with the base branch and HEAD, and a push has no base. The step reads
@@ -390,6 +391,7 @@ jobs:
         run: python3 lint/test_all_jobs_passed.py
 
       - name: Cancel-on-close workflow and script fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_cancel_on_close.py
 
       - name: Scope detector fixture suite
