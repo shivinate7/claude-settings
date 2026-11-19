@@ -360,12 +360,52 @@ add("local-tier folder: a W= named only in a comment is no assignment, so the fo
     rule=RECORD_RULE, tool="Bash", command="echo done # W=" + slash(PUSHSSH) + "\n" + VCS + " -C $W push origin HEAD:roadmap",
     cwd=NOGIT, session=LT_SID, env=LT_FOLDER_ENV, config=LT_TRIAGE, carries=("$W",), lacks=FOLDER_LACKS)
 
+PUSH_TWICE = VCS + ' -C "$W" push origin roadmap'
+# RED. Cause: both pushes read the same text, so the old guard stops at the first and never reads the second `W=`. It judges the
+# second push at PUSHSSH, a triage repo. The shell runs the second push at PUSHFEAT, which is not this session's repo.
+add("local-tier folder: a push after W is reassigned is judged at the new folder, so the second push is refused", "deny",
+    rule=RECORD_RULE, tool="Bash", command="W=" + slash(PUSHSSH) + "; " + PUSH_TWICE + "; W=" + slash(PUSHFEAT) + "; " + PUSH_TWICE,
+    cwd=NOGIT, session=LT_SID, env=LT_FOLDER_ENV, config=LT_TRIAGE)
+# CONTROL, green on the old code: the new folder alone is refused, so the refusal above belongs to the second push.
+add("local-tier folder: a triage session's push through the reassigned folder alone is refused", "deny", rule=RECORD_RULE,
+    tool="Bash", command="W=" + slash(PUSHFEAT) + "; " + PUSH_TWICE, cwd=NOGIT, session=LT_SID, env=LT_FOLDER_ENV,
+    config=LT_TRIAGE)
+# RED. Cause: `cd "$W"` runs before `W=` and reads W unset, so the shell stays in the session's folder, PUSHFEAT, which is not
+# this triage session's repo. The old guard reads the later assignment into the cd and judges the push at PUSHSSH.
+add("local-tier folder: a cd to W before W is assigned does not reach the push, which is refused", "deny", rule=RECORD_RULE,
+    tool="Bash", command='cd "$W"; W=' + slash(PUSHSSH) + "; " + LT_PUSH, cwd=PUSHFEAT, session=LT_SID, env=LT_FOLDER_ENV,
+    config=LT_TRIAGE)
+# CONTROL, green on the old code: an assignment before the cd reaches it, so the push runs at PUSHSSH and is allowed.
+add("local-tier folder: a cd to W after W is assigned reaches the push, which is allowed", "allow", tool="Bash",
+    command="W=" + slash(PUSHSSH) + '; cd "$W"; ' + LT_PUSH, cwd=PUSHFEAT, session=LT_SID, env=LT_FOLDER_ENV,
+    config=LT_TRIAGE, silent=True)
+# RED. Cause: a pipeline runs each element in its own shell, so the assignment before `|` never reaches the push after it.
+# The old guard reads that assignment as set and judges the push at PUSHSSH.
+add("local-tier folder: an assignment before a pipe does not reach the push after it, so the folder is refused, naming $W",
+    "deny", rule=RECORD_RULE, tool="Bash", command="W=" + slash(PUSHSSH) + " | " + VCS + ' -C "$W" push origin HEAD:roadmap',
+    cwd=NOGIT, session=LT_SID, env=LT_FOLDER_ENV, config=LT_TRIAGE, carries=("$W",), lacks=FOLDER_LACKS)
+# CONTROL, green on the old code: a `|` inside quotes starts no pipe, so the W= after it is text and $W stays unassigned.
+add("local-tier folder: a pipe character inside quotes starts no pipe, so the W= after it is text and the folder is refused",
+    "deny", rule=RECORD_RULE, tool="Bash", command='echo "x | W=' + slash(PUSHSSH) + '"; ' + VCS + ' -C "$W" push origin HEAD:roadmap',
+    cwd=NOGIT, session=LT_SID, env=LT_FOLDER_ENV, config=LT_TRIAGE, carries=("$W",), lacks=FOLDER_LACKS)
+# RED. Cause: the old guard does not read `W+=` as an assignment, so it keeps the value W had and judges the push at PUSHSSH.
+# The shell appends, so the folder is PUSHSSH/b, which is no checkout, and the push is refused.
+add("local-tier folder: an append to W (W+=) changes the folder, so the push through it is refused", "deny", rule=RECORD_RULE,
+    tool="Bash", command="W=" + slash(PUSHSSH) + "; W+=/b; " + VCS + ' -C "$W" push origin HEAD:roadmap',
+    cwd=NOGIT, session=LT_SID, env=LT_FOLDER_ENV, config=LT_TRIAGE)
+
 # CONTROL, green on the old code: a cloud triage proof is read from the transcript, never from the folder.
 sh("roadmap-one-writer folder: a cloud triage session's push through an assigned folder is allowed", ASSIGN_PUSHFEAT,
    "allow", silent=True, transcript=TRIAGE_TRANSCRIPT, env=CLOUD_FOLDER_ENV, cwd=PUSHFEAT)
-# RED. Cause: `$X` is unassigned, so the folder is unreadable. The old guard allows this cloud triage push (expected deny).
-sh("roadmap-one-writer folder: a cloud triage session's push through an unassigned folder is refused, naming the folder",
-   VCS + " -C $X push origin HEAD:roadmap", "deny", rule=RECORD_RULE, carries=(FOLDER_NAME,), lacks=FOLDER_LACKS,
+# RED. Cause: the folder refusal runs before the cloud proof, so an unreadable folder refuses a push that the cloud triage
+# proof covers. origin/main allows this push.
+sh("roadmap-one-writer folder: a cloud triage session's push through an unassigned folder is allowed",
+   VCS + " -C $X push origin HEAD:roadmap", "allow", silent=True,
+   transcript=TRIAGE_TRANSCRIPT, env=CLOUD_FOLDER_ENV, cwd=PUSHFEAT)
+# RED. Same cause, with the folder named by a command substitution. `$(pwd)` is the session's own folder, so the push is its own.
+# origin/main allows it.
+sh("roadmap-one-writer folder: a cloud triage session's push through a command-substitution folder is allowed",
+   VCS + ' -C "$(pwd)" push origin HEAD:roadmap', "allow", silent=True,
    transcript=TRIAGE_TRANSCRIPT, env=CLOUD_FOLDER_ENV, cwd=PUSHFEAT)
 # RED. The same push from a coordinator, which holds no triage proof. A pure lane is not used here: on a machine with under
 # 5 GB free the load brake stops a pure lane's shell before the rule runs (guard.py lane_session_hit). The record rule
@@ -377,6 +417,11 @@ sh("roadmap-one-writer folder: a cloud coordinator's push through an unassigned 
 # judges the default name `roadmap`, and allows the push.
 record_refuse("a cloud coordinator's push through an assigned folder is judged by that folder's record branch",
               "W=" + slash(RECFORK) + "; " + VCS + " -C $W push origin roadmap-fork", role_path("coordinator"),
+              env=CLOUD_FOLDER_ENV)
+# RED. Cause: the old guard judges this push at the session's cwd, PUSHFEAT, where roadmap-fork is no record, so it allows the
+# push. The folder is RECFORK, whose record branch is roadmap-fork, so the coordinator's push is refused.
+record_refuse("a cloud coordinator's push through a command-substitution folder is judged by that folder's record branch",
+              VCS + ' -C "$(echo ' + slash(RECFORK) + ')" push origin roadmap-fork', role_path("coordinator"),
               env=CLOUD_FOLDER_ENV)
 # CONTROL, green on the old code: a push to a branch that no record names stays allowed through an assigned folder.
 sh("roadmap-one-writer folder: a cloud coordinator's push to lane/foo through an assigned folder is allowed",
