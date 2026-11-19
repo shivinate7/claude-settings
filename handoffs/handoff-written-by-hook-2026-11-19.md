@@ -1,4 +1,4 @@
-# Handoff: lane handoff-written-by-hook, 2026-11-19 00:30 CST
+# Handoff: lane handoff-written-by-hook, 2026-11-19 00:26 CST
 
 ## Goal
 
@@ -7,7 +7,7 @@ Owner ruling 2026-11-13 22:52 CST (relayed by the consultant, started by the coo
 ## Where things stand
 
 - Slug: `handoff-written-by-hook`. Branch on origin: `handoff-written-by-hook`, head d10d4f9427a90c6cb5a711881944bbb94da52097. It holds the work; git keeps it.
-- PR #3364 (draft): CLOSED, not merged. Triage closed it 2026-11-15 18:38 UTC as a stale draft ("silent 24 h or more, not proven dead"; reopen if live). REST 2026-11-19 00:30 CST: state closed, merged false, mergeable_state dirty.
+- PR #3364 (draft): CLOSED, not merged. Triage closed it 2026-11-15 18:38 UTC as a stale draft ("silent 24 h or more, not proven dead"; reopen if live). REST 2026-11-19 00:26 CST: state closed, merged false, mergeable_state dirty.
 - Draft #3202 (owner-waits section, overlaps the same files) MERGED. So #3364 now conflicts with main again: merge main, re-lint, re-run tests before reopening.
 - The one lane PR was never marked ready or merged. Runner 10 (session_013NEJL2f1YCYsvLdpFqtWP3) was handed the PR at d10d4f942 on 2026-11-14 01:10 CST, copy to the coordinator. No merge reported.
 
