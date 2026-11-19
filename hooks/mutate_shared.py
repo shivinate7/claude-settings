@@ -324,6 +324,31 @@ def verdict_path(folder, verdict_key, entry):
     return os.path.join(folder, hashlib.sha256(text.encode("utf-8")).hexdigest())
 
 
+def digest_tree(digest, label: str, path: str) -> None:
+    """Feed every file under `path`, or the one file `path` names, into `digest`. Each file is keyed by `label` and its
+    path relative to `path`, with `/` separators, so the same files at another absolute path digest the same. A
+    `__pycache__` folder and a `.pyc` file are skipped: a run writes bytecode, and it is not source. A missing path is
+    fed as absent, so a folder that moves changes the key. Cost: each file is read once per call."""
+    found = []
+    if os.path.isfile(path):
+        found.append((label, path))
+    elif os.path.isdir(path):
+        for dirpath, dirnames, names in os.walk(path):
+            dirnames[:] = [name for name in dirnames if name != "__pycache__"]
+            for name in names:
+                if not name.endswith(".pyc"):
+                    full = os.path.join(dirpath, name)
+                    rel = os.path.relpath(full, path).replace(os.sep, "/")
+                    found.append(("%s/%s" % (label, rel), full))
+    else:
+        digest.update(repr([label, None]).encode("utf-8"))
+    for key, full in sorted(found):
+        with open(full, "rb") as handle:
+            data = handle.read()
+        digest.update(repr([key, len(data)]).encode("utf-8"))
+        digest.update(data)
+
+
 def load_verdict(path):
     """The result saved at `path`, or None. A missing, unreadable or malformed file is a miss, never a crash. A skip is
     never saved, so a saved result has no skip."""
