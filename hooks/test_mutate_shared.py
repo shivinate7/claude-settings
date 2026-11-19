@@ -1486,6 +1486,26 @@ SIBLING_BEFORE = "RESUME_SIBLING_RULE = 'allow'\n"  # its text while the suite k
 SIBLING_AFTER = "RESUME_SIBLING_RULE = 'deny'\n"  # its text once the suite lets both fixture mutants live
 HANG_GUARD = 10.0  # a stopped-leg case waits this long for the other mutants to end: far above their run
 RESUME_RUN_LIMIT = 30.0  # main must return within this long; a stopped-leg case can wait up to HANG_GUARD inside it
+SYNTHETIC_NOW = 1800000000.0  # the clock a pruning case reads: a fixed instant, never the real date
+HOUR = 3600
+DAY = 24 * HOUR
+
+
+class SyntheticClock:
+    """Stands in for the `time` module in mutate_shared: time() returns `now`, and every other attribute is the real module's."""
+
+    def __init__(self, now):
+        self.now = now
+
+    def time(self):
+        return self.now
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
+def set_mtime(path, when):
+    os.utime(path, (when, when))
 
 
 class LegStopped(RuntimeError):
@@ -1767,6 +1787,30 @@ class ResumeTests(unittest.TestCase):
                          "a head that differs only in a guard sibling reused another head's saved KILLED verdicts: its "
                          "run ran %r, want both" % ran_mutants(changed))
         self.assertEqual(code, 1, "the third head's run judges both survivors and exits %r, not 1: %r" % (code, lines))
+
+    def test_a_verdict_past_the_keep_window_is_pruned_when_a_run_starts_and_a_fresh_one_is_kept(self):
+        """Pruning on a synthetic clock: A's saved verdict is dated past VERDICT_KEEP_SECONDS, B's inside it. The rerun
+        judges A again and reuses B. Cost: three main() calls over the fixture, and no suite run beyond their mutants."""
+        with mock.patch.object(mutate_shared, "time", SyntheticClock(SYNTHETIC_NOW)):
+            self.run_leg("A", self.suite_for("A"))
+            first = saved_files(self.verdicts)
+            self.assertEqual(len(first), 1, "precondition: the run of A saved %r, want one file" % first)
+            set_mtime(first[0], SYNTHETIC_NOW - HOUR)  # inside the keep window, so the next run start keeps it
+            self.run_leg("B", self.suite_for("B"))
+            saved_a = first[0]
+            saved_b = [path for path in saved_files(self.verdicts) if path != saved_a]
+            self.assertEqual(len(saved_b), 1, "precondition: the run of B saved %r beside A, want one new file" % saved_b)
+            set_mtime(saved_a, SYNTHETIC_NOW - mutate_shared.VERDICT_KEEP_SECONDS - DAY)
+            set_mtime(saved_b[0], SYNTHETIC_NOW - HOUR)
+            rerun = self.suite_for("AB")
+            _code, lines, error = self.run_leg("AB", rerun)
+        self.assertIsNone(error, "the rerun raised: %r" % error)
+        self.assertIn(resume_label("A"), ran_mutants(rerun),
+                      "the verdict written past VERDICT_KEEP_SECONDS was not pruned when the run started: the rerun ran %r, "
+                      "want A judged again: %r" % (ran_mutants(rerun), lines))
+        self.assertNotIn(resume_label("B"), ran_mutants(rerun),
+                         "the verdict written inside VERDICT_KEEP_SECONDS was pruned when the run started: the rerun ran %r, "
+                         "want B reused" % ran_mutants(rerun))
 
 
 if __name__ == "__main__":
