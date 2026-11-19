@@ -577,8 +577,11 @@ def skipped_count(line):
     return int(m.group(1)) if m else None
 
 
-def printing(text, rc=0):
-    """Child code that writes `text` byte for byte, then exits `rc`."""
+def printing(text, rc=0, raw=False):
+    """Child code that writes `text` byte for byte, then exits `rc`. `raw` writes UTF-8 bytes to the binary stdout: a text
+    stream turns each \\n into \\r\\n on Windows, so only raw keeps a CRLF line end as it is on every platform."""
+    if raw:
+        return "import sys\nsys.stdout.buffer.write(%r)\nsys.stdout.flush()\nsys.exit(%d)\n" % (text.encode("utf-8"), rc)
     return "import sys\nsys.stdout.write(%s)\nsys.exit(%d)\n" % (ascii(text), rc)  # ascii: the script file stays ASCII on any locale
 
 
@@ -764,9 +767,9 @@ SHIM_SKIP = "the fake is a POSIX shell script; verdict names a Windows .cmd shim
 class NoTestCount(unittest.TestCase):
     """A run with no test count is unknown, so it is never PASS (verification-report-unknown-reads).
     FAIL for a success marker with no count, and for a test command by argv with no count. FAIL for a
-    unittest run that counts zero tests (`Ran 0 tests`), run directly or through sim-test. SKIP for a
-    module skipped in setUpModule, with its count. PASS for a run that is no counted test, for a zero
-    count beside any other count, and for a counted run wherever its count sits."""
+    unittest run that counts zero tests (`Ran 0 tests`), with LF or CRLF line ends, run directly or through
+    sim-test. SKIP for a module skipped in setUpModule, with its count. PASS for a run that is no counted test,
+    for a zero count beside any other count, and for a counted run wherever its count sits."""
     BUILD_OK = "** BUILD SUCCEEDED **"
     ST_PASS = "Test run with 3 tests passed after 0.001 seconds."  # Swift Testing's summary, no XCTest line
     XCT_12 = "Executed 12 tests, with 0 failures (0 unexpected) in 1.2 (1.3) seconds"
@@ -774,12 +777,13 @@ class NoTestCount(unittest.TestCase):
     assert_fail = Skips.assert_fail  # one home for the FAIL check
     assert_skip = Skips.assert_skip  # one home for the SKIP check
 
-    def run_case(self, code=None, argv=None, shim=None):
-        """Run one case with its log in this run's folder. Returns the run and the log's text."""
+    def run_case(self, code=None, argv=None, shim=None, newline=None):
+        """Run one case with its log in this run's folder. Returns the run and the log's text. `newline=""` keeps each CRLF
+        as it is: the default text read folds CR LF to LF, so a CRLF case must pass it to see its own line ends."""
         with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
             log = os.path.join(d, "v.log")
             r = run(code, log, argv=argv, shim=shim, timeout=120)
-            with open(log, encoding="utf-8", errors="replace") as f: full = f.read()
+            with open(log, encoding="utf-8", errors="replace", newline=newline) as f: full = f.read()
         return r, full
 
     def assert_no_count_fail(self, r):
@@ -968,6 +972,22 @@ class NoTestCount(unittest.TestCase):
         self.assertRegex(full, r"(?m)^Ran 0 tests in\b", "the zero count never reached the log, so this run proves nothing")
         self.assertRegex(full, r"(?m)^Ran 5 tests in\b", "the count of five never reached the log, so this run proves nothing")
         self.assert_pass(r)
+
+    def test_crlf_unittest_zero_count_is_fail_no_tests_ran(self):
+        """A zero count whose lines end in CRLF, as a Windows log holds it. The result line sits behind a CRLF blank
+        line, which the summary match did not take, so the run read PASS."""
+        log_text = "Ran 0 tests in 0.000s\r\n\r\nNO TESTS RAN\r\n"
+        r, full = self.run_case(code=printing(log_text, raw=True), newline="")
+        self.assertIn(log_text, full, "the CRLF zero count never reached the log, so this run proves nothing")
+        self.assert_fail(r, 1, "no tests ran")
+
+    def test_crlf_module_skip_reads_skip_with_its_count(self):
+        """Control: a CRLF module skipped in setUpModule (`Ran 0 tests`, then `OK (skipped=1)`) reads SKIP 1, so the CRLF
+        fix keeps a skip a skip and never reads it as a zero count."""
+        log_text = "Ran 0 tests in 0.000s\r\n\r\nOK (skipped=1)\r\n"
+        r, full = self.run_case(code=printing(log_text, raw=True), newline="")
+        self.assertIn(log_text, full, "the CRLF module skip never reached the log, so this run proves nothing")
+        self.assert_skip(r, 1)
 
 
 def tearDownModule():
