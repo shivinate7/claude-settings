@@ -264,7 +264,7 @@ A list read asks for each page by number (`Host.pages`), so no `gh` flag beyond 
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, concurrent.futures, contextlib, datetime, fnmatch, functools, hashlib, importlib.util, io, json, math, os, pathlib, re, shlex, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, ast, concurrent.futures, contextlib, datetime, fnmatch, functools, hashlib, importlib.util, io, json, math, os, pathlib, re, shlex, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -3305,20 +3305,42 @@ SAVED_PASS_KEEP = 3  # the most saved results kept after a save: the new one and
 SAVED_PART_STALE_SECONDS = 3600  # a .part file this old is the leftover of a killed save; a younger one may be a live save's
 TOOL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # the tool's own tree: merge/merge.py sits two levels under it
 
-TOOL_TREE_FOLDERS = ("lint", "actions", "hooks", "bin", "merge")  # the folders of the tool's tree that the checks job reads or runs; each is hashed whole
+TOOL_TREE_FOLDERS = ("lint", "actions", "hooks", "bin", "merge")  # the folders of the tool's tree that the checks job reads or runs; each is hashed whole, and tool_files adds the files LINT_FILES names outside them
 TOOL_TREE_SKIP_DIRS = frozenset({"__pycache__", ".git"})  # bytecode and git state are not source: a run writes them with no edit
 TOOL_KEY_ENV = ("TREE_CITES",)  # env the checks job reads that changes its verdict: actions/ste-lint/run.sh runs tree mode on TREE_CITES=true
 
+def tool_lint_files():
+    """The files bin/ste-changed's LINT_FILES names, as tree-relative paths: the one home of what the CI lint step runs. Read from that file's source with
+    ast, since the script runs its own start-up on import. A file that cannot be read or parsed, or a LINT_FILES that is not a tuple of strings, raises
+    OSError (tool_key then reads None, and no result is read or saved)."""
+    path = os.path.join(TOOL_ROOT, "bin", "ste-changed")
+    try:
+        with open(path, encoding="utf-8") as f:
+            module = ast.parse(f.read())
+        for node in module.body:
+            if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "LINT_FILES" for t in node.targets):
+                names = ast.literal_eval(node.value)
+                if isinstance(names, (tuple, list)) and all(isinstance(n, str) for n in names):
+                    return list(names)
+    except (SyntaxError, ValueError) as e:
+        raise OSError(f"LINT_FILES of {path} cannot be read: {e}")
+    raise OSError(f"{path} holds no LINT_FILES tuple of strings")
+
 def tool_files():
-    """Every file under the tool's lint/, actions/, hooks/, bin/ and merge/ folders, as sorted paths. Whole folders, not a list of the files the job names
-    today, so a file the job starts to read later is in the key with no edit here. Bytecode and .git are left out. A folder missing from the tree adds
-    nothing: a copy of the tool may hold fewer folders."""
+    """Every file the checks job runs from the tool's tree, as sorted paths: each file under the lint/, actions/, hooks/, bin/ and merge/ folders (whole
+    folders, not a list of the files the job names today, so a file the job starts to read later is in the key with no edit here; bytecode and .git are
+    left out), and each file bin/ste-changed's LINT_FILES names outside those folders (the skills/ file that stale_cites loads by path). A folder or file
+    missing from the tree adds nothing: a copy of the tool may hold fewer of them."""
     found = []
     for folder in TOOL_TREE_FOLDERS:
         for top, dirs, names in os.walk(os.path.join(TOOL_ROOT, folder)):
             dirs[:] = [d for d in dirs if d not in TOOL_TREE_SKIP_DIRS]
             found.extend(os.path.join(top, n) for n in names if not n.endswith(".pyc"))
-    return sorted(found)
+    for rel in tool_lint_files():
+        path = os.path.join(TOOL_ROOT, *rel.split("/"))
+        if rel.split("/")[0] not in TOOL_TREE_FOLDERS and os.path.isfile(path):
+            found.append(path)
+    return sorted(set(found))
 
 def tool_env():
     """The env values the key carries, as one string. TREE_CITES is read as run.sh reads it: only "true" is on."""
@@ -3337,28 +3359,27 @@ def tool_key():
     digest.update(b"env\0" + tool_env().encode())
     return digest.hexdigest()
 
-def saved_pass_path(root, head, merged, base, job, pr_body=None):
+def saved_pass_path(root, head, merged, base, job, pr_body, tool):
     """The file that holds the saved PASS of `job` at (head, merged tree, base name, base tip, pr_body, the tool's bytes), or None when the clone's git dir
     cannot be read. `merged` is [the merged tree, the base tip] (merge_reason's list). The key is the head sha, the merged tree, the base name, the base tip
     the lint merged, the job name, a hash of the PR body that ci-job reads as PR_BODY (None, a ref or commit with no body, is told from an empty body) and
-    tool_key, so a new head, base, body or an edit to a file the lint reads names another file. The base name is in the key since ci-job runs against
+    `tool`, the tool_key the caller took once before the job (so a tool-tree edit during the run never saves under the new key), so a new head, base, body or an edit to a file the lint reads names another file. The base name is in the key since ci-job runs against
     origin/<base>; the tip, since a tip that moves with no change to the merged tree is a new base. The folder sits under the clone's git dir, which outlives a lint tree and holds no state of a lane's work."""
     c, out = git(root, "rev-parse", "--git-common-dir")
     if c or not out.strip() or len(merged) < 2:
         return None
     gitdir = out.strip()
     gitdir = gitdir if os.path.isabs(gitdir) else os.path.join(root, gitdir)
-    tool = tool_key()
     if tool is None:
         return None
     body = "none" if pr_body is None else "body:" + hashlib.sha256(pr_body.encode()).hexdigest()
     key = hashlib.sha256("\0".join([head, merged[0], merged[1], base, job, body, tool]).encode()).hexdigest()
     return os.path.join(gitdir, SAVED_PASS_FOLDER, key + ".json")
 
-def saved_pass_read(root, head, merged, base, job, pr_body=None):
+def saved_pass_read(root, head, merged, base, job, pr_body, tool):
     """-> {"skipped": [...], "notes": [...]} of the saved PASS at this key, or None: no file, or one that is empty, unreadable or not a PASS record (a miss)."""
     try:
-        path = saved_pass_path(root, head, merged, base, job, pr_body)
+        path = saved_pass_path(root, head, merged, base, job, pr_body, tool)
         if path is None:
             return None
         with open(path, "rb") as f:
@@ -3398,14 +3419,14 @@ def saved_pass_prune(folder, keep_path):
         except OSError:
             pass
 
-def saved_pass_write(root, head, merged, base, job, skipped, notes, pr_body=None):
+def saved_pass_write(root, head, merged, base, job, skipped, notes, pr_body, tool):
     """Save the PASS of `job` after a run that passed, and only then: a fail, a timeout, an unknown and a run with no verdict never reach this call.
     The file is written whole and moved into place, so a reader never sees half of it, and its .part file is removed on any exit, a SIGTERM's SystemExit
     included. A record over SAVED_PASS_MAX_BYTES, or any write error, saves nothing: the next lint runs the job, which costs time and never a wrong pass.
     A save then prunes the folder (saved_pass_prune)."""
     part = None
     try:
-        path = saved_pass_path(root, head, merged, base, job, pr_body)
+        path = saved_pass_path(root, head, merged, base, job, pr_body, tool)
         if path is None:
             return
         body = json.dumps({"verdict": "pass", "head": head, "tree": merged[0], "tip": merged[1], "base": base, "job": job,
@@ -3747,7 +3768,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     A hand-in of a pull request that is not an integration PR is refused while its body names an open replaced pull request (open_named); no override lifts it.
     On a batch integration PR, a PASS (after its lint comment) posts a pointer comment on each open lane its freeze block names, then closes it as replaced
     (close_replaced); the same PASS reopens each closed lane the block has dropped when the tool closed it, and posts a pointer after the reopen (reopen_dropped).
-    A job that passes is saved (saved_pass_write) under the clone's git dir, keyed by the head sha, the merged tree, the base name and tip, the job name, a hash of the PR body and a hash of the tool's folders and the env they read (tool_files, tool_env). A rerun at
+    A job that passes is saved (saved_pass_write) under the clone's git dir, keyed by the head sha, the merged tree, the base name and tip, the job name, a hash of the PR body and a hash of the tool's folders, the files LINT_FILES names outside them, and the env they read (tool_files, tool_env), taken once before the job. A rerun at
     the same key skips the job and prints "PASS (cached)"; it still posts the lane-lint comment. A fail, a timeout, an unknown and a lifted unknown are never saved,
     and a corrupt, empty or unreadable file is a miss. The mutation test run (mutate_run_check) does not go through this path and is not saved.
     Before any tree is made, refuse_full_disk refuses a drive under the guard's full disk floor, in a cloud session and a local one."""
@@ -3814,7 +3835,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the merge of the head with {base} could not be made the lint worktree's HEAD: {out} {LANE_LINT_CITE}")
         refuse_incomplete_tree(wt, head, base, merge_commit)
         body_for_job = (info.get("body") or "") if target.isdigit() else None  # a ref or commit has no PR body
-        saved = saved_pass_read(root, head, merged, base, LINT_JOB, body_for_job)
+        tool = tool_key()  # taken once, before the job: the read and the write use this key, so a tool-tree edit during the run saves under no new key
+        saved = saved_pass_read(root, head, merged, base, LINT_JOB, body_for_job, tool)
         if saved is not None:
             state, lines, log, liftable = "pass", saved["skipped"], [], False
             pin_notes.extend(saved["notes"])
@@ -3823,7 +3845,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             state, lines, log, liftable = ci_job_run(wt, LINT_JOB, "--lint", "--base", f"origin/{base}", notes=pin_notes, head_sha=head,
                                                      pr_body=body_for_job)
             if state == "pass":
-                saved_pass_write(root, head, merged, base, LINT_JOB, lines, pin_notes, body_for_job)
+                saved_pass_write(root, head, merged, base, LINT_JOB, lines, pin_notes, body_for_job, tool)
         if state == "pass" and touched_tests:
             touched = run_touched_tests(wt, base, head)
         mutate, mutate_fails, skipped = "", [], False
