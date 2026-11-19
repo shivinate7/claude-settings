@@ -134,6 +134,7 @@ def decide(case):
         command = [sys.executable, "-c", LB_PROBE, guard_file, os.devnull,
                    json.dumps({"mode": "judge", "reading": case.get("load") or LB_NORMAL})]
     started = time.monotonic()
+    LAST_STDERR[0] = ""
     limit = case.get("max_seconds")
     try:
         # A case with a limit stops its guard at the limit, so a guard too slow fails at once, not at 120 s.
@@ -146,6 +147,7 @@ def decide(case):
             raise
         return "slow", "still judging after %s s, over the %s s limit" % (limit + 1, limit)
     elapsed = time.monotonic() - started
+    LAST_STDERR[0] = result.stderr
     if case.get("max_seconds") and elapsed > case["max_seconds"]:
         return "slow", "judged in %.2f s, over the %s s limit" % (elapsed, case["max_seconds"])
     if result.returncode != 0:

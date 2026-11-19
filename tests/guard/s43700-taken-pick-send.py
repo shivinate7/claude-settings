@@ -1,15 +1,17 @@
 # section 43700
 FAMILY = "pick-reaches-page"
 #
-# Rule pick-reaches-page, the send check (step page-taken-picks-area, row 2 of the goal). A coordinator's send_message whose
-# text has a line that opens `Coordinator pick` is refused unless the same turn also sent the page writer (triage) the pick.
-# The writer files a pick as a taken-pick card, which the owner can overrule; a pick sent only to a lane reaches the owner
-# nowhere. The refusal's remedy names that card. It names no stands item: the owner's 15 Nov ruling (step
-# page-no-preselected-pick) removed the stands fields. A send to the page writer passes. Only a coordinator's send is judged,
-# and a turn is the records after the last human message. The page writer is the writer of the newest meta/page read in the
-# transcript (lint/_transcript.py page_writer_id).
+# Rule pick-reaches-page, the send check (step page-taken-picks-area, row 2 of the goal). A coordinator's send_message or
+# create_session whose text has a line that opens `Coordinator pick` is refused unless the same turn also sent the page
+# writer (triage) the pick. The writer files a pick as a taken-pick card, which the owner can overrule; a pick sent only to
+# a lane reaches the owner nowhere. The refusal's remedy names that card. It names no stands item: the owner's 15 Nov
+# ruling (step page-no-preselected-pick) removed the stands fields. A send to the page writer passes. Only a coordinator's
+# send is judged, and a turn is the records after the last human message. The page writer is the writer of the newest
+# meta/page read in the transcript (lint/_transcript.py page_writer_id). A transcript with no page read refuses; a
+# transcript that cannot be read, or a code error in the rule, allows and prints one stderr line that names the rule.
 TK_RULE = "pick-reaches-page"
 TK_SEND = "mcp__claude-code-remote__send_message"
+TK_CREATE = "mcp__claude-code-remote__create_session"
 TK_OWN = "session_TKCOORD01"  # the coordinator that sends the pick; TK_ENV below names it through the remote env id
 TK_ENV = {"CLAUDE_CODE_REMOTE_SESSION_ID": "cse_TKCOORD01"}
 TK_WRITER = "session_TKWRITER01"  # the page writer: the writer the meta/page read in each transcript names
@@ -19,7 +21,7 @@ TK_REMEDY = "send the pick to triage as a taken-pick card"  # the phrase the ref
 TK_TURN_ONE = "Owner: pick the icons for the page."
 TK_TURN_TWO = "Owner: and the colours too."
 TK_DIR = os.path.join(ROOT, "takenpick")
-TK_LINES = ("lane-no-writer", "writer-earlier-turn", "writer-same-turn", "to-writer", "no-marker")
+TK_LINES = ("lane-no-writer", "writer-earlier-turn", "writer-same-turn", "to-writer", "no-marker", "unread-writer", "code-error")
 
 
 def tk_path(name):
@@ -43,6 +45,11 @@ def tk_send(tool_id, target, text):
 # for the target-id-in-roster rule to know each target: the head every fixture shares.
 TK_HEAD = ([role_said(TK_TURN_ONE)] + role_call("o1", COORD_TAGS, session=TK_OWN) + tk_page_read("p1", TK_WRITER)
            + role_target_call("l1", LANE_TAGS, target=TK_LANE) + role_target_call("w1", TRIAGE_TAGS, target=TK_WRITER))
+# The same head with no meta/page read: the page's writer is unknown to this transcript.
+TK_HEAD_NO_READ = ([role_said(TK_TURN_ONE)] + role_call("o1", COORD_TAGS, session=TK_OWN)
+                   + role_target_call("l1", LANE_TAGS, target=TK_LANE) + role_target_call("w1", TRIAGE_TAGS, target=TK_WRITER))
+# A record the rule's reader cannot take: its message is a string, not an object, so reading its tool uses raises.
+TK_BAD_RECORD = json.dumps({"type": "assistant", "message": "a message that is text, not an object"})
 TK_LINES_BY_NAME = {
     "lane-no-writer": TK_HEAD,
     # The writer got the pick in an earlier turn only: the owner's last words open a new turn, which sends nothing yet.
@@ -51,6 +58,10 @@ TK_LINES_BY_NAME = {
     "writer-same-turn": TK_HEAD + tk_send("s1", TK_WRITER, TK_PICK),
     "to-writer": TK_HEAD,
     "no-marker": TK_HEAD,
+    # The coordinator read no page at all, so no writer is named for the pick to reach.
+    "unread-writer": TK_HEAD_NO_READ,
+    # The turn holds a record the rule cannot read, after the owner's words.
+    "code-error": TK_HEAD + [TK_BAD_RECORD],
 }
 
 
@@ -65,28 +76,64 @@ def write_tk_transcripts():
 lazy_fixture([tk_path(name) for name in TK_LINES], write_tk_transcripts)
 
 
-def tk_refuse(name, transcript, text, target=TK_LANE):
-    """A coordinator's send_message the guard refuses. The reason names its rule and the taken-pick remedy, and no stands item."""
-    add("pick-reaches-page: " + name, "deny", rule=TK_RULE, tool=TK_SEND, cwd=NOGIT, transcript=tk_path(transcript),
-        env=TK_ENV, carries=(TK_REMEDY,), lacks=("stands",), session_id=target, message=text)
+def tk_input(tool, target, text):
+    """The tool_input of a pick send: a send_message names its target; a create_session carries the pick in its prompt."""
+    return dict(prompt=text) if tool == TK_CREATE else dict(session_id=target, message=text)
 
 
-def tk_allow(name, transcript, text, target=TK_LANE):
-    """A send_message the guard lets through silently."""
-    add("pick-reaches-page: " + name, "allow", tool=TK_SEND, cwd=NOGIT, silent=True, transcript=tk_path(transcript),
-        env=TK_ENV, session_id=target, message=text)
+def tk_refuse(name, transcript, text, target=TK_LANE, tool=TK_SEND):
+    """A coordinator's send the guard refuses. The reason names its rule and the taken-pick remedy, and no stands item."""
+    add("pick-reaches-page: " + name, "deny", rule=TK_RULE, tool=tool, cwd=NOGIT, transcript=tk_path(transcript),
+        env=TK_ENV, carries=(TK_REMEDY,), lacks=("stands",), **tk_input(tool, target, text))
 
 
-# RED on main: no rule holds a coordinator's pick back, so the pick sent to a lane with no writer send this turn is allowed.
+def tk_allow(name, transcript, text, target=TK_LANE, tool=TK_SEND, err=()):
+    """A send the guard lets through with nothing on stdout. `err` names what its stderr must carry."""
+    add("pick-reaches-page: " + name, "allow", tool=tool, cwd=NOGIT, silent=True, transcript=tk_path(transcript),
+        env=TK_ENV, err=err, **tk_input(tool, target, text))
+
+
+# A pick sent to a lane with no writer send this turn is refused.
 tk_refuse("a coordinator pick sent to a lane with no writer send this turn is refused, and the remedy names the taken-pick card",
           "lane-no-writer", TK_PICK)
-# RED on main: the writer got the pick in an earlier turn, so this turn's lane send has no writer send behind it.
+# The writer got the pick in an earlier turn, so this turn's lane send has no writer send behind it: refused.
 tk_refuse("a coordinator pick sent to a lane whose writer send is from an earlier turn is refused",
           "writer-earlier-turn", TK_PICK)
 
+# MARKER FORMS. The line opens with `Coordinator picks` or with `(coordinator pick`, and the match is case-insensitive.
+# The marker is `Coordinator pick` followed by a word boundary, after markdown lead characters only, so the first two forms
+# pass the rule today.
+tk_refuse("a Coordinator picks line sent to a lane with no writer send this turn is refused",
+          "lane-no-writer", "Coordinator picks: icons-a")
+tk_refuse("a parenthesised coordinator pick line sent to a lane with no writer send this turn is refused",
+          "lane-no-writer", "(coordinator pick, icons-a)")
+# The lower-case form is matched already. Kept so a change to the marker cannot lose it.
+tk_refuse("a lower-case coordinator pick line sent to a lane with no writer send this turn is refused",
+          "lane-no-writer", "coordinator pick: icons-a")
+
+# CREATE_SESSION. A coordinator's create_session whose prompt opens with a Coordinator pick line is judged the same way.
+# The rule judges send_message only, so a start with the pick in its prompt passes today.
+tk_refuse("a create_session whose prompt has a Coordinator pick line is refused when the writer got no pick this turn",
+          "lane-no-writer", TK_PICK, tool=TK_CREATE)
+# CONTROL: with the writer's send this turn, the same start passes.
+tk_allow("a create_session whose prompt has a Coordinator pick line passes when the writer got the pick this turn",
+         "writer-same-turn", TK_PICK, tool=TK_CREATE)
+
+# UNREAD WRITER. A transcript with no page read names no writer, so the pick has nowhere to reach: the rule refuses it.
+tk_refuse("a coordinator pick sent to a lane from a transcript with no page read is refused, and the remedy names the taken-pick card",
+          "unread-writer", TK_PICK)
+
+# FAIL OPEN, SAID ON STDERR. A transcript that cannot be read, or a code error inside the rule, allows, and says so on
+# stderr. Today the rule returns with no line at all.
+tk_allow("a coordinator pick whose transcript cannot be read is allowed, with a stderr line that names the rule",
+         "never-written", TK_PICK, err=(TK_RULE,))
+tk_allow("a code error inside the rule is allowed, with a stderr line that names the rule",
+         "code-error", TK_PICK, err=(TK_RULE,))
+
 # CONTROLS, green on main: the lane send passes once the writer got the same pick this turn; a send to the writer passes; a
-# message with no Coordinator pick line is not judged.
+# message with no Coordinator pick line is not judged; a line that says Pick with no Coordinator is no marker.
 tk_allow("a coordinator pick sent to a lane passes when the writer got the same pick this turn",
          "writer-same-turn", TK_PICK)
 tk_allow("a coordinator pick sent to the page writer itself passes", "to-writer", TK_PICK, target=TK_WRITER)
 tk_allow("a coordinator message with no Coordinator pick line passes", "no-marker", "Status: the icons are done.")
+tk_allow("a line that opens Pick, with no Coordinator, is no marker", "lane-no-writer", "Pick: icons-a")

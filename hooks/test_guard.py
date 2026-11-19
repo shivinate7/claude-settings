@@ -87,6 +87,7 @@ VCS = "g" + "it"
 os.environ["CLAUDE_CODE_SUBAGENT_MODEL"] = "sonnet"
 
 CASES = []
+LAST_STDERR = [""]  # the stderr of the guard run decide made last, for a case with an `err` expectation
 
 # GUARD_TESTS=windows-slice keeps only the cases tagged "windows": the ones that reach Windows-only
 # guard code. GUARD_TESTS=macos-slice keeps only the cases tagged "macos": the ones that reach a darwin
@@ -480,7 +481,7 @@ def macos_arm_problems():
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
         session=None, carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
         agent_type=None, event=None, stop_active=False, windows=False, transcript=None,
-        max_seconds=None, env=None, guard=None, **tool_input):
+        max_seconds=None, env=None, guard=None, err=(), **tool_input):
     """Register one case.
 
     `guard` is the path of a copy of hooks/guard.py to run in place of this repository's, for the
@@ -500,6 +501,9 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
 
     `agent_id`, when given, rides on the payload the same way the harness sends it for a
     agent's own tool call: alongside `tool_name` and `tool_input`, never inside either.
+
+    `err` names fragments the guard's STDERR must hold on the run, for a case whose point is a line the guard prints
+    to stderr (an allow that fails open with a note). decide keeps the last run's stderr in LAST_STDERR.
     """
     CASES.append({
         "name": name,
@@ -529,6 +533,8 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "env": env,
         # The guard copy this case runs (see add), or None for this repository's guard.
         "guard": guard,
+        # Fragments the guard's stderr must hold (see add).
+        "err": (err,) if isinstance(err, str) else tuple(err),
         # An allow that must print NOTHING, not even context. Only a case that says so is held to it.
         "silent": silent,
         # The temp folder this case's guard run reads as its own (see TEMP_DIR above).
@@ -865,6 +871,10 @@ def run_cases():
             ok = False
             note = "  (the reason names the forbidden target %r)" % names_the_target(
                 reason, case["rule"])
+        elif ok and case.get("err") and [f for f in case["err"] if f not in LAST_STDERR[0]]:
+            ok = False
+            note = "  (the stderr does not carry %r: %s)" % (
+                [f for f in case["err"] if f not in LAST_STDERR[0]][0], LAST_STDERR[0].strip()[-90:])
         elif not ok:
             note = "  (%s)" % reason[:110] if reason else ""
         failed += 0 if ok else 1
