@@ -1,0 +1,1 @@
+- handed-in-push-cd-semicolon: `cd typo; git push origin feat` skips the check, because with `;` the cd fails and the push runs in the original folder. Only `&&` and `-C` match the decision's "fails before it sends". (decision handed-in-push-needs-record, round 3 review) Seen: 2026-11-15 x1

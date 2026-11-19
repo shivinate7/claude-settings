@@ -1,0 +1,1 @@
+- handed-in-push-folder-denied: a folder shaped like a shell variable, or one shlex cannot parse, is refused unknown before `uses_merge_tool` runs. So `cd "$WT" && git push origin feat` is denied in a repo with no merge tool, where main allowed it. If lanes hit it, make it a debt. (decision handed-in-push-needs-record, round 3 review) Seen: 2026-11-15 x1

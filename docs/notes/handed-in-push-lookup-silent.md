@@ -1,0 +1,1 @@
+- handed-in-push-lookup-silent: when the PR-list read cannot run, the push passes and the "unknown" line goes to stderr at exit 0, which the session never sees. The allow is the lane's call, not an owner grant; it departs from guard-hooks-fail-closed. Owner may rule. (decision handed-in-push-needs-record, round 3 review) Seen: 2026-11-15 x1

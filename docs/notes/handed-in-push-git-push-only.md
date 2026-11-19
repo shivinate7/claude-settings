@@ -1,0 +1,1 @@
+- handed-in-push-git-push-only: the handed-in-push check reads `git push` only. The GitHub MCP tools `create_or_update_file` and `push_files` move a pull request head unseen, so a lane can stale a review log through them. (decision handed-in-push-needs-record, round 1 review) Seen: 2026-11-15 x1
