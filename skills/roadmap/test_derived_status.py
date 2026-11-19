@@ -211,7 +211,7 @@ class UnknownReads(DriftFixture):
         self.no_trailer_on_main()
         self.publish(sessions=[], items=[], pulls=[self.open_pull(44, "lane/c2")], landed=[],
                      read_at=test_build.iso_ago(120))
-        out = self.out_with_live(expect=(0,))
+        out = self.out_with_live(expect=(0, 1))  # c2 is doing: a stale file fails it, and the drift row still reads unknown
         self.drift_row_unknown(out)
 
     def test_main_branch_that_cannot_be_read_reads_the_row_unknown(self):

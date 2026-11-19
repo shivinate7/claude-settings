@@ -1645,7 +1645,7 @@ class StaleInProgress(UpkeepFixture):
     def test_read_at_two_hours_old_reads_the_row_unknown(self):
         self.commit_step("c1", status="doing")
         value = self.publish(sessions=[], read_at=iso_ago(120))
-        page, out = self.build_from_main("--live", str(self.live))
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))  # c1 is doing: a stale file fails it
         count, entries = self.stale(out)
         found = re.fullmatch(r"unknown \(the live file was read (\d+) minutes ago; read it again\)", entries)
         self.assertEqual(count, 1)
@@ -1780,11 +1780,16 @@ class StalledStep(UpkeepFixture):
     stalled until it has a disposition: a valid `paused` field, which triage writes, or status done. A stalled
     step prints `stalled step: <id> (resume, pause or done)`, or `stalled step: <id> (done: landed in #N)` when it
     landed, and the build exits 1 after it writes the page. An unknown live read prints
-    `stalled step: unknown (<why>)`, lists no steps as [], and exits 0."""
+    `stalled step: unknown (<why>)`, lists no steps as [], and exits 0, except a stale live file, which fails a
+    doing step (test_stale_live_file_fails_a_doing_step_and_prints_its_age)."""
 
     PAUSE = {"why": "waits on the owner's call on the batch", "decides": "owner",
              "at": "2026-11-06T11:00:00-06:00", "by": "triage"}
     RESUME = "stalled step: c2 (resume, pause or done)"
+    # The build's clock for the stale cases (test-practices P5). A read 120 minutes before NOW is past STALE_LIVE_MINUTES.
+    NOW = "2026-11-18T19:00:00Z"
+    STALE_READ = "2026-11-18T17:00:00Z"
+    FRESH_READ = "2026-11-18T18:55:00Z"
 
     def stalled_lines(self, out):
         """The printed step lines, in print order. The unknown and item lines are not step lines."""
@@ -1884,9 +1889,8 @@ class StalledStep(UpkeepFixture):
 
     def test_unknown_live_read_prints_unknown_with_steps_none_and_exits_0(self):
         self.commit_step("c2", status="doing", order=2)
-        cases = {
+        cases = {  # a stale read is not here: it fails the doing step (test_stale_live_file_fails_a_doing_step_and_prints_its_age)
             "no --live file": None,
-            "readAt two hours old": dict(sessions=[], read_at=iso_ago(120), items=[]),
             "no sessions list": dict(items=[]),
         }
         for name, live in cases.items():
@@ -1900,6 +1904,46 @@ class StalledStep(UpkeepFixture):
                 self.assertIsNone(stalled["steps"], "an unknown read lists no steps, never []")
                 self.assertRegex(out, r"(?m)^stalled step: unknown \(", "the unknown line is missing")
                 self.assertEqual(self.code, 0, "an unknown read exits 0")
+
+    def clocked_build(self, *extra, expect):
+        """build_from_main with the build's clock fixed at NOW, so a live file's age is exact (test-practices P5)."""
+        with mock.patch.object(build, "datetime", fixed_clock(self.NOW)):
+            return self.build_from_main(*extra, expect=expect)
+
+    def stale_lines(self, out):
+        """The output lines that say the live file is stale and name its age (120 minutes, or 2 hours)."""
+        return [line for line in out.splitlines()
+                if re.search(r"\bstale\b", line, re.I) and re.search(r"\b(?:120 minutes|2 hours)\b", line)]
+
+    def test_stale_live_file_fails_a_doing_step_and_prints_its_age(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.publish(sessions=[], items=[], read_at=self.STALE_READ)
+        _, out = self.clocked_build("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.code, 1, "a stale live file must fail a doing step: exit 1, not 0 with an unknown line")
+        self.assertTrue(self.stale_lines(out), "no line says the live file is stale and names its age (120 minutes):\n%s" % out)
+
+    def test_stale_live_file_never_reads_a_held_doing_step_as_held(self):
+        self.commit_step("c1", status="doing")
+        cases = {
+            "running lane session": dict(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")]),
+            "open pull on the lane branch": dict(sessions=[], pulls=[self.draft(1001, "lane/c1")]),
+        }
+        for name, live in cases.items():
+            with self.subTest(name):
+                self.publish(items=[], read_at=self.STALE_READ, **live)
+                _, out = self.clocked_build("--live", str(self.live), expect=(0, 1))
+                self.assertEqual(self.code, 1, "a stale live file must not hold c1: exit 1, not 0")
+                self.assertTrue(self.stale_lines(out), "no line says the live file is stale and names its age:\n%s" % out)
+
+    def test_fresh_live_file_holds_the_running_step_and_lists_only_the_other(self):
+        self.commit_step("c1", status="doing")  # control: its live session holds it on a fresh read
+        self.commit_step("c2", status="doing", order=2)
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")],
+                     items=[], read_at=self.FRESH_READ)
+        _, out = self.clocked_build("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.stalled_lines(out), [self.RESUME], "on a fresh read c1 is held, so c2 is the one stalled line")
+        self.assertEqual(self.code, 1, "a stalled step must exit 1")
+        self.assertEqual(self.stale_lines(out), [], "a fresh read prints no stale line")
 
     def test_landed_feel_fix_without_a_device_trial_is_not_stalled(self):
         self.commit_step("c2", status="doing", order=2)  # control: a plain lane-less step is still stalled
