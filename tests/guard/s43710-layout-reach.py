@@ -17,7 +17,7 @@ def lr_install():
     ('', why) when the stamp placeholder is missing from the repo's guard.py (a setup fault)."""
     base = os.path.join(ROOT, "layout-reach", "installs", LR_INSTALL)
     hooks = os.path.join(base, "hooks")
-    stamp = 'INSTALL_ID = "%s"' % LR_INSTALL
+    install_line = 'INSTALL_ID = "%s"' % LR_INSTALL
     if not os.path.isfile(os.path.join(hooks, "guard.py")):
         modules = mutate_shared.module_files(os.path.dirname(GUARD))
         set_dir = os.path.join(hooks, "guard.d", LR_INSTALL)
@@ -25,10 +25,10 @@ def lr_install():
         for path in modules:
             with open(path, encoding="utf-8") as handle:
                 text = handle.read()
-            stamped = text.replace(LR_PLACEHOLDER, stamp, 1)
+            stamped = text.replace(LR_PLACEHOLDER, install_line, 1)
             for folder in (hooks, set_dir):
                 write(os.path.join(folder, os.path.basename(path)), stamped)
-        if not os.path.isfile(os.path.join(hooks, "guard.py")) or stamp not in open(
+        if not os.path.isfile(os.path.join(hooks, "guard.py")) or install_line not in open(
                 os.path.join(hooks, "guard.py"), encoding="utf-8").read():
             return "", "setup: the repo's guard.py has no `%s` line to stamp" % LR_PLACEHOLDER
         shutil.copytree(os.path.join(REPO, "lint"), os.path.join(base, "lint"),
