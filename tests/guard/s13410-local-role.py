@@ -327,8 +327,6 @@ sh("local-role: claude-role -h passes", "claude-role -h", "allow",
    cwd=PUSHSSH, session=LT_SID, env=SR_NO_ROLE, silent=True)
 sh("local-role: claude-role --help piped to head passes", "claude-role --help | head", "allow",
    cwd=PUSHSSH, session=LT_SID, env=SR_NO_ROLE, silent=True)
-sh("local-role: command -v claude-role passes", "command -v claude-role", "allow",
-   cwd=PUSHSSH, session=LT_SID, env=SR_NO_ROLE, silent=True)
 add("local-role: a PowerShell read of the role variable into a variable passes", "allow", tool="PowerShell",
     command="$role = $env:CS_SESSION_ROLE", cwd=PUSHSSH, session=LT_SID, env=SR_NO_ROLE, silent=True, windows=True)
 # GREEN on the old code: these reads are no claim already, and each stays allowed.
@@ -364,6 +362,21 @@ add("local-role: a PowerShell Set-Item on the role variable is denied as a claim
 add("local-role: a PowerShell SetEnvironmentVariable on the role variable, spaced, is denied as a claim", "deny",
     rule="self-role-claim", tool="PowerShell", command="SetEnvironmentVariable('CS_SESSION_ROLE', 'triage')",
     cwd=PUSHSSH, session=LT_SID, env=SR_NO_ROLE, lacks=("SetEnvironmentVariable(",), windows=True)
+# LOOKUPS, denied. `command -v` and `-V` print where the launcher is, so they are no claim alone, but their output can run as the
+# command: a lookup in a substitution, a variable or backticks, then run as the role command. The lookup alone stays denied, so a
+# fix that exempts the lookup must still deny each lookup-then-run form. The old guard refuses all six.
+sh("local-role: command -v claude-role is denied as a launcher run", "command -v claude-role", "deny", rule="self-role-claim",
+   cwd=PUSHSSH, session=LT_SID, env=SR_NO_ROLE)
+sh("local-role: command -V claude-role is denied as a launcher run", "command -V claude-role", "deny", rule="self-role-claim",
+   cwd=PUSHSSH, session=LT_SID, env=SR_NO_ROLE)
+sh("local-role: a launcher path from $(command -v) run as the role command is denied", "$(command -v claude-role) triage", "deny",
+   rule="self-role-claim", cwd=PUSHSSH, session=LT_SID, env=SR_NO_ROLE)
+sh("local-role: a launcher path from a lookup kept in a variable and run is denied",
+   'path=$(command -v claude-role); "$path" triage', "deny", rule="self-role-claim", cwd=PUSHSSH, session=LT_SID, env=SR_NO_ROLE)
+sh("local-role: a launcher path from a chained lookup held in a variable and run is denied",
+   "x=$(command -v claude-role) && $x triage", "deny", rule="self-role-claim", cwd=PUSHSSH, session=LT_SID, env=SR_NO_ROLE)
+sh("local-role: a launcher path from a backtick lookup run as the role command is denied",
+   "`command -v claude-role` triage", "deny", rule="self-role-claim", cwd=PUSHSSH, session=LT_SID, env=SR_NO_ROLE)
 # BOUNDARY CONTROLS, green on the old code. A fix that reads a leading command word, a help flag, or a read in the same call as
 # a claim as a read must still deny each of these.
 sh("local-role: command claude-role triage is denied as a claim", "command claude-role triage", "deny", rule="self-role-claim",
@@ -377,15 +390,24 @@ sh("local-role: a claim with a help flag after its role is denied", "claude-role
 # not a log check like stack_reason_hygiene_case: LOG_CHECKS_EXTRA is first defined in section 21304, after this section. Every
 # deny also runs the generic forbidden-name check (names_the_target) in run_cases.
 RS_CLAIM = "claude-role triage"
-sh("local-role: a claim's reason names create_session, the route a cloud session takes to a role", RS_CLAIM, "deny",
-   rule="self-role-claim", cwd=PUSHSSH, session=LT_SID, env=SR_NO_ROLE, carries=("create_session",))
-sh("local-role: a claim's reason names the cs-build:<role> tag a cloud role session carries", RS_CLAIM, "deny",
-   rule="self-role-claim", cwd=PUSHSSH, session=LT_SID, env=SR_NO_ROLE, carries=("cs-build:",))
+sh("local-role: a claim's reason says the rule covers only the local launcher and the role variable", RS_CLAIM, "deny",
+   rule="self-role-claim", cwd=PUSHSSH, session=LT_SID, env=SR_NO_ROLE, carries=("covers only",))
 sh("local-role: a claim's reason says the rule covers the role variable", RS_CLAIM, "deny",
    rule="self-role-claim", cwd=PUSHSSH, session=LT_SID, env=SR_NO_ROLE, carries=(("role variable", "CS_SESSION_ROLE"),))
 sh("local-role: a claim's reason says the rule covers the local launcher", RS_CLAIM, "deny",
    rule="self-role-claim", cwd=PUSHSSH, session=LT_SID, env=SR_NO_ROLE, carries=("launcher",))
+sh("local-role: a claim's reason says a cloud session's role comes from the coordinator that starts it", RS_CLAIM, "deny",
+   rule="self-role-claim", cwd=PUSHSSH, session=LT_SID, env=SR_NO_ROLE, carries=("coordinator",))
+sh("local-role: a claim's reason says a session that is not that coordinator does the work or asks the coordinator", RS_CLAIM,
+   "deny", rule="self-role-claim", cwd=PUSHSSH, session=LT_SID, env=SR_NO_ROLE,
+   carries=(("does the work", "asks the coordinator", "ask the coordinator"),))
+sh("local-role: a claim's reason does not hand over create_session", RS_CLAIM, "deny",
+   rule="self-role-claim", cwd=PUSHSSH, session=LT_SID, env=SR_NO_ROLE, lacks=("create_session",))
+sh("local-role: a claim's reason does not hand over the cs-build tag", RS_CLAIM, "deny",
+   rule="self-role-claim", cwd=PUSHSSH, session=LT_SID, env=SR_NO_ROLE, lacks=("cs-build",))
 sh("local-role: a claim's reason never sends the owner to start the session", RS_CLAIM, "deny",
    rule="self-role-claim", cwd=PUSHSSH, session=LT_SID, env=SR_NO_ROLE, lacks=("ask the owner",))
+sh("local-role: a claim's reason names no terminal", RS_CLAIM, "deny",
+   rule="self-role-claim", cwd=PUSHSSH, session=LT_SID, env=SR_NO_ROLE, lacks=("terminal",))
 
 FAMILY = _LT_PREV_FAMILY
