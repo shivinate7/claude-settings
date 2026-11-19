@@ -6,11 +6,20 @@ and this repo's checks.yml calls it. Until the lift moves the script, the copy a
 
 The contract these cases pin. A change to any of it changes these cases first.
 - Env in: PUSH_TREE (the push commit's tree), HEAD_SHA (the push commit), REPO, GH_TOKEN, GITHUB_OUTPUT. EVENT is the event name,
-  as ci-scope.sh reads it: a schedule or workflow_dispatch run never skips. GITHUB_WORKSPACE is the calling checkout; the suite
+  as ci-scope.sh reads it: a schedule or workflow_dispatch run never skips, and a pull_request run skips only on the proof in the
+  pull request bullets below. GITHUB_WORKSPACE is the calling checkout; the suite
   list is read from its .github/workflows/checks.yml, and unset means this repo, as before.
 - Reads: commits/<sha>/pulls (the pull requests the push commit belongs to); git/commits/<head> (the head's tree);
   commits/<head>/check-runs (a batch-* head only: its all-jobs-passed run and its suite runs); actions/runs?head_sha&event
   (the checks.yml runs of a merged pull request head that is not a batch head); actions/runs/<id>/jobs (its jobs, with steps).
+- A pull_request run: EVENT=pull_request, HEAD_SHA is the run's merge commit (github.sha, the tree GitHub tested), PUSH_TREE is empty.
+  Its merged tree is the tree of git/commits/<HEAD_SHA>. The decision reads no pull request list on this path.
+- A pull_request run skips when an earlier push run of the same workflow file (RUN_PATH) is completed with conclusion success, its
+  commit's tree equals the merged tree, and its jobs pass by the merged pull request rule (all-jobs-passed and every suite job
+  succeeded). Reads: actions/runs?event=push (the earlier runs, filtered by path and conclusion in the decision), git/commits/<its
+  head_sha> (its tree), actions/runs/<its id>/jobs. A push run is the only earlier run that names a tree, since a pull request run's
+  head is the PR head, not the tree it tested. The output names the proving run's id. A red, cancelled, in-progress or other-workflow
+  run proves nothing. No earlier run with the merged tree gives skip=false. A full page of earlier runs with no match is unknown.
 - skip=true when the push tree equals the tree of a batch-* head whose ready run passed every suite job, or of a merged pull
   request head whose newest checks.yml run is a green pull request run: all-jobs-passed and every suite job succeeded. A suite step
   that scope skipped does not stop the skip: after a passing PR run, narrowed or full, main runs none of its suites for that merge.
@@ -199,10 +208,11 @@ class FakeGitHub:
     check runs are the defaults. `pulls` is the list the push commit's pull request read returns, `trees` maps a head sha to its tree,
     `workflow_runs` are the runs of the repo (filtered by head_sha and event when the read names them) and `jobs` maps a run id to its
     jobs. check_name filters the check runs; per_page (default 30) and page cut every list. `fail` is raised by every check-runs read,
-    `runs_fail` by the runs read and `jobs_fail` by the jobs read. A URL no case expects goes to `unexpected`, which the case asserts
-    empty; `reads` keeps every path asked, in order."""
+    `runs_fail` by the runs read and `jobs_fail` by the jobs read. `commit_fails` maps a commit sha to the error its commit read raises.
+    A URL no case expects goes to `unexpected`, which the case asserts empty; `reads` keeps every path asked, in order."""
 
-    def __init__(self, runs=(), fail=None, pulls=None, trees=None, workflow_runs=None, jobs=None, runs_fail=None, jobs_fail=None):
+    def __init__(self, runs=(), fail=None, pulls=None, trees=None, workflow_runs=None, jobs=None, runs_fail=None, jobs_fail=None,
+                 commit_fails=None):
         self.runs = list(runs or [])
         self.fail = fail
         self.pulls = [{"head": {"ref": BATCH, "sha": HEAD}}] if pulls is None else pulls
@@ -210,6 +220,7 @@ class FakeGitHub:
         self.workflow_runs = [] if workflow_runs is None else workflow_runs
         self.jobs = {} if jobs is None else jobs
         self.runs_fail, self.jobs_fail = runs_fail, jobs_fail
+        self.commit_fails = {} if commit_fails is None else commit_fails
         self.unexpected, self.reads = [], []
 
     @staticmethod
@@ -226,6 +237,8 @@ class FakeGitHub:
         self.reads.append(path)
         if path == "commits/%s/pulls" % SHA:
             return self.pulls
+        if path.startswith("git/commits/") and path[len("git/commits/"):] in self.commit_fails:
+            raise self.commit_fails[path[len("git/commits/"):]]
         if path.startswith("git/commits/") and path[len("git/commits/"):] in self.trees:
             return {"tree": {"sha": self.trees[path[len("git/commits/"):]]}}
         if path == "commits/%s/check-runs" % HEAD:
@@ -846,9 +859,133 @@ class RecordsOnlyRun(LiveHead):
         self.assert_gap(None, "success", "there is no scope run, so the flags the skips rest on are not known")
 
 
+PR_MERGE = "7" * 40  # a pull request run's merge commit: github.sha on that run, the tree GitHub tested
+EARLIER = "6" * 40  # the commit of an earlier push run of the same workflow file
+PROOF_RUN = 900417  # the earlier push run that proves the merged tree; the output must name its id
+PR_ENV = {"EVENT": "pull_request", "HEAD_SHA": PR_MERGE, "PUSH_TREE": ""}  # what a pull_request run gives the decision
+FULL_PAGE = 100  # the reads' page size, so a full page is the state that makes the read unknown
+
+
+def head_of(i):
+    """A distinct commit sha for the i-th filler run of a full page."""
+    return "%040x" % (0x1000 + i)
+
+
+class PullRequestRunProof(LiveHead):
+    """A pull_request run skips when an earlier passing push run of the same workflow file has its merged tree (decision
+    push-skip-on-proven-tree; owner approval of ci-skips-proven-tree, 14:31 CST Nov 19). Old code refuses every pull_request run, so a
+    bare refusal passes there and proves nothing. Each refusal case therefore asserts its green twin first: the same fixture with
+    the one difference removed must skip. The twin is what goes red on old code."""
+
+    def proof(self, runs, jobs=None, trees=None, env=None, **options):
+        """main() on a pull_request run, with the reads answered by FakeGitHub. -> (skip value, printed text, the fake).
+        The earlier run's jobs default to a full green run; the merged tree and the earlier commit default to TREE."""
+        fake = FakeGitHub(workflow_runs=runs, jobs={PROOF_RUN: full_run_jobs()} if jobs is None else jobs,
+                          trees={PR_MERGE: TREE, EARLIER: TREE} if trees is None else trees, pulls=[], **options)
+        value, text = self.skip_on(fake=fake, extra_env=PR_ENV if env is None else env)
+        return value, text, fake
+
+    def assert_matching_run_skips(self, cause):
+        """The green twin: one matching passing earlier run and no fault. It must skip, or a refusal checked against it proves nothing."""
+        value, text, _ = self.proof([pull_request_run(PROOF_RUN, head=EARLIER, event="push")])
+        self.assertEqual(value, "true", "%s: the matching green earlier run did not skip, so the refusal checked against it proves nothing (%s)"
+                         % (cause, text.strip()[-200:]))
+
+    def test_a_pull_request_run_whose_merged_tree_matches_a_passing_earlier_run_skips_and_names_it(self):
+        run = pull_request_run(PROOF_RUN, head=EARLIER, event="push")
+        self.assertEqual((run["event"], run["path"], run["conclusion"]), ("push", RUN_PATH, "success"),
+                         "the fixture must be a green push run of checks.yml, or it proves nothing")
+        value, text, fake = self.proof([run])
+        self.assertEqual(value, "true", "a pull_request run whose merged tree equals a passing earlier run's tree must give skip=true (%s)"
+                         % text.strip()[-200:])
+        self.assertIn("git/commits/%s" % PR_MERGE, fake.reads, "the decision never read the merged tree, so it cannot compare it")
+        self.assertIn(str(PROOF_RUN), text, "the skip must say which run proved it, and the run's id %d is not in the output" % PROOF_RUN)
+
+    def test_an_earlier_run_with_another_tree_does_not_prove_the_merged_tree(self):
+        self.assert_matching_run_skips("the green twin of a different tree")
+        trees = {PR_MERGE: TREE, EARLIER: OTHER_TREE}
+        self.assertNotEqual(trees[EARLIER], trees[PR_MERGE], "the fixture's earlier tree must differ from the merged tree, or it proves nothing")
+        value, _, _ = self.proof([pull_request_run(PROOF_RUN, head=EARLIER, event="push")], trees=trees)
+        self.assertEqual(value, "false", "the earlier run's tree is another tree, so it does not prove the merged tree: skip=false")
+
+    def test_a_run_of_another_workflow_file_does_not_prove_the_merged_tree(self):
+        self.assert_matching_run_skips("the green twin of another workflow file")
+        run = pull_request_run(PROOF_RUN, head=EARLIER, event="push", path=OTHER_PATH)
+        self.assertNotEqual(run["path"].split("@")[0], RUN_PATH, "the fixture's run must be another workflow, or it proves nothing")
+        value, _, _ = self.proof([run])
+        self.assertEqual(value, "false", "a run of another workflow file is not the checks run, so it does not prove the tree: skip=false")
+
+    def test_an_earlier_run_that_was_not_all_green_does_not_prove_the_merged_tree(self):
+        self.assert_matching_run_skips("the green twin of a run that was not all green")
+        self.assertIn("checks-windows-rest", SUITE_JOBS, "checks-windows-rest is not a suite job of checks.yml, so this case probes the wrong job")
+        cases = (
+            ("a failed run", {"conclusion": "failure"}, full_run_jobs()),
+            ("a cancelled run", {"conclusion": "cancelled"}, full_run_jobs()),
+            ("a run still in progress", {"conclusion": None, "status": "in_progress"}, full_run_jobs()),
+            ("a green run whose suite job failed", {}, full_run_jobs({"checks-windows-rest": {"conclusion": "failure"}})),
+        )
+        for label, change, jobs in cases:
+            with self.subTest(label=label):
+                run = pull_request_run(PROOF_RUN, head=EARLIER, event="push", **change)
+                value, _, _ = self.proof([run], jobs={PROOF_RUN: jobs})
+                self.assertEqual(value, "false", "%s: it does not prove the merged tree, so skip=false" % label)
+
+    def test_an_unreadable_list_of_earlier_runs_is_unknown_and_runs(self):
+        self.assert_matching_run_skips("the green twin of an unreadable run list")
+        value, text, fake = self.proof([pull_request_run(PROOF_RUN, head=EARLIER, event="push")], runs_fail=http.client.IncompleteRead(b"partial"))
+        self.assertIn("actions/runs", fake.reads, "the decision never asked for the earlier runs, so it never tried to prove the tree")
+        self.assertEqual(value, "false", "the earlier runs could not be read, so the proof is unknown and the push runs everything: skip=false")
+        self.assertIn("unknown", text.lower(), "an unreadable list of earlier runs must say unknown")
+
+    def test_an_unreadable_proof_of_an_earlier_run_is_unknown_and_runs(self):
+        self.assert_matching_run_skips("the green twin of an unreadable jobs read")
+        value, text, fake = self.proof([pull_request_run(PROOF_RUN, head=EARLIER, event="push")], jobs_fail=http.client.IncompleteRead(b"partial"))
+        self.assertIn("actions/runs/%d/jobs" % PROOF_RUN, fake.reads, "the decision never read the earlier run's jobs, so it never tried to prove the tree")
+        self.assertEqual(value, "false", "the earlier run's jobs could not be read, so the proof is unknown: skip=false")
+        self.assertIn("unknown", text.lower(), "an unreadable earlier run's jobs must say unknown")
+
+    def test_an_unreadable_commit_of_an_earlier_run_is_unknown_and_runs(self):
+        self.assert_matching_run_skips("the green twin of an unreadable earlier commit")
+        value, text, fake = self.proof([pull_request_run(PROOF_RUN, head=EARLIER, event="push")],
+                                       commit_fails={EARLIER: http.client.IncompleteRead(b"partial")})
+        self.assertIn("git/commits/%s" % EARLIER, fake.reads, "the decision never read the earlier run's tree, so it never compared it")
+        self.assertEqual(value, "false", "the earlier run's tree could not be read, so the proof is unknown: skip=false")
+        self.assertIn("unknown", text.lower(), "an unreadable earlier commit must say unknown")
+
+    def test_an_unreadable_merged_tree_is_unknown_and_runs(self):
+        self.assert_matching_run_skips("the green twin of an unreadable merged tree")
+        value, text, fake = self.proof([pull_request_run(PROOF_RUN, head=EARLIER, event="push")],
+                                       commit_fails={PR_MERGE: http.client.IncompleteRead(b"partial")})
+        self.assertIn("git/commits/%s" % PR_MERGE, fake.reads, "the decision never read the merged tree, so it cannot compare it")
+        self.assertEqual(value, "false", "the merged tree could not be read, so nothing is proven: skip=false")
+        self.assertIn("unknown", text.lower(), "an unreadable merged tree must say unknown")
+
+    def test_a_full_page_of_earlier_runs_with_no_match_is_unknown_and_runs(self):
+        matching = pull_request_run(PROOF_RUN, head=EARLIER, event="push")
+        fillers = [pull_request_run(i, head=head_of(i), event="push") for i in range(1, FULL_PAGE + 1)]
+        trees = {PR_MERGE: TREE, EARLIER: TREE, **{head_of(i): OTHER_TREE for i in range(1, FULL_PAGE + 1)}}
+        self.assertEqual(len(fillers), FULL_PAGE, "the fixture must fill a page of %d, or it proves nothing" % FULL_PAGE)
+        value, text, _ = self.proof([matching] + fillers[:FULL_PAGE - 1], trees=trees)
+        self.assertEqual(value, "true", "the matching run is on the full page, so the page holds the proof: skip=true (%s)" % text.strip()[-200:])
+        value, text, _ = self.proof(fillers, trees=trees)
+        self.assertEqual(value, "false", "a full page of earlier runs with no match may hide the proof, so the read is unknown: skip=false")
+        self.assertIn("unknown", text.lower(), "a full page of earlier runs with no match must say unknown")
+
+    def test_no_earlier_run_gives_skip_false(self):
+        self.assert_matching_run_skips("the green twin of an empty list")
+        value, _, _ = self.proof([])
+        self.assertEqual(value, "false", "no earlier push run of the workflow exists, so nothing proves the merged tree: skip=false")
+
+    def test_control_a_schedule_run_beside_a_matching_passing_earlier_run_never_skips(self):
+        run = pull_request_run(PROOF_RUN, head=EARLIER, event="push")
+        self.assertEqual(run["conclusion"], "success", "the fixture's earlier run must be green, or the control proves nothing")
+        value, _, _ = self.proof([run], env={"EVENT": "schedule", "HEAD_SHA": PR_MERGE, "PUSH_TREE": ""})
+        self.assertEqual(value, "false", "a scheduled run never skips, even beside a passing earlier run with its tree: skip=false")
+
+
 class EventRefusal(LiveHead):
-    """A scheduled or manual run never skips, even when a green batch head with the push's tree is there. The push job runs on push
-    only, but the decision refuses by event too, so a wiring that drops the push-only if: cannot skip a nightly."""
+    """A scheduled or manual run never skips, even when a green batch head with the push's tree is there. The push-skip job runs on a
+    push and a pull request, and the decision refuses a schedule or a dispatch by event, so a wiring that lets one through cannot skip a nightly."""
 
     def test_a_schedule_run_never_skips_even_when_a_green_batch_head_matches(self):
         fake = FakeGitHub(ready_head_runs())
@@ -909,9 +1046,10 @@ class PushSkipWiring(unittest.TestCase):
             self.text = f.read()
         self.jobs = all_jobs(self.text)
 
-    def test_push_skip_starts_on_every_event_and_its_steps_run_on_a_push_only(self):
+    def test_push_skip_starts_on_every_event_and_its_steps_run_on_a_push_or_a_pull_request_only(self):
         # A job-level if would leave the job skipped on a pull request, and all-jobs-passed reads a skipped needed job as red.
-        # Named failure: a job-level if returns, or a step runs off a push.
+        # Named failure: a job-level if returns, a step does not run on a pull request (so the PR run never reaches the decision),
+        # or a step runs on a schedule or a dispatch. Owner approval of ci-skips-proven-tree, 14:31 CST Nov 19, re-points this from push-only.
         self.assertIsNone(self.jobs.get(JOB, {}).get("if"), f"{JOB} keeps a job-level if: it would read skipped on a pull request")
         block = job_block(self.text, JOB) or ""
         steps = step_blocks(block)
@@ -920,7 +1058,9 @@ class PushSkipWiring(unittest.TestCase):
             expr = step_key(step, "if")
             self.assertIsNotNone(expr, f"a {JOB} step has no if: it would run off a push")
             self.assertTrue(eval_if(expr, "push", "", draft=False), f"a {JOB} step does not run on push: if {expr}")
-            for event in ("pull_request", "schedule", "workflow_dispatch"):
+            self.assertTrue(eval_if(expr, "pull_request", "", draft=False),
+                            f"a {JOB} step does not run on pull_request, so a PR run never reaches the decision: if {expr}")
+            for event in ("schedule", "workflow_dispatch"):
                 self.assertFalse(eval_if(expr, event, "", draft=False), f"a {JOB} step runs on {event}: if {expr}")
 
     def test_push_skip_decides_in_a_step_with_id_decide_and_outputs_skip(self):
