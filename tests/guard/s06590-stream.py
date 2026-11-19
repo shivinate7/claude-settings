@@ -983,7 +983,7 @@ sh("wait-until: a foreground wait for a time 24 s away with --timeout 500 is all
 
 # A time that is not a literal (a command substitution or a variable) cannot be read here, so a foreground wait on
 # one is refused. Under run_in_background it is allowed. An echo that names such a wait is text, and is allowed.
-for _non_literal in ('"$(date -u +%Y-%m-%dT%H:%M:%SZ)"', "$T"):
+for _non_literal in ('"$(date -u +%Y-%m-%dT%H:%M:%SZ)"', '$(date -u +%Y-%m-%dT%H:%M:%SZ)', "$T"):
     sh("wait-until: a foreground wait on the non-literal time %s is refused, and the reason names run_in_background"
        % _non_literal, "wait-until %s" % _non_literal, "deny", "waiter", cwd=NOGIT,
        carries=("run_in_background",), env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW})
@@ -992,6 +992,29 @@ for _non_literal in ('"$(date -u +%Y-%m-%dT%H:%M:%SZ)"', "$T"):
         run_in_background=True)
 sh("wait-until: an echo that names a wait on $T is text and is allowed", 'echo "wait-until $T"', "allow",
    cwd=NOGIT, env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW})
+
+# A redirect, a grouping, or a --timeout that is not a number does not change the wait: the far time still
+# waits, and a --timeout that cannot be read caps nothing. Each refused form has a background control, which
+# is the same line allowed under run_in_background. The 10 s cap on a redirected line is the foreground control:
+# the cap allows the wait, whatever the redirect.
+WAIT_UNTIL_LINE_FORMS = (
+    "wait-until %s 2>&1",
+    "wait-until %s >/dev/null 2>&1",
+    "wait-until %s > f",
+    "wait-until %s --timeout 500 2>&1",
+    "wait-until %s --timeout $N",
+    "(wait-until %s)",
+)
+for _line_form in WAIT_UNTIL_LINE_FORMS:
+    _line_command = _line_form % WAIT_UNTIL_FAR
+    sh("wait-until: a foreground %s is refused, and the reason names run_in_background" % _line_command,
+       _line_command, "deny", "waiter", cwd=NOGIT, carries=("run_in_background",),
+       env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW})
+    add("wait-until: %s is allowed under run_in_background" % _line_command, "allow", cwd=NOGIT,
+        env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW}, command=_line_command, run_in_background=True)
+sh("wait-until: a foreground wait for a far time with --timeout 10 and a redirect is allowed",
+   "wait-until %s --timeout 10 2>&1" % WAIT_UNTIL_FAR, "allow", cwd=NOGIT,
+   env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW})
 
 # THE REMEDY CHECK. Every command form that a waiter-family remedy names in backticks is allowed, in the
 # foreground and under run_in_background: the guard must not refuse the advice it gives. The remedies are read
