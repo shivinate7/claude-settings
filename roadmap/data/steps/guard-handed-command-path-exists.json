@@ -1,0 +1,13 @@
+{
+ "id": "guard-handed-command-path-exists",
+ "title": "A command handed to the owner starts in a folder that exists in his checkout",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "consultant",
+ "why": "Lane sim-lease-gaps' own mistake (coordinator relay 20:53 CST Nov 18, not verified by triage): the Mac command on owner item 876 began with cd ~/claude-settings, a path that is not on the owner's Mac (the repo is at ~/Developer/claude-settings), so his first run skipped the hinge loop and he had to rerun it. Cost: one wasted run. Filed 20:53 CST by triage; the coordinator left it to triage whether it is a step.",
+ "source": "coordinator relay 20:53 CST Nov 18; owner's note on item 876 (his report)",
+ "note": "Idea from the lane: a check that the first cd path of a command handed to the owner (a page item's command.mac) is a path the repo's notes say exists on his Mac. Open: where the repo notes name the Mac checkout path (README.md and the ios-ship text say ~/Developer/claude-settings; no per-owner file read by triage), and whether a guard on the page write (like command-in-item) is the right place. Not built; no incident beyond the one wasted run, so it is a step to size, not a debt. Done check: a page item whose command starts with a path not in the notes is refused, red then green.",
+ "updatedAt": "2026-11-18T20:53:29-06:00"
+}
