@@ -1,5 +1,6 @@
 # section 38500
 FAMILY = "start-session-audit"
+import shared_names  # the lane tag and the Grant reader: the one home, hooks/shared_names.py
 # ---- The start-session audit (roadmap step start-session-not-pretooluse). settings.json does not route start_session to
 # PreToolUse: a PreToolUse matcher that covers it makes the desktop app show the "Allow Claude to start the session?"
 # card on every start, even in Bypass (anthropics/claude-code#103832). The start checks run after the call instead.
@@ -60,6 +61,7 @@ def audit_text(stdin_text, state, wrapper=None):
     env = dict(os.environ)
     env.pop("CLAUDE_CODE_REMOTE", None)
     env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env.pop("CS_SESSION_ROLE", None)   # a runner under bin/claude-role must not leak its role into the audit
     env["CLAUDE_CONFIG_DIR"] = state
     command = [sys.executable, path] if wrapper is None else [sys.executable, "-c", wrapper, path]
     result = subprocess.run(command, input=stdin_text, capture_output=True, text=True, env=env, timeout=60)
@@ -113,6 +115,11 @@ def audit_expect(model, folder, setup, flagged, fragments=(), response="session 
     if setup is not None:
         setup(folder)
     stdout, reason = audit_start(model, folder, response)
+    return audit_judged(stdout, reason, flagged, fragments, absent)
+
+
+def audit_judged(stdout, reason, flagged, fragments=(), absent=()):
+    """(ok, note) for one audit run's stdout and reason, judged as audit_expect judges it."""
     if reason:
         return False, reason
     context, reason = audit_context(stdout)
@@ -168,6 +175,58 @@ def audit_flag_without_handoff_silent():
 
 def audit_handoff_without_flag_silent():
     return audit_expect("sonnet", audit_folder("handoff-only"), lambda folder: hu_files(folder, False, True), False)
+
+
+# A desktop lane start: a start_session call whose tags carry the lane tag and whose prompt opens with the Grant line, as a
+# lane brief does (decision agent-model-cap, the lane start). The fixture must read as a lane by the shared readers, so a
+# failure names the audit, not the fixture. The Grant line starts the lane and names no Opus grant. An Opus grant is the
+# owner override, read from CLAUDE_CONFIG_DIR (decision owner-override), and each audit folder starts without one.
+LANE_PROMPT = ("Grant: the owner said to audit the start's role and model, 2026-11-18 19:00 CST\n"
+               "Lane brief: start-session-audit. Topic: the start audit.\n\nAdd the audit cases.")
+
+
+def lane_payload(model=None):
+    """The PostToolUse payload of a lane start: audit_payload's start_session call, tagged and briefed as a lane."""
+    payload = audit_payload(model)
+    payload["tool_input"].update(prompt=LANE_PROMPT, tags=[shared_names.LANE_TAG])
+    return payload
+
+
+def lane_reads(tool_input):
+    """True when the start reads as a lane by the shared readers: the lane tag, and a Grant line first with the owner's words."""
+    first = next((ln.strip() for ln in tool_input["prompt"].splitlines() if ln.strip()), "")
+    return shared_names.LANE_TAG in shared_names.lane_tags(tool_input) and shared_names.grant_line_holds_words(first)
+
+
+def lane_expect(model, folder, flagged, fragments=()):
+    payload = lane_payload(model)
+    if not lane_reads(payload["tool_input"]):
+        return False, "the lane fixture does not read as a lane start (the lane tag and the Grant line)"
+    stdout, reason = audit_run(payload, folder)
+    return audit_judged(stdout, reason, flagged, fragments)
+
+
+def audit_lane_no_model_flagged():
+    return lane_expect(None, audit_folder("lane-no-model"), True, ("lane", "model") + AUDIT_STOP_LINE)
+
+
+def audit_lane_sonnet_silent():
+    # Control: the same lane start with the model named passes, so the flag above turns on the missing model alone.
+    return lane_expect("sonnet", audit_folder("lane-sonnet"), False)
+
+
+def audit_lane_opus_flagged():
+    return lane_expect("opus", audit_folder("lane-opus"), True, ("opus",) + AUDIT_STOP_LINE)
+
+
+def audit_env_role_flagged():
+    # A plain sonnet start that is not a lane, so the env role is the only thing that can flag it.
+    payload = audit_payload("sonnet")
+    if lane_reads(payload["tool_input"]):
+        return False, "the env fixture reads as a lane start, so the lane rules could flag it"
+    payload["tool_input"]["env"] = {"CS_SESSION_ROLE": "coordinator"}
+    stdout, reason = audit_run(payload, audit_folder("env-role"))
+    return audit_judged(stdout, reason, True, ("CS_SESSION_ROLE",) + AUDIT_STOP_LINE)
 
 
 def guard_module():
@@ -319,6 +378,10 @@ for _label, _check in (
         ("the flag does not name the word session_start as the session, and says the id is unread",
          audit_word_session_start_no_id_unread),
         ("the flag names the real id after a field name, not the field", audit_field_text_names_real_id),
-        ("control: a real id in plain text is still named", audit_plain_text_real_id_control)):
+        ("control: a real id in plain text is still named", audit_plain_text_real_id_control),
+        ("a lane start with no model is flagged, with the stop line", audit_lane_no_model_flagged),
+        ("control: a lane start naming sonnet passes", audit_lane_sonnet_silent),
+        ("a lane start naming opus with no owner grant is flagged, with the stop line", audit_lane_opus_flagged),
+        ("a start whose env carries CS_SESSION_ROLE is flagged, with the stop line", audit_env_role_flagged)):
     LOG_CHECKS_EXTRA.append(("start-session: " + _label, _check))
     FIXTURELESS_CHECKS.add(_check)
