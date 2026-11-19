@@ -1902,14 +1902,14 @@ class StaleInProgress(UpkeepFixture):
 
     def test_read_at_two_hours_old_reads_the_row_unknown(self):
         self.commit_step("c1", status="doing")
-        value = self.publish(sessions=[], read_at=iso_ago(120))
-        page, out = self.build_from_main("--live", str(self.live))
+        # The build clock is fixed, so the file is exactly 120 minutes old and the row names that age exactly.
+        with mock.patch.object(build, "datetime", fixed_clock(BUILD_NOW)):
+            value = self.publish(sessions=[], read_at=readat_before(BUILD_NOW, 120))
+            page, out = self.build_from_main("--live", str(self.live))
         count, entries = self.stale(out)
-        found = re.fullmatch(r"unknown \(the live file was read (\d+) minutes ago and is stale; "
-                             r"the rebuild failed: no session API in a test\)", entries)
         self.assertEqual(count, 1)
-        self.assertIsNotNone(found, entries)
-        self.assertIn(int(found.group(1)), range(119, 122))
+        self.assertEqual(entries, "unknown (the live file was read 120 minutes ago and is stale; "
+                                  "the rebuild failed: no session API in a test)")
         self.assertEqual(self.panel(page)["read"], value["readAt"])
 
     def test_read_at_five_minutes_old_lists_normally(self):
