@@ -1,6 +1,6 @@
-# The fix check accepts a fix head that merges two lane commits
+# The fix verifier accepts a fix head that merges two lane commits
 
-**What.** `merge <pr> --review-record --fix-check` accepts a fix head that is a merge of two lane commits. Only a merge of main should pass. Queued step `fix-check-accepts-sibling-merge`. Not reproduced yet, so unmeasured.
+**What.** `merge <pr> --review-record --fix-check` accepts a fix head that is a merge of two lane commits. Only a merge of main should pass. Queued step `fix-verifier-takes-sibling-merge`, queued in chat on Nov 18-19. Not reproduced yet, so unmeasured.
 
 **Where.** `merge/merge.py`, the `--fix-check` branch of `--review-record`. It accepts a merge when the head has two parents and `holds_head_gh` reads that the base holds the second parent. A second parent that is a lane commit already on the base passes that read. The usage text of `merge/merge.py` says the second parent must be on the base.
 
