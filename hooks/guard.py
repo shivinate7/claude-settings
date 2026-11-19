@@ -2640,22 +2640,54 @@ def write_result_texts(tool_input, full: str):
 
 
 def test_shape(text: str):
-    """`(shape, count)` of a python test file: its `ast` dump with each test function name and each docstring
-    blanked, and the number of distinct test names, one per class path. A comment is no node. None when the text
-    does not parse."""
+    """`(shape, count, clashes)` of a python test file: its `ast` dump with each undecorated test function name and
+    each docstring blanked, the number of distinct undecorated test names (one per class path), and the test names
+    that a non-def statement of the same scope also binds (an assignment, an import, a class attribute, a class,
+    a decorated def). A decorated def named `test` is a fixture or a mark, no test: its name stays in the dump.
+    A comment is no node. None when the text does not parse."""
     import ast
+
+    def is_test(node):
+        return (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test")
+                and not node.decorator_list)
+
+    def binds(owner):
+        # The names the scope's own statements bind: not what a def or a lambda binds inside itself.
+        found, stack = set(), list(owner.body)
+        while stack:
+            node = stack.pop()
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                if not is_test(node):
+                    found.add(node.name)
+                continue
+            if isinstance(node, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+                continue
+            if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+                found.add(node.id)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                found.update((alias.asname or alias.name).split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ExceptHandler) and node.name:
+                found.add(node.name)
+            elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+                found.add(node.name)
+            elif isinstance(node, ast.MatchMapping) and node.rest:
+                found.add(node.rest)
+            stack.extend(ast.iter_child_nodes(node))
+        return found
 
     def blank_docstring(node):
         first = node.body[0] if node.body else None
         if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str):
             node.body = node.body[1:] or [ast.Pass()]
 
-    names = set()
+    names, bound = set(), set()
 
     def strip(node, scope):
+        if isinstance(node, (ast.Module, ast.ClassDef)):
+            bound.update(scope + (name,) for name in binds(node))
         for child in ast.iter_child_nodes(node):
             inner = scope
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) and child.name.startswith("test"):
+            if is_test(child):
                 names.add(scope + (child.name,))
                 child.name = ""
             if isinstance(child, ast.ClassDef):
@@ -2670,7 +2702,7 @@ def test_shape(text: str):
     except (SyntaxError, ValueError, RecursionError, MemoryError):
         return None
     blank_docstring(tree)
-    return ast.dump(tree), len(names)
+    return ast.dump(tree), len(names), frozenset(names & bound)
 
 
 def builder_rename_only(rel: str, tool_input, target: str, cwd: str) -> bool:
@@ -2689,12 +2721,13 @@ def python_test_rel(rel: str) -> bool:
 
 
 def same_test_shape(before, after) -> bool:
-    """True when two texts hold the same python test file but for test names, comments and docstrings. A text that
-    is None (a file that does not exist there) or does not parse is not."""
+    """True when two texts hold the same python test file but for test names, comments and docstrings, and the new
+    text binds no test name a second way that the old text did not (a rename onto a name an assignment, an import
+    or a class attribute holds). A text that is None (a file that does not exist there) or does not parse is not."""
     if before is None or after is None:
         return False
     left, right = test_shape(before), test_shape(after)
-    return left is not None and left == right
+    return left is not None and right is not None and left[:2] == right[:2] and right[2] <= left[2]
 
 
 def builder_rename_diff(root: str, top: str, rel: str, names, old: str, new=None) -> bool:
