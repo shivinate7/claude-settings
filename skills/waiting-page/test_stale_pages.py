@@ -875,12 +875,14 @@ class Stale(unittest.TestCase):
         The key is the item's id, unless `keys` names one per item, for an item with no id field."""
         return self.docs_folder({(keys[i] if keys else item["id"]): item for i, item in enumerate(items)}, "items")
 
-    def docs_folder(self, docs, name):
-        """The folder `ArtifactData list` saves: one <doc id>.json per entry of `docs` ({doc id: data}), and the .complete marker it leaves."""
+    def docs_folder(self, docs, name, complete=True):
+        """The folder `ArtifactData list` saves: one <doc id>.json per entry of `docs` ({doc id: data}), and the .complete marker it leaves.
+        `complete=False` writes no marker, for a folder that is not a fetch (the record's roadmap/data/steps is read in place)."""
         folder = tempfile.mkdtemp(dir=self.tmp.name, prefix=name + "-")
         for doc_id, data in docs.items():
             write_text(os.path.join(folder, doc_id + ".json"), json.dumps(data))
-        write_text(os.path.join(folder, ".complete"), "")
+        if complete:
+            write_text(os.path.join(folder, ".complete"), "")
         return folder
 
     def current_and_behind(self):
@@ -1690,6 +1692,120 @@ class Stale(unittest.TestCase):
         alone, both = self.gh_calls(alone_folder), self.gh_calls(both_folder)
         self.assertGreaterEqual(len(alone), 2, "the items-alone run did not start the gh processes its open waits need: %s" % alone)
         self.assertLessEqual(len(both), len(alone), "--answers started more gh processes than --items alone:\n%s" % both)
+
+    # The found-false cases: an open item whose home step is done, dropped, folded or done-obsolete is flagged on the --items path.
+    # Each run asserts the page verdict first (the path ran), then looks for the item's line. A case that asserts an item is NOT
+    # flagged also holds a flagged item in the same run: an old run flags nothing, so such a case alone would pass there.
+
+    def found_false_run(self, items, steps):
+        """Runs the --items path on the current page. `items` is the items folder; `steps` ({step file name: step data}) is the folder
+        WAITING_PAGE_STEPS names. Returns (the run, its found-false lines), after the page verdict is asserted."""
+        current, _ = self.current_and_behind()
+        steps_dir = self.docs_folder(steps, "steps", complete=False)
+        r = self.items_run(current, self.items_folder(items), {FOUND_ENV: steps_dir})
+        self.assert_page_word(r, "current", 0)  # the scope: the page verdict ran, and the flag leaves its exit code as it was
+        return r, found_lines(r.stdout)
+
+    def assert_found_line(self, lines, n, item_id):
+        """Exactly one found-false line starts `found-false: item <n> (<id>)`. Returns it."""
+        want = "found-false: item %d (%s)" % (n, item_id)
+        hits = [line for line in lines if line.startswith(want)]
+        self.assertEqual(len(hits), 1, "item %d (%s) is not flagged: want one line starting %r, got %r" % (n, item_id, want, lines))
+        return hits[0]
+
+    def test_found_false_an_open_item_whose_home_step_is_done_is_flagged_with_its_home(self):
+        """Both home forms name the step: the bare step id, and `step <id>`. The flag names the item, its home and the home's status."""
+        for home in ("home-done", "step home-done"):
+            with self.subTest(home=home):
+                _, lines = self.found_false_run([found_item(956, "moot-item", home)], {"home-done": found_step("done", "home-done")})
+                line = self.assert_found_line(lines, 956, "moot-item")
+                self.assertIn("home-done", line, "the found-false line does not name its home step:\n" + line)
+                self.assertRegex(line, r"\bdone\b", "the found-false line does not name the step's status:\n" + line)
+
+    def test_found_false_the_flag_names_the_way_to_close_the_item(self):
+        """The line names the close the writer makes: status and closed, and reply and replied, which name the record that shows it false."""
+        _, lines = self.found_false_run([found_item(956, "moot-item", "home-done")], {"home-done": found_step("done", "home-done")})
+        line = self.assert_found_line(lines, 956, "moot-item")
+        for word in ("status", "closed", "reply", "replied"):
+            self.assertRegex(line, r"\b%s\b" % word, "the found-false line does not name %r, a way to close the item:\n%s" % (word, line))
+
+    def test_found_false_the_flag_never_asks_the_owner_to_answer(self):
+        """The flag closes the item and never asks the owner. The line uses no word that starts answer, ask or respon, in any case."""
+        _, lines = self.found_false_run([found_item(956, "moot-item", "home-done")], {"home-done": found_step("done", "home-done")})
+        line = self.assert_found_line(lines, 956, "moot-item")
+        for stem in ("answer", "ask", "respon"):
+            self.assertNotRegex(line, r"(?i)\b%s" % stem, "the found-false line asks the owner (%r):\n%s" % (stem, line))
+
+    def test_found_false_a_dropped_folded_or_done_obsolete_home_is_flagged_too(self):
+        for status in ("dropped", "folded", "done-obsolete"):
+            with self.subTest(status=status):
+                home = "home-" + status
+                _, lines = self.found_false_run([found_item(956, "moot-item", home)], {home: found_step(status, home)})
+                line = self.assert_found_line(lines, 956, "moot-item")
+                self.assertIn(status, line, "the found-false line does not name the home's status %s:\n%s" % (status, line))
+
+    def test_found_false_only_an_open_item_with_a_done_home_is_flagged(self):
+        """The open item with a done home is flagged. In the same run, a closed item with a done home and an open item under each
+        live step status are not."""
+        steps = {"home-done": found_step("done", "home-done")}
+        items = [found_item(956, "moot-item", "home-done"),
+                 found_item(957, "closed-moot", "home-done", status="closed", closed="2026-11-18T10:00:00Z")]
+        for i, status in enumerate(FOUND_LIVE):
+            home = "home-" + status
+            steps[home] = found_step(status, home)
+            items.append(found_item(960 + i, "live-" + status, home))
+        _, lines = self.found_false_run(items, steps)
+        self.assert_found_line(lines, 956, "moot-item")
+        self.assertEqual(len(lines), 1, "a closed item or an open item under a live home is flagged too:\n" + "\n".join(lines))
+
+    def test_found_false_a_full_store_flags_exactly_its_open_done_home_items(self):
+        """200 items over every step status, both home forms, closed items and a record home that is no step. Exactly the open items
+        whose step is done, dropped, folded or done-obsolete are flagged, in item order. The empty store then flags none."""
+        kinds = FOUND_DONE + FOUND_LIVE
+        steps = {"home-" + kind: found_step(kind) for kind in kinds}  # no id field: the check keys each step by its file name
+        items, want = [], []
+        for n in range(1, 201):
+            kind = kinds[n % len(kinds)]
+            step_id = "home-" + kind
+            home = step_id if n % 2 else "step " + step_id
+            status = "closed" if n % 6 == 0 else "open"
+            if n % 7 == 0:
+                home = "docs/decisions/session-messages.md"  # a record home, not a step: never flagged
+            items.append(found_item(n, "item-%d" % n, home, status=status))
+            if status == "open" and n % 7 and kind in FOUND_DONE:
+                want.append(n)
+        _, lines = self.found_false_run(items, steps)
+        got = [int(m.group(1)) for m in (re.match(r"found-false: item (\d+) ", line) for line in lines) if m]
+        self.assertEqual(got, want, "the flagged items are not the open done-home items:\n" + "\n".join(lines))
+        _, lines = self.found_false_run([], steps)
+        self.assertEqual(lines, [], "an empty store flags an item:\n" + "\n".join(lines))
+
+
+# Fixtures for the found-false cases. A step's `home` is its bare step id (SKILL.md, "Add an item"); records also hold the `step <id>`
+# form, so both are read. FOUND_DONE are the step statuses that make an item's premise moot; FOUND_LIVE are the others.
+FOUND_ENV = "WAITING_PAGE_STEPS"  # the folder of step files, <step id>.json, that the check reads (the record's roadmap/data/steps)
+FOUND_DONE = ("done", "dropped", "folded", "done-obsolete")
+FOUND_LIVE = ("todo", "ready", "doing", "blocked", "open", "parked")
+
+
+def found_item(n, item_id, home, status="open", **extra):
+    """An open decision item, as the page holds it, whose `home` names the step that carries its work."""
+    item = {"id": item_id, "n": n, "kind": "decision", "status": status, "title": "A question its record answers", "home": home}
+    item.update(extra)
+    return item
+
+
+def found_step(status, step_id=None):
+    """A step file as roadmap/data/steps holds it. Most step files carry no `id` field, so the file name is the step's id."""
+    data = {"title": "A step", "status": status}
+    if step_id is not None:
+        data["id"] = step_id
+    return data
+
+
+def found_lines(out):
+    """The found-false lines of a run's output."""
+    return [line for line in out.splitlines() if line.startswith("found-false:")]
 
 
 # Fixtures for the --items cases: a repo, a run that ended completed/failure, and the PR that run checked.
