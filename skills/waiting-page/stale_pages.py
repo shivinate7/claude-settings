@@ -65,6 +65,10 @@ answers/<id> is kept`, then the remedy: when its wait has ended, drop `waits` an
 a closed item with a `lane` and a `lastAnswer` (routed: its answer stays until the done report), an item with `arbiter` true, a park answer (`park.<id>`, `parked: true` or `act: "park"`), an answer with no item. An unreadable file, a folder without the marker,
 unreadable items, an items folder without the marker, or --answers without --items print one `kept-answer: unknown (...)` line, with no other kept-answer line.
 The folder loader is export_page.docs_in, the one home of reading that folder.
+With --items and the env WAITING_PAGE_STEPS naming the record's roadmap/data/steps folder (no CLI flag), an open item whose `home` (a bare step id, or `step <id>`)
+names a step whose status is done, dropped, folded or done-obsolete prints `found-false: item <n> (<id>): ...` after the other lines. The line names the home, its
+status and the close (status closed, a reply, replied); the item is moot, so the owner is never asked. Unset, the check does nothing; an unreadable folder prints
+one `found-false: unknown (...)` line. The exit code stays the verdict's.
 Session-start mode, run by hooks/session_start.sh in a repo whose extras name a waiting page:
 
     python3 ~/.claude/skills/waiting-page/stale_pages.py --session-line <repo toplevel> [--main-checkout <dir>]
@@ -200,6 +204,8 @@ DESIGN_BODY = re.compile(r'(<script type="application/json" id="designData">)(.*
 TEMPLATE_IN_GIT = "skills/waiting-page/page.html"
 GIT_TIMEOUT = 30
 WAIT_CAP = 50  # most gh calls one --items run makes
+FOUND_ENV = "WAITING_PAGE_STEPS"  # the folder of step files the --items run reads for found-false items; unset, the check does nothing
+FOUND_DONE = ("done", "dropped", "folded", "done-obsolete")  # the step statuses that make an item's premise moot
 REPO_NAME = re.compile(r"[\w.-]+/[\w.-]+")
 WAIT_NUMBER = re.compile(r"[1-9][0-9]*")  # a run id or PR number: a whole number above zero, with no leading zero (page.html waitsOf reads the same form)
 # One piece of the text before the template: white space or a document skeleton tag (no event-handler
@@ -710,10 +716,58 @@ def kept_answer_lines(items, answers, complete=True, answers_complete=True):
     return reopened + lines  # the stale open items lead, as they hold the page's wrong state
 
 
+def read_steps(folder):
+    """{step id: status} from the `<step id>.json` files in `folder` (the record's roadmap/data/steps). A step's id is its file name; an `id` field,
+    when present, names it too. Raises ValueError with the cause. A file that is not a JSON object with a string status reads as no status."""
+    steps = {}
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError as err:
+        raise ValueError("%s cannot be read (%s)" % (FOUND_ENV, err.strerror or err))
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(folder, name), encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        status = data.get("status") if isinstance(data, dict) else None
+        if not isinstance(status, str):
+            continue
+        steps[name[:-len(".json")]] = status
+        if isinstance(data.get("id"), str):
+            steps.setdefault(data["id"], status)
+    return steps
+
+
+def found_false_lines(items, steps):
+    """One line per open item, in `n` order, whose `home` names a step that is done, dropped, folded or done-obsolete: its premise is moot, so the
+    writer closes it the same turn (SKILL.md, "Route and close", an item found false). `home` reads as a bare step id or as `step <id>`; any other home (a record
+    path, a pointer to a live step) is never flagged. `steps` is {step id: status} from read_steps."""
+    lines = []
+    # The folder lists docs by file name ("10" before "2"), so order by `n`, which is the order the page shows; an item with no whole `n` goes last.
+    ordered = sorted((i for i in items if isinstance(i, dict)), key=lambda i: (not isinstance(i.get("n"), int), i.get("n") if isinstance(i.get("n"), int) else 0))
+    for item in ordered:
+        if item.get("status") == "closed" or not isinstance(item.get("home"), str):
+            continue
+        home = item["home"].strip()
+        if home.startswith("step "):
+            home = home[len("step "):].strip()
+        status = steps.get(home)
+        if status in FOUND_DONE:
+            lines.append("found-false: item %s (%s): its home step %s is %s, so the item is moot; close it this turn: write status closed "
+                         "and closed (now), with a reply naming the record that shows it false, and file it as replied (SKILL.md, \"Route and close\")"
+                         % (item.get("n", item.get("id", "?")), item.get("id", "?"), home, status))
+    return lines
+
+
 def single_page(argv):
     """Exit 0 current, 1 behind, 2 unknown for one fetched page. Writes a file only with --write, never on unknown.
     With --items, prints after the verdict line one wait line per open item with a `waits` field, and one lane line per open
     item with a `lane` and a `lastAnswer` and no `waits`. With --answers too, one kept-answer line per closed item whose answer is kept, and per open item whose answer is older than its `added`.
+    With --items and the env WAITING_PAGE_STEPS (the record's roadmap/data/steps), one found-false line per open item whose `home` step is done, dropped,
+    folded or done-obsolete; unset, none.
     The exit code stays the verdict's."""
     ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
     ap.add_argument("--page", required=True)
@@ -726,9 +780,10 @@ def single_page(argv):
     if args.items is not None:
         try:
             items, complete = load_docs(args.items, keyed=True)
-            lines = wait_lines([dict(d, id=k) if k and isinstance(d, dict) else d for k, d in items], complete)
+            named = [dict(d, id=k) if k and isinstance(d, dict) else d for k, d in items]
+            lines = wait_lines(named, complete)
         except ValueError as err:
-            items, lines = None, ["wait: the items cannot be read: unknown (%s)" % err]
+            items, named, lines = None, [], ["wait: the items cannot be read: unknown (%s)" % err]
         if args.answers is not None:
             try:
                 if items is None:
@@ -737,6 +792,11 @@ def single_page(argv):
                 lines += kept_answer_lines(items, answers, complete, answers_complete)
             except ValueError as err:
                 lines.append("kept-answer: unknown (%s)" % err)
+        if os.environ.get(FOUND_ENV):
+            try:
+                lines += found_false_lines(named, read_steps(os.environ[FOUND_ENV]))
+            except ValueError as err:
+                lines.append("found-false: unknown (%s)" % err)
         for line in lines:
             print(line)
     elif args.answers is not None:

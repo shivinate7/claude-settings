@@ -299,6 +299,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
   - Written: the writer closes the item (`status: "closed"` and `closed` set to now), with the answer and its time in `context`. The owning
     session then files the answer to `home`, as "Route and close" step 1 says. Either way, every
     question and answer ends in the page's record.
+- An item found false (its `home` step is done, dropped, folded or done-obsolete, which `stale_pages.py --items` prints as `found-false:` when the env `WAITING_PAGE_STEPS` names roadmap/data/steps) is closed the same turn with a reply naming the record that shows it false; the owner is never asked.
 - A lane has no chat with the owner. Its question goes in its report, and a lane also sends it
   to its parent with `send_message` in the same turn. The Stop report guard blocks a lane reply whose
   Input Needed asks a pick or a yes/no unless the same turn sent it to its parent or the writer. A box,
