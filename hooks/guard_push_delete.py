@@ -555,10 +555,13 @@ def push_text(segment: str, script: str = "") -> str:
     return PUSH_QUOTED.sub(" ", segment)
 
 
-def push_calls(segment: str, script: str = ""):
+def push_calls(segment: str, script: str = "", written: bool = False):
     """(subcommand, arguments) of each `git` call in the live text of one segment: the one
-    reader of git calls for a push. Each line of push_text is its own command."""
-    for line in push_text(segment, script).split("\n"):
+    reader of git calls for a push. Each line of push_text is its own command. `written` keeps
+    quoted multi-word words as shlex reads them, so a `"$(git rev-parse ...)"` refspec stays a
+    word whose shell shape a caller can test, where push_text would blank it."""
+    text = _push_scan(segment, script) if written else push_text(segment, script)
+    for line in text.split("\n"):
         yield from guard_core.git_calls(line)
 
 
@@ -653,13 +656,20 @@ def _colon_delete(delete, plain):
 
 def push_refspecs(args):
     """(remote, refspecs) of a push that names the refs it sends, else None: `--all`, `--branches`,
-    `--mirror`, a deletion and a tags-only push send no range this reader can name. The remote is ''
-    when none is named, and the refspecs are empty for a bare push."""
+    `--mirror`, a push that only deletes and a tags-only push send no range this reader can name. The
+    remote is '' when none is named, and the refspecs are empty for a bare push. A `:ref` beside a
+    sending refspec stays in the list, so it lines up with push_destinations; callers skip it."""
     _force, mirror, every, _includes, _unpinned, _leased, delete, _upstream, remote, plain = _push_parse(args)
-    delete = _colon_delete(delete, plain)
+    delete = delete or bool(plain) and all(spec.startswith(":") for spec in plain)
     if mirror or every or delete or (_push_tags_only(args) and not plain):
         return None
     return remote, plain
+
+
+def push_every_remote(args):
+    """The remote word of a push that sends every branch (`--all`, `--branches`, `--mirror`), else None. '' is a push that names no remote."""
+    _force, mirror, every, _includes, _unpinned, _leased, _delete, _upstream, remote, _plain = _push_parse(args)
+    return remote if mirror or every else None
 
 
 def push_verdict(args, cwd: str, overrides=None) -> str:
@@ -796,6 +806,14 @@ def _push_goes_to_network(remote: str, cwd: str, current, overrides=None, resolv
     if resolved is not None:
         resolved["name"] = remote
     return _push_url_is_network(get("remote." + remote + ".pushurl") or get("remote." + remote + ".url"))
+
+
+def push_remote_name(remote: str, cwd: str, overrides=None) -> str:
+    """The configured name of the remote a push goes to, by the chain `_push_goes_to_network` walks. '' when the push names a URL or a
+    path, or the config cannot be read: the caller cannot name the remote."""
+    resolved = {}
+    _push_goes_to_network(remote, cwd, lambda: _push_current_branch(cwd), overrides, resolved)
+    return resolved.get("name", "")
 
 
 def _glob_reach(spec: str):

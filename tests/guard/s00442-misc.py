@@ -957,6 +957,20 @@ else:
     elif re.fullmatch(r"branches/.+", rel):  # a branch's tip: its commit sha, at f * 40 unless the fixture names one
         name = rel[len("branches/"):]
         print(json.dumps({"name": name, "commit": {"sha": state["tips"].get(name, "f" * 40)}}))
+    elif re.fullmatch(r"issues(?:/\d+)?/comments", rel):  # the repo's issue comments, or one issue's (Host.issue_comments, Host.source_comments)
+        if state["comments"] in (None, "missing"):
+            api_error(404, "Not Found")
+        if state["comments"] == "server":  # the read fails, as a server error
+            api_error(500, "comments read broke")
+        number = re.search(r"issues/(\d+)/comments$", rel)
+        rows = [c for c in state["comments"] if number is None or c["issue_url"].endswith("/issues/" + number.group(1))]
+        print(listing(rows, None, fields, flags, rel=rel))
+    elif re.fullmatch(r"commits/[0-9a-f]{40}", rel):  # a commit's parents and tree (Host.commit_read)
+        sha = rel[len("commits/"):]
+        commit = (state["commits"] or {}).get(sha)
+        if commit is None:
+            api_error(404, "Not Found")
+        print(json.dumps({"sha": sha, "parents": [{"sha": p} for p in commit["parents"]], "commit": {"tree": {"sha": commit["tree"]}}}))
     else:
         api_error(404, "Not Found")
 '''
@@ -965,8 +979,19 @@ else:
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
                  cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
                  count_file=None, compares=None, repos=None, refs=(), tips=None, head_sha=None, head_ref=None,
-                 draft=False):
+                 draft=False, comments=None, commits=None, head_repo=None):
     """Put a stand-in for the pull request tool in its own folder on PATH.
+
+    `head_repo`, when given, is the `owner/name` the head branch of the pull request lives in, as GitHub names it in
+    head.repo.full_name: a fork's pull request names the fork. None leaves the head with no repo, as before.
+
+    `comments`, when given, is the list of issue comments the comment reads answer (the repo's `issues/comments` and one
+    issue's `issues/<n>/comments`), each a dict with `issue_url`, `body`, `created_at`, `updated_at`, `user` and
+    `author_association`. "missing" makes those reads fail with 404, and "server" with 500: a 500 is resent three times by the
+    merge tool (a GET, NET_RETRIES with a pause), so a case that wants a fast failed read names "missing". None answers 404, as before.
+
+    `commits`, when given, maps a commit sha to {"parents": [sha, ...], "tree": sha}: the commit read (`commits/<sha>`)
+    answers from it, and a sha not listed answers 404. None answers 404 for every commit read.
 
     `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
     JSON), before it answers. Only a case that counts calls names one; every other fake writes nothing.
@@ -1043,10 +1068,14 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "repos": None if repos is None else dict(repos),  # None: one repo, the top-level answers; a map: see the docstring
         "refs": list(refs),  # branch names the repo holds: the matching-refs read answers the ones under its prefix
         "tips": dict(tips or {}),  # branch name -> the sha of its tip; a branch not listed is at f * 40
+        "comments": comments if comments is None or isinstance(comments, str) else list(comments),  # see the docstring
+        "commits": None if commits is None else dict(commits),  # sha -> {"parents", "tree"}: see the docstring
     }
     if head_sha:  # the pull request's own head, when a case names a real commit (records-page-ready); its draft flag too
         state["pr"]["head"] = {"ref": head_ref or "feat", "sha": head_sha}
         state["pr"]["draft"] = draft
+        if head_repo:  # a fork's head: GitHub names the repo the head branch lives in
+            state["pr"]["head"]["repo"] = {"full_name": head_repo}
     write(os.path.join(folder, "state.json"), json.dumps(state))
     write(os.path.join(folder, "ghfake.py"), FAKE_GH_PY)
     fake_py = os.path.join(folder, "ghfake.py")

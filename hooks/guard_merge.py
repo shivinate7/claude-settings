@@ -24,8 +24,9 @@ from guard_pointer import (
     pointer_checkout,
 )
 from guard_push_delete import (
-    ARCHIVE_COPY_SUFFIX, ARCHIVE_PREFIX, DEFAULT_BRANCH_FALLBACK, push_calls, push_destinations, push_is_plain, push_refspecs,
-    push_target,
+    ARCHIVE_COPY_SUFFIX, ARCHIVE_PREFIX, DEFAULT_BRANCH_FALLBACK, push_calls, push_destinations, push_every_remote, push_is_plain,
+    push_refspecs, push_remote_name, push_target,
+    _push_config,
 )
 
 
@@ -914,8 +915,13 @@ def _push_refs(segment, stripped, cwd, args, skip=()):
     names, except a destination in `skip`. The tracking ref is `refs/remotes/<remote>/<dest>`, the named
     remote else origin. A source that does not resolve (a `$(...)`, a backtick, a glob, a typo) is read as
     HEAD. Everything comes from the arguments alone, with no git read beyond the destinations."""
-    named = push_refspecs(args)
     where, overrides = push_target(segment, stripped, cwd)
+    yield from _push_refs_at(where, overrides, args, skip)
+
+
+def _push_refs_at(where, overrides, args, skip=()):
+    """`_push_refs` for a push whose directory and config overrides are known: `_push_calls` yields them for a push nested in a wrapper."""
+    named = push_refspecs(args)
     if named is None or not where or not os.path.isdir(where):
         return
     specs = named[1] or [""]
@@ -1112,6 +1118,138 @@ def octopus_push_hit(stripped: str, cwd: str, read_verb):
             if sha:
                 return sha, stale
     return "", False
+
+
+# ---- a push to the branch of a pull request whose newest review log is for an older head (rule handed-in-push-needs-record)
+# A push moves the head and stales the review log of the head the last round reviewed, so a second push before that log is posted leaves
+# the round unlogged. The verdict is merge.handed_in_push, the one home: it refuses only a stale review log, so a push with none
+# (a first round), over the review log of the live head, over a clean merge of main or the merge tool's records-page commit passes.
+# Judged only in a repo that uses the merge tool, for a push to origin (the remote the merge tool and gh read), for a destination other than
+# main or master (push-main asks about those) and not for a dry run. A pull request whose head is in a fork holds no branch of origin.
+# The pushes are those of `_push_calls`, as the force-push loop reads them (wrappers and command substitutions included), read as written.
+# Cost: per pushed ref one paged read of the open pull requests; only when one holds the branch, one paged read of its comments, and for a
+# stale review log the clean-merge reads (commit reads, a compare per merge). A named remote reads one `git config --get-regexp`, a remote
+# named by URL or path one `git config --get`. All gh reads share MERGE_READ_TIMEOUT. An open pull requests read that cannot run names no
+# pull request, so the push passes with one stderr line. A later read that cannot run refuses as unknown (decision handed-in-push-needs-record),
+# and so does a folder or a branch this reader cannot name.
+HANDED_IN_PUSH_STALE_REASON = (
+    "Rule (Git, handed-in-push-needs-record; decision handed-in-push-needs-record): this push goes to the branch of #%d, whose newest "
+    "review log is stale at its live head %s: %s. A push moves the head again, so the round that reviewed the live head "
+    "has no review log yet. Remedy: have that round's review log posted for the live head (`merge %d --review-record --head %s "  # glossary-ok: the flag --review-record stays
+    "--kind K --guard yes|no --round N:ROLE:MODEL:VERDICT` prints it), then retry the push."
+)
+HANDED_IN_PUSH_UNKNOWN_REASON = (
+    "Rule (Git, handed-in-push-needs-record; decision handed-in-push-needs-record): whether the review log of the pull request this push "
+    "goes to is stale is unknown: %s. A read that cannot run refuses the push. Remedy: retry when the read works, or push a branch "
+    "name this check can read from a folder it can read."
+)
+HANDED_IN_PUSH_LOOKUP_NOTE = "handed-in-push-needs-record: unknown: the open pull requests could not be read, so the push passes: {detail}"
+
+
+def _pushes_to_origin(where, remote, overrides):
+    """True when the push's remote is origin, False when it is another configured remote, None when that cannot be told: a URL or a path that
+    is not origin's own spelling, or a config that cannot be read."""
+    name = push_remote_name(remote, where, overrides)
+    if name:
+        return name == "origin"
+    origin = _push_config(where, "remote.origin.url", overrides)
+    return True if remote and origin and remote == origin else None
+
+
+def _handed_in_push_read(where, dest):
+    """-> (verdict, number, head, why) for a push to `dest`: verdict is "none" when no open pull request of this repo holds the branch,
+    "lookup" when the open pull requests cannot be read (an unloadable tool too), else merge.handed_in_push's "allow", "refuse" or "unknown".
+    A lookup that cannot run names no pull request, so no review log is stale; a failure after it (two pull requests on the branch, a comment
+    read) is one unknown with its cause. Never raises."""
+    module = merge_module()
+    if module is None:
+        return "lookup", 0, "", "the merge tool could not be loaded"
+    try:
+        with module.shared_deadline(MERGE_READ_TIMEOUT):
+            host = module.Host(cwd=where)
+            try:
+                rows = host.open_prs()
+            except subprocess.TimeoutExpired:
+                return "lookup", 0, "", "the open pull requests read timed out after %d s" % MERGE_READ_TIMEOUT
+            except Exception as e:
+                return "lookup", 0, "", " ".join(str(e).split()) or type(e).__name__
+            row = host.batch_pr(dest, forks=False, rows=rows)
+            if row is None:
+                return "none", 0, "", ""
+            n, info = row
+            main = (_merge_configs(where) or [{}])[0].get("defaultBranch") or host.base
+            verdict, why = module.handed_in_push(host, n, info["head"], main)
+            return verdict, n, info["head"], why
+    except subprocess.TimeoutExpired:  # its text names the resolved program path
+        return "unknown", 0, "", "a read timed out after %d s" % MERGE_READ_TIMEOUT
+    except Exception as e:  # a Stop, a missing gh, malformed JSON: all unread
+        return "unknown", 0, "", " ".join(str(e).split()) or type(e).__name__
+
+
+def _shell_shaped(word):
+    """True for a word the shell expands before git reads it: a variable, a `$( )` or a backtick."""
+    return "$" in word or "`" in word
+
+
+def handed_in_push_hit(texts, stripped: str, cwd: str, read_verb):
+    """(reason, matched) for the first `git push` among `texts` (the command and its substitutions) that goes to the branch of a pull request
+    whose newest review log is stale at the live head, or whose review log read cannot run, or whose folder or branch cannot be named; else
+    None. Each segment is judged from its own command word, and a push inside `bash -c` or a substitution as `_push_calls` reads it, with
+    quoted words as written, so only the remote and refspec words are tested for a shell shape; a redirection or a pipe is no destination.
+    `read_verb("push", args)` is true for a dry run, which sends nothing. A push that only deletes or sends tags moves no head: it passes."""
+    reads, noted = {}, False
+    for segment in (part for text in texts for part in split_segments(text)):
+        if not segment.strip():
+            continue
+        for args, where, overrides in _push_calls(segment, stripped, cwd, written=True):
+            if read_verb("push", args):
+                continue
+            every = push_every_remote(args)
+            named = push_refspecs(args)
+            if every is None and named is None:
+                continue
+            if not where and cwd:
+                # push_target gives no folder only for a segment shlex cannot read, and that is an unclosed quote: the shell stops at it with a
+                # syntax error and sends nothing. The quote hides the words after it, so the whitespace-split read the push comes from (a
+                # commit message that names `git push`, a refspec word cut by the quote) is no destination. The force-push ask below reads the
+                # same text and keeps its own verdict.
+                continue
+            if not where or _shell_shaped(where):
+                # The shell names the folder at run time, so neither its remotes nor whether it uses the merge tool can be read. A push
+                # whose every destination is main or master is push-main's to ask about. A literal folder that is not there fails git
+                # before it sends anything, so it is passed on below to the force-push ask.
+                if every is None and named[1] and all(d in DEFAULT_BRANCH_FALLBACK for d in push_destinations(args, where, overrides)):
+                    continue
+                return HANDED_IN_PUSH_UNKNOWN_REASON % cap_safe("the folder this push runs in cannot be resolved", 200), "push, review log read unknown"
+            if not os.path.isdir(where):
+                continue
+            if not uses_merge_tool(where):
+                continue
+            counts = _pushes_to_origin(where, named[0] if every is None else every, overrides)
+            if counts is False:
+                continue
+            if counts is None:
+                return HANDED_IN_PUSH_UNKNOWN_REASON % cap_safe("the remote this push goes to cannot be told from origin", 200), "push, review log read unknown"
+            if every is not None:
+                return HANDED_IN_PUSH_UNKNOWN_REASON % cap_safe("this push names every branch, so the branch of a pull request it reaches cannot be named", 200), "push, review log read unknown"
+            if any(_shell_shaped(spec) for spec in named[1]):
+                return HANDED_IN_PUSH_UNKNOWN_REASON % cap_safe("this push names a branch through a shell variable or a substitution", 200), "push, review log read unknown"
+            for _where, _source, dest, _tracking, _remote, _memo in _push_refs_at(where, overrides, args, DEFAULT_BRANCH_FALLBACK):
+                if not dest or "*" in dest:
+                    return HANDED_IN_PUSH_UNKNOWN_REASON % cap_safe("the branch this push goes to cannot be named", 200), "push, review log read unknown"
+                if (where, dest) not in reads:
+                    reads[where, dest] = _handed_in_push_read(where, dest)
+                verdict, n, live, why = reads[where, dest]
+                if verdict == "lookup":
+                    if not noted:
+                        noted = True
+                        print(HANDED_IN_PUSH_LOOKUP_NOTE.format(detail=cap_safe(why, 200)), file=sys.stderr)
+                    continue
+                if verdict == "refuse":
+                    return HANDED_IN_PUSH_STALE_REASON % (n, live[:9], cap_safe(why, 200), n, live), "push to #%d at %s" % (n, live[:9])
+                if verdict == "unknown":
+                    return HANDED_IN_PUSH_UNKNOWN_REASON % cap_safe(why, 200), "push, review log read unknown"
+    return None
 
 
 def _untracked_names(where, specs):
@@ -2148,12 +2286,12 @@ def _command_words(args):
     return words
 
 
-def _push_calls(segment: str, script: str, cwd: str):
+def _push_calls(segment: str, script: str, cwd: str, written: bool = False):
     """(arguments, directory, config overrides) of each `git push` in one segment, and in the scripts the
     segment hands on (`bash -c`, `sh -lc`, `eval`, `ssh`): the one reader of those wrappers is inner_commands.
     `script` is the text the segment came from, which push_target reads for a leading `cd`. A script
-    runs in the folder its segment's own `cd` or `git -C` names."""
-    for subcommand, args in push_calls(segment, script):
+    runs in the folder its segment's own `cd` or `git -C` names. `written` is push_calls' own."""
+    for subcommand, args in push_calls(segment, script, written):
         if subcommand == "push":
             where, overrides = push_target(segment, script, cwd)
             yield _command_words(args), where, overrides
@@ -2168,7 +2306,7 @@ def _push_calls(segment: str, script: str, cwd: str):
             stripped = strip_heredoc_bodies(text)
             for each in (stripped, *substitution_commands(text, stripped)):
                 for part in split_segments(each):
-                    yield from _push_calls(part, each, inner_cwd)
+                    yield from _push_calls(part, each, inner_cwd, written)
 
 
 HANDOFF_SLUG =re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")  # no `/` and no `.`, so a slug is one plain file-name part
