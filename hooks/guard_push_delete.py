@@ -676,6 +676,14 @@ def push_every_remote(args):
     return remote if mirror or every else None
 
 
+def push_matching_remote(args):
+    """The remote word ('' when none is named) of a push with a bare colon refspec (`:` or `+:`), else None. A bare colon is git's matching
+    push: it sends every branch both sides hold, names no destination, and is no deletion (`:ref` is one), so push_refspecs reads it as a
+    delete or skips it and no caller can name where it goes."""
+    plain = _push_parse(args)
+    return plain[8] if any(spec.lstrip("+") == ":" for spec in plain[-1]) else None
+
+
 def push_verdict(args, cwd: str, overrides=None) -> str:
     """'' for an allowed push, else 'ask' or 'deny', for the `git push` arguments `args`.
 

@@ -5826,12 +5826,13 @@ def newest_review_log(n, bodies):
         rec = None
     return rec, bool(bodies) and rec is None
 
-def handed_in_push(h, n, live, main, claims=None):
+def handed_in_push(h, n, live, main, draft, claims=None):
     """-> (verdict, why) for a push to the branch of pull request `n` whose head on GitHub is `live`: "allow", "refuse" or "unknown" (step
     handed-in-push-needs-record, decision pr-review-record). A push moves the head, so a record for an older head must be posted before the next one.
-    It refuses only when the newest record of `n` is stale at `live` (live_review_read, the one home of that read: a clean merge of main and the
-    tool's own records-page commit keep a record, so a push over them is allowed). A pull request with no record is allowed: its first round is the
-    known gap, which a record for no head cannot close. A newest record that does not parse or names another number, a comment read that cannot run
+    It refuses when the newest record of `n` is stale at `live` (live_review_read, the one home of that read: a clean merge of main and the
+    tool's own records-page commit keep a record, so a push over them is allowed). A pull request with no record is refused only when it is handed in,
+    which is `draft` False (a ready pull request, ruling handed-in-push-fourth-way); a draft with no record is a first round and is allowed. A newest
+    record that does not parse or names another number, a comment read that cannot run
     and a clean-merge read that cannot run are "unknown", never allow. `main` is the repo's default branch, as live_review_state takes it. Cost: one
     paged read of the pull request's comments, and clean_merges_after's reads only for a stale record. Step fix-push-needs-fail-record folds into this check."""
     try:
@@ -5842,7 +5843,9 @@ def handed_in_push(h, n, live, main, claims=None):
     if bad:
         return "unknown", f"the newest review log of #{n} cannot be read: it does not parse, or it names another pull request"
     if rec is None:
-        return "allow", f"#{n} has no review log to keep"
+        if draft:
+            return "allow", f"#{n} is a draft with no review log to keep"
+        return "refuse", f"#{n} is handed in (ready) with no review log"
     state, why, unread = live_review_read(h, rec, live, main, claims, own_records(n, bodies[:-1]))
     if state != "stale":
         return "allow", why
