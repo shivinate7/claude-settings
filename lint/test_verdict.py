@@ -577,18 +577,26 @@ def skipped_count(line):
     return int(m.group(1)) if m else None
 
 
-def printing(text, rc=0):
-    """Child code that writes `text` byte for byte, then exits `rc`."""
+def printing(text, rc=0, raw=False):
+    """Child code that writes `text` byte for byte, then exits `rc`. `raw` writes UTF-8 bytes to the binary stdout: a text
+    stream turns each \\n into \\r\\n on Windows, so only raw keeps a CRLF line end as it is on every platform."""
+    if raw:
+        return "import sys\nsys.stdout.buffer.write(%r)\nsys.stdout.flush()\nsys.exit(%d)\n" % (text.encode("utf-8"), rc)
     return "import sys\nsys.stdout.write(%s)\nsys.exit(%d)\n" % (ascii(text), rc)  # ascii: the script file stays ASCII on any locale
 
 
-def unittest_run(skips, fails=0):
-    """Child code: a real unittest run of `skips` skipped tests and `fails` failing ones. Its output goes to stderr."""
-    body = ["import sys, unittest", "class T(unittest.TestCase):", "    def test_ok(self):", "        pass"]
+def unittest_run(skips, fails=0, oks=1, module_skip=False):
+    """Child code: a real unittest run of `oks` passing, `skips` skipped and `fails` failing tests. Its output goes to stderr.
+    `module_skip` skips the whole module in setUpModule, so the run counts no test and one skip."""
+    body = ["import sys, unittest", "class T(unittest.TestCase):", "    pass"]
+    for i in range(oks):
+        body += ["    def test_ok%d(self):" % i, "        pass"]
     for i in range(skips):
         body += ["    def test_skip_%d(self):" % i, "        self.skipTest('shelved')"]
     for i in range(fails):
         body += ["    def test_fail_%d(self):" % i, "        self.fail('boom')"]
+    if module_skip:
+        body += ["def setUpModule():", "    raise unittest.SkipTest('shelved')"]
     body += ["r = unittest.main(argv=['x'], exit=False)", "sys.exit(0 if r.result.wasSuccessful() else 1)"]
     return "\n".join(body) + "\n"
 
@@ -758,19 +766,24 @@ SHIM_SKIP = "the fake is a POSIX shell script; verdict names a Windows .cmd shim
 
 class NoTestCount(unittest.TestCase):
     """A run with no test count is unknown, so it is never PASS (verification-report-unknown-reads).
-    FAIL for a success marker with no count, and for a test command by argv with no count. PASS for a
-    run that is no counted test, and for a counted run wherever its count sits."""
+    FAIL for a success marker with no count, and for a test command by argv with no count. FAIL for a
+    unittest run that counts zero tests (`Ran 0 tests`), with LF or CRLF line ends, run directly or through
+    sim-test. SKIP for a module skipped in setUpModule, with its count. PASS for a run that is no counted test,
+    for a zero count beside any other count, and for a counted run wherever its count sits."""
     BUILD_OK = "** BUILD SUCCEEDED **"
     ST_PASS = "Test run with 3 tests passed after 0.001 seconds."  # Swift Testing's summary, no XCTest line
     XCT_12 = "Executed 12 tests, with 0 failures (0 unexpected) in 1.2 (1.3) seconds"
     assert_pass = Skips.assert_pass  # one home for the PASS check
+    assert_fail = Skips.assert_fail  # one home for the FAIL check
+    assert_skip = Skips.assert_skip  # one home for the SKIP check
 
-    def run_case(self, code=None, argv=None, shim=None):
-        """Run one case with its log in this run's folder. Returns the run and the log's text."""
+    def run_case(self, code=None, argv=None, shim=None, newline=None):
+        """Run one case with its log in this run's folder. Returns the run and the log's text. `newline=""` keeps each CRLF
+        as it is: the default text read folds CR LF to LF, so a CRLF case must pass it to see its own line ends."""
         with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
             log = os.path.join(d, "v.log")
             r = run(code, log, argv=argv, shim=shim, timeout=120)
-            with open(log, encoding="utf-8", errors="replace") as f: full = f.read()
+            with open(log, encoding="utf-8", errors="replace", newline=newline) as f: full = f.read()
         return r, full
 
     def assert_no_count_fail(self, r):
@@ -884,6 +897,97 @@ class NoTestCount(unittest.TestCase):
                 r, full = self.run_case(argv=["swift", "test", flag], shim=("swift", shim_script("AppTests.testFoo")))
                 self.assertIn("SHIM-RAN", full, "the fake never ran, so this run proves nothing")
                 self.assert_pass(r)
+
+    def test_unittest_zero_count_on_exit0_is_fail_no_tests_ran(self):
+        """A real unittest run of no tests prints `Ran 0 tests` and exits 0. The count is read, so the run is no pass."""
+        r, full = self.run_case(code=unittest_run(skips=0, oks=0))
+        self.assertIn("Ran 0 tests", full, "the unittest run never printed its count, so this run proves nothing")
+        self.assert_fail(r, 1, "no tests ran")
+
+    @unittest.skipIf(os.name == "nt", SHIM_SKIP)
+    def test_unittest_zero_count_through_sim_test_is_fail_no_tests_ran(self):
+        """sim-test --hold -- CMD passes its child's output on, so a zero count reads FAIL under argv sim-test too."""
+        shim = ("sim-test", shim_script("Ran 0 tests in 0.000s", "", "NO TESTS RAN"))
+        r, full = self.run_case(argv=["sim-test", "--hold", "--", "python3", "-m", "unittest"], shim=shim)
+        self.assertIn("SHIM-RAN", full, "the fake never ran, so this run proves nothing")
+        self.assert_fail(r, 1, "no tests ran")
+
+    def test_unittest_zero_count_after_one_mib_of_output_is_fail_no_tests_ran(self):
+        """Full size: the zero count sits past the first 1 MiB chunk, so the whole run is read for it."""
+        code = ("import sys\n"
+                "line = 'x' * 1023 + '\\n'\n"
+                "for _ in range(1100):\n"
+                "    sys.stdout.write(line)\n"
+                "sys.stdout.write('Ran 0 tests in 0.000s\\n\\nNO TESTS RAN\\n')\n")
+        r, full = self.run_case(code=code)
+        self.assertIn("Ran 0 tests", full, "the zero count never reached the log, so this run proves nothing")
+        self.assert_fail(r, 1, "no tests ran")
+
+    def test_unittest_five_tests_ok_stays_pass(self):
+        """Control: a real unittest run of five passing tests counts them and reads PASS."""
+        r, full = self.run_case(code=unittest_run(skips=0, oks=5))
+        self.assertIn("Ran 5 tests", full, "the unittest run never printed its count, so this run proves nothing")
+        self.assert_pass(r)
+
+    @unittest.skipIf(os.name == "nt", SHIM_SKIP)
+    def test_unittest_five_tests_ok_through_sim_test_stays_pass(self):
+        """Control: the same five-test output through sim-test reads PASS."""
+        shim = ("sim-test", shim_script("Ran 5 tests in 0.000s", "", "OK"))
+        r, full = self.run_case(argv=["sim-test", "--hold", "--", "python3", "-m", "unittest"], shim=shim)
+        self.assertIn("SHIM-RAN", full, "the fake never ran, so this run proves nothing")
+        self.assert_pass(r)
+
+    def test_zero_count_quoted_inside_a_line_stays_pass(self):
+        """Control: `Ran 0 tests` quoted inside a line of other text is no count, as an echoed success marker is no marker."""
+        r, full = self.run_case(code=printing("checked the old log: Ran 0 tests in 0.000s\n"))
+        self.assertIn("Ran 0 tests", full, "the quoted text never reached the log, so this run proves nothing")
+        self.assert_pass(r)
+
+    def test_module_skipped_in_setup_reads_skip_with_its_count(self):
+        """A module whose setUpModule skips runs no test and counts one skip. It reads SKIP 1, not FAIL no tests ran."""
+        r, full = self.run_case(code=unittest_run(skips=0, oks=1, module_skip=True))
+        self.assertRegex(full, r"(?m)^Ran 0 tests in\b", "the unittest run never printed its zero count, so this run proves nothing")
+        self.assertIn("OK (skipped=1)", full, "the module skip never reached the log, so this run proves nothing")
+        self.assert_skip(r, 1)
+
+    def test_pytest_log_with_a_line_start_ran_zero_is_pass(self):
+        """A passing pytest log that holds a line-start `Ran 0 tests in` and no unittest OK or FAILED line is no unittest run: PASS."""
+        lines = ["=" * 25 + " test session starts " + "=" * 25, "collected 3 items",
+                 "Ran 0 tests in 0.000s", "=" * 25 + " 3 passed in 0.01s " + "=" * 25]
+        r, full = self.run_case(code=printing("\n".join(lines) + "\n"))
+        self.assertRegex(full, r"(?m)^Ran 0 tests in\b", "the line-start zero count never reached the log, so this run proves nothing")
+        self.assertNotRegex(full, r"(?m)^(OK|FAILED)\b", "a unittest verdict line would make this a unittest run, so the case proves nothing")
+        self.assert_pass(r)
+
+    def test_zero_count_beside_an_xctest_count_stays_pass(self):
+        """Control: `Ran 0 tests` beside an XCTest `Executed 12 tests` line reads PASS, since any other count beats a unittest zero."""
+        r, full = self.run_case(code=printing(self.XCT_12 + "\nRan 0 tests in 0.000s\n\nNO TESTS RAN\n"))
+        self.assertRegex(full, r"(?m)^Ran 0 tests in\b", "the unittest zero count never reached the log, so this run proves nothing")
+        self.assertIn("Executed 12 tests", full, "the XCTest count never reached the log, so this run proves nothing")
+        self.assert_pass(r)
+
+    def test_zero_count_beside_a_unittest_count_of_five_stays_pass(self):
+        """Control: a unittest run of no tests beside one of five reads PASS, since a zero count loses to any other count."""
+        r, full = self.run_case(code=printing("Ran 0 tests in 0.000s\n\nNO TESTS RAN\n" + "Ran 5 tests in 0.001s\n\nOK\n"))
+        self.assertRegex(full, r"(?m)^Ran 0 tests in\b", "the zero count never reached the log, so this run proves nothing")
+        self.assertRegex(full, r"(?m)^Ran 5 tests in\b", "the count of five never reached the log, so this run proves nothing")
+        self.assert_pass(r)
+
+    def test_crlf_unittest_zero_count_is_fail_no_tests_ran(self):
+        """A zero count whose lines end in CRLF, as a Windows log holds it. The result line sits behind a CRLF blank
+        line, which the summary match did not take, so the run read PASS."""
+        log_text = "Ran 0 tests in 0.000s\r\n\r\nNO TESTS RAN\r\n"
+        r, full = self.run_case(code=printing(log_text, raw=True), newline="")
+        self.assertIn(log_text, full, "the CRLF zero count never reached the log, so this run proves nothing")
+        self.assert_fail(r, 1, "no tests ran")
+
+    def test_crlf_module_skip_reads_skip_with_its_count(self):
+        """Control: a CRLF module skipped in setUpModule (`Ran 0 tests`, then `OK (skipped=1)`) reads SKIP 1, so the CRLF
+        fix keeps a skip a skip and never reads it as a zero count."""
+        log_text = "Ran 0 tests in 0.000s\r\n\r\nOK (skipped=1)\r\n"
+        r, full = self.run_case(code=printing(log_text, raw=True), newline="")
+        self.assertIn(log_text, full, "the CRLF module skip never reached the log, so this run proves nothing")
+        self.assert_skip(r, 1)
 
 
 def tearDownModule():
