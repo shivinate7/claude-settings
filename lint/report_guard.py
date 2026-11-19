@@ -1103,23 +1103,31 @@ UNSTARTED_RE = re.compile(
 # An item that waits on another lane's merge, PR or landing must name the file the two lanes share, so the wait is
 # checkable. No word exempts it: the owner or the load brake may also be in the sentence.
 _UNSTARTED_LANE_WAIT_RE = re.compile(
-    r"\b(?:PRs?|pull requests?|merges?|merged|merging|to land)\b|#\d+", re.I)
-_UNSTARTED_NONE_RE = re.compile(r"\s*none\b", re.I)
+    r"\b(?:PRs?|pull requests?|merges?|merged|merging|land(?:s|ed|ing)?)\b|#\d+", re.I)
+# "none" or "nothing", bare, in bold or in parentheses, says no item waits.
+_UNSTARTED_NONE_RE = re.compile(r"[\s*(]*(?:none|nothing)\b", re.I)
 _UNSTARTED_STOP_RE = re.compile(r"\s*(?:\*\*(?:Done|Deviations|Input Needed|Next)\b|$)")
 _BULLET_RE = re.compile(r"([ \t]*)[-*+]\s")
-# A shared file is `name.ext`, or a build file with no extension. "e.g." and "i.e." are not files.
+# A shared file is `name.ext`, a build file with no extension, a dotfile, or a path with a slash. "e.g." and
+# "i.e." are not files, and neither are slash pairs such as "and/or" or a number pair such as "3679/3680".
 _SHARED_FILE_RE = re.compile(
     r"\b[\w-]+\.[A-Za-z][A-Za-z0-9]{0,9}\b"
-    r"|\b(?:makefile|dockerfile|gemfile|rakefile|procfile|justfile|jenkinsfile|vagrantfile|codeowners)\b", re.I)
-_NOT_A_FILE = frozenset(("e.g", "i.e"))
+    r"|\b(?:makefile|dockerfile|gemfile|rakefile|procfile|justfile|jenkinsfile|vagrantfile|codeowners)\b"
+    r"|(?<![\w.])\.[A-Za-z][\w.-]*"
+    r"|(?<![\w/])/?[\w.-]+(?:/[\w.-]*)+", re.I)
+_NOT_A_FILE = frozenset(("e.g", "i.e", "and/or", "either/or", "n/a", "w/o", "yes/no", "he/she", "his/her",
+                         "pass/fail", "read/write", "i/o"))
 
 
 def _unstarted_item(block, found):
     """The Unstarted item's text: the rest of its line, then the wrapped or sub-bullet lines under it, up to
-    a blank line, a label, or a sibling bullet at its own indent or less."""
+    a blank line, a label, or a sibling bullet at its own indent or less. A bare `Unstarted:` line that is not
+    itself a bullet owns the bullets under it, at any indent."""
     lines = block[found.end():].split("\n")
     line = block[block.rfind("\n", 0, found.end()) + 1:].split("\n", 1)[0]
     base = len(line) - len(line.lstrip())
+    if not lines[0].strip() and not _BULLET_RE.match(line):
+        base = -1
     item = [lines[0]]
     for line in lines[1:]:
         if _UNSTARTED_STOP_RE.match(line):
@@ -1132,7 +1140,11 @@ def _unstarted_item(block, found):
 
 
 def _names_a_file(item):
-    return any(m.group(0).lower() not in _NOT_A_FILE for m in _SHARED_FILE_RE.finditer(item))
+    for m in _SHARED_FILE_RE.finditer(item):
+        word = m.group(0).lower()
+        if word not in _NOT_A_FILE and not re.fullmatch(r"[\d/]+", word):
+            return True
+    return False
 
 
 def unstarted_problem(text, spawned):
