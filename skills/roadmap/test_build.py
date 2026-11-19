@@ -1973,8 +1973,8 @@ class StalledStep(UpkeepFixture):
                 self.assertEqual(bool(self.live_file_stale_lines(out)), code == 1,
                                  "%s: the live file stale line prints only when the step is not excepted" % name)
 
-    # The real case: a doing step whose PR closed unmerged on 2026-11-14, with its lane session archived. Its step text
-    # cites no PR number, so only the landedPulls row tells the reader what happened.
+    # Pins a doing step whose PR closed unmerged while its lane session is archived. Its step text cites no PR
+    # number, so only the landedPulls row tells the reader what happened.
     CLOSED = "ci-linux-windows-once"
     CLOSED_AT = "2026-11-14T18:00:00Z"  # noon CST, so the date reads the same in UTC and local time
 
