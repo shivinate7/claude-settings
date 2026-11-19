@@ -193,9 +193,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        also inside `bash -c`, `sh -c` or `eval`: a session does not claim a role. Also a call
                        that starts claude while the guard's own CS_SESSION_ROLE is non-empty, since the child
                        inherits the role. Reads pass: Test-Path, Get-Item or Remove-Item on Env:,
-                       `$role = $env:CS_SESSION_ROLE`, `command -v` or `-V` on the launcher, and the launcher
-                       with only `--help` or `-h`, judged per segment. A bare `CS_SESSION_ROLE=x` and quoted
-                       text at command position are still refused (debt self-role-claim-false-alarms). (self-role-claim)
+                       `$role = $env:CS_SESSION_ROLE` and the launcher with only `--help` or `-h`, judged per
+                       segment. `command -v` on the launcher is refused, because its output can feed a later
+                       run. A bare `CS_SESSION_ROLE=x` and quoted text at command position are refused too
+                       (debt self-role-claim-false-alarms). (self-role-claim)
   roadmap-one-writer   deny. A `git push`, also one inside `bash -c`, `sh -c` or `eval`, whose destination is
                        the checkout's record branch (lint/layout.py record_branch) or `roadmap`, except a
                        dry run, unless the session's own get_session record (read
