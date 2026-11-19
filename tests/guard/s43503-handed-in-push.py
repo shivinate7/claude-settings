@@ -29,6 +29,7 @@ HIP_CLONE_P = os.path.join(HIP_ROOT, "clone-p")      # live head P, a records-pa
 HIP_CLONE_C = os.path.join(HIP_ROOT, "clone-c")      # live head C, one commit on B (feat-three)
 HIP_CLONE_BK = os.path.join(HIP_ROOT, "clone-bk")    # live head B, with a second remote named backup
 HIP_BACKUP = os.path.join(HIP_ROOT, "backup.git")    # the bare repo backup names: not the repo the pull request lives in
+HIP_CLONE_PLAIN = os.path.join(HIP_ROOT, "clone-plain")  # live head B, with no merge tool config in its tree (the repo does not use the tool)
 HIP_MERGE_CONFIG = json.dumps({"defaultBranch": "main", "kinds": [],
                                "merge": {"method": "merge", "deadlineMinutes": 5, "afterMerge": [], "deleteBranch": True}})
 HIP_DEBT = "# Gap one\n\n- **What.** The check misses one case.\n- **Where.** x\n- **Decision.** none\n- **Retire.** y\n"
@@ -48,6 +49,7 @@ HIP_GH_MALFORMED = os.path.join(HIP_ROOT, "gh-malformed")        # live C, a val
 HIP_GH_FEATURE = os.path.join(HIP_ROOT, "gh-feature")            # live B, on a branch named feature, the record for A: stale
 HIP_GH_FORK = os.path.join(HIP_ROOT, "gh-fork")                  # live B on feat, the head repo a fork, the record for A: stale
 HIP_GH_BROKEN = os.path.join(HIP_ROOT, "gh-broken")              # every pull request read answers no JSON: no lookup can run
+HIP_GH_MAIN = os.path.join(HIP_ROOT, "gh-main")                  # live B, on a branch named main, the record for A: stale
 HIP_STALE_CARRIES = ("record",)     # a stale refusal names the review record, the thing to post
 HIP_UNKNOWN_CARRIES = ("unknown",)  # an unread refusal says the read is unknown
 HIP_UNKNOWN_LACKS = ("no record", "missing")  # ...and never reads as a record that is absent
@@ -174,6 +176,9 @@ def _hip_build():
     make_fake_gh(HIP_GH_FORK, "main", head_sha=b, head_ref="feat", head_repo="fork/x", comments=[_hip_record(1, a, REVIEW_PASS_ONE)],
                  commits=commits)
     make_fake_gh(HIP_GH_BROKEN, "main", head_sha=b, head_ref="feat", broken=True, commits=commits)
+    make_fake_gh(HIP_GH_MAIN, "main", head_sha=b, head_ref="main", comments=[_hip_record(1, a, REVIEW_PASS_ONE)], commits=commits)
+    _hip_clone_at(HIP_CLONE_PLAIN, b)
+    os.remove(os.path.join(HIP_CLONE_PLAIN, ".github", "stamp.json"))  # glossary-ok: the merge tool's fixed config path, removed so the tree has no merge tool config
 
 
 lazy_fixture(HIP_FOLDERS, _hip_build)
@@ -288,3 +293,48 @@ hip_push("handed-in-push: a push to a new branch while the pull request lookup c
 # A deletion and a push to feat in one call: the deletion moves no head, the push to feat does, so the stale record refuses the call.
 hip_run("handed-in-push: a push that deletes old and sends HEAD to feat is refused over a stale record",
         "git push origin :old HEAD:feat", "deny", HIP_CLONE_B, HIP_GH_STALE, carries=HIP_STALE_CARRIES)
+
+# Each skip the check takes before it reads a record. A dry run sends nothing, so it passes over a stale record.
+hip_run("handed-in-push: a dry run, --dry-run, of a push over a stale record is allowed",
+        "git push --dry-run origin HEAD:feat", "allow", HIP_CLONE_B, HIP_GH_STALE)
+# A repo whose tree holds no merge tool config does not use the tool, so its push passes over a stale record.
+hip_run("handed-in-push: a push over a stale record in a repo with no merge tool config is allowed",
+        "git push origin HEAD:feat", "allow", HIP_CLONE_PLAIN, HIP_GH_STALE)
+# A destination named main or master is not read here, even when a pull request holds main with a stale record. This
+# fixture's origin is a local path, so no push-main ask is raised: the case pins that this check does not refuse it.
+sh("handed-in-push: a push to main, with a pull request on main holding a stale record, is not refused here",
+   "git push origin HEAD:main", "allow", cwd=HIP_CLONE_B, env_path=_hip_env(HIP_GH_MAIN),
+   config=MERGECFG, lacks=HIP_RULE)
+# The same skip where the folder is a shell variable: the push is refused unknown for feat, but not for main.
+sh("handed-in-push: a push to main from a folder held in a shell variable keeps its push-main ask, unread",
+   'cd "$WT" && git push origin HEAD:main', "ask", rule=PUSH_MAIN_RULE, cwd=HIP_CLONE_B, env_path=_hip_env(HIP_GH_STALE),
+   config=MERGECFG, lacks=HIP_RULE)
+
+# The push's own words hold each quoted span, so a comment opener, a quote or a template in it is what the scan must read as text.
+# A span in a separate command is split off before the scan, so it cannot show the scan's handling of a quote.
+hip_run("handed-in-push: a # inside a quoted push option is text, so a stale push after it is refused",
+        'git push --push-option="ci # skip" origin HEAD:feat', "deny", HIP_CLONE_B, HIP_GH_STALE, carries=HIP_STALE_CARRIES)
+hip_run("handed-in-push: a // inside a single-quoted push option is text, so a stale push after it is refused",
+        "git push --push-option='see // x' origin HEAD:feat", "deny", HIP_CLONE_B, HIP_GH_STALE, carries=HIP_STALE_CARRIES)
+hip_run("handed-in-push: a /* inside a quoted push option is text, so a stale push after it is refused",
+        'git push --push-option="open /* x" origin HEAD:feat', "deny", HIP_CLONE_B, HIP_GH_STALE, carries=HIP_STALE_CARRIES)
+hip_run("handed-in-push: a backtick template holding // and /* openers is text, so a stale push after it is refused",
+        "git push --push-option='`// x /* y`' origin HEAD:feat", "deny", HIP_CLONE_B, HIP_GH_STALE, carries=HIP_STALE_CARRIES)
+# A lone apostrophe inside double quotes (JSX text) opens no quote, so the push after it is judged.
+hip_run("handed-in-push: a lone apostrophe inside a double-quoted push option is text, so a stale push after it is refused",
+        'git push --push-option="<p>Don\'t</p>" origin HEAD:feat', "deny", HIP_CLONE_B, HIP_GH_STALE, carries=HIP_STALE_CARRIES)
+# A git push named inside quotes is text, not a push the shell runs.
+hip_run("handed-in-push: a git push named inside double quotes is text, so the push to topic-x after it is allowed",
+        'echo "git push origin HEAD:feat" && git push origin HEAD:topic-x', "allow", HIP_CLONE_B, HIP_GH_STALE)
+# A git push on its own line inside a multi-line quoted message is text. Its line starts with `git push`, the form the
+# written scan must not read as a command.
+hip_run("handed-in-push: a git push on its own line inside a multi-line quoted message is text, so the push to topic-x is allowed",
+        "git commit -q -m 'use `x`\ngit push origin HEAD:feat\ndone' && git push origin HEAD:topic-x", "allow",
+        HIP_CLONE_B, HIP_GH_STALE)
+
+# A # that starts a word is a comment, so a refspec after it is not sent: the push goes to topic-x alone.
+hip_run("handed-in-push: a comment after a push to topic-x that names feat is not sent, so the push is allowed",
+        "git push origin HEAD:topic-x # HEAD:feat", "allow", HIP_CLONE_B, HIP_GH_STALE)
+# A # inside a word is no comment: the branch is feat#x, which no pull request holds.
+hip_run("handed-in-push: a # inside a branch name is no comment, so a push to feat#x is allowed",
+        "git push origin HEAD:feat#x", "allow", HIP_CLONE_B, HIP_GH_STALE)
