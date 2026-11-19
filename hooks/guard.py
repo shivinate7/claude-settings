@@ -253,6 +253,13 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        fragment); in roadmap/data/steps/<name>.json, `updatedAt` in a Write and every instant in an
                        Edit's or MultiEdit's new text; the last literal `updatedAt` in a Bash command, single- or double-quoted, read as text. The reason prints the time in Central and ISO. One clock read only when
                        a judged value is present. An override lifts it.
+  pick-reaches-page    deny. A send_message from a session whose own newest get_session record carries cs-build:coordinator,
+                       with a line that opens `Coordinator pick` (after optional markdown lead characters), to a session
+                       other than the page writer, when the turn (the records after the last human message) holds no
+                       delivered send to the page writer whose text also has a Coordinator pick line. The page writer is the
+                       writer of the newest meta/page read in the transcript. The reason steers to sending the pick to triage
+                       as a taken-pick card first. An unread record, writer or transcript passes. One transcript read, only
+                       for a message with a pick line. An override lifts it.
   agent-no-remote-tools
                        deny. A call by an agent (the payload carries a non-empty agent_id) to a claude-code-remote
                        tool in shared_names.REMOTE_OUTWARD_TOOLS: starting, messaging, tagging or archiving sessions,
@@ -720,6 +727,7 @@ while True:
             records_page_hit, repo_proof_hit, role_proof_hit, lane_ready_hit, lane_mcp_ready_hit, self_role_child_hit, self_role_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, PRIOR_WORK_REASON, prior_work_lane_hit, prior_work_named, stamp_hit, step_dup_hit, step_pr_hit, target_roster_hit, trust_card_hit, written_time_hit,
             BRIEF_ID_REASON, BRIEF_TOPIC_REASON, STEP_DUP_REASON,
+            pick_reaches_page_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
         _loading = "guard_review_log"
@@ -7704,6 +7712,11 @@ def judge(payload) -> None:
     unknown_target = target_roster_hit(tool, tool_input, cwd, trust_transcript if isinstance(trust_transcript, str) else "")
     if unknown_target:
         refuse(tool, "deny", "target-id-in-roster", unknown_target[1], unknown_target[0])
+
+    # A coordinator's pick sent to a session other than the page writer, with no pick sent to the writer this turn (rule pick-reaches-page).
+    unsent_pick = pick_reaches_page_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+    if unsent_pick:
+        refuse(tool, "deny", "pick-reaches-page", unsent_pick[1], unsent_pick[0])
 
     # 8b. agent-no-remote-tools. An agent never starts, messages, tags or archives sessions, nor sets scheduled tasks;
     # the session that spawned it does. Keyed on a truthy agent_id of any shape, so a drifted id stays refused. After the

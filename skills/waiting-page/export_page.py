@@ -51,6 +51,10 @@ A doc is written with sorted keys, two-space indent and a final newline, so an u
 longer fetched stays in a waiting collection folder: the export adds and updates, and a truncated fetch deletes nothing
 there. A collection outside the six, from another role's registry entry, still mirror-deletes.
 
+Taken picks, with --page: a fetched closed item that holds a `taken` object is a pick a session took for the owner. When the page
+has no taken-picks area (the id `tier-taken`, in the built page or in the code that draws it), each prints `held taken pick <n>:
+<why>`, which names the owner's 15 Nov ruling and step page-no-preselected-pick, and the run exits 4.
+
 Check, before a republish, writes nothing:
 
     python3 ~/.claude/skills/waiting-page/export_page.py --check --fetched DIR --page FILE
@@ -613,10 +617,28 @@ def fetched_docs(fetched, collections):
     return docs
 
 
+TAKEN_AREA = re.compile(r"""["']tier-taken["']""")  # the taken-picks area's element id, in the built page or the code that draws it
+
+
+def taken_picks_held(page, items):
+    """The `held taken pick <n>: <why>` lines: one for each closed decision that holds a `taken` object, when the page at
+    `page` has no taken-picks area. Without the area the owner cannot see the pick or overrule it."""
+    taken = [doc.get("n") for _, doc in sorted(items.items())
+             if isinstance(doc, dict) and doc.get("status") == "closed" and isinstance(doc.get("taken"), dict)]
+    if not taken or TAKEN_AREA.search(read_page(page)[1]):
+        return []
+    why = ("the page draws no taken-picks area (element id tier-taken), so the owner cannot see this pick or overrule it. "
+           "Owner ruling 15 Nov, step page-no-preselected-pick: a pick taken for the owner shows with no option chosen for them. "
+           "Publish the page that draws the area, then export again")
+    return ["held taken pick %s: %s" % (n, why) for n in taken]
+
+
 def picture_checks(page, docs):
-    """([held item lines], the `checks unknown: <why>` line or None) for the fetched docs against the page file `page`."""
+    """([held lines], the `checks unknown: <why>` line or None) for the fetched docs against the page file `page`: the held
+    taken picks, then the held pictured items."""
     held, why = page_check.check_items(page, docs["items"], docs.get("answers", {}))
-    return ["held item %s: %s" % (n, sentence) for n, sentence in held], ("checks unknown: " + why) if why else None
+    lines = taken_picks_held(page, docs["items"]) + ["held item %s: %s" % (n, sentence) for n, sentence in held]
+    return lines, ("checks unknown: " + why) if why else None
 
 
 def check_lacks(collections):

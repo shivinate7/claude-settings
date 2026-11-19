@@ -3133,6 +3133,67 @@ def target_roster_hit(tool: str, tool_input, cwd: str, transcript: str = ""):
         return None
 
 
+# ---- a coordinator's pick reaches the page writer in the same turn (rule pick-reaches-page)
+PICK_LINE = re.compile(r"^" + _MARKDOWN_LEAD + r"Coordinator pick\b", re.IGNORECASE | re.MULTILINE)
+COORDINATOR_ROLE_TAG = BUILD_TAG + "coordinator"
+PICK_REACHES_REASON = (
+    "this coordinator's message carries a Coordinator pick line, and the page writer has not been sent the pick in this "
+    "turn. A pick that reaches only a lane never reaches the owner, who cannot overrule what the page never shows. In "
+    "the same turn, send the pick to triage as a taken-pick card: send_message to the page writer (the writer of the "
+    "page's meta/page record) with the same Coordinator pick line and the pick's what, changes and over, so the writer "
+    "files a closed item with a `taken` object that the owner can overrule. Then send this message again. "
+    "(owner ruling 15 Nov, step page-no-preselected-pick: the owner overrules a taken pick, no option is chosen for them; step page-taken-picks-area)"
+)
+
+
+def _transcript_module():
+    """lint/_transcript.py, the one reader of transcript records, as _parent_targets reads lint/layout.py."""
+    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import _transcript
+    return _transcript
+
+
+def pick_reaches_page_hit(tool: str, tool_input, transcript: str = ""):
+    """Return (matched, reason) when a coordinator's send_message has a line that opens `Coordinator pick`, goes to a session
+    other than the page writer, and the same turn has sent the page writer no pick, else None. The page writer is the
+    writer named by the newest meta/page read in the transcript (_transcript.page_writer_id). The turn is the records after
+    the last human message. A writer send counts when it was delivered and its own text holds a Coordinator pick line.
+    Only a session whose own newest get_session record carries cs-build:coordinator is judged. Cost: for a message with no
+    pick line, none; else one transcript read and one record read, on a send_message only; no network, no file. Fails open
+    on any unread input (no id, no record, no writer read, no transcript): the rule judges a route, not an act."""
+    if tool != BRIEF_TOOL or not isinstance(tool_input, dict):
+        return None
+    message, target = tool_input.get("message"), tool_input.get("session_id")
+    if not isinstance(message, str) or not PICK_LINE.search(message) or not isinstance(target, str):
+        return None
+    try:
+        from override import remote_session_id
+        own_id = remote_session_id()
+        tags = _own_get_session_tags(transcript, own_id) if own_id and transcript else None
+        if tags is None or COORDINATOR_ROLE_TAG not in tags:
+            return None
+        lib = _transcript_module()
+        records = lib.read_transcript(transcript)
+        writer = lib.page_writer_id(records)
+        if not writer or target == writer:
+            return None
+        turn = lib.records_after_last_human(records)
+        delivered = lib.delivered_tool_use_ids(records)
+        for record in turn:
+            if record.get("isSidechain"):
+                continue
+            for use in lib.tool_uses(record):
+                sent = use.get("input")
+                if (writer in lib.send_targets(use) and use.get("id") in delivered and isinstance(sent, dict)
+                        and isinstance(sent.get("message"), str) and PICK_LINE.search(sent["message"])):
+                    return None
+        return "a Coordinator pick sent to a session other than the page writer", PICK_REACHES_REASON
+    except Exception:
+        return None
+
+
 # ---- send_message: a header stamp matches the clock (rule message-time-matches-clock)
 STAMP_LIMIT_MINUTES = 1  # a header stamp this far ahead of the clock passes; one more minute ahead is refused
 STAMP_QUOTE_MINUTES = 60  # an undated stamp more than this far ahead reads as a quote from an earlier day, and passes

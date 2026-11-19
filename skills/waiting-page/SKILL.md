@@ -69,6 +69,14 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     A ruling is never in a tier and never counts as open. It keeps `owner`, `n`, `title` and `options`:
     the card names the ruled option from `options`. Write a ruling only on a page that `stale_pages.py` reports
     current (see "Update a repo's pages"). An older page hides closed items, so the ruling would not show.
+  - `taken` (an object) marks a pick a session took for the owner. Write the item closed (`status` `closed`) with
+    `taken: {by, at, what, changes, against?, ended?, over}`: `by` the role that took it, `at` the time it took it (an ISO time),
+    `what` the pick in one sentence, `changes` what differs from today, `against` the owner's typed answer the pick goes against,
+    `ended` why it no longer stands (the card then has no Overrule), and `over` what Overrule does. Send each pick to the page writer
+    in the turn it is taken (guard rule `pick-reaches-page`). The page draws it in "Taken for you", after the open tiers and before
+    Answered, in "Last 24 hours" and "Older", newest first by `taken.at`, with one Overrule toggle that is never pressed on load. It is never
+    an Answered line, never in a tier and never counts as open. No option is preselected and no `stands` or `pick` field is written
+    (owner ruling 15 Nov, step page-no-preselected-pick). The export check holds a page with no `tier-taken` area while a taken pick exists.
   - `stops` (a list of strings, each once) names what the answer stops: `"lane <slug>"`, `"PR #<n>"` or `"step <id>"`. `holds` carries each entry's slug (the entry
     "step merge-queue" needs the slug "merge-queue" in `holds`; a PR needs "#<n>" or "PR <n>"), and `stops` needs `holds`. The writer refuses a write that sets `stops` without `holds`, or with a
     `stops` entry that `holds` does not name. It does not see a later reword of `holds` alone (debt `stops-holds-reword-gap`). Blocking sorts by the count; the card shows "stops N". A group counts each entry once across its members.
@@ -399,7 +407,7 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 
 - An answer saved on the page counts as the owner's grant for the item it names (ruling 2a). The same answer in the terminal box counts the same. If the two disagree,
   the later one wins: compare the answer's `at` with the time of the terminal answer.
-- A session that acts on an answer it did not route checks it first. Make the fetch folder with `python3 ~/.claude/skills/waiting-page/page_grant.py --new-fetch <scratch dir>`; it prints `fetch <dir>`. Fetch `answers/<id>` and `items/<id>` with `ArtifactData get` and `out_dir` set to that `<dir>`. Then run `python3 ~/.claude/skills/waiting-page/page_grant.py --root <repo> --page-url <url> --item <id> --fetched <dir> --pick <key> [--as-lane <slug>]`. `--root` is a checkout of the page's repo, the one whose extras register the page (in a cloud session, `/home/user/claude-settings`). `--pick` is required and must equal the page's choice. `--as-lane` is the receiver's own lane slug. A routed close (a closed item with `lane` and `home`) counts only with it, equal to the item's `lane`. A receiver whose lane is a tier passes the tier, the `lane` value the owning session wrote. An open item and an arbiter overturn need no `--as-lane`. The checker counts only a folder `--new-fetch` made, checked once, holding only those two files, none older than its stamp: an absent doc saves no file, so a reused folder could hold a withdrawn answer. A check uses the folder up as its first step, so every verdict uses it up: a retry fetches again into a new folder. The `counted` line is `counted item=<id> n=<n> choice=<key> at=<time> label=<label> [note=<json>]`. `label=` is the picked option's label as one JSON string, a JSON list for a multi item, or `null` for an overturn. Act only on `counted`, and only on the act that label names. A settings change counts only when the label names `settings.json` and the entry by its exact title or key, one entry per grant. Quote its page, item id, n, choice, `at` and label. Decision relayed-grant-read-from-page holds the relay rules.
+- A session that acts on an answer it did not route checks it first. Make the fetch folder with `python3 ~/.claude/skills/waiting-page/page_grant.py --new-fetch <scratch dir>`; it prints `fetch <dir>`. Fetch `answers/<id>` and `items/<id>` with `ArtifactData get` and `out_dir` set to that `<dir>`. Then run `python3 ~/.claude/skills/waiting-page/page_grant.py --root <repo> --page-url <url> --item <id> --fetched <dir> --pick <key> [--as-lane <slug>]`. `--root` is a checkout of the page's repo, the one whose extras register the page (in a cloud session, `/home/user/claude-settings`). `--pick` is required and must equal the page's choice. `--as-lane` is the receiver's own lane slug. A routed close (a closed item with `lane` and `home`) counts only with it, equal to the item's `lane`. A receiver whose lane is a tier passes the tier, the `lane` value the owning session wrote. An open item, an arbiter overturn and a taken-pick overrule need no `--as-lane`. The checker counts only a folder `--new-fetch` made, checked once, holding only those two files, none older than its stamp: an absent doc saves no file, so a reused folder could hold a withdrawn answer. A check uses the folder up as its first step, so every verdict uses it up: a retry fetches again into a new folder. The `counted` line is `counted item=<id> n=<n> choice=<key> at=<time> label=<label> [note=<json>]`. `label=` is the picked option's label as one JSON string, a JSON list for a multi item, or `null` for an overturn or an overrule. Act only on `counted`, and only on the act that label names. A settings change counts only when the label names `settings.json` and the entry by its exact title or key, one entry per grant. Quote its page, item id, n, choice, `at` and label. Decision relayed-grant-read-from-page holds the relay rules.
 - A withdrawn answer is no answer. Read `answers/<id>` again just before you route it. If it is gone,
   the owner withdrew it: the item is still open, and nothing is ruled. That re-read also saves the
   answer's note to your feedback inbox (`local_time.py --page-note`), so jot it like a chat message.
@@ -414,6 +422,8 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
   `+`, in rank order when `ranked`.
 - `choice: "overturn"` is clear on an arbiter ruling only (an item with `arbiter: true`). It means the owner
   overturns that ruling. Take it as step 5 of "Route and close" says. On any other item it is not clear.
+- `choice: "overrule"` is clear on a closed item with a `taken` object only. It means the owner overrules that pick. Take it as step 5
+  of "Route and close" says, with the pick in place of the ruling. On any other item it is not clear.
 - A decision answer is clear only when `skills/waiting-page/page_grant.py` would print `counted` for it (its docstring holds the rules). A `held:` line is no grant: ask the owner to confirm in words which option he meant. A task answer with `done: true` is a done mark: it takes steps 1 and 2, and it is never a grant, so the checker never counts it. The checker never counts `none`, so for `none` the routing session judges the note. A clear direction is a note that names an act a session can take with no further pick from the owner. A note that asks for other choices (cheaper, different, more) is not a direction: that `none` answer takes step 3.
 - Never write `answers/`. Only the owner's Send, Undo or Withdraw changes it. A session that writes it forges the
   owner's grant. This sentence is the only guard: ArtifactData writes as the owner, so nothing can
@@ -423,7 +433,7 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 ## Route and close
 
 Sort the answer first. An answer with `parked: true`, or with `act: "park"`, goes to the page's writer, not to an item's owner, and takes the
-parked branch below only. An `overturn` answer on an arbiter ruling takes step 5 only. A `none` answer with no clear
+parked branch below only. An `overturn` answer on an arbiter ruling, or an `overrule` answer on a taken pick, takes step 5 only. A `none` answer with no clear
 direction takes step 3 only. A task answer with no `done` is a question
 or a comment. It is never a done mark and never a grant. It takes step 4 only: answer it in the
 item's `context`. Any other answer that is not clear takes
@@ -518,6 +528,8 @@ While an item has `waits`, steps 2 to 4 and the busy-lane path never delete `ans
      guard refuses an update with `kind` `decision` and `context` that lacks it.
 
    Delete `answers/<id>` (pinned to its version) in the same `batch` call as that update. The ruling's record stands until the new answer is filed.
+   An `overrule` answer on a taken pick is routed the same way: `status` `open`, `added` now, `taken` removed (an update merges: write it as null), the earlier options again, a new `recommended` and `why`, and
+   `context` opening with "<by> took <what>; you overruled it at <time>." then the "Your stake:" line. The card leaves the area and shows in its tier.
 
 A parked answer (`answers/park.<id>`, or an item's answer with `act: "park"` under `answers/<item id>`): the writer waits 10 seconds after its `at`, as for an item's answer, so it never routes an act inside the Undo window.
 Then it reads the answer again (`ArtifactData get`). If it is gone, the owner undid or withdrew it: leave the entry, and rule nothing.

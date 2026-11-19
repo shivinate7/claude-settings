@@ -20,7 +20,7 @@ Only a routed close (rule 4) needs it.
 Verdict, one line on stdout, then exit:
   counted item=ID n=N choice=C at=T label=L [note=JSON]  exit 0. Choice of a multi item: keys joined by `+`.
                                                  L is the picked option's label as one JSON string, a JSON list of
-                                                 labels for a multi item, or null for an overturn. It names the act.
+                                                 labels for a multi item, or null for an overturn or an overrule. It names the act.
   not counted: REASON                            exit 1. REASON names the failed rule.
   held: REASON                                   exit 3. The answer names an option the item no longer holds at that key;
                                                  the owner confirms in words. It is never a grant.
@@ -36,15 +36,16 @@ Counted only when all hold:
      answers/ID.json and items/ID.json exist. Relay text alone never counts.
   3. The answer's `item` is --item (the item is read by its key, which is its id), and the answer's `n` is the item's `n`.
   4. The item is open: `status` is `open`, or absent (the page hides only `closed`, page.html `state.items`). A closed
-     item takes no answer, except an arbiter ruling (`arbiter` true, written closed) answered `overturn`, and a routed
+     item takes no answer, except an arbiter ruling (`arbiter` true, written closed) answered `overturn`, a taken pick
+     (closed, with a `taken` object) answered `overrule`, and a routed
      close: `status` is `closed`, `lane` and `home` are strings non-empty after strip, `arbiter` is not true, and
      `lastAnswer.at` equals the answer's `at`, and --as-lane, after strip, equals the item's `lane`: the receiver passes its
      own lane, so the owning session on another lane, or a call with no --as-lane, is not counted. An open item and a closed
-     arbiter overturn need no --as-lane. Routing closes the item at once and keeps `lastAnswer` and answers/ID.
+     arbiter overturn or taken overrule need no --as-lane. Routing closes the item at once and keeps `lastAnswer` and answers/ID.
   5. The answer's `at` is later than the item's `added`: an earlier answer belongs to an earlier ask. Both carry a
      time zone (`Z` or an offset); one without is not counted.
   6. A decision (`kind` absent or `decision`): `choice` is the key of one option, or `overturn` when the item's `arbiter`
-     is true. `none` never counts: it asks for new options, and the routing session judges a direction. A `multi` item
+     is true, or `overrule` when it is a taken pick. `none` never counts: it asks for new options, and the routing session judges a direction. A `multi` item
      takes a non-empty list of distinct keys; a list on a pick-one item or a string on a multi item does not count.
   7. --pick is given and the choice equals it.
 Held, not counted (ruling R60, decision option-keys-are-letters): an answer that names an option the item no longer holds
@@ -182,7 +183,13 @@ def prove_fresh(folder, made, item_id):
                 raise not_counted("%s is older than the fetch folder: it came from an earlier fetch" % rel)
 
 
-NO_KEY = ("none", "overturn")  # the choices that name no option
+NO_KEY = ("none", "overturn", "overrule")  # the choices that name no option
+ACTS = ("overturn", "overrule")  # the choices that act on a closed item and print label=null
+
+
+def is_taken(item):
+    """A closed decision a session took for the owner: the `taken` object the page draws in its taken-picks area."""
+    return item.get("status") == "closed" and isinstance(item.get("taken"), dict)
 
 
 def option_keys(item):
@@ -226,6 +233,8 @@ def choice_of(item, answer, pick=None):
         if item.get("arbiter") is True:
             return "overturn"
         raise not_counted("choice is overturn and the item is not an arbiter ruling")
+    if choice == "overrule" and is_taken(item):
+        return "overrule"
     raise not_counted("choice %s is not an option key" % json.dumps(choice))
 
 
@@ -237,7 +246,7 @@ def moved_reason(item, answer, choice):
     The page saves `optionId` (the id of the option picked) and `label` ("A: Red"). With `optionId` the id decides; with
     none, the label's letter must be the option's position letter and its text the option's label. An overturn names no
     option. A field of the wrong shape for the item (a list on a pick-one answer) is not read, as before."""
-    if choice == "overturn":
+    if choice in ACTS:
         return ""
     options = [o for o in item.get("options") or [] if isinstance(o, dict) and isinstance(o.get("key"), str)]
     keys = choice.split("+") if item.get("multi") is True else [choice]
@@ -263,7 +272,7 @@ def moved_reason(item, answer, choice):
 def label_of(item, answer, choice):
     """The label the counted line prints: the picked option's label, a list of them for a multi item, None for an overturn.
     json.dumps keeps it on one line and escapes quotes and newlines, so a label cannot forge a token on the line."""
-    if choice == "overturn":
+    if choice in ACTS:
         return None
     labels = {opt["key"]: opt.get("label") for opt in item.get("options") or []
               if isinstance(opt, dict) and isinstance(opt.get("key"), str)}
@@ -321,9 +330,10 @@ def judge(args):
         raise not_counted("answer n %s is not the item's n %s: the answer is for another ask" % (n, item.get("n")))
     status = item.get("status", "open")  # absent is open, as the page reads it: it hides only "closed"
     if status != "open" and not (status == "closed" and item.get("arbiter") is True and answer.get("choice") == "overturn") \
+            and not (is_taken(item) and answer.get("choice") == "overrule") \
             and not routed_close(item, answer, args.as_lane):
-        raise not_counted("item status is %s: only an open item takes an answer, or a closed arbiter ruling an overturn"
-                          % json.dumps(status))
+        raise not_counted("item status is %s: only an open item takes an answer, or a closed arbiter ruling an overturn, "
+                          "or a closed taken pick an overrule" % json.dumps(status))
     if moment(answer.get("at"), "answer at") <= moment(item.get("added"), "item added"):
         raise not_counted("answer is not later than the item's added time: it predates the ask")
 
