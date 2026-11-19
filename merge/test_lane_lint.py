@@ -26,9 +26,11 @@ closed-stdout pair (a control run and the raising run); unmeasured.
 BatchHeadMutation (class BatchHeadMutation) lints a touched lane's head at the batch runner's pre-join call, `--lane-lint <pr>`, through the gh shim,
 in a cloud session with the batch-runner role or with none; the shim's comment list holds the hand-off PASS record. Cost per case: one ci-job stub
 start, and one mutate stub start where the run starts. Its times are unmeasured since the batch-build cases were removed.
-LintResumesPassedJobs (class LintResumesPassedJobs) covers the saved PASS of a job: a rerun at the same key (head sha, base sha, job name, merge tool
-version) skips it, and every other key or state that is not a pass runs the job again. Each case first runs scope_and_save, whose rerun must run no job.
-Cost per case: at most four stub starts; a tool-copy case copies the repo's tree once (unmeasured).
+LintResumesPassedJobs (class LintResumesPassedJobs) covers the saved PASS of a job: a rerun at the same key skips it, and every other key or state that is
+not a pass runs the job again. The key is the head sha, the base name and tip ci-job reads, the job name, the PR body and the tool's files (merge.py,
+bin/ci-job, bin/ste-changed, and the hooks and lint modules ci-job imports). Most cases first run scope_and_save, whose rerun must run no job. Saved
+results are pruned: after passes under new tool keys, few remain, and a .part file left by a crash or a kill is gone after the next save.
+Cost per case: at most four stub starts; a tool-copy case copies the repo's tree once; the prune cases make TOOL_KEYS lints (unmeasured).
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import ast, atexit, contextlib, importlib.util, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, threading, time, types, unittest, unittest.mock, uuid
@@ -528,15 +530,16 @@ class LaneFixture(CiJobStub, tm.CloudSession):
         return {"root": root, "refused": None, "branches": [], "worktrees": [], "listeners": [], "pruned": None,
                 "husks": [], "strays": [], "trash": []}
 
-    def push_main(self, files):
-        """One commit of `files` on main, pushed from the second clone: the base the lane is linted against."""
+    def push_main(self, files, allow_empty=False):
+        """One commit of `files` on main, pushed from the second clone: the base the lane is linted against. `allow_empty` makes a commit that
+        changes no file, which moves main's tip and keeps its tree."""
         o = self.other
         tm.sh(o, "git", "fetch", "-q", "origin")
         tm.sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
         for rel, text in files.items():
             tm.put(os.path.join(o, rel), text)
         tm.sh(o, "git", "add", "-A")
-        tm.sh(o, "git", "commit", "-q", "-m", "main: " + ", ".join(sorted(files)))
+        tm.sh(o, "git", "commit", "-q", *(["--allow-empty"] if allow_empty else []), "-m", "main: " + (", ".join(sorted(files)) or "no file change"))
         tm.sh(o, "git", "push", "-q", "origin", "main")
 
     @staticmethod
@@ -6443,13 +6446,19 @@ class LaneLintDiskFloor(LaneFixture):
 
 
 class LintResumesPassedJobs(LaneFixture):
-    """A job that passes is saved, and a rerun at the same key skips it: the key is the head sha, the base sha, the job name and the merge tool
-    version. Scope first: every case runs scope_and_save, where head A passes and is saved, and its rerun must run no job. On origin/main that
-    scope fails, since nothing is saved, so the claims after it are read only where the key hits. Cost per case: at most four stub starts and one
-    fixture pair; a tool-copy case also copies the repo's tree once (unmeasured). The job name is not varied: `merge --lane-lint` runs one job."""
+    """A job that passes is saved, and a rerun at the same key skips it. The key is the head sha, the base name and tip ci-job reads, the job name,
+    the PR body ci-job reads as PR_BODY, and the bytes of the tool's files: merge.py, bin/ci-job, bin/ste-changed, and the hooks and lint modules
+    ci-job imports. Most cases first run scope_and_save, where head A passes and is saved, and its rerun must run no job. On origin/main that scope
+    fails, since nothing is saved, so the claims after it are read only where the key hits. The prune and .part cases lint their own tool versions.
+    Cost per case: at most four stub starts and one fixture pair; a tool-copy case also copies the repo's tree once; the prune cases make TOOL_KEYS
+    lints (unmeasured). The job name is not varied: `merge --lane-lint` runs one job."""
 
     DATE_A = "@1700000000 +0000"  # GIT_AUTHOR_DATE and GIT_COMMITTER_DATE of a run's merge commit: two runs of one head then make two commits
     DATE_B = "@1700000600 +0000"
+    TOOL_KEYS = 5  # passes under a new tool key each, for the prune case
+    KEEP_MAX = 3  # the most saved results after them: a small count, and at least 2, which the other-head case needs
+    EDIT = b"\n# an edit the tool's key must see\n"  # appended to a copy of a file the tool reads
+    STALE = 1600000000  # a fixed, old mtime (2020-09-13 UTC) for a planted .part file
 
     def lint_at(self, when, *extra, module=None):
         """One `--lane-lint 7` run with the merge commit's dates set to `when`. `module` runs a loaded copy of merge.py instead of this process's.
@@ -6472,11 +6481,11 @@ class LintResumesPassedJobs(LaneFixture):
             os.chdir(prior)
         return rc, out.getvalue() + err.getvalue()
 
-    def tool_copy(self, extra=b""):
-        """merge.py loaded from a copy of this repo's tree, with `extra` bytes appended to the copy's merge/merge.py, and CI_JOB set to this case's
-        stub. The copy is a second version of the same tool. -> the loaded module."""
+    def tool_copy(self, extra=b"", edited=("merge", "merge.py")):
+        """merge.py loaded from a copy of this repo's tree, with `extra` bytes appended to the copy's file at `edited` (path parts under the tree;
+        merge.py by default), and CI_JOB set to this case's stub. The copy is a second version of the same tool. -> the loaded module."""
         tree = self.merge_tree_copy()
-        path = os.path.join(tree, "merge", "merge.py")
+        path = os.path.join(tree, *edited)
         if extra:
             with open(path, "ab") as f:
                 f.write(extra)
@@ -6565,6 +6574,56 @@ class LintResumesPassedJobs(LaneFixture):
         self.assertEqual(rc, 0, "a corrupt saved result refused a lint that passes: " + out)
         self.assertNotIn("Traceback", out, "the lint crashed on a corrupt saved result: " + out)
         self.assertEqual(self.cached(out), [], "a corrupt saved result printed a cached pass: " + out)
+
+    def saved_files(self):
+        """Every file under the saved PASS folder of the lane checkout's clone, however deep, .part files included. [] when the folder is gone."""
+        git_dir = os.path.join(self.co, tm.sh(self.co, "git", "rev-parse", "--git-common-dir"))
+        found = []
+        for folder, _, files in os.walk(os.path.join(git_dir, merge.SAVED_PASS_FOLDER)):
+            found.extend(os.path.join(folder, name) for name in files)
+        return found
+
+    def stray_part_files(self):
+        """Every .part file under the clone's git dir and the config dir. A save writes one, then moves it into place."""
+        return sorted(p for p in self.store_files() if p.endswith(".part"))
+
+    def merged_tree(self, base_sha, head):
+        """The tree git makes of base_sha and head: the merged tree a lint's key reads (merge_reason's tree). Read in the second clone, which holds both."""
+        tm.sh(self.other, "git", "fetch", "-q", "origin")
+        return tm.sh(self.other, "git", "merge-tree", "--write-tree", base_sha, head).split()[0]
+
+    def assert_ci_job_reads(self, module, pattern):
+        """Scope: the copy's bin/ci-job, the file merge.CI_JOB names (merge.py), matches `pattern`, so the file a case edits is one the job reads."""
+        with open(os.path.join(os.path.dirname(module.__file__), "..", "bin", "ci-job"), encoding="utf-8") as f:
+            self.assertRegex(f.read(), pattern, "scope: the copy's bin/ci-job does not read the file the case edits")
+
+    def assert_edited_tool_misses(self, module, edited):
+        """The lint run by `module`, a tool copy with the file `edited` changed, must miss the saved result and run the job."""
+        ran = self.ran()
+        rc, out = self.lint_at(self.DATE_B, module=module)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.ran(), ran + 1, "an edit to %s read the saved result, so the job did not run: %s" % (edited, out))
+        self.assertEqual(self.cached(out), [], "an edit to %s printed a cached pass: %s" % (edited, out))
+
+    def pass_under_new_tool_keys(self, count):
+        """`count` lints of one head, each by a copy of merge.py with one comment line more than the copy before. Each copy has a new tool key, so each
+        lint must run the job and save its PASS. A copy is loaded and linted before the next line is added, since saved_pass_path reads the file
+        when it is called. -> the last copy's module."""
+        tree = self.merge_tree_copy()
+        path = os.path.join(tree, "merge", "merge.py")
+        with open(path, "rb") as f:
+            original = f.read()
+        module = None
+        for i in range(count):
+            with open(path, "wb") as f:
+                f.write(original + (b"# tool copy %d\n" % i))
+            module = self.load_merge_from(tree)
+            module.CI_JOB = self.stub
+            ran = self.ran()
+            rc, out = self.lint_at(self.DATE_A, module=module)
+            self.assertEqual(rc, 0, out)
+            self.assertEqual(self.ran(), ran + 1, "copy %d of the tool read a saved result, so its job did not run: %s" % (i, out))
+        return module
 
     def test_a_pass_saves_one_small_file_in_the_config_dir_or_the_clone_git_dir(self):
         self.use_ci_job(PASSING, 0)
@@ -6752,6 +6811,105 @@ class LintResumesPassedJobs(LaneFixture):
 
     def test_a_saved_result_that_cannot_be_read_is_a_miss_and_the_job_runs_again(self):
         self.corrupt_saved_result(self.unreadable)
+
+    def test_a_new_base_name_with_the_same_merged_tree_misses_the_saved_result_and_runs_the_job(self):
+        self.scope_and_save()
+        self.push_release_branch()  # release sits at main's tip: the same merged tree under another base name
+        self.host.base = "release"
+        self.assertEqual(self.head("release"), self.head("main"), "scope: release is not at main's tip")
+        ran = self.ran()
+        rc, out = self.lint_at(self.DATE_B)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.ran(), ran + 1, "a lint against release read the saved result of main, so the job did not run: " + out)
+        self.assertEqual(self.cached(out), [], "a lint against release printed a cached pass: " + out)
+        self.assertEqual(self.lint_calls()[-1]["argv"], ["checks", "--lint", "--base", "origin/release"], "the job did not run against origin/release: " + out)
+
+    def test_a_new_base_tip_with_the_same_merged_tree_misses_the_saved_result_and_runs_the_job(self):
+        head, _, _, _ = self.scope_and_save()
+        tip_before = self.head("main")
+        self.push_main({}, allow_empty=True)  # main moves one commit that changes no file
+        tip_after = self.head("main")
+        self.assertNotEqual(tip_after, tip_before, "scope: the empty commit did not move main")
+        self.assertEqual(self.merged_tree(tip_after, head), self.merged_tree(tip_before, head), "scope: the new tip merges to another tree")
+        ran = self.ran()
+        rc, out = self.lint_at(self.DATE_B)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.ran(), ran + 1, "a new base tip with the same merged tree read the saved result of the old tip, so the job did not run: " + out)
+        self.assertEqual(self.cached(out), [], "a new base tip with the same merged tree printed a cached pass: " + out)
+        self.assert_lint_merge(self.lint_calls()[-1]["head"], head, "main")
+
+    def test_an_edit_to_bin_ci_job_misses_the_saved_result_and_runs_the_job(self):
+        self.scope_and_save()
+        module = self.tool_copy(extra=self.EDIT, edited=("bin", "ci-job"))
+        self.assert_edited_tool_misses(module, "bin/ci-job")
+
+    def test_an_edit_to_bin_ste_changed_misses_the_saved_result_and_runs_the_job(self):
+        self.scope_and_save()
+        module = self.tool_copy(extra=self.EDIT, edited=("bin", "ste-changed"))
+        self.assert_ci_job_reads(module, r'"ste-changed"')
+        self.assert_edited_tool_misses(module, "bin/ste-changed")
+
+    def test_an_edit_to_a_hooks_module_that_ci_job_imports_misses_the_saved_result_and_runs_the_job(self):
+        self.scope_and_save()
+        module = self.tool_copy(extra=self.EDIT, edited=("hooks", "action_pin.py"))
+        self.assert_ci_job_reads(module, r"(?m)^from action_pin import ")
+        self.assert_edited_tool_misses(module, "hooks/action_pin.py")
+
+    def test_an_edit_to_a_lint_module_that_ci_job_imports_misses_the_saved_result_and_runs_the_job(self):
+        self.scope_and_save()
+        module = self.tool_copy(extra=self.EDIT, edited=("lint", "workflow_steps.py"))
+        self.assert_ci_job_reads(module, r"(?m)^from workflow_steps import ")
+        self.assert_edited_tool_misses(module, "lint/workflow_steps.py")
+
+    def test_a_pass_under_a_new_tool_key_keeps_a_small_count_of_saved_results(self):
+        self.use_ci_job(PASSING, 0)
+        self.pass_under_new_tool_keys(self.TOOL_KEYS)
+        kept = self.saved_files()
+        self.assertTrue(kept, "scope: no saved result is in the saved PASS folder after the passes")
+        self.assertLessEqual(len(kept), self.KEEP_MAX, "the saved results were not pruned: %d remain after %d passes under new tool keys, and at most %d may: %s"
+                             % (len(kept), self.TOOL_KEYS, self.KEEP_MAX, sorted(kept)))
+
+    def test_the_newest_saved_result_survives_the_prune_and_its_rerun_skips_the_job(self):  # control: a prune must keep the newest save
+        self.use_ci_job(PASSING, 0)
+        module = self.pass_under_new_tool_keys(self.TOOL_KEYS)
+        ran = self.ran()
+        rc, out = self.lint_at(self.DATE_B, module=module)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.ran(), ran, "the newest saved result was pruned, so its rerun ran the job again: " + out)
+        self.assertTrue(self.cached(out), "the rerun of the newest tool printed no 'PASS (cached)' line: " + out)
+
+    def test_a_crash_while_a_pass_is_saved_leaves_no_part_file(self):
+        self.use_ci_job(PASSING, 0)
+        real_replace = os.replace
+        fired = []
+
+        def crash_on_part(src, dst, *args, **kwargs):
+            if str(src).endswith(".part"):
+                fired.append(str(src))
+                raise SystemExit(143)  # a SIGTERM reaches a save as SystemExit (merge.release_on_signals)
+            return real_replace(src, dst, *args, **kwargs)
+
+        with unittest.mock.patch.object(os, "replace", crash_on_part):
+            rc, out = self.lint_at(self.DATE_A)
+        self.assertEqual(len(fired), 1, "scope: the save did not reach its crash point: " + out)
+        self.assertEqual(self.stray_part_files(), [], "a crash while a pass was saved left a .part file")
+
+    def test_a_part_file_left_by_a_killed_run_is_removed_by_the_next_save(self):
+        _, saved, _, _ = self.scope_and_save()
+        self.assertEqual(len(saved), 1, "scope: a PASS saved %d files, want the one result: %s" % (len(saved), sorted(saved)))
+        (result,) = saved
+        child = subprocess.Popen([sys.executable, "-c", "pass"])
+        child.wait()  # reaped: no live process holds its pid
+        stale = "%s.%d.part" % (result, child.pid)  # the name saved_pass_write gives a save's temp file
+        with open(stale, "wb") as f:
+            f.write(b'{"verdict": "pa')  # half of a save
+        os.utime(stale, (self.STALE, self.STALE))
+        self.push_second_lane_commit()
+        ran = self.ran()
+        rc, out = self.lint_at(self.DATE_B)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.ran(), ran + 1, "scope: the next save did not run its job: " + out)
+        self.assertFalse(os.path.exists(stale), "the next save left the .part file of a killed run: " + stale)
 
 
 if __name__ == "__main__":
