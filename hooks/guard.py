@@ -323,8 +323,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (agent-model-cap)
                        deny. An Agent or Task spawn that sets model opus, unless Plan, designer,
                        design-reviewer, refuter, a builder's third-round marker or an Explore's `Audit:` marker
-                       covers it, or the owner's last typed turn names opus as a whole word with no negation
-                       before it (owner_names_model; the same read lifts agent-model-floor for haiku). The general override, `opus [role] <time>` or a step grant lifts the
+                       covers it. The owner's word for a model lifts agent-model-floor only (owner_names_model), never this ceiling. The general override, `opus [role] <time>` or a step grant lifts the
                        spawn refusal; none lifts the settings-write ask.
   ask-alone            deny. An ask command chained with other commands. (ask-commands-run-alone)
   guard-crash          crash. The guard itself raised. The call is allowed and the log shows it.
@@ -3581,30 +3580,39 @@ def floor_hit(tool: str, tool_input) -> str:
 
 
 # The owner's own word for a model (owner, 2026-11-18 19:03 CST: "if i say haiku it should work, there shouldnt be any
-# guards on a FLOOR"). A spawn the floor or the Opus ceiling would refuse passes when the owner's last typed turn names
-# that model as a whole word. A mention after no, not, never, n't or without does not name it.
-MODEL_FAMILIES = ("haiku", "sonnet", "opus")
-MODEL_NEGATION = r"(?:\bnot|\bno|\bnever|\bwithout|n't)\s+(?:(?:use|using|run|running|on|with|the|a|any|an)\s+)*"
+# guards on a FLOOR"). A spawn the floor would refuse passes when the owner's last typed turn names that model. The word
+# lifts the floor only: the Opus ceiling (agent-model-cap) never reads it (consultant pick, same time). It covers a lane
+# start too (lane_start_hits).
+MODEL_CLAUSE_BREAK = re.compile(r"[.;,!?\n]+")  # a negation reaches only to the end of its own clause
 
 
 def owner_names_model(payload, model) -> bool:
-    """True when the owner's last typed turn (override.latest_owner_text, read from the payload's transcript_path on
-    demand) names the family of `model` as a whole word with a mention no negation precedes. No transcript_path, an
-    unreadable transcript or an unknown model family is False, so the refusal stands."""
-    family = next((f for f in MODEL_FAMILIES if f in str(model).lower()), "")
+    """True when the owner's last typed turn names the floor's model `model` (a Haiku name) and no mention of it is
+    negated. The turn is override.latest_owner_text, read from the payload's transcript_path on demand, with pasted and
+    machine blocks stripped (override._strip_blocks: that text is not the owner's words). A mention is negated when a word
+    of override.MODEL_NEGATIONS, or one ending n't, stands before it in its clause. One negated mention refuses the whole
+    turn ("use haiku. No, not haiku, use sonnet"). No transcript_path, an unreadable transcript, no mention or a model
+    that is not Haiku is False, so the refusal stands."""
     transcript = payload.get("transcript_path") if isinstance(payload, dict) else None
-    if not family or not isinstance(transcript, str) or not transcript:
+    if not below_the_floor(model) or not isinstance(transcript, str) or not transcript:
         return False
     try:
         import override
         text = override.latest_owner_text(transcript)
+        words_by_clause = [override.ROLE_WORDS.findall(clause) for clause in
+                           MODEL_CLAUSE_BREAK.split(override._strip_blocks(text or ""))]
+        negations = override.MODEL_NEGATIONS
     except Exception:
         return False
-    if not text:
-        return False
-    word = re.compile(r"\b%s\b" % family, re.IGNORECASE)
-    negated = re.compile(MODEL_NEGATION + r"%s\b" % family, re.IGNORECASE)
-    return len(word.findall(text)) > len(negated.findall(text))
+    named = False
+    for words in words_by_clause:
+        for at, word in enumerate(words):
+            if word.lower() != "haiku":
+                continue
+            if any(w.lower() in negations or w.lower().endswith(("n't", "n’t")) for w in words[:at]):
+                return False
+            named = True
+    return named
 
 
 def lane_effort_hit(tool: str, tool_input) -> str:
@@ -3695,7 +3703,8 @@ def lane_start_hits(tool: str, tool_input, cwd: str, transcript: str = "", judge
     if named_id:
         hits.append(("brief-ids-in-roster", named_id[1], named_id[0]))
     floor_model = floor_hit(tool, tool_input)
-    if floor_model:
+    # The owner's word for the model lifts the floor here as at step 9; the transcript is read only when the floor fires.
+    if floor_model and not owner_names_model({"transcript_path": transcript}, floor_model):
         hits.append(("agent-model-floor", LANE_MODEL_FLOOR_REASON, floor_model))
     lane_prompt = lane_effort_hit(tool, tool_input)
     if lane_prompt:
@@ -7776,7 +7785,7 @@ def judge(payload) -> None:
     # 9d. The Opus ceiling: a spawn on Opus with no standing grant is refused (decision agent-model-cap).
     # An override, an Opus pass for the spawn's role or a step grant lifts it. A spawn with no role runs general-purpose.
     opus_model, opus_role, opus_unread = opus_spawn_hit(tool, tool_input)
-    if opus_model and not owner_names_model(payload, opus_model):
+    if opus_model:
         refuse(tool, "deny", "agent-model-cap",
                (OPUS_BUILDER_REASON if opus_role == "builder" else OPUS_SPAWN_REASON)
                + (" The scan could not read this brief, so it read no marker: " + BRIEF_LITERAL_REMEDY + "."
