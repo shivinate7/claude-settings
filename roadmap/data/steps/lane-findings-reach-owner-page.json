@@ -1,0 +1,13 @@
+{
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "blockedBy": [],
+  "status": "todo",
+  "updatedAt": "2026-11-19T19:22:24Z",
+  "id": "lane-findings-reach-owner-page",
+  "title": "Lanes send findings and deviations up in the same turn so they reach the owner's page",
+  "owner": "coordinator",
+  "why": "Owner (via coordinator 13:21 CST Nov 19): the owner never sees lane sessions, so a finding or deviation left in a lane's own report never reaches the page.",
+  "source": "Coordinator 13:21 CST Nov 19 (relayed), from lane ste-lint-fail-closed-exit-codes 13:18 CST.",
+  "note": "Proposed: extend the owner-acts-and-questions brief rule to findings and deviations. It is a ruling, so it waits for the owner's word before docs/decisions. Not started."
+}

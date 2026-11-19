@@ -1,0 +1,13 @@
+{
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "blockedBy": [],
+  "status": "todo",
+  "updatedAt": "2026-11-19T19:22:24Z",
+  "id": "ste-lint-never-fetches-comments",
+  "title": "Debt: the ste-lint comments say it never fetches, but a missing base is still fetched",
+  "owner": "coordinator",
+  "why": "Owner 13:2x CST Nov 19 via coordinator: 'at least a debt'. Three comments overstate: actions/ste-lint/run.sh:31, actions/ste-lint/test_action.py:33 and :959 say 'never fetches'.",
+  "source": "Coordinator 13:21 CST Nov 19 (relayed), from lane ste-lint-fail-closed-exit-codes 13:18 CST; lines not read by triage 12.",
+  "note": "Suggested wording: 'skips `git fetch --unshallow`; a missing origin/BASE is still fetched, depth 1'. Fix needs a test-author for the test file and a builder for run.sh, or one test-author lane. A debt in the repo's debt store when the coordinator lands it; this step is its pointer."
+}
