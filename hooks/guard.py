@@ -3586,8 +3586,8 @@ def floor_hit(tool: str, tool_input) -> str:
 # The owner's own word for a model (owner, 2026-11-18 19:03 CST: "if i say haiku it should work, there shouldnt be any
 # guards on a FLOOR"). A spawn the floor would refuse passes when the owner's last typed turn names that model. The word
 # lifts the floor only: the Opus ceiling (agent-model-cap) never reads it (consultant pick, same time). It covers a lane
-# start too (lane_start_hits). A started session cannot read the word, so start_check.py and start_session_audit.py do
-# not flag a Haiku start (the spawn guard already judged the owner's word).
+# start too (lane_start_hits). A started session cannot read the word, so start_check.py flags no Haiku start. The audit
+# (start_session_audit.py) can read it through transcript_path, yet flags none either: it stops a start only for an unread handoff.
 MODEL_CLAUSE_BREAK = re.compile(r"[.;,!?:\n\u2013\u2014]+")  # a negation reaches only to the end of its own clause
 MODEL_MENTION = re.compile(r"(?<![A-Za-z])%s(?![A-Za-z])" % FLOOR_WORD, re.I)  # also inside claude-haiku-4-5, haiku-4.5
 

@@ -35,7 +35,7 @@ Coordinator pick, 08:40 CST Nov 15: a flag, not a stop. This is not an owner rul
 
 ## Why no check flags a Haiku start
 
-Owner, 2026-11-18 19:03 CST: "if i say haiku it should work, there shouldnt be any guards on a FLOOR". The spawn guard checks the owner's last typed turn for the model word (`guard.py` `owner_names_model`) on Agent, Task, Workflow and create_session calls. No guard reads the model of a `start_session` call (decision `start-session-not-pretooluse`). A started session, and the PostToolUse audit (`start_session_audit.py`), cannot read that word, so a flag there would fire on a start the owner asked for. Neither flags a Haiku start.
+Owner, 2026-11-18 19:03 CST: "if i say haiku it should work, there shouldnt be any guards on a FLOOR". The spawn guard checks the owner's last typed turn for the model word (`guard.py` `owner_names_model`) on Agent, Task, Workflow and create_session calls. No guard reads the model of a `start_session` call (decision `start-session-not-pretooluse`). A started session (`start_check.py`) cannot read that word, so a flag there would fire on a start the owner asked for. The PostToolUse audit (`start_session_audit.py`) can read it, because its payload carries `transcript_path`. It still flags no Haiku start, with or without the owner's word, because it stops a start only for an unread handoff (consultant pick, same time). Neither flags a Haiku start.
 
 ## What stays with the audit
 
