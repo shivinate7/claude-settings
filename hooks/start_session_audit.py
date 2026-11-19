@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """PostToolUse audit of a desktop session start (docs/decisions/start-session-not-pretooluse.md).
 
-After a start_session call, flags a start below the model floor (guard.floor_hit, the one reading) or one made with
-the calling session's handoff unread (reread_check.unread_handoff, the guard's own read). A flagged start prints
+After a start_session call, flags a start that earns any of five reasons: a model below the floor (guard.floor_hit, the
+one reading); the calling session's handoff unread (reread_check.unread_handoff, the guard's own read); a lane start (the
+lane tag, shared_names.is_lane_tagged) that names no model; a lane start that names Opus when the calling session holds
+no Opus override (override._take_opus, read only, so it spends nothing); and a top-level `env` that carries a session
+role key, since only bin/claude-role sets a role and a start never claims one. A lane's own Grant line is not an owner
+grant for Opus. An Opus override file that cannot be read adds no flag. A flagged start prints
 PostToolUse additionalContext that tells the calling session to stop the new session with interrupt_session or
 archive_session. A start that passes prints nothing. It never refuses and never exits 2.
 
@@ -51,17 +55,37 @@ def new_session(response):
     return found.group(0) if found else "id is unread"
 
 
+ROLE_ENV_KEY = "CS_SESSION_ROLE"   # the key bin/claude-role sets
+
+
+def lane_opus_without_grant(payload):
+    """True when the calling session holds no Opus override that covers a lane start now. A lane start runs as a
+    general-purpose role, as the guard reads a create_session. An override file that cannot be read is no flag."""
+    import override
+    return override._take_opus(payload.get("session_id"), "general-purpose", override.now()) is None
+
+
 def reasons(payload):
-    """The flags a start earns, as short phrases: the model below the floor, and an unread handoff. Empty for a
-    start that passes."""
+    """The flags a start earns, as short phrases: the model below the floor, a lane start with no model or with Opus
+    and no owner grant, a role claimed in env, and an unread handoff. Empty for a start that passes."""
     import guard
     from reread_check import unread_handoff
+    from shared_names import is_lane_tagged
     tool_input = payload.get("tool_input")
     found = []
     if isinstance(tool_input, dict):
         floor_model = guard.floor_hit(guard.SESSION_TOOL, tool_input)
         if floor_model:
             found.append("it names the model %s, below the Sonnet floor" % floor_model)
+        if is_lane_tagged(tool_input):
+            model = tool_input.get("model")
+            if not (isinstance(model, str) and model.strip()):
+                found.append("it is a lane start that names no model")
+            elif "opus" in model.lower() and lane_opus_without_grant(payload):
+                found.append("it is a lane start that names %s with no owner grant for Opus" % model)
+        env = tool_input.get("env")
+        if isinstance(env, dict) and ROLE_ENV_KEY in env:
+            found.append("its env sets %s, which only bin/claude-role may set" % ROLE_ENV_KEY)
     unread = unread_handoff(payload)
     if unread:
         found.append("the calling session had not read its handoff (%s) after compaction" % unread)
