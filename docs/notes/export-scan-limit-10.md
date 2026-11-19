@@ -1,0 +1,1 @@
+- export-scan-limit-10: redis://:pw@host (empty user) passes, as on main. Fix: none until a real incident. Decision: waiting-data-in-repo.

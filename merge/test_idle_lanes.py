@@ -129,10 +129,11 @@ class IdleLanesCli(unittest.TestCase):
         """The joint lines that name lane `sid`."""
         return [e for e in entries if e.startswith("joint (") and e.endswith("; archive lane %s)" % sid)]
 
-    def run_merge(self, *argv, extra_env=None):
-        """(exit code, stdout, stderr) of `merge.py <argv>`, run in the fixture checkout."""
-        env = _test_git.apply({**os.environ, **roadmap.GIT_ENV, **(extra_env or {})})
-        done = subprocess.run([sys.executable, str(MERGE), *argv], cwd=str(self.repo), capture_output=True,
+    def run_merge(self, *argv, extra_env=None, cwd=None, drop=()):
+        """(exit code, stdout, stderr) of `merge.py <argv>`, run in the fixture checkout (or `cwd`). `drop` names the
+        variables the run leaves out."""
+        env = _test_git.apply({k: v for k, v in {**os.environ, **roadmap.GIT_ENV, **(extra_env or {})}.items() if k not in drop})
+        done = subprocess.run([sys.executable, str(MERGE), *argv], cwd=str(cwd or self.repo), capture_output=True,
                               text=True, env=env)
         return done.returncode, done.stdout, done.stderr
 
@@ -256,6 +257,11 @@ class IdleLanesCli(unittest.TestCase):
         roadmap.git(self.repo, "update-ref", "refs/remotes/origin/roadmap", "roadmap")
         roadmap.git(self.repo, "checkout", "-q", "main")
         self.commit_files(main, "handoffs on main")
+
+    def single_branch_clone(self):
+        """(origin, clone): a bare origin holding main and roadmap, and a --single-branch clone of its main. The clone
+        has no local record branch, and origin does hold one."""
+        return roadmap.single_branch_clone(self.tmp.name, self.repo, "idle", "main", "roadmap")
 
     def commit_files(self, paths, message):
         """Commit each path with one line of text on the checked-out branch. No paths, no commit."""
@@ -596,6 +602,22 @@ class IdleLanesCli(unittest.TestCase):
                 self.assertEqual(out.splitlines(), ["unknown (1 landedPulls rows skipped)"],
                                  "a non-int replacedBy is not skipped: out: %r, err: %r" % (out, err))
                 self.assertEqual(code, 1, "a skipped landedPulls row exits %d, so a caller reads the list as read: %s" % (code, err))
+
+    def test_idle_lanes_starts_no_fetch_or_ls_remote_when_origin_holds_the_record_branch(self):
+        # The read is local. GIT_TRACE logs every git command this run starts, so a fetch or ls-remote shows up in it.
+        origin, clone = self.single_branch_clone()
+        self.publish([lane("session_a", "c1")])
+        trace = pathlib.Path(self.tmp.name) / "git-trace.log"
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live), cwd=clone,
+                                        drop=roadmap.TOKEN_VARS + ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID"),
+                                        extra_env={"GIT_TRACE": str(trace)})
+        ran = trace.read_text(encoding="utf-8") if trace.exists() else ""
+        self.assertRegex(ran, r"\brev-parse\b", "the trace logs no git call, so it proves nothing:\n" + err)
+        network = r"\bgit (?:-C \S+ )?(?:fetch|ls-remote)\b"
+        self.assertNotRegex(ran, network, "merge --idle-lanes started a git fetch or ls-remote:\n"
+                            + "\n".join(line for line in ran.splitlines() if re.search(network, line)))
+        self.assertEqual(code, 1, err)
+        self.assertTrue(any(line.startswith("unknown (") for line in out.splitlines()), "out: %r, err: %r" % (out, err))
 
 
 if __name__ == "__main__":

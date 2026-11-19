@@ -1,0 +1,1 @@
+- catalog-session-start-tmpdir: the session_start.sh row in docs/catalog.md does not mention the TMPDIR line from #1517/#1826.

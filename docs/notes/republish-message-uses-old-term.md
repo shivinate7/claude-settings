@@ -1,0 +1,1 @@
+- republish-message-uses-old-term: The republish message in merge/merge.py uses an old term for the page, where the glossary term is "page". check_glossary passes it because it sits in a string.

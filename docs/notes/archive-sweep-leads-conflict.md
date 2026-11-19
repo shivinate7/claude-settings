@@ -1,0 +1,1 @@
+- archive-sweep-leads-conflict: Lane read: #3108, #2817 and #2848 conflict with main, and #3108's Windows job was cancelled on its head run. Guard that would have caught it: lane lead #3108 (merge --confirm prints the idle-lanes report or says the pass is owed).

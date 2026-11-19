@@ -1,0 +1,1 @@
+- batch95-pr-2600-no-step: Triage 04:09 CST Nov 12: #2600, "Stalled steps: doing comes from live PRs, not typed" (branch status-from-prs-ruling), merged in batch 95 with no step naming it; nearest is step pr-state-is-on-the-pr.

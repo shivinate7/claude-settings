@@ -1,0 +1,1 @@
+- session-start-watchdog-load: hooks/test_session_start.py test_the_watchdog_sleep_is_gone_when_the_fetch_returns_first failed once under load, beside lint and test_guard: a sleep 7 outlived the hook. It passed alone, 105 of 105. A note until it fails in CI. Fix: wait on the child's exit, not a fixed sleep.

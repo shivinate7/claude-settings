@@ -1,0 +1,1 @@
+- dead-wait-closed-after-word: #2560 dead-PR wait row: only "closed" or "merged" right after #N counts as history, so "after #46 was closed" and "after #46 (closed)" list as waits; a false alarm on an advisory row.

@@ -1,0 +1,1 @@
+- lpfib-all-moves-silent: _all_moves logs nothing when git for-each-ref fails (the --all path only).

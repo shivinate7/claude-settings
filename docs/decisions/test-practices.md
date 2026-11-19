@@ -36,7 +36,7 @@ P5. Owner ruling, 2026-11-07 13:00 CST, paraphrased in PR #1177 (closed, unmerge
 - degen branch `l4-row-wait` — a test counted rows before they rendered; wait on the rendered condition, then count.
 Applies to: every test.
 
-P6. Treat a flake as a defect report: find its cause and make it deterministic before you widen a bound.
+P6. Treat a flake as a defect report: find its cause and make it deterministic before you widen a bound. An unfixable flaky test is deleted with its reason, never given a wider limit, a sleep or a retry. A deletion keeps the proof P9 asks for. Owner, 2026-11-17 20:01 CST, consultant goal v6.
 - claude-settings 53dc1bd81 — a random macOS failure was a real race; over 2584 fake-clock pairs, old code reported a stall in 1212 and new code in 0.
 - degen 9e42fe74 — a flake was a product race; the new case holds both threads and is red on every run.
 - Counter: degen 53710605 — widened a flaky wait and named no cause (a bandaid).

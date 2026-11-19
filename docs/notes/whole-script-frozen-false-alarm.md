@@ -1,0 +1,1 @@
+- whole-script-frozen-false-alarm: (#1186 released) guard_env.py `_whole_script` now denies a node script that holds a frozen-path literal beside an exec it cannot read, even when the script only reads or logs; main allows it.

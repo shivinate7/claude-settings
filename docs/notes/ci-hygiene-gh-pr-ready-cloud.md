@@ -1,0 +1,1 @@
+- ci-hygiene-gh-pr-ready-cloud: The ci-hygiene skill and its snippets still say `gh pr ready`, which gets 403 in cloud. Fix: name MCP update_pull_request (draft:false) for cloud sessions.

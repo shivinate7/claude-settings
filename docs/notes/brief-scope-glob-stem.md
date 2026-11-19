@@ -1,0 +1,1 @@
+- brief-scope-glob-stem: a glob with a literal stem and no `/` or extension (`verdict-*`) names no file, so the incident-2 shape escapes when written that way. Fix: match a stem-only glob against the brief's file list.

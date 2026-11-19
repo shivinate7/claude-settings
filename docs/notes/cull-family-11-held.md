@@ -1,0 +1,1 @@
+- cull-family-11-held: guard-false-alarm-cull 14:06 CST Nov 12: Held family 11 (branch cull-narration-hex-id, head 2cb3ad856), coordinator 14:03 CST Nov 12: round 3 net value negative (3 history-citation shapes open, 0 closed, about 73 of 91 synthetic false alarms removed, live cost 0). Parked; owner item 630 (a drop, recommended; b fix lane; c merge with debts).

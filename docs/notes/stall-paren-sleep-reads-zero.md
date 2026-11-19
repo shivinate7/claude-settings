@@ -1,1 +1,1 @@
-- stall-paren-sleep-reads-zero: `(sleep 600) && cmd` gets 0 from `pause_seconds`, since its operand reads `600)` and is not a number. Measured 2026-11-15 17:10 CST: returns 0.0. Decision: stall-watch (a stalled background command is reported, never stopped). Fix: none until seen.
+- stall-paren-sleep-reads-zero: `(sleep 600) && cmd` gets 0 from `pause_seconds`, since its operand reads `600)` and is not a number. Measured 2026-11-15 17:10 CST: returns 0.0. Decision: stall-watch (a stalled background command is reported, never stopped). Fix: none until seen. Seen: 2026-11-17 x1

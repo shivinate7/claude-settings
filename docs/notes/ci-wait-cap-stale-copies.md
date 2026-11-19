@@ -1,0 +1,1 @@
+- ci-wait-cap-stale-copies: The gist at docs/records.md line 52 goes stale until the merge tool rewrites it. skills/project-ops/templates/operating-model.md line 139 holds an old copy of rule git-ci-wait-checks-in with no cap, unchecked. hooks/ci_wait_cap.json's `read` date has no staleness check; register it with ruling R28 upkeep when built.

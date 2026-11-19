@@ -1,0 +1,1 @@
+- worktree-home-cd-docstring: stale docstring at hooks/test_guard.py about line 25357 (worktree_home_cd_after_untracked_case). Fix: update the text.

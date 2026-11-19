@@ -1,0 +1,1 @@
+- page-form-scope-silent-pass: page_form_scope (feedback_guard.py:542-556) passes with no systemMessage on a layout or git failure; the docstring documents the fail-open.

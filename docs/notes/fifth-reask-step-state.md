@@ -1,0 +1,1 @@
+- fifth-reask-step-state: Retrospective 23:29 CST Nov 12: fifth re-ask today, this time of a step's state, not a ruling (express for D25, already on review-record-fix-check-reads). The check matched steps by slug word and missed it. Fix candidate: match a question's cited file (here merge/merge.py) against open steps' files.

@@ -1,0 +1,1 @@
+- past-ruling-relay-test-pin: The past-ruling relay test pins only the no-store cost (2 git starts).

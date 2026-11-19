@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
 """List the tests whose verdict depends on wall-clock speed. Read-only. Standard library only.
 
-    python3 lint/find_time_pinned.py <root> [--json]
+    python3 lint/find_time_pinned.py <root> [--json] [--check]
 
 Decision test-strategy-reset, point 2: no test waits on a fixed sleep or a wall-clock bound. This
 tool lists the tests that do. It fixes none, and it writes nothing. Each finding has one category:
-- sleep: a real wait in a test file.
+- sleep: a real wait in a test file. Not a poll interval: a `sleep` in a Python loop that has both a
+  condition and a cap is a wait-cap. A condition is a while-test term other than a bare `True` and a
+  clock comparison, or an `if` in the body that returns or breaks and tests something
+  other than a clock. A cap is a clock compared in the while test or in such an `if`, or, when the while
+  test holds the condition, in an `if` that only raises or fails, or
+  `range(<literal>)` in a `for`. A bare sleep, `while True` with no exit, a condition with no cap, a cap
+  with no condition and a sleep after the loop stay sleep.
 - elapsed-assert: an assert that reads a wall-clock reading or a difference of two.
 - test-cap: a per-test or per-suite time limit.
-- wait-cap: a fixed time bound on a wait for a condition or a child process (a hang guard).
+- wait-cap: a fixed time bound on a wait for a condition or a child process, or the poll interval of such
+  a capped wait loop (a hang guard).
   Kept apart because it may be fine. The plan decides case by case.
 
 Scanned: test files only. Python is `test_*.py`, `*_test.py`, `conftest.py` or any `.py` under a
@@ -39,28 +46,49 @@ it still counts when it is an operand of `-` or the receiver or argument of `.ti
 `.duration(to:`: that is a measured duration. An assert's message argument is not read. Clock reads inside a Swift interpolation
 hole are masked.
 
+Keep marker: a comment on the finding's own line, `# time-pinned-ok: <reason>` (Python) or
+`// time-pinned-ok: <reason>` (JS, TS, Swift), keeps that finding out of the listing. It keeps every
+category except an elapsed-assert, which stays listed: a timed test uses a synthetic clock, and the marker
+never keeps a hang guard's elapsed read. The reason must not be blank. A marker on another line, or marker text inside a string,
+keeps nothing. It is read from real comments only: Python from tokenizer comment tokens, JS and Swift from
+the `//` comment spans the masker blanks (a block comment is not a marker). A kept finding is counted,
+never listed.
+
 Paths are relative to <root>. Output is one `<path>:<line>: <category>: <source line>` per finding
 (one per line and category), then `UNREAD <path>: <reason>` per file that could not be read, then a
-summary. A file that cannot be read or parsed is unread, never clean.
-Exit 0: nothing found, nothing unread. Exit 1: findings. Exit 2: the root cannot be read, or nothing
-found but some file unread, so the result is unknown.
+summary. The summary ends `; kept N` when N > 0 findings were kept by the marker. `--json` holds listed
+findings only, and its counts leave kept findings out. A file that cannot be read or parsed is unread,
+never clean.
+Exit 0: nothing listed, nothing unread (kept findings alone leave it 0). Exit 1: findings listed. Exit 2:
+the root cannot be read, or nothing listed but some file unread, so the result is unknown.
+With `--check` the listing is the same, but the exit is 1 only when a sleep or an elapsed-assert is listed,
+2 when only an unread file remains, and 0 when nothing else is listed: a wait-cap or a test-cap is a hang
+guard the owner keeps (item 345), so it never fails the check. Its summary counts hang guards apart and leaves
+them out of the time-pinned total and the file count.
+Python only: an `.elapsed` attribute in an assert is an elapsed-assert, also inside a helper call under a bound
+(`to_ms(r.elapsed) < 100`, `assertLess(to_ms(r.elapsed), 100)`). An exact `==` or `assertEqual` on it is a value
+check, so it is not listed. JS and Swift list no `.elapsed` read, only a clock call or a name that holds one.
+A file over 8 MiB is not scanned and is listed unread.
 Cost: one `git ls-files` (or one folder walk outside a git tree) and one read of each test file. No
 process stays running.
 """
 import argparse
 import ast
+import io
 import json
 import os
 import re
 import sys
+import tokenize
 import warnings
 from bisect import bisect_right
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
-MAX_BYTES = 1_000_000
+MAX_BYTES = 8 * 1024 * 1024
 CATEGORIES = ("sleep", "elapsed-assert", "test-cap", "wait-cap")
+CHECK_FAILS = ("sleep", "elapsed-assert")  # the categories --check fails on, besides an unread file
 WALK_SKIP = {".git", "node_modules", ".build", "DerivedData", "venv", ".venv"}
 JS_EXTS = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts", ".cts")
 TEXT_MAX = 120
@@ -427,6 +455,25 @@ class Hits:
         self.found.add((bisect_right(self.starts, pos), category))
 
 
+# ---- the keep marker ---------------------------------------------------------------------------------
+
+KEEP_MARKER = {"python": re.compile(r"#\s*time-pinned-ok:(.*)", re.S),
+               "js": re.compile(r"//\s*time-pinned-ok:(.*)", re.S)}
+KEEP_MARKER["swift"] = KEEP_MARKER["js"]
+
+
+def kept_lines(text, comments, marker):
+    """The lines of text whose own comment holds the keep marker with a reason. `comments` is a list of
+    (start, end) spans of real comments (never string text), so the marker is read from comments only."""
+    starts = [0] + [x.end() for x in re.finditer("\n", text)]
+    kept = set()
+    for a, b in comments:
+        got = marker.search(text[a:b])
+        if got and got.group(1).strip():
+            kept.add(bisect_right(starts, a))
+    return kept
+
+
 # ---- Python, through ast -----------------------------------------------------------------------------
 
 PY_CLOCKS = {"time.time", "time.monotonic", "time.perf_counter", "time.process_time", "time.time_ns",
@@ -491,6 +538,10 @@ PY_COMPARED = {"assertTrue": 1, "assertFalse": 1, "assertIsNone": 1, "assertIsNo
                                  "assertTupleEqual", "assertSequenceEqual", "assertMultiLineEqual")}}
 
 
+PY_EXACT = {"assertEqual"}  # an assert of one exact value, never a bound on a clock
+PY_ORDERED = {"assertLess", "assertLessEqual", "assertGreater", "assertGreaterEqual"}
+
+
 def assert_parts(call, name):
     """The nodes of an assert call that hold the asserted value: no message argument, no `msg=`."""
     count = PY_COMPARED.get(name)
@@ -522,44 +573,84 @@ def scan_python(text):
     def is_clock(node):
         return isinstance(node, ast.Call) and bool(names_of(node) & PY_CLOCKS)
 
-    def holds_clock(node, tainted, durations=False):
+    def is_elapsed(node):
+        return isinstance(node, ast.Attribute) and node.attr == "elapsed" and isinstance(node.ctx, ast.Load)
+
+    def holds_clock(node, tainted, durations=False, elapsed=True, bound=False):
         """True when node reads a clock call or a tainted name. The arguments of a call count only when that
         call is a pass-through, or, with `durations` (an asserted value), when they hold a difference with a
-        clock in it. A lambda reads what it returns."""
+        clock in it. A lambda reads what it returns. An `.elapsed` attribute is a measured duration, except
+        under an exact `==` (`elapsed` False): that checks one value and bounds no clock. Under an ordering
+        compare (`bound`), an `.elapsed` inside a helper call's arguments is a bound on a duration too."""
         if isinstance(node, ast.Lambda):
-            return holds_clock(node.body, tainted, durations)
+            return holds_clock(node.body, tainted, durations, elapsed, bound)
+        if isinstance(node, ast.Compare):
+            ordered = any(isinstance(o, (ast.Lt, ast.LtE, ast.Gt, ast.GtE)) for o in node.ops)
+            exact = all(isinstance(o, ast.Eq) for o in node.ops)
+            return any(holds_clock(c, tainted, durations, elapsed and not exact, bound or ordered)
+                       for c in [node.left] + node.comparators)
         if isinstance(node, ast.Call):
             if is_clock(node):
                 return True
             args = node.args + [k.value for k in node.keywords]
             if names_of(node) & PY_PASS_THROUGH:
-                return any(holds_clock(p, tainted, durations) for p in [node.func] + args)
-            return holds_clock(node.func, tainted, durations) or (
-                durations and any(holds_difference(p, tainted) for p in args))
+                return any(holds_clock(p, tainted, durations, elapsed, bound) for p in [node.func] + args)
+            return holds_clock(node.func, tainted, durations, elapsed, bound) or (
+                durations and any(holds_difference(p, tainted, elapsed, bound) for p in args))
         if isinstance(node, ast.Name):
             return isinstance(node.ctx, ast.Load) and node.id in tainted
-        return any(holds_clock(c, tainted, durations) for c in ast.iter_child_nodes(node))
+        if elapsed and is_elapsed(node):
+            return True  # a result's measured duration, such as `run_child().elapsed`
+        return any(holds_clock(c, tainted, durations, elapsed, bound) for c in ast.iter_child_nodes(node))
 
-    def holds_difference(node, tainted):
-        """True when node, an input to a call, holds `a - b` with a clock or a tainted name in a or b: a
-        measured duration, not an injected clock. A lambda's body is not searched."""
+    def holds_difference(node, tainted, elapsed=True, bound=False):
+        """True when node, an input to a call, holds `a - b` with a clock or a tainted name in a or b, or,
+        under a bound, an `.elapsed` attribute: a measured duration, not an injected clock. A lambda's body
+        is not searched."""
         if isinstance(node, ast.Lambda):
             return False
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Sub) and (
-                holds_clock(node.left, tainted, True) or holds_clock(node.right, tainted, True)):
+        if bound and elapsed and is_elapsed(node):
             return True
-        return any(holds_difference(c, tainted) for c in ast.iter_child_nodes(node))
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Sub) and (
+                holds_clock(node.left, tainted, True, elapsed) or holds_clock(node.right, tainted, True, elapsed)):
+            return True
+        return any(holds_difference(c, tainted, elapsed, bound) for c in ast.iter_child_nodes(node))
 
-    scopes = {}
+    infos = {}
 
-    def scope_taint(root):
-        """The clock-tainted names of root's own scope, repeated until nothing changes. A def in that scope
-        taints its name when a value it returns reads a clock."""
-        if id(root) in scopes:
-            return scopes[id(root)]
-        tainted = scopes[id(root)] = set()
+    def bound_names(root, nodes):
+        """The names root's own scope binds: its parameters, stores, defs, classes, imports and `except as`."""
+        names = set()
+        if isinstance(root, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            a = root.args
+            names.update(x.arg for x in a.posonlyargs + a.args + a.kwonlyargs + [a.vararg, a.kwarg] if x)
+        for n in nodes:
+            if isinstance(n, ast.Name) and not isinstance(n.ctx, ast.Load):
+                names.add(n.id)
+            elif isinstance(n, ast.ClassDef):
+                names.add(n.name)
+            elif isinstance(n, (ast.Import, ast.ImportFrom)):
+                names.update((x.asname or x.name.split(".")[0]) for x in n.names)
+            elif isinstance(n, ast.ExceptHandler) and n.name:
+                names.add(n.name)
+            for child in ast.iter_child_nodes(n):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    names.add(child.name)
+        return names
+
+    def scope_info(root, outer):
+        """(tainted, helpers, kids) of root's own scope. `outer` holds the helper names the enclosing scopes
+        offer: a def whose returned value reads a clock. A name that root rebinds is not one. The clock-tainted
+        names are repeated until nothing changes. A def in the scope taints its name when a value it returns
+        reads a clock, and a def that is not a method is a helper for every scope inside this one."""
+        key = (id(root), outer)
+        if key in infos:
+            return infos[key]
         nodes = list(walk_scope(root))
+        helpers = set(outer - bound_names(root, nodes))
+        tainted = set(helpers)
         assigns = []
+        kids = []
         for n in nodes:
             if isinstance(n, ast.Assign):
                 assigns.append(([x for t in n.targets for x in target_names(t)], n.value))
@@ -569,10 +660,21 @@ def scan_python(text):
                 assigns.append((target_names(n.target), n.value))
             for child in ast.iter_child_nodes(n):
                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    inner = scope_taint(child)
-                    if any(isinstance(r, ast.Return) and r.value is not None and holds_clock(r.value, inner)
-                           for r in walk_scope(child)):
-                        tainted.add(child.name)
+                    kids.append((child, isinstance(n, ast.ClassDef)))
+        pending = list(kids)
+        changed = True
+        while changed:  # a def may call a sibling def that a later pass shows to return a clock
+            changed = False
+            for entry in list(pending):
+                kid, method = entry
+                inner = scope_info(kid, frozenset(helpers))[0]
+                if any(isinstance(r, ast.Return) and r.value is not None and holds_clock(r.value, inner)
+                       for r in walk_scope(kid)):
+                    tainted.add(kid.name)
+                    if not method:
+                        helpers.add(kid.name)
+                    pending.remove(entry)
+                    changed = True
         changed = True
         while changed:
             changed = False
@@ -580,7 +682,137 @@ def scan_python(text):
                 if not set(targets) <= tainted and holds_clock(value, tainted):
                     tainted.update(targets)
                     changed = True
-        return tainted
+        infos[key] = (tainted, helpers, [k for k, _ in kids])
+        return infos[key]
+
+    outers = {}
+
+    def collect_outers(root, outer):
+        """Record the helper names each scope inherits, so a lookup by scope reads the same taint visit() does."""
+        outers[id(root)] = outer
+        _, helpers, kids = scope_info(root, outer)
+        for kid in kids:
+            collect_outers(kid, frozenset(helpers))
+
+    collect_outers(tree, frozenset())
+
+    parents = {}
+    for n in ast.walk(tree):
+        for child in ast.iter_child_nodes(n):
+            parents[id(child)] = n
+
+    def terms_of(test):
+        """The terms of a loop or if test, with `and` and `or` flattened."""
+        if isinstance(test, ast.BoolOp):
+            return [t for v in test.values for t in terms_of(v)]
+        return [test]
+
+    def own_nodes(stmts):
+        """Every node under stmts, not entering a nested function, lambda or class."""
+        todo = list(stmts)
+        while todo:
+            node = todo.pop()
+            yield node
+            for child in ast.iter_child_nodes(node):
+                if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                    todo.append(child)
+
+    def exits(ifnode, in_inner_loop=False):
+        """True when the if's own branch ends the wait normally: a `return`, or a `break` of the wait loop. A
+        raise or a fail only stops a hang, so it is no exit. A `break` inside a nested loop leaves that loop, so
+        the walk reads that loop's body for a `return` only. Its `else` is read in full. in_inner_loop is True
+        when the if itself sits in a loop nested in the wait loop: then a `break` in its branch is no exit."""
+        def leaves(stmts, in_inner_loop):
+            for n in stmts:
+                if isinstance(n, ast.Return) or (isinstance(n, ast.Break) and not in_inner_loop):
+                    return True
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                    continue
+                if isinstance(n, (ast.While, ast.For, ast.AsyncFor)):
+                    if leaves(n.body, True) or leaves(n.orelse, in_inner_loop):
+                        return True
+                    continue
+                for field in ("body", "orelse", "finalbody"):
+                    if leaves(getattr(n, field, None) or [], in_inner_loop):
+                        return True
+                if isinstance(n, ast.Try) and any(leaves(h.body, in_inner_loop) for h in n.handlers):
+                    return True
+                if hasattr(ast, "Match") and isinstance(n, ast.Match) and any(leaves(c.body, in_inner_loop) for c in n.cases):
+                    return True
+            return False
+        return leaves(ifnode.body, in_inner_loop)
+
+    def stops(ifnode):
+        """True when the if's own branch raises or fails the test: it ends a hang, not the wait."""
+        for n in own_nodes(ifnode.body):
+            if isinstance(n, ast.Raise):
+                return True
+            if isinstance(n, ast.Call) and (n.func.attr if isinstance(n.func, ast.Attribute)
+                                            else getattr(n.func, "id", "")) == "fail":
+                return True
+        return False
+
+    def poll_loop_of(start):
+        """The nearest loop whose body holds start in its own scope, or None. A loop's `else` is not its body."""
+        child, node = start, parents.get(id(start))
+        while node is not None and not isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            if isinstance(node, (ast.While, ast.For, ast.AsyncFor)) and child in node.body:
+                return node
+            child, node = node, parents.get(id(node))
+        return None
+
+    def is_hang_guard_poll(call):
+        """A sleep in a loop that has both a condition and a clock or count cap is a hang guard, not a fixed
+        wait (decision test-practices P5). A condition is a while-test term that is neither `True` nor a clock
+        comparison, or an if in the body that returns or breaks and tests something other than a clock or an error flag (a
+        name with fail, error or abort in it: it aborts the loop, so a sleep that only paces work is a sleep). A cap
+        is a clock comparison in the while test or in such an if, or `range(<literal>)` in a for. An if in a
+        nested loop ends the wait only by a `return`. An if that only raises or fails is never the condition.
+        Its clock comparison is a cap only when the while test holds the condition. So a `while True` poll that
+        breaks on its condition and only fails at its deadline is listed as sleep, though it is a real poll: a
+        known limit."""
+        loop = poll_loop_of(call)
+        if loop is None:
+            return False
+        root = parents.get(id(loop))
+        while root is not None and not isinstance(root, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            root = parents.get(id(root))
+        root = root if root is not None else tree
+        tainted = scope_info(root, outers.get(id(root), frozenset()))[0]
+
+        def clock_term(t):
+            return isinstance(t, ast.Compare) and holds_clock(t, tainted)
+
+        def always_true(t):
+            return isinstance(t, ast.Constant) and bool(t.value)
+
+        def error_flag(t):
+            """A bare name, attribute or call named for a failure. Breaking on it aborts the loop; it is not the
+            state the loop waits for."""
+            if isinstance(t, ast.Call):
+                t = t.func
+            name = t.attr if isinstance(t, ast.Attribute) else getattr(t, "id", "")
+            return bool(re.search(r"fail|error|abort|(^|_)err($|_)", name.lower()))
+
+        all_ifs = [n for n in own_nodes(loop.body) if isinstance(n, ast.If)]
+        ifs = [n for n in all_ifs if exits(n, poll_loop_of(n) is not loop)]
+        has_cond = any(not all(clock_term(t) or always_true(t) or error_flag(t) for t in terms_of(i.test))
+                       for i in ifs)
+        cap = any(clock_term(t) for i in ifs for t in terms_of(i.test))
+        if isinstance(loop, ast.While):
+            terms = terms_of(loop.test)
+            while_cond = any(not (clock_term(t) or always_true(t)) for t in terms)
+            has_cond = has_cond or while_cond
+            cap = cap or any(clock_term(t) for t in terms)
+            if while_cond:
+                cap = cap or any(clock_term(t) for i in all_ifs if i not in ifs and stops(i)
+                                 for t in terms_of(i.test))
+        else:
+            it = loop.iter
+            cap = cap or (isinstance(it, ast.Call) and isinstance(it.func, ast.Name) and it.func.id == "range"
+                          and bool(it.args) and not it.keywords and all(py_number(a) for a in it.args))
+        return has_cond and cap
 
     found = set()
     decorator_calls = {id(d) for n in ast.walk(tree)
@@ -592,7 +824,8 @@ def scan_python(text):
         if names & PY_SLEEPS:
             if not (isinstance(first, ast.Constant) and not isinstance(first.value, bool)
                     and isinstance(first.value, (int, float)) and first.value == 0):
-                found.add((call.lineno, "sleep"))  # sleep(0) is a yield, not a wait
+                # sleep(0) is a yield, not a wait. A poll interval of a capped wait loop is a hang guard.
+                found.add((call.lineno, "wait-cap" if is_hang_guard_poll(call) else "sleep"))
         capped = bool(names & PY_MARK_CAP) or (id(call) in decorator_calls and bool(names & PY_DECORATOR_CAP))
         if names & PY_SIGNAL_CAP and not (
                 names & {"signal.alarm"} and isinstance(first, ast.Constant) and first.value == 0):
@@ -602,17 +835,36 @@ def scan_python(text):
         elif any(k.arg == "timeout" and py_number(k.value) for k in call.keywords):
             found.add((call.lineno, "wait-cap"))
 
-    roots = [tree] + [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
-    for root in roots:
-        tainted = scope_taint(root)
+    def visit(root, outer):
+        tainted, helpers, kids = scope_info(root, outer)
         for n in walk_scope(root):
             if isinstance(n, ast.Assert) and holds_clock(n.test, tainted, True):
                 found.add((n.lineno, "elapsed-assert"))
             elif isinstance(n, ast.Call):
                 name = n.func.attr if isinstance(n.func, ast.Attribute) else getattr(n.func, "id", "")
-                if name.startswith("assert") and any(holds_clock(x, tainted, True) for x in assert_parts(n, name)):
+                if name.startswith("assert") and any(
+                        holds_clock(x, tainted, True, name not in PY_EXACT, name in PY_ORDERED)
+                        for x in assert_parts(n, name)):
                     found.add((n.lineno, "elapsed-assert"))
-    return found
+        for kid in kids:
+            visit(kid, frozenset(helpers))
+
+    visit(tree, frozenset())
+    return found, python_kept(text)
+
+
+def python_kept(text):
+    """Lines whose real comment (a tokenizer COMMENT token, never string text) holds the keep marker."""
+    kept = set()
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+            if tok.type == tokenize.COMMENT:
+                got = KEEP_MARKER["python"].search(tok.string)
+                if got and got.group(1).strip():
+                    kept.add(tok.start[0])
+    except (tokenize.TokenError, SyntaxError):
+        pass  # the lines read so far still count; any line not read lists, which is the safe side
+    return kept
 
 
 # ---- JS and TS: one-pass masker, then patterns -------------------------------------------------------
@@ -622,9 +874,9 @@ _RE_WORDS = {"return", "typeof", "case", "do", "else", "in", "of", "yield", "awa
              "throw", "new"}
 
 
-def mask_js(src):
+def mask_js(src, comments=None):
     """src with every comment and every string, template or regex body blanked. Same length, same newlines.
-    Quote and backtick delimiters stay."""
+    Quote and backtick delimiters stay. A list passed as `comments` gets the (start, end) of each `//` comment."""
     n = len(src)
     out = list(src)
     template_parts = []  # brace depth at each open `${`
@@ -701,6 +953,8 @@ def mask_js(src):
         if c == "/" and d == "/":
             j = src.find("\n", i)
             j = n if j < 0 else j
+            if comments is not None:
+                comments.append((i, j))
             blank(i, j)
             i = j
             continue
@@ -870,7 +1124,8 @@ def parse_test_head(m, i):
 
 
 def scan_js(text):
-    m = mask_js(text)
+    comments = []
+    m = mask_js(text, comments)
     hits = Hits(m)
     fake_clock = re.search(r"(?<![\w$])useFakeTimers\s*\(", m) is not None
     claimed = []  # character ranges whose `timeout:` a test-cap finding already holds
@@ -948,7 +1203,7 @@ def scan_js(text):
         got = args_of(mm.end() - 1)
         if got and is_num(m[got[1][0][0]:got[1][0][1]]):
             hits.add(mm.start(), "wait-cap")
-    return hits.found
+    return hits.found, kept_lines(text, comments, KEEP_MARKER["js"])
 
 
 # ---- Swift: one-pass masker, then patterns -----------------------------------------------------------
@@ -964,9 +1219,9 @@ SWIFT_DECL = re.compile(r"(?<![\w$.])(?:let|var)\s+(?=[A-Za-z_])")
 SWIFT_ASSERT = re.compile(r"(?<![\w$])(?:XCTAssert\w*|#expect|#require)\s*\(")
 
 
-def mask_swift(src):
+def mask_swift(src, comments=None):
     """src with every comment and every string body blanked, interpolation holes included. Same length,
-    same newlines. String delimiters stay."""
+    same newlines. String delimiters stay. A list passed as `comments` gets the (start, end) of each `//` comment."""
     n = len(src)
     out = list(src)
 
@@ -1024,6 +1279,8 @@ def mask_swift(src):
         if c == "/" and d == "/":
             j = src.find("\n", i)
             j = n if j < 0 else j
+            if comments is not None:
+                comments.append((i, j))
             blank(i, j)
             i = j
         elif c == "/" and d == "*":
@@ -1099,7 +1356,8 @@ def swift_function_returns(m, start, end):
 
 
 def scan_swift(text):
-    m = mask_swift(text)
+    comments = []
+    m = mask_swift(text, comments)
     hits = Hits(m)
 
     def args_of(open_idx):
@@ -1133,40 +1391,44 @@ def scan_swift(text):
         label = {"wait": r"(?<![\w])for\s*:", "fulfillment": r"(?<![\w])of\s*:"}.get(mm.group(1))
         if label is None or re.search(label, body):
             hits.add(mm.start(), "wait-cap")
-    return hits.found
+    return hits.found, kept_lines(text, comments, KEEP_MARKER["swift"])
 
 
 # ---- driver ------------------------------------------------------------------------------------------
 
 def scan_file(root, rel, kind):
-    """(findings as (line, category) pairs, lines of the file) or (None, reason) when it cannot be read."""
+    """(listed findings as (line, category) pairs, lines of the file, kept findings) or (None, reason, set()) when
+    it cannot be read. A kept finding sits on a line that holds the keep marker with a reason."""
     path = os.path.join(root, rel)
     try:
         if not os.path.isfile(path):
-            return None, "not a regular file"
+            return None, "not a regular file", set()
         if os.path.getsize(path) > MAX_BYTES:
-            return None, f"over {MAX_BYTES} bytes"
+            return None, f"over {MAX_BYTES} bytes", set()
         with open(path, "rb") as f:
             data = f.read()
     except OSError as e:
-        return None, f"cannot be read: {e.strerror or e}"
+        return None, f"cannot be read: {e.strerror or e}", set()
     try:
         text = data.decode("utf-8-sig")
     except UnicodeDecodeError:
-        return None, "not UTF-8"
+        return None, "not UTF-8", set()
     try:
-        found = {"python": scan_python, "js": scan_js, "swift": scan_swift}[kind](text)
+        found, kept = {"python": scan_python, "js": scan_js, "swift": scan_swift}[kind](text)
     except SyntaxError as e:
-        return None, f"syntax error at line {e.lineno}: {e.msg}"
+        return None, f"syntax error at line {e.lineno}: {e.msg}", set()
     except (ValueError, RecursionError, MemoryError) as e:
-        return None, f"cannot be parsed: {type(e).__name__}: {e}"
-    return found, re.split(r"\r\n|\r|\n", text)
+        return None, f"cannot be parsed: {type(e).__name__}: {e}", set()
+    held = {f for f in found if f[0] in kept and f[1] != "elapsed-assert"}
+    return found - held, re.split(r"\r\n|\r|\n", text), held
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("root", help="the repo root, or any folder")
     ap.add_argument("--json", action="store_true", help="print one JSON object")
+    ap.add_argument("--check", action="store_true",
+                    help="exit non-zero only on a sleep, an elapsed-assert or an unread file")
     args = ap.parse_args(argv)
     root = os.path.abspath(args.root)
     if not os.path.isdir(root):
@@ -1177,14 +1439,16 @@ def main(argv=None):
         print(f"unknown: git ls-files failed in {root}")
         return 2
     findings = []
+    kept_total = 0
     for rel in files:
         kind = kind_of(rel)
         if kind is None:
             continue
-        found, detail = scan_file(root, rel, kind)
+        found, detail, held = scan_file(root, rel, kind)
         if found is None:
             unread.append({"path": rel, "reason": detail})
             continue
+        kept_total += len(held)
         for line, category in sorted(found):
             src = detail[line - 1].strip() if 0 < line <= len(detail) else ""
             findings.append({"path": rel, "line": line, "category": category, "lang": kind,
@@ -1197,10 +1461,25 @@ def main(argv=None):
             print(f"{f['path']}:{f['line']}: {f['category']}: {f['text']}")
         for u in unread:
             print(f"UNREAD {u['path']}: {u['reason']}")
-        nfiles = len({f["path"] for f in findings})
-        print(f"{len(findings)} time-pinned in {nfiles} files (sleep {counts['sleep']}, "
-              f"elapsed-assert {counts['elapsed-assert']}, test-cap {counts['test-cap']}, "
-              f"wait-cap {counts['wait-cap']}); {len(unread)} unread")
+        kept = f"; kept {kept_total}" if kept_total else ""
+        if args.check:
+            # --check allows a hang guard (a wait-cap or a test-cap), so the summary counts it apart.
+            pinned = [f for f in findings if f["category"] in CHECK_FAILS]
+            nfiles = len({f["path"] for f in pinned})
+            print(f"{len(pinned)} time-pinned in {nfiles} files (sleep {counts['sleep']}, "
+                  f"elapsed-assert {counts['elapsed-assert']}); hang guards "
+                  f"{counts['test-cap'] + counts['wait-cap']} (allowed; check each cap sits well above the run); "
+                  f"{len(unread)} unread{kept}")
+        else:
+            nfiles = len({f["path"] for f in findings})
+            print(f"{len(findings)} time-pinned in {nfiles} files (sleep {counts['sleep']}, "
+                  f"elapsed-assert {counts['elapsed-assert']}, test-cap {counts['test-cap']}, "
+                  f"wait-cap {counts['wait-cap']}); {len(unread)} unread{kept}")
+    if args.check:
+        # A wait-cap or a test-cap is a hang guard the owner keeps (item 345), so it never fails the check.
+        if any(f["category"] in CHECK_FAILS for f in findings):
+            return 1
+        return 2 if unread else 0
     if findings:
         return 1
     return 2 if unread else 0

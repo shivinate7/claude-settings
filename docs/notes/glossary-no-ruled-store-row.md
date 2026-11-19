@@ -1,0 +1,1 @@
+- glossary-no-ruled-store-row: GLOSSARY.md has no row for "ruled store" or "entry".

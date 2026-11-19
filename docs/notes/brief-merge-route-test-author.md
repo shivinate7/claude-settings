@@ -1,0 +1,1 @@
+- brief-merge-route-test-author: Lane brief template: say "a merge that conflicts in test and product files goes to one test-author" (builders-cannot-edit-tests, merge route, item 420 a); lane main-merge-project-ops hand-assembled such a merge, and a test-author spawn naming a model and a builder spawn naming none were both refused.

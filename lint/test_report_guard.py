@@ -41,9 +41,10 @@ sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
-# The correction step's words (decision guard-remedy-not-to-owner, shared tails). A refusal holds none of them; the
-# record holds both. Lower case, to match a lowered reason or record.
-CORRECTION_STEP = ("post only the corrected lines", "never send the report again")
+# The shared correction tail (decision guard-remedy-not-to-owner). Each reply refusal but
+# a missing report ends with it. Read with getattr, so a build without it fails on the assert that names it, not on
+# the import.
+CORRECTION_TAIL = getattr(RG, "CORRECTION_TAIL", "")
 RUN_FOLDER = _test_temp.run_folder()  # the new cases take their temp folders from it, never from the system temp dir
 
 # Isolation. Every spawned guard inherits this process's environment (env=None, or a copy
@@ -1485,21 +1486,22 @@ class NoResendTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
 
-    def test_nr_red_each_refusal_holds_no_correction_tail(self):
+    def test_nr_each_refusal_carries_the_correction_tail(self):
         rows = [
-            # Catches: the label-word refusal carries the correction tail.
+            # Catches: the label-word refusal lacks the correction tail.
             ("label words", "> **Done** fixed it in abc123\n> **Next** none", ()),
-            # Catches: the model-name refusal carries the correction tail.
+            # Catches: the model-name refusal lacks the correction tail.
             ("model names", "> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none",
              (self.BUILDER,)),
-            # Catches: the Unstarted refusal carries the correction tail.
+            # Catches: the Unstarted refusal lacks the correction tail.
             ("Unstarted line", "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** merge",
              (self.BUILDER,)),
-            # Catches: the cite-gloss refusal carries the correction tail.
+            # Catches: the cite-gloss refusal lacks the correction tail.
             ("cite gloss", "Per D12.\n\n> **Done** BUILT guard, PR #5\n> **Next** none", ()),
-            # Catches: a joined refusal carries the correction tail.
+            # Catches: a joined refusal lacks the correction tail.
             ("label words and cite gloss", "Per D12.\n\n> **Done** fixed it\n> **Next** none", ()),
         ]
+        self.assertTrue(CORRECTION_TAIL, "report_guard holds no shared CORRECTION_TAIL constant")
         for name, reply, spawns in rows:
             with self.subTest(refusal=name):
                 out = self.verdict(reply, spawns)
@@ -1507,22 +1509,23 @@ class NoResendTests(unittest.TestCase):
                 reason = out["reason"].lower()
                 self.assertIn("decision guard-remedy-not-to-owner", reason)
                 self.assertNotIn("send the report now", reason)
-                for phrase in CORRECTION_STEP:
-                    self.assertNotIn(phrase, reason, "the refusal carries the correction tail: %r" % phrase)
+                self.assertIn(CORRECTION_TAIL, out["reason"], "the refusal lacks the shared correction tail")
                 self.assertEqual(reason.count("rule reports-order-of-labels"), 1)
                 self.assertIn("rule reports-order-of-labels", reason)
 
     def test_nr_missing_report_block_keeps_the_reply(self):
         out = self.verdict("All done.")
         self.assertIn("does not end with the report", out["reason"])
-        self.assertNotIn("post only the corrected lines", out["reason"].lower())
+        self.assertTrue(CORRECTION_TAIL, "report_guard holds no shared CORRECTION_TAIL constant")
+        self.assertNotIn(CORRECTION_TAIL, out["reason"], "a missing-report block carries the correction tail")
 
     def test_nr_missing_report_with_bare_cite_never_forbids_the_report(self):
-        # Catches: the block asks for the report and also says never send it.
+        # Catches: the block asks for the report and also carries the correction tail, which bars a resend.
         out = self.verdict("Per D12.\n\nAll done.")
         self.assertIn("'D12'", out["reason"])
         self.assertIn("does not end with the report", out["reason"])
-        self.assertNotIn("never send the report again", out["reason"].lower())
+        self.assertTrue(CORRECTION_TAIL, "report_guard holds no shared CORRECTION_TAIL constant")
+        self.assertNotIn(CORRECTION_TAIL, out["reason"], "a missing-report block carries the correction tail")
 
     def test_nr_correction_only_follow_up_passes(self):
         # The follow-up holds only the corrected lines, with no report. It runs as a rewrite.
@@ -4648,18 +4651,50 @@ class UICopyRoundTwoTests(unittest.TestCase):
                                              "launch</button>;\n"), ["STE011"])
 
     def test_114_many_generics_lint_in_linear_time(self):
-        import time
-        lines = []
-        for i in range(600):
-            lines.append("const f%d = <T extends X>(a: T): T => a;" % i)
-            lines.extend(["const v%d_%d = %d;" % (i, j, j) for j in range(7)])
-        lines.append("const y = <p>In order to go.</p>;")
-        text = "\n".join(lines) + "\n"
-        self.assertGreaterEqual(len(lines), 4800)
-        started = time.monotonic()
-        codes = self.check("a.tsx", text)
-        self.assertLess(time.monotonic() - started, 2.0)
-        self.assertEqual(codes, ["STE011"])
+        def build(generics):
+            lines = []
+            for i in range(generics):
+                lines.append("const f%d = <T extends X>(a: T): T => a;" % i)
+                lines.extend(["const v%d_%d = %d;" % (i, j, j) for j in range(7)])
+            lines.append("const y = <p>In order to go.</p>;")
+            return "\n".join(lines) + "\n"
+
+        def check_counted(text):
+            # Steps are the line events the trace sees in lint/ste_lint.py while the check runs. No clock is
+            # read, so machine load cannot move the count.
+            linter_file = ste_lint._jsx_copy.__code__.co_filename
+            steps = [0]
+
+            def count_line(frame, event, arg):
+                if event == "line":
+                    steps[0] += 1
+                return count_line
+
+            def trace_call(frame, event, arg):
+                return count_line if frame.f_code.co_filename == linter_file else None
+
+            previous = sys.gettrace()
+            sys.settrace(trace_call)
+            try:
+                codes = self.check("a.tsx", text)
+            finally:
+                sys.settrace(previous)
+            return codes, steps[0]
+
+        small, large = build(600), build(2400)
+        self.assertGreaterEqual(small.count("\n"), 4800)
+        small_codes, small_steps = check_counted(small)
+        large_codes, large_steps = check_counted(large)
+        self.assertEqual(small_codes, ["STE011"])
+        self.assertEqual(large_codes, ["STE011"])
+        # Scope first: the trace must have seen at least one step per input line, or the ratio below proves nothing.
+        self.assertGreaterEqual(small_steps, small.count("\n"),
+                                "the trace counted fewer steps than input lines: it missed lint/ste_lint.py")
+        # Four times the lines take about four times the steps. A Python scan to the end of the file for each
+        # generic makes the steps grow as the square, which the 8x bound catches. A str.find scan to the end
+        # adds one step per generic, so this count does not see it. The bound is for Python-level scans only.
+        ratio = large_steps / small_steps
+        self.assertLess(ratio, 8, "4x the lines took %.1fx the steps: the check is not linear" % ratio)
 
 
 class TurnReaderTests(unittest.TestCase):
@@ -5978,8 +6013,9 @@ class PendingRefusalTests(unittest.TestCase):
                 order = RG.session_wording(reason)
                 checks = (
                     ("the block does not say when a refused tool clears", "clears when" in reason),
+                    # The shared correction tail says "Post only", which is no clearing claim, so it is stripped first.
                     ("the block says 'only' about clearing, which is false: other forms clear a tool too",
-                     not re.search(r"\bonly\b", reason, re.I)),
+                     not re.search(r"\bonly\b", reason.replace(CORRECTION_TAIL, ""), re.I)),
                     ("the block does not give the Input Needed clearing form", "under Input Needed" in reason),
                     ("the block does not give the phrase clearing form `<tool_name>`: refusal was right",
                      "`<tool_name>`: refusal was right" in reason),

@@ -1,0 +1,1 @@
+- ledger-waits-line-edges: `PR_WAITS_LINE` in `merge/merge.py` rejects trailing prose beyond one `(note)`. It keeps a trailing period in the item. A newer invalid line leaves an older valid one standing. It checks no author. Each case is fail-visible. Found in review rounds 2 and 3 of lane pr-state-is-on-the-pr. Decision: roles-findings-are-debts-or-notes.

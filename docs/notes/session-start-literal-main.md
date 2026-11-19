@@ -1,0 +1,1 @@
+- session-start-literal-main: merge-flow-after-anthropic 17:03 CST Nov 12: Coordinator 17:01 CST Nov 12 (lane cloud-hooks-stale-copy): act 2 open, session_start.sh around lines 243-271 still reads a literal origin/main.

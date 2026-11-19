@@ -1,0 +1,1 @@
+- delete-route-decision-name: Retro 48 h audit 20:56 CST Nov 12: R45's home is "a new decision for the delete route", but no slug existed. Triage names it decision cloud-branch-delete, one record for the delete route, written by this lane. (The R45 store entry's step field reads merge-reads-ruleset; this step carries the delete-route half.)

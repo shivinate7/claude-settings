@@ -1,0 +1,1 @@
+- check-staged-copy-carried: Coordinator 21:18 CST Nov 12: #2878 (the --check-staged copy) is carried by lane old-drafts-to-handin after #2825.

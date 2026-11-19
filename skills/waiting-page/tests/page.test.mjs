@@ -1277,6 +1277,79 @@ for (const width of [430, 390, 360]) {
   });
 }
 
+// ---------------------------------------------------------------- long unbroken words in the Questions tab
+
+// A word with no space or hyphen has no break point, so it must wrap inside its box or it widens the page. Each fixture puts one such
+// word in one place the Questions tab sets text in a box: the Lands in line (.dest), a thread reply in an answered line (.thread .reply)
+// and an option's trade-off text (.opt .tr).
+const UNBROKEN = "x".repeat(90);
+const WRAP_DEST = mk("wrap-dest", 41, { home: "PR #2906; step " + UNBROKEN });
+const WRAP_TR = mk("wrap-tr", 42, { options: [{ ...opt("a", "Red"), gain: UNBROKEN }, opt("b", "Blue")] });
+// A closed item is one line in the Answered section, folded until Show answer opens its reply. open() waits for the first item's card,
+// so DECISION stays on the page.
+const WRAP_REPLY = mk("wrap-reply", 43, { status: "closed", closed: "2026-11-09T15:00:00Z", home: "step:ask-phase-out", reply: UNBROKEN });
+// box: the element that holds the word, found by its text, so a page that drops the word fails at the scope check, not as "no overflow".
+const WRAP_LINE = { what: "the Lands in line", items: [WRAP_DEST], box: ".dest" };
+const WRAP_REPLY_CASE = { what: "the thread reply in an answered line", items: [DECISION, WRAP_REPLY], open: WRAP_REPLY, box: "#tier-answered .thread .reply" };
+const WRAP_TRADE = { what: "the option's trade-off text", items: [WRAP_TR], box: ".opt .tr div > span:not(.s)" };
+// The filed line of an opened answer reads "The record stays in <home>.", so a 90-character home is the unbroken word in .askc .thread .filed.
+// Measured on the build with that home: the page is 717 px wide at 360, 390 and 430 px with .hometag shown, and the viewport width with it
+// hidden. The tag's nowrap text (666 px) gives the tag a 684 px box, so its row .ahead is 684 px wide and runs past its line. .hometag's
+// overflow hidden does not stop this: the tag's box is still 684 px, and .ahead takes that width. The tag's width is another lane's
+// (page-home-tag-cut-off), so this measure hides it and reads only the filed line.
+const WRAP_FILED = mk("wrap-filed", 44, { status: "closed", closed: "2026-11-09T15:00:00Z", home: UNBROKEN });
+const WRAP_FILED_CASE = { what: "the filed line of an opened answer", items: [DECISION, WRAP_FILED], open: WRAP_FILED, box: "#tier-answered .thread .filed", hide: ".hometag" };
+async function openWrap(t, c, { width = 1280, scheme = "light" } = {}) {
+  const page = await open(t, { items: c.items, viewport: { width, height: 900 }, scheme }); if (!page) return null;
+  if (c.open) {
+    await mustHave(page, `#tier-answered #lrow-${c.open.id}`, `Show answer on the line of No. ${c.open.n}`);
+    await page.click(`#tier-answered #lrow-${c.open.id}`);
+  }
+  return page;
+}
+
+for (const c of [WRAP_LINE, WRAP_REPLY_CASE, WRAP_TRADE, WRAP_FILED_CASE]) {
+  for (const width of [360, 390, 430]) {
+    for (const scheme of ["light", "dark"]) {
+      test(`${c.what} with an unbroken 90-character word never widens the Questions tab, at ${width} wide, ${scheme} scheme`, async (t) => {
+        const page = await openWrap(t, c, { width, scheme }); if (!page) return;
+        const box = page.locator(c.box).filter({ hasText: UNBROKEN });
+        assert.equal(await box.count(), 1, `no ${c.what} holds the unbroken word`);
+        // c.hide: elements taken out of the page for this measure, such as the home tag another lane owns.
+        if (c.hide) await page.evaluate((sel) => document.querySelectorAll(sel).forEach((e) => { e.style.display = "none"; }), c.hide);
+        const { sw, iw } = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth }));
+        assert.ok(sw <= iw, `${c.what} widens the page to ${sw} px on a ${iw} px screen`);
+      });
+    }
+  }
+}
+
+test("the Lands in line with a 90-character word computes overflow-wrap: anywhere and min-width: 0", async (t) => {
+  const page = await openWrap(t, WRAP_LINE); if (!page) return;
+  await mustHave(page, ".dest", `the Lands in line of No. ${WRAP_DEST.n}`);
+  const cs = await page.locator(".dest").first().evaluate((e) => ({ wrap: getComputedStyle(e).overflowWrap, min: getComputedStyle(e).minWidth }));
+  assert.equal(cs.wrap, "anywhere", `the Lands in line's overflow-wrap is ${cs.wrap}, not anywhere`);
+  assert.equal(cs.min, "0px", `the Lands in line's min-width is ${cs.min}, not 0px`);
+});
+
+test("the thread reply with a 90-character word computes overflow-wrap: anywhere and min-width: 0", async (t) => {
+  const page = await openWrap(t, WRAP_REPLY_CASE); if (!page) return;
+  await mustHave(page, ".thread .reply", `the reply of No. ${WRAP_REPLY.n}`);
+  const cs = await page.locator(".thread .reply").first().evaluate((e) => ({ wrap: getComputedStyle(e).overflowWrap, min: getComputedStyle(e).minWidth }));
+  assert.equal(cs.wrap, "anywhere", `the thread reply's overflow-wrap is ${cs.wrap}, not anywhere`);
+  assert.equal(cs.min, "0px", `the thread reply's min-width is ${cs.min}, not 0px`);
+});
+
+test("the option's trade-off text with a 90-character word computes overflow-wrap: anywhere and min-width: 0", async (t) => {
+  const page = await openWrap(t, WRAP_TRADE); if (!page) return;
+  // Scope first: the one trade-off text that holds the unbroken word, so a page that drops it fails by name.
+  const span = page.locator(".opt .tr div > span:not(.s)").filter({ hasText: UNBROKEN });
+  assert.equal(await span.count(), 1, `no trade-off text holds the unbroken word of No. ${WRAP_TR.n}`);
+  const cs = await span.evaluate((e) => ({ wrap: getComputedStyle(e).overflowWrap, min: getComputedStyle(e).minWidth }));
+  assert.equal(cs.wrap, "anywhere", `the trade-off text's overflow-wrap is ${cs.wrap}, not anywhere`);
+  assert.equal(cs.min, "0px", `the trade-off text's min-width is ${cs.min}, not 0px`);
+});
+
 test("an item that is not a look question never warns about pictures, with or without a named design", async (t) => {
   const plain = mk("not-a-look", 37, { options: LOOK_OPTS.map(({ design, ...o }) => o), pick: "a" });
   const named = mk("names-a-design", 38, { options: LOOK_OPTS, pick: "a" });
@@ -2320,6 +2393,282 @@ test("a group with one new member is new as a whole, so a seen item in its tier 
   assert.notEqual(await seenOf(page, older), "true", "a group with a new member is marked seen");
   assert.notEqual(await seenOf(page, newer), "true", "the new member is marked seen");
   assert.deepEqual(await idsInSection(page, "calm"), ["g-new", "g-old", "g-solo"], "the seen solo sits above the group in Whenever");
+});
+
+// ---------------------------------------------------------------- repo sub-groups inside each tier (session-role-sort-notes, sections 1 to 5)
+// Inside each tier, one sub-group per repo: a section role="group" labelled by its head (a letter tile, the repo name, the count).
+// This repo is meta/page `repo` (owner/name) when set, else the item repo whose name part matches identity.name, ignoring case.
+// Only the repo sub-groups are tested here. The `stops` key and its sort wait on an owner answer, so no case sorts by stops.
+// Names start "repo sub-groups:"; a control (green on the old code) starts "repo sub-groups control:".
+const SAMPLE = { identity: { name: "sample-repo" } };
+const inRepo = (id, n, repo, over = {}) => mk(id, n, { repo, ...over });
+// The sub-groups of one tier, in page order: each head's text with its whitespace removed (the tile, the name, the count) and the cards in it.
+// null when the tier is not on the page; [] when it draws no sub-group.
+const repoGroups = (page, k) => page.evaluate((key) => {
+  const section = document.getElementById("tier-" + key);
+  if (!section) return null;
+  return [...section.querySelectorAll('[role="group"][aria-labelledby]')].map((g) => {
+    const head = document.getElementById(g.getAttribute("aria-labelledby"));
+    return { head: head ? head.textContent.replace(/\s+/g, "") : "", cards: [...g.querySelectorAll("article.card")].map((c) => c.id.slice(5)) };
+  });
+}, k);
+const headsOf = (groups) => groups.map((g) => g.head);
+const cardsOf = (groups) => groups.map((g) => g.cards);
+// The chip runs of one tier row on the rail, in order: each run's name, its first child's text with the whitespace removed (the tile and the name), and its chips.
+// null when the row is not on the rail; [] when the row has no runs.
+const railRuns = (page, k) => page.evaluate((key) => {
+  const head = document.querySelector(`#rail a.ov-head[href="#tier-${key}"]`);
+  const row = head && head.closest(".ov-tier");
+  if (!row) return null;
+  return [...row.querySelectorAll('[role="group"][aria-label]')].map((g) => ({
+    name: g.getAttribute("aria-label"),
+    first: g.firstElementChild ? g.firstElementChild.textContent.replace(/\s+/g, "") : "",
+    chips: [...g.querySelectorAll(".nchip")].map((c) => c.id.slice(2)),
+  }));
+}, k);
+// The seen dividers of each sub-group, in page order: "w" when a divider shows its words, "sr" when only a screen reader hears them.
+const dividersIn = (page, k) => page.evaluate((key) => {
+  const section = document.getElementById("tier-" + key);
+  if (!section) return null;
+  return [...section.querySelectorAll('[role="group"][aria-labelledby]')].map((g) => [...g.querySelectorAll(".seenhead")].map((d) => (d.querySelector(".sr") ? "sr" : "w")));
+}, k);
+
+// Case 1: this repo first, then each other repo at the place of its first item. Beta's first item outranks alpha's, so place and A to Z differ.
+test("repo sub-groups: inside a tier, this repo comes first and each other repo sits at the place of its first item", async (t) => {
+  const items = [
+    inRepo("own-1", 1, "acme/sample-repo", { rank: 9 }), inRepo("beta-1", 2, "acme/beta", { rank: 0 }),
+    inRepo("alpha-1", 3, "acme/alpha", { rank: 1 }), inRepo("alpha-2", 4, "acme/alpha", { rank: 2 }),
+    inRepo("own-2", 5, "acme/sample-repo", { rank: 10 }),
+  ];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 3, `tier-calm draws ${groups.length} repo sub-groups, not one per repo (3)`);
+  assert.deepEqual(cardsOf(groups), [["own-1", "own-2"], ["beta-1"], ["alpha-1", "alpha-2"]], "the sub-groups are not this repo first, then each repo at its first item's place");
+});
+
+// Case 1, full size: six repos and twelve items. Each repo is whole, this repo is first, and the rest follow their first items.
+test("repo sub-groups: a tier of six repos and twelve items keeps each repo whole, this repo first and the rest in first-item order", async (t) => {
+  const others = ["hotel", "golf", "foxtrot", "echo", "delta"]; // by rank, their first items are 0, 1, 2, 3, 4
+  const items = []; let n = 1;
+  others.forEach((name, i) => { for (const r of [i, i + 10]) items.push(inRepo(`${name}-${r}`, n++, `acme/${name}`, { rank: r })); });
+  for (const r of [20, 21]) items.push(inRepo(`own-${r}`, n++, "acme/sample-repo", { rank: r }));
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 6, `tier-calm draws ${groups.length} repo sub-groups, not one per repo (6)`);
+  assert.deepEqual(cardsOf(groups), [["own-20", "own-21"], ["hotel-0", "hotel-10"], ["golf-1", "golf-11"], ["foxtrot-2", "foxtrot-12"], ["echo-3", "echo-13"], ["delta-4", "delta-14"]], "the six sub-groups are not this repo first, then the others in first-item order");
+});
+
+// Case 1, tie: two other repos whose first items agree on every key. Their order is A to Z, not the order the items were stored in.
+test("repo sub-groups: other repos whose first items tie on every key sit A to Z", async (t) => {
+  // Both other items carry n 2: no key the sort reads tells them apart, so only the repo name can.
+  const items = [inRepo("own-1", 1, "acme/sample-repo", { added: at(1) }), inRepo("zeta-1", 2, "acme/zeta", { added: at(1) }), inRepo("alpha-1", 2, "acme/alpha", { added: at(1) })];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 3, `tier-calm draws ${groups.length} repo sub-groups, not 3`);
+  assert.deepEqual(cardsOf(groups), [["own-1"], ["alpha-1"], ["zeta-1"]], "tied repos are not in A to Z order");
+});
+
+// Case 1, own repo: meta/page `repo` decides it. Another repo with the same name part is not this repo.
+test("repo sub-groups: the page's own repo is the meta/page repo when set, so another repo with the same name part is not this repo", async (t) => {
+  const items = [inRepo("own-cock", 1, "acme/cockpit", { rank: 9 }), inRepo("other-cock", 2, "other/cockpit", { rank: 0 }), inRepo("alpha-1", 3, "acme/alpha", { rank: 1 })];
+  const page = await open(t, { items, meta: { identity: { name: "cockpit" }, repo: "acme/cockpit" } }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 3, `tier-calm draws ${groups.length} repo sub-groups, not 3: other/cockpit is folded into this repo or dropped`);
+  assert.deepEqual(cardsOf(groups), [["own-cock"], ["other-cock"], ["alpha-1"]], "other/cockpit sits with this repo, or this repo is not first");
+});
+
+// Case 1, own repo: no meta/page repo, so the item whose name part matches identity.name, ignoring case, is this repo. A bare name counts too.
+test("repo sub-groups: with no meta/page repo, this repo is the item whose name part matches identity.name, ignoring case, and a bare name counts", async (t) => {
+  const items = [inRepo("own-case", 1, "acme/Sample-Repo", { rank: 5 }), inRepo("beta-1", 2, "acme/beta", { rank: 0 }), inRepo("own-bare", 3, "sample-repo", { rank: 7 })];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 2, `tier-calm draws ${groups.length} repo sub-groups, not 2`);
+  assert.deepEqual(cardsOf(groups), [["own-case", "own-bare"], ["beta-1"]], "the matching items are not this repo's sub-group, first");
+});
+
+// Case 2: a tier with this repo and another draws a head for each. The tile is the first letter, the count is the sub-group's cards.
+test("repo sub-groups: a tier holding this repo and another draws one sub-head per repo: a letter tile, the repo name and the count", async (t) => {
+  const items = [inRepo("own-1", 1, "acme/sample-repo", { rank: 0 }), inRepo("own-2", 2, "acme/sample-repo", { rank: 1 }), inRepo("beta-1", 3, "acme/beta", { rank: 2 })];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 2, `tier-calm draws ${groups.length} repo sub-groups, not 2`);
+  assert.deepEqual(headsOf(groups), ["Ssample-repo2", "Bbeta1"], "a sub-head does not read the tile, the repo name and the count");
+});
+
+// Case 2, control: the single-repo tier is the page as it is today. Its cards come first, so a head drawn here would be the only change.
+test("repo sub-groups control: a tier holding only this repo draws no sub-head and keeps today's card order", async (t) => {
+  const items = [inRepo("own-2", 2, "acme/sample-repo", { rank: 1 }), inRepo("own-1", 1, "acme/sample-repo", { rank: 0 })];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), ["own-1", "own-2"], "the tier's cards are not in today's order");
+  const groups = await repoGroups(page, "calm");
+  assert.equal(groups.length, 0, `tier-calm draws ${groups.length} sub-head(s) for this repo alone, not 0`);
+});
+
+// Case 2: a tier with only another repo keeps its head, so the owner sees whose the items are.
+test("repo sub-groups: a tier holding only another repo keeps its head, so the owner sees whose it is", async (t) => {
+  const items = [inRepo("beta-due", 1, "acme/beta", { by: "2030-11-30T12:00:00Z" }), inRepo("own-calm", 2, "acme/sample-repo")];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "due");
+  assert.ok(groups, "tier-due is not on the page");
+  assert.equal(groups.length, 1, `tier-due draws ${groups.length} repo sub-groups, not 1`);
+  assert.deepEqual(headsOf(groups), ["Bbeta1"], "the Upcoming tier's head does not read the other repo's tile, name and count");
+});
+
+// Case 3: an item with no repo field sits under this repo's name, so its sub-group has this repo's head.
+test("repo sub-groups: an item with no repo field sits under this repo's name", async (t) => {
+  const items = [mk("no-repo-item", 1, { rank: 0 }), inRepo("beta-1", 2, "acme/beta", { rank: 1 })];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 2, `tier-calm draws ${groups.length} repo sub-groups, not 2`);
+  assert.deepEqual(cardsOf(groups), [["no-repo-item"], ["beta-1"]], "the item with no repo field is not under this repo's sub-group");
+  assert.deepEqual(headsOf(groups), ["Ssample-repo1", "Bbeta1"], "the item with no repo field has no head with this repo's name");
+});
+
+// Case 4: a group whose members sit in two repos is one sub-group. Which repo it sits under is the sort's to set, so the case does not check it.
+test("repo sub-groups: a group whose members sit in two repos stays in one sub-group", async (t) => {
+  const items = [
+    inRepo("g-own", 1, "acme/sample-repo", { group: "pair", rank: 5 }), inRepo("g-beta", 2, "acme/beta", { group: "pair", rank: 6 }),
+    inRepo("beta-solo", 3, "acme/beta", { rank: 0 }), inRepo("own-solo", 4, "acme/sample-repo", { rank: 7 }),
+  ];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 2, `tier-calm draws ${groups.length} repo sub-groups, not 2`);
+  const withOwn = groups.filter((g) => g.cards.includes("g-own")), withBeta = groups.filter((g) => g.cards.includes("g-beta"));
+  assert.equal(withOwn.length, 1, `g-own is in ${withOwn.length} sub-groups, not 1`);
+  assert.deepEqual(withBeta, withOwn, "the group splits: g-beta is not in the sub-group that holds g-own");
+});
+
+// Case 5: the seen divider repeats inside each sub-group that has seen items. Its words show on the first divider of the page only.
+test("repo sub-groups: the seen divider repeats inside each repo sub-group, and its words show once on the page", async (t) => {
+  const items = [
+    inRepo("own-seen", 1, "acme/sample-repo", { added: at(5) }), inRepo("own-new", 2, "acme/sample-repo", { added: at(20) }),
+    inRepo("beta-seen", 3, "acme/beta", { added: at(6) }), inRepo("beta-new", 4, "acme/beta", { added: at(21) }),
+    sentItem(),
+  ];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 2, `tier-calm draws ${groups.length} repo sub-groups, not 2`);
+  const dividers = await dividersIn(page, "calm");
+  assert.deepEqual(dividers.map((d) => d.length), [1, 1], `the seen divider is not once per repo sub-group: ${JSON.stringify(dividers)}`);
+  assert.deepEqual(dividers.flat(), ["w", "sr"], "the seen divider's words do not show once on the page: the first divider shows them and each later one is for screen readers only");
+});
+
+// Case 6: the heads are fixed at load. Sending the last card of one repo removes that repo's head and no other.
+test("repo sub-groups: sending the last card of one repo removes only that repo's head, and the head left stays until reload", async (t) => {
+  const alpha = inRepo("alpha-1", 1, "acme/alpha", { rank: 0 });
+  const items = [alpha, inRepo("own-1", 2, "acme/sample-repo", { rank: 1 }), inRepo("own-2", 3, "acme/sample-repo", { rank: 2 })];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const before = await repoGroups(page, "calm");
+  assert.ok(before, "tier-calm is not on the page");
+  assert.equal(before.length, 2, `tier-calm draws ${before.length} repo sub-groups before the send, not 2`);
+  await choose(page, alpha, "a");
+  await send(page);
+  await waitAnswered(page, [alpha.id]);
+  await card(page, alpha).locator(".receipt").waitFor();
+  assert.equal(await sectionOf(page, alpha), "tier-answered", `No. ${alpha.n} did not move to the Answered section after its Send`);
+  const after = await repoGroups(page, "calm");
+  assert.equal(after.length, 1, `after the last alpha card was sent, tier-calm draws ${after.length} repo sub-groups, not 1`);
+  assert.deepEqual(headsOf(after), ["Ssample-repo2"], "sending the last alpha card changed this repo's head, or did not remove alpha's");
+});
+
+// Case 7: each repo's chip run in a tier row starts with its tile and name. The run keeps the order of the tier's cards.
+test("repo sub-groups: the rail row of a tier with two repos starts each repo's chip run with its tile and name", async (t) => {
+  const items = [inRepo("own-1", 1, "acme/sample-repo", { rank: 1 }), inRepo("alpha-1", 2, "acme/alpha", { rank: 0 }), inRepo("own-2", 3, "acme/sample-repo", { rank: 2 })];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const runs = await railRuns(page, "calm");
+  assert.ok(runs, "the rail has no Whenever row");
+  assert.equal(runs.length, 2, `the Whenever row holds ${runs.length} repo chip runs, not 2`);
+  assert.deepEqual(runs.map((r) => r.first), ["Ssample-repo", "Aalpha"], "a repo's chip run does not start with its tile and name");
+  assert.deepEqual(runs.map((r) => r.chips), [["own-1", "own-2"], ["alpha-1"]], "the chip runs do not follow the tier's card order");
+});
+
+// Case 7: the Answered section and its rail row draw one sub-group per repo, this repo first, newest first inside each.
+// Cites step answered-sections-by-repo (the Answered section and its rail row, one sub-group per repo, this repo first) and page item 212
+// (taken by lane page-answered-sink).
+test("repo sub-groups answered: the Answered section and its rail row draw one sub-group per repo, this repo first, newest first inside each", async (t) => {
+  const items = [inRepo("ans-own", 1, "acme/sample-repo"), inRepo("ans-alpha", 2, "acme/alpha"), inRepo("ans-beta", 3, "acme/beta"), inRepo("ans-own2", 4, "acme/sample-repo")];
+  const answers = { ...answerOf(items[0], "a", { at: "2026-10-26T09:00:00Z" }), ...answerOf(items[1], "a", { at: "2026-10-28T09:00:00Z" }), ...answerOf(items[2], "a", { at: "2026-10-27T09:00:00Z" }), ...answerOf(items[3], "a", { at: "2026-10-29T09:00:00Z" }) };
+  const page = await open(t, { items, meta: SAMPLE, answers }); if (!page) return;
+  const groups = await answeredGroups(page);
+  assert.ok(groups, "the Answered section is not on the page");
+  assert.deepEqual(cardsOf(groups), [["ans-own2", "ans-own"], ["ans-alpha"], ["ans-beta"]], "the Answered sub-groups are not this repo first, then each repo at its first answer's place, newest first inside each");
+  const runs = await railRuns(page, "answered");
+  assert.ok(runs, "the rail has no Answered row");
+  assert.deepEqual(runs.map((r) => r.chips), [["ans-own2", "ans-own"], ["ans-alpha"], ["ans-beta"]], "the Answered rail row does not draw the same repo runs");
+});
+
+// Answered by repo (the designer's questions-sorted-answered mockup): the Answered section draws one sub-group per repo, this repo first,
+// then each other repo at its first answer's place, newest first inside each. The rail's Answered row draws the same runs.
+// Names start "repo sub-groups answered:".
+const ansLine = (n, repo, sent) => mk("ans-" + n, n, { status: "closed", closed: sent, lastAnswer: { choice: "a", at: sent, note: "" }, repo, reply: "Filed.", home: "step " + n });
+// The mockup's six answers. Flat newest first is 61 59 60 58 55 57; this repo's three come first, then ledger-app's two, then trail-notes' one.
+const ANS_REPOS = [
+  ansLine(61, "acme/sample-repo", "2026-11-15T16:40:00Z"), ansLine(59, "acme/sample-repo", "2026-11-15T14:05:00Z"),
+  ansLine(55, "acme/sample-repo", "2026-11-14T21:00:00Z"), ansLine(60, "acme/ledger-app", "2026-11-15T11:00:00Z"),
+  ansLine(57, "acme/ledger-app", "2026-11-14T15:00:00Z"), ansLine(58, "acme/trail-notes", "2026-11-15T09:00:00Z"),
+];
+// The sub-groups of the Answered section, in page order: each head's text with its whitespace removed (the tile, the name, the count) and
+// the lines in it, by number. null when the section is not on the page.
+const answeredGroups = (page) => page.evaluate(() => {
+  const section = document.getElementById("tier-answered");
+  if (!section) return null;
+  return [...section.querySelectorAll('[role="group"][aria-labelledby]')].map((g) => {
+    const head = document.getElementById(g.getAttribute("aria-labelledby"));
+    return { head: head ? head.textContent.replace(/\s+/g, "") : "", cards: [...g.querySelectorAll("article.askc, article.card")].map((c) => c.id.replace(/^(line|item)-/, "")) };
+  });
+});
+
+test("repo sub-groups answered: the Answered section draws one sub-group per repo, this repo first, newest first inside each", async (t) => {
+  const page = await open(t, { items: [DECISION, ...ANS_REPOS], meta: SAMPLE }); if (!page) return;
+  const groups = await answeredGroups(page);
+  assert.ok(groups, "the Answered section is not on the page");
+  assert.equal(groups.length, 3, `the Answered section draws ${groups.length} repo sub-groups, not one per repo (3)`);
+  assert.deepEqual(cardsOf(groups), [["61", "59", "55"], ["60", "57"], ["58"]], "the Answered sub-groups are not this repo first, then each repo at its first answer's place, newest first inside each");
+});
+
+test("repo sub-groups answered: the Answered section line says This repo first.", async (t) => {
+  const page = await open(t, { items: [DECISION, ...ANS_REPOS], meta: SAMPLE }); if (!page) return;
+  const line = page.locator("#tier-answered .rsub");
+  assert.equal(await line.count(), 1, "the Answered section has no section line");
+  assert.match(await line.textContent(), /This repo first\./, "the Answered section line does not say This repo first.");
+});
+
+test("repo sub-groups answered: the rail's Answered row draws one run per repo, each with its tile and name", async (t) => {
+  const page = await open(t, { items: [DECISION, ...ANS_REPOS], meta: SAMPLE }); if (!page) return;
+  const runs = await railRuns(page, "answered");
+  assert.ok(runs, "the rail has no Answered row");
+  assert.equal(runs.length, 3, `the Answered row holds ${runs.length} repo runs, not 3`);
+  assert.deepEqual(runs.map((r) => r.first), ["Ssample-repo", "Lledger-app", "Ttrail-notes"], "a repo's run in the Answered row does not start with its tile and name");
+  assert.deepEqual(runs.map((r) => r.chips), [["ans-61", "ans-59", "ans-55"], ["ans-60", "ans-57"], ["ans-58"]], "the Answered row's runs do not follow the answered order inside each repo");
+});
+
+// Case 8: inside a repo's sub-group the order stays: an arrival first, then new before seen, then rank, then age.
+test("repo sub-groups: inside a repo's sub-group the order stays: an arrival first, then new before seen, rank, and newest first", async (t) => {
+  const items = [
+    inRepo("own-1", 9, "acme/sample-repo", { added: at(1), rank: 0 }),
+    inRepo("a-seen", 1, "acme/alpha", { added: at(5), rank: 0 }), inRepo("a-r2", 2, "acme/alpha", { added: at(20), rank: 2 }),
+    inRepo("a-r1", 3, "acme/alpha", { added: at(25), rank: 1 }), inRepo("a-old", 4, "acme/alpha", { added: at(15) }),
+    inRepo("a-young", 5, "acme/alpha", { added: at(22) }), sentItem(),
+  ];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const arrival = inRepo("a-arrival", 6, "acme/alpha", { added: at(28), rank: 9 });
+  await page.evaluate((it) => window.__putItem(it), arrival);
+  await card(page, arrival).waitFor();
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 2, `tier-calm draws ${groups.length} repo sub-groups, not 2`);
+  const alpha = groups.find((g) => g.cards.includes("a-r1"));
+  assert.ok(alpha, "no sub-group holds alpha's cards");
+  assert.deepEqual(alpha.cards, ["a-arrival", "a-r1", "a-r2", "a-young", "a-old", "a-seen"], "alpha's sub-group does not keep arrival, new before seen, rank, then newest first");
 });
 
 // ---------------------------------------------------------------- a reply or a step since the last visit
@@ -5957,7 +6306,7 @@ async function sinkSendInView(t, { width, anchored = false }) {
   const took = reads(rd).map(([when, post]) => `${when} ${post[B].top}`).join(", ");
   assert.ok(reads(rd).every(([, post]) => Math.abs(post[B].top - rd.pre[S].top) <= 2), `the open card below did not take the sent card's top ${rd.pre[S].top}: ${took}`);
 }
-async function sinkSendLastInTier(t, { width, anchored = false }) {
+async function sinkSendLastInSection(t, { width, anchored = false }) {
   const sent = mk("sink-last", 4, { context: LONG });
   // Nothing in a later tier: a stood pick there would go with the Send. The card is tall enough to scroll to the band.
   const page = await openSend(t, { items: [...HOLDS, ...LEADS, sent], width, height: 800, scheme: "light", anchored, sentMove: "sink" }); if (!page) return;
@@ -5977,7 +6326,7 @@ for (const width of [1280, 390]) {
     await sinkSendInView(t, { width });
   });
   test(`answered-sink: a sent card last in its tier: nothing above it moves on screen, at ${width} wide (SENT_MOVE sink)`, async (t) => {
-    await sinkSendLastInTier(t, { width });
+    await sinkSendLastInSection(t, { width });
   });
 }
 // The two 390 cases again with the browser's scroll anchoring on. The cases above keep it off, so they stay as they are.
@@ -5985,7 +6334,7 @@ test("answered-sink: a sent card in view, with scroll anchoring on: the open car
   await sinkSendInView(t, { width: 390, anchored: true });
 });
 test("answered-sink: a sent card last in its tier, with scroll anchoring on: nothing above it moves on screen, at 390 wide (SENT_MOVE sink)", async (t) => {
-  await sinkSendLastInTier(t, { width: 390, anchored: true });
+  await sinkSendLastInSection(t, { width: 390, anchored: true });
 });
 
 // Scroll anchoring stays on in the cases below: they test what a reader's browser does with the page's own compensation. A card in view
@@ -6766,7 +7115,7 @@ async function openStatus(page) {
 // Whether any visible or hidden text of the page matches (a yes or no, so a red run does not print the page).
 const shows = async (page, re) => re.test(await page.locator("body").textContent());
 const waitingShape = (page) => page.evaluate(() => ({
-  tiers: [...document.querySelectorAll("section.tier")].map((s) => [s.id, [...s.querySelectorAll("article.card")].map((c) => c.id)]),
+  sections: [...document.querySelectorAll("section.tier")].map((s) => [s.id, [...s.querySelectorAll("article.card")].map((c) => c.id)]),
   bar: document.getElementById("barStatus").textContent,
   send: document.getElementById("send").textContent,
 }));
@@ -6792,7 +7141,7 @@ test("with no roadmap data the Status tab says unknown with a reason, and the wa
   const shipped = await open(t, { items, dbExtra: LEAK }); if (!shipped) return; // PAGE as shipped: its roadmap block is empty
   const built = await open(t, { pageHtml: mergedPage("--no-roadmap"), items, dbExtra: LEAK }); // ROADMAP_DATA = null
   const before = await waitingShape(shipped);
-  assert.ok(before.tiers.length > 0 && before.send, "the waiting part drew nothing: " + JSON.stringify(before));
+  assert.ok(before.sections.length > 0 && before.send, "the waiting part drew nothing: " + JSON.stringify(before));
   assert.deepEqual(await waitingShape(built), before, "the roadmap block changed the waiting part");
   assert.equal(await statusTab(built).count(), 1, "the page has no Status tab (role=tab, name Status)");
   assert.equal(await statusTab(built).isVisible(), true, "the tab row hides Status when no item has a design");
@@ -7608,10 +7957,14 @@ test("merged_page.py --live hands its JSON to the build as the live file", () =>
 // A case passes only the keys it changes; JSON.stringify drops an undefined key, so { pulls: undefined } builds a file with no pulls list.
 const LIVE_READ = "2026-11-10T12:00:00Z";
 const liveFile = (over = {}) => ({ readAt: LIVE_READ, branches: [], sessions: [], ...over });
-async function liveStatus(t, over) {
-  const page = await open(t, { pageHtml: mergedPage("--live", JSON.stringify(liveFile(over))) });
+// The live file's text as given: a case that needs a value JSON cannot carry (NaN, Infinity) writes it in by hand.
+async function liveStatusText(t, text) {
+  const page = await open(t, { pageHtml: mergedPage("--live", text) });
   if (page) await openStatus(page);
   return page;
+}
+async function liveStatus(t, over) {
+  return liveStatusText(t, JSON.stringify(liveFile(over)));
 }
 const PULL_ONLY = { pulls: [{ number: 7, title: "Lane pull seven", branch: "lane-seven" }] };
 
@@ -7638,6 +7991,186 @@ test("control: the Status tab with a live file that has no pulls list reads live
   const line = page.locator(".livenone").filter({ hasText: "Live work" });
   assert.equal(await line.count(), 1, "the Status tab draws no live work line for a live file with no pulls list");
   assert.match((await line.textContent()).replace(/\s+/g, " "), /not read/, "the live work line does not say not read");
+});
+
+// ---------------------------------------------------------------- the open pull requests' next acts (decision pr-ledger, part 3b)
+// The live file's `ledger` key holds `merge --reviewed --json`: {readAt, rows}. The build bakes each pull row with its act, owner,
+// ageHours and red, and the Status tab draws them. The ledger's readAt is taken from the clock: the build reads a live file's age
+// against the real clock, so a fixed date would read every act unknown.
+const ACT_PULLS = [
+  { number: 7, title: "Pull seven", branch: "feat-seven" },
+  { number: 8, title: "Pull eight", branch: "feat-eight" },
+  { number: 9, title: "Pull nine", branch: "feat-nine" },
+];
+const ACT_ROWS = [
+  { number: 7, act: "lane round 2", owner: "lane", ageHours: 3, red: false, blockedOn: null },
+  { number: 8, act: "batch", owner: "batch runner", ageHours: 48, red: true, blockedOn: null },
+  { number: 9, act: "lane round 1", owner: "lane", ageHours: 2, red: false, blockedOn: null },
+];
+const actsOver = () => ({ pulls: ACT_PULLS, ledger: { readAt: new Date().toISOString(), rows: ACT_ROWS } });
+const actRow = (page, title) => page.locator("details.live li", { hasText: title });
+const rowText = async (loc) => (await loc.first().textContent()).replace(/\s+/g, " ").trim();
+// Whether a heading's text counts `n` pulls for `owner`, in either order ("lane 2" or "2 lane").
+const countedAs = (text, owner, n) => new RegExp(`${owner}\\D{0,12}\\b${n}\\b|\\b${n}\\b\\D{0,12}${owner}`).test(text);
+
+// The row's act line, as the mockup draws it (item 1): the act, then "owner <owner>", then "waited <age>" from the page's span().
+test("the Status tab shows each open pull request's act, owner and age in the mockup's act line", async (t) => {
+  const page = await liveStatus(t, actsOver()); if (!page) return;
+  assert.equal(await actRow(page, "Pull seven").count(), 1, "scope: the Status tab draws no row for open pull request #7");
+  const seven = await rowText(actRow(page, "Pull seven")), eight = await rowText(actRow(page, "Pull eight"));
+  assert.match(seven, /lane round 2/, "the row of #7 shows no act 'lane round 2': " + seven);
+  assert.match(seven, /owner lane/, "the row of #7 shows no owner 'lane': " + seven);
+  assert.match(seven, /waited 3 hours/, "the row of #7 shows no age 'waited 3 hours': " + seven);
+  assert.match(eight, /batch/, "the row of #8 shows no act 'batch': " + eight);
+  assert.match(eight, /owner batch runner/, "the row of #8 shows no owner 'batch runner': " + eight);
+  assert.match(eight, /waited 2 days/, "the row of #8 shows no age 'waited 2 days': " + eight);
+});
+
+// The red mark (the mockup's "edge and mark" pick, item 3): a role=img mark whose label starts "Red", on a red row only.
+// Its text is the label, not visible words; the word "red" shows once, in the head count.
+test("a red open pull request carries the Red mark, and a row that is not red carries none", async (t) => {
+  const page = await liveStatus(t, actsOver()); if (!page) return;
+  assert.equal(await actRow(page, "Pull eight").count(), 1, "scope: the Status tab draws no row for open pull request #8");
+  const mark = (title) => actRow(page, title).locator('[role="img"][aria-label^="Red"]');
+  assert.equal(await mark("Pull eight").count(), 1, "the row of #8 is red and carries no Red mark: " + (await rowText(actRow(page, "Pull eight"))));
+  assert.equal(await mark("Pull seven").count(), 0, "the row of #7 is not red and carries a Red mark");
+  assert.equal(await mark("Pull nine").count(), 0, "the row of #9 is not red and carries a Red mark");
+});
+
+// Acts unknown with the ledger unread (item 7, "reason once at the head"): each row reads "act unknown" alone, and the reason is one
+// line of the list head. The readAt is not a time, so the case reads no clock.
+test("an acts-unknown ledger gives its reason once, at the list head, and no row carries it", async (t) => {
+  const page = await liveStatus(t, { pulls: ACT_PULLS, ledger: { readAt: "yesterday", rows: ACT_ROWS } }); if (!page) return;
+  assert.equal(await actRow(page, "Pull seven").count(), 1, "scope: the Status tab draws no row for open pull request #7");
+  for (const title of ["Pull seven", "Pull eight", "Pull nine"]) {
+    const text = await rowText(actRow(page, title));
+    assert.match(text, /act unknown/, `the row of ${title} does not read 'act unknown': ${text}`);
+    assert.doesNotMatch(text, /ledger/, `the row of ${title} carries the reason, which shows once at the list head: ${text}`);
+  }
+  const live = (await page.locator("details.live").textContent()).replace(/\s+/g, " ");
+  const times = live.split("ledger").length - 1;
+  assert.equal(times, 1, `the ledger's reason shows ${times} times in Live work, not once at the list head: ${live}`);
+});
+
+// ---------------------------------------------------------------- acts: a lane unknown row's reason, and a non-finite or negative age (step status-tab-next-act)
+// The pinned reason of a skipped sessions row, as the page shows it: the build's laneWhy with its "unknown (...)" wrapper taken off.
+const SKIPPED_ROW_REASON = "a session row was skipped";
+const DRAFT_SEVEN = { number: 7, title: "Draft seven", branch: "feat-seven", draft: true };
+const HOLD_SEVEN = { number: 7, act: "lane round 1", owner: "lane", ageHours: 2, red: false, blockedOn: null };
+const draftOver = (sessions) => ({ pulls: [DRAFT_SEVEN], sessions, ledger: { readAt: new Date().toISOString(), rows: [HOLD_SEVEN] } });
+// The two places a lane unknown row gives its reason: the title of its span, and the page's Lane holds line.
+async function laneReasons(page) {
+  const row = actRow(page, "Draft seven");
+  assert.equal(await row.count(), 1, "scope: the Status tab draws no row for draft #7");
+  const span = row.locator("span.unk[title]").filter({ hasText: "lane unknown" });
+  assert.equal(await span.count(), 1, "the row of #7 has no lane unknown span with a reason: " + (await rowText(row)));
+  const why = page.locator("p.prwhy").filter({ hasText: "Lane holds unknown" });
+  assert.equal(await why.count(), 1, "the Status tab has no Lane holds line for draft #7");
+  return { title: (await span.first().getAttribute("title")) || "", why: (await why.first().textContent()).replace(/\s+/g, " ") };
+}
+
+// Item 2 (red): one sessions row the build skips makes the lane hold unknown. The reason says a row was skipped, not that the list is missing.
+test("a draft reads lane unknown with the skipped-row reason when a sessions row is skipped, never the missing-list reason", async (t) => {
+  const page = await liveStatus(t, draftOver([{ id: "s2" }])); if (!page) return;
+  const { title, why } = await laneReasons(page);
+  assert.ok(title.includes(SKIPPED_ROW_REASON), `the lane unknown of #7 gives the title ${JSON.stringify(title)}, not the skipped-row reason`);
+  assert.doesNotMatch(title, /sessions list/, `the lane unknown of #7 says the sessions list is missing: ${title}`);
+  assert.ok(why.includes(SKIPPED_ROW_REASON), `the Lane holds line gives no skipped-row reason: ${why}`);
+  assert.doesNotMatch(why, /sessions list/, `the Lane holds line says the sessions list is missing: ${why}`);
+});
+
+// The control: with no sessions list at all, the reason still says the list is missing.
+test("control: a draft reads lane unknown with the missing-list reason when the sessions list is missing", async (t) => {
+  const page = await liveStatus(t, draftOver(undefined)); if (!page) return;
+  const { title, why } = await laneReasons(page);
+  assert.match(title, /no sessions list/, `the lane unknown of #7 with no sessions list gives the title ${JSON.stringify(title)}`);
+  assert.match(why, /no sessions list/, `the Lane holds line with no sessions list says: ${why}`);
+});
+
+// Item 3: JSON.stringify writes NaN and Infinity as null, so the literal goes into the text by hand. A negative age is no age either.
+const ageText = (literal) => JSON.stringify(liveFile({ pulls: ACT_PULLS, ledger: { readAt: new Date().toISOString(), rows: [ACT_ROWS[0], { ...ACT_ROWS[1], ageHours: "@AGE@" }, ACT_ROWS[2]] } })).replace('"@AGE@"', literal);
+for (const [name, literal] of [["NaN", "NaN"], ["Infinity", "Infinity"], ["minus Infinity", "-Infinity"], ["minus 3 hours", "-3"]]) {
+  test(`an ageHours of ${name} reads act unknown on its row, and the Status tab never prints NaN or Infinity`, async (t) => {
+    const page = await liveStatusText(t, ageText(literal)); if (!page) return;
+    assert.equal(await actRow(page, "Pull eight").count(), 1, "scope: the Status tab draws no row for open pull request #8");
+    const seven = await rowText(actRow(page, "Pull seven"));
+    assert.match(seven, /waited 3 hours/, "control: #7 has a finite age and does not read 'waited 3 hours': " + seven);
+    const eight = await rowText(actRow(page, "Pull eight"));
+    assert.match(eight, /act unknown/, `the row of #8 has ageHours ${name} and does not read 'act unknown': ${eight}`);
+    assert.doesNotMatch(eight, /waited/, `the row of #8 has ageHours ${name} and prints a wait: ${eight}`);
+    const live = (await page.locator("details.live").textContent()).replace(/\s+/g, " ");
+    assert.doesNotMatch(live, /NaN|Infinity/, `the Status tab prints ${name} as an age: ${live}`);
+  });
+}
+
+// Item 2: a ledger row of the wrong shape (here a NaN age) reads act unknown with its reason on its row. The finite row beside it reads its act and no reason.
+test("an ageHours of NaN reads act unknown with the wrong-shape reason on its row, and the finite row reads no reason", async (t) => {
+  const page = await liveStatusText(t, ageText("NaN")); if (!page) return;
+  assert.equal(await actRow(page, "Pull eight").count(), 1, "scope: the Status tab draws no row for open pull request #8");
+  const seven = await rowText(actRow(page, "Pull seven"));
+  assert.match(seven, /lane round 2/, "control: #7 has a finite row and does not read its act 'lane round 2': " + seven);
+  assert.doesNotMatch(seven, /wrong shape/, "control: #7 has a finite row and carries the wrong-shape reason: " + seven);
+  const eight = await rowText(actRow(page, "Pull eight"));
+  assert.match(eight, /act unknown: its ledger row has the wrong shape/,
+    `the row of #8 has ageHours NaN and does not read 'act unknown: its ledger row has the wrong shape': ${eight}`);
+});
+
+test("the Status tab lists a red open pull request before the others", async (t) => {
+  const page = await liveStatus(t, actsOver()); if (!page) return;
+  const order = await page.locator("details.live li").allTextContents();
+  const at = (title) => order.findIndex((s) => s.includes(title));
+  assert.ok(at("Pull eight") >= 0, "scope: the Status tab draws no row for open pull request #8: " + JSON.stringify(order));
+  assert.ok(at("Pull eight") < at("Pull seven"), "the red open pull request #8 is listed after #7, which is not red: " + JSON.stringify(order));
+  assert.ok(at("Pull eight") < at("Pull nine"), "the red open pull request #8 is listed after #9, which is not red: " + JSON.stringify(order));
+});
+
+test("the Open pull requests heading counts each owner's pull requests", async (t) => {
+  const page = await liveStatus(t, actsOver()); if (!page) return;
+  const heading = page.locator("details.live h4", { hasText: "Open pull requests" });
+  assert.equal(await heading.count(), 1, "scope: the Status tab has no Open pull requests heading");
+  const text = (await heading.textContent()).replace(/\s+/g, " ");
+  assert.ok(countedAs(text, "lane", 2), "the Open pull requests heading does not count 2 lane pull requests: " + text);
+  assert.ok(countedAs(text, "batch runner", 1), "the Open pull requests heading does not count 1 batch runner pull request: " + text);
+});
+
+test("the Live work header shows when the acts were read", async (t) => {
+  const page = await liveStatus(t, actsOver()); if (!page) return;
+  const summary = (await page.locator("details.live > summary").textContent()).replace(/\s+/g, " ").trim();
+  assert.doesNotMatch(summary, /acts read unknown/, "the header reads the acts unknown with a fresh ledger: " + summary);
+  assert.match(summary, /acts read [A-Z][a-z]{2} \d{1,2}, \d{2}:\d{2} [A-Z]{2,4}/, "the header shows no 'acts read <time>': " + summary);
+});
+
+// The roadmap page (skills/roadmap/page/index.html) and this page draw one open pull request's act row with the same text.
+const ROADMAP_BUILT = path.join(HERE, "..", "..", "roadmap", "tests", "built_index.py");
+function builtRoadmapHtml(live) {
+  const r = spawnSync(process.env.PYTHON || "python3", [ROADMAP_BUILT, "--live", JSON.stringify(live)], { encoding: "utf8", maxBuffer: 1 << 28 });
+  assert.equal(r.status, 0, "the roadmap page build failed: " + (r.stderr || r.error));
+  return r.stdout;
+}
+async function openRoadmap(t, html) {
+  browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
+  if (!browser) return null;
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  page.setDefaultTimeout(Number(process.env.WP_TIMEOUT) || 5000);
+  t.after(() => page.close());
+  await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body: html }) : r.abort()));
+  await page.goto(ORIGIN);
+  await page.waitForSelector("#live");
+  return page;
+}
+test("the roadmap page and this page draw one open pull request's act row with the same text", async (t) => {
+  const over = {
+    pulls: [{ number: 8, title: "Pull eight", branch: "feat-eight" }],
+    ledger: { readAt: new Date().toISOString(), rows: [{ number: 8, act: "batch", owner: "batch runner", ageHours: 30, red: true, blockedOn: null }] },
+  };
+  const waiting = await liveStatus(t, over); if (!waiting) return;
+  const plan = await openRoadmap(t, builtRoadmapHtml(liveFile(over))); if (!plan) return;
+  assert.equal(await actRow(waiting, "Pull eight").count(), 1, "scope: this page draws no row for open pull request #8");
+  assert.equal(await plan.locator("#live li", { hasText: "Pull eight" }).count(), 1, "scope: the roadmap page draws no row for open pull request #8");
+  const here = await rowText(actRow(waiting, "Pull eight")), there = await rowText(plan.locator("#live li", { hasText: "Pull eight" }));
+  assert.match(here, /batch runner/, "this page's row for #8 shows no act owner: " + here);
+  assert.match(there, /batch runner/, "the roadmap page's row for #8 shows no act owner: " + there);
+  assert.equal(there, here, "the roadmap page and this page draw #8's row with different text:\n  roadmap: " + there + "\n  waiting: " + here);
 });
 
 // The threads-unknown marker in the Live work summary. A pill reads as a thread state (failed and stopped share its colour), so an

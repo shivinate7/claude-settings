@@ -1,0 +1,1 @@
+- rg-gh-target-joined-r: lint/report_guard.py:2154 (_gh_target) drops a joined `-Ro/r` repo and keys the target "12". Pre-existing.

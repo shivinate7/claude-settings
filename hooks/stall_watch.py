@@ -98,7 +98,8 @@ Stop: stall_watch.py --stop
   ready call (`gh pr ready <N>` in Bash or PowerShell, outside quotes, heredoc bodies and `#` comments, not
   --undo; or MCP update_pull_request with draft false) opens a wait. An --undo, or draft true, closes the wait on its PR. A `gh` global flag before `pr`
   (`gh -R o/r pr ready 5`) is skipped. A later user or queued message with a
-  `CI green|cancelled on <sha>` line closes it; a `CI unknown` line leaves it open. A merge or close that
+  `CI green|cancelled|none on <sha>` line closes it (ci_wake writes `CI none` for a repo with no active workflow,
+  so the Stop starts no gh process); a `CI unknown` line leaves it open. A merge or close that
   names the waited PR number closes it (bin/merge N, merge N, gh pr merge N, gh pr close N in Bash or
   PowerShell, same scanner rules; MCP merge_pull_request with that pullNumber). The ready call's PR and a
   merge's are read alike (pr_ref): the first all-digit word or the N of a /pull/N URL, with each flag and its
@@ -926,7 +927,7 @@ def stopped_ids(content):
     return [m.group(1)] if m else []
 
 # "finished" is the word actions/ci-done-comment/comment.sh puts in its red line; test CI94 runs that script, so the pattern follows it.
-CI_VERDICT = re.compile(r"^CI (?:finished )?(green|red|cancelled|unknown) on \S", re.M)
+CI_VERDICT = re.compile(r"^CI (?:finished )?(green|red|cancelled|unknown|none) on \S", re.M)
 CI_KEYS = (b"ready", b"pull_request", b"merge", b"send_later", b"create_trigger", b"CronCreate",
            b"ScheduleWakeup", b"CI ", b"close", b'"is_error":true', b'"is_error": true')
 CI_CHECKIN_TOOLS = ("send_later", "create_trigger", "CronCreate", "ScheduleWakeup")
@@ -1070,7 +1071,7 @@ def ci_events(rec):
 
 def open_ci_wait(transcript):
     """The PR of a CI wait that is open with no check-in, as a string ('' when the call named none), or
-    None. The newest ready call opens a wait. A green or cancelled verdict closes it; an unknown verdict
+    None. The newest ready call opens a wait. A green, cancelled or none verdict closes it; an unknown verdict
     leaves it open. A merge or close closes a numbered wait only when it names that PR, or is a gh pr merge
     or close that names no PR at all; it closes a wait whose ready call named no number (bare, a branch or
     a $var) when it names any PR or none. An undo (gh pr ready --undo, or MCP draft true) closes the wait on
@@ -1234,7 +1235,14 @@ def stop():
     except Exception:  # guard-hooks-fail-closed: a failed check prints nothing and does not block
         pass
     if out:
-        print(json.dumps(out))
+        # Imported here: the --hook path runs on every tool call and needs none of report_guard.
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+        try:
+            import report_guard  # the one home of the Stop output and its correction line
+        except Exception:  # no lint folder beside this hook, or a broken report_guard: the block still prints, without the correction tail
+            print(json.dumps(out))
+        else:
+            report_guard.emit_stop(out)
     return 0
 
 
