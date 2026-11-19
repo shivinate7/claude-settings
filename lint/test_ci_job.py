@@ -22,6 +22,8 @@ lines and each step's log lines in workflow order, and treats an install step as
 LocalActionUnderLint: --lint runs a local uses: action only when the read of its action.yml before any step runs accepts it; FAIL beats unknown, and each refusal
 names its file, line or value and runs no step. A plain run never runs one.
 OwnLogPrune: ci-job removes its own ci-job-* logs over one day old when it starts, and keeps the rest.
+RerunCache: a rerun at the same key runs no passing step and prints PASS (cached); a failed, unknown, unrun, edited, renamed or
+  corrupt step runs again. The control case is a first run, which runs every step and prints no cached line.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -2996,6 +2998,205 @@ class OwnLogPrune(Job):
         self.assertTrue(os.path.exists(other), "a log whose name is not ci-job-* must stay")
         own = [n for n in self.ci_logs() if n not in (first[0], "ci-job-lane-kept.log")]
         self.assertEqual(len(own), 1, "the second run must leave its own log, got %r" % own)
+
+
+# A step of the rerun cases is a probe, lint/<script>.py. Each run appends the step name to runs.txt in PROBE_DIR, then exits
+# with the code the case wrote for that step (0 when none). The count is taken below the cache, so no run_step is replaced.
+PROBE_SOURCE = '''import os, sys
+folder = os.environ["PROBE_DIR"]
+with open(os.path.join(folder, "runs.txt"), "a", encoding="utf-8") as f:
+    f.write(sys.argv[1] + "\\n")
+code = os.path.join(folder, sys.argv[1] + ".exit")
+sys.exit(int(open(code, encoding="utf-8").read()) if os.path.exists(code) else 0)
+'''
+
+
+def rerun_step(name, script=None):
+    """A workflow step that runs its probe, lint/<script>.py (the name with dashes as underscores by default), as step `name`."""
+    return step(name, "python3 lint/%s.py %s" % (script or name.replace("-", "_"), name))
+
+
+def state_of(lines, name):
+    """The state a verdict line prints before the step's name, or None when no line names the step."""
+    for ln in lines:
+        head = ln.partition(": ")[0].split()
+        if head[-1:] == [name]:
+            return " ".join(head[:-1])
+    return None
+
+
+class RerunCache(unittest.TestCase):
+    """The rerun cache of the lane job. A step that passed is saved under its name, the files it reads and the tool version,
+    and a rerun at the same key runs no saved step and prints PASS (cached). A failed or unknown step is never saved. An edit to
+    a script, a rename, or a corrupt saved result misses. Each case runs the real bin/ci-job in a fresh repo under RUN_FOLDER."""
+
+    def fixture(self):
+        """A new throwaway repo of three committed probe steps, with its probe folder and home in one sandbox under RUN_FOLDER."""
+        self.sandbox = tempfile.mkdtemp(prefix="rerun_", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, self.sandbox, True)
+        self.root = os.path.join(self.sandbox, "repo")
+        self.probe = os.path.join(self.sandbox, "probe")
+        self.home = os.path.join(self.sandbox, "home")
+        self.tmp = os.path.join(self.sandbox, "tmp")
+        for folder in (os.path.join(self.root, "lint"), self.probe, self.home, self.tmp):
+            os.makedirs(folder)
+        self.workers = "1"
+        subprocess.run(["git", "init", "-q", "-b", "main", self.root], check=True, env=ENV)
+        for script in ("check_a", "check_b", "check_c"):
+            with open(os.path.join(self.root, "lint", script + ".py"), "w", encoding="utf-8", newline="\n") as f:
+                f.write(PROBE_SOURCE + "# fixture %s\n" % os.path.basename(self.sandbox))
+        self.commit("fixture")
+
+    def commit(self, message):
+        subprocess.run(["git", "add", "-A"], cwd=self.root, check=True, env=ENV)
+        subprocess.run(["git", "commit", "-q", "-m", message], cwd=self.root, check=True, env=ENV)
+
+    def set_exit(self, name, code):
+        with open(os.path.join(self.probe, name + ".exit"), "w", encoding="utf-8") as f:
+            f.write(str(code))
+
+    def edit_script(self, script, commit=False):
+        """Append one line to a probe script, uncommitted, or committed too."""
+        with open(os.path.join(self.root, "lint", script + ".py"), "a", encoding="utf-8", newline="\n") as f:
+            f.write("# edit\n")
+        if commit:
+            self.commit("edit " + script)
+
+    def lane_run(self, *steps):
+        """One lane run of `steps` with --lint. Returns the exit code, the verdict lines, the step names whose probe ran, and the output."""
+        wf = os.path.join(self.sandbox, "wf.yml")
+        with open(wf, "w", encoding="utf-8", newline="\n") as f:
+            f.write(workflow(*steps))
+        runs = os.path.join(self.probe, "runs.txt")
+        if os.path.exists(runs):
+            os.remove(runs)
+        env = {**ENV, "VERDICT_LOG": os.path.join(self.sandbox, "verdict.log"), "PROBE_DIR": self.probe,
+               "CI_JOB_LINT_WORKERS": self.workers, "HOME": self.home, "XDG_CACHE_HOME": os.path.join(self.home, "cache"),
+               "XDG_STATE_HOME": os.path.join(self.home, "state"), "TMPDIR": self.tmp, "TEMP": self.tmp, "TMP": self.tmp}
+        done = subprocess.run([sys.executable, CI_JOB, "lane", "--lint", "--workflow", wf], cwd=self.root,
+                              capture_output=True, text=True, env=env, timeout=120)
+        ran = []
+        if os.path.exists(runs):
+            with open(runs, encoding="utf-8") as f:
+                ran = f.read().split()
+        lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("log=")]
+        return done.returncode, lines, ran, done.stdout + done.stderr
+
+    def files(self):
+        """Every file under the repo, the home and the temp folder: where a build may keep a saved result."""
+        found = set()
+        for top in (self.root, self.home, self.tmp):
+            for dirpath, _, names in os.walk(top):
+                found.update(os.path.join(dirpath, name) for name in names)
+        return found
+
+    def test_a_first_run_runs_every_step_and_prints_no_cached_line(self):  # the control: passes on main
+        self.fixture()
+        rc, lines, ran, out = self.lane_run(rerun_step("check-a"), rerun_step("check-b"))
+        self.assertEqual(sorted(ran), ["check-a", "check-b"], "the first run should run every step, got %r\n%s" % (ran, out))
+        self.assertEqual(rc, 0, out)
+        self.assertEqual([state_of(lines, n) for n in ("check-a", "check-b")], ["PASS", "PASS"], out)
+        self.assertFalse([ln for ln in lines if "(cached)" in ln], out)
+
+    def test_a_rerun_at_the_same_key_runs_no_passing_step_and_prints_cached_for_each(self):
+        for workers in ("1", "2"):
+            with self.subTest(workers=workers):
+                self.fixture()
+                self.workers = workers
+                steps = (rerun_step("check-a"), rerun_step("check-b"))
+                _, _, first, out = self.lane_run(*steps)
+                self.assertEqual(sorted(first), ["check-a", "check-b"], "the first run should run every step, got %r\n%s" % (first, out))
+                rc, lines, ran, out = self.lane_run(*steps)
+                self.assertEqual(ran, [], "the rerun ran %r again: each passed at the same key and nothing changed\n%s" % (ran, out))
+                for name in ("check-a", "check-b"):
+                    self.assertEqual(state_of(lines, name), "PASS (cached)", "%s did not print PASS (cached) on the rerun\n%s" % (name, out))
+                self.assertEqual(rc, 0, "a rerun where every step is cached must exit 0, not %d\n%s" % (rc, out))
+
+    def test_a_rerun_runs_only_the_failed_and_the_unrun_steps(self):
+        self.fixture()
+        self.set_exit("check-b", 1)
+        _, _, first, out = self.lane_run(rerun_step("check-a"), rerun_step("check-b"))
+        self.assertEqual(sorted(first), ["check-a", "check-b"], "the first run should run every step, got %r\n%s" % (first, out))
+        self.set_exit("check-b", 0)
+        rc, lines, ran, out = self.lane_run(rerun_step("check-a"), rerun_step("check-b"), rerun_step("check-c"))
+        self.assertEqual(ran, ["check-b", "check-c"],
+                         "the rerun should run only the failed check-b and the unrun check-c, got %r\n%s" % (ran, out))
+        self.assertEqual(state_of(lines, "check-a"), "PASS (cached)", out)
+        self.assertEqual(rc, 0, out)
+
+    def not_saved_until_a_pass(self, code, state):
+        """check-a exits `code` in the first run and passes after. The second run must run check-a again, since the first
+        run's result is not saved. check-b passes in every run, so the third run must run nothing: that proves the second
+        run's pass is saved."""
+        self.fixture()
+        self.set_exit("check-a", code)
+        steps = (rerun_step("check-a"), rerun_step("check-b"))
+        _, lines, _, out = self.lane_run(*steps)
+        self.assertEqual(state_of(lines, "check-a"), state, "scope: check-a should read %s in the first run\n%s" % (state, out))
+        self.set_exit("check-a", 0)
+        _, _, ran, out = self.lane_run(*steps)
+        self.assertIn("check-a", ran, "check-a did not run in the second run: its saved %s from the first run was reused\n%s" % (state, out))
+        self.assertNotIn("check-b", ran, "check-b ran again in the second run, though it passed at the same key\n%s" % out)
+        rc, lines, ran, out = self.lane_run(*steps)
+        self.assertEqual(ran, [], "the third run ran %r again: the pass the second run earned was not saved\n%s" % (ran, out))
+        self.assertEqual(state_of(lines, "check-a"), "PASS (cached)", out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_failed_step_is_never_saved(self):
+        self.not_saved_until_a_pass(1, "FAIL")
+
+    def test_an_unknown_step_is_never_saved(self):
+        self.not_saved_until_a_pass(127, "unknown")
+
+    def edit_misses(self, commit):
+        self.fixture()
+        steps = (rerun_step("check-a"), rerun_step("check-b"))
+        _, _, first, out = self.lane_run(*steps)
+        self.assertEqual(sorted(first), ["check-a", "check-b"], "the first run should run every step, got %r\n%s" % (first, out))
+        self.edit_script("check_a", commit=commit)
+        _, _, ran, out = self.lane_run(*steps)
+        self.assertIn("check-a", ran, "check-a did not run after its script changed, so its saved pass was reused\n%s" % out)
+        rc, lines, ran, out = self.lane_run(*steps)
+        self.assertEqual(ran, [], "the third run ran %r again with no change since the second, so the second run's pass was not saved\n%s" % (ran, out))
+        self.assertEqual(state_of(lines, "check-a"), "PASS (cached)", out)
+        self.assertEqual(rc, 0, out)
+
+    def test_an_uncommitted_edit_to_a_script_misses_its_saved_result(self):
+        self.edit_misses(commit=False)
+
+    def test_a_committed_edit_to_a_script_misses_its_saved_result(self):
+        self.edit_misses(commit=True)
+
+    def corrupt_saved_result(self, junk):
+        self.fixture()
+        steps = (rerun_step("check-a"),)
+        before = self.files()
+        _, _, first, out = self.lane_run(*steps)
+        self.assertEqual(first, ["check-a"], "the first run should run check-a, got %r\n%s" % (first, out))
+        self.assertTrue(self.files() - before, "the first run saved no file under the repo, the home or the temp folder, so there is no saved result to corrupt")
+        _, _, ran, out = self.lane_run(*steps)
+        self.assertEqual(ran, [], "the second run ran check-a again with nothing changed, so the saved result did not serve it\n%s" % out)
+        for path in self.files() - before:
+            with open(path, "wb") as f:
+                f.write(junk)
+        rc, lines, ran, out = self.lane_run(*steps)
+        self.assertEqual(ran, ["check-a"], "check-a was not run after its saved result was corrupted\n%s" % out)
+        self.assertEqual(state_of(lines, "check-a"), "PASS", out)
+        self.assertEqual(rc, 0, out)
+
+    def test_an_empty_saved_result_is_a_miss(self):
+        self.corrupt_saved_result(b"")
+
+    def test_a_garbled_saved_result_is_a_miss(self):
+        self.corrupt_saved_result(b"\xff\xfe not a saved result \x00")
+
+    def test_a_renamed_step_misses_and_the_other_steps_still_hit(self):
+        self.fixture()
+        _, _, first, out = self.lane_run(rerun_step("check-a"), rerun_step("check-b"))
+        self.assertEqual(sorted(first), ["check-a", "check-b"], "the first run should run every step, got %r\n%s" % (first, out))
+        _, _, ran, out = self.lane_run(rerun_step("check-z", script="check_a"), rerun_step("check-b"))
+        self.assertNotIn("check-b", ran, "check-b ran again though neither it nor its files changed\n%s" % out)
+        self.assertIn("check-z", ran, "check-z did not run: under its new name it has no saved result\n%s" % out)
 
 
 if __name__ == "__main__":
