@@ -87,9 +87,39 @@ def _push_default_branches(cwd: str, remote: str):
     return DEFAULT_BRANCH_FALLBACK + named
 
 
-# A quoted run with a space in it is text (a commit message, an echo), never a push. A quoted
-# single word stays: it is a refspec or a remote, and the shell would unquote it.
-PUSH_QUOTED = re.compile(r"\"[^\"\s]*\s[^\"]*\"|'[^'\s]*\s[^']*'")
+class _QuotedText:
+    """A quoted run with a space in it is text (a commit message, an echo), never a push. A quoted
+    single word stays: it is a refspec or a remote, and the shell would unquote it.
+
+    `sub(repl, text)` walks the quotes as the shell pairs them: an opening quote closes at its own
+    mate, so the gap between two spans (`'%s\\n' "a b"`, `'x' --force 'y'`) is never read as a span.
+    A regex pairs `' '` across that gap, blanks the live text beside it, and leaves the data of a
+    real span as a command. A backslash outside quotes escapes the next character, and inside
+    double quotes and `$'..'` too (`_span_end`). A quote with no mate is left as it stands."""
+
+    @staticmethod
+    def sub(repl: str, text: str) -> str:
+        out, index, length = [], 0, len(text)
+        while index < length:
+            char = text[index]
+            if char == "\\":
+                out.append(text[index:index + 2])
+                index += 2
+            elif char in "'\"":
+                end = _span_end(text, index, char == '"' or text[index - 1:index] == "$")
+                if end < 0:
+                    out.append(text[index:])
+                    break
+                span = text[index:end + 1]
+                out.append(repl if re.search(r"\s", span) else span)
+                index = end + 1
+            else:
+                out.append(char)
+                index += 1
+        return "".join(out)
+
+
+PUSH_QUOTED = _QuotedText()
 
 
 def push_target(segment: str, cmd: str, cwd: str):
@@ -167,8 +197,8 @@ TEXT_SEARCH_TOOLS = {"grep", "egrep", "fgrep", "zgrep", "rg", "ag", "ack", "ugre
 ARGV_GAP = re.compile(r"[\s,]*(?:\{\s*args\s*:\s*\[[\s,]*)?")
 # One argument as one shell word: each character the shell or shlex splits on is
 # backslash-escaped, so an argument with a space stays one word. The word holds no quote:
-# PUSH_QUOTED reads raw quotes and ignores backslashes, so a quote here could pair with a
-# quote in a neighbouring word and blank the words between.
+# PUSH_QUOTED pairs raw quotes, so a quote here could pair with a quote in a neighbouring word
+# and blank the words between.
 ARGV_UNSAFE = re.compile(r"[^\w@%+=:,./-]")
 # The names of a call that runs its string argument as a command, even inside a print: the one list
 # of run calls. RUN_NAME_ANYWHERE is read in any quoted text. RUN_NAME adds the bare names a script

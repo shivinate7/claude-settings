@@ -10,7 +10,8 @@ The store is the folder roadmap/rulings on origin/roadmap of REPO, one JSON file
 `at` (ISO 8601 with a zone), `ruling`, `source`, `status` ("open" or "closed"), `supersedes` (a list of
 {"kind", "ref"}) or `supersedes_none` (the reason it supersedes nothing; a reason that starts with "unread" means
 triage has not read it yet), and optionally `quote` (the owner's own words), `step` (the roadmap step that lands the
-ruling) and `lands_in` ({"path", "contains"}).
+ruling), `lands_in` ({"path", "contains"}) and `scope` ({"visibility": "public" or "private", "repos": [names]}).
+check_entry validates the whole scope. in_scope(entry, repo) reads only the visibility; no reader uses `repos` yet.
 
 An entry is open until its ruling is on main. It closes when `status` is "closed", or when the text of
 `lands_in.contains` is found, whitespace-normalised, in the blob of `lands_in.path` on origin/main. Triage writes
@@ -67,6 +68,7 @@ STEP_SLUG = re.compile(r"^[\w.-]+$")
 RULE_ID = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 STATUSES = ("open", "closed")
 REQUIRED = ("id", "at", "ruling", "source")
+SCOPE_KEYS = ("visibility", "repos")
 SESSION_ENTRIES = 5  # entry lines after the header; with the header and the command line, at most 7 of the 8 allowed
 RULING_CUT = 100
 REF_CUT = 80
@@ -300,7 +302,48 @@ def check_entry(entry):
     reason = entry.get("supersedes_none")
     if not _supersedes(entry) and not (isinstance(reason, str) and reason.strip()):
         problems.append("neither supersedes nor supersedes_none is set")
+    if "scope" in entry:
+        problems.extend(_scope_problems(entry["scope"]))
     return problems
+
+
+def _visibilities():
+    """The visibility words a scope may name: the keys layout.json maps to a caution level, bar "default"."""
+    import layout  # lint/layout.py, the one reader of the visibility key
+    return tuple(key for key in layout.layout()["visibility-caution"] if key != "default")
+
+
+def _scope_problems(scope):
+    """One problem line per defect in an entry's optional `scope`: not an object, a key outside SCOPE_KEYS, a
+    `visibility` that is not a word layout.json maps, or `repos` that is not a list of text."""
+    if not isinstance(scope, dict):
+        return ["scope is not an object: %r" % (scope,)]
+    problems = ["scope has an unknown key: %r" % key for key in scope if key not in SCOPE_KEYS]
+    if "visibility" in scope and scope["visibility"] not in _visibilities():
+        problems.append("scope visibility is not one of %s: %r" % (", ".join(_visibilities()), scope["visibility"]))
+    repos = scope.get("repos", [])
+    if not isinstance(repos, list) or not all(isinstance(r, str) and r.strip() for r in repos):
+        problems.append("scope repos is not a list of repo names: %r" % (repos,))
+    return problems
+
+
+def in_scope(entry, repo_dir):
+    """False when the entry's `scope.visibility` names a visibility other than the one lint/layout.py reads for
+    REPO_DIR. A repo whose visibility is unread, an entry with no scope or a scope check_entry refuses all stay
+    in scope: nothing is hidden on a guess."""
+    scope = entry.get("scope")
+    if not isinstance(scope, dict) or "visibility" not in scope:
+        return True
+    import layout
+    try:
+        if _scope_problems(scope):  # reads layout.json, so it sits inside the guarded read
+            return True
+        mapped = layout.layout()["visibility-caution"]
+        level = layout.caution(repo_dir)["level"]
+    except (layout.LayoutError, OSError):
+        return True
+    known = {v for k, v in mapped.items() if k != "default"}
+    return level not in known or level == mapped[scope["visibility"]]
 
 
 def is_unchecked(entry):
