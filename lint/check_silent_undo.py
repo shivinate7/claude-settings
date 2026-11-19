@@ -449,18 +449,37 @@ def lost_lines(cwd, m, refs=()):
     try:
         for p in parents:
             # a pair with no common base has nothing to read against; a parent with no such pair is never flagged
-            readings = [lost_in_parent(cwd, m, p, bases_of[p, q], refs, blobs) for q in parents if q != p and bases_of[p, q]]
-            if not readings:
+            pairs = [(q, bases_of[p, q]) for q in parents if q != p and bases_of[p, q]]
+            if not pairs:
                 continue
-            # a line is lost only when every pairwise reading finds it lost
-            kept = [{path: set(lines) for path, _, lines in r} for r in readings]
-            for path, _, lines in readings[0]:
-                both = [l for l in lines if all(l in k.get(path, ()) for k in kept[1:])]
-                if both:
-                    found.append((path, p, both))
+            # a line is lost when any pairwise reading finds it lost, unless another parent removed it from a base that held it.
+            # A base that held the line with a parent that still holds it excuses nothing, so that parent's own pair stays lost.
+            lost, own, names = {}, {}, {}
+            for q, bases in pairs:
+                for path, _, lines in lost_in_parent(cwd, m, p, bases, refs, blobs):
+                    lost.setdefault(path, []).extend(l for l in lines if l not in lost.get(path, ()))
+                    own.setdefault(q, {}).setdefault(path, set()).update(lines)
+            for path, lines in lost.items():
+                # a pair that read the line as lost found it absent from its base, so it excuses nothing
+                kept = [l for l in lines if not any(l not in own.get(q, {}).get(path, ()) and removed_by(cwd, blobs, names, p, q, bases, path, l)
+                                                    for q, bases in pairs)]
+                if kept:
+                    found.append((path, p, kept))
     finally:
         blobs.close()
     return found
+
+
+def removed_by(cwd, blobs, names, p, q, bases, path, line):
+    """True when parent q removed `line` of parent p's `path` from a base of the pair that held it: a base holds the line,
+    and q's file does not. Each side is read at the name git pairs with p's path, so a rename moves neither read."""
+    def text_at(rev):
+        if rev not in names:  # names: rev -> {p's path: its path in rev}, read once per rev
+            names[rev] = {old: new for old, (new, _, _) in renamed(cwd, p, rev, raw_files(cwd, p, rev)).items()}
+        return blobs.get(rev, names[rev].get(path, path))
+    if not any(line in counts(text_at(b)) for b in bases):
+        return False
+    return line not in counts(text_at(q))
 
 
 def unrestored(cwd, h, m, found, unspent):
