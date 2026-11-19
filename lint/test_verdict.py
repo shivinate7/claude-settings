@@ -11,10 +11,10 @@ CMD = [os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "ve
 UTF8 = {"PYTHONIOENCODING": "utf-8"}  # the child prints the real \u2714/\u2718 marks; a cp1252 stdout cannot
 HB_FORMAT = re.compile(r"^verdict: still running, [0-9][0-9.]*s?, log=")
 
-def run(code=None, log=None, extra=None, timeout=None, launcher=None, shell=None, argv=None, shim=None):
+def run(code=None, log=None, extra=None, timeout=None, launcher=None, shell=None, argv=None, shim=None, cwd=None):
     """`shell` is an sh -c line in which {cmd} stands for the verdict command, e.g. a pipe or a redirect.
     `argv` runs `verdict <argv...>` in place of the script. `shim` is (name, body): a fake executable `name`
-    in a folder that comes first on PATH, so verdict sees argv[0] as that fake."""
+    in a folder that comes first on PATH, so verdict sees argv[0] as that fake. `cwd` is the child's folder."""
     env = dict(os.environ)
     env.pop("VERDICT_LOG", None)
     env.pop("VERDICT_HEARTBEAT", None)
@@ -36,7 +36,7 @@ def run(code=None, log=None, extra=None, timeout=None, launcher=None, shell=None
             open(script, "w").write(code)
             cmd = (launcher or [sys.executable, V]) + [sys.executable, script]
         if shell: cmd = ["sh", "-c", shell.replace("{cmd}", " ".join(shlex.quote(p) for p in cmd))]
-        return subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout)
+        return subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout, cwd=cwd)
 
 def heartbeats(out):
     return [l for l in out.splitlines() if l.startswith("verdict: still running")]
@@ -1005,6 +1005,10 @@ NO_TESTS_BARS = "=" * 30 + " no tests ran in 0.01s " + "=" * 30 + "\n"  # the su
 NO_TESTS_QUIET = "no tests ran in 0.01s\n"  # the same summary with -q: no bars
 FILTERED_BARS = "=" * 30 + " 3/103 tests collected (100 deselected) in 0.09s " + "=" * 30 + "\n"  # --collect-only under -k: a filtered count, in bars
 FILTERED_QUIET = "3/103 tests collected (100 deselected) in 0.09s\n"  # the same summary with -q: no bars
+QQ_LINE = "..." + " " * 70 + "[100%]\n"  # pytest 9.2's -qq output for three passing tests: progress and the percent, no summary line (80 bytes)
+QQ_FULL = ("." * 70 + " [ 50%]\n") * 14000 + QQ_LINE  # over one chunk of progress lines, ending in the same [100%] line
+QQ_CUT = "..." + " " * 70 + "[ 30%]\n"  # a -qq run cut at 30 percent: progress with no [100%] line
+POSIX_SKIP = "the form runs through a POSIX shell (bash -c), which Windows does not have"
 HANG_GUARD = 20  # seconds before a verdict counts as hung; a linear scan of one 1 MiB line finishes far below it
 
 
@@ -1018,11 +1022,13 @@ def straddling_body():
 
 class CutStream(unittest.TestCase):
     """A pytest run that exits 0 and stops before its summary reads FAIL, with `cut` in the note.
-    Rule: the argv is pytest's (`pytest`, or `python -m pytest`), the argv has `-q` or the output has pytest's header
+    Rule: the argv is pytest's, as typed: `pytest`, `py.test`, `python -m pytest`, `python -mpytest`, `env pytest`,
+    `uv run pytest`, or `bash -c "python -m pytest ..."`. The argv has `-q` (not `-qq`) or the output has pytest's header
     (`=` bars around `test session starts` at a line start), and no line starts with pytest's summary: `=` bars around
     ` in <N>s`, or the bare `<counts> in <N>s` that `-q` prints. A `--collect-only` run ends `N tests collected in <N>s`,
     an empty run ends `no tests ran in <N>s`, and a filtered one ends `N/M tests collected (K deselected) in <N>s`. All
-    of these count as summaries. Where the header sits does not matter. Colour codes
+    of these count as summaries. A `-qq` run prints no summary: it reads PASS when its last progress line ends `[100%]`,
+    and is cut otherwise. Where the header sits does not matter. Colour codes
     are ignored. A pytest run with neither `-q` nor a header is never cut. A run that is not pytest is never cut, even
     when it prints pytest's header or progress lines, so `print('noisy')` reads PASS. A header quoted mid-line is no
     header. Other runners are not covered."""
@@ -1031,23 +1037,41 @@ class CutStream(unittest.TestCase):
     assert_skip = Skips.assert_skip
     assert_fail = Skips.assert_fail
 
-    def pytest_case(self, text, args=(), form="module", timeout=120):
+    def pytest_case(self, text, args=(), form="module", timeout=120, hard=False):
         """Run `text` as the output of a pytest run, and return the run. The fake pytest writes `text`, exits 0 and
-        leaves a sentinel file, so a case knows the fake ran before it reads the verdict. form "module" runs
-        `python -m pytest` through a fake package on PYTHONPATH; form "bare" runs `pytest` from a fake on PATH."""
-        if form == "bare" and os.name == "nt": raise unittest.SkipTest(SHIM_SKIP)
+        leaves a sentinel file, so a case knows the fake ran before it reads the verdict. `hard` ends the fake with
+        os._exit(0) after a flush, as a test that exits mid-run does. Each form is the argv as verdict receives it:
+        "module" runs `python -m pytest` and "glued" runs `python -mpytest`, through a fake package on PYTHONPATH;
+        "bash" runs `bash -c "python -m pytest <args>"` through the same package; "bare" runs `pytest` and "env" runs
+        `env pytest` through a fake on PATH; "uv" runs `uv run pytest` through a fake in a throwaway venv's bin."""
+        if form in ("bare", "env", "uv") and os.name == "nt": raise unittest.SkipTest(SHIM_SKIP)
+        if form == "bash" and os.name == "nt": raise unittest.SkipTest(POSIX_SKIP)
+        if form == "uv" and shutil.which("uv") is None: raise unittest.SkipTest("uv is not installed")
         with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
             ran, log = os.path.join(d, "ran"), os.path.join(d, "v.log")
-            fake = "open(%r, 'w').close()\n" % ran + printing(text)
-            if form == "bare":
-                r = run(log=log, shim=("pytest", "#!%s\n" % sys.executable + fake), argv=["pytest"] + list(args), timeout=timeout)
+            end = "import os, sys\nsys.stdout.write(%s)\nsys.stdout.flush()\nos._exit(0)\n" % ascii(text) if hard else printing(text)
+            fake = "open(%r, 'w').close()\n" % ran + end
+            script = "#!%s\n" % sys.executable + fake
+            if form in ("bare", "env"):
+                argv = {"bare": ["pytest"], "env": ["env", "pytest"]}[form] + list(args)
+                r = run(log=log, shim=("pytest", script), argv=argv, timeout=timeout, cwd=d)
+            elif form == "uv":
+                # uv finds pytest in the environment's bin before PATH (a shim on PATH loses), so the fake goes in a throwaway venv
+                venv = os.path.join(d, "venv")
+                subprocess.run([sys.executable, "-m", "venv", "--without-pip", venv], check=True, capture_output=True)
+                with open(os.path.join(venv, "bin", "pytest"), "w") as g: g.write(script)
+                os.chmod(os.path.join(venv, "bin", "pytest"), 0o755)
+                r = run(log=log, extra={"VIRTUAL_ENV": venv}, argv=["uv", "run", "pytest"] + list(args), timeout=timeout, cwd=d)
             else:
                 pkg = os.path.join(d, "pytest")
                 os.mkdir(pkg)
                 open(os.path.join(pkg, "__init__.py"), "w").close()
                 with open(os.path.join(pkg, "__main__.py"), "w") as g: g.write(fake)
                 path = os.pathsep.join(p for p in (d, os.environ.get("PYTHONPATH")) if p)
-                r = run(log=log, extra={"PYTHONPATH": path}, argv=[sys.executable, "-m", "pytest"] + list(args), timeout=timeout)
+                if form == "glued": argv = [sys.executable, "-mpytest"] + list(args)
+                elif form == "bash": argv = ["bash", "-c", " ".join(shlex.quote(p) for p in [sys.executable, "-m", "pytest"] + list(args))]
+                else: argv = [sys.executable, "-m", "pytest"] + list(args)
+                r = run(log=log, extra={"PYTHONPATH": path}, argv=argv, timeout=timeout, cwd=d)
             self.assertTrue(os.path.exists(ran), "the fake pytest never ran, so this case proves nothing")
         return r
 
@@ -1188,6 +1212,62 @@ class CutStream(unittest.TestCase):
                 f"print({PYTEST_START!r}, end='', flush=True)\n"
                 "open(os.environ['VERDICT_LOG'], 'w').close()\n")
         self.assert_fail(self.check(code), 1, "log unreadable")
+
+    def assert_argv_cut(self, form, sizes=("empty", "three")):
+        """F2, a bypass: a pytest run that exits 0 mid-run reads FAIL with cut through `form`. The control for it is
+        test_quiet_run_cut_before_its_summary_is_fail, which reads the same cut through `python -m pytest -q`."""
+        bodies = {"empty": "", "three": PROGRESS * 3, "full": PROGRESS * 2048}
+        for size in sizes:
+            with self.subTest(form=form, size=size):
+                body = bodies[size]
+                if size == "full": self.assertGreater(len(body), CHUNK, "the full fixture must hold more than one chunk")
+                self.assert_cut(self.pytest_case(body, args=("-q",), form=form, hard=True))
+
+    def test_argv_glued_cut_run_is_fail(self):
+        """F2: `python -mpytest -q` is pytest's argv, so a run it cuts reads FAIL with cut."""
+        self.assert_argv_cut("glued", sizes=("empty", "three", "full"))
+
+    def test_argv_env_cut_run_is_fail(self):
+        """F2: `env pytest -q` is pytest's argv, so a run it cuts reads FAIL with cut."""
+        self.assert_argv_cut("env")
+
+    def test_argv_uv_run_cut_run_is_fail(self):
+        """F2: `uv run pytest -q` is pytest's argv, so a run it cuts reads FAIL with cut. Skipped when uv is missing."""
+        self.assert_argv_cut("uv")
+
+    def test_argv_bash_c_cut_run_is_fail(self):
+        """F2: `bash -c "python -m pytest -q"` is pytest's argv, so a run it cuts reads FAIL with cut."""
+        self.assert_argv_cut("bash")
+
+    def test_argv_forms_summary_run_is_pass(self):
+        """Control, green on the old code: a complete `-q` run through each new form reads PASS. A fix that cuts every
+        wrapped run fails here."""
+        for form in ("glued", "env", "uv", "bash"):
+            with self.subTest(form=form):
+                self.assert_pass(self.pytest_case(PROGRESS * 3 + QUIET_SUMMARY, args=("-q",), form=form))
+
+    def test_argv_bash_quoted_pytest_text_is_pass(self):
+        """Control, green on the old code: pytest's words inside a quoted `bash -c` string run no pytest, so the run reads PASS."""
+        if os.name == "nt": raise unittest.SkipTest(POSIX_SKIP)
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            r = run(log=os.path.join(d, "v.log"), argv=["bash", "-c", "echo 'python3 -m pytest -q'"], cwd=d)
+        self.assert_pass(r)
+
+    def test_argv_qq_complete_run_without_summary_is_pass(self):
+        """F1, a false alarm: a complete `-qq` run of passing tests prints no summary line in pytest 9.x, only progress
+        that ends `[100%]`, so it reads PASS. Today it reads FAIL, cut before the pytest summary. No empty state is
+        built: pytest 9.x exits 5 when `-qq` collects no test, so an rc-0 empty run is not a complete one."""
+        for form in ("module", "bare"):
+            with self.subTest(form=form, size="three"):
+                self.assert_pass(self.pytest_case(QQ_LINE, args=("-qq",), form=form))
+        with self.subTest(form="module", size="full"):
+            self.assertGreater(len(QQ_FULL), CHUNK, "the full fixture must hold more than one chunk")
+            self.assert_pass(self.pytest_case(QQ_FULL, args=("-qq",)))
+
+    def test_argv_qq_cut_run_is_fail(self):
+        """Control, green on the old code: a `-qq` run cut at 30 percent, with no `[100%]` line, reads FAIL with cut. A fix
+        that stops counting `-qq` as quiet would pass it, so this pins that a complete `-qq` run is the one ending `[100%]`."""
+        self.assert_cut(self.pytest_case(QQ_CUT, args=("-qq",), hard=True))
 
 
 def tearDownModule():
