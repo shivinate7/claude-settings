@@ -1,0 +1,1 @@
+- unstarted-stoplist-untested: On PR #3684 (the Unstarted shared-file check), lint/test_report_guard.py pins only the stoplist entry "e.g" for that guard. The other entries in `_NOT_A_FILE` have no test: "i.e", "and/or", "either/or", "n/a", "w/o", "yes/no", "he/she", "his/her", "pass/fail", "read/write" and "i/o". The digits-only slash rule in `_names_a_file` has no test either.
