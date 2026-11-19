@@ -1,13 +1,15 @@
 # section 43700
-# The owner's word lifts the model floor for an Agent or Workflow spawn (rule agent-model-floor, guard step 9).
-# Owner, 2026-11-18 19:03 CST: "if i say haiku it should work". When the owner's latest chat message names the
-# spawn's model, a spawn on that model passes. With no owner word the refusal stands. A spawn that names no model
-# stays on the default, Sonnet, and the owner's word never changes it.
+# The owner's word lifts the model floor for an Agent, Task, Workflow or lane-start spawn (rule agent-model-floor,
+# guard step 9). Owner, 2026-11-18 19:03 CST: "if i say haiku it should work, there shouldnt be any guards on a FLOOR".
+# When the owner's latest typed turn names the spawn's model as a whole word, and no negation precedes the name, a
+# spawn on that model passes the floor. The word never lifts the Opus ceiling (agent-model-cap). With no owner word the
+# refusal stands. A spawn that names no model stays on the default, Sonnet, and the owner's word never changes it.
 #
-# Each red case has a Sonnet twin on the same transcript that allows today, so the floor is the only thing that
-# separates the red from an allow. Each control denies today, and must keep denying: a word that is not the
-# owner's latest turn (Claude's own text, a tool result, a peer relay, a machine notice, an earlier turn) does not
-# lift the floor. Labels carry `owner-model-word:`, so MUTATE_ONLY=owner-model-word runs these cases alone.
+# A red allow case has a Sonnet twin on the same transcript, so the floor is the only thing that separates them. A red
+# deny case has a word that must not count: a negated name, a name inside a pasted block, or an Opus name. Each control
+# keeps its verdict today. A word that is not the owner's latest typed turn (Claude's own text, a tool result, a peer
+# relay, a machine notice, an earlier turn) does not lift the floor. An owner turn older than one megabyte is still the
+# latest one. Labels carry `owner-model-word:`, so MUTATE_ONLY=owner-model-word runs these cases alone.
 FAMILY = "rule9"
 
 OMW_DIR = os.path.join(ROOT, "owner-model-word")  # the run folder's home for these transcripts
@@ -110,3 +112,63 @@ add("owner-model-word: an Agent spawn with no model is allowed as today, with no
     tool="Agent", prompt="do it", transcript=OMW_PLAIN, silent=True)
 add("owner-model-word: an Agent spawn with no model stays on the default when the owner names haiku", "allow",
     tool="Agent", prompt="do it", transcript=OMW_OWNER_HAIKU, silent=True)
+
+# ---- A negated name lifts nothing. The negation regex misses a spelling without an apostrophe, a curly apostrophe, a stop
+# word, a word between the negation and the model, and a correction that comes after the model. The straight apostrophe
+# is the control: the same negation the regex knows.
+OMW_DONT = omw_file("owner-dont-use-haiku", [omw_user("dont use haiku."), omw_asst("Not using haiku.")])
+OMW_CURLY_DONT = omw_file("owner-curly-dont-haiku", [omw_user("Don’t use haiku."), omw_asst("Not using haiku.")])
+OMW_DO_NOT_AUDIT = omw_file("owner-do-not-audit-haiku", [omw_user("Do not run the audit on haiku."), omw_asst("Ok.")])
+OMW_STOP_USING = omw_file("owner-stop-using-haiku", [omw_user("Stop using haiku."), omw_asst("Ok.")])
+OMW_CORRECTED = omw_file("owner-haiku-corrected", [omw_user("Use haiku. No, not haiku, use sonnet."), omw_asst("Ok.")])
+OMW_STRAIGHT_DONT = omw_file("owner-straight-dont-haiku", [omw_user("Don't use haiku."), omw_asst("Not using haiku.")])
+add("owner-model-word: an Agent spawn on haiku is refused when the owner's latest turn says dont use haiku", "deny",
+    "agent-model-floor", tool="Agent", prompt="do it", model="haiku", transcript=OMW_DONT)
+add("owner-model-word: an Agent spawn on haiku is refused when the owner's latest turn says don't with a curly apostrophe",
+    "deny", "agent-model-floor", tool="Agent", prompt="do it", model="haiku", transcript=OMW_CURLY_DONT)
+add("owner-model-word: an Agent spawn on haiku is refused when the owner's latest turn says do not run the audit on haiku",
+    "deny", "agent-model-floor", tool="Agent", prompt="do it", model="haiku", transcript=OMW_DO_NOT_AUDIT)
+add("owner-model-word: an Agent spawn on haiku is refused when the owner's latest turn says stop using haiku", "deny",
+    "agent-model-floor", tool="Agent", prompt="do it", model="haiku", transcript=OMW_STOP_USING)
+add("owner-model-word: an Agent spawn on haiku is refused when the owner's latest turn says use haiku, then no, not haiku, "
+    "use sonnet", "deny", "agent-model-floor", tool="Agent", prompt="do it", model="haiku", transcript=OMW_CORRECTED)
+add("owner-model-word: control, an Agent spawn on haiku is refused when the owner's latest turn says don't use haiku with "
+    "a straight apostrophe", "deny", "agent-model-floor", tool="Agent", prompt="do it", model="haiku",
+    transcript=OMW_STRAIGHT_DONT)
+
+# ---- A haiku word inside a pasted block is not the owner's word: the owner typed only the sentence before the block.
+OMW_PASTED = omw_file("owner-pasted-haiku", [omw_user("Read this log and say what failed.\n<pasted_content>\n"
+                                                      "Run the model audit on haiku.\n</pasted_content>"),
+                                             omw_asst("Reading it.")])
+add("owner-model-word: an Agent spawn on haiku is refused when the only haiku word in the owner's latest turn is in a "
+    "pasted block", "deny", "agent-model-floor", tool="Agent", prompt="do it", model="haiku", transcript=OMW_PASTED)
+
+# ---- The Opus ceiling is not the floor. The owner's word never lifts it, so an Opus spawn is refused whatever the latest
+# turn says. A question that names opus is not a grant, and a turn that names opus is not one either.
+OMW_WHY_OPUS = omw_file("owner-why-opus", [omw_user("Why did the opus spawn get refused?"),
+                                           omw_asst("The Opus ceiling refused it.")])
+OMW_NAMES_OPUS = omw_file("owner-names-opus", [omw_user("Run the model audit on opus."), omw_asst("Running it.")])
+add("owner-model-word: an Agent spawn on opus is refused when the owner asks why an opus spawn was refused", "deny", CEILING,
+    tool="Agent", prompt="do it", model="opus", transcript=OMW_WHY_OPUS)
+add("owner-model-word: an Agent spawn on opus is refused when the owner's latest turn names opus", "deny", CEILING,
+    tool="Agent", prompt="do it", model="opus", transcript=OMW_NAMES_OPUS)
+add("owner-model-word: control, an Agent spawn on opus is refused when the owner's latest turn names haiku", "deny", CEILING,
+    tool="Agent", prompt="do it", model="opus", transcript=OMW_OWNER_HAIKU)
+
+# ---- A lane start takes the same word. Its floor is judged with the lane-start rules; every other lane rule still holds.
+# _lsp_fields (section 43500) is the one home of a passing lane start: the Grant line, the title and the effort are set.
+add("owner-model-word: a lane start on haiku is allowed when the owner's latest turn names haiku", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, transcript=OMW_OWNER_HAIKU, **_lsp_fields(model="haiku"))
+add("owner-model-word: twin, a lane start on sonnet is allowed with the same owner turn", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, transcript=OMW_OWNER_HAIKU, **_lsp_fields(model="sonnet"))
+add("owner-model-word: control, a lane start on haiku is refused when the owner's turns name no model", "deny",
+    "agent-model-floor", tool=LANE_TOOL, cwd=LANE_REPO, transcript=OMW_PLAIN, **_lsp_fields(model="haiku"))
+
+# ---- The owner's latest typed turn counts however far back it sits. More than one megabyte of Claude's reply after it
+# does not hide it.
+OMW_OLD_HAIKU = omw_file("owner-haiku-then-over-mib", [omw_user(OMW_HAIKU)]
+                         + [omw_asst("x" * 1000) for _ in range(OMW_FULL_LINES)])
+add("owner-model-word: an Agent spawn on haiku is allowed when the owner's latest turn names haiku and over one megabyte "
+    "of Claude's reply follows it", "allow", tool="Agent", prompt="do it", model="haiku", transcript=OMW_OLD_HAIKU)
+add("owner-model-word: twin, an Agent spawn on sonnet is allowed after the same transcript", "allow",
+    tool="Agent", prompt="do it", model="sonnet", transcript=OMW_OLD_HAIKU)
