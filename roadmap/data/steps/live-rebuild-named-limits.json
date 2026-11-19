@@ -1,0 +1,16 @@
+{
+ "id": "live-rebuild-named-limits",
+ "title": "Three named limits of the live-file rebuild (PR 3702), to fix before a session-rows reader is wired",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "live-file-refresh-one-command"
+ ],
+ "why": "Round 3 review (sonnet reviewer, net safety value zero) of PR 3702 left three open findings; a finding becomes a debt only after a real incident, and none can bite until a session-rows reader exists (owner page item 894), so they are named here, not debts. Read by the reviewer, not re-read by triage, 20:30 CST Nov 18.",
+ "source": "round 3 review of PR 3702 at head eac3f97a23 (reviewer report 20:30 CST Nov 18)",
+ "note": "(1) skills/roadmap/build.py:556-557 with :1846 (laneless): a rebuilt file has no landedPulls key and a fresh readAt, so live_why is None and pull_landed_marks returns {}; a doing step with no live lane whose PR merged with no Step trailer then reads 'set to todo' where a publisher file with the landedPulls row reads 'set to done: landed in #5'. Only waits_on_closed_pulls (:1806) and status_drift read the missing key as unknown; unlaned, stalled and the stalled-step exit 1 read it as nothing landed; SKILL.md ~124 says the four list keys read unknown, which is false for those readers. Fix first. (2) build.py:1640: no test pins that the carried ledger keeps its own readAt or is carried at all (two mutants left 29 of 29 tests green). (3) build.py:1638 and :1195: held and reviewLog are carried from the old reading under a fresh readAt, so a mark set since is absent (the stale-draft row can list a held draft); main passes steps=None when the record is unreadable and the rebuild then drops archived rows only a live step's lane names and writes that file. Done check: a test per limit, red then green.",
+ "updatedAt": "2026-11-18T20:30:38-06:00"
+}
