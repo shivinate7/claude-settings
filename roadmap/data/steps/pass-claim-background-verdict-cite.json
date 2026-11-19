@@ -1,0 +1,16 @@
+{
+ "id": "pass-claim-background-verdict-cite",
+ "title": "The pass-claim guard counts a verbatim PASS line read from a background run's output file as a cite",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [
+  "pass-claim-cites-verdict lane PR 2851 merge"
+ ],
+ "why": "Coordinator ruling relayed 18:42 CST Nov 18 (the coordinator's, undoable, not owner-typed; not read by triage against the repo).",
+ "source": "coordinator relay 18:42 CST Nov 18",
+ "note": "Incident: the pass-claim guard (hooks/pass_claim.py backed_kinds) refuses a claim backed by a backgrounded `verdict` run, but the lane lint only runs in the background, so the guard's remedy 'run it through verdict' cannot work. Lane pass-claim-cites-verdict, PR 2851, session_013NEJKzT3Q2wV34EZTGF4mX. Coordinator pick: file the debt in a docs-only change after PR 2851 merges, then this step fixes it: a verbatim `PASS ...` line read from the background run's output file counts as a cite. No new lane session for the fix. Notes (limits 2 and 3): a short path like lint/rule_audit.py reads as a noun; merge/merge.py lines 3558 and 4517 and skills/ci-hygiene/SKILL.md line 131 still name the bare form; stale comment at tests/guard/s43700-pass-claim-send.py lines 3-5. Prior-work search first.",
+ "updatedAt": "2026-11-18T18:42:40-06:00"
+}
