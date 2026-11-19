@@ -36,6 +36,9 @@ import layout  # noqa: E402  the waiting page and record branch readers (lint/la
 import shared_names  # noqa: E402  the one home of the tag names (hooks/shared_names.py), on the path build set
 import guard_merge  # noqa: E402  the guard's lane-form rule (_on_lane_form), which the ready-pull case reads (hooks/guard_merge.py)
 
+# The rebuild's real fetch, kept before Fixture.setUp swaps in its mock, so a LiveRefresh case can run the fetch itself.
+REAL_LIVE_FETCH = getattr(build, "live_fetch", None)
+
 # Made in setUpModule, not at import, so a helper that imports make_repo leaks no folder.
 RUN_FOLDER = None
 
@@ -958,6 +961,15 @@ class UpkeepFixture(Fixture):
         self.assertEqual(trailers, "", "main holds a Step trailer, so the case would not show the landedPulls read")
 
 
+# The build clock that the cases which fix it read (test-practices P5). LiveRefresh and StaleInProgress share it.
+BUILD_NOW = "2026-11-18T20:00:00Z"
+
+
+def readat_before(now_iso, minutes):
+    """The readAt `minutes` before `now_iso`, in the form the publisher writes."""
+    return (read_time(now_iso) - datetime.timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def fixed_clock(now_iso):
     """A stand-in for build's datetime module whose datetime.now() reads `now_iso`, an ISO time with a zone. Every other
     name is the real module's, so only the build's clock is synthetic (test-practices P5). build.py reads the clock as
@@ -996,8 +1008,9 @@ class LiveRefresh(UpkeepFixture):
     cases drive the page bake (build.main with --live) through the seam Fixture.setUp installs. The build's clock is fixed
     at FIXED_NOW for the class (test-practices P5)."""
 
-    FIXED_NOW = "2026-11-18T20:00:00Z"
+    FIXED_NOW = BUILD_NOW
     ARCHIVED = build.ARCHIVED_SESSION
+    ROWS_READER = "session-rows"  # the registry name live_fetch reads its sessions from
 
     def setUp(self):
         super().setUp()
@@ -1009,7 +1022,7 @@ class LiveRefresh(UpkeepFixture):
 
     def ago(self, minutes):
         """The readAt `minutes` before FIXED_NOW, in the form the publisher writes."""
-        return (read_time(self.FIXED_NOW) - datetime.timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return readat_before(self.FIXED_NOW, minutes)
 
     def write_file(self, read_at, sessions=(), pulls=()):
         self.write_live({"readAt": read_at, "threads": [], "pulls": list(pulls), "sessions": list(sessions)})
@@ -1023,6 +1036,33 @@ class LiveRefresh(UpkeepFixture):
 
     def file_value(self):
         return json.loads(self.live.read_text(encoding="utf-8"))
+
+    def use_real_fetch(self):
+        """Put the real rebuild fetch in place of Fixture's mock. Its sessions come from a stub session-rows reader that
+        holds no rows, and its pulls from the REST pages a case serves (serve_pulls), so the rebuild runs offline."""
+        fetch = mock.patch.object(build, "live_fetch", REAL_LIVE_FETCH)
+        reader = self.register_source(self.ROWS_READER, lambda: ([], None))
+        for patch in (fetch, reader):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def stale_pull(self, number, branch, updated_min=780):
+        """A REST pulls row for an open draft, updated `updated_min` before FIXED_NOW (780 min is 13 h, so stale), whose
+        branch commit is dated the same. The commit is set on origin first, so serve_pulls never dates it by the real clock."""
+        self.origin_commit(branch, self.ago(updated_min))
+        row = self.rest_draft(number, branch, updated_min)
+        row["updated_at"] = self.ago(updated_min)
+        return row
+
+    def build_in(self, folder, *extra, expect=(0, None)):
+        """build_from_main with the process in `folder`, so a rebuild reads that folder's GitHub name. The folder is left
+        again after the build, so tearDown can remove the temp folder."""
+        before = os.getcwd()
+        os.chdir(str(folder))
+        try:
+            return self.build_from_main(*extra, expect=expect)
+        finally:
+            os.chdir(before)
 
     def test_a_stale_file_is_rebuilt_once_and_the_reader_sees_the_new_read_at(self):
         self.write_file(self.ago(build.STALE_LIVE_MINUTES + 1))
@@ -1126,6 +1166,51 @@ class LiveRefresh(UpkeepFixture):
         programs = [pathlib.Path(a[0] if isinstance(a, (list, tuple)) else str(a).split()[0]).name for a in started]
         self.assertEqual(sorted(set(programs) - {"git"}), [],
                          "the stale read started a process other than git: %r" % programs)
+
+
+    def test_a_rebuild_keeps_the_triage_keys_the_old_file_holds(self):
+        # The fetch returns only the open pulls and the sessions, so the triage keys of the old file must carry over.
+        self.use_real_fetch()
+        old = {"readAt": self.ago(build.STALE_LIVE_MINUTES + 1), "sessions": [],
+               "threads": [{"title": "Build a", "state": "working", "step": "c1"}],
+               "pulls": [{"number": 7, "title": "lane 7", "branch": "lane-7", "held": True, "reviewLog": True,
+                          "checks": "pass", "url": "https://github.com/owner/fixture/pull/7"}],
+               "branches": [{"name": "lane-x"}], "items": [], "landedPulls": [self.pull_row(3, "lane-3", merged=True)]}
+        self.write_live(old)
+        self.serve_pulls([self.stale_pull(7, "lane-7", 60)])
+        self.build_in(self.repo, "--live", str(self.live), expect=(0, 1))
+        value = self.file_value()
+        self.assertEqual(read_time(value["readAt"]), read_time(BUILD_NOW),
+                         "control: the stale file was not rebuilt, so the case reads no triage keys")
+        for key in ("threads", "branches", "items", "landedPulls"):
+            with self.subTest(key=key):
+                self.assertEqual(value.get(key), old[key], "the rebuilt live file lost its %s key" % key)
+        rebuilt = {p["number"]: p for p in value["pulls"]}.get(7, {})
+        for key in ("held", "reviewLog", "checks", "url"):
+            with self.subTest(pull_key=key):
+                self.assertEqual(rebuilt.get(key), old["pulls"][0][key],
+                                 "the rebuilt pulls row for #7 lost its %s key" % key)
+
+    def test_a_held_draft_stays_held_through_a_rebuild_and_is_not_listed(self):
+        self.use_real_fetch()
+        self.serve_pulls([self.stale_pull(1001, "held-draft"), self.stale_pull(1002, "lone-draft")])
+        held = dict(self.live_pull(1001, "held-draft"), held=True)
+        lone = self.live_pull(1002, "lone-draft")
+        # Control, before any rebuild: a fresh file reads #1001 held, so only #1002 is listed.
+        self.write_file(self.ago(5), pulls=[held, lone])
+        _, out = self.build_in(self.repo, "--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.entries(self.row(out, ReadyAndDraftRows.DRAFT)[1]), ["#1002 (lone-draft)"],
+                         "control: a fresh file does not read the held draft as held")
+        # The probe: the same pulls in a file stale enough to rebuild. The rebuild must keep #1001's held mark.
+        self.write_file(self.ago(build.STALE_LIVE_MINUTES + 1), pulls=[held, lone])
+        _, out = self.build_in(self.repo, "--live", str(self.live), expect=(0, 1))
+        rebuilt = {p["number"]: p for p in self.file_value()["pulls"]}
+        with self.subTest("the rebuilt file keeps the held mark"):
+            self.assertIs(rebuilt.get(1001, {}).get("held"), True,
+                          "the rebuilt live file dropped the held mark of #1001")
+        with self.subTest("the held draft is not listed"):
+            self.assertEqual(self.entries(self.row(out, ReadyAndDraftRows.DRAFT)[1]), ["#1002 (lone-draft)"],
+                             "a held draft is listed as stale after a rebuild")
 
 
 class LedgerActs(UpkeepFixture):
