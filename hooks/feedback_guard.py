@@ -1405,11 +1405,11 @@ def _exported_write(inp, collections, tool_verb=None):
     exports: named by `collection`, or by a `doc_id` or `path` of the form `<collection>/...`. A batch that
     names none is counted, since its writes are not read. `delete` is counted here and in no shared list.
     A claude-artifacts `tool_verb` wins over the input's action: db_write and db_delete count, db_get, db_list
-    and db_query do not."""
+    and db_query do not. A db_write that names no collection counts like an unnamed batch."""
     if tool_verb is not None:
         if tool_verb not in ("write", "delete"):
             return False
-        verb = None
+        verb = "batch" if tool_verb == "write" else None
     else:
         verb = inp.get("action", inp.get("op"))
     if isinstance(verb, str) and verb not in _transcript.WRITE_VERBS + ("delete",):
