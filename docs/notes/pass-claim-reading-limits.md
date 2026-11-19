@@ -1,1 +1,1 @@
-- pass-claim-reading-limits: the claim reader flags "Working tree clean, tests added." and "The checks passed to merge ...", and misses "Lint is passing.", "lint OK", plural "suites", counts and a single-quoted claim. Decision: pass-claim-cites-verdict.
+- pass-claim-reading-limits: the claim reader flags "Working tree clean, tests added." and "The checks passed to merge ...", and misses "Lint is passing.", "lint OK", plural "suites", counts and a single-quoted claim. Decision: pass-claim-cites-verdict. Seen: 2026-11-18 x1
