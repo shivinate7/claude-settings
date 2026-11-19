@@ -1,0 +1,58 @@
+{
+  "added": "2026-11-18T19:55:29-06:00",
+  "context": "Goal: a push cannot skip the review of a branch another session handed in for review, without stopping normal pushes.\nProblem (rule): no ruling says how strict the new push check must be when it cannot prove a review log, so the choice is yours.\nBased on (read): the reviewer's report: merge/merge.py lines 5844 to 5845 allow a push with no review log, and hooks/guard_merge.py lines 1243 to 1247 allow it when the pull-request list read fails (a failed comment read refuses); the destination refusal at lines 1235 to 1237 runs before any pull-request read.\nBased on (read): the lane's own note of this check (the recorded decision handed-in-push-needs-record) says 'Owner pick a', but the Explore agent found no such pick; the ruling guard-hooks-fail-closed (a missing guard script refuses; a guard that times out or crashes does not) says nothing about a failed read inside a guard.\nDeparts from: main \u2014 adds a check on pushes to handed-in branches.\nWaiting on: the merge of the push check waits on your answer; triage's builder applies it and re-runs the review.\nMeanwhile: the builder fixes the two findings that need no ruling (a glossary-banned name 'review record' in new code, and missing test cases).",
+  "home": "step handed-in-push-needs-record",
+  "kind": "decision",
+  "n": 986,
+  "options": [
+    {
+      "gain": "No false stops on normal pushes.",
+      "how": "A push with no review log, a failed pull-request read, and an unnameable destination are each allowed with a one-line warning.",
+      "id": "allow-as-built",
+      "key": "a",
+      "label": "Keep it as built: let all three through, with a stderr line",
+      "lose": "A push past a reviewed head with no log goes through; the step's stated rule ('refused until the log exists') is not enforced."
+    },
+    {
+      "gain": "A push cannot skip the review; this is the step's original guard.",
+      "how": "Refuse a push with no review log, refuse when the pull-request list cannot be read, and refuse an unnameable destination.",
+      "id": "refuse-all-three",
+      "key": "b",
+      "label": "Refuse all three until proven",
+      "lose": "A failed read or a variable destination stops a normal push (false stops); lanes need your override more often."
+    },
+    {
+      "gain": "Stops the harm the step names (a push past a review) with the fewest false stops.",
+      "how": "When a pull request is found for the branch and no review log exists for its last round, refuse; a failed pull-request read, or a destination that cannot be named, is allowed with a stderr line.",
+      "id": "refuse-no-log-only",
+      "key": "c",
+      "label": "Refuse only a push with no review log when a pull request exists; allow the other two with a warning (recommended)",
+      "lose": "A push slips through on a failed read or an unnameable destination, with only a warning."
+    }
+  ],
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "c",
+  "ref": "review round 1 (haiku reviewer) on branch handed-in-push-needs-record-2, 19:50 CST Nov 18, and an Explore agent's read of the rulings (none settles these four points); both are agent reads, not re-read by triage",
+  "repo": "shivinate7/claude-settings",
+  "short": "Handed-in push: strict?",
+  "shown": [
+    {
+      "id": "allow-as-built",
+      "key": "a",
+      "label": "Keep it as built: let all three through, with a stderr line"
+    },
+    {
+      "id": "refuse-all-three",
+      "key": "b",
+      "label": "Refuse all three until proven"
+    },
+    {
+      "id": "refuse-no-log-only",
+      "key": "c",
+      "label": "Refuse only a push with no review log when a pull request exists; allow the other two with a warning (recommended)"
+    }
+  ],
+  "status": "open",
+  "title": "How strict should the handed-in push check be when it cannot prove a review log?",
+  "why": "c refuses the one push the step exists to stop and keeps normal pushes moving; a refuses nothing, b refuses on every failed read. Recommended by triage, not owner-typed."
+}
