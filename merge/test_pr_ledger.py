@@ -208,8 +208,8 @@ class NextActReds(LedgerCase):
 
     def test_a_done_record_with_no_lint_pass_reads_lane_not_batch(self):
         out = self.reviewed(LedgerHost([pull(7)], comments=[record(7, 3)]))
-        self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} no lint: .*Run `merge --lane-lint 7`",
-                         "control: #7's line does not name merge --lane-lint 7 for a done record with no lint PASS")
+        self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} no lint: .*Run `verdict merge --lane-lint 7`",
+                         "control: #7's line does not name verdict merge --lane-lint 7 for a done record with no lint PASS")
         act, owner, _red = self.next_part(out, 7)
         self.assertIn(act, ("lane", "lane lint"), f"#7 is done at the live head, but no lane-lint PASS names that head, so its act is the lane's, not batch:\n{out}")
         self.assertEqual(owner, "lane", f"#7's act is the lane's, so its owner is lane, not batch runner:\n{out}")
