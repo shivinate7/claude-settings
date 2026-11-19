@@ -3407,9 +3407,8 @@ def judge_stop(payload) -> None:
 SPAWN_TOOLS = ("Agent", "Task")
 # The desktop start. No PreToolUse matcher in settings.json lists it: any hook on it makes the desktop app show the
 # "Allow Claude to start the session?" card on every start, even in Bypass (anthropics/claude-code#103832; decision
-# start-session-not-pretooluse). hooks/start_session_audit.py judges it after the call with floor_hit and
-# unread_handoff. The judge() branches below that name it run only if a matcher is added again, and the guard's cases
-# call them directly.
+# start-session-not-pretooluse). hooks/start_session_audit.py judges it after the call with unread_handoff only. The
+# judge() branches below that name it run only if a matcher is added again, and the guard's cases call them directly.
 SESSION_TOOL = "mcp__ccd_session__start_session"
 from shared_names import (  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER and LANE_EFFORT from here
     CREATE_SESSION_TOOL, LANE_EFFORT, REMOTE_OUTWARD_TOOLS, REMOTE_SERVER, is_lane_create_session, lane_tags,  # noqa: F401  REMOTE_SERVER and LANE_EFFORT re-exported: lint/check_agent_models.py reads guard.REMOTE_SERVER and guard.LANE_EFFORT
