@@ -10195,6 +10195,8 @@ class OwnAgentLockTests(unittest.TestCase):
 # never ran.
 
 LEFTOVER_RUNNER = """\
+import errno
+import os
 import sys
 import time
 
@@ -10210,6 +10212,28 @@ sweep.find_dead_rooted = lambda *a, **k: []
 sweep.find_loose_processes = lambda *a, **k: []
 sweep.reap_listener = lambda decision: None
 sweep.sim_tier = lambda *a, **k: []
+
+# Two seams, for what Linux cannot make real. A Windows junction is a link only sweep.is_link sees, so
+# the names in LINK_NAMES are read as links. A pid in EPERM_PIDS has an owner this user may not signal:
+# the owner read must keep its folder, not take the owner for dead.
+LINK_NAMES = %(link_names)r
+EPERM_PIDS = %(eperm_pids)r
+_real_is_link = sweep.is_link
+_real_kill = os.kill
+
+
+def _seam_is_link(path):
+    return os.path.basename(path) in LINK_NAMES or _real_is_link(path)
+
+
+def _seam_kill(pid, sig):
+    if pid in EPERM_PIDS:
+        raise PermissionError(errno.EPERM, "Operation not permitted")
+    return _real_kill(pid, sig)
+
+
+sweep.is_link = _seam_is_link
+os.kill = _seam_kill
 sys.exit(sweep.main(sys.argv[1:]))
 """
 
@@ -10265,11 +10289,13 @@ class LeftoverTempFolderTests(unittest.TestCase):
                    JANITOR_RUN_LOG=os.path.join(self.base, "run.log"))
         return env
 
-    def run_sweep(self, *flags):
-        """The real sweep on the fixture repo, in a child process with the fixture temp folder."""
+    def run_sweep(self, *flags, link_names=(), eperm_pids=()):
+        """The real sweep on the fixture repo, in a child process with the fixture temp folder. LINK_NAMES
+        and EPERM_PIDS are the two seams LEFTOVER_RUNNER installs for the link and owner-read keeps."""
         runner = os.path.join(self.base, "runner.py")
         write(runner, LEFTOVER_RUNNER % {"hooks": os.path.join(REPO_ROOT, "hooks"), "janitor": HERE,
-                                         "now": self.now})
+                                         "now": self.now, "link_names": sorted(link_names),
+                                         "eperm_pids": sorted(eperm_pids)})
         proc = subprocess.run([sys.executable, runner, "--restore-log", os.path.join(self.base, "restore.log"),
                                *flags, self.repo], cwd=self.base, env=self.child_env(),
                               capture_output=True, text=True, timeout=120)
@@ -10345,6 +10371,64 @@ class LeftoverTempFolderTests(unittest.TestCase):
         left = [os.path.basename(folder) for folder in folders if os.path.exists(folder)]
         self.assertFalse(left, "--confirm left %d of %d dead-owner folders\n%s"
                          % (len(left), len(folders), self.report(proc)))
+
+    def test_confirm_keeps_a_symlink_named_as_a_dead_owner_folder(self):
+        """A symlink is a link, never an owner's folder: the link stays, and so does what it points at."""
+        target = self.leftover(os.path.join(self.base, "outside", "work-dir"), self.OLD_HOURS)
+        link = os.path.join(self.temp, "mutate_guard_%d-%s" % (self.dead_pid, uuid.uuid4().hex[:8]))
+        reason = temp_make_link(link, target)
+        if reason:
+            self.skipTest(reason)
+        control = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        proc = self.run_sweep("--confirm")
+        self.assertGone(control, "control: --confirm did not remove a dead-owner folder, so the symlink keep "
+                                 "proves nothing", proc)
+        self.assertTrue(os.path.islink(link), "--confirm removed the symlink %s\n%s" % (link, self.report(proc)))
+        self.assertTrue(os.path.isfile(os.path.join(target, "work", "scratch.txt")),
+                        "--confirm removed the folder a symlink points at: %s\n%s" % (target, self.report(proc)))
+
+    def test_confirm_keeps_a_real_folder_the_link_check_flags(self):
+        """The link check flags a real folder, as it flags a Windows junction. Dropping that check reaps it."""
+        flagged = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        flagged_run = self.run_folder_leftover(self.dead_pid, self.OLD_HOURS)
+        control = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        proc = self.run_sweep("--confirm", link_names=[os.path.basename(flagged), os.path.basename(flagged_run)])
+        self.assertGone(control, "control: --confirm did not remove a dead-owner folder, so the link-flag keeps "
+                                 "prove nothing", proc)
+        self.assertKept(flagged, "--confirm removed a mutate_guard folder that the link check flags", proc)
+        self.assertKept(flagged_run, "--confirm removed a run folder that the link check flags", proc)
+
+    def test_confirm_keeps_a_pid_less_mutate_guard_name(self):
+        """The older name `mutate_guard_<rand>` carries no owner pid, so no owner can be proven dead."""
+        pidless = self.leftover(os.path.join(self.temp, "mutate_guard_%s" % uuid.uuid4().hex[:8]), self.OLD_HOURS)
+        control = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        proc = self.run_sweep("--confirm")
+        self.assertGone(control, "control: --confirm did not remove a dead-owner folder, so the pid-less keep "
+                                 "proves nothing", proc)
+        self.assertKept(pidless, "--confirm removed a pid-less mutate_guard folder", proc)
+
+    def test_confirm_keeps_a_mutate_guard_name_with_no_hyphen_after_its_digits(self):
+        """`mutate_guard_<dead pid>abc123` has no separator after the digits, so they are not a pid. A
+        pattern with an optional hyphen would read them as the dead owner's pid and reap the folder."""
+        hyphenless = self.leftover(os.path.join(self.temp, "mutate_guard_%dabc123" % self.dead_pid), self.OLD_HOURS)
+        control = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        proc = self.run_sweep("--confirm")
+        self.assertGone(control, "control: --confirm did not remove a dead-owner folder, so the hyphen-less keep "
+                                 "proves nothing", proc)
+        self.assertKept(hyphenless, "--confirm read the digits of a hyphen-less name as an owner pid", proc)
+
+    @unittest.skipIf(sys.platform.startswith("win"), "the owner read this case seams is os.kill; Windows reads "
+                                                     "a process table instead")
+    def test_confirm_keeps_a_folder_whose_owner_pid_cannot_be_read(self):
+        """An owner the OS refuses to signal may be alive, so its folder stays. The control's owner is a
+        different dead pid, so the control does not share the refusal."""
+        unreadable = temp_dead_pid()
+        folder = self.mutate_guard_leftover(unreadable, self.OLD_HOURS)
+        control = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        proc = self.run_sweep("--confirm", eperm_pids=[unreadable])
+        self.assertGone(control, "control: --confirm did not remove a dead-owner folder, so the unreadable-owner "
+                                 "keep proves nothing", proc)
+        self.assertKept(folder, "--confirm removed a folder whose owner pid it could not read", proc)
 
     def test_confirm_keeps_a_dead_owner_folder_with_a_live_process_inside(self):
         """A process running inside a dead owner's folder keeps the folder: removing it pulls the
