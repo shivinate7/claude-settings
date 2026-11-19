@@ -1,6 +1,6 @@
 # A bad session start is flagged, not refused
 
-**What.** Handoff-unread no longer refuses a `start_session` call. A PostToolUse audit flags a bad start after the session exists, and the calling session must stop it with `interrupt_session` or `archive_session`. A caller that ignores the flag leaves a session started from a brief written without the caller's handoff. The guard refused it before the call. A Haiku start is not flagged: the owner's word for a model lifts the floor (owner, 2026-11-18 19:03 CST, decision `agent-model-cap`), and a started session cannot read that word.
+**What.** Handoff-unread no longer refuses a `start_session` call. A PostToolUse audit flags a bad start after the session exists, and the calling session must stop it with `interrupt_session` or `archive_session`. A caller that ignores the flag leaves a session started from a brief written without the caller's handoff. The guard refused it before the call. A Haiku start is not flagged: the owner's model name lifts the floor (owner, 2026-11-18 19:03 CST, decision `agent-model-cap`), and a started session cannot read that word.
 
 **Where.** `hooks/start_session_audit.py`, and the PostToolUse entry for `mcp__ccd_session__start_session` in `settings.json`.
 

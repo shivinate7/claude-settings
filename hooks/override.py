@@ -129,7 +129,7 @@ ROLE_WORDS = re.compile(r"[A-Za-z][\w\u2019'-]*")
 NEGATIONS = {"not", "no", "never", "except", "without", "dont", "don't", "don\u2019t",
              "excluding", "exclude", "skip", "ignore", "instead", "rather", "besides", "minus"}
 OVERRIDE_NEGATIONS = NEGATIONS | {"off"}  # the override ask also reads a request to turn an override off as a negation
-# The owner's word for a model (guard.owner_names_model) has its own negations. They are not the Opus-grant NEGATIONS: a
+# The owner's model name (guard.owner_names_model) has its own negations. They are not the Opus-grant NEGATIONS: a
 # model word is negated only by a negation that stands in its own span, so "Instead use haiku" and "Skip the checks and
 # run it on haiku" name it. "instead" and "rather" negate only as the pairs in MODEL_NEGATION_PAIRS, before the model.
 MODEL_NEGATIONS = {"not", "no", "never", "except", "without", "dont", "don't", "don\u2019t", "excluding", "exclude",

@@ -7,7 +7,7 @@ Lane brief line, as guard_merge reads it) that names no model; a lane start that
 holds no Opus override (override._take_opus) and no live timed override (override.timed_live), both read only, so
 nothing is spent; and a top-level `env` that carries a session role key, since only bin/claude-role sets a role and a
 start never claims one. A lane's own Grant line is not an owner grant for Opus. An Opus override file that cannot be
-read adds no flag. It does not flag a Haiku start: the owner's word for a model lifts the floor, and a started session
+read adds no flag. It does not flag a Haiku start: the owner's model name lifts the floor, and a started session
 cannot read that word (decision start-checks-after-call). A flagged start prints
 PostToolUse additionalContext that tells the calling session to stop the new session with interrupt_session or
 archive_session. A start that passes prints nothing. It never refuses and never exits 2.

@@ -323,7 +323,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (agent-model-cap)
                        deny. An Agent or Task spawn that sets model opus, unless Plan, designer,
                        design-reviewer, refuter, a builder's third-round marker or an Explore's `Audit:` marker
-                       covers it. The owner's word for a model lifts agent-model-floor only (owner_names_model), never this ceiling. The general override, `opus [role] <time>` or a step grant lifts the
+                       covers it. The owner's model name lifts agent-model-floor only (owner_names_model), never this ceiling. The general override, `opus [role] <time>` or a step grant lifts the
                        spawn refusal; none lifts the settings-write ask.
   ask-alone            deny. An ask command chained with other commands. (ask-commands-run-alone)
   guard-crash          crash. The guard itself raised. The call is allowed and the log shows it.
@@ -403,7 +403,7 @@ Other tools, in `judge` order:
                        (agent-model-cap)
   agent-model-floor, roles-third-round-steps-up
                        deny. A spawn below the model floor, or a reviewer's later round on the wrong model. The
-                       owner's last typed turn naming Haiku (owner_names_model; owner, 2026-11-18 19:03 CST) lifts the
+                       owner's last typed turn naming Haiku (owner_names_model) lifts the
                        floor only, never the Opus ceiling. A start_session call never reaches this hook: settings.json
                        lists it in no PreToolUse matcher, so hooks/start_session_audit.py checks its handoff after the call.
                        The Workflow scan is static. It reads string-literal `model` and
@@ -603,7 +603,7 @@ No override lifts `frozen-path`, `git-env-set`, a kill of pid 0, 1 or -1, the
 role and model guards (the settings-write ask of `agent-model-cap`,
 the no-model refusal of `agent-role-model`, `roles-third-round-steps-up`, `builder-test-edit` and the other role guards),
 or `worktree-home`. `agent-model-floor` reads no override: only the owner's typed word for the model lifts it
-(owner_names_model; owner, 2026-11-18 19:03 CST). No override check reaches the missing-module deny, the `settings.json` deny list
+(owner_names_model). No override check reaches the missing-module deny, the `settings.json` deny list
 or the `bin/rm` and `bin/merge` shims; each of those refusals says that no override lifts it. Every
 refusal that goes through refuse() ends with the line the owner types, or with that same sentence.
 The model judges (hooks/call_judge.py, hooks/prose_judge.py, hooks/sendmessage_state.py) refuse through
@@ -3593,7 +3593,7 @@ def floor_hit(tool: str, tool_input) -> str:
     return ""
 
 
-# The owner's own word for a model (owner, 2026-11-18 19:03 CST: "if i say haiku it should work, there shouldnt be any
+# The owner's own word for a model (ruling: "if i say haiku it should work, there shouldnt be any
 # guards on a FLOOR"). A spawn the floor would refuse passes when the owner's last typed turn names that model. The word
 # lifts the floor only: the Opus ceiling (agent-model-cap) never reads it (consultant pick, same time). It covers a lane
 # start too (lane_start_hits). A started session cannot read the word, so start_check.py flags no Haiku start. The audit
@@ -3727,7 +3727,7 @@ def lane_start_hits(tool: str, tool_input, cwd: str, transcript: str = "", judge
     if named_id:
         hits.append(("brief-ids-in-roster", named_id[1], named_id[0]))
     floor_model = floor_hit(tool, tool_input)
-    # The owner's word for the model lifts the floor here as at step 9; the transcript is read only when the floor fires.
+    # The owner's model name lifts the floor here as at step 9; the transcript is read only when the floor fires.
     if floor_model and not owner_names_model({"transcript_path": transcript}, floor_model):
         hits.append(("agent-model-floor", LANE_MODEL_FLOOR_REASON, floor_model))
     lane_prompt = lane_effort_hit(tool, tool_input)

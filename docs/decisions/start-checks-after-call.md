@@ -4,7 +4,7 @@
 
 Every session that starts from source `startup` gets one check at its own start. The check is in `hooks/start_check.py`, a SessionStart hook. `settings.json` runs it with matcher `startup`, so it runs on no other source.
 
-The check flags. It does not stop. `start_check.py` `main` prints one line: SessionStart `additionalContext`. It has no `continue` and no `stopReason`. The one check is the full-machine load brake (decision `machine-load-brake`, the machine-load brake). The model floor is not checked here (decision `agent-model-cap`, the owner's word for a model). The coordinator picked a flag over a stop (08:40 CST, 2026-11-15). The owner has not ruled; owner confirmation is open.
+The check flags. It does not stop. `start_check.py` `main` prints one line: SessionStart `additionalContext`. It has no `continue` and no `stopReason`. The one check is the full-machine load brake (decision `machine-load-brake`, the machine-load brake). The model floor is not checked here (decision `agent-model-cap`, the owner's model name). The coordinator picked a flag over a stop (08:40 CST, 2026-11-15). The owner has not ruled; owner confirmation is open.
 
 The flag text tells the session what to do. It addresses a session tagged `cs-build:lane`, read with `get_session` and passing no session_id: that session does no work and tells its parent it started in this state. A session that is not a lane (the owner's own) goes on.
 
@@ -20,7 +20,7 @@ A SessionStart hook is not a PreToolUse hook, and it does not list the start too
 
 The hook acts on source `startup` only. A resume, compact, clear or fork prints nothing.
 
-1. No model check (owner, 2026-11-18 19:03 CST, "if i say haiku it should work, there shouldnt be any guards on a FLOOR"; consultant pick, same time). `start_check.py` `flag_text` reads no model. A started session cannot read the owner's word for a model (`guard.py` `owner_names_model`), so a Haiku start is not flagged.
+1. No model check (owner, 2026-11-18 19:03 CST, "if i say haiku it should work, there shouldnt be any guards on a FLOOR"; consultant pick, same time). `start_check.py` `flag_text` reads no model. A started session cannot read the owner's model name (`guard.py` `owner_names_model`), so a Haiku start is not flagged.
 2. The full-machine load brake. Local sessions only. `guard.py` `read_load` reads the load once. `guard.py` `load_full` names each reading over the full line: memory over 95% (`hooks/guard.py: LOAD_FULL_MEMORY = 95.0`), or disk free under the smaller of 5% and 5 GB. A cloud session skips this check.
 3. A run prints one flag at most.
 4. It fails open. A failed import of `guard`, a bad payload, a payload that is not an object, or any error prints nothing and exits 0. A broken check lets a start through with no flag. That is the choice: a session must still start.
@@ -35,7 +35,7 @@ Coordinator pick, 08:40 CST Nov 15: a flag, not a stop. This is not an owner rul
 
 ## Why no check flags a Haiku start
 
-Owner, 2026-11-18 19:03 CST: "if i say haiku it should work, there shouldnt be any guards on a FLOOR". The spawn guard checks the owner's last typed turn for the model word (`guard.py` `owner_names_model`) on Agent, Task, Workflow and create_session calls. No guard reads the model of a `start_session` call (decision `start-session-not-pretooluse`). A started session (`start_check.py`) cannot read that word, so a flag there would fire on a start the owner asked for. The PostToolUse audit (`start_session_audit.py`) can read it, because its payload carries `transcript_path`. It still flags no Haiku start, with or without the owner's word, because it stops a start only for an unread handoff (consultant pick, same time). Neither flags a Haiku start.
+Owner, 2026-11-18 19:03 CST: "if i say haiku it should work, there shouldnt be any guards on a FLOOR". The spawn guard checks the owner's last typed turn for the model word (`guard.py` `owner_names_model`) on Agent, Task, Workflow and create_session calls. No guard reads the model of a `start_session` call (decision `start-session-not-pretooluse`). A started session (`start_check.py`) cannot read that word, so a flag there would fire on a start the owner asked for. The PostToolUse audit (`start_session_audit.py`) can read it, because its payload carries `transcript_path`. It still flags no Haiku start, with or without the owner's model name, because it stops a start only for an unread handoff (consultant pick, same time). Neither flags a Haiku start.
 
 ## What stays with the audit
 

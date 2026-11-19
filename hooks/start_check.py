@@ -10,7 +10,7 @@ machine-load-brake). The text names the readings and the decision, and tells the
 session with the tag does no work and tells its parent (send_message @parent) what it started in. A session without the
 tag (the owner's own, the coordinator, triage, the batch runner) goes on.
 
-It reads no model. A Haiku start is not flagged: the spawn guard already checked the owner's word for the model
+It reads no model. A Haiku start is not flagged: the spawn guard already checked the owner's model name
 (guard.owner_names_model), and the started session cannot read that word (decision start-checks-after-call). In a local
 session it reads the load once (guard.read_load) and asks guard.load_full for the readings over the full point. A cloud
 session is never load-flagged.
