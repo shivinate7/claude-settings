@@ -177,31 +177,38 @@ def audit_handoff_without_flag_silent():
     return audit_expect("sonnet", audit_folder("handoff-only"), lambda folder: hu_files(folder, False, True), False)
 
 
-# A desktop lane start: a start_session call whose tags carry the lane tag and whose prompt opens with the Grant line, as a
-# lane brief does (decision agent-model-cap, the lane start). The fixture must read as a lane by the shared readers, so a
-# failure names the audit, not the fixture. The Grant line starts the lane and names no Opus grant. An Opus grant is the
-# owner override, read from CLAUDE_CONFIG_DIR (decision owner-override), and each audit folder starts without one.
+# A desktop lane start as start_session carries it: no tags field. The guard judges a lane tag on create_session only
+# (decision agent-model-cap, the lane start settings; guard.py names start_session as one with no tags). So the lane reads
+# from the prompt: a Grant line first, with the owner's words, then the `Lane brief:` line of a brief
+# (shared_names.LANE_GRANT_MARKER, LANE_BRIEF_MARKER). The fixture must read as a lane by those readers, so a failure names
+# the audit, not the fixture. The Grant line names no Opus grant. An Opus grant is the owner override, read from
+# CLAUDE_CONFIG_DIR (decision owner-override), and each audit folder starts without one.
 LANE_PROMPT = ("Grant: the owner said to audit the start's role and model, 2026-11-18 19:00 CST\n"
                "Lane brief: start-session-audit. Topic: the start audit.\n\nAdd the audit cases.")
 
 
 def lane_payload(model=None):
-    """The PostToolUse payload of a lane start: audit_payload's start_session call, tagged and briefed as a lane."""
+    """The PostToolUse payload of a lane start as start_session carries it: audit_payload's call, with the lane's prompt
+    and no tags."""
     payload = audit_payload(model)
-    payload["tool_input"].update(prompt=LANE_PROMPT, tags=[shared_names.LANE_TAG])
+    payload["tool_input"]["prompt"] = LANE_PROMPT
     return payload
 
 
 def lane_reads(tool_input):
-    """True when the start reads as a lane by the shared readers: the lane tag, and a Grant line first with the owner's words."""
-    first = next((ln.strip() for ln in tool_input["prompt"].splitlines() if ln.strip()), "")
-    return shared_names.LANE_TAG in shared_names.lane_tags(tool_input) and shared_names.grant_line_holds_words(first)
+    """True when the start reads as a lane from its prompt: no tags field, a Grant line first with the owner's words, and
+    a Lane brief line next."""
+    if "tags" in tool_input:
+        return False
+    lines = [ln.strip() for ln in str(tool_input.get("prompt", "")).splitlines() if ln.strip()]
+    return (len(lines) > 1 and shared_names.grant_line_holds_words(lines[0])
+            and lines[1].startswith(shared_names.LANE_BRIEF_MARKER))
 
 
 def lane_expect(model, folder, flagged, fragments=()):
     payload = lane_payload(model)
     if not lane_reads(payload["tool_input"]):
-        return False, "the lane fixture does not read as a lane start (the lane tag and the Grant line)"
+        return False, "the lane fixture does not read as a lane start (no tags, a Grant line, a Lane brief line)"
     stdout, reason = audit_run(payload, folder)
     return audit_judged(stdout, reason, flagged, fragments)
 
@@ -217,6 +224,66 @@ def audit_lane_sonnet_silent():
 
 def audit_lane_opus_flagged():
     return lane_expect("opus", audit_folder("lane-opus"), True, ("opus",) + AUDIT_STOP_LINE)
+
+
+# The guard's Opus spawn refusal lifts on a live timed `override 2h`: override.take, for rule OPUS_RULE, reads the timed
+# file first. The audit's lane Opus check reads only the Opus override file (override._take_opus), so it must agree with
+# take() on the same override. This probe is a child process, as the hook runs: the config folder and the clock are set
+# in its env. It answers for both readers in one run, so the scope (take() lifts) is judged before the subject (the audit).
+OPUS_LANE_PROBE = (
+    "import json, sys\n"
+    "sys.path.insert(0, sys.argv[1])\n"
+    "import override, start_session_audit\n"
+    "lifted = override.take(sys.argv[2], None, override.now(), rule=override.OPUS_RULE,\n"
+    "                       spawn_role='general-purpose', cwd=sys.argv[3])\n"
+    "flagged = start_session_audit.lane_opus_without_grant({'session_id': sys.argv[2]})\n"
+    "print(json.dumps({'lifted': lifted, 'flagged': flagged}))\n"
+)
+
+
+def opus_lane_probe(folder, seconds):
+    """(lifted, flagged, reason) for the session HU_SID in `folder` at OV_T0 + seconds: `lifted` is what override.take
+    returns for an Opus spawn (None when nothing lifts), `flagged` is what the audit's lane Opus check returns."""
+    env = dict(os.environ)
+    for key in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_SESSION_ID", "CS_SESSION_ROLE"):
+        env.pop(key, None)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    env["LOCAL_TIME_NOW"] = ov_clock(seconds)
+    run = subprocess.run([sys.executable, "-c", OPUS_LANE_PROBE, os.path.join(REPO, "hooks"), HU_SID, folder],
+                         capture_output=True, text=True, env=env, timeout=60)
+    if run.returncode != 0:
+        return None, None, "the probe exited %d: %s" % (run.returncode, run.stderr.strip()[-120:])
+    got = json.loads(run.stdout)
+    return got["lifted"], got["flagged"], ""
+
+
+def audit_opus_lane_timed_override_silent():
+    # Scope: the timed override is written by override.grant, and take() lifts it. Subject: the audit does not flag it.
+    folder = audit_folder("opus-lane-timed")
+    note = ov_type(folder, HU_SID, "override 2h", 0)
+    if note:
+        return False, "the scope: the override was not written by override.grant (%s)" % note
+    lifted, flagged, reason = opus_lane_probe(folder, 60)
+    if reason:
+        return False, reason
+    if lifted is None:
+        return False, "the scope: take() does not lift the live timed override, so the audit has nothing to agree with"
+    if flagged:
+        return False, "the audit flags an Opus lane start that a live timed override lifts"
+    return True, "a live timed override lifts the Opus lane start, as take() does, and the audit does not flag it"
+
+
+def audit_opus_lane_no_override_flags():
+    # Control: with no override, take() lifts nothing and the audit flags the same Opus lane start, so the silence above
+    # comes from the override alone.
+    lifted, flagged, reason = opus_lane_probe(audit_folder("opus-lane-none"), 60)
+    if reason:
+        return False, reason
+    if lifted is not None:
+        return False, "the scope: take() lifts an Opus spawn with no override in the folder"
+    if not flagged:
+        return False, "the audit does not flag an Opus lane start that no override lifts"
+    return True, "with no override, take() lifts nothing and the audit flags the Opus lane start"
 
 
 def audit_env_role_flagged():
@@ -379,9 +446,14 @@ for _label, _check in (
          audit_word_session_start_no_id_unread),
         ("the flag names the real id after a field name, not the field", audit_field_text_names_real_id),
         ("control: a real id in plain text is still named", audit_plain_text_real_id_control),
-        ("a lane start with no model is flagged, with the stop line", audit_lane_no_model_flagged),
-        ("control: a lane start naming sonnet passes", audit_lane_sonnet_silent),
-        ("a lane start naming opus with no owner grant is flagged, with the stop line", audit_lane_opus_flagged),
+        ("a lane start with no tags, read from its prompt, with no model is flagged, with the stop line",
+         audit_lane_no_model_flagged),
+        ("control: a lane start with no tags, read from its prompt, naming sonnet passes", audit_lane_sonnet_silent),
+        ("a lane start with no tags, read from its prompt, naming opus with no owner grant is flagged, with the stop line",
+         audit_lane_opus_flagged),
+        ("a live timed override that take() lifts is not flagged on an Opus lane start",
+         audit_opus_lane_timed_override_silent),
+        ("control: with no override, the Opus lane start is flagged", audit_opus_lane_no_override_flags),
         ("a start whose env carries CS_SESSION_ROLE is flagged, with the stop line", audit_env_role_flagged)):
     LOG_CHECKS_EXTRA.append(("start-session: " + _label, _check))
     FIXTURELESS_CHECKS.add(_check)
