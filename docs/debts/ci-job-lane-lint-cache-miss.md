@@ -7,4 +7,4 @@
 
 ## Ruling
 
-Owner, 2026-11-19 14:31 CST: rerun only the failed checks. Lane lints were the point (owner goal item 4, 16:23 CST, 2026-11-19).
+Owner, 2026-11-19 14:31 CST: rerun only the failed checks. The session reads lane lints as the main user (assumed, unconfirmed).
