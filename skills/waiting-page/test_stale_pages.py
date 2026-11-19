@@ -152,6 +152,7 @@ class Stale(unittest.TestCase):
     def run_script(self, *args, script=None, home=None, extra_env=None):
         """Every script run goes through here, so the timeout bounds each one. `extra_env` adds variables to the run."""
         env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+        env.pop(FOUND_ENV, None)  # a caller's step folder must not turn the found-false check on in another case
         if home is not None:
             env["HOME"] = home
         env.update(extra_env or {})
@@ -1699,7 +1700,7 @@ class Stale(unittest.TestCase):
 
     def found_false_run(self, items, steps):
         """Runs the --items path on the current page. `items` is the items folder; `steps` ({step file name: step data}) is the folder
-        WAITING_PAGE_STEPS names. Returns (the run, its found-false lines), after the page verdict is asserted."""
+        ROADMAP_STEPS_FOLDER names. Returns (the run, its found-false lines), after the page verdict is asserted."""
         current, _ = self.current_and_behind()
         steps_dir = self.docs_folder(steps, "steps", complete=False)
         r = self.items_run(current, self.items_folder(items), {FOUND_ENV: steps_dir})
@@ -1728,6 +1729,11 @@ class Stale(unittest.TestCase):
         self.assert_found_line(lines, 8, "q8")
         flagged = [line for line in lines if line.startswith("found-false: item 7 ")]
         self.assertEqual(flagged, [], "the bare id answered-needs-source flags item 7:\n" + "\n".join(lines))
+
+    def test_found_false_the_step_folder_is_the_one_ROADMAP_STEPS_FOLDER_names(self):
+        """The check reads the step folder that the env ROADMAP_STEPS_FOLDER names. With no line, the run read no folder from it."""
+        _, lines = self.found_false_run([found_item(956, "moot-item", "step home-done")], {"home-done": found_step("done", "home-done")})
+        self.assertTrue(lines, "no found-false line: the run read no step folder from ROADMAP_STEPS_FOLDER")
 
     def test_found_false_the_flag_names_the_way_to_close_the_item(self):
         """The line names the close the writer makes, in the words the page uses: status closed, closed, replied, reply."""
@@ -1809,7 +1815,7 @@ class Stale(unittest.TestCase):
 
 # Fixtures for the found-false cases. The check reads only the `step <id>` home: a bare id is also a decision or debt id, so it is never
 # flagged. FOUND_DONE are the step statuses that make an item's premise moot; FOUND_LIVE are the others.
-FOUND_ENV = "WAITING_PAGE_STEPS"  # the folder of step files, <step id>.json, that the check reads (the record's roadmap/data/steps)
+FOUND_ENV = "ROADMAP_STEPS_FOLDER"  # the folder of step files, <step id>.json, that the check reads (the record's roadmap/data/steps)
 FOUND_DONE = ("done", "dropped", "folded", "done-obsolete")
 FOUND_LIVE = ("todo", "ready", "doing", "blocked", "open", "parked")
 
