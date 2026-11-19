@@ -1008,6 +1008,18 @@ FILTERED_QUIET = "3/103 tests collected (100 deselected) in 0.09s\n"  # the same
 QQ_LINE = "..." + " " * 70 + "[100%]\n"  # pytest 9.2's -qq output for three passing tests: progress and the percent, no summary line (80 bytes)
 QQ_FULL = ("." * 70 + " [ 50%]\n") * 14000 + QQ_LINE  # over one chunk of progress lines, ending in the same [100%] line
 QQ_CUT = "..." + " " * 70 + "[ 30%]\n"  # a -qq run cut at 30 percent: progress with no [100%] line
+SGR_DOT = "\x1b[32m.\x1b[0m"  # one green progress char, as --color=yes writes it (pytest 9.2)
+QQ_COLOUR = SGR_DOT * 3 + "\x1b[32m" + " " * 70 + "[100%]\x1b[0m\n"  # pytest 9.2's -qq --color=yes for three passing tests, captured: SGR between the chars
+QQ_COLOUR_FULL = ("\x1b[32m" + "." * 70 + "\x1b[0m [ 50%]\n") * 13000 + QQ_COLOUR  # over one chunk; one SGR pair per line, not per char
+QQ_COLOUR_CUT = "\x1b[32m..\x1b[0m\x1b[32m" + " " * 70 + "[ 30%]\x1b[0m\n"  # the coloured run cut at 30 percent, no [100%] line
+QQ_WIDE = "..." + " " * 190 + "[100%]\n"  # pytest 9.2's -qq at COLUMNS=200 for three passing tests, captured: 199 characters, 190 spaces before [100%]
+QQ_WIDE_FULL = ("." * 70 + " [ 50%]\n") * 14000 + QQ_WIDE  # over one chunk
+QQ_WIDE_CUT = "..." + " " * 190 + "[ 30%]\n"  # the padded line cut at 30 percent
+QQ_SUB = "..u" + " " * 70 + "[100%]\n"  # a subtest char u (subtests.py: the SUBPASSED and SUBFAILED progress char) in the last line; synthetic, no captured pytest 9.2 run holds a u on an rc-0 run
+QQ_SUB_FULL = ("." * 70 + " [ 50%]\n") * 14000 + QQ_SUB  # over one chunk, ending in the u line
+QQ_SUB_CUT = "..u" + " " * 70 + "[ 30%]\n"  # the subtest line cut at 30 percent
+QQ_CO = "test_plain.py: 3\n\n"  # pytest 9.2's -qq --co for a three-test module, captured: per-file counts, no progress, no summary line
+QQ_CO_FULL = "".join("test_%05d.py: 1\n" % i for i in range(65000))  # over one chunk, one count line per file
 POSIX_SKIP = "the form runs through a POSIX shell (bash -c), which Windows does not have"
 HANG_GUARD = 20  # seconds before a verdict counts as hung; a linear scan of one 1 MiB line finishes far below it
 
@@ -1028,8 +1040,11 @@ class CutStream(unittest.TestCase):
     ` in <N>s`, or the bare `<counts> in <N>s` that `-q` prints. A `--collect-only` run ends `N tests collected in <N>s`,
     an empty run ends `no tests ran in <N>s`, and a filtered one ends `N/M tests collected (K deselected) in <N>s`. All
     of these count as summaries. A `-qq` run prints no summary: it reads PASS when its last progress line ends `[100%]`,
-    and is cut otherwise. Where the header sits does not matter. Colour codes
-    are ignored. A pytest run with neither `-q` nor a header is never cut. A run that is not pytest is never cut, even
+    and is cut otherwise. A subtest char `u` in that line and any padding before `[100%]` do not change that. A
+    `-qq --collect-only` run prints per-file counts and no summary: it reads PASS when it prints some, and is cut when it
+    prints none. Where the header sits does not matter. Colour codes are ignored. A `bash -c` line runs pytest when a
+    newline or `do` starts its command, and a `#` that does not start a word is no comment. A quote in heredoc text is
+    text. A pytest run with neither `-q` nor a header is never cut. A run that is not pytest is never cut, even
     when it prints pytest's header or progress lines, so `print('noisy')` reads PASS. A header quoted mid-line is no
     header. Other runners are not covered."""
     check = Skips.check  # one home for a fixture's run and its timeout
@@ -1037,31 +1052,36 @@ class CutStream(unittest.TestCase):
     assert_skip = Skips.assert_skip
     assert_fail = Skips.assert_fail
 
-    def pytest_case(self, text, args=(), form="module", timeout=120, hard=False):
+    def pytest_case(self, text, args=(), form="module", timeout=120, hard=False, env=None, bash_line=None):
         """Run `text` as the output of a pytest run, and return the run. The fake pytest writes `text`, exits 0 and
         leaves a sentinel file, so a case knows the fake ran before it reads the verdict. `hard` ends the fake with
         os._exit(0) after a flush, as a test that exits mid-run does. Each form is the argv as verdict receives it:
         "module" runs `python -m pytest` and "glued" runs `python -mpytest`, through a fake package on PYTHONPATH;
         "bash" runs `bash -c "python -m pytest <args>"` through the same package; "bare" runs `pytest` and "env" runs
-        `env pytest` through a fake on PATH; "uv" runs `uv run pytest` through a fake in a throwaway venv's bin."""
+        `env pytest` through a fake on PATH; "uv" runs `uv run pytest` through a fake in a throwaway venv's bin.
+        `bash_line` runs that line as `bash -c`, with the fake on PATH, so the line's own words decide what runs; the
+        line names pytest and its args as a user types them. `env` adds variables to the run's environment."""
         if form in ("bare", "env", "uv") and os.name == "nt": raise unittest.SkipTest(SHIM_SKIP)
-        if form == "bash" and os.name == "nt": raise unittest.SkipTest(POSIX_SKIP)
+        if (form == "bash" or bash_line is not None) and os.name == "nt": raise unittest.SkipTest(POSIX_SKIP)
         if form == "uv" and shutil.which("uv") is None: raise unittest.SkipTest("uv is not installed")
         with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
             ran, log = os.path.join(d, "ran"), os.path.join(d, "v.log")
             end = "import os, sys\nsys.stdout.write(%s)\nsys.stdout.flush()\nos._exit(0)\n" % ascii(text) if hard else printing(text)
             fake = "open(%r, 'w').close()\n" % ran + end
             script = "#!%s\n" % sys.executable + fake
-            if form in ("bare", "env"):
+            if bash_line is not None:
+                os.mkdir(os.path.join(d, "d"))  # a line may `cd d` before it runs pytest
+                r = run(log=log, extra=env, shim=("pytest", script), argv=["bash", "-c", bash_line], timeout=timeout, cwd=d)
+            elif form in ("bare", "env"):
                 argv = {"bare": ["pytest"], "env": ["env", "pytest"]}[form] + list(args)
-                r = run(log=log, shim=("pytest", script), argv=argv, timeout=timeout, cwd=d)
+                r = run(log=log, extra=env, shim=("pytest", script), argv=argv, timeout=timeout, cwd=d)
             elif form == "uv":
                 # uv finds pytest in the environment's bin before PATH (a shim on PATH loses), so the fake goes in a throwaway venv
                 venv = os.path.join(d, "venv")
                 subprocess.run([sys.executable, "-m", "venv", "--without-pip", venv], check=True, capture_output=True)
                 with open(os.path.join(venv, "bin", "pytest"), "w") as g: g.write(script)
                 os.chmod(os.path.join(venv, "bin", "pytest"), 0o755)
-                r = run(log=log, extra={"VIRTUAL_ENV": venv}, argv=["uv", "run", "pytest"] + list(args), timeout=timeout, cwd=d)
+                r = run(log=log, extra=dict(env or {}, VIRTUAL_ENV=venv), argv=["uv", "run", "pytest"] + list(args), timeout=timeout, cwd=d)
             else:
                 pkg = os.path.join(d, "pytest")
                 os.mkdir(pkg)
@@ -1071,7 +1091,7 @@ class CutStream(unittest.TestCase):
                 if form == "glued": argv = [sys.executable, "-mpytest"] + list(args)
                 elif form == "bash": argv = ["bash", "-c", " ".join(shlex.quote(p) for p in [sys.executable, "-m", "pytest"] + list(args))]
                 else: argv = [sys.executable, "-m", "pytest"] + list(args)
-                r = run(log=log, extra={"PYTHONPATH": path}, argv=argv, timeout=timeout, cwd=d)
+                r = run(log=log, extra=dict(env or {}, PYTHONPATH=path), argv=argv, timeout=timeout, cwd=d)
             self.assertTrue(os.path.exists(ran), "the fake pytest never ran, so this case proves nothing")
         return r
 
@@ -1268,6 +1288,110 @@ class CutStream(unittest.TestCase):
         """Control, green on the old code: a `-qq` run cut at 30 percent, with no `[100%]` line, reads FAIL with cut. A fix
         that stops counting `-qq` as quiet would pass it, so this pins that a complete `-qq` run is the one ending `[100%]`."""
         self.assert_cut(self.pytest_case(QQ_CUT, args=("-qq",), hard=True))
+
+    def assert_complete_qq(self, three, full, args, env=None):
+        """A complete run whose output is `three`, or `full` (over one chunk), reads PASS through the module and bare
+        forms. Each form and size is one subtest."""
+        for form in ("module", "bare"):
+            with self.subTest(form=form, size="three"):
+                self.assert_pass(self.pytest_case(three, args=args, form=form, env=env))
+            with self.subTest(form=form, size="full"):
+                self.assertGreater(len(full), CHUNK, "the full fixture must hold more than one chunk")
+                self.assert_pass(self.pytest_case(full, args=args, form=form, env=env))
+
+    def test_argv_qq_subtest_char_run_is_pass(self):
+        """A complete `-qq` run whose last progress line holds the subtest char `u` reads FAIL with cut. It must read PASS."""
+        self.assertRegex(QQ_SUB, r"\.\.u +\[100%\]\n\Z", "the fixture must hold u in its last progress line, or this case proves nothing")
+        self.assert_complete_qq(QQ_SUB, QQ_SUB_FULL, ("-qq",))
+
+    def test_argv_qq_coloured_run_is_pass(self):
+        """With `--color=yes`, SGR codes sit between the progress chars and around `[100%]`. A complete `-qq` run like that
+        reads FAIL with cut. It must read PASS."""
+        self.assertIn("\x1b[0m\x1b[32m.", QQ_COLOUR, "the fixture must hold SGR codes between the progress chars, or this case proves nothing")
+        self.assert_complete_qq(QQ_COLOUR, QQ_COLOUR_FULL, ("-qq", "--color=yes"))
+
+    def test_argv_qq_padding_over_120_run_is_pass(self):
+        """At COLUMNS=200 pytest pads the last progress line with more than 120 spaces before `[100%]`. The padding is no
+        limit: a complete `-qq` run like that must read PASS."""
+        self.assertGreater(QQ_WIDE.index("[100%]"), 3 + 120, "the fixture must pad past 120 spaces, or this case proves nothing")
+        self.assert_complete_qq(QQ_WIDE, QQ_WIDE_FULL, ("-qq",), env={"COLUMNS": "200"})
+
+    def test_argv_qq_collect_only_run_is_pass(self):
+        """`pytest -qq --co` prints per-file counts, with no progress line and no summary line. A complete collect-only run
+        must read PASS."""
+        self.assert_complete_qq(QQ_CO, QQ_CO_FULL, ("-qq", "--co"))
+
+    def test_argv_qq_cut_runs_of_those_shapes_stay_fail(self):
+        """Control: a `-qq` run cut at 30 percent, with no `[100%]` line, reads FAIL with cut in each shape the complete-run
+        cases above use: a subtest char, colour, and padding past 120. A `-qq --co` run that exits 0 before it prints
+        anything reads FAIL too."""
+        shapes = {"subtest char": (QQ_SUB_CUT, ("-qq",), None),
+                  "colour": (QQ_COLOUR_CUT, ("-qq", "--color=yes"), None),
+                  "padding": (QQ_WIDE_CUT, ("-qq",), {"COLUMNS": "200"})}
+        for shape, (body, args, env) in shapes.items():
+            with self.subTest(shape=shape):
+                self.assert_cut(self.pytest_case(body, args=args, hard=True, env=env))
+        with self.subTest(shape="collect only, no output"):
+            self.assert_cut(self.pytest_case("", args=("-qq", "--co"), hard=True))
+
+    def assert_line_cut(self, line, sizes=("empty", "three", "full")):
+        """A pytest run that exits 0 mid-run, started by the bash line `line`, reads FAIL with cut. The fake pytest is first
+        on PATH, so the sentinel proves the line ran it. A line with a newline in it prints its command name on more than
+        one line, so the note may sit on a later line than `FAIL`."""
+        bodies = {"empty": "", "three": PROGRESS * 3, "full": PROGRESS * 2048}
+        for size in sizes:
+            with self.subTest(line=line, size=size):
+                if size == "full": self.assertGreater(len(bodies[size]), CHUNK, "the full fixture must hold more than one chunk")
+                r = self.pytest_case(bodies[size], bash_line=line, hard=True)
+                self.assertTrue(r.stdout.startswith("FAIL "), f"a cut run must read FAIL, got: {r.stdout[:200]!r}")
+                self.assertRegex(r.stdout, r"rc=1[^(\n]*\bcut\b", "a cut run must carry rc=1 and the cut note")
+                self.assertEqual(r.returncode, 1, r.stdout[:300])
+
+    def test_bash_newline_before_pytest_cut_run_is_fail(self):
+        """In `bash -c`, a newline ends a command, so `pytest -q` on the line after `cd d` runs pytest. A scanner that reads
+        the two lines as one command, `cd d pytest -q`, finds no pytest and reads the cut run as PASS."""
+        self.assert_line_cut("cd d\npytest -q")
+
+    def test_bash_for_loop_pytest_cut_run_is_fail(self):
+        """`do` starts a command, so `pytest -q $f` in a `for` loop runs pytest. A scanner that reads the command as `do`
+        finds no pytest and reads the cut run as PASS."""
+        self.assert_line_cut("for f in a; do pytest -q $f; done")
+
+    def test_bash_newline_and_for_loop_summary_runs_are_pass(self):
+        """Control: a complete `-q` run through the newline line and the `for` line reads PASS, in three and full size. A fix
+        that cuts every run a shell wrapper starts fails here."""
+        for line in ("cd d\npytest -q", "for f in a; do pytest -q $f; done"):
+            for size, body in (("three", PROGRESS * 3 + QUIET_SUMMARY), ("full", PROGRESS * 2048 + QUIET_SUMMARY)):
+                with self.subTest(line=line, size=size):
+                    if size == "full": self.assertGreater(len(body), CHUNK, "the full fixture must hold more than one chunk")
+                    self.assert_pass(self.pytest_case(body, bash_line=line))
+
+    def test_scanner_hash_after_a_quoted_hash_is_cut(self):
+        """A `#` inside quotes is text, and so is a `#` that follows the quote in the same word, so `pytest -q` after
+        `echo 'a#b'#c;` runs pytest. A scanner that reads that second `#` as a comment drops the rest of the line."""
+        self.assert_line_cut("echo 'a#b'#c; pytest -q")
+
+    def test_scanner_apostrophe_in_heredoc_text_is_cut(self):
+        """An apostrophe in heredoc text (`Don't`) is text, not an open quote, so the `pytest -q` after the heredoc runs
+        pytest. A scanner that reads the apostrophe as an open quote never finds its close and reads no pytest. The heredoc
+        also holds newlines, which end commands in bash, so the newline fix is needed for this case too."""
+        self.assert_line_cut("cat <<EOF\nDon't\nEOF\npytest -q")
+
+    def test_scanner_hash_in_quotes_and_apostrophe_in_comment_are_cut(self):
+        """Control: a `#` inside quotes opens no comment, so `echo '#'; pytest -q` runs pytest. An apostrophe in a comment
+        after pytest is text, so `pytest -q # don't` runs it too. A fix that cuts a line at its first `#` before it reads
+        quotes fails the first line."""
+        for line in ("echo '#'; pytest -q", "pytest -q # don't"):
+            self.assert_line_cut(line)
+
+    def test_scanner_newline_inside_quotes_is_text_pass(self):
+        """Control: a newline inside single quotes is text, so the `pytest -q` in the quoted string runs no pytest, and the
+        run reads PASS. A fix that splits lines before it reads quotes cuts this run."""
+        if os.name == "nt": raise unittest.SkipTest(POSIX_SKIP)
+        line = "echo 'x\npytest -q'"
+        r, full = self.run_logged(argv=["bash", "-c", line])
+        self.assertIn("x\npytest -q\n", full, "the quoted text must reach the log, or this case proves nothing")
+        self.assert_pass(r)
 
 
 def tearDownModule():
