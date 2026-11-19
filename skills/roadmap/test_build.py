@@ -781,15 +781,19 @@ class UpkeepFixture(Fixture):
             row["createdAt"] = created
         return row
 
-    def rest_draft(self, number, branch, updated_min=780, title=None, created_min=None, draft=True, head_repo=_OWN_REPO):
+    def rest_draft(self, number, branch, updated_min=780, title=None, created_min=None, draft=True, head_repo=_OWN_REPO,
+                   sha=None):
         """A pulls row as GitHub's list call returns it, the shape the REST read takes. updated_min and created_min
         are minutes before now. The default 780 (13 h) is stale; created_min is left out when None. head.repo is the
         head repo as GitHub gives it: the base repo's full name by default, another full name for a fork's pull, and
-        null (head_repo=None) for a head repo GitHub no longer has, such as a deleted fork."""
+        null (head_repo=None) for a head repo GitHub no longer has, such as a deleted fork. head.sha is the head commit,
+        left out when sha is None, so a row with no head commit reads as one."""
         full_name = self.SLUG if head_repo is _OWN_REPO else head_repo
         row = {"number": number, "title": title or "lane " + branch, "draft": draft,
                "head": {"ref": branch, "repo": None if full_name is None else {"full_name": full_name}},
                "updated_at": iso_ago(updated_min)}
+        if sha is not None:
+            row["head"]["sha"] = sha
         if created_min is not None:
             row["created_at"] = iso_ago(created_min)
         return row
@@ -999,18 +1003,24 @@ def read_time(text):
 
 
 class LiveRefresh(UpkeepFixture):
-    """A stale live file rebuilds in-process (step live-file-refresh-one-command). A reader that finds the file older than
-    build.STALE_LIVE_MINUTES calls build.live_fetch() once. It takes no argument, returns {"sessions": the list_sessions
-    rows, "pulls": the open pull requests as REST gives them (number, title, body)}, and raises when it cannot read. The
-    reader writes the rebuilt file and reads that. A file no older than the limit is never fetched. A failed fetch leaves
-    the file as it was, and the reader says stale with the file's age, never current. The rebuilt sessions keep every row
-    that is not archived, and an archived row only when an open pull request's footer or a live step's lane names it. The
-    cases drive the page bake (build.main with --live) through the seam Fixture.setUp installs. The build's clock is fixed
-    at FIXED_NOW for the class (test-practices P5)."""
+    """A stale live file rebuilds in-process (step live-file-refresh-one-command), and only the page bake does it:
+    build.main with --live passes live_work the rebuild flag, and the other readers (merge's lane read, --idle-lanes)
+    read the file as it is. A file older than build.STALE_LIVE_MINUTES is rebuilt once from build.live_fetch(slug), which
+    takes the repo's GitHub name and returns {"sessions": the list_sessions rows, "pulls": the open pull requests as REST
+    gives them (number, title, body, head sha)}, and raises when it cannot read. The rebuilt file keeps the pull marks
+    (held, reviewLog, url, and checks only for the head the old row recorded), the sessions, and no other list: threads,
+    items, branches and landedPulls are not carried, so they read unknown after a rebuild. A file no older than the limit
+    is never fetched. A failed fetch leaves the file as it was, and the reader says stale with the file's age, never
+    current. The rebuilt sessions keep every row that is not archived, and an archived row only when an open pull
+    request's footer or a live step's lane names it. The cases drive the page bake (build.main with --live) through the
+    seam Fixture.setUp installs, except the flag case, which calls live_work directly. The build's clock is fixed at
+    FIXED_NOW for the class (test-practices P5)."""
 
     FIXED_NOW = BUILD_NOW
     ARCHIVED = build.ARCHIVED_SESSION
     ROWS_READER = "session-rows"  # the registry name live_fetch reads its sessions from
+    OLD_HEAD = "1" * 40  # the head commit a live row recorded before its pull moved
+    NEW_HEAD = "2" * 40  # the head commit GitHub reads for the pull now
 
     def setUp(self):
         super().setUp()
@@ -1031,6 +1041,11 @@ class LiveRefresh(UpkeepFixture):
         """An open pull request as the fetch returns it: the number, the title and the body, whose footer is its last link."""
         return {"number": number, "title": "lane %d" % number, "body": body}
 
+    def marks(self, number, checks="pass"):
+        """The triage marks of pull `number` as the old file holds them: held, reviewLog, checks and url."""
+        return {"held": True, "reviewLog": True, "checks": checks,
+                "url": "https://github.com/owner/fixture/pull/%d" % number}
+
     def read_of(self, page):
         return self.panel(page)["read"]
 
@@ -1046,13 +1061,34 @@ class LiveRefresh(UpkeepFixture):
             patch.start()
             self.addCleanup(patch.stop)
 
-    def fixed_rest_draft(self, number, branch, updated_min=780):
+    def fixed_rest_draft(self, number, branch, updated_min=780, sha=None):
         """A REST pulls row for an open draft, updated `updated_min` before FIXED_NOW (780 min is 13 h, so stale), whose
-        branch commit is dated the same. The commit is set on origin first, so serve_pulls never dates it by the real clock."""
+        branch commit is dated the same. The commit is set on origin first, so serve_pulls never dates it by the real clock.
+        sha is the head commit the row names (see rest_draft)."""
         self.origin_commit(branch, self.ago(updated_min))
-        row = self.rest_draft(number, branch, updated_min)
+        row = self.rest_draft(number, branch, updated_min, sha=sha)
         row["updated_at"] = self.ago(updated_min)
         return row
+
+    def spawns_of(self, run):
+        """(threads started, programs started) while run() runs: each Thread.start, and each process a subprocess.Popen
+        starts, by its program name. The caller reads git as the one program a rebuild may start."""
+        started, threads = [], []
+        real_popen, real_start = subprocess.Popen, threading.Thread.start
+
+        class Recording(real_popen):
+            def __init__(self, args, *rest, **kwargs):
+                started.append(args)
+                super().__init__(args, *rest, **kwargs)
+
+        def start(thread):
+            threads.append(thread)
+            return real_start(thread)
+
+        with mock.patch.object(subprocess, "Popen", Recording), mock.patch.object(threading.Thread, "start", start):
+            run()
+        programs = [pathlib.Path(a[0] if isinstance(a, (list, tuple)) else str(a).split()[0]).name for a in started]
+        return threads, programs
 
     def build_in(self, folder, *extra, expect=(0, None)):
         """build_from_main with the process in `folder`, so a rebuild reads that folder's GitHub name. The folder is left
@@ -1148,48 +1184,129 @@ class LiveRefresh(UpkeepFixture):
 
     def test_a_stale_read_starts_no_thread_and_no_process_but_git(self):
         self.write_file(self.ago(build.STALE_LIVE_MINUTES + 1))
-        started, threads = [], []
-        real_popen, real_start = subprocess.Popen, threading.Thread.start
-
-        class Recording(real_popen):
-            def __init__(self, args, *rest, **kwargs):
-                started.append(args)
-                super().__init__(args, *rest, **kwargs)
-
-        def start(thread):
-            threads.append(thread)
-            return real_start(thread)
-
-        with mock.patch.object(subprocess, "Popen", Recording), mock.patch.object(threading.Thread, "start", start):
-            self.build_from_main("--live", str(self.live), expect=(0, 1))
+        threads, programs = self.spawns_of(lambda: self.build_from_main("--live", str(self.live), expect=(0, 1)))
         self.assertEqual(threads, [], "the stale read started %d thread(s), want none" % len(threads))
-        programs = [pathlib.Path(a[0] if isinstance(a, (list, tuple)) else str(a).split()[0]).name for a in started]
         self.assertEqual(sorted(set(programs) - {"git"}), [],
                          "the stale read started a process other than git: %r" % programs)
 
-
-    def test_a_rebuild_keeps_the_triage_keys_the_old_file_holds(self):
-        # The fetch returns only the open pulls and the sessions, so the triage keys of the old file must carry over.
+    def test_a_rebuild_through_the_real_fetch_starts_no_thread_and_no_process_but_git(self):
+        # The fetch is the real one here, so a thread or process it starts is counted. The mocked fetch of the case above
+        # would hide one.
         self.use_real_fetch()
-        old = {"readAt": self.ago(build.STALE_LIVE_MINUTES + 1), "sessions": [],
-               "threads": [{"title": "Build a", "state": "working", "step": "c1"}],
-               "pulls": [{"number": 7, "title": "lane 7", "branch": "lane-7", "held": True, "reviewLog": True,
-                          "checks": "pass", "url": "https://github.com/owner/fixture/pull/7"}],
-               "branches": [{"name": "lane-x"}], "items": [], "landedPulls": [self.pull_row(3, "lane-3", merged=True)]}
-        self.write_live(old)
-        self.serve_pulls([self.fixed_rest_draft(7, "lane-7", 60)])
+        self.write_file(self.ago(build.STALE_LIVE_MINUTES + 1))
+        self.serve_pulls([self.fixed_rest_draft(7, "lane-7", 60, sha=self.NEW_HEAD)])
+        threads, programs = self.spawns_of(lambda: self.build_in(self.repo, "--live", str(self.live), expect=(0, 1)))
+        self.assertEqual(read_time(self.file_value()["readAt"]), read_time(BUILD_NOW),
+                         "control: the real fetch did not rebuild the file, so the case proves nothing about the fetch")
+        self.assertEqual(threads, [], "the rebuild through the real fetch started %d thread(s), want none" % len(threads))
+        self.assertEqual(sorted(set(programs) - {"git"}), [],
+                         "the rebuild through the real fetch started a process other than git: %r" % programs)
+
+    def test_a_rebuild_drops_checks_of_a_pull_whose_head_moved_or_was_never_recorded(self):
+        # checks is CI's reading of one head commit, so a rebuild carries it only when the old row's head is the head the
+        # fetch reads now. Three pulls lose it: one whose head moved, one whose old row names no head, and one the fetch
+        # gives no head for. The other marks stay with the pull number, whatever its head.
+        self.use_real_fetch()
+        self.write_live({"readAt": self.ago(build.STALE_LIVE_MINUTES + 1), "threads": [], "sessions": [], "pulls": [
+            dict(self.live_pull(7, "lane-7"), head=self.OLD_HEAD, **self.marks(7)),
+            dict(self.live_pull(9, "lane-9"), **self.marks(9)),
+            dict(self.live_pull(10, "lane-10"), head=self.OLD_HEAD, **self.marks(10))]})
+        self.serve_pulls([self.fixed_rest_draft(7, "lane-7", 60, sha=self.NEW_HEAD),
+                          self.fixed_rest_draft(9, "lane-9", 60, sha=self.NEW_HEAD),
+                          self.fixed_rest_draft(10, "lane-10", 60)])
         self.build_in(self.repo, "--live", str(self.live), expect=(0, 1))
+        self.assertEqual(read_time(self.file_value()["readAt"]), read_time(BUILD_NOW),
+                         "control: the stale file was not rebuilt, so the case reads no pull rows")
+        rebuilt = {p["number"]: p for p in self.file_value()["pulls"]}
+        for number, why in ((7, "its head moved from the one the old row recorded"),
+                            (9, "the old row names no head"),
+                            (10, "the fetch gives no head")):
+            with self.subTest(pull=number):
+                self.assertIn(number, rebuilt, "the rebuilt file lost pull #%d" % number)
+                self.assertNotIn("checks", rebuilt[number],
+                                 "the rebuilt row for #%d kept checks, though %s" % (number, why))
+                for key in ("held", "reviewLog", "url"):
+                    self.assertIn(key, rebuilt[number], "the rebuilt row for #%d lost its %s mark" % (number, key))
+
+    def test_a_rebuild_keeps_checks_of_a_pull_whose_head_did_not_move(self):
+        self.use_real_fetch()
+        self.write_live({"readAt": self.ago(build.STALE_LIVE_MINUTES + 1), "threads": [], "sessions": [], "pulls": [
+            dict(self.live_pull(8, "lane-8"), head=self.NEW_HEAD, **self.marks(8, checks="fail"))]})
+        self.serve_pulls([self.fixed_rest_draft(8, "lane-8", 60, sha=self.NEW_HEAD)])
+        self.build_in(self.repo, "--live", str(self.live), expect=(0, 1))
+        self.assertEqual(read_time(self.file_value()["readAt"]), read_time(BUILD_NOW),
+                         "control: the stale file was not rebuilt, so the case reads no pull row")
+        row = {p["number"]: p for p in self.file_value()["pulls"]}.get(8, {})
+        self.assertEqual(row.get("checks"), "fail",
+                         "the rebuilt row for #8 lost checks though its head did not move, it reads %r" % row.get("checks"))
+        for key in ("held", "reviewLog", "url"):
+            self.assertEqual(row.get(key), self.marks(8)[key], "the rebuilt row for #8 lost its %s mark" % key)
+
+    def test_a_rebuild_keeps_the_pull_marks_and_carries_none_of_the_four_list_keys(self):
+        # The fetch returns the open pulls and the sessions. Of the old file, a rebuild keeps only the pull marks: held,
+        # reviewLog, url, and checks while the head is the same. threads, items, branches and landedPulls are not carried,
+        # so each reads unknown (branches read no stale row as current).
+        self.use_real_fetch()
+        old = {"readAt": self.ago(300), "sessions": [],  # five hours old: an open item in it must not read as current
+               "threads": [{"title": "Build a", "state": "working", "step": "c1"}],
+               "pulls": [dict(self.live_pull(7, "lane-7"), head=self.NEW_HEAD, **self.marks(7))],
+               "branches": [{"name": "lane-x"}], "items": [{"n": 3, "status": "open", "home": "decisions"}],
+               "landedPulls": [self.pull_row(3, "lane-3", merged=True)]}
+        self.write_live(old)
+        self.serve_pulls([self.fixed_rest_draft(7, "lane-7", 60, sha=self.NEW_HEAD)])
+        page, _ = self.build_in(self.repo, "--live", str(self.live), expect=(0, 1))
         value = self.file_value()
         self.assertEqual(read_time(value["readAt"]), read_time(BUILD_NOW),
-                         "control: the stale file was not rebuilt, so the case reads no triage keys")
-        for key in ("threads", "branches", "items", "landedPulls"):
-            with self.subTest(key=key):
-                self.assertEqual(value.get(key), old[key], "the rebuilt live file lost its %s key" % key)
+                         "control: the stale file was not rebuilt, so the case reads no pull marks")
         rebuilt = {p["number"]: p for p in value["pulls"]}.get(7, {})
         for key in ("held", "reviewLog", "checks", "url"):
             with self.subTest(pull_key=key):
                 self.assertEqual(rebuilt.get(key), old["pulls"][0][key],
                                  "the rebuilt pulls row for #7 lost its %s key" % key)
+        for key in ("threads", "branches", "items", "landedPulls"):
+            with self.subTest(list_key=key):
+                self.assertNotIn(key, value, "the rebuilt live file still carries its %s key from the old file" % key)
+        live = build_info(page)["live"]
+        with self.subTest(reading="threads"):
+            self.assertIsNone(live.get("threads"), "a rebuilt file with no threads key reads threads %r" % live.get("threads"))
+            self.assertEqual(live.get("threadsWhy"), build.THREADS_MISSING_WHY)
+        with self.subTest(reading="items"):
+            self.assertIsNone(live.get("pageItems"), "a rebuilt file with no items key reads its items as current")
+            self.assertEqual(live.get("itemsWhy"), build.ITEMS_MISSING_WHY)
+        with self.subTest(reading="landedPulls"):
+            self.assertIsNone(live.get("landedPulls"), "a rebuilt file with no landedPulls key reads them as current")
+        with self.subTest(reading="branches"):
+            names = [b.get("name") for b in live.get("branches") or []]
+            self.assertNotIn("lane-x", names, "a branch the old file held reads as current after a rebuild")
+
+    def test_live_work_without_a_rebuild_flag_never_fetches_and_reads_the_stale_file_with_its_age(self):
+        # merge's lane read and --idle-lanes call live_work with no flag. They read the file as it is, with its age.
+        old = self.ago(build.STALE_LIVE_MINUTES + 1)
+        self.write_file(old)
+        before = self.live.read_bytes()
+        self.live_fetch.return_value = {"sessions": [], "pulls": [self.open_pull(7)]}
+        work = build.live_work(str(self.live), {}, self.SLUG)
+        self.assertEqual(self.live_fetch.call_count, 0,
+                         "live_work with no rebuild flag fetched the live file %d time(s)" % self.live_fetch.call_count)
+        self.assertEqual(self.live.read_bytes(), before, "live_work with no rebuild flag rewrote the live file")
+        self.assertEqual(work["read"], old, "live_work with no rebuild flag does not read the file's own readAt")
+        self.assertEqual(work["ageMinutes"], build.STALE_LIVE_MINUTES + 1,
+                         "live_work with no rebuild flag reads the stale file's age as %r" % work["ageMinutes"])
+        self.assertIn("not rebuilt", work["staleWhy"], "the stale reading does not say the file was not rebuilt")
+
+    def test_an_empty_github_name_makes_the_rebuild_fetch_raise_and_the_file_stays_stale(self):
+        self.use_real_fetch()
+        self.serve_pulls([])
+        self.assertEqual(build.live_fetch(self.SLUG)["pulls"], [],
+                         "control: a fetch with a GitHub name does not return its pulls")
+        with self.assertRaises(RuntimeError, msg="a fetch with an empty GitHub name returned rows, not a raise"):
+            build.live_fetch("")
+        self.write_file(self.ago(build.STALE_LIVE_MINUTES + 1))
+        before = self.live.read_bytes()
+        git(self.repo, "remote", "remove", "origin")  # no origin, so the build reads no GitHub name
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.live.read_bytes(), before, "a rebuild with no GitHub name rewrote the live file")
+        self.assertRegex(out, r"\bstale\b", "a stale live file the rebuild could not fetch is not printed as stale")
 
     def test_a_held_draft_stays_held_through_a_rebuild_and_is_not_listed(self):
         self.use_real_fetch()
