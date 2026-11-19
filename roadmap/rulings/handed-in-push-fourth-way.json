@@ -1,0 +1,10 @@
+{
+ "id": "handed-in-push-fourth-way",
+ "at": "2026-11-18T21:17:51-06:00",
+ "title": "A handed-in push check refuses an unnameable destination, allows a failed read, and refuses no log only when the pull request shows a hand-in.",
+ "ruling": "Owner ruling, chat to triage, 21:17 CST Nov 18, on page item 986 (handed-in-push-strictness): he approved the blind agent's opinion, a fourth way. (1) A push whose destination cannot be named is refused. (2) A failed pull-request list read is allowed, with a one-line warning on stderr. (3) A push with no review log is refused only when the pull request shows the branch was handed in; otherwise it is allowed. Open fact: where a hand-in is marked where the guard can read it (the blind agent could not read it; the builder reads it, and asks the owner before guessing if there is none). Home: step handed-in-push-needs-record, PR 3490's branch line (guard_merge.py, merge.py).",
+ "quote": "986 blind agents opinion is approved",
+ "source": "Owner's chat message to triage 11, 21:17 CST Nov 18 (direct, this session). The blind agent's pick is in page item 986's reply.",
+ "status": "open",
+ "step": "handed-in-push-needs-record"
+}
