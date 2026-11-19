@@ -199,15 +199,15 @@ def audit_handoff_without_flag_silent():
 # (shared_names.LANE_GRANT_MARKER, LANE_BRIEF_MARKER). The fixture must read as a lane by those readers, so a failure names
 # the audit, not the fixture. The Grant line names no Opus grant. An Opus grant is the owner override, read from
 # CLAUDE_CONFIG_DIR (decision owner-override), and each audit folder starts without one.
-LANE_PROMPT = ("Grant: the owner said to audit the start's role and model, 2026-11-18 19:00 CST\n"
-               "Lane brief: start-session-audit. Topic: the start audit.\n\nAdd the audit cases.")
+AUDIT_LANE_PROMPT = ("Grant: the owner said to audit the start's role and model, 2026-11-18 19:00 CST\n"
+                     "Lane brief: start-session-audit. Topic: the start audit.\n\nAdd the audit cases.")
 
 
 def lane_payload(model=None):
     """The PostToolUse payload of a lane start as start_session carries it: audit_payload's call, with the lane's prompt
     and no tags."""
     payload = audit_payload(model)
-    payload["tool_input"]["prompt"] = LANE_PROMPT
+    payload["tool_input"]["prompt"] = AUDIT_LANE_PROMPT
     return payload
 
 
