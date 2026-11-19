@@ -1,7 +1,7 @@
 {
  "id": "scratch-rm-other-agent",
  "title": "The guard refuses `rm -rf` on a scratchpad folder another agent wrote",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL47hBFavdCYLVNEBad",
@@ -9,7 +9,7 @@
  "blockedBy": [],
  "why": "A builder in lane test-guard-split-per-rule deleted a scratchpad folder another agent wrote, losing that agent's work (coordinator 04:05 CST Nov 12).",
  "source": "coordinator 04:05 CST Nov 12, from lane test-guard-split-per-rule",
- "note": "A real incident, so a step. Likely home: guard rule scratchpad-owner; first check why it let this delete through (unchecked by triage). Related: steps scratchpad-owner-refuse-not-ask, scratchpad-owner-follow-ups (#2119) and scratch-folder-per-agent. Unblocked: the guard test split merged (39e378f15, 07:16 CST Nov 12). Lane started 07:20 CST Nov 12 (coordinator, Sonnet, medium).",
- "updatedAt": "2026-11-17T13:39:30-06:00",
+ "note": "A real incident, so a step. Likely home: guard rule scratchpad-owner; first check why it let this delete through (unchecked by triage). Related: steps scratchpad-owner-refuse-not-ask, scratchpad-owner-follow-ups (#2119) and scratch-folder-per-agent. Unblocked: the guard test split merged (39e378f15, 07:16 CST Nov 12). Lane started 07:20 CST Nov 12 (coordinator, Sonnet, medium).\nLanded: PR 3013 merged (b92ac4791f), rechecked by REST 2026-11-18 21:30 CST (triage 12).",
+ "updatedAt": "2026-11-19T03:30:17Z",
  "pr": 3013
 }

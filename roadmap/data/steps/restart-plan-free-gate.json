@@ -1,7 +1,7 @@
 {
  "id": "restart-plan-free-gate",
  "title": "docs/plans/restart-plan.md item 3.15 restores the owner's \"if literally free\" gate",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL3FP12ztogsV6d7q6J",
@@ -9,7 +9,7 @@
  "blockedBy": [],
  "why": "Item 3.15 of the restart plan drops the owner's \"if literally free\" gate, which the record keeps.",
  "source": "coordinator 07:57 CST Nov 12, from lane fan-prose-unmapped-6",
- "note": "Prose. Put on lane fan-prose-unmapped-6 by triage 07:58 CST Nov 12.",
- "updatedAt": "2026-11-17T13:39:30-06:00",
+ "note": "Prose. Put on lane fan-prose-unmapped-6 by triage 07:58 CST Nov 12.\nLanded: PR 2698 merged (42c61f7248), rechecked by REST 2026-11-18 21:30 CST (triage 12).",
+ "updatedAt": "2026-11-19T03:30:17Z",
  "pr": 2698
 }

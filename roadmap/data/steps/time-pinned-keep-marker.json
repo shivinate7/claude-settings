@@ -1,7 +1,7 @@
 {
  "id": "time-pinned-keep-marker",
  "title": "lint/find_time_pinned.py honours a keep marker, so a kept sleep with its reason does not list",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "lane": "session_013NEJL4PjaEKZtDccHU8fNp",
@@ -9,7 +9,7 @@
  "blockedBy": [],
  "why": "Lane timing-tests (#2933, coordinator 14:36 CST Nov 12): the finder has no keep marker, so a kept sleep that carries its reason as a comment still lists, and convert-time-pinned-tests' done line (\"lists none, or each kept carries its reason\") cannot be read by the finder alone.",
  "source": "coordinator 14:36 CST Nov 12, from lane timing-tests",
- "note": "Add a keep marker with a required reason that the finder honours; a marker with no reason still lists. Red first on a kept sleep from #2933. Kin: convert-time-pinned-tests. Folded into lane timing-tests 14:39 CST Nov 12 (coordinator).",
- "updatedAt": "2026-11-15T23:19:04-06:00",
+ "note": "Add a keep marker with a required reason that the finder honours; a marker with no reason still lists. Red first on a kept sleep from #2933. Kin: convert-time-pinned-tests. Folded into lane timing-tests 14:39 CST Nov 12 (coordinator).\nLanded: PR 2975 merged (302a6223ae), rechecked by REST 2026-11-18 21:30 CST (triage 12).",
+ "updatedAt": "2026-11-19T03:30:17Z",
  "pr": 2975
 }

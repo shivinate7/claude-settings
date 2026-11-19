@@ -2,14 +2,14 @@
  "id": "lane-start-one-pass",
  "title": "Starting a lane: one refusal lists every broken rule, one helper prints the create_session fields",
  "priority": "now",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "owner": "triage",
  "blockedBy": [],
- "updatedAt": "2026-11-15T22:52:46-06:00",
+ "updatedAt": "2026-11-19T03:30:17Z",
  "why": "[13:18 CST Nov 15, triage] Owner chat 13:16 CST, relayed by the consultant (verbatim): \"any feedback for claude-settings to tell you how to create lanes mroe easily so you dont see so many failures first?\" (owner: \"ignore the stale handoff part tho\"). The step: one refusal lists every broken lane-start rule; one helper prints the create_session fields; the handoff template points at the helper; the archive check names the add_repo fix. The lane was started by the consultant 13:18 CST. Guard or check: yes (unverified). (source: consultant 13:18 CST via the coordinator, relayed by triage; not owner-typed)",
  "source": "consultant 13:18 CST via the coordinator, relayed by triage; not owner-typed",
- "note": "Doing. One refusal lists every broken lane-start rule; one helper prints the create_session fields; the handoff template points at the helper; the archive check names the add_repo fix. Source: the owner's second question, 13:16 CST (relayed). Guard or check: yes (unverified).",
+ "note": "Doing. One refusal lists every broken lane-start rule; one helper prints the create_session fields; the handoff template points at the helper; the archive check names the add_repo fix. Source: the owner's second question, 13:16 CST (relayed). Guard or check: yes (unverified).\nLanded: PR 3549 merged (28d4752adb), rechecked by REST 2026-11-18 21:30 CST (triage 12).",
  "pr": 3549
 }

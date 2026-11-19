@@ -2,14 +2,14 @@
  "id": "session-roster-at-start",
  "title": "At lane start the harness gives the new session a roster; send_message refuses an id not in list_sessions",
  "priority": "now",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "owner": "triage",
  "blockedBy": [],
- "updatedAt": "2026-11-16T07:20:37-06:00",
+ "updatedAt": "2026-11-19T03:30:17Z",
  "why": "[13:31 CST Nov 15, triage] At lane start the harness gives the new session a roster (role, repo tag, id, status from list_sessions); roles and slugs stay in briefs; ids reach sessions by the harness, never hand-typed; send_message refuses an id not in list_sessions for the repo tag and prints the roster. Ruling own-ids-by-harness-roster (a lean). Guard or check: yes (unverified). (source: coordinator 13:31 CST, relayed by triage; lane started by the consultant 13:30 CST; not owner-typed, undoable) New step.\n\n[07:20 CST Nov 16, triage] MERGED: #3560 (\"Sessions get the roster at start\", branch session-roster-at-start) merged 07:20:08 CST Nov 16 (REST read by triage 07:20 CST: merged true, merged_at 2026-11-16T13:20:08Z, merged_by shivinate7, merge commit 721144d71f7d; coordinator 07:21 CST relayed it; triage read no diff). Status stays doing: the step also says send_message refuses an id not in list_sessions, and nobody has read whether #3560 builds that part. The consultant owns it and decides the STANDING_HOLDERS change after this merge (coordinator, relayed).",
  "source": "coordinator 13:31 CST, relayed by triage; lane started by the consultant 13:30 CST; not owner-typed",
- "note": "Doing. At lane start the harness gives the new session a roster (role, repo tag, id, status from list_sessions); roles and slugs stay in briefs; ids reach sessions by the harness, never hand-typed; send_message refuses an id not in list_sessions for the repo tag and prints the roster. Ruling own-ids-by-harness-roster (a lean). Guard or check: yes (unverified).",
+ "note": "Doing. At lane start the harness gives the new session a roster (role, repo tag, id, status from list_sessions); roles and slugs stay in briefs; ids reach sessions by the harness, never hand-typed; send_message refuses an id not in list_sessions for the repo tag and prints the roster. Ruling own-ids-by-harness-roster (a lean). Guard or check: yes (unverified).\nLanded: PR 3560 merged (721144d71f), rechecked by REST 2026-11-18 21:30 CST (triage 12).",
  "pr": 3560
 }

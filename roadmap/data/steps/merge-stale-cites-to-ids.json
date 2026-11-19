@@ -1,7 +1,7 @@
 {
  "id": "merge-stale-cites-to-ids",
  "title": "The merge tool's stale line cites BATCH_CITE 223, DROP_CITE 222 and RED_CITE 216 point at ids, not at moved text",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL1k9L6aaoYwt9rkang",
@@ -9,7 +9,7 @@
  "blockedBy": [],
  "why": "Debt merge-stale-texts-and-cites: the three cites no longer match the records.",
  "source": "Consultant 20:59 CST Nov 13, from its Opus read-only audit of merge/merge.py at origin/main 309fa5ed5b; line numbers and debts are its, unchecked by triage.",
- "note": "Triage 21:00 CST Nov 13: rule git-cite-by-id. Small fix; unchecked by triage. Coordinator 21:01 CST Nov 13 (21:00): lane merge-tool-audit-fixes (session_013NEJL1k9L6aaoYwt9rkang) started, built on #3269. Whether it covers this step: unchecked by triage.",
- "updatedAt": "2026-11-17T13:39:30-06:00",
+ "note": "Triage 21:00 CST Nov 13: rule git-cite-by-id. Small fix; unchecked by triage. Coordinator 21:01 CST Nov 13 (21:00): lane merge-tool-audit-fixes (session_013NEJL1k9L6aaoYwt9rkang) started, built on #3269. Whether it covers this step: unchecked by triage.\nLanded: PR 3377 merged (9f44f200bb), rechecked by REST 2026-11-18 21:30 CST (triage 12).",
+ "updatedAt": "2026-11-19T03:30:17Z",
  "pr": 3377
 }

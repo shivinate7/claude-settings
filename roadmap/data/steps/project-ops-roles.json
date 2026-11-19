@@ -2,15 +2,15 @@
  "id": "project-ops-roles",
  "title": "Lane project-ops-roles: #3521 handed in to runner 10",
  "priority": "now",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "owner": "triage",
  "lane": "project-ops-roles",
  "blockedBy": [],
- "updatedAt": "2026-11-15T20:19:00-06:00",
+ "updatedAt": "2026-11-19T03:30:17Z",
  "why": "[13:09 CST Nov 15, triage] Lane project-ops-roles handed in #3521 (head 3fce9a5a0, lane lint PASS). Goes to runner 10. (source: coordinator/lane message, relayed by triage; not owner-typed, undoable) New step; none existed.\n\n[20:19 CST Nov 15, triage] PR #3521: open, draft, head 33e459a8a745, REST read at 20:19 CST Nov 15 (pull_request_read; the PR's title or branch names this step's work).",
  "source": "coordinator/lane message, relayed by triage; not owner-typed",
- "note": "Lane project-ops-roles handed in #3521 (head 3fce9a5a0, lane lint PASS). Goes to runner 10. Guard or check: unverified (not relayed; triage read no PR).",
+ "note": "Lane project-ops-roles handed in #3521 (head 3fce9a5a0, lane lint PASS). Goes to runner 10. Guard or check: unverified (not relayed; triage read no PR).\nLanded: PR 3521 merged (67d200f0ab), rechecked by REST 2026-11-18 21:30 CST (triage 12).",
  "pr": 3521
 }

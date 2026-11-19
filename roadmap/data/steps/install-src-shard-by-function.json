@@ -1,15 +1,15 @@
 {
  "id": "install-src-shard-by-function",
  "title": "Install source split into shards by function",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "lane": "session_013NEJL1v6rTTEen8UAKXFHF",
  "owner": "triage",
  "blockedBy": [],
  "why": "12:43 CST Nov 15 (coordinator, relayed; its pick, none owner-typed, undoable; triage read no lane): NEW step, lane session_013NEJL1v6rTTEen8UAKXFHF started, doing now. Guard or check: no. Triage's reading: an install-source layout change, no verdict moves (reading from the name; unverified).\n\n[14:25 CST Nov 15, triage] #3541 (draft, lane): the lane's sharding of shell-macos adds a fourth macOS runner per PR run; ci-job-caps.md says the macOS jobs stay at 3 because a fourth would queue (checks-macos waited 379 s in run 41383013723, n=1). Options: (a) accept 4 and amend the record, (b) leg 2/2 on ubuntu, (c) drop the macOS sharding, keep the stripe and the run-exactly-once test. Coordinator picked (c): keeps the record true, no owner ruling needed. Basis: the record line and runner 10's report that CI is queue-bound. Lane told 14:25 CST (lane message 14:26 CST). (source: coordinator 14:25 CST, relayed by triage; not owner-typed, undoable)\n\n[20:19 CST Nov 15, triage] PR #3541: open, draft, head c2b1fb57cb51, REST read at 20:19 CST Nov 15 (pull_request_read; the PR's title or branch names this step's work).",
- "note": "Install source split into shards by function. Guard or check: no. Lane session_013NEJL1v6rTTEen8UAKXFHF.",
+ "note": "Install source split into shards by function. Guard or check: no. Lane session_013NEJL1v6rTTEen8UAKXFHF.\nLanded: PR 3541 merged (8a17c21393), rechecked by REST 2026-11-18 21:30 CST (triage 12).",
  "order": -300,
- "updatedAt": "2026-11-15T20:19:00-06:00",
+ "updatedAt": "2026-11-19T03:30:17Z",
  "pr": 3541
 }

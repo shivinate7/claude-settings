@@ -1,7 +1,7 @@
 {
  "id": "plain-push-asks-source-fix",
  "title": "Decision plain-push-asks cites an \"owner answer A\" that was a coordinator pick",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL3Qfr77MPmpYU76EMk",
@@ -9,7 +9,7 @@
  "blockedBy": [],
  "why": "docs/decisions/plain-push-asks.md lines 11 and 60 say \"owner answer A, 2026-11-11 09:12 CST\". At 09:12 CST the owner delegated, and the coordinator picked A (relayed at 09:14 CST). A wrong source makes a coordinator pick read as an owner ruling, and the past-ruling checks lean on that.",
  "source": "retrospective 48 h audit, 20:56 CST Nov 12",
- "note": "Fix: a one-line source edit at each of the two places: \"owner delegated 2026-11-11 09:12 CST; coordinator pick A, relayed 09:14 CST\". Prose only, express under R55; ruled prose path if a store entry backs it.",
- "updatedAt": "2026-11-17T13:39:30-06:00",
+ "note": "Fix: a one-line source edit at each of the two places: \"owner delegated 2026-11-11 09:12 CST; coordinator pick A, relayed 09:14 CST\". Prose only, express under R55; ruled prose path if a store entry backs it.\nLanded: PR 3083 merged (98db63e2c8), rechecked by REST 2026-11-18 21:30 CST (triage 12).",
+ "updatedAt": "2026-11-19T03:30:17Z",
  "pr": 3083
 }

@@ -1,15 +1,15 @@
 {
-  "id": "archive-refusal-names-add-repo",
-  "title": "The lane-archive guard's refusal names the add_repo access push route when it cannot read a lane's repo",
-  "status": "doing",
-  "pr": 3136,
-  "repo": "shivinate7/claude-settings",
-  "phase": "next",
-  "lane": "session_013NEJL12RbFvv4332eciB9j",
-  "owner": "triage",
-  "blockedBy": [],
-  "why": "lane-closes-after-records refused three times tonight on lane session-mailbox-followups because this session could not read the lane's second repo; add_repo fixed it at 09:08 CST. The owner asked (09:12 CST) that the fix be mechanical.",
-  "source": "retrospective 09:13 CST Nov 13, owner ask 09:12 CST",
-  "note": "Fix: when the archive guard cannot read a lane repo, its refusal names the act 'add_repo <owner>/<repo> access push, then retry', with the repo from the lane's cs-repo tag. Red first: a fixture lane whose repo read fails gets that remedy. The gap itself (archive-guard-child-repo-read) is a debt for the lane to file on main. 13:14 CST Nov 17 (coordinator relay, filed by triage 11): hook lane-closes-after-records refused archive_session twice, \"the open pull requests of the lane's repo (shivinate7/mailaudit) could not be read\". Measured by the coordinator: add_repo access read attaches nothing for a public repo, so the guard's gh could not read its PRs; access push fixed it. Owner 13:11 CST Nov 17 (page item 937 a, relayed): the guard reads a public repo's open PRs anonymously. REPLACED 14:20 CST Nov 17 (owner chat, relayed by the consultant; page item 940 b): consultant measured 14:15 CST that the cloud proxy refuses an unattached public repo even with no token (cli/cli 403, \"add_repo\"), so the anonymous read helps only local sessions. Owner: \"just do the option that has you add in the repo you need\". Now: NO anonymous read; the refusal says \"add_repo <owner>/<repo> access push, then retry\" (not read). Test-author red case first; review rounds apply. #3136 held at 764e0adf21 until rebuilt.",
-  "updatedAt": "2026-11-17T14:20:45-06:00"
+ "id": "archive-refusal-names-add-repo",
+ "title": "The lane-archive guard's refusal names the add_repo access push route when it cannot read a lane's repo",
+ "status": "done",
+ "pr": 3136,
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL12RbFvv4332eciB9j",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "lane-closes-after-records refused three times tonight on lane session-mailbox-followups because this session could not read the lane's second repo; add_repo fixed it at 09:08 CST. The owner asked (09:12 CST) that the fix be mechanical.",
+ "source": "retrospective 09:13 CST Nov 13, owner ask 09:12 CST",
+ "note": "Fix: when the archive guard cannot read a lane repo, its refusal names the act 'add_repo <owner>/<repo> access push, then retry', with the repo from the lane's cs-repo tag. Red first: a fixture lane whose repo read fails gets that remedy. The gap itself (archive-guard-child-repo-read) is a debt for the lane to file on main. 13:14 CST Nov 17 (coordinator relay, filed by triage 11): hook lane-closes-after-records refused archive_session twice, \"the open pull requests of the lane's repo (shivinate7/mailaudit) could not be read\". Measured by the coordinator: add_repo access read attaches nothing for a public repo, so the guard's gh could not read its PRs; access push fixed it. Owner 13:11 CST Nov 17 (page item 937 a, relayed): the guard reads a public repo's open PRs anonymously. REPLACED 14:20 CST Nov 17 (owner chat, relayed by the consultant; page item 940 b): consultant measured 14:15 CST that the cloud proxy refuses an unattached public repo even with no token (cli/cli 403, \"add_repo\"), so the anonymous read helps only local sessions. Owner: \"just do the option that has you add in the repo you need\". Now: NO anonymous read; the refusal says \"add_repo <owner>/<repo> access push, then retry\" (not read). Test-author red case first; review rounds apply. #3136 held at 764e0adf21 until rebuilt.\nLanded: PR 3136 merged (62b515246b), rechecked by REST 2026-11-18 21:30 CST (triage 12).",
+ "updatedAt": "2026-11-19T03:30:17Z"
 }
