@@ -1,0 +1,1 @@
+- guard-merge-dead-while: guard_merge.py:123-128 has a dead `while` for a repo flag before `pr`. gh_call_of already moves root flags (#2229 round 3).

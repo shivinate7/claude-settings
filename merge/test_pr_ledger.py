@@ -22,16 +22,30 @@ control assert reads that line's state first. A pull request with no line today 
 for it) runs before the act is read. The no-write case passes on the current code: it guards the cost the record states.
 The cases of NextActGaps, and the lane-lint and held-draft greens of NextActShapes, pass on the current code: each guards a rule
 the fix for the reds must keep.
+
+THE JSON OUTPUT (LedgerJson, decision pr-ledger part 3b): `merge --reviewed --json` prints one object, {readAt, rows}, where readAt
+is an ISO time with a zone and each row holds number, act, owner, ageHours, red and blockedOn (the pull number it is blocked on, or
+null). Its rows carry the same acts and RED as the text lines, the blocked-on red fix-up included. On a main without the flag the
+JSON case is refused with exit 2 at its first assert; that is a not-built red, not a semantic one, and the mutant case carries the
+semantic proof after the build.
 """
 import calendar
+import importlib.util
+import io
+import json
 import os
 import re
+import subprocess
 import sys
+import tarfile
+import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(HERE)  # the repo under test: its HEAD is the code the mutant case copies
 sys.path.insert(0, HERE)
 import test_merge as tm  # noqa: E402  the review-record fixtures, PullsHost and ReviewEnv (one home); importing it runs none of its cases
 
@@ -40,6 +54,8 @@ LIVE, OLD, OTHER = tm.REVIEW_HEAD, tm.REVIEW_OLD_HEAD, "3c" * 20  # the live hea
 NEXT_PART = re.compile(r"; next: (?P<act>[^;]+?), owner (?P<owner>[^,;]+), age (?P<age>[^,;]+?)(?P<red>, RED)?(?=;|$)")
 LONGEST_LINE = re.compile(r"^longest wait from a done record: (?P<hours>\d+(?:\.\d+)?)h$", re.M)
 NO_ACT_LINE = re.compile(r"^open PRs with no next act: (?P<count>\d+)$", re.M)
+# The one line of merge.py that holds a blocked-on pull's red (the fix-up loop in reviewed_read). The mutant case drops it.
+FIX_UP_LAST_LINE = '            got[3] = acts[at][0].startswith("blocked on") or acts[at][3]\n'
 
 
 def iso(hours_ago):
@@ -520,6 +536,78 @@ class LedgerCost(LedgerCase):
         self.reviewed(host)
         self.assertEqual(tree_state(), before, "a `merge --reviewed` run wrote or changed a file under its folder")
         self.assertEqual(threading.active_count(), threads, "a `merge --reviewed` run started a thread")
+
+
+class LedgerJson(LedgerCase):
+    """`merge --reviewed --json` (decision pr-ledger, part 3b): one row for each open pull request, with the act, owner, age in hours,
+    RED and blocked-on pull that its text line prints. The publisher puts the whole output under the live file's `ledger` key, so
+    the rows must carry the same acts, the blocked-on red fix-up included."""
+
+    def blocked_on_json_case(self):
+        """The body of the JSON case. It runs on the code under test, and the mutant case runs it on a mutant. Pull 7 is blocked on
+        pull 5, a done record that has waited 30 h for a batch, so it reads RED. Pull 9 is a draft with no record."""
+        def host():
+            return LedgerHost([pull(7, base="feat5", hours_ago=5), pull(5, hours_ago=2), pull(9, draft=True, hours_ago=2)],
+                              comments=[record(5, 30), lint(5)])
+
+        out = self.reviewed(host())
+        text = {n: self.next_part(out, n) for n in (5, 7, 9)}  # (act, owner, red) of each text line: the control
+        ages = {n: float(NEXT_PART.search(self.line_of(out, n)).group("age")[:-1]) for n in (5, 7, 9)}
+        rc, jout, jerr = self.run_args("--reviewed", "--json", host=host())
+        self.assertEqual(rc, 0, f"merge --reviewed --json exited {rc}, so it prints no JSON rows: {(jerr or jout).strip()}")
+        try:
+            payload = json.loads(jout)
+        except ValueError as err:
+            self.fail(f"merge --reviewed --json printed no JSON object: {err}")
+        self.assertIsInstance(payload, dict, "merge --reviewed --json printed a JSON value that is not an object")
+        self.assertRegex(str(payload.get("readAt")), r"(Z|[+-]\d{2}:\d{2})$", "the JSON has no readAt with a time zone")
+        rows = {r.get("number"): r for r in payload.get("rows") or [] if isinstance(r, dict)}
+        self.assertEqual(sorted(rows), [5, 7, 9], "scope: the JSON holds one row for each open pull request")
+        for n in (5, 7, 9):
+            act, owner, red = text[n]
+            row = rows[n]
+            self.assertEqual(row.get("act"), act, f"#{n}: the JSON act differs from its text line's act")
+            self.assertEqual(row.get("owner"), owner, f"#{n}: the JSON owner differs from its text line's owner")
+            self.assertEqual(bool(row.get("red")), red, f"#{n}: the JSON red differs from its text line's RED")
+            self.assertIsInstance(row.get("ageHours"), (int, float), f"#{n}: the JSON row has no numeric ageHours")
+            self.assertAlmostEqual(row["ageHours"], ages[n], places=1, msg=f"#{n}: the JSON ageHours differs from its text line's age")
+        self.assertEqual(rows[7].get("blockedOn"), 5, "#7 is blocked on #5, and its JSON row does not name pull 5")
+        self.assertIs(rows[7].get("red"), True,
+                      "#7 is blocked on #5, which reads RED, and its JSON row reads red false: the blocked-on red fix-up is not in the JSON")
+
+    def test_json_rows_carry_the_text_acts_and_the_blocked_on_red_fix_up(self):
+        self.blocked_on_json_case()
+
+    def test_the_json_case_kills_a_mutant_that_drops_the_blocked_on_fix_up(self):
+        self.blocked_on_json_case()  # the control: the case passes on the code under test
+        mutant = self.mutant_merge()
+        with mock.patch.object(tm, "merge", mutant), self.assertRaises(AssertionError) as caught:
+            self.blocked_on_json_case()
+        self.assertIn("blocked-on red fix-up is not in the JSON", str(caught.exception),
+                      "the mutant died of another cause: " + str(caught.exception))
+
+    def mutant_merge(self):
+        """merge/merge.py from HEAD with the blocked-on red fix-up dropped, loaded as its own module. The copy is a git archive, so it
+        holds no .git, and it sits in this run's folder, which lies outside every repository (test-practices P3). No repo file is written."""
+        scratch = tempfile.mkdtemp(dir=tm.run_folder())
+        archive = subprocess.run(["git", "-C", REPO, "archive", "--format=tar", "HEAD"], capture_output=True, check=True).stdout
+        with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+            tar.extractall(scratch, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
+        path = os.path.join(scratch, "merge", "merge.py")
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        self.assertEqual(source.count(FIX_UP_LAST_LINE), 1,
+                         "the blocked-on fix-up's last line is not in merge.py exactly once, so no mutant can be cut from it")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(source.replace(FIX_UP_LAST_LINE, "            pass\n"))
+        saved = list(sys.path)
+        try:
+            spec = importlib.util.spec_from_file_location("merge_mutant", path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        finally:
+            sys.path[:] = saved
+        return module
 
 
 if __name__ == "__main__":

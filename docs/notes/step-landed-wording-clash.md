@@ -1,0 +1,1 @@
+- step-landed-wording-clash: docs/decisions/session-tiers.md says "Its every step has landed" for the idle-lane list, but its archiving rule says "whatever its step status" for a superseded lane. The two read differently.

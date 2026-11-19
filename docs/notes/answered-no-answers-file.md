@@ -1,0 +1,1 @@
+- answered-no-answers-file: 252 of 827 closed items have no answers file, so a true claim on an old item refuses (filed 2026-11-15 14:58 CST, round 3 review). Decision: `answered-claims-match-page` (a claim that a waiting-page item is answered matches the page).

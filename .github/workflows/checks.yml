@@ -373,6 +373,9 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_all_jobs_passed.py
 
+      - name: Cancel-on-close workflow and script fixture suite
+        run: python3 lint/test_cancel_on_close.py
+
       - name: Scope detector fixture suite
         if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_ci_scope.py
@@ -656,6 +659,12 @@ jobs:
       - name: Skill model rows fixture suite
         run: python3 lint/test_check_skill_model_rows.py
 
+      - name: Project-ops roles check
+        run: python3 lint/check_project_ops_roles.py
+
+      - name: Project-ops roles fixture suite
+        run: python3 lint/test_check_project_ops_roles.py
+
       - name: Python 3.9 floor check
         if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/check_python_floor.py
@@ -782,6 +791,9 @@ jobs:
 
       - name: CI-wait cap fixture suite
         run: python3 hooks/test_ci_wait_cap.py
+
+      - name: Answered-claim fixture suite
+        run: python3 hooks/test_answered_claims.py
 
       - name: Handoff wave-2 fixture suite
         run: python3 hooks/test_handoff_wave2.py
@@ -1140,6 +1152,10 @@ jobs:
       - name: Merge tool review rows fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_review_policy.py
+
+      - name: Merge tool review tally fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 merge/test_review_tally.py
 
       - name: Merge launcher fixture suite (bin/merge)
         if: ${{ needs.scope.outputs.code == 'true' }}
@@ -2828,7 +2844,7 @@ jobs:
         with:
           job: checks-windows-rest-2
 
-  # The one check branch protection requires. It fails on a needed job that failed, was cancelled or was
+  # The rollup check. Main requires no check (merge.requiredChecks "none"); a repo set up with protect.py requires this one. It fails on a needed job that failed, was cancelled or was
   # skipped, so every needed job runs on a ready PR and puts its scope condition on its steps, never on the job. There are two
   # exceptions. The three macOS jobs start on a dispatch and a daily that runs only (owner, 01:33 CST Nov 16), so a PR skips
   # them and this job does not need them. The second is the job-level `if: needs.scope.outputs.records_only_skip != 'true'` on the

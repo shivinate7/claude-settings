@@ -11,7 +11,7 @@ Owner ruling, 11:20 CST, Nov 16, 2026, word for word: `"drop any and all private
 
 The ruling drops the GitHub-hosted jobs of the private repos (q_max, degen, home, and likely ios-adblock and joyous) and keeps their self-hosted jobs. The workflows were disabled by REST on 2026-11-16, not by this PR. The merge tool must merge with no CI run.
 
-Ruling `own-all-jobs-passed-removed` (owner, 2026-11-15 19:08 CST) takes the required check off these repos. Decision `main-branch-protection` holds the one-check rule for the repos that keep CI.
+Ruling `own-all-jobs-passed-removed` (owner, 2026-11-15 19:08 CST) takes the required check off these repos. Decision `main-branch-protection` holds the rule for the repos that keep CI: their `main` requires no status check.
 
 ## The value
 

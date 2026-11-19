@@ -1,1 +1,1 @@
-- ps-pipe-at-line-end: the check does not refuse a pipe that ends a line when the Unix tool is on the next line (hooks/question_form.py PS_BASH_FORMS). Decision: act-in-place
+- ps-pipe-at-line-end: the check does not refuse a pipe that ends a line when the Unix tool is on the next line (hooks/question_form.py PS_BASH_FORMS). Decision: act-in-place Seen: 2026-11-17 x1

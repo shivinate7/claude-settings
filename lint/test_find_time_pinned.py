@@ -40,6 +40,24 @@ SWIFT_CLOCKS = [
 SUMMARY_ZERO = "0 time-pinned in 0 files (sleep 0, elapsed-assert 0, test-cap 0, wait-cap 0); 0 unread"
 
 
+def summary_line(total, files, sleep=0, elapsed=0, hang_guards=0, unread=0):
+    """The one summary line. A hang guard (test-cap or wait-cap) is its own count: it is never added to the
+    total or the file count, and it is not a kind in the parenthesised list (test-practices P5)."""
+    return ("%d time-pinned in %d files (sleep %d, elapsed-assert %d); "
+            "hang guards %d (allowed; check each cap sits well above the run); %d unread"
+            % (total, files, sleep, elapsed, hang_guards, unread))
+
+
+def assert_summary(case, stdout, expected):
+    """The summary is the last line. The total and the file count come first, so a hang guard counted there
+    fails with that cause alone. Then the whole line, so a changed kinds list or hang guards count fails
+    with the summary-form cause alone."""
+    last = (stdout.splitlines() or [""])[-1]
+    case.assertEqual(last.split(" (", 1)[0], expected.split(" (", 1)[0],
+                     "a hang guard or test-cap is counted in the time-pinned total or files")
+    case.assertEqual(last, expected, "the summary line is not the pinned form")
+
+
 def src(*lines):
     return "\n".join(lines) + "\n"
 
@@ -83,8 +101,8 @@ class FinderCase(unittest.TestCase):
     def put(self, rel, text):
         put(self.root, rel, text)
 
-    def report(self):
-        proc = run(self.root, "--json")
+    def report(self, *extra):
+        proc = run(self.root, "--json", *extra)
         self.assertIn(proc.returncode, (0, 1), proc.stdout + proc.stderr)
         return proc.returncode, json.loads(proc.stdout)
 
@@ -903,6 +921,584 @@ class ExitCodeTest(FinderCase):
         self.assertIn("UNREAD tests/test_bad.py: ", proc.stdout)
 
 
+# ---- a poll interval in a loop that waits on a condition with a cap is a hang guard (P5) ------
+
+POLL_PATH = "tests/test_poll.py"
+
+
+class PollLoopTest(FinderCase):
+    """A sleep in a loop that waits on a condition with a cap is a wait-cap: listed, never counted. A sleep
+    with no condition, or with no cap, is a fixed wait and stays sleep. Each case pins the sleep line, not
+    the loop line."""
+
+    def listed(self, text, needle, *extra):
+        """The categories the finder gives the sleep line, and the exit code. Scope first (P7): the fixture is
+        read and the line has a finding at all."""
+        self.put(POLL_PATH, text)
+        code, out = self.report(*extra)
+        line = lineno(text, needle)
+        cats = {cat for path, ln, cat in self.rows(out) if ln == line}
+        self.assertTrue(cats, "scope: the sleep at line %d is not listed at all" % line)
+        return code, cats
+
+    def assert_wait_cap(self, text, needle):
+        # The default run exits 1 on any listed row. A wait-cap is a hang guard, so --check, which fails only
+        # on a sleep, an elapsed-assert or an unread file, is the route that must exit 0 for it.
+        code, cats = self.listed(text, needle, "--check")
+        self.assertEqual(cats, {"wait-cap"},
+                         "the poll interval is listed as %s, not wait-cap (a hang guard)" % sorted(cats))
+        self.assertEqual(code, 0, "a poll interval listed as wait-cap fails --check (exit %d)" % code)
+
+    def assert_sleep(self, text, needle):
+        _, cats = self.listed(text, needle)
+        self.assertEqual(cats, {"sleep"}, "the fixed wait is listed as %s, not sleep" % sorted(cats))
+
+    # The real shapes. Each names the site it copies, so the next reader can find it.
+
+    def test_deadline_in_the_while_test_and_an_if_return_in_the_body(self):
+        # janitor/test_sweep.py, _wait_for_pidport_file and _read_when_ready
+        text = src(
+            "import os",
+            "import time",
+            "",
+            "def wait_for_file(path, timeout=10.0):",
+            "    deadline = time.time() + timeout",
+            "    while time.time() < deadline:",
+            "        if os.path.exists(path) and os.path.getsize(path) > 0:",
+            "            return path",
+            "        time.sleep(0.05)",
+            "    raise AssertionError('never written: %r' % path)",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.05)")
+
+    def test_deadline_and_a_condition_in_the_while_test_with_monotonic_and_a_multi_line_test(self):
+        # janitor/test_sweep.py, the trash-folder wait
+        text = src(
+            "import time",
+            "",
+            "def wait_for_trash_gone(names, is_trash):",
+            "    deadline = time.monotonic() + 10",
+            "    while time.monotonic() < deadline and any(",
+            "            is_trash(n) for n in names()):",
+            "        time.sleep(0.2)",
+            "    return not any(is_trash(n) for n in names())",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.2)")
+
+    def test_deadline_and_a_condition_in_the_while_test_with_time_time(self):
+        # janitor/test_sweep.py, the reap wait
+        text = src(
+            "import time",
+            "",
+            "def wait_for_reap(pid_alive, pid):",
+            "    deadline = time.time() + 5",
+            "    while time.time() < deadline and pid_alive(pid):",
+            "        time.sleep(0.2)",
+            "    return not pid_alive(pid)",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.2)")
+
+    def test_a_negated_condition_and_a_stop_name_in_the_while_test(self):
+        # merge/test_merge.py, the held-call wait (the loop only)
+        text = src(
+            "import os",
+            "import time",
+            "",
+            "def wait_for_marker(marker):",
+            "    stop = time.time() + 60",
+            "    while not os.path.exists(marker) and time.time() < stop:",
+            "        time.sleep(0.05)",
+            "    return os.path.exists(marker)",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.05)")
+
+    def test_three_terms_in_the_while_test(self):
+        # merge/test_lane_lint.py, the lint-start wait
+        text = src(
+            "import time",
+            "",
+            "def wait_for_lint(calls, proc):",
+            "    deadline = time.time() + 60",
+            "    while not calls() and proc.poll() is None and time.time() < deadline:",
+            "        time.sleep(0.05)",
+            "    return calls()",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.05)")
+
+    def test_condition_in_the_while_test_and_the_cap_in_an_if_that_fails(self):
+        # janitor/test_sweep.py, the holder start
+        text = src(
+            "import os",
+            "import subprocess",
+            "import time",
+            "import unittest",
+            "",
+            "class Holder(unittest.TestCase):",
+            "    def start_holder(self, ready):",
+            "        holder = subprocess.Popen(['sleep', '30'])",
+            "        deadline = time.time() + 30",
+            "        while not os.path.exists(ready):",
+            "            if holder.poll() is not None or time.time() > deadline:",
+            "                self.fail('the holder never took the lock')",
+            "            time.sleep(0.02)",
+            "        return holder",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.02)")
+
+    def test_for_range_with_a_direct_condition_that_returns(self):
+        # lint/test_sim_lease.py, queue_waiter
+        text = src(
+            "import time",
+            "",
+            "class Waiter:",
+            "    def queue_waiter(self, status, pid):",
+            "        for _ in range(100):",
+            "            if mentions(status(), pid):",
+            "                return pid",
+            "            time.sleep(0.05)",
+            "        raise AssertionError('not on the queue')",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.05)")
+
+    def test_for_range_with_an_assign_before_the_condition_that_returns(self):
+        # lint/test_wait_pid.py, the child wait
+        text = src(
+            "import time",
+            "",
+            "def wait_for_child(stub, ps_parents):",
+            "    for _ in range(100):",
+            "        found = [p for p, parent in ps_parents().items() if parent == stub]",
+            "        if found:",
+            "            return found[0]",
+            "        time.sleep(0.05)",
+            "    return None",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.05)")
+
+    def test_for_range_with_a_condition_that_breaks(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_flag(flag):",
+            "    for _ in range(50):",
+            "        if flag.is_set():",
+            "            break",
+            "        time.sleep(0.1)",
+            "    return flag.is_set()",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.1)")
+
+    def test_while_true_with_a_condition_return_and_a_deadline_return(self):
+        # hooks/test_stall_watch.py, wait_until
+        text = src(
+            "import time",
+            "",
+            "def wait_until(cond, secs):",
+            "    deadline = time.monotonic() + secs",
+            "    while True:",
+            "        if cond():",
+            "            return True",
+            "        if time.monotonic() >= deadline:",
+            "            return False",
+            "        time.sleep(0.2)",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.2)")
+
+    # The controls. Each must stay sleep, and each passes on the old code.
+
+    def test_a_bare_sleep_before_an_assert_stays_sleep(self):
+        text = src(
+            "import time",
+            "import unittest",
+            "",
+            "class Settle(unittest.TestCase):",
+            "    def test_settles(self):",
+            "        time.sleep(1)",
+            "        self.assertTrue(ready())",
+        )
+        self.assert_sleep(text, "time.sleep(1)")
+
+    def test_a_loop_with_no_condition_and_no_cap_stays_sleep(self):
+        text = src("import time", "", "def test_forever():", "    while True:", "        time.sleep(1)")
+        self.assert_sleep(text, "time.sleep(1)")
+
+    def test_a_condition_with_no_cap_stays_sleep(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_ready():",
+            "    while not ready():",
+            "        time.sleep(0.05)",
+            "    return True",
+        )
+        self.assert_sleep(text, "time.sleep(0.05)")
+
+    def test_an_in_body_condition_with_no_cap_stays_sleep(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_ready(ready):",
+            "    while True:",
+            "        if ready():",
+            "            return True",
+            "        time.sleep(0.2)",
+        )
+        self.assert_sleep(text, "time.sleep(0.2)")
+
+    def test_a_fixed_count_with_no_condition_stays_sleep(self):
+        text = src(
+            "import time",
+            "",
+            "def settle():",
+            "    for _ in range(10):",
+            "        time.sleep(0.1)",
+        )
+        self.assert_sleep(text, "time.sleep(0.1)")
+
+    def test_a_deadline_with_no_condition_stays_sleep(self):
+        text = src(
+            "import time",
+            "",
+            "def pause(secs):",
+            "    deadline = time.monotonic() + secs",
+            "    while time.monotonic() < deadline:",
+            "        time.sleep(0.2)",
+        )
+        self.assert_sleep(text, "time.sleep(0.2)")
+
+    def test_a_sleep_after_the_loop_stays_sleep(self):
+        # merge/test_merge.py, the held call: the sleep follows the loop and its assert
+        text = src(
+            "import os",
+            "import time",
+            "",
+            "def wait_then_settle(marker, out):",
+            "    stop = time.time() + 60",
+            "    while not os.path.exists(marker) and time.time() < stop:",
+            "        time.sleep(0.05)",
+            "    assert os.path.exists(marker), 'the held call never started'",
+            "    time.sleep(4)  # a human watching the terminal gets this long before anything is said",
+            "    return out.getvalue()",
+        )
+        self.assert_sleep(text, "time.sleep(4)")
+
+    def test_a_branch_that_does_not_end_the_wait_stays_sleep(self):
+        text = src(
+            "import time",
+            "",
+            "def tick_for(secs, cond, log):",
+            "    deadline = time.monotonic() + secs",
+            "    while time.monotonic() < deadline:",
+            "        if cond():",
+            "            log.append('seen')",
+            "        time.sleep(0.2)",
+        )
+        self.assert_sleep(text, "time.sleep(0.2)")
+
+    def test_a_loop_shape_in_a_comment_or_a_string_stays_sleep(self):
+        text = src(
+            "import time",
+            "",
+            "# while time.monotonic() < deadline: a loop named in a comment",
+            "NOTE = \"don't wait: for _ in range(100): if ready: break\"",
+            "",
+            "def test_settles():",
+            "    time.sleep(1)",
+        )
+        self.assert_sleep(text, "time.sleep(1)")
+
+    def test_a_file_of_only_poll_loops_exits_0_with_the_hang_guards_uncounted(self):
+        text = src(
+            "import os",
+            "import time",
+            "",
+            "def wait_for_file(path, timeout=10.0):",
+            "    deadline = time.time() + timeout",
+            "    while time.time() < deadline:",
+            "        if os.path.exists(path):",
+            "            return path",
+            "        time.sleep(0.05)",
+            "    return None",
+            "",
+            "def wait_until(cond, secs):",
+            "    deadline = time.monotonic() + secs",
+            "    while True:",
+            "        if cond():",
+            "            return True",
+            "        if time.monotonic() >= deadline:",
+            "            return False",
+            "        time.sleep(0.2)",
+            "",
+            "def wait_for_flag(flag):",
+            "    for _ in range(50):",
+            "        if flag.is_set():",
+            "            break",
+            "        time.sleep(0.1)",
+            "    return flag.is_set()",
+        )
+        self.put(POLL_PATH, text)
+        proc = run(self.root, "--check")
+        self.assertNotIn("UNREAD", proc.stdout, "scope: the fixture was not read")
+        self.assertEqual(proc.returncode, 0,
+                         "a file whose only findings are poll-loop hang guards exits %d under --check, not 0"
+                         % proc.returncode)
+        assert_summary(self, proc.stdout, summary_line(0, 0, hang_guards=3))
+
+    # A raise or a fail in an if caps the loop. It does not end the wait, so the loop has no condition.
+
+    def test_for_range_with_an_if_that_raises_is_a_cap_not_a_condition(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(proc, ready):",
+            "    for _ in range(3):",
+            "        time.sleep(1)",
+            "        if proc.poll() is not None:",
+            "            raise RuntimeError('the child exited')",
+            "    return ready()",
+        )
+        self.assert_sleep(text, "time.sleep(1)")
+
+    def test_while_deadline_with_an_if_that_raises_is_a_cap_not_a_condition(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(proc, ready):",
+            "    deadline = time.monotonic() + 10",
+            "    while time.monotonic() < deadline:",
+            "        time.sleep(0.2)",
+            "        if proc.poll() is not None:",
+            "            raise RuntimeError('the child exited')",
+            "    return ready()",
+        )
+        self.assert_sleep(text, "time.sleep(0.2)")
+
+    def test_for_range_with_an_if_that_self_fails_is_a_cap_not_a_condition(self):
+        text = src(
+            "import time",
+            "import unittest",
+            "",
+            "class Child(unittest.TestCase):",
+            "    def wait_for_ready(self, proc, ready):",
+            "        for _ in range(3):",
+            "            time.sleep(1)",
+            "            if proc.poll() is not None:",
+            "                self.fail('the child exited')",
+            "        self.assertTrue(ready())",
+        )
+        self.assert_sleep(text, "time.sleep(1)")
+
+    def test_while_deadline_with_an_if_that_calls_fail_is_a_cap_not_a_condition(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(proc, ready):",
+            "    deadline = time.monotonic() + 10",
+            "    while time.monotonic() < deadline:",
+            "        time.sleep(0.2)",
+            "        if proc.poll() is not None:",
+            "            fail('the child exited')",
+            "    return ready()",
+        )
+        self.assert_sleep(text, "time.sleep(0.2)")
+
+    # The controls for the raise and fail cases: the same loops with a break or a return stay wait-cap.
+
+    def test_control_for_range_with_an_if_that_breaks_stays_wait_cap(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(proc, ready):",
+            "    for _ in range(3):",
+            "        time.sleep(1)",
+            "        if proc.poll() is not None:",
+            "            break",
+            "    return ready()",
+        )
+        self.assert_wait_cap(text, "time.sleep(1)")
+
+    def test_control_for_range_with_an_if_that_returns_stays_wait_cap(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(proc, ready):",
+            "    for _ in range(3):",
+            "        time.sleep(1)",
+            "        if proc.poll() is not None:",
+            "            return None",
+            "    return ready()",
+        )
+        self.assert_wait_cap(text, "time.sleep(1)")
+
+    def test_control_while_deadline_with_an_if_that_breaks_stays_wait_cap(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(proc, ready):",
+            "    deadline = time.monotonic() + 10",
+            "    while time.monotonic() < deadline:",
+            "        time.sleep(0.2)",
+            "        if proc.poll() is not None:",
+            "            break",
+            "    return ready()",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.2)")
+
+    # A break in an inner loop leaves that loop, not the outer one. A fixed window that decides the verdict
+    # is a sleep too.
+
+    def test_a_break_in_an_inner_loop_does_not_end_the_outer_wait(self):
+        text = src(
+            "import time",
+            "",
+            "def settle(flags, xs):",
+            "    for _ in range(3):",
+            "        time.sleep(1)",
+            "        if flags.on:",
+            "            for x in xs:",
+            "                break",
+            "    return True",
+        )
+        self.assert_sleep(text, "time.sleep(1)")
+
+    def test_control_a_break_in_the_if_itself_stays_wait_cap(self):
+        text = src(
+            "import time",
+            "",
+            "def settle(flags, xs):",
+            "    for _ in range(3):",
+            "        time.sleep(1)",
+            "        if flags.on:",
+            "            break",
+            "    return True",
+        )
+        self.assert_wait_cap(text, "time.sleep(1)")
+
+    def test_a_fixed_window_that_decides_the_verdict_stays_sleep(self):
+        # janitor/test_session_end_sweep.py, assert_heartbeat_stops: the 1 s window is the verdict
+        text = src(
+            "import time",
+            "",
+            "def assert_heartbeat_stops(case, read_beat, path):",
+            "    last = read_beat(path)",
+            "    deadline = time.time() + 10",
+            "    while True:",
+            "        time.sleep(1.0)",
+            "        now = read_beat(path)",
+            "        if now == last:",
+            "            return",
+            "        if time.time() > deadline:",
+            "            case.fail('the heartbeat still moves')",
+            "        last = now",
+        )
+        self.assert_sleep(text, "time.sleep(1.0)")
+
+    # An if break inside an inner loop leaves that inner loop, so the outer wait has no condition there. An if
+    # return inside an inner loop ends the function, so it is the wait's end and stays a condition (the controls).
+
+    def test_an_if_break_in_an_inner_loop_does_not_end_the_outer_range_wait(self):
+        text = src(
+            "import time",
+            "",
+            "def settle(xs):",
+            "    for _ in range(3):",
+            "        time.sleep(1)",
+            "        for x in xs:",
+            "            if x.ready:",
+            "                break",
+            "    return True",
+        )
+        self.assert_sleep(text, "time.sleep(1)")
+
+    def test_an_if_break_in_an_inner_loop_does_not_end_the_outer_deadline_wait(self):
+        text = src(
+            "import time",
+            "",
+            "def settle(xs):",
+            "    deadline = time.monotonic() + 10",
+            "    while time.monotonic() < deadline:",
+            "        time.sleep(0.2)",
+            "        for x in xs:",
+            "            if x.ready:",
+            "                break",
+            "    return True",
+        )
+        self.assert_sleep(text, "time.sleep(0.2)")
+
+    def test_control_an_if_return_in_an_inner_loop_stays_wait_cap(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(xs):",
+            "    for _ in range(3):",
+            "        time.sleep(1)",
+            "        for x in xs:",
+            "            if x.ready:",
+            "                return x",
+            "    return None",
+        )
+        self.assert_wait_cap(text, "time.sleep(1)")
+
+    def test_control_deadline_while_an_if_return_in_an_inner_loop_stays_wait_cap(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(xs):",
+            "    deadline = time.monotonic() + 10",
+            "    while time.monotonic() < deadline:",
+            "        time.sleep(0.2)",
+            "        for x in xs:",
+            "            if x.ready:",
+            "                return x",
+            "    return None",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.2)")
+
+    # Known limit: the finder lists this real poll as sleep. In a while True, a deadline that only fails is a
+    # fixed window, not a cap (is_hang_guard_poll). The pin fails if the row moves, so the move is seen.
+
+    def test_known_limit_while_true_with_a_failing_deadline_reads_sleep(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_until_ready(cond, deadline_at):",
+            "    while True:",
+            "        if cond():",
+            "            break",
+            "        if time.monotonic() > deadline_at:",
+            "            fail('the poll timed out')",
+            "        time.sleep(0.05)",
+            "    return True",
+        )
+        _, cats = self.listed(text, "time.sleep(0.05)")
+        self.assertEqual(cats, {"sleep"},
+                         "known limit (a real poll the finder lists as sleep): this while True poll with a failing "
+                         "deadline now reads %s, not sleep; moving it is a decision to record" % sorted(cats))
+
+    def test_heartbeat_spelling_with_the_deadline_in_the_while_test_is_wait_cap(self):
+        # The fixed window above with its deadline moved into the while test. The deadline is a cap, and the
+        # return is the wait's end, so this is a hang guard.
+        text = src(
+            "import time",
+            "",
+            "def assert_heartbeat_stops(case, read_beat, path):",
+            "    last = read_beat(path)",
+            "    deadline = time.time() + 10",
+            "    while time.time() < deadline:",
+            "        time.sleep(1.0)",
+            "        now = read_beat(path)",
+            "        if now == last:",
+            "            return",
+            "        last = now",
+            "    case.fail('the heartbeat still moves')",
+        )
+        code, cats = self.listed(text, "time.sleep(1.0)", "--check")
+        self.assertEqual(cats, {"wait-cap"},
+                         "the heartbeat spelling with the deadline in the while test is listed as %s, not wait-cap"
+                         % sorted(cats))
+        self.assertEqual(code, 0, "the heartbeat spelling is wait-cap and fails --check (exit %d)" % code)
+
+
 # ---- helper taint, assert arguments, a Playwright wait, an unlistable folder --------------
 
 class HelperTaintTest(FinderCase):
@@ -1658,6 +2254,380 @@ class KeepMarkerOutputTest(FinderCase):
         self.assertTrue(out_lines[-1].startswith("1 time-pinned in 1 files (sleep 1,"),
                         "the summary counts the kept lines: " + out_lines[-1])
         self.assertIn("kept 50", out_lines[-1], "the summary does not count all 50 kept lines")
+
+
+# ---- check mode: --check fails on a sleep, an elapsed-assert or an unread file only ---------------------
+
+class CheckModeTest(FinderCase):
+    """--check fails on a sleep, an elapsed-assert or an unread file. It does not fail on a wait-cap or a
+    test-cap. The flag is new, so an unknown flag prints nothing. Each check run asserts the listing first,
+    which names that cause and keeps every red a failure, never a crash."""
+
+    def checked(self):
+        proc = run(self.root, "--check", "--json")
+        self.assertTrue(proc.stdout.strip(),
+                        "--check printed no listing (exit %d, stderr %r): the flag is not recognised"
+                        % (proc.returncode, proc.stderr[-200:]))
+        return proc.returncode, json.loads(proc.stdout)
+
+    def put_cap_only(self):
+        text = src(
+            "import pytest",
+            "import subprocess",
+            "",
+            "@pytest.mark.timeout(30)",
+            "def test_waits(p, cmd):",
+            "    subprocess.run(cmd, timeout=5)",
+            "    p.wait(timeout=3)",
+        )
+        self.put("tests/test_caps_only.py", text)
+        return text
+
+    def test_check_fails_on_a_sleep(self):
+        text = src("import time", "", "def test_wait():", "    time.sleep(1)")
+        self.put("tests/test_wait.py", text)
+        _, plain = self.report()
+        sleep_row = ("tests/test_wait.py", lineno(text, "time.sleep(1)"), "sleep")
+        self.assertIn(sleep_row, self.rows(plain), "scope: the sleep is not listed without --check")
+        code, out = self.checked()
+        self.assertEqual(code, 1, "--check exits %d on a sleep, not 1" % code)
+        self.assertIn(sleep_row, self.rows(out), "--check does not list the sleep")
+
+    def test_check_fails_on_an_elapsed_assert(self):
+        text = src(
+            "import time",
+            "",
+            "def test_budget():",
+            "    t0 = time.monotonic()",
+            "    assert time.monotonic() - t0 < 1",
+        )
+        self.put("tests/test_budget.py", text)
+        _, plain = self.report()
+        row = ("tests/test_budget.py", lineno(text, "assert time.monotonic() - t0 < 1"), "elapsed-assert")
+        self.assertIn(row, self.rows(plain), "scope: the elapsed-assert is not listed without --check")
+        code, out = self.checked()
+        self.assertEqual(code, 1, "--check exits %d on an elapsed-assert, not 1" % code)
+        self.assertIn(row, self.rows(out), "--check does not list the elapsed-assert")
+
+    def test_check_fails_on_an_unread_file(self):
+        self.put("tests/test_bad.py", "def broken(:\n    pass\n")
+        plain = json.loads(run(self.root, "--json").stdout)
+        self.assertEqual([u["path"] for u in plain["unread"]], ["tests/test_bad.py"],
+                         "scope: the file is not listed unread without --check")
+        code, out = self.checked()
+        self.assertEqual(code, 2, "--check exits %d on an unread file alone, not 2" % code)
+        self.assertEqual([u["path"] for u in out["unread"]], ["tests/test_bad.py"],
+                         "--check does not list the unread file")
+
+    def test_check_passes_when_only_wait_caps_and_test_caps_are_listed(self):
+        self.put_cap_only()
+        _, plain = self.report()
+        self.assertEqual({cat for _, _, cat in self.rows(plain)}, {"wait-cap", "test-cap"},
+                         "scope: the caps are not listed without --check")
+        code, _ = self.checked()
+        self.assertEqual(code, 0, "--check fails on a wait-cap or a test-cap (exit %d)" % code)
+
+    def test_without_the_check_a_cap_only_fixture_still_exits_1(self):
+        text = self.put_cap_only()
+        code, out = self.report()
+        self.assertEqual(code, 1, "without --check a wait-cap or a test-cap exits %d, not 1" % code)
+        self.assertEqual(self.rows(out), pinned(
+            "tests/test_caps_only.py", text,
+            ("@pytest.mark.timeout(30)", "test-cap"), ("subprocess.run(cmd, timeout=5)", "wait-cap"),
+            ("p.wait(timeout=3)", "wait-cap"),
+        ))
+
+
+# ---- an assertLess on a result's .elapsed is an elapsed-assert (lint/test_wait_pid.py has four) --------
+
+class AssertLessElapsedTest(FinderCase):
+    def test_assertless_on_an_elapsed_attribute_is_an_elapsed_assert(self):
+        text = src(
+            "import unittest",
+            "",
+            "class WaitTest(unittest.TestCase):",
+            "    def test_returns_at_once(self):",
+            "        r = run_child()",
+            "        self.assertLess(r.elapsed, 5)",
+            "",
+            "    def test_message_after_the_bound(self):",
+            "        r = run_child()",
+            "        self.assertLess(r.elapsed, 5, \"did not return at once\")",
+            "",
+            "    def test_other_name_and_bound(self):",
+            "        result = run_child()",
+            "        self.assertLess(result.elapsed, 10)",
+        )
+        self.put("tests/test_wait_elapsed.py", text)
+        code, out = self.report()
+        self.assertEqual(out["unread"], [], "scope: the fixture was not read")
+        self.assertEqual(self.rows(out), pinned(
+            "tests/test_wait_elapsed.py", text,
+            ("self.assertLess(r.elapsed, 5)", "elapsed-assert"),
+            ("did not return at once", "elapsed-assert"),
+            ("self.assertLess(result.elapsed, 10)", "elapsed-assert"),
+        ), "an assertLess on a result's .elapsed is not listed as elapsed-assert")
+
+    def test_assertless_on_a_count_or_an_elapsed_message_is_clean(self):
+        text = src(
+            "import time",
+            "import unittest",
+            "",
+            "class CleanTest(unittest.TestCase):",
+            "    def test_count(self):",
+            "        r = run_child()",
+            "        self.assertLess(r.count, 5)",
+            "",
+            "    def test_elapsed_only_in_the_message(self):",
+            "        r = run_child()",
+            "        self.assertLess(len(r.out), 5, \"elapsed %s\" % r.elapsed)",
+            "",
+            "    def test_scope_sleep(self):",
+            "        time.sleep(1)",
+        )
+        self.put("tests/test_wait_clean.py", text)
+        code, out = self.report()
+        sleep_row = ("tests/test_wait_clean.py", lineno(text, "time.sleep(1)"), "sleep")
+        self.assertIn(sleep_row, self.rows(out), "scope: the fixture's sleep is not listed, so it was not scanned")
+        self.assertEqual({row for row in self.rows(out) if row[2] == "elapsed-assert"}, set(),
+                         "an assertLess on r.count or on a message is listed as elapsed-assert")
+
+    def test_value_checks_on_elapsed_are_not_elapsed_asserts(self):
+        # An equality checks one value. It sets no bound on the clock, so it is not a wall-clock bound.
+        text = src(
+            "import time",
+            "import unittest",
+            "",
+            "class ValueTest(unittest.TestCase):",
+            "    def test_zero_elapsed(self):",
+            "        job = run_child()",
+            "        assert job.elapsed == 0",
+            "",
+            "    def test_exact_elapsed(self):",
+            "        stats = run_child()",
+            "        self.assertEqual(stats.elapsed, 3)",
+            "",
+            "    def test_scope_sleep(self):",
+            "        time.sleep(1)",
+        )
+        self.put("tests/test_value_elapsed.py", text)
+        code, out = self.report()
+        sleep_row = ("tests/test_value_elapsed.py", lineno(text, "time.sleep(1)"), "sleep")
+        self.assertIn(sleep_row, self.rows(out), "scope: the fixture's sleep is not listed, so it was not scanned")
+        self.assertEqual({row for row in self.rows(out) if row[2] == "elapsed-assert"}, set(),
+                         "an equality on .elapsed is listed as elapsed-assert, but it is a value check, not a bound")
+
+    def helper_bound_rows(self, assert_line):
+        """Scans one fixture whose test holds assert_line, with a sleep as the scope sentinel. Returns (text, rows)."""
+        rel = "tests/test_helper_bound.py"
+        text = src(
+            "import time",
+            "import unittest",
+            "",
+            "class HelperBoundTest(unittest.TestCase):",
+            "    def test_bound(self):",
+            "        r = run_child()",
+            "        " + assert_line,
+            "",
+            "    def test_scope_sleep(self):",
+            "        time.sleep(1)",
+        )
+        self.put(rel, text)
+        _, out = self.report()
+        sleep_row = (rel, lineno(text, "time.sleep(1)"), "sleep")
+        self.assertIn(sleep_row, self.rows(out), "scope: the fixture's sleep is not listed, so it was not scanned")
+        return text, self.rows(out)
+
+    def test_bound_on_elapsed_inside_a_helper_call_is_an_elapsed_assert(self):
+        line = "assert to_ms(r.elapsed) < 100"
+        text, rows = self.helper_bound_rows(line)
+        self.assertIn(("tests/test_helper_bound.py", lineno(text, line), "elapsed-assert"), rows,
+                      "an assert bound on to_ms(r.elapsed) is not listed as elapsed-assert")
+
+    def test_assertless_bound_on_elapsed_inside_a_helper_call_is_an_elapsed_assert(self):
+        line = "self.assertLess(to_ms(r.elapsed), 100)"
+        text, rows = self.helper_bound_rows(line)
+        self.assertIn(("tests/test_helper_bound.py", lineno(text, line), "elapsed-assert"), rows,
+                      "an assertLess bound on to_ms(r.elapsed) is not listed as elapsed-assert")
+
+
+# ---- a file over 1 MB is read, a file over 8 MB is unread ------------------------------------------
+
+EIGHT_MB = 8 * 1024 * 1024  # 8 MiB: over the 8,000,000 bytes that "8 MB" may also mean
+
+
+def comment_padded(total, head, tail):
+    """Python source of at least `total` bytes: the head lines, comment lines of 100 bytes each, then the tail
+    lines. Comments scan in a fraction of a second, so the byte count is the only thing a case probes."""
+    fixed = len(src(*head, *tail).encode("utf-8"))
+    pad = ["# " + "p" * 97] * max(0, -(-(total - fixed) // 100))  # 100 bytes a line, newline included
+    return src(*head, *pad, *tail)
+
+
+class BigFileTest(FinderCase):
+    def test_a_file_over_one_megabyte_is_read_and_its_late_sleep_is_listed(self):
+        # About 1.75 MB. merge/test_merge.py is the real file over the 1 MB limit, at 1.7 MB. The sleep sits
+        # past the first megabyte, so a read that stops there misses it.
+        text = comment_padded(1_750_000, ["import time"], ["", "def test_late():", "    time.sleep(1)"])
+        size = len(text.encode("utf-8"))
+        self.assertTrue(1_000_000 < size < 2_000_000, "scope: the fixture is %d bytes, not 1 MB to 2 MB" % size)
+        self.put("tests/test_big.py", text)
+        proc = run(self.root, "--json")
+        out = json.loads(proc.stdout)
+        self.assertEqual(out["unread"], [], "a file over 1 MB is listed unread, not read")
+        self.assertEqual(self.rows(out), pinned(
+            "tests/test_big.py", text, ("time.sleep(1)", "sleep"),
+        ), "the sleep past the 1 MB mark is not listed")
+        self.assertEqual(proc.returncode, 1, proc.stdout[-200:])
+
+    def over_cap_text(self):
+        # Over 8 MB under both readings. The sleep sits near the top, so a read that scans the file lists it.
+        text = comment_padded(EIGHT_MB + 1, ["import time", "", "def test_head():", "    time.sleep(1)"],
+                              ["", "def test_tail():", "    pass"])
+        self.assertGreater(len(text.encode("utf-8")), EIGHT_MB, "scope: the fixture is not over 8 MiB")
+        return text
+
+    def test_a_file_over_8_mb_is_listed_unread(self):
+        self.put("tests/test_over_cap.py", self.over_cap_text())
+        proc = run(self.root, "--json")
+        out = json.loads(proc.stdout)
+        self.assertEqual([u["path"] for u in out["unread"]], ["tests/test_over_cap.py"],
+                         "a file over 8 MB is read, not listed unread")
+        self.assertEqual(proc.returncode, 2, "a file over 8 MB alone exits %d, not 2" % proc.returncode)
+
+    def test_a_file_over_8_mb_is_not_scanned(self):
+        self.put("tests/test_over_cap.py", self.over_cap_text())
+        out = json.loads(run(self.root, "--json").stdout)
+        self.assertEqual(self.rows(out), set(), "a file over 8 MB is scanned: its sleep is listed as a finding")
+
+    def test_a_file_under_8_mb_and_an_empty_file_are_read(self):
+        text = comment_padded(7 * 1024 * 1024, ["import time", "", "def test_head():", "    time.sleep(1)"], [""])
+        self.assertLess(len(text.encode("utf-8")), 8_000_000, "scope: the fixture is not under 8 MB")
+        self.put("tests/test_under_cap.py", text)
+        self.put("tests/test_empty.py", "")
+        proc = run(self.root, "--json")
+        out = json.loads(proc.stdout)
+        self.assertEqual(out["unread"], [], "a file under 8 MB or an empty file is listed unread")
+        self.assertEqual(self.rows(out), pinned(
+            "tests/test_under_cap.py", text, ("time.sleep(1)", "sleep"),
+        ), "the sleep in a file under 8 MB is not listed")
+        self.assertEqual(proc.returncode, 1, proc.stdout[-200:])
+
+
+# ---- a clock read that a same-file helper returns, followed into the test that calls the helper -------
+
+class HelperFollowTest(FinderCase):
+    """A test's call to a helper in the same file. A clock read that the helper returns reaches the assert
+    that holds the call, one helper deep or two. A helper that no test calls, and a local that shadows a
+    helper's name, are not followed. The two red cases fail on the old code. The three controls pass on it."""
+
+    def test_helper_that_sleeps_is_listed_at_its_sleep_once(self):
+        text = src(
+            "import time",
+            "",
+            "",
+            "def _settle():",
+            "    time.sleep(1)",
+            "",
+            "",
+            "def test_waits():",
+            "    _settle()",
+            "    assert True",
+        )
+        self.put("tests/test_sleep_helper.py", text)
+        code, out = self.report()
+        self.assertEqual(self.rows(out), pinned(
+            "tests/test_sleep_helper.py", text, ("time.sleep(1)", "sleep"),
+        ), "a sleep in a helper that a test calls is not listed once, at its own line")
+        self.assertEqual(code, 1)
+
+    def test_clock_read_a_helper_returns_reaches_the_test_assert(self):
+        text = src(
+            "import time",
+            "",
+            "",
+            "def _age(t0):",
+            "    return time.monotonic() - t0",
+            "",
+            "",
+            "def test_budget():",
+            "    t0 = time.monotonic()",
+            "    assert _age(t0) < 1",
+        )
+        self.put("tests/test_one_helper.py", text)
+        code, out = self.report()
+        self.assertEqual(self.rows(out), pinned(
+            "tests/test_one_helper.py", text, ("assert _age(t0) < 1", "elapsed-assert"),
+        ), "a clock read that a same-file helper returns is not followed into the test's assert")
+        self.assertEqual(code, 1)
+
+    def test_clock_read_two_helpers_deep_reaches_the_test_assert(self):
+        text = src(
+            "import time",
+            "",
+            "",
+            "def _now():",
+            "    return time.monotonic()",
+            "",
+            "",
+            "def _age(t0):",
+            "    return _now() - t0",
+            "",
+            "",
+            "def test_budget():",
+            "    t0 = time.monotonic()",
+            "    assert _age(t0) < 1",
+        )
+        self.put("tests/test_two_deep.py", text)
+        code, out = self.report()
+        self.assertEqual(self.rows(out), pinned(
+            "tests/test_two_deep.py", text, ("assert _age(t0) < 1", "elapsed-assert"),
+        ), "a clock read two same-file helpers deep is not followed into the test's assert")
+        self.assertEqual(code, 1)
+
+    def test_helper_no_test_calls_is_not_followed(self):
+        text = src(
+            "import time",
+            "",
+            "",
+            "def _age(t0):",
+            "    return time.monotonic() - t0",
+            "",
+            "",
+            "def test_fast():",
+            "    assert time.time() > 0",
+        )
+        self.put("tests/test_uncalled.py", text)
+        code, out = self.report()
+        sibling = ("tests/test_uncalled.py", lineno(text, "assert time.time() > 0"), "elapsed-assert")
+        self.assertIn(sibling, self.rows(out), "scope: the sibling assert is not listed, so the file was not read")
+        self.assertEqual(self.rows(out), {sibling},
+                         "a helper that no test calls is followed: its clock return is listed")
+        self.assertEqual(code, 1)
+
+    def test_local_that_shadows_a_helper_name_is_not_followed(self):
+        text = src(
+            "import time",
+            "",
+            "",
+            "def _age(t0):",
+            "    return time.monotonic() - t0",
+            "",
+            "",
+            "def test_shadowed():",
+            "    def _age(t0):",
+            "        return 0.0",
+            "    t0 = time.monotonic()",
+            "    assert _age(t0) < 1",
+            "    assert time.time() > 0",
+        )
+        self.put("tests/test_shadowed.py", text)
+        code, out = self.report()
+        sibling = ("tests/test_shadowed.py", lineno(text, "assert time.time() > 0"), "elapsed-assert")
+        self.assertIn(sibling, self.rows(out), "scope: the sibling assert is not listed, so the file was not read")
+        self.assertEqual(self.rows(out), {sibling},
+                         "a call to a local that shadows a helper's name is followed to the module helper")
+        self.assertEqual(code, 1)
 
 
 if __name__ == "__main__":

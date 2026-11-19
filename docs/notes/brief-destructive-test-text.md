@@ -1,0 +1,1 @@
+- brief-destructive-test-text: brief-destructive-git refuses a brief that holds a hard-reset command as test text. Possible false alarm. It becomes a debt on a second sighting (PR #2494).
