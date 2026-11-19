@@ -1,10 +1,10 @@
 {
  "id": "sim-drive-needs-lease",
  "at": "2026-11-07T16:13:00-06:00",
- "title": "A session with no live lease of its own may not drive a booted phone.",
- "ruling": "Coordinator ruling, 2026-11-07 16:13 CST, from the owner's 2026-11-02 sim rulings (ruling 12 of decision sim-test-is-the-one-boot-path). Every session leases the shared phone before it uses it. A session with no live lease that drives a booted phone is refused, and the remedy names sim-lease take or sim-test --hold. Not on main; the PR adds guard rule simulator-drive-lease.",
- "quote": "Ruling: coordinator 2026-11-07 16:13 CST, from the owner's 2026-11-02 sim rulings. Every session leases the shared phone before it uses it. A session with no live lease that drives a booted phone is refused, and the remedy names `sim-lease take` or `sim-test --hold`.",
- "source": "PR 1692 body, quoting the coordinator. https://github.com/shivinate7/claude-settings/pull/1692 Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "title": "A run that reuses an already booted simulator takes no lease.",
+ "ruling": "Rewritten 2026-11-18 20:56 CST by triage to match main, on the consultant's ruling of 20:52 CST Nov 18 on page item 737 (option a, main's rules win; the consultant speaks for the owner under own-consultant-speaks-for-owner); wording from PR 3704's body (open draft, read by REST 20:56 CST). A run that reuses an already booted simulator takes no lease. sim-test takes a lease only on its own boot (decision sim-lease-tool, ruling 4). The earlier text (every session leases the shared phone before it drives it) is replaced.",
+ "quote": "A run that reuses an already booted simulator takes no lease. `sim-test` takes a lease only on its own boot (decision `sim-lease-tool`, ruling 4).",
+ "source": "PR 1692 body, quoting the coordinator. https://github.com/shivinate7/claude-settings/pull/1692 Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so. Rewrite source: page item 737 and PR 3704.",
  "status": "open",
  "step": "sim-lease-gaps"
 }
