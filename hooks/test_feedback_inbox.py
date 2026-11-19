@@ -25,6 +25,11 @@ Capture: hooks/local_time.py (env LOCAL_TIME_UNDER_TEST overrides the path). A U
     were working:`, the CLI's mid-turn frame), then a newline and that tag.
   - A peer session's message is never captured. It starts with `<cross-session-message`, the tag
     the harness puts on a send_message from another session. A tag quoted mid-message is owner text.
+  - A bash-input echo is never captured. It is a prompt that is only the record a `!` command leaves:
+    a `<bash-input>` block, or `<bash-stdout>` and `<bash-stderr>` blocks, with whitespace around.
+    A tag quoted mid-message is owner text, and owner words after an echo are saved.
+  - A bare paste is never captured. It is a prompt that is only `<pasted_content>` blocks and
+    whitespace. Owner words around a paste are saved verbatim.
   - A lone surrogate in the text (JSON escape `\\ud800`) is either saved with U+FFFD (the
     replacement character) in its place, or stdout carries a line that says `not saved`. Never
     silent. The inbox stays strict UTF-8.
@@ -2875,6 +2880,90 @@ def case_cross_session_tag_mid_line_is_owner_text():
           captured_texts(cfg, sid))
 
 
+# --------------------------------------------------------------------------- bash echo and bare paste cases
+
+# The records the harness writes for a `!` command: the typed command, then its output.
+BASH_ECHOES = (
+    ("the input record", "<bash-input>git status --short</bash-input>"),
+    ("the output record", "<bash-stdout>a.txt\nb.txt</bash-stdout><bash-stderr></bash-stderr>"),
+    ("an empty output record", "<bash-stdout></bash-stdout><bash-stderr></bash-stderr>"),
+    ("a multi-line input record", "<bash-input>cat <<'EOF'\nline one\nline two\nEOF</bash-input>"),
+    ("a multi-line output record with whitespace around",
+     "\n<bash-stdout>ok\nok\nok</bash-stdout>\n<bash-stderr></bash-stderr>\n"),
+)
+# A paste with no words of the owner's own around it.
+BARE_PASTES = (
+    ("one paste block", '<pasted_content index="1">reviewers please audit</pasted_content>'),
+    ("two paste blocks", '<pasted_content index="1">first paste</pasted_content>\n'
+                         '<pasted_content index="2">second paste</pasted_content>'),
+    ("a multi-line paste with whitespace around",
+     '\n<pasted_content index="1">line one\nline two\nline three</pasted_content>\n'),
+)
+OWNER_WORDS_AROUND_PASTE = (
+    ("words before the paste", 'send opus now <pasted_content index="1">reviewers please audit</pasted_content>'),
+    ("words after the paste", '<pasted_content index="1">reviewers please audit</pasted_content>\nthen the refactor'),
+    ("words on both sides", 'look at this <pasted_content index="1">reviewers please audit</pasted_content> then the refactor'),
+    ("a line of words above a paste", 'the reviewers said:\n<pasted_content index="1">reviewers please audit</pasted_content>'),
+)
+BASH_TAGS_IN_OWNER_TEXT = (
+    ("a bash-input tag quoted mid-sentence", "the log shows a <bash-input> tag I did not expect"),
+    ("a bash-stdout tag quoted mid-line", "the output had <bash-stdout>ok</bash-stdout> in it, check why"),
+    ("owner words after an input record", "<bash-input>ls</bash-input>\nwhy is the list empty?"),
+)
+
+
+def case_bash_input_echo_is_not_filed():
+    """A prompt that is only a bash-input echo is not an owner message: it is not saved, and a turn
+    of it and one short owner note does not block Stop."""
+    for label, echo in BASH_ECHOES:
+        cfg, sid = new_cfg(), "bash-echo"
+        p = capture(cfg, sid, echo)
+        check("bash echo, %s: hook ran" % label, ran_central(p), p.desc())
+        check("bash echo, %s: not saved as an owner message" % label, captured_texts(cfg, sid) == [],
+              captured_texts(cfg, sid))
+        cfg, sid = new_cfg(), "bash-echo-turn"
+        p = turn(cfg, sid, echo, "a short owner note")
+        check("bash echo, %s: the owner's note is the only message saved" % label,
+              captured_texts(cfg, sid) == ["a short owner note"], captured_texts(cfg, sid))
+        expect_silent("bash echo, %s: a turn of the echo and one short note does not block Stop" % label, p)
+
+
+def case_bare_paste_is_not_filed():
+    """A prompt that is only a paste, with no words of the owner's own, is not an owner message: it is
+    not saved, and a turn of it and one short owner note does not block Stop."""
+    for label, paste in BARE_PASTES:
+        cfg, sid = new_cfg(), "bare-paste"
+        p = capture(cfg, sid, paste)
+        check("bare paste, %s: hook ran" % label, ran_central(p), p.desc())
+        check("bare paste, %s: not saved as an owner message" % label, captured_texts(cfg, sid) == [],
+              captured_texts(cfg, sid))
+        cfg, sid = new_cfg(), "bare-paste-turn"
+        p = turn(cfg, sid, paste, "a short owner note")
+        check("bare paste, %s: the owner's note is the only message saved" % label,
+              captured_texts(cfg, sid) == ["a short owner note"], captured_texts(cfg, sid))
+        expect_silent("bare paste, %s: a turn of the paste and one short note does not block Stop" % label, p)
+
+
+def case_owner_words_around_a_paste_are_filed():
+    """Control: a turn with owner words around a paste is an owner message, saved verbatim."""
+    for label, text in OWNER_WORDS_AROUND_PASTE:
+        cfg, sid = new_cfg(), "paste-words"
+        p = capture(cfg, sid, text)
+        check("owner words around a paste, %s: hook ran" % label, ran_central(p), p.desc())
+        check("owner words around a paste, %s: saved verbatim" % label, captured_texts(cfg, sid) == [text],
+              captured_texts(cfg, sid))
+
+
+def case_bash_tags_in_owner_text_are_filed():
+    """Control: owner text that quotes a bash tag, or that follows an input record, is saved verbatim."""
+    for label, text in BASH_TAGS_IN_OWNER_TEXT:
+        cfg, sid = new_cfg(), "bash-tag-words"
+        p = capture(cfg, sid, text)
+        check("owner text with a bash tag, %s: hook ran" % label, ran_central(p), p.desc())
+        check("owner text with a bash tag, %s: saved verbatim" % label, captured_texts(cfg, sid) == [text],
+              captured_texts(cfg, sid))
+
+
 # --------------------------------------------------------------------------- page note cases
 
 PAGE_URL = "https://claude.ai/artifact/3f9c1e2a-5b7d-4e8f-9a1b-2c3d4e5f6a7b"
@@ -4793,6 +4882,10 @@ CASES = (
     case_owner_text_near_a_hand_back_is_captured,
     case_capture_skips_cross_session_frame,
     case_cross_session_tag_mid_line_is_owner_text,
+    case_bash_input_echo_is_not_filed,
+    case_bare_paste_is_not_filed,
+    case_owner_words_around_a_paste_are_filed,
+    case_bash_tags_in_owner_text_are_filed,
     case_one_line_messages_never_trigger_the_guard,
     case_two_messages_in_a_turn_are_a_burst,
     case_long_or_bulleted_message_is_a_burst,
