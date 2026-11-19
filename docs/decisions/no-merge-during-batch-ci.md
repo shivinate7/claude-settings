@@ -46,7 +46,7 @@ Limits:
 
 - Pressing GitHub's own Merge button is not refused by a hook.
 - A raw `gh api -X PUT .../pulls/<n>/merge` is not refused by a hook.
-- The guard stops `gh pr merge`, the MCP merge tool and the MCP tool `enable_pr_auto_merge`, which arms GitHub auto-merge. It judges all three on the same head read. For the rest, the rule binds the owner by the owner's own word.
+- The guard stops `gh pr merge`, the MCP merge tool and the MCP tool `enable_pr_auto_merge`, which arms GitHub auto-merge. It judges all three on the same head read, at the moment of the call only. An armed auto-merge can fire on a later head, because the guard does not look again after a push. What GitHub does with an armed auto-merge after a push is unverified. For the rest, the rule binds the owner by the owner's own word.
 - A required check with no entry and no workflow run on the other head does not count. So in the seconds after a PR goes ready, before GitHub creates its runs, a merge is not refused.
 - A claim or heal commit at merge changes this PR's head. The running batch does not hold the new head, so the brake refuses again, and the claim is reverted. Build the next batch on this batch's head at ready, after its records step.
 
