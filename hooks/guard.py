@@ -35,7 +35,7 @@ set_override_veto and session_home_keep):
   compaction-audit     deny. After compaction, once the handoff is read, a call from the main session
                        until it spawns one agent (Agent or Task) whose brief's first non-blank line
                        starts with `Audit:`. That spawn clears the audit flag only once it has passed every
-                       later rule (main() clears it after judge() returns); a refused, asked or
+                       later rule (main() clears it after judge() returns, or fails open on a crash); a refused, asked or
                        override-lifted spawn clears nothing. The reason names the remedy. A payload with `agent_id` passes and
                        clears nothing. An override lifts it and keeps the flag. A failed import allows.
                        While the handoff is unread, handoff-unread speaks first. Cost: one flag-file
@@ -4799,7 +4799,8 @@ def role_model_one(tool_input):
 # and the field is not offered, so busy does not slow an Agent call there.) Full (memory over 95%, disk free
 # under the smaller of 5% of the disk and 5 GB) refuses every start call. A reading that cannot be read counts as normal. Only an
 # agent's shell or file write also reads load (RUNNING_AGENT_TOOLS, below). A cloud session (CLAUDE_CODE_REMOTE
-# "true") skips the brake and reads nothing, because the brake guards the owner's own machine.
+# "true") brakes a start call at a full disk only, read once from "/", and skips every other reading and every
+# running-agent call (decision machine-load-brake, "Cloud sessions").
 # SESSION_TOOL stays in the list, but no PreToolUse hook sees a start_session call (see SESSION_TOOL), so the brake does not
 # read the load for it. The audit after the call does not read load either.
 START_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
@@ -4814,6 +4815,9 @@ LOAD_BUSY_REASON = "the machine is busy (%s). %s " + LOAD_CITE
 LOAD_BUSY_AGENT_FORM = ", or make this an Agent call that leaves run_in_background out or sets it false"
 LOAD_BUSY_NO_FOREGROUND = "A Workflow has no foreground form. "
 LOAD_FULL_REASON = "the machine is full (%s). No new lane or agent starts until the load drops. Wait, then retry. " + LOAD_CITE
+LOAD_SWEEP = "python3 ~/.claude/janitor/sweep.py --root <repo> --attended --fast"
+LOAD_FULL_CLOUD_REASON = ("the disk is full (%s). No new lane or agent starts until space is freed. Free it with "
+                          + LOAD_SWEEP + " (preview first, then add --confirm), then retry. " + LOAD_CITE)
 
 
 def _read_memory():
@@ -4844,10 +4848,11 @@ def _read_memory():
     return None
 
 
-def _read_disk():
-    """(GB free, GB total) of the drive that holds the home folder, 2**30 bytes to the GB."""
+def _read_disk(path=None):
+    """(GB free, GB total) of the drive that holds `path`, the home folder when none is given, 2**30 bytes to the GB.
+    The lane lint calls it bare and so reads the home drive in every session."""
     import shutil
-    usage = shutil.disk_usage(os.path.expanduser("~"))
+    usage = shutil.disk_usage(path or os.path.expanduser("~"))
     return usage.free / GIB, usage.total / GIB
 
 
@@ -4863,7 +4868,8 @@ def read_load() -> dict:
         except Exception:
             out[key] = None
     try:
-        out["disk_free_gb"], out["disk_total_gb"] = _read_disk()
+        # A cloud start reads "/": df "available" (f_bavail, the free that shutil reports) is what it can use.
+        out["disk_free_gb"], out["disk_total_gb"] = _read_disk("/" if is_cloud() else None)
     except Exception:
         out["disk_free_gb"] = out["disk_total_gb"] = None
     return out
@@ -4877,8 +4883,12 @@ def _load_value(reading: dict, key: str):
 
 def load_hit(tool: str, tool_input) -> tuple:
     """(rule reason, matched) when the machine's load refuses this start call, else ("", ""). The one
-    read of the call: a failed read or an unread value counts as normal. A cloud session is never braked."""
-    if tool not in START_TOOLS or is_cloud():
+    read of the call: a failed read or an unread value counts as normal. A cloud session is braked at a full disk
+    only: memory and busy never refuse its start."""
+    if tool not in START_TOOLS:
+        return "", ""
+    cloud = is_cloud()
+    if cloud and tool == SESSION_TOOL:   # a cloud brake covers Agent, Task and Workflow starts only
         return "", ""
     try:
         reading = read_load()
@@ -4893,9 +4903,11 @@ def load_hit(tool: str, tool_input) -> tuple:
     def disk_under(share, gb):
         return disk_text is not None and disk < min(disk_total * share / 100.0, gb)
 
-    full = load_full(reading)
+    full = load_full(reading, disk_only=cloud)
     if full:
-        return LOAD_FULL_REASON % ", ".join(full), ", ".join(full)
+        return (LOAD_FULL_CLOUD_REASON if cloud else LOAD_FULL_REASON) % ", ".join(full), ", ".join(full)
+    if cloud:
+        return "", ""
     # An Agent or Task call that leaves run_in_background out or sets it false passes busy. Any other present value
     # is a background request. A session start has no such field, and no ruling covers it at busy.
     if tool == SESSION_TOOL or (tool in SPAWN_TOOLS and (
@@ -4969,15 +4981,17 @@ def lane_session_hit(payload, tool: str) -> tuple:
     return LOAD_SESSION_FULL_REASON % ", ".join(full), ", ".join(full)
 
 
-def load_full(reading) -> list:
-    """The readings over the full line, as text, or []. An unread or malformed reading counts as normal."""
+def load_full(reading, disk_only=False) -> list:
+    """The readings over the full point, as text, or []. An unread or malformed reading counts as normal. `disk_only`
+    leaves memory out, as a cloud start does."""
     if not isinstance(reading, dict):
         return []
     memory = _load_value(reading, "memory_pct")
     disk, disk_total = _load_value(reading, "disk_free_gb"), _load_value(reading, "disk_total_gb")
     disk_full = (disk is not None and disk_total is not None
                  and disk < min(disk_total * LOAD_FULL_DISK_SHARE / 100.0, LOAD_FULL_DISK_GB))
-    return [t for t in (memory is not None and memory > LOAD_FULL_MEMORY and "memory %.1f%% in use" % memory,
+    return [t for t in (not disk_only and memory is not None and memory > LOAD_FULL_MEMORY
+                        and "memory %.1f%% in use" % memory,
                         disk_full and "disk %.1f GB free of %.0f GB" % (disk, disk_total)) if t]
 
 
@@ -7667,7 +7681,8 @@ def judge(payload) -> None:
         refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % unread, unread)
     # 0, compaction-audit. Once the handoff is read, no call runs from the main session until it sends the audit
     # step 3 of the handoff prompt asks for: a spawn whose brief opens with `Audit:`. The spawn passes this rule
-    # and is marked; main() clears the flag only once judge() returns, that is, after every later rule allowed it.
+    # and is marked in AUDIT_SPAWN_PASSED. main() clears the flag when judge() returns, or when a later rule crashes
+    # after the mark (main() fails open on a crash, so the spawn runs). A later refusal clears nothing.
     # A failed import allows.
     try:
         from reread_check import audit_pending, audit_spawn
@@ -8096,6 +8111,7 @@ def main() -> None:
         # Fail open, but never silently: a crash that hides a rule must show in the log.
         record(str(payload.get("tool_name", "")), "crash", "guard-crash",
                cap_safe(type(exc).__name__ + ": " + str(exc), 200))
+        audit_flag_clear_after_allow(payload)  # the failed-open spawn runs, so the audit it owed is sent
         sys.exit(0)  # fail open on a guard defect
     sys.exit(0)
 
