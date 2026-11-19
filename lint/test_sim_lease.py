@@ -270,11 +270,13 @@ class PoolExclusive(LeaseCase):
 
 class Queue(LeaseCase):
     def test_second_waiter_is_not_granted_ahead_of_the_head(self):
-        holder, head, later = self.spawn(), self.spawn(), self.spawn()
-        self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the first duo take is not granted slot 1")
+        # The head waits on the one pro slot, held by another pro lease. Slot 1 is free and the load allows a grant,
+        # so only the queue keeps the later duo out.
+        pro_holder, head, later = self.spawn(), self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("pro", pro_holder.pid)), (0, "pro"), "the pro holder take is not granted pro")
         self.queue_waiter("pro", head.pid)
         r = self.take("duo", later.pid)
-        self.assertEqual(r.returncode, 1, "a duo take is granted slot 2 ahead of the queued pro head")
+        self.assertEqual(r.returncode, 1, "a duo take is granted ahead of the queued pro head")
 
     def test_second_duo_is_granted_slot_2_when_no_waiter_is_queued(self):
         holder, later = self.spawn(), self.spawn()
