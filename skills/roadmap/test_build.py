@@ -1212,6 +1212,23 @@ class LiveRefresh(UpkeepFixture):
             self.assertEqual(self.entries(self.row(out, ReadyAndDraftRows.DRAFT)[1]), ["#1002 (lone-draft)"],
                              "a held draft is listed as stale after a rebuild")
 
+    def test_the_rebuild_reads_the_pulls_of_the_repo_the_build_names_not_the_folder_it_runs_in(self):
+        self.use_real_fetch()
+        self.write_file(self.ago(build.STALE_LIVE_MINUTES + 1))
+        self.serve_pulls([self.stale_pull(7, "lane-7", 60)])
+        elsewhere = pathlib.Path(self.tmp.name) / "elsewhere"  # a checkout of another GitHub repo, the folder the build runs in
+        elsewhere.mkdir()
+        git(elsewhere, "init", "-q")
+        git(elsewhere, "remote", "add", "origin", "git@github.com:other/elsewhere.git")
+        self.build_in(elsewhere, "--live", str(self.live), expect=(0, 1))
+        self.assertEqual(read_time(self.file_value()["readAt"]), read_time(BUILD_NOW),
+                         "control: the stale file was not rebuilt, so the case reads no pulls")
+        urls = [request_url(c) for c in self.rest_get.call_args_list]
+        named = {m.group(1) for m in (re.search(r"/repos/([^/]+/[^/]+)/pulls", u) for u in urls) if m}
+        self.assertEqual(sorted(named), [self.SLUG],
+                         "the open-pulls reads named a repo other than the --repo %s the build was given, "
+                         "the folder it ran in" % self.SLUG)
+
 
 class LedgerActs(UpkeepFixture):
     """The ledger's acts on the live file's pulls (decision pr-ledger, part 3b). The publisher puts `merge --reviewed --json`
