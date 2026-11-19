@@ -1173,8 +1173,9 @@ class RecordsOnlyEveryJob(unittest.TestCase):
         with self.assertRaises(ValueError, msg="the reader accepts a form it does not know"):
             _IfParser("github.event_name == 'push' ? 'a' : 'b'", {}).parse()
 
-    # Controls: a records change beside another file starts the jobs that file starts alone, and a workflow
-    # change beside records starts every job the rollup needs. The delta is asserted before the jobs (P7).
+    # Controls: a records change beside another file starts the jobs that file starts alone. A workflow change beside records
+    # starts every non-Windows job the rollup needs, because a workflow path starts no Windows job on a pull request.
+    # The delta is asserted before the jobs (P7).
     def test_a_records_change_beside_another_file_starts_the_jobs_that_file_starts_alone(self):
         text = self.workflow()
         for label, extra in self.CONTROL_EXTRAS:
@@ -1189,8 +1190,11 @@ class RecordsOnlyEveryJob(unittest.TestCase):
                 self.assertIn("checks", together, f"the lint job does not start for a records change beside {extra}: {together}")
                 self.assertEqual(together, alone, f"a records change beside {extra} starts other jobs than {extra} alone: {together}")
                 if extra == ".github/workflows/checks.yml":
-                    missing = sorted(set(rollup_needs(text)) - set(together))
-                    self.assertEqual(missing, [], f"a workflow change beside records leaves rollup jobs off: {missing}")
+                    non_windows = set(rollup_needs(text)) - set(split.windows_jobs(text))
+                    # Scope before subject (P7): a known non-Windows job must survive the filter, or `missing` is empty by accident.
+                    self.assertIn("checks-guard", non_windows, f"the non-Windows rollup set lacks checks-guard: {sorted(non_windows)}")
+                    missing = sorted(non_windows - set(together))
+                    self.assertEqual(missing, [], f"a workflow change beside records leaves non-Windows rollup jobs off: {missing}")
 
 
 # The mod phase must run each mods check script (mods/**/check.mjs), not only *.test.mjs. The script cds to its own
