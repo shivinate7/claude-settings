@@ -1877,6 +1877,8 @@ def sweep_over_fixture(fx, session_end, before=None):
         stack.enter_context(mock.patch.object(sweep, "find_loose_processes", loose))
         stack.enter_context(mock.patch.object(sweep, "sim_tier", sim))
         stack.enter_context(mock.patch.object(sweep, "temp_tier", temp))
+        # The daily run also reads the real temp root, and this run passes --confirm: stub that step too.
+        stack.enter_context(leftover_temp_stubbed())
         stack.enter_context(mock.patch.object(sweep, "find_swept_listeners", lambda paths: []))
         stack.enter_context(mock.patch.object(sweep, "print_grace_period_report",
                                               lambda *a, **k: None))
