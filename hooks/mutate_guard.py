@@ -4948,7 +4948,7 @@ def main() -> int:
                 return 1
             seen_paths[candidate.lower()] = (control_index, label)
 
-    work = tempfile.mkdtemp(prefix="mutate_guard_")
+    work = tempfile.mkdtemp(prefix="mutate_guard_%d-" % os.getpid())
     # A "watch" mutant is a copy of config_watch.py that runs OUTSIDE hooks/, as its own
     # subprocess, and it does a plain `import guard` (never GUARD_UNDER_TEST: a mutation of the
     # watch must never be killed by a guard that moved with it, which is why
