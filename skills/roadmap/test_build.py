@@ -1945,6 +1945,49 @@ class StalledStep(UpkeepFixture):
         self.assertEqual(self.code, 1, "a stalled step must exit 1")
         self.assertEqual(self.stale_lines(out), [], "a fresh read prints no stale line")
 
+    # The real case: a doing step whose PR closed unmerged on 2026-11-14, with its lane session archived. Its step text
+    # cites no PR number, so only the landedPulls row tells the reader what happened.
+    CLOSED = "ci-linux-windows-once"
+    CLOSED_AT = "2026-11-14T18:00:00Z"  # noon CST, so the date reads the same in UTC and local time
+
+    def closed_line(self, out, step):
+        """The one stalled line for `step`. Fails with a named cause when no line, or more than one, names it."""
+        lines = [line for line in out.splitlines() if line.startswith("stalled step: %s (" % step)]
+        self.assertEqual(len(lines), 1, "expected one stalled line for %s, got %r in:\n%s" % (step, lines, out))
+        return lines[0]
+
+    def publish_closed_pr(self, branch, pulls=()):
+        """A live file whose lane session is archived, and whose only pull is #3042 closed unmerged on CLOSED_AT."""
+        self.publish(sessions=[self.session_in_repo("session_old01", "SESSION_STATUS_ARCHIVED", "cs-step:" + self.CLOSED)],
+                     items=[], pulls=list(pulls),
+                     landed=[self.pull_row(3042, branch, merged=False, closedAt=self.CLOSED_AT)])
+
+    def test_doing_step_whose_pr_closed_unmerged_prints_the_date_and_unmerged(self):
+        self.commit_step(self.CLOSED, status="doing", title="Linux and Windows CI run once", note="Moves CI onto one job.")
+        self.no_trailer_on_main()  # scope: no Step trailer on main, so the step is not read as landed
+        for branch in (self.CLOSED, "lane/" + self.CLOSED):
+            with self.subTest(branch=branch):
+                self.publish_closed_pr(branch)
+                _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+                self.assertEqual(self.stalled_ids(out), [self.CLOSED], "scope: the step with no live lane is stalled")
+                self.assertEqual(self.code, 1, "a stalled step must exit 1")
+                line = self.closed_line(out, self.CLOSED)
+                self.assertIn("2026-11-14", line, "the stalled line must print the PR's closed date: %r" % line)
+                self.assertIn("unmerged", line, "the stalled line must say the PR closed unmerged: %r" % line)
+
+    def test_closed_unmerged_pr_with_an_open_successor_holds_the_step(self):
+        self.commit_step(self.CLOSED, status="doing", title="Linux and Windows CI run once", note="Moves CI onto one job.")
+        self.publish_closed_pr(self.CLOSED, pulls=[self.draft(3050, "lane/" + self.CLOSED)])  # control: a successor holds it
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.stalled_ids(out), [], "an open pull on the lane branch holds the step: no stalled line")
+
+    def test_a_doing_step_with_no_pr_beside_a_closed_one_keeps_the_plain_line(self):
+        self.commit_step(self.CLOSED, status="doing", title="Linux and Windows CI run once", note="Moves CI onto one job.")
+        self.commit_step("c2", status="doing", order=2)  # control: no PR of its own, so its line stays plain
+        self.publish_closed_pr(self.CLOSED)
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertIn(self.RESUME, out.splitlines(), "a step with no PR prints the plain line, with no date and no reason")
+
     def test_landed_feel_fix_without_a_device_trial_is_not_stalled(self):
         self.commit_step("c2", status="doing", order=2)  # control: a plain lane-less step is still stalled
         self.land("c1", 12, feel=True)  # waits for a device trial: the device row lists it, not the stalled lines
