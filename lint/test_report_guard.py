@@ -1404,7 +1404,7 @@ class UnstartedItemsTests(unittest.TestCase):
     """reports-name-unstarted-items, in report_guard.py's Stop hook."""
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)  # test-temp-standard: this run's folder
         self.addCleanup(self.tmp.cleanup)
 
     def verdict(self, reply, spawns):
@@ -1461,6 +1461,40 @@ class UnstartedItemsTests(unittest.TestCase):
         for spawns, reply in rows:
             with self.subTest(reply=reply):
                 self.assertIsNone(self.verdict(reply, spawns))
+
+    def test_un_red_wait_on_merge_without_shared_file_blocks(self):
+        rows = [
+            # Catches: an item that waits on a PR, and names no file, passes the turn.
+            self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge",
+            # Catches: the list form passes the same wait when it names no file.
+            self.DONE + "> **Next**\n> - merge the batch\n> - Unstarted: lint-stub, waits on another lane's merge",
+            # Catches: the word "file" alone names no file, so the turn passes.
+            self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679, which touches the report file",
+        ]
+        for reply in rows:
+            with self.subTest(reply=reply):
+                out = self.verdict(reply, [self.BUILDER])
+                self.assertIsNotNone(out, "a wait on a merge or PR that names no shared file passed the turn")
+                self.assertEqual(out["decision"], "block")
+                self.assertIn("Unstarted guard", out["reason"])
+                self.assertIn("shared file", out["reason"].lower())
+
+    def test_un_green_shared_file_none_brake_and_owner_waits_pass(self):
+        rows = [
+            # Catches: the wait of the refused row passes once the reason names a file with a slash.
+            self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge, both touch lint/report_guard.py",
+            # Catches: a bare file name with an extension is a shared file too, so a slash-only match fails here.
+            self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge, both touch CLAUDE.md",
+            # Catches: "none" names no waiting item, so it needs no file and must pass.
+            self.DONE + "> **Next** Unstarted: none",
+            # Catches: a wait on the load brake names no merge or PR, so it needs no file.
+            self.DONE + "> **Next** Unstarted: lint-stub, waits on the load brake",
+            # Catches: a wait on the owner names no merge or PR, so it needs no file.
+            self.DONE + "> **Next** Unstarted: lint-stub, waits on the owner's ruling",
+        ]
+        for reply in rows:
+            with self.subTest(reply=reply):
+                self.assertIsNone(self.verdict(reply, [self.BUILDER]))
 
 
 class NoResendTests(unittest.TestCase):
