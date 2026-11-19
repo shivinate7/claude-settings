@@ -1,14 +1,14 @@
 {
  "id": "agent-model-rows-stale",
- "title": "Agent files and the model-per-role table agree with the rulings on which model each role runs",
+ "title": "Briefs tell each agent to sign commits with the model it runs, not a fixed name",
  "priority": "now",
  "status": "todo",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "owner": "consultant",
  "blockedBy": [],
- "updatedAt": "2026-11-19T04:15:06Z",
- "why": "Coordinator's pick on the owner's typed ask at 22:13 CST Nov 18 (\"the brief is stalely built message consultant to fix it\"). The coordinator read on main: agents/test-author.md, agents/reviewer.md and agents/record-writer.md say model: haiku, and docs/decisions/agent-model-cap.md line 28 reads \"test-author | haiku | xhigh\". He says CLAUDE.md makes Sonnet the ceiling and hook agent-model-floor refuses a spawn that names haiku, so a spawn with no model field ran Haiku 5.5 (his test-author and round 1 reviewer today).",
- "source": "coordinator 22:14 CST Nov 18, relayed by triage 12; the coordinator's pick, not owner-typed beyond the quoted ask",
- "note": "Todo, owner of the fix: the consultant (session_013NEJKz5AWFJhGvmCUoi6wQ, told by the coordinator 22:13 CST). Triage read the three agent files and the table row on main by REST at 22:14 CST: all four say haiku. Not read by triage: the agent-model-floor hook, and the claim that it refuses haiku. Read first: done step round1-haiku-xhigh (round-1 reviewers run Haiku at xhigh by ruling) and step agent-model-unnamed-spawn; Sonnet as a ceiling does not itself forbid Haiku, so the stale part may be the brief, the floor hook or the files. Related: docs/todo.md line 9 (step c201); the consultant decides whether this joins it."
+ "updatedAt": "2026-11-19T04:26:11Z",
+ "why": "Owner's typed ask at 22:13 CST Nov 18, as the coordinator relayed it: \"the brief is stalely built message consultant to fix it\". Coordinator's reading (his pick, rewritten 22:25 CST on the consultant's read, labelled his): the owner may have meant the coordinator's briefs, which tell agents to sign commits \"Claude Sonnet 5.5\" while the agent runs its file's model (Haiku). The first version of this step said the agent files and model table were stale; that premise is dropped.",
+ "source": "owner ask via coordinator 22:14 CST Nov 18; premise corrected by the consultant's read relayed by the coordinator 22:25 CST; triage 12 read the ruling in docs/decisions/agent-model-cap.md",
+ "note": "Todo, owner of the fix: the consultant (session_013NEJKz5AWFJhGvmCUoi6wQ). The fix is a brief line that has each agent name the model it runs, not a fixed name. Triage read on main by REST at 22:26 CST: agent-model-cap.md has test-author, reviewer and record-writer on Haiku at xhigh, and round 1 reviewers on Haiku by owner ruling 2026-11-17 19:45 CST (line 30 and line 101), so the files and table are current. Not read by triage: the floor guard that refuses a spawn naming haiku. PR 3688 (A model the owner names passes the floor) is open, unmerged; the ruling date H32 19:03 CST is unread. Ask the owner on the page only if he must choose Sonnet for those roles. Related: docs/todo.md line 9 (step c201)."
 }
