@@ -2525,7 +2525,7 @@ jobs:
   checks-windows-sweep:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || (needs.scope.outputs.checks_windows_sweep == 'true' || needs.scope.outputs.sweep == 'true'))) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || needs.scope.outputs.checks_windows_sweep == 'true')) && needs.scope.outputs.records_only_skip != 'true' }}
     # Now 75, above the 3600 s suite cap that the janitor sweep mutation test runs under (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go).
     timeout-minutes: 75
     permissions:
