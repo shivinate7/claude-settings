@@ -1,6 +1,6 @@
 # Handoff: lane record-vs-later-ruling-check, 2026-11-19
 
-Lane slug: record-vs-later-ruling-check. Session: session_013NEJL4gw6EdrSyvHkTUEx6 is the parent (coordinator); this lane is session_013NEJq... see session list. Repo: shivinate7/claude-settings.
+Lane slug: record-vs-later-ruling-check. This lane: session_013NEJKzCLNUNqCwEF8se48h. Parent (coordinator): session_013NEJL1gw6EdrSyvHkTUEx6. Repo: shivinate7/claude-settings.
 
 ## What it is
 Grant own-mechanical-before-cleanup (owner, 11:07 CST Nov 15): a mechanical check that a Markdown file does not cite an older owner ruling and miss the later ruling that overtakes it. Incident: decision all-repos-switch-together kept "mailaudit merges in a batch until the cutover" after ruling own-820-c-five-repos overtook it.
