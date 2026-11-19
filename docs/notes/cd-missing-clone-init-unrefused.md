@@ -1,0 +1,1 @@
+- cd-missing-clone-init-unrefused: cd into a missing folder then git clone or init from a non-checkout folder is not refused; unlikely in normal work. Decision: refuse-git-after-missing-cd.

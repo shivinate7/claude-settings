@@ -1,0 +1,1 @@
+- loop-body-cd-last-item: (#2123) a `cd "$f"` in a loop body unrolls, so later words are judged in the last item's folder.

@@ -1,0 +1,1 @@
+- degen-d1-d2-mailbox-read-backs: Degen ledger row D1 (inbox hook misses page read-backs) and the first half of D2 land here; plans/degen-report-2026-11-12.md on branch restart-plan, commit 113d77849 (retrospective 21:04 CST Nov 12).

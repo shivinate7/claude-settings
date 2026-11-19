@@ -1,0 +1,1 @@
+- wait-pid-test-live-pid: The test_guard case 'wait-pid: a kill -0 loop stays refused' hard-codes pid 12345, which can be live. It flaked once on a full run.

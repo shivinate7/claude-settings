@@ -1,0 +1,1 @@
+- runner10-round3-owed-fixcheck: 13:32 CST Nov 13, runner 10: review_state still owes round 3 after a fix check, and --review-record --round refuses skipped rounds; both are in scope. Homes for the owner's typed answers: ruling r9 (newest text, owner 13:29 CST) and item 741 a (ruling own-741-a-lint-fix-no-r3).

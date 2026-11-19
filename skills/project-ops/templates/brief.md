@@ -31,7 +31,7 @@ For a test or merge change, read decisions `test-practices` and `merge-practices
 
 Sort each failing test into class a, b, c or d (rule `outcomes-tests-are-statements`). Class d covers only a ruling quoted above.
 The test-author writes new cases red first.
-Review round 1 follows the store's round-1 review ruling. Round 3 is not automatic; that ruling says when.
+Round 1 follows the store's round-1 review ruling. Round 3 is not automatic; that ruling says when.
 
 ## Done-check
 
@@ -41,7 +41,7 @@ The lane can run it.
 
 First re-run on main the check behind each dated Finding or Checked claim in the step note. If a claim fails, stop and report. Report each as "Checked <Mon D> on main <commit>: <result>".
 Before hand-in, run `~/.claude/bin/merge --lane-lint <pr>` (repos with `bin/ci-job`) and report its verdict; a red lane does not hand in. Run `merge --lane-lint` from the main checkout, never from a session or agent isolated in a worktree: Claude Code's worktree check can refuse it there.
-Hand in a draft PR to the batch runner. Never merge.
+A coordinator-started lane hands in a draft PR to the batch runner. Only in claude-settings does it merge its own PR (decision `session-tiers`, merge path).
 
 ## Report cap
 
@@ -53,6 +53,5 @@ Agent spawn brief head
 
 A spawn brief's first line holds a marker alone.
 Markers: `Guard or check: yes`, `Fix check`, `Round 2 of 3`, `Round 3 of 3` and `Audit:`.
-A marker counts only alone at a line start of a real brief.
 
 None for product code or docs.

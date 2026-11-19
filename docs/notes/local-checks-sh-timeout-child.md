@@ -1,0 +1,1 @@
+- local-checks-sh-timeout-child: (#2536 PR body, coordinator 07:12 CST Nov 10) on a timeout, `sh` kills only its direct child, so a grandchild process can live on.

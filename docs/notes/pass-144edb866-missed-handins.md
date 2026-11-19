@@ -1,0 +1,1 @@
+- pass-144edb866-missed-handins: 12:00 CST Nov 13, incident (retro 11:53 CST Nov 13): the pass at 144edb866 ("closed 73, R45 part 2 re-run", 23:49 CST Nov 12) missed runner 10's hand-ins, and lanes archived after hand-in read as no live lane. Linked to step bulk-close-needs-ledger; the per-batch close is stopped until it lands. Later passes only list.

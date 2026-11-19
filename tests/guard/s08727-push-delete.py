@@ -105,6 +105,8 @@ LE = "--force-with-lease --force-if-includes "
 push_case("a quoted refspec to the default branch asks", LE + 'origin "HEAD:main"', "ask")
 push_case("a single-quoted plus refspec to the default branch asks", "origin '+main'", "ask")
 push_case("a quoted remote is unquoted", LE + '"origin" HEAD:main', "ask")
+# The text between two quoted words is live shell, so a forced flag there still forces the push.
+push_case("quoted remote and branch around --force asks, as the bare form does", "'origin' --force 'main'", "ask")
 push_case("lease with --repo=, refspec to the default branch asks", "--repo=origin " + LE + "HEAD:main",
           "ask")
 push_case("lease with --repo and its value, refspec to the default branch asks",

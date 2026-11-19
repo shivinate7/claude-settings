@@ -2087,10 +2087,11 @@ def _on_windows():
 
 
 def temp_tier(confirm):
-    """The Windows temp-folder step: removes the temp folder of a session idle over 24 hours (preview
-    without CONFIRM). Windows only. It stops at the sweep deadline. Returns the number of
-    failures: folders it could not remove or folders it could not read."""
-    if temp_sweep is None or not _on_windows():
+    """The session temp-folder step: removes the temp folder of a session idle over 24 hours (preview
+    without CONFIRM), under the Windows temp root and the POSIX `claude-<uid>` root. Every OS. It
+    stops at the sweep deadline. Returns the number of failures: folders it could not remove or
+    folders it could not read."""
+    if temp_sweep is None:
         return 0
     print("")
     print("== session temp folders ==")
@@ -3082,13 +3083,14 @@ def _fetch_prune(root: str) -> bool:
 
 
 def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "full",
-               attended: bool = False):
+               attended: bool = False, own_lock_rule: bool = True):
     """One repository. `mode` "full" is the whole sweep. "tier1" acts for real, with no
     --confirm, and only on stale registrations and husks: no worktree, branch or process work.
     "branches" reaps branches only (preview without --confirm), removes no worktree, and holds
     every branch any worktree has checked out. "fast" judges worktrees only, with no fetch, no
     remote read and no branch work: a tree goes only when its HEAD is already in the default
-    branch, and the default branch must be a remote-tracking ref."""
+    branch, and the default branch must be a remote-tracking ref. `own_lock_rule` False keeps a tree
+    that the caller's own agent lock holds (decide_worktree), for a caller still reading its tree."""
     if mode == "tier1":
         confirm = True
     result = {"root": root, "refused": None, "branches": [], "worktrees": [], "listeners": [],
@@ -3169,7 +3171,7 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
             # Could not tell whether this IS the primary checkout. Rule 7's direction: an
             # unreadable subject means keep, never a guess that it is safe to evaluate.
             return {"path": entry["path"], "action": "keep", "reason": "unreadable-subject"}
-        return decide_worktree(root, entry, attended, agent_rule, batch, mode == "fast")
+        return decide_worktree(root, entry, attended, agent_rule, batch, mode == "fast", own_lock_rule)
 
     judged = _oldest_idle_first(entries) if mode in ("full", "fast") else []
     if judged and mode == "full" and not _past_deadline():
@@ -3579,7 +3581,7 @@ def _sweep_roots(args, roots, restore_log_path, mode):
         if any(_removed_count(r["worktrees"]) + _removed_count(r["branches"]) for r in results):
             try:
                 free = min(shutil.disk_usage(r["root"]).free for r in results)
-                print("  free disk: %.1f GB" % (free / 1e9))
+                print("  free disk: %.1f GB" % (free / 2 ** 30))
             except (OSError, ValueError):
                 print("  free disk: unknown")
     if mode != "full":

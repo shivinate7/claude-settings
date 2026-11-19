@@ -1,0 +1,1 @@
+- scpr-fragment-pass-unpinned: (#2038) no case pins that a behind, yesterday-late or more-than-12h-ahead fragment passes; an unsigned `% 1440` mutant of _fragment_ahead stays green.

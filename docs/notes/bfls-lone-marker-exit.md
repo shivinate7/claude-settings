@@ -1,0 +1,1 @@
+- bfls-lone-marker-exit: (#2378 batch-freeze-lane-set-enforce N1, coordinator 02:11 CST Nov 10) a lane named batch-* whose body quotes a lone unfenced begin marker makes a good --batch-drop exit 1 after the drop is done. False alarm only; no test covers it.

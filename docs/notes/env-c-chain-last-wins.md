@@ -1,0 +1,1 @@
+- env-c-chain-last-wins: In `env -C a -C b`, GNU env keeps the last -C, but the guard may read the first. Near-zero likelihood (PR #2494).

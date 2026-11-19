@@ -1,0 +1,1 @@
+- lane-mutate-record-drift: the record says 21 cases where the file has 28, and the usage text says "step" where the glossary says "CI step". Fix: correct the count and the term.

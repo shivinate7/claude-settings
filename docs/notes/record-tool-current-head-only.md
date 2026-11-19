@@ -1,0 +1,1 @@
+- record-tool-current-head-only: 14:50 CST Nov 13, sighting (lane stamp-clock-check-everywhere, #3234): the record tool takes a record only for the current PR head, so earlier round results at older heads cannot be filed.

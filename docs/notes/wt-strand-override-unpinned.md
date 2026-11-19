@@ -1,0 +1,1 @@
+- wt-strand-override-unpinned: (#1921) the strand tests do not pin the override lift.

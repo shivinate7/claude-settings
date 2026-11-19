@@ -82,7 +82,6 @@ NO_MD = [
     'Stall watch fixture suite',
     'Stall watch stop suite',
     'Simulator boot-record fixture suite',
-    'Session start notice suite',
     'Start check suite',
     'Directory before a segment suite',
     'Refusal settle fixture suite',
@@ -107,6 +106,7 @@ NO_MD = [
     'Debt notes union merge fixture suite',
     'all-jobs-passed needs every pull-request job',
     'Scope detector fixture suite',
+    'install.sh shard pins',
     'Touched-test selector fixture suite',
     'Mutation report-mode fixture suite',
     'Hook platform exit fixture suite',
@@ -159,6 +159,8 @@ MUST_STAY_UNSCOPED = [
     'Scratchpad owner fixture suite',  # runs test_guard.py, whose section files read skills/impeccable/SKILL.md
     'Guard wrappers fixture suite',  # runs test_guard.py through drive_test_guard
     'Skill model rows fixture suite',  # its checks job step has no `if:` (test_check_skill_model_rows.py pins it)
+    'Project-ops roles check',  # reads the session-tiers record and the project-ops templates at run time (audit hook, run-time open)
+    'Project-ops roles fixture suite',  # its real-repo case reads the same record and templates at run time
     'Reply judge fixture suite',  # reads CLAUDE.md at run time (hooks/test_reply_judge.py), so a CLAUDE.md-only pull request must run it
     'Nightly skip fixture suite',  # not audited yet, so it stays unscoped (fail safe)
     'Proc env read suite',  # not audited yet, so it stays unscoped (fail safe)
@@ -190,6 +192,7 @@ DOC_STEPS = {
     'SendMessage state fixture suite': ("decisions",),
     'Stop-hook owner-safe reason suite': ("decisions",),
     'Settings matcher fixture suite': ("decisions",),
+    'Session start notice suite': ("decisions",),  # its test class SessionStartRolePickTests reads docs/decisions/session-tiers.md
     'Stop-hook review-record fixture suite': ("rules",),
     'CLAUDE.md size (warns, never fails)': ("rules",),
     'Landed-directory manifest agreement': ("skills",),
@@ -387,6 +390,7 @@ MAIN_STEPS = [
     'Windows split guard',
     'all-jobs-passed needs every pull-request job',
     'Scope detector fixture suite',
+    'install.sh shard pins',
     'Touched-test selector fixture suite',
     'Nightly skip fixture suite',
     'rm shim fixture suite',
@@ -458,6 +462,8 @@ MAIN_STEPS = [
     'Agent push form fixture suite',
     'Skill model rows check',
     'Skill model rows fixture suite',
+    'Project-ops roles check',
+    'Project-ops roles fixture suite',
     'Python 3.9 floor check',
     'Python 3.9 floor fixture suite',
     'No-window spawn check',
@@ -481,7 +487,7 @@ MAIN_STEPS = [
 ALLOWED = {
     "hooks/test_call_judge.py": (["README.md", "docs/design/last-answer-notes.md"], "README.md is written into a temp repo; the other name is in comments"),
     "hooks/test_decision_watch.py": (["CLAUDE.md", "decisions/reply-judge-samples-never-refuses.md"], "CLAUDE.md is written into temp repos; the record name is in a comment"),
-    "hooks/test_feedback_inbox.py": ([".claude/CLAUDE.md", "CLAUDE.md", "README.md", "docs/debts/notes.md", "docs/notes/README.md", "docs/todo.md"], "fixture repos track or write these names in temp dirs; docs/notes/README.md is written into a temp repo, and the suite never reads the root copy"),
+    "hooks/test_feedback_inbox.py": ([".claude/CLAUDE.md", "CLAUDE.md", "README.md", "docs/debts/notes.md", "docs/notes/README.md", "docs/todo.md"], "fixture repos track or write these names in temp dirs; docs/notes/README.md is written into a temp repo, and the suite never reads the root copy; the frozen notes file is named by the case that checks the home judge refuses it"),
     "hooks/test_prose_judge.py": (["README.md", "decisions/test-strategy-reset.md"], "a hook payload's file path and edit text"),
     "hooks/test_question_form_letters_frozen.py": (["docs/decisions/option-keys-are-letters.md"], "named in the module docstring"),
     "hooks/test_session_start.py": ([".claude/CLAUDE.md", "CLAUDE.md"], "written into temp config and checkout dirs"),
@@ -498,7 +504,8 @@ ALLOWED = {
         "skills/waiting-page/reference/designs.md", "skills/waiting-page/reference/repo-pages.md",
         "skills/waiting-page/reference/republish.md", "skills/waiting-page/reference/routing-and-sessions.md",
         "tests/fixture/docs/map/core.md", "tests/fixture/docs/map/traces/home.md", "docs/records.md",
-    ], "paths that run() commits into temp git repos, the doc-group cases' rule and glossary paths included; the records-only skip "
+        "agents/builder.md", "docs/decisions/agent-model-cap.md", "skills/impeccable/SKILL.md",
+    ], "paths that run() commits into temp git repos, the doc-group cases' rule and glossary paths and the guard-inputs cases' three modified .md files included; the records-only skip "
        "fixtures name the generated page as the one file a records push changes; the file reads no tracked .md at run time"),
     "lint/test_find_copies.py": ([
         ".github/pull_request_template.md", "reference/document.md", "skills/impeccable/SKILL.md",

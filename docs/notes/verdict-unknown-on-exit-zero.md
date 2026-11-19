@@ -1,0 +1,1 @@
+- verdict-unknown-on-exit-zero: Possible false green, unmeasured: `verdict` printed PASS for a check that exited 0 with an UNKNOWN line on shallow history, after a test-author ran `fetch --unshallow` in the shared clone. If verdict reads only exit codes, an UNKNOWN on exit 0 reads green. Source: the #1099 lane.

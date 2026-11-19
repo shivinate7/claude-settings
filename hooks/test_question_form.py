@@ -2049,6 +2049,213 @@ def case_past_rulings_skips_the_debt_notes_file():
           notes_mark not in text, text[:200])
 
 
+# ------------------------------------------------------------------ past rulings: owner sentences past the index cap
+#
+# A decision's `## The ruling` section is cut to question_form.INDEX_CAP characters in the judge's index, so an owner
+# ruling sentence past the cap never reaches the judge. A record may add owner-ruling sentences past the cap, but never
+# more than question_form.RULING_EXTRA_CAP characters of them, so the prompt does not grow for every record. Each case
+# makes its own fixture decision in a fixture repo; the pointer is patched to that repo, so no real checkout is read.
+# A case's candidate lines are the ones that start with its record id (`decisions/<slug>: `).
+PAST_CAP_SLUG = "round-one-reviewers-haiku"
+PAST_CAP_QUESTION = "round 1 first review stronger model guard or check change"
+RULING_SENTENCE = "Round 1 reviewers run Haiku at xhigh on every change (owner ruling, 2026-11-17 19:45 CST)."
+OWNER_SENTENCES = ["Owner ruling %02d: keep item %02d as it is." % (i, i) for i in range(60)]
+
+
+def _filler(n_chars):
+    """Plain sentences with no RULING_WORDS word (ruling, owner, shiv), at least n_chars long."""
+    sentences, size = [], 0
+    while size < n_chars:
+        sentence = "Background sentence %03d: the review stack and its model pins stay as they are." % len(sentences)
+        sentences.append(sentence)
+        size += len(sentence) + 1
+    return " ".join(sentences)
+
+
+def _record_lines(candidates, record_id):
+    """The candidate lines of one record, `<record id>: <text>`, in the order past_rulings gave them."""
+    prefix = record_id + ": "
+    return [str(c) for c in candidates if str(c).startswith(prefix)]
+
+
+def _record_text(candidates, record_id):
+    """The record's text: its candidate lines after the id, joined. The most a record adds is what this bounds."""
+    prefix = record_id + ": "
+    return " ".join(line[len(prefix):] for line in _record_lines(candidates, record_id))
+
+
+def _past_cap_candidates(name, section, fn):
+    """(record id, candidates) for one decision whose `## The ruling` section is `section`, from past_rulings."""
+    repo = tcj.make_repo(name, decisions={PAST_CAP_SLUG: section})
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
+        candidates, _unknown = fn(PAST_CAP_QUESTION, repo)
+    return "decisions/" + PAST_CAP_SLUG, candidates
+
+
+def case_past_ruling_owner_sentence_past_the_cap_reaches_the_line():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("past rulings past cap: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    section = _filler(1000) + " " + RULING_SENTENCE + " " + _filler(300)
+    offset = section.index(RULING_SENTENCE)
+    check("past rulings past cap: the fixture puts the owner sentence past INDEX_CAP and past character 1000",
+          offset > question_form.INDEX_CAP and offset >= 1000, "offset %d" % offset)
+    record_id, candidates = _past_cap_candidates("past-owner-past-cap", section, fn)
+    lines = _record_lines(candidates, record_id)
+    check("past rulings past cap: the decision record is a candidate (scope)", bool(lines), str(candidates)[:200])
+    if not lines:
+        return
+    check("past rulings past cap: a candidate line for the record carries Haiku at xhigh and 2026-11-17 19:45",
+          any("Haiku at xhigh" in line and "2026-11-17 19:45" in line for line in lines),
+          "line ends: ..." + lines[0][-160:])
+
+
+def case_past_ruling_owner_sentence_inside_the_cap_reaches_the_line():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("past rulings inside cap: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    section = RULING_SENTENCE + " " + _filler(1500)
+    check("past rulings inside cap: the fixture puts the owner sentence inside INDEX_CAP",
+          section.index(RULING_SENTENCE) + len(RULING_SENTENCE) <= question_form.INDEX_CAP,
+          "sentence ends at %d" % (section.index(RULING_SENTENCE) + len(RULING_SENTENCE)))
+    record_id, candidates = _past_cap_candidates("past-owner-inside-cap", section, fn)
+    lines = _record_lines(candidates, record_id)
+    check("past rulings inside cap: the decision record is a candidate (scope)", bool(lines), str(candidates)[:200])
+    if not lines:
+        return
+    check("past rulings inside cap: the owner sentence inside INDEX_CAP still reaches the record's line",
+          any("Haiku at xhigh" in line and "2026-11-17 19:45" in line for line in lines), lines[0][:200])
+
+
+def case_past_ruling_section_without_owner_sentence_is_cut_at_the_cap():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("past rulings cut: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    head, tail = "HEADMARK-5a1e opens the record.", "TAILMARK-9c2d closes it."
+    section = head + " " + _filler(2400) + " " + tail
+    record_id, candidates = _past_cap_candidates("past-owner-none", section, fn)
+    lines = _record_lines(candidates, record_id)
+    check("past rulings cut: the decision record is a candidate (scope)", bool(lines), str(candidates)[:200])
+    if not lines:
+        return
+    text = _record_text(candidates, record_id)
+    check("past rulings cut: the text inside INDEX_CAP still reaches the record's line", "HEADMARK-5a1e" in text,
+          text[:200])
+    check("past rulings cut: a section with no owner sentence is cut, so its tail past the cap is absent",
+          "TAILMARK-9c2d" not in text, text[-200:])
+    check("past rulings cut: the record adds no more than INDEX_CAP plus RULING_EXTRA_CAP characters",
+          len(text) <= question_form.INDEX_CAP + question_form.RULING_EXTRA_CAP, "%d characters" % len(text))
+
+
+def case_past_ruling_owner_sentences_added_text_is_capped():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("past rulings capped: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    section = _filler(900) + " " + " ".join(OWNER_SENTENCES)
+    check("past rulings capped: the fixture puts the first owner sentence past INDEX_CAP",
+          section.index(OWNER_SENTENCES[0]) > question_form.INDEX_CAP,
+          "offset %d" % section.index(OWNER_SENTENCES[0]))
+    record_id, candidates = _past_cap_candidates("past-owner-bounded", section, fn)
+    lines = _record_lines(candidates, record_id)
+    check("past rulings capped: the decision record is a candidate (scope)", bool(lines), str(candidates)[:200])
+    if not lines:
+        return
+    text = _record_text(candidates, record_id)
+    check("past rulings capped: the first owner sentence past INDEX_CAP reaches the record's line",
+          OWNER_SENTENCES[0] in text, text[-200:])
+    check("past rulings capped: 60 owner sentences sit past the cap, and the record adds no more than "
+          "INDEX_CAP plus RULING_EXTRA_CAP characters",
+          len(text) <= question_form.INDEX_CAP + question_form.RULING_EXTRA_CAP, "%d characters" % len(text))
+
+
+# A markdown table row is judged alone. Run on together, the rows of a long table form one unit bigger than a record's
+# whole ruling budget, and a ruling by the owner in the table's last row would be lost with that unit.
+TABLE_FILLER_ROWS = 90  # joined, these rows run well past one record's whole ruling budget
+
+
+def case_past_ruling_owner_row_after_a_long_table_reaches_the_line():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("past rulings table: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    rows = ["| a%d | b | c |" % i for i in range(TABLE_FILLER_ROWS)]
+    rows.append("| last | owner ruling 2026-11-17 19:45 CST | keep | ... |")
+    section = "B" * 790 + ". \n" + "\n".join(rows)
+    record_id, candidates = _past_cap_candidates("past-owner-table-row", section, fn)
+    lines = _record_lines(candidates, record_id)
+    check("past rulings table: the decision record is a candidate (scope)", bool(lines), str(candidates)[:200])
+    if not lines:
+        return
+    text = _record_text(candidates, record_id)
+    check("past rulings table: the owner ruling row past INDEX_CAP, after a long table, reaches the record's line",
+          "owner ruling 2026-11-17 19:45" in text, text[-200:])
+    check("past rulings table: the record adds no more than INDEX_CAP plus RULING_EXTRA_CAP characters",
+          len(text) <= question_form.INDEX_CAP + question_form.RULING_EXTRA_CAP, "%d characters" % len(text))
+
+
+# Sentences that state a ruling by the owner that do not all fit are taken newest date stamp first (question_form._owner_sentences). So a
+# newer ruling beats an older one that sits earlier in the section, and an undated one sorts after the dated ones, so
+# it is the one dropped when the newer ruling fills the budget.
+NEWEST_LEAD = "Owner ruling, 2026-11-17 19:45 CST: keep the new review budget"
+OLDER_LEAD = "Owner ruling, 2026-11-16 09:00 CST: keep the old review budget"
+UNDATED_LEAD = "Owner ruling: keep the undated review budget"
+PAD_WORDS = "keep the review stack and its model pins as they are".split()
+
+
+def _sized_sentence(lead, n_chars):
+    """One sentence of n_chars characters: `lead`, then plain words with no ruling word, then a period. It holds no
+    sentence break before its end."""
+    text, index = lead, 0
+    while len(text) < n_chars - 1:
+        text += " " + PAD_WORDS[index % len(PAD_WORDS)]
+        index += 1
+    return text[:n_chars - 1] + "."
+
+
+def case_past_ruling_owner_sentences_newest_date_first():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("past rulings newest first: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    cap = question_form.RULING_EXTRA_CAP  # the budget is read from the module, never copied
+    newer = _sized_sentence(NEWEST_LEAD, cap // 2)
+    older = _sized_sentence(OLDER_LEAD, cap * 55 // 100)
+    undated = _sized_sentence(UNDATED_LEAD, cap * 52 // 100)
+    section = _filler(900) + " " + older + " " + undated + " " + newer
+    check("past rulings newest first: the fixture puts the three owner sentences past INDEX_CAP",
+          min(section.index(s) for s in (older, undated, newer)) > question_form.INDEX_CAP,
+          "offset %d" % section.index(older))
+    check("past rulings newest first: the older and newer dated sentences together are over RULING_EXTRA_CAP",
+          len(older) + len(newer) > cap, "%d characters" % (len(older) + len(newer)))
+    check("past rulings newest first: the undated sentence does not fit beside the newer dated one",
+          1 + len(newer) + 1 + len(undated) > cap, "%d characters" % (len(newer) + len(undated)))
+    check("past rulings newest first: the older dated sentence comes first in the section",
+          section.index(older) < section.index(newer), "fixture order")
+    record_id, candidates = _past_cap_candidates("past-owner-newest-first", section, fn)
+    lines = _record_lines(candidates, record_id)
+    check("past rulings newest first: the decision record is a candidate (scope)", bool(lines),
+          str(candidates)[:200])
+    if not lines:
+        return
+    text = _record_text(candidates, record_id)
+    check("past rulings newest first: the newer dated owner sentence reaches the record's line", newer in text,
+          text[-200:])
+    check("past rulings newest first: the older dated owner sentence is dropped, as it does not fit beside the newer",
+          older not in text, text[-200:])
+    check("past rulings newest first: the undated owner sentence sorts after the dated ones, so it is dropped when "
+          "the newer one fills the budget", undated not in text, text[-200:])
+
+
 # The owner's rulings not yet on main (the ruled store) sit on origin/roadmap. past_rulings puts each open entry first,
 # ahead of the decision records, and names what it supersedes. The pointer is patched to the fixture repo, so the cases
 # pass whichever checkout past_rulings reads the store from.
@@ -2212,6 +2419,174 @@ def case_ruled_store_ranks_by_shared_words_before_recency():
           bool(listed) and listed[0] == many, str(listed))
     check("ruled store rank: still at most %d ruled entries" % RULED_CAP_MAX,
           len(listed) <= RULED_CAP_MAX, "listed %d: %r" % (len(listed), listed))
+
+
+# A ruling's optional `scope` (lint/test_ruled_store.py): {"visibility": "private"} governs a private repo only. The
+# repo's visibility is its extras key `visibility`, which lint/layout.py reads (make_repo(visibility=...) writes it). Each
+# case reads that visibility back through layout.caution, and asserts it, before it judges the candidates.
+SCOPE_PRIVATE = {"visibility": "private"}
+SCOPE_PUBLIC = {"visibility": "public"}
+SCOPE_OPEN_ID, SCOPE_PRIVATE_ID, SCOPE_PUBLIC_ID = "scope-open", "scope-private", "scope-public"
+SCOPE_DAY = "2026-11-13T09:00:00-06:00"
+
+
+def _reads_as(repo, level):
+    """True when lint/layout.py reads the repo's visibility as the caution level `level` (public or private-solo)."""
+    import layout  # lint/layout.py, the one reader of the visibility key
+    return layout.caution(repo)["level"] == level
+
+
+def _scoped_store(repo, entries):
+    fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files(entries), tcj.ROOT)
+
+
+def _listed_ruled_ids(repo):
+    """The ruled ids past_rulings lists for the Apps goal, the store read from `repo` itself."""
+    import question_form  # the one form check (hooks/question_form.py)
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
+        candidates, _unknown = question_form.past_rulings(tcj.APPS_GOAL, repo)
+    return ruled_ids(candidates)
+
+
+def case_ruled_store_scope_omits_a_private_ruling_in_a_public_repo():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled scope public: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-scope-public", decisions={tcj.APPS_SLUG: tcj.APPS_RULING}, visibility="public")
+    _scoped_store(repo, {
+        SCOPE_OPEN_ID: fixture.entry(SCOPE_OPEN_ID, at=SCOPE_DAY, ruling=RULED_TEXT),
+        SCOPE_PRIVATE_ID: fixture.entry(SCOPE_PRIVATE_ID, at=SCOPE_DAY, ruling=RULED_TEXT, scope=SCOPE_PRIVATE),
+    })
+    reads_public = _reads_as(repo, "public")
+    check("ruled scope public: the fixture repo reads as public (scope control)", reads_public,
+          "layout.caution did not read the repo's visibility as public")
+    if not reads_public:
+        return
+    listed = _listed_ruled_ids(repo)
+    check("ruled scope public: an unscoped ruling is listed in a public repo", SCOPE_OPEN_ID in listed, str(listed))
+    check("ruled scope public: a ruling scoped to private is omitted from a public repo",
+          SCOPE_PRIVATE_ID not in listed, str(listed))
+
+
+def case_ruled_store_scope_keeps_a_private_ruling_in_a_private_repo():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled scope private: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-scope-private", decisions={tcj.APPS_SLUG: tcj.APPS_RULING}, visibility="private")
+    _scoped_store(repo, {
+        SCOPE_OPEN_ID: fixture.entry(SCOPE_OPEN_ID, at=SCOPE_DAY, ruling=RULED_TEXT),
+        SCOPE_PRIVATE_ID: fixture.entry(SCOPE_PRIVATE_ID, at=SCOPE_DAY, ruling=RULED_TEXT, scope=SCOPE_PRIVATE),
+    })
+    reads_private = _reads_as(repo, "private-solo")
+    check("ruled scope private: the fixture repo reads as private (scope control)", reads_private,
+          "layout.caution did not read the repo's visibility as private")
+    if not reads_private:
+        return
+    listed = _listed_ruled_ids(repo)
+    check("ruled scope private: an unscoped ruling is listed in a private repo", SCOPE_OPEN_ID in listed, str(listed))
+    check("ruled scope private: a ruling scoped to private is listed in a private repo",
+          SCOPE_PRIVATE_ID in listed, str(listed))
+
+
+def case_ruled_store_scope_private_only_lists_no_ruling_in_a_public_repo():
+    # The empty state: the only ruling that shares words with the question is private-scoped.
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled scope empty: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-scope-empty", decisions={tcj.APPS_SLUG: tcj.APPS_RULING}, visibility="public")
+    _scoped_store(repo, {
+        SCOPE_PRIVATE_ID: fixture.entry(SCOPE_PRIVATE_ID, at=SCOPE_DAY, ruling=RULED_TEXT, scope=SCOPE_PRIVATE),
+    })
+    reads_public = _reads_as(repo, "public")
+    check("ruled scope empty: the fixture repo reads as public (scope control)", reads_public,
+          "layout.caution did not read the repo's visibility as public")
+    if not reads_public:
+        return
+    listed = _listed_ruled_ids(repo)
+    check("ruled scope empty: a public repo whose only matching ruling is private lists no ruled candidate",
+          listed == [], str(listed))
+
+
+def case_ruled_store_scope_private_rulings_do_not_take_the_cap():
+    # The full-size state: RULED_CAP_MAX private-scoped rulings are newer than the unscoped one, and all match the words.
+    # A cap applied before the scope filter would spend its slots on them and drop the unscoped ruling.
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled scope cap: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-scope-cap", decisions={tcj.APPS_SLUG: tcj.APPS_RULING}, visibility="public")
+    entries = {SCOPE_OPEN_ID: fixture.entry(SCOPE_OPEN_ID, at="2026-11-01T09:00:00-06:00", ruling=RULED_TEXT)}
+    for day in range(1, RULED_CAP_MAX + 1):
+        rid = "scope-cap-private-%02d" % day
+        entries[rid] = fixture.entry(rid, at="2026-11-%02dT09:00:00-06:00" % (10 + day),
+                                     ruling="Owner: keep the apps' access to claude-settings, round %02d." % day,
+                                     scope=SCOPE_PRIVATE)
+    _scoped_store(repo, entries)
+    reads_public = _reads_as(repo, "public")
+    check("ruled scope cap: the fixture repo reads as public (scope control)", reads_public,
+          "layout.caution did not read the repo's visibility as public")
+    if not reads_public:
+        return
+    listed = _listed_ruled_ids(repo)
+    check("ruled scope cap: the unscoped ruling is listed though %d newer private rulings match" % RULED_CAP_MAX,
+          SCOPE_OPEN_ID in listed, str(listed))
+    check("ruled scope cap: no private-scoped ruling is listed in a public repo",
+          not any(rid.startswith("scope-cap-private-") for rid in listed), str(listed))
+
+
+def case_ruled_store_scope_omits_a_public_ruling_in_a_private_repo():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled scope public-in-private: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-scope-public-in-private", decisions={tcj.APPS_SLUG: tcj.APPS_RULING},
+                         visibility="private")
+    _scoped_store(repo, {
+        SCOPE_OPEN_ID: fixture.entry(SCOPE_OPEN_ID, at=SCOPE_DAY, ruling=RULED_TEXT),
+        SCOPE_PUBLIC_ID: fixture.entry(SCOPE_PUBLIC_ID, at=SCOPE_DAY, ruling=RULED_TEXT, scope=SCOPE_PUBLIC),
+    })
+    reads_private = _reads_as(repo, "private-solo")
+    check("ruled scope public-in-private: the fixture repo reads as private (scope control)", reads_private,
+          "layout.caution did not read the repo's visibility as private")
+    if not reads_private:
+        return
+    listed = _listed_ruled_ids(repo)
+    check("ruled scope public-in-private: an unscoped ruling is listed in a private repo",
+          SCOPE_OPEN_ID in listed, str(listed))
+    check("ruled scope public-in-private: a ruling scoped to public is omitted from a private repo",
+          SCOPE_PUBLIC_ID not in listed, str(listed))
+
+
+def case_ruled_store_scope_keeps_a_public_ruling_in_a_public_repo():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled scope public-in-public: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-scope-public-in-public", decisions={tcj.APPS_SLUG: tcj.APPS_RULING},
+                         visibility="public")
+    _scoped_store(repo, {
+        SCOPE_OPEN_ID: fixture.entry(SCOPE_OPEN_ID, at=SCOPE_DAY, ruling=RULED_TEXT),
+        SCOPE_PUBLIC_ID: fixture.entry(SCOPE_PUBLIC_ID, at=SCOPE_DAY, ruling=RULED_TEXT, scope=SCOPE_PUBLIC),
+    })
+    reads_public = _reads_as(repo, "public")
+    check("ruled scope public-in-public: the fixture repo reads as public (scope control)", reads_public,
+          "layout.caution did not read the repo's visibility as public")
+    if not reads_public:
+        return
+    listed = _listed_ruled_ids(repo)
+    check("ruled scope public-in-public: an unscoped ruling is listed in a public repo",
+          SCOPE_OPEN_ID in listed, str(listed))
+    check("ruled scope public-in-public: a ruling scoped to public is listed in a public repo",
+          SCOPE_PUBLIC_ID in listed, str(listed))
 
 
 class _BrokenPipeGit:
@@ -2499,6 +2874,36 @@ def case_dismissed_reason_keeps_the_generic_remedy_for_other_fields():
     stray = {"url": PAGE_URL, "action": "set", "collection": "items", "doc_id": DOC, "data": page_item(focus="#fill")}
     check("control: a stray top-level field keeps the generic itemFields reason",
           question_form.ITEM_FIELD_REASON in printed_reason(stray), printed_reason(stray)[:200])
+
+
+# ------------------------------------------------------------------ holdsLane: a lane wait's flag, which the page must draw
+#
+# A lane wait sets `holdsLane` true and `lane` (skills/waiting-page/SKILL.md, "Add an item"). The guard refuses a top-level
+# field that the page's itemFields block does not list, so the flag is refused until the page lists it. A merge or PR wait
+# sets `holds` alone and carries no flag.
+
+LANE_HOLDS = "Stops the batch run until the answer."
+LANE_WAIT = {"holds": LANE_HOLDS, "holdsLane": True, "lane": "batch-runner"}
+
+
+def case_lane_wait_flag_is_not_refused_as_undrawn():
+    """A session's set and update that carry holdsLane with lane and holds pass on both surfaces. The controls: an update
+    that names only lane passes, and a merge wait (holds alone, no flag) passes."""
+    got = call("item_field_hit", "update", {}, {"holdsLane": True, "lane": "batch-runner"})
+    check("item_field_hit: holdsLane with a lane is not an undrawn field", got == "", "want no hit, got %r" % (got,))
+    page("a set carrying holdsLane, lane and holds passes", "set", entry_of(page_item(**LANE_WAIT)), None)
+    page("an update carrying holdsLane, lane and holds passes", "update", entry_of(dict(LANE_WAIT)), None)
+    page("control: an update that names only lane passes", "update", entry_of({"lane": "batch-runner"}), None)
+    page("control: a merge wait, holds alone with no holdsLane, passes", "update", entry_of({"holds": LANE_HOLDS}), None)
+
+
+def case_page_lists_holds_lane():
+    """The page draws the lane-wait flag: its itemFields block lists holdsLane, the list the guard reads."""
+    fields = question_form._item_fields(question_form.ITEM_FIELDS_PAGE)
+    check("page: its itemFields block reads as a list", fields is not None,
+          "the itemFields block in skills/waiting-page/page.html did not read as a list of strings")
+    check("page: the itemFields block lists holdsLane", "holdsLane" in (fields or []),
+          "the page's itemFields block does not list holdsLane")
 
 
 # ------------------------------------------------------------------ a press link needs a string label
@@ -3145,6 +3550,136 @@ def case_judged_mixed_writes_all_returned():
           "doc ids %r: the relative write p4 is read against the process cwd and dropped" % (ids,))
 
 
+# ------------------------------------------------------------------ stops: the entries Blocking counts are named in holds
+#
+# Design notes docs/design/session-role-sort-notes.md, ruling Q1 and point 1: `stops` is a list of what an answer stops, each entry a
+# lane slug, a PR number or a step id. holds names them in words, so the two cannot drift. The rule id is not fixed by the
+# brief, so each case takes any refusal, other than item-field-rendered, that names the entry it refuses.
+
+STOPS_HOLDS = "Lane fix-proxy and PR #1201 wait on your word."
+STOPS_NOT_A_REFUSAL = ("", "MISSING", "RAISED", "item-field-rendered")
+_STOPS_PAGE = []
+
+
+def stops_fields_page():
+    """A page whose itemFields block is the real page's list plus `stops`. The list is read from the page, never copied, and
+    the seam GUARD_ITEM_FIELDS_PAGE points the check at it, so a stops write is judged by the stops rule, not by
+    item-field-rendered. The real page lists `stops` (page.html itemFields), and the seam writes that list as it is."""
+    if not _STOPS_PAGE:
+        fields = question_form._item_fields(question_form.ITEM_FIELDS_PAGE)
+        check("stops: the page's itemFields list reads", fields is not None, "no itemFields list in the page")
+        check("stops: the page's itemFields list names stops", "stops" in (fields or []), "the page does not list stops")
+        path = os.path.join(RUN_FOLDER, "stops_fields_page.html")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('<script type="application/json" id="itemFields">%s</script>' % json.dumps(fields or []))
+        _STOPS_PAGE.append(path)
+    return _STOPS_PAGE[0]
+
+
+def stops_item(holds=None, stops=None):
+    """A decision in the form. `holds` and `stops` are set when given and left out when None."""
+    item = page_item(holds=holds, stops=stops)
+    return {k: v for k, v in item.items() if not (k in ("holds", "stops") and v is None)}
+
+
+def stops_refused(name, got, fragment):
+    ok = got[0] not in STOPS_NOT_A_REFUSAL and fragment.lower() in str(got[1]).lower()
+    check(name, ok, "want a refusal naming %r, got %r" % (fragment, got))
+
+
+def stops_page(name, data, fragment=None, op="set"):
+    """One page write judged by item_hit and by the guard, with the stops seam. A fragment is a refusal that names it;
+    None is a pass. `op` is the write's verb: set by default, or update for a write that carries only the fields it changes."""
+    with mock.patch.dict(os.environ, {question_form.ITEM_FIELDS_SEAM: stops_fields_page()}):
+        for surface, got in (("page item_hit", call("item_hit", op, entry_of(data))),
+                             ("page guard", guard_hit(op, entry_of(data)))):
+            if fragment is None:
+                check("%s: %s passes" % (surface, name), got == ("", ""), "want a pass, got %r" % (got,))
+            else:
+                stops_refused("%s: %s" % (surface, name), got, fragment)
+
+
+def case_stops_names_each_entry_in_holds():
+    """A lane is named by its slug in the words, a PR by "#N" or "PR N". A PR number is not named by a longer one that
+    starts with it (#12 is not #1201), nor a lane slug by a longer slug (fix is not fix-proxy)."""
+    stops_page("a lane entry that holds does not name", stops_item(holds="PR #1201 waits on your word.", stops=["lane fix-proxy"]), "fix-proxy")
+    stops_page("a PR entry that holds does not name", stops_item(holds="Lane fix-proxy waits on your word.", stops=["PR #1201"]), "1201")
+    stops_page("a second entry that holds does not name", stops_item(holds="Lane fix-proxy waits on your word.", stops=["lane fix-proxy", "PR #1201"]), "1201")
+    stops_page("a PR number that is the start of the one holds names", stops_item(holds="Waits on PR #1201.", stops=["PR #12"]), "PR #12")
+    stops_page("a lane slug that is the start of the one holds names", stops_item(holds="Lane fix-proxy waits on your word.", stops=["lane fix"]), "fix")
+
+
+def case_stops_consistent_items_pass():
+    """Controls: an item whose holds names every entry passes, with the PR written either way, and so does an item with
+    neither field, or an empty list."""
+    stops_page("holds names both entries", stops_item(holds=STOPS_HOLDS, stops=["lane fix-proxy", "PR #1201"]), None)
+    stops_page("holds writes the PR as PR N", stops_item(holds="Lane fix-proxy and PR 1201 wait on your word.", stops=["lane fix-proxy", "PR #1201"]), None)
+    stops_page("holds writes the PR as #N", stops_item(holds="Lane fix-proxy waits on #1201.", stops=["PR #1201"]), None)
+    stops_page("an empty stops list with holds", stops_item(holds=STOPS_HOLDS, stops=[]), None)
+    stops_page("neither holds nor stops", stops_item(), None)
+
+
+def case_stops_item_passes_the_real_page_fields():
+    """No seam: the check reads the real page's itemFields list, which lists `stops`, so a consistent stops item passes on
+    both surfaces. A page that dropped `stops` from that list would refuse it as item-field-rendered, naming the field."""
+    page("a consistent stops item passes the page's own field list", "set",
+         entry_of(stops_item(holds=STOPS_HOLDS, stops=["lane fix-proxy", "PR #1201"])), None)
+
+
+def case_stops_needs_holds_and_a_list():
+    """stops with no holds, a stops that is not a list, and a repeated entry are each refused, naming the stops or the entry."""
+    stops_page("stops with no holds", stops_item(stops=["lane fix-proxy"]), "stops")
+    stops_page("stops that is a string, not a list", stops_item(holds=STOPS_HOLDS, stops="lane fix-proxy"), "stops")
+    stops_page("a repeated entry", stops_item(holds=STOPS_HOLDS, stops=["lane fix-proxy", "lane fix-proxy"]), "fix-proxy")
+
+
+def case_stops_refusal_prints_its_table_text():
+    """A stops refusal prints its rule's text from question_form.PAGE_REASONS, the one table guard.py prints from (as
+    case_page_reasons_are_one_table checks the other page rules)."""
+    table = getattr(question_form, "PAGE_REASONS", None)
+    if table is None:
+        check("stops reason: question_form.PAGE_REASONS is the table of page reasons", False, MISSING)
+        return
+    tool_input = {"url": PAGE_URL, "action": "set", "collection": "items", "doc_id": DOC,
+                  "data": stops_item(holds="PR #1201 waits on your word.", stops=["lane fix-proxy"])}
+    with mock.patch.dict(os.environ, {question_form.ITEM_FIELDS_SEAM: stops_fields_page()}):
+        rule = guard.data_tool_hit(tool_input, PAGE_REPO)[0]
+        check("stops reason: the refused entry has a rule that is in the page reasons table",
+              rule in table and rule not in STOPS_NOT_A_REFUSAL, "rule %r" % (rule,))
+        if rule in table:
+            printed = printed_reason(tool_input)
+            check("stops reason: the refusal prints its rule's table text", table[rule] in printed, printed[:200])
+
+
+def case_stops_update_judged_by_the_fields_it_carries():
+    """An update that sets stops with no holds is refused, as a set is. An update that removes stops passes, and so does
+    one that carries holds alone: the stored stops is unseen, so the update is judged by what it carries."""
+    stops_page("an update that sets stops with no holds", {"stops": ["lane fix-proxy"]}, "stops", op="update")
+    stops_page("an update that sets stops and holds that names both", {"stops": ["lane fix-proxy", "PR #1201"], "holds": STOPS_HOLDS},
+               None, op="update")
+    stops_page("an update that removes stops", {"stops": {"__delete__": True}}, None, op="update")
+    stops_page("an update that carries holds only", {"holds": "Lane fix-proxy waits on your word."}, None, op="update")
+
+
+def case_stops_batch_judged_per_write():
+    """A batch that holds a stops write with no holds is refused by the stops rule. A batch of consistent stops writes passes."""
+    def batch(writes):
+        with mock.patch.dict(os.environ, {question_form.ITEM_FIELDS_SEAM: stops_fields_page()}):
+            return page_batch(writes)
+    good = {"op": "set", "collection": "items", "doc_id": "stops-batch-ok", "data": stops_item(holds=STOPS_HOLDS, stops=["lane fix-proxy", "PR #1201"])}
+    bad = {"op": "set", "collection": "items", "doc_id": "stops-batch-bad", "data": stops_item(stops=["lane fix-proxy"])}
+    verdict("page guard: a batch with a stops write and no holds is refused", batch([good, bad]),
+            (getattr(question_form, "STOPS_RULE", "<STOPS_RULE missing from hooks/question_form.py>"), "stops"))
+    verdict("page guard: a batch of consistent stops writes passes", batch([good]), None)
+
+
+def case_stops_str_replace_on_holds_is_a_known_gap():
+    """KNOWN GAP, pinned so it is on record: a str_replace that drops an entry from holds passes, since stops_hit judges a
+    set and an update only, and the stored stops is unseen. This case passes today. A fix that judges the edit turns it red,
+    and the case is re-pointed then."""
+    page("KNOWN GAP: a str_replace that drops PR #1201 from holds passes while stops still lists it", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "holds", "old_str": STOPS_HOLDS,
+          "new_str": "Lane fix-proxy waits on your word."}, None)
 # ------------------------------------------------------------------ a decision states its recommendation, why, and what waits
 #
 # Rule question-form (decision question-form, the page's card). An open decision set or update shows a
@@ -3464,6 +3999,7 @@ def main():
                  case_item_n_reason_and_the_pages_own_rule, case_session_update_naming_dismissed_is_refused,
                  case_dismissed_refused_on_every_route, case_dismissed_refused_without_a_readable_field_list,
                  case_dismissed_reason_keeps_the_generic_remedy_for_other_fields,
+                 case_lane_wait_flag_is_not_refused_as_undrawn, case_page_lists_holds_lane,
                  case_item_stray_field_refused_from_a_record_branch_checkout,
                  case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
@@ -3493,11 +4029,23 @@ def main():
                  case_past_rulings_caps_and_ranks, case_past_rulings_reads_debts, case_key_overlap,
                  case_key_overlap_resend_and_fact_lists, case_key_overlap_similar_questions_clash,
                  case_past_rulings_skips_the_debt_notes_file,
+                 case_past_ruling_owner_sentence_past_the_cap_reaches_the_line,
+                 case_past_ruling_owner_sentence_inside_the_cap_reaches_the_line,
+                 case_past_ruling_section_without_owner_sentence_is_cut_at_the_cap,
+                 case_past_ruling_owner_sentences_added_text_is_capped,
+                 case_past_ruling_owner_row_after_a_long_table_reaches_the_line,
+                 case_past_ruling_owner_sentences_newest_date_first,
                  case_ruled_store_first_and_carries_supersedes, case_ruled_store_absent_is_only_unknown,
                  case_ruled_store_words_filter_leaves_out_an_unrelated_entry,
                  case_ruled_store_caps_matching_entries_at_eight_newest_first,
                  case_ruled_store_marks_an_unread_entry_unchecked,
                  case_ruled_store_ranks_by_shared_words_before_recency,
+                 case_ruled_store_scope_omits_a_private_ruling_in_a_public_repo,
+                 case_ruled_store_scope_keeps_a_private_ruling_in_a_private_repo,
+                 case_ruled_store_scope_private_only_lists_no_ruling_in_a_public_repo,
+                 case_ruled_store_scope_private_rulings_do_not_take_the_cap,
+                 case_ruled_store_scope_omits_a_public_ruling_in_a_private_repo,
+                 case_ruled_store_scope_keeps_a_public_ruling_in_a_public_repo,
                  case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
                  case_task_why_cited_reds, case_task_why_cited_greens,
                  case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
@@ -3517,7 +4065,12 @@ def main():
                  case_cross_repo_writer_guard_path, case_cross_repo_writer_page_item_hit,
                  case_cross_repo_writer_call_judge, case_cross_repo_update_checked_with_needs_repo,
                  case_judged_relative_file_path_read_at_cwd, case_judged_absolute_and_empty_are_unchanged,
-                 case_judged_mixed_writes_all_returned):
+                 case_judged_mixed_writes_all_returned,
+                 case_stops_names_each_entry_in_holds, case_stops_consistent_items_pass,
+                 case_stops_item_passes_the_real_page_fields,
+                 case_stops_needs_holds_and_a_list, case_stops_refusal_prints_its_table_text,
+                 case_stops_update_judged_by_the_fields_it_carries, case_stops_batch_judged_per_write,
+                 case_stops_str_replace_on_holds_is_a_known_gap):
         try:
             case()
         except Exception as exc:

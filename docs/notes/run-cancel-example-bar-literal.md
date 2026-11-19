@@ -1,0 +1,1 @@
+- run-cancel-example-bar-literal: the test that bars the measured example in Own CI Run Cancel blocks only the literal strings "41377928751" and "Measured example"; a reworded quote of another run passes. Decision: auto-mode-owner-acts.

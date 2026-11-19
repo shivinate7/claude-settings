@@ -1,0 +1,1 @@
+- sim-test-check-no-retry: sim-boot-screen-check 13:36 CST Nov 12 (lane session_013NEJL1Lig4ktvop4WSuEDo, PR #2887): retry question withdrawn; decision sim-boot-is-verified (item 433 a, Nov 8 12:00 CST) already rules one check, no retry. Mac-unmeasured; becomes a question only if a Mac run shows a healthy cold boot failing.

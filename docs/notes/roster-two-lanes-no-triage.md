@@ -1,0 +1,1 @@
+- roster-two-lanes-no-triage: lane-finds-triage 13:46 CST Nov 12: Coordinator 13:41 CST Nov 12: two lanes this hour could not find triage or the batch runner in their first list_sessions rows; briefs name roles only (R22). The fix names the standing sessions in one place every lane reads (a roster), or filters by the role tag.

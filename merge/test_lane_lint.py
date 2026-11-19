@@ -17,12 +17,18 @@ prints cost the same per lint. The wrong-cause loop runs six lints. A stub exits
 at any exit code, and a tally at exit 1 fails. Measured: the 30 mutation cases took 16.1 s in one run, with the module's import, before the shard
 cases were added; their time and lint-run count are unmeasured since. The shard cases (test_mutation_test_shard_*) run checks-mutate-guard's shard
 jobs: a clean lint starts three mutate stubs (unmeasured), and a stop or a FAIL starts fewer.
+The progress cases (test_mutation_test_progress_*) check the lines a shard run prints: a start and an end line per shard, and heartbeat
+lines while a shard runs (merge.MUTATE_HEARTBEAT_SECONDS, patched small or huge). Their slow shards sleep inside the mutate stub: 1 s in the
+heartbeat case (shard 2/3 of two runs), 0.6 s in the timeout case. Their clean runs use the fake clock. Measured: unmeasured.
+The closed-stdout cases (test_mutation_test_progress_broken_pipe_*, _value_error_*) make merge.say raise on every shard line; the join case
+(test_mutation_test_progress_heartbeat_thread_is_gone_*) holds a heartbeat line until the call joins its thread. Their cost: one lint each, two for the
+closed-stdout pair (a control run and the raising run); unmeasured.
 BatchHeadMutation (class BatchHeadMutation) lints a touched lane's head at the batch runner's pre-join call, `--lane-lint <pr>`, through the gh shim,
 in a cloud session with the batch-runner role or with none; the shim's comment list holds the hand-off PASS record. Cost per case: one ci-job stub
 start, and one mutate stub start where the run starts. Its times are unmeasured since the batch-build cases were removed.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
-import ast, atexit, contextlib, importlib.util, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
+import ast, atexit, contextlib, importlib.util, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, threading, time, types, unittest, unittest.mock, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -34,6 +40,10 @@ import test_merge as tm  # noqa: E402  the git half's fixture and fakes; importi
 from test_merge import LANE_LINT_MARKER, NOT_OWNER, lint_comment  # noqa: E402  the lint comment's one form, in test_merge.py (decision lanes-run-no-full-ci-job)
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import merge  # noqa: E402
+sys.path.append(os.path.join(HERE, "..", "janitor"))  # noqa: E402  janitor/sweep.py: the sweep a lane lint runs under a full floor
+import sweep  # noqa: E402
+REAL_SWEEP_REPO = sweep.sweep_repo  # read before any case patches it: the real-sweep case puts it back
+import guard  # noqa: E402  the full-disk floor's constants: hooks/guard.py LOAD_FULL_DISK_SHARE and LOAD_FULL_DISK_GB
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
@@ -261,14 +271,15 @@ MUTATE_STEP = "Guard mutation test"  # the step of that job whose run: line is t
 MUTATE_SHARD_STEP = "Guard mutation test, shard 1/3"  # main's name for that step: the first of three shard jobs, which the split made of the one job
 WORKFLOW_REL = ".github/workflows/checks.yml"
 MUTATE_LOG = "mutate-calls.jsonl"  # one line per start of a mutate stub, in this case's folder
-MUTATE_STUB ='''import json, os, subprocess, sys
-LOG, OUT, ERR, RC, SHARDS = __LOG__, __OUT__, __ERR__, __RC__, __SHARDS__
+MUTATE_STUB ='''import json, os, subprocess, sys, time
+LOG, OUT, ERR, RC, SHARDS, SLEEPS = __LOG__, __OUT__, __ERR__, __RC__, __SHARDS__, __SLEEPS__
 def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
 shard = os.environ.get("MUTATE_SHARD")
 with open(LOG, "a", encoding="utf-8") as f:
     print(json.dumps({"argv": sys.argv, "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "shard": shard,
                       "detached": subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True).returncode != 0}), file=f)
+time.sleep(SLEEPS.get(shard, 0))  # a shard that runs long: its run lasts this many seconds
 OUT, ERR, RC = SHARDS.get(shard, (OUT, ERR, RC))
 sys.stdout.write(OUT)
 sys.stderr.write(ERR)
@@ -276,11 +287,12 @@ sys.exit(RC)
 '''
 
 
-def mutate_script(log, out="", err="", rc=0, shards=None):
+def mutate_script(log, out="", err="", rc=0, shards=None, sleeps=None):
     """The file a lane commits as the mutate command's script: it logs its start to `log` with its MUTATE_SHARD, prints `out` and `err`, and exits
-    `rc`. `shards` maps a MUTATE_SHARD value such as "2/3" to the (out, err, rc) of that shard's run; the other runs print `out`, `err` and `rc`."""
+    `rc`. `shards` maps a MUTATE_SHARD value such as "2/3" to the (out, err, rc) of that shard's run; the other runs print `out`, `err` and `rc`.
+    `sleeps` maps a MUTATE_SHARD value to the seconds that shard's run takes before it prints; the other runs take none."""
     return (MUTATE_STUB.replace("__LOG__", repr(log)).replace("__OUT__", repr(out)).replace("__ERR__", repr(err))
-            .replace("__RC__", repr(rc)).replace("__SHARDS__", repr(shards or {})))
+            .replace("__RC__", repr(rc)).replace("__SHARDS__", repr(shards or {})).replace("__SLEEPS__", repr(sleeps or {})))
 
 
 def mutate_report(made, killed, crashed, survived):
@@ -404,6 +416,50 @@ def counts_missing(text, counts):
     return None
 
 
+HEARTBEAT_THREAD = "mutate-heartbeat"  # the name merge.py gives the thread that prints a shard's heartbeat lines
+HEARTBEAT_FAST = 0.2  # MUTATE_HEARTBEAT_SECONDS where a case needs heartbeats: a shard that runs for a second or more prints several
+HEARTBEAT_NEVER = 3600  # MUTATE_HEARTBEAT_SECONDS where a case must print none: no shard in these cases runs for an hour
+SHARD_EVENT = re.compile(r"mutation test shard (\d+)/(\d+): (start|end|running)\b")  # the progress line of one shard, as merge.py prints it
+PROGRESS_START = "mutation test shard "  # the opening of every shard progress line: what a closed-stdout case makes merge.say raise on
+HOLD_CEILING = 10  # seconds a held heartbeat line waits for its release: a hang guard only. A correct run releases it at the join or at the end line
+
+
+def heartbeat_every(seconds):
+    """A patch of merge.MUTATE_HEARTBEAT_SECONDS to `seconds`. create=True: a merge with no such constant still runs the case, and the case's
+    assert names the line that is missing."""
+    return unittest.mock.patch.object(merge, "MUTATE_HEARTBEAT_SECONDS", seconds, create=True)
+
+
+def shard_events(text):
+    """-> [(n, M, kind)] of the shard progress lines in `text`, in print order: kind is start, end or running."""
+    return [(int(n), int(m), kind) for n, m, kind in SHARD_EVENT.findall(text)]
+
+
+def shard_lines(text, n, m, kind):
+    """-> the lines of `text` that announce `kind` for shard n of m."""
+    return [ln for ln in text.splitlines() if any(g == (str(n), str(m), kind) for g in SHARD_EVENT.findall(ln))]
+
+
+def elapsed_shown(line):
+    """True when a progress line shows elapsed seconds: a number with a unit, read after the `shard n/M:` label, so the label's digits do not count."""
+    return re.search(r"\b\d+(?:\.\d+)?\s*s(?:ec(?:onds?)?)?\b", line.split(": ", 1)[-1]) is not None
+
+
+def masked_verdict(text):
+    """-> the PASS lines of `text` with each wall time in seconds masked, so two runs of one verdict compare equal whatever their real clock read."""
+    return [re.sub(r"\b\d+ s\b", "N s", line) for line in pass_lines(text)]
+
+
+def progress_passes(text):
+    """-> the progress lines of `text` that start with PASS:. Empty when no progress line reads as a pass."""
+    return [ln for ln in text.splitlines() if ln.startswith("PASS:") and "mutation test shard" in ln]
+
+
+def live_heartbeat_threads():
+    """-> the heartbeat threads that are alive now."""
+    return [t for t in threading.enumerate() if t.name == HEARTBEAT_THREAD]
+
+
 class WallClock:
     """The wall clock of one lint run: time.time, time.monotonic and time.perf_counter read it. It starts at the real time and moves only by advance()."""
 
@@ -415,6 +471,24 @@ class WallClock:
 
     def advance(self, seconds):
         self.t += seconds
+
+
+class NoAnswer:
+    """A stdin that records each read and gives nothing back. A sweep that asks a question reads its answer here."""
+    def __init__(self, reads):
+        self.reads = reads
+
+    def read(self, *args):
+        self.reads.append("read")
+        return ""
+
+    def readline(self, *args):
+        self.reads.append("readline")
+        return ""
+
+    def __iter__(self):
+        self.reads.append("iter")
+        return iter(())
 
 
 class LaneFixture(CiJobStub, tm.CloudSession):
@@ -430,16 +504,41 @@ class LaneFixture(CiJobStub, tm.CloudSession):
         self.lock = NoLock()
         self.init_stub()
         self.mutate_log = os.path.join(self.t, MUTATE_LOG)
+        self.sweep_runs = []  # each sweep_repo call a lane lint makes; the stand-in reaps nothing, so no case sweeps a fixture tree
+        sweep_patch = unittest.mock.patch.object(sweep, "sweep_repo", side_effect=self.record_sweep)
+        self.sweep_mock = sweep_patch.start()
+        self.addCleanup(sweep_patch.stop)
+        # The floor reads the host's drives (merge.refuse_full_disk). A case that names a drive patches shutil.disk_usage itself, and that patch
+        # wins until it ends. Every other case reads this roomy drive, so no result depends on the host's free space.
+        roomy = types.SimpleNamespace(total=int(DISK_GIB * GIB), used=int((DISK_GIB - 500) * GIB), free=int(500 * GIB))
+        disk_patch = unittest.mock.patch.object(shutil, "disk_usage", return_value=roomy)
+        disk_patch.start()
+        self.addCleanup(disk_patch.stop)
+
+    def record_sweep(self, root, confirm, restore_log_path, mode="full", attended=False, own_lock_rule=True):
+        """The stand-in for janitor/sweep.py's sweep_repo: it records the call with where stdout stands, and reaps nothing. -> sweep_repo's result shape.
+        `own_lock_rule` is sweep_repo's keyword, which run_safe_sweep passes; the stand-in takes it and reads no lock.
+        The same stand-in as test_merge.py's, kept here so the lane lint cases do not depend on that module's fixture."""
+        out = sys.stdout
+        self.sweep_runs.append({"root": root, "confirm": confirm, "mode": mode, "attended": attended,
+                                "stdout_at": len(out.getvalue()) if hasattr(out, "getvalue") else None})
+        return {"root": root, "refused": None, "branches": [], "worktrees": [], "listeners": [], "pruned": None,
+                "husks": [], "strays": [], "trash": []}
 
     def run_lane(self, *argv, cloud=False):
         """-> (rc, stdout and stderr together) of merge in the lane checkout. A refused command line fails the case with its reason."""
+        rc, out, err = self.lane_streams(*argv, cloud=cloud)
+        return rc, out + err
+
+    def lane_streams(self, *argv, cloud=False):
+        """-> (rc, stdout, stderr) of merge in the lane checkout. A refused command line fails the case with its reason."""
         rc, out, err = self.run_main(*argv, **({} if cloud else {"CLAUDE_CODE_REMOTE": None}))
         if rc == 2 and "error:" in err:  # argparse refused the command line
             last = err.strip().splitlines()[-1]
             if "unrecognized arguments" in last and "--lane-lint" in last:
                 self.fail("the mode does not exist: " + last)
             self.fail("argparse refused the command line: " + last)
-        return rc, out + err
+        return rc, out, err
 
     def assert_lint_merge(self, lint_head, head, base, repo=None):
         """The lint's HEAD is the merge commit of origin/<base> (first parent) and the head (second parent): the lint reads the merged files,
@@ -530,6 +629,48 @@ class LaneLint(LaneFixture):
                 break
         out, rest = proc.communicate(timeout=120)
         return proc.returncode, out, "".join(err) + rest
+
+    def closed_stdout_run(self, make_exc):
+        """Run the lane lint on the sharded head with merge.say raising make_exc() on every shard progress line, as a closed or broken stdout
+        does. -> (rc, stdout, stderr, attempts): attempts are the lines the raise was tried on, oldest first. An error that leaves the lint
+        fails the case with its cause; it is not a crash of the test."""
+        attempts, real_say = [], merge.say
+
+        def say_raising(*lines):
+            if lines and lines[0].startswith(PROGRESS_START):
+                attempts.append(lines[0])
+                raise make_exc()
+            return real_say(*lines)
+
+        error = None
+        with heartbeat_every(HEARTBEAT_FAST), unittest.mock.patch.object(merge, "say", say_raising):
+            try:
+                rc, out, err = self.lane_streams("--lane-lint", "7")
+            except AssertionError:
+                raise
+            except Exception as e:
+                error = e
+        if error is not None:  # raised here, outside the except: one failure, with no chained traceback
+            self.fail("the lint let %s out of a shard progress line, so the run ended in a traceback, not its verdict: %s" % (type(error).__name__, error))
+        return rc, out, err, attempts
+
+    def assert_closed_stdout_changes_no_verdict(self, make_exc):
+        """Why: a shard progress line that cannot be written must not change the lint's verdict. The run with the raise gives the exit code and the
+        PASS lines of the run without it, and tries each shard's start, running and end line in order. Shard 2/3 sleeps 1 s, so its heartbeat fires."""
+        self.use_ci_job(PASSING, 0)
+        self.push_sharded_lane(shard_jobs(), sleeps={"2/3": 1})
+        with heartbeat_every(HEARTBEAT_FAST):
+            rc_plain, out_plain, err_plain = self.lane_streams("--lane-lint", "7")
+        self.assertEqual(rc_plain, 0, "precondition: the unpatched sharded run does not pass: " + out_plain + err_plain)
+        rc, out, err, attempts = self.closed_stdout_run(make_exc)
+        self.assertTrue(attempts, "precondition: no shard progress line reached the raise, so the case probes nothing: " + out + err)
+        self.assertEqual(rc, rc_plain, "a closed stdout changed the exit code: %d, want %d: %s" % (rc, rc_plain, out + err))
+        self.assertEqual(masked_verdict(out), masked_verdict(out_plain), "a closed stdout changed the verdict line: " + out)
+        tried = shard_events("\n".join(attempts))
+        self.assertEqual([ev for ev in tried if ev[2] != "running"], [(n, 3, kind) for n in (1, 2, 3) for kind in ("start", "end")],
+                         "the lint did not try a start and an end line for each shard, in order: " + "\n".join(attempts))
+        self.assertIn((2, 3, "running"), tried, "the heartbeat of shard 2/3 was not tried: " + "\n".join(attempts))
+        self.assertNotIn("Traceback", out + err, "the lint printed a traceback: " + out + err)
 
     def test_a_progress_line_from_ci_job_reaches_the_callers_stderr_live_and_the_pass_still_reads_from_stdout(self):
         rc, out, err = self.progress_run(PASSING, 0, "--lane-lint", self.head("feat"))
@@ -982,11 +1123,12 @@ class LaneLint(LaneFixture):
             with open(text_path, encoding="utf-8") as f:
                 return f.read()
 
-        deadline = time.time() + 60
-        while not self.lint_calls() and proc.poll() is None and time.time() < deadline:
-            time.sleep(0.05)
+        for _ in range(1200):
+            if self.lint_calls() or proc.poll() is not None:
+                break
+            time.sleep(0.05)  # poll interval of a condition wait; the try count is the deadline
         self.assertIsNone(proc.poll(), "the run ended before its lint started: " + run_text())
-        self.assertTrue(self.lint_calls(), "the lint did not start within 60 s: " + run_text())
+        self.assertTrue(self.lint_calls(), "the lint did not start after 1200 polls of 0.05 s: " + run_text())
         lint_tree = self.lint_calls()[0]["cwd"]
         temp_dir = os.path.dirname(lint_tree)
         self.assertTrue(os.path.isdir(lint_tree), "the lint tree was not on disk while the lint ran")
@@ -1120,7 +1262,12 @@ class LaneLint(LaneFixture):
 
     def timed_lint(self, seconds, *argv):
         """Run merge in the lane checkout with the wall clock faked: each mutation test run returns `seconds` after it starts, and no real time passes.
-        The mutate log is cleared first. -> (rc, stdout and stderr together)."""
+        -> (rc, stdout and stderr together). timed_lint_streams is the same run with the streams apart."""
+        rc, out, err = self.timed_lint_streams(seconds, *argv)
+        return rc, out + err
+
+    def timed_lint_streams(self, seconds, *argv):
+        """timed_lint with the streams apart: -> (rc, stdout, stderr). The mutate log is cleared first."""
         if os.path.exists(self.mutate_log):
             os.remove(self.mutate_log)
         real_sh, clock = merge.sh, WallClock()
@@ -1135,7 +1282,7 @@ class LaneLint(LaneFixture):
 
         with unittest.mock.patch.object(merge, "sh", sh_timed), unittest.mock.patch("time.time", clock.now), \
                 unittest.mock.patch("time.monotonic", clock.now), unittest.mock.patch("time.perf_counter", clock.now):
-            return self.run_lane(*argv)
+            return self.lane_streams(*argv)
 
     def assert_mutation_test_runs_at(self, head, count):
         """The mutate command ran `count` times, each in a detached tree on the lint's merge commit of `head` into main, and every tree is gone afterwards."""
@@ -1153,11 +1300,12 @@ class LaneLint(LaneFixture):
         """The mutate command ran once, in a detached tree on the lint's merge commit of `head` into main, and both trees are gone afterwards."""
         self.assert_mutation_test_runs_at(head, 1)
 
-    def push_sharded_lane(self, jobs, shards=None):
+    def push_sharded_lane(self, jobs, shards=None, sleeps=None):
         """The lane's commit: the mutate script, which prints a clean 694-mutant report except for the shards `shards` names
-        ({MUTATE_SHARD value: (out, err, rc)}), and checks.yml with the shard jobs `jobs` names. -> the lane's head."""
+        ({MUTATE_SHARD value: (out, err, rc)}), takes the seconds `sleeps` names ({MUTATE_SHARD value: s}) before each run ends,
+        and checks.yml with the shard jobs `jobs` names. -> the lane's head."""
         _, script = real_mutate_job()
-        return self.push_lane({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0), shards=shards),
+        return self.push_lane({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0), shards=shards, sleeps=sleeps),
                                WORKFLOW_REL: sharded_workflow(jobs)})
 
     def test_mutation_test_touched_file_reads_670_unknown_fails_and_names_the_counts_and_time(self):
@@ -1570,6 +1718,195 @@ class LaneLint(LaneFixture):
         rc, text = self.timed_lint(60, "--lane-lint", "7")
         self.assertNotEqual(rc, 0, "the lint passed a head whose checks.yml has no shard 2/3: " + text)
         self.assertIn("2/3", text, "the stop does not name the missing shard 2/3: " + text)
+
+    def test_mutation_test_progress_clean_sharded_head_prints_start_and_end_for_each_shard_in_order(self):  # the progress lines of a clean sharded run
+        jobs = shard_jobs()
+        self.use_ci_job(PASSING, 0)
+        head = self.push_sharded_lane(jobs)
+        with heartbeat_every(HEARTBEAT_NEVER):
+            rc, out, err = self.timed_lint_streams(60, "--lane-lint", "7")
+        self.assertEqual(rc, 0, "the lint refused a sharded head whose three shard runs are clean: " + out + err)
+        self.assertEqual(shard_events(out), [(n, 3, kind) for n in (1, 2, 3) for kind in ("start", "end")],
+                         "the progress lines are not a start and an end for shard 1/3, 2/3 and 3/3, in that order: " + out)
+        for n in (1, 2, 3):
+            (end,) = shard_lines(out, n, 3, "end")
+            self.assertTrue(wall_time_shown(end, 60), "the end line of shard %d/3 shows no elapsed seconds of its run: %s" % (n, end))
+            self.assertIsNone(counts_missing(end, {"killed": 694, "survived": 0, "unknown": 0}),
+                              "the end line of shard %d/3 does not show its tally: %s" % (n, end))
+        self.assertEqual(progress_passes(out), [], "a progress line of the clean sharded run starts with PASS: " + out)
+        self.assertEqual(len(pass_lines(out)), 1, "the clean sharded run does not print one PASS line: " + out)
+        self.assert_mutation_test_runs_at(head, 3)
+
+    def test_mutation_test_progress_slow_shard_prints_heartbeats_naming_it_and_changes_no_verdict(self):  # a heartbeat is a progress line: rc and the verdict stay as they were
+        self.use_ci_job(PASSING, 0)
+        self.push_sharded_lane(shard_jobs(), sleeps={"2/3": 1})
+        with heartbeat_every(HEARTBEAT_FAST):
+            rc_beat, out_beat, err_beat = self.lane_streams("--lane-lint", "7")
+        beats = shard_lines(out_beat, 2, 3, "running")
+        self.assertGreaterEqual(len(beats), 2, "the slow shard 2/3 printed %d heartbeat lines in a 1 s run at a %s s interval, want at least 2: %s"
+                                % (len(beats), HEARTBEAT_FAST, out_beat))
+        self.assertTrue(all(elapsed_shown(b) for b in beats), "a heartbeat line of shard 2/3 shows no elapsed seconds: " + "\n".join(beats))
+        with heartbeat_every(HEARTBEAT_NEVER):
+            rc_never, out_never, err_never = self.lane_streams("--lane-lint", "7")
+        self.assertEqual(rc_never, 0, "the slow clean run did not pass with no heartbeat: " + out_never + err_never)
+        self.assertEqual(rc_beat, rc_never, "the heartbeat changed the exit code: %d, want %d" % (rc_beat, rc_never))
+        self.assertEqual(len(masked_verdict(out_never)), 1, "the slow clean run prints no one PASS line: " + out_never)
+        self.assertEqual(masked_verdict(out_beat), masked_verdict(out_never), "the heartbeat changed the verdict line: " + out_beat)
+        self.assertEqual(progress_passes(out_beat + out_never), [], "a progress line starts with PASS: " + out_beat)
+        self.assertEqual([ev for ev in shard_events(out_never) if ev[2] == "running"], [],
+                         "a run at a %d s heartbeat interval printed heartbeat lines: %s" % (HEARTBEAT_NEVER, out_never))
+
+    def test_mutation_test_progress_failing_shard_prints_its_end_and_starts_no_later_shard(self):  # the FAIL decides the lint: its end line prints, and shard 3/3 does not start
+        self.use_ci_job(PASSING, 0)
+        self.push_sharded_lane(shard_jobs(), shards={"2/3": (real_tally(693, survived=1), "", 1)})
+        with heartbeat_every(HEARTBEAT_NEVER):
+            rc, out, err = self.timed_lint_streams(60, "--lane-lint", "7")
+        self.assertEqual(rc, 1, "the lint passed a head whose shard 2/3 run let a mutant survive: " + out + err)
+        ends = shard_lines(out, 2, 3, "end")
+        self.assertEqual(len(ends), 1, "the failing shard 2/3 printed %d end lines, want one: %s" % (len(ends), out))
+        self.assertIsNone(counts_missing(ends[0], {"killed": 693, "survived": 1, "unknown": 0}),
+                          "the end line of the failing shard 2/3 does not show its tally: " + ends[0])
+        self.assertEqual(shard_events(out), [(1, 3, "start"), (1, 3, "end"), (2, 3, "start"), (2, 3, "end")],
+                         "the progress lines are not those of shards 1/3 and 2/3 with no later shard: " + out)
+        self.assertIn("FAILs: the diff touches a mutation test file, and its", out + err, "the FAIL text lost its opening: " + out + err)
+        self.assertIn("job %s: 1 mutant survived" % SHARD_JOBS[1], out + err, "the FAIL text does not name the failing shard's survivor: " + out + err)
+        self.assertIn("killed 693, survived 1, unknown 0, fail", out + err, "the FAIL text does not carry the failing run's counts and verdict: " + out + err)
+        self.assertEqual([c["shard"] for c in self.mutation_test_calls()], ["1/3", "2/3"],
+                         "the lint started a shard after the one that failed, or did not start the one before it: " + out + err)
+
+    def test_mutation_test_progress_timed_out_shard_prints_start_and_end_and_no_heartbeat_thread_outlives_it(self):  # a shard at its cap is a FAIL, and its heartbeat thread ends with the call
+        self.use_ci_job(PASSING, 0)
+        self.push_sharded_lane(shard_jobs(), sleeps={"2/3": 0.6})
+        self.assertEqual(live_heartbeat_threads(), [], "precondition: a heartbeat thread is alive before the run, so the case probes nothing")
+        real_sh = merge.sh
+
+        def sh_timing_out_on_shard_2(args, *rest, **kwargs):
+            if mutation_test_run(args) and (kwargs.get("env") or {}).get("MUTATE_SHARD") == "2/3":
+                real_sh(args, *rest, **kwargs)  # the run takes its sleep, while the heartbeats print; then it is past its cap
+                raise subprocess.TimeoutExpired(args, kwargs.get("timeout"))
+            return real_sh(args, *rest, **kwargs)
+
+        with heartbeat_every(HEARTBEAT_FAST), unittest.mock.patch.object(merge, "sh", sh_timing_out_on_shard_2):
+            rc, out, err = self.lane_streams("--lane-lint", "7")
+        self.assertEqual(rc, 1, "the lint did not FAIL a shard run that timed out: " + out + err)
+        self.assertEqual(pass_lines(out), [], "the lint printed a PASS line for a shard run that timed out: " + out)
+        self.assertEqual(len(shard_lines(out, 2, 3, "start")), 1, "the timed-out shard 2/3 printed no start line: " + out)
+        self.assertEqual(len(shard_lines(out, 2, 3, "end")), 1, "the timed-out shard 2/3 printed no end line: " + out)
+        for t in live_heartbeat_threads():
+            t.join(timeout=2 * HEARTBEAT_FAST)
+        self.assertEqual(live_heartbeat_threads(), [], "a heartbeat thread outlived the call that ran its shard: " + out)
+
+    def test_mutation_test_progress_error_out_of_a_shard_run_leaves_no_heartbeat_thread_alive(self):  # an error that is not a start error still leaves the call, and the shard's heartbeat thread ends with it
+        self.use_ci_job(PASSING, 0)
+        self.push_sharded_lane(shard_jobs(), sleeps={"2/3": 0.6})
+        self.assertEqual(live_heartbeat_threads(), [], "precondition: a heartbeat thread is alive before the run, so the case probes nothing")
+        real_sh = merge.sh
+
+        def sh_raising_after_shard_2(args, *rest, **kwargs):
+            if mutation_test_run(args) and (kwargs.get("env") or {}).get("MUTATE_SHARD") == "2/3":
+                real_sh(args, *rest, **kwargs)  # the run takes its sleep, while the heartbeats print; then the error leaves the shard
+                raise RuntimeError("shard 2/3 raised after its run")
+            return real_sh(args, *rest, **kwargs)
+
+        with heartbeat_every(HEARTBEAT_FAST), unittest.mock.patch.object(merge, "sh", sh_raising_after_shard_2):
+            with self.assertRaises(RuntimeError):
+                self.lane_streams("--lane-lint", "7")
+        for t in live_heartbeat_threads():
+            t.join(timeout=2 * HEARTBEAT_FAST)
+        self.assertEqual(live_heartbeat_threads(), [], "a heartbeat thread outlived the call that raised out of shard 2/3's run")
+
+    def test_mutation_test_progress_shard_whose_command_cannot_start_prints_did_not_start_and_no_end_line(self):  # a start error: its shard prints did not start and no end line, and the lint FAILs
+        self.use_ci_job(PASSING, 0)
+        self.push_sharded_lane(shard_jobs())
+        real_sh = merge.sh
+
+        def sh_missing_on_shard_2(args, *rest, **kwargs):
+            if mutation_test_run(args) and (kwargs.get("env") or {}).get("MUTATE_SHARD") == "2/3":
+                raise FileNotFoundError(2, "No such file or directory", args[0])  # the command cannot start: its program is not there
+            return real_sh(args, *rest, **kwargs)
+
+        with heartbeat_every(HEARTBEAT_NEVER), unittest.mock.patch.object(merge, "sh", sh_missing_on_shard_2):
+            rc, out, err = self.lane_streams("--lane-lint", "7")
+        self.assertEqual(len(shard_lines(out, 2, 3, "start")), 1, "shard 2/3 printed no start line, so its run was not reached: " + out + err)
+        self.assertIn("mutation test shard 2/3: did not start", out, "shard 2/3, whose command could not start, printed no did-not-start line: " + out + err)
+        self.assertEqual(shard_lines(out, 2, 3, "end"), [], "shard 2/3, whose command could not start, printed an end line: " + out + err)
+        self.assertEqual(rc, 1, "the lint passed a head whose shard 2/3 command could not start: " + out + err)
+        self.assertNotIn("Traceback", out + err, "the lint printed a traceback when shard 2/3's command could not start: " + out + err)
+        self.assertEqual(pass_lines(out + err), [], "the lint printed a PASS line for shard 2/3, whose command could not start: " + out + err)
+        self.assertRegex(out + err, r"FAIL", "the lint printed no FAIL line for shard 2/3, whose command could not start: " + out + err)
+
+    def test_mutation_test_progress_one_job_head_prints_start_and_end_for_its_one_shard(self):  # a head with no shard step: its one run prints a start and an end too
+        body, script = real_mutate_job()
+        self.use_ci_job(PASSING, 0)
+        head = self.push_lane({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0)), WORKFLOW_REL: workflow_of(body)})
+        with heartbeat_every(HEARTBEAT_NEVER):
+            rc, out, err = self.timed_lint_streams(437, "--lane-lint", "7")
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(shard_events(out), [(1, 1, "start"), (1, 1, "end")],
+                         "the one-job head's run does not print one start and one end line for shard 1/1: " + out)
+        (end,) = shard_lines(out, 1, 1, "end")
+        self.assertTrue(wall_time_shown(end, 437), "the end line of the one-job run shows no elapsed seconds of its run: " + end)
+        self.assertIsNone(counts_missing(end, {"killed": 694, "survived": 0, "unknown": 0}), "the end line of the one-job run does not show its tally: " + end)
+        self.assertEqual(progress_passes(out), [], "a progress line of the one-job run starts with PASS: " + out)
+        self.assert_one_mutation_test_run(head)
+
+    def test_mutation_test_progress_broken_pipe_on_a_shard_line_changes_no_verdict(self):  # BrokenPipeError is an OSError, which progress swallows: the run reads as it does unpatched
+        self.assert_closed_stdout_changes_no_verdict(lambda: BrokenPipeError(32, "Broken pipe"))
+
+    def test_mutation_test_progress_value_error_on_a_shard_line_changes_no_verdict(self):  # a closed file raises ValueError, which progress must catch too: the lint must not end in a traceback
+        self.assert_closed_stdout_changes_no_verdict(lambda: ValueError("I/O operation on closed file."))
+
+    def test_mutation_test_progress_heartbeat_thread_is_gone_before_its_shard_end_line(self):  # the join pin: the call joins the heartbeat thread itself, so no thread outlives its shard
+        """Why: the running line of shard 2/3 is held until the call joins its heartbeat thread, or until shard 2/3's end line is about to print.
+        A call that does not join prints that held line after the end line, with the thread alive at the end line. The hold is an event, not a
+        sleep: no verdict here depends on elapsed time."""
+        self.use_ci_job(PASSING, 0)
+        self.push_sharded_lane(shard_jobs())
+        self.assertEqual(live_heartbeat_threads(), [], "precondition: a heartbeat thread is alive before the run, so the case probes nothing")
+        in_flight, released = threading.Event(), threading.Event()  # the held line was reached; the hold is over
+        real_say, real_sh, real_join = merge.say, merge.sh, threading.Thread.join
+        seen = {}
+
+        def say_holding(*lines):
+            line = lines[0] if lines else ""
+            if line.startswith("mutation test shard 2/3: running"):
+                in_flight.set()
+                released.wait(HOLD_CEILING)
+            elif line.startswith("mutation test shard 2/3: end"):
+                seen["alive_at_end"] = [t.name for t in live_heartbeat_threads()]
+                real_say(*lines)
+                released.set()
+                return
+            return real_say(*lines)
+
+        def sh_marking(args, *rest, **kwargs):
+            result = real_sh(args, *rest, **kwargs)
+            if mutation_test_run(args) and (kwargs.get("env") or {}).get("MUTATE_SHARD") == "2/3":
+                seen["in_flight"] = in_flight.wait(HOLD_CEILING)
+            return result
+
+        def join_releasing(thread, timeout=None):
+            if thread.name == HEARTBEAT_THREAD:
+                released.set()
+            return real_join(thread, timeout)
+
+        def join_leftovers():
+            for t in live_heartbeat_threads():
+                t.join(timeout=HOLD_CEILING)
+        self.addCleanup(join_leftovers)  # runs after the asserts, so a leftover thread cannot reach the next case
+        self.addCleanup(released.set)  # runs first: a held line never outlives the case
+        with heartbeat_every(HEARTBEAT_FAST), unittest.mock.patch.object(merge, "say", say_holding), \
+                unittest.mock.patch.object(merge, "sh", sh_marking), unittest.mock.patch.object(threading.Thread, "join", join_releasing):
+            rc, out, err = self.lane_streams("--lane-lint", "7")
+        self.assertTrue(seen.get("in_flight"), "precondition: the heartbeat of shard 2/3 never reached its running line, so the case probes nothing: " + out + err)
+        self.assertEqual(seen.get("alive_at_end"), [], "the heartbeat thread of shard 2/3 was alive at its end line: the call did not join it first: %s" % seen.get("alive_at_end"))
+        self.assertEqual(rc, 0, "the held run of the clean sharded head did not pass: " + out + err)
+        lines = out.splitlines()
+        ends = [i for i, ln in enumerate(lines) if ln.startswith("mutation test shard 2/3: end")]
+        self.assertTrue(ends, "shard 2/3 printed no end line: " + out)
+        after_end = [ln for ln in lines[ends[0] + 1:] if shard_events(ln) == [(2, 3, "running")]]
+        self.assertEqual(after_end, [], "a heartbeat line of shard 2/3 printed after its end line: " + out)
+        self.assertEqual(live_heartbeat_threads(), [], "a heartbeat thread was alive when the call returned, with no join from the test: " + out)
 
 
 # The stack cross-measure (roadmap step stack-cross-measure): `merge --lane-lint <pr>` checks the PR's head against each other open PR of its
@@ -5670,6 +6007,421 @@ class ReplacedDocs(unittest.TestCase):
     def test_session_roles_does_not_say_combined_pull_request(self):
         self.assertFalse("combined pull request" in self.closes_bullet(),
                          "the session-tiers bullet that says a pull request closes as replaced still says combined pull request")
+
+
+GIB = 2 ** 30  # shutil.disk_usage counts bytes; the guard's floor counts GB of 2**30 bytes
+DISK_GIB = 926  # the drive the cases read, unless a case names another size
+REFUSE_GIB = 3.0  # free on DISK_GIB: under the floor of 5 GiB
+
+
+def full_floor_gib(total_gib):
+    """The guard's full floor on a drive of `total_gib` GiB: free space under min(LOAD_FULL_DISK_SHARE percent of the total, LOAD_FULL_DISK_GB) is full."""
+    return min(total_gib * guard.LOAD_FULL_DISK_SHARE / 100.0, guard.LOAD_FULL_DISK_GB)
+
+
+class LaneLintDiskFloor(LaneFixture):
+    """`merge --lane-lint` on a drive under the guard's full floor. The refusal comes before any worktree is made, in a cloud session and in a
+    local one, and it names the full sweep of the lane's checkout. The reading is shutil.disk_usage, the reader the guard and the janitor use."""
+
+    @staticmethod
+    def under(path, folder):
+        """True when `path`, resolved, is `folder` or lies inside it."""
+        base = os.path.realpath(folder)
+        return os.path.commonpath([os.path.realpath(path), base]) == base
+
+    @contextlib.contextmanager
+    def disk_reading(self, free_gib=None, total_gib=DISK_GIB, error=None, tmp=None):
+        """Patch shutil.disk_usage for every path: `free_gib` free of `total_gib` GiB, or `error` raised on each read. `tmp` = (folder, free_gib)
+        gives a path under `folder` its own reading, the drive the temp folder sits on; every other path reads `free_gib`."""
+        def usage(free):
+            return types.SimpleNamespace(total=int(total_gib * GIB), used=int((total_gib - free) * GIB), free=int(free * GIB))
+        def reading(path):
+            if tmp is not None and self.under(path, tmp[0]):
+                return usage(tmp[1])
+            return usage(free_gib)
+        if error is not None:
+            patch = unittest.mock.patch.object(shutil, "disk_usage", side_effect=error)
+        else:
+            patch = unittest.mock.patch.object(shutil, "disk_usage", side_effect=reading)
+        with patch:
+            yield
+
+    @contextlib.contextmanager
+    def worktree_adds(self):
+        """Record each `git worktree add` that merge runs inside the block. -> the list, filled with each call's argv after `git`."""
+        adds = []
+        real = merge.git  # Env.setUp's wrapper: the spy chains on it
+        def git(cwd, *a, **k):
+            if a[:2] == ("worktree", "add"):
+                adds.append(a)
+            return real(cwd, *a, **k)
+        with unittest.mock.patch.object(merge, "git", git):
+            yield adds
+
+    def refusal_run(self, cloud, free_gib, total_gib=DISK_GIB):
+        """`merge 7 --lane-lint` with `free_gib` free on a `total_gib` drive, the lint stubbed to PASS. -> (rc, output, worktree adds)."""
+        self.assertLess(free_gib, full_floor_gib(total_gib), "the case reads %s GiB, not under the full floor; it proves nothing" % free_gib)
+        self.use_ci_job(PASSING, 0)
+        with self.disk_reading(free_gib=free_gib, total_gib=total_gib), self.worktree_adds() as adds:
+            rc, text = self.run_lane("--lane-lint", "7", cloud=cloud)
+        return rc, text, adds
+
+    def assert_refused_before_any_tree(self, rc, text, adds, free_gib, total_gib=DISK_GIB):
+        floor = full_floor_gib(total_gib)
+        self.assertEqual(rc, 1, "the lane lint went ahead with %s GiB free of %d GiB, under the full floor of %s GiB: %s"
+                         % (free_gib, total_gib, floor, text))
+        self.assertRegex(text, r"(?i)\bdisk\b", "the disk refusal does not name the disk: " + text)
+        self.assertEqual(adds, [], "the refused lane lint made a worktree before it refused: %r" % (adds,))
+        self.assertEqual(self.lint_calls(), [], "the refused lane lint ran the lint anyway: " + text)
+
+    def test_a_full_disk_refuses_a_cloud_lane_lint_before_any_worktree(self):
+        rc, text, adds = self.refusal_run(cloud=True, free_gib=REFUSE_GIB)
+        self.assert_refused_before_any_tree(rc, text, adds, REFUSE_GIB)
+
+    def test_a_full_disk_refuses_a_local_lane_lint_before_any_worktree(self):
+        rc, text, adds = self.refusal_run(cloud=False, free_gib=REFUSE_GIB)
+        self.assert_refused_before_any_tree(rc, text, adds, REFUSE_GIB)
+
+    def test_the_full_disk_refusal_names_the_full_sweep_of_this_checkout(self):
+        _, text, _ = self.refusal_run(cloud=True, free_gib=REFUSE_GIB)
+        match = re.search(r"sweep\.py --root (\S+) --confirm", text)
+        self.assertIsNotNone(match, "the disk refusal names no full sweep, `sweep.py --root <repo> --confirm`: " + text)
+        self.assertEqual(match.group(1), self.co, "the sweep the refusal names is for %s, not this checkout" % match.group(1))
+
+    def test_a_small_drive_refuses_under_its_five_percent_share(self):
+        """On a 40 GiB drive the floor is the 5% share, 2 GiB, which is the smaller term: 1.2 GiB free is full."""
+        rc, text, adds = self.refusal_run(cloud=True, free_gib=1.2, total_gib=40)
+        self.assert_refused_before_any_tree(rc, text, adds, 1.2, total_gib=40)
+
+    def test_fifty_gib_free_goes_ahead_in_a_cloud_and_a_local_session(self):  # the control
+        self.use_ci_job(PASSING, 0)
+        for cloud in (True, False):
+            with self.subTest(cloud=cloud), self.disk_reading(free_gib=50):
+                rc, out = self.lint_run("--lane-lint", "7", cloud=cloud)
+                self.assertEqual(rc, 0, "50 GiB free on a %d GiB drive was refused: %s" % (DISK_GIB, out))
+                self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_three_gib_free_on_a_small_drive_goes_ahead_because_the_share_is_the_smaller_term(self):  # the control of the share case
+        self.assertGreater(3.0, full_floor_gib(40), "the control reads under the full floor; it proves nothing")
+        self.use_ci_job(PASSING, 0)
+        with self.disk_reading(free_gib=3.0, total_gib=40):
+            rc, out = self.lint_run("--lane-lint", "7", cloud=True)
+        self.assertEqual(rc, 0, "3 GiB free on a 40 GiB drive was refused, though its floor is %s GiB: %s" % (full_floor_gib(40), out))
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def unknown_disk_run(self, cloud):
+        """The disk read fails. -> (rc, output) of the lane lint, which must go ahead and say so."""
+        self.use_ci_job(PASSING, 0)
+        with self.disk_reading(error=OSError("no disk reading")):
+            rc, out = self.lint_run("--lane-lint", "7", cloud=cloud)
+        self.assertEqual(rc, 0, "an unreadable disk refused the lane lint: " + out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assertRegex(out, r"(?i)disk[^\n]*unknown|unknown[^\n]*disk",
+                         "an unreadable disk printed no line that says disk and unknown: " + out)
+
+    def test_an_unreadable_disk_reads_unknown_in_a_cloud_session_and_goes_ahead(self):
+        self.unknown_disk_run(cloud=True)
+
+    def test_an_unreadable_disk_reads_unknown_in_a_local_session_and_goes_ahead(self):
+        self.unknown_disk_run(cloud=False)
+
+    def test_memory_at_ninety_nine_percent_with_ample_disk_goes_ahead(self):  # the control: the floor reads the disk alone
+        """The lane lint refuses on the disk only. The guard's whole-load reading (read_load, which reads memory too) would refuse 99% memory,
+        so this control is red on a lane lint that takes that reading."""
+        self.use_ci_job(PASSING, 0)
+        with self.disk_reading(free_gib=50), unittest.mock.patch.object(guard, "_read_memory", return_value=99.0):
+            reading = guard.read_load()
+            self.assertEqual(reading.get("memory_pct"), 99.0, "the memory reading is not the 99%% this control sets: %r" % (reading,))
+            self.assertTrue(guard.load_full(reading), "the whole-load check does not refuse 99%% memory, so this control proves nothing: %r" % (reading,))
+            for cloud in (True, False):
+                with self.subTest(cloud=cloud):
+                    rc, out = self.lint_run("--lane-lint", "7", cloud=cloud)
+                    self.assertEqual(rc, 0, "99% memory with 50 GiB free on the disk refused the lane lint: " + out)
+                    self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_a_full_temp_drive_refuses_a_cloud_lane_lint_while_home_has_room(self):
+        """The lint tree lands under the temp folder (add_worktree's mkdtemp). That drive is full and home's drive has room, so the lane lint
+        must refuse before it makes the tree. A check that reads only home's drive would pass, so the case fills the temp drive."""
+        temp = tempfile.mkdtemp(prefix="full-temp-", dir=RUN_FOLDER)
+        self.use_ci_job(PASSING, 0)
+        with unittest.mock.patch.object(tempfile, "tempdir", temp), unittest.mock.patch.dict(os.environ, {"TMPDIR": temp}), \
+                self.disk_reading(free_gib=50, tmp=(temp, REFUSE_GIB)), self.worktree_adds() as adds:
+            self.assertEqual(os.path.realpath(tempfile.gettempdir()), os.path.realpath(temp),
+                             "the lint tree would not land under the temp folder: %s" % tempfile.gettempdir())
+            self.assertFalse(self.under(os.path.expanduser("~"), temp), "home sits under the full temp folder, so home reads full too")
+            home_free, home_total = guard._read_disk()
+            self.assertEqual(guard.load_full({"disk_free_gb": home_free, "disk_total_gb": home_total}), [],
+                             "home's drive reads %.1f GB free, under its floor, so this case does not isolate the temp drive" % home_free)
+            temp_usage = shutil.disk_usage(temp)
+            self.assertNotEqual(guard.load_full({"disk_free_gb": temp_usage.free / GIB, "disk_total_gb": temp_usage.total / GIB}), [],
+                                "the temp drive reads %.1f GB free, not under its floor, so this case proves nothing" % (temp_usage.free / GIB))
+            rc, text = self.run_lane("--lane-lint", "7", cloud=True)
+        self.assertEqual(rc, 1, "the lane lint read home's drive alone, which had 50 GiB free, and went ahead while the temp folder's drive "
+                                "held %s GiB, under its floor: %s" % (REFUSE_GIB, text))
+        self.assertRegex(text, r"(?i)\bdisk\b", "the refusal does not name the disk: " + text)
+        self.assertEqual(adds, [], "the lane lint made a tree under the full temp folder before it refused: %r" % (adds,))
+        self.assertEqual(self.lint_calls(), [], "the refused lane lint ran the lint anyway: " + text)
+
+    @contextlib.contextmanager
+    def floor_disk(self, free_gib, freed_gib=0.0, raises=None, refused=None):
+        """A drive of DISK_GIB GiB with `free_gib` free, read through shutil.disk_usage. Each sweep the block runs frees `freed_gib` more, so the
+        lint's re-read sees what the sweep reclaimed. `raises` is an error each sweep raises before it frees anything. `refused` is the reason each
+        sweep returns as a refusal, which frees nothing. Yields the state dict, whose "free" key holds the reading now."""
+        state = {"free": free_gib}
+
+        def usage(path):
+            return types.SimpleNamespace(total=int(DISK_GIB * GIB), used=int((DISK_GIB - state["free"]) * GIB), free=int(state["free"] * GIB))
+
+        def sweep_then_record(root, confirm, restore_log_path, mode="full", attended=False, own_lock_rule=True):
+            if raises is not None:
+                raise raises
+            result = self.record_sweep(root, confirm, restore_log_path, mode, attended, own_lock_rule=own_lock_rule)
+            if refused is not None:
+                result["refused"] = refused
+                return result
+            state["free"] += freed_gib
+            return result
+
+        previous = self.sweep_mock.side_effect
+        self.sweep_mock.side_effect = sweep_then_record
+        try:
+            with unittest.mock.patch.object(shutil, "disk_usage", side_effect=usage):
+                yield state
+        finally:
+            self.sweep_mock.side_effect = previous
+
+    @contextlib.contextmanager
+    def real_sweep(self, busy=None):
+        """The real janitor sweep, not the stand-in, for the block. Fast mode needs origin's default base as a remote-tracking ref, so this sets
+        it and checks it. Each tree reads two strict keeps idle. No tree holds a process except `busy` (a path), which holds pid 4242. A prompt or
+        a stdin read gets no answer, and the sweep's config and run logs go to a folder of this case. -> (asked, reads): each prompt and each
+        stdin read the sweep made."""
+        tm.sh(self.co, "git", "remote", "set-head", "origin", "-a")
+        self.assertEqual(tm.sh(self.co, "git", "rev-parse", "--abbrev-ref", "origin/HEAD"), "origin/main",
+                         "scope first: the sweep's default base is not origin/main")
+        folder = os.path.realpath(tempfile.mkdtemp(prefix="real-sweep-", dir=RUN_FOLDER))
+        self.addCleanup(shutil.rmtree, folder, True)
+        busy_path = os.path.realpath(busy) if busy else None
+
+        def process_inside(path):
+            return ([4242] if busy_path and os.path.realpath(path) == busy_path else []), []
+
+        asked, reads = [], []
+        with unittest.mock.patch.object(sweep, "sweep_repo", REAL_SWEEP_REPO), \
+                unittest.mock.patch.object(sweep, "worktree_idle_seconds", return_value=2.0 * sweep.STRICT_IDLE_SECONDS), \
+                unittest.mock.patch.object(sweep, "processes_in", side_effect=process_inside), \
+                unittest.mock.patch("builtins.input", side_effect=lambda prompt="": asked.append(prompt) or ""), \
+                unittest.mock.patch.object(sys, "stdin", NoAnswer(reads)), \
+                unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": folder, "JANITOR_RUN_LOG": os.path.join(folder, "runs.jsonl")}):
+            yield asked, reads
+
+    def assert_one_sweep_on_the_checkout(self, text):
+        """The sweep ran once, in this process, on the lane checkout, with confirm on and attended off: the same args the confirm's sweep takes
+        (test_merge.py, PerLaneMerge)."""
+        self.assertEqual(len(self.sweep_runs), 1, "the lane lint ran the sweep %d times, want once: %s" % (len(self.sweep_runs), text))
+        run = self.sweep_runs[0]
+        self.assertEqual(os.path.realpath(run["root"]), os.path.realpath(self.co), "the sweep ran on %s, not on the lane checkout" % run["root"])
+        self.assertIs(run["confirm"], True, "the sweep did not reap: confirm is %r" % (run["confirm"],))
+        self.assertIs(run["attended"], False, "the sweep ran attended, which skips the merged and idle keeps")
+
+    def test_a_floor_refusal_runs_the_sweep_once_and_the_lint_goes_ahead_when_it_frees_enough(self):
+        self.use_ci_job(PASSING, 0)
+        with self.floor_disk(free_gib=REFUSE_GIB, freed_gib=6.0):
+            rc, out = self.run_lane("--lane-lint", "7", cloud=True)
+        self.assert_one_sweep_on_the_checkout(out)
+        self.assertEqual(rc, 0, "the lane lint refused though the sweep left 9 GiB free, over the floor of %s GiB: %s" % (full_floor_gib(DISK_GIB), out))
+        self.assertEqual(len(self.lint_calls()), 1, "the lane lint did not run the lint once after the sweep freed space: " + out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_a_floor_refusal_whose_sweep_frees_too_little_refuses_and_names_the_bytes_freed(self):
+        self.use_ci_job(PASSING, 0)
+        with self.floor_disk(free_gib=REFUSE_GIB, freed_gib=1.0), self.worktree_adds() as adds:
+            rc, text = self.run_lane("--lane-lint", "7", cloud=True)
+        self.assert_one_sweep_on_the_checkout(text)
+        self.assertEqual(rc, 1, "the lane lint went ahead with 4 GiB free after the sweep, under the floor of %s GiB: %s" % (full_floor_gib(DISK_GIB), text))
+        self.assertRegex(text, r"\b1\.0 ?(GB|GiB)\b", "the refusal does not name the 1.0 GB the sweep freed: " + text)
+        self.assertRegex(text, r"sweep\.py'? --root \S+ --confirm", "the refusal does not name the sweep command: " + text)
+        self.assertEqual(adds, [], "the refused lane lint made a worktree before it refused: %r" % (adds,))
+        self.assertEqual(self.lint_calls(), [], "the refused lane lint ran the lint anyway: " + text)
+
+    def test_a_floor_refusal_whose_sweep_frees_nothing_names_zero_bytes(self):  # the empty state of the case above
+        self.use_ci_job(PASSING, 0)
+        with self.floor_disk(free_gib=REFUSE_GIB, freed_gib=0.0), self.worktree_adds() as adds:
+            rc, text = self.run_lane("--lane-lint", "7", cloud=True)
+        self.assert_one_sweep_on_the_checkout(text)
+        self.assertEqual(rc, 1, "the lane lint went ahead with 3 GiB free after an empty sweep, under the floor: " + text)
+        self.assertRegex(text, r"\b0\.0 ?(GB|GiB)\b", "the refusal does not name the 0.0 GB an empty sweep freed: " + text)
+        self.assertEqual(adds, [], "the refused lane lint made a worktree before it refused: %r" % (adds,))
+
+    def test_a_floor_sweep_that_raises_still_refuses_with_the_remedy(self):
+        self.use_ci_job(PASSING, 0)
+        with self.floor_disk(free_gib=REFUSE_GIB, raises=RuntimeError("the sweep broke")), self.worktree_adds() as adds:
+            try:
+                rc, text = self.run_lane("--lane-lint", "7", cloud=True)
+            except RuntimeError as e:  # the error left the lane lint: a named failure, not an error
+                self.fail("a raising sweep escaped run_safe_sweep and the lane lint, so no refusal was printed: %s" % e)
+        self.assertEqual(self.sweep_mock.call_count, 1, "scope first: the lane lint did not run the sweep once under the floor: " + text)
+        lines = [line for line in text.splitlines() if line.startswith("merge: the safe sweep")]  # the refusal's own line; the remedy also says "safe sweep"
+        self.assertEqual(len(lines), 1, "the sweep's failure printed %d lines, want one: %s" % (len(lines), text))
+        self.assertIn("RuntimeError: the sweep broke", lines[0])
+        self.assertNotIn("Traceback", text)
+        self.assertEqual(rc, 1, "the lane lint went ahead with %s GiB free, under the floor, after a sweep that raised: %s" % (REFUSE_GIB, text))
+        self.assertRegex(text, r"sweep\.py --root \S+ --confirm", "the refusal does not name the sweep command: " + text)
+        self.assertEqual(adds, [], "the refused lane lint made a worktree before it refused: %r" % (adds,))
+        self.assertEqual(self.lint_calls(), [], "the refused lane lint ran the lint anyway: " + text)
+
+    def refusal_of_a_sweep_that_did_not_run(self, **failure):
+        """The refusal of a floor hit whose safe sweep did not run. `failure` is floor_disk's `raises` or `refused`. The sweep runs once, and the
+        lint runs no lint and makes no worktree. -> the refusal's text."""
+        self.use_ci_job(PASSING, 0)
+        with self.floor_disk(free_gib=REFUSE_GIB, **failure), self.worktree_adds() as adds:
+            rc, text = self.run_lane("--lane-lint", "7", cloud=True)
+        self.assertEqual(self.sweep_mock.call_count, 1, "scope first: the lane lint did not run the sweep once under the floor: " + text)
+        self.assertEqual(rc, 1, "the lane lint went ahead with %s GiB free, under the floor, after a sweep that did not run: %s" % (REFUSE_GIB, text))
+        self.assertEqual(adds, [], "the refused lane lint made a worktree before it refused: %r" % (adds,))
+        self.assertEqual(self.lint_calls(), [], "the refused lane lint ran the lint anyway: " + text)
+        return text
+
+    def test_a_floor_refusal_after_a_sweep_that_raises_says_it_did_not_run_and_never_freed_zero(self):
+        text = self.refusal_of_a_sweep_that_did_not_run(raises=RuntimeError("the sweep broke"))
+        self.assertIn("did not run or refused", text, "the refusal does not say the sweep did not run or refused: " + text)
+        self.assertNotIn("freed 0.0 GiB", text, "the refusal says a sweep that raised freed 0.0 GiB: " + text)
+
+    def test_a_floor_refusal_after_a_sweep_that_refuses_says_it_did_not_run_and_never_freed_zero(self):
+        text = self.refusal_of_a_sweep_that_did_not_run(refused="no-default-base")
+        self.assertIn("did not run or refused", text, "the refusal does not say the sweep did not run or refused: " + text)
+        self.assertNotIn("freed 0.0 GiB", text, "the refusal says a sweep that refused freed 0.0 GiB: " + text)
+
+    def test_a_lane_lint_above_the_floor_runs_no_sweep(self):  # the control: the drive is not under its floor, so no sweep has a reason to run
+        self.use_ci_job(PASSING, 0)
+        with self.floor_disk(free_gib=50.0):
+            rc, out = self.lint_run("--lane-lint", "7", cloud=True)
+        self.assertEqual(rc, 0, "50 GiB free on a %d GiB drive was refused: %s" % (DISK_GIB, out))
+        self.assertEqual(self.sweep_runs, [], "the lane lint ran the sweep %d times with 50 GiB free, over the floor: %s" % (len(self.sweep_runs), out))
+
+    def test_a_floor_sweep_reaps_only_the_removable_tree_and_asks_no_question(self):
+        """The real janitor sweep runs on the lane checkout under a full floor, not the stand-in. Of five worktrees only the one merged into main,
+        clean, unlocked, idle and with no process inside goes. The dirty, locked, unmerged and process-inside trees stay. The sweep asks nothing
+        and reads no answer from stdin."""
+        self.assertEqual(subprocess.run(["git", "merge-base", "--is-ancestor", "origin/feat", "origin/main"], cwd=self.co,
+                                        capture_output=True).returncode, 1,
+                         "scope first: the lane branch lies in main, so its tree would read as merged")
+        folder = os.path.realpath(tempfile.mkdtemp(prefix="floor-trees-", dir=RUN_FOLDER))
+        self.addCleanup(shutil.rmtree, folder, True)
+        trees = {name: os.path.join(folder, name) for name in ("merged", "dirty", "locked", "unmerged", "busy")}
+        tm.sh(self.co, "git", "worktree", "add", "-q", "--detach", trees["merged"], "origin/main")
+        tm.sh(self.co, "git", "worktree", "add", "-q", "--detach", trees["dirty"], "origin/main")
+        tm.put(os.path.join(trees["dirty"], "scratch.txt"), "not committed\n")
+        tm.sh(self.co, "git", "worktree", "add", "-q", "--detach", "--lock", "--reason", "held by a test", trees["locked"], "origin/main")
+        tm.sh(self.co, "git", "worktree", "add", "-q", "--detach", trees["unmerged"], "origin/feat")
+        tm.sh(self.co, "git", "worktree", "add", "-q", "--detach", trees["busy"], "origin/main")
+        self.use_ci_job(PASSING, 0)
+        with self.floor_disk(free_gib=REFUSE_GIB), self.real_sweep(busy=trees["busy"]) as (asked, reads):
+            rc, text = self.run_lane("--lane-lint", "7", cloud=True)
+        self.assertFalse(os.path.exists(trees["merged"]), "the sweep kept the removable tree, merged into main and clean: " + text)
+        for name in ("dirty", "locked", "unmerged", "busy"):
+            self.assertTrue(os.path.isdir(trees[name]), "the sweep reaped the %s tree, which it must keep: %s" % (name, text))
+        self.assertEqual(asked, [], "the sweep asked a question: %r" % (asked,))
+        self.assertEqual(reads, [], "the sweep read an answer from stdin: %r" % (reads,))
+        self.assertEqual(rc, 1, "the lane lint went ahead under the floor, though the disk reading is unchanged: " + text)
+        self.assertEqual(self.lint_calls(), [], "the refused lane lint ran the lint anyway: " + text)
+
+    def test_the_safe_sweep_keeps_a_merged_idle_tree_that_its_own_agent_lock_holds(self):
+        """`run_safe_sweep` is the one sweep a confirm and a full floor run, in this process. A tree its caller's own agent lock holds is the
+        caller's tree, so the sweep keeps it. A clean merged idle tree that no lock holds goes in the same call: the control."""
+        folder = os.path.realpath(tempfile.mkdtemp(prefix="own-lock-", dir=RUN_FOLDER))
+        self.addCleanup(shutil.rmtree, folder, True)
+        plain, locked = os.path.join(folder, "plain"), os.path.join(folder, "own-lock")
+        reason = "claude agent agent-own (pid %d)" % os.getpid()  # the no-start form: this process is the holder, so the ancestor climb reads it as own
+        tm.sh(self.co, "git", "worktree", "add", "-q", "--detach", plain, "origin/main")
+        tm.sh(self.co, "git", "worktree", "add", "-q", "--detach", "--lock", "--reason", reason, locked, "origin/main")
+        self.assertTrue(self.under(plain, RUN_FOLDER) and self.under(locked, RUN_FOLDER), "scope first: the trees lie outside the run folder")
+        verdict = sweep.own_agent_lock_verdict(reason)
+        self.assertIs(verdict, True, "scope first: the lock reads as %r, not the caller's own, so the case proves nothing" % (verdict,))
+        err = io.StringIO()
+        with self.real_sweep(), contextlib.redirect_stderr(err):
+            result = merge.run_safe_sweep(self.co)
+        self.assertIsNotNone(result, "scope first: the safe sweep did not run: " + err.getvalue())
+        self.assertIsNone(result["refused"], "scope first: the safe sweep refused: " + err.getvalue())
+        self.assertFalse(os.path.exists(plain), "scope first: the sweep kept the clean merged idle tree that no lock holds: " + err.getvalue())
+        self.assertTrue(os.path.isdir(locked), "the sweep reaped the tree that the caller's own agent lock holds: " + err.getvalue())
+
+    # The cases below load merge.py as a fresh process does: from a copy of the repo's tree, after the case sets the config dir. A fix may
+    # read CLAUDE_CONFIG_DIR at import or at the refusal, and both cases still hold. launch.py runs merge.py from a temp tree it deletes at the end.
+
+    def merge_tree_copy(self):
+        """A copy of this repo's tree in a temp folder of this run, laid out as launch.py lays its tree (merge-fresh-*/tree). -> the tree's path.
+        The copy has no .git, no .claude (other checkouts) and no bytecode. The case deletes the folder."""
+        folder = tempfile.mkdtemp(prefix="merge-fresh-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, folder, True)
+        tree = os.path.join(folder, "tree")
+        shutil.copytree(REPO, tree, ignore=shutil.ignore_patterns(".git", ".claude", "__pycache__"))
+        self.assertTrue(os.path.isfile(os.path.join(tree, "merge", "merge.py")), "the copied tree holds no merge/merge.py: " + tree)
+        return tree
+
+    def load_merge_from(self, tree):
+        """merge.py as a fresh process loads it from `tree`: its __file__ is in `tree`, and the import runs now. sys.path is put back, because
+        merge.py puts its own hooks folder first on it."""
+        saved = list(sys.path)
+        try:
+            spec = importlib.util.spec_from_file_location("merge_from_tree_" + uuid.uuid4().hex, os.path.join(tree, "merge", "merge.py"))
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        finally:
+            sys.path[:] = saved
+        return module
+
+    def refusal_from(self, module):
+        """The refusal of `module`'s refuse_full_disk on a drive with REFUSE_GIB free: the call lane_lint makes first. -> the refusal's text."""
+        self.assertLess(REFUSE_GIB, full_floor_gib(DISK_GIB), "the case reads %s GiB, not under the full floor; it proves nothing" % REFUSE_GIB)
+        with self.disk_reading(free_gib=REFUSE_GIB), self.assertRaises(module.Stop) as caught:
+            module.refuse_full_disk(self.co)
+        return str(caught.exception)
+
+    @staticmethod
+    def named_sweep(text):
+        """The sweep the refusal names: the path before `--root` in `python3 <sweep> --root <root> --confirm`, unquoted. None when it names none."""
+        match = re.search(r"python3 ('[^']*'|\S+) --root", text)
+        return shlex.split(match.group(1))[0] if match else None
+
+    @staticmethod
+    def landed_sweep_in(config):
+        """Put the landed sweep in the config dir `config`, where the install lands janitor/. -> its path."""
+        landed = os.path.join(config, "janitor", "sweep.py")
+        tm.put(landed, "# the landed sweep, a fixture of this case\n")
+        return landed
+
+    def assert_names_landed_sweep(self, text, landed, tree):
+        """The refusal names `landed`, and that file is still there once the run's tree is deleted."""
+        named = self.named_sweep(text)
+        self.assertIsNotNone(named, "the disk refusal names no sweep: " + text)
+        self.assertEqual(os.path.realpath(named), os.path.realpath(landed),
+                         "the refusal names %s, not the landed sweep %s (the path comes from merge.py's own __file__)" % (named, landed))
+        shutil.rmtree(tree, True)  # launch.py's finally: the run's tree is gone when the run ends
+        self.assertTrue(os.path.isfile(named), "the sweep the refusal names is gone once the run's tree is deleted: " + named)
+
+    def test_a_refusal_from_a_temp_tree_names_the_landed_sweep_under_the_config_dir(self):
+        """The refusal names the landed sweep, not a file in the temp tree that launch.py deletes when the run ends."""
+        landed = self.landed_sweep_in(self.cfg)
+        tree = self.merge_tree_copy()
+        self.assertEqual(os.environ.get("CLAUDE_CONFIG_DIR"), self.cfg, "the case does not set the config dir it names")  # scope first
+        module = self.load_merge_from(tree)
+        self.assertTrue(self.under(module.__file__, tree), "merge.py did not load from the temp tree: %s" % module.__file__)
+        self.assert_names_landed_sweep(self.refusal_from(module), landed, tree)
+
+    def test_with_no_config_dir_the_refusal_from_a_temp_tree_names_the_landed_sweep_under_home_claude(self):
+        """The default config dir is ~/.claude, which install.sh and janitor/GUIDE.md use. HOME and USERPROFILE point at a fixture home, so the
+        case never reads the real one."""
+        home = tempfile.mkdtemp(prefix="home-", dir=RUN_FOLDER)
+        landed = self.landed_sweep_in(os.path.join(home, ".claude"))
+        tree = self.merge_tree_copy()
+        with unittest.mock.patch.dict(os.environ, {"HOME": home, "USERPROFILE": home}):
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            self.assertEqual(os.path.realpath(os.path.expanduser("~")), os.path.realpath(home), "the case would read the real home")  # scope first
+            module = self.load_merge_from(tree)
+            self.assertTrue(self.under(module.__file__, tree), "merge.py did not load from the temp tree: %s" % module.__file__)
+            text = self.refusal_from(module)
+        self.assert_names_landed_sweep(text, landed, tree)
 
 
 if __name__ == "__main__":

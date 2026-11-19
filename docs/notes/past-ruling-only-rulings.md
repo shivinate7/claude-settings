@@ -1,0 +1,1 @@
+- past-ruling-only-rulings: Retrospective 22:36 CST Nov 12, note: the past-ruling check reads only rulings, not facts the owner told a session (the D3/D25 re-ask tonight).

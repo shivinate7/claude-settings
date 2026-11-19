@@ -1,0 +1,1 @@
+- ruling-ow-13-rewritten: 13:27 CST Nov 13 (coordinator): ruling ow-13 rewritten in place: git home, database live view, timely export; decision page-one-store, PR #3212 replaces #2829.

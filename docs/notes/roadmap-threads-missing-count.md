@@ -1,0 +1,1 @@
+- roadmap-threads-missing-count: skills/roadmap/build.py, lines 717 and 1628, prints "live threads naming no open step: 1" when the threads list is missing. Strays already holds the reason, so these lines should print no count (PR #2534).

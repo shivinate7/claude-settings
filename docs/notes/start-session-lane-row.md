@@ -1,0 +1,1 @@
+- start-session-lane-row: Lane start-session-not-pretooluse has been running since 00:13 CST Nov 14, and its lane row is set (status doing at the time; relayed by the coordinator at 00:23 CST Nov 14, unchecked).

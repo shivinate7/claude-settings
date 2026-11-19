@@ -1,0 +1,1 @@
+- encoded-retry-refusal-note-10min: (lane encoded-retry) hooks/refusal_note.py: a harness refusal more than 10 minutes after the first, in the same turn, may leave no fresh row (orchestrator only).

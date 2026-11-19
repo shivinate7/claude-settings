@@ -397,6 +397,19 @@ cloud_git() {
   fi
 }
 
+# fetch_roadmap DIR [FETCH ARGS]: cloud only. Brings origin's roadmap branch into refs/remotes/origin/roadmap of the checkout DIR,
+# the ref hooks/own_session.py (ROSTER_REF, the other copy of this name) reads the session roster from; the start hook never
+# fetches, so this refresh does, beside the stable fetch. One bounded fetch through cloud_git. A failed fetch keeps the old
+# ref, logs one WARN and never fails the install: the hook then records no role for a row it cannot see (fails closed).
+# A checkout with no origin url has nothing to fetch and logs nothing.
+fetch_roadmap() {
+  fr_dir="$1"; shift
+  [ -n "$(git -C "$fr_dir" config --get remote.origin.url 2>/dev/null)" ] || return 0
+  if ! cloud_git -C "$fr_dir" fetch -q "$@" origin "+refs/heads/roadmap:refs/remotes/origin/roadmap" 2>/dev/null; then
+    log "WARN: could not fetch roadmap into $fr_dir; its old refs/remotes/origin/roadmap stays, so a session start records no merge role from a roster it cannot see"
+  fi
+}
+
 # Resume: a clone this script made (marker set) follows the ref. A clone without the marker is a
 # person's own: this block never moves it, and the block below moves it only when clean and detached. The clone keeps its
 # main only when main holds a commit the fetched ref lacks, because moving main would drop that commit. Only this script
@@ -451,6 +464,7 @@ mirror_refresh() {
 }
 if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ "$(git -C "$SRC" config --get claude-settings.cloudMirror 2>/dev/null)" = true ]; then
   mirror_refresh "$SRC"
+  fetch_roadmap "$SRC" --depth 1   # the clone is shallow already; the roadmap branch shares no history with main
 fi
 
 # Origin has no $REF branch (stable): the rest of the run installs from main, with one WARN line naming $REF.
@@ -532,6 +546,9 @@ use_main_mirror() {
 if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ -e "$SRC/.git" ] \
    && [ "$(git -C "$SRC" config --get claude-settings.cloudMirror 2>/dev/null)" != true ]; then
   own_not_source=0
+  # The session roster's ref lives in this checkout, the one the session works in, whatever happens to it below (a branch,
+  # a dirty tree and a detached head all stay as they are; a fetch moves no file). A full clone, so no --depth.
+  fetch_roadmap "$SRC"
   if git -C "$SRC" symbolic-ref -q HEAD >/dev/null 2>&1; then
     # A clean branch checkout at the tip of origin/$REF already holds $REF's files: it stays the source, untouched.
     # The fetch runs only when the origin/$REF ref the checkout has is HEAD or an ancestor of it (a stale record still

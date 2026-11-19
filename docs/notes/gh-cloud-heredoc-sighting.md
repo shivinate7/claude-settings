@@ -1,0 +1,1 @@
+- gh-cloud-heredoc-sighting: guard-false-alarm-cull 17:07 CST Nov 12: Sighting, lane auto-merge-refused 17:04 CST Nov 12: gh-write-cloud refused a python3 heredoc whose text only held gh command strings (builder, round 3). Possible false alarm.

@@ -1,0 +1,1 @@
+- test-guard-history-comment: hooks/test_guard.py (~line 28410) has a comment that narrates history (rule building-comments-say-why).
