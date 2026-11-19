@@ -1828,13 +1828,16 @@ def _resume_target(tokens):
 
 
 def _resume_names_role(target: str, cwd: str, transcript: str) -> bool:
-    """True when a resume that names `target` would bring back a session whose role file is valid. A session id of the id shape is read by its own
-    file. A value that names no id (`-c`, a bare `--resume`, a title) can reach any role session whose transcript sits in this project's folder
-    (the folder of the own transcript, else the one the cwd names under the config dir); with no such folder to read, any valid role file counts."""
+    """True when a resume that names `target` would bring back a session whose role file is valid. A session id of the id shape with its own role
+    file counts. An id-shaped value with no role file is a known non-role session only when `<value>.jsonl` sits in this project's folder; any other
+    such value (a title like `batch-runner` fits the id shape) is judged as a value that names no id. A value that names no id (`-c`, a bare
+    `--resume`, a title) can reach any role session whose transcript sits in the project's folder (the folder of the own transcript, else the one
+    the cwd names under the config dir); with no such folder to read, any valid role file counts, except for an id-shaped value, taken as a session id."""
     import re
     import session_role
-    if target and session_role.valid_id(target):
-        return session_role.own_record(target) is not None
+    id_shaped = bool(target) and session_role.valid_id(target)
+    if id_shaped and session_role.own_record(target) is not None:
+        return True
     records = session_role.all_records()
     if not records:
         return False
@@ -1842,7 +1845,9 @@ def _resume_names_role(target: str, cwd: str, transcript: str) -> bool:
     if not folder and cwd:
         folder = os.path.join(session_role.roles_dir().parent.parent, "projects", re.sub(r"[^A-Za-z0-9]", "-", cwd))
     if not folder or not os.path.isdir(folder):
-        return True
+        return not id_shaped   # no folder to read: an id-shaped value is taken as a session id, as before; any other value counts any role file
+    if id_shaped and os.path.exists(os.path.join(folder, target + ".jsonl")):
+        return False
     return any(os.path.exists(os.path.join(folder, record["session"] + ".jsonl")) for record in records)
 
 
