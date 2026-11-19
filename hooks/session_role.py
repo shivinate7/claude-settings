@@ -2,7 +2,8 @@
 """The launcher's role file: the one home of how a local session's tier is written and read (decision session-tiers).
 
 bin/claude-role starts `claude` with CS_SESSION_ROLE set. The session-start hook runs `session_role.py write`, which records
-that role in <config dir>/state/session-roles/<session id>.json as {"session", "role", "repo"}. The guard and the merge tool read
+that role in <config dir>/state/session-roles/<session id>.json as {"session", "role", "repo"}, rewriting it at every start. A resume,
+compact or clear start with the variable unset keeps the file (owner pick 981 a). The guard and the merge tool read
 it with `own_record` / `own_role` where a cloud session reads its get_session tags. Claude's own writes into the folder are refused,
 as far as the guards reach: the configuration rule and settings.json's Edit deny refuse a write under the config directory.
 
@@ -22,6 +23,7 @@ from guard_shared_tree import SESSION_ID_RE  # noqa: E402  the one home of the s
 
 SESSION_ROLES = ("coordinator", "triage", "batch-runner")  # what bin/claude-role may start; a lane is never launched
 STALE_SECONDS = 7 * 24 * 3600  # a role file this old belongs to a session that ended; `write` removes it
+KEEP_SOURCES = ("resume", "compact", "clear")  # starts of a session that goes on: the variable is unset there, and its file stays
 
 
 def roles_dir():
@@ -111,14 +113,21 @@ def _repo_of(cwd):
         return None
 
 
-def write(session_id, cwd, role):
+def write(session_id, cwd, role, source=""):
     """Record `role` for session `session_id`, or remove that session's file when `role` is empty or outside SESSION_ROLES (a stale
-    file must not outlive a role the launcher no longer names). Returns True when the file now says what was asked. An id outside
-    the id shape writes nothing. Each call first prunes files older than STALE_SECONDS (prune_stale)."""
+    file must not outlive a role the launcher no longer names). The exception: an empty `role` on a start whose `source` is in
+    KEEP_SOURCES keeps the file and refreshes its mtime, so the prune never takes a live session's file. Returns True when the file
+    now says what was asked. An id outside the id shape writes nothing. Each call first prunes files older than STALE_SECONDS
+    (prune_stale)."""
     if not valid_id(session_id):
         return False
-    prune_stale()
     path = roles_dir() / (session_id + ".json")
+    if not role and source in KEEP_SOURCES:
+        with contextlib.suppress(OSError):
+            os.utime(path)  # before the prune: an old kept file must survive this start
+        prune_stale()
+        return True
+    prune_stale()
     if role not in SESSION_ROLES:
         try:
             path.unlink()
@@ -150,7 +159,8 @@ def main(argv):
     if not isinstance(payload, dict):
         return 0
     cwd = payload.get("cwd") if isinstance(payload.get("cwd"), str) else ""
-    write(payload.get("session_id"), cwd, os.environ.get("CS_SESSION_ROLE", ""))
+    source = payload.get("source") if isinstance(payload.get("source"), str) else ""
+    write(payload.get("session_id"), cwd, os.environ.get("CS_SESSION_ROLE", ""), source)
     return 0  # a hook that fails writes nothing and says nothing
 
 
