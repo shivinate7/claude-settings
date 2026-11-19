@@ -1547,6 +1547,87 @@ class UnstartedItemsTests(unittest.TestCase):
                 out = self.verdict(reply, [self.BUILDER])
                 self.assertIsNone(out, "%s is refused: %r" % (cause, out))
 
+    def assert_passes_unstarted(self, rows):
+        """Each (reply, cause) row must pass the Unstarted guard, with no refusal of any kind."""
+        for reply, cause in rows:
+            with self.subTest(cause=cause):
+                out = self.verdict(reply, [self.BUILDER])
+                self.assertIsNone(out, "%s: the turn was refused: %r" % (cause, out))
+
+    def test_un_shared_path_names_the_shared_file(self):
+        # Control, passes at head: the same wait with no file is refused.
+        self.assert_refused_for_shared_file([
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge",
+             "control: a wait on a PR names no file"),
+        ])
+        self.assert_passes_unstarted([
+            # Catches: an extensionless file in a folder, bin/merge, is not read as a shared file.
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge, both touch bin/merge",
+             "an extensionless file in a folder, bin/merge"),
+            # Catches: an extensionless file in a folder, bin/verdict, is not read as a shared file.
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge, both touch bin/verdict",
+             "an extensionless file in a folder, bin/verdict"),
+            # Catches: a dotfile, .gitignore, is not read as a shared file.
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge, both touch .gitignore",
+             "a dotfile, .gitignore"),
+            # Catches: a folder named with a trailing slash, lint/, is not read as a shared path.
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge, both touch lint/",
+             "a folder with a trailing slash, lint/"),
+            # Catches: a folder path with a slash inside, docs/decisions, is not read as a shared path.
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge, both touch docs/decisions",
+             "a folder path, docs/decisions"),
+        ])
+
+    def test_un_none_forms_name_no_waiting_item(self):
+        # Control, passes at head: a plain none with merged after it passes.
+        self.assert_passes_unstarted([
+            (self.DONE + "> **Next** Unstarted: none, all merged", "control: a plain none with merged after it"),
+        ])
+        self.assert_passes_unstarted([
+            # Catches: a bold none, **none**, is read as a waiting item, so the turn is refused.
+            (self.DONE + "> **Next** Unstarted: **none**, every PR merged", "a bold none, **none**"),
+            # Catches: a parenthesised none, (none), is read as a waiting item, so the turn is refused.
+            (self.DONE + "> **Next** Unstarted: (none) - all PRs merged", "a parenthesised none, (none)"),
+            # Catches: "nothing" says no item waits, but the word is read as a waiting item, so the turn is refused.
+            (self.DONE + "> **Next** Unstarted: nothing, all PRs merged", "the word nothing, for no item"),
+        ])
+
+    def test_un_bullet_under_unstarted_line_names_the_shared_file(self):
+        # Control, passes at head: the same wait on the Unstarted line is refused.
+        self.assert_refused_for_shared_file([
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge",
+             "control: the wait on the Unstarted line names no file"),
+        ])
+        self.assert_refused_for_shared_file([
+            # Catches: a bullet under a bare Unstarted line is not read, so a wait in it passes the turn.
+            (self.DONE + "> **Next**\n> Unstarted:\n> - lint-stub waits on PR #3679 to merge",
+             "a bullet under a bare Unstarted line names no file"),
+            # Catches: a bullet under an Unstarted line with no item on it is not read, so the wait passes.
+            (self.DONE + "> **Next** Unstarted:\n> - lint-stub waits on PR #3679 to merge",
+             "a bullet under an Unstarted line with no item on it names no file"),
+        ])
+
+    def test_un_landing_wait_without_shared_file_blocks(self):
+        # Control, passes at head: a wait for another lane to land is refused.
+        self.assert_refused_for_shared_file([
+            (self.DONE + "> **Next** Unstarted: lint-stub waits for lane ci-wait-no-ci-repo to land",
+             "control: a wait for a lane to land names no file"),
+        ])
+        self.assert_refused_for_shared_file([
+            # Catches: a wait on another lane's landing, named with "landing", passes the turn.
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on lane X landing",
+             "a wait on lane X landing names no file"),
+            # Catches: a wait on the landing of a lane, named with the noun, passes the turn.
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on the landing of lane X",
+             "a wait on the landing of lane X names no file"),
+            # Catches: a wait after the batch lands, named with "lands", passes the turn.
+            (self.DONE + "> **Next** Unstarted: lint-stub waits after the batch lands",
+             "a wait after the batch lands names no file"),
+            # Catches: a wait once a lane has landed, named with "landed", passes the turn.
+            (self.DONE + "> **Next** Unstarted: lint-stub waits once lane X has landed",
+             "a wait once lane X has landed names no file"),
+        ])
+
 
 class NoResendTests(unittest.TestCase):
     """A report guard never makes a session send its whole report twice (roadmap c101)."""
