@@ -19,6 +19,7 @@ import subprocess
 import sys
 import shutil
 import tempfile
+import threading
 import unittest
 import urllib.error
 import urllib.parse
@@ -237,6 +238,11 @@ class Fixture(unittest.TestCase):
         seam = mock.patch.object(build, "rest_get", create=True, return_value=([], headers_of()))
         self.rest_get = seam.start()
         self.addCleanup(seam.stop)
+        # The one home of the live file's rebuild fetch (build.live_fetch, no argument): no case reads a session API or the
+        # network. A case that rebuilds sets the return value or side effect it needs. create=True covers a build without it.
+        fetch = mock.patch.object(build, "live_fetch", create=True, side_effect=RuntimeError("no session API in a test"))
+        self.live_fetch = fetch.start()
+        self.addCleanup(fetch.stop)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -970,6 +976,148 @@ def fixed_clock(now_iso):
             return getattr(datetime, name)
 
     return Stand()
+
+
+def read_time(text):
+    """The instant an ISO readAt names, or None when the text names none (an unknown reason, say)."""
+    try:
+        return datetime.datetime.fromisoformat(str(text).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+class LiveRefresh(UpkeepFixture):
+    """A stale live file rebuilds in-process (step live-file-refresh-one-command). A reader that finds the file older than
+    build.STALE_LIVE_MINUTES calls build.live_fetch() once. It takes no argument, returns {"sessions": the list_sessions
+    rows, "pulls": the open pull requests as REST gives them (number, title, body)}, and raises when it cannot read. The
+    reader writes the rebuilt file and reads that. A file no older than the limit is never fetched. A failed fetch leaves
+    the file as it was, and the reader says stale with the file's age, never current. The rebuilt sessions keep every row
+    that is not archived, and an archived row only when an open pull request's footer or a live step's lane names it. The
+    cases drive the page bake (build.main with --live) through the seam Fixture.setUp installs. The build's clock is fixed
+    at FIXED_NOW for the class (test-practices P5)."""
+
+    FIXED_NOW = "2026-11-18T20:00:00Z"
+    ARCHIVED = build.ARCHIVED_SESSION
+
+    def setUp(self):
+        super().setUp()
+        clock = mock.patch.object(build, "datetime", fixed_clock(self.FIXED_NOW))
+        clock.start()
+        self.addCleanup(clock.stop)
+        self.live_fetch.side_effect = None
+        self.live_fetch.return_value = {"sessions": [], "pulls": []}
+
+    def ago(self, minutes):
+        """The readAt `minutes` before FIXED_NOW, in the form the publisher writes."""
+        return (read_time(self.FIXED_NOW) - datetime.timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def write_file(self, read_at, sessions=(), pulls=()):
+        self.write_live({"readAt": read_at, "threads": [], "pulls": list(pulls), "sessions": list(sessions)})
+
+    def open_pull(self, number, body=""):
+        """An open pull request as the fetch returns it: the number, the title and the body, whose footer is its last link."""
+        return {"number": number, "title": "lane %d" % number, "body": body}
+
+    def read_of(self, page):
+        return self.panel(page)["read"]
+
+    def file_value(self):
+        return json.loads(self.live.read_text(encoding="utf-8"))
+
+    def test_a_stale_file_is_rebuilt_once_and_the_reader_sees_the_new_read_at(self):
+        self.write_file(self.ago(build.STALE_LIVE_MINUTES + 1))
+        self.live_fetch.return_value = {"sessions": [], "pulls": [self.open_pull(7)]}
+        page, _ = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.live_fetch.call_count, 1,
+                         "a stale live file was fetched %d times, want one rebuild" % self.live_fetch.call_count)
+        self.assertEqual(read_time(self.read_of(page)), read_time(self.FIXED_NOW),
+                         "the reader does not show the rebuilt readAt: %r" % self.read_of(page))
+        value = self.file_value()
+        self.assertEqual(read_time(value["readAt"]), read_time(self.FIXED_NOW), "the live file keeps its old readAt")
+        self.assertEqual([p["number"] for p in value["pulls"]], [7], "the rebuilt live file does not hold the open pulls")
+
+    def test_a_file_read_within_the_limit_is_not_rebuilt(self):
+        fresh = self.ago(5)
+        self.write_file(fresh)
+        before = self.live.read_bytes()
+        self.live_fetch.return_value = {"sessions": [], "pulls": [self.open_pull(9)]}
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.live_fetch.call_count, 0, "a file read 5 minutes ago was fetched")
+        self.assertEqual(self.live.read_bytes(), before, "a file read 5 minutes ago was rewritten")
+        self.assertEqual(self.read_of(page), fresh, "the reader does not read the fresh file as it is")
+
+    def test_a_file_read_exactly_at_the_limit_is_not_rebuilt(self):
+        self.write_file(self.ago(build.STALE_LIVE_MINUTES))
+        self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.live_fetch.call_count, 0,
+                         "a file exactly STALE_LIVE_MINUTES old was fetched, but the limit is only exceeded past it")
+
+    def test_a_failed_rebuild_leaves_the_file_and_the_reader_says_stale_with_its_age(self):
+        stale = self.ago(build.STALE_LIVE_MINUTES + 1)
+        self.write_file(stale)
+        before = self.live.read_bytes()
+        self.live_fetch.side_effect = OSError("the session API cannot be reached from this run")
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.live.read_bytes(), before, "a failed rebuild rewrote the live file")
+        self.assertRegex(out, r"\bstale\b", "a stale live file that could not be rebuilt is not printed as stale")
+        self.assertRegex(out, r"\b%d minutes\b" % (build.STALE_LIVE_MINUTES + 1),
+                         "the reader does not print the stale file's age")
+        self.assertEqual(self.live_fetch.call_count, 1, "the failed rebuild was not tried once")
+
+    def test_the_rebuilt_file_keeps_live_rows_and_only_the_archived_rows_a_pull_or_a_live_lane_names(self):
+        self.commit_step("c1", status="doing", order=1, lane="session_arch_lane")  # a live step names its lane
+        self.commit_step("c2", status="done", order=2, lane="session_arch_done")  # a done step names nothing live
+        rows = [session_row("session_running", "SESSION_STATUS_RUNNING", self.REPO),
+                session_row("session_idle", "SESSION_STATUS_IDLE", self.REPO),
+                {"id": "session_tagless", "session_status": "SESSION_STATUS_IDLE"},  # list_sessions omits tags on a tagless row
+                session_row("session_elsewhere", "SESSION_STATUS_IDLE", "cs-repo:other/elsewhere"),
+                session_row("session_arch_pr", self.ARCHIVED, self.REPO),
+                session_row("session_arch_lane", self.ARCHIVED, self.REPO),
+                session_row("session_arch_done", self.ARCHIVED, self.REPO),
+                session_row("session_arch_bare", self.ARCHIVED, self.REPO)]
+        rows += [session_row("session_old_%02d" % n, self.ARCHIVED, self.REPO) for n in range(25)]
+        kept = {"session_running", "session_idle", "session_tagless", "session_elsewhere", "session_arch_pr", "session_arch_lane"}
+        self.write_file(self.ago(build.STALE_LIVE_MINUTES + 1), sessions=rows)
+        self.live_fetch.return_value = {"sessions": rows, "pulls": [
+            self.open_pull(7, body="Lane work.\n\nhttps://claude.ai/code/session_arch_pr\n")]}
+        self.build_from_main("--live", str(self.live), expect=(0, 1))
+        now = {r["id"] for r in self.file_value()["sessions"]}
+        self.assertEqual(now, kept, "the rebuilt sessions differ: keep %s, drop %s"
+                         % (sorted(kept - now), sorted(now - kept)))
+
+    def test_a_stale_file_rebuilt_with_nothing_open_holds_empty_lists(self):
+        self.write_file(self.ago(build.STALE_LIVE_MINUTES + 1),
+                        sessions=[session_row("session_old", self.ARCHIVED, self.REPO)], pulls=[self.open_pull(3)])
+        self.live_fetch.return_value = {"sessions": [], "pulls": []}
+        page, _ = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.live_fetch.call_count, 1,
+                         "a stale live file was fetched %d times, want one rebuild" % self.live_fetch.call_count)
+        value = self.file_value()
+        self.assertEqual((value["sessions"], value["pulls"]), ([], []),
+                         "the rebuild kept rows or pulls that nothing open holds")
+        self.assertEqual(read_time(self.read_of(page)), read_time(self.FIXED_NOW),
+                         "the reader does not show the rebuilt readAt")
+
+    def test_a_stale_read_starts_no_thread_and_no_process_but_git(self):
+        self.write_file(self.ago(build.STALE_LIVE_MINUTES + 1))
+        started, threads = [], []
+        real_popen, real_start = subprocess.Popen, threading.Thread.start
+
+        class Recording(real_popen):
+            def __init__(self, args, *rest, **kwargs):
+                started.append(args)
+                super().__init__(args, *rest, **kwargs)
+
+        def start(thread):
+            threads.append(thread)
+            return real_start(thread)
+
+        with mock.patch.object(subprocess, "Popen", Recording), mock.patch.object(threading.Thread, "start", start):
+            self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(threads, [], "the stale read started %d thread(s), want none" % len(threads))
+        programs = [pathlib.Path(a[0] if isinstance(a, (list, tuple)) else str(a).split()[0]).name for a in started]
+        self.assertEqual(sorted(set(programs) - {"git"}), [],
+                         "the stale read started a process other than git: %r" % programs)
 
 
 class LedgerActs(UpkeepFixture):
