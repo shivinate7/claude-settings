@@ -791,6 +791,9 @@ def live_work(path, steps, slug=None):
     `staleWhy` says why the live reading is unknown, or None. `pullWhy` says why the todo-with-open-PR line reads
     unknown, or None; it reads only readAt and the pulls list, never the sessions.
     A live file with no sessions list still renders Live work.
+    A file whose readAt is over STALE_LIVE_MINUTES old is first rebuilt in-process (rebuild_stale_live: readAt now, the
+    open pulls and the kept sessions; a failed rebuild leaves the file and reads stale with its age). `ageMinutes` is
+    the readAt's age in whole minutes at this read, or None, for the page's Live work panel.
     "items" (optional, the waiting page's rows `{"n", "status", "home", "lane"?, "owner"?}`) feeds the page-ruling upkeep
     row, the stalled items and the lanes-to-archive row: `pageItems` holds the rows, or None with `itemsWhy` saying why
     they read unknown. `lane` is where the item's answer went (text, or null for none) and `owner` is the session that
@@ -815,6 +818,7 @@ def live_work(path, steps, slug=None):
     """
     if not path:
         return {"read": "unknown (no --live file: the publisher writes it from the project threads and GitHub)"}
+    rebuild_why = rebuild_stale_live(path, steps)
     try:
         raw = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as err:
@@ -871,6 +875,7 @@ def live_work(path, steps, slug=None):
             strays.append("%s (%s)" % (sid, row["title"]))
     threads.sort(key=lambda r: (STATES.index(r["state"]), r.get("title")))
     why, session_steps, live_steps, live_rows, lane_rows = [], [], [], {}, None  # the first reason wins
+    age = None  # whole minutes since readAt, for the page's Live work panel
     lane_tags = []  # the cs-topic: and cs-build: tags of the same live sessions, for lane_live
     if read.startswith("unknown"):
         why.append(read)
@@ -878,10 +883,13 @@ def live_work(path, steps, slug=None):
         minutes = live_age_minutes(read)
         if minutes is None:
             why.append("unknown (the live file's readAt has no time zone: %r)" % (read,))
-        elif minutes > STALE_LIVE_MINUTES:
-            why.append("unknown (the live file was read %d minutes ago; read it again)" % minutes)
-        elif minutes < -FUTURE_MINUTES:
-            why.append("unknown (the live file's readAt is in the future)")
+        else:
+            age = minutes
+            if minutes > STALE_LIVE_MINUTES:
+                why.append("unknown (the live file was read %d minutes ago and is stale; %s)"
+                           % (minutes, ("the rebuild failed: " + rebuild_why) if rebuild_why else "it was not rebuilt"))
+            elif minutes < -FUTURE_MINUTES:
+                why.append("unknown (the live file's readAt is in the future)")
     read_why = why[0] if why else None  # the page-ruling row takes the readAt reasons only, never the sessions ones
     pull_why = read_why  # the red pair line reads readAt and pulls only, never sessions
     if not isinstance(raw.get("sessions"), list):
@@ -931,7 +939,7 @@ def live_work(path, steps, slug=None):
         # a publisher that does not send `lane` reads unknown in stalled_items, never "no lane".
         page_items = [dict({"n": r["n"], "status": r["status"], "home": r["home"]},
                            **{k: r[k] for k in ("lane", "owner") if k in r}) for r in raw["items"]]
-    return {"read": read, "threads": threads if has_threads else None,
+    return {"read": read, "ageMinutes": age, "threads": threads if has_threads else None,
             "threadsWhy": None if has_threads else THREADS_MISSING_WHY, "pulls": sorted(pulls, key=lambda r: r["number"]),
             "branches": branches, "skipped": skipped, "strays": strays,
             "sessionSteps": session_steps, "liveSteps": live_steps, "liveRows": live_rows, "laneTags": lane_tags, "staleWhy": stale_why, "pullWhy": pull_why,
@@ -1475,8 +1483,8 @@ def pull_shape_why(row):
 
 
 def open_pulls_rest(slug):
-    """([{number, title, branch, head_repo, draft, updated_at}], None) for every open pull of `slug`, or (None, why).
-    head_repo is head.repo.full_name, None when GitHub gives no head repo (a deleted fork).
+    """([{number, title, branch, head_repo, draft, updated_at, body, created_at, sha}], None) for every open pull of
+    `slug`, or (None, why). head_repo is head.repo.full_name, None when GitHub gives no head repo (a deleted fork).
 
     Reads GitHub's pulls list a page at a time (a manual page loop: the list is complete or the read is unknown, never a
     partial list). A full page is followed by one more, so N open pulls cost N // 100 + 1 calls, at most REST_PAGE_CAP.
@@ -1510,7 +1518,11 @@ def open_pulls_rest(slug):
             full_name = head_repo.get("full_name") if isinstance(head_repo, dict) else None
             rows.append({"number": row["number"], "title": row.get("title") if isinstance(row.get("title"), str) else "",
                          "branch": row["head"]["ref"], "head_repo": full_name if isinstance(full_name, str) else None,
-                         "draft": row["draft"], "updated_at": zoned_time(row["updated_at"])})
+                         "draft": row["draft"], "updated_at": zoned_time(row["updated_at"]),
+                         # The live file's rebuild (live_fetch) reads these three; the stale-draft readers do not.
+                         "body": row.get("body") if isinstance(row.get("body"), str) else "",
+                         "created_at": row.get("created_at") if isinstance(row.get("created_at"), str) else None,
+                         "sha": row["head"].get("sha") if isinstance(row["head"].get("sha"), str) else None})
         if len(body) < REST_PAGE_SIZE:
             return rows, None
         left = headers.get("X-RateLimit-Remaining") if headers is not None else None
@@ -1546,6 +1558,82 @@ def read_sessions_source(name):
                                               and all(isinstance(k, str) for k in ids) for sid, ids in rows.items()):
         return None, bad
     return rows, None
+
+
+# The reader of the sessions the live file's rebuild keeps (live_fetch). Unlike the lane readers above, it returns the
+# list_sessions rows themselves, (rows, None) or (None, why), so the rebuilt file can hold their status and tags. No
+# reader is wired yet (owner page item 894), so a rebuild reads stale until one is registered under this name.
+SESSION_ROWS_SOURCE = "session-rows"
+FOOTER_SESSION = re.compile(r"https://claude\.ai/code/(session_\w+)")
+
+
+def live_fetch():
+    """{"sessions": list_sessions rows, "pulls": open pull requests} for the live file's rebuild, or raises. Each pull
+    is {number, title, body, branch, draft, createdAt, head}. The sessions come from the reader registered under
+    SESSION_ROWS_SOURCE and are read first, so a run with no reader reaches no network. The pulls come from
+    open_pulls_rest for the checkout in the current folder. Cost: one reader call and N // 100 + 1 GitHub calls."""
+    reader = SESSION_SOURCES.get(SESSION_ROWS_SOURCE)
+    if reader is None:
+        raise RuntimeError("no list_sessions reader is wired (SESSION_SOURCES has no %s)" % SESSION_ROWS_SOURCE)
+    rows, why = reader()
+    if why is not None or not isinstance(rows, list):
+        raise RuntimeError(why or "the %s reader returned no rows" % SESSION_ROWS_SOURCE)
+    pulls, why = open_pulls_rest(github_slug(pathlib.Path("."), None))
+    if why:
+        raise RuntimeError(unknown_inner(why))
+    return {"sessions": rows, "pulls": [
+        {"number": p["number"], "title": p["title"], "body": p["body"], "branch": p["branch"], "draft": p["draft"],
+         "createdAt": p["created_at"], "head": p["sha"]} for p in pulls]}
+
+
+def rebuilt_live(fetched, steps):
+    """The live file's new value from a live_fetch result: readAt now, the open pulls, and the sessions to keep. A
+    session row stays unless it is archived; an archived row stays only when an open pull's footer (its last
+    claude.ai/code link) or a live step's lane (running_under) names it. Raises ValueError on a result of the wrong shape."""
+    fetched = fetched if isinstance(fetched, dict) else {}
+    sessions, pulls = fetched.get("sessions"), fetched.get("pulls")
+    if not isinstance(sessions, list) or not isinstance(pulls, list):
+        raise ValueError("the fetch gave no sessions list and pulls list")
+    sessions_ok = all(isinstance(r, dict) and isinstance(r.get("id"), str) for r in sessions)
+    pulls_ok = all(isinstance(p, dict) and type(p.get("number")) is int and isinstance(p.get("title"), str) for p in pulls)
+    if not (sessions_ok and pulls_ok):
+        raise ValueError("the fetch gave a session or pull row of the wrong shape")
+    named = set()
+    for p in pulls:
+        found = FOOTER_SESSION.findall(p.get("body") if isinstance(p.get("body"), str) else "")
+        if found:
+            named.add(found[-1])
+    held = lambda sid: sid in named or any(isinstance(d, dict) and running_under(d, sid) for d in (steps or {}).values())
+    return {"readAt": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "pulls": [{k: p[k] for k in ("number", "title", "branch", "draft", "createdAt", "head") if p.get(k) is not None}
+                      for p in sorted(pulls, key=lambda p: p["number"])],
+            "sessions": [r for r in sessions if r.get("session_status") != ARCHIVED_SESSION or held(r["id"])]}
+
+
+def rebuild_stale_live(path, steps):
+    """None, or why the live file at `path` is stale and could not be rebuilt. A file whose readAt is a time with a zone
+    and over STALE_LIVE_MINUTES old is rebuilt once, in this process, from live_fetch() and rebuilt_live: the new
+    value replaces the file (its `ledger` key, which carries its own readAt, is kept). A file no older than the limit,
+    or one whose readAt cannot be read, is left alone, the caller's own reasons covering it. A failed fetch leaves the
+    file as it was. No timer, no thread, no process but the fetch's own reads."""
+    try:
+        raw = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+        at = zoned_time(raw.get("readAt"))
+    except (OSError, ValueError, AttributeError):
+        return None
+    if at is None or live_age_minutes(raw["readAt"]) <= STALE_LIVE_MINUTES:
+        return None
+    try:
+        value = rebuilt_live(live_fetch(), steps)
+        if isinstance(raw.get("ledger"), dict):
+            value["ledger"] = raw["ledger"]
+        target = pathlib.Path(path)
+        temp = target.with_name(target.name + ".tmp")
+        temp.write_text(json.dumps(value), encoding="utf-8")
+        os.replace(temp, target)
+    except Exception as err:  # the fetch is outside code and the write is disk: whatever fails reads stale, never stops the build
+        return str(err) or type(err).__name__
+    return None
 
 
 def unknown_inner(why):
