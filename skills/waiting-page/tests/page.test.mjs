@@ -10767,3 +10767,44 @@ test("a ruling card's item number says it is the stable answer number, not a dat
   const title = await page.locator(`#item-${ARBITER.id} .num`).first().getAttribute("title");
   assert.match(title, N_MEANING, "the ruling's number carries no label saying what it is: " + title);
 });
+
+// ---------------------------------------------------------------- the taken-picks area (step page-taken-picks-area)
+// A closed decision with a `taken` object is a pick a session took for the owner. The page draws it in the taken-picks
+// area (the element with id tier-taken, after the open tiers), never as an Answered line, and it preselects no option.
+// The fixture carries no `stands` and no `pick`: the owner's 15 Nov ruling (step page-no-preselected-pick) removed both.
+const TAKEN = {
+  id: "taken-panel-colour", n: 911, kind: "decision", status: "closed", closed: "2026-11-18T18:00:00-06:00",
+  added: "2026-11-15T00:23:00-06:00", ref: "c1, a test step", title: "Which colour does the panel take?", owner: "test thread",
+  home: "c1", context: "Two colours for the detail panel.", why: "The darker one reads at phone width.",
+  options: [opt("a", "Dark"), opt("b", "Light")],
+  taken: { by: "coordinator", at: "2026-11-14T17:15:00-06:00", what: "Dark, the darker colour.",
+           changes: "The panel colour changes.", over: "Light, the lighter colour." },
+};
+// Control: the same closed item with no `taken` object is an ordinary Answered line, as today.
+const CLOSED_PLAIN = { ...TAKEN, id: "closed-plain-colour", n: 912, title: "Which font does the page take?", taken: undefined };
+
+test("a taken pick never renders as an Answered line", async (t) => {
+  const page = await open(t, { items: [DECISION, TAKEN] }); if (!page) return;
+  assert.equal(await page.locator(`#tier-answered #line-${TAKEN.n}`).count(), 0, `No. ${TAKEN.n} is drawn as an Answered line`);
+});
+
+test("a taken pick is drawn in the taken-picks area", async (t) => {
+  const page = await open(t, { items: [DECISION, TAKEN] }); if (!page) return;
+  await mustHave(page, "#tier-taken", "the taken-picks area (the element with id tier-taken)");
+  const area = await page.locator("#tier-taken").textContent();
+  assert.ok(area.includes(TAKEN.title), `the taken-picks area does not hold No. ${TAKEN.n}, "${TAKEN.title}": ${area.slice(0, 200)}`);
+});
+
+test("a taken pick preselects no option, and nothing is staged for Send", async (t) => {
+  const page = await open(t, { items: [DECISION, TAKEN] }); if (!page) return;
+  await mustHave(page, "#tier-taken", "the taken-picks area (the element with id tier-taken)");
+  const taken = page.locator(`#tier-taken #item-${TAKEN.id}`);
+  await need(taken, `No. ${TAKEN.n} is not a card in the taken-picks area`);
+  assert.equal(await taken.locator("input:checked").count(), 0, `an option of No. ${TAKEN.n} is preselected`);
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is open though the owner answered nothing");
+});
+
+test("control: a closed item with no taken object stays an Answered line", async (t) => {
+  const page = await open(t, { items: [DECISION, CLOSED_PLAIN] }); if (!page) return;
+  await mustHave(page, `#tier-answered #line-${CLOSED_PLAIN.n}`, `the Answered line of No. ${CLOSED_PLAIN.n}`);
+});
