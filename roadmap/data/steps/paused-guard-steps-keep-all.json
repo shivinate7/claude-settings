@@ -1,0 +1,14 @@
+{
+ "id": "paused-guard-steps-keep-all",
+ "title": "Seven paused guard steps stay paused until their branch is read, then a step-by-step keep-or-drop list comes to the owner",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "consultant",
+ "blockedBy": [],
+ "why": "Owner picks saved on the page 19:16 CST Nov 18 (items 983 a, 985 a, 981 a), from the consultant's Degen gap list (gaps 21, 30, 5b and 5c); the audit's reads are the consultant's, not read by triage.",
+ "source": "owner picks via the waiting page 19:16 CST Nov 18",
+ "note": "Owner pick a on item 985. The seven: brief-ruling-has-source, lane-default-checks-rulings, hold-zero-tests-fails, review-model-from-agent-record, shared-tree-guard-reads-last-cd, silent-undo-reads-octopus, scratch-probe-cleanup, on branch roadmap-guards-degen. The owner notes some may have landed independently: check that first. None of the seven names was found on main or on the roadmap branch by triage.",
+ "updatedAt": "2026-11-18T19:17:13-06:00"
+}

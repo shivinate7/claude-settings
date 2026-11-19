@@ -1,0 +1,14 @@
+{
+ "id": "inbox-skips-bash-input",
+ "title": "The feedback inbox skips bash-input echoes and pastes with no instruction",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "consultant",
+ "blockedBy": [],
+ "why": "Owner picks saved on the page 19:16 CST Nov 18 (items 983 a, 985 a, 981 a), from the consultant's Degen gap list (gaps 21, 30, 5b and 5c); the audit's reads are the consultant's, not read by triage.",
+ "source": "owner picks via the waiting page 19:16 CST Nov 18",
+ "note": "Owner pick a on item 983. Debt inbox-saves-other-notices is the home. Prior-work search first.",
+ "updatedAt": "2026-11-18T19:17:13-06:00"
+}
