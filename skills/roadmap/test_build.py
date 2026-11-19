@@ -1229,6 +1229,20 @@ class LiveRefresh(UpkeepFixture):
                          "the open-pulls reads named a repo other than the --repo %s the build was given, "
                          "the folder it ran in" % self.SLUG)
 
+    def test_a_readat_in_the_future_shows_no_negative_age(self):
+        self.write_file(self.ago(5))
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(build_info(page)["live"].get("ageMinutes"), 5,
+                         "control: a readAt 5 minutes old does not show an age of 5 minutes")
+        for minutes_ahead in (3, 60):  # within the FUTURE_MINUTES clock-skew allowance, and past it
+            with self.subTest(minutes_ahead=minutes_ahead):
+                self.write_file(self.ago(-minutes_ahead))
+                page, _ = self.build_from_main("--live", str(self.live))
+                age = build_info(page)["live"].get("ageMinutes")
+                self.assertFalse(isinstance(age, int) and age < 0,
+                                 "the Live work panel shows an age of %r for a readAt %d minutes ahead"
+                                 % (age, minutes_ahead))
+
 
 class LedgerActs(UpkeepFixture):
     """The ledger's acts on the live file's pulls (decision pr-ledger, part 3b). The publisher puts `merge --reviewed --json`
