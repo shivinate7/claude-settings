@@ -7,6 +7,10 @@ Owner asked at 21:2x CST Nov 18 for triage 11 to be archived and a new triage sp
 - plans/step-audit-2026-11-18.md: 303 doing steps with PR state and lane state; proposal: 44 done, 3 todo. Recheck each merge sha by REST before setting a status.
 - plans/idle-lanes-2026-11-18.md: 5 lanes the tool would archive; coordinator re-reads and archives.
 
+## Coordinator's reads (his, 21:26 CST Nov 18)
+- Idle-lanes: he archived session_013NEJKzJGK41QGR8wh8oCT2, session_013NEJL2fP71oxAPczKdc3ru, session_013NEJL43tUQwcGVkndMWBRt, session_013NEJL3o4VZAch2NXdx3diD. He HOLDS session_013NEJKyxhKQHRJ7JPchUovk (child-repos-decision-claude-md-gap): open PR 3471 names its slug until read as not that lane's.
+- Triage 12: the guard (hook self-role-claim) refuses a session starting a role session; the owner must start triage 12 from his own terminal.
+
 ## Open page items
 - 991 act-mac-ios-adblock-swift6-rerun3: Mac re-run of PR 179 head a2bd53e12c0f65b126e116aa77bd09c03c0d7ee1; relay the owner's result to the ios-adblock lane (session_013NEJKzK1Tenht43Uyj5RDE).
 - 987 paused-guard-steps-per-step: consultant files seven steps; close when all seven have a PR.
