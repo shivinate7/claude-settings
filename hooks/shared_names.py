@@ -137,7 +137,7 @@ def lane_tags(tool_input: dict[str, Any]) -> list[Any]:
 
 def is_lane_tagged(tool_input: dict[str, Any]) -> bool:
     """True when a start call's tags hold a lane tag: any tag that, stripped and casefolded, is LANE_TAG. The one
-    reading of the lane tag; the lane checks, the floor's remedy choice and the start_session audit share it."""
+    reading of the lane tag; the lane checks and the floor's remedy choice share it."""
     return any(isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in lane_tags(tool_input))
 
 

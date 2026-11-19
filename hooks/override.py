@@ -878,6 +878,3 @@ def _take_override(session_id, agent_id, at):
     if not _claim(path, raw):
         return None
     return LIFTED
-    if not _claim(path, raw):
-        return None
-    return LIFTED
