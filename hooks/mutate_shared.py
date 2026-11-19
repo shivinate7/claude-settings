@@ -43,7 +43,14 @@ import sys
 import tempfile
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
+
+# A saved verdict is filed under this version too: bump it when a change alters what a verdict means.
+MUTATE_TOOL_VERSION = "1"
+# The folder each judged mutant's verdict is saved in. Read at call time: unset means no save and no reuse.
+VERDICT_DIR_ENV = "MUTATE_VERDICT_DIR"
+# Saved verdicts last written longer ago than this are pruned when a run starts.
+VERDICT_KEEP_SECONDS = 7 * 24 * 3600
 
 # The folder guard_tree copies from. Read at call time, so a test can point it elsewhere.
 HOOKS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -302,7 +309,71 @@ def parse_shard(value):
     return int(m.group(1)), int(m.group(2))
 
 
-def run_mutants(entries, run_one, controls=None, control_of=None):
+def judge_control(result):
+    """Why a control's mutants read UNKNOWN, as (reason, lines), or None when the clean layout is green."""
+    if isinstance(result, Exception):
+        return ("clean layout raised %s: %s" % (type(result).__name__, result), [])
+    code, red, ran, seen = result
+    return control_verdict(code, red, seen, ran)
+
+
+def verdict_path(folder, verdict_key, entry):
+    """The file a judged mutant is saved in: sha256 of the tool version, the run's key and the entry. A change to any
+    of the three names another file, so the saved verdict misses."""
+    text = json.dumps([MUTATE_TOOL_VERSION, verdict_key, entry], sort_keys=True, default=repr)
+    return os.path.join(folder, hashlib.sha256(text.encode("utf-8")).hexdigest())
+
+
+def load_verdict(path):
+    """The result saved at `path`, or None. A missing, unreadable or malformed file is a miss, never a crash. A skip is
+    never saved, so a saved result has no skip."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            saved = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(saved, list) or len(saved) < 5 or not isinstance(saved[0], str) or saved[4] is not None:
+        return None
+    return tuple(saved)
+
+
+def save_verdict(path, result):
+    """Write `result` at `path` in one step: a temp file in the same folder, then os.replace, so a reader never sees a
+    half-written file. A save that fails leaves no file, and the mutant is judged again on the next run."""
+    folder = os.path.dirname(path)
+    tmp = None
+    try:
+        os.makedirs(folder, exist_ok=True)
+        handle, tmp = tempfile.mkstemp(dir=folder, prefix=".verdict-", suffix=".tmp")
+        with os.fdopen(handle, "w", encoding="utf-8") as out:
+            json.dump(list(result), out)
+        os.replace(tmp, path)
+    except (OSError, TypeError, ValueError):
+        if tmp is not None:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
+def prune_verdicts(folder):
+    """Remove the saved verdicts in `folder` last written more than VERDICT_KEEP_SECONDS ago. A folder that does not
+    exist has none to prune."""
+    cutoff = time.time() - VERDICT_KEEP_SECONDS
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return
+    for name in names:
+        path = os.path.join(folder, name)
+        try:
+            if os.path.isfile(path) and os.path.getmtime(path) < cutoff:
+                os.remove(path)
+        except OSError:
+            pass
+
+
+def run_mutants(entries, run_one, controls=None, control_of=None, verdict_key=None):
     """Run every entry through `run_one`, in parallel, printing each mutant's verdict as it
     lands, then the tally line. Returns 0 when every mutant was killed (a caller's own `main`
     should return that, or 1 otherwise), so a caller can end with
@@ -325,10 +396,16 @@ def run_mutants(entries, run_one, controls=None, control_of=None):
 
     `controls` is {key: function returning run_suite's (code, red, ran, seen)}: one clean-layout control per
     key, and `control_of(entry)` names the key whose control judges that entry. The controls go into the same
-    pool as the mutants, ahead of them, so they count in the job cap and no worker ever waits on one. Results
-    are read in submission order, so every control's result is in hand before the first mutant's is read. A red
+    pool as the mutants, ahead of them, so they count in the job cap. A mutant's worker waits on its own control's
+    verdict only when it saves (see `verdict_key`), and the pool has already started that control, so the wait ends.
+    Results are read in submission order, so every control's result is in hand before the first mutant's is read. A red
     control, one that exits 0 with no case run, or one that raises, makes every mutant of its key read UNKNOWN. An entry whose key has no control
     raises KeyError: it never reads KILLED unchecked. A skipped entry has no control to ask for.
+
+    `verdict_key`, with MUTATE_VERDICT_DIR set, files each judged mutant's result under sha256 of (MUTATE_TOOL_VERSION,
+    verdict_key, entry). Each saves as it lands, and a run reuses a result saved under the same name. A result is saved
+    only when its control is green, and never a skip or an UNKNOWN. A corrupt file is a miss. Saved files older than
+    VERDICT_KEEP_SECONDS are pruned when the run starts.
     """
     shard = os.environ.get("MUTATE_SHARD")
     if shard is not None:
@@ -353,27 +430,53 @@ def run_mutants(entries, run_one, controls=None, control_of=None):
     wrong_cause = 0
     skipped = 0
     unknown = 0
+    folder = (os.environ.get(VERDICT_DIR_ENV) or None) if verdict_key is not None else None
+    if folder is not None:
+        prune_verdicts(folder)
+    judged = {key: Future() for key in keys}  # each control's verdict, set by its own job
+
+    def control_job(key):
+        # The default answers "not green", so a judge that raises saves no mutant of this key.
+        judged_as = ("clean layout did not finish", [])
+        result = None
+        try:
+            try:
+                result = controls[key]()
+            except Exception as error:  # a control that crashes reads red for its key, never ends the run
+                result = error
+            judged_as = judge_control(result)
+        finally:
+            judged[key].set_result(judged_as)
+        return result
+
+    def run_saved(entry):
+        if folder is None:
+            return run_one(entry)
+        path = verdict_path(folder, verdict_key, entry)
+        saved = load_verdict(path)
+        if saved is not None:
+            return saved
+        result = run_one(entry)
+        _label, _code, _red, _required, skip, *more = result
+        unknown_reason = more[1] if len(more) > 1 else None
+        # Only a green control saves. The pool started this control before this mutant, so the wait ends.
+        if control_of is not None and not skip and not unknown_reason and judged[control_of(entry)].result() is None:
+            save_verdict(path, result)
+        return result
 
     def work(job):
         kind, item = job
         if kind == "mutant":
-            return run_one(item)
-        try:
-            return controls[item]()
-        except Exception as error:  # a control that crashes reads red for its key, never ends the run
-            return error
+            return run_saved(item)
+        return control_job(item)
 
     verdicts = {}
     jobs_in_order = [("control", key) for key in keys] + [("mutant", entry) for entry in entries]
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         results = pool.map(work, jobs_in_order)
         for key in keys:
-            result = next(results)
-            if isinstance(result, Exception):
-                verdicts[key] = ("clean layout raised %s: %s" % (type(result).__name__, result), [])
-            else:
-                code, red, ran, seen = result
-                verdicts[key] = control_verdict(code, red, seen, ran)
+            next(results)  # the control's own job sets its verdict in `judged`
+            verdicts[key] = judged[key].result()
         for entry, (label, code, red, required, skip, *more) in zip(entries, results):
             if skip:
                 skipped += 1

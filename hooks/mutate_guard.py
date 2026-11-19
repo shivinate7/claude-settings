@@ -54,6 +54,7 @@ with a family row also prints its `hooks/test_guard.py::<family>` lines beside t
 
 import contextlib
 import functools
+import hashlib
 import os
 import shutil
 import signal
@@ -4862,6 +4863,20 @@ def run_mutant(sources, work: str, entry):
     return label, code, red, required, None, seen
 
 
+def verdict_digest(sources):
+    """The key this run's saved verdicts are filed under: one digest of the guarded text and the suite text of each
+    target the run judges, so an edit to either misses that target's saved verdicts. None when no verdict folder is
+    named: nothing is digested, saved or reused."""
+    if not os.environ.get(mutate_shared.VERDICT_DIR_ENV):
+        return None
+    digest = hashlib.sha256()
+    for target in sorted({mutation_parts(entry)[3] for entry in MUTATIONS}):
+        _path, suite, _variable, _stem = TARGETS[target]
+        with open(suite, encoding="utf-8") as handle:
+            digest.update(repr([target, sources[target], handle.read()]).encode("utf-8"))
+    return digest.hexdigest()
+
+
 def main() -> int:
     if "--report" in sys.argv[1:]:
         return report_main(sys.argv[1:])
@@ -4964,7 +4979,8 @@ def main() -> int:
     try:
         return mutate_shared.run_mutants(
             MUTATIONS, lambda entry: run_mutant(sources, work, entry),
-            controls=run_controls(sources, work, MUTATIONS), control_of=lambda entry: mutation_parts(entry)[3])
+            controls=run_controls(sources, work, MUTATIONS), control_of=lambda entry: mutation_parts(entry)[3],
+            verdict_key=verdict_digest(sources))
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
