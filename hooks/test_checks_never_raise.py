@@ -378,7 +378,7 @@ def value_for(fn, name, param, rng, text, env, state):
         return [text]
     if name in PATH_NAMES:
         return text if rng.random() < 0.3 else env.cwd
-    if annotation == "int":
+    if param.annotation is int or annotation == "int":   # a real int, or its string form (postponed annotations)
         return rng.randint(0, 3)
     if annotation == "dict":
         return state("payload")
