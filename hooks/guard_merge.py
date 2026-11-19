@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 
 from guard_core import (
     SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, GIT_WRITES, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
-    REPLAY_MARKS, command_indexes, dir_before_segment, heredoc_heads, inline_script, inner_commands, own_heredoc_bodies, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    REDIRECTION, REPLAY_MARKS, command_indexes, dir_before_segment, heredoc_heads, inline_script, inner_commands, own_heredoc_bodies, resolve_command, resolve_default_base, segment_tokens, split_segments,
     is_cloud, shell_abs, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
@@ -1673,10 +1673,11 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
 # ---- self-role-claim: a session does not start a child session that claims a role (decision session-tiers)
 SELF_ROLE_VARIABLE = "CS_SESSION_ROLE"
 SELF_ROLE_LAUNCHERS = ("claude-role", "claude-role.cmd")
+SELF_ROLE_HELP_FLAGS = ("--help", "-h")
 SELF_ROLE_REASON = (
-    "self-role-claim: a session does not claim a role for a session it starts, because a role proves who may merge and who writes "
-    "the roadmap. The owner starts a role session from his own terminal. Do the work in this session, or ask the owner to start "
-    "the session he wants. "
+    "self-role-claim: this rule covers only the local launcher and the role variable. A session does not claim a role for a session it "
+    "starts, because a role proves who may merge and who writes the roadmap. A cloud session's role comes from the coordinator that "
+    "starts it (skill project-ops). A session that is not that coordinator does the work itself, or asks the coordinator. "
     "(decision session-tiers, a local role comes from the owner's launcher, never from a session's own call)"  # glossary-ok: session-tiers is the decision's file name
 )
 
@@ -1700,7 +1701,8 @@ def _set_environment_variable_names(lowered) -> bool:
 def _claims_a_role(tokens) -> bool:
     """True when one tokenized command sets the role variable (a `VAR=x` prefix, also glued to a subshell's `(`, `env VAR=x`, `export VAR=x`,
     PowerShell `$env:VAR=x`, `Set-Item` or `New-Item` on `Env:VAR`, `SetEnvironmentVariable('VAR', ...)`) or runs the launcher, as its command
-    word or as the script of a python call. A PowerShell read of `Env:VAR` (Test-Path, Get-Item, Remove-Item) is no claim."""
+    word or as the script of a python call. A read is no claim: a PowerShell read of `Env:VAR` (Test-Path, Get-Item, Remove-Item, `$x = $env:VAR`)
+    and the launcher with only help flags (and redirections), which prints usage and starts no session."""
     index = resolve_command(tokens)
     before = tokens if index is None else tokens[:index]
     if any(t.lstrip("(").startswith(SELF_ROLE_VARIABLE + "=") for t in before):
@@ -1709,7 +1711,8 @@ def _claims_a_role(tokens) -> bool:
     variable = SELF_ROLE_VARIABLE.lower()
     if any(t.startswith("$env:" + variable) and t[len("$env:" + variable):].lstrip().startswith("=") for t in lowered):
         return True
-    if any(t == "$env:" + variable for t in lowered) and any(t.startswith("=") for t in lowered):
+    # the `=` must be the token right after the variable: `$x = $env:VAR` reads it, `$env:VAR = x` sets it
+    if any(t == "$env:" + variable and at + 1 < len(lowered) and lowered[at + 1].startswith("=") for at, t in enumerate(lowered)):
         return True
     if _set_environment_variable_names(lowered):
         return True
@@ -1722,7 +1725,9 @@ def _claims_a_role(tokens) -> bool:
     if word in ("export", "declare", "typeset", "setenv") and any(t.startswith(SELF_ROLE_VARIABLE + "=") for t in rest):
         return True
     if word in SELF_ROLE_LAUNCHERS:
-        return True
+        # Help flags only print usage. `command -v` is no pass: its output feeds a later run (`$(command -v x) triage`), and one segment cannot see that.
+        help_only = bool(rest) and all(t in SELF_ROLE_HELP_FLAGS or REDIRECTION.fullmatch(t) for t in rest) and any(t in SELF_ROLE_HELP_FLAGS for t in rest)
+        return not help_only
     if word.startswith("python"):
         script = next((t for t in rest if not t.startswith("-")), None)
         return script is not None and basename(script) in SELF_ROLE_LAUNCHERS
