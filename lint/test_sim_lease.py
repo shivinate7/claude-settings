@@ -267,6 +267,25 @@ class PoolExclusive(LeaseCase):
                 self.set_load(one, five, "0.50")
                 self.assert_waits_then_refused("pro", needle)
 
+    def test_a_second_pro_is_refused_beside_a_held_pro(self):
+        # The pro slot is one slot. At a load the brake allows, a second pro waits, is refused, and the refusal names the
+        # held pro. Once that pro gives back, a pro take is granted.
+        self.set_load("0.50", "0.50", "0.50")
+        holder, second = self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("pro", holder.pid)), (0, "pro"), "the pro holder take is not granted pro")
+        before = self.load_reads()
+        r = self.take("pro", second.pid, wait=2)
+        self.assertEqual(r.returncode, 1, "a second pro take beside the held pro is granted")
+        self.assertEqual(r.stdout.strip(), "", "a refused second pro take prints a slot")
+        self.assertGreaterEqual(self.load_reads() - before, 2, "a second pro take beside the held pro does not wait")
+        lines = [line for line in r.stderr.splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1, "the refusal of a second pro take is not one stderr line")
+        self.assertIn("slot pro pid %d" % holder.pid, lines[0],
+                      "the refusal of a second pro take does not name the held pro")
+        self.give(holder.pid)
+        self.assertEqual(grant(self.take("pro", second.pid)), (0, "pro"),
+                         "a pro take is not granted once the held pro gives back")
+
 
 class Queue(LeaseCase):
     def test_second_waiter_is_not_granted_ahead_of_the_head(self):
