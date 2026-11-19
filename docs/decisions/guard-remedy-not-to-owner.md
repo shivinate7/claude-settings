@@ -54,6 +54,13 @@ Text: `UNSTARTED_REASON`. It applies when the turn ran a builder.
 - Next holds an "Unstarted:" line. Name each queued item with every question answered that you left unstarted, with its reason.
 - If none, write "Unstarted: none".
 
+Text: `UNSTARTED_FILE_REASON`. It applies when an Unstarted item waits on another lane's merge, PR or landing and names no shared file.
+
+- Name the file the two lanes share, like `lint/report_guard.py` or `Makefile`, in the same item.
+- Or say what the item waits on in other words, with no merge, PR, "#<n>" or landing in it. A wait on the owner or the load brake also needs the file when it names a PR or merge.
+- "Unstarted: none" needs no file, even when it adds "all merged".
+- "e.g." and "i.e." are not files. The item runs to the end of its wrapped lines and its sub-bullets.
+
 ### Answered guard (any reply)
 
 Text: `ANSWERED_REASON`, rule `answered-needs-source` (a claim of "answered" needs its source).

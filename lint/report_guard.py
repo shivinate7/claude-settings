@@ -1093,31 +1093,60 @@ def done_models_problem(text, spawned, every=None):
 
 
 # reports-name-unstarted-items: a builder spawn marks an orchestrator's turn. Its report holds an
-# `Unstarted:` line, inline after Next, after a `;` or `.`, or on its own line, in any case. It lists
-# the ready items or says none. A bold `**Unstarted:**` is an unknown label, which the shape check refuses.
+# `Unstarted:` line, inline after Next, after a `;` or `.`, on its own line, or as an indented sub-bullet,
+# in any case. It lists the ready items or says none. A bold `**Unstarted:**` is an unknown label, which the
+# shape check refuses.
 UNSTARTED_RE = re.compile(
-    r"(?:^|[;.]\s+)(?:\*\*Next:?\*\*:?\s*)?(?:[-*+]\s+)?unstarted:", re.M | re.I)
+    r"(?:^[ \t]*|[;.]\s+)(?:\*\*Next:?\*\*:?\s*)?(?:[-*+]\s+)?unstarted:", re.M | re.I)
 
 
-# An item that waits on another lane's merge or PR must name the file the two lanes share, so the wait is
-# checkable. A wait on the owner or the load brake names no other lane, so it needs no file.
-_UNSTARTED_LANE_WAIT_RE = re.compile(r"\b(?:PRs?|pull requests?|merges?|merged)\b", re.I)
-_UNSTARTED_OTHER_WAIT_RE = re.compile(r"\bowner|load[- ]brake", re.I)
-_SHARED_FILE_RE = re.compile(r"[\w-]+\.[A-Za-z][A-Za-z0-9]{0,5}\b")
+# An item that waits on another lane's merge, PR or landing must name the file the two lanes share, so the wait is
+# checkable. No word exempts it: the owner or the load brake may also be in the sentence.
+_UNSTARTED_LANE_WAIT_RE = re.compile(
+    r"\b(?:PRs?|pull requests?|merges?|merged|merging|to land)\b|#\d+", re.I)
+_UNSTARTED_NONE_RE = re.compile(r"\s*none\b", re.I)
+_UNSTARTED_STOP_RE = re.compile(r"\s*(?:\*\*(?:Done|Deviations|Input Needed|Next)\b|$)")
+_BULLET_RE = re.compile(r"([ \t]*)[-*+]\s")
+# A shared file is `name.ext`, or a build file with no extension. "e.g." and "i.e." are not files.
+_SHARED_FILE_RE = re.compile(
+    r"\b[\w-]+\.[A-Za-z][A-Za-z0-9]{0,9}\b"
+    r"|\b(?:makefile|dockerfile|gemfile|rakefile|procfile|justfile|jenkinsfile|vagrantfile|codeowners)\b", re.I)
+_NOT_A_FILE = frozenset(("e.g", "i.e"))
+
+
+def _unstarted_item(block, found):
+    """The Unstarted item's text: the rest of its line, then the wrapped or sub-bullet lines under it, up to
+    a blank line, a label, or a sibling bullet at its own indent or less."""
+    lines = block[found.end():].split("\n")
+    line = block[block.rfind("\n", 0, found.end()) + 1:].split("\n", 1)[0]
+    base = len(line) - len(line.lstrip())
+    item = [lines[0]]
+    for line in lines[1:]:
+        if _UNSTARTED_STOP_RE.match(line):
+            break
+        bullet = _BULLET_RE.match(line)
+        if bullet and len(bullet.group(1)) <= base:
+            break
+        item.append(line)
+    return "\n".join(item)
+
+
+def _names_a_file(item):
+    return any(m.group(0).lower() not in _NOT_A_FILE for m in _SHARED_FILE_RE.finditer(item))
 
 
 def unstarted_problem(text, spawned):
     """The refusal reason when a builder ran this turn and Next's `Unstarted:` line is missing, or waits on
-    another lane's merge or PR and names no shared file. '' when the line is fine."""
+    another lane's merge, PR or landing and names no shared file. '' when the line is fine."""
     if "builder" not in spawned:
         return ""
     block = block_text(text, keep_indent=True)
     found = UNSTARTED_RE.search(block)
     if not found:
         return UNSTARTED_REASON
-    item = block[found.end():].split("\n", 1)[0]
-    if (_UNSTARTED_LANE_WAIT_RE.search(item) and not _UNSTARTED_OTHER_WAIT_RE.search(item)
-            and not _SHARED_FILE_RE.search(item)):
+    item = _unstarted_item(block, found)
+    if (not _UNSTARTED_NONE_RE.match(item) and _UNSTARTED_LANE_WAIT_RE.search(item)
+            and not _names_a_file(item)):
         return UNSTARTED_FILE_REASON
     return ""
 
