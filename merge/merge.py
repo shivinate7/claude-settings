@@ -3320,6 +3320,16 @@ def mutate_report_counts(out):
         return int(line.group(1)), by_label.get("survived", 0), by_label.get("unknown", 0), unread, True, by_label.get("wrong cause", 0)
     return (0, 0, 0, unread, False, 0) if unread else None
 
+MUTATE_VERDICT_DIR_ENV = "MUTATE_VERDICT_DIR"  # the env name hooks/mutate_shared.py reads for the folder a leg saves its judged mutants in
+
+def mutate_verdict_dir():
+    """The one folder every mutation leg of every lint run saves its verdicts in. It sits in the temp folder, outside the lint tree that
+    drop_worktree removes when the lint ends, and its path is the same on each call, so a rerun of a leg that timed out reads what the
+    first run saved. Each saved verdict carries its own key (guarded file, suite file, tool version), so a run on another head reuses only
+    what still holds. The mutation tool prunes the old files."""
+    who = str(os.getuid()) if hasattr(os, "getuid") else "user"  # one folder per user: another user's folder is unwritable here
+    return os.path.join(tempfile.gettempdir(), f"merge-mutate-verdicts-{who}")
+
 def mutate_run_check(wt):
     """Run the head's mutation test in the tree `wt`: each shard job of checks.yml one after another (step "Guard mutation test, shard i/M"), or the
     old one job (step "Guard mutation test") once when the head has no shard step. -> (summary, failures): one line of wall time and counts, and the
@@ -3362,6 +3372,7 @@ def mutate_run_check(wt):
         if not body or "\n" in body or not cap:
             raise Stop(f"the head's checks.yml has no one-line run: for CI step {(step_key(step, 'name') if step else MUTATE_STEP)!r} of job {job}, or no timeout-minutes on that job, so its mutation test run cannot start. {LANE_LINT_REMEDY}")
         env = no_github_env()
+        env[MUTATE_VERDICT_DIR_ENV] = mutate_verdict_dir()
         if shard:
             if step_env(step).get("MUTATE_SHARD") != shard:
                 raise Stop(f"the step for shard {shard} of job {job} in the head's checks.yml does not set MUTATE_SHARD to {shard}, so its mutation test run cannot start. {LANE_LINT_REMEDY}")
