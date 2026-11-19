@@ -56,6 +56,8 @@ ENV = _test_git.apply(dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_
 ENV.pop("VERDICT_LOG", None)
 ENV.pop("CI_JOB_LINT_WORKERS", None)
 ENV.pop("CI_JOB_HEAD_SHA", None)  # the lane lint's pushed head: a case sets it, and the unset case needs it absent
+ENV.pop("CI_JOB_NO_CACHE", None)  # the rerun cache's knob: a case sets it, and the cache cases need it absent
+ENV["XDG_CACHE_HOME"] = os.path.join(RUN_FOLDER, "xdg-cache")  # the rerun cache's store: no case writes the real ~/.cache
 
 
 def workflow(*steps, job="lane", other=None):
@@ -1661,7 +1663,9 @@ class ParallelLint(Job):
     def test_an_invalid_worker_count_falls_back_to_the_default(self):
         for value in ("0", "abc"):
             self.fresh_run()
-            rc, lines, out = self.run_lint(*self.rendezvous_steps(["a", "b"]), workers=value, launch=cpus(4))
+            # Each pass reruns the same two steps, so the rerun cache would answer the second pass: the knob turns it off.
+            rc, lines, out = self.run_lint(*self.rendezvous_steps(["a", "b"]), workers=value, launch=cpus(4),
+                                           env={"CI_JOB_NO_CACHE": "1"})
             self.assertEqual(list(by_step(lines).items()), [("a", "PASS"), ("b", "PASS")],
                              "CI_JOB_LINT_WORKERS=%s did not fall back to the default worker count:\n%s" % (value, out))
             self.assertEqual(rc, 0, out)
@@ -2088,7 +2092,7 @@ def pipx_runs_pinned_ruff():
         pin = json.load(f)["tools"]["ruff"]
     try:
         return subprocess.run(["pipx", "run", "ruff==" + pin, "--version"], capture_output=True,
-                              timeout=60).returncode == 0
+                              timeout=60, env=ENV).returncode == 0  # ENV's cache folder: pipx caches under XDG_CACHE_HOME
     except (OSError, subprocess.TimeoutExpired):
         return False
 
