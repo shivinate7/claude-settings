@@ -95,7 +95,7 @@ GitHub, so the publisher reads them just before the build and passes one file:
   the pull, `reviewLog` when the pull has a posted review log. The stale-draft row skips a draft with either
   true, matched by pull number. A present key must be a JSON bool (`null` counts as non-bool); a pull row with a non-bool value is skipped, so the
   stale-draft, pair, unlaned and lanes-to-archive rows read unknown. `branches`: lane branches with no open pull request.
-- `landedPulls` (optional, beside the keys above): `[{"number", "branch", "head"?, "merged"?, "replacedBy"?}]`, the repo's pull
+- `landedPulls` (optional, beside the keys above): `[{"number", "branch", "head"?, "merged"?, "replacedBy"?, "closedAt"?}]`, the repo's pull
   requests closed in the last 14 days whose base is the default branch, each with its head ref (`branch`), head sha
   (`head`), GitHub's `merged` flag and, for a pull closed as replaced, `replacedBy` (the replacing pull's number). Triage's live-file brief must fill it; see "A merge marks a step".
 - `sessions`: `list_sessions`, every page, each row copied as it comes with only these fields.
@@ -192,13 +192,24 @@ a live session of this repo, or an open pull whose branch is the id or `lane/<id
 bucket is completed or failed has ended and holds no step; an idle or review ready one still does. The tag value is
 read stripped, as idle_lanes reads it. A `cs-topic:` tag never keeps a step live. The page's stalled block lists the ids.
 
+A doing step whose pull request closed unmerged, with no open pull on its lane branch and no open or merged `replacedBy`
+successor, prints the date and the word unmerged: `stalled step: <id> (resume, pause or done; PR #N closed unmerged
+<YYYY-MM-DD>)`. The date is `closedAt` on the step's `landedPulls` row (an ISO time with a zone, from GitHub's
+`closed_at`; triage's live-file brief fills it); with several such rows the latest wins, and a missing or unreadable
+`closedAt` prints `(date unknown)`. A step that landed keeps its `done: landed in` line.
+
+A live file older than `STALE_LIVE_MINUTES` fails a doing or active step too: when any open step is doing or active
+and has no valid `paused` field, the build prints one line, `live file stale: the live file was read N minutes ago
+(limit 60); ...read it again`, and exits 1. That line never begins `stalled step: <id> (`, so triage's Stop hold,
+which reads that shape, does not read it as an entry. A stale file with no such step exits 0.
+
 An open waiting-page item whose `lane` is a non-empty text and has no live work is stalled too. It
 prints `stalled step: item <n> (lane <slug>: re-route, close or resume)` and exits 1. The lane is live
 by the same `cs-step:` tag and pulls, and also by `cs-topic:<slug>`, or `cs-build:<tier>` for a tier lane such as `batch-runner`. A closed item is
 never stalled, and a `null` lane names no lane.
 
 With no usable live read the lines read `stalled step: unknown (<why>)` and `stalled step: items
-unknown (<why>)`, and build.py exits 0; the page's stalled block then reads not read, never zero. An
+unknown (<why>)`, and build.py exits 0, except a stale file with a doing step (above), which exits 1; the page's stalled block then reads not read, never zero. An
 open item row with no `lane` key reads the items unknown, so a publisher that does not send `lane` never
 passes for zero stalled items.
 
