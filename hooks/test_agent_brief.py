@@ -175,17 +175,17 @@ def context_for(stdin_text):
 RUN_FOLDER = None  # made on the first request of the run, so an import leaks no folder (test-temp-standard)
 
 
-def repo_tree(extras=None, stamp=None):
+def repo_tree(extras=None, config=None):
     """A repo-shaped folder in this run's folder: its layout extras file when `extras` is text, its .github/stamp.json
-    when `stamp` is a dict. The hook reads both through the payload's cwd. main() removes the run folder."""
+    when `config` is a dict. The hook reads both through the payload's cwd. main() removes the run folder."""
     global RUN_FOLDER
     if RUN_FOLDER is None:
         RUN_FOLDER = _test_temp.run_folder()
     root = tempfile.mkdtemp(prefix="brief-tree-", dir=RUN_FOLDER)
     if extras is not None:
         write_under(root, ".claude/layout-extras.json", extras)
-    if stamp is not None:
-        write_under(root, ".github/stamp.json", json.dumps(stamp))
+    if config is not None:
+        write_under(root, ".github/stamp.json", json.dumps(config))
     return root
 
 
@@ -561,7 +561,7 @@ for _name, _stdin in BAD_CASES:
 # under the payload's `cwd`, so the form comes from the repo, not from the hook's text. The
 # fixture has three kinds (D, F, Q). The form is per kind: one brief line gives every kind's form,
 # in kind order, because a single {prefix} filled from kinds[0] would name only D.
-CITE_STAMP = {
+CITE_CONFIG = {
     "kinds": [
         {"id": "decision", "folder": "decisions", "prefix": "D", "idTemplate": "{prefix}{n}"},
         {"id": "finding", "folder": "findings", "prefix": "F", "idTemplate": "{prefix}{n}"},
@@ -572,17 +572,17 @@ CITE_STAMP = {
 }
 
 
-def brief_for_stamp(stamp):
-    """Run the hook in a repo whose .github/stamp.json holds `stamp`. Return (text, problem)."""
-    return brief_in(repo_tree(stamp=stamp))
+def brief_for_config(config):
+    """Run the hook in a repo whose .github/stamp.json holds `config`. Return (text, problem)."""
+    return brief_in(repo_tree(config=config))
 
 
 def cite_form_check():
     """A repo whose stamp.json carries cite.form gets one brief line that carries every kind's form."""
-    text, problem = brief_for_stamp(CITE_STAMP)
+    text, problem = brief_for_config(CITE_CONFIG)
     if problem:
         return problem
-    forms = ["%s‹slug›" % letter for letter in ("D", "F", "Q")]  # spelled as escapes
+    forms =["%s‹slug›" % letter for letter in ("D", "F", "Q")]  # spelled as escapes
     if not has_line(text, *forms):
         return "no one brief line carries the form of each kind (D, F, Q) from the repo's stamp.json"
     if len(text.split("\n")) >= 20:
@@ -592,9 +592,9 @@ def cite_form_check():
 
 def cite_form_absent_check():
     """A stamp.json with cite.pattern and no cite.form adds no cite line: no form is derived."""
-    stamp = json.loads(json.dumps(CITE_STAMP))
-    del stamp["cite"]["form"]
-    text, problem = brief_for_stamp(stamp)
+    config = json.loads(json.dumps(CITE_CONFIG))
+    del config["cite"]["form"]
+    text, problem = brief_for_config(config)
     if problem:
         return problem
     if "‹slug›" in text or "Cite a record in this repo" in text:
