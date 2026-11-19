@@ -313,6 +313,21 @@ class Conditions(Job):
         rc, lines, out = self.run_job(step("last", "true", **{"if": cond}))
         self.assertEqual(self.verdicts(lines), ["PASS"], out)
 
+    def test_a_records_only_skip_not_equal_to_true_reads_true(self):
+        cond = "${{ success() && needs.scope.outputs.records_only_skip != 'true' }}"
+        rc, lines, out = self.run_job(step("skip flag", "true", **{"if": cond}))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
+
+    def test_a_records_only_skip_in_the_combined_scope_condition_reads_true(self):
+        cond = ("${{ (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') "
+                "&& needs.scope.outputs.records_only_skip != 'true' }}")
+        rc, lines, out = self.run_job(step("combined", "true", **{"if": cond}))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
+
+    def test_an_unrelated_unreadable_term_still_reads_unknown(self):  # the control: the flag fix must not read every != as true
+        rc, lines, out = self.run_job(step("hash", "true", **{"if": "${{ hashFiles('x') != '' }}"}))
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
+
     def test_a_pull_request_step_is_skipped_with_no_base(self):
         rc, lines, out = self.run_job(step("pr", "false", **{"if": self.PR}))
         self.assertEqual((rc, self.verdicts(lines)), (0, ["skipped"]), out)
