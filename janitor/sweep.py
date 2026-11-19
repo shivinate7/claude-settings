@@ -2126,12 +2126,59 @@ def _owner_dead(pid: int) -> bool:
     return False
 
 
+def _open_file_holders(path: str):
+    """Pids with an open file at or under PATH, or `None` when that cannot be read. Linux reads each
+    `/proc/<pid>/fd`; macOS asks `lsof +D`. Windows has no read here, so its holders are cwd-only."""
+    if sys.platform.startswith("win"):
+        return []
+    if sys.platform.startswith("linux"):
+        pids = list_all_pids()
+        if pids is None:
+            return None
+        holders = []
+        for pid in pids:
+            fd_dir = "/proc/%d/fd" % pid
+            try:
+                links = [os.readlink(os.path.join(fd_dir, fd)) for fd in os.listdir(fd_dir)]
+            except OSError:
+                continue  # the process ended, or is not ours to read: out of scope, as in `processes_in`
+            if any(_cwd_under_checkout(link, path) for link in links if link.startswith(os.sep)):
+                holders.append(pid)
+        return holders
+    try:
+        answer = _nowindow.run(["lsof", "-Fp", "+D", path], capture_output=True, text=True, timeout=60)
+    except Exception:
+        return None
+    if answer.returncode not in (0, 1):
+        return None
+    return [int(line[1:]) for line in answer.stdout.splitlines() if line[1:].isdigit() and line[0] == "p"]
+
+
+def _live_process_inside(path: str):
+    """A reason string when a live process has its cwd or an open file inside PATH, or when that
+    cannot be read; `None` when none does. Removing a folder under a running process breaks it, so
+    a read that fails keeps the folder."""
+    inside, _unreadable = processes_in(path)
+    if inside is None:
+        return "the process list could not be read"
+    holders = _open_file_holders(path)
+    if holders is None:
+        return "the open files could not be read"
+    pids = sorted(set(inside) | set(holders))
+    if pids:
+        return "process %d is running inside it" % pids[0]
+    return None
+
+
 def find_leftover_temp(temp_root: str, now: float):
-    """One decision per folder that names an owner pid: reap when the owner is dead and the folder is
-    over LEFTOVER_TEMP_MIN_AGE old, else keep. A link, a file and any other name are never listed."""
+    """One decision per folder that names an owner pid: reap when the owner is dead, the folder is
+    over LEFTOVER_TEMP_MIN_AGE old and no live process runs inside it, else keep. A link, a file and
+    any other name are never listed."""
     decisions = []
     for sub, pattern in LEFTOVER_TEMP_PATTERNS:
         parent = temp_root if sub is None else os.path.join(temp_root, sub)
+        if sub is not None and is_link(parent):  # listdir would follow it out of the temp root
+            continue
         try:
             names = sorted(os.listdir(parent))
         except OSError:
@@ -2154,7 +2201,11 @@ def find_leftover_temp(temp_root: str, now: float):
             elif not _owner_dead(pid):
                 action, reason = "keep", "owner pid %d is alive" % pid
             else:
-                action, reason = "reap", "owner pid %d is dead, idle %d min" % (pid, age // 60)
+                busy = _live_process_inside(path)
+                if busy:
+                    action, reason = "keep", busy
+                else:
+                    action, reason = "reap", "owner pid %d is dead, idle %d min" % (pid, age // 60)
             decisions.append({"path": path, "action": action, "reason": reason})
     return decisions
 
