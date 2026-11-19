@@ -17,6 +17,7 @@ Without a project, each session holds one or more roles, and the owner acts as t
   `templates/brief*.md`: `brief.md` for a lane, `brief-<role>.md` for each other role. Triage, the batch runner and the arbiter
   compact in routine use and are not replaced. The coordinator rotates a standing session only when it
   goes stale or breaks. The coordinator compacts in place and has no successor (owner, 2026-11-10 14:29 CST, G7, standing sessions compact).
+- **App sessions.** A desktop-app session gets its role from `CS_SESSION_ROLE` in the app's scoped environment. A terminal session gets its role from `bin/claude-role` (decision `session-tiers`, session roles). Proven 2026-11-15 19:31 CST and 2026-11-18 18:34 CST.
 - **The roster.** One list of who holds each standing session now. `templates/roster.md`.
 - **Autopilot.** An act that needs the owner's answer gets a "Deferred" line and waits. All other
   work runs. `templates/operating-model.md`.
