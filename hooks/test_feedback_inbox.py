@@ -1833,20 +1833,25 @@ def case_page_read_back_of_a_second_account_link_proves_the_filing():
 CLAUDE_ARTIFACTS = "mcp__claude-artifacts__"  # the claude-artifacts page tools; the read verb is the tool's name
 
 
+def claude_artifacts_reads(action):
+    """(verb, tool_input, docs, form) for a claude-artifacts db_get, db_list and db_query of the items collection,
+    with `action` in the input (None leaves it out). The list is the full 40-item fixture with item 98 last."""
+    forty = [(item_id, {"id": item_id, "n": n}) for item_id, n in reversed(FORTY)]
+    return (
+        ("db_get", tool_input(action, collection="items", doc_id="disk-cleanup"), [ITEM_98], "string"),
+        ("db_list", tool_input(action, collection="items", doc_id=None), forty, "blocks"),
+        ("db_query", tool_input(action, collection="items", doc_id=None, query={"where": [["n", "==", 98]]}),
+         [ITEM_98], "nested"),
+    )
+
+
 def case_page_claude_artifacts_read_back_proves_the_filing():
     """A claude-artifacts db_get, db_list or db_query of the waiting page's items collection, after the owner's
     message, whose result returns item 98, proves the filing as an ArtifactData read does. The tool's name carries
     the verb, so the input has no action key. The copy lacks item 98, so only the read-back can pass the item. The
     list is the full 40-item fixture with item 98 last, so the item is found past the head of a full result."""
     repo = record_repo("unfiled", copy_files(UNFILED))
-    forty = [(item_id, {"id": item_id, "n": n}) for item_id, n in reversed(FORTY)]
-    reads = (
-        ("db_get", tool_input(None, collection="items", doc_id="disk-cleanup"), [ITEM_98], "string"),
-        ("db_list", tool_input(None, collection="items", doc_id=None), forty, "blocks"),
-        ("db_query", tool_input(None, collection="items", doc_id=None, query={"where": [["n", "==", 98]]}),
-         [ITEM_98], "nested"),
-    )
-    for verb, inp, docs, form in reads:
+    for verb, inp, docs, form in claude_artifacts_reads(None):
         p = page_run(new_cfg(), "page-ca-readback", [(NEUTRAL, (PAGE_ITEM,))],
                      [owner_rec(NEUTRAL), send_rec(SENT), used_rec(CLAUDE_ARTIFACTS + verb, inp, tool_id="rb1"),
                       result_rec("rb1", response_of(docs, form=form))], cwd=repo)
@@ -1910,6 +1915,84 @@ def case_export_scan_counts_a_claude_artifacts_db_write_of_items():
         None, collection="items", doc_id="disk-cleanup", data=data))])
     check("export scan: a claude-artifacts db_write of items is one export write to the page",
           len(found) == 1 and found[0][2] == PAGE_URL, found)
+
+
+def case_page_claude_artifacts_read_with_action_set_proves_the_filing():
+    """A claude-artifacts db_get, db_list or db_query whose input says action "set" is a read: the tool's name carries
+    the verb, and the input's action does not override it. After the owner's send, its result returns item 98. The copy
+    lacks item 98, so only the read-back can pass the item."""
+    repo = record_repo("unfiled", copy_files(UNFILED))
+    for verb, inp, docs, form in claude_artifacts_reads("set"):
+        p = page_run(new_cfg(), "page-ca-set-read", [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL), send_rec(SENT), used_rec(CLAUDE_ARTIFACTS + verb, inp, tool_id="rb1"),
+                      result_rec("rb1", response_of(docs, form=form))], cwd=repo)
+        expect_silent("page filing: n 98 read back by a claude-artifacts %s whose input says action set" % verb, p)
+
+
+def case_page_claude_artifacts_read_with_action_set_does_not_prove_the_send():
+    """A claude-artifacts db_get, db_list or db_query whose input says action "set" and carries n 98 is a read. It
+    does not prove the send of item 98, as a write of that input would, and the export scan counts it as no write."""
+    for verb in ("db_get", "db_list", "db_query"):
+        inp = tool_input("set", collection="items", doc_id="disk-cleanup", data={"n": 98})
+        p = page_run(new_cfg(), "page-ca-set-send", [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL), used_rec(CLAUDE_ARTIFACTS + verb, inp, tool_id="rb1"),
+                      result_rec("rb1", "ok")])
+        expect_send_missing("page send: a claude-artifacts %s whose input says action set does not prove 98" % verb,
+                            p, "fb-0958-7", "98")
+        found = export_writes([used_rec(CLAUDE_ARTIFACTS + verb, inp)])
+        check("export scan: a claude-artifacts %s whose input says action set is no export write" % verb,
+              found == [], found)
+
+
+def case_page_claude_artifacts_db_write_with_action_get_proves_the_send():
+    """A claude-artifacts db_write whose input says action get is a write: the tool's name carries the verb, and the
+    input's action does not make it a read. Its n 98 in items proves the send, and the export scan counts it. The copy
+    holds item 98, so only the send check can block."""
+    inp = tool_input("get", collection="items", doc_id="disk-cleanup", data={"n": 98})
+    p = page_run(new_cfg(), "page-ca-get-write", [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL), used_rec(CLAUDE_ARTIFACTS + "db_write", inp, tool_id="w1"),
+                  result_rec("w1", "ok")], cwd=record_repo("filed", copy_files(FILED)))
+    expect_silent("page send: a claude-artifacts db_write whose input says action get proves the send of 98", p)
+    found = export_writes([used_rec(CLAUDE_ARTIFACTS + "db_write", inp)])
+    check("export scan: a claude-artifacts db_write whose input says action get is one export write to the page",
+          len(found) == 1 and found[0][2] == PAGE_URL, found)
+
+
+def case_claude_artifacts_read_artifact_and_db_delete_do_not_prove_the_send():
+    """A claude-artifacts read_artifact or db_delete is no write, so an input that proves item 98 as a write does not
+    prove it here. The control is an ArtifactData delete of the same input: the delete action never proves a send, on
+    the old code too. The read_artifact is also no export write."""
+    data = {"n": 98}
+    p = page_run(new_cfg(), "page-ca-delete-control", [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL), used_rec("ArtifactData", tool_input("delete", collection="items",
+                                                                       doc_id="disk-cleanup", data=data),
+                                               tool_id="d0"), result_rec("d0", "ok")])
+    expect_send_missing("page send: control, an ArtifactData delete of items with n 98 does not prove 98", p,
+                        "fb-0958-7", "98")
+    for name in (CLAUDE_ARTIFACTS + "read_artifact", CLAUDE_ARTIFACTS + "db_delete"):
+        p = page_run(new_cfg(), "page-ca-no-send", [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL), used_rec(name, tool_input(None, collection="items", doc_id="disk-cleanup",
+                                                                    data=data), tool_id="x1"),
+                      result_rec("x1", "ok")])
+        expect_send_missing("page send: %s of items with n 98 does not prove 98" % name[len(CLAUDE_ARTIFACTS):],
+                            p, "fb-0958-7", "98")
+    found = export_writes([used_rec(CLAUDE_ARTIFACTS + "read_artifact", tool_input(
+        None, collection="items", doc_id="disk-cleanup", data=data))])
+    check("export scan: a claude-artifacts read_artifact of items is no export write", found == [], found)
+
+
+def case_page_claude_artifacts_read_artifact_does_not_prove_the_filing():
+    """A claude-artifacts read_artifact of the items collection, after the owner's send, whose result returns item 98,
+    does not read item 98 back: the copy lacks it, so the item stays unfiled. This is a control, since the old code
+    counts no read_artifact as a read-back."""
+    repo = record_repo("unfiled", copy_files(UNFILED))
+    p = page_run(new_cfg(), "page-ca-read-artifact", [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL), send_rec(SENT),
+                  used_rec(CLAUDE_ARTIFACTS + "read_artifact", tool_input(None, collection="items",
+                                                                          doc_id="disk-cleanup"), tool_id="ra1"),
+                  result_rec("ra1", response_of([ITEM_98]))], cwd=repo)
+    expect_unfiled("page filing: a claude-artifacts read_artifact of items does not prove n 98", p,
+                   "fb-0958-7", "98")
 
 
 # --------------------------------------------------------------------------- repo cases
@@ -4959,6 +5042,11 @@ CASES = (
     case_page_claude_artifacts_read_of_another_collection_does_not_prove_the_filing,
     case_page_claude_artifacts_db_write_proves_the_send,
     case_export_scan_counts_a_claude_artifacts_db_write_of_items,
+    case_page_claude_artifacts_read_with_action_set_proves_the_filing,
+    case_page_claude_artifacts_read_with_action_set_does_not_prove_the_send,
+    case_page_claude_artifacts_db_write_with_action_get_proves_the_send,
+    case_claude_artifacts_read_artifact_and_db_delete_do_not_prove_the_send,
+    case_page_claude_artifacts_read_artifact_does_not_prove_the_filing,
     case_repo_send_naming_the_repo_passes,
     case_repo_send_with_error_result_does_not_count,
     case_repo_slug_match_ignores_case,
