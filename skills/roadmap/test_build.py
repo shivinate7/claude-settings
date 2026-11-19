@@ -1046,7 +1046,7 @@ class LiveRefresh(UpkeepFixture):
             patch.start()
             self.addCleanup(patch.stop)
 
-    def stale_pull(self, number, branch, updated_min=780):
+    def fixed_rest_draft(self, number, branch, updated_min=780):
         """A REST pulls row for an open draft, updated `updated_min` before FIXED_NOW (780 min is 13 h, so stale), whose
         branch commit is dated the same. The commit is set on origin first, so serve_pulls never dates it by the real clock."""
         self.origin_commit(branch, self.ago(updated_min))
@@ -1177,7 +1177,7 @@ class LiveRefresh(UpkeepFixture):
                           "checks": "pass", "url": "https://github.com/owner/fixture/pull/7"}],
                "branches": [{"name": "lane-x"}], "items": [], "landedPulls": [self.pull_row(3, "lane-3", merged=True)]}
         self.write_live(old)
-        self.serve_pulls([self.stale_pull(7, "lane-7", 60)])
+        self.serve_pulls([self.fixed_rest_draft(7, "lane-7", 60)])
         self.build_in(self.repo, "--live", str(self.live), expect=(0, 1))
         value = self.file_value()
         self.assertEqual(read_time(value["readAt"]), read_time(BUILD_NOW),
@@ -1193,7 +1193,7 @@ class LiveRefresh(UpkeepFixture):
 
     def test_a_held_draft_stays_held_through_a_rebuild_and_is_not_listed(self):
         self.use_real_fetch()
-        self.serve_pulls([self.stale_pull(1001, "held-draft"), self.stale_pull(1002, "lone-draft")])
+        self.serve_pulls([self.fixed_rest_draft(1001, "held-draft"), self.fixed_rest_draft(1002, "lone-draft")])
         held = dict(self.live_pull(1001, "held-draft"), held=True)
         lone = self.live_pull(1002, "lone-draft")
         # Control, before any rebuild: a fresh file reads #1001 held, so only #1002 is listed.
@@ -1215,7 +1215,7 @@ class LiveRefresh(UpkeepFixture):
     def test_the_rebuild_reads_the_pulls_of_the_repo_the_build_names_not_the_folder_it_runs_in(self):
         self.use_real_fetch()
         self.write_file(self.ago(build.STALE_LIVE_MINUTES + 1))
-        self.serve_pulls([self.stale_pull(7, "lane-7", 60)])
+        self.serve_pulls([self.fixed_rest_draft(7, "lane-7", 60)])
         elsewhere = pathlib.Path(self.tmp.name) / "elsewhere"  # a checkout of another GitHub repo, the folder the build runs in
         elsewhere.mkdir()
         git(elsewhere, "init", "-q")
