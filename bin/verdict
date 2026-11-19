@@ -5,10 +5,10 @@
 # Why stderr: a pipe on stdout (`verdict ... | grep`) hides the line, and the background output file keeps stderr. A quiet verdict over 300 s then draws a false STALL (decision stall-watch, "Tools that are quiet by design"). Why the file too: `2>&1 | grep` or `2>/dev/null` hides stderr as well, and the stall watch reads that file.
 # Exit 0 is FAIL if the output holds a runner marker, no test ran (an XCTest `Executed 0 tests` line beats a unittest `Ran N tests` line; a unittest `Ran 0 tests in` line at a line start counts only when an `OK`, `FAILED` or `NO TESTS RAN` line follows it with no skips, and no other count is read), or a test run read no test count (a test success marker at a line start, or `xcodebuild test` or `swift test` as typed), else SKIP (`SKIP <cmd>, N skipped (<secs>s)`, exit 0) if N > 0 tests skipped, else PASS.
 # N is the larger of two counts: the sum of the runner summaries in the run (`skipped=N`, `N skipped`, node's `# skipped N` and `ℹ skipped N`), and the lines that start `SKIP `, `SKIPPED` or `SKIP:`. A summary line `SKIP: N check` is not one of them, so it never counts on top of its cases. XCTest `Executed N tests, with M tests skipped` lines nest (class, bundle, All tests), so their max is one term of the sum. Colour codes (SGR) are ignored. A count of 10 or more digits reads as 10**9. A count of 0 is PASS. Why: a test that always skips must not read as a pass.
-# Exit 0 is also FAIL (`cut`) for a pytest argv (`pytest`, `py.test`, `python -m pytest`, also through `env`, `uv run`, `uvx` and `bash -c`) with `-q` or a line-start session header, and no line-start summary: the run stopped early. A `-qq` run (no summary line) is complete when a progress line ends `[100%]`.
+# Exit 0 is also FAIL (`cut`) for a pytest argv (`pytest`, `py.test`, `python -m pytest`, also through `env`, `uv run`, `uvx` and `bash -c`) with `-q` or a line-start session header, and no line-start summary: the run stopped early. A `-qq` run (no summary line) is complete when a line of progress chars ends `[100%]` (any padding, colour codes ignored), or, with `--co`, when it prints a `<file>: <count>` line. A `bash -c` script is read by its own scanner: a newline, `;`, `&`, `|` or `do`/`then`/`else`/`{`/`!` starts a command, a `#` starts a comment only at a word start, and heredoc text is no command.
 # A run with no $VERDICT_LOG deletes verdict-*.log files older than 1 day from the temp folder: regular files whose first line is our own header only; errors skipped.
 # Killed by signal N: exit 128+N. Ctrl-C: exit 130. Windows: bin/verdict.cmd.
-import os, re, shlex, shutil, subprocess, sys, tempfile, time
+import os, re, shutil, subprocess, sys, tempfile, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 HOT = re.compile(r"FAIL|Error|assert|Traceback")
@@ -39,7 +39,13 @@ SKIP_LINE = re.compile(rb"^(?:" + SGR + rb")*SKIP(?:" + SGR + rb")*(?: |PED|:(?!
 # The summary is `<counts> in <N>s`, with or without `=` bars around it (`-q` prints none). `N tests collected` or `N/M tests collected` (--collect-only) and `no tests ran` count as counts.
 PY_START = re.compile(rb"^(?:" + SGR + rb")*={3,}(?:" + SGR + rb"| ){0,64}test session starts", re.M)
 PY_SUMMARY = re.compile(rb"^(?:" + SGR + rb")*(?:={3,}(?:" + SGR + rb"| ){0,64})?(?:\d{1,9}(?:/\d{1,9})?(?:" + SGR + rb")* (?:" + SGR + rb")*(?:passed|failed|skipped|errors?|warnings?|deselected|xfailed|xpassed|tests? collected)|no tests ran)\b[^\n]{0,200}? in \d[\d.]{0,20}s\b", re.M)
-PY_DONE = re.compile(rb"^(?:" + SGR + rb")*[.sxXFE]{1,120} {0,120}\[100%\]", re.M)  # the last progress line of a complete `-qq` run, which prints no summary; a cut run never reaches 100 percent
+# The last progress line of a complete `-qq` run, which prints no summary: any non-space progress chars (`.sxXFEu`, a plugin's own), colour codes anywhere, padding of any length, then `[100%]` at the line end. A cut run never reaches 100 percent.
+# Every part is a disjoint set of chars, so one 1 MiB line scans in linear time. A line may be longer than OVERLAP, so `seen` reads a match at a later chunk's start as whole when it ends past OVERLAP.
+PY_DONE = re.compile(rb"^(?:" + SGR + rb"| )*[^\s\[\x1b](?:" + SGR + rb"|[^\s\[\x1b]| )*\[100%\](?:" + SGR + rb")*[ \t\r]*$", re.M)
+PY_COUNTS = re.compile(rb"^(?:" + SGR + rb")*[^\s:][^\n]{0,300}?: \d{1,9}(?:" + SGR + rb")*[ \t\r]*$", re.M)  # a `-qq --collect-only` run prints `<file>: <count>` lines and no summary
+COLLECT = re.compile(r"(?<![\w-])--co(?:llect-only)?(?![\w-])")
+def seen(rx, raw, pos, start):  # does rx match in this chunk? A later chunk starts mid-line, so a match at its index 0 counts only when the line was too long for the previous chunk to hold whole
+    return any(pos == start or m.start() or m.end() > OVERLAP for m in rx.finditer(raw))
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
 ENV_VAR = r"[A-Za-z_]\w*=.*"
 UV_VALUE_OPTS = {"--with", "--with-editable", "--with-requirements", "--python", "-p", "--project", "--directory", "--group", "--extra", "--package", "--env-file", "--index", "--index-url", "--from", "--no-group", "--only-group", "-w"}
@@ -71,15 +77,58 @@ def pytest_level(argv, depth=0):  # the -q level of the pytest run this argv sta
         for j, a in enumerate(rest):
             if re.fullmatch(r"-[a-zA-Z]*c[a-zA-Z]*", a) and j + 1 < len(rest): return script_level(rest[j + 1], depth + 1)
     return None
+KEYWORDS = {"if", "then", "elif", "else", "while", "until", "do", "!", "{", "time"}  # a command may start after one of these
+HEREDOC_WORD = re.compile(r"""[ \t]*(?:'([^']*)'|"([^"]*)"|\\?([^\s;&|()<>'"]+))""")
+def shell_commands(script):  # the commands of a shell script, each a list of words; None when a quote never closes
+    cmds, cmd, word, has, pend, i, n = [], [], [], False, [], 0, len(script)
+    def end_word():
+        nonlocal has
+        if has: cmd.append("".join(word)); word.clear(); has = False
+    def end_cmd():
+        end_word()
+        if cmd: cmds.append(cmd[:]); cmd.clear()
+    while i < n:
+        c = script[i]
+        if c == "\\":
+            if script[i + 1:i + 2] != "\n": word.append(script[i + 1:i + 2]); has = True
+            i += 2
+        elif c == "'":
+            j = script.find("'", i + 1)
+            if j < 0: return None
+            word.append(script[i + 1:j]); has = True; i = j + 1
+        elif c == '"':
+            j = i + 1
+            while j < n and script[j] != '"': j += 2 if script[j] == "\\" else 1
+            if j >= n: return None
+            word.append(script[i + 1:j]); has = True; i = j + 1
+        elif c == "#" and not has:  # a comment starts only at the start of a word
+            j = script.find("\n", i)
+            i = n if j < 0 else j
+        elif c == "\n":
+            end_cmd(); i += 1
+            for delim, dash in pend:  # heredoc bodies start on the line after their `<<`; their text is no command
+                while i < n:
+                    j = script.find("\n", i); j = n if j < 0 else j
+                    line = script[i:j]; i = min(j + 1, n)
+                    if (line.lstrip("\t") if dash else line) == delim: break
+            pend = []
+        elif c in " \t": end_word(); i += 1
+        elif c == "<" and script.startswith("<<", i) and not script.startswith("<<<", i):
+            end_cmd(); j = i + 2; dash = script[j:j + 1] == "-"; j += dash
+            m = HEREDOC_WORD.match(script, j)
+            if m: pend.append((m[1] if m[1] is not None else m[2] if m[2] is not None else m[3], dash)); j = m.end()
+            i = j
+        elif c in ";&|()<>`": end_cmd(); i += 1
+        else: word.append(c); has = True; i += 1
+    end_cmd()
+    return cmds
 def script_level(script, depth):  # a shell script string: the highest -q level among its pytest commands, or None. Quoted words stay one token, so `echo 'pytest -q'` runs no pytest
-    try:
-        lex = shlex.shlex(script, posix=True, punctuation_chars=True); lex.whitespace_split = True
-        toks = list(lex)
-    except ValueError: return None
-    levels, seg = [], []
-    for t in toks + [";"]:
-        if re.fullmatch(r"[;&|()<>]+", t): levels.append(pytest_level(seg, depth)); seg = []
-        else: seg.append(t)
+    cmds = shell_commands(script)
+    if cmds is None: return None
+    levels = []
+    for cmd in cmds:
+        while cmd and cmd[0] in KEYWORDS: cmd = cmd[1:]
+        levels.append(pytest_level(cmd, depth))
     levels = [l for l in levels if l is not None]
     return max(levels) if levels else None
 def pytest_argv(argv):  # (is pytest, -q level), read from the argv as typed
@@ -105,6 +154,7 @@ def main(argv):
     by_argv = test_argv(argv)
     is_pytest, qlevel = pytest_argv(argv)
     quiet = qlevel > 0
+    collect = bool(COLLECT.search(" ".join(argv)))
     argv = [shutil.which(argv[0]) or argv[0]] + argv[1:]  # finds .cmd/.bat shims on Windows
     log = os.environ.get("VERDICT_LOG")
     if not log:
@@ -168,7 +218,7 @@ def main(argv):
                     if pos == start or m.start(): marks[pos + m.start()] = 1
                 started = started or any(pos == start or m.start() for m in PY_START.finditer(raw))  # a later chunk's index 0 may be mid-line
                 summed = summed or any(pos == start or m.start() for m in PY_SUMMARY.finditer(raw))
-                done = done or (qlevel > 1 and any(pos == start or m.start() for m in PY_DONE.finditer(raw)))
+                done = done or (qlevel > 1 and (seen(PY_DONE, raw, pos, start) or (collect and seen(PY_COUNTS, raw, pos, start))))
                 fail = fail or "** TEST FAILED **" in buf or "** BUILD FAILED **" in buf or bool(ST_FAILED.search(buf))
                 if not marked: marked = any(pos == start or m.start() for m in TEST_OK.finditer(raw))  # a later chunk's index 0 may be mid-line; the previous chunk holds that line whole
                 for a, b in EXEC.findall(buf): n = a or b; zero, ran = zero or n == "0", ran or n != "0"
