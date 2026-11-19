@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-18T20:38:26-06:00",
+  "context": "Goal: run two phone simulators at once safely.\nProblem (rule): with PR 3689 (a pull request that lets the smaller phone simulator, the Duo, run beside the larger one, the Pro), a Pro may start beside a Duo when the Mac's five-minute load average is under 100, but a second Duo needs it under 60, and your 12 Nov ruling sims-load-brake-only (the simulator lease is held back by load alone) names only the second-slot bar, so the bar for a mixed pair is your call.\nBased on (read): the consultant's reading of PR 3689 as built: a Pro beside a Duo starts under load 100; a second Duo needs load under 60.\nDeparts from: main \u2014 the lease refuses a Duo while the Pro slot is held \u2014 a second simulator of any kind starts only when the five-minute load is under 60.\nWaiting on: nothing is stopped; PR 3689 merges as built after its lint, and the consultant changes it on your answer.",
+  "home": "PR 3689; ruling sims-load-brake-only",
+  "kind": "decision",
+  "n": 988,
+  "options": [
+    {
+      "gain": "One rule to remember; less risk of overloading the Mac.",
+      "how": "The lease holds every second simulator, mixed pair or two Duos, to a five-minute load under 60.",
+      "id": "same-bar-under-60",
+      "key": "a",
+      "label": "The same bar for any second simulator: load under 60 (recommended)",
+      "lose": "A Pro beside a Duo waits more often."
+    },
+    {
+      "gain": "A mixed pair starts sooner.",
+      "how": "No change to PR 3689.",
+      "id": "keep-as-built",
+      "key": "b",
+      "label": "Keep it as built: under 100 for a Pro beside a Duo, under 60 for a second Duo",
+      "lose": "Two bars to remember."
+    }
+  ],
+  "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "recommended": "a",
+  "ref": "consultant message 20:38 CST Nov 18, asking triage to post this question; the reads are the consultant's, not re-read by triage",
+  "repo": "shivinate7/claude-settings",
+  "short": "Second simulator bar",
+  "shown": [
+    {
+      "id": "same-bar-under-60",
+      "key": "a",
+      "label": "The same bar for any second simulator: load under 60 (recommended)"
+    },
+    {
+      "id": "keep-as-built",
+      "key": "b",
+      "label": "Keep it as built: under 100 for a Pro beside a Duo, under 60 for a second Duo"
+    }
+  ],
+  "status": "open",
+  "title": "Should any second phone simulator wait for the same load bar of 60?",
+  "why": "a gives one rule and less overload risk at the cost of a longer wait for a mixed pair; b starts a mixed pair sooner but keeps two bars. Recommended by the consultant, not owner-typed."
+}
