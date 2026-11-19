@@ -580,18 +580,32 @@ def clock_loop(token_rows) -> bool:
     return words[heads[0] + 1:heads[0] + 2] == ["do"] and clock_test(token_rows[heads[0]])
 
 
-WAIT_UNTIL_AHEAD = 25   # a foreground wait-until for a time more than this many seconds away is refused
+WAIT_UNTIL_AHEAD = 25   # a foreground wait-until that lasts this many seconds or more is refused
 
 
 def wait_until_far(tokens, index) -> bool:
-    """True when `wait-until TIME` at `tokens[index]` waits for a time more than WAIT_UNTIL_AHEAD seconds after the
-    hook clock (local_time.clock, which LOCAL_TIME_NOW replaces in tests). A time that cannot be read, or that has no
-    zone, is the helper's own error at once, so it is not a wait."""
+    """True when `wait-until TIME` at `tokens[index]` waits WAIT_UNTIL_AHEAD seconds or more: TIME is that far after the
+    hook clock (local_time.clock, which LOCAL_TIME_NOW replaces in tests) and no --timeout under that caps the wait.
+    The arguments are read by wait_common.split_args, the helper's own reader, so a flag value is never the time.
+    A TIME that is not a literal (`$(...)`, `$VAR`) cannot be read here, so it counts as far unless --timeout caps
+    it. A literal that cannot be read, or has no zone, is the helper's own error at once, so it is not a wait."""
+    import contextlib
+    import io
     import local_time
-    from wait_common import parse_instant
-    args = [t for t in tokens[index + 1:] if not t.startswith("--")]
-    when = parse_instant(args[0]) if args else None
-    return when is not None and (when - local_time.clock()).total_seconds() > WAIT_UNTIL_AHEAD
+    from wait_common import parse_instant, split_args
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):   # split_args exits 2 with a message on a bad argument
+            time_arg, timeout = split_args("wait-until", "usage: wait-until TIME [--timeout SECS]", tokens[index + 1:])
+    except SystemExit:
+        return False
+    if time_arg is None or 0 < timeout < WAIT_UNTIL_AHEAD:
+        return False
+    if "$" in time_arg or "`" in time_arg:
+        return True
+    when = parse_instant(time_arg)
+    if when is None:
+        return False
+    return (when - local_time.clock()).total_seconds() >= WAIT_UNTIL_AHEAD
 
 
 def waiter_verdict(segments, background: bool) -> str:
@@ -599,7 +613,7 @@ def waiter_verdict(segments, background: bool) -> str:
 
     Refused: a loop around a sleep, two or more sleeps, one sleep of SLEEP_LIMIT seconds or
     more, `timeout /t`, `gh run watch` (foreground or background), and a foreground
-    `gh pr checks --watch`, and a foreground `wait-until` for a time more than WAIT_UNTIL_AHEAD seconds away. Allowed: one short sleep, `gh pr checks --watch` with
+    `gh pr checks --watch`, and a foreground `wait-until` for a time WAIT_UNTIL_AHEAD seconds or more away, or a time not a literal. Allowed: one short sleep, `gh pr checks --watch` with
     run_in_background, and, with run_in_background, one sleep of any length followed by a command
     and a `clock_loop`: a `+%s` read ordered against an epoch, or an ISO read ordered against an ISO time."""
     sleeps, loop, watcher, run_watch, followed = [], False, "", "", False
@@ -654,7 +668,7 @@ WAITER_REASON = (
     "loop whose test orders the date output against a literal time of the same kind: date +%s against an "
     "epoch with -gt or -ge, or an ISO date-time read against an ISO time with \\>. "
     "A single pause under 25 seconds is allowed in the foreground, and so is wait-until for a time under 25 "
-    "seconds away. A foreground wait-until for a time further away is refused: run it with run_in_background. Avoid gh pr checks --watch in the "
+    "seconds away. A foreground wait-until for a time 25 seconds or more away is refused: run it with run_in_background. Avoid gh pr checks --watch in the "
     "foreground, which serves a cached status. For a server warm-up, use a "
     "readiness check such as `curl --retry 5 --retry-connrefused http://localhost:3000`."
 )
