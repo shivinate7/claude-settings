@@ -1738,10 +1738,10 @@ def case_pr_file_list_read_as_get_so_no_workflow_repo_says_ci_none():
     (`-F per_page=100`), and GitHub answers a POST to that route with 404. The hook then cannot tell whether the
     PR adds a workflow, so it counts the PR as adding one and watches a head with no CI: it prints "CI unknown on
     <sha7>: no run yet" where it must print "CI none". The fixture's files_get_only answers that route to a GET
-    alone. Rows: a PR that changes README.md, and a PR with no changed files (the empty state). In each row the
+    alone. Rows: a PR that changes src/app.py, and a PR with no changed files (the empty state). In each row the
     watch stops at the CI none line, with no run list and no run view."""
     rows = (
-        ("README.md changed", ["README.md"]),
+        ("src/app.py changed", ["src/app.py"]),
         ("no changed files", []),
     )
     for name, files in rows:
