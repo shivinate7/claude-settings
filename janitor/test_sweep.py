@@ -2785,11 +2785,11 @@ class SameRunBranchCutTests(unittest.TestCase):
             self.assertIs(live_read(wt), expected,
                           "fixture session for %s does not read %r" % (os.path.basename(wt), expected))
 
-    def _sweep_stale_verdicts(self, root):
+    def _sweep_stale_verdicts(self, root, confirm=False):
         def stale_reap(where, entry, *args, **kwargs):
             return {"path": entry["path"], "action": "reap", "reason": "stub: verdict read before the session started"}
         with mock.patch.object(sweep, "decide_worktree", side_effect=stale_reap):
-            return sweep.sweep_repo(root, False, os.path.join(ROOT, "held.log"), attended=True)
+            return sweep.sweep_repo(root, confirm, os.path.join(ROOT, "held.log"), attended=True)
 
     def _assert_every_tree_row_reaps(self, result, trees):
         """Scope before subject: each tree's row reads reap, so a keep can only come from the branch stage."""
@@ -2839,6 +2839,41 @@ class SameRunBranchCutTests(unittest.TestCase):
         self.assertEqual(self._held_branch_row(result)["action"], "reap",
                          "a branch whose every session reads dead was held back: %s"
                          % self._held_branch_row(result).get("reason"))
+
+    # --- confirm: the run removes the tree that holds the branch ---------------------------
+    # A confirm run releases a branch by removing its tree, so the tree's path is gone when the
+    # branch stage runs. The branch stage must still read a live holder's session before it cuts
+    # the branch, since the tree stage read that session only once, before the removal.
+
+    def _confirm_released(self, name, kind):
+        """Runs a confirm sweep whose one tree is stubbed to reap, and returns the branch row. The
+        tree is removed by the real remove_worktree, so the branch stage sees a released tree."""
+        root, trees = self._held(name, [kind])
+        self._assert_fixture_reads(trees)
+        result = self._sweep_stale_verdicts(root, confirm=True)
+        self._assert_every_tree_row_reaps(result, trees)
+        wt = trees[0][0]
+        target = os.path.normcase(os.path.realpath(wt))
+        row = [w for w in result["worktrees"]
+               if os.path.normcase(os.path.realpath(w["path"])) == target][0]
+        self.assertNotIn("error", row, "the tree was not removed: %s" % row.get("error"))
+        self.assertFalse(os.path.isdir(wt), "the run did not remove the tree, so it released nothing")
+        return root, self._held_branch_row(result)
+
+    def test_confirm_a_live_holder_in_a_released_tree_keeps_the_branch(self):
+        root, row = self._confirm_released("confirm-live", "live")
+        self.assertEqual(row["action"], "keep",
+                         "the branch was released after this run removed the tree its live session holds: %s"
+                         % row.get("reason"))
+        self.assertIn("lane-held", sweep.list_local_branches(root))
+
+    def test_control_confirm_a_released_tree_with_dead_holder_still_releases_the_branch(self):
+        # Green on the old code too. It proves a confirm run releases the branch of a removed tree
+        # whose session reads dead, so no fix passes by keeping every branch of a removed tree.
+        root, row = self._confirm_released("confirm-dead", "dead")
+        self.assertEqual(row["action"], "reap",
+                         "a branch whose removed tree reads dead was held back: %s" % row.get("reason"))
+        self.assertNotIn("lane-held", sweep.list_local_branches(root))
 
 
 class SingleTierModeTests(unittest.TestCase):
