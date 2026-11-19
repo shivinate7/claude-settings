@@ -1795,7 +1795,8 @@ class StaleInProgress(UpkeepFixture):
         value = self.publish(sessions=[], read_at=iso_ago(120))
         page, out = self.build_from_main("--live", str(self.live))
         count, entries = self.stale(out)
-        found = re.fullmatch(r"unknown \(the live file was read (\d+) minutes ago; read it again\)", entries)
+        found = re.fullmatch(r"unknown \(the live file was read (\d+) minutes ago and is stale; "
+                             r"the rebuild failed: no session API in a test\)", entries)
         self.assertEqual(count, 1)
         self.assertIsNotNone(found, entries)
         self.assertIn(int(found.group(1)), range(119, 122))
