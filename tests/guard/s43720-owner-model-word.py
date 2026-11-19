@@ -1,4 +1,4 @@
-# section 43700
+# section 43720
 # The owner's model name lifts the model floor for an Agent, Task, Workflow or lane-start spawn (rule agent-model-floor,
 # guard step 9). Owner, 19:03 CST: "if i say haiku it should work, there shouldnt be any guards on a FLOOR".
 # When the owner's latest typed turn names the spawn's model as a whole word, and no negation precedes the name, a
