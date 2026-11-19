@@ -1462,22 +1462,28 @@ class UnstartedItemsTests(unittest.TestCase):
             with self.subTest(reply=reply):
                 self.assertIsNone(self.verdict(reply, spawns))
 
-    def test_un_red_wait_on_merge_without_shared_file_blocks(self):
-        rows = [
-            # Catches: an item that waits on a PR, and names no file, passes the turn.
-            self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge",
-            # Catches: the list form passes the same wait when it names no file.
-            self.DONE + "> **Next**\n> - merge the batch\n> - Unstarted: lint-stub, waits on another lane's merge",
-            # Catches: the word "file" alone names no file, so the turn passes.
-            self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679, which touches the report file",
-        ]
-        for reply in rows:
-            with self.subTest(reply=reply):
+    def assert_refused_for_shared_file(self, rows):
+        """Each (reply, cause) row must block on the Unstarted guard's shared-file reason."""
+        for reply, cause in rows:
+            with self.subTest(cause=cause):
                 out = self.verdict(reply, [self.BUILDER])
-                self.assertIsNotNone(out, "a wait on a merge or PR that names no shared file passed the turn")
-                self.assertEqual(out["decision"], "block")
-                self.assertIn("Unstarted guard", out["reason"])
-                self.assertIn("shared file", out["reason"].lower())
+                self.assertIsNotNone(out, "%s: the turn passed" % cause)
+                self.assertEqual(out["decision"], "block", "%s: %r" % (cause, out))
+                self.assertIn("Unstarted guard", out["reason"], "%s: %r" % (cause, out))
+                self.assertIn("shared file", out["reason"].lower(), "%s: %r" % (cause, out))
+
+    def test_un_red_wait_on_merge_without_shared_file_blocks(self):
+        self.assert_refused_for_shared_file([
+            # Catches: an item that waits on a PR, and names no file, passes the turn.
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge",
+             "a wait on a PR names no file"),
+            # Catches: the list form passes the same wait when it names no file.
+            (self.DONE + "> **Next**\n> - merge the batch\n> - Unstarted: lint-stub, waits on another lane's merge",
+             "a list item waits on a merge and names no file"),
+            # Catches: the word "file" alone names no file, so the turn passes.
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679, which touches the report file",
+             "the word file names no file"),
+        ])
 
     def test_un_green_shared_file_none_brake_and_owner_waits_pass(self):
         rows = [
@@ -1495,6 +1501,51 @@ class UnstartedItemsTests(unittest.TestCase):
         for reply in rows:
             with self.subTest(reply=reply):
                 self.assertIsNone(self.verdict(reply, [self.BUILDER]))
+
+    def test_un_red_owner_word_does_not_exempt_a_wait_on_a_pr(self):
+        self.assert_refused_for_shared_file([
+            # Catches: the owner exemption reads any "owner" word, so a PR wait with an owner review after it passes.
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge, owner reviews after",
+             "an owner word after a PR wait exempts it"),
+        ])
+
+    def test_un_red_wait_without_merge_word_or_on_wrapped_line_blocks(self):
+        self.assert_refused_for_shared_file([
+            # Catches: a PR number with no PR or merge word reads as no wait, so the turn passes.
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on #3679, the lint batch",
+             "a bare PR number is not read as a wait"),
+            # Catches: a wait on another lane's landing reads as no wait, so the turn passes.
+            (self.DONE + "> **Next** Unstarted: lint-stub waits for lane ci-wait-no-ci-repo to land",
+             "a wait for another lane to land is not read as a wait"),
+            # Catches: only the first line of an item is read, so a wait on a wrapped second line passes.
+            (self.DONE + "> **Next** Unstarted: lint-stub, the lint lane,\n> waits on PR #3679 to merge",
+             "a wait on a wrapped second line is not read"),
+            # Catches: "e.g." reads as a file name, so a wait with only "e.g." after it passes.
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge, e.g. after the review",
+             "e.g. is read as a shared file"),
+        ])
+
+    def test_un_green_indented_unstarted_none_sub_bullet_passes(self):
+        # Catches: an indented "Unstarted: none" sub-bullet is read as no Unstarted line, so the turn is refused.
+        reply = self.DONE + "> **Next**\n> - merge the batch\n>   - Unstarted: none"
+        out = self.verdict(reply, [self.BUILDER])
+        self.assertIsNone(out, "an indented Unstarted: none sub-bullet is refused: %r" % (out,))
+
+    def test_un_green_none_with_merged_and_named_shared_files_pass(self):
+        rows = [
+            # Catches: "none" names no waiting item, so a "merged" after it must not refuse the line.
+            (self.DONE + "> **Next** Unstarted: none, all merged", "Unstarted: none, all merged"),
+            # Catches: a Makefile named as the shared file has no extension, so the wait is refused.
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge, both touch the Makefile",
+             "a Makefile named as the shared file"),
+            # Catches: an extension of seven letters is a shared file too, so the wait is refused.
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge, both touch project.pbxproj",
+             "project.pbxproj named as the shared file"),
+        ]
+        for reply, cause in rows:
+            with self.subTest(cause=cause):
+                out = self.verdict(reply, [self.BUILDER])
+                self.assertIsNone(out, "%s is refused: %r" % (cause, out))
 
 
 class NoResendTests(unittest.TestCase):
