@@ -6339,5 +6339,76 @@ class CostTests(unittest.TestCase):
         self.assertEqual((run["models"], run["children"], run["files"]), ([], [], []))
 
 
+class HassioPagePathTests(unittest.TestCase):
+    """An old Home Assistant app page path in a reply, in report_guard.py's Stop hook, on any turn.
+
+    Home Assistant app pages are now /<slug>. So /hassio/ingress/<slug> and /hassio/addon/<slug> open a
+    page the owner no longer reaches by that path. /api/hassio/... is the supervisor API and passes. A path
+    inside an inline code span is a quotation, not a claim: the answered check reads code spans as non-claims
+    (AnsweredNeedsSourceTests), so a quoted log line passes.
+    """
+
+    def hook(self, reply):
+        records = [human("point me at the add-on page"), assistant_text(reply)]
+        path = write_transcript(records, tempfile.mkdtemp(dir=RUN_FOLDER))
+        return {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
+
+    def verdict(self, reply):
+        run = run_guard(REPORT_GUARD, self.hook(reply))
+        self.assertEqual(run.returncode, 0, run.stderr)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def assert_flagged(self, reply, needle):
+        out = self.verdict(reply) or {}
+        self.assertEqual(out.get("decision"), "block",
+                         "a reply that names an old HA page path is not flagged: %r" % reply)
+        self.assertIn(needle, out.get("reason", ""),
+                      "the flag does not name the old HA page path: %r" % reply)
+
+    def assert_not_flagged(self, reply):
+        out = self.verdict(reply) or {}
+        self.assertNotIn("decision", out,
+                         "a false flag for %r: %s" % (reply, out.get("reason")))
+
+    def test_control_the_harness_blocks_a_known_reply_on_this_shape(self):
+        # Control, green on the old code: an existing check blocks a plain turn, so a pass below is a
+        # read of the new check and not a silent harness.
+        out = self.verdict("The owner answered it.") or {}
+        self.assertEqual(out.get("decision"), "block", "the plain-turn harness did not block a known reply")
+
+    def test_an_old_ingress_page_path_is_flagged(self):
+        replies = [
+            "Open the add-on at /hassio/ingress/core_configurator to check the config.",
+            "/hassio/ingress/core_configurator opens the add-on page.",
+            "The add-on page (/hassio/ingress/core_configurator) still loads.",
+        ]
+        for reply in replies:
+            with self.subTest(reply=reply):
+                self.assert_flagged(reply, "/hassio/ingress/")
+
+    def test_an_old_addon_page_path_is_flagged(self):
+        replies = [
+            "Use /hassio/addon/core_configurator/info for the add-on page.",
+            "The add-on page is at /hassio/addon/core_configurator.",
+        ]
+        for reply in replies:
+            with self.subTest(reply=reply):
+                self.assert_flagged(reply, "/hassio/addon/")
+
+    def test_the_supervisor_api_path_is_not_flagged(self):
+        # Green on the old code. The lookbehind must read the path start as /hassio/, not any /hassio/ in it.
+        replies = [
+            "The supervisor call is /api/hassio/info.",
+            "The ingress API is /api/hassio/ingress/core_configurator.",
+        ]
+        for reply in replies:
+            with self.subTest(reply=reply):
+                self.assert_not_flagged(reply)
+
+    def test_an_old_path_quoted_in_a_code_span_is_not_flagged(self):
+        # Green on the old code. Code spans are non-claims, so a quoted log line that holds the old path passes.
+        self.assert_not_flagged("The log holds `GET /hassio/ingress/core_configurator 200` from the old page.")
+
+
 if __name__ == "__main__":
     unittest.main()
