@@ -1875,10 +1875,11 @@ class VerdictKeyTests(unittest.TestCase):
         os.environ[VERDICT_DIR_ENV] = os.path.join(self.run, "verdicts")
         self.checkout = os.path.join(self.run, "checkout")
         self.hooks = os.path.join(self.checkout, "hooks")
-        for folder in ("hooks", "lint", "janitor", "skills", "testing"):
+        for folder in ("hooks", "lint", "janitor", "skills", "testing", "tests/guard"):
             os.makedirs(os.path.join(self.checkout, folder))
         write_files(self.checkout, {"hooks/guard_fixture.py": "GUARD = 1\n", "lint/layout.py": "LAYOUT = 1\n",
-                                    "testing/tracked_tree.py": "TRACKED = 1\n"})
+                                    "testing/tracked_tree.py": "TRACKED = 1\n",
+                                    "tests/guard/s00442-misc.py": "SECTION = 1\n", "settings.json": "{}\n"})
         for patch in (mock.patch.object(mutate_guard, "HERE", self.hooks),
                       mock.patch.object(mutate_shared, "HOOKS_DIR", self.hooks),
                       mock.patch.object(mutate_guard, "MUTATIONS", [])):
@@ -1908,6 +1909,30 @@ class VerdictKeyTests(unittest.TestCase):
         self.assertNotEqual(self.key(), before,
                             "an edit to testing/tracked_tree.py left the saved-verdict key unchanged, so a saved verdict "
                             "would be reused")
+
+    def test_an_edit_to_a_guard_section_under_tests_changes_the_key(self):
+        """The guard's suite reads its section files from tests/guard (test_guard.py SECTION_DIR). An edit there must miss
+        the saved verdicts, so the key must digest that folder. On the old code it does not, so an edit leaves the key
+        unchanged."""
+        before = self.key()
+        self.assertIsNotNone(before, "precondition: no key was made, so the verdict folder was not read")
+        write_files(self.checkout, {"tests/guard/s00442-misc.py": "SECTION = 2\n"})
+        self.assertEqual(read_file(self.checkout, "tests/guard/s00442-misc.py"), "SECTION = 2\n",
+                         "scope: the edit did not land in tests/guard/")
+        self.assertNotEqual(self.key(), before,
+                            "an edit to tests/guard/s00442-misc.py left the saved-verdict key unchanged, so a saved verdict "
+                            "would be reused")
+
+    def test_an_edit_to_settings_json_changes_the_key(self):
+        """The call judge's suite reads settings.json (test_call_judge.py SETTINGS). An edit there must miss the saved
+        verdicts, so the key must digest that file. On the old code it does not, so an edit leaves the key unchanged."""
+        before = self.key()
+        self.assertIsNotNone(before, "precondition: no key was made, so the verdict folder was not read")
+        write_files(self.checkout, {"settings.json": '{"hooks": {}}\n'})
+        self.assertEqual(read_file(self.checkout, "settings.json"), '{"hooks": {}}\n',
+                         "scope: the edit did not land in settings.json")
+        self.assertNotEqual(self.key(), before,
+                            "an edit to settings.json left the saved-verdict key unchanged, so a saved verdict would be reused")
 
 
 if __name__ == "__main__":
