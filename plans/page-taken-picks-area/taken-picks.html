@@ -1,0 +1,1402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Taken picks mockup</title>
+<style>
+/* Harness only: the toolbar and frames around the drawn screen. The screen itself is page.html's own CSS. */
+:root { --h-bg: #eef0f3; --h-ink: #161b22; --h-muted: #565f6b; --h-line: #cfd5dd; --h-btn: #ffffff; --h-on: #161b22; --h-on-ink: #ffffff; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; } }
+:root[data-theme="dark"] { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.sample { background: #5b21b6; color: #fff; font-weight: 700; text-align: center; padding: 8px 16px; }
+.tool { display: grid; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--h-line); }
+.tool h1 { margin: 0; font-size: 17px; }
+.tool .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tool .row > span { color: var(--h-muted); font-size: 13px; min-width: 64px; }
+.tool button { min-height: 32px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--h-line); background: var(--h-btn); color: var(--h-ink); font: inherit; font-size: 13.5px; cursor: pointer; }
+.tool button[aria-pressed="true"] { background: var(--h-on); color: var(--h-on-ink); border-color: var(--h-on); }
+.tool button.hide { border-style: dashed; color: var(--h-muted); }
+.tool p { margin: 0; font-size: 13.5px; color: var(--h-muted); max-width: 90ch; }
+.tool code { overflow-wrap: anywhere; }
+#stage { display: grid; gap: 24px; padding: 16px; justify-items: center; }
+.fr { display: grid; gap: 6px; width: 100%; justify-items: center; }
+.fr > b { font-size: 13px; color: var(--h-muted); }
+.fw { overflow: hidden; border: 1px solid var(--h-line); border-radius: 8px; background: var(--h-btn); max-width: 100%; }
+.fw iframe { border: 0; display: block; transform-origin: 0 0; }
+</style>
+</head>
+<body>
+<div class="sample" id="sampleBanner">Sample. No figure on this page is real: the numbers, times, picks and records are drawn from today's five taken items or made up.</div>
+<header class="tool">
+  <h1>Waiting page: the Taken for you area</h1>
+  <div class="row" id="rowS"><span>State</span>
+    <button data-s="cards">Cards</button>
+    <button data-s="pressed">Overrule pressed, not sent</button>
+    <button data-s="overruled">One card overruled</button>
+    <button data-s="routed">After the writer routes it</button>
+    <button data-s="empty">Empty</button>
+  </div>
+  <div class="row" id="rowN"><span>Act name</span>
+    <button data-n="overrule" id="opt-overrule">Overrule everywhere (pick)</button>
+    <button data-n="overturn" id="opt-overturn">Overturn everywhere</button>
+    <button class="hide" data-hide="overrule">Hide Overrule</button>
+    <button class="hide" data-hide="overturn">Hide Overturn</button>
+  </div>
+  <div class="row" id="rowR"><span>Route</span>
+    <button data-r="reopen" id="opt-reopen">Reopen in place (pick)</button>
+    <button data-r="keep" id="opt-keep">Card stays, new item</button>
+    <button class="hide" data-hide="reopen">Hide reopen</button>
+    <button class="hide" data-hide="keep">Hide card stays</button>
+  </div>
+  <div class="row" id="rowE"><span>Empty</span>
+    <button data-e="show" id="opt-empty-show">Show the area (pick)</button>
+    <button data-e="none" id="opt-empty-none">Hide the area</button>
+    <button class="hide" data-hide="show">Hide shown</button>
+    <button class="hide" data-hide="none">Hide hidden</button>
+  </div>
+  <div class="row" id="rowP"><span>Place</span>
+    <button data-p="above" id="opt-above">Before Answered (pick)</button>
+    <button data-p="below" id="opt-below">After Arbiter rulings</button>
+    <button data-p="merged" id="opt-merged">Merged with Arbiter rulings</button>
+    <button class="hide" data-hide="above">Hide before Answered</button>
+    <button class="hide" data-hide="below">Hide after rulings</button>
+    <button class="hide" data-hide="merged">Hide merged</button>
+  </div>
+  <div class="row" id="rowO"><span>Older</span>
+    <button data-o="open" id="opt-older-open">Open on load (pick)</button>
+    <button data-o="folded" id="opt-older-folded">Folded on load</button>
+    <button class="hide" data-hide="open">Hide open</button>
+    <button class="hide" data-hide="folded">Hide folded</button>
+  </div>
+  <div class="row" id="rowW"><span>Size</span>
+    <button data-w="all">Both</button><button data-w="390">Phone 390</button><button data-w="1280">Desktop 1280</button>
+  </div>
+  <div class="row" id="rowT"><span>Theme</span>
+    <button data-t="light">Light</button><button data-t="dark">Dark</button>
+    <button data-lab="1" id="labBtn">Labels on</button>
+  </div>
+  <p>Deep links: <code>#s=cards|pressed|overruled|routed|empty</code>, <code>&amp;p=above|below|merged</code>, <code>&amp;o=open|folded</code>, <code>&amp;n=overrule|overturn</code>, <code>&amp;r=reopen|keep</code>, <code>&amp;e=show|none</code>, <code>&amp;w=all|390|1280</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;hide=below,merged</code>.
+    "Now" is pinned at Nov 18, 19:30 CST, so the 24-hour split never drifts. The act button works in every frame: press it, press again to clear it.
+    A card label (Took, Changes, If you overrule, Against your answer, No longer stands) shows on its first card only; later cards keep it for a screen reader.
+    Fonts fall back to the system font: the page's Google Fonts need the network.</p>
+</header>
+<main id="stage"></main>
+
+<script type="text/plain" id="pagecss">
+/* page.html's <style>, lines 8 to 1010, word for word, from the roadmap checkout's waiting/page/page.html (read Nov 18). */
+/* Layout: one stable list in three tiers. A slim bar in the
+   repo's colour and a tinted ground carry the repo. Nothing on the page moves when an answer is picked or sent. */
+:root {
+  /* Neutrals and state colours. The script replaces the --r-* values when meta/page names a brand. */
+  --surface: #ffffff; --ink: #161b22; --muted: #565f6b; --faint: #5b6470; --line: #d9dee5; --chip: #eef1f4;
+  --holds: var(--r-holds-l, #b3261e); --on-holds: var(--r-on-holds-l, #ffffff); --due: var(--r-due-l, #8a5300); --due-soft: #fbefd9; --calm: #56606e;
+  --good: var(--r-good-l, #1d7445); --good-soft: #e0f2e7; --gold-soft: #fbf3d6; --gold-ink: #6b5000;
+  --ground: var(--r-ground-l, #f3f4f6); --hdr: var(--r-hdr-l, #4b5a6b); --on-hdr: var(--r-on-hdr-l, #ffffff);
+  --acc: var(--r-ink-l, #4b5a6b); --on-acc: #ffffff; --acc-soft: var(--r-soft-l, #eceff3);
+  --body: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --wm: system-ui, sans-serif; --wmw: 700; --wmls: -0.01em;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35); color-scheme: dark } }
+:root[data-theme="dark"] {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35); color-scheme: dark }
+
+* { box-sizing: border-box; }
+/* The fixed send bar covers the bottom of the viewport, so a focused or scrolled-to element stops above it. */
+html { scroll-padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 16px/1.55 var(--body); padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--hdr); }
+button, input, textarea { font: inherit; color: inherit; }
+a { color: var(--acc); }
+:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.in { max-width: 1160px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+
+/* Repo bar: the repo's colour at full strength, one slim sticky band. */
+.hdr { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 7; background: var(--hdr); color: var(--on-hdr); box-shadow: 0 1px 0 color-mix(in srgb, var(--ink) 12%, transparent); }
+.hdr .in { padding-block: 6px; min-height: 44px; display: flex; align-items: center; gap: 12px; }
+.mark { flex: none; width: 28px; height: 28px; border-radius: 7px; background: var(--on-hdr); color: var(--hdr); display: grid; place-items: center; font: 800 15px/1 var(--wm); }
+/* The repo's own icon sits on a tile chosen so most of its drawn pixels stand out (applyIcon). */
+.mark.icon { background: var(--tile, var(--on-hdr)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--on-hdr) 28%, transparent); }
+.mark img { width: 22px; height: 22px; object-fit: contain; display: block; }
+.who { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.who .repo { margin: 0; font: var(--wmw) 18px/1.2 var(--wm); letter-spacing: var(--wmls); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); padding-top: 10px; }
+.tabs a { padding: 8px 14px; border-radius: 8px 8px 0 0; color: var(--muted); text-decoration: none; font-weight: 600; border: 1px solid transparent; border-bottom: none; margin-bottom: -1px; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+.tabs a[aria-selected="true"] { color: var(--ink); background: var(--surface); border-color: var(--line); }
+.tabs .cnt { font: 600 12px/1 var(--mono); color: var(--muted); }
+
+/* State shapes: a tier shows by shape and word, never by colour alone. */
+.g { display: inline-block; flex: none; width: 12px; height: 12px; }
+.g.holds { background: var(--holds); border-radius: 2px; }
+.g.due { width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 12px solid var(--due); }
+.g.calm { border: 2px solid var(--calm); border-radius: 50%; }
+.g.done { background: var(--good); border-radius: 50%; position: relative; }
+.g.done::after { content: ""; position: absolute; left: 4px; top: 1.5px; width: 3px; height: 6px; border: solid var(--surface); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+
+/* Main grid: the overview beside the list on wide screens, above it on a phone. */
+.main { padding-block: 18px 40px; display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 28px; align-items: start; }
+.rail { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 60px); display: grid; gap: 16px; align-content: start; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+.ov-prog { display: grid; gap: 8px; }
+.ov-prog .big { font: 700 15px/1.3 var(--body); }
+.ov-prog .big b { font: inherit; font-variant-numeric: normal; color: var(--acc); margin-right: 4px; }
+.ov-prog .sub { min-height: 22px; display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--muted); }
+.ov-prog .sub.none { visibility: hidden; }
+.ov-prog .sw { width: 10px; height: 10px; border-radius: 3px; background: color-mix(in srgb, var(--acc) 55%, transparent); }
+.ov-prog .track { height: 6px; border-radius: 99px; background: var(--chip); overflow: hidden; display: flex; }
+.ov-prog .track i { display: block; height: 100%; }
+.ov-prog .track .s { background: var(--good); }
+.ov-prog .track .r { background: color-mix(in srgb, var(--acc) 55%, transparent); }
+.ov-tier { display: grid; gap: 8px; align-items: start; padding-top: 12px; border-top: 1px solid var(--line); }
+.ov-head { display: flex; align-items: center; gap: 7px; min-height: 32px; color: var(--ink); text-decoration: none; font: 700 16px var(--body); font-variant-numeric: tabular-nums; }
+.ov-head .ct { margin-left: auto; padding-left: 8px; color: var(--muted); font-weight: 600; }
+@media (pointer: coarse) { .ov-head { min-height: 44px; } }
+.chips-n { display: flex; flex-wrap: wrap; gap: 6px; }
+.nchip { width: 48px; height: 32px; padding: 0; border-radius: 8px; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); font: 600 13.5px var(--mono); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.nchip:hover { border-color: var(--acc); }
+.nchip.ready { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
+.nchip.sent { background: var(--good-soft); border-color: transparent; color: var(--good); }
+.nchip.sent::before { content: "\2713"; margin-right: 3px; }
+.nchip.sent:not(.filed)::before { content: "\25CB"; }
+.pairchips { display: inline-flex; flex-wrap: wrap; max-width: 100%; gap: 4px; padding: 4px; border: 1.5px dashed color-mix(in srgb, var(--acc) 60%, var(--line)); border-radius: 12px; }
+.pairchips .nchip { height: 32px; width: 48px; }
+.nchip .nt { display: none; }
+.ov-tier, .chips-n, .pairchips { min-width: 0; }
+.nchip { min-width: 0; overflow: hidden; }
+@media (min-width: 961px) {
+  .chips-n, .pairchips { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+  .chips-n { gap: 4px; }
+  .pairchips { display: flex; }
+  .nchip.sent::before { flex: none; margin-right: 0; }
+  .nchip, .pairchips .nchip { width: 100%; height: 32px; justify-content: flex-start; gap: 8px; padding-inline: 8px; }
+  .nchip .no { flex: none; min-width: 2ch; text-align: end; font-variant-numeric: tabular-nums; }
+  .nchip .nt { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13px var(--body); }
+}
+@media (pointer: coarse) { .nchip, .pairchips .nchip { height: 44px; } }
+@media (max-width: 960px) { .main { grid-template-columns: minmax(0, 1fr); } .main > .rail { position: static; padding: 12px; gap: 10px; } .ov-tier { padding-top: 8px; } }
+
+.list { display: grid; gap: 30px; min-width: 0; grid-column: 2; }
+@media (max-width: 960px) { .list { grid-column: 1; } }
+.tier { display: grid; gap: 12px; scroll-margin-top: 64px; }
+.tier > header { display: flex; align-items: center; }
+.tier > header h2 { font: 700 19px/1.25 var(--body); display: flex; align-items: center; gap: 10px; }
+.tier > header .ct { font: 600 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
+.empty { color: var(--muted); padding: 20px; border: 1px dashed var(--line); border-radius: 12px; background: var(--surface); }
+
+/* Item card */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: clamp(16px, 2.4vw, 24px); display: grid; gap: 14px; align-content: start; scroll-margin-top: 64px; min-width: 0; }
+.card.holds { border-left: 6px solid var(--holds); }
+.card.due { border-left: 6px solid var(--due); }
+.card.answered { background: color-mix(in srgb, var(--good-soft) 45%, var(--surface)); }
+.top { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; font-size: 14px; color: var(--muted); }
+.top .num { font: 600 15px var(--mono); color: var(--acc); }
+.title { font: 700 clamp(19px, 2vw, 22px)/1.3 var(--body); max-width: 40ch; }
+.stake { margin: 0; display: flex; gap: 10px; align-items: baseline; padding: 9px 12px; border-radius: 8px; font-size: 15px; }
+/* The Blocking line is a solid fill, so it reads at full strength next to any repo colour. */
+.stake.holds { background: var(--holds); color: var(--on-holds); font-weight: 600; }
+.stake.holds .g.holds { background: var(--on-holds); }
+.stake.due { background: var(--due-soft); box-shadow: inset 0 0 0 1.5px var(--due); }
+.stake.due b { color: var(--due); }
+.ctx { margin: 0; max-width: 70ch; white-space: pre-line; overflow-wrap: anywhere; }
+.ctx.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.morebtn { justify-self: start; background: none; border: 0; padding: 0; min-height: 32px; color: var(--acc); font-weight: 600; cursor: pointer; font-size: 14.5px; }
+.about { margin: 0; font-size: 14px; color: var(--muted); }
+/* Related items sit together in one frame, with one sentence on how they connect. */
+.bundle { display: grid; gap: 10px; padding: 12px; border: 1.5px solid color-mix(in srgb, var(--acc) 55%, var(--line)); border-radius: 16px; background: var(--acc-soft); scroll-margin-top: 64px; }
+.bundle > header { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; padding: 4px 6px 2px; align-items: start; }
+.bundle > header svg { grid-row: span 2; margin-top: 2px; color: var(--acc); }
+.bundle > header b { font-size: 16px; }
+.bundle > header p { margin: 0; font-size: 15px; max-width: 72ch; }
+.inbundle { font-weight: 600; color: var(--acc); }
+/* The lane the item waits on: the weight and colour of "goes with No. 4". It never holds the owner's answer, so it is no stake line. */
+.onlane { font-weight: 600; color: var(--acc); min-width: 0; overflow-wrap: anywhere; }
+/* A wait on a CI run or a PR extends the lane span: same weight and accent, and its link is the one target in it. */
+.onlane.waits a { display: inline-flex; align-items: center; gap: 2px; min-height: 24px; color: inherit; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1.5px; border-radius: 4px; }
+.onlane.waits a:hover { text-decoration-thickness: 2.5px; }
+.onlane.waits a:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+@media (pointer: coarse) { .onlane.waits a { min-height: 44px; } }
+@media (forced-colors: active) { .onlane.waits a { color: LinkText; } }
+
+/* Options side by side; each card's rows line up so lose sits beside lose. */
+.opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 10px; }
+.opt { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 8px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); cursor: pointer; text-align: left; }
+@supports (grid-template-rows: subgrid) { .opts { grid-auto-rows: auto; } .opt { grid-row: span 4; grid-template-rows: subgrid; } }
+.opt:hover { border-color: var(--faint); }
+.opt input { position: absolute; opacity: 0; pointer-events: none; }
+.opt:has(input:focus-visible) { outline: 2px solid var(--acc); outline-offset: 2px; }
+.opt.sel { border-color: var(--acc); background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--acc); }
+.opt .head { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.key { flex: 0 1 auto; min-width: 26px; max-width: 45%; height: 26px; padding-inline: 6px; box-sizing: border-box; border-radius: 7px; border: 1.5px solid var(--line); display: block; text-align: center; line-height: 23px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 600 13px/23px var(--mono); color: var(--muted); }
+.opt .lab { min-width: 0; overflow-wrap: anywhere; }
+.opt .opic { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 8px; position: relative; cursor: zoom-in; min-height: 44px; }
+.opt .opic .dfitwrap { justify-self: center; }
+.opt .opic .view { display: flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 8px; background: var(--hdr); color: var(--on-hdr); font: 600 14px var(--body); }
+.opts.pics { grid-auto-rows: auto; }
+.opts.pics .opt { grid-template-rows: auto auto auto 1fr auto; }
+@supports (grid-template-rows: subgrid) { .opts.pics .opt { grid-row: span 5; grid-template-rows: subgrid; } }
+.opt .dwarn { margin: 0; font-size: 13.5px; }
+.opt.sel .dfitwrap { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc); }
+.opt.sel .key { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
+.opt .lab { font-weight: 700; line-height: 1.3; padding-top: 2px; }
+.opt .how { margin: 0; font-size: 14.5px; color: var(--muted); }
+.opt .how .optnote { display: block; margin-top: 4px; font-weight: 600; color: var(--ink); }
+.opt .tr { margin: 0; display: grid; gap: 4px; font-size: 14.5px; align-content: start; }
+.opt .tr div { display: grid; grid-template-columns: 18px minmax(0, 1fr); }
+.opt .tr .s { font: 600 15px/1.4 var(--mono); }
+.opt .tr div > span:not(.s) { min-width: 0; overflow-wrap: anywhere; }
+.opt .tr .gain .s { color: var(--good); }
+.opt .tr .lose .s { color: var(--holds); }
+/* What sets an option apart: a bar on the row, a not-equal sign and hidden words. Shape, sign and words carry it; the accent colour only adds. */
+.opt .dif { position: relative; border-left: 3px solid var(--acc); margin-left: -11px; padding-left: 8px; padding-right: 20px; }
+.opt .tr .dif { grid-template-columns: 18px minmax(0, 1fr); }
+.opt .dif > .ne { position: absolute; right: 0; top: 0; }
+.ne { font: 700 15px/1.4 var(--mono); color: var(--acc); }
+.opt .opic.dif { border-left: 0; margin-left: 0; padding: 0; }
+.opt .opic.dif .view { position: relative; }
+.opt .opic.dif .dfitwrap { border-left: 3px solid var(--acc); }
+.opt .opic.dif .view .ne { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--on-hdr); }
+.difkey { margin: 0; display: flex; gap: 8px; align-items: baseline; font-size: 14px; color: var(--muted); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.opt .pick { align-self: end; display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--gold-soft); color: var(--ink); font-size: 14px; }
+.opt .pick b { display: inline-flex; padding-top: 1px; color: var(--gold-ink); }
+.opt .nopick { align-self: end; }
+/* The Recommended line: one gold panel at card level, above the options, with the tokens of .pick. The option card keeps only the star, so the why has one home. */
+.recline { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; align-items: start; padding: 8px 12px; border-radius: 8px; background: var(--gold-soft); color: var(--ink); max-width: 70ch; }
+.recline > .spark { display: inline-flex; padding-top: 2px; color: var(--gold-ink); }
+.recline p { margin: 0; }
+.recline .rechead { font-size: 15px; }
+.recline .rechead > b { font-weight: 700; }
+.recline .rechead.single { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.recline .rechead .rn { font-weight: 600; }
+.recline .key { display: inline-block; max-width: none; vertical-align: 1px; border-color: var(--gold-ink); color: var(--gold-ink); background: transparent; }
+/* Inside a sentence the chip keeps the line's height, so the first line does not sit lower than the rest. */
+.recline .rechead.single .key { height: 20px; min-width: 22px; line-height: 17px; padding-inline: 4px; vertical-align: 2px; }
+.recline .rl { min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; font-weight: 600; }
+.recline ol { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 4px; }
+.recline li { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.recline ol.unordered li { grid-template-columns: auto minmax(0, 1fr); }
+.recline li .ord { font: 600 13px var(--mono); color: var(--gold-ink); min-width: 3ch; }
+.recline .recwhy { font-size: 14.5px; overflow-wrap: anywhere; }
+/* The Waiting on line: parsed out of the context, so the context clamp never hides it. Shaped like .stake, neutral. */
+.waitline { margin: 0; padding: 8px 12px; border-radius: 8px; background: var(--chip); font-size: 15px; overflow-wrap: anywhere; max-width: 70ch; }
+.waitline > b { font-weight: 700; }
+.opt .pick.star { justify-self: start; grid-template-columns: auto auto; align-items: center; padding: 4px 8px; }
+.opt .pick.star .ord { font: 600 13px var(--mono); color: var(--gold-ink); }
+/* A multi item: the options are checkboxes. The tick box is one fixed square, so a tick moves nothing. */
+.multihint { margin: 0; font-size: 14.5px; color: var(--muted); }
+.tick { flex: none; width: 26px; height: 26px; border-radius: 6px; border: 2px solid var(--faint); background: var(--surface); display: grid; place-items: center; font: 700 14px/1 var(--mono); color: var(--on-acc); }
+.opt.sel .tick { background: var(--acc); border-color: var(--acc); }
+.opt.sel .tick.mark::before { content: ""; width: 6px; height: 12px; border: solid var(--on-acc); border-width: 0 2.5px 2.5px 0; transform: translateY(-1px) rotate(45deg); }
+/* Ranked: the card is a div, and its label stretches over it so a press anywhere ticks it. The rank number sits in the tick box. Up, Down, View and the marked rows sit above the label. */
+.opt.ranked { cursor: default; }
+.opt.ranked > label.head { cursor: pointer; }
+.opt.ranked > label.head::after { content: ""; position: absolute; inset: 0; border-radius: var(--r); z-index: 1; }
+.opt.ranked .rank, .opt.ranked .opic { position: relative; z-index: 2; }
+.opts.ranked .opt { grid-template-rows: auto auto 1fr auto auto; }
+.opts.ranked.pics .opt { grid-template-rows: auto auto auto 1fr auto auto; }
+@supports (grid-template-rows: subgrid) { .opts.ranked .opt { grid-row: span 5; grid-template-rows: subgrid; } .opts.ranked.pics .opt { grid-row: span 6; } }
+.opt .rank { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.opt .rank.gone { visibility: hidden; }
+.btn.mv { position: relative; min-height: 44px; min-width: 44px; padding: 8px 12px; background: var(--surface); color: var(--acc); }
+.btn.mv svg { flex: none; }
+/* At an end of the order the button stays in place and focusable. It is marked off by a dashed border, and the reason shows on hover and focus. */
+.btn.mv[aria-disabled="true"] { border-style: dashed; border-color: var(--faint); color: var(--muted); cursor: default; }
+.btn.mv[aria-disabled="true"] svg { opacity: .5; }
+.btn.mv[aria-disabled="true"]:is(:hover, :focus-visible)::after { content: attr(data-why); position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 2; white-space: nowrap; padding: 2px 8px; border-radius: 6px; background: var(--ink); color: var(--surface); font: 500 13px/1.5 var(--body); pointer-events: none; }
+/* Links on an option card: optCard puts <div class="links"> after .how and before .tr. A card with no links gets <span class="nolinks">,
+   as .nopick does, so the subgrid rows still line up. buildCard adds "olinks" to .opts only when some option has links. */
+.opts.olinks .opt { grid-template-rows: auto auto auto 1fr auto; }
+@supports (grid-template-rows: subgrid) { .opts.olinks .opt { grid-row: span 5; grid-template-rows: subgrid; } }
+.opts.pics.olinks .opt { grid-template-rows: auto auto auto auto 1fr auto; }
+@supports (grid-template-rows: subgrid) { .opts.pics.olinks .opt { grid-row: span 6; grid-template-rows: subgrid; } }
+/* A miss on a small link lands on the <label> and picks the option, so each link gets a 44px tap box. A flex item
+   is a block, and a screen reader puts a space between blocks, so the one span inside the link holds all its text:
+   the arrow's gap sits in CSS and the link's name is the label plus the hidden phrase. */
+.links a { display: inline-flex; align-items: center; min-height: 44px; }
+.links a [aria-hidden] { margin-inline-start: 4px; }
+/* A block-level .sr (position: absolute is one) gets a space before it in the link's name, so in a link it stays inline and takes no room. */
+.links a .sr { position: static; display: inline; font-size: 0; }
+/* Links on a ranked card: one more row than the ranked rows above. The label's ::after overlay covers the card, so the links row sits above it as .rank and .opic do. */
+.opt.ranked .links { position: relative; z-index: 2; }
+/* A press anywhere on a ranked card ticks it, so only the link itself is raised above the overlay. */
+.opt.ranked .links { pointer-events: none; }
+.opt.ranked .links a { pointer-events: auto; }
+.opts.ranked.olinks .opt { grid-template-rows: auto auto auto 1fr auto auto; }
+.opts.ranked.pics.olinks .opt { grid-template-rows: auto auto auto auto 1fr auto auto; }
+@supports (grid-template-rows: subgrid) { .opts.ranked.olinks .opt { grid-row: span 6; grid-template-rows: subgrid; } .opts.ranked.pics.olinks .opt { grid-row: span 7; grid-template-rows: subgrid; } }
+
+.ready { min-height: 1.55em; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14.5px; color: var(--muted); }
+.ready.on { color: var(--good); font-weight: 600; }
+/* A multi item names its picks, so its line may wrap. Hidden copies of its longest possible lines share the live line's grid cell,
+   so the cell is always as tall as the longest line at the current width: the tail is never cut and the cards never move. */
+.readybox { display: grid; }
+.readybox > * { grid-area: 1 / 1; min-width: 0; }
+.ready.multi, .readyfit { white-space: normal; overflow: visible; }
+.readyfit { visibility: hidden; margin: 0; font-size: 14.5px; font-weight: 600; }
+.ready.on::before, .readyfit::before { content: "\2713  "; }
+/* The row under the body: None of these on a decision, Mark done on a task. */
+.alts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.btn { min-height: 44px; padding: 8px 16px; border-radius: var(--r); border: 1.5px solid var(--acc); background: var(--acc); color: var(--on-acc); font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+.btn.alt { background: transparent; color: var(--acc); }
+.btn.quiet { border-color: transparent; background: transparent; color: var(--muted); font-weight: 500; padding-inline: 10px; }
+.btn.dash { border: 1.5px dashed var(--faint); background: transparent; color: var(--muted); font-weight: 500; }
+.btn.dash[aria-pressed="true"] { border-style: solid; border-color: var(--ink); color: var(--ink); }
+.btn:disabled { opacity: .45; cursor: default; }
+.note { display: grid; gap: 6px; }
+.note label { font-size: 14px; color: var(--muted); }
+.note.need label { color: var(--due); font-weight: 600; }
+.note textarea { width: 100%; min-height: 60px; resize: vertical; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--ground); }
+.note.need textarea { border-color: var(--due); }
+/* A blocked card's note box dims like its other disabled controls; the label stays readable. */
+.note textarea:disabled { opacity: .45; cursor: default; }
+ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.links { display: flex; flex-wrap: wrap; gap: 12px; font-size: 15px; }
+/* A command on a task: a head row (status, then Copy), then the command in a closed disclosure. Copy works while it is closed. */
+.cmd { display: grid; gap: 8px; min-width: 0; }
+.cmd + .cmd { border-top: 1px solid var(--line); padding-top: 14px; }
+.cmd-head { display: flex; align-items: center; gap: 12px; min-height: 44px; }
+.cmd-say { flex: 1 1 0; min-width: 0; margin: 0; font-size: 14px; line-height: 1.4; color: var(--muted); }
+.cmd.shell .cmd-say { color: var(--ink); font-weight: 600; }
+.cmd.failed .cmd-say { color: var(--due); font-weight: 600; }
+/* Both labels share one grid cell, so the button keeps the box of "Copied" in every state. */
+.btn.cmd-copy { flex: none; display: inline-grid; justify-items: center; }
+.cmd-copy > span { grid-area: 1 / 1; }
+.cmd-copy .ok, .cmd.copied .cmd-copy .go { visibility: hidden; }
+.cmd.copied .cmd-copy .ok { visibility: visible; }
+.cmd-more > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--acc); font-weight: 600; font-size: 14.5px; }
+.cmd-more[open] > summary { margin-bottom: 8px; }
+.status .cmd-more { font-weight: 400; color: var(--ink); }
+/* Each written line is one block. A long line wraps in the block, and its wrapped part hangs 2ch in. */
+.cmd-text { margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--ground); color: var(--ink); font: 14px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2; }
+.cmd-text code { font: inherit; }
+.cmd-text .ln { display: block; padding-inline-start: 2ch; text-indent: -2ch; }
+.cmd-text .ln:empty::after { content: " "; }
+.dest { margin: 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+.status.broken { padding: 9px 12px; border-radius: 8px; box-shadow: inset 0 0 0 1.5px var(--due); background: var(--due-soft); }
+.status { font-size: 14px; color: var(--due); font-weight: 600; margin: 0; }
+
+/* Receipt: the card stays where it was and shows what happened to the answer. */
+.receipt { display: grid; gap: 8px; }
+.receipt .line { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; min-height: 44px; font-size: 15.5px; }
+.receipt .line > .g { grid-column: 1; grid-row: 1; }
+.receipt .line b { grid-column: 2; grid-row: 1; }
+.receipt .line .read { grid-column: 2; grid-row: 2; }
+.receipt .line .changebtn { grid-column: 3; grid-row: 1; }
+.receipt .line:has(.read) .changebtn { grid-row: 1 / span 2; }
+.receipt .line b { overflow-wrap: anywhere; color: var(--good); }
+.receipt .rnote, .foldbody > .rnote { margin: 0; color: var(--muted); font-size: 14.5px; }
+/* A multi answer lists each pick with its letter and title, in order. */
+.receipt .picks { margin: 0; padding: 0 0 0 20px; list-style: none; display: grid; gap: 6px; counter-reset: pk; }
+.receipt .picks li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; min-height: 32px; font-size: 15.5px; }
+.receipt ol.picks li { grid-template-columns: 2ch auto minmax(0, 1fr); }
+.receipt ol.picks li::before { counter-increment: pk; content: counter(pk) "."; font: 600 14px var(--mono); color: var(--muted); text-align: end; }
+.receipt .picks .key { color: var(--ink); }
+/* The thread: the owner's last answer, then the writer's reply, in one calm panel with the shape of .stake. */
+.thread { display: grid; gap: 8px; padding: 12px; border-radius: 8px; background: var(--chip); min-width: 0; }
+.thread > .last:has(+ .reply) { padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+/* The last answer extends the receipt: muted head, ink answer, no done mark, no Change button. */
+.receipt.last { gap: 4px; }
+.receipt.last .lhead { margin: 0; font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
+.receipt.last .line { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+.receipt.last .line b { grid-column: 1; color: var(--ink); font-weight: 600; }
+.thread .reply { font-size: 15px; }
+.card.answered { border-left: 6px solid var(--good); }
+.ans { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 24px; padding: 0 8px; border-radius: 12px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; line-height: 20px; }
+.ans::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 2px solid currentColor; }
+.ans.filed { background: var(--good); color: var(--surface); }
+.ans.filed::before { content: "\2713"; width: auto; height: auto; border: 0; }
+.ans .t { white-space: nowrap; }
+.receipt .read { color: var(--muted); font-size: 14.5px; }
+.nchip.sent.filed { background: var(--good); color: var(--surface); }
+
+.checked { font: 13px var(--mono); color: var(--faint); margin: 0; }
+.parked { background: var(--surface); border: 1px dashed var(--line); border-radius: 12px; padding: 14px 18px; font-size: 15px; display: grid; gap: 8px; container-type: inline-size; color: var(--ink); }
+.parked > h2 { font: 700 15px/1.4 var(--body); margin: 0; }
+.pk-hint { margin: 0; font-size: 14px; color: var(--muted); max-width: 70ch; }
+.parked .pk-list { list-style: none; margin: 0; padding: 0; display: grid; }
+/* One line: the text, then its acts. Narrow: the acts wrap under the text. Wide: they sit at the right, in a column as wide as the widest state (a sent badge with Change, 287px), so no state re-wraps the text. */
+.pk { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding-block: 10px; border-top: 1px solid var(--line); scroll-margin-top: 64px; }
+@container (min-width: 600px) { .pk { grid-template-columns: minmax(0, 1fr) minmax(19rem, auto); align-items: center; gap: 16px; } .pk-acts { justify-content: flex-end; } }
+.pk-txt { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.pk-txt .ref { font-weight: 600; }
+.pk-txt .nt { color: var(--muted); }
+/* A staged or sent Drop strikes the line: a shape, so the act does not rest on colour. */
+.pk.drop .pk-txt { text-decoration: line-through; text-decoration-thickness: 1.5px; }
+/* The acts row is one 44px cluster in every state, so a press, a Send or a badge moves nothing. */
+.pk-acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 44px; }
+.pk-acts .ans { min-height: 32px; }
+.pk .status, .pk-why { grid-column: 1 / -1; }
+/* The reason an act is off, as text under the line: a touch screen has no hover, and a bubble clips at the edge. */
+.pk-why { margin: 0; font-size: 14px; color: var(--muted); max-width: 70ch; }
+/* A toggle keeps the box of its widest label: both labels share one grid cell. */
+.btn.pkb { display: inline-grid; justify-items: center; position: relative; }
+.pkb > span { grid-area: 1 / 1; white-space: nowrap; }
+.pkb .on, .pkb[aria-pressed="true"] .off { visibility: hidden; }
+.pkb[aria-pressed="true"] .on { visibility: visible; }
+.btn.alt.pkb[aria-pressed="true"] { background: var(--acc); color: var(--on-acc); }
+/* Off: still focusable, with a solid --faint edge (3:1, a11y.md state cue) and a struck label, so an off act never rests on colour alone.
+   This strike marks an off button. A staged Drop strikes the line text, never its button. The reason shows as .pk-why under the line.
+   This rule stays after .btn.dash[aria-pressed="true"]: both have the same weight, so the source order decides. */
+.btn.pkb[aria-disabled="true"] { border-style: solid; border-color: var(--faint); background: transparent; color: var(--muted); cursor: default; font-weight: 500; }
+.btn.pkb[aria-disabled="true"] .off { text-decoration: line-through; text-decoration-thickness: 1.5px; }
+/* The Sent panel names a parked act by its act, where an item shows "No. n". */
+.sent-list .pkref { max-width: 24ch; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Forced colours drop --faint and --muted, so an off act draws in the system's off colour. */
+@media (forced-colors: active) { .btn.pkb[aria-disabled="true"] { color: GrayText; border-color: GrayText; } }
+
+/* Answer bar: what is ready, then one Send. The stamp and Undo sit above it after a Send. */
+.bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.bar .in { padding-block: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.bar .brow { flex: 1 1 100%; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; } /* the status and its buttons; the read-only copy box sits below the row */
+.bar .st { flex: 1 1 0; font-size: 14.5px; color: var(--muted); min-width: 0; }
+.bar .st b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.bar textarea { flex: 1 1 100%; font: 13px var(--mono); background: var(--ground); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.btn.send { min-height: 48px; padding-inline: 18px; white-space: nowrap; }
+.sent { background: var(--surface); border-bottom: 1px solid var(--line); }
+.sent .in { padding-block: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; font-size: 15px; }
+.sent-head { flex: 1 1 320px; min-width: 0; display: flex; gap: 16px; align-items: center; }
+.sent-what { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.sent-line { margin: 0; }
+.stamp { flex: none; transform: rotate(-4deg); border: 2px solid var(--good); color: var(--good); border-radius: 8px; padding: 4px 8px; font: 700 18px/20px var(--body); letter-spacing: .06em; text-transform: uppercase; text-align: center; }
+.stamp small { display: block; font: 500 12px/16px var(--mono); letter-spacing: 0; text-transform: none; }
+@media (prefers-reduced-motion: no-preference) { .sent:not([hidden]) .stamp { animation: stamp-settle 200ms cubic-bezier(0.2, 0, 0, 1) both; } }
+@keyframes stamp-settle { from { transform: rotate(-4deg) scale(1.06); opacity: 0; } to { transform: rotate(-4deg) scale(1); opacity: 1; } }
+.sent-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; max-height: 22vh; overflow: auto; }
+.sent-list li { max-width: 100%; display: inline-flex; gap: 8px; align-items: center; min-height: 28px; padding: 0 4px 0 12px; border-radius: 999px; background: var(--chip); font-size: 13.5px; }
+.sent-list .no { color: var(--acc); font: 600 12px var(--mono); }
+.sent-list li:not(:has(.dstate)) { padding-inline-end: 12px; }
+.dstate { padding: 0 8px; line-height: 20px; border-radius: 999px; background: var(--surface); color: var(--faint); font-size: 12.5px; }
+.dstate.on { background: var(--good-soft); color: var(--good); font-weight: 600; }
+.sent .row { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; gap: 8px; min-width: 16rem; margin-inline-start: auto; } /* a fixed width, so the bar wraps the same with or without Undo */
+#undoBtn { font-variant-numeric: tabular-nums; }
+@media (max-width: 520px) { .bar .st { flex-basis: 0; font-size: 13.5px; } .btn.send { padding-inline: 12px; } }
+/* With Copy answers shown on a phone, two buttons leave the status too narrow to read, so it takes its own row. */
+@media (max-width: 520px) { .bar .brow:has(> #copy:not([hidden])) > .st { flex-basis: 100%; } }
+
+/* Designs: a mockup shows in a sandboxed frame on its card, and a sheet pages through all of them. */
+.dprev { display: grid; gap: 8px; }
+.dprev .dbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.dprev .dbar .sp { flex: 1; }
+.dframe { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #fff; display: block; }
+.dfitwrap { position: relative; width: 100%; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.dfitwrap .dframe.dfit { position: absolute; top: 0; left: 0; max-width: none; border: 0; border-radius: 0; transform-origin: 0 0; }
+.dfitwrap.inert .dframe { pointer-events: none; }
+/* A card picture taller than its 480px box scrolls inside it (fitFrame, maxH). The pill sits on the wrap's #fff gutter and the white mockup frame in both themes, so the cue keeps one pair: 17.3:1. */
+:root { --pic-cue: #161b22; --on-pic-cue: #ffffff; }
+.dfitwrap .dsizer { display: block; position: relative; overflow: hidden; }
+.dfitwrap .dtop, .dfitwrap .dcue { display: none; }
+.dfitwrap.scroll { overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-gutter: stable; }
+.dfitwrap.scroll .dtop { display: block; position: sticky; top: 0; z-index: 1; height: 12px; margin-bottom: -12px; background: linear-gradient(rgb(22 27 34 / 0.28), rgb(22 27 34 / 0)); opacity: 0; pointer-events: none; }
+.dfitwrap.scroll.scrolled .dtop { opacity: 1; }
+.dfitwrap.scroll .dcue { display: flex; position: sticky; bottom: 0; z-index: 1; height: 40px; margin-top: -40px; align-items: flex-end; justify-content: center; padding-bottom: 8px; background: linear-gradient(rgb(22 27 34 / 0), rgb(22 27 34 / 0.28)); pointer-events: none; }
+.dfitwrap.scroll.at-end .dcue { opacity: 0; }
+.dfitwrap .dmore { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: 12px; background: var(--pic-cue); color: var(--on-pic-cue); box-shadow: 0 0 0 1px var(--on-pic-cue); font: 600 12px/1 var(--body); white-space: nowrap; }
+@media (prefers-reduced-motion: no-preference) { .dfitwrap.scroll .dcue, .dfitwrap.scroll .dtop { transition: opacity 150ms linear; } }
+.dsheet { position: fixed; inset: 0; z-index: 20; background: var(--ground); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
+.dsh-head { background: var(--hdr); color: var(--on-hdr); padding-top: env(safe-area-inset-top, 0px); }
+.dsh-head .in { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; padding-block: 8px; }
+.dsh-head h2 { font: 700 17px/1.25 var(--body); flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-head .btn { flex: none; white-space: nowrap; }
+.dsh-head .sm { display: none; }
+@media (max-width: 520px) { .dsh-head .lg { display: none; } .dsh-head .sm { display: inline; font-size: 20px; line-height: 1; } .dsh-head .btn { min-width: 40px; padding-inline: 8px; } #dBack { display: none; } }
+.dsh-head .btn { min-height: 40px; }
+.dsh-head .btn { border-color: color-mix(in srgb, var(--on-hdr) 50%, transparent); }
+.dsh-head .btn:focus-visible { outline-color: var(--on-hdr); }
+.dsh-head .btn.quiet { color: var(--on-hdr); }
+.dsh-body { position: relative; min-height: 0; overflow: auto; display: grid; justify-items: center; align-content: start; margin: 10px clamp(8px, 2vw, 20px) calc(10px + env(safe-area-inset-bottom, 0px)); }
+.dsh-body .dfitwrap { width: min(100%, 780px); }
+.dsh-body .dfitwrap.off { display: none; }
+/* The caption shows only while the head cuts the title. Its min-height keeps a grid row the stage overflows from squeezing it to 0. */
+.dcap { display: none; margin: 0 0 6px; justify-self: stretch; min-width: 0; min-height: 1.4em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 14px/1.4 var(--body); color: var(--muted); }
+.dcap.on { display: block; }
+body.sheet-open { overflow: hidden; }
+
+/* Status tab: the roadmap's layout in this page's tokens, under .sv. The names page.html also uses
+   (.bar, .rail, .card, .tabs, .steps, .g, .top, .big, .sub, .empty) are renamed here, so no rule above reaches status. */
+.tabs .tl { display: flex; gap: 4px; }
+.tabs .cnt:empty { display: none; }
+.tabs .cnt { display: inline-block; min-width: 3.5ch; font-variant-numeric: tabular-nums; text-align: start; }
+/* Three tabs with a count box each must fit a 320 phone: the page never scrolls sideways. The row wraps when a wide fallback font makes them too wide. It wraps in reverse so the tab list stays on the bottom row, on the border, and Designs moves above. */
+@media (max-width: 400px) { .tabs a { padding-inline: 6px; gap: 4px; } .tabs, .tabs .tl { gap: 2px; } .tabs { flex-wrap: wrap-reverse; } }
+.tabs #qCount:empty { display: inline-block; }
+.svwrap { container-type: inline-size; padding-block: 18px 40px; }
+.sv { display: grid; gap: 16px; min-width: 0; }
+.sv h2, .sv h3, .sv h4, .sv p { margin: 0; }
+:where(.sv) button { background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
+:where(.sv) button:disabled { cursor: default; }
+.sv .id, .sv .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.sv-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+.readat { font-size: 14px; color: var(--muted); min-width: 0; }
+.readat summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+.readat ul { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 4px; font-size: 13.5px; }
+.readat li { overflow-wrap: anywhere; }
+.unk { color: var(--due); font-weight: 600; }
+.sv summary { list-style: none; }
+.sv summary::-webkit-details-marker { display: none; }
+.sv summary::before { content: "\25B8"; flex: none; width: 1em; color: var(--muted); }
+.sv details[open] > summary::before { content: "\25BE"; }
+.rg.unk { display: inline-block; width: 12px; height: 12px; vertical-align: -1px; border: 2px dashed var(--due); border-radius: 50%; }
+
+.live { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.live summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 14px; min-height: 44px; font-size: 14.5px; }
+.live summary .lh { font-weight: 700; }
+.live summary .asof { margin-left: auto; font-size: 13px; color: var(--muted); padding: 0; }
+/* nowrap keeps the ring and "threads unknown" on one line at phone width. */
+.live summary .thr-unk { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.live h4 { padding: 8px 14px 4px; font-size: 13px; font-weight: 600; color: var(--muted); border-top: 1px solid var(--line); }
+.live ul { list-style: none; margin: 0; padding: 0; }
+.live li { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px; padding: 7px 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.live li .nm { display: block; font: 13px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.livenone { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 8px 14px; display: grid; gap: 2px; font-size: 14.5px; }
+.livenone .lh { font-weight: 700; }
+.livenone details { font-size: 14px; color: var(--muted); }
+.livenone summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; }
+.livenone pre { margin: 0 0 6px; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.live a { color: var(--acc); text-decoration: none; }
+.live a:hover { text-decoration: underline; }
+/* Each open pull request's next act: the list head holds the per-owner counts; a red row has the stalled band's red edge and a red mark. The parent spaces its children. */
+.live h4.prh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+.live h4.prh .cts { font-weight: 400; }
+.live h4.prh .cts .rd { color: var(--holds); font-weight: 600; }
+.live .prwhy { padding: 0 14px 8px; font-weight: 600; color: var(--due); }
+.live li .act { display: block; font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere; }
+.live li .act b { color: var(--ink); font-weight: 600; }
+.live li .act .tag { margin-right: 6px; vertical-align: 1px; }
+.live li.red { box-shadow: inset 3px 0 0 var(--holds); }
+.live li .tag.redm { color: var(--holds); }
+@container (max-width: 559px) { .live li { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+/* The stalled band: the same box, head and row grid as Live work, so the two read as one family. Red edge only while something is stalled. */
+.stall { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.stall.hot { box-shadow: inset 4px 0 0 var(--holds); }
+.stall .sth { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; padding: 8px 14px; min-height: 44px; font-size: 14.5px; }
+.stall .sth h3 { display: inline-flex; align-items: center; gap: 6px; font: 700 14.5px/1.3 var(--body); }
+.stall .sth .lead { color: var(--muted); font-size: 14px; flex: 1 1 24ch; min-width: 0; }
+.stall .sth.calm h3 { font-weight: 600; color: var(--muted); }
+.stall h4 { margin: 0; padding: 8px 14px 4px; font-size: 13px; font-weight: 600; color: var(--muted); border-top: 1px solid var(--line); }
+.stall ul { list-style: none; margin: 0; padding: 0; }
+.stall li { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 6px 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.stall h4 + ul > li:first-child { border-top: 0; }
+.stall li .k { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.stall li .tx { min-height: 32px; padding: 0; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; }
+.stall li .tx:hover { text-decoration: underline; }
+.stall li .fx { display: block; font-size: 13.5px; color: var(--muted); }
+.stall li .fx.land { color: var(--good); font-weight: 600; }
+.stall li .fx.bad { color: var(--due); }
+.stall li .fx.why { color: var(--ink); }
+.stall li .ln { font: 13px var(--mono); overflow-wrap: anywhere; }
+.stall li.unkrow { grid-template-columns: minmax(0, 1fr); }
+.stall li.unkrow details { font-size: 14px; color: var(--muted); }
+.stall li.unkrow summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; }
+.stall li.unkrow pre { margin: 0 0 6px; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.stall .pz { border-top: 1px solid var(--line); }
+.stall .pz > summary { display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; font-size: 14px; font-weight: 600; color: var(--muted); cursor: pointer; }
+@container (max-width: 559px) { .stall li { grid-template-columns: 40px minmax(0, 1fr); gap: 0 8px; padding-inline: 10px; } .stall li.it, .stall li.unkrow { grid-template-columns: minmax(0, 1fr); } .stall .sth { padding-inline: 10px; } .stall .sth .lead { flex-basis: 100%; } }
+@media (pointer: coarse) { .stall li .tx { min-height: 44px; } }
+.tag { font-size: 12.5px; font-weight: 600; padding: 0 8px; border-radius: 999px; border: 1.5px solid currentColor; line-height: 19px; white-space: nowrap; }
+.tag.st-working { color: var(--acc); }
+.tag.st-blocked, .tag.blk { color: var(--holds); }
+.tag.st-review_ready, .tag.landed { color: var(--good); }
+.tag.st-failed, .tag.st-stopped { color: var(--due); }
+.tag.st-done { color: var(--muted); }
+.tag.next { color: var(--muted); border-style: dashed; }
+.tag.stl { color: var(--holds); }
+.tag.pzd { color: var(--muted); }
+.tag.ic { display: inline-grid; place-items: center; min-width: 26px; padding: 0 4px; }
+.tag.ic svg { width: 12px; height: 12px; }
+
+.now { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.now > div { background: var(--surface); padding: 12px 14px; min-width: 0; display: grid; gap: 6px; align-content: start; }
+.now h3 { font: 600 13.5px/1.3 var(--body); color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+.now .ph { font: 700 19px/1.2 var(--body); }
+.now .lead { padding: 0; font-size: 14px; color: var(--muted); }
+/* The count line breaks only between groups ("2 in progress,"): a group never splits. */
+.now .lead .grp { white-space: nowrap; }
+.now ul, .now ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.now li { display: flex; gap: 8px; align-items: center; min-width: 0; font-size: 14.5px; }
+.now li .id { flex: none; font-size: 13px; color: var(--muted); }
+.now li .tx { min-width: 0; min-height: 32px; padding: 0; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; }
+.now li .tx:hover, .lnk:hover { text-decoration: underline; }
+.now li.none { color: var(--muted); }
+.now .ix { flex: none; width: 12px; font: 13px var(--mono); color: var(--muted); }
+.now .offt .ic { flex: none; font-size: 12px; font-weight: 700; color: var(--holds); border: 1.5px solid currentColor; border-radius: 4px; padding: 0 5px; }
+@container (min-width: 640px) { .now { grid-template-columns: 1fr 1fr; } }
+@container (min-width: 1000px) { .now { grid-template-columns: 1.1fr 1.4fr 1.6fr 1.6fr; } }
+
+.segbar { height: 6px; display: flex; gap: 2px; border-radius: 3px; overflow: hidden; }
+.segbar i { flex: 1; background: var(--line); }
+.segbar i.done { background: var(--acc); }
+.segbar i.act { background: color-mix(in srgb, var(--acc) 45%, transparent); }
+.segbar i.blk { background: var(--holds); }
+.segbar i.stl { background: repeating-linear-gradient(135deg, var(--holds) 0 2px, transparent 2px 4px); }
+.segbar i.pzd { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
+
+/* The view switch sits right above the view it changes. What every view shares sits above the switch. */
+.views { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; padding: 3px; max-width: 520px; background: var(--chip); border-radius: 11px; }
+.views button { min-height: 44px; padding: 4px 2px; font-size: 14.5px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-weight: 600; cursor: pointer; white-space: nowrap; text-align: center; }
+/* Below 340px four equal columns cut "Reference": each column takes its label's width, and the rest is shared. */
+@container (max-width: 339px) {
+  .views { grid-template-columns: repeat(4, auto); }
+  .views button { padding-inline: 4px; font-size: 14px; }
+}
+.views button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
+.sview { display: grid; gap: 14px; min-width: 0; }
+
+.prail { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.prail button { display: grid; gap: 6px; min-width: 0; min-height: 44px; padding: 8px 10px; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; color: var(--ink); cursor: pointer; }
+.prail button[aria-pressed="true"] { border-color: var(--acc); box-shadow: inset 0 3px 0 var(--acc); }
+.prail .nm { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; font: 600 14px/1.25 var(--body); flex-wrap: wrap; white-space: normal; }
+.prail .nm > span:first-child { overflow-wrap: anywhere; }
+.prail .nm .num { font-weight: 400; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.prail .here { display: inline-block; width: 7px; height: 7px; margin-left: 5px; border-radius: 50%; background: var(--acc); vertical-align: 2px; }
+@container (max-width: 639px) {
+  .prail { gap: 4px; }
+  .prail button { padding: 6px 5px; }
+  .prail .nm { flex-direction: column; gap: 0; font-size: 12.5px; }
+}
+/* Five chips keep each phase name and the current-phase dot on one line from a 452px box in DejaVu Sans, a wide fallback if the web font fails, and from a 410px box in the web font (Organize current is the widest). Five columns start at 464px, a 12px margin over the wide font. Below that the rail wraps to three columns. A longer name, such as a repo's own phase name, wraps at its spaces. */
+@container (max-width: 463px) { .prail { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+.cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+@container (min-width: 1000px) { .cols { grid-template-columns: minmax(0, 1fr) 320px; } }
+.side { display: grid; gap: 12px; min-width: 0; }
+.box { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; min-width: 0; }
+.box > header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.box > header h3 { font: 700 15px/1.3 var(--body); }
+.sv .lbl { font-size: 13px; color: var(--muted); }
+.ph-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 12px 14px; }
+.ph-head h3 { font: 700 18px/1.25 var(--body); }
+.ph-head .prog { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+.ph-head .prog .segbar { width: 110px; }
+@container (max-width: 639px) { .ph-head .prog { margin-left: 0; width: 100%; } .ph-head .prog .segbar { flex: 1; } }
+.asof { font-size: 13px; color: var(--muted); padding: 0 14px 8px; }
+.howto { display: inline-flex; align-items: center; min-height: 32px; margin-left: 4px; font-size: 13px; font-weight: 600; color: var(--acc); }
+.howbody { font-size: 13.5px; color: var(--muted); padding: 0 14px 10px; }
+.foot { font-size: 13px; color: var(--muted); padding: 6px 14px; border-bottom: 1px solid var(--line); }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--line); border-block: 1px solid var(--line); }
+.tile { background: var(--surface); padding: 10px 14px; display: grid; gap: 4px; min-width: 0; align-content: start; text-align: left; }
+button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surface)); }
+.tile .tl { font-size: 13.5px; color: var(--muted); }
+.tile .row { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.tile .v { font: 600 20px/1.1 var(--mono); overflow-wrap: anywhere; }
+.tile .v small { font-size: 14px; font-weight: 400; color: var(--muted); }
+.tile .goal { font-size: 13px; color: var(--muted); }
+.tile svg { display: block; width: 100%; height: 30px; overflow: visible; }
+.tile .ft { font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; gap: 6px; }
+.tile .rule { display: none; font-size: 13.5px; color: var(--ink); border-top: 1px dashed var(--line); padding-top: 5px; margin-top: 2px; }
+.tile[aria-expanded="true"] .rule { display: block; }
+.tiles .none { grid-column: 1 / -1; background: var(--surface); padding: 12px 14px; font-size: 14px; color: var(--muted); }
+.dl { font: 500 12px var(--mono); padding: 0 4px; border-radius: 3px; white-space: nowrap; }
+.dl.good { color: var(--good); background: var(--good-soft); }
+.dl.bad { color: var(--holds); background: color-mix(in srgb, var(--holds) 14%, var(--surface)); }
+.dl.flat { color: var(--muted); background: var(--chip); }
+.meter { display: flex; gap: 2px; height: 8px; }
+.meter i { flex: 1; background: var(--line); border-radius: 2px; }
+.meter i.on { background: var(--acc); }
+.one { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; min-height: 30px; }
+.one::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--acc); }
+.hint { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 8px; padding: 8px 14px; font-size: 13.5px; color: var(--muted); border-bottom: 1px solid var(--line); }
+.rsteps { list-style: none; margin: 0; padding: 0; }
+.rsteps > li + li { border-top: 1px solid var(--line); }
+.rrow { display: grid; grid-template-columns: 16px 44px minmax(0, 1fr) auto 12px; gap: 8px; align-items: center; width: 100%; min-height: 44px; padding: 8px 14px; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; }
+.rrow:hover { background: color-mix(in srgb, var(--chip) 60%, transparent); }
+.rrow .ttl { min-width: 0; overflow-wrap: anywhere; }
+.rrow .id { font-size: 13px; color: var(--muted); }
+.rrow .meta { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.rrow .chev { font-size: 11px; color: var(--muted); }
+.rsteps li.open .chev, .donefold.open > .fold .chev { transform: rotate(90deg); }
+.rsteps .active > .rrow { background: var(--acc-soft); box-shadow: inset 3px 0 0 var(--acc); }
+.rsteps .active .ttl { font-weight: 700; }
+.rsteps .blocked > .rrow { box-shadow: inset 3px 0 0 var(--holds); }
+.rsteps .stl-row > .rrow { background: color-mix(in srgb, var(--holds) 14%, var(--surface)); box-shadow: inset 3px 0 0 var(--holds); }
+/* A paused step keeps status active: no tint, and a muted edge in the paused band's grey. */
+.rsteps .pzd-row > .rrow { background: none; box-shadow: inset 3px 0 0 var(--muted); }
+.rsteps .pzd-row > .rrow:hover { background: color-mix(in srgb, var(--chip) 60%, transparent); }
+.rsteps .done .ttl { text-decoration: line-through; text-decoration-color: var(--line); color: var(--muted); }
+.rbody { display: none; padding: 2px 14px 12px 70px; font-size: 14px; color: var(--muted); }
+.rsteps li.open .rbody { display: block; }
+.rbody dl { margin: 0; display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 6px 10px; }
+.rbody dt { font-size: 13px; padding-top: 2px; }
+.rbody dd { margin: 0; overflow-wrap: anywhere; min-width: 0; color: var(--ink); }
+.ask { display: flex; gap: 8px; align-items: flex-start; background: var(--ground); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: 13px var(--mono); color: var(--ink); }
+.ask span { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; max-height: 12em; overflow: auto; }
+.copy { flex: none; min-height: 44px; padding: 0 12px; border-radius: var(--r); background: var(--acc); color: var(--on-acc); font: 600 14px var(--body); }
+.sv .clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.more { min-height: 32px; font-size: 13.5px; font-weight: 600; color: var(--acc); }
+.noneyet { padding: 12px 14px; font-size: 14px; color: var(--muted); }
+.rg { width: 16px; height: 16px; display: grid; place-items: center; }
+.rg svg { width: 14px; height: 14px; }
+.fold { display: flex; gap: 8px; align-items: center; width: 100%; min-height: 44px; padding: 8px 14px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--muted); cursor: pointer; text-align: left; }
+.donefold .fb { display: none; border-top: 1px solid var(--line); }
+.donefold.open .fb { display: block; }
+@container (max-width: 639px) {
+  .rrow { grid-template-columns: 16px 40px minmax(0, 1fr) 12px; gap: 4px 8px; padding-inline: 10px; }
+  .rrow .meta { grid-column: 3; grid-row: 2; justify-content: flex-start; }
+  .rrow .chev { grid-column: 4; grid-row: 1; }
+  .rbody { padding: 2px 10px 12px; }
+}
+.pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 14px; border-top: 1px solid var(--line); background: var(--ground); }
+.pager .pc { font-size: 13.5px; color: var(--muted); text-align: center; }
+.pager button { min-height: 44px; padding: 4px 12px; font-size: 13.5px; font-weight: 600; color: var(--acc); border: 1px solid var(--line); background: var(--surface); border-radius: 8px; white-space: nowrap; }
+.pager button:disabled { color: var(--muted); opacity: .5; }
+.box > .pager:last-child { border-radius: 0 0 12px 12px; }
+
+.feed { list-style: none; margin: 0; padding: 4px 0; }
+.feed li { display: grid; grid-template-columns: 76px 16px minmax(0, 1fr); gap: 8px; align-items: start; padding: 6px 14px; font-size: 14px; }
+.feed .when, .ev .when { font: 13px var(--mono); color: var(--muted); padding-top: 1px; }
+.lnk { display: inline; min-height: 32px; color: var(--ink); text-align: left; }
+.lnk .id { color: var(--muted); }
+.morelink { display: flex; align-items: center; width: 100%; min-height: 44px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 14px; font-weight: 600; color: var(--acc); }
+.trend { padding: 8px 14px 10px; display: grid; gap: 8px; }
+.trow { display: grid; grid-template-columns: 96px minmax(0, 1fr) 64px; gap: 8px; align-items: center; }
+.trow .k { font-size: 13px; color: var(--muted); line-height: 1.2; }
+.trow svg { width: 100%; height: 30px; display: block; overflow: visible; }
+.trow .r { text-align: right; line-height: 1.15; }
+.trow .r .num { font-size: 13px; font-weight: 600; display: block; }
+.legend { display: flex; gap: 12px; font-size: 13px; color: var(--muted); padding: 0 14px 10px; flex-wrap: wrap; }
+.legend i { display: inline-block; width: 12px; border-top: 1px dashed var(--muted); vertical-align: middle; margin-right: 4px; }
+.burn { padding: 10px 14px 12px; display: grid; gap: 6px; }
+.burn svg { width: 100%; height: 110px; display: block; overflow: visible; }
+.dot { width: 8px; height: 8px; display: inline-block; flex: none; border-radius: 2px; background: var(--acc); }
+
+.day h3 { padding: 10px 14px; font: 700 15px/1.3 var(--body); display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); background: var(--chip); }
+.day:not(:first-child) h3 { border-top: 1px solid var(--line); }
+.day h3 .lbl { font-weight: 400; }
+.ev { display: grid; grid-template-columns: 76px 16px minmax(0, 1fr); gap: 8px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.day h3 + .ev { border-top: 0; }
+.ev .rg { margin-top: 3px; }
+.ev .gist { color: var(--muted); font-size: 13.5px; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ev.done .t { text-decoration: line-through; text-decoration-color: var(--line); }
+.lead { padding: 10px 14px; font-size: 14px; color: var(--muted); }
+.gcard { margin-bottom: 16px; }
+.gcard ol { margin: 0; padding: 0 0 0 18px; font-size: 14px; }
+.gcard ol li { padding: 2px 0; }
+.tp > button { display: grid; grid-template-columns: 30px minmax(0, 1fr) 14px; gap: 8px; width: 100%; min-height: 44px; padding: 8px 14px; border-top: 1px solid var(--line); align-items: baseline; }
+.tp:first-of-type > button { border-top: 0; }
+.tp > button:hover { background: color-mix(in srgb, var(--chip) 60%, transparent); }
+.tp .id { font-size: 13px; color: var(--muted); }
+.tp .sm { display: block; font-size: 13px; color: var(--muted); }
+.tp .tb { display: none; padding: 0 14px 12px 52px; min-width: 0; }
+.tp.open .tb { display: block; }
+.tp.open .chev { transform: rotate(90deg); }
+.tp .chev { font-size: 11px; color: var(--muted); }
+.tp ul { margin: 0; padding-left: 16px; font-size: 14px; color: var(--ink); }
+.tp ul li { margin: 3px 0; }
+.tp .ask { margin-top: 6px; }
+.tp .ask span { max-height: 16em; }
+.tp .blbl { margin-top: 10px; font-size: 13px; color: var(--muted); }
+.src { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13.5px; margin-top: 8px; }
+.hl, .rc { list-style: none; margin: 0; padding: 0; }
+.hl li, .rc li { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 10px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.hl li:first-child, .rc li:first-child { border-top: 0; }
+.hl .k { color: var(--muted); font-weight: 600; }
+.rc li { grid-template-columns: 72px minmax(0, 1fr); }
+.rc .when { font: 13px var(--mono); color: var(--muted); padding-top: 2px; }
+.rc a, .hl a { color: var(--acc); text-decoration: none; }
+.rc a:hover, .hl a:hover { text-decoration: underline; }
+.rc .nm { display: block; font: 13px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.count { font: 600 22px var(--mono); padding: 10px 14px 2px; }
+@container (max-width: 559px) { .hl li { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+
+/* No roadmap: unknown, why, and one control that leads on. */
+.nob { padding: 16px; display: grid; gap: 10px; justify-items: start; }
+.nob h3 { font: 700 17px/1.3 var(--body); display: flex; gap: 8px; align-items: center; }
+.nob p { max-width: 62ch; }
+.nob details { font-size: 14px; color: var(--muted); }
+.nob summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; }
+.nob pre, .nob textarea { margin: 0; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.nob textarea { width: 100%; background: var(--ground); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.sv-tip { position: fixed; z-index: 12; pointer-events: none; background: var(--ink); color: var(--surface); font-size: 13px; padding: 4px 7px; border-radius: 4px; max-width: 240px; opacity: 0; transition: opacity .08s; left: 0; top: 0; }
+.sv-tip.on { opacity: 1; }
+.sv-toast { position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 12; background: var(--ink); color: var(--surface); font-size: 14px; padding: 8px 14px; border-radius: 8px; max-width: calc(100vw - 32px); }
+@media (pointer: coarse) { .now li .tx, .feed .lnk, .ev .lnk { min-height: 44px; } }
+/* Arbiter rulings: a section after the open tiers; each ruling is a quiet card with one Overturn toggle. */
+/* Its own shape: a hollow diamond, unlike the square, triangle, ring, dot and check of the other sections. */
+.g.ruled { width: 10px; height: 10px; margin: 0 1px; border: 2px solid var(--muted); border-radius: 1px; transform: rotate(45deg); }
+/* The section sits after the open tiers. Its head is a disclosure button inside the h2, so the heading stays a heading.
+   The Answered section (.sunk) has the same shape, and its cards take a ruling card's size. */
+.tier.ruled, .tier.sunk { gap: 10px; }
+.tier.ruled > header, .tier.sunk > header { display: grid; gap: 2px; }
+.tier.ruled > header h2, .tier.sunk > header h2 { font: 700 17px/1.25 var(--body); }
+.rhead { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 6px 0 0; border: 0; background: none; color: var(--ink); font: inherit; cursor: pointer; text-align: left; }
+.rhead .ct { font: 600 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
+.rhead .chev { width: 1em; color: var(--muted); font-size: 15px; }
+.rhead[aria-expanded="false"] .chev::before { content: "\25B8"; }
+.rhead[aria-expanded="true"] .chev::before { content: "\25BE"; }
+.rsub { margin: 0; font-size: 14px; color: var(--muted); }
+/* Not .rbody: the Status tab already uses that class. */
+.rlist { display: grid; gap: 10px; }
+/* A ruling card is quieter than an ask: a lighter ground, a smaller title, no tier edge. */
+.card.rcard, .tier.sunk .card { padding: 14px 16px; gap: 8px; }
+.card.rcard:not(.answered) { background: color-mix(in srgb, var(--surface) 55%, var(--ground)); }
+.rcard .title, .tier.sunk .card .title { font-size: 17px; max-width: 60ch; }
+.rcard.armed { border-color: var(--acc); box-shadow: inset 0 0 0 1px var(--acc); }
+.ruledline { margin: 0; display: flex; gap: 10px; align-items: flex-start; font-size: 15.5px; }
+.ruledline .key { flex: none; max-width: none; }
+.ruledline b { min-width: 0; overflow-wrap: anywhere; line-height: 1.4; padding-top: 1px; }
+.rwhy { margin: 0; max-width: 70ch; font-size: 14.5px; color: var(--muted); }
+.rfoot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.rfoot .dest { flex: 1 1 12rem; border: 0; padding: 0; }
+.rfoot .btn { min-width: 7.5rem; justify-content: center; }
+/* A seen item (open, asked before the owner's last Send, no answer) sinks under the new ones in its tier. A divider marks the line, the card is quieter, and its answer parts fold. */
+.seenhead { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; min-height: 24px; color: var(--muted); font-size: 14px; font-weight: 600; }
+.seenhead > svg { flex: none; color: var(--faint); }
+.seenhead > .seenrule { flex: 1 1 0; min-width: 24px; border-top: 2px dotted var(--faint); }
+.card[data-seen="true"]:not(.answered) { background: color-mix(in srgb, var(--surface) 55%, var(--ground)); }
+/* The fold control. All three labels share one grid cell, so the box keeps the widest label in every state and a press moves nothing beside it. */
+.unfold { width: 100%; min-height: 48px; display: flex; align-items: center; gap: 10px; padding: 8px 14px; border: 1.5px dashed var(--faint); border-radius: var(--r); background: var(--surface); color: var(--acc); font-weight: 600; font-size: 15px; line-height: 1.35; text-align: left; cursor: pointer; }
+.unfold:hover { border-color: var(--acc); background: var(--acc-soft); }
+.unfold .chev { flex: none; width: 1em; text-align: center; }
+.unfold[aria-expanded="false"] .chev::before { content: "\25B8"; }
+.unfold[aria-expanded="true"] .chev::before { content: "\25BE"; }
+.unfold .uf-labels { display: grid; min-width: 0; }
+.unfold .uf-labels > span { grid-area: 1 / 1; visibility: hidden; }
+.unfold[aria-expanded="false"] .uf-show, .unfold[aria-expanded="true"]:not([aria-disabled="true"]) .uf-hide, .unfold[aria-disabled="true"] .uf-lock { visibility: visible; }
+/* Locked open: the card holds an answer Send would submit, so the fold cannot close. */
+.unfold[aria-disabled="true"] { border-style: solid; border-color: var(--line); background: transparent; color: var(--muted); cursor: default; }
+.foldbody { display: grid; gap: 14px; min-width: 0; }
+.foldbody[hidden] { display: none; }
+
+/* The Ask box: one section after both tab panels, so it ends the Questions tab and the Status tab. Wide, it keeps the list's two
+   columns: the heading in the rail's column, the box and the asks in the list's. Not .ask: the Status tab already uses that class. */
+.asks { border-top: 1px solid var(--line); padding-block: 24px 40px; display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 28px; align-items: start; scroll-margin-top: 64px; }
+@media (max-width: 960px) { .asks { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
+.asks-head { display: grid; gap: 4px; align-content: start; }
+.asks-head h2 { font: 700 19px/1.25 var(--body); display: flex; align-items: center; gap: 12px; }
+.asks-head h2 .ct { font: 600 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
+.asks-head p { margin: 0; font-size: 14.5px; color: var(--muted); max-width: 44ch; }
+.asks-body { display: grid; gap: 16px; min-width: 0; }
+/* Pending: a half-filled disc, its own shape. The hollow ring already means Whenever, and the check means answered. */
+.g.wait { border: 2px solid var(--acc); border-radius: 50%; background: linear-gradient(90deg, var(--acc) 50%, transparent 50%); }
+.askform { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 8px; }
+.askform > label { font-weight: 600; }
+.askform textarea { width: 100%; min-height: 88px; resize: vertical; padding: 8px 12px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--ground); }
+.askform textarea:focus-visible { border-color: var(--acc); }
+/* The hint and the buttons keep one grid: Send never moves when Copy ask shows beside it. Each keeps its own column, so a hidden
+   slot leaves its track empty and Send stays flush with the box's right edge. */
+.askrow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 8px 12px; }
+.askrow .slot { min-width: 0; grid-column: 2; }
+.askrow .slot:empty { display: none; }
+.askrow .btn.askadd { grid-column: 3; }
+.askrow .btn.askgo { grid-column: 4; }
+.askhint { margin: 0; min-height: 44px; display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+.askhint.bad { color: var(--due); font-weight: 600; }
+.btn.askgo, .btn.askadd { min-height: 48px; white-space: nowrap; }
+/* Off, they keep their box and label, marked by a dashed edge as .btn.mv is at an end of the order; the hint beside them says why. */
+.btn.askgo:disabled, .btn.askadd:disabled { opacity: 1; background: transparent; border-style: dashed; border-color: var(--faint); color: var(--muted); }
+/* A label that changes keeps the box of its widest form: the shown label and a hidden sizer share one grid cell. */
+.btn.fixw { display: inline-grid; justify-items: center; }
+.btn.fixw > span { grid-area: 1 / 1; }
+.btn.fixw > .sz { visibility: hidden; }
+@media (pointer: coarse) { .askhint .kbd { display: none; } }
+@media (max-width: 520px) {
+  .askrow { grid-template-columns: minmax(0, 1fr) auto; }
+  /* Three lines reserved, so typing or a new count never moves the buttons under the hint. */
+  .askrow .askhint { grid-column: 1 / -1; min-height: 66px; }
+  .askrow .btn.askadd { grid-column: 1; grid-row: 2; justify-self: start; }
+  .askrow .btn.askgo { grid-column: 2; grid-row: 2; }
+  .askrow .slot { grid-column: 1 / -1; grid-row: 3; justify-self: start; }
+}
+/* The tray under the row: the line that answers Send or Undo, then the asks not sent yet. */
+.tray { display: grid; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.tray[hidden], .tray > div:empty { display: none; }
+.tray > div { display: grid; gap: 8px; }
+.sline { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; min-height: 44px; font-size: 14.5px; }
+.sline b { color: var(--good); }
+.sline .bad { color: var(--due); font-weight: 600; }
+.sline .btn { font-variant-numeric: tabular-nums; }
+/* When the count ends the Undo keeps its box, hidden, so the line does not move. */
+.sline .btn.spent { visibility: hidden; }
+@media (max-width: 520px) { .sline { grid-template-columns: auto minmax(0, 1fr); } .sline .btn { grid-column: 2; justify-self: start; } }
+.stackh { margin: 0; font-size: 14px; font-weight: 600; color: var(--muted); }
+.stack { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+/* A stacked ask is not in the store yet: a dashed edge, the look the page gives a thing not yet sent. */
+.stack > li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: start; gap: 4px 12px; padding: 8px 8px 8px 12px; border: 1.5px dashed var(--faint); border-radius: var(--r); background: var(--ground); }
+.stack .sn { font: 600 13px/44px var(--mono); color: var(--muted); text-align: end; }
+.stack .stext { margin: 0; min-width: 0; padding-block: 10px; white-space: pre-line; overflow-wrap: anywhere; }
+.stack .stext.sedit { padding-block: 0; }
+.stack .sacts { display: flex; gap: 4px; justify-content: flex-end; }
+.stack .sacts .btn { min-height: 44px; }
+.stack .sstate { min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding-inline: 10px; font-size: 14px; color: var(--muted); white-space: nowrap; }
+.stack .sstate.ok { color: var(--good); font-weight: 600; }
+.stack textarea, .askform textarea.copybox { width: 100%; min-height: 66px; resize: vertical; padding: 8px 12px; border: 1.5px solid var(--acc); border-radius: var(--r); background: var(--surface); font: inherit; color: var(--ink); }
+.stack .serr { grid-column: 2 / -1; margin: 0; font-size: 14.5px; font-weight: 600; color: var(--due); }
+.stack > li.failed { border-color: var(--due); }
+.stack > li.gone { background: transparent; }
+.stack > li.gone .stext { color: var(--muted); }
+@media (max-width: 520px) {
+  .stack > li { grid-template-columns: 24px minmax(0, 1fr); }
+  .stack .sacts { grid-column: 2; justify-content: flex-start; }
+  .stack .serr { grid-column: 2; }
+}
+#askList { display: grid; gap: 8px; }
+.asklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.askc { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; display: grid; gap: 8px; min-width: 0; }
+.ahead { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; min-height: 44px; font-size: 14px; color: var(--muted); }
+.ahead .aby { min-width: 0; }
+.ahead .morebtn { margin-inline-start: auto; min-height: 44px; padding-inline: 4px; }
+@media (pointer: coarse) { .ahead .morebtn { min-width: 44px; } }
+.atext { margin: 0; max-width: 70ch; white-space: pre-line; overflow-wrap: anywhere; font-size: 16px; }
+.astate { margin: 0; font-size: 14.5px; color: var(--ink); font-weight: 600; }
+.astate .t { color: var(--muted); font-weight: 400; }
+/* The one "new since your baseline" mark: an ask's New answer, a card's New reply, a step's Updated. Green, the answered colour. */
+.newmark { display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; border-radius: 12px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; white-space: nowrap; }
+/* Each later mark on a screen: a filled dot in an outline pill wider than tall, so it never reads as a radio button beside the options.
+   The chart legend's .dot (a filled square, 8px high) shares the class name, so this rule resets its ground, height and corner. */
+.newmark.dot { padding: 0; width: 34px; height: 22px; border-radius: 12px; background: none; justify-content: center; }
+.newmark.dot::before, .newmark.ct::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+/* A count of updated steps, on the phase rail and the done fold: the dot, then the number. */
+.newmark.ct { padding: 0 7px; gap: 5px; font: 600 12px/20px var(--mono); }
+.rrow .meta .newmark { font-size: 12.5px; line-height: 19px; min-height: 0; }
+.prail .nm .newmark, .fold .newmark { min-height: 0; }
+.prail .nmr { display: inline-flex; align-items: center; gap: 6px; }
+.askc .thread .lhead { margin: 0; font-size: 14px; color: var(--muted); }
+.askc .thread .reply { margin: 0; white-space: pre-line; overflow-wrap: anywhere; min-width: 0; }
+.askc .thread .filed { margin: 0; padding-top: 8px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+/* A folded answer is one button: the whole row unfolds it. */
+.askc.folded { padding: 0; }
+.frow { width: 100%; min-height: 48px; padding: 4px 16px; background: none; border: 0; border-radius: 12px; text-align: left; cursor: pointer; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 4px 12px; color: var(--ink); }
+.frow:hover { background: var(--acc-soft); }
+.frow .ftext { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.frow .fwhen { font-size: 14px; color: var(--muted); white-space: nowrap; }
+.frow .fgo { color: var(--acc); font-weight: 600; font-size: 14.5px; white-space: nowrap; }
+@media (max-width: 520px) {
+  .frow { grid-template-columns: auto minmax(0, 1fr) auto; padding-block: 8px; }
+  .frow .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .frow .fwhen { grid-column: 2; grid-row: 2; }
+  .frow .fgo { grid-column: 3; grid-row: 1 / span 2; }
+}
+.older { justify-self: start; width: auto; }
+/* The owner's reply sits inside the thread it follows, on the surface ground of "You asked", so his words and a session's differ by ground. */
+.askc .thread .myreply { display: grid; gap: 4px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); min-width: 0; }
+.askc .thread .myreply .lhead { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.askc .thread .myreply .reply { font-size: 16px; }
+.askc .thread .myreply + .lhead, .askc .thread .reply + .myreply { margin-top: 4px; }
+/* The thread's end: the line that answers Send reply and Undo, then Reply or the reply box. */
+.replyend { display: grid; gap: 8px; min-width: 0; }
+.replyend > .btn.replybtn { justify-self: start; min-height: 44px; }
+.replyform { padding: 12px; border-radius: var(--r); background: var(--ground); }
+.replyform textarea { background: var(--surface); }
+.replyform .askrow .btn.rx { grid-column: 3; min-height: 48px; }
+@media (max-width: 520px) { .replyform .askrow .btn.rx { grid-column: 1; grid-row: 2; justify-self: start; } }
+/* A folded thread with a reply that waits or a new answer to one: the row stays one button; the reply shows under it, outside the fold. */
+.askc.folded .fwait { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 2px 12px; margin: 0; padding: 8px 16px 12px; border-top: 1px solid var(--line); }
+.askc.folded .fwait > .g { margin-top: 5px; }
+.askc.folded .fwait .ftext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.askc.folded .fwait .astate { grid-column: 2; }
+@media (max-width: 520px) { .askc.folded .fwait .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; } }
+/* Mark read: it shares the thread's end with Reply, Reply first. It is the quieter act, kept 44 px. Off while a reply waits: a dashed edge, with the reason beside it. */
+.replyend .endrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }
+.replyend .endrow > .btn { min-height: 44px; }
+.btn.dismiss, .btn.restore { min-height: 44px; }
+.btn.dismiss[aria-disabled="true"] { border: 1.5px dashed var(--faint); color: var(--muted); cursor: default; }
+.endrow .dwhy { font-size: 14px; color: var(--muted); min-width: 0; }
+/* A folded row with a side press: the row button and Mark read (or Mark unread) are siblings, never one inside the other. */
+.askc.folded.withd { grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 4px; padding-inline-end: 8px; }
+.askc.folded.withd > .fwait { grid-column: 1 / -1; }
+.askc.folded.withd > .sline, .askc.folded > .sline.dline { grid-column: 1 / -1; padding: 0 16px 8px; }
+/* The Marked read line keeps the row's place until the next load, at the folded row's height. */
+.askc.dropped { padding: 2px 8px 2px 16px; background: transparent; border-style: dashed; border-color: var(--faint); }
+.askc.dropped:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.askc.dropped .sline { min-height: 44px; }
+.askc.dropped .sline > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.askc.dropped .sline .dt { color: var(--muted); }
+.asklist.dlist .askc.folded { background: transparent; border-style: dashed; border-color: var(--faint); }
+@media (max-width: 520px) {
+  /* With a side press, the row has no room for "Show answer" on a phone: the words stay in the row button's name, and the row is the press. */
+  .askc.folded.withd .frow { grid-template-columns: auto minmax(0, 1fr); padding-inline-end: 4px; }
+  .askc.folded.withd .frow .fwhen { grid-column: 2; grid-row: 2; }
+  .askc.folded.withd .frow .fgo { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+  .askc.dropped .sline > span { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .askc.dropped .sline .btn { grid-column: 3; grid-row: 1; }
+  .askc.dropped .sline { grid-template-columns: auto minmax(0, 1fr) auto; }
+}
+.reline { margin: 0; font-size: 14.5px; color: var(--muted); overflow-wrap: anywhere; }
+.asks .empty.unk { color: var(--due); border-color: var(--due); }
+/* The rail row for asks: the head of an overview tier, no chips. With no waiting ask it is grey, as an empty tier is. */
+.ov-tier.zero .ov-head { color: var(--muted); }
+/* The routed line extends the ask's folded row with a side press (.askc.folded.withd), so an ask and an item share one shape.
+   The row button holds two text lines: what it was with its home, then the short reply. Mark read is the side press. */
+.askc.folded.withd.rline .frow { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto auto; align-items: start; row-gap: 2px; padding-block: 8px; }
+.askc.rline .frow > .g { margin-top: 7px; }
+.frow .fhead { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.frow .fhead .ftext { flex: 0 1 auto; }
+/* From 701px the head is one row: a long text shrinks and is cut with an ellipsis, so the number, the new mark and the home keep their place. Under 701px the head wraps. With the New reply mark drawn, a one-row head leaves the title under 60 px below about 665px, so the break sits at 701px, a round figure above that width with a margin. Its other widths are 520px and 960px, so 701px is this rule's own choice. */
+@media (min-width: 701px) {
+  .frow .fhead { flex-wrap: nowrap; }
+  .frow .fhead .ftext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .frow .fhead .fno, .frow .fhead .newmark { flex: none; }
+  .frow .fhead .hometag { flex: 0 0 auto; max-width: 40%; }
+}
+.frow .fno { font: 600 13.5px var(--mono); color: var(--acc); white-space: nowrap; }
+.frow .freply { grid-column: 2; grid-row: 2; min-width: 0; font-size: 14.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.askc.folded.withd.rline .frow .fgo { grid-column: 3; grid-row: 1 / span 2; align-self: center; }
+/* The home: a neutral pill, its word "Home:" in a .sr span. A line with no home says so on a dashed edge. */
+.hometag { display: inline-flex; align-items: center; min-height: 22px; max-width: 100%; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--chip); color: var(--ink); font-size: 13px; font-weight: 600; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hometag.none { background: transparent; border-style: dashed; border-color: var(--faint); color: var(--muted); }
+.frow .newmark { min-height: 22px; font-size: 13px; line-height: 19px; }
+/* Mark read keeps the box of its widest label (.fixw), so "Marking…" moves nothing. */
+.rline > .btn.dismiss { white-space: nowrap; }
+/* The opened line: the open ask card's shape, with its home and number in the head. */
+.askc.rline.ropen .ahead .fno { font: 600 13.5px var(--mono); color: var(--acc); }
+.askc.rline.ropen .rtitle { margin: 0; font: 600 16px/1.4 var(--body); max-width: 70ch; }
+.askc.rline.ropen .thread { display: grid; gap: 6px; padding: 10px 12px; border-radius: 8px; background: var(--ground); min-width: 0; }
+.askc .thread .filed a { color: var(--acc); }
+/* An item line sits in the Answered section's list, beside the cards that still wait to be filed. */
+.tier.sunk .rlist .askc { scroll-margin-top: 64px; }
+.rlist > .older { margin-top: 2px; }
+.asklist.dlist.items { margin: 0; }
+.allread { margin: 0; font-size: 15px; color: var(--ink); }
+@media (max-width: 520px) {
+  .askc.folded.withd.rline .frow { grid-template-columns: auto minmax(0, 1fr); }
+  .askc.folded.withd.rline .frow .freply { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .askc.folded.withd.rline .frow .fhead .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+}
+/* The tier's order, said once under its head. Wide, it sits beside the head; on a phone it wraps under it. */
+.tier > header { flex-wrap: wrap; gap: 2px 14px; }
+.tier > header .tsub { flex: 1 1 24ch; margin: 0; font-size: 14px; color: var(--muted); max-width: 72ch; }
+/* What the answer stops, on a Blocking card and in a group head: ink and weight, so it reads beside the muted "waited". */
+.top .stops, .bundle > header .gst { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.bundle > header .gst { margin-left: 12px; font-size: 14px; white-space: nowrap; }
+/* A group member whose repo is not its sub-group's: the weight and colour of "goes with No. 4". */
+.top .inrepo { font-weight: 600; color: var(--acc); overflow-wrap: anywhere; }
+/* One sub-group per repo inside a tier: a neutral letter tile, the name, a count and a solid rule, unlike the seen divider's eye and dotted rule. */
+.subgrp { display: grid; gap: 12px; padding-top: 6px; min-width: 0; }
+.subhead { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 28px; margin: 0; font: 700 15px/1.3 var(--body); color: var(--ink); }
+.subhead .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.subhead .ct { font: 600 12px var(--mono); color: var(--muted); }
+.subhead .rule { flex: 1 1 0; min-width: 24px; border-top: 1px solid var(--line); }
+.rmark { flex: none; width: 22px; height: 22px; border-radius: 6px; background: var(--chip); color: var(--ink); display: grid; place-items: center; font: 800 12px/1 var(--wm); }
+/* The rail: each repo's run of chips starts with the same tile and the name, and the run wraps as one so a phone row never ends on a lone tile. */
+.rrun { display: inline-flex; flex-wrap: wrap; gap: 6px; max-width: 100%; min-width: 0; }
+@media (min-width: 961px) { .rrun { display: flex; flex-direction: column; gap: 4px; } }
+.rrepo { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; min-height: 32px; color: var(--muted); font: 600 13px var(--body); }
+.rrepo .rmark { width: 20px; height: 20px; font-size: 11px; }
+/* The name shows at every size: two repos may share a first letter, so the tile alone never names a repo. */
+.rrepo .rn { min-width: 0; max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (pointer: coarse) { .rrepo { min-height: 44px; } }
+@media (min-width: 961px) { .rrepo { min-height: 26px; margin-top: 4px; } .chips-n > .rrun:first-child .rrepo { margin-top: 0; } .rrepo .rn { max-width: none; } }
+</script>
+
+<script type="text/plain" id="newcss">
+/* ---- New: the Taken for you area ---- */
+/* Its own shape: an undo arrow, unlike the square, triangle, ring, dot, check and diamond of the other sections. */
+svg.g.taken { width: 14px; height: 14px; color: var(--muted); }
+.tier.taken { gap: 10px; }
+.tier.taken > header { display: grid; gap: 2px; }
+.tier.taken > header h2 { font: 700 17px/1.25 var(--body); }
+/* A taken card takes a ruling card's size and ground. A pick you have not reviewed carries an accent edge; the sub-line names the edge once. */
+.card.tcard { padding: 14px 16px; gap: 8px; }
+.card.tcard:not(.answered) { background: color-mix(in srgb, var(--surface) 55%, var(--ground)); }
+.card.tcard.fresh { border-left: 5px solid var(--acc); }
+.tcard .title { font-size: 17px; max-width: 60ch; }
+.tcard.armed { border-color: var(--acc); box-shadow: inset 0 0 0 1px var(--acc); }
+.tcard.ended .title { color: var(--muted); }
+.tcard .top .by b { color: var(--ink); font-weight: 600; }
+/* Took / Changes: a label column and the words, so the pick reads first. */
+.tk { margin: 0; display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); gap: 2px 10px; align-items: baseline; max-width: 72ch; }
+.tk .lbl { font-size: 14px; color: var(--muted); }
+.tk.took > :last-child { font-weight: 600; font-size: 15.5px; overflow-wrap: anywhere; }
+.tk.chg > :last-child { font-size: 14.5px; color: var(--muted); overflow-wrap: anywhere; }
+@media (max-width: 520px) { .tk { grid-template-columns: minmax(0, 1fr); } }
+.tcard .stake.due { font-size: 14.5px; }
+.tk.nol { grid-template-columns: minmax(0, 1fr); }
+.ifover { margin: 0; max-width: 72ch; font-size: 14.5px; color: var(--muted); display: flex; gap: 8px; align-items: baseline; }
+.ifover svg.g.taken { flex: none; position: relative; top: 2px; }
+.ifover b { color: var(--ink); font-weight: 600; }
+.endline { margin: 0; display: flex; gap: 10px; align-items: baseline; font-size: 14.5px; color: var(--muted); max-width: 72ch; }
+.endline b { color: var(--ink); }
+.tcard .ctx { font-size: 14.5px; color: var(--muted); padding: 8px 12px; border-radius: 8px; background: var(--ground); }
+.tgrp { display: grid; gap: 10px; min-width: 0; }
+.older-fold { margin-top: 4px; }
+/* The ready line shares the foot's cell with "Recorded in", so a card reserves no empty row; a press swaps the two and moves nothing. */
+.rfoot .tfl { flex: 1 1 12rem; min-width: 0; }
+.rfoot .tfl .dest { border: 0; padding: 0; }
+.tcard.armed .rfoot .tfl .dest { visibility: hidden; }
+/* Sample labels: dashed "Today:" for what exists, "New:" for what this step adds. */
+[data-new], [data-today] { position: relative; outline: 2px dashed #7c3aed; outline-offset: 3px; }
+[data-today] { outline-color: #0f766e; }
+[data-new]::after, [data-today]::after { position: absolute; z-index: 6; left: 4px; top: -11px; padding: 1px 6px; border-radius: 4px; font: 600 11px/1.4 system-ui, sans-serif; color: #fff; white-space: nowrap; pointer-events: none; }
+[data-new]::after { content: "New: " attr(data-new); background: #6d28d9; }
+[data-today]::after { content: "Today: " attr(data-today); background: #0f766e; }
+html.nolab [data-new], html.nolab [data-today] { outline: none; }
+html.nolab [data-new]::after, html.nolab [data-today]::after { display: none; }
+</script>
+
+<script>
+// page.html's fmt, word for word: US Central, 24-hour, with the zone's short name.
+function fmt(iso, withDay = true) {
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  const p = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "short" }).formatToParts(d);
+  const g = (t) => (p.find((x) => x.type === t) || {}).value;
+  return (withDay ? g("month") + " " + g("day") + ", " : "") + g("hour") + ":" + g("minute") + " " + g("timeZoneName");
+}
+const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+const TAKEN_SVG = '<svg class="g taken" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>';
+// Pinned "now", so the 24-hour split is the same on every load.
+const NOW = Date.parse("2026-11-18T19:30:00-06:00");
+const DAY = 24 * 3600 * 1000;
+const SENT_AT = "2026-11-18T19:31:00-06:00";
+
+// The proposed item shape: `taken` marks a taken pick (it replaces the id prefix and the title words).
+// taken = { by, at, what, against?, ended?, over }. `over` is the overrule option's words; `lastAnswer` is today's field.
+const TAKEN = [
+  { id: "sample-rerun-flaky", n: 912, title: "The batch runner reruns a failed check once before it calls the run red", home: "step rerun-once-sample", owner: "coordinator",
+    taken: { by: "coordinator", at: "2026-11-18T16:40:00-06:00", what: "A check that fails once is run once more; only a second fail turns the run red.", changes: "main calls a run red on the first failed check.",
+      over: "the first fail turns the run red again, and a lane removes the rerun step." },
+    ctx: "Problem (rule): the coordinator took this pick for you under your words \"Nothing can't be undone don't wait on me\". It changes when a run counts as red.\nBased on: two runs on Nov 18 that failed once and passed on a rerun." },
+  { id: "sample-mockup-home", n: 911, title: "Design mockups stay in the scratchpad until a lane lands them", home: "ruling sample-mockup-home", owner: "consultant",
+    taken: { by: "consultant", at: "2026-11-18T11:05:00-06:00", against: "You typed A on No. 905: commit each mockup to the design folder.",
+      what: "A designer writes each mockup in its scratchpad; the lane that builds the screen commits it.", changes: "a designer commits each mockup to the design folder.",
+      over: "each mockup is committed as you typed, and a lane moves the 3 mockups that sit in scratchpads now." },
+    ctx: "Problem (rule): you typed A on No. 905. The consultant read your later note as handing it the pick, and picked another way. It is the consultant's reading, not your typed words." },
+  { id: "taken-debt-close-route-a", n: 855, title: "A debt close reads the ready PR's CI result (route A)", home: "ruling coord-debt-close-route-a; step debt-close-reads-ci", owner: "coordinator",
+    taken: { by: "coordinator", at: "2026-11-14T21:20:00-06:00", what: "--ready defers the debt close for a draft; the ready PR's CI step judges every close; confirm refuses a missing, running, red, wrong-head or unreadable result.",
+      changes: "a debt close on a draft runs its Retire test; the pick defers it to the ready PR's CI.", over: "the rebuild on top of #3251 (step debt-close-reads-ci) stops until you choose." },
+    lastAnswer: { who: "you", at: "2026-11-15T17:39:47Z" },
+    ctx: "Problem (rule): the coordinator took this pick for you, not typed by you, under your 15:06 CST Nov 14 chat question, your 20:17 goal and your 20:18 words." },
+  { id: "taken-791-2-revert-first", n: 856, title: "Narrow first on --base-red-ok", home: "ruling own-791-2-narrow-revert-first; step allow-merge-base-red-ok", owner: "consultant",
+    taken: { by: "consultant", at: "2026-11-14T20:34:00-06:00", against: "You typed B on No. 791: keep as written.",
+      what: "Narrow first: a lane adds the merge-tool check that a --base-red-ok PR reverts the breaking merge.", changes: "--base-red-ok asks before a merge lands on a red main; the pick adds a check that the PR reverts the breaking merge.",
+      ended: "Your ruling of Nov 17, 09:20 CST replaced it: a proven fix may merge on a red main." },
+    ctx: "Problem (rule): you typed B on item 791, with the note \"ask consultsnt for a or b and why\". The consultant read that note as handing it the pick, picked another way, and told you so in chat at 20:33 CST Nov 14." },
+  { id: "taken-837-d-send-later", n: 854, title: "Session waits count send_later only; four tools stay for event waits", home: "ruling coord-837-d-send-later-session-waits; step ci-wait-stop-needs-checkin", owner: "coordinator",
+    taken: { by: "coordinator", at: "2026-11-14T20:20:00-06:00", what: "send_later only for a session's own waits; create_trigger, CronCreate and ScheduleWakeup stay for event waits.",
+      changes: "the Stop check reads only the tool name; the pick makes it tell session waits from event waits.", over: "you choose from the options on No. 837 again, and the build under step ci-wait-stop-needs-checkin waits for you." },
+    lastAnswer: { who: "the consultant, on your word", at: "2026-11-16T19:35:54Z" },
+    ctx: "Problem (rule): the coordinator took this pick for you under your 20:18 words, not typed by you. It was none of the options posted; triage added it from the coordinator's words." },
+  { id: "taken-836-b-one-wait", n: 853, title: "The Stop check keeps one wait per ready PR", home: "ruling own-853-a-keep-836-b-one-wait; step ci-wait-stop-needs-checkin", owner: "coordinator",
+    taken: { by: "coordinator", at: "2026-11-14T20:20:00-06:00", what: "The Stop check keeps one wait per ready PR.",
+      changes: "the Stop check demands a check-in per waiting session; the pick narrows it to one wait per ready PR.", over: "you choose the Stop check again on No. 836, and the build under step ci-wait-stop-needs-checkin stops until you choose." },
+    lastAnswer: { who: "you", at: "2026-11-15T17:57:48Z" },
+    ctx: "Problem (rule): the coordinator took this pick for you under your 20:18 words, not typed by you. It changes what the Stop check demands of a session that waits on a ready PR." },
+  { id: "taken-830-c-narrowed", n: 857, title: "The records-only CI skip was built narrower than your \"every job\"", home: "ruling own-830-c-ci-scope-green-before-head; step ci-scope-skips-records-only-push", owner: "coordinator",
+    taken: { by: "coordinator", at: "2026-11-14T17:15:00-06:00", against: "You chose c on No. 830: skip every job.",
+      what: "The skip gates only the jobs main already scopes, plus the merge, rest and mutation-report jobs; the md-reading steps and the Windows guard job still run.",
+      changes: "all jobs run on every push; the build skips part of them on a records-only push, less than you chose.",
+      ended: "The wider skip you chose is built: PR #3568 merged Nov 16, 09:57 CST." },
+    ctx: "Problem (rule): you chose c (\"every job\") knowingly. The coordinator's own pick of 17:15 CST narrowed the build, undoable, and you had not been told." },
+];
+// The arbiter ruling that sits in its own section today. Merged, it joins this area.
+const RULING = { id: "shot-home", n: 90, title: "Where do a review's screenshots go?", home: "screenshot-home", ruled: "2026-11-17T16:05:00-06:00",
+  letter: "A", label: "In the pull request only", why: "A screenshot proves one review. The repo keeps the mockup, which stays true." };
+const OPEN = [{ id: "report-home", n: 913, title: "Where should the nightly report land?", added: "2026-11-18T18:10:00-06:00" }];
+
+const fresh = (it) => !it.lastAnswer && !it.taken.ended;
+const takenAt = (it) => Date.parse(it.taken ? it.taken.at : it.ruled);
+
+/* ---------- The drawn screen ---------- */
+// One act name for both kinds of card (#n=overrule|overturn). Today's Arbiter rulings say Overturn.
+let W = "Overrule";
+const w = () => W.toLowerCase();
+// Label once (house rule ux-label-once): a card label shows on its first card only; later cards keep it for a screen reader, and its shape or weight carries it.
+let seenLbl = {};
+const once = (k) => { const first = !seenLbl[k]; seenLbl[k] = true; return first ? "" : " sr"; };
+function openCard(it) {
+  const lead = it.lead ? `<p class="stake due"><span class="g due" aria-hidden="true"></span><span>${esc(it.lead)}</span></p>` : "";
+  return `<article class="card" id="item-${it.id}" aria-labelledby="t-${it.id}"${it.lab ? ` data-new="${it.lab}"` : ""}><div class="top"><span class="num">No. ${it.n}</span><span>${it.age || "waited 1 hour"}</span></div><h3 class="title" id="t-${it.id}">${esc(it.title)}</h3>${lead}<p class="ctx">An open question, drawn short. Its options and Send stay as today.</p></article>`;
+}
+// A taken card. st: "" | "armed" (pressed, not sent) | "sent" (answer saved) | "kept" (routed, the card stays). lab: draw the New labels on this card.
+function takenCard(it, st, lab, P) {
+  const t = it.taken, L = (k) => (lab ? ` data-new="${k}"` : "");
+  const num = `<span class="num" aria-label="No. ${it.n}, a pick taken for you by the ${esc(t.by)}">No. ${it.n}</span>`;
+  const title = `<h3 class="title" id="t-${it.id}">${esc(it.title)}</h3>`;
+  const took = `<p class="tk took${once("took") ? " nol" : ""}"${L("the pick, from taken.what")}><span class="lbl${once("tookw")}">Took</span><span>${esc(t.what)}</span></p>`;
+  if (st === "sent") {
+    return `<article class="card rcard tcard answered" id="item-${it.id}" aria-labelledby="t-${it.id}"><div class="top">${num}<span class="ans" data-today="answered style">Answered, filing pending <span class="t">${fmt(SENT_AT)}</span></span></div>${title}${took}
+      <div class="receipt"><div class="line"><span class="g done" aria-hidden="true"></span><b data-new="receipt words">You ${w()}d it.</b><button class="btn quiet changebtn" type="button" data-today="Change">Change</button></div>
+      <p class="rnote" data-new="what happens next">${P.r === "keep" ? `Next: the ${esc(t.by)} opens your earlier question again as a new item, and this card stays here, marked.` : `Next: the ${esc(t.by)} reopens this as a question in its tier, with your earlier options, and the card leaves this list.`}</p></div></article>`;
+  }
+  if (st === "kept") {
+    return `<article class="card rcard tcard ended" id="item-${it.id}" aria-labelledby="t-${it.id}" data-new="route: the card stays, marked"><div class="top">${num}<span class="by">taken by <b>${esc(t.by)}</b> <time datetime="${t.at}">${fmt(t.at)}</time></span></div>${title}${took}
+      <p class="endline"><span class="g done" aria-hidden="true"></span><span><b>You ${w()}d it ${fmt(SENT_AT)}.</b> Your question is open again as <a href="#item-reopened">No. 914</a> in Whenever.</span></p>
+      <div class="rfoot"><div class="readybox tfl"><p class="dest">Recorded in ${esc(it.home)}.</p></div></div></article>`;
+  }
+  const armed = st === "armed";
+  let body = `<div class="top">${num}<span class="by"${L("who took it, and when")}>taken by <b>${esc(t.by)}</b> <time datetime="${t.at}">${fmt(t.at)}</time></span></div>${title}`;
+  if (t.against) body += `<p class="stake due"${L("against your answer")}><span class="g due" aria-hidden="true"></span><span><b class="${once("against").trim()}">Against your answer. </b>${esc(t.against)}</span></p>`;
+  body += took;
+  body += `<p class="tk chg${once("chg") ? " nol" : ""}"><span class="lbl${once("chgw")}">Changes</span><span>${esc(t.changes)}</span></p>`;
+  if (it.lastAnswer) body += `<div class="receipt last"${L("your last answer")}><p class="lhead">Your last answer, ${fmt(it.lastAnswer.at)}</p><div class="line"><b>${it.lastAnswer.who === "you" ? "You kept it." : "Kept by " + esc(it.lastAnswer.who) + "."}</b></div></div>`;
+  if (t.ended) body += `<p class="endline"${L("no longer stands: no " + W)}><span class="g done" aria-hidden="true"></span><span><b class="${once("ended").trim()}">No longer stands. </b>${esc(t.ended)}</span></p>`;
+  else body += `<p class="ifover"${L("what " + W + " does")}>${TAKEN_SVG}<span><b class="${once("ifover").trim()}">If you ${w()}: </b>${esc(t.over)}</span></p>`;
+  body += `<button class="morebtn" type="button" aria-expanded="false" aria-controls="ctx-${it.id}">Show the full reasoning</button><p class="ctx" id="ctx-${it.id}" hidden>${esc(it.ctx)}</p>`;
+  body += `<div class="rfoot"><div class="readybox tfl"><p class="dest">Recorded in ${esc(it.home)}.</p>${t.ended ? "" : `<p class="ready${armed ? " on" : ""}" aria-live="polite">${armed ? "Ready to send: " + w() + "." : ""}</p>`}</div>${t.ended ? "" : `<button class="btn dash act-taken" type="button" id="b-over-${it.id}" aria-pressed="${armed}" aria-label="${W} the pick on No. ${it.n}"${L(W + ", never pressed on load")}>${W}</button>`}</div>`;
+  return `<article class="card rcard tcard${fresh(it) ? " fresh" : ""}${t.ended ? " ended" : ""}${armed ? " armed" : ""}" id="item-${it.id}" aria-labelledby="t-${it.id}">${body}</article>`;
+}
+// The arbiter's ruling. inArea: drawn inside the Taken area (merged); else in its own section, as today.
+function rulingCard(r, inArea) {
+  return `<article class="card rcard${inArea ? " tcard" : ""}" id="item-${r.id}" aria-labelledby="t-${r.id}"><div class="top"><span class="num">No. ${r.n}</span><span${inArea ? ' data-new="the arbiter is one more taker"' : ""}>${inArea ? "taken by <b>the arbiter</b> " : "ruled "}<time datetime="${r.ruled}">${fmt(r.ruled)}</time></span></div>
+    <h3 class="title" id="t-${r.id}">${esc(r.title)}</h3><p class="ruledline"><span class="key">${r.letter}</span><b>${esc(r.label)}</b></p><p class="rwhy">${esc(r.why)}</p><p class="ready" aria-live="polite"></p>
+    <div class="rfoot"><p class="dest">Recorded in ${esc(r.home)}.</p><button class="btn dash act-ruling" type="button" aria-pressed="false" aria-label="${W} the ruling on No. ${r.n}"${!inArea && W === "Overturn" ? ' data-today="Overturn"' : !inArea ? ' data-new="Overturn renamed"' : ""}>${W}</button></div></article>`;
+}
+// Which taken items the area lists in this state.
+function takenList(P) {
+  if (P.s === "empty") return [];
+  let l = [...TAKEN, ...(P.p === "merged" ? [RULING] : [])];
+  if (P.s === "routed" && P.r === "reopen") l = l.filter((it) => it.n !== 912);
+  return l.sort((a, b) => takenAt(b) - takenAt(a) || b.n - a.n);
+}
+function takenArea(P) {
+  const empty = P.s === "empty", merged = P.p === "merged", list = takenList(P);
+  if (empty && P.e === "none") return "";
+  const recent = list.filter((it) => NOW - takenAt(it) <= DAY), older = list.filter((it) => NOW - takenAt(it) > DAY);
+  const nFresh = list.filter((it) => it.taken && fresh(it)).length;
+  const stOf = (it) => (it.n !== 912 ? "" : P.s === "pressed" ? "armed" : P.s === "overruled" ? "sent" : P.s === "routed" && P.r === "keep" ? "kept" : "");
+  const card = (it) => (it.taken ? takenCard(it, stOf(it), it.n === 911 || it.n === 856, P) : rulingCard(it, true));
+  const head = (name, n, id, lab) => `<p class="subhead" id="${id}"${lab ? ` data-new="${lab}"` : ""}><span class="nm">${name}</span><span class="ct">${n}</span><span class="rule" aria-hidden="true"></span></p>`;
+  let body = "";
+  if (empty) body = `<p class="empty" id="taken-empty" data-new="empty state">No session has taken a pick for you. When one does, it shows here, and you can ${w()} it.</p>`;
+  else {
+    if (recent.length) body += `<section class="tgrp" role="group" aria-labelledby="tg-recent">${head("Last 24 hours", recent.length, "tg-recent", "newest first, by taken.at")}${recent.map(card).join("")}</section>`;
+    if (older.length) {
+      const folded = P.o === "folded";
+      body += `<section class="tgrp" role="group" aria-labelledby="tg-older" id="older-taken">${head("Older", older.length, "tg-older")}`;
+      if (folded) body += `<button class="unfold older older-fold" type="button" id="olderBtn" aria-expanded="false" aria-controls="olderList"><span class="chev" aria-hidden="true"></span><span class="uf-labels"><span class="uf-show">Show ${older.length} older picks</span><span class="uf-hide">Hide older picks</span></span></button>`;
+      body += `<div class="tgrp" id="olderList"${folded ? " hidden" : ""}>${older.map(card).join("")}</div></section>`;
+    }
+  }
+  const sub = empty ? "" : `Picks a session took for you, newest first. Each stands unless you ${w()} it.${nFresh ? ` ${nFresh} not reviewed yet, marked by the edge.` : ""}`;
+  return `<section class="tier taken" id="tier-taken" aria-labelledby="th-taken" data-new="${merged ? "one area: sessions and the arbiter" : P.p === "below" ? "after Arbiter rulings" : "before Answered"}">
+    <header><h2 id="th-taken"><button class="rhead" type="button" aria-expanded="true" aria-controls="tb"><span class="chev" aria-hidden="true"></span>${TAKEN_SVG}Taken for you<span class="ct">${list.length}</span></button></h2>${sub ? `<p class="rsub">${sub}</p>` : ""}</header>
+    <div class="rlist" id="tb">${body}</div></section>`;
+}
+function answeredSec() {
+  return `<section class="tier sunk" id="tier-answered" aria-labelledby="th-answered"><header><h2 id="th-answered"><button class="rhead" type="button" aria-expanded="true"><span class="chev" aria-hidden="true"></span><span class="g done" aria-hidden="true"></span>Answered<span class="ct">1</span></button></h2><p class="rsub">Your sent answers, newest first.</p></header>
+    <div class="rlist" data-new="no taken item here any more"><article class="askc folded withd rline"><button class="frow" type="button" aria-expanded="false"><span class="g done" aria-hidden="true"></span><span class="fhead"><span class="fno">No. 905</span><span class="ftext">Where do design mockups live?</span><span class="hometag">step mockup-home</span></span><span class="freply">Filed Nov 18, 10:40 CST.</span><span class="fgo">Show answer</span></button><button class="btn quiet dismiss" type="button">Mark read</button></article></div></section>`;
+}
+function rulingsSec() {
+  return `<section class="tier ruled" id="tier-ruled" aria-labelledby="th-ruled"><header><h2 id="th-ruled"><button class="rhead" type="button" aria-expanded="true"><span class="chev" aria-hidden="true"></span><span class="g ruled" aria-hidden="true"></span>Arbiter rulings<span class="ct">1</span></button></h2><p class="rsub">Each stands unless you ${w()} it.</p></header><div class="rlist">${rulingCard(RULING, false)}</div></section>`;
+}
+// The open items: after a routed overrule, the reopened question joins Whenever.
+function openList(P) {
+  if (P.s !== "routed") return OPEN;
+  const t = TAKEN[0].taken;
+  const re = P.r === "keep"
+    ? { id: "reopened", n: 914, title: "When does the batch runner call a run red?", age: "new", lead: `You ${w()}d the ${t.by}'s pick on No. 912 at ${fmt(SENT_AT)}.`, lab: "route: a new item" }
+    : { id: "reopened", n: 912, title: "When does the batch runner call a run red?", age: "new", lead: `The ${t.by} took "${t.what}" You ${w()}d it at ${fmt(SENT_AT)}.`, lab: "route: the same item, open again" };
+  return [re, ...OPEN];
+}
+function rail(P) {
+  const open = openList(P), showArea = !(P.s === "empty" && P.e === "none");
+  const row = (k, g, name, ct, lab) => `<div class="ov-tier"${lab ? ` data-new="${lab}"` : ""}><a class="ov-head" href="#tier-${k}" aria-label="${ct} ${name}">${g}${name}<span class="ct">${ct}</span></a></div>`;
+  const taken = showArea ? row("taken", TAKEN_SVG, "Taken for you", takenList(P).length, "rail row, no chips") : "";
+  const ans = row("answered", '<span class="g done" aria-hidden="true"></span>', "Answered", 1), rul = P.p === "merged" ? "" : row("ruled", '<span class="g ruled" aria-hidden="true"></span>', "Arbiter rulings", 1);
+  let out = `<div class="ov-prog"><div class="big"><b>0</b>of ${open.length} sent</div><div class="sub none"><i class="sw"></i>0 ready to send</div><div class="track" aria-hidden="true"><i class="s" style="width:0%"></i><i class="r" style="width:0%"></i></div></div>`;
+  out += `<div class="ov-tier"><a class="ov-head" href="#tier-calm"><span class="g calm" aria-hidden="true"></span>Whenever<span class="ct">${open.length}</span></a><div class="chips-n">${open.map((it) => `<button type="button" class="nchip" title="${esc(it.title)}"><span class="no">${it.n}</span><span class="nt">${esc(it.title)}</span></button>`).join("")}</div></div>`;
+  out += P.p === "below" ? ans + rul + taken : taken + ans + rul;
+  return `<nav class="rail" id="rail" aria-label="Overview">${out}</nav>`;
+}
+const stays = (n) => `<b>${n}</b> ${n === 1 ? "stays" : "stay"} open.`;
+function bar(P) {
+  const armed = P.s === "pressed", open = openList(P).length;
+  const st = armed ? `<b>1</b> ready (1 ${w()}). ${stays(open)}` : stays(open);
+  const sent = P.s === "overruled" ? `<div class="sent" id="sent"><div class="in"><div class="sent-head"><span class="stamp">Sent<small>${fmt(SENT_AT, false)}</small></span><div class="sent-what"><p class="sent-line"><b>1 answer sent. </b><span>Claude was told.</span></p><ul class="sent-list"><li><span class="no">No. 912</span></li></ul></div></div><div class="row"><button class="btn alt" type="button" data-today="Undo send">Undo send (6)</button><button class="btn quiet" type="button">Close</button></div></div></div>` : "";
+  return `<div class="bar" id="bar">${sent}<div class="in"><span class="st" id="barStatus">${st}</span><button class="btn send" type="button" id="send"${armed ? "" : " disabled"}>${armed ? "Send 1 answer" : "Send answers"}</button></div></div>`;
+}
+function screen(P, theme, lab) {
+  W = P.n === "overturn" ? "Overturn" : "Overrule"; seenLbl = {};
+  const open = openList(P), area = takenArea(P), parts = P.p === "below" ? [answeredSec(), rulingsSec(), area] : P.p === "merged" ? [area, answeredSec()] : [area, answeredSec(), rulingsSec()];
+  return `<!doctype html><html lang="en" data-theme="${theme}" class="${lab ? "" : "nolab"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Questions</title><style>${document.getElementById("pagecss").textContent}${document.getElementById("newcss").textContent}</style></head><body>
+<header class="hdr"><div class="in"><div class="mark" aria-hidden="true">C</div><div class="who"><h1 class="repo">claude-settings</h1></div></div></header>
+<nav class="in tabs" aria-label="Page"><a href="#" aria-selected="true">Questions <span class="cnt">${open.length}</span></a><a href="#" aria-selected="false">Status</a></nav>
+<div class="in main">${rail(P)}<div class="list" id="list">
+<section class="tier" id="tier-calm" aria-labelledby="th-calm"><header><h2 id="th-calm"><span class="g calm" aria-hidden="true"></span>Whenever<span class="ct">${open.length}</span></h2></header>${open.map(openCard).join("")}</section>
+${parts.filter(Boolean).join("\n")}
+<p class="checked">Drawn on page.html as read Nov 18</p></div></div>
+${bar(P)}</body></html>`;
+}
+
+/* ---------- Harness ---------- */
+const STATES = ["cards", "pressed", "overruled", "routed", "empty"];
+// Each option row: hash key, its values (first is the pick). A value names the option and is what Hide removes.
+const ROWS = { p: ["above", "below", "merged"], o: ["open", "folded"], n: ["overrule", "overturn"], r: ["reopen", "keep"], e: ["show", "none"] };
+const P = { s: "cards", p: "above", o: "open", n: "overrule", r: "reopen", e: "show", w: "all", t: "", lab: "on", hide: [] };
+const ALLV = Object.values(ROWS).flat();
+function readHash() {
+  new URLSearchParams(location.hash.slice(1)).forEach((v, k) => { if (k === "hide") P.hide = v.split(",").filter((x) => ALLV.includes(x)); else if (k in P) P[k] = v; });
+  if (!STATES.includes(P.s)) P.s = "cards";
+  Object.entries(ROWS).forEach(([k, vs]) => { if (!vs.includes(P[k])) P[k] = vs[0]; });
+}
+function writeHash() { const q = new URLSearchParams({ s: P.s, p: P.p, o: P.o, n: P.n, r: P.r, e: P.e, w: P.w }); if (P.t) q.set("t", P.t); if (P.lab === "off") q.set("lab", "off"); if (P.hide.length) q.set("hide", P.hide.join(",")); history.replaceState(null, "", "#" + q); }
+const theme = () => P.t || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+function frame(wd) {
+  const box = document.createElement("div"); box.className = "fr";
+  const cap = document.createElement("b"); cap.textContent = (wd === 390 ? "Phone" : "Desktop") + " " + wd + ", " + theme();
+  const wrap = document.createElement("div"); wrap.className = "fw";
+  const f = document.createElement("iframe"); f.title = "Waiting page at " + wd + " wide"; f.style.width = wd + "px";
+  wrap.append(f); box.append(cap, wrap); document.getElementById("stage").append(box);
+  const fit = () => {
+    const avail = Math.min(document.getElementById("stage").clientWidth - 32, wd), sc = avail / wd;
+    let hgt = 900;
+    try { const d = f.contentDocument; hgt = d.documentElement.scrollHeight + (P.s === "overruled" ? (d.getElementById("sent") || {}).offsetHeight || 0 : 0); } catch (e) {}
+    f.style.height = hgt + "px"; f.style.transform = "scale(" + sc + ")";
+    wrap.style.width = Math.ceil(wd * sc) + 2 + "px"; wrap.style.height = Math.ceil(hgt * sc) + 2 + "px";
+  };
+  f.addEventListener("load", () => { wire(f.contentDocument, fit); fit(); setTimeout(fit, 200); });
+  f.srcdoc = screen(P, theme(), P.lab !== "off");
+  addEventListener("resize", fit);
+}
+// In the frame: the act button toggles the pending state (a second press clears it); the reasoning and the Older fold open in place.
+function wire(doc, fit) {
+  const status = doc.getElementById("barStatus"), send = doc.getElementById("send"), open = openList(P).length, word = W.toLowerCase();
+  const sync = () => {
+    const n = doc.querySelectorAll(".act-taken[aria-pressed='true'], .act-ruling[aria-pressed='true']").length;
+    status.innerHTML = n ? `<b>${n}</b> ready (${n} ${word}). ${stays(open)}` : stays(open);
+    send.disabled = !n; send.textContent = n ? "Send " + n + (n === 1 ? " answer" : " answers") : "Send answers";
+  };
+  doc.querySelectorAll(".act-taken, .act-ruling").forEach((b) => b.addEventListener("click", () => {
+    const on = b.getAttribute("aria-pressed") !== "true", card = b.closest(".rcard");
+    b.setAttribute("aria-pressed", String(on)); card.classList.toggle("armed", on);
+    const r = card.querySelector(".ready"); if (r) { r.classList.toggle("on", on); r.textContent = on ? "Ready to send: " + word + "." : ""; }
+    sync();
+  }));
+  doc.querySelectorAll(".morebtn").forEach((b) => b.addEventListener("click", () => { const p = doc.getElementById(b.getAttribute("aria-controls")), on = p.hidden; p.hidden = !on; b.setAttribute("aria-expanded", String(on)); b.textContent = on ? "Hide the full reasoning" : "Show the full reasoning"; fit(); }));
+  const ob = doc.getElementById("olderBtn");
+  if (ob) ob.addEventListener("click", () => { const on = ob.getAttribute("aria-expanded") !== "true"; ob.setAttribute("aria-expanded", String(on)); doc.getElementById("olderList").hidden = !on; fit(); });
+  doc.querySelectorAll(".rhead").forEach((h) => h.addEventListener("click", () => { const on = h.getAttribute("aria-expanded") !== "true"; h.setAttribute("aria-expanded", String(on)); const l = h.closest("section").querySelector(".rlist"); if (l) l.hidden = !on; fit(); }));
+}
+function render() {
+  Object.entries(ROWS).forEach(([k, vs]) => { if (P.hide.includes(P[k])) P[k] = vs.find((x) => !P.hide.includes(x)) || vs[0]; });
+  writeHash();
+  document.documentElement.dataset.theme = theme();
+  const name = { above: "before Answered", below: "after rulings", merged: "merged", open: "open", folded: "folded", overrule: "Overrule", overturn: "Overturn", reopen: "reopen in place", keep: "card stays", show: "shown", none: "hidden" };
+  document.querySelectorAll("[data-s]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.s === P.s)));
+  Object.keys(ROWS).forEach((k) => document.querySelectorAll(`[data-${k}]`).forEach((b) => { const v = b.dataset[k]; b.hidden = P.hide.includes(v); b.setAttribute("aria-pressed", String(v === P[k])); }));
+  document.querySelectorAll("[data-hide]").forEach((b) => { b.textContent = (P.hide.includes(b.dataset.hide) ? "Show " : "Hide ") + name[b.dataset.hide]; });
+  document.querySelectorAll("[data-w]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.w === P.w)));
+  document.querySelectorAll("[data-t]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.t === theme())));
+  const lb = document.getElementById("labBtn"); lb.textContent = P.lab === "off" ? "Labels off" : "Labels on"; lb.setAttribute("aria-pressed", String(P.lab !== "off"));
+  document.getElementById("stage").replaceChildren();
+  (P.w === "all" ? [390, 1280] : [Number(P.w) === 1280 ? 1280 : 390]).forEach(frame);
+}
+document.querySelector(".tool").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.s) P.s = b.dataset.s;
+  Object.keys(ROWS).forEach((k) => { if (b.dataset[k]) P[k] = b.dataset[k]; });
+  if (b.dataset.w) P.w = b.dataset.w;
+  if (b.dataset.t) P.t = b.dataset.t;
+  if (b.dataset.lab) P.lab = P.lab === "off" ? "on" : "off";
+  if (b.dataset.hide) { const k = b.dataset.hide; P.hide = P.hide.includes(k) ? P.hide.filter((x) => x !== k) : [...P.hide, k]; }
+  render();
+});
+addEventListener("hashchange", () => { readHash(); render(); });
+readHash(); render();
+</script>
+</body>
+</html>
