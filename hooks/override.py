@@ -129,7 +129,14 @@ ROLE_WORDS = re.compile(r"[A-Za-z][\w\u2019'-]*")
 NEGATIONS = {"not", "no", "never", "except", "without", "dont", "don't", "don\u2019t",
              "excluding", "exclude", "skip", "ignore", "instead", "rather", "besides", "minus"}
 OVERRIDE_NEGATIONS = NEGATIONS | {"off"}  # the override ask also reads a request to turn an override off as a negation
-MODEL_NEGATIONS = NEGATIONS | {"stop"}  # the owner's word for a model (guard.owner_names_model) also reads "stop using haiku"
+# The owner's word for a model (guard.owner_names_model) has its own negations. They are not the Opus-grant NEGATIONS: a
+# model word is negated only by a negation that stands in its own span, so "Instead use haiku" and "Skip the checks and
+# run it on haiku" name it. "instead" and "rather" negate only as the pairs in MODEL_NEGATION_PAIRS, before the model.
+MODEL_NEGATIONS = {"not", "no", "never", "except", "without", "dont", "don't", "don\u2019t", "excluding", "exclude",
+                   "skip", "ignore", "minus", "besides", "stop"}
+MODEL_NEGATION_PAIRS = {("instead", "of"), ("rather", "than")}  # negate only when they stand just before the model word
+# A span of the model word's clause ends at one of these: a negation before it reaches no further ("Not sonnet but haiku").
+MODEL_SPAN_BREAKS = {"and", "but"}
 NEGATION_SPAN = 3  # a negation within this many words before or after a role word negates it
 PLAIN_LIST = re.compile(r"(?:[\s,&]|\b(?:and|or|plus)\b)*", re.I)  # the only text that may join two role words
 SPELLED_UNIT = r"h(?:ours?|rs?)|m(?:ins?|inutes?)"

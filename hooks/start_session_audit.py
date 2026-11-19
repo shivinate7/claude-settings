@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """PostToolUse audit of a desktop session start (docs/decisions/start-session-not-pretooluse.md).
 
-After a start_session call, flags a start below the model floor (guard.floor_hit, the one reading) or one made with
-the calling session's handoff unread (reread_check.unread_handoff, the guard's own read). A flagged start prints
+After a start_session call, flags a start made with the calling session's handoff unread (reread_check.unread_handoff,
+the guard's own read). It does not flag a Haiku start: the owner's word for a model lifts the floor, and a started
+session cannot read that word (decision start-checks-after-call). A flagged start prints
 PostToolUse additionalContext that tells the calling session to stop the new session with interrupt_session or
 archive_session. A start that passes prints nothing. It never refuses and never exits 2.
 
@@ -52,16 +53,9 @@ def new_session(response):
 
 
 def reasons(payload):
-    """The flags a start earns, as short phrases: the model below the floor, and an unread handoff. Empty for a
-    start that passes."""
-    import guard
+    """The flags a start earns, as short phrases: an unread handoff. Empty for a start that passes."""
     from reread_check import unread_handoff
-    tool_input = payload.get("tool_input")
     found = []
-    if isinstance(tool_input, dict):
-        floor_model = guard.floor_hit(guard.SESSION_TOOL, tool_input)
-        if floor_model:
-            found.append("it names the model %s, below the Sonnet floor" % floor_model)
     unread = unread_handoff(payload)
     if unread:
         found.append("the calling session had not read its handoff (%s) after compaction" % unread)

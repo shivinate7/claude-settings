@@ -394,9 +394,10 @@ Other tools, in `judge` order:
                        cannot read is skipped, and an unread brief is judged as an empty brief.
                        (agent-model-cap)
   agent-model-floor, roles-third-round-steps-up
-                       deny. A spawn below the model floor, or a reviewer's later round on the wrong model. A
-                       start_session call never reaches this hook: settings.json lists it in no PreToolUse
-                       matcher, so hooks/start_session_audit.py checks its floor and handoff after the call.
+                       deny. A spawn below the model floor, or a reviewer's later round on the wrong model. The
+                       owner's last typed turn naming Haiku (owner_names_model; owner, 2026-11-18 19:03 CST) lifts the
+                       floor only, never the Opus ceiling. A start_session call never reaches this hook: settings.json
+                       lists it in no PreToolUse matcher, so hooks/start_session_audit.py checks its handoff after the call.
                        The Workflow scan is static. It reads string-literal `model` and
                        `agentType` keys, and a literal prompt, in each `agent()` call. A template
                        prompt reads its static text only. A step-up call whose prompt or model is
@@ -592,8 +593,9 @@ next refused act through, or every refused act for a time. The narrower Opus ove
 only the Opus spawn refusal, and so does a step grant on the lane's roadmap step (decision agent-model-cap).
 No override lifts `frozen-path`, `git-env-set`, a kill of pid 0, 1 or -1, the
 role and model guards (the settings-write ask of `agent-model-cap`,
-`agent-model-floor`, the no-model refusal of `agent-role-model`, `roles-third-round-steps-up`, `builder-test-edit` and the other role guards),
-or `worktree-home`. No override check reaches the missing-module deny, the `settings.json` deny list
+the no-model refusal of `agent-role-model`, `roles-third-round-steps-up`, `builder-test-edit` and the other role guards),
+or `worktree-home`. `agent-model-floor` reads no override: only the owner's typed word for the model lifts it
+(owner_names_model; owner, 2026-11-18 19:03 CST). No override check reaches the missing-module deny, the `settings.json` deny list
 or the `bin/rm` and `bin/merge` shims; each of those refusals says that no override lifts it. Every
 refusal that goes through refuse() ends with the line the owner types, or with that same sentence.
 The model judges (hooks/call_judge.py, hooks/prose_judge.py, hooks/sendmessage_state.py) refuse through
@@ -3558,8 +3560,11 @@ def script_agent_calls(script: str):
         yield prompt, bodies
 
 
+FLOOR_WORD = "haiku"  # the model word below the floor: below_the_floor and owner_names_model both read it
+
+
 def below_the_floor(model) -> bool:
-    return "haiku" in str(model).lower()
+    return FLOOR_WORD in str(model).lower()
 
 
 def floor_hit(tool: str, tool_input) -> str:
@@ -3582,35 +3587,45 @@ def floor_hit(tool: str, tool_input) -> str:
 # The owner's own word for a model (owner, 2026-11-18 19:03 CST: "if i say haiku it should work, there shouldnt be any
 # guards on a FLOOR"). A spawn the floor would refuse passes when the owner's last typed turn names that model. The word
 # lifts the floor only: the Opus ceiling (agent-model-cap) never reads it (consultant pick, same time). It covers a lane
-# start too (lane_start_hits).
-MODEL_CLAUSE_BREAK = re.compile(r"[.;,!?\n]+")  # a negation reaches only to the end of its own clause
+# start too (lane_start_hits). A started session cannot read the word, so start_check.py and start_session_audit.py do
+# not flag a Haiku start (the spawn guard already judged the owner's word).
+MODEL_CLAUSE_BREAK = re.compile(r"[.;,!?:\n\u2013\u2014]+")  # a negation reaches only to the end of its own clause
+MODEL_MENTION = re.compile(r"(?<![A-Za-z])%s(?![A-Za-z])" % FLOOR_WORD, re.I)  # also inside claude-haiku-4-5, haiku-4.5
 
 
 def owner_names_model(payload, model) -> bool:
     """True when the owner's last typed turn names the floor's model `model` (a Haiku name) and no mention of it is
     negated. The turn is override.latest_owner_text, read from the payload's transcript_path on demand, with pasted and
-    machine blocks stripped (override._strip_blocks: that text is not the owner's words). A mention is negated when a word
-    of override.MODEL_NEGATIONS, or one ending n't, stands before it in its clause. One negated mention refuses the whole
-    turn ("use haiku. No, not haiku, use sonnet"). No transcript_path, an unreadable transcript, no mention or a model
-    that is not Haiku is False, so the refusal stands."""
+    machine blocks stripped (override._strip_blocks: that text is not the owner's words). A mention is a word that holds
+    FLOOR_WORD, so `claude-haiku-4-5` and `haiku-4.5` count. It is negated when, between it and the start of its clause or
+    the nearest word of override.MODEL_SPAN_BREAKS before it, stands a word of override.MODEL_NEGATIONS or one ending
+    n't. A pair of override.MODEL_NEGATION_PAIRS negates only when it stands just before the mention. So "Not sonnet but haiku", "Instead use haiku" and "Skip the checks and run it
+    on haiku" name the model, and "don't use haiku" does not. One negated mention refuses the whole turn ("use haiku. No,
+    not haiku, use sonnet"). No transcript_path, an unreadable transcript, no mention or a model that is not Haiku is
+    False, so the refusal stands."""
     transcript = payload.get("transcript_path") if isinstance(payload, dict) else None
     if not below_the_floor(model) or not isinstance(transcript, str) or not transcript:
         return False
     try:
         import override
         text = override.latest_owner_text(transcript)
-        words_by_clause = [override.ROLE_WORDS.findall(clause) for clause in
+        words_by_clause = [[w.lower() for w in override.ROLE_WORDS.findall(clause)] for clause in
                            MODEL_CLAUSE_BREAK.split(override._strip_blocks(text or ""))]
-        negations = override.MODEL_NEGATIONS
+        negations, pairs, breaks = override.MODEL_NEGATIONS, override.MODEL_NEGATION_PAIRS, override.MODEL_SPAN_BREAKS
     except Exception:
         return False
     named = False
     for words in words_by_clause:
         for at, word in enumerate(words):
-            if word.lower() != "haiku":
+            if not MODEL_MENTION.search(word):
                 continue
-            if any(w.lower() in negations or w.lower().endswith(("n't", "n’t")) for w in words[:at]):
+            if tuple(words[max(at - 2, 0):at]) in pairs:
                 return False
+            for i in range(at - 1, -1, -1):
+                if words[i] in breaks:
+                    break
+                if words[i] in negations or words[i].endswith(("n't", "n\u2019t")):
+                    return False
             named = True
     return named
 
