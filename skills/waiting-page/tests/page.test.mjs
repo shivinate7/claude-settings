@@ -9366,7 +9366,7 @@ const pressed = (page) => overrule(card(page, ARBITER)).getAttribute("aria-press
 test("a saved answer that is no overturn does not read as an overturn on the ruling card", async (t) => {
   const page = await open(t, { items: [DECISION, ARBITER], answers: staleAnswer }); if (!page) return;
   await need(card(page, ARBITER), "the closed arbiter item has no card");
-  assert.doesNotMatch(await card(page, ARBITER).innerText(), /You overturned/, "a saved answer with choice a shows as an overturn");
+  assert.doesNotMatch(await card(page, ARBITER).innerText(), /You overruled/, "a saved answer with choice a shows as an overturn");
   assert.equal(await overrule(card(page, ARBITER)).count(), 1, "the ruling card no longer offers Overrule");
   assert.equal(await pressed(page), "false", "the ruling card shows its Overrule unpressed");
 });
@@ -9425,13 +9425,13 @@ test("Undo of a sent Overrule removes the answer and the ruling card is back, wi
   await overrule(card(page, ARBITER)).click();
   await send(page);
   assert.ok(await holds(page, (id) => !!window.__answers()[id], ARBITER.id), "Send wrote no answer for the arbiter item");
-  assert.match(await card(page, ARBITER).innerText(), /You overturned/, "the sent overturn shows no receipt");
+  assert.match(await card(page, ARBITER).innerText(), /You overruled/, "the sent overturn shows no receipt");
   await page.locator("#undoBtn").click();
   assert.ok(await holds(page, (id) => !(id in window.__answers()), ARBITER.id), "Undo left the overturn answer");
   assert.deepEqual(await page.evaluate((id) => window.__log.filter((l) => l[0] === "delete" && l[1] === "answers" && l[2] === id), ARBITER.id), [["delete", "answers", ARBITER.id]], "Undo did not delete answers/<id>");
   assert.deepEqual(await page.evaluate(() => window.__log.filter((l) => l[1] === "items")), [], "an Undo wrote or deleted an items doc");
   assert.equal(await card(page, ARBITER).locator(".receipt").count(), 0, "the ruling card still shows a receipt");
-  assert.doesNotMatch(await card(page, ARBITER).innerText(), /You overturned/, "the ruling card still says it was overturned");
+  assert.doesNotMatch(await card(page, ARBITER).innerText(), /You overruled/, "the ruling card still says it was overruled");
   // Undo hands the owner's pick back as a draft, as it does on a decision (undoSend): the Overrule is pressed again but unsent.
   assert.equal(await pressed(page), "true", "Undo lost the owner's pressed Overrule");
   assert.equal(await page.locator("#send").textContent(), "Send 1 answer", "the undone overturn is not ready to send again");
@@ -9440,7 +9440,7 @@ test("Undo of a sent Overrule removes the answer and the ruling card is back, wi
 test("Withdraw of a sent Overrule removes the answer and the ruling card is back, unpressed", async (t) => {
   const page = await open(t, { items: [DECISION, ARBITER], answers: overturnAnswer }); if (!page) return;
   await need(card(page, ARBITER), "the closed arbiter item has no card");
-  assert.match(await card(page, ARBITER).innerText(), /You overturned/, "a saved overturn shows no receipt");
+  assert.match(await card(page, ARBITER).innerText(), /You overruled/, "a saved overturn shows no receipt");
   await card(page, ARBITER).getByRole("button", { name: "Change" }).click();
   await need(overrule(card(page, ARBITER)), "the arbiter card has no Overrule button after Change");
   assert.equal(await pressed(page), "true", "Change on a saved overturn does not bring the pressed Overrule back");
@@ -9450,7 +9450,7 @@ test("Withdraw of a sent Overrule removes the answer and the ruling card is back
   assert.ok(await holds(page, (id) => !(id in window.__answers()), ARBITER.id), "Withdraw left the overturn answer");
   assert.deepEqual(await page.evaluate(() => window.__log), [["delete", "answers", ARBITER.id]], "Withdraw wrote more than the one delete of answers/<id>");
   assert.equal(await card(page, ARBITER).locator(".receipt").count(), 0, "the ruling card still shows a receipt");
-  assert.doesNotMatch(await card(page, ARBITER).innerText(), /You overturned/, "the ruling card still says it was overturned");
+  assert.doesNotMatch(await card(page, ARBITER).innerText(), /You overruled/, "the ruling card still says it was overruled");
   assert.equal(await pressed(page), "false", "the ruling card is not back to its unpressed state");
 });
 
