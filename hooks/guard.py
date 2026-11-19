@@ -683,7 +683,7 @@ while True:
             path_is_inside, primary_checkout, record, refuse, resolve_command,
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
-            _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes,
+            _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes, segment_with_vars as _segment_with_vars,
             _REDIRECT_OPERATOR, ssh_remote_script, strip_redirections,
         )
         _loading = "guard_branch_worktree"
@@ -1154,15 +1154,6 @@ def worktree_add_target(args):
             if len([a for a in args[cursor:] if not a.startswith("-")]) > 1:
                 cursor += 1
     return words[0] if words else None
-
-
-def _segment_with_vars(segments, number: int) -> str:
-    """`segments[number]` with each variable read as the value an earlier segment of the same
-    command assigned (`_resolve_vars`, the one home). Unassigned variables stay as written."""
-    if "$" not in segments[number]:
-        return segments[number]
-    mark = " ;\x00; "
-    return _resolve_vars(mark.join(segments[:number + 1])).split(mark)[-1]
 
 
 def hand_made_worktree_hit(segments, number: int, cwd: str, ends=(), payload=None) -> str:

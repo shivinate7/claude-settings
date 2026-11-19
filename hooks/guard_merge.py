@@ -2075,12 +2075,13 @@ RECORD_REASON = (
 )
 
 # A push whose folder still holds a variable or a substitution after the command's own assignments are read: the
-# folder is the shell's to know, so the push's repo and record branch are unknown, whoever the session is.
+# folder is the shell's to know, so the push's repo and record branch are unknown. A cloud triage proof reads the
+# transcript, never the folder, so it still lets the push through.
 RECORD_FOLDER_MATCH = "git push to the record branch through an unreadable folder: "
 RECORD_FOLDER_REASON = (
     "roadmap-one-writer: this push to the record branch runs in a folder this guard cannot read, because it holds "
-    "{names} that the command does not assign. The push's repo and record branch are unknown, so no session's "
-    "role is judged. Write the folder as a literal path, or assign the variable earlier in the same command "
+    "{names} that the command does not assign. The push's repo and record branch are unknown, so a local "
+    "role file cannot be matched to its repo. Write the folder as a literal path, or assign the variable earlier in the same command "
     "(`W=<folder>; git -C \"$W\" push ...`), then retry."
 )
 UNREAD_FOLDER = re.compile(r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|\$\(|`")
@@ -2275,11 +2276,11 @@ def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of
             destinations = push_destinations(args, where, overrides)
             if not {record, DEFAULT_RECORD_BRANCH} & set(destinations):
                 continue
+            if _own_role_proved(transcript, RECORD_WRITER_TIER, session_id, root):  # glossary-ok: RECORD_WRITER_TIER is the existing name
+                continue
             unread = _unread_folder_names(where)
             if unread and DEFAULT_RECORD_BRANCH in destinations:
                 return RECORD_FOLDER_MATCH + unread
-            if _own_role_proved(transcript, RECORD_WRITER_TIER, session_id, root):  # glossary-ok: RECORD_WRITER_TIER is the existing name
-                continue
             tags = _own_proved_tags(transcript)
             if (tags is not None and LANE_TAG in tags and len(destinations) == 1 and root
                     and _lane_handoff_holds(args, where, overrides, root, destinations[0], tags)):

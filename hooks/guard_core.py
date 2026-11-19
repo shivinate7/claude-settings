@@ -1425,6 +1425,23 @@ def _variable_text(known, text: str) -> str:
     return _resolve_vars(given + text).split(mark)[-1]
 
 
+def segment_with_vars(segments, number: int, ends=()) -> str:
+    """`segments[number]` with each variable read as the value an earlier segment of the same command
+    assigned (`_resolve_vars`, the one resolver). Unassigned variables stay as written. `ends` is what
+    `split_segments` gave: bash runs each part of a pipe in a subshell, so a piped segment ahead of NUMBER
+    sets nothing for it and is read as `:`."""
+    if "$" not in segments[number]:
+        return segments[number]
+    from guard_frozen import _resolve_vars  # imported late: guard_frozen imports this file
+    mark = " ;\x00; "
+
+    def piped(at):
+        return "|" in (ends[at] if at < len(ends) else "", ends[at - 1] if 0 < at <= len(ends) else "")
+
+    earlier = [":" if piped(at) else segments[at] for at in range(number)]
+    return _resolve_vars(mark.join(earlier + [segments[number]])).split(mark)[-1]
+
+
 def _track_variables(known, segment: str, tokens, ran: bool) -> bool:
     """Update `known`, the variables the shell holds, for one segment the walk passes. Only a segment of
     plain `NAME=value` words that surely ran here (`ran`: not in a pipe, not after `||`, not after an `&&`
