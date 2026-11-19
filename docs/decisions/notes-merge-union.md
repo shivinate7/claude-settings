@@ -12,6 +12,8 @@ Merge. `.gitattributes` keeps its `merge=union` line for the old file while that
 
 Scope. The rule in the root `CLAUDE.md` sends every repo's new notes to that repo's notes folder. A repo with no notes folder reads as empty. A repo's old notes file keeps its own `.gitattributes` line.
 
+Write-time log. The guard step `note-form-at-write` (`hooks/guard.py` `note_form_hit`) logs one `noted` line, and refuses nothing, when a Write, Edit or MultiEdit adds a line to the old file, so the author learns it before the commit. A line is added when its count after the write is over its count before, a blank line apart: the checker's test. The line carries `NEW_NOTE_REFUSAL`, the checker's own text, and the old file's path is read from the `debt-notes` kind of `lint/layout.json`, never copied. Cost: a `.md` target reads `lint/layout.json` once, and a write that adds a line reads the old file once more. No process starts, no file is written but the log line. A target that is no `.md` file reads nothing. The guard family `note-form-at-write` pins it; a guard that copied the path fails it once the layout moves the kind. The step is log-only first. A refusal would be a later step.
+
 ## Known costs
 
 - The check fails every branch that adds a line to the old file. That is intended: the line goes into a file of its own.

@@ -150,6 +150,28 @@ def flagged(out):
             if line.startswith("check_record_slugs: FAIL:")]
 
 
+AGENT_RULES = "AGENT_FORM_RULES"  # the one list of agent-facing record-form rules, in check_record_slugs.py
+NOTE_FORM = "- <slug>: <text>"  # the form a note line takes (decision notes-merge-union)
+
+
+def note_rule(module_path):
+    """(the note rule as a refusal prints it, None), read from the module under test, or (None, problem). The rule is
+    the list's entry that holds the note form, with the note folder and the old notes file filled in."""
+    try:
+        spec = importlib.util.spec_from_file_location("check_record_slugs_under_test", module_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        rules = getattr(module, AGENT_RULES, None)
+    except Exception as exc:  # a module that does not load is a red case, never a crash
+        return None, "the module under test does not load: %s" % exc
+    if rules is None:
+        return None, "check_record_slugs has no %s list, the one home of the agent-facing rules" % AGENT_RULES
+    for rule in rules:
+        if "{folder}" in rule and NOTE_FORM in rule:
+            return rule.replace("{folder}", NOTE_DIR + "/").replace("{old}", OLD_NOTES), None
+    return None, "no entry of %s holds the note form with {folder}" % AGENT_RULES
+
+
 class RecordSlugsTests(unittest.TestCase):
     def setUp(self):
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_record_slugs.py")
@@ -478,6 +500,18 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertEqual(rc, 1, out)
         self.remedy_names_note_folder(out)
 
+    def test_refusal_prints_the_note_rule_the_list_holds(self):
+        """The refusal prints the note rule from the one list in check_record_slugs, so the brief and the check share it."""
+        rule, problem = note_rule(MODULE)
+        self.assertIsNone(problem, problem)
+        lines = self.frozen_base()
+        self.commit_base()
+        self.put(OLD_NOTES, "\n".join(lines + [NEW_LINE]) + "\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertIn(rule, out, out)
+
     def test_deleted_line_in_the_frozen_notes_file_passes_beside_a_bad_note(self):
         lines = self.frozen_base()
         self.commit_base()
@@ -534,6 +568,18 @@ class RecordSlugsTests(unittest.TestCase):
         rc, out = self.lint()
         self.assertEqual(rc, 1, out)
         self.assertEqual(flagged(out), [NOTE % SLUG_LONG], out)
+
+    def test_refused_long_note_name_prints_the_note_form_rule_and_not_the_old_file(self):
+        self.roll_out()
+        self.commit_base()
+        self.put(NOTE % SLUG_LONG, NOTE_TEXT % SLUG_LONG)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        rules = [line for line in out.splitlines() if line.startswith("check_record_slugs: note rule: ")]
+        self.assertTrue(any(NOTE_DIR + "/" in line and NOTE_FORM in line for line in rules), out)
+        self.remedy_names_note_folder(out)
+        self.assertNotIn(OLD_NOTES, out)
 
     def test_note_file_without_a_slug_line_is_refused(self):
         self.roll_out()
