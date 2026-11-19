@@ -32,7 +32,7 @@ The seventh part pins mutate_sweep's clean-layout control: one filtered control 
 mutant, on an unmutated scaffold in its own folder, removed before the next job starts. A red, empty or raising control
 reads that suite's mutants UNKNOWN, never KILLED.
 
-The eighth part pins the resume of a leg: each mutant's verdict is saved as the leg judges it, in the folder
+The eighth part pins the resume of a shard: each mutant's verdict is saved as the shard judges it, in the folder
 MUTATE_VERDICT_DIR names, and a rerun skips each mutant judged at the same key (its id, the guarded file, the test
 file and the tool version). The cases drive `mutate_guard.main()` over a fixture target, so the key reads real files.
 The ninth part pins the saved-verdict key (`mutate_guard.verdict_digest`): an edit to any file a copied guard reads, testing/ included, changes it.
@@ -1478,15 +1478,15 @@ class LinuxOnlySweepMutationsTests(unittest.TestCase):
                     self.assertEqual(mutate_shared.skip_reason("posix") is None, posix)
 
 
-VERDICT_DIR_ENV = "MUTATE_VERDICT_DIR"  # the folder a leg saves each mutant's verdict in; read at call time, unset means no save
+VERDICT_DIR_ENV = "MUTATE_VERDICT_DIR"  # the folder a shard saves each mutant's verdict in; read at call time, unset means no save
 RESUME_TARGET = "resume"  # a fixture target: its guarded file and its test file are written into the run folder
 RESUME_SOURCE = 'RULE_A = "allow"\nRULE_B = "allow"\nRULE_C = "allow"\n'
 RESUME_SUITE = "# the fixture suite: its text is hashed, its cases are the stub's\n"
 RESUME_SIBLING = "guard_resume_sibling.py"  # a guard module beside the copied guard tree: the fixture suite imports it
 SIBLING_BEFORE = "RESUME_SIBLING_RULE = 'allow'\n"  # its text while the suite kills both fixture mutants
 SIBLING_AFTER = "RESUME_SIBLING_RULE = 'deny'\n"  # its text once the suite lets both fixture mutants live
-HANG_GUARD = 10.0  # a stopped-leg case waits this long for the other mutants to end: far above their run
-RESUME_RUN_LIMIT = 30.0  # main must return within this long; a stopped-leg case can wait up to HANG_GUARD inside it
+HANG_GUARD = 10.0  # a stopped-shard case waits this long for the other mutants to end: far above their run
+RESUME_RUN_LIMIT = 30.0  # main must return within this long; a stopped-shard case can wait up to HANG_GUARD inside it
 SYNTHETIC_NOW = 1800000000.0  # the clock a pruning case reads: a fixed instant, never the real date
 HOUR = 3600
 DAY = 24 * HOUR
@@ -1510,7 +1510,7 @@ def set_mtime(path, when):
 
 
 class LegStopped(RuntimeError):
-    """Stands in for the time limit that ends a leg: the first mutant raises it after the others have ended."""
+    """Stands in for the time limit that ends a shard: the first mutant raises it after the others have ended."""
 
 
 def resume_label(letter):
@@ -1546,7 +1546,7 @@ def verdict_of(lines, label):
 
 
 class ResumeTests(unittest.TestCase):
-    """A leg resumes from the verdicts it saved. Each run is main() over the fixture target, with `_FakeSuite` as the
+    """A shard resumes from the verdicts it saved. Each run is main() over the fixture target, with `_FakeSuite` as the
     suite that answers each mutant. Every case reads a save by a rerun's calls, its exit code or its tally, never a file
     layout. Each run is one main() call over three fixture mutants."""
 
@@ -1601,7 +1601,7 @@ class ResumeTests(unittest.TestCase):
             return self.run_leg(letters, suite)
 
     def run_leg(self, letters, suite, jobs=None, limit=RESUME_RUN_LIMIT, saved=True):
-        """One run of the leg: main() over the mutants `letters`, saving into the folder VERDICT_DIR_ENV names when
+        """One run of the shard: main() over the mutants `letters`, saving into the folder VERDICT_DIR_ENV names when
         `saved`. Return (exit code or None, stdout lines, exception or None)."""
         env = {VERDICT_DIR_ENV: self.verdicts} if saved else {}
         if jobs is not None:
@@ -1660,7 +1660,7 @@ class ResumeTests(unittest.TestCase):
         others = {resume_label("B"), resume_label("C")}
 
         def stopped_at_the_limit():
-            # The first mutant holds until the other two have ended, then the leg stops, as its time limit would stop it.
+            # The first mutant holds until the other two have ended, then the shard stops, as its time limit would stop it.
             with suite.cond:
                 suite.cond.wait_for(lambda: others <= set(suite.events), timeout=HANG_GUARD)
             raise LegStopped("the time limit stopped the leg")

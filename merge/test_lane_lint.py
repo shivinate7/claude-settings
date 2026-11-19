@@ -6446,12 +6446,12 @@ class LaneLintDiskFloor(LaneFixture):
         self.assert_names_landed_sweep(text, landed, tree)
 
 
-VERDICT_DIR_ENV = "MUTATE_VERDICT_DIR"  # the one name of the folder a mutate leg saves its verdicts in (hooks/test_mutate_shared.py ResumeTests names it too)
+VERDICT_DIR_ENV = "MUTATE_VERDICT_DIR"  # the one name of the folder a mutate shard saves its verdicts in (hooks/test_mutate_shared.py ResumeTests names it too)
 
 
 class MutateLegVerdictDir(unittest.TestCase):
-    """mutate_run_check hands every shard leg one folder for the saved verdicts (MUTATE_VERDICT_DIR). The folder sits outside the lint
-    tree, which drop_worktree removes when the lint ends, and it is the same on each call, so a rerun of a leg that timed out reads
+    """mutate_run_check hands every shard one folder for the saved verdicts (MUTATE_VERDICT_DIR). The folder sits outside the lint
+    tree, which drop_worktree removes when the lint ends, and it is the same on each call, so a rerun of a shard that timed out reads
     what the first run saved. Cost per case: two mutate_run_check calls on the head's three shard jobs, with the mutate command stubbed."""
 
     def setUp(self):
@@ -6463,7 +6463,7 @@ class MutateLegVerdictDir(unittest.TestCase):
             f.write(sharded_workflow(shard_jobs()))
 
     def mutate_legs(self):
-        """One mutate_run_check call on the lint tree, with each mutate leg answered as a clean run. Return the env of each leg, in order."""
+        """One mutate_run_check call on the lint tree, with each mutate shard answered as a clean run. Return the env of each shard, in order."""
         legs = []
         real_sh = merge.sh
 
