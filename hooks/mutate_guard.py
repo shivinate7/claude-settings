@@ -4714,6 +4714,11 @@ GUARD_READ_FOLDERS = ("lint", "janitor", "skills", "testing")
 # lay_out_guard_reads copies them, and the saved-verdict key digests the same files.
 GUARD_READ_FILES = (os.path.join("bin", "sim-lease"), os.path.join("merge", "merge.py"),
                     os.path.join("actions", "ci-alarm", "events.json"))
+# The folder and file the suites read from the checkout and no copy holds: test_guard.py reads its section files from
+# tests/guard, and test_call_judge.py reads settings.json. lay_out copies neither. The saved-verdict key digests both, so an
+# edit to either misses the saved verdicts.
+KEY_ONLY_FOLDERS = ("tests/guard",)
+KEY_ONLY_FILES = ("settings.json",)
 
 
 def lay_out_guard_reads(root: str) -> None:
@@ -4875,10 +4880,11 @@ def verdict_digest(sources):
     """The key this run's saved verdicts are filed under. It digests the guarded text and the suite text of each target
     the run judges, and every file a copied guard can read: the hooks folder the copies come from (mutate_shared.HOOKS_DIR,
     read now so a test can point it elsewhere), then GUARD_READ_FOLDERS and GUARD_READ_FILES under the checkout, the roots
-    lay_out copies from. An edit to any of them misses the saved verdicts. Each file is keyed by its path relative to its
-    root, never an absolute path, so two checkouts with the same files share verdicts. Cost: a named run reads about 20 MB
-    (511 files under hooks, lint, janitor, skills and testing, plus three files) once, before its first mutant. None when no verdict
-    folder is named: nothing is digested, saved or reused."""
+    lay_out copies from, then KEY_ONLY_FOLDERS and KEY_ONLY_FILES, which the suites read there and no copy holds. An edit to
+    any of them misses the saved verdicts. Each file is keyed by its path relative to its root, never an absolute path, so
+    two checkouts with the same files share verdicts. Cost: a named run reads about 20 MB (511 files under hooks, lint,
+    janitor, skills and testing, plus three files), plus tests/guard (113 files, about 3.4 MB) and settings.json (48 KB) at
+    this commit, once, before its first mutant. None when no verdict folder is named: nothing is digested, saved or reused."""
     if not os.environ.get(mutate_shared.VERDICT_DIR_ENV):
         return None
     digest = hashlib.sha256()
@@ -4892,6 +4898,10 @@ def verdict_digest(sources):
         mutate_shared.digest_tree(digest, folder, os.path.join(checkout, folder))
     for rel in GUARD_READ_FILES:
         mutate_shared.digest_tree(digest, rel.replace(os.sep, "/"), os.path.join(checkout, rel))
+    for folder in KEY_ONLY_FOLDERS:
+        mutate_shared.digest_tree(digest, folder, os.path.join(checkout, folder))
+    for rel in KEY_ONLY_FILES:
+        mutate_shared.digest_tree(digest, rel, os.path.join(checkout, rel))
     return digest.hexdigest()
 
 
