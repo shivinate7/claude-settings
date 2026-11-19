@@ -31,7 +31,7 @@ from git_reads import (  # noqa: F401
 
 def is_cloud() -> bool:
     """True in a Claude Code cloud session: CLAUDE_CODE_REMOTE is exactly "true". Read at each call. The one home of the
-    cloud check; the load brake and its report stand down here, because the brake is local-only."""
+    cloud check; the load brake and its report read it. A cloud session is braked at a full disk only."""
     return os.environ.get("CLAUDE_CODE_REMOTE") == "true"
 
 

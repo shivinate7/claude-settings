@@ -11,7 +11,7 @@ session with the tag does no work and tells its parent (send_message @parent) wh
 tag (the owner's own, the coordinator, triage, the batch runner) goes on.
 
 The model is checked first (guard.floor_hit, the one home of the floor), so a run prints one flag at most. Then, in a
-local session, it reads the load once (guard.read_load) and asks guard.load_full for the readings over the full line.
+local session, it reads the load once (guard.read_load) and asks guard.load_full for the readings over the full point.
 A cloud session is never load-flagged; the model flag still applies there.
 
 hooks/start_session_audit.py flags a Haiku start too: the audit runs in the caller after the start_session call, and
