@@ -24,6 +24,8 @@ Decision ci-wait-reads-run-status, section "The CI wake-up":
 - One watcher runs per PR. A second watcher for the same PR exits 0 with no output and no watch.
   A killed watcher, or a finished one, releases the PR.
 - Any uncaught error exits 2 with one "unknown" line, never exit 1.
+- A repo with no active workflow wakes once, exit 2, with one CI line on the head sha7. That line is
+  what closes the CI wait in the transcript. An unreadable workflow list writes no such line.
 
 Decision ci-wait-reads-run-status ("CI waits read the run status"): the hook never runs
 `gh run watch` (one watch made 131 API calls in 60 s). `watch_run` reads `gh run view <id> --json
@@ -77,8 +79,9 @@ A prs, runs or workflows entry with a `repo` field answers only a call that reac
 with its own -R or --repo (any spelling gh takes), else a PR URL selector's repo, else GH_REPO, else the
 fixture's `cwd_repo`. An entry with no
 `repo` answers every call. `workflows` is the `gh workflow list` answer (one active `checks` workflow
-when absent); without --all only active entries answer. The fixture key `workflow_list` ("error" or
-"garbage") fails that one call and no other. The fixture key `list_error_from` N makes every `run list`
+when absent); without --all only active entries answer. The fixture key `workflow_list` ("error",
+"garbage" or "empty") changes that one call and no other. "empty" prints nothing and exits 0: the answer
+gh 2.89.0 gives for a repo with no workflow. The fixture key `list_error_from` N makes every `run list`
 from the Nth call of the case on exit 1 (HTTP 403), so a re-list can be refused after a judged run.
 
 Draft run, then the real run: `gh pr create --draft` makes a run
@@ -304,6 +307,11 @@ def rest(path, full, args, fx):
             return 1
         sys.stdout.write(json.dumps(rest_pr(hits[0])) + "\n")
         return 0
+    if len(parts) == 6 and parts[5] == "files":
+        hits = [p for p in mine if str(p["number"]) == parts[4]]
+        names = hits[0].get("files", []) if hits else []
+        sys.stdout.write(json.dumps([{"filename": n, "status": "added"} for n in names]) + "\n")
+        return 0
     query = {}
     for i, a in enumerate(args):
         if a in ("-f", "-F") and i + 1 < len(args) and "=" in args[i + 1]:
@@ -367,6 +375,11 @@ def main(args):
         if fx.get("workflow_list") == "garbage":
             sys.stdout.write("<html>not json</html>\n")
             return 0
+        if fx.get("workflow_list") == "empty_stderr":
+            sys.stderr.write("warning: the workflow answer is not complete\n")
+            return 0   # exit 0 and 0 bytes on stdout, with a message on stderr: not a repo with no workflow
+        if fx.get("workflow_list") == "empty":
+            return 0   # gh 2.89.0 prints 0 bytes and exits 0 for a repo with no workflow, not "[]"
         # gh lists the active workflows unless --all; the fixture's repo field is not gh's, so it is dropped
         wf = [{k: v for k, v in w.items() if k != "repo"} for w in fx.get("workflows", DEFAULT_WORKFLOWS)
               if here(w, args, fx) and ("--all" in args or w.get("state") == "active")]
@@ -566,7 +579,7 @@ PUSH_FORMS = [
 
 FAILS = []
 COUNT = [0]
-LINE = re.compile(r"^CI (green|red|cancelled|unknown) on (\S+?): ?(.*)$")
+LINE = re.compile(r"^CI (green|red|cancelled|unknown|none) on (\S+?): ?(.*)$")
 
 
 def check(label, ok, detail=""):
@@ -711,6 +724,16 @@ def expect_verdict(label, res, verdict, names_in=(), names_out=()):
 
 def expect_silent(label, res):
     check("%s: exit 0, no output" % label, res.rc == 0 and not res.hung and res.lines == [], why(res))
+
+
+def expect_closing_line(label, res):
+    """A repo with no active workflow wakes once: exit 2, and one CI line on the head sha7. The line reads
+    `CI none on <sha7>: no active workflow`, never green: a green line would say CI passed. The line reaches
+    the transcript only through that exit-2 wake, and the Stop cases read whether a none line closes the wait."""
+    v = verdict_of(res)
+    check("%s: exit 2, one CI none line on sha7 (the wake line)" % label,
+          res.rc == 2 and not res.hung and v is not None and v[0] == "none" and v[1] == SHA7
+          and "no active workflow" in v[2], why(res))
 
 
 def expect_no_watch(label, res):
@@ -1575,9 +1598,9 @@ def case_wrong_repo_every_gh_call_names_the_pr_repo():
 
 
 def case_repo_without_ci_starts_no_watch():
-    """A repo with no active workflow starts no watch: silent, exit 0, no run read. The rows: no repo
-    flag (the incident form), no workflows, and only a disabled workflow. The --repo rows also check
-    that the hook asked the PR's repo for its workflows."""
+    """A repo with no active workflow starts no watch: it wakes once with its CI line (exit 2, on the head
+    sha7), and makes no run read. The rows: no repo flag (the incident form), no workflows, and only a
+    disabled workflow. The --repo rows also check that the hook asked the PR's repo for its workflows."""
     rows = (
         ("no repo flag, no workflows", "gh pr ready 7", [], False),
         ("--repo, no workflows", "gh pr ready 7 --repo " + REPO_HOME, [], True),
@@ -1588,7 +1611,7 @@ def case_repo_without_ci_starts_no_watch():
         label = "no CI, %s" % name
         fx = fixture([pr(7, repo=REPO_HOME)], [], cwd_repo=REPO_HOME, workflows=workflows)
         res = run_hook(bash(command), fx, extra={"CI_WAKE_DEADLINE": "4"})
-        expect_silent(label, res)
+        expect_closing_line(label, res)
         expect_no_watch(label, res)
         check("%s: no run list or run view call" % label,
               count(res, "run", "list") == 0 and count(res, "run", "view") == 0, why(res))
@@ -1613,7 +1636,9 @@ def case_workflows_but_no_run_on_head_still_says_no_run_yet():
 
 def case_failed_workflow_read_is_not_no_workflows():
     """Pins existing behaviour (a control). A failed `gh workflow list` read is not "no workflows": the watch
-    runs as it does today, so a red run still wakes the session with its failing jobs. Rows: exit 1, non-JSON."""
+    runs as it does today, so a red run still wakes the session with its failing jobs. Rows: exit 1, non-JSON.
+    The red verdict is the only line: verdict_of needs exactly one, so a closing line written beside it fails
+    here. An unknown read writes no closing line."""
     for name, switch in (("exit 1", "error"), ("non-JSON", "garbage")):
         label = "workflow list %s, red run (control)" % name
         fx = fixture([pr(214, repo=REPO_APP)], [in_repo(RED, REPO_APP)], cwd_repo=REPO_APP,
@@ -1621,6 +1646,55 @@ def case_failed_workflow_read_is_not_no_workflows():
         res = run_hook(bash("gh pr ready 214 --repo " + REPO_APP), fx, extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
         expect_verdict(label, res, "red", names_in=["unit", "e2e"])
         expect_watch(label, res, ["902"])
+
+
+def case_empty_workflow_list_is_no_workflows():
+    """A repo with no workflow starts no watch, and wakes once with its CI line. The answer that shows it is
+    gh 2.89.0's, probed on shivinate7/session-mailbox (REST total_count 0, no .github/workflows): `gh workflow
+    list --json id` writes 0 bytes to stdout and exits 0. It does not write "[]". A repo with a workflow prints
+    a JSON list. An empty answer is no workflow, so the hook must not read it as unknown and watch. Rows: no
+    repo flag, --repo."""
+    rows = (
+        ("no repo flag", "gh pr ready 7", False),
+        ("--repo", "gh pr ready 7 --repo " + REPO_HOME, True),
+    )
+    for name, command, asks in rows:
+        label = "empty workflow list, %s" % name
+        fx = fixture([pr(7, repo=REPO_HOME)], [], cwd_repo=REPO_HOME, workflow_list="empty")
+        res = run_hook(bash(command), fx, extra={"CI_WAKE_DEADLINE": "4"})
+        check("%s: the hook reads the workflow list" % label, count(res, "workflow", "list") >= 1, why(res))
+        if asks:
+            check("%s: the list reads -R %s" % (label, REPO_HOME),
+                  any(GH.strip_repo(c)[:2] == ["workflow", "list"] and GH.repo_of(c) == REPO_HOME
+                      for c in res.calls), why(res))
+        expect_closing_line(label, res)
+        expect_no_watch(label, res)
+        check("%s: no run list or run view call" % label,
+              count(res, "run", "list") == 0 and count(res, "run", "view") == 0, why(res))
+
+
+def case_workflow_list_with_stderr_is_unknown():
+    """An answer with exit 0, 0 bytes on stdout and a message on stderr is not the answer of a repo with no
+    workflow. It is unknown, so the watch runs and the one line is the red verdict. A none line beside it
+    would make two lines, and verdict_of would fail it."""
+    fx = fixture([pr(214, repo=REPO_APP)], [in_repo(RED, REPO_APP)], cwd_repo=REPO_APP,
+                 workflow_list="empty_stderr")
+    res = run_hook(bash("gh pr ready 214 --repo " + REPO_APP), fx, extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+    label = "workflow list exit 0, empty stdout, message on stderr"
+    expect_verdict(label, res, "red", names_in=["unit", "e2e"])
+    expect_watch(label, res, ["902"])
+
+
+def case_pr_adding_a_workflow_file_is_not_no_ci():
+    """A PR whose own diff adds a .github/workflows file has CI on its head, though the default branch has no
+    active workflow. The watch runs and reads that head's red run. The PR's file list is the fixture's `files`
+    key, answered for the REST route repos/O/R/pulls/N/files."""
+    p = dict(pr(214, repo=REPO_APP), files=[".github/workflows/ci.yml"])
+    fx = fixture([p], [in_repo(RED, REPO_APP)], cwd_repo=REPO_APP, workflows=[])
+    res = run_hook(bash("gh pr ready 214 --repo " + REPO_APP), fx, extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+    label = "PR adds a workflow file, no active workflow on the default branch"
+    expect_verdict(label, res, "red", names_in=["unit", "e2e"])
+    expect_watch(label, res, ["902"])
 
 
 # Selector forms that leave the repo out of the hook's own parse. The PR lives in REPO_APP, and the folder
@@ -2272,6 +2346,9 @@ def main():
     case_repo_without_ci_starts_no_watch()
     case_workflows_but_no_run_on_head_still_says_no_run_yet()
     case_failed_workflow_read_is_not_no_workflows()
+    case_empty_workflow_list_is_no_workflows()
+    case_workflow_list_with_stderr_is_unknown()
+    case_pr_adding_a_workflow_file_is_not_no_ci()
 
     # Selector forms that leave the repo blank, and the folder without workflows.
     case_url_selector_pins_pr_repo_on_later_calls()

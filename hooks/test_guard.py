@@ -22,6 +22,10 @@ GUARD_SHARD=<i>/<n> or GUARD_SHARD=<i>-<n> runs every n-th selected case, starti
 every case, so CI can split the suite across jobs and drop none. A malformed value stops the run
 before a case runs.
 
+GUARD_LIST=<path> writes a JSON list of rows {name, tool, expected, key}, one per case, then exits before any case
+runs (lint/check_guard_cases_from_base.py reads it; lint/_guard_case_list.py holds the key). No run filter narrows
+the listing, and GUARD_FAMILY needs no real family name.
+
 GUARD_SECTION_DIR=<folder> reads the section files from that folder instead of tests/guard/. A folder with no
 section file, or with a set that lint/_guard_sections.py faults (two files that share a `# section <n>` number,
 or a name whose number disagrees with its header), stops the run before any case.
@@ -78,6 +82,7 @@ import precompact_handoff as ph  # noqa: E402,F401  the one home of the handoff 
 import local_time  # noqa: E402,F401  the one home of the inbox paths
 import mutate_shared  # noqa: E402,F401  module_files: every module a copied guard may import
 import _guard_sections  # noqa: E402  the one home of the section folder, header read and faults
+import _guard_case_list  # noqa: E402  the one home of the case listing and its key
 
 # Assembled, so this file never holds the token whole.
 ENV = "." + "env"
@@ -182,7 +187,8 @@ FAMILIES = {
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
-if GUARD_FAMILY and GUARD_FAMILY not in FAMILIES:
+GUARD_LIST = os.environ.get("GUARD_LIST", "")
+if GUARD_FAMILY and not GUARD_LIST and GUARD_FAMILY not in FAMILIES:
     sys.exit("GUARD_FAMILY=%r is not a family. Want one of: %s"
              % (GUARD_FAMILY, ", ".join(sorted(FAMILIES))))
 
@@ -591,12 +597,30 @@ def load_sections(section_dir):
         exec(compile(text, os.path.join(section_dir, name), "exec"), globals())
 
 
+
+
+def stop_what_the_sections_started():
+    """Remove the run's folder and end the sleeps the sections started, by their own pids."""
+    shutil.rmtree(ROOT, ignore_errors=True)
+    OWNED.kill()
+    for orphan in ORPHAN_PIDS:
+        try:
+            os.kill(orphan, signal.SIGTERM)
+        except OSError:
+            pass
+
+
 load_sections(os.environ.get("GUARD_SECTION_DIR") or SECTION_DIR)
 # A log check appended to LOG_CHECKS_EXTRA after its join is in no run. Refuse that, rather than drop it.
 UNJOINED = [label for label, check in LOG_CHECKS_EXTRA if (label, check) not in LOG_CHECKS]
 if UNJOINED:
     sys.exit("fixture setup failed: %d log check(s) were appended to LOG_CHECKS_EXTRA after its join and "
              "never run, first: %s" % (len(UNJOINED), UNJOINED[0]))
+
+if GUARD_LIST:
+    _guard_case_list.write_listing(GUARD_LIST, CASES, (ROOT, TEMP_ROOT))
+    stop_what_the_sections_started()
+    sys.exit(0)
 
 # A section set the loader refuses must stop a run before any case. A refusal that reads as a pass would hide
 # every case the set holds, so each check below runs a child run of this runner on such a set and reads the stop.
@@ -886,13 +910,7 @@ def run_cases():
         say("%s  %-6s(want %-6s)  [%-11s] %s  (%s)" % (
             "PASS" if ok else "FAIL", "logged" if ok else "wrong", "logged", "Bash", label, note))
     say("")
-    shutil.rmtree(ROOT, ignore_errors=True)
-    OWNED.kill()
-    for orphan in ORPHAN_PIDS:   # the sleeps this file started, by their own pids
-        try:
-            os.kill(orphan, signal.SIGTERM)
-        except OSError:
-            pass
+    stop_what_the_sections_started()
     if (mode or fam or only or GUARD_SHARD != (1, 1)) and not ran:
         say("test_guard FAIL: ran 0 cases (GUARD_TESTS=%s, GUARD_FAMILY=%s, MUTATE_ONLY=%s, "
             "GUARD_SHARD=%d/%d matched none, or matched only skips: %d skipped)" % (

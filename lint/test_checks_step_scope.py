@@ -182,6 +182,7 @@ MUST_STAY_UNSCOPED = [
     'Checks step scope suite',  # names tracked .md files as data; a docs-only rename would turn main red if it carried the scope condition
     'Scratchpad owner fixture suite',  # runs test_guard.py, whose section files read skills/impeccable/SKILL.md
     'Guard wrappers fixture suite',  # runs test_guard.py through drive_test_guard
+    'Guard cases from base fixture suite',  # runs test_guard.py's listing, whose section files read skills/impeccable/SKILL.md
     'Skill model rows fixture suite',  # its `if:` is the records-only clause alone (test_check_skill_model_rows.py pins it)
     'Project-ops roles check',  # reads the session-tiers record and the project-ops templates at run time (audit hook, run-time open)
     'Project-ops roles fixture suite',  # its real-repo case reads the same record and templates at run time
@@ -323,6 +324,7 @@ PR_ONLY = [
     'Ruling kind check',
     'Silent undo check',
     'Comment narration check',
+    'Guard cases from base check',
 ]
 
 # The checks job's step names. An unnamed step is its `uses:` reference.
@@ -400,6 +402,8 @@ MAIN_STEPS = [
     'Stale prose check fixture suite',
     'Ruled store fixture suite',
     'Route judge measure fixture suite',
+    'Guard cases from base fixture suite',
+    'Guard cases from base check',
     'Guard log report fixture suite',
     'Verdict runner fixture suite',
     'Wait-pid helper fixture suite',

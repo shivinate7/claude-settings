@@ -113,6 +113,18 @@ def run_folder():
     if not _RUN:
         _RUN.append(_test_temp.run_folder())
     return _RUN[0]
+
+
+def visible_repo(name, visibility):
+    """A repo folder under this run's temp folder whose layout extras file holds `visibility`, the key that
+    lint/layout.py reads."""
+    root = os.path.join(run_folder(), name)
+    os.makedirs(os.path.join(root, ".claude"), exist_ok=True)
+    with open(os.path.join(root, ".claude", "layout-extras.json"), "w", encoding="utf-8") as handle:
+        json.dump({"kinds": {}, "visibility": visibility}, handle)
+    return root
+
+
 HEADER = "rulings not on main: %d open (%d with no supersedes read yet), newest first"
 DST_CDT = "2026-11-01T01:30:00-05:00"  # 06:30 UTC, the first 01:30 before the clocks go back
 DST_CST = "2026-11-01T01:10:00-06:00"  # 07:10 UTC, after the change: later, though its text sorts first
@@ -487,6 +499,83 @@ class CheckEntryTests(unittest.TestCase):
         self.assertEqual(len(problems), 1, "a pending status: want one problem, got %r" % problems)
         self.assertTrue(names(problems[0], "status"), "a pending status: the problem does not name status: %r"
                         % problems[0])
+
+
+class ScopeTests(unittest.TestCase):
+    """The optional `scope` key: which repos a ruling governs. check_entry refuses a scope it cannot read. The shape
+    that passes is a control, green on the old reader, which ignores scope. The refusals are the red cases."""
+
+    def test_a_scope_naming_visibility_or_repos_passes_check_entry(self):
+        for scope in ({"visibility": "private"}, {"visibility": "public"},
+                      {"repos": ["example-owner/example-repo"]}):
+            with self.subTest(scope=scope):
+                problems = ruled_store.check_entry(fixture.entry("scoped", scope=scope))
+                self.assertEqual(problems, [], "a valid scope %r has a problem: %r" % (scope, problems))
+
+    def test_an_unknown_scope_key_is_refused(self):
+        problems = ruled_store.check_entry(fixture.entry("odd-key", scope={"colour": "red"}))
+        self.assertEqual(len(problems), 1, "an unknown scope key: want one problem, got %r" % problems)
+        self.assertTrue(names(problems[0], "scope") and "colour" in problems[0],
+                        "the problem does not name scope and its unknown key: %r" % problems[0])
+
+    def test_a_scope_that_is_not_an_object_is_refused(self):
+        problems = ruled_store.check_entry(fixture.entry("text-scope", scope="private"))
+        self.assertEqual(len(problems), 1, "a text scope: want one problem, got %r" % problems)
+        self.assertTrue(names(problems[0], "scope"), "the problem does not name scope: %r" % problems[0])
+
+    def test_a_visibility_other_than_public_or_private_is_refused(self):
+        problems = ruled_store.check_entry(fixture.entry("typo", scope={"visibility": "privat"}))
+        self.assertEqual(len(problems), 1, "a visibility typo: want one problem, got %r" % problems)
+        self.assertTrue(names(problems[0], "scope") and "privat" in problems[0],
+                        "the problem does not name scope and the bad visibility: %r" % problems[0])
+
+    def test_a_refused_scope_keeps_its_ruling_in_scope_in_a_public_repo(self):
+        import layout  # lint/layout.py, the one reader of the visibility key
+        public = visible_repo("refused-scope-public", "public")
+        self.assertEqual(layout.caution(public)["level"], "public", "scope control: the repo does not read as public")
+        valid = fixture.entry("valid-private", scope={"visibility": "private"})
+        self.assertEqual(ruled_store.check_entry(valid), [], "scope control: a valid private scope has a problem")
+        self.assertFalse(ruled_store.in_scope(valid, public),
+                         "scope control: a private ruling is in scope in a public repo")
+        refused = fixture.entry("refused", scope={"visibility": "private", "repos": "oops"})
+        self.assertNotEqual(ruled_store.check_entry(refused), [],
+                            "scope control: check_entry accepts the refused scope")
+        self.assertTrue(ruled_store.in_scope(refused, public),
+                        "a ruling whose scope check_entry refuses left the store's scope in a public repo")
+
+    def test_an_unreadable_layout_keeps_the_ruling_in_scope_without_raising(self):
+        import layout  # lint/layout.py, the one reader of the visibility key
+        private = visible_repo("unreadable-layout-private", "private")
+        valid = fixture.entry("valid-private", scope={"visibility": "private"})
+        self.assertTrue(ruled_store.in_scope(valid, private),
+                        "scope control: a private ruling is not in scope in a private repo")
+        bad_path = os.path.join(run_folder(), "unreadable-layout.json")
+        with open(bad_path, "w", encoding="utf-8") as handle:
+            handle.write("{bad")
+        with mock.patch.object(layout, "LAYOUT_PATH", bad_path):
+            with self.assertRaises(layout.LayoutError,
+                                   msg="scope control: the bad layout file does not raise LayoutError"):
+                layout.layout()
+            try:
+                kept = ruled_store.in_scope(valid, private)
+            except Exception as exc:
+                self.fail("in_scope raised %s on an unreadable layout file: %s" % (type(exc).__name__, exc))
+        self.assertTrue(kept, "in_scope hid a private ruling while the layout file is unreadable")
+
+    def test_a_repos_that_is_not_a_list_is_refused(self):
+        listed = fixture.entry("listed", scope={"repos": ["example-owner/example-repo"]})
+        self.assertEqual(ruled_store.check_entry(listed), [], "scope control: a list of repo names has a problem")
+        problems = ruled_store.check_entry(fixture.entry("text-repos", scope={"repos": "oops"}))
+        self.assertEqual(len(problems), 1, "a text repos: want one problem, got %r" % problems)
+        self.assertTrue(names(problems[0], "repos"), "the problem does not name repos: %r" % problems[0])
+
+    def test_a_repos_list_with_a_non_text_item_is_refused(self):
+        listed = fixture.entry("listed", scope={"repos": ["example-owner/example-repo"]})
+        self.assertEqual(ruled_store.check_entry(listed), [], "scope control: a list of repo names has a problem")
+        numbered = fixture.entry("number-repo", scope={"repos": ["example-owner/example-repo", 7]})
+        problems = ruled_store.check_entry(numbered)
+        self.assertEqual(len(problems), 1, "a non-text repos item: want one problem, got %r" % problems)
+        self.assertTrue(names(problems[0], "repos"), "the problem does not name repos: %r" % problems[0])
 
 
 class SessionLinesTests(RepoCase):
