@@ -1917,6 +1917,21 @@ def case_export_scan_counts_a_claude_artifacts_db_write_of_items():
           len(found) == 1 and found[0][2] == PAGE_URL, found)
 
 
+def case_export_scan_counts_a_claude_artifacts_db_delete_of_items():
+    """The export scan counts a claude-artifacts db_delete of the items collection as one export write to the page, as
+    it counts an ArtifactData delete of the same input. The ArtifactData control runs first, so a failure on the
+    claude-artifacts delete names that delete alone. The delete is no send, so only the export scan is checked."""
+    data = {"n": 98}
+    control = export_writes([used_rec("ArtifactData", tool_input("delete", collection="items",
+                                                                  doc_id="disk-cleanup", data=data))])
+    check("export scan: control, an ArtifactData delete of items is one export write to the page",
+          len(control) == 1 and control[0][2] == PAGE_URL, control)
+    found = export_writes([used_rec(CLAUDE_ARTIFACTS + "db_delete", tool_input(
+        None, collection="items", doc_id="disk-cleanup", data=data))])
+    check("export scan: a claude-artifacts db_delete of items is one export write to the page",
+          len(found) == 1 and found[0][2] == PAGE_URL, found)
+
+
 def case_page_claude_artifacts_read_with_action_set_proves_the_filing():
     """A claude-artifacts db_get, db_list or db_query whose input says action "set" is a read: the tool's name carries
     the verb, and the input's action does not override it. After the owner's send, its result returns item 98. The copy
@@ -1959,8 +1974,8 @@ def case_page_claude_artifacts_db_write_with_action_get_proves_the_send():
 
 
 def case_claude_artifacts_read_artifact_and_db_delete_do_not_prove_the_send():
-    """A claude-artifacts read_artifact or db_delete is no write, so an input that proves item 98 as a write does not
-    prove it here. The control is an ArtifactData delete of the same input: the delete action never proves a send, on
+    """A claude-artifacts read_artifact or db_delete proves no send, so an input that proves item 98 as a write does not
+    prove it here. A db_delete is an export write, which its own case pins. The control is an ArtifactData delete of the same input: the delete action never proves a send, on
     the old code too. The read_artifact is also no export write."""
     data = {"n": 98}
     p = page_run(new_cfg(), "page-ca-delete-control", [(NEUTRAL, (PAGE_ITEM,))],
@@ -5042,6 +5057,7 @@ CASES = (
     case_page_claude_artifacts_read_of_another_collection_does_not_prove_the_filing,
     case_page_claude_artifacts_db_write_proves_the_send,
     case_export_scan_counts_a_claude_artifacts_db_write_of_items,
+    case_export_scan_counts_a_claude_artifacts_db_delete_of_items,
     case_page_claude_artifacts_read_with_action_set_proves_the_filing,
     case_page_claude_artifacts_read_with_action_set_does_not_prove_the_send,
     case_page_claude_artifacts_db_write_with_action_get_proves_the_send,
