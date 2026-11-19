@@ -3083,13 +3083,14 @@ def _fetch_prune(root: str) -> bool:
 
 
 def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "full",
-               attended: bool = False):
+               attended: bool = False, own_lock_rule: bool = True):
     """One repository. `mode` "full" is the whole sweep. "tier1" acts for real, with no
     --confirm, and only on stale registrations and husks: no worktree, branch or process work.
     "branches" reaps branches only (preview without --confirm), removes no worktree, and holds
     every branch any worktree has checked out. "fast" judges worktrees only, with no fetch, no
     remote read and no branch work: a tree goes only when its HEAD is already in the default
-    branch, and the default branch must be a remote-tracking ref."""
+    branch, and the default branch must be a remote-tracking ref. `own_lock_rule` False keeps a tree
+    that the caller's own agent lock holds (decide_worktree), for a caller still reading its tree."""
     if mode == "tier1":
         confirm = True
     result = {"root": root, "refused": None, "branches": [], "worktrees": [], "listeners": [],
@@ -3170,7 +3171,7 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
             # Could not tell whether this IS the primary checkout. Rule 7's direction: an
             # unreadable subject means keep, never a guess that it is safe to evaluate.
             return {"path": entry["path"], "action": "keep", "reason": "unreadable-subject"}
-        return decide_worktree(root, entry, attended, agent_rule, batch, mode == "fast")
+        return decide_worktree(root, entry, attended, agent_rule, batch, mode == "fast", own_lock_rule)
 
     judged = _oldest_idle_first(entries) if mode in ("full", "fast") else []
     if judged and mode == "full" and not _past_deadline():
