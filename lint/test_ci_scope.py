@@ -335,20 +335,17 @@ class Scope(unittest.TestCase):
         # `guard` too: the janitor launcher turns the guard suite on.
         self.assertFlags(run(["bin/claude-janitor"]), want_true=["shell_macos", "guard"], want_false=WINDOWS_SET)
 
-    # hooks/test_install_windows.sh is a .sh file, so the Windows-only list (*.ps1, bin/*.cmd) decides its Windows set. Its script
-    # comment calls it Windows-only, which the list does not say: the owner decides (Input Needed). The case follows the list, so it
-    # passes once the list names the file or the arm stops setting the Windows set. The scope is read before the subject (P7).
+    # Named failure: the Windows install suite is not in WINDOWS_ONLY_GLOBS, so an edit to it starts no Windows job.
     def test_windows_install_test_change_follows_the_windows_only_list(self):
         p = "hooks/test_install_windows.sh"
         got = run([p], existing=[p])
         globs = windows_globs(got)
         self.assertIsNotNone(globs, f"ci-scope.sh emits no {WINDOWS_CONSTANT} output")
-        listed = any(fnmatch.fnmatchcase(p, g) for g in globs)
+        self.assertTrue(any(fnmatch.fnmatchcase(p, g) for g in globs), f"{p} is not in {WINDOWS_CONSTANT}: {globs}")
         self.assertFlags(got, want_true=["shell_macos", "code"])
         for flag in WINDOWS_SET:
             with self.subTest(flag=flag):
-                self.assertEqual(got.get(flag), "true" if listed else "false",
-                                 f"{p} is {'listed' if listed else 'not listed'} in {WINDOWS_CONSTANT} but sets {flag}={got.get(flag)!r}")
+                self.assertEqual(got.get(flag), "true", f"{p} is in {WINDOWS_CONSTANT} but sets {flag}={got.get(flag)!r}")
 
     # Named failure: the silent-undo checker starts a Windows merge job on a pull_request that names no Windows-only path (F1).
     def test_silent_undo_checker_change_turns_on_code_and_no_windows_merge_job(self):
