@@ -115,12 +115,14 @@
 # (a SIGKILL from merge's timeout reaches only ci-job: it leaves the folder in TMPDIR and may leave verdict children running). Each `not run` line,
 # the summary and each CI step's `start: <name>` line on stderr (before it runs, so a caller sees which CI step is running)
 # are one print.
-# Rerun cache: a step that passed is saved under its name, its script, env, shell, directory, base and the repo's path, a hash of the tree it tests (the
-# committed files plus uncommitted and untracked ones, minus ignored ones) and a hash of this file's bytes. A rerun at the same key runs no
-# such step and prints `PASS (cached)` for it. Never saved: an install step, or a step that failed, read unknown or skipped. A saved file
-# that cannot be read is a miss. Cost: per run, one set of git processes (a temp index, add, write-tree) when a step may be cached; per
-# pass, one file of under 1 KB in $XDG_CACHE_HOME (else ~/.cache) /claude-settings/ci-job-pass. A save prunes files unused for 7 days,
-# and the store holds at most 300 files. No timer, no lasting process. CI_JOB_NO_CACHE=1 turns the cache off.
+# Rerun cache: a step that passed is saved under its name, its script, the whole environment it runs with (VOLATILE_ENV aside), shell, directory, base
+# and the repo's path, a hash of the tree it tests as it stands when the step starts (the committed files plus uncommitted and untracked ones, minus
+# ignored ones, so a step that follows a writing step keys on what that step wrote) and a hash of the bin/, hooks/ and lint/ trees of this install
+# (never __pycache__ or .pyc). A rerun at the same key runs no such step and prints `PASS (cached)` for it. Never saved: an install step, or a step
+# that failed, read unknown or skipped. A saved file that cannot be read is a miss. A pass ages from its save time: a hit does not refresh it, and
+# it misses 7 days after the save. Cost: per step that may be cached, one set of git processes (a temp index, add, write-tree); per run, one read of the
+# install's three trees; per pass, one file of under 1 KB in $XDG_CACHE_HOME (else ~/.cache) /claude-settings/ci-job-pass. A save prunes files saved
+# over 7 days ago, and the store holds at most 300 files. No timer, no lasting process. CI_JOB_NO_CACHE=1 turns the cache off.
 import concurrent.futures, hashlib, json, os, re, shutil, subprocess, sys, tarfile, tempfile, threading, time
 BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
@@ -654,7 +656,9 @@ def lint_workers():
 
 CACHE_MARK = "(cached) "  # the start of a cached step's line: its caller prints PASS (cached) and drops the mark
 CACHE_FILES, CACHE_DAYS = 300, 7
-TREE_KEYS, TREE_LOCK = {}, threading.Lock()  # the tree hash of each repo, read once per run: every step of a run tests the same tree
+VOLATILE_ENV = {"GITHUB_WORKSPACE", "VERDICT_LOG", "CI_JOB_LINT_WORKERS", "CI_JOB_NO_CACHE", "PWD", "OLDPWD", "SHLVL", "_", "COLUMNS", "LINES"}  # a variable that differs between runs and changes no step's result; GITHUB_WORKSPACE repeats the repo path, which the key holds once
+TOOL_TREES = ("bin", "hooks", "lint")  # the folders of this install that a step may run or import
+TOOL_KEYS, TOOL_LOCK = {}, threading.Lock()  # the install's hash, read once per run: no step of a run changes the tool
 
 
 def cache_folder():
@@ -665,27 +669,53 @@ def cache_folder():
 
 def tree_key(top):
     """A hash of the tree under `top`: the committed files, plus every uncommitted and untracked file that .gitignore does not hide.
-    The temp index is a copy of the real one, so the real index is never written. None when git cannot read the tree: nothing is cached."""
-    with TREE_LOCK:
-        if top not in TREE_KEYS:
-            TREE_KEYS[top] = None
-            tmp = tempfile.mkdtemp(prefix="ci-job-index-")
+    The temp index is a copy of the real one, so the real index is never written. None when git cannot read the tree: nothing is cached.
+    Read at each step's start, since an earlier step may have written into the tree."""
+    tmp = tempfile.mkdtemp(prefix="ci-job-index-")
+    try:
+        real = git("rev-parse", "--path-format=absolute", "--git-path", "index", cwd=top)
+        index = os.path.join(tmp, "index")
+        if real and os.path.isfile(real):
+            shutil.copyfile(real, index)
+        kw = dict(cwd=top, capture_output=True, text=True, env={**os.environ, "GIT_INDEX_FILE": index},
+                  timeout=120, stdin=subprocess.DEVNULL)
+        if _nowindow.run(["git", "add", "-A"], **kw).returncode == 0:
+            done = _nowindow.run(["git", "write-tree"], **kw)
+            if done.returncode == 0 and re.fullmatch(r"[0-9a-f]{40,64}", done.stdout.strip()):
+                return done.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return None
+
+
+def tool_key():
+    """A hash of every file under the bin/, hooks/ and lint/ folders of this install (never __pycache__ or .pyc), each named by its path,
+    or None when one cannot be read. Read once per run. A step may run or import any of them."""
+    with TOOL_LOCK:
+        if "key" not in TOOL_KEYS:
+            root, digest = os.path.dirname(BIN), hashlib.sha256()
             try:
-                real = git("rev-parse", "--path-format=absolute", "--git-path", "index", cwd=top)
-                index = os.path.join(tmp, "index")
-                if real and os.path.isfile(real):
-                    shutil.copyfile(real, index)
-                kw = dict(cwd=top, capture_output=True, text=True, env={**os.environ, "GIT_INDEX_FILE": index},
-                          timeout=120, stdin=subprocess.DEVNULL)
-                if _nowindow.run(["git", "add", "-A"], **kw).returncode == 0:
-                    done = _nowindow.run(["git", "write-tree"], **kw)
-                    if done.returncode == 0 and re.fullmatch(r"[0-9a-f]{40,64}", done.stdout.strip()):
-                        TREE_KEYS[top] = done.stdout.strip()
-            except (OSError, subprocess.SubprocessError):
-                pass
-            finally:
-                shutil.rmtree(tmp, ignore_errors=True)
-        return TREE_KEYS[top]
+                for tree in TOOL_TREES:
+                    for dirpath, dirs, names in os.walk(os.path.join(root, tree)):
+                        dirs[:] = sorted(d for d in dirs if d != "__pycache__")
+                        for fname in sorted(names):
+                            if fname.endswith(".pyc"):
+                                continue
+                            path = os.path.join(dirpath, fname)
+                            with open(path, "rb") as f:
+                                digest.update(os.path.relpath(path, root).replace(os.sep, "/").encode() + b"\0" + hashlib.sha256(f.read()).digest())
+                TOOL_KEYS["key"] = digest.hexdigest()
+            except OSError:
+                TOOL_KEYS["key"] = None
+        return TOOL_KEYS["key"]
+
+
+def child_env(env, base, values):
+    """The whole environment a step runs with: this process's, less what a runner step lacks, then the step's own. The one home: the key reads it as the step does."""
+    return {**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF", PIN_NOTE_ENV, HEAD_SHA_ENV}},
+            **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}), **env}
 
 
 def cache_key(name, install, detail, shell, env, cwd, ctx, suite):
@@ -693,17 +723,12 @@ def cache_key(name, install, detail, shell, env, cwd, ctx, suite):
     top, base, values, pinned = ctx
     if install or os.environ.get("CI_JOB_NO_CACHE") or not detail:
         return None
-    tree = tree_key(top)
-    try:
-        with open(os.path.realpath(__file__), "rb") as f:
-            tool = hashlib.sha256(f.read()).hexdigest()
-    except OSError:
-        return None
-    if tree is None:
+    tree, tool = tree_key(top), tool_key()
+    if tree is None or tool is None:
         return None
     parts = [name, detail, shell[0], cwd or "", str(bool(suite)), str(bool(pinned)), values.get("base", ""),
              values.get("github.event.pull_request.base.sha", ""), tree, tool, os.path.realpath(top),
-             *("%s=%s" % kv for kv in sorted(env.items()) if kv[0] != "GITHUB_WORKSPACE")]  # GITHUB_WORKSPACE repeats the repo path, which the key holds once
+             *("%s=%s" % kv for kv in sorted(child_env(env, base, values).items()) if kv[0] not in VOLATILE_ENV)]
     return hashlib.sha256("\0".join(parts).encode("utf-8", "replace")).hexdigest()
 
 
@@ -715,7 +740,8 @@ def cache_load(key, name):
             saved = json.loads(f.read().decode("utf-8"))
         if isinstance(saved, dict) and saved.get("key") == key and saved.get("name") == name \
                 and isinstance(saved.get("first"), str) and saved["first"].startswith("PASS "):
-            os.utime(path)  # a hit keeps the file out of the prune
+            if time.time() - os.path.getmtime(path) > CACHE_DAYS * 86400:  # the age runs from the save: a hit never refreshes it
+                return None
             return saved["first"]
     except (OSError, ValueError):
         pass
@@ -778,9 +804,7 @@ def run_step_uncached(name, step, install, detail, shell, env, cwd, ctx, log, su
         with _nowindow.Popen([sys.executable, os.path.join(BIN, "verdict"), *shell, script],
                              cwd=os.path.join(top, cwd) if cwd else top, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, text=True,
-                             env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF", PIN_NOTE_ENV, HEAD_SHA_ENV}},
-                                  **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}),
-                                  **env, "VERDICT_LOG": log}) as proc:
+                             env={**child_env(env, base, values), "VERDICT_LOG": log}) as proc:
             for line in proc.stdout:  # relay each heartbeat at once: the stall watch reads this job's output
                 if line.startswith("verdict: still running"):
                     err_line(line)
