@@ -1,0 +1,14 @@
+{
+ "id": "page-taken-picks-area",
+ "title": "The page has one area that lists every pick a session took or preselected, for the owner's review",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 18:30 CST Nov 18, in the consultant's chat (relayed): 'Has triage created the area of picks that let me see whats been preselected for my review'. Triage found none (read 18:32 CST).",
+ "source": "consultant relay 18:30 CST Nov 18",
+ "note": "Not built; no step existed (grep of roadmap steps and page copy, 18:32 CST). What exists: five closed 'taken-*' items (for example 'Taken for you, against your typed B ... Overrule?'), each one card in Answered, and no area that gathers them. Earlier owner words that govern it: 20:18 CST Nov 14 'Nothing can't be undone don't wait on me' and 00:11 CST Nov 15 (where the picks went); and 'in general on this artifact pick stands can not be preselected answers' (Nov 15, step page-no-preselected-pick): so the area lists picks a session TOOK (with undo), and never preselects an answer in a card. Design first (designer, mockup per size and theme), then test-author, builder, reviewer. Open for the designer: which items it lists (taken picks, closed with a taken flag), order newest first with last 24 hours and older (step page-artifacts-section-newest-first), and one Overrule button per card. Prior-work search first: step stood-pick-closes-on-answer.",
+ "updatedAt": "2026-11-18T18:32:08-06:00"
+}
