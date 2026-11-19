@@ -163,7 +163,39 @@ function timePinnedFindings(text) {
   });
 }
 
-// ---- the registry. A new scanner joins here with one entry: its name, its defect, and a flags(text) check.
+// ---- scanner 7, the guard's shell reading of a Bash call (hooks/guard.py judge_shell). The guard is Python, so a Python child imports the
+// never-raise test (hooks/test_checks_never_raise.py) and asks its shell_decision reader. The import gives the child that file's isolation: a
+// run folder for the config, and an empty PATH. The traps are shell text. A backtick in JS text is a command substitution in shell, so the
+// JS-shaped TRAPS do not fit this scanner.
+const GUARD_DIR = join(ROOT, "hooks");
+const SHELL_DRIVER = [
+  "import json, sys",
+  "sys.path.insert(0, sys.argv[1])",
+  "import test_checks_never_raise as t",
+  "for command in json.load(sys.stdin):",
+  "    print(t.shell_decision(command))",
+  "t.shutil.rmtree(t.RUN, ignore_errors=True)",
+].join("\n");
+const shellMemo = new Map();
+function shellDecision(command) {
+  if (!shellMemo.has(command)) {
+    const run = spawnSync("python3", ["-I", "-c", SHELL_DRIVER, GUARD_DIR], { input: JSON.stringify([command]), encoding: "utf8" });
+    if (run.status !== 0) throw new Error(`guard gave no result (exit ${run.status}): ${String(run.stderr).trim().split("\n").pop()}`);
+    shellMemo.set(command, run.stdout.trim());
+  }
+  return shellMemo.get(command);
+}
+const shellRefused = (text) => ["ask", "deny"].includes(shellDecision(text));
+const SHELL_TRAPS = [
+  { name: "comment opener // in a string", text: 'echo "http://a.test/" ; ' },
+  { name: "comment opener /* in a string", text: 'echo "/* not a comment" ; ' },
+  { name: "comment opener # in a string", text: 'echo "# not a comment" ; ' },
+  { name: "multi-line quote", text: 'echo "first line\nmiddle line\nlast line" ; ' },
+  { name: "lone quote in a string", text: "echo \"Don't\" ; " },
+];
+
+// ---- the registry. A new scanner joins here with one entry: its name, its defect, and a flags(text) check. A scanner whose text is
+// not JS may name its own traps (traps); the rest share TRAPS.
 const SCANNERS = [
   { name: "decision-watch machinePaths", defect: 'const p = "D:/work/x"', flags: (t) => machinePaths(t).length > 0 },
   { name: "decision-watch codeNouns", defect: "typeof $.fs.mkdir", flags: (t) => codeNouns(t).length > 0 },
@@ -171,11 +203,12 @@ const SCANNERS = [
   { name: "plain-diff looksSecret", defect: 'const k = "' + GHP + '"', flags: secretFlagged },
   { name: "ios-mockup duo frames", defect: '<div data-device="iphone-duo-unfolded"></div>', flags: (t) => iosCodes(iosPage(t)).length > 0 },
   { name: "time-pinned finder", defect: "await new Promise((r) => setTimeout(r, 500));", flags: (t) => timePinnedFindings(t).length > 0 },
+  { name: "guard shell quote reading", defect: "git push -f origin main", flags: shellRefused, traps: SHELL_TRAPS },
 ];
 
 // ---- the shared table: every scanner, every trap. A trap alone is clean; a trap then the defect is flagged.
 for (const s of SCANNERS) {
-  for (const t of TRAPS) {
+  for (const t of s.traps || TRAPS) {
     test(`${s.name}: ${t.name} alone finds nothing`, () => {
       assert.equal(s.flags(t.text), false, `false alarm on the trap alone: ${JSON.stringify(t.text)}`);
     });
@@ -211,6 +244,10 @@ test("decision-watch codeNouns: a lone quote in a comment does not hide the code
 });
 test("decision-watch codeNouns: a called $.fs.write and a called $.model.complete are not bare reads", () => {
   same(codeNouns("await $.fs.write(file, text); await $.model.complete({ model });"), [], "called methods");
+});
+test("guard shell quote reading: a deny text inside echo's quotes is data, and bash -c runs the same text and asks", () => {
+  same(shellDecision("echo 'git push -f origin main'"), "allow", "quoted data in echo");
+  same(shellDecision("bash -c 'git push -f origin main'"), "ask", "bash -c runs the quoted text");
 });
 // ---- run. Only when this file is the entry point: the decision-watch mod test imports two scanners from it.
 if (isMain) {
