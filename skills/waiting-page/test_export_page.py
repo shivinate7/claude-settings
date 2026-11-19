@@ -3712,6 +3712,42 @@ class TakenArea(Copied):
         self.assertIn("checks pass", verdict_lines(r), "a page with no taken pick did not pass the check. Output:\n" + shown(r))
         self.assertEqual(r.returncode, 0, "a clean check must exit 0. Output:\n" + shown(r))
 
+    def real_page(self):
+        """The page the repo ships, skills/waiting-page/page.html, as text: the page the check reads in production."""
+        return read_text(os.path.join(HERE, "page.html"))
+
+    def test_the_real_page_with_its_area_draw_cut_and_its_rail_kept_holds_the_taken_pick(self):
+        """The check must find the area itself, not the rail's jump to it. The real page with each line that draws the area cut,
+        and the rail's jump kept, draws no area, so the check holds the taken pick."""
+        lines = self.real_page().split("\n")
+        self.assertTrue(any('sectionEl("taken"' in line for line in lines),
+                        "scope: the real page has no line that draws the taken-picks area, so the copy changes nothing")
+        self.assertTrue(any('jump("tier-taken")' in line for line in lines),
+                        "scope: the real page's rail no longer jumps to tier-taken, so the copy keeps no rail")
+        cut = "\n".join(line for line in lines if 'sectionEl("taken"' not in line)
+        r = self.check({TAKEN_ID: taken_item()}, cut)
+        self.assertEqual(len(self.named_lines(r)), 1, "the check passed a taken pick on a page that draws no taken-picks area, "
+                                                      "because the rail's jump still names tier-taken. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 4, "a taken pick on a page with no drawn area must hold the check, exit 4. Output:\n" + shown(r))
+
+    def test_the_real_page_with_its_rail_renamed_and_its_area_kept_passes_the_check(self):
+        """The check must find the area by what draws it. The real page with the rail renamed to another id, and the area's draw
+        kept, draws the area, so the check passes and holds nothing."""
+        renamed = self.real_page().replace('"tier-taken"', '"tier-picks"').replace('"#tier-taken"', '"#tier-picks"')
+        self.assertNotIn("tier-taken", renamed, "scope: the rail still names tier-taken, so the copy keeps the id the check reads")
+        self.assertIn('sectionEl("taken"', renamed, "scope: the area's draw line is gone, so the copy draws no area")
+        r = self.check({TAKEN_ID: taken_item()}, renamed)
+        self.assertEqual(self.named_lines(r), [], "the check held a taken pick on a page that draws the area, with the rail renamed. "
+                                                  "Output:\n" + shown(r))
+        self.assertIn("checks pass", verdict_lines(r), "the page with the area and a renamed rail did not pass the check. "
+                                                       "Output:\n" + shown(r))
+
+    def test_control_the_real_page_passes_the_check_for_a_taken_pick(self):
+        """Control, green on the built page: the page as shipped draws the area, so the same taken pick passes."""
+        r = self.check({TAKEN_ID: taken_item()}, self.real_page())
+        self.assertEqual(self.named_lines(r), [], "the real page held a taken pick that it draws in the area. Output:\n" + shown(r))
+        self.assertIn("checks pass", verdict_lines(r), "the real page did not pass the check for a taken pick. Output:\n" + shown(r))
+
 
 if __name__ == "__main__":
     unittest.main()
