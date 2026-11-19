@@ -2056,11 +2056,12 @@ def lane_mcp_ready_hit(tool: str, tool_input, transcript: str) -> str:
 # ---- the record branch's one writer: only the triage session pushes to it (rule roadmap-one-writer)
 RECORD_WRITER_TIER = "triage"
 DEFAULT_RECORD_BRANCH = "roadmap"
+RECORD_DECISION_CITE = "(decision session-tiers, the triage session is the only writer of the record branch)"  # glossary-ok: session-tiers is the decision's file name
 RECORD_CITE = (
     "own turn, then retry. Before this session asks the owner to push a commit, run `git fetch origin <record "
     "branch>`, then `git merge-base --is-ancestor <commit> origin/<record branch>`: exit 0 means the commit is "
     "already there, so ask the owner only when it is not. "
-    "(decision session-tiers, the triage session is the only writer of the record branch)"  # glossary-ok: session-tiers is the decision's file name
+    + RECORD_DECISION_CITE
 )
 RECORD_REASON = (
     "roadmap-one-writer: the repo's record branch has one writer, the triage session, and this session's own "
@@ -2082,7 +2083,8 @@ RECORD_FOLDER_REASON = (
     "roadmap-one-writer: this push to the record branch runs in a folder this guard cannot read, because it holds "
     "{names} that the command does not assign. The push's repo and record branch are unknown, so a local "
     "role file cannot be matched to its repo. Write the folder as a literal path, or assign the variable earlier in the same command "
-    "(`W=<folder>; git -C \"$W\" push ...`), then retry."
+    "(`W=<folder>; git -C \"$W\" push ...`), then retry. "
+    + RECORD_DECISION_CITE
 )
 UNREAD_FOLDER = re.compile(r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|\$\(|`")
 
@@ -3191,7 +3193,7 @@ def _minutes_ahead(then, now) -> int:
     return int((then.replace(second=0, microsecond=0) - now.replace(second=0, microsecond=0)).total_seconds() // 60)
 
 
-def stamp_hit(tool: str, tool_input):
+def header_time_hit(tool: str, tool_input):
     """Return (matched, reason) when this send_message opens with a header stamp that is wrong for the clock, else
     None. Only the first non-blank line is read, and only its header stamp. Wrong means one of three things. The
     zone name is not the clock's own (local_time's DST rule names the current zone), whatever the minutes. A dated
@@ -3363,7 +3365,7 @@ def written_time_hit(tool: str, tool_input, cwd: str = ""):
     roadmap/data/steps/<name>.json file: `updatedAt` in a Write, and each instant in an Edit's or MultiEdit's new
     text. In a shell command: the last literal `updatedAt` key with a single- or double-quoted value. Only a value
     with an offset is read. Cost: one clock read, and only when a judged value is present; one local file read,
-    only for an items write that carries `file_path` and no inline data; no transcript or process. Fails open, like stamp_hit."""
+    only for an items write that carries `file_path` and no inline data; no transcript or process. Fails open, like header_time_hit."""
     if not isinstance(tool_input, dict):
         return None
     judged = []
