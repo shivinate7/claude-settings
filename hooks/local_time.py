@@ -22,7 +22,10 @@ This hook is also the owner feedback inbox's capture (decision owner-feedback-in
 UserPromptSubmit prompt is appended verbatim to <config dir>/handoffs/<session_id>.inbox.md, with its
 Central time, in a backtick fence longer than any backtick run in the text. No word opens or closes
 capture. A notice or an agent hand-back (a prompt that starts with a shared_names.MACHINE_TAGS
-entry) is never saved.
+entry) is never saved. Nor is a prompt that is only a bash-input echo (`<bash-input>`, `<bash-stdout>`
+and `<bash-stderr>` records, the trace a `!` command leaves) or only a bare paste (`<pasted_content>`
+blocks): neither holds a word of the owner's own. A tag quoted in owner words, or owner words beside
+a record or a paste, keep the whole prompt (decision owner-feedback-inbox).
 After a save, capture writes `<session_id>.inbox.repo` once, when the payload cwd is inside a git
 repo (a `.git` found by walking up; no process starts): the real path of the cwd. The Stop guard reads
 it to find other sessions' inboxes of the same repo (decision owner-feedback-inbox, "Repeats"). Cost:
@@ -219,6 +222,18 @@ def not_saved(what, err):
     return "Feedback capture: this %s was not saved (%s). Jot it by hand into the handoff." % (what, err)
 
 
+def _only_blocks(tag, text):
+    """True when `text` is whitespace and blocks of `tag` alone. A block body never holds its own
+    closing tag, so owner words between two blocks cannot hide inside one match."""
+    block = r"<(%s)(?: [^>]*)?>(?:(?!</\1>).)*</\1>" % tag
+    return re.fullmatch(r"\s*(?:%s\s*)+" % block, text, re.S) is not None
+
+
+def is_not_owner_words(prompt):
+    """True for a prompt that is only a bash-input echo or only a bare paste."""
+    return _only_blocks("bash-input|bash-stdout|bash-stderr", prompt) or _only_blocks("pasted_content", prompt)
+
+
 def capture(raw, stamp):
     """Saves one owner prompt to the inbox. `raw` is the hook's stdin as bytes."""
     hook = json.loads(raw.decode("utf-8"))
@@ -232,6 +247,8 @@ def capture(raw, stamp):
         MACHINE_TAGS = ()
     if MACHINE_TAGS and prompt.strip().startswith(MACHINE_TAGS):
         return  # a notice is not an owner message
+    if is_not_owner_words(prompt):
+        return
     err = save_message(paths[0], stamp, prompt)
     if err is not None:
         print(not_saved("message", err))
