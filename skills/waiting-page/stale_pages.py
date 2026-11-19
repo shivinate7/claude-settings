@@ -65,9 +65,9 @@ answers/<id> is kept`, then the remedy: when its wait has ended, drop `waits` an
 a closed item with a `lane` and a `lastAnswer` (routed: its answer stays until the done report), an item with `arbiter` true, a park answer (`park.<id>`, `parked: true` or `act: "park"`), an answer with no item. An unreadable file, a folder without the marker,
 unreadable items, an items folder without the marker, or --answers without --items print one `kept-answer: unknown (...)` line, with no other kept-answer line.
 The folder loader is export_page.docs_in, the one home of reading that folder.
-With --items and the env ROADMAP_STEPS_FOLDER naming the record's roadmap/data/steps folder (no CLI flag), an open item whose `home` reads `step <id>` (a bare id is
-also a decision or debt id, so it is never flagged)
-names a step whose status is done, dropped, folded or done-obsolete prints `found-false: item <n> (<id>): ...` after the other lines. The line names the home, its
+With --items and the env ROADMAP_STEPS_FOLDER naming the record's roadmap/data/steps folder (no CLI flag), an open item whose `home` reads `step <id>` (the keyword in any case) or is a bare <id>
+names a step whose status is done, dropped or done-obsolete prints `found-false: item <n> (<id>): ...` after the other lines. A folded step waits on purpose, so it is never flagged.
+A bare id may also be a decision or debt id, so its line adds "if <id> is a decision or debt id, leave it open". The line names the home, its
 status and the close (status closed, closed, replied, reply); the item is moot, so the owner is never asked. Unset, the check does nothing; an unreadable folder prints
 one `found-false: unknown (...)` line. The exit code stays the verdict's.
 Session-start mode, run by hooks/session_start.sh in a repo whose extras name a waiting page:
@@ -207,7 +207,7 @@ GIT_TIMEOUT = 30
 WAIT_CAP = 50  # most gh calls one --items run makes
 FOUND_ENV = "ROADMAP_STEPS_FOLDER"  # the folder of step files the --items run reads for found-false items; unset, the check does nothing
 FOUND_BULLET = "- An item found false"  # the start of the SKILL.md bullet that holds the found-false rule; the printed cite names the section holding it
-FOUND_DONE = ("done", "dropped", "folded", "done-obsolete")  # the step statuses that make an item's premise moot
+FOUND_DONE = ("done", "dropped", "done-obsolete")  # the step statuses that make an item's premise moot; a folded step waits on purpose, so it is not one
 REPO_NAME = re.compile(r"[\w.-]+/[\w.-]+")
 WAIT_NUMBER = re.compile(r"[1-9][0-9]*")  # a run id or PR number: a whole number above zero, with no leading zero (page.html waitsOf reads the same form)
 # One piece of the text before the template: white space or a document skeleton tag (no event-handler
@@ -757,9 +757,10 @@ def found_false_cite():
 
 
 def found_false_lines(items, steps):
-    """One line per open item, in `n` order, whose `home` names a step that is done, dropped, folded or done-obsolete: its premise is moot, so the
-    writer closes it the same turn (SKILL.md, "Route and close", an item found false). `home` reads only as `step <id>`; any other home (a bare id, which a decision or debt
-    record also holds, a record path, a pointer to a live step) is never flagged. `steps` is {step id: status} from read_steps."""
+    """One line per open item, in `n` order, whose `home` names a step that is done, dropped or done-obsolete: its premise is moot, so the
+    writer closes it the same turn (SKILL.md, "Chat first", an item found false). `home` reads as `step <id>` (the keyword in any case) or as a bare <id>, the form
+    SKILL.md "The database" tells writers to use. A bare id may also be a decision or debt id, so its line says to leave the item open then. Any other home (a record path,
+    a pointer to a live or folded step) is never flagged. `steps` is {step id: status} from read_steps."""
     lines = []
     cite = found_false_cite()
     # The folder lists docs by file name ("10" before "2"), so order by `n`, which is the order the page shows; an item with no whole `n` goes last.
@@ -768,14 +769,15 @@ def found_false_lines(items, steps):
         if item.get("status") == "closed" or not isinstance(item.get("home"), str):
             continue
         home = item["home"].strip()
-        if not home.startswith("step "):
-            continue
-        home = home[len("step "):].strip()
+        keyword = re.match(r"step\s+(\S.*)$", home, re.IGNORECASE)
+        if keyword:
+            home = keyword.group(1).strip()
         status = steps.get(home)
         if status in FOUND_DONE:
-            lines.append("found-false: item %s (%s): its home step %s is %s, so the item is moot; close it this turn: write status closed, closed, replied, reply "
+            caveat = "" if keyword else "; if %s is a decision or debt id, leave it open" % home
+            lines.append("found-false: item %s (%s): its home step %s is %s, so the item is moot%s; close it this turn: write status closed, closed, replied, reply "
                          "(the reply names the record that shows it false) (%s)"
-                         % (item.get("n", item.get("id", "?")), item.get("id", "?"), home, status, cite))
+                         % (item.get("n", item.get("id", "?")), item.get("id", "?"), home, status, caveat, cite))
     return lines
 
 
@@ -783,8 +785,8 @@ def single_page(argv):
     """Exit 0 current, 1 behind, 2 unknown for one fetched page. Writes a file only with --write, never on unknown.
     With --items, prints after the verdict line one wait line per open item with a `waits` field, and one lane line per open
     item with a `lane` and a `lastAnswer` and no `waits`. With --answers too, one kept-answer line per closed item whose answer is kept, and per open item whose answer is older than its `added`.
-    With --items and the env ROADMAP_STEPS_FOLDER (the record's roadmap/data/steps), one found-false line per open item whose `step <id>` home is done, dropped,
-    folded or done-obsolete; unset, none.
+    With --items and the env ROADMAP_STEPS_FOLDER (the record's roadmap/data/steps), one found-false line per open item whose home (`step <id>` or a bare id) is done, dropped
+    or done-obsolete; unset, none.
     The exit code stays the verdict's."""
     ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
     ap.add_argument("--page", required=True)
