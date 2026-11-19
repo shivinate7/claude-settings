@@ -1832,7 +1832,7 @@ class Stale(unittest.TestCase):
             home = step_id if n % 2 else "step " + step_id
             status = "closed" if n % 6 == 0 else "open"
             if n % 7 == 0:
-                home = "docs/decisions/session-messages.md"  # a record home, not a step: never flagged
+                home = "session-messages"  # a decision id, a record home that no step carries: never flagged
             items.append(found_item(n, "item-%d" % n, home, status=status))
             if status == "open" and n % 7 and kind in FOUND_DONE:
                 want.append(n)
