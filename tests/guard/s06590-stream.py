@@ -929,8 +929,8 @@ for _label, _trigger, _rule in REMEDY_TRIGGERS:
     sh("wait-until: the remedy of %s names the helper by its bin path" % _label, _trigger, "deny", _rule,
        cwd=NOGIT, carries=("`bin/wait-until",))
 
-# The helper is allowed in the foreground for a past time or one under 25 s away, and under run_in_background for
-# any time. A command after the helper is allowed too. A foreground time more than 25 s away is refused: see below.
+# The helper is allowed in the foreground for a past time, a time under 25 s away, or a far time with --timeout 10
+# (see below). Under run_in_background it is allowed for any time. A command after the helper is allowed too.
 for _command in ("wait-until %s" % WAIT_UNTIL_TIME, "wait-until %s --timeout 500" % WAIT_UNTIL_TIME):
     sh("wait-until: %s is allowed in the foreground" % _command, _command, "allow", cwd=NOGIT)
     add("wait-until: %s is allowed under run_in_background" % _command, "allow", cwd=NOGIT,
@@ -938,12 +938,15 @@ for _command in ("wait-until %s" % WAIT_UNTIL_TIME, "wait-until %s --timeout 500
 add("wait-until: the helper, then one command, is allowed under run_in_background", "allow", cwd=NOGIT,
     command="wait-until %s; node tool.mjs" % WAIT_UNTIL_TIME, run_in_background=True)
 
-# A foreground wait for a time more than 25 s away is refused, as a pause of 25 s or more is: the wait goes under
-# run_in_background, and the reason names it. The clock is LOCAL_TIME_NOW, the hook clock's one home
-# (local_time.clock), so no verdict reads the real time. The 26 s and 24 s times bracket the 25 s line.
+# A foreground wait is refused when it lasts 25 s or more, as a pause of that length is: its time is 25 s or more
+# away, and no short --timeout caps it. The wait goes under run_in_background, and the reason names it. The clock is
+# LOCAL_TIME_NOW, the hook clock's one home (local_time.clock), so no verdict reads the real time. The 24, 25 and 26 s
+# times bracket the line. SLEEP_LIMIT (guard_stream.py) is 25, and its sleep check refuses a pause of 25 s or more.
 WAIT_UNTIL_NOW = "2026-11-19T12:00:00+00:00"  # the synthetic clock of the cases below
-WAIT_UNTIL_26S = "2026-11-19T12:00:26Z"  # 26 s after that clock: more than 25 s away
-WAIT_UNTIL_24S = "2026-11-19T12:00:24Z"  # 24 s after it: under 25 s away
+WAIT_UNTIL_24S = "2026-11-19T12:00:24Z"  # 24 s after that clock: under 25 s away
+WAIT_UNTIL_25S = "2026-11-19T12:00:25Z"  # 25 s after it: at the line, so refused
+WAIT_UNTIL_26S = "2026-11-19T12:00:26Z"  # 26 s after it: more than 25 s away
+WAIT_UNTIL_FAR = "2026-11-19T13:00:00Z"  # an hour after it: far away
 add("wait-until: a foreground wait for a time 26 s away is refused, and the reason names run_in_background",
     "deny", "waiter", cwd=NOGIT, carries=("run_in_background",), env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW},
     command="~/.claude/bin/wait-until %s" % WAIT_UNTIL_26S)
@@ -954,6 +957,41 @@ for _bg in (False, True):
     add("wait-until: a wait for a time 24 s away is allowed%s" % (" under run_in_background" if _bg else ""),
         "allow", cwd=NOGIT, env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW},
         command="~/.claude/bin/wait-until %s" % WAIT_UNTIL_24S, **({"run_in_background": True} if _bg else {}))
+
+# The line itself: a time 25 s away is a wait of 25 s, which the sleep check refuses too.
+add("wait-until: a foreground wait for a time 25 s away is refused, and the reason names run_in_background",
+    "deny", "waiter", cwd=NOGIT, carries=("run_in_background",), env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW},
+    command="wait-until %s" % WAIT_UNTIL_25S)
+add("wait-until: a background wait for a time 25 s away is allowed", "allow", cwd=NOGIT,
+    env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW}, command="wait-until %s" % WAIT_UNTIL_25S, run_in_background=True)
+
+# --timeout caps a wait. A far time under a long cap is refused, and the same time under a 10 s cap is allowed.
+# The far time with no cap stays refused, so the allow under the 10 s cap comes from the cap, not a missed branch.
+sh("wait-until: a foreground wait for a far time with no --timeout is refused, and the reason names run_in_background",
+   "wait-until %s" % WAIT_UNTIL_FAR, "deny", "waiter", cwd=NOGIT, carries=("run_in_background",),
+   env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW})
+sh("wait-until: a foreground wait for a far time with --timeout 500 is refused, and the reason names run_in_background",
+   "wait-until --timeout 500 %s" % WAIT_UNTIL_FAR, "deny", "waiter", cwd=NOGIT,
+   carries=("run_in_background",), env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW})
+add("wait-until: a background wait for a far time with --timeout 500 is allowed", "allow", cwd=NOGIT,
+    env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW}, command="wait-until --timeout 500 %s" % WAIT_UNTIL_FAR,
+    run_in_background=True)
+sh("wait-until: a foreground wait for a far time with --timeout 10 is allowed",
+   "wait-until %s --timeout 10" % WAIT_UNTIL_FAR, "allow", cwd=NOGIT, env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW})
+sh("wait-until: a foreground wait for a time 24 s away with --timeout 500 is allowed",
+   "wait-until --timeout 500 %s" % WAIT_UNTIL_24S, "allow", cwd=NOGIT, env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW})
+
+# A time that is not a literal (a command substitution or a variable) cannot be read here, so a foreground wait on
+# one is refused. Under run_in_background it is allowed. An echo that names such a wait is text, and is allowed.
+for _non_literal in ('"$(date -u +%Y-%m-%dT%H:%M:%SZ)"', "$T"):
+    sh("wait-until: a foreground wait on the non-literal time %s is refused, and the reason names run_in_background"
+       % _non_literal, "wait-until %s" % _non_literal, "deny", "waiter", cwd=NOGIT,
+       carries=("run_in_background",), env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW})
+    add("wait-until: a wait on the non-literal time %s is allowed under run_in_background" % _non_literal,
+        "allow", cwd=NOGIT, env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW}, command="wait-until %s" % _non_literal,
+        run_in_background=True)
+sh("wait-until: an echo that names a wait on $T is text and is allowed", 'echo "wait-until $T"', "allow",
+   cwd=NOGIT, env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW})
 
 # THE REMEDY CHECK. Every command form that a waiter-family remedy names in backticks is allowed, in the
 # foreground and under run_in_background: the guard must not refuse the advice it gives. The remedies are read
