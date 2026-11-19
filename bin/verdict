@@ -3,7 +3,7 @@
 # Log: $VERDICT_LOG (appended, never truncated), else a new file in $TMPDIR. Exit code is the command's.
 # While it runs, print "verdict: still running, <elapsed>, log=<path>" to stderr every $VERDICT_HEARTBEAT s (default 120), and append it to $STALL_WATCH_BEAT when set.
 # Why stderr: a pipe on stdout (`verdict ... | grep`) hides the line, and the background output file keeps stderr. A quiet verdict over 300 s then draws a false STALL (decision stall-watch, "Tools that are quiet by design"). Why the file too: `2>&1 | grep` or `2>/dev/null` hides stderr as well, and the stall watch reads that file.
-# Exit 0 is FAIL if the output holds a runner marker, no test ran (an XCTest `Executed 0 tests` line beats a unittest `Ran N tests` line; a unittest `Ran 0 tests in` line at a line start counts only when no other count is read), or a test run read no test count (a test success marker at a line start, or `xcodebuild test` or `swift test` as typed), else SKIP (`SKIP <cmd>, N skipped (<secs>s)`, exit 0) if N > 0 tests skipped, else PASS.
+# Exit 0 is FAIL if the output holds a runner marker, no test ran (an XCTest `Executed 0 tests` line beats a unittest `Ran N tests` line; a unittest `Ran 0 tests in` line at a line start counts only when an `OK`, `FAILED` or `NO TESTS RAN` line follows it with no skips, and no other count is read), or a test run read no test count (a test success marker at a line start, or `xcodebuild test` or `swift test` as typed), else SKIP (`SKIP <cmd>, N skipped (<secs>s)`, exit 0) if N > 0 tests skipped, else PASS.
 # N is the larger of two counts: the sum of the runner summaries in the run (`skipped=N`, `N skipped`, node's `# skipped N` and `ℹ skipped N`), and the lines that start `SKIP `, `SKIPPED` or `SKIP:`. A summary line `SKIP: N check` is not one of them, so it never counts on top of its cases. XCTest `Executed N tests, with M tests skipped` lines nest (class, bundle, All tests), so their max is one term of the sum. Colour codes (SGR) are ignored. A count of 10 or more digits reads as 10**9. A count of 0 is PASS. Why: a test that always skips must not read as a pass.
 # A run with no $VERDICT_LOG deletes verdict-*.log files older than 1 day from the temp folder: regular files whose first line is our own header only; errors skipped.
 # Killed by signal N: exit 128+N. Ctrl-C: exit 130. Windows: bin/verdict.cmd.
@@ -16,7 +16,8 @@ CHUNK, OVERLAP = 1 << 20, 256  # OVERLAP > longest marker
 KEEP = 86400
 HEADER = b"=== verdict run "
 EXEC = re.compile(r"Executed (\d+) tests?|Test run with (\d+) tests?\b.{0,100}?\bpassed after")  # XCTest summary, Swift Testing summary
-UT_RAN = re.compile(r"^Ran (\d{1,10}) tests? in\b", re.M)  # unittest's summary, at a line start: a line that quotes it is no count
+UT_RAN = re.compile(rb"^Ran (\d{1,10}) tests? in\b[^\n]*(?:\n(?:[ \t]*\n)*(OK|FAILED|NO TESTS RAN)\b([^\n]*))?", re.M)  # unittest's summary at a line start, with the result line that follows it, if any: a line that quotes it is no count
+UT_SKIPS = re.compile(rb"\bskipped=0*[1-9]")  # `OK (skipped=N)`: the run is a skip, which the skip count reports
 ST_FAILED = re.compile(r"Test run with \d+ tests?\b.{0,100}?\bfailed after")  # `swift test` can exit 0 on it; its XCTest line says 0
 SGR = rb"\x1b\[[0-9;]*m"
 # XCTest first (its match swallows its own "M tests skipped"), then unittest, then pytest/jest/vitest/playwright/case_runner, then node (TAP `#`, spec `ℹ`) summaries.
@@ -92,8 +93,8 @@ def main(argv):
         f.flush(); end = f.tell()
     secs = f"{time.time() - t:.1f}s"
     if rc < 0: note, rc = f" killed by signal {-rc}", 128 - rc
-    fail = zero = ran = marked = uzero = uran = False; lines = []
-    summaries, xct, marks = {}, {}, {}  # absolute byte offset of a match -> its count; a match in the chunk overlap is read twice, counted once
+    fail = zero = ran = marked = False; lines = []
+    summaries, xct, marks, ut = {}, {}, {}, {}  # absolute byte offset of a match -> its count; a match in the chunk overlap is read twice, counted once
     try:
         with open(log, "rb") as f:
             pos = start
@@ -115,8 +116,8 @@ def main(argv):
                 fail = fail or "** TEST FAILED **" in buf or "** BUILD FAILED **" in buf or bool(ST_FAILED.search(buf))
                 if not marked: marked = any(pos == start or m.start() for m in TEST_OK.finditer(raw))  # a later chunk's index 0 may be mid-line; the previous chunk holds that line whole
                 for a, b in EXEC.findall(buf): n = a or b; zero, ran = zero or n == "0", ran or n != "0"
-                for m in UT_RAN.finditer(buf):  # a later chunk's index 0 may be mid-line; the previous chunk holds that line whole
-                    if pos == start or m.start(): uzero, uran = uzero or m[1] == "0", uran or m[1] != "0"
+                for m in UT_RAN.finditer(raw):  # a later chunk's index 0 may be mid-line; the previous chunk holds that line whole. A later chunk overwrites a match cut at its edge
+                    if pos == start or m.start(): ut[pos + m.start()] = (m[1] != b"0", m[2] is not None and not UT_SKIPS.search(m[3]))
                 pos += CHUNK - OVERLAP if pos + CHUNK < end else CHUNK
             f.seek(max(start, end - TAIL))
             lines = rd(end - f.tell()).decode("utf-8", errors="replace").splitlines()
@@ -125,7 +126,7 @@ def main(argv):
         note += " log unreadable"
     if rc == 0:
         if fail: rc, note = 1, " runner failure marker"
-        elif (zero and not ran) or (uzero and not (uran or ran)): rc, note = 1, " no tests ran"  # an `Executed 0` line beats a `Ran N` line; a `Ran 0` line loses to any other count
+        elif (zero and not ran) or (any(c and not n for n, c in ut.values()) and not (ran or any(n for n, c in ut.values()))): rc, note = 1, " no tests ran"  # an `Executed 0` line beats a `Ran N` line; a `Ran 0` line, closed by an OK, FAILED or NO TESTS RAN line (`OK (skipped=N)` is a skip, not a zero), loses to any other count
         elif not (zero or ran) and (marked or by_argv): rc, note = 1, " no test count"
         else:
             skips = max(sum(summaries.values()) + max(xct.values(), default=0), len(marks))
