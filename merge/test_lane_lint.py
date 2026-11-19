@@ -641,7 +641,7 @@ class LaneFixture(CiJobStub, tm.CloudSession):
         with open(self.mutate_log, encoding="utf-8") as f:
             return [json.loads(line) for line in f if line.strip()]
 
-    def push_release_branch(self):
+    def push_stable_branch(self):
         sh = tm.sh
         sh(self.other, "git", "fetch", "-q", "origin")
         sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/release")
@@ -839,14 +839,14 @@ class LaneLint(LaneFixture):
         self.assertEqual(len(pass_lines(out)), 1, out)
 
     def test_a_base_flag_names_the_base_the_lint_runs_against_for_a_ref_target(self):
-        self.push_release_branch()
+        self.push_stable_branch()
         self.use_ci_job(PASSING, 0)
         sha = self.head("feat")
         rc, out = self.lint_run("--lane-lint", sha, "--base", "release", base="release", head=sha)
         self.assertEqual(rc, 0, out)
 
     def test_a_pr_target_takes_its_head_and_base_from_the_pull_request(self):
-        self.push_release_branch()
+        self.push_stable_branch()
         self.host.base = "release"
         self.use_ci_job(PASSING, 0)
         rc, out = self.lint_run("--lane-lint", "7", base="release")
@@ -854,7 +854,7 @@ class LaneLint(LaneFixture):
 
     def stacked_pr_on_release(self):
         """PR 7 is feat, based on release, not main. release moves one commit on after feat forked from it. -> (feat sha, release sha)."""
-        self.push_release_branch()
+        self.push_stable_branch()
         self.host.base = "release"
         o = self.other
         tm.sh(o, "git", "fetch", "-q", "origin")
@@ -2438,7 +2438,7 @@ class CrossMeasure(LaneFixture):
         self.assert_remedy_names_a_merge_or_a_rebase(text)
 
     def test_the_conflict_remedy_names_a_merge_or_a_rebase_for_a_release_base_pr(self):
-        self.push_release_branch()  # release is main's tip, so the lane's head holds it and the stack check passes
+        self.push_stable_branch()  # release is main's tip, so the lane's head holds it and the stack check passes
         self.host.base = "release"
         self.own_writes({"shared-a.txt": "lane 7\n"})
         self.pr_writes(8, {"shared-a.txt": "lane 8\n"}, lane_body(OWN))
@@ -6461,7 +6461,7 @@ class LintResumesPassedJobs(LaneFixture):
     TOOL_KEYS = 5  # passes under a new tool key each, for the prune case
     KEEP_MAX = 3  # the most saved results after them: a small count, and at least 2, which the other-head case needs
     EDIT = b"\n# an edit the tool's key must see\n"  # appended to a copy of a file the tool reads
-    STALE = 1600000000  # a fixed, old mtime (2020-09-13 UTC) for a planted .part file
+    STALE = 1600000000  # a fixed, old mtime for a planted .part file
 
     def lint_at(self, when, *extra, module=None):
         """One `--lane-lint 7` run with the merge commit's dates set to `when`. `module` runs a loaded copy of merge.py instead of this process's.
@@ -6837,7 +6837,7 @@ class LintResumesPassedJobs(LaneFixture):
 
     def test_a_new_base_name_with_the_same_merged_tree_misses_the_saved_result_and_runs_the_job(self):
         self.scope_and_save()
-        self.push_release_branch()  # release sits at main's tip: the same merged tree under another base name
+        self.push_stable_branch()  # release sits at main's tip: the same merged tree under another base name
         self.host.base = "release"
         self.assertEqual(self.head("release"), self.head("main"), "scope: release is not at main's tip")
         ran = self.ran()
