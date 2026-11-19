@@ -929,14 +929,31 @@ for _label, _trigger, _rule in REMEDY_TRIGGERS:
     sh("wait-until: the remedy of %s names the helper by its bin path" % _label, _trigger, "deny", _rule,
        cwd=NOGIT, carries=("`bin/wait-until",))
 
-# The helper is never refused, in the foreground or under run_in_background. Nothing judges it yet, so these
-# pin that a waiter rule never refuses the one allowed form. A command after the helper is allowed too.
+# The helper is allowed in the foreground for a past time or one under 25 s away, and under run_in_background for
+# any time. A command after the helper is allowed too. A foreground time more than 25 s away is refused: see below.
 for _command in ("wait-until %s" % WAIT_UNTIL_TIME, "wait-until %s --timeout 500" % WAIT_UNTIL_TIME):
     sh("wait-until: %s is allowed in the foreground" % _command, _command, "allow", cwd=NOGIT)
     add("wait-until: %s is allowed under run_in_background" % _command, "allow", cwd=NOGIT,
         command=_command, run_in_background=True)
 add("wait-until: the helper, then one command, is allowed under run_in_background", "allow", cwd=NOGIT,
     command="wait-until %s; node tool.mjs" % WAIT_UNTIL_TIME, run_in_background=True)
+
+# A foreground wait for a time more than 25 s away is refused, as a pause of 25 s or more is: the wait goes under
+# run_in_background, and the reason names it. The clock is LOCAL_TIME_NOW, the hook clock's one home
+# (local_time.clock), so no verdict reads the real time. The 26 s and 24 s times bracket the 25 s line.
+WAIT_UNTIL_NOW = "2026-11-19T12:00:00+00:00"  # the synthetic clock of the cases below
+WAIT_UNTIL_26S = "2026-11-19T12:00:26Z"  # 26 s after that clock: more than 25 s away
+WAIT_UNTIL_24S = "2026-11-19T12:00:24Z"  # 24 s after it: under 25 s away
+add("wait-until: a foreground wait for a time 26 s away is refused, and the reason names run_in_background",
+    "deny", "waiter", cwd=NOGIT, carries=("run_in_background",), env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW},
+    command="~/.claude/bin/wait-until %s" % WAIT_UNTIL_26S)
+add("wait-until: a background wait for a time 26 s away is allowed", "allow", cwd=NOGIT,
+    env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW}, command="~/.claude/bin/wait-until %s" % WAIT_UNTIL_26S,
+    run_in_background=True)
+for _bg in (False, True):
+    add("wait-until: a wait for a time 24 s away is allowed%s" % (" under run_in_background" if _bg else ""),
+        "allow", cwd=NOGIT, env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW},
+        command="~/.claude/bin/wait-until %s" % WAIT_UNTIL_24S, **({"run_in_background": True} if _bg else {}))
 
 # THE REMEDY CHECK. Every command form that a waiter-family remedy names in backticks is allowed, in the
 # foreground and under run_in_background: the guard must not refuse the advice it gives. The remedies are read
