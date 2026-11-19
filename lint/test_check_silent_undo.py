@@ -949,10 +949,27 @@ class MainLineDrop:
         r.sh("checkout", "-q", "feat")
         r.sh("merge", "-q", "--no-ff", "-m", "Merge %s into feat" % " and ".join(merged), *merged)
         if drop:
-            r.put("app.txt", BODY)
-            r.sh("add", "-A")
-            r.sh("commit", "-q", "--amend", "--no-edit")
+            self.drop_main_lines()
         return r.sh("rev-parse", "HEAD"), carried
+
+    def drop_main_lines(self):
+        """Sets app.txt back to BODY and amends HEAD: every line main added to it is dropped, with no conflict."""
+        self.r.put("app.txt", BODY)
+        self.r.sh("add", "-A")
+        self.r.sh("commit", "-q", "--amend", "--no-edit")
+
+    def parent_count(self, rev):
+        return len(self.r.sh("rev-list", "--parents", "-n", "1", rev).split()) - 1
+
+    def assert_dropped(self, head, carried):
+        """Premise: the carrier's app.txt holds the line, and the merge's app.txt does not."""
+        self.assertIn(self.LINE, self.r.sh("show", carried + ":app.txt"), "premise: parent %s does not hold the line" % carried[:9])
+        self.assertNotIn(self.LINE, self.r.sh("show", head + ":app.txt"), "premise: merge %s still holds the line" % head[:9])
+
+    def assert_drops(self, problems, carried, head):
+        """One FAIL names the line the merge drops and the parent that held it, by that parent's sha."""
+        named = [p for p in problems if "drops" in p and carried[:9] in p and self.LINE in p]
+        self.assertTrue(named, "merge %s drops the line parent %s holds, and no finding names it: %r" % (head[:9], carried[:9], problems))
 
 
 class OwnHistory(MainLineDrop, unittest.TestCase):
@@ -3444,19 +3461,6 @@ class OctopusDrop(MainLineDrop, unittest.TestCase):
 
     CARRIERS = ("feat", "side-a", "side-b")  # parents ^1, ^2 and ^3 of the octopus
 
-    def parent_count(self, rev):
-        return len(self.r.sh("rev-list", "--parents", "-n", "1", rev).split()) - 1
-
-    def assert_dropped(self, head, carried):
-        """Premise: the carrier's app.txt holds the line, and the merge's app.txt does not."""
-        self.assertIn(self.LINE, self.r.sh("show", carried + ":app.txt"), "premise: parent %s does not hold the line" % carried[:9])
-        self.assertNotIn(self.LINE, self.r.sh("show", head + ":app.txt"), "premise: merge %s still holds the line" % head[:9])
-
-    def assert_drops(self, problems, carried, head):
-        """One FAIL names the line the merge drops and the parent that held it, by that parent's sha."""
-        named = [p for p in problems if "drops" in p and carried[:9] in p and self.LINE in p]
-        self.assertTrue(named, "merge %s drops the line parent %s holds, and no finding names it: %r" % (head[:9], carried[:9], problems))
-
     def test_an_octopus_that_drops_a_line_from_any_parent_is_refused(self):
         for carrier in self.CARRIERS:
             with self.subTest(carrier=carrier):
@@ -3486,6 +3490,101 @@ class OctopusDrop(MainLineDrop, unittest.TestCase):
         head, _ = self.octopus_of("side-a", ("side-a",))
         self.assertEqual(self.parent_count(head), 2, "premise: the head is a merge of two parents")
         self.assertEqual(self.r.verdict(head), [], "a clean two-parent merge that carries the line is refused")
+
+
+class OctopusCommonBase(MainLineDrop, unittest.TestCase):
+    """An octopus merge is read against the base all its parents share. A two-way merge is read against the base of its own
+    pair. The two bases differ when a line that main adds and removes sits in the pair's base but not in the octopus's, so
+    the octopus and the two-way read of the same parents can disagree. Each shape below makes them disagree. Every case runs
+    once per first parent, since the octopus is read parent by parent."""
+
+    T3, T4 = "2026-01-04T10:00:00", "2026-01-05T10:00:00"
+
+    def merge_of(self, first, others, msg, drop=False):
+        """A merge of `others` into `first`, on a new branch. With `drop`, the commit drops the lines main added. -> the head sha."""
+        r = self.r
+        r.sh("checkout", "-q", "-b", "m-" + first, first)
+        r.sh("merge", "-q", "--no-ff", "-m", msg, *others)
+        if drop:
+            self.drop_main_lines()
+        return r.sh("rev-parse", "HEAD")
+
+    def build_removal(self):
+        """main adds LINE, then deletes it. p2 is cut at the add and keeps the line. p1 is cut at the add and merges main after
+        the delete, so it has none. feat is cut before the add. -> the sha of the two-way chain: p2 with p1, then feat."""
+        self.cut_feat("feat adds its own file", feat_txt="feat\n")
+        r = self.r
+        self.main_commit("main adds the line", self.T1, app_txt=BODY + self.LINE + "\n")
+        added = r.sh("rev-parse", "main")
+        r.sh("checkout", "-q", "-b", "p2", added)
+        r.commit("p2 adds its own file", date=self.T2, p2_txt="p2\n")
+        self.p2 = r.sh("rev-parse", "HEAD")
+        r.sh("checkout", "-q", "-b", "p1", added)
+        r.commit("p1 adds its own file", date=self.T2, p1_txt="p1\n")
+        self.main_commit("main deletes the line", self.T3, app_txt=BODY)
+        r.sh("checkout", "-q", "p1")
+        r.sh("merge", "-q", "--no-edit", "--no-ff", "main")
+        r.sh("checkout", "-q", "-b", "chain", "p2")
+        r.sh("merge", "-q", "--no-ff", "-m", "chain: p2 with p1", "p1")
+        r.sh("merge", "-q", "--no-ff", "-m", "chain: then feat", "feat")
+        return r.sh("rev-parse", "HEAD")
+
+    def build_readd(self):
+        """main adds LINE, deletes it, then re-adds it. origin/main stops at the delete, and the re-add stays on local main.
+        So the upstream holds no line for the drop to undo, while the default branch still holds the re-add. third is cut at
+        the add, dropper at the delete, and carrier at the re-add. The carrier's sha is self.carrier."""
+        self.cut_feat("feat adds its own file", feat_txt="feat\n")
+        r = self.r
+        self.main_commit("main adds the line", self.T1, app_txt=BODY + self.LINE + "\n")
+        added = r.sh("rev-parse", "main")
+        r.sh("checkout", "-q", "-b", "third", added)
+        r.commit("third adds its own file", date=self.T2, third_txt="third\n")
+        self.main_commit("main deletes the line", self.T3, app_txt=BODY)
+        deleted = r.sh("rev-parse", "main")
+        r.sh("checkout", "-q", "-b", "dropper", deleted)
+        r.commit("dropper adds its own file", date=self.T3, dropper_txt="dropper\n")
+        r.sh("checkout", "-q", "main")
+        r.commit("main re-adds the line", date=self.T4, app_txt=BODY + self.LINE + "\n")
+        readded = r.sh("rev-parse", "main")
+        r.sh("checkout", "-q", "-b", "carrier", readded)
+        r.commit("carrier adds its own file", date=self.T4, carrier_txt="carrier\n")
+        self.carrier = r.sh("rev-parse", "HEAD")
+
+    def test_an_octopus_whose_tree_is_its_chain_tip_is_clean(self):
+        chain = self.build_removal()
+        parents = ("p2", "p1", "feat")
+        for first in parents:
+            with self.subTest(first=first):
+                head = self.merge_of(first, [p for p in parents if p != first], "octopus: %s first" % first)
+                self.assertEqual(self.parent_count(head), 3, "premise: the head is an octopus merge of three parents")
+                self.assertEqual(self.r.sh("rev-parse", head + "^{tree}"), self.r.sh("rev-parse", chain + "^{tree}"),
+                                 "premise: octopus %s does not hold the tree of its chain tip %s" % (head[:9], chain[:9]))
+                self.assert_dropped(head, self.p2)
+                problems, _ = octopus_verdict(self.r.dir, head)
+                self.assertEqual(problems, [], "octopus %s holds the tree of its chain tip %s, and is refused: %r" % (head[:9], chain[:9], problems))
+
+    def test_the_two_way_chain_of_the_same_parents_is_clean(self):  # control
+        chain = self.build_removal()
+        self.assertEqual(self.parent_count(chain), 2, "premise: the chain tip is a merge of two parents")
+        self.assertEqual(self.r.verdict(chain), [], "the two-way chain tip %s, of the same parents, is refused" % chain[:9])
+
+    def test_an_octopus_that_drops_a_line_the_pair_base_shows_is_refused(self):
+        self.build_readd()
+        parents = ("dropper", "carrier", "third")
+        for first in parents:
+            with self.subTest(first=first):
+                head = self.merge_of(first, [p for p in parents if p != first], "octopus: %s first" % first, drop=True)
+                self.assertEqual(self.parent_count(head), 3, "premise: the head is an octopus merge of three parents")
+                self.assert_dropped(head, self.carrier)
+                problems, _ = octopus_verdict(self.r.dir, head)
+                self.assert_drops(problems, self.carrier, head)
+
+    def test_a_two_way_merge_of_the_same_pair_that_drops_the_line_is_refused(self):  # control
+        self.build_readd()
+        pair = self.merge_of("dropper", ["carrier"], "pair: dropper with carrier", drop=True)
+        self.assertEqual(self.parent_count(pair), 2, "premise: the head is a merge of two parents")
+        self.assert_dropped(pair, self.carrier)
+        self.assert_drops(self.r.verdict(pair), self.carrier, pair)
 
 
 class DefaultBase(unittest.TestCase):
