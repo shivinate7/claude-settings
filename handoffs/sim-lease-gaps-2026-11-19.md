@@ -29,7 +29,17 @@ Written 2026-11-19 00:2x CST on the coordinator's wind-down order (00:24 CST, ow
 
 ## Next step
 
-Merge main into #3482, push, hand the head to runner 10. I do not mark ready or merge.
+Hold until fix #3681 (the fix for main's two stale mutation anchors, head ca493c1f5a) merges. Then one plain merge of main into #3482, push, hand the new head to runner 10. Coordinator hold set 20:53 CST Nov 18. The wind-down suspends it. Records 6892010024, 6892012314 and lint comment 6893715063 name 0dfed5f2f, not the live head 833682e14; whether the merge tool accepts them on the live head is unknown.
+
+## Added after the handoff audit (read from the transcript by the audit agent)
+
+- Owner ruling, 11:12 CST Nov 15 via the consultant: "lanes can merge claude settings prs". A lane merges its own PR with `merge <N> --confirm --head <sha>`; marking ready stays runner 10's. Before merging, read main's newest finished push run by REST and report it to the parent. The ruling's record home: unknown.
+- Lint "hang" (coordinator question 12:24 CST Nov 15): not a test hang. Silent mutation shards run after ci-job's last step. Lint on main merged into 833682e14: SKIP, 306.7 s, 110 of 116 steps; shard 1 passed 286 of 286 in 1085 s. Coordinator started lane mutate-stage-prints-progress (13:06 CST) and told runner 10 to let lint run past 41 minutes per shard. The aligned probe passes on 833682e14, so no `Rules checked:` line is needed.
+- Mac read, item 876 (20:51 CST Nov 18): `hinge get` printed 180.0 for an open fold; the word `closed` is unread. Slot 1 held by pid 72925. Loads 41.16, 30.58, 19.22; 26 crash reports. The reuse-then-status path was not run.
+- Unpushed local merge debbb4295 in worktree `sim-lease-hang` (detached on 833682e14). It exists only on this machine and is not part of #3482.
+- Worktrees: sim-lease-hang, sim-lease-docfix, sim-lease-shardb, sim-lease-gaps-rebase, handoff-sim-lease-gaps. The branches of the six earlier reviewer agents are unknown.
+- Builder `ace1554a299aff0ab` (sonnet, branch worktree-agent-ace1554a299aff0ab) finished and pushed nothing.
+- My mistake: the Mac command used `~/claude-settings`, which the owner's Mac lacks. The guard idea (check that a handed-over command's first `cd` path exists) went to triage via the coordinator, no step id.
 
 ## Refused acts
 
