@@ -2737,6 +2737,109 @@ class SameRunBranchCutTests(unittest.TestCase):
         self.assertEqual(self._branch(result)["reason"], "checked-out")
         self.assertIn("lane-cut", sweep.list_local_branches(root))
 
+    # --- a session that starts in a tree after that tree's verdict was read -----------------
+    # The tree stage reads each session once, before the branch stage runs. A session can start
+    # in a tree after that read, so the branch stage must read every holder's session again. These
+    # cases stub each tree's verdict to "reap", as if the read came before the session started, and
+    # they run in preview, so nothing is removed. The branch stage is then the only read left.
+
+    def _session(self, wt, kind):
+        """A session record whose cwd is WT, and the liveness its kind must read. "live" names this
+        process, so it reads True. "unreadable" names this process with a start time far behind its
+        real one, which reads None (WorktreeDecisionTests proves that read). "dead" names a pid that
+        has ended, which reads False. CFG is shared by every case, so the record is removed at cleanup."""
+        sid = "held-%s-%s" % (kind, os.path.basename(wt))
+        if kind == "live":
+            write_session(sid, os.getpid(), this_process_start_ms(), wt)
+        elif kind == "unreadable":
+            write_session(sid, os.getpid(), this_process_start_ms() - 10_000_000, wt)
+        else:
+            write_session(sid, temp_dead_pid(), 0, wt)
+        record = os.path.join(CFG, "sessions", sid + ".json")
+        self.addCleanup(lambda: os.remove(record) if os.path.exists(record) else None)
+        return {"live": True, "unreadable": None, "dead": False}[kind]
+
+    def _held(self, name, kinds):
+        """One repository and one branch, lane-held, held by one linked tree per entry of KINDS. The
+        first tree is added with -b and the rest with --force, as in
+        test_a_second_kept_worktree_on_the_same_branch_keeps_it_held. Returns the root and a list of
+        (tree path, the liveness its session must read)."""
+        root = os.path.join(ROOT, "held-" + name)
+        make_repo(root, {"f.txt": "x\n"})
+        give_remote(root)
+        trees = []
+        for number, kind in enumerate(kinds):
+            wt = os.path.join(ROOT, "held-%s-wt%d" % (name, number))
+            if number == 0:
+                added = run_vcs(root, "worktree", "add", "-q", wt, "-b", "lane-held")
+            else:
+                added = run_vcs(root, "worktree", "add", "-q", "--force", wt, "lane-held")
+            require(added.returncode == 0, "adding %r failed: %s" % (wt, added.stderr.strip()))
+            trees.append((wt, self._session(wt, kind)))
+        return root, trees
+
+    def _assert_fixture_reads(self, trees):
+        """Scope first: each session reads what its kind says, through the one liveness read the sweep makes."""
+        live_read = sys.modules["git_reads"].worktree_live_session
+        for wt, expected in trees:
+            self.assertIs(live_read(wt), expected,
+                          "fixture session for %s does not read %r" % (os.path.basename(wt), expected))
+
+    def _sweep_stale_verdicts(self, root):
+        def stale_reap(where, entry, *args, **kwargs):
+            return {"path": entry["path"], "action": "reap", "reason": "stub: verdict read before the session started"}
+        with mock.patch.object(sweep, "decide_worktree", side_effect=stale_reap):
+            return sweep.sweep_repo(root, False, os.path.join(ROOT, "held.log"), attended=True)
+
+    def _assert_every_tree_row_reaps(self, result, trees):
+        """Scope before subject: each tree's row reads reap, so a keep can only come from the branch stage."""
+        for wt, _expected in trees:
+            target = os.path.normcase(os.path.realpath(wt))
+            rows = [w for w in result["worktrees"]
+                    if os.path.normcase(os.path.realpath(w["path"])) == target]
+            self.assertEqual(len(rows), 1, "no tree row for %s" % wt)
+            self.assertEqual(rows[0]["action"], "reap", "the stub did not take for %s" % wt)
+
+    def _held_branch_row(self, result):
+        rows = [b for b in result["branches"] if b["name"] == "lane-held"]
+        self.assertEqual(len(rows), 1, "the branch lane-held is not judged exactly once")
+        return rows[0]
+
+    def test_a_live_session_that_started_after_its_tree_verdict_keeps_the_branch_held(self):
+        root, trees = self._held("live", ["live"])
+        self._assert_fixture_reads(trees)
+        result = self._sweep_stale_verdicts(root)
+        self._assert_every_tree_row_reaps(result, trees)
+        self.assertEqual(self._held_branch_row(result)["action"], "keep",
+                         "the branch was released while a live session holds its tree")
+
+    def test_an_unknown_session_that_started_after_its_tree_verdict_keeps_the_branch_held(self):
+        root, trees = self._held("unknown", ["unreadable"])
+        self._assert_fixture_reads(trees)
+        result = self._sweep_stale_verdicts(root)
+        self._assert_every_tree_row_reaps(result, trees)
+        self.assertEqual(self._held_branch_row(result)["action"], "keep",
+                         "the branch was released while its tree's session reads unknown")
+
+    def test_one_live_tree_among_dead_ones_keeps_the_branch_held(self):
+        # The live tree is the SECOND holder. A check that reads only the first holder would release it.
+        root, trees = self._held("mixed", ["dead", "live"])
+        self._assert_fixture_reads(trees)
+        result = self._sweep_stale_verdicts(root)
+        self._assert_every_tree_row_reaps(result, trees)
+        self.assertEqual(self._held_branch_row(result)["action"], "keep",
+                         "the branch was released while one tree on it has a live session")
+
+    def test_control_a_branch_whose_every_tree_reads_dead_is_still_released(self):
+        # Green on the old code too. It proves the stubbed preview does reach the branch decision.
+        root, trees = self._held("alldead", ["dead", "dead"])
+        self._assert_fixture_reads(trees)
+        result = self._sweep_stale_verdicts(root)
+        self._assert_every_tree_row_reaps(result, trees)
+        self.assertEqual(self._held_branch_row(result)["action"], "reap",
+                         "a branch whose every session reads dead was held back: %s"
+                         % self._held_branch_row(result).get("reason"))
+
 
 class SingleTierModeTests(unittest.TestCase):
     """`--tier1` and `--branches`, driven through `main`. Fixture per test: a stale
