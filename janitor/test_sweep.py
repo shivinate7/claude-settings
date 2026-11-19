@@ -790,7 +790,7 @@ class TempSweepTests(unittest.TestCase):
 def leftover_temp_stubbed():
     """The leftover temp-folder step reads the real temp root on every full run. A case that runs a
     full sweep in this process stubs it, or the case reaches the machine's own temp folders."""
-    return mock.patch.object(sweep, "leftover_temp_tier", return_value=0)
+    return mock.patch.object(sweep, "leftover_temp_pass", return_value=0)
 
 
 @contextlib.contextmanager
@@ -1876,7 +1876,7 @@ def sweep_over_fixture(fx, session_end, before=None):
             sweep, "sweep_repo", lambda root, *a, **k: fake_result(root)))
         stack.enter_context(mock.patch.object(sweep, "find_loose_processes", loose))
         stack.enter_context(mock.patch.object(sweep, "sim_tier", sim))
-        stack.enter_context(mock.patch.object(sweep, "temp_tier", temp))
+        stack.enter_context(mock.patch.object(sweep, "temp_pass", temp))
         # The daily run also reads the real temp root, and this run passes --confirm: stub that step too.
         stack.enter_context(leftover_temp_stubbed())
         stack.enter_context(mock.patch.object(sweep, "find_swept_listeners", lambda paths: []))
@@ -1945,7 +1945,7 @@ class SessionEndScopeTests(unittest.TestCase):
         self.assertEqual(seen["pid_reads"], 1,
                          "the session-end run read the machine pid list %d times" % seen["pid_reads"])
 
-    def test_the_session_end_run_still_runs_the_simulator_and_temp_tiers(self):
+    def test_the_session_end_run_still_runs_the_simulator_and_temp_pass(self):
         seen = sweep_over_fixture(self.fx, session_end=True)
         self.assertEqual(seen["sim"], 1, "the session-end run did not run the simulator tier")
         self.assertEqual(seen["temp"], 1, "the session-end run did not run the temp-folder tier")
