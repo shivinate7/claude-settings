@@ -729,5 +729,30 @@ class Unknown(Base):
         self.assertUnknown(self.check(self.repo(), fetched), "fetched answer file is not JSON")
 
 
+# ------------------------------------------------- an overrule of a taken pick (step page-taken-picks-area)
+# A session took a pick for the owner and filed it closed, with a `taken` object. The owner's Overrule is an answer with
+# choice `overrule`; the checker counts it, as it counts an overturn of an arbiter ruling, and the owning session reopens
+# the item in its tier. The counted line prints label=null, as it does for an overturn.
+TAKEN_OBJECT = {"by": "coordinator", "at": "2026-11-14T17:15:00Z", "what": "Option A, the first colour.",
+                "changes": "The colour changes from the default.", "over": "Option B, the second colour."}
+TAKEN_COUNTED = "counted item=%s n=%d choice=overrule at=%s label=null" % (ITEM_ID, ITEM_N, AT)
+
+
+class TakenOverrule(Base):
+    def test_an_overrule_of_a_closed_taken_pick_is_counted(self):
+        fetched = self.pair(item_fields={"status": "closed", "taken": TAKEN_OBJECT}, answer_fields={"choice": "overrule"})
+        self.assertCounted(self.check(self.repo(), fetched, pick="overrule"), TAKEN_COUNTED)
+
+    def test_control_an_overrule_of_a_closed_item_with_no_taken_object_is_not_counted(self):
+        """Control, green on main: a closed item that no session took takes no overrule."""
+        fetched = self.pair(item_fields={"status": "closed"}, answer_fields={"choice": "overrule"})
+        self.assertNotCounted(self.check(self.repo(), fetched), "closed item, no taken object", reason="closed")
+
+    def test_control_an_overrule_of_an_open_item_is_not_counted(self):
+        """Control, green on main: overrule is no option key of an open decision."""
+        fetched = self.pair(answer_fields={"choice": "overrule"})
+        self.assertNotCounted(self.check(self.repo(), fetched), "open item", reason="option key")
+
+
 if __name__ == "__main__":
     unittest.main()
