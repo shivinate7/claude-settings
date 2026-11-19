@@ -82,7 +82,7 @@ WORD = re.compile(r"[A-Za-z0-9]")
 
 
 class Unknown(Exception):
-    problems = ()  # findings the read made before it gave up; only check() sets them
+    problems = ()  # findings the read made before it gave up; no reader sets them now (the octopus read gave them up), and the merge refusal still reads them
     notes = ()
 
 
@@ -437,14 +437,27 @@ def lost_lines(cwd, m, refs=()):
     parents = out.split()[1:]
     if len(parents) < 2:
         return []
-    # an octopus is read the same way: each parent against the ancestors all of them share
-    rc, out = git(cwd, "merge-base", *(("--octopus",) if len(parents) > 2 else ()), "--all", *parents, ok=(0, 1))
-    bases = out.split() if rc == 0 else []
+    # each parent is read against its merge bases with each other parent, as a two-parent merge reads it. An octopus read against the
+    # one base all parents share would flag a line another parent's merge removed, and miss a drop a pairwise read catches.
+    bases_of = {}
+    for i, p in enumerate(parents):
+        for q in parents[i + 1:]:
+            rc, out = git(cwd, "merge-base", "--all", p, q, ok=(0, 1))
+            bases_of[p, q] = bases_of[q, p] = out.split() if rc == 0 else []
     found = []
     blobs = Blobs(cwd)
     try:
         for p in parents:
-            found += lost_in_parent(cwd, m, p, bases, refs, blobs)
+            # a pair with no common base has nothing to read against; a parent with no such pair is never flagged
+            readings = [lost_in_parent(cwd, m, p, bases_of[p, q], refs, blobs) for q in parents if q != p and bases_of[p, q]]
+            if not readings:
+                continue
+            # a line is lost only when every pairwise reading finds it lost
+            kept = [{path: set(lines) for path, _, lines in r} for r in readings]
+            for path, _, lines in readings[0]:
+                both = [l for l in lines if all(l in k.get(path, ()) for k in kept[1:])]
+                if both:
+                    found.append((path, p, both))
     finally:
         blobs.close()
     return found
