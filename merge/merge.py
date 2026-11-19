@@ -264,7 +264,7 @@ A list read asks for each page by number (`Host.pages`), so no `gh` flag beyond 
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, concurrent.futures, contextlib, datetime, fnmatch, functools, importlib.util, io, json, math, os, pathlib, re, shlex, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, concurrent.futures, contextlib, datetime, fnmatch, functools, hashlib, importlib.util, io, json, math, os, pathlib, re, shlex, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -3298,6 +3298,62 @@ def ci_job_run(wt, *args, notes=None, raw=None, head_sha=None, pr_body=None):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
+LINT_JOB = "checks"  # the one job `merge --lane-lint` runs through ci_job_run
+SAVED_PASS_FOLDER = "lane-lint-pass"  # under the clone's git dir: one small file for each job that passed
+SAVED_PASS_MAX_BYTES = 4096
+
+def saved_pass_path(root, head, base_sha, job):
+    """The file that holds the saved PASS of `job` at (head, base_sha, this merge tool's bytes), or None when the clone's git dir cannot be read.
+    The key is the head sha, the base tip the lint merged, the job name and a hash of this file's bytes, so a new head, a new base or an edited tool
+    names another file. The folder sits under the clone's git dir, which outlives a lint tree and holds no state of a lane's work."""
+    c, out = git(root, "rev-parse", "--git-common-dir")
+    if c or not out.strip():
+        return None
+    gitdir = out.strip()
+    gitdir = gitdir if os.path.isabs(gitdir) else os.path.join(root, gitdir)
+    try:
+        with open(os.path.abspath(__file__), "rb") as f:
+            tool = hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return None
+    key = hashlib.sha256("\0".join([head, base_sha, job, tool]).encode()).hexdigest()
+    return os.path.join(gitdir, SAVED_PASS_FOLDER, key + ".json")
+
+def saved_pass_read(root, head, base_sha, job):
+    """-> {"skipped": [...], "notes": [...]} of the saved PASS at this key, or None: no file, or one that is empty, unreadable or not a PASS record (a miss)."""
+    try:
+        path = saved_pass_path(root, head, base_sha, job)
+        if path is None:
+            return None
+        with open(path, "rb") as f:
+            data = json.loads(f.read(SAVED_PASS_MAX_BYTES + 1).decode("utf-8"))
+        key = {"head": head, "base": base_sha, "job": job}
+        if (not isinstance(data, dict) or data.get("verdict") != "pass" or any(data.get(k) != v for k, v in key.items())
+                or not all(isinstance(data.get(k), list) and all(isinstance(x, str) for x in data[k]) for k in ("skipped", "notes"))):
+            return None
+        return {"skipped": data["skipped"], "notes": data["notes"]}
+    except (OSError, ValueError):  # a corrupt, empty or unreadable file is a miss; UnicodeDecodeError is a ValueError
+        return None
+
+def saved_pass_write(root, head, base_sha, job, skipped, notes):
+    """Save the PASS of `job` after a run that passed, and only then: a fail, a timeout, an unknown and a run with no verdict never reach this call.
+    The file is written whole and moved into place, so a reader never sees half of it. A record over SAVED_PASS_MAX_BYTES, or any write error, saves
+    nothing: the next lint runs the job, which costs time and never a wrong pass."""
+    try:
+        path = saved_pass_path(root, head, base_sha, job)
+        if path is None:
+            return
+        body = json.dumps({"verdict": "pass", "head": head, "base": base_sha, "job": job, "skipped": list(skipped), "notes": list(notes)}).encode("utf-8")
+        if len(body) >= SAVED_PASS_MAX_BYTES:
+            return
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        part = f"{path}.{os.getpid()}.part"
+        with open(part, "wb") as f:
+            f.write(body)
+        os.replace(part, path)
+    except OSError:
+        pass
+
 MUTATE_JOB, MUTATE_STEP = "checks-mutate-guard", "Guard mutation test"  # the old one-job head: its job and step, whose run: line and timeout-minutes the lint reads. A sharded head names each step MUTATE_STEP + ", shard i/M", one job each
 MUTATE_TEST_FILE = re.compile(r"hooks/mutate_[^/]*\.(?:py|mjs)")
 MUTATE_HEARTBEAT_SECONDS = 60  # gap between the running lines of one shard run; read at call time. A shard runs many minutes and its stdout is captured, so without them the lint is silent
@@ -3617,6 +3673,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     A hand-in of a pull request that is not an integration PR is refused while its body names an open replaced pull request (open_named); no override lifts it.
     On a batch integration PR, a PASS (after its lint comment) posts a pointer comment on each open lane its freeze block names, then closes it as replaced
     (close_replaced); the same PASS reopens each closed lane the block has dropped when the tool closed it, and posts a pointer after the reopen (reopen_dropped).
+    A job that passes is saved (saved_pass_write) under the clone's git dir, keyed by the head sha, the base tip, the job name and a hash of this file's bytes. A rerun at
+    the same key skips the job and prints "PASS (cached)"; it still posts the lane-lint comment. A fail, a timeout, an unknown and a lifted unknown are never saved,
+    and a corrupt, empty or unreadable file is a miss. The mutation test run (mutate_run_check) does not go through this path and is not saved.
     Before any tree is made, refuse_full_disk refuses a drive under the guard's full disk floor, in a cloud session and a local one."""
     refuse_full_disk(root)
     if target.isdigit():
@@ -3680,8 +3739,16 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         if c2:
             raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the merge of the head with {base} could not be made the lint worktree's HEAD: {out} {LANE_LINT_CITE}")
         refuse_incomplete_tree(wt, head, base, merge_commit)
-        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes, head_sha=head,
-                                                 pr_body=(info.get("body") or "") if target.isdigit() else None)  # a ref or commit has no PR body
+        saved = saved_pass_read(root, head, merged[0], LINT_JOB)
+        if saved is not None:
+            state, lines, log, liftable = "pass", saved["skipped"], [], False
+            pin_notes.extend(saved["notes"])
+            say(f"PASS (cached): ci-job {LINT_JOB} passed at head {head[:9]} on base {merged[0][:9]} with this merge tool; the job is not run again.")
+        else:
+            state, lines, log, liftable = ci_job_run(wt, LINT_JOB, "--lint", "--base", f"origin/{base}", notes=pin_notes, head_sha=head,
+                                                     pr_body=(info.get("body") or "") if target.isdigit() else None)  # a ref or commit has no PR body
+            if state == "pass":
+                saved_pass_write(root, head, merged[0], LINT_JOB, lines, pin_notes)
         if state == "pass" and touched_tests:
             touched = run_touched_tests(wt, base, head)
         mutate, mutate_fails, skipped = "", [], False
