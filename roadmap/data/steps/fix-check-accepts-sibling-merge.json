@@ -1,0 +1,14 @@
+{
+ "id": "fix-check-accepts-sibling-merge",
+ "title": "A fix check may end on a merge of two lane commits that the verifier read",
+ "priority": "next",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "consultant",
+ "blockedBy": [],
+ "updatedAt": "2026-11-19T06:16:30Z",
+ "why": "Owner chat 00:14 CST Nov 19 asked whether the merge tool's refusal of the PR 3694 record (\"the head is a merge of a lane commit\") is valid or a fixed bug. Triage read by REST: head 02736c944a of PR 3694 is a two-parent merge of two lane commits (d13b244d53, a32b081ff7), not main, so the carve-out for a clean merge of main (steps carry-forgives-main-merge, grant-line-clean-merge-no-verifier) does not cover it. Owner typed \"approved\" at 00:16 CST on the consultant's offer to fix it (relayed by the consultant).",
+ "source": "consultant's offer; owner's word \"approved\" 00:16 CST Nov 19, relayed by the consultant; triage 12",
+ "note": "Todo. Builder lane after the merge queue clears (the consultant's plan, his words). Not verified by triage: the refusal's exact text and the rule that fired; the consultant was asked for the full output. Check first whether steps fix-check-after-main-merge and fix-check-merge-forced-test already cover part of this."
+}
