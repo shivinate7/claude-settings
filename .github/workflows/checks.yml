@@ -75,7 +75,11 @@ jobs:
   # every suite job succeeded; a step scope skipped is no gap (the shared action actions/push-skip, ruling own-769-a-narrowed-pr-push).
   # Scope waits on it, so a skip reaches every job through needs and the run is a completed success: nothing is cancelled, since a
   # cancelled run reads UNKNOWN and blocks merges. A failed read says skip=false: unknown runs everything. A suite a narrowed PR run
-  # left out is not run on main until a later change touches it. The job starts on every event and its steps run on a push only, so it stays on all-jobs-passed's needs like nightly-skip. Reads per push: the PR list, per head its commit, and per matching head its runs (unmeasured).
+  # left out is not run on main until a later change touches it. A pull request run skips too (step ci-skips-proven-tree) when an
+  # earlier push run of this workflow passed on the same merged tree: proof_run names that run, and all-jobs-passed reads the skip as
+  # passed only with it. The job starts on every event and its steps run on a push or a pull request only, so it stays on all-jobs-passed's needs like nightly-skip.
+  # Reads per push: the PR list, per head its commit, and per matching head its runs. Reads per pull request run: the merged commit, one page of push runs,
+  # a commit per candidate run, and the jobs of a run whose tree matches (unmeasured).
   push-skip:
     runs-on: ubuntu-latest
     # Cap 5 min, unmeasured: the job makes a handful of reads.
@@ -87,15 +91,16 @@ jobs:
       actions: read
     outputs:
       skip: ${{ steps.decide.outputs.skip }}
+      proof_run: ${{ steps.decide.outputs.proof_run }}
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        if: ${{ github.event_name == 'push' }}
+        if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
         with:
           persist-credentials: false
 
       - name: Decide whether the push can skip
         id: decide
-        if: ${{ github.event_name == 'push' }}
+        if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
         uses: $/actions/push-skip
         env:
           GH_TOKEN: ${{ github.token }}

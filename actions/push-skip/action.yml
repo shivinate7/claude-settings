@@ -5,7 +5,9 @@ description: >
   belongs to (a batch-* integration pull request, or a merged lone-lane pull request), and that pull request's
   run passed: all-jobs-passed and every suite job succeeded. A suite step skipped by scope (a narrowed run) is no gap. A direct push,
   an admin merge with no green run, a tree mismatch, a red, draft, cancelled or in-progress run, a run of another
-  head or workflow, a schedule or workflow_dispatch run, and any read error give skip=false. The step always
+  head or workflow, a schedule or workflow_dispatch run, and any read error give skip=false. A pull_request run also skips, when an
+  earlier push run of the calling workflow passed on the tree of the run's merge commit (HEAD_SHA); the proving run's id is the
+  `proof_run` output. The step always
   exits 0, so the calling job is a visible success. The suite jobs are the jobs all-jobs-passed needs in
   the calling workflow (read from the calling checkout), so the caller job needs a checkout. The caller passes
   the context in the calling step's env: GH_TOKEN, REPO, HEAD_SHA, PUSH_TREE and EVENT (checks.yml shows the
@@ -21,8 +23,11 @@ inputs:
     default: .github/workflows/checks.yml
 outputs:
   skip:
-    description: "'true' when the push can skip, else 'false'."
+    description: "'true' when the run can skip, else 'false'."
     value: ${{ steps.decide.outputs.skip }}
+  proof_run:
+    description: "On a pull_request run that skips, the id of the earlier push run whose green jobs prove the merged tree. Empty otherwise."
+    value: ${{ steps.decide.outputs.proof_run }}
 runs:
   using: composite
   steps:
