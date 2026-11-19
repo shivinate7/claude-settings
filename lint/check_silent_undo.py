@@ -86,10 +86,6 @@ class Unknown(Exception):
     notes = ()
 
 
-class Octopus(Unknown):
-    """A merge with three or more parents, which lost_lines does not read. check() keeps going past it."""
-
-
 def git(cwd, *a, ok=(0,)):
     # literal pathspecs: a path that starts with `:` is a name, never magic. surrogateescape keeps a non-UTF-8 name exact.
     r = _nowindow.run(["git", "-C", cwd, *a], capture_output=True, encoding="utf-8", errors="surrogateescape", env=dict(os.environ, GIT_LITERAL_PATHSPECS="1"))
@@ -433,7 +429,7 @@ class Blobs:
 
 
 def lost_lines(cwd, m, refs=()):
-    """[(path, parent, [line])] for merge commit m. With refs (upstream, then the default branch),
+    """[(path, parent, [line])] for merge commit m, of two or more parents. With refs (upstream, then the default branch),
     a lost line whose adding commit no ref holds is the branch's own work and is skipped. The
     test is per line, not per parent: a parent the branch built on an integration branch can still
     carry main's lines."""
@@ -441,9 +437,8 @@ def lost_lines(cwd, m, refs=()):
     parents = out.split()[1:]
     if len(parents) < 2:
         return []
-    if len(parents) > 2:
-        raise Octopus("%s has %d parents; only two-parent merges are read" % (m[:9], len(parents)))
-    rc, out = git(cwd, "merge-base", "--all", *parents, ok=(0, 1))
+    # an octopus is read the same way: each parent against the ancestors all of them share
+    rc, out = git(cwd, "merge-base", *(("--octopus",) if len(parents) > 2 else ()), "--all", *parents, ok=(0, 1))
     bases = out.split() if rc == 0 else []
     found = []
     blobs = Blobs(cwd)
@@ -816,8 +811,7 @@ def retire_excuses(cwd, upstream, head, pr_body, run_state, paths):
 
 
 def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=None, retire_head=None):
-    """(problem lines, ALLOWED notes); no problems is green. Raises Unknown; for a merge of three or more parents it raises
-    only after every other read, with the findings in .problems and .notes. Reads only the commits
+    """(problem lines, ALLOWED notes); no problems is green. Raises Unknown. Reads only the commits
     upstream gained after the branch was cut: from where the branch's own first-parent line left
     main, up, the fork commit included. The window starts at the fork point, never at a commit time (one-second resolution)."""
     if git(cwd, "rev-parse", "--is-shallow-repository")[1].strip() != "false":
@@ -829,12 +823,9 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     ok = allowed(cwd, "%s..%s" % (upstream, h), pr_body)
     refs = [upstream] + [r for r in ((default,) if default else ("origin/HEAD", "origin/main", "main")) if r != upstream and git(
         cwd, "rev-parse", "--verify", "-q", r + "^{commit}", ok=(0, 1))[0] == 0][:1]  # the default branch too
-    items, octopus, unspent = [], [], {}
+    items, unspent = [], {}
     for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
-        try:
-            items += [(x[0], fmt_lost(m, *x)) for x in unrestored(cwd, h, m, lost_lines(cwd, m, refs), unspent)]
-        except Octopus as e:  # the other reads still run: their findings must not hide behind this one
-            octopus.append(str(e))
+        items += [(x[0], fmt_lost(m, *x)) for x in unrestored(cwd, h, m, lost_lines(cwd, m, refs), unspent)]
     items += revived_notes(cwd, upstream, h)
     rc, out = git(cwd, "merge-tree", "--write-tree", upstream, h, ok=(0, 1))
     if rc == 0:
@@ -858,10 +849,6 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
         ok = dict(retire_excuses(cwd, upstream, retire_head or h, pr_body, run_state, open_paths), **ok)
     bad, notes = judge(items, ok)
     notes += misplaced(cwd, "%s..%s" % (upstream, h)) if bad else []
-    if octopus:
-        e = Octopus("; ".join(octopus))
-        e.problems, e.notes = bad, notes
-        raise e
     return bad, notes
 
 
