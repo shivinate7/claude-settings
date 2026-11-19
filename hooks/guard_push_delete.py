@@ -513,7 +513,7 @@ def _push_scan(segment: str, script: str = "") -> str:
                 out.append(" " if re.search(r"\s", tail) else char + tail)
                 index = length
                 continue
-            span = segment[index:end + 1]
+            span = raw = segment[index:end + 1]
             ahead = segment[max(0, index - 512):index]
             if char == '"' and '\\"' in span:
                 span = _nested_commands(span, segment[:index])
@@ -539,6 +539,10 @@ def _push_scan(segment: str, script: str = "") -> str:
                 # call is open ahead of it in `script` (the string of a call split over lines).
                 # No shell line has either shape.
                 span = "\n" + span[1:-1] + "\n"
+            if span is raw:
+                # A span no rule above rewrote is one shell word: a newline in it is text, so a
+                # line of it that starts with `git push` is not a command (push_calls splits lines).
+                span = span.replace("\n", " ")
             out.append(span)
             index = end + 1
         else:

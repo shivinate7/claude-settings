@@ -1,1 +1,0 @@
-- handed-in-push-record-wording: "review record" remains in `merge/merge.py` reason text and helper names, in test names and comments; GLOSSARY.md puts it in the Not cell of "review log". (decision handed-in-push-needs-record, round 3 review) Seen: 2026-11-15 x1

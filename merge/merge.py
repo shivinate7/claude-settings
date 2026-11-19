@@ -5547,7 +5547,7 @@ def carry_source(h, m, live, main):
     (carries_by_tree). A tree that is neither, an unparsable newest record and a record for another number carry nothing. The lane lint is not carried
     here: lint_carried takes equal trees only. A failed read raises Stop. Cost: Host.source_comments, which reads issue `m` once a run, then carries_by_tree's."""
     rows = h.source_comments(m)[0].get(m)
-    rec = newest_record(m, [r[0] for r in rows or []])[0]
+    rec = newest_review_log(m, [r[0] for r in rows or []])[0]
     how = carries_by_tree(h, rec["head"], live, main) if rec else None
     return (rec, rows[-1], how) if how else None
 
@@ -5818,8 +5818,8 @@ def own_records(n, bodies):
     """-> the parsed records among `bodies` that name pull request `n`, in order: the earlier records review_state walks back through."""
     return [e for e in (parse_review(b) for b in bodies) if e and e["n"] == n]
 
-def newest_record(n, bodies):
-    """-> (rec, bad) for the review-record comment bodies `bodies` of pull request `n`, oldest first. `rec` is the newest one parsed, None when there is none or
+def newest_review_log(n, bodies):
+    """-> (rec, bad) for the review log comment bodies `bodies` of pull request `n`, oldest first. `rec` is the newest one parsed, None when there is none or
     it does not parse or names another number; `bad` is True in that second case: a record is there and cannot be read."""
     rec = parse_review(bodies[-1]) if bodies else None
     if rec is not None and rec["n"] != n:
@@ -5838,11 +5838,11 @@ def handed_in_push(h, n, live, main, claims=None):
         bodies = [r[0] for r in h.source_comments(n)[0].get(n) or []]
     except (Stop, subprocess.TimeoutExpired, OSError) as e:
         return "unknown", f"the review comments of #{n} could not be read ({' '.join(str(e).split())[:300]})"
-    rec, bad = newest_record(n, bodies)
+    rec, bad = newest_review_log(n, bodies)
     if bad:
-        return "unknown", f"the newest review record of #{n} cannot be read: it does not parse, or it names another pull request"
+        return "unknown", f"the newest review log of #{n} cannot be read: it does not parse, or it names another pull request"
     if rec is None:
-        return "allow", f"#{n} has no review record to keep"
+        return "allow", f"#{n} has no review log to keep"
     state, why, unread = live_review_read(h, rec, live, main, claims, own_records(n, bodies[:-1]))
     if state != "stale":
         return "allow", why
@@ -5893,7 +5893,7 @@ def reviewed_read(h, cfgrel=None, facts=None, ledger=None):
             source = replaces_source(n, d.get("body"))
             state, why = live_review_state(h, None, sha, main, cfgrel, source=source) if source else ("none", "")
         else:
-            rec = newest_record(n, bodies)[0]
+            rec = newest_review_log(n, bodies)[0]
             state, why = live_review_state(h, rec, sha, main, cfgrel, own_records(n, bodies[:-1]))
         if state == "none":
             bare.append(f"#{n}")
