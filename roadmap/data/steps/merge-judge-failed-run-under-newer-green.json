@@ -1,0 +1,14 @@
+{
+ "id": "merge-judge-failed-run-under-newer-green",
+ "title": "The merge check lets a failed run pass when a newer green run of the same name exists",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Row 6 recheck of the outbox line merge-while-pr-run-in-progress (triage.md line 314), read by an Explore agent from origin/main bd0759f83c by code read only (no test run), 19:34 CST Nov 18. Harm: a merge could pass on a newer green run while an older run of the same name failed, so a real failure reaches main.",
+ "source": "Explore agent read of merge/merge.py:1809-1825 (newest-per-name dedup in judge_runs); unfinished runs are covered at merge/test_merge.py:5153; no debt or note on main records this gap",
+ "note": "Not yet measured: whether the dedup case is reachable (a re-run after a failure usually IS the newer run). First act: a prior-work search of debts and notes, then a red test on judge_runs with a failed older run and a green newer run of the same name; if the newer run is a true re-run of the failed job, say so and close. Also unchecked: enable_pr_auto_merge is absent from guard.py, guard_core.py, guard_stream.py and guard_merge.py (MERGE_TOOLS at guard_merge.py:109 lists only merge_pull_request); whether it is judged elsewhere is unknown. Outbox lines coordinator-merge-subshell-cd (covered: guard_merge.py:2124, tests/guard/s29942-merge.py:202 and :208) and coordinator-rel-dot-slash (unknown: coordinator_rel_ok never landed) rechecked the same way.",
+ "updatedAt": "2026-11-18T19:34:55-06:00"
+}
