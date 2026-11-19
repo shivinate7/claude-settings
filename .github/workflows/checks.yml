@@ -791,8 +791,8 @@ jobs:
           python-version: "3.11"
 
       # A step below that has a scope condition and reads no .md file skips a docs-only pull request (`code` is false,
-      # ci-scope.sh) and a records-only push. A step that reads a .md file also runs when its doc groups change, and on a
-      # records-only push, because the records page is a .md file.
+      # ci-scope.sh). Every step skips on a records-only run (`records_only_skip`), the steps that read
+      # a .md file included. A step that reads a .md file also runs when its doc groups change.
       - name: Config watch fixture suite
         if: ${{ (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_config_watch.py
@@ -1123,12 +1123,15 @@ jobs:
         run: pwsh -NoProfile -File install.test.ps1
 
       - name: Record stamp engine fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: node actions/stamp/test_stamp.mjs
 
       - name: Scanner trap lint
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: node lint/test_scanner_traps.mjs
 
       - name: Record stamp action fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         shell: bash
         run: bash actions/stamp/test_action.sh
 
