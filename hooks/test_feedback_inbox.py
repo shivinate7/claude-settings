@@ -1756,10 +1756,10 @@ def case_page_read_back_proves_the_filing():
 
 
 def case_page_read_back_that_misses_n_does_not_prove_the_filing():
-    """A read proves the filing only as an ArtifactData get, list or query of the waiting page's items
-    collection, with no out_dir, no error, a result that returns item 98, and a send after the owner's message.
-    Each case here misses one of those. The copy lacks item 98, so each one must be refused. The case guards the
-    proof against over-accepting: a read that misses any one condition does not file the number."""
+    """A read proves the filing only as an ArtifactData or claude-artifacts get, list or query of the waiting
+    page's items collection, with no out_dir, no error, a result that returns item 98, and a send after the
+    owner's message. Each case here misses one of those. The copy lacks item 98, so each one must be refused.
+    The case guards the proof against over-accepting: a read that misses any one condition does not file the number."""
     repo = record_repo("unfiled", copy_files(UNFILED))
     get98 = tool_input("get", collection="items", doc_id="disk-cleanup")
     misses = (
@@ -1828,6 +1828,48 @@ def case_page_read_back_of_a_second_account_link_proves_the_filing():
                  [owner_rec(NEUTRAL), send_rec(SENT), used_rec("ArtifactData", get98, tool_id="rb1"),
                   result_rec("rb1", response_of([ITEM_98]))], cwd=repo)
     expect_silent("page filing: n 98 read back through the waiting page's gmail link proves the filing", p)
+
+
+CLAUDE_ARTIFACTS = "mcp__claude-artifacts__"  # the claude-artifacts page tools; the read verb is the tool's name
+
+
+def case_page_claude_artifacts_read_back_proves_the_filing():
+    """A claude-artifacts db_get, db_list or db_query of the waiting page's items collection, after the owner's
+    message, whose result returns item 98, proves the filing as an ArtifactData read does. The tool's name carries
+    the verb, so the input has no action key. The copy lacks item 98, so only the read-back can pass the item. The
+    list is the full 40-item fixture with item 98 last, so the item is found past the head of a full result."""
+    repo = record_repo("unfiled", copy_files(UNFILED))
+    forty = [(item_id, {"id": item_id, "n": n}) for item_id, n in reversed(FORTY)]
+    reads = (
+        ("db_get", tool_input(None, collection="items", doc_id="disk-cleanup"), [ITEM_98], "string"),
+        ("db_list", tool_input(None, collection="items", doc_id=None), forty, "blocks"),
+        ("db_query", tool_input(None, collection="items", doc_id=None, query={"where": [["n", "==", 98]]}),
+         [ITEM_98], "nested"),
+    )
+    for verb, inp, docs, form in reads:
+        p = page_run(new_cfg(), "page-ca-readback", [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL), send_rec(SENT), used_rec(CLAUDE_ARTIFACTS + verb, inp, tool_id="rb1"),
+                      result_rec("rb1", response_of(docs, form=form))], cwd=repo)
+        expect_silent("page filing: n 98 proved by a claude-artifacts %s of items, with its send" % verb, p)
+
+
+def case_page_claude_artifacts_read_of_another_collection_does_not_prove_the_filing():
+    """A claude-artifacts db_get, db_list or db_query of a collection other than the waiting page's items does not
+    prove item 98, even when its result returns n 98. The copy lacks item 98, so each read must be refused. This is
+    a control: the old code counts no claude-artifacts read, so it passes there, and it must stay green once such
+    reads count, because the collection must still be items."""
+    repo = record_repo("unfiled", copy_files(UNFILED))
+    reads = (
+        ("db_get", tool_input(None, collection="answers", doc_id="disk-cleanup")),
+        ("db_list", tool_input(None, collection="answers", doc_id=None)),
+        ("db_query", tool_input(None, collection="answers", doc_id=None, query={"where": [["n", "==", 98]]})),
+    )
+    for verb, inp in reads:
+        p = page_run(new_cfg(), "page-ca-other", [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL), send_rec(SENT), used_rec(CLAUDE_ARTIFACTS + verb, inp, tool_id="rb1"),
+                      result_rec("rb1", response_of([ITEM_98]))], cwd=repo)
+        expect_unfiled("page filing: a claude-artifacts %s of answers does not prove n 98" % verb, p,
+                       "fb-0958-7", "98")
 
 
 # --------------------------------------------------------------------------- repo cases
@@ -2922,8 +2964,11 @@ def response_of(docs, form="string", extra=()):
 
 
 def tool_input(action, collection="answers", doc_id="a-7k2", **extra):
-    """The tool_input of an ArtifactData call. doc_id None leaves the key out, as a list does."""
+    """The tool_input of an ArtifactData call. doc_id None leaves the key out, as a list does. action None leaves
+    it out too: a claude-artifacts db tool carries its verb in its tool name, not in its input."""
     obj = {"action": action, "url": PAGE_URL, "collection": collection}
+    if action is None:
+        del obj["action"]
     if doc_id is not None:
         obj["doc_id"] = doc_id
     obj.update(extra)
@@ -4870,6 +4915,8 @@ CASES = (
     case_page_read_back_that_misses_n_does_not_prove_the_filing,
     case_page_unfiled_remedy_offers_the_read_back,
     case_page_read_back_of_a_second_account_link_proves_the_filing,
+    case_page_claude_artifacts_read_back_proves_the_filing,
+    case_page_claude_artifacts_read_of_another_collection_does_not_prove_the_filing,
     case_repo_send_naming_the_repo_passes,
     case_repo_send_with_error_result_does_not_count,
     case_repo_slug_match_ignores_case,
