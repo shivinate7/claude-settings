@@ -10400,6 +10400,25 @@ class LeftoverTempFolderTests(unittest.TestCase):
         self.assertKept(flagged, "--confirm removed a mutate_guard folder that the link check flags", proc)
         self.assertKept(flagged_run, "--confirm removed a run folder that the link check flags", proc)
 
+    def test_confirm_keeps_a_dead_owner_folder_under_a_symlinked_run_folder_parent(self):
+        """The run-folder parent is a link to a folder outside the temp root. The sweep must not list through
+        the link, so the dead-owner folder inside the target stays. The control in the temp root is reaped, so
+        the keep is not a sweep that never ran."""
+        target = os.path.join(self.base, "outside")
+        held = self.leftover(os.path.join(target, "%d-%s" % (self.dead_pid, uuid.uuid4().hex)), self.OLD_HOURS)
+        os.rmdir(self.test_temp)  # setUp made it as an empty folder
+        reason = temp_make_link(self.test_temp, target)
+        if reason:
+            self.skipTest(reason)
+        self.assertTrue(os.path.islink(self.test_temp), "precondition: the run-folder parent is not a link, so the "
+                                                        "case proves nothing")
+        control = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        proc = self.run_sweep("--confirm")
+        self.assertGone(control, "control: --confirm did not remove a dead-owner folder, so the symlinked-parent "
+                                 "keep proves nothing", proc)
+        self.assertKept(held, "--confirm listed through a symlinked run-folder parent and removed a folder outside "
+                              "the temp root", proc)
+
     def test_confirm_keeps_a_pid_less_mutate_guard_name(self):
         """The older name `mutate_guard_<rand>` carries no owner pid, so no owner can be proven dead."""
         pidless = self.leftover(os.path.join(self.temp, "mutate_guard_%s" % uuid.uuid4().hex[:8]), self.OLD_HOURS)
