@@ -19,6 +19,16 @@
                           marked ready, and no flag lifts it. A repo with no list runs no ready check, and one line says so.
                           Cost per draft-step ready: one ci-job run per job of the list, and one worktree; the run time is unmeasured for a step subset
                           (the 3600 s lint bound applies), and a head that lacks the default base's tip adds one merge commit, one more local `git merge` start and one push even when its page is current (a head that holds the tip with a current page pushes none; any head pushes at most once). No new file but ci-job's own log.
+                          After a landed merge onto the default branch (never a refused one, never a merge onto another base) it fetches origin/roadmap and reads
+                          roadmap/live/live.json. A readAt later than the merge commit's time prints the `merge --idle-lanes` report. Otherwise (a stale or unread file, where a failed
+                          fetch is unread, or a fresh file whose report holds an unknown line, alone or beside a lane or a hold) one line says the idle-lanes pass is owed and names `merge --idle-lanes`, and the merged step's lane (its record's `lane`,
+                          else the session link at the foot of the PR body) prints as `check this lane`, never as a lane to archive. A lane still working prints
+                          no line (a step still doing under it holds it unless a Step trailer on main shows that step landed). The merged steps are those of
+                          `commit^1..commit` and of the base's tip before the merge to the merge, so a rebase merge names each lane. A session in the file's keepSessions, read at any age, prints a `hold (` line. With no roadmap branch on origin it prints nothing.
+                          None of this changes the exit code. Cost: one fetch, one git show of the live file and one of the merge commit's time. A fresh file then
+                          runs the full idle-lanes report (the roadmap build's record-branch and main reads, unmeasured). The owed path instead reads the merge's log (a second log for the range since the base's tip), then the step
+                          records in three git ls-tree, one git cat-file and one git log of the default branch for the Step trailers, and one open-pulls read only for a lane no earlier test skipped. No file, timer or new process beyond those
+                          reads (merge/test_merge.py ConfirmIdleLanes pins that each git call is a read and that no file is made).
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it. Under merge.requiredChecks "none" (no check
                           gates the merge) --confirm heals it itself (page item 926 a, 14:32 CST): it merges the base in when the base gained a record, pushes one page commit, waits on no
                           check, and merges that head in the one run. A base that moves after the push refuses and keeps the commit. A relayed yes binds across the heal's page and base-merge commits.
@@ -38,7 +48,7 @@
                           print the review record for the head SHA that was reviewed. It refuses a Kind or Guard that the diff contradicts. Stops (exit 1) when the PR's live head is another
                           sha. Posts nothing: the lane posts it as a PR comment. --fix-check adds the optional `Fix check:` line after
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
-                          unless HEAD is the Head of the newest earlier record on the PR, read from the PR's issue comments since the PR opened, and that record
+                          unless HEAD is the Head of an earlier record on the PR (the newest, or an older one when the new record carries its rounds; see older_start_record), read from the PR's issue comments since the PR opened, and that record
                           has no Fix check line or a PASS one (owner item 741); after a PASS one, when SHA is a merge commit (a fix after a merge of main), that record reads done and HEAD is an ancestor of SHA
                           (the fix verifier reviews every commit since HEAD) and SHA's second parent is on the base, with no edit beyond git's own merge (a merge that conflicts may edit its conflicted paths only).
                           The fix check's MODEL must be sonnet (exit 2 otherwise), and a reviewer's later rounds must equal their round row's model.
@@ -218,6 +228,9 @@
                           lane lines (a lane the roadmap's live file shows done and safe to archive) and `hold (` lines (a lane not to archive now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane; the last clears when the step's status is set to todo or done; a lane whose pull an open or merged pull replaced is listed whatever its step status), then a summary line. A lane that waits (a step not done, an open pull, an open item) prints no line, except a lane only stale drafts hold: that prints one `joint (close #N ...; archive archive/<branch> ...; archive lane <id>)` line, counted among the lanes to archive. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
                           posts nothing; any session may run it. An unreadable build or a missing --live exits 1: unknown, never empty.
+                          A session in the live file's keepSessions ([{id, reason}]) prints a `hold (kept: ...)` line, never a lane line, and is not counted among the
+                          lanes to archive; a keepSessions that is not a list of rows with an id reads unknown (exit 1), as does an int unarchived_epoch below 0.
+                          Each `unknown (` line ends with "Fix what it names, then read the live file again." unless it already says to read it again.
   merge <pr> --ready      a lane's one act on its own draft: the draft step of --confirm (on the default branch, merge origin/<base> into
                           the head when the head lacks its tip and the merge is clean; rebuild the records page; run the repo's ready checks: the ci-job
                           steps on that final tree, the debt-close lint and the open-PR clash on the pre-merge head; one plain push of the merge commit and
@@ -351,6 +364,11 @@ def run_id(run):
     m = RUN_URL_ID.search(run)
     return m.group(1) if m else run
 
+IDLE_CITE = "(decision session-tiers, the batch runner reads the lanes to archive from the output of each merge)"
+# The one home of the fix an `unknown (` line of `merge --idle-lanes` names. It deliberately omits the command's name, so the owed line after a
+# merge stays the one line that names it. A line that already says to read the live file again keeps its own text.
+IDLE_UNKNOWN_FIX = " Fix what it names, then read the live file again."
+IDLE_FIX_NAMED = re.compile(r"merge --idle-lanes|read (?:it|the live file|the file) again")
 UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not run is reported as unknown, never as clear)"
 # The two role cites name no tier: a lane must not learn which tier may claim a merge.
 ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may merge)"
@@ -3508,28 +3526,69 @@ def landed_sweep():
     from shared_names import config_dir  # hooks/shared_names.py, the one home of the config dir, on sys.path from the top of this file
     return os.path.join(config_dir(), "janitor", "sweep.py")
 
+def run_safe_sweep(root):
+    """The one safe janitor sweep, run in this process on `root`: janitor/sweep.py sweep_repo in "fast" mode with confirm on and attended off. Fast
+    mode judges worktrees only, with no fetch, and reaps only a clean, idle tree already in the default branch that no lock holds, so it asks
+    nothing. A tree its caller's own agent lock holds is kept too (own_lock_rule=False turns off the sweep's own-lock reap), since this process
+    still reads it.
+    Both triggers call it, so the sweep has one home: the lane lint's full disk floor (refuse_full_disk) and the confirm that just merged
+    (confirm). Cost (decision machine-load-brake, rule outcomes-mechanize-rules): one sweep per successful merge and one per floor hit. It starts
+    no timer and no long-lived process. A sweep that cannot run or refuses never stops the caller: one line on stderr, and -> None.
+    Otherwise -> the sweep_repo result."""
+    try:
+        janitor = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "janitor")  # this tree's own janitor, beside merge/
+        if janitor not in sys.path:
+            sys.path.append(janitor)
+        import sweep  # here, not at the top: only a merge or a full disk needs it
+        result = sweep.sweep_repo(root, True, sweep.default_restore_log_path(), "fast", False, own_lock_rule=False)
+    except Exception as e:
+        print(f"merge: the safe sweep did not run: {type(e).__name__}: {' '.join(str(e).split())[:200]}", file=sys.stderr)
+        return None
+    if result.get("refused"):
+        print(f"merge: the safe sweep refused: {result['refused']}", file=sys.stderr)
+        return None
+    return result
+
 def refuse_full_disk(root):
     """Refuse a lane lint when a drive it writes to is under the guard's full disk floor, min(5% of the drive, 5 GiB) (decision machine-load-brake): the
     drive of the home folder (the guard's reader, hooks/guard.py _read_disk) or the drive of the temp folder, where add_worktree makes the lint tree.
     A lint tree is a full checkout, and a full disk fails it half made. The floor is the guard's (load_full), fed the disk reading alone, so memory
     never refuses here. The floor holds in a cloud session too. A drive that cannot be read prints one line that says so; the other is still checked,
-    and the lint goes ahead when none is full."""
+    and the lint goes ahead when none is full.
+    A full drive runs the safe sweep once (run_safe_sweep), reads the drives again, and refuses only if one is still under the floor. The refusal
+    names the GiB the sweep freed on the drive that was full, or says the sweep did not run or refused. Cost: one sweep per floor hit, and two disk reads of two drives."""
     import guard as hook_guard  # here, not at the top: it loads the whole guard set, and only the lane lint and the review record need it
     def temp_read():
         usage = shutil.disk_usage(tempfile.gettempdir())
         return usage.free / hook_guard.GIB, usage.total / hook_guard.GIB
-    full, unknown = [], False
-    for read in (hook_guard._read_disk, temp_read):
-        try:
-            free, total = read()
-        except Exception:
-            unknown = True
-            continue
-        full += [t for t in hook_guard.load_full({"disk_free_gb": free, "disk_total_gb": total}) if t not in full]  # one drive under both folders is named once
+    def read_drives():
+        """-> (the full drives as text, a drive was unread, each drive's free GiB or None, the positions of the full drives in that list)."""
+        full, unknown, frees, full_at = [], False, [], []
+        for at, read in enumerate((hook_guard._read_disk, temp_read)):
+            try:
+                free, total = read()
+            except Exception:
+                unknown = True
+                frees.append(None)
+                continue
+            frees.append(free)
+            named = hook_guard.load_full({"disk_free_gb": free, "disk_total_gb": total})
+            if named:
+                full_at.append(at)
+            full += [t for t in named if t not in full]  # one drive under both folders is named once
+        return full, unknown, frees, full_at
+    full, unknown, before, full_at = read_drives()
+    freed, swept = 0.0, True
+    if full:
+        swept = run_safe_sweep(root) is not None  # None: the sweep did not run or refused, so the refusal says that and never "freed 0.0 GiB"
+        full, unknown, after, _ = read_drives()
+        # Only a drive that read full before the sweep counts: the other drive's free space moves with other work, not with this sweep.
+        freed = max([after[i] - before[i] for i in full_at if after[i] is not None and before[i] is not None] + [0.0])
     if unknown:
         print("merge: the free disk read as unknown, so the lane lint goes ahead" if not full else "merge: a free disk read as unknown", file=sys.stderr)
     if full:
-        raise Stop(f"the lane lint makes a full checkout, and the machine is full ({', '.join(full)}). Free space first: "
+        after_sweep = f"after the safe sweep freed {freed:.1f} GiB" if swept else "and the safe sweep did not run or refused, so it freed nothing"
+        raise Stop(f"the lane lint makes a full checkout, and the machine is full ({', '.join(full)}) {after_sweep}. Free space first: "
                    f"`python3 {shlex.quote(landed_sweep())} --root {shlex.quote(str(root))} --confirm` "
                    "(decision machine-load-brake, the lane lint refuses at the full disk floor in a cloud session too).")
 
@@ -5049,9 +5108,12 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         if wt:
             drop_worktree(root, tmp, wt)
         lock.release(base, token)
+    if base == cfg["defaultBranch"]:  # a merge onto an integration branch owes no pass
+        idle_lanes_after_merge(root, commit, host, n, info.get("body", ""), plan_base)  # lock released: it fetches and reads; the merge has landed, so it never moves `code`
     report = prose_judge_run(judge, n) + where_else_run(where_else, n)  # each model call waits up to MODEL_TIMEOUT, so it runs with the lock released
     if report:
         say(*report)
+    run_safe_sweep(root)  # last: the lint worktree and the lock are gone, so the sweep cannot take a tree this merge still reads. A failed sweep never changes the exit code
     return code
 
 def default_lock(root):
@@ -5325,6 +5387,20 @@ def round_three_refusal(a, earlier):
     if not fixes or any(f[3] != "FAIL" for f in fixes):
         return "a record that opens at round 3 needs a failed round 2, or a failed fix verifier, before it."
     return ""
+
+def older_start_record(earlier, base, rounds):
+    """-> the newest parsed record in `earlier` (oldest first, None for an unparseable one) that names `base` as its Head, when `base` may start a fix
+    check although it is not the newest record's Head (decision pr-review-record, the --fix-check order), else None. It is None when no record names
+    `base`; when a later record is unparseable, does not read done (a failed round of another head counts), or holds a FAIL Fix check from any head;
+    or when `rounds` (the new record's) do not carry every round line of every record that names `base`. The caller has already refused an
+    unparseable newest record. Reads no host."""
+    named = [i for i, e in enumerate(earlier) if e and e["head"] == base]
+    if not named:
+        return None
+    i = named[-1]
+    if any(e is None or (e["fix"] and e["fix"][3] == "FAIL") or review_state(e, e["head"])[0] != "done" for e in earlier[i + 1:]):
+        return None
+    return earlier[i] if all(r in rounds for j in named for r in earlier[j]["rounds"]) else None
 
 def pr_had_head(h, head, live, base):
     """True when `head` is a head the pull request had before its live head `live`: a commit on `live`'s first-parent line (a push, or a clean merge of
@@ -6864,7 +6940,13 @@ def load_roadmap_build():
     return build
 
 def idle_lanes(live, repo_dir=None):
-    """merge --idle-lanes: print lane lines (a lane to archive; a lane whose handoff is not on the record branch ends with
+    """merge --idle-lanes: the exit code of idle_lanes_read, whose docstring holds the report's form."""
+    return idle_lanes_read(live, repo_dir)[0]
+
+def idle_lanes_read(live, repo_dir=None):
+    """merge --idle-lanes -> (exit code, whether the printed report holds an `unknown (` line). A report with an unknown line beside a lane or
+    a hold exits 0 and is only partly read; idle_lanes_after_merge reads the flag to print its owed line.
+    The report prints lane lines (a lane to archive; a lane whose handoff is not on the record branch ends with
     HOLD and counts only in the summary's "M held", not in "N lanes to archive") and `hold (` lines (a lane not to archive
     now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane;
     the last clears when the step's status is set to todo or done; a lane whose pull an open or merged pull replaced is listed whatever
@@ -6873,24 +6955,25 @@ def idle_lanes(live, repo_dir=None):
     `joint (close #N ...; archive archive/<branch> ...; archive lane <id>)` line, counted among the lanes to archive.
     Exit 1 with no summary when the
     live file is not named or the roadmap build cannot be loaded or run, so an unread list never reads as an empty one.
-    `repo_dir` is the -C checkout (None: the one the process stands in)."""
+    `live` is the file's path, or the live file already parsed (a dict, as idle_lanes_after_merge passes it). A kept session (keepSessions)
+    prints a `hold (kept: ...)` line. Each `unknown (` line ends with IDLE_UNKNOWN_FIX unless it already says to read the live file again. `repo_dir` is the -C checkout (None: the one the process stands in)."""
     if not live:
         print("merge: --idle-lanes needs --live FILE, the publisher's live-work file. No list was made.", file=sys.stderr)
-        return 1
+        return 1, False
     try:
         build = load_roadmap_build()
     except Exception as e:
         print(f"merge: cannot load the roadmap build {IDLE_BUILD}: {type(e).__name__}: {e}. No list was made.", file=sys.stderr)
-        return 1
+        return 1, False
     c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=repo_dir)
     if c:
         print("merge: not in a git checkout. No list was made.", file=sys.stderr)
-        return 1
+        return 1, False
     try:
         entries = build.idle_lanes_report(root, live)
     except (Exception, SystemExit) as e:
         print(f"merge: the roadmap build could not read the lanes: {type(e).__name__}: {e}. No list was made.", file=sys.stderr)
-        return 1
+        return 1, False
     holds = [x for x in entries if x.startswith("hold (")]
     lanes = [x for x in entries if not x.startswith("unknown (") and x not in holds]
     handoff_held = [x for x in lanes if build.IDLE_HOLD_MARK in x]  # lanes whose handoff is not on the record branch
@@ -6904,8 +6987,106 @@ def idle_lanes(live, repo_dir=None):
         else:
             tail = "Run get_session on each lane in one message, then archive them in the next message."
         entries = [*entries, f"merge: {count}. {tail}"]
+    # No unknown line ends bare: each names what to fix and to read the live file again, so a reader never meets a dead end. The checks above read the raw entries.
+    entries = [x + IDLE_UNKNOWN_FIX if x.startswith("unknown (") and not IDLE_FIX_NAMED.search(x) else x for x in entries]
     say(*entries)
-    return 1 if unread else 0
+    return (1 if unread else 0), any(x.startswith("unknown (") for x in entries)
+
+LIVE_PATH = "roadmap/live/live.json"  # triage commits the live file here on origin's roadmap branch at each batch merge
+
+def idle_lanes_after_merge(root, commit, host, n, body, before=None):
+    """After a landed merge onto the default branch: print the `merge --idle-lanes` report when the live file on origin/roadmap was read after the
+    merge commit's time and reads as a list. Otherwise (stale, missing, unreadable, origin unreadable, or a fresh file whose report holds an
+    unknown line, alone or beside a lane or a hold, so it is not fully read) print one line saying the pass is owed, which names `merge --idle-lanes`, then the
+    lanes to check from the merged step's record (idle_lanes_to_check). `before` is the base's tip before the merge, or None. A repo whose origin has no roadmap branch has no live file and owes no pass:
+    it prints nothing. The live file is passed in memory, never written. Never raises and never moves the exit code: the merge has landed.
+    Cost: one fetch, one git show of the live file, one of the merge commit's time. Fresh path: the full idle-lanes report's reads (unmeasured).
+    Owed path: one log of the merge (a second only when its range cannot be read), the step records in three git ls-tree and one git cat-file,
+    and one open-pulls read only for a lane no earlier test skipped. One more `git ls-remote` only when the fetch fails."""
+    owed = "merge: the idle-lanes pass is owed: the live file on origin/roadmap is %s. Run merge --idle-lanes --live FILE once triage has read it. " + IDLE_CITE
+    try:
+        try:
+            fetch_branch(root, "roadmap", IDLE_CITE)
+        except Stop:
+            # A fetch of a missing branch and a failed fetch both exit non-zero; only a listing that works and is empty proves the branch is absent.
+            lc, listed = git(root, "ls-remote", "--heads", "origin", "refs/heads/roadmap")
+            if lc == 0 and not listed.strip():
+                return
+            say(owed % "unread (the fetch of origin/roadmap failed)")
+            return
+        c, text = git(root, "show", f"refs/remotes/origin/roadmap:{LIVE_PATH}")
+        c2, merged_at = git(root, "show", "-s", "--format=%cI", commit)
+        raw = None  # the live file parsed, or None when it could not be read
+        if c:
+            why = "unread (git could not read the file)"
+        else:
+            try:
+                raw = json.loads(text)
+            except ValueError:
+                why = "unread (the file is not JSON)"
+            else:
+                why = None if isinstance(raw, dict) else "unread (the file is not a JSON object)"
+                raw = raw if isinstance(raw, dict) else None
+        if raw is not None:
+            try:
+                read_at = datetime.datetime.fromisoformat(raw["readAt"].replace("Z", "+00:00"))
+                landed = datetime.datetime.fromisoformat(merged_at) if not c2 else None
+            except (ValueError, TypeError, KeyError, AttributeError):
+                read_at = landed = None
+                why = "unread (its readAt or the merge commit's time is not an ISO time)"
+            if why is None and landed is None:
+                why = "unread (git could not read the merge commit's time)"
+            elif why is None and read_at.tzinfo is None:
+                why = "unread (its readAt has no time zone)"
+            elif why is None and read_at <= landed:
+                why = "stale (read before this merge landed)"
+        if why is None:
+            code, partial = idle_lanes_read(raw, root)  # its exit code is the report's own; the merge's code stays as it was
+            if code == 0 and not partial:
+                return
+            # The fresh file read unknown, wholly (a bad shape, an unread build) or beside a lane or a hold: the lines above say why, and a bare
+            # unknown names no command that fixes it. A partly read report owes the pass too, so the reader runs it again once the file is fixed.
+            reads = "reads unknown" if code else "holds an unknown line, so it is only partly read"
+            say(f"merge: the idle-lanes pass is owed: the live file on origin/roadmap is fresh but its report {reads} (above). "
+                "Fix what the line above names in the live file, then run merge --idle-lanes --live FILE. " + IDLE_CITE)
+        else:
+            say(owed % why)
+        idle_lanes_to_check(root, commit, host, n, body, raw, before)
+    except Exception as e:
+        say(owed % f"unread ({type(e).__name__}: {e})")
+
+def idle_lanes_to_check(root, commit, host, n, body, raw, before=None):
+    """The owed path's second source: each step the merge landed (Step trailers on the merge's commits) names a lane in its record on
+    origin/roadmap; the roadmap build (lanes_to_check) says which of those lanes to check by hand. `raw` is the live file parsed, or None.
+    The commits the merge landed are `commit^1..commit` plus `before..commit` (`before` is the base's tip before the merge): a rebase merge
+    makes one commit per pull commit and no merge commit, so `commit^1` alone holds only the last. For a merge or a squash the two agree."""
+    fmt = "--format=%(trailers:key=Step,valueonly,separator=%x2C)"
+    c, trailers = git(root, "log", fmt, f"{commit}^1..{commit}")
+    if c:  # the range is unreadable (a shallow clone cut at the first parent): the commit alone, with a line that the merged steps may be missing
+        say("unknown (the commits the merge landed could not be read, so a merged step's lane may not be named)")
+        c, trailers = git(root, "log", "-1", "--format=%(trailers:key=Step,valueonly,separator=%x2C)", commit)
+    if c:
+        say("unknown (the Step trailers of the merge could not be read, so its lane is not named)")
+        return
+    if before:
+        c, more = git(root, "log", fmt, f"{before}..{commit}")
+        if c:
+            say("unknown (the commits since the base's tip before the merge could not be read, so a rebased step's lane may not be named)")
+        else:
+            trailers += "\n" + more
+    slugs = {s.strip() for line in trailers.splitlines() for s in line.split(",") if s.strip()}
+    if not slugs:
+        return
+    try:
+        build = load_roadmap_build()
+        steps =build.load(build.Ref(pathlib.Path(root), "origin/roadmap"))["steps"]  # raises SystemExit when git cannot read the record branch
+    except (Exception, SystemExit) as e:
+        say(f"unknown (the step records could not be read: {type(e).__name__}: {e}, so the merged lane is not named)")
+        return
+    landed_marks, _strays, landed_why = build.landed_marks(pathlib.Path(root), commit, "the default branch", steps)  # steps whose Step trailer is on main
+    lines = build.lanes_to_check(steps, slugs, body, raw, None if landed_why else set(landed_marks), lambda: {p["head"]["ref"] for p in host.open_pulls() if p.get("number") != n})
+    if lines:
+        say(*lines)
 
 def build_parser():
     """The one home of merge's command line. The guard (hooks/guard_merge.py) parses a command with this, so its reading of -C and --repo-dir is the tool's own.
@@ -6949,7 +7130,7 @@ def build_parser():
     p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")
     p.add_argument("--guard", choices=REVIEW_GUARDS, help="with --review-record: whether the change touches a guard or check")
     p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
-    p.add_argument("--fix-check", type=fix_verifier_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the `Fix check:` line, after the rounds; HEAD is the reviewed head the fix diff starts from; the newest review log has no Fix check line or a PASS one; after a PASS one, a head that is a merge of main must be a merge of the base into that Head with no edit beyond git's own merge")
+    p.add_argument("--fix-check", type=fix_verifier_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the `Fix check:` line, after the rounds; HEAD is the reviewed head the fix diff starts from; the review log that names HEAD (the newest, or an older one under older_start_record's guards) has no Fix check line or a PASS one; after a PASS one, a head that is a merge of main must be a merge of the base into that Head with no edit beyond git's own merge")
     p.add_argument("--grant", type=grant_arg, metavar="TEXT", help="with --review-record: the owner's grant of round 4, `#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT`, with PR the pull request's own number; the rounds must then reach round 4")
     p.add_argument("--accepted", type=accepted_arg, metavar="ID,TIME", help="with --review-record: the owner's acceptance of a negative net value, `RULING_ID,YYYY-MM-DD HH:MM CST|CDT`; prints the `Owner accepted:` line directly before Net value. `merge --reviewed` then reads the record as at Net value zero only at the record's own Head, and only when this checkout's origin/roadmap holds an open, checked ruling named own-<PR>-<letters> for this PR (the ruled store reader's two git starts, only for a negative record with the line)")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after the final round (round 3, or 4 with --grant) when that round failed; a passing round, or a passing fix check after any round, owes none")
@@ -7187,7 +7368,7 @@ def main(argv, host=None, lock=None, hosts=None):
             if held and held[1] != "PASS":
                 print(f"merge: a record with no round line cannot clear the design reviewer's {held[1]} in round {held[0]} of an earlier record. Post a full record whose design reviewer PASSes. " + REVIEW_CITE, file=sys.stderr)
                 return 2
-            if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed
+            if a.fix_check:  # the fix diff starts from the head an earlier record reviewed
                 last = earlier[-1] if earlier else None
                 source = replaces_source(a.pr, info["body"]) if not earlier else None
                 if source:  # a replacement with no log of its own starts from its source's newest log when the trees match or the live tree is git's clean merge of main (carry_source)
@@ -7197,6 +7378,8 @@ def main(argv, host=None, lock=None, hosts=None):
                         print(f"merge: --fix-check: whether the log of #{source} carries by tree is unknown ({' '.join(str(e).split())[:300]}), so the fix verifier is refused. " + REVIEW_CITE, file=sys.stderr)
                         return 2
                     last = got[0] if got else None
+                if last and last["head"] != a.fix_check[0]:  # an older record's Head starts the fix check too, under older_start_record's guards
+                    last = older_start_record(earlier, a.fix_check[0], a.round)
                 if not last or last["head"] != a.fix_check[0]:
                     ok = False
                 elif not last["fix"]:
@@ -7229,7 +7412,7 @@ def main(argv, host=None, lock=None, hosts=None):
                             print(f"merge: --fix-check: whether {a.head[:9]} is git's own merge of the base is unknown ({unread}), so the fix verifier is refused. Fetch both parents of that head into this checkout, then run again. " + REVIEW_CITE, file=sys.stderr)
                             return 2
                 if not ok:
-                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line or a PASS one. After a PASS one, the head must descend from that Head (the fix verifier reviews every commit since it). A head that is a merge must also be a merge of the base, and the log must read done, with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
+                    print("merge: --fix-check: the reviewed head must be the Head of an earlier review log on this pull request (the newest one, or an older one when the new record carries its rounds, no later log is unreadable, and no later Fix check from that head FAILed), and that log must have no Fix check line or a PASS one. After a PASS one, the head must descend from that Head (the fix verifier reviews every commit since it). A head that is a merge must also be a merge of the base, and the log must read done, with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant, accepted=a.accepted).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)

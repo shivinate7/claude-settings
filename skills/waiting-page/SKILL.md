@@ -56,7 +56,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   and ignored: the page, the guard and the tools read the key. Fields: `n` (a stable number the owner answers by),
   `kind` (`decision` or `task`), `status` (`open` or `closed`), `added` (ISO time), `ref` (each id
   with its plain name), `title`, `short` (optional, 24 characters or fewer: the name on the wide left list; longer or missing, the list shows `title` cut with an ellipsis), `owner` (the session that reads the answer at its wake), `home` (the step, PR or
-  record the answer goes to; a step is its bare step id, so the roadmap upkeep row can match it), `context` (plain text, line breaks kept).
+  record the answer goes to; a step is its bare step id, so the roadmap upkeep row can match it; the found-false check reads `step <id>` too), `context` (plain text, line breaks kept).
   - The page derives the tier from these fields. Never write a tier.
     - `holds` (one plain sentence: what is stopped until the answer) puts the item in Blocking.
     - `holdsLane` (boolean `true`) says a lane waits on the item. It does not move the tier. A merge or PR wait sets `holds` only. See `lane`. The page lists it in `itemFields` so a write passes, and never draws it. Drop it with `lane` when no lane waits on the item any more (the withdrawn path and unpark).
@@ -299,6 +299,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
   - Written: the writer closes the item (`status: "closed"` and `closed` set to now), with the answer and its time in `context`. The owning
     session then files the answer to `home`, as "Route and close" step 1 says. Either way, every
     question and answer ends in the page's record.
+- An item found false (its `home` is a bare step id or reads `step <id>`, and that step is done, dropped or done-obsolete, which `stale_pages.py --items` prints as `found-false:` when the env `ROADMAP_STEPS_FOLDER` names roadmap/data/steps) is closed the same turn with a reply naming the record that shows it false; the owner is never asked. A folded step waits on purpose, so its items stay open. A bare id may also be a decision or debt id: the bare-id line says "if <id> is a decision or debt id, leave it open", and then the item stays open.
 - A lane has no chat with the owner. Its question goes in its report, and a lane also sends it
   to its parent with `send_message` in the same turn. The Stop report guard blocks a lane reply whose
   Input Needed asks a pick or a yes/no unless the same turn sent it to its parent or the writer. A box,
