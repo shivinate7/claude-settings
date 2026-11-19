@@ -23,7 +23,9 @@ LocalActionUnderLint: --lint runs a local uses: action only when the read of its
 names its file, line or value and runs no step. A plain run never runs one.
 OwnLogPrune: ci-job removes its own ci-job-* logs over one day old when it starts, and keeps the rest.
 RerunCache: a rerun at the same key runs no passing step and prints PASS (cached); a failed, unknown, unrun, edited, renamed or
-  corrupt step runs again. The control case is a first run, which runs every step and prints no cached line.
+  corrupt step runs again. The control case is a first run, which runs every step and prints no cached line. A changed ambient
+  variable, a changed tool file that ci-job runs, a changed tree a step before it wrote into, and a saved pass seven days old
+  from its save (a hit does not refresh it) each miss too.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -2115,10 +2117,11 @@ class CodeCheckFromCopiedInstall(Job):
     # shell files, so code_check's run over the tree stays small.
     IN_REPO = ("bin/ci-job", "bin/verdict", "hooks/*.py", "lint/workflow_steps.py", "ruff.toml")
 
-    def install(self, claude_md_checkout):
+    def install(self, claude_md_checkout, folder=None):
         """A copied install: ci-job, verdict and ste-changed as plain files, hooks/ and lint/ beside them, and a global rules
-        file whose @-line names claude_md_checkout. Returns the copied ci-job and the config dir."""
-        cfg = os.path.join(self.root, "cfg")
+        file whose @-line names claude_md_checkout. It goes in folder (default: cfg under the repo).
+        Returns the copied ci-job and the config dir."""
+        cfg = folder or os.path.join(self.root, "cfg")
         os.makedirs(os.path.join(cfg, "bin"))
         for name in ("ci-job", "verdict", "ste-changed"):
             shutil.copy2(os.path.join(HERE, "..", "bin", name), os.path.join(cfg, "bin", name))  # copy2: ste-changed runs as a program
@@ -3006,10 +3009,15 @@ class OwnLogPrune(Job):
 
 # A step of the rerun cases is a probe, lint/<script>.py. Each run appends the step name to runs.txt in PROBE_DIR, then exits
 # with the code the case wrote for that step (0 when none). The count is taken below the cache, so no run_step is replaced.
+# A probe whose PROBE_DIR holds <name>.write also writes that text to gen.txt in the tree it runs in (a writing step).
 PROBE_SOURCE = '''import os, sys
 folder = os.environ["PROBE_DIR"]
 with open(os.path.join(folder, "runs.txt"), "a", encoding="utf-8") as f:
     f.write(sys.argv[1] + "\\n")
+write = os.path.join(folder, sys.argv[1] + ".write")
+if os.path.exists(write):
+    with open(write, encoding="utf-8") as src, open("gen.txt", "w", encoding="utf-8") as dst:
+        dst.write(src.read())
 code = os.path.join(folder, sys.argv[1] + ".exit")
 sys.exit(int(open(code, encoding="utf-8").read()) if os.path.exists(code) else 0)
 '''
@@ -3032,7 +3040,12 @@ def state_of(lines, name):
 class RerunCache(unittest.TestCase):
     """The rerun cache of the lane job. A step that passed is saved under its name, the files it reads and the tool version,
     and a rerun at the same key runs no saved step and prints PASS (cached). A failed or unknown step is never saved. An edit to
-    a script, a rename, or a corrupt saved result misses. Each case runs the real bin/ci-job in a fresh repo under RUN_FOLDER."""
+    a script, a rename, or a corrupt saved result misses. A changed ambient variable, a changed tool file ci-job runs, or a changed
+    tree that an earlier step wrote into also misses. A hit does not refresh a saved pass: it ages out seven days after its save.
+    Each case runs bin/ci-job, or a copied install of it, in a fresh repo under RUN_FOLDER."""
+
+    install = CodeCheckFromCopiedInstall.install  # the copied install: this class calls it, it does not copy it
+    DAY = 86400  # seconds: the age cases set a saved pass's age in days
 
     def fixture(self):
         """A new throwaway repo of three committed probe steps, with its probe folder and home in one sandbox under RUN_FOLDER."""
@@ -3066,8 +3079,9 @@ class RerunCache(unittest.TestCase):
         if commit:
             self.commit("edit " + script)
 
-    def lane_run(self, *steps):
-        """One lane run of `steps` with --lint. Returns the exit code, the verdict lines, the step names whose probe ran, and the output."""
+    def lane_run(self, *steps, ambient=None, script=CI_JOB):
+        """One lane run of `steps` with --lint. `ambient` is set in the caller's environment, which the steps inherit; `script` is
+        the ci-job to run. Returns the exit code, the verdict lines, the step names whose probe ran, and the output."""
         wf = os.path.join(self.sandbox, "wf.yml")
         with open(wf, "w", encoding="utf-8", newline="\n") as f:
             f.write(workflow(*steps))
@@ -3076,8 +3090,9 @@ class RerunCache(unittest.TestCase):
             os.remove(runs)
         env = {**ENV, "VERDICT_LOG": os.path.join(self.sandbox, "verdict.log"), "PROBE_DIR": self.probe,
                "CI_JOB_LINT_WORKERS": self.workers, "HOME": self.home, "XDG_CACHE_HOME": os.path.join(self.home, "cache"),
-               "XDG_STATE_HOME": os.path.join(self.home, "state"), "TMPDIR": self.tmp, "TEMP": self.tmp, "TMP": self.tmp}
-        done = subprocess.run([sys.executable, CI_JOB, "lane", "--lint", "--workflow", wf], cwd=self.root,
+               "XDG_STATE_HOME": os.path.join(self.home, "state"), "TMPDIR": self.tmp, "TEMP": self.tmp, "TMP": self.tmp,
+               **(ambient or {})}
+        done = subprocess.run([sys.executable, script, "lane", "--lint", "--workflow", wf], cwd=self.root,
                               capture_output=True, text=True, env=env, timeout=120)
         ran = []
         if os.path.exists(runs):
@@ -3201,6 +3216,95 @@ class RerunCache(unittest.TestCase):
         _, _, ran, out = self.lane_run(rerun_step("check-z", script="check_a"), rerun_step("check-b"))
         self.assertNotIn("check-b", ran, "check-b ran again though neither it nor its files changed\n%s" % out)
         self.assertIn("check-z", ran, "check-z did not run: under its new name it has no saved result\n%s" % out)
+
+    def test_an_ambient_variable_the_step_did_not_set_misses_its_saved_pass(self):
+        self.fixture()
+        steps = (rerun_step("check-a"),)
+        _, _, first, out = self.lane_run(*steps, ambient={"FOO": "1"})
+        self.assertEqual(first, ["check-a"], "the first run should run check-a, got %r\n%s" % (first, out))
+        _, lines, ran, out = self.lane_run(*steps, ambient={"FOO": "1"})
+        self.assertEqual(ran, [], "scope: the rerun with FOO=1 again ran %r, so the saved pass was not reused\n%s" % (ran, out))
+        self.assertEqual(state_of(lines, "check-a"), "PASS (cached)", out)
+        _, _, ran, out = self.lane_run(*steps, ambient={"FOO": "0"})
+        self.assertIn("check-a", ran, "check-a was not run when the ambient FOO changed from 1 to 0: its saved pass keys on the "
+                      "step's own env, which does not hold FOO\n%s" % out)
+
+    def test_an_edit_to_a_tool_file_ci_job_runs_misses_its_saved_pass(self):
+        for rel in ("bin/verdict", "bin/ste-changed", "hooks/pin_note.py", "lint/workflow_steps.py"):
+            with self.subTest(file=rel):
+                self.fixture()
+                script, cfg = self.install(CHECKOUT, folder=os.path.join(self.sandbox, "tool"))
+                steps = (rerun_step("check-a"),)
+                _, _, first, out = self.lane_run(*steps, script=script)
+                self.assertEqual(first, ["check-a"], "the first run should run check-a, got %r\n%s" % (first, out))
+                _, lines, ran, out = self.lane_run(*steps, script=script)
+                self.assertEqual(ran, [], "scope: the rerun with no edit ran %r, so the saved pass was not reused\n%s" % (ran, out))
+                self.assertEqual(state_of(lines, "check-a"), "PASS (cached)", out)
+                with open(os.path.join(cfg, rel), "a", encoding="utf-8", newline="\n") as f:
+                    f.write("\n# edit\n")
+                _, _, ran, out = self.lane_run(*steps, script=script)
+                self.assertIn("check-a", ran, "check-a printed PASS (cached) after %s changed in the copy that runs it: the key holds "
+                              "ci-job's own bytes only\n%s" % (rel, out))
+
+    def test_a_step_after_a_writing_step_keys_on_the_tree_it_sees_not_the_run_start_tree(self):
+        self.fixture()
+        steps = (rerun_step("check-a"), rerun_step("check-b"))
+        gen = os.path.join(self.root, "gen.txt")
+        self.set_exit("check-a", 1)  # the writer fails, so it is never saved: it runs, and writes gen.txt, in every run
+        self.set_write("check-a", "good\n")
+        _, _, first, out = self.lane_run(*steps)
+        self.assertEqual(sorted(first), ["check-a", "check-b"], "the first run should run both steps, got %r\n%s" % (first, out))
+        self.assertTrue(os.path.exists(gen), "scope: the writing step wrote no gen.txt in the first run\n%s" % out)
+        os.remove(gen)  # the run-start tree now matches the first run's
+        _, lines, ran, out = self.lane_run(*steps)
+        self.assertEqual(ran, ["check-a"], "scope: the rerun with the same write ran %r, not only the failed writer\n%s" % (ran, out))
+        self.assertEqual(state_of(lines, "check-b"), "PASS (cached)", out)
+        os.remove(gen)
+        self.set_write("check-a", "bad\n")
+        _, _, ran, out = self.lane_run(*steps)
+        self.assertIn("check-b", ran, "check-b printed PASS (cached) after the writing step put 'bad' in the tree it reads: its key "
+                      "came from the tree before the writing step ran\n%s" % out)
+
+    def test_a_cached_hit_does_not_refresh_a_saved_pass_and_it_ages_out_seven_days_after_its_save(self):
+        self.fixture()
+        steps = (rerun_step("check-a"),)
+        before = self.files()
+        _, _, first, out = self.lane_run(*steps)
+        self.assertEqual(first, ["check-a"], "the first run should run check-a, got %r\n%s" % (first, out))
+        entry = self.saved_entry("check-a", before)
+        self.age(entry, -6 * self.DAY)  # the pass was saved six days ago
+        _, _, ran, out = self.lane_run(*steps)
+        self.assertEqual(ran, [], "scope: a pass six days old should still hit, but check-a ran %r\n%s" % (ran, out))
+        self.age(entry, -2 * self.DAY)  # saved eight days ago: the hit above must not have made it newer
+        _, _, ran, out = self.lane_run(*steps)
+        self.assertIn("check-a", ran, "check-a printed PASS (cached) from a pass saved eight days ago: a hit refreshed its age, "
+                      "or the age is not checked when the pass is loaded\n%s" % out)
+
+    def set_write(self, name, text):
+        """Make the probe `name` write `text` to gen.txt in the tree it runs in, on every run."""
+        with open(os.path.join(self.probe, name + ".write"), "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def saved_entry(self, name, before):
+        """The one saved pass of step `name` that appeared since `before`. The store is under the home folder, where $XDG_CACHE_HOME points."""
+        found = []
+        for path in self.files() - before:
+            if not path.startswith(self.home + os.sep):
+                continue
+            try:
+                with open(path, encoding="utf-8") as f:
+                    saved = json.load(f)
+            except (OSError, ValueError):
+                continue
+            if isinstance(saved, dict) and saved.get("name") == name:
+                found.append(path)
+        self.assertEqual(len(found), 1, "scope: expected one saved pass for %s under the home folder, found %r" % (name, found))
+        return found[0]
+
+    def age(self, path, seconds):
+        """Move a file's mtime by `seconds` from its current mtime: a synthetic clock for a saved pass's age, with no sleep."""
+        when = os.path.getmtime(path) + seconds
+        os.utime(path, (when, when))
 
 
 if __name__ == "__main__":
