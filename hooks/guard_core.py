@@ -2256,9 +2256,30 @@ def _checkout_root_by_stat(folder: str) -> str:
     return ""
 
 
+def lint_dir():
+    """The lint folder, the one home of where lint/ is. It walks up from this file's folder to the first ancestor that
+    holds lint/layout.py: a guard loaded from an install's guard.d/<id> set sits two folders below the hooks folder, so
+    the lint folder is beside hooks, not beside the set. Then it tries $CLAUDE_CONFIG_DIR/lint (default ~/.claude/lint).
+    When none holds layout.py it returns the folder beside this file's folder, which does not exist in a copy with no
+    lint: the import that follows raises, as it always did."""
+    here = os.path.dirname(os.path.realpath(__file__))
+    folder = here
+    while True:
+        if os.path.isfile(os.path.join(folder, "lint", "layout.py")):
+            return os.path.join(folder, "lint")
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            break
+        folder = parent
+    config = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    if os.path.isfile(os.path.join(config, "lint", "layout.py")):
+        return os.path.join(config, "lint")
+    return os.path.join(here, "..", "lint")
+
+
 def layout_module():
-    """lint/layout.py, imported from the lint folder beside this file's folder. The one home of the import."""
-    lint = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lint")
+    """lint/layout.py, imported from lint_dir(). The one home of the import."""
+    lint = lint_dir()
     if lint not in sys.path:
         sys.path.append(lint)
     import layout

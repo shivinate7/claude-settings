@@ -336,7 +336,8 @@ def _file_role(roles):
 
 def _text_of(rec):
     """The owner text of one transcript record (lint/_transcript.py owner_text), or None."""
-    lint = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lint")
+    from guard_core import lint_dir  # lazy: the one home of where lint/ is
+    lint = lint_dir()
     if lint not in sys.path:
         sys.path.insert(0, lint)
     import _transcript
