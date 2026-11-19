@@ -1481,6 +1481,9 @@ VERDICT_DIR_ENV = "MUTATE_VERDICT_DIR"  # the folder a leg saves each mutant's v
 RESUME_TARGET = "resume"  # a fixture target: its guarded file and its test file are written into the run folder
 RESUME_SOURCE = 'RULE_A = "allow"\nRULE_B = "allow"\nRULE_C = "allow"\n'
 RESUME_SUITE = "# the fixture suite: its text is hashed, its cases are the stub's\n"
+RESUME_SIBLING = "guard_resume_sibling.py"  # a guard module beside the copied guard tree: the fixture suite imports it
+SIBLING_BEFORE = "RESUME_SIBLING_RULE = 'allow'\n"  # its text while the suite kills both fixture mutants
+SIBLING_AFTER = "RESUME_SIBLING_RULE = 'deny'\n"  # its text once the suite lets both fixture mutants live
 HANG_GUARD = 10.0  # a stopped-leg case waits this long for the other mutants to end: far above their run
 RESUME_RUN_LIMIT = 30.0  # main must return within this long; a stopped-leg case can wait up to HANG_GUARD inside it
 
@@ -1538,6 +1541,34 @@ class ResumeTests(unittest.TestCase):
 
     def suite_for(self, letters, control_passes=True, hooks=None):
         return _FakeSuite([resume_entry(letter) for letter in letters], control_passes=control_passes, hooks=hooks)
+
+    def head(self, name, sibling_text):
+        """A head's hooks folder: its own absolute path, holding the guard sibling the fixture suite imports."""
+        folder = os.path.join(self.run, name)
+        os.makedirs(folder, exist_ok=True)
+        write_files(folder, {RESUME_SIBLING: sibling_text})
+        return folder
+
+    def suite_importing(self, letters, head):
+        """A suite that answers from the sibling it imports in `head`: each mutant is killed while the sibling reads
+        SIBLING_BEFORE, and survives once it reads SIBLING_AFTER. Scope is checked by each call's copied tree."""
+        sibling = os.path.join(head, RESUME_SIBLING)
+
+        def answer(letter):
+            def hook():
+                with open(sibling, encoding="utf-8") as handle:
+                    text = handle.read()
+                if text == SIBLING_AFTER:
+                    return pass_result(resume_entry(letter)[4])
+                return fail_result(resume_entry(letter)[4])
+            return hook
+
+        return self.suite_for(letters, hooks={resume_label(letter): answer(letter) for letter in letters})
+
+    def run_head(self, letters, suite, head):
+        """run_leg, with `head` as the hooks folder the run copies its guard siblings from."""
+        with mock.patch.object(mutate_shared, "HOOKS_DIR", head, create=True):
+            return self.run_leg(letters, suite)
 
     def run_leg(self, letters, suite, jobs=None, limit=RESUME_RUN_LIMIT, saved=True):
         """One run of the leg: main() over the mutants `letters`, saving into the folder VERDICT_DIR_ENV names when
@@ -1691,6 +1722,51 @@ class ResumeTests(unittest.TestCase):
         self.assertEqual(ran_mutants(again), [],
                          "the run after the green run ran %r again: the green run's verdicts were not saved"
                          % ran_mutants(again))
+
+    def test_a_saved_kill_misses_when_a_guard_sibling_the_suite_imports_changes(self):
+        head = self.head("head", SIBLING_BEFORE)
+        first = self.suite_importing("AB", head)
+        code, lines, error = self.run_head("AB", first, head)
+        self.assertIsNone(error, "the first run raised: %r" % error)
+        self.assertEqual(ran_mutants(first), self.BOTH, "precondition: the first run did not judge both mutants")
+        self.assertEqual(code, 0, "precondition: the first run's two kills exit %r, not 0: %r" % (code, lines))
+        write_files(head, {RESUME_SIBLING: SIBLING_AFTER})  # the suite imports this file, and now lets both mutants live
+        changed = self.suite_importing("AB", head)
+        code, lines, error = self.run_head("AB", changed, head)
+        self.assertIsNone(error, "the rerun raised: %r" % error)
+        self.assertTrue(changed.calls and all(SIBLING_AFTER in call["tree"] for call in changed.calls),
+                        "scope: the changed sibling did not reach the rerun's copied tree, so the rerun proves nothing")
+        self.assertEqual(ran_mutants(changed), self.BOTH,
+                         "a saved KILLED was reused after a guard sibling the suite imports changed: the rerun ran %r, "
+                         "want both" % ran_mutants(changed))
+        self.assertEqual(code, 1, "the rerun judges both survivors and exits %r, not 1: %r" % (code, lines))
+        unchanged = self.suite_importing("AB", head)
+        self.run_head("AB", unchanged, head)
+        self.assertEqual(ran_mutants(unchanged), [],
+                         "the run after the change ran %r again: the survivors judged at the new sibling text were not "
+                         "saved" % ran_mutants(unchanged))
+
+    def test_two_heads_share_saved_verdicts_only_when_the_whole_key_matches(self):
+        first_head = self.head("head-one", SIBLING_BEFORE)
+        same_head = self.head("head-two", SIBLING_BEFORE)  # the same content at another absolute path: another worktree
+        other_head = self.head("head-three", SIBLING_AFTER)  # differs only in the guard sibling the suite imports
+        first = self.suite_importing("AB", first_head)
+        self.run_head("AB", first, first_head)
+        self.assertEqual(ran_mutants(first), self.BOTH, "precondition: the first head did not judge both mutants")
+        twin = self.suite_importing("AB", same_head)
+        self.run_head("AB", twin, same_head)
+        self.assertEqual(ran_mutants(twin), [],
+                         "a head with the same content at another path ran %r, want none: its saved verdicts were not "
+                         "shared, so the key holds a path" % ran_mutants(twin))
+        changed = self.suite_importing("AB", other_head)
+        code, lines, error = self.run_head("AB", changed, other_head)
+        self.assertIsNone(error, "the third head's run raised: %r" % error)
+        self.assertTrue(changed.calls and all(SIBLING_AFTER in call["tree"] for call in changed.calls),
+                        "scope: the third head's sibling did not reach its copied tree, so the run proves nothing")
+        self.assertEqual(ran_mutants(changed), self.BOTH,
+                         "a head that differs only in a guard sibling reused another head's saved KILLED verdicts: its "
+                         "run ran %r, want both" % ran_mutants(changed))
+        self.assertEqual(code, 1, "the third head's run judges both survivors and exits %r, not 1: %r" % (code, lines))
 
 
 if __name__ == "__main__":
