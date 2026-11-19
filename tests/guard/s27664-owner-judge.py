@@ -145,6 +145,7 @@ def decide(case):
         if not limit:
             raise
         return "slow", "still judging after %s s, over the %s s limit" % (limit + 1, limit)
+    case["stderr_seen"] = result.stderr  # a checker that reads the guard's stderr reads it from the case it passed
     elapsed = time.monotonic() - started
     if case.get("max_seconds") and elapsed > case["max_seconds"]:
         return "slow", "judged in %.2f s, over the %s s limit" % (elapsed, case["max_seconds"])

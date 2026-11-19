@@ -5,8 +5,11 @@ FAMILY = "handed-in-push"  # a push to a pull request's branch (roadmap step han
 # against the live head: the record is for an older head, and no clean merge of main and no records-page commit of the merge
 # tool carries it to the live head. The live head is the pull request's head on GitHub before the push, the head the lane
 # pushes from. A record for the live head (a FAIL round too) passes, so the fix push after a posted FAIL round is allowed.
-# A pull request with no record at all passes: its first round is the known gap of option a. A PR-list read that cannot run
-# lets the push pass, and a read after a pull request is found that cannot run is refused unknown (decision
+# A pull request with no review log is refused only when it is handed in: a ready pull request, not a draft. A lane marks its
+# own PR ready to hand it in (decision draft-until-reviewed), so a draft with no log is a first round and passes. The owner's
+# ruling handed-in-push-fourth-way (21:17 CST Nov 18) sets this, and sets the other two points too: a destination that cannot be
+# named is refused, whatever the open pull requests read says; and a failed read of the open pull requests passes the push with
+# one stderr line that names the read unknown. A read after a pull request is found that cannot run is refused unknown (decision
 # guard-hooks-fail-closed), never allowed as clear and never named as a missing record.
 #
 # THE FIXTURE. A bare origin with feat (Z, A, B), feat-merge (a clean merge M of main into B), feat-page (a page-only commit
@@ -50,6 +53,8 @@ HIP_GH_FEATURE = os.path.join(HIP_ROOT, "gh-feature")            # live B, on a 
 HIP_GH_FORK = os.path.join(HIP_ROOT, "gh-fork")                  # live B on feat, the head repo a fork, the record for A: stale
 HIP_GH_BROKEN = os.path.join(HIP_ROOT, "gh-broken")              # every pull request read answers no JSON: no lookup can run
 HIP_GH_MAIN = os.path.join(HIP_ROOT, "gh-main")                  # live B, on a branch named main, the record for A: stale
+HIP_GH_HANDED = os.path.join(HIP_ROOT, "gh-handed")              # live B, ready (handed in), no review log at all
+HIP_GH_DRAFT_STALE = os.path.join(HIP_ROOT, "gh-draft-stale")    # live B, a draft (not handed in), the record for A: stale
 HIP_STALE_CARRIES = ("record",)     # a stale refusal names the review log, the thing to post
 HIP_UNKNOWN_CARRIES = ("unknown",)  # an unread refusal says the read is unknown
 HIP_UNKNOWN_LACKS = ("no record", "missing")  # ...and never reads as a record that is absent
@@ -160,7 +165,7 @@ def _hip_build():
 
     main_compare = "%s...main" % mt  # the containment read of main's tip, as holds_head asks it
     make_fake_gh(HIP_GH_STALE, "main", head_sha=b, head_ref="feat", comments=[_hip_record(1, a, REVIEW_PASS_ONE)], commits=commits)
-    make_fake_gh(HIP_GH_FIRST, "main", head_sha=b, head_ref="feat", comments=[], commits=commits)
+    make_fake_gh(HIP_GH_FIRST, "main", head_sha=b, head_ref="feat", comments=[], commits=commits, draft=True)  # a first round: still a draft
     make_fake_gh(HIP_GH_LIVE, "main", head_sha=b, head_ref="feat", comments=[_hip_record(1, b, REVIEW_PASS_ONE)], commits=commits)
     make_fake_gh(HIP_GH_FAIL_OLD, "main", head_sha=a, head_ref="feat", comments=[_hip_record(1, z, REVIEW_FAIL_ONE)], commits=commits)
     make_fake_gh(HIP_GH_FAIL_LIVE, "main", head_sha=a, head_ref="feat", comments=[_hip_record(1, a, REVIEW_FAIL_ONE)], commits=commits)
@@ -177,6 +182,9 @@ def _hip_build():
                  commits=commits)
     make_fake_gh(HIP_GH_BROKEN, "main", head_sha=b, head_ref="feat", broken=True, commits=commits)
     make_fake_gh(HIP_GH_MAIN, "main", head_sha=b, head_ref="main", comments=[_hip_record(1, a, REVIEW_PASS_ONE)], commits=commits)
+    make_fake_gh(HIP_GH_HANDED, "main", head_sha=b, head_ref="feat", comments=[], commits=commits)  # ready: handed in, unlogged
+    make_fake_gh(HIP_GH_DRAFT_STALE, "main", head_sha=b, head_ref="feat", draft=True, comments=[_hip_record(1, a, REVIEW_PASS_ONE)],
+                 commits=commits)
     _hip_clone_at(HIP_CLONE_PLAIN, b)
     os.remove(os.path.join(HIP_CLONE_PLAIN, ".github", "stamp.json"))  # glossary-ok: the merge tool's fixed config path, removed so the tree has no merge tool config
 
@@ -202,9 +210,15 @@ hip_push("handed-in-push: a push over a review log for an older head is refused"
 hip_push("handed-in-push: a fix push over an unposted FAIL round is refused", "deny", HIP_CLONE_A, HIP_GH_FAIL_OLD,
          carries=HIP_STALE_CARRIES, lacks=HIP_UNKNOWN_CARRIES)
 # Allowed: each control changes one thing from a refused case.
-hip_push("handed-in-push: a push with no review log on the pull request is allowed (a first round, option a's known gap)",
+hip_push("handed-in-push: a push with no review log on a draft pull request is allowed (a first round, not yet handed in)",
          "allow", HIP_CLONE_B, HIP_GH_FIRST)
 hip_push("handed-in-push: a push over the review log of the live head is allowed", "allow", HIP_CLONE_B, HIP_GH_LIVE)
+hip_push("handed-in-push: a push with no review log on a pull request handed in (ready, not a draft) is refused",
+         "deny", HIP_CLONE_B, HIP_GH_HANDED, carries=("review log",), lacks=HIP_UNKNOWN_CARRIES)
+hip_push("handed-in-push: a push with no review log to a branch no pull request holds is allowed, though a handed-in pull request sits elsewhere",
+         "allow", HIP_CLONE_B, HIP_GH_HANDED, dest="topic-x")
+hip_push("handed-in-push: a draft pull request with a stale review log is still refused, the draft flag reaches only the no-log case",
+         "deny", HIP_CLONE_B, HIP_GH_DRAFT_STALE, carries=HIP_STALE_CARRIES)
 hip_push("handed-in-push: a fix push over a posted FAIL round is allowed, the record being for the live head", "allow",
          HIP_CLONE_A, HIP_GH_FAIL_LIVE)
 hip_push("handed-in-push: a clean merge of main into the reviewed head keeps the record, so the push is allowed", "allow",
@@ -289,6 +303,13 @@ hip_run("handed-in-push: a push over the live record piped through tee to a file
 # found, with its comments unread, is still refused unknown (the comment-read case above).
 hip_push("handed-in-push: a push to a new branch while the pull request lookup cannot run is allowed, no record being stale",
          "allow", HIP_CLONE_B, HIP_GH_BROKEN, dest="topic-new")
+# The same read failing on the branch a pull request holds: no pull request is named, so the push passes, with the stderr line
+# the log check at the end of this section reads.
+hip_push("handed-in-push: a push to feat while the open pull requests cannot be read is allowed, since no pull request is named",
+         "allow", HIP_CLONE_B, HIP_GH_BROKEN)
+# The gh tool missing from the PATH is a failed read too: the push passes the same way.
+sh("handed-in-push: a push to feat with no gh on the PATH, so the open pull requests cannot be read, is allowed",
+   "git push origin HEAD:feat", "allow", rule=None, cwd=HIP_CLONE_B, env_path=GIT_PATH + os.pathsep + PY_PATH, config=MERGECFG)
 
 # A deletion and a push to feat in one call: the deletion moves no head, the push to feat does, so the stale record refuses the call.
 hip_run("handed-in-push: a push that deletes old and sends HEAD to feat is refused over a stale record",
@@ -338,3 +359,40 @@ hip_run("handed-in-push: a comment after a push to topic-x that names feat is no
 # A # inside a word is no comment: the branch is feat#x, which no pull request holds.
 hip_run("handed-in-push: a # inside a branch name is no comment, so a push to feat#x is allowed",
         "git push origin HEAD:feat#x", "allow", HIP_CLONE_B, HIP_GH_STALE)
+
+# A destination that cannot be named is refused (ruling point 1), whatever the open pull requests read says. A bare colon is git's
+# matching push: it sends each branch that both sides hold, so it can move a pull request's branch and names no destination. It is
+# not a deletion (`:ref` is one), and it is not in the list of destinations this reader can name. The cases over HIP_GH_BROKEN have
+# a failed read, so a refusal there can only come from the unnameable destination, never from a record.
+hip_run("handed-in-push: a bare colon, git's matching push, is refused unknown when the open pull requests cannot be read",
+        "git push origin :", "deny", HIP_CLONE_B, HIP_GH_BROKEN, carries=HIP_UNKNOWN_CARRIES, lacks=HIP_UNKNOWN_LACKS)
+hip_run("handed-in-push: a bare colon beside a named refspec is refused unknown, its matching part unnamed, over a stale record of feat",
+        "git push origin HEAD:topic-x :", "deny", HIP_CLONE_B, HIP_GH_STALE, carries=HIP_UNKNOWN_CARRIES, lacks=HIP_UNKNOWN_LACKS)
+hip_run("handed-in-push: a push to HEAD:feat through a remote held in a shell variable is refused unknown over a stale record",
+        'git push "$REMOTE" HEAD:feat', "deny", HIP_CLONE_B, HIP_GH_STALE, carries=HIP_UNKNOWN_CARRIES, lacks=HIP_UNKNOWN_LACKS)
+# Control: a destination held in a shell variable stays refused when the open pull requests read fails, so the failed read never lets
+# an unnameable destination through.
+hip_run("handed-in-push: a push to a destination held in a shell variable is refused unknown, though the open pull requests cannot be read",
+        'git push origin "$BR"', "deny", HIP_CLONE_B, HIP_GH_BROKEN, carries=HIP_UNKNOWN_CARRIES, lacks=HIP_UNKNOWN_LACKS)
+
+# A failed open pull requests read passes the push with one stderr line that names the rule and the read unknown (ruling point 2).
+# decide() leaves the guard's stderr on the case it ran, as case["stderr_seen"]; the log check reads it there.
+def _hip_lookup_stderr_case():
+    case = {"raw": None, "tool": "Bash", "tool_input": {"command": "git push origin HEAD:feat"}, "cwd": HIP_CLONE_B,
+            "session": None, "env_path": _hip_env(HIP_GH_BROKEN), "config": MERGECFG, "agent_id": None, "transcript": None,
+            "agent_type": None, "event": None, "stop_active": False, "no_root": False, "env": None, "max_seconds": None, "guard": None}
+    got, _reason = decide(case)
+    seen = case.get("stderr_seen", "")
+    lines = [line for line in seen.splitlines() if line.strip()]
+    if got != "allow":
+        return False, "the push over the failed read was %s, not allowed" % got
+    if len(lines) != 1:
+        return False, "stderr holds %d lines, one is wanted: %r" % (len(lines), seen[:120])
+    if "handed-in-push-needs-record" not in lines[0] or "unknown" not in lines[0]:
+        return False, "the one stderr line does not name the rule and the read unknown: %s" % lines[0][:120]
+    return True, "allowed, with one stderr line that names the rule and the read unknown"
+
+
+HIP_STDERR_LABEL = "handed-in-push: a failed open pull requests read allows the push, with one stderr line naming the read unknown"
+LOG_FAMILY[HIP_STDERR_LABEL] = FAMILY  # this section is past the LOG_CHECKS_EXTRA join, so it joins LOG_CHECKS itself
+LOG_CHECKS = LOG_CHECKS + ((HIP_STDERR_LABEL, _hip_lookup_stderr_case),)
