@@ -2717,11 +2717,16 @@ class LiveStatusPhase(UpkeepFixture):
         self.commit_step("build-ready", status="ready", phase="build", note="Parked for a lane.",
                          updatedAt=self.ten_days_ago(), order=2)
         self.commit_step("stuck-blocked", status="blocked", phase="stuck", note="", updatedAt=self.ten_days_ago(), order=3)
-        self.commit_step("waiting-folded", status="folded", phase="waiting", note="", updatedAt=self.ten_days_ago(), order=4)
+        self.commit_step("stuck-todo", status="todo", phase="stuck", note="", updatedAt=self.ten_days_ago(), order=4)
+        self.commit_step("waiting-folded", status="folded", phase="waiting", note="", updatedAt=self.ten_days_ago(), order=5)
+        self.commit_step("waiting-todo", status="todo", phase="waiting", note="", updatedAt=self.ten_days_ago(), order=6)
         (_, stale), (_, empty) = self.stale_and_empty()
         self.assertIn("build-ready", stale, "scope first: build holds a doing step, so its ready step is listed")
         self.assertNotIn("stuck-blocked", stale + empty, "stuck holds only a blocked step, so it is not live")
         self.assertNotIn("waiting-folded", stale + empty, "waiting holds only a folded step, so it is not live")
+        # The todo steps are stale and empty, so both rows would list them if their phase were live: only the phase keeps them out.
+        self.assertNotIn("stuck-todo", stale + empty, "stuck is not live, so its todo step is not listed")
+        self.assertNotIn("waiting-todo", stale + empty, "waiting is not live, so its todo step is not listed")
 
     def test_a_legacy_active_step_still_makes_its_phase_live(self):
         # A legacy active step still makes its phase live, which the upkeep rows in this file depend on.
