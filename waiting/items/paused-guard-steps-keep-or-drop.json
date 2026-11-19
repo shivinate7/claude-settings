@@ -1,0 +1,58 @@
+{
+  "added": "2026-11-18T19:11:58-06:00",
+  "context": "Goal: no paused guard step sits for ever with no decision.\nProblem (rule): you ruled on 15 Nov 23:15 CST to save these paused guard ideas to the gripe page and ask later. The seven, glossed from their names only (triage has not read them): brief-ruling-has-source (a brief's ruling names where it came from); lane-default-checks-rulings (a lane checks the rulings before it starts); hold-zero-tests-fails (a test run that finds zero tests fails); review-model-from-agent-record (a reviewer's model is read from the agent's record); shared-tree-guard-reads-last-cd (the shared-folder guard reads the last directory change); silent-undo-reads-octopus (the silent-undo check reads multi-parent merges); scratch-probe-cleanup (scratch probe files are cleaned up). They sit on the Degen guards branch roadmap-guards-degen.\nBased on (read): the consultant's reading of the Degen gap audit (not re-read by triage); triage found none of the seven names on main or on the roadmap branch.\nDeparts from: main \u2014 the seven steps stay paused on the Degen guards branch with no ruling \u2014 each is kept, or dropped, on your answer.\nWaiting on: nothing is stopped; the consultant files each outcome.",
+  "home": "step archive-sweep-runs-per-merge",
+  "kind": "decision",
+  "n": 985,
+  "options": [
+    {
+      "gain": "No guard idea is lost unread.",
+      "how": "No step is dropped; the consultant reads the branch and brings back a step-by-step list.",
+      "id": "keep-all",
+      "key": "a",
+      "label": "Keep all seven paused until their branch is read (recommended)",
+      "lose": "The seven stay paused longer."
+    },
+    {
+      "gain": "The list is cleared at once.",
+      "how": "The consultant closes each step as dropped.",
+      "id": "drop-all",
+      "key": "b",
+      "label": "Drop all seven",
+      "lose": "A guard idea may be lost unread."
+    },
+    {
+      "gain": "You choose per step.",
+      "how": "You name the steps to drop in the note.",
+      "id": "split",
+      "key": "c",
+      "label": "Keep some, drop others: say which in the note",
+      "lose": "You must read the seven yourself."
+    }
+  ],
+  "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "recommended": "a",
+  "ref": "consultant message 19:10 CST Nov 18, from the Degen gap audit (workflow wf_9ba2f097-22f); the audit's reads are the consultant's, not re-read by triage",
+  "repo": "shivinate7/claude-settings",
+  "short": "Seven paused guard steps: keep or drop",
+  "shown": [
+    {
+      "id": "keep-all",
+      "key": "a",
+      "label": "Keep all seven paused until their branch is read (recommended)"
+    },
+    {
+      "id": "drop-all",
+      "key": "b",
+      "label": "Drop all seven"
+    },
+    {
+      "id": "split",
+      "key": "c",
+      "label": "Keep some, drop others: say which in the note"
+    }
+  ],
+  "status": "open",
+  "title": "Keep or drop the seven paused guard steps on the Degen guards branch?",
+  "why": "a loses nothing while the steps are unread; b clears the list; c needs your own read of seven steps triage has not seen. Recommended by the consultant, not owner-typed."
+}

@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-18T19:11:58-06:00",
+  "context": "Goal: a session that resumes, compacts or clears still knows its role.\nProblem (rule): today the role file is pruned at 7 days, so an old session loses its role; changing that changes how long a role record lives, which is your call.\nBased on (read): the consultant's reading of the Degen gap audit: an old session that resumes, compacts or clears with no role env loses its role (not re-read by triage).\nDeparts from: main \u2014 the role file is pruned at 7 days \u2014 it is kept on resume, compact or clear when the role env is missing, and refreshed at each session start.\nWaiting on: nothing is stopped; the consultant builds it on a yes.",
+  "home": "decision start-session-not-pretooluse",
+  "kind": "decision",
+  "n": 981,
+  "options": [
+    {
+      "gain": "A long-lived session keeps its role.",
+      "how": "A resumed, compacted or cleared session with no role env reads the kept file; every session start rewrites it.",
+      "id": "keep-and-refresh",
+      "key": "a",
+      "label": "Keep it and refresh it each session start (recommended)",
+      "lose": "Each session start takes a moment longer."
+    },
+    {
+      "gain": "Session start stays as fast as today.",
+      "how": "No change.",
+      "id": "prune-7-days",
+      "key": "b",
+      "label": "Keep pruning at 7 days",
+      "lose": "A session older than 7 days loses its role."
+    }
+  ],
+  "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "recommended": "a",
+  "ref": "consultant message 19:10 CST Nov 18, from the Degen gap audit (workflow wf_9ba2f097-22f); the audit's reads are the consultant's, not re-read by triage",
+  "repo": "shivinate7/claude-settings",
+  "short": "Keep the role file on resume",
+  "shown": [
+    {
+      "id": "keep-and-refresh",
+      "key": "a",
+      "label": "Keep it and refresh it each session start (recommended)"
+    },
+    {
+      "id": "prune-7-days",
+      "key": "b",
+      "label": "Keep pruning at 7 days"
+    }
+  ],
+  "status": "open",
+  "title": "Should the role file stay through resume, compact and clear, and be refreshed at each session start, instead of being deleted after 7 days?",
+  "why": "a fixes the lost role at the cost of a slightly slower session start; b keeps today's gap. Recommended by the consultant, not owner-typed."
+}
