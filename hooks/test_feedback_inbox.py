@@ -1872,6 +1872,46 @@ def case_page_claude_artifacts_read_of_another_collection_does_not_prove_the_fil
                        "fb-0958-7", "98")
 
 
+CA_STAMP = "2026-10-13T10:05:00Z"  # a transcript time: the export scan reads a record's time and skips a record without one
+
+
+def timed_rec(rec):
+    """`rec` with the transcript timestamp the export scan needs before it counts a write."""
+    return dict(rec, timestamp=CA_STAMP)
+
+
+def export_writes(records):
+    """The export writes the Stop scan finds in `records` for the items collection, as (epoch, id, url) each."""
+    writes, _, _ = guard_module()._scan_transcript([timed_rec(rec) for rec in records], ("items",))
+    return writes
+
+
+def case_page_claude_artifacts_db_write_proves_the_send():
+    """A claude-artifacts db_write of the waiting page's items with n 98, after the owner's message, proves the send
+    of item 98, as an ArtifactData write of the same input does. The tool's name carries the verb, so the input has
+    no action key. The copy holds item 98, so the filing passes and only the send check can block."""
+    write = tool_input(None, collection="items", doc_id="disk-cleanup", data={"n": 98})
+    p = page_run(new_cfg(), "page-ca-write", [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL), used_rec(CLAUDE_ARTIFACTS + "db_write", write, tool_id="w1"),
+                  result_rec("w1", "ok")], cwd=record_repo("filed", copy_files(FILED)))
+    expect_silent("page send: a claude-artifacts db_write of items with n 98 proves the send", p)
+
+
+def case_export_scan_counts_a_claude_artifacts_db_write_of_items():
+    """The export scan counts a claude-artifacts db_write of the items collection as one export write to the page, as
+    it counts an ArtifactData update of the same input. The ArtifactData control runs first, so a failure on the
+    claude-artifacts write names that write alone."""
+    data = {"n": 98}
+    control = export_writes([used_rec("ArtifactData", tool_input("update", collection="items",
+                                                                  doc_id="disk-cleanup", data=data))])
+    check("export scan: control, an ArtifactData update of items is one export write to the page",
+          len(control) == 1 and control[0][2] == PAGE_URL, control)
+    found = export_writes([used_rec(CLAUDE_ARTIFACTS + "db_write", tool_input(
+        None, collection="items", doc_id="disk-cleanup", data=data))])
+    check("export scan: a claude-artifacts db_write of items is one export write to the page",
+          len(found) == 1 and found[0][2] == PAGE_URL, found)
+
+
 # --------------------------------------------------------------------------- repo cases
 
 def case_repo_send_naming_the_repo_passes():
@@ -4917,6 +4957,8 @@ CASES = (
     case_page_read_back_of_a_second_account_link_proves_the_filing,
     case_page_claude_artifacts_read_back_proves_the_filing,
     case_page_claude_artifacts_read_of_another_collection_does_not_prove_the_filing,
+    case_page_claude_artifacts_db_write_proves_the_send,
+    case_export_scan_counts_a_claude_artifacts_db_write_of_items,
     case_repo_send_naming_the_repo_passes,
     case_repo_send_with_error_result_does_not_count,
     case_repo_slug_match_ignores_case,
