@@ -6450,9 +6450,10 @@ class LaneLintDiskFloor(LaneFixture):
 class LintResumesPassedJobs(LaneFixture):
     """A job that passes is saved, and a rerun at the same key skips it. The key is the head sha, the base name and tip ci-job reads, the job name,
     the PR body ci-job reads as PR_BODY, the TREE_CITES env the ste-lint step reads, and the bytes of the tool's files: merge.py, and every file the
-    checks job runs from the tool's tree (the family cases, one per folder: lint/, actions/, hooks/, bin/). Most cases first run scope_and_save, where
-    head A passes and is saved, and its rerun must run no job. On origin/main that scope fails, since nothing is saved, so the claims after it are read
-    only where the key hits. The prune and .part cases lint their own tool versions.
+    checks job runs from the tool's tree (the family cases, one per folder: lint/, actions/, hooks/, bin/, and skills/ for the one file bin/ste-changed's
+    LINT_FILES names outside those folders). Most cases first run scope_and_save, where head A passes and is saved, and its rerun must run no job. On
+    origin/main that scope fails, since nothing is saved, so the claims after it are read only where the key hits. The prune and .part cases lint their
+    own tool versions. A tool edit made while the job runs saves under the key read before the job.
     Cost per case: at most four stub starts and one fixture pair; a tool-copy case also copies the repo's tree once, and a family case once per file
     (unmeasured); the prune cases make TOOL_KEYS lints (unmeasured). The job name is not varied: `merge --lane-lint` runs one job."""
 
@@ -6913,6 +6914,48 @@ class LintResumesPassedJobs(LaneFixture):
         self.assert_family_edits_miss([
             ("bin/verdict", self.EDIT, ("bin", "ci-job"), r'os\.path\.join\(BIN, "verdict"\)'),
         ])
+
+    def test_an_edit_to_py_facts_that_ste_changed_names_misses_the_saved_result_and_runs_the_job(self):
+        """The skills file bin/ste-changed's LINT_FILES names outside the hashed folders: the lint loads it by path, so an edit to it is a new key."""
+        self.assert_family_edits_miss([
+            ("skills/plain-english-map/scripts/lib/py-facts.py", self.EDIT, ("bin", "ste-changed"), r'"skills/plain-english-map/scripts/lib/py-facts\.py"'),
+        ])
+
+    def test_a_tool_edit_while_the_job_runs_saves_the_pass_under_the_key_read_before_the_job(self):
+        """The tool key is read once, before the job, and the PASS is saved under that key. The edit is made as the lint's job starts, so the edited
+        tool misses the saved PASS and runs the job, and the unedited tool still finds it."""
+        self.use_ci_job(PASSING, 0)
+        module = self.tool_copy()
+        path = os.path.join(os.path.dirname(module.__file__), "..", "bin", "ci-job")
+        with open(path, "rb") as f:
+            original = f.read()
+        lint_job = module.ci_job_run
+
+        def edit_as_the_job_starts(*args, **kwargs):
+            if "--lint" in args:  # the lint's own run, not a plan or a draft step's ready check
+                with open(path, "ab") as f:
+                    f.write(self.EDIT)
+            return lint_job(*args, **kwargs)
+
+        with unittest.mock.patch.object(module, "ci_job_run", edit_as_the_job_starts):
+            rc, out = self.lint_at(self.DATE_A, module=module)
+        self.assertEqual(rc, 0, out)
+        with open(path, "rb") as f:
+            self.assertTrue(f.read().endswith(self.EDIT), "scope: the edit did not land in the tool's bin/ci-job while the job ran")
+        self.assertEqual(self.ran(), 1, "scope: the first lint did not run its job once: " + out)
+        saved = self.saved_files()
+        self.assertEqual(len(saved), 1, "scope: a PASS saved %d files, want the one result: %s" % (len(saved), sorted(saved)))
+        ran = self.ran()
+        rc, out = self.lint_at(self.DATE_B, module=module)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.ran(), ran + 1, "a PASS saved while the tool changed under its job was read under the edited tool's key, so the job did not run: " + out)
+        with open(path, "wb") as f:
+            f.write(original)  # the tool as the job started with
+        ran = self.ran()
+        rc, out = self.lint_at(self.DATE_B, module=module)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.ran(), ran, "the unedited tool missed the PASS saved under its key, so the job ran again: " + out)
+        self.assertTrue(self.cached(out), "the unedited tool printed no 'PASS (cached)' line: " + out)
 
     def test_a_pass_saved_with_tree_cites_unset_is_not_reused_with_tree_cites_set_and_runs_the_job(self):
         """actions/ste-lint/run.sh runs tree mode when TREE_CITES is true, so a PASS saved while it was unset is not the PASS of a run with it set."""
