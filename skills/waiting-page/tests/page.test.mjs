@@ -288,6 +288,7 @@ test("the list has three tiers read from holds and by", async (t) => {
     ["tier-holds", "Blocking", ["hold-new", "hold-old"]],
     ["tier-due", "Upcoming", ["due-soon", "due-late"]],
     ["tier-calm", "Whenever", ["calm-dec", "calm-task"]],
+    ["tier-taken", "Taken for you", []],
   ]);
   const wait = await card(page, items[4]).locator(".stake.holds").textContent();
   assert.match(wait, /A lane waits\./);
@@ -2187,8 +2188,8 @@ test("rank never moves an item across tiers", async (t) => {
   const items = [mk("calm-rank0", 1, { rank: 0 }), mk("hold-rank9", 2, { holds: "A lane waits.", rank: 9 }), mk("due-rank0", 3, { by: "2030-01-01T00:00:00Z", rank: 0 })];
   const page = await open(t, { items }); if (!page) return;
   const sections = await order(page);
-  assert.deepEqual(sections.map((x) => x[0]), ["tier-holds", "tier-due", "tier-calm"]);
-  assert.deepEqual(sections.map((x) => x[1]), [["hold-rank9"], ["due-rank0"], ["calm-rank0"]]);
+  assert.deepEqual(sections.map((x) => x[0]), ["tier-holds", "tier-due", "tier-calm", "tier-taken"]);
+  assert.deepEqual(sections.map((x) => x[1]), [["hold-rank9"], ["due-rank0"], ["calm-rank0"], []]);
 });
 
 // The skill's text: SKILL.md plus every reference/*.md, since its steps moved into reference/. A check on what the skill says reads all of it.
@@ -3023,7 +3024,7 @@ test("an answered item sinks to the Answered section, after the open tiers and b
   const ans = mk("sink-ans", 1, { added: at(5) }), open1 = mk("sink-open", 2, { added: NEW_ADDED });
   const page = await open(t, { items: [ans, open1, ARBITER], answers: answerOf(ans, "a", { note: "Kept the red one." }) }); if (!page) return;
   assert.equal(await sectionOf(page, ans), "tier-answered", `No. ${ans.n} is not in the Answered section`);
-  assert.deepEqual(await sectionIds(page), ["tier-calm", "tier-answered", "tier-ruled"], "the Answered section is not between the open tiers and Arbiter rulings");
+  assert.deepEqual(await sectionIds(page), ["tier-calm", "tier-taken", "tier-answered", "tier-ruled"], "the Answered section is not between the taken-picks area and Arbiter rulings");
   assert.deepEqual(await cardsIn(page, "#tier-calm"), [open1.id], "the open item left its tier, or the answered item stayed in it");
   const c = page.locator(`#tier-answered #item-${ans.id}`), fold = c.locator("button.unfold");
   assert.doesNotMatch(await c.getAttribute("class"), /\b(holds|due|calm|stands)\b/, "the answered card keeps its tier class");
@@ -9322,9 +9323,9 @@ test("page-item-waits-on: a run or PR given as a string of digits with no leadin
 // home = the ruling's record id, pick = the ruled option, why and ruled. Every case keeps DECISION open and first: open() waits
 // for an open card, so a red run fails on the arbiter assertions, not on that wait.
 const ARBITER = mk("arbiter-d901", 901, { status: "closed", arbiter: true, home: "D-901", pick: "a", why: "The arbiter ruled Red.", ruled: "2026-10-30T17:40:00Z" });
-const overturn = (from) => from.getByRole("button", { name: /^Overturn/ });
+const overrule = (from) => from.getByRole("button", { name: /^Overrule the ruling/ });
 
-test("a closed arbiter item shows as one card with its record id, the ruled option and one Overturn button", async (t) => {
+test("a closed arbiter item shows as one card with its record id, the ruled option and one Overrule button", async (t) => {
   const page = await open(t, { items: [DECISION, ARBITER] }); if (!page) return;
   await need(card(page, ARBITER), "the closed arbiter item has no card");
   assert.equal(await page.locator('[id^="item-"]').count(), 2, "the arbiter item is not drawn as exactly one card");
@@ -9332,18 +9333,18 @@ test("a closed arbiter item shows as one card with its record id, the ruled opti
   assert.match(text, /D-901/, "the card does not name the ruling's record");
   assert.match(text, /Red/, "the card does not name the ruled option");
   assert.doesNotMatch(text, /Blue/, "the card names an option the arbiter did not rule");
-  assert.equal(await overturn(card(page, ARBITER)).count(), 1, "the card has not exactly one Overturn button");
+  assert.equal(await overrule(card(page, ARBITER)).count(), 1, "the card has not exactly one Overrule button");
 });
 
-test("Overturn then Send writes an overturn answer for the item and writes nothing to items", async (t) => {
+test("Overrule then Send writes an overturn answer for the item and writes nothing to items", async (t) => {
   const page = await open(t, { items: [DECISION, ARBITER] }); if (!page) return;
-  await need(overturn(card(page, ARBITER)), "the arbiter card has no Overturn button");
-  await overturn(card(page, ARBITER)).click();
+  await need(overrule(card(page, ARBITER)), "the arbiter card has no Overrule button");
+  await overrule(card(page, ARBITER)).click();
   await send(page);
   assert.ok(await holds(page, (id) => !!window.__answers()[id], ARBITER.id), "Send wrote no answer for the arbiter item");
   const a = (await answers(page))[ARBITER.id];
   assert.deepEqual([a.item, a.choice], [ARBITER.id, "overturn"]);
-  assert.deepEqual(await page.evaluate(() => window.__log.filter((l) => l[1] === "items")), [], "an Overturn wrote or deleted an items doc");
+  assert.deepEqual(await page.evaluate(() => window.__log.filter((l) => l[1] === "items")), [], "an Overrule wrote or deleted an items doc");
 });
 
 test("a closed item with no arbiter flag stays hidden next to a closed arbiter item", async (t) => {
@@ -9352,7 +9353,7 @@ test("a closed item with no arbiter flag stays hidden next to a closed arbiter i
   await need(card(page, ARBITER), "the closed arbiter item has no card");
   assert.equal(await card(page, plain).count(), 0, "a closed item with no arbiter flag is shown");
   assert.equal(await page.locator('[id^="item-"]').count(), 2, "the page draws a card for a closed item that is no ruling");
-  assert.equal(await overturn(page).count(), 1, "the page offers Overturn on more than the arbiter item");
+  assert.equal(await overrule(page).count(), 1, "the page offers Overrule on more than the arbiter item");
 });
 
 // An answer or a draft that is no overturn. A ruling was an open item once, so a saved answer or a draft under its id
@@ -9360,14 +9361,14 @@ test("a closed item with no arbiter flag stays hidden next to a closed arbiter i
 const staleAnswer = { [ARBITER.id]: { item: ARBITER.id, n: 901, at: "2026-10-30T18:00:00Z", choice: "a", note: "" } };
 const staleDraft = { "waiting.draft": JSON.stringify({ [ARBITER.id]: { choice: "a" } }) };
 const overturnAnswer = { [ARBITER.id]: { item: ARBITER.id, n: 901, at: "2026-10-30T18:00:00Z", choice: "overturn", note: "" } };
-const pressed = (page) => overturn(card(page, ARBITER)).getAttribute("aria-pressed");
+const pressed = (page) => overrule(card(page, ARBITER)).getAttribute("aria-pressed");
 
 test("a saved answer that is no overturn does not read as an overturn on the ruling card", async (t) => {
   const page = await open(t, { items: [DECISION, ARBITER], answers: staleAnswer }); if (!page) return;
   await need(card(page, ARBITER), "the closed arbiter item has no card");
   assert.doesNotMatch(await card(page, ARBITER).innerText(), /You overturned/, "a saved answer with choice a shows as an overturn");
-  assert.equal(await overturn(card(page, ARBITER)).count(), 1, "the ruling card no longer offers Overturn");
-  assert.equal(await pressed(page), "false", "the ruling card shows as overturned");
+  assert.equal(await overrule(card(page, ARBITER)).count(), 1, "the ruling card no longer offers Overrule");
+  assert.equal(await pressed(page), "false", "the ruling card shows its Overrule unpressed");
 });
 
 test("a stale pick draft under a ruling's id is not sent", async (t) => {
@@ -9401,15 +9402,16 @@ test("a ruling is no open question: the counts and the bar count only the open i
   assert.equal(await count(), "1", "the Questions count includes the ruling");
   assert.match(await page.locator("#barStatus").innerText(), /\b1 stays open/, "the bar does not count the one open item as staying open");
   assert.doesNotMatch(await page.locator("#barStatus").innerText(), /All answered/, "All answered shows with an open item");
-  await overturn(card(page, ARBITER)).click();
-  assert.equal(await count(), "1", "a pressed Overturn changes the Questions count");
-  assert.match(await page.locator("#barStatus").innerText(), /\b1 stays open/, "a pressed Overturn changes the stay-open count");
-  await overturn(card(page, ARBITER)).click(); // unpress: the ruling stands unpressed
+  await need(overrule(card(page, ARBITER)), "the arbiter card has no Overrule button");
+  await overrule(card(page, ARBITER)).click();
+  assert.equal(await count(), "1", "a pressed Overrule changes the Questions count");
+  assert.match(await page.locator("#barStatus").innerText(), /\b1 stays open/, "a pressed Overrule changes the stay-open count");
+  await overrule(card(page, ARBITER)).click(); // unpress: the ruling stands unpressed
   await choose(page, DECISION, "a"); await send(page);
   await page.locator("#barStatus", { hasText: "All answered." }).waitFor();
   assert.equal(await count(), "0", "the Questions count still includes the ruling");
   assert.doesNotMatch(await page.locator("#barStatus").innerText(), /stays? open/, "the bar counts the unpressed ruling as staying open");
-  assert.equal(await pressed(page), "false", "answering the open item pressed the Overturn");
+  assert.equal(await pressed(page), "false", "answering the open item pressed the Overrule");
 });
 
 test("the bar reads 2 stay open. with two open items, the plural form", async (t) => {
@@ -9417,10 +9419,10 @@ test("the bar reads 2 stay open. with two open items, the plural form", async (t
   assert.match(await page.locator("#barStatus").innerText(), /\b2 stay open\./, "the bar does not read 2 stay open. with two open items");
 });
 
-test("Undo of a sent overturn removes the answer and the ruling card is back, with no receipt", async (t) => {
+test("Undo of a sent Overrule removes the answer and the ruling card is back, with no receipt", async (t) => {
   const page = await open(t, { items: [DECISION, ARBITER] }); if (!page) return;
-  await need(overturn(card(page, ARBITER)), "the arbiter card has no Overturn button");
-  await overturn(card(page, ARBITER)).click();
+  await need(overrule(card(page, ARBITER)), "the arbiter card has no Overrule button");
+  await overrule(card(page, ARBITER)).click();
   await send(page);
   assert.ok(await holds(page, (id) => !!window.__answers()[id], ARBITER.id), "Send wrote no answer for the arbiter item");
   assert.match(await card(page, ARBITER).innerText(), /You overturned/, "the sent overturn shows no receipt");
@@ -9430,18 +9432,19 @@ test("Undo of a sent overturn removes the answer and the ruling card is back, wi
   assert.deepEqual(await page.evaluate(() => window.__log.filter((l) => l[1] === "items")), [], "an Undo wrote or deleted an items doc");
   assert.equal(await card(page, ARBITER).locator(".receipt").count(), 0, "the ruling card still shows a receipt");
   assert.doesNotMatch(await card(page, ARBITER).innerText(), /You overturned/, "the ruling card still says it was overturned");
-  // Undo hands the owner's pick back as a draft, as it does on a decision (undoSend): the Overturn is pressed again but unsent.
-  assert.equal(await pressed(page), "true", "Undo lost the owner's pressed Overturn");
+  // Undo hands the owner's pick back as a draft, as it does on a decision (undoSend): the Overrule is pressed again but unsent.
+  assert.equal(await pressed(page), "true", "Undo lost the owner's pressed Overrule");
   assert.equal(await page.locator("#send").textContent(), "Send 1 answer", "the undone overturn is not ready to send again");
 });
 
-test("Withdraw of a sent overturn removes the answer and the ruling card is back, unpressed", async (t) => {
+test("Withdraw of a sent Overrule removes the answer and the ruling card is back, unpressed", async (t) => {
   const page = await open(t, { items: [DECISION, ARBITER], answers: overturnAnswer }); if (!page) return;
   await need(card(page, ARBITER), "the closed arbiter item has no card");
   assert.match(await card(page, ARBITER).innerText(), /You overturned/, "a saved overturn shows no receipt");
   await card(page, ARBITER).getByRole("button", { name: "Change" }).click();
-  assert.equal(await pressed(page), "true", "Change on a saved overturn does not bring the pressed Overturn back");
-  await overturn(card(page, ARBITER)).click(); // unpress: nothing is left to send
+  await need(overrule(card(page, ARBITER)), "the arbiter card has no Overrule button after Change");
+  assert.equal(await pressed(page), "true", "Change on a saved overturn does not bring the pressed Overrule back");
+  await overrule(card(page, ARBITER)).click(); // unpress: nothing is left to send
   assert.equal(await page.locator("#send").textContent(), "Withdraw answer");
   await send(page);
   assert.ok(await holds(page, (id) => !(id in window.__answers()), ARBITER.id), "Withdraw left the overturn answer");
@@ -10380,11 +10383,11 @@ const edgeBad = async (page, edges, scheme) => {
   return bad;
 };
 
-// The dashed buttons draw an unpressed edge that must reach 3:1. Overturn on a ruling card is one of them.
+// The dashed buttons draw an unpressed edge that must reach 3:1. Overrule on a ruling card is one of them.
 for (const scheme of ["light", "dark"]) {
-  test(`the unpressed None of these, Mark done, Park and Overturn buttons draw an edge of 3:1 or more on their card and on the page, ${scheme} scheme`, async (t) => {
+  test(`the unpressed None of these, Mark done, Park and Overrule buttons draw an edge of 3:1 or more on their card and on the page, ${scheme} scheme`, async (t) => {
     const page = await open(t, { items: [DECISION, TASK, ARBITER], scheme }); if (!page) return;
-    const edges = await dashEdges(page, [["None of these", "b-none", DECISION], ["Mark done", "b-done", TASK], ["Park", "b-park", DECISION], ["Park", "b-park", TASK], ["Overturn", "b-over", ARBITER]]);
+    const edges = await dashEdges(page, [["None of these", "b-none", DECISION], ["Mark done", "b-done", TASK], ["Park", "b-park", DECISION], ["Park", "b-park", TASK], ["Overrule", "b-over", ARBITER]]);
     assert.deepEqual(await edgeBad(page, edges, scheme), []);
   });
   // A seen card is tinted (color-mix of --surface and --ground), so its ground is not the plain card: its edge is read against that tint too.
@@ -10430,17 +10433,17 @@ for (const scheme of ["light", "dark"]) {
     assert.equal(on.style, "solid", "a pressed Drop does not draw a solid edge: " + on.style);
     assert.equal(on.color, await inkColor(page), "a pressed Drop's edge is not the ink colour: " + on.color);
   });
-  test(`a pressed Overturn on a closed arbiter card draws a solid ink edge, and an unpressed one a dashed edge, ${scheme} scheme`, async (t) => {
+  test(`a pressed Overrule on a closed arbiter card draws a solid ink edge, and an unpressed one a dashed edge, ${scheme} scheme`, async (t) => {
     const page = await open(t, { items: [DECISION, ARBITER], scheme }); if (!page) return;
     await need(card(page, ARBITER), `No. ${ARBITER.n} is not on the page`);
-    await need(overPress(page, ARBITER), "the arbiter card has no Overturn button");
+    await need(overPress(page, ARBITER), "the arbiter card has no Overrule button");
     const off = await edgeOf(overPress(page, ARBITER));
-    assert.equal(off.style, "dashed", "an unpressed Overturn does not draw a dashed edge: " + off.style);
+    assert.equal(off.style, "dashed", "an unpressed Overrule does not draw a dashed edge: " + off.style);
     await overPress(page, ARBITER).click();
-    assert.equal(await pressedOf(overPress(page, ARBITER)), "true", "an Overturn press did not press Overturn");
+    assert.equal(await pressedOf(overPress(page, ARBITER)), "true", "an Overrule press did not press Overrule");
     const on = await edgeOf(overPress(page, ARBITER));
-    assert.equal(on.style, "solid", "a pressed Overturn does not draw a solid edge: " + on.style);
-    assert.equal(on.color, await inkColor(page), "a pressed Overturn's edge is not the ink colour: " + on.color);
+    assert.equal(on.style, "solid", "a pressed Overrule does not draw a solid edge: " + on.style);
+    assert.equal(on.color, await inkColor(page), "a pressed Overrule's edge is not the ink colour: " + on.color);
   });
   test(`a pressed None of these on a decision draws a solid ink edge, and an unpressed one a dashed edge, ${scheme} scheme`, async (t) => {
     const page = await open(t, { items: [DECISION], scheme }); if (!page) return;
@@ -10807,4 +10810,73 @@ test("a taken pick preselects no option, and nothing is staged for Send", async 
 test("control: a closed item with no taken object stays an Answered line", async (t) => {
   const page = await open(t, { items: [DECISION, CLOSED_PLAIN] }); if (!page) return;
   await mustHave(page, `#tier-answered #line-${CLOSED_PLAIN.n}`, `the Answered line of No. ${CLOSED_PLAIN.n}`);
+});
+
+// ---------------------------------------------------------------- the taken-picks area: empty state, lines, labels, Overrule (step page-taken-picks-area)
+const TAKEN_EMPTY = "No session has taken a pick for you. When one does, it shows here, and you can overrule it.";
+const oneLine = (s) => String(s || "").replace(/\s+/g, " ").trim();
+
+test("with no taken pick, the taken-picks area still draws: its head reads 0 and it holds the one sentence", async (t) => {
+  const page = await open(t, { items: [DECISION] }); if (!page) return;
+  await mustHave(page, "#tier-taken", "the taken-picks area (the element with id tier-taken)");
+  assert.equal((await page.locator("#tier-taken h2 .ct").textContent()).trim(), "0", "the taken-picks head does not read 0");
+  assert.ok(oneLine(await page.locator("#tier-taken").textContent()).includes(TAKEN_EMPTY), "the taken-picks area does not hold the one sentence");
+});
+
+test("with no taken pick, the rail draws the Taken for you row, reading 0", async (t) => {
+  const page = await open(t, { items: [DECISION] }); if (!page) return;
+  const row = page.locator('#rail a.ov-head[href="#tier-taken"]');
+  await need(row, "the rail has no Taken for you row");
+  assert.equal((await row.locator(".ct").textContent()).trim(), "0", "the Taken for you row does not read 0");
+});
+
+test("the taken-picks area's line says Each stands unless you overrule it", async (t) => {
+  const page = await open(t, { items: [DECISION, TAKEN] }); if (!page) return;
+  await mustHave(page, "#tier-taken .rsub", "the line of the taken-picks area");
+  assert.match(await page.locator("#tier-taken .rsub").textContent(), /Each stands unless you overrule it\./, "the taken-picks line does not say Each stands unless you overrule it.");
+});
+
+test("an arbiter card's one act is Overrule, and the rulings line says Each stands unless you overrule it", async (t) => {
+  const page = await open(t, { items: [DECISION, ARBITER] }); if (!page) return;
+  await need(overrule(card(page, ARBITER)), "the arbiter card has no Overrule button");
+  assert.equal((await overrule(card(page, ARBITER)).textContent()).trim(), "Overrule", "the arbiter card's button does not read Overrule");
+  assert.match(await page.locator("#tier-ruled .rsub").textContent(), /Each stands unless you overrule it\./, "the rulings line does not say Each stands unless you overrule it.");
+  assert.doesNotMatch(await page.locator("#tier-ruled").textContent(), /overturn/i, "the rulings section still names the act Overturn");
+});
+
+// Each line of a taken card has a label. Label once: the first card that draws a line shows its label, and later cards
+// keep it for a screen reader only. A saved pick draws no line, so the label must not sit on it.
+const TAKEN_OLD = { ...TAKEN, id: "taken-older-colour", n: 913, title: "Which border does the panel take?", taken: { ...TAKEN.taken, at: "2026-11-13T09:00:00-06:00", against: "Light, the lighter colour." } };
+const TAKEN_NEW = { ...TAKEN, id: "taken-newer-colour", n: 914, title: "Which icon does the rail take?", taken: { ...TAKEN.taken, at: "2026-11-18T09:00:00-06:00", what: "The outline icon.", changes: "The rail icon changes.", against: "Filled, the solid icon.", over: "Filled, the solid icon again." } };
+const NEW_OVERRULED = { [TAKEN_NEW.id]: { item: TAKEN_NEW.id, n: TAKEN_NEW.n, at: "2026-11-18T10:00:00-06:00", choice: "overrule", note: "" } };
+const TAKEN_LINES = [["Changes", ".tk.chg", ".lbl"], ["Against your answer.", ".stake.due", "b"], ["If you overrule:", ".ifover", "b"]];
+const lineRows = (page, sel, lab) => page.evaluate(([sel, lab]) => [...document.querySelectorAll("#tier-taken article.card")].flatMap((c) => {
+  const line = c.querySelector(sel); if (!line) return [];
+  const l = line.querySelector(lab);
+  return [{ card: c.id, label: l ? l.textContent.replace(/\s+/g, " ").trim() : "", visible: !!l && !l.classList.contains("sr") }];
+}), [sel, lab]);
+
+test("in the taken-picks area, the first card that draws each line shows its label, and every card that draws it names it", async (t) => {
+  const page = await open(t, { items: [DECISION, TAKEN_OLD, TAKEN_NEW], answers: NEW_OVERRULED }); if (!page) return;
+  await need(card(page, TAKEN_NEW), `No. ${TAKEN_NEW.n} is not on the page`);
+  assert.match(await card(page, TAKEN_NEW).getAttribute("class"), /\banswered\b/, `precondition: No. ${TAKEN_NEW.n} is not the saved card`);
+  for (const [word, sel, lab] of TAKEN_LINES) {
+    const rows = await lineRows(page, sel, lab);
+    assert.ok(rows.length > 0, `no card in the taken-picks area draws the line "${word}"`);
+    assert.deepEqual(rows.filter((r) => r.label !== word).map((r) => [r.card, r.label]), [], `a card draws "${word}" without that label`);
+    assert.equal(rows[0].visible, true, `the first card that draws "${word}" (${rows[0].card}) shows its label only for a screen reader`);
+  }
+});
+
+// The Overrule toggle is never pressed on load, Send waits for the owner, and Send then writes the overrule choice.
+test("a taken pick's Overrule starts unpressed with Send off, and a press then Send writes choice overrule", async (t) => {
+  const page = await open(t, { items: [DECISION, TAKEN] }); if (!page) return;
+  await need(overPress(page, TAKEN), `No. ${TAKEN.n} has no Overrule button`);
+  assert.equal(await pressedOf(overPress(page, TAKEN)), "false", `the Overrule on No. ${TAKEN.n} is pressed on load`);
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is open before the owner presses Overrule");
+  await overPress(page, TAKEN).click();
+  assert.equal(await pressedOf(overPress(page, TAKEN)), "true", `a press did not press the Overrule on No. ${TAKEN.n}`);
+  assert.equal(await page.locator("#send").isDisabled(), false, "a pressed Overrule leaves Send shut");
+  const a = await sendOne(page, TAKEN);
+  assert.deepEqual([a.item, a.choice], [TAKEN.id, "overrule"], "Send did not write choice overrule for the taken pick");
 });
