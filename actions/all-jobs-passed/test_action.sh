@@ -161,6 +161,7 @@ PS_PROVEN='"push-skip":{"result":"success","outputs":{"skip":"true","proof_run":
 PS_EMPTY='"push-skip":{"result":"success","outputs":{"skip":"true","proof_run":""}}'
 PS_ABSENT='"push-skip":{"result":"success","outputs":{"skip":"true"}}'
 PS_NONNUM='"push-skip":{"result":"success","outputs":{"skip":"true","proof_run":"abc"}}'
+PS_MIXED='"push-skip":{"result":"success","outputs":{"skip":"true","proof_run":"12a"}}'
 PS_SKIP_FALSE='"push-skip":{"result":"success","outputs":{"skip":"false","proof_run":"123456789"}}'
 PS_FAILED='"push-skip":{"result":"failure","outputs":{"skip":"true","proof_run":"123456789"}}'
 PROOF_SKIPPED='"scope":{"result":"skipped"},"checks":{"result":"skipped"},"checks-hooks":{"result":"skipped"}'
@@ -171,6 +172,7 @@ skips_case pass "proof run, full size: 40 skipped jobs pass on the same proof" '
 skips_case fail "proof run: an empty proof_run stays red" '{}' "{$PS_EMPTY,$PROOF_SKIPPED,$PROOF_REST}"
 skips_case fail "proof run: an absent proof_run stays red" '{}' "{$PS_ABSENT,$PROOF_SKIPPED,$PROOF_REST}"
 skips_case fail "proof run: a non-numeric proof_run stays red" '{}' "{$PS_NONNUM,$PROOF_SKIPPED,$PROOF_REST}"
+skips_case fail "proof run: a proof_run with a digit and a letter (12a) stays red" '{}' "{$PS_MIXED,$PROOF_SKIPPED,$PROOF_REST}"
 skips_case fail "proof run: skip not true stays red" '{}' "{$PS_SKIP_FALSE,$PROOF_SKIPPED,$PROOF_REST}"
 skips_case fail "proof run: a failed push-skip stays red" '{}' "{$PS_FAILED,$PROOF_SKIPPED,$PROOF_REST}"
 skips_case fail "proof run: a failed needed job stays red" '{}' "{$PS_PROVEN,$PROOF_SKIPPED,$PROOF_REST,\"checks-windows\":{\"result\":\"failure\"}}"
