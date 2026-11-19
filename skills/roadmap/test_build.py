@@ -1046,6 +1046,14 @@ class LiveRefresh(UpkeepFixture):
         self.assertEqual(self.live.read_bytes(), before, "a file read 5 minutes ago was rewritten")
         self.assertEqual(self.read_of(page), fresh, "the reader does not read the fresh file as it is")
 
+    def test_a_live_file_read_25_minutes_ago_has_an_age_of_25_minutes(self):
+        self.write_file(self.ago(25))
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.read_of(page), self.ago(25), "control: the reader does not read the file it was given")
+        live = build_info(page)["live"]
+        self.assertEqual(live.get("ageMinutes"), 25,
+                         "a live file read 25 minutes ago has ageMinutes %r, want 25" % live.get("ageMinutes"))
+
     def test_a_file_read_exactly_at_the_limit_is_not_rebuilt(self):
         self.write_file(self.ago(build.STALE_LIVE_MINUTES))
         self.build_from_main("--live", str(self.live))
