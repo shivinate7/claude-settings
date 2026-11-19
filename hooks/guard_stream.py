@@ -583,6 +583,45 @@ def clock_loop(token_rows) -> bool:
 WAIT_UNTIL_AHEAD = 25   # a foreground wait-until that lasts this many seconds or more is refused
 
 
+REDIRECT_WORD = re.compile(r"(?:\d*|&)(?:>>?|<)")   # a redirect operator at the start of a word
+
+
+def wait_until_words(words):
+    """The words after `wait-until`, as the helper would receive them: an unquoted `$(...)` or backtick
+    substitution that the tokenizer split on its spaces is one word again, a redirect (`2>&1`, `> f`) is dropped,
+    a `)` that closes a grouping is cut off, and a `--timeout` whose value is not a literal is dropped, since the
+    helper never gets a number it could cap the wait with."""
+    merged, at = [], 0
+    while at < len(words):
+        word, at = words[at], at + 1
+        while at < len(words) and (word.startswith("$(") and word.count("(") > word.count(")")
+                                   or word.count("`") % 2):
+            word, at = word + " " + words[at], at + 1
+        merged.append(word)
+    kept, skip = [], False
+    for word in merged:
+        if skip:
+            skip = False
+        elif REDIRECT_WORD.match(word) and not word.startswith("$"):
+            skip = bool(REDIRECT_WORD.fullmatch(word))   # `>` or `2>` takes the next word as its file
+        else:
+            while word.endswith(")") and word.count(")") > word.count("("):
+                word = word[:-1]
+            if word:
+                kept.append(word)
+    args, at = [], 0
+    while at < len(kept):
+        value = kept[at + 1] if at + 1 < len(kept) else ""
+        if kept[at] == "--timeout" and ("$" in value or "`" in value):
+            at += 2
+        elif kept[at].startswith("--timeout=") and ("$" in kept[at] or "`" in kept[at]):
+            at += 1
+        else:
+            args.append(kept[at])
+            at += 1
+    return args
+
+
 def wait_until_far(tokens, index) -> bool:
     """True when `wait-until TIME` at `tokens[index]` waits WAIT_UNTIL_AHEAD seconds or more: TIME is that far after the
     hook clock (local_time.clock, which LOCAL_TIME_NOW replaces in tests) and no --timeout under that caps the wait.
@@ -595,7 +634,8 @@ def wait_until_far(tokens, index) -> bool:
     from wait_common import parse_instant, split_args
     try:
         with contextlib.redirect_stderr(io.StringIO()):   # split_args exits 2 with a message on a bad argument
-            time_arg, timeout = split_args("wait-until", "usage: wait-until TIME [--timeout SECS]", tokens[index + 1:])
+            time_arg, timeout = split_args("wait-until", "usage: wait-until TIME [--timeout SECS]",
+                                         wait_until_words(tokens[index + 1:]))
     except SystemExit:
         return False
     if time_arg is None or 0 < timeout < WAIT_UNTIL_AHEAD:
@@ -636,7 +676,7 @@ def waiter_verdict(segments, background: bool) -> str:
                 sleeps.append((tokens[at], sleep_seconds(tokens, at)))
         if word in WAITER_COMMANDS:
             pass
-        elif word == "wait-until":
+        elif word.lstrip("(") == "wait-until":
             if not background and wait_until_far(tokens, index):
                 return tokens[index]
         elif word in ("gh", "gh.exe") and gh_watches(tokens[index + 1:]):
