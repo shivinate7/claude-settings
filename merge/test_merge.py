@@ -14831,16 +14831,16 @@ class ExpressPath(ScopedRepo, Env):
         self.assert_refused(rc, out, before, "skills/plain-english-map/x.md")
 
     def test_a_mods_file_beside_a_lint_flag_is_refused_naming_the_job(self):
-        """mods/* turns checks_windows, checks_macos and mods on. The decision record's lint flag rides along, and the refusal still names the job."""
+        """mods/* turns checks_macos and mods on, and no Windows flag (F1). The decision record's lint flag rides along, and the refusal still names the job."""
         self.store(self.RULINGS)
         self.host.body = "Ruling: r55\n"
         self.on("feat", {"mods/notes.md": "# Notes\n"})
         rc_scope, flags = self.scope_run()
         self.assertEqual(rc_scope, 0, "the real ci-scope.sh exits %d on the fixture's feat" % rc_scope)
-        self.assertIn("checks_windows", self.turned_on(flags), "mods/notes.md no longer turns checks_windows on: %r" % flags)
+        self.assertIn("checks_macos", self.turned_on(flags), "mods/notes.md no longer turns checks_macos on: %r" % flags)
         before = self.refs()
         rc, out = self.run_express()
-        self.assert_refused(rc, out, before, "mods/notes.md", "checks_windows")
+        self.assert_refused(rc, out, before, "mods/notes.md", "checks_macos")
 
     def test_a_scope_script_with_no_lint_flag_is_refused_naming_each_lint(self):
         """merge reads the lint flags from the script's LINTS line, as it reads the job flags. A script that writes every job flag and no lint
