@@ -408,6 +408,8 @@ MODELS_REASON = owner_line(
     "a Done item that agents built or reviewed does not name each one's role and model (%s)")
 UNSTARTED_REASON = owner_line(
     "Unstarted guard", "this turn ran a builder, and Next holds no \"Unstarted:\" line")
+UNSTARTED_FILE_REASON = owner_line(
+    "Unstarted guard", "an Unstarted item waits on another lane's merge or PR and names no shared file")
 
 
 # is_last_human and tool_uses live in lint/_transcript.py, imported above.
@@ -1097,9 +1099,27 @@ UNSTARTED_RE = re.compile(
     r"(?:^|[;.]\s+)(?:\*\*Next:?\*\*:?\s*)?(?:[-*+]\s+)?unstarted:", re.M | re.I)
 
 
+# An item that waits on another lane's merge or PR must name the file the two lanes share, so the wait is
+# checkable. A wait on the owner or the load brake names no other lane, so it needs no file.
+_UNSTARTED_LANE_WAIT_RE = re.compile(r"\b(?:PRs?|pull requests?|merges?|merged)\b", re.I)
+_UNSTARTED_OTHER_WAIT_RE = re.compile(r"\bowner|load[- ]brake", re.I)
+_SHARED_FILE_RE = re.compile(r"[\w-]+\.[A-Za-z][A-Za-z0-9]{0,5}\b")
+
+
 def unstarted_problem(text, spawned):
-    """True when a builder ran this turn and the report holds no `Unstarted:` line."""
-    return "builder" in spawned and not UNSTARTED_RE.search(block_text(text))
+    """The refusal reason when a builder ran this turn and Next's `Unstarted:` line is missing, or waits on
+    another lane's merge or PR and names no shared file. '' when the line is fine."""
+    if "builder" not in spawned:
+        return ""
+    block = block_text(text, keep_indent=True)
+    found = UNSTARTED_RE.search(block)
+    if not found:
+        return UNSTARTED_REASON
+    item = block[found.end():].split("\n", 1)[0]
+    if (_UNSTARTED_LANE_WAIT_RE.search(item) and not _UNSTARTED_OTHER_WAIT_RE.search(item)
+            and not _SHARED_FILE_RE.search(item)):
+        return UNSTARTED_FILE_REASON
+    return ""
 
 # decisions-reach-a-clickable-pick: "a pick with options" in the Input Needed item is either two or
 # more distinct option markers, or the phrase "A or B". A marker is a lettered or numbered item at
@@ -3149,7 +3169,7 @@ def rewrite_problems(hook):
         if models:
             reasons.append(MODELS_REASON % models)
         if unstarted_problem(text, spawned):
-            reasons.append(UNSTARTED_REASON)
+            reasons.append(unstarted_problem(text, spawned))
         answered = answered_problem(text)
         if answered:
             reasons.append(answered)
@@ -3641,7 +3661,7 @@ def main():
     if models:
         reasons.append(MODELS_REASON % models)
     if shape_ok and unstarted_problem(text, spawned):
-        reasons.append(UNSTARTED_REASON)
+        reasons.append(unstarted_problem(text, spawned))
     if pick_reason:
         reasons.append(pick_reason)
     try:
