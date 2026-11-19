@@ -55,13 +55,14 @@ def _read(path, extras=False):
 
 
 def _parse(text, path, extras=False):
-    """The extras or layout text as a dict. `path` names the source in an error. An extras file (`extras`) may hold
-    no "kinds" object, as a repo that sets only keys such as "protected-paths" has none; it then reads as {}."""
+    """The extras or layout text as a dict. `path` names the source in an error. An extras file (`extras`) that holds
+    the "protected-paths" key may hold no "kinds" object; its kinds then read as {}. Any other extras file with no
+    "kinds" stays unreadable, as on main."""
     try:
         data = json.loads(text)
     except ValueError as err:
         raise LayoutError("cannot read %s: %s" % (path, err)) from err
-    if extras and isinstance(data, dict) and "kinds" not in data:
+    if extras and isinstance(data, dict) and "kinds" not in data and PROTECTED_PATHS in data:
         data = dict(data, kinds={})
     if not isinstance(data, dict) or not isinstance(data.get("kinds"), dict):
         raise LayoutError("%s: no \"kinds\" object" % path)
