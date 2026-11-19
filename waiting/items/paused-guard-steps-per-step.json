@@ -1,0 +1,58 @@
+{
+  "added": "2026-11-18T20:08:52-06:00",
+  "context": "Goal: no paused guard step sits for ever with no decision.\nProblem (rule): you picked to keep all seven paused until their branch was read; it is read, so each step now needs your keep, drop or fold.\nBased on (read): the consultant's read of the seven steps: none is named on main or in any commit message, no incident is recorded for any of them, and the open-pull-request state is unread.\nBased on (read): per step, from the consultant. (1) brief-ruling-has-source (a brief's ruling names where it came from): not on main. (2) hold-zero-tests-fails (a test run that finds zero tests fails): partly on main, since the verdict command (the script that runs a check and prints pass or fail) fails a run of zero Swift tests; the same case for Python unittest runs is an open debt (a recorded known gap: a unittest run that reports zero tests passes). (3) lane-default-checks-rulings (a lane checks the rulings before it starts): not on main. (4) review-model-from-agent-record (a reviewer's model is read from the agent's record): main reads the spawn, not the record. (5) scratch-probe-cleanup (scratch probe files are cleaned up): not on main. (6) shared-tree-guard-reads-last-cd (the shared-folder guard reads the last directory change): main may already hold it, since the shared guard code already reads the last directory change in a command; its incident is needed to confirm. (7) silent-undo-reads-octopus (the silent-undo check reads multi-parent merges): a recorded decision (octopus-push-refused) already refuses a push that holds a merge of three or more branches, which is the shape this step would read.\nDeparts from: main \u2014 the seven steps stay paused with no ruling; each is kept, folded or dropped on your answer.\nWaiting on: nothing is stopped; the consultant files each outcome.",
+  "home": "step paused-guard-steps-keep-all",
+  "kind": "decision",
+  "n": 987,
+  "options": [
+    {
+      "gain": "Each step gets the outcome its read supports; the list shrinks by two.",
+      "how": "Steps 1, 3, 4, 5 and 6 stay paused; step 2 is folded into the open debt for unittest runs that report zero tests; step 7 is dropped.",
+      "id": "consultant-per-step",
+      "key": "a",
+      "label": "The consultant's per-step list: keep 1, 3, 4, 5 and 6; fold 2 into the open debt; drop 7 (recommended)",
+      "lose": "Step 6 may already be on main, and its incident is unknown, so it stays paused unconfirmed."
+    },
+    {
+      "gain": "Nothing is dropped unread.",
+      "how": "No step changes.",
+      "id": "keep-all-seven",
+      "key": "b",
+      "label": "Keep all seven paused",
+      "lose": "Seven steps with no incident stay paused; step 7 stays though a recorded decision already refuses that push shape."
+    },
+    {
+      "gain": "The list is cleared at once.",
+      "how": "The consultant closes each step as dropped.",
+      "id": "drop-all-seven",
+      "key": "c",
+      "label": "Drop all seven",
+      "lose": "Steps 1, 3, 4 and 5 are not on main and are lost with no incident reading; step 2 is half on main and its debt stays."
+    }
+  ],
+  "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "recommended": "a",
+  "ref": "consultant message 20:07 CST Nov 18 (his per-step read of the seven paused guard steps); the reads are the consultant's, not re-read by triage",
+  "repo": "shivinate7/claude-settings",
+  "short": "Seven guard steps",
+  "shown": [
+    {
+      "id": "consultant-per-step",
+      "key": "a",
+      "label": "The consultant's per-step list: keep 1, 3, 4, 5 and 6; fold 2 into the open debt; drop 7 (recommended)"
+    },
+    {
+      "id": "keep-all-seven",
+      "key": "b",
+      "label": "Keep all seven paused"
+    },
+    {
+      "id": "drop-all-seven",
+      "key": "c",
+      "label": "Drop all seven"
+    }
+  ],
+  "status": "open",
+  "title": "Keep, fold or drop each of the seven paused guard steps?",
+  "why": "a follows the consultant's per-step read: five steps have no counterpart on main, one is half covered, one is already rejected by a recorded decision. To choose per step yourself, pick 'None of these' and name each step's outcome in the note. Recommended by the consultant, not owner-typed."
+}
