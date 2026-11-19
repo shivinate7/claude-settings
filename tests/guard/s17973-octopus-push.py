@@ -178,6 +178,12 @@ oct_refuse("a push by an explicit refspec of a three-parent merge in the range",
            VCS + " push origin HEAD:refs/heads/topic", OCT_THREE)
 oct_refuse("a push of a four-parent merge in the range", VCS + " push", OCT_FOUR)
 
+# A mixed push keeps its sending refspec: the `:old` beside HEAD:topic is a deletion, and the merge HEAD sends is refused.
+# A push that only deletes sends no range, so it passes.
+oct_refuse("a mixed push, a deletion of old with HEAD sent to topic, of a three-parent merge in the range",
+           VCS + " push origin :old HEAD:topic", OCT_THREE)
+oct_allow("a push that only deletes old, with no sending refspec", VCS + " push origin :old", OCT_THREE)
+
 # Only what the push sends is judged: two-parent merges pass, and so does a range with no merge at all.
 oct_allow("a push of a range holding only two-parent merges", VCS + " push", OCT_TWO)
 oct_allow("a push of a range with no merge", VCS + " push", OCT_PLAIN)
