@@ -1352,6 +1352,10 @@ jobs:
           GUARD_SHARD: 2/2
         run: python3 hooks/test_guard.py
 
+      - name: Protected-path suite
+        if: ${{ needs.scope.outputs.checks_guard == 'true' || github.event_name != 'pull_request' }}
+        run: python3 hooks/test_guard_protected.py
+
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
         if: ${{ failure() && github.event_name == 'pull_request' }}

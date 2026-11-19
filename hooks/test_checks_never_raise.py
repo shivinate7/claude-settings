@@ -51,6 +51,7 @@ names a waiting page, so the item checks and the workflow check run on a real pa
 pointer checkout: its CLAUDE.md names it, and it holds the role table and an agents folder with one role
 file, so the role checks read real files. fixture_proof asserts
 that each fixture reaches its check, so a moved key or path fails by name instead of leaving the fuzz blind.
+annotation_proof asserts that value_for gives an int to an int-annotated parameter, so the int inputs are real.
 
 The self-test feeds a raising check, a silent exit and a real refusal through the same harness. A
 sweep case proves the shared run-folder sweep (lint/_test_temp.py) removes an old sibling and keeps
@@ -381,7 +382,7 @@ def value_for(fn, name, param, rng, text, env, state):
         return [text]
     if name in PATH_NAMES:
         return text if rng.random() < 0.3 else env.cwd
-    if annotation == "int":
+    if param.annotation is int or annotation == "int":   # a real int, or its string form (postponed annotations)
         return rng.randint(0, 3)
     if annotation == "dict":
         return state("payload")
@@ -652,6 +653,29 @@ def fixture_proof():
            lambda: guard.workflow_step_disables("        continue-on-error: true"))
     _probe(problems, "SETTINGS_PATH is no settings file (the settings basenames moved)",
            lambda: guard.is_settings_file(SETTINGS_PATH, CONFIG))
+    return problems
+
+
+def annotation_proof():
+    """[problem] for each probe value_for answers with a non-int. The probe is cap_safe's own `limit`, read from its
+    signature, so a moved annotation fails here by name. The string form "int" is a control: value_for already reads it
+    as an int, so it holds on the old harness too."""
+    real = inspect.signature(guard_core.cap_safe).parameters["limit"]
+    if real.annotation is not int:   # the scope: the probe must be the int parameter it names
+        return ["cap_safe's limit is no longer annotated int (%r), so the int probe reads another parameter"
+                % (real.annotation,)]
+    problems = []
+    rng = random.Random("%s:annotation" % SEED)
+    env = Env(rng, "Bash", "x")
+    probes = (("an int annotation", real), ('the string annotation "int"', real.replace(annotation="int")))
+    for label, param in probes:
+        values = [value_for(guard_core.cap_safe, "limit", param, rng, "x", env, lambda key: None) for _ in range(20)]
+        wrong = sorted({type(value).__name__ for value in values if type(value) is not int})
+        if wrong:
+            problems.append("value_for gives %s for cap_safe's limit under %s, not an int"
+                            % (" and ".join(wrong), label))
+        elif 0 not in values:   # the empty limit is drawn too
+            problems.append("value_for never draws the empty limit 0 for cap_safe's limit under %s" % label)
     return problems
 
 
@@ -947,6 +971,9 @@ def main():
         problems = fixture_proof()
         for problem in problems:
             print("FAIL fixture: %s" % problem)   # the fuzz still runs, so each family's own rows show too
+        for problem in annotation_proof():
+            print("FAIL annotation: %s" % problem)   # the fuzz still runs, so the rows it names show too
+            problems.append(problem)
         if not family_list_is_whole():
             print("FAIL the guard_*.py files and guard._FAMILY_MODULES differ: a family module is not fuzzed")
             return 1
