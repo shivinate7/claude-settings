@@ -187,7 +187,8 @@ KINDS = ("ruling", "task", "question", "note", "standing", "page", "repo")
 JOT = re.compile(r"\[(%s)\]\s+->\s+\S" % "|".join(KINDS))
 PAGE_HOME = re.compile(r"page:(\d+)")
 SEND_TOOLS = _transcript.SEND_TOOLS  # the send predicates live in lint/_transcript.py, one home
-ARTIFACT_DATA = _transcript.ARTIFACT_DATA
+CLAUDE_ARTIFACTS = "mcp__claude-artifacts__"  # the claude-artifacts page tools; the verb is the tool name (db_get, db_list, db_query), not an action key
+ARTIFACT_DATA = _transcript.ARTIFACT_DATA + (CLAUDE_ARTIFACTS,)
 _writes_n = _transcript.writes_n
 _is_n = _transcript.is_n
 REPO_HOME = re.compile(r"repo:([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)")
@@ -805,14 +806,23 @@ def _proves(use, n):
     if name in SEND_TOOLS:
         msg = tool_input.get("message")
         return isinstance(msg, str) and re.search(r"(?<![A-Za-z0-9-])%s(?![A-Za-z0-9-])" % n, msg) is not None
-    return name.startswith(ARTIFACT_DATA) and _writes_n(tool_input, n)
+    return name.startswith(ARTIFACT_DATA) and _read_verb(use) is None and _writes_n(tool_input, n)
+
+
+def _read_verb(use):
+    """The read verb (get, list or query) of an ArtifactData action or a claude-artifacts db_<verb> tool name, else None."""
+    name, inp = use.get("name") or "", use.get("input")
+    verb = inp.get("action") if isinstance(inp, dict) else None
+    if verb is None and name.startswith(CLAUDE_ARTIFACTS) and name[len(CLAUDE_ARTIFACTS):].startswith("db_"):
+        verb = name[len(CLAUDE_ARTIFACTS) + 3:]
+    return verb if verb in READ_VERBS else None
 
 
 def _reads_items(use):
     """True for an ArtifactData get, list or query of collection `items` that names a page url and no out_dir.
     A read with out_dir returns file paths, not the documents, so its result cannot show item n."""
     name, inp = use.get("name") or "", use.get("input")
-    return (name.startswith(ARTIFACT_DATA) and isinstance(inp, dict) and inp.get("action") in READ_VERBS
+    return (name.startswith(ARTIFACT_DATA) and isinstance(inp, dict) and _read_verb(use) is not None
             and inp.get("collection") == "items" and isinstance(inp.get("url"), str) and not inp.get("out_dir"))
 
 
@@ -1415,7 +1425,7 @@ def _scan_transcript(records, collections):
             if not isinstance(inp, dict) or when is None:
                 continue
             if name.startswith(ARTIFACT_DATA):
-                if _exported_write(inp, collections) and isinstance(inp.get("url"), str):
+                if _read_verb(use) is None and _exported_write(inp, collections) and isinstance(inp.get("url"), str):
                     writes.append((when, use.get("id"), inp["url"]))
             elif name in SHELL_TOOLS and EXPORT_RUN.search(str(inp.get("command", ""))):
                 exports.append((when, use.get("id")))
