@@ -1694,15 +1694,17 @@ class Stale(unittest.TestCase):
         self.assertGreaterEqual(len(alone), 2, "the items-alone run did not start the gh processes its open waits need: %s" % alone)
         self.assertLessEqual(len(both), len(alone), "--answers started more gh processes than --items alone:\n%s" % both)
 
-    # The found-false cases: an open item whose home step is done, dropped, folded or done-obsolete is flagged on the --items path.
+    # The found-false cases: an open item whose home step is done, dropped or done-obsolete is flagged on the --items path. A folded
+    # step is a wait on purpose, so its items are never flagged.
     # Each run asserts the page verdict first (the path ran), then looks for the item's line. A case that asserts an item is NOT
     # flagged also holds a flagged item in the same run: an old run flags nothing, so such a case alone would pass there.
 
-    def found_false_run(self, items, steps):
+    def found_false_run(self, items, steps=None, steps_dir=None):
         """Runs the --items path on the current page. `items` is the items folder; `steps` ({step file name: step data}) is the folder
-        ROADMAP_STEPS_FOLDER names. Returns (the run, its found-false lines), after the page verdict is asserted."""
+        ROADMAP_STEPS_FOLDER names, or `steps_dir` names that folder itself. Returns (the run, its found-false lines), after the page verdict is asserted."""
         current, _ = self.current_and_behind()
-        steps_dir = self.docs_folder(steps, "steps", complete=False)
+        if steps_dir is None:
+            steps_dir = self.docs_folder(steps or {}, "steps", complete=False)
         r = self.items_run(current, self.items_folder(items), {FOUND_ENV: steps_dir})
         self.assert_page_word(r, "current", 0)  # the scope: the page verdict ran, and the flag leaves its exit code as it was
         return r, found_lines(r.stdout)
@@ -1721,14 +1723,34 @@ class Stale(unittest.TestCase):
         self.assertIn("home-done", line, "the found-false line does not name its home step:\n" + line)
         self.assertRegex(line, r"\bdone\b", "the found-false line does not name the step's status:\n" + line)
 
-    def test_found_false_a_bare_id_that_a_record_shares_is_never_flagged(self):
-        """A bare id names a decision or debt record too, so it is never flagged. The `step <id>` item in the same run shows the check ran."""
-        steps = {"answered-needs-source": found_step("done", "answered-needs-source")}
-        items = [found_item(7, "q7", "answered-needs-source"), found_item(8, "q8", "step answered-needs-source")]
+    def test_found_false_a_bare_id_of_a_done_step_is_flagged_and_an_open_folded_or_unknown_one_is_not(self):
+        """A bare home equal to a done, dropped or done-obsolete step id is flagged. Its line says to leave the item open when the id is a
+        decision or debt id, and keeps the close. In the same run the `step <id>` item is flagged, and a bare or `step` home that names an
+        open, folded or unknown step is not."""
+        for status in ("done", "dropped", "done-obsolete"):
+            with self.subTest(status=status):
+                home = "home-" + status
+                steps = {home: found_step(status, home), "home-open": found_step("open", "home-open"),
+                         "home-folded": found_step("folded", "home-folded")}
+                items = [found_item(7, "q7", home), found_item(8, "q8", "step " + home),
+                         found_item(9, "q9", "home-open"), found_item(10, "q10", "home-folded"),
+                         found_item(11, "q11", "no-such-step"), found_item(12, "q12", "step no-such-step"),
+                         found_item(13, "q13", "step home-folded")]
+                _, lines = self.found_false_run(items, steps)
+                self.assert_found_line(lines, 8, "q8")  # the scope: the step form is flagged in this run
+                line = self.assert_found_line(lines, 7, "q7")
+                self.assertIn("if %s is a decision or debt id, leave it open" % home, line, "the bare-id line has no leave-open caveat:\n" + line)
+                self.assertIn("status closed, closed, replied, reply", line, "the bare-id line does not name the close:\n" + line)
+                self.assertEqual(len(lines), 2, "an open, folded or unknown home is flagged:\n" + "\n".join(lines))
+
+    def test_found_false_the_step_keyword_is_case_insensitive(self):
+        """The keyword `step` matches in any case. A lowercase `step` item in the same run is the scope."""
+        steps = {"home-done": found_step("done", "home-done")}
+        items = [found_item(6, "q6", "step home-done"), found_item(7, "q7", "Step home-done"), found_item(8, "q8", "STEP home-done")]
         _, lines = self.found_false_run(items, steps)
+        self.assert_found_line(lines, 6, "q6")  # the scope: the lowercase keyword is flagged in this run
+        self.assert_found_line(lines, 7, "q7")
         self.assert_found_line(lines, 8, "q8")
-        flagged = [line for line in lines if line.startswith("found-false: item 7 ")]
-        self.assertEqual(flagged, [], "the bare id answered-needs-source flags item 7:\n" + "\n".join(lines))
 
     def test_found_false_the_step_folder_is_the_one_ROADMAP_STEPS_FOLDER_names(self):
         """The check reads the step folder that the env ROADMAP_STEPS_FOLDER names. With no line, the run read no folder from it."""
@@ -1767,13 +1789,21 @@ class Stale(unittest.TestCase):
         for stem in ("answer", "ask", "respon"):
             self.assertNotRegex(line, r"(?i)\b%s" % stem, "the found-false line asks the owner (%r):\n%s" % (stem, line))
 
-    def test_found_false_a_dropped_folded_or_done_obsolete_home_is_flagged_too(self):
-        for status in ("dropped", "folded", "done-obsolete"):
+    def test_found_false_a_dropped_or_done_obsolete_home_is_flagged_too(self):
+        for status in ("dropped", "done-obsolete"):
             with self.subTest(status=status):
                 home = "home-" + status
                 _, lines = self.found_false_run([found_item(956, "moot-item", "step " + home)], {home: found_step(status, home)})
                 line = self.assert_found_line(lines, 956, "moot-item")
                 self.assertIn(status, line, "the found-false line does not name the home's status %s:\n%s" % (status, line))
+
+    def test_found_false_an_item_homed_on_a_folded_step_is_never_flagged(self):
+        """A folded step is a wait on purpose (SKILL.md), so an item homed on it is not moot. The `done` step item in the same run is the scope."""
+        steps = {"home-done": found_step("done", "home-done"), "home-folded": found_step("folded", "home-folded")}
+        items = [found_item(956, "moot-item", "step home-done"), found_item(957, "held-item", "step home-folded")]
+        _, lines = self.found_false_run(items, steps)
+        self.assert_found_line(lines, 956, "moot-item")  # the scope: the done home is flagged in this run
+        self.assertEqual(len(lines), 1, "an item homed on a folded step is flagged:\n" + "\n".join(lines))
 
     def test_found_false_only_an_open_item_with_a_done_home_is_flagged(self):
         """The open item with a done home is flagged. In the same run, a closed item with a done home and an open item under each
@@ -1791,8 +1821,8 @@ class Stale(unittest.TestCase):
 
     def test_found_false_a_full_store_flags_exactly_its_open_done_home_items(self):
         """200 items over every step status, both home forms, closed items and a record home that is no step. Exactly the open items
-        whose `step <id>` home names a done, dropped, folded or done-obsolete step are flagged, in item order; a bare id is never flagged.
-        The empty store then flags none."""
+        whose home (`step <id>` or a bare id) names a done, dropped or done-obsolete step are flagged, in item order; a folded step
+        or a record home is never flagged. The empty store then flags none."""
         kinds = FOUND_DONE + FOUND_LIVE
         steps = {"home-" + kind: found_step(kind) for kind in kinds}  # no id field: the check keys each step by its file name
         items, want = [], []
@@ -1804,20 +1834,36 @@ class Stale(unittest.TestCase):
             if n % 7 == 0:
                 home = "docs/decisions/session-messages.md"  # a record home, not a step: never flagged
             items.append(found_item(n, "item-%d" % n, home, status=status))
-            if status == "open" and n % 7 and kind in FOUND_DONE and home.startswith("step "):
+            if status == "open" and n % 7 and kind in FOUND_DONE:
                 want.append(n)
         _, lines = self.found_false_run(items, steps)
         got = [int(m.group(1)) for m in (re.match(r"found-false: item (\d+) ", line) for line in lines) if m]
-        self.assertEqual(got, want, "the flagged items are not the open done-home items:\n" + "\n".join(lines))
+        self.assertEqual([n for n in want if n not in got], [], "open done-home items not flagged:\n" + "\n".join(lines))
+        self.assertEqual([n for n in got if n not in want], [], "items flagged that are not open done-home items:\n" + "\n".join(lines))
+        self.assertEqual(got, want, "the flagged items are not in item order:\n" + "\n".join(lines))
         _, lines = self.found_false_run([], steps)
         self.assertEqual(lines, [], "an empty store flags an item:\n" + "\n".join(lines))
 
+    def test_found_false_an_unreadable_step_folder_prints_one_unknown_line_and_exits_0(self):
+        """ROADMAP_STEPS_FOLDER names a folder that cannot be read: a path that does not exist, and a path that is a file. The run prints
+        exactly one `found-false: unknown (` line, and the page's exit code stays 0. Root reads any folder, so the cases use paths
+        that cannot be listed."""
+        missing = os.path.join(self.tmp.name, "no-such-steps")
+        a_file = write_text(os.path.join(self.tmp.name, "steps-file"), "not a folder")
+        items = [found_item(956, "moot-item", "step home-done")]
+        for label, steps_dir in (("missing folder", missing), ("a file", a_file)):
+            with self.subTest(label):
+                _, lines = self.found_false_run(items, steps_dir=steps_dir)  # the scope: the page verdict ran with exit 0
+                self.assertEqual(len(lines), 1, "want exactly one found-false line for an unreadable folder, got %r" % lines)
+                self.assertTrue(lines[0].startswith("found-false: unknown ("), "the line is not the unknown line: " + lines[0])
 
-# Fixtures for the found-false cases. The check reads only the `step <id>` home: a bare id is also a decision or debt id, so it is never
-# flagged. FOUND_DONE are the step statuses that make an item's premise moot; FOUND_LIVE are the others.
+
+# Fixtures for the found-false cases. A home that names a done step is flagged, bare or as `step <id>`; a bare id may also be a decision
+# or debt id, so its line says to leave the item open then. FOUND_DONE are the step statuses that make an item's premise moot;
+# FOUND_LIVE are the others, folded among them: a folded step is a wait on purpose.
 FOUND_ENV = "ROADMAP_STEPS_FOLDER"  # the folder of step files, <step id>.json, that the check reads (the record's roadmap/data/steps)
-FOUND_DONE = ("done", "dropped", "folded", "done-obsolete")
-FOUND_LIVE = ("todo", "ready", "doing", "blocked", "open", "parked")
+FOUND_DONE = ("done", "dropped", "done-obsolete")
+FOUND_LIVE = ("todo", "ready", "doing", "blocked", "open", "parked", "folded")
 
 
 def found_item(n, item_id, home, status="open", **extra):
