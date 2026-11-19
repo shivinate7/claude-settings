@@ -383,6 +383,17 @@ def _owner_text(rec):
     return text
 
 
+def latest_owner_text(transcript):
+    """The words of the owner's last typed turn in the transcript at path `transcript`, or None: no path, an unreadable or
+    empty transcript, or no owner turn in the tail read. The one reader of the last turn for a guard that lets the owner's
+    own word through (hooks/guard.py owner_names_model). Cost: one open and one tail read (_tail_prompts), on demand."""
+    for _, rec in reversed(_tail_prompts(transcript)):
+        text = _owner_text(rec)
+        if text is not None:
+            return text
+    return None
+
+
 def _own_record(found, prompt):
     """Offset of the prompt's own record among `found` (_tail_prompts): the last owner prompt record whose text equals
     the prompt, or None."""

@@ -323,7 +323,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (agent-model-cap)
                        deny. An Agent or Task spawn that sets model opus, unless Plan, designer,
                        design-reviewer, refuter, a builder's third-round marker or an Explore's `Audit:` marker
-                       covers it. The general override, `opus [role] <time>` or a step grant lifts the
+                       covers it, or the owner's last typed turn names opus as a whole word with no negation
+                       before it (owner_names_model; the same read lifts agent-model-floor for haiku). The general override, `opus [role] <time>` or a step grant lifts the
                        spawn refusal; none lifts the settings-write ask.
   ask-alone            deny. An ask command chained with other commands. (ask-commands-run-alone)
   guard-crash          crash. The guard itself raised. The call is allowed and the log shows it.
@@ -3577,6 +3578,33 @@ def floor_hit(tool: str, tool_input) -> str:
                 if below_the_floor(keys.get("model")) and keys.get("agentType") not in HAIKU_ROLES:
                     return keys["model"]
     return ""
+
+
+# The owner's own word for a model (owner, 2026-11-18 19:03 CST: "if i say haiku it should work, there shouldnt be any
+# guards on a FLOOR"). A spawn the floor or the Opus ceiling would refuse passes when the owner's last typed turn names
+# that model as a whole word. A mention after no, not, never, n't or without does not name it.
+MODEL_FAMILIES = ("haiku", "sonnet", "opus")
+MODEL_NEGATION = r"(?:\bnot|\bno|\bnever|\bwithout|n't)\s+(?:(?:use|using|run|running|on|with|the|a|any|an)\s+)*"
+
+
+def owner_names_model(payload, model) -> bool:
+    """True when the owner's last typed turn (override.latest_owner_text, read from the payload's transcript_path on
+    demand) names the family of `model` as a whole word with a mention no negation precedes. No transcript_path, an
+    unreadable transcript or an unknown model family is False, so the refusal stands."""
+    family = next((f for f in MODEL_FAMILIES if f in str(model).lower()), "")
+    transcript = payload.get("transcript_path") if isinstance(payload, dict) else None
+    if not family or not isinstance(transcript, str) or not transcript:
+        return False
+    try:
+        import override
+        text = override.latest_owner_text(transcript)
+    except Exception:
+        return False
+    if not text:
+        return False
+    word = re.compile(r"\b%s\b" % family, re.IGNORECASE)
+    negated = re.compile(MODEL_NEGATION + r"%s\b" % family, re.IGNORECASE)
+    return len(word.findall(text)) > len(negated.findall(text))
 
 
 def lane_effort_hit(tool: str, tool_input) -> str:
@@ -7456,7 +7484,8 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     check."""
     POWERSHELL_CALL[0] = tool == "PowerShell"
     # role_model_check's above-row refusal is liftable (item 127 pick a); only its no-model refusal is never lifted.
-    if (floor_hit(tool, tool_input) or step_up_hit(tool, tool_input)
+    floor_model = floor_hit(tool, tool_input)  # the owner's own word for that model leaves the floor out of this list (step 9)
+    if ((floor_model and not owner_names_model(payload, floor_model)) or step_up_hit(tool, tool_input)
             or role_model_check(tool, tool_input)[1].startswith(ROLE_NO_MODEL_MATCH)
             or worktree_home_hit(payload, tool, tool_input, cwd)):
         return True
@@ -7714,8 +7743,9 @@ def judge(payload) -> None:
 
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
     # model; the log holds what the call asked for. A lane start's floor is judged with the lane-start rules (8a).
+    # The owner's last turn naming the model lifts it (owner_names_model); the transcript is read only when the floor fires.
     floor_model = floor_hit(tool, tool_input)
-    if floor_model:
+    if floor_model and not owner_names_model(payload, floor_model):
         refuse(tool, "deny", "agent-model-floor", MODEL_FLOOR_REASON, floor_model)
 
     # 9b. Step-up: a reviewer's second round on Sonnet. A builder's third try has no step-up: it runs Sonnet, its role row (owner item 893). A reviewer's third round passes here on
@@ -7746,7 +7776,7 @@ def judge(payload) -> None:
     # 9d. The Opus ceiling: a spawn on Opus with no standing grant is refused (decision agent-model-cap).
     # An override, an Opus pass for the spawn's role or a step grant lifts it. A spawn with no role runs general-purpose.
     opus_model, opus_role, opus_unread = opus_spawn_hit(tool, tool_input)
-    if opus_model:
+    if opus_model and not owner_names_model(payload, opus_model):
         refuse(tool, "deny", "agent-model-cap",
                (OPUS_BUILDER_REASON if opus_role == "builder" else OPUS_SPAWN_REASON)
                + (" The scan could not read this brief, so it read no marker: " + BRIEF_LITERAL_REMEDY + "."
