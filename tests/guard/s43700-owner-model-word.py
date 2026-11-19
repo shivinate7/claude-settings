@@ -172,3 +172,51 @@ add("owner-model-word: an Agent spawn on haiku is allowed when the owner's lates
     "of Claude's reply follows it", "allow", tool="Agent", prompt="do it", model="haiku", transcript=OMW_OLD_HAIKU)
 add("owner-model-word: twin, an Agent spawn on sonnet is allowed after the same transcript", "allow",
     tool="Agent", prompt="do it", model="sonnet", transcript=OMW_OLD_HAIKU)
+
+# ---- Clause and negation reach. A negation reaches only to the end of its own clause (MODEL_CLAUSE_BREAK, guard.py), and
+# a negation that governs another word does not refuse the name: `Not sonnet but haiku`, `Skip the checks and run it on
+# haiku`. `instead` negates nothing when it does not stand before the name. A name written in full (claude-haiku-4-5) or with
+# a point (haiku-4.5) is the owner's word for haiku. The clause case is green on the old code: it pins the clause break, and a
+# mutant whose MODEL_CLAUSE_BREAK matches nothing turns it red. The other allows are red on the old code, each with a Sonnet
+# twin. The two controls are negations that do govern the name, so they stay refused.
+OMW_CLAUSE_DONT = omw_file("owner-dont-clause-then-haiku", [omw_user("Don't overthink it. Use haiku."), omw_asst("Ok.")])
+OMW_INSTEAD = omw_file("owner-instead-use-haiku", [omw_user("Instead use haiku."), omw_asst("Ok.")])
+OMW_NOT_SONNET_BUT = omw_file("owner-not-sonnet-but-haiku", [omw_user("Not sonnet but haiku."), omw_asst("Ok.")])
+OMW_DONT_COLON = omw_file("owner-dont-colon-use-haiku", [omw_user("Don't overthink it: use haiku."), omw_asst("Ok.")])
+OMW_SKIP_CHECKS = omw_file("owner-skip-checks-haiku", [omw_user("Skip the checks and run it on haiku"), omw_asst("Ok.")])
+OMW_FULL_NAME = omw_file("owner-full-model-name", [omw_user("Use claude-haiku-4-5 for the audit."), omw_asst("Ok.")])
+OMW_POINT_NAME = omw_file("owner-point-model-name", [omw_user("Use haiku-4.5 for the audit."), omw_asst("Ok.")])
+OMW_SONNET_INSTEAD_OF = omw_file("owner-sonnet-instead-of-haiku",
+                                 [omw_user("Use sonnet instead of haiku."), omw_asst("Ok.")])
+OMW_NOT_HAIKU_BUT = omw_file("owner-not-haiku-but-sonnet", [omw_user("Not haiku but sonnet."), omw_asst("Ok.")])
+
+add("owner-model-word: an Agent spawn on haiku is allowed when a negation sits in an earlier clause, after a full stop", "allow",
+    tool="Agent", prompt="do it", model="haiku", transcript=OMW_CLAUSE_DONT)
+add("owner-model-word: an Agent spawn on haiku is allowed when the owner's latest turn says instead use haiku", "allow",
+    tool="Agent", prompt="do it", model="haiku", transcript=OMW_INSTEAD)
+add("owner-model-word: twin, an Agent spawn on sonnet is allowed with the same owner turn (instead use haiku)", "allow",
+    tool="Agent", prompt="do it", model="sonnet", transcript=OMW_INSTEAD)
+add("owner-model-word: an Agent spawn on haiku is allowed when the owner's latest turn says not sonnet but haiku", "allow",
+    tool="Agent", prompt="do it", model="haiku", transcript=OMW_NOT_SONNET_BUT)
+add("owner-model-word: twin, an Agent spawn on sonnet is allowed with the same owner turn (not sonnet but haiku)", "allow",
+    tool="Agent", prompt="do it", model="sonnet", transcript=OMW_NOT_SONNET_BUT)
+add("owner-model-word: an Agent spawn on haiku is allowed when the owner's latest turn says don't overthink it: use haiku",
+    "allow", tool="Agent", prompt="do it", model="haiku", transcript=OMW_DONT_COLON)
+add("owner-model-word: twin, an Agent spawn on sonnet is allowed with the same owner turn (don't overthink it: use haiku)",
+    "allow", tool="Agent", prompt="do it", model="sonnet", transcript=OMW_DONT_COLON)
+add("owner-model-word: an Agent spawn on haiku is allowed when the owner's latest turn says skip the checks and run it on "
+    "haiku", "allow", tool="Agent", prompt="do it", model="haiku", transcript=OMW_SKIP_CHECKS)
+add("owner-model-word: twin, an Agent spawn on sonnet is allowed with the same owner turn (skip the checks, run it on haiku)",
+    "allow", tool="Agent", prompt="do it", model="sonnet", transcript=OMW_SKIP_CHECKS)
+add("owner-model-word: an Agent spawn on claude-haiku-4-5 is allowed when the owner's latest turn names claude-haiku-4-5",
+    "allow", tool="Agent", prompt="do it", model="claude-haiku-4-5", transcript=OMW_FULL_NAME)
+add("owner-model-word: twin, an Agent spawn on sonnet is allowed with the same owner turn (claude-haiku-4-5)", "allow",
+    tool="Agent", prompt="do it", model="sonnet", transcript=OMW_FULL_NAME)
+add("owner-model-word: an Agent spawn on haiku-4.5 is allowed when the owner's latest turn names haiku-4.5", "allow",
+    tool="Agent", prompt="do it", model="haiku-4.5", transcript=OMW_POINT_NAME)
+add("owner-model-word: twin, an Agent spawn on sonnet is allowed with the same owner turn (haiku-4.5)", "allow",
+    tool="Agent", prompt="do it", model="sonnet", transcript=OMW_POINT_NAME)
+add("owner-model-word: control, an Agent spawn on haiku is refused when the owner's latest turn says use sonnet instead of "
+    "haiku", "deny", "agent-model-floor", tool="Agent", prompt="do it", model="haiku", transcript=OMW_SONNET_INSTEAD_OF)
+add("owner-model-word: control, an Agent spawn on haiku is refused when the owner's latest turn says not haiku but sonnet",
+    "deny", "agent-model-floor", tool="Agent", prompt="do it", model="haiku", transcript=OMW_NOT_HAIKU_BUT)
