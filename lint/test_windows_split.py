@@ -398,7 +398,7 @@ SLOW_LEG_JOBS = (GUARD_JOB, "checks-windows-guard-2", "checks-windows-guard-3", 
 # its flags is set, and the flags follow the Windows-only list ci-scope.sh emits. The merge shards belong to checks-windows-merge.
 FAST_WINDOWS_JOBS = {"pointer-windows": ("pointer_windows",), "checks-windows": ("checks_windows",),
                      "checks-windows-rest": ("checks_windows_rest",), "checks-windows-rest-2": ("checks_windows_rest_2",),
-                     "checks-windows-sweep": ("checks_windows_sweep", "sweep"),  # the mutation step in it reads `sweep` (IF_PIN)
+                     "checks-windows-sweep": ("checks_windows_sweep",),  # F1: the sweep flag alone starts no Windows job; the mutation step reads `sweep` (IF_PIN)
                      **{name: ("checks_windows_merge",) for name in ("checks-windows-merge", "checks-windows-merge-2", "checks-windows-merge-3",
                                                                      "checks-windows-merge-4", "checks-windows-merge-5")}}
 WINDOWS_FLAG_NAMES = sorted({flag for flags in FAST_WINDOWS_JOBS.values() for flag in flags})
@@ -2395,15 +2395,32 @@ class SweepOnReadyPull(unittest.TestCase):
         self.assertIsNotNone(expr, f"{job} sweep step has no if")
         self.assertTrue(eval_if(expr, "pull_request", "true"), f"{job} sweep step does not run on a ready pull_request: {expr}")
 
-    def test_both_sweep_mutations_run_on_a_ready_pull_request_whatever_their_platform_flag_says(self):
-        # Named failure: a sweep step is conditioned on its platform's scope flag, so a ready PR whose flag is false skips the mutation.
-        for label, cmd_jobs, cmd in self.sweep_steps():
-            flag = PLATFORM_SWEEP_FLAG[label]
-            job, st = self.sweep_home(cmd_jobs, cmd)
-            expr = unwrap(step_key(st, "if"))
-            with self.subTest(job=job):
-                self.assertTrue(eval_with(expr, "pull_request", {flag: "false", "sweep": "true"}),
-                                f"{job} sweep step does not run on a ready pull_request when {flag} is false: {expr}")
+    def test_the_macos_sweep_mutation_runs_on_a_ready_pull_request_whatever_its_platform_flag_says(self):
+        # Named failure: the macOS sweep step is conditioned on its platform's scope flag, so a ready PR whose flag is false skips the mutation.
+        label, cmd_jobs, cmd = self.sweep_steps()[0]
+        flag = PLATFORM_SWEEP_FLAG[label]
+        job, st = self.sweep_home(cmd_jobs, cmd)
+        expr = unwrap(step_key(st, "if"))
+        with self.subTest(job=job):
+            self.assertTrue(eval_with(expr, "pull_request", {flag: "false", "sweep": "true"}),
+                            f"{job} sweep step does not run on a ready pull_request when {flag} is false: {expr}")
+
+    def test_the_windows_sweep_mutation_runs_on_a_ready_pull_request_only_with_its_own_flag(self):
+        # F1 (goal v11): the sweep flag alone starts no Windows job. The mutation step runs on a ready pull_request only when the job
+        # starts, so its job-level if and its own if are read together. Named failure: checks-windows-sweep starts on `sweep` alone,
+        # so the Windows mutation runs for a path the Windows-only list does not name.
+        label, cmd_jobs, cmd = self.sweep_steps()[1]
+        job, st = self.sweep_home(cmd_jobs, cmd)
+        job_expr = job_if_without_records(all_jobs(self.text)[job]["if"])
+        step_expr = unwrap(step_key(st, "if"))
+
+        def starts(values):
+            return (job_expr is None or eval_with(job_expr, "pull_request", values)) and eval_with(step_expr, "pull_request", values)
+
+        # Control, green on the old code: with its own flag and the sweep flag both set, the mutation runs on a ready pull_request.
+        self.assertTrue(starts({"checks_windows_sweep": "true", "sweep": "true"}), f"{job} mutation does not run with both flags: {job_expr}")
+        self.assertFalse(starts({"checks_windows_sweep": "false", "sweep": "true"}),
+                         f"{job} mutation runs on a ready pull_request for `sweep` alone: job if {job_expr!r}, step if {step_expr!r}")
 
     def test_both_sweep_mutations_still_run_on_push_schedule_and_dispatch(self):
         # Control, green on the old code: the change must keep the events the step already ran on.

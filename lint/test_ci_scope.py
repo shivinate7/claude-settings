@@ -43,9 +43,9 @@ STEP_FLAGS = ["code", "guard", "sweep", "mods", "shoot"]
 # directly by the arm for actions/playwright-setup and .github/shoot (the paths checks-guard installs from).
 DERIVED_FLAGS = ["checks_windows_sweep", "checks_guard"]
 ALL = JOB_FLAGS + STEP_FLAGS
-# The Windows flags (R62/R63). A Windows job starts only on its own scope flag or a Windows-only path, so the catch-all arm
-# sets none of these. windows_guard is not here: it is the guard-input gate, not a Windows job.
-WINDOWS_SET = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_windows_rest_2", "checks_windows_sweep",
+# The Windows flags (R62/R63, goal v11 F1). A pull_request starts a Windows job only for a Windows-only path, so no other
+# path sets these. windows_guard is not here: its job (checks-windows-guard) starts on no pull_request, so the flag starts no job.
+WINDOWS_SET =["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_windows_rest_2", "checks_windows_sweep",
                "pointer_windows"]
 ALL_NO_WINDOWS = [n for n in ALL if n not in WINDOWS_SET]
 BASH = shutil.which("bash")
@@ -196,8 +196,9 @@ class DerivedFlags(unittest.TestCase):
                     got = run(paths, event=event)
                     self.check(got)
                     seen.add((got["checks_windows_rest"], got["checks_guard"]))
-        # The sample reaches both ends: everything on, and a docs-only change with everything off.
-        self.assertTrue({("true", "true"), ("false", "false")} <= seen, seen)
+        # The sample reaches the Windows end (install.ps1: rest on, guard off), the guard end (hooks/guard.py: guard on, rest off)
+        # and a docs-only change with both off. No non-Windows path sets the rest flag (F1).
+        self.assertTrue({("true", "false"), ("false", "true"), ("false", "false")} <= seen, seen)
 
     def test_unreadable_diff_turns_the_derived_flags_on(self):
         self.check(run(["hooks/guard.py"], base="0" * 40))
@@ -290,15 +291,18 @@ class Scope(unittest.TestCase):
         got = run(["merge/merge.py"])
         self.assertFlags(got, want_false=["pointer_windows", "shell_macos"])
 
-    def test_workflow_or_scope_script_change_runs_everything(self):
+    # Named failure: the workflow or the scope script starts a Windows job on a pull_request that names no Windows-only path (F1).
+    def test_workflow_or_scope_script_change_runs_every_non_windows_job(self):
         for p in (".github/workflows/checks.yml", ".github/scripts/ci-scope.sh"):
-            self.assertFlags(run([p]), want_true=ALL)
+            with self.subTest(path=p):
+                self.assertFlags(run([p]), want_true=ALL_NO_WINDOWS, want_false=WINDOWS_SET)
 
-    def test_a_test_run_signing_helper_change_runs_everything(self):
-        # Every suite loads the helper, so a change to any of its three twins runs every job.
+    # Named failure: the signing helper starts a Windows job on a pull_request that names no Windows-only path (F1).
+    def test_a_test_run_signing_helper_change_runs_every_non_windows_job(self):
+        # Every suite loads the helper, so a change to any of its three twins runs every non-Windows job.
         for p in ("lint/_test_git.py", "lint/_test_git.sh", "lint/_test_git.mjs"):
             with self.subTest(path=p):
-                self.assertFlags(run([p]), want_true=ALL + DERIVED_FLAGS)
+                self.assertFlags(run([p]), want_true=ALL_NO_WINDOWS + ["checks_guard"], want_false=WINDOWS_SET)
 
     # The catch-all arm (R62/R63): an unmapped path turns on every non-Windows flag and no Windows flag.
     # Named failure: the catch-all starts a Windows job for a path that no rule names.
@@ -320,32 +324,46 @@ class Scope(unittest.TestCase):
         self.assertFlags(run(["merge/merge.py"]), want_true=["checks_macos", "guard"],
                          want_false=["checks_windows", "checks_windows_merge"])
 
-    def test_layout_change_turns_on_the_guard_and_merge_suites(self):
+    # Named failure: a layout file starts a Windows job on a pull_request that names no Windows-only path (F1).
+    def test_layout_change_turns_on_the_guard_and_macos_suites_and_no_windows_job(self):
         for path in ("lint/layout.json", "lint/layout.py"):
-            self.assertFlags(run([path]), want_true=["checks_windows", "checks_macos", "guard", "code", "checks_windows_merge"])
+            with self.subTest(path=path):
+                self.assertFlags(run([path]), want_true=["checks_macos", "guard", "code"], want_false=WINDOWS_SET)
 
+    # Named failure: the janitor launcher starts a Windows job on a pull_request that names no Windows-only path (F1).
     def test_janitor_launcher_change_turns_on_the_install_suite(self):
         # `guard` too: the janitor launcher turns the guard suite on.
-        self.assertFlags(run(["bin/claude-janitor"]), want_true=["checks_windows", "shell_macos", "guard"])
+        self.assertFlags(run(["bin/claude-janitor"]), want_true=["shell_macos", "guard"], want_false=WINDOWS_SET)
 
-    def test_windows_install_test_change_turns_on_the_windows_install_job(self):
-        # The file is in the base, so an edit to it is no new file in a landed dir; the job that runs it must start.
-        self.assertFlags(run(["hooks/test_install_windows.sh"], existing=["hooks/test_install_windows.sh"]),
-                         want_true=["checks_windows", "code"])
+    # hooks/test_install_windows.sh is a .sh file, so the Windows-only list (*.ps1, bin/*.cmd) decides its Windows set. Its script
+    # comment calls it Windows-only, which the list does not say: the owner decides (Input Needed). The case follows the list, so it
+    # passes once the list names the file or the arm stops setting the Windows set. The scope is read before the subject (P7).
+    def test_windows_install_test_change_follows_the_windows_only_list(self):
+        p = "hooks/test_install_windows.sh"
+        got = run([p], existing=[p])
+        globs = windows_globs(got)
+        self.assertIsNotNone(globs, f"ci-scope.sh emits no {WINDOWS_CONSTANT} output")
+        listed = any(fnmatch.fnmatchcase(p, g) for g in globs)
+        self.assertFlags(got, want_true=["shell_macos", "code"])
+        for flag in WINDOWS_SET:
+            with self.subTest(flag=flag):
+                self.assertEqual(got.get(flag), "true" if listed else "false",
+                                 f"{p} is {'listed' if listed else 'not listed'} in {WINDOWS_CONSTANT} but sets {flag}={got.get(flag)!r}")
 
-    def test_silent_undo_checker_change_turns_on_the_merge_job(self):
-        self.assertFlags(run(["lint/check_silent_undo.py"]), want_true=["checks_windows_merge"])
+    # Named failure: the silent-undo checker starts a Windows merge job on a pull_request that names no Windows-only path (F1).
+    def test_silent_undo_checker_change_turns_on_code_and_no_windows_merge_job(self):
+        self.assertFlags(run(["lint/check_silent_undo.py"]), want_true=["code"], want_false=["checks_windows_merge"])
 
     def test_session_start_change_turns_off_the_windows_rest_job(self):
         # hooks/session_start.sh is not a Windows-only path (R62/R63), so the Windows rest job does not start for it.
         self.assertFlags(run(["hooks/session_start.sh"]), want_false=["checks_windows_rest"])
 
-    # A new file under a landed dir sets checks_windows, except under lint/: a new non-Windows lint file sets no Windows
-    # flag (R62/R63). test_scanner_traps and the lint/test_x.py snapshot row pin the same rule.
+    # A new file under a landed dir sets shell_macos and guard, and no Windows flag: the landed-dir rule starts no Windows job
+    # for a path the list does not name (F1). Its lint/ control stays as it was.
     def test_a_new_file_in_a_landed_dir_turns_on_the_install_suite(self):
         for p in ("agents/new.md", "skills/new/SKILL.md", "output-styles/new.md"):
             with self.subTest(path=p):
-                self.assertFlags(run([p]), want_true=["checks_windows", "shell_macos"])
+                self.assertFlags(run([p]), want_true=["shell_macos"], want_false=WINDOWS_SET)
         with self.subTest(path="lint/new.py"):
             self.assertFlags(run(["lint/new.py"]), want_true=["shell_macos"], want_false=["checks_windows"])
         # Named failure: review
@@ -358,18 +376,18 @@ class Scope(unittest.TestCase):
     def test_a_new_file_in_hooks_or_janitor_turns_on_the_install_suite(self):
         # hooks/new.py is not a Windows-only path (R62/R63): it starts the shell job alone.
         self.assertFlags(run(["hooks/new.py"]), want_true=["shell_macos"], want_false=["checks_windows"])
-        self.assertFlags(run(["janitor/new.py"]), want_true=["checks_windows", "shell_macos"])
+        self.assertFlags(run(["janitor/new.py"]), want_true=["shell_macos"], want_false=WINDOWS_SET)
 
     def test_the_landed_dirs_come_from_landed_dirs_txt(self):
-        # A made-up dir in the scratch repo's landed-dirs.txt: the script reads the file, it does not copy the list.
-        self.assertFlags(run(["zz-made-up/new.md"], landed=["zz-made-up"]), want_true=["checks_windows", "shell_macos"])
+        # A made-up dir in the scratch repo's landed-dirs.txt: the script reads the file, it does not copy the list. No Windows flag (F1).
+        self.assertFlags(run(["zz-made-up/new.md"], landed=["zz-made-up"]), want_true=["shell_macos"], want_false=WINDOWS_SET)
 
     def test_an_empty_or_comment_only_landed_list_turns_everything_on(self):
         for landed in ([], ["# only a comment", ""]):
             self.assertFlags(run(["docs/new.md"], landed=landed), want_true=ALL)
 
     def test_a_trailing_slash_in_landed_dirs_is_read_as_the_dir(self):
-        self.assertFlags(run(["zz-made-up/new.md"], landed=["zz-made-up/"]), want_true=["checks_windows", "shell_macos"])
+        self.assertFlags(run(["zz-made-up/new.md"], landed=["zz-made-up/"]), want_true=["shell_macos"], want_false=WINDOWS_SET)
 
     # Cut F: checks-windows-guard and checks-mutate-guard skip on the `guard` flag. The slice selector
     # (GUARD_TESTS) is read from hooks/test_guard.py, so an edit to that file must turn `guard` on,
@@ -385,15 +403,16 @@ class Scope(unittest.TestCase):
     def test_guard_log_reader_change_selects_the_jobs_of_the_transcript_reader(self):
         reader = self.true_set(run(["lint/guard_log_report.py"]))
         self.assertEqual(reader, self.true_set(run(["lint/_transcript.py"])))
-        self.assertTrue({"checks_windows_rest", "checks_macos", "code", "guard"} <= reader, reader)
+        self.assertTrue({"checks_macos", "code", "guard"} <= reader, reader)
+        self.assertEqual(reader & set(WINDOWS_SET), set(), f"the transcript reader starts a Windows job (F1): {reader}")
 
     # lint/_clause.py: report_guard.py imports it, and test_clause.py is its suite. It sits in the hooks/* arm of ci-scope.sh,
-    # so an edit turns on that arm's jobs and no merge job (only the transcript reader and guard_log_report.py reach that one).
+    # so an edit turns on that arm's non-Windows jobs and no merge job (only the transcript reader and guard_log_report.py reach that one).
     # An edit, not a new file: a new file under lint/ also turns on the landed-dir jobs, which is another arm's rule.
     def test_clause_parser_change_selects_the_jobs_the_arm_names(self):
         self.assertEqual(self.true_set(run(["lint/_clause.py"], existing=["lint/_clause.py"])),
-                         {"checks_windows_rest", "checks_macos", "code", "guard", "shoot"},
-                         "lint/_clause.py must select the hooks/* arm's jobs and no merge job")
+                         {"checks_macos", "code", "guard", "shoot"},
+                         "lint/_clause.py must select the hooks/* arm's non-Windows jobs and no merge job")
 
     # Guard family: hooks/guard_<anything>.py is split out of hooks/guard.py. Each sibling must set
     # exactly the flags guard.py sets, as a new file and as an edit. Today the generic hooks/* rule
@@ -458,11 +477,11 @@ class Scope(unittest.TestCase):
         self.assertEqual(self.true_set(run([self.SECTION_FILE], existing=[self.SECTION_FILE])), want,
                          "an edited section file sets flags other than hooks/test_guard.py's")
 
-    # Mod and map-skill tests run as a step of the checks, checks-windows and checks-macos jobs, run only on the
-    # `mods` flag. A job runs on its own flag, so a path that turns on `mods` must turn on checks_windows and
-    # checks_macos too, or a mod-only pull request starts neither job and the step never runs there.
+    # Mod and map-skill tests run as a step of the checks and checks-macos jobs, run only on the `mods` flag. A job runs on its
+    # own flag, so a path that turns on `mods` must turn on checks_macos too, or a mod-only pull request starts no job and the
+    # step never runs there. The Windows mod step follows the Windows-only list, so no mod path turns it on (F1).
     # `mods` is in ALL, so every fail-safe case in the Scope class carries the mods check.
-    MOD_JOBS = ["checks_windows", "checks_macos"]
+    MOD_JOBS = ["checks_macos"]
     def test_a_mods_path_sets_the_mods_flag(self):
         for p in ("mods/plain-diff/check.mjs", "mods/session-board/session-board.test.mjs"):
             with self.subTest(path=p):
@@ -505,21 +524,19 @@ class Scope(unittest.TestCase):
     # `.gitignore` is an arm too: skills/plain-english-map/tests/typescript-home.test.mjs reads it, so a .gitignore-only
     # pull request must run the CI step. It keeps `code`, which its lint suites read. The mods/ arm is not here: its
     # Windows job is gone (test_a_mods_only_diff_sets_the_mod_jobs_code_and_no_other_flag).
-    # Each arm's value: whether it starts checks_windows. A lint test file is not a Windows-only path (R62/R63), so it starts the
-    # CI step and the macOS job alone.
-    MOD_ARMS = {"lint/test_scanner_traps.mjs": False, "skills/plain-english-map/README.md": True, ".gitignore": True}
+    # None of these paths is on the Windows-only list, so none starts a Windows job (F1). A lint test file is not a Windows-only path
+    # either, so it starts the CI step and the macOS job alone.
+    MOD_ARMS = ["lint/test_scanner_traps.mjs", "skills/plain-english-map/README.md", ".gitignore"]
 
     def test_each_mods_arm_starts_its_own_mod_jobs(self):
-        for p, windows in self.MOD_ARMS.items():
-            jobs = ["checks_macos"] + (["checks_windows"] if windows else [])
+        for p in self.MOD_ARMS:
+            code_arm = p.startswith("lint/") or p == ".gitignore"
             with self.subTest(path=p, edit=True):
-                code_arm = p.startswith("lint/") or p == ".gitignore"
-                want = {"mods", "checks_macos"} | ({"checks_windows"} if windows else set()) | ({"code"} if code_arm else set())
+                want = {"mods", "checks_macos"} | ({"code"} if code_arm else set())
                 self.assertEqual(self.true_set(run([p], existing=[p])), want,
                                  msg=f"{p}: the mods arm must start the CI step and its mod jobs, and keep code")
             with self.subTest(path=p, edit=False):
-                off = ["checks_windows_merge", "checks_windows_rest", "pointer_windows"] + ([] if windows else ["checks_windows"])
-                self.assertFlags(run([p]), want_true=["mods"] + jobs, want_false=off)
+                self.assertFlags(run([p]), want_true=["mods", "checks_macos"], want_false=WINDOWS_SET)
 
     # Any path under the map skill turns `mods` on, .md files included, as a new file or an edit.
     # The checks job runs the skill's tests only when `mods` is on. Those tests read SKILL.md and
@@ -533,23 +550,21 @@ class Scope(unittest.TestCase):
             for existing in ((), (p,)):
                 with self.subTest(path=p, edit=bool(existing)):
                     got = run([p], existing=existing)
-                    self.assertFlags(got, want_true=["mods"] + self.MOD_JOBS)
+                    self.assertFlags(got, want_true=["mods"] + self.MOD_JOBS, want_false=WINDOWS_SET)
 
-    # Control: the fix must not narrow the skill's non-.md paths. They stay on the fail-safe arm: every non-Windows flag
-    # and no Windows flag (R62/R63). A new file under skills/ also sets checks_windows by the landed-dir rule. That flag
-    # is pinned once, in test_a_new_file_in_a_landed_dir_turns_on_the_install_suite, so the new-file row leaves it out.
+    # Control: the skill's non-.md paths stay on the fail-safe arm: every non-Windows flag and no Windows flag (R62/R63, F1).
+    # A new file under skills/ also gets the landed-dir rule, which starts no Windows flag either (F1).
     def test_a_map_skill_script_change_still_turns_every_non_windows_flag_on(self):
         p = self.MAP_SKILL + "scripts/map-check.mjs"
         for existing in ((), (p,)):
             with self.subTest(edit=bool(existing)):
-                off = WINDOWS_SET if existing else [n for n in WINDOWS_SET if n != "checks_windows"]
-                self.assertFlags(run([p], existing=existing), want_true=ALL_NO_WINDOWS, want_false=off)
+                self.assertFlags(run([p], existing=existing), want_true=ALL_NO_WINDOWS, want_false=WINDOWS_SET)
 
-    # Control: another skill's .md keeps today's flags. The new rule must name the map skill only.
-    def test_another_skills_md_keeps_its_current_flags(self):
+    # Control: another skill's .md keeps its other flags and sets no Windows flag. The rule must name the map skill only (F1).
+    def test_another_skills_md_sets_no_windows_flag(self):
         p = "skills/ci-hygiene/SKILL.md"
         self.assertFlags(run([p], existing=[p]), want_false=ALL)
-        self.assertEqual(self.true_set(run([p])), {"checks_windows", "shell_macos", "code", "guard"})
+        self.assertEqual(self.true_set(run([p])), {"shell_macos", "code", "guard"})
 
     # The rm shim suite also runs in checks-macos: BSD rm and the /var symlink change what the shim reads,
     # and a Linux pass proves neither. ci-scope.sh maps bin/rm and the suite to that job ahead of
@@ -1107,11 +1122,7 @@ class RecordsOnlyEveryJob(unittest.TestCase):
     )
 
     def workflow(self):
-        path, why = job_workflow(os.path.join(HERE, ".."), "checks")
-        if why:
-            self.fail(why)
-        with open(path, encoding="utf-8") as f:
-            return f.read()
+        return checks_workflow_text()
 
     # Named failure: a job starts on a records-only run. One subtest per job and event, so each job reports its own if:.
     # The delta is asserted before the jobs (P7).
@@ -1813,6 +1824,159 @@ class WindowsOnlyPaths(unittest.TestCase):
                 for flag in WINDOWS_SET:
                     with self.subTest(glob=glob, flag=flag):
                         self.assertEqual(got.get(flag), "true", f"{path} matches {glob} and sets {flag}={got.get(flag)!r}, want true")
+
+
+# ---- F1 (goal v11), by path. A pull_request whose diff names no Windows-only path starts no Windows job. The flag cases read the
+# list from the script's output, and the job cases read the windows-latest jobs of the checks workflow. Each probe below is named
+# by the ci-scope.sh arm that sets a Windows flag for it, by the arm's pattern and not its line.
+
+def checks_workflow_text():
+    """The text of this repo's checks workflow, read as RecordsOnlyEveryJob reads it."""
+    path, why = job_workflow(os.path.join(HERE, ".."), "checks")
+    if why:
+        raise AssertionError(why)
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def windows_jobs_on_a_pull_request(text, outs):
+    """The windows-latest jobs of the checks workflow that start on a ready pull_request, given the scope outputs `outs`."""
+    windows = [name for name in job_names(text) if "runs-on: windows-latest" in (job_block(text, name) or "")]
+    return sorted(set(windows) & set(running_jobs(text, outs, "pull_request")))
+
+
+def tracked_paths():
+    """The tracked paths of this repo, as the index lists them."""
+    return git(os.path.join(HERE, ".."), "ls-files").split("\n")
+
+
+def landed_dirs_for_new_files():
+    """The landed dirs (landed-dirs.txt) whose new files the landed-dir rule reads: all but hooks/ and lint/, which that rule skips."""
+    with open(os.path.join(HERE, "..", "landed-dirs.txt"), encoding="utf-8") as f:
+        dirs = [line.split("#", 1)[0].strip().rstrip("/") for line in f]
+    return [d for d in dirs if d and d.split("/", 1)[0] not in ("hooks", "lint")]
+
+
+# Tracked paths outside the Windows-only list, each with the arm of ci-scope.sh that sets a Windows flag for it. The controls below
+# them name the arms that set none. A control can still start a Windows job through the sweep flag (checks.yml, the job-level if
+# of checks-windows-sweep): the job cases report that, and the flag cases do not.
+PATH_PROBES = {
+    ".github/workflows/checks.yml": "the fail-safe arm: the workflow, the scope script, green-head.sh and .gitattributes",
+    ".github/scripts/ci-scope.sh": "the same fail-safe arm",
+    "landed-dirs.txt": "the landed-dirs list arm",
+    "hooks/config_watch.py": "the hooks/* arm",
+    "janitor/sweep.py": "the janitor/* arm",
+    "bin/verdict": "the bin/verdict arm",
+    "testing/tracked_tree.py": "the fixture-helper arm that every suite loads",
+    "lint/_test_git.py": "the signing-helper arm that every suite loads",
+    "lint/layout.json": "the layout arm",
+    "lint/check_silent_undo.py": "the silent-undo checker arm",
+    "merge/test_merge.py": "the merge/* arm",
+    "actions/stamp/stamp.mjs": "the actions/stamp/* arm",
+    ".gitignore": "the .gitignore arm",
+    "skills/plain-english-map/SKILL.md": "the map skill .md arm",
+    "merge/merge.py": "control: the merge tool arm (no Windows flag)",
+    "install.sh": "control: the install arm (no Windows flag)",
+    "hooks/session_start.sh": "control: the session-start arm (no Windows flag)",
+    "lint/test_ci_scope.py": "control: the lint/* arm (no Windows flag)",
+    "bin/ci-job": "control: the ci-job arm (no Windows flag)",
+    "README.md": "control: a markdown file (no Windows flag)",
+    "mods/plain-diff/check.mjs": "control: the mods arm (no Windows flag)",
+    "hooks/guard.py": "the guard arm: no Windows flag, but the sweep flag it sets starts checks-windows-sweep",
+    "settings.json": "the settings arm: no Windows flag, but the sweep flag it sets starts checks-windows-sweep",
+}
+NEW_FILE_TAIL = "zz-probe/new-file.txt"  # a new file under each landed dir (landed_dirs_for_new_files), the landed-dir rule's probe
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class WindowsOnlyPathsWholeTree(unittest.TestCase):
+    """F1 (goal v11): a pull_request whose diff names no Windows-only path sets no Windows flag and starts no Windows job."""
+
+    def windows_only_globs(self):
+        globs = windows_globs(run([WINDOWS_ONLY_EXAMPLE]))
+        self.assertIsNotNone(globs, f"ci-scope.sh emits no {WINDOWS_CONSTANT} output")
+        self.assertTrue(globs, f"ci-scope.sh emits an empty {WINDOWS_CONSTANT}")
+        return globs
+
+    @staticmethod
+    def outside(path, globs):
+        return not any(fnmatch.fnmatchcase(path, g) for g in globs)
+
+    @staticmethod
+    def windows_flags(got):
+        return [flag for flag in WINDOWS_SET if got.get(flag) == "true"]
+
+    # Named failure: a probe sets a Windows flag. Its subtest names the path and the arm that sets it.
+    def test_a_modified_path_outside_the_list_sets_no_windows_flag(self):
+        globs = self.windows_only_globs()
+        tracked = tracked_paths()
+        for path, arm in PATH_PROBES.items():
+            with self.subTest(path=path, arm=arm):
+                # Scope before subject (P7): the probe is a tracked path, and the Windows-only list does not name it.
+                self.assertIn(path, tracked, f"{path} is not a tracked path of this repo")
+                self.assertTrue(self.outside(path, globs), f"{path} matches a Windows-only glob, so it is no non-Windows probe")
+                got = run([path], existing=[path])
+                self.assertEqual(self.windows_flags(got), [], f"{path} ({arm}) sets a Windows flag: {got}")
+
+    # Named failure: a probe starts a Windows job on a ready pull_request. Its subtest names the path, the arm and the jobs.
+    def test_a_modified_path_outside_the_list_starts_no_windows_job(self):
+        globs = self.windows_only_globs()
+        tracked = tracked_paths()
+        text = checks_workflow_text()
+        for path, arm in PATH_PROBES.items():
+            with self.subTest(path=path, arm=arm):
+                self.assertIn(path, tracked, f"{path} is not a tracked path of this repo")
+                self.assertTrue(self.outside(path, globs), f"{path} matches a Windows-only glob, so it is no non-Windows probe")
+                got = run([path], existing=[path])
+                jobs = windows_jobs_on_a_pull_request(text, got)
+                self.assertEqual(jobs, [], f"{path} ({arm}) starts Windows jobs on a ready pull_request: {jobs}")
+
+    # Named failure: a new file under a landed dir sets a Windows flag. The landed dirs come from landed-dirs.txt, one subtest each.
+    def test_a_new_file_under_a_landed_dir_outside_the_list_sets_no_windows_flag(self):
+        globs = self.windows_only_globs()
+        dirs = landed_dirs_for_new_files()
+        self.assertIn("agents", dirs, f"landed-dirs.txt names no agents dir, so the new-file probes are empty: {dirs}")
+        for d in dirs:
+            path = f"{d}/{NEW_FILE_TAIL}"
+            with self.subTest(dir=d):
+                self.assertTrue(self.outside(path, globs), f"{path} matches a Windows-only glob, so it is no non-Windows probe")
+                got = run([path])
+                self.assertEqual(self.windows_flags(got), [], f"a new file {path} sets a Windows flag: {got}")
+
+    # Named failure: some tracked path outside the list sets a Windows flag or starts a Windows job. One run covers the whole tree,
+    # since each flag is an OR over the paths. Only when that run shows one is each top-level folder run alone, and its subtest
+    # names the folder and the kind of cause (flag or job).
+    def test_every_tracked_path_outside_the_list_sets_no_windows_flag_or_job(self):
+        globs = self.windows_only_globs()
+        text = checks_workflow_text()
+        outside = [p for p in tracked_paths() if self.outside(p, globs)]
+        # Scope before subject (P7): the sample is most of the tree, and the clear non-Windows paths are in it.
+        self.assertGreater(len(outside), 1000, f"only {len(outside)} tracked paths lie outside the list")
+        for path in ("hooks/guard.py", "lint/layout.py", "merge/merge.py", "settings.json", "install.sh"):
+            self.assertIn(path, outside, f"{path} is named by the list, so it is no sample of a non-Windows path")
+        whole = run(outside, existing=outside)
+        if not self.windows_flags(whole) and not windows_jobs_on_a_pull_request(text, whole):
+            return
+        folders = {}
+        for path in outside:
+            folders.setdefault(path.split("/", 1)[0], []).append(path)
+        for name, paths in sorted(folders.items()):
+            got = run(paths, existing=paths)
+            with self.subTest(folder=name, kind="flag"):
+                self.assertEqual(self.windows_flags(got), [], f"folder {name} sets a Windows flag: {got}")
+            with self.subTest(folder=name, kind="job"):
+                jobs = windows_jobs_on_a_pull_request(text, got)
+                self.assertEqual(jobs, [], f"folder {name} starts Windows jobs on a ready pull_request: {jobs}")
+
+    # Control, green on the old code: the Windows-only list names a path, and the set it sets is the whole Windows set (F1).
+    def test_every_tracked_windows_only_path_sets_the_windows_set(self):
+        globs = self.windows_only_globs()
+        inside = [p for p in tracked_paths() if not self.outside(p, globs)]
+        self.assertIn("install.ps1", inside, "install.ps1 is named by the list, so it must be among the Windows-only paths")
+        got = run(inside, existing=inside)
+        for flag in WINDOWS_SET:
+            with self.subTest(flag=flag):
+                self.assertEqual(got.get(flag), "true", f"the Windows-only paths {inside[:3]}... leave {flag}={got.get(flag)!r}")
 
 
 if __name__ == "__main__":
