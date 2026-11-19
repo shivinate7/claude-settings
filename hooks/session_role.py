@@ -2,8 +2,8 @@
 """The launcher's role file: the one home of how a local session's tier is written and read (decision session-tiers).
 
 bin/claude-role starts `claude` with CS_SESSION_ROLE set. The session-start hook runs `session_role.py write`, which records
-that role in <config dir>/state/session-roles/<session id>.json as {"session", "role", "repo"}, rewriting it at every start. A resume,
-compact or clear start with the variable unset keeps the file (owner pick 981 a). The guard and the merge tool read
+that role in <config dir>/state/session-roles/<session id>.json as {"session", "role", "repo"}, rewriting it at every start. A resume or
+compact start with the variable unset keeps the file (owner pick 981 a); a clear start gets a new session id, so it has no file to keep. The guard and the merge tool read
 it with `own_record` / `own_role` where a cloud session reads its get_session tags. Claude's own writes into the folder are refused,
 as far as the guards reach: the configuration rule and settings.json's Edit deny refuse a write under the config directory.
 
@@ -23,7 +23,7 @@ from guard_shared_tree import SESSION_ID_RE  # noqa: E402  the one home of the s
 
 SESSION_ROLES = ("coordinator", "triage", "batch-runner")  # what bin/claude-role may start; a lane is never launched
 STALE_SECONDS = 7 * 24 * 3600  # a role file this old belongs to a session that ended; `write` removes it
-KEEP_SOURCES = ("resume", "compact", "clear")  # starts of a session that goes on: the variable is unset there, and its file stays
+KEEP_SOURCES = ("resume", "compact")  # starts of a session that goes on under its own id: the variable is unset there, and its file stays
 
 
 def roles_dir():
@@ -89,6 +89,15 @@ def local_judgement(sid):
     return True, record
 
 
+def all_records():
+    """Every valid role file of the folder, as own_record reads it: a list of dicts, [] when the folder is unreadable. One directory listing."""
+    try:
+        names = [entry.stem for entry in roles_dir().iterdir() if entry.suffix == ".json"]
+    except OSError:
+        return []
+    return [record for record in (own_record(name) for name in names) if record]
+
+
 def prune_stale(now=None):
     """Remove every file in the role folder whose mtime is older than STALE_SECONDS. Any failure is skipped: a file that stays is only clutter.
     Cost: one directory listing and one stat per entry, at most one delete per stale file, once per session start (inside `write`)."""
@@ -116,8 +125,8 @@ def _repo_of(cwd):
 def write(session_id, cwd, role, source=""):
     """Record `role` for session `session_id`, or remove that session's file when `role` is empty or outside SESSION_ROLES (a stale
     file must not outlive a role the launcher no longer names). The exception: an empty `role` on a start whose `source` is in
-    KEEP_SOURCES keeps the file and refreshes its mtime, so the prune never takes a live session's file. Returns True when the file
-    now says what was asked. An id outside the id shape writes nothing. Each call first prunes files older than STALE_SECONDS
+    KEEP_SOURCES keeps the file and refreshes its mtime, so the prune does not take it at this start (a session that runs 7 days with no
+    start, resume or compact can still lose it). Returns True when the file now says what was asked. An id outside the id shape writes nothing. Each call first prunes files older than STALE_SECONDS
     (prune_stale)."""
     if not valid_id(session_id):
         return False

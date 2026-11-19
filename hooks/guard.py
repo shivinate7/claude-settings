@@ -5340,7 +5340,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 2a1. A session that holds a role and starts claude: the child inherits the role (rule self-role-claim). It runs before the
     # detached-launch rule so `Start-Process claude` names its own reason. Cost: one environment read per call.
-    matched = self_role_child_hit(stripped)
+    matched = self_role_child_hit(stripped, cwd, transcript)
     if matched:
         refuse(tool, "deny", "self-role-claim", SELF_ROLE_CHILD_REASON, matched)
 
