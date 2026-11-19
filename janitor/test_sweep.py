@@ -10230,9 +10230,10 @@ class LeftoverTempFolderTests(unittest.TestCase):
         os.makedirs(self.test_temp)
         make_repo(self.repo, {"README.md": "fixture\n"})
 
-    def live_pid(self):
-        """A pid whose process this case starts and stops, so it stays alive for the whole run."""
-        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
+    def live_pid(self, cwd=None):
+        """A pid whose process this case starts and stops, so it stays alive for the whole run. CWD, when
+        given, is the child's working folder."""
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"], cwd=cwd)
         self.addCleanup(self.stop_child, child)
         return child.pid
 
@@ -10344,6 +10345,25 @@ class LeftoverTempFolderTests(unittest.TestCase):
         left = [os.path.basename(folder) for folder in folders if os.path.exists(folder)]
         self.assertFalse(left, "--confirm left %d of %d dead-owner folders\n%s"
                          % (len(left), len(folders), self.report(proc)))
+
+    def test_confirm_keeps_a_dead_owner_folder_with_a_live_process_inside(self):
+        """A process running inside a dead owner's folder keeps the folder: removing it pulls the
+        directory out from under that process. The process's cwd sits one level down, so a check that
+        only compares the folder itself with the cwd misses it."""
+        if sys.platform.startswith("win"):
+            self.skipTest("the cwd read this case proves is POSIX-only here; Windows reads it as None")
+        folder = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        inner = os.path.join(folder, "work")
+        control = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        pid = self.live_pid(cwd=inner)
+        read = sweep.process_cwd(pid)
+        self.assertEqual(os.path.realpath(read or ""), os.path.realpath(inner),
+                         "control: the live child's cwd reads as %r, not inside the folder, so the keep "
+                         "below proves nothing" % (read,))
+        proc = self.run_sweep("--confirm")
+        self.assertGone(control, "control: --confirm did not remove a dead-owner folder with no process in it",
+                        proc)
+        self.assertKept(folder, "--confirm removed a dead-owner folder while a live process ran inside it", proc)
 
     def test_the_child_sweep_gets_the_fixture_temp_root(self):
         """Green on purpose: the child's temp root is the fixture, so the cases above never reach /tmp."""
