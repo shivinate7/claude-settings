@@ -10464,6 +10464,25 @@ class LeftoverTempFolderTests(unittest.TestCase):
                                  "proves nothing", proc)
         self.assertKept(folder, "--confirm removed a dead-owner folder a live process holds a file open in", proc)
 
+    def test_confirm_skips_a_plain_file_named_as_a_dead_owner_folder(self):
+        """A plain file named like a dead owner's folder is not a folder, so the sweep skips it and prints no
+        FAILED line for it. Without the folder check the sweep tries to remove the file, and that fails."""
+        name = "mutate_guard_%d-%s" % (self.dead_pid, uuid.uuid4().hex[:8])
+        plain = os.path.join(self.temp, name)
+        write(plain, "not a folder\n")
+        stamp = self.now - self.OLD_HOURS * 3600
+        os.utime(plain, (stamp, stamp))
+        control = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        proc = self.run_sweep("--confirm")
+        self.assertIn("== leftover temp folders ==", proc.stdout,
+                      "scope: the run never reached the leftover temp-folder step\n%s" % self.report(proc))
+        self.assertGone(control, "control: --confirm did not remove a dead-owner folder, so the plain-file skip "
+                                 "proves nothing", proc)
+        failed = [line for line in proc.stdout.splitlines() if "FAILED" in line and name in line]
+        self.assertFalse(failed, "--confirm tried to remove the plain file %s\n  %s\n%s"
+                         % (plain, "\n  ".join(failed), self.report(proc)))
+        self.assertTrue(os.path.isfile(plain), "--confirm removed the plain file %s\n%s" % (plain, self.report(proc)))
+
     def test_confirm_keeps_a_pid_less_mutate_guard_name(self):
         """The older name `mutate_guard_<rand>` carries no owner pid, so no owner can be proven dead."""
         pidless = self.leftover(os.path.join(self.temp, "mutate_guard_%s" % uuid.uuid4().hex[:8]), self.OLD_HOURS)
