@@ -1,7 +1,7 @@
 # section 43503
 FAMILY = "handed-in-push"  # a push to a pull request's branch (roadmap step handed-in-push-needs-record; decision pr-review-record)
 
-# A Bash `git push` to the branch of an open pull request is refused when the pull request's newest review record is stale
+# A Bash `git push` to the branch of an open pull request is refused when the pull request's newest review log is stale
 # against the live head: the record is for an older head, and no clean merge of main and no records-page commit of the merge
 # tool carries it to the live head. The live head is the pull request's head on GitHub before the push, the head the lane
 # pushes from. A record for the live head (a FAIL round too) passes, so the fix push after a posted FAIL round is allowed.
@@ -50,12 +50,12 @@ HIP_GH_FEATURE = os.path.join(HIP_ROOT, "gh-feature")            # live B, on a 
 HIP_GH_FORK = os.path.join(HIP_ROOT, "gh-fork")                  # live B on feat, the head repo a fork, the record for A: stale
 HIP_GH_BROKEN = os.path.join(HIP_ROOT, "gh-broken")              # every pull request read answers no JSON: no lookup can run
 HIP_GH_MAIN = os.path.join(HIP_ROOT, "gh-main")                  # live B, on a branch named main, the record for A: stale
-HIP_STALE_CARRIES = ("record",)     # a stale refusal names the review record, the thing to post
+HIP_STALE_CARRIES = ("record",)     # a stale refusal names the review log, the thing to post
 HIP_UNKNOWN_CARRIES = ("unknown",)  # an unread refusal says the read is unknown
 HIP_UNKNOWN_LACKS = ("no record", "missing")  # ...and never reads as a record that is absent
 
 sys.path.append(os.path.join(REPO, "merge"))  # append: no module shadows one the guard suite imports
-import merge as merge_tool  # noqa: E402  the review record's one writer (review_body) and the records-page subject (PAGE_SUBJECT)
+import merge as merge_tool  # noqa: E402  the review log's one writer (review_body) and the records-page subject (PAGE_SUBJECT)
 
 
 def _hip_env(fake):
@@ -106,12 +106,12 @@ def _hip_comment(i, body):
 
 
 def _hip_record(i, head, rounds):
-    """An issue comment that carries a review record for `head`, written by the merge tool's own writer."""
+    """An issue comment that carries a review log for `head`, written by the merge tool's own writer."""
     return _hip_comment(i, merge_tool.review_body(HIP_PR, head, "normal", "no", rounds, "not owed"))
 
 
 def _hip_malformed(i, head, rounds):
-    """An issue comment that opens as a review record and does not parse: its Head line holds 12 characters, not 40.
+    """An issue comment that opens as a review log and does not parse: its Head line holds 12 characters, not 40.
     The writer's own text, changed in one field, so the only fault is the one the case names."""
     body = merge_tool.review_body(HIP_PR, head, "normal", "no", rounds, "not owed")
     return _hip_comment(i, body.replace("Head: " + head, "Head: " + head[:12], 1))
@@ -196,15 +196,15 @@ def hip_push(name, expected, cwd, fake, dest="feat", **kw):
 
 
 # Refused: the newest record is for an older head, so the record of the live head is unposted.
-hip_push("handed-in-push: a push over a review record for an older head is refused", "deny", HIP_CLONE_B, HIP_GH_STALE,
+hip_push("handed-in-push: a push over a review log for an older head is refused", "deny", HIP_CLONE_B, HIP_GH_STALE,
          carries=HIP_STALE_CARRIES, lacks=HIP_UNKNOWN_CARRIES)
 # Refused: the fix push after a FAIL round whose record is for an older head. The reviewed head A holds no record.
 hip_push("handed-in-push: a fix push over an unposted FAIL round is refused", "deny", HIP_CLONE_A, HIP_GH_FAIL_OLD,
          carries=HIP_STALE_CARRIES, lacks=HIP_UNKNOWN_CARRIES)
 # Allowed: each control changes one thing from a refused case.
-hip_push("handed-in-push: a push with no review record on the pull request is allowed (a first round, option a's known gap)",
+hip_push("handed-in-push: a push with no review log on the pull request is allowed (a first round, option a's known gap)",
          "allow", HIP_CLONE_B, HIP_GH_FIRST)
-hip_push("handed-in-push: a push over the review record of the live head is allowed", "allow", HIP_CLONE_B, HIP_GH_LIVE)
+hip_push("handed-in-push: a push over the review log of the live head is allowed", "allow", HIP_CLONE_B, HIP_GH_LIVE)
 hip_push("handed-in-push: a fix push over a posted FAIL round is allowed, the record being for the live head", "allow",
          HIP_CLONE_A, HIP_GH_FAIL_LIVE)
 hip_push("handed-in-push: a clean merge of main into the reviewed head keeps the record, so the push is allowed", "allow",
