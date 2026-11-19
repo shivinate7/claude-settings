@@ -10239,6 +10239,15 @@ os.kill = _seam_kill
 sys.exit(sweep.main(sys.argv[1:]))
 """
 
+# A child that holds the file at argv[1] open and then waits. It prints `ready` once the file is open.
+HOLD_CHILD = """\
+import sys
+import time
+handle = open(sys.argv[1], "rb")  # held open for the whole run
+print("ready", flush=True)
+time.sleep(600)
+"""
+
 
 class LeftoverTempFolderTests(unittest.TestCase):
     OLD_HOURS = 2  # over the one-hour limit, with a wide margin
@@ -10256,17 +10265,27 @@ class LeftoverTempFolderTests(unittest.TestCase):
         os.makedirs(self.test_temp)
         make_repo(self.repo, {"README.md": "fixture\n"})
 
-    def live_pid(self, cwd=None):
+    def live_pid(self, cwd=None, hold=None):
         """A pid whose process this case starts and stops, so it stays alive for the whole run. CWD, when
-        given, is the child's working folder."""
-        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"], cwd=cwd)
+        given, is the child's working folder. HOLD, when given, is a file the child keeps open: this returns
+        only after the child reports it holds the file."""
+        if hold is None:
+            child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"], cwd=cwd)
+        else:
+            child = subprocess.Popen([sys.executable, "-c", HOLD_CHILD, hold], cwd=cwd,
+                                     stdout=subprocess.PIPE, text=True)
         self.addCleanup(self.stop_child, child)
+        if hold is not None:
+            ready = child.stdout.readline()  # "" at end of file, when the child died before it opened HOLD
+            self.assertEqual(ready.strip(), "ready", "the child did not open %s\n  stdout: %r" % (hold, ready))
         return child.pid
 
     @staticmethod
     def stop_child(child):
         child.kill()
         child.wait(timeout=30)
+        if child.stdout is not None:
+            child.stdout.close()
 
     def leftover(self, folder, hours):
         """A folder with one nested file, every mtime `hours` old. A killed run leaves this shape."""
@@ -10418,6 +10437,32 @@ class LeftoverTempFolderTests(unittest.TestCase):
                                  "keep proves nothing", proc)
         self.assertKept(held, "--confirm listed through a symlinked run-folder parent and removed a folder outside "
                               "the temp root", proc)
+
+    def test_confirm_keeps_a_dead_owner_folder_a_live_process_holds_a_file_open_in(self):
+        """A live process with an open file inside a dead owner's folder keeps the folder, though its cwd is
+        outside it. The cwd read cannot see it, so only the open-file read can keep the folder."""
+        if sys.platform.startswith("win"):
+            self.skipTest("Windows reads no open files here: its holders read is cwd-only")
+        folder = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        held = os.path.join(folder, "work", "scratch.txt")
+        control = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        pid = self.live_pid(cwd=self.base, hold=held)
+        # Scope first: the holder's cwd is outside the folder, and the kernel lists the open file.
+        read = sweep.process_cwd(pid)
+        self.assertEqual(os.path.realpath(read or ""), os.path.realpath(self.base),
+                         "control: the holder's cwd reads as %r, not the case's base, so the keep below proves "
+                         "nothing" % (read,))
+        inside, _unreadable = sweep.processes_in(folder)
+        self.assertNotIn(pid, inside or [], "control: the holder's cwd reads inside the folder, so the keep below "
+                                            "proves nothing about its open file")
+        if os.path.isdir("/proc/%d/fd" % pid):  # Linux lists a process's open files here
+            links = [os.readlink(os.path.join("/proc/%d/fd" % pid, fd)) for fd in os.listdir("/proc/%d/fd" % pid)]
+            self.assertIn(os.path.realpath(held), [os.path.realpath(link) for link in links],
+                          "control: the holder does not list the file open, so the keep below proves nothing")
+        proc = self.run_sweep("--confirm")
+        self.assertGone(control, "control: --confirm did not remove a dead-owner folder, so the open-file keep "
+                                 "proves nothing", proc)
+        self.assertKept(folder, "--confirm removed a dead-owner folder a live process holds a file open in", proc)
 
     def test_confirm_keeps_a_pid_less_mutate_guard_name(self):
         """The older name `mutate_guard_<rand>` carries no owner pid, so no owner can be proven dead."""
