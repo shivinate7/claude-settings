@@ -35,7 +35,7 @@ set_override_veto and session_home_keep):
   compaction-audit     deny. After compaction, once the handoff is read, a call from the main session
                        until it spawns one agent (Agent or Task) whose brief's first non-blank line
                        starts with `Audit:`. That spawn clears the audit flag only once it has passed every
-                       later rule (main() clears it after judge() returns); a refused, asked or
+                       later rule (main() clears it after judge() returns, or fails open on a crash); a refused, asked or
                        override-lifted spawn clears nothing. The reason names the remedy. A payload with `agent_id` passes and
                        clears nothing. An override lifts it and keeps the flag. A failed import allows.
                        While the handoff is unread, handoff-unread speaks first. Cost: one flag-file
@@ -7628,7 +7628,8 @@ def judge(payload) -> None:
         refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % unread, unread)
     # 0, compaction-audit. Once the handoff is read, no call runs from the main session until it sends the audit
     # step 3 of the handoff prompt asks for: a spawn whose brief opens with `Audit:`. The spawn passes this rule
-    # and is marked; main() clears the flag only once judge() returns, that is, after every later rule allowed it.
+    # and is marked in AUDIT_SPAWN_PASSED. main() clears the flag when judge() returns, or when a later rule crashes
+    # after the mark (main() fails open on a crash, so the spawn runs). A later refusal clears nothing.
     # A failed import allows.
     try:
         from reread_check import audit_pending, audit_spawn
@@ -8053,6 +8054,7 @@ def main() -> None:
         # Fail open, but never silently: a crash that hides a rule must show in the log.
         record(str(payload.get("tool_name", "")), "crash", "guard-crash",
                cap_safe(type(exc).__name__ + ": " + str(exc), 200))
+        audit_flag_clear_after_allow(payload)  # the failed-open spawn runs, so the audit it owed is sent
         sys.exit(0)  # fail open on a guard defect
     sys.exit(0)
 
