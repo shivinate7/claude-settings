@@ -821,6 +821,18 @@ chained_ask("per-file ask: cd lane && restore f.txt && cd lane && the same resto
             "cd " + slash(GITWT) + " && " + VCS + " restore f.txt && cd " + slash(GITWT) + " && "
             + VCS + " restore f.txt && echo done", cwd=NOGIT)
 
+# EACH SEGMENT IS JUDGED IN THE FOLDER THE SHELL IS IN WHEN IT RUNS. A cd after a destructive segment
+# moves nothing that ran before it. So the restore below runs in the shared checkout and must deny,
+# even though the call ends in a clean checkout.
+sh("per-file deny: cd shared, restore f.txt, then cd to a clean checkout; the restore runs in the shared tree",
+   "cd " + slash(SUBJDIRTY) + " && " + VCS + " restore f.txt && cd " + slash(SUBJCLEAN),
+   "deny", "shared-tree", cwd=NOGIT)
+# The mirror: the restore runs in the clean checkout, and only the cd after it enters the shared one.
+# Nothing the restore touches is uncommitted, so the call must not refuse.
+sh("per-file allow: cd to a clean checkout, restore f.txt, then cd shared; the restore runs in the clean tree",
+   "cd " + slash(SUBJCLEAN) + " && " + VCS + " restore f.txt && cd " + slash(SUBJDIRTY),
+   "allow", cwd=NOGIT)
+
 # HEREDOC BODY WITH A LONE QUOTE, THEN A CD. segment_roots (guard.py ~1228) loses sync when a heredoc
 # body holds a lone quote, and drops every later `cd`. The cwd is in no checkout, so the cd act does
 # not refuse the cd below; the shared-tree rule reads the folder it moves to, and the restore runs in
