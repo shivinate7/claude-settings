@@ -252,10 +252,20 @@ class PoolExclusive(LeaseCase):
                 self.set_load(one, five, "0.50")
                 self.assert_waits_then_refused("duo", needle)
 
-    def test_pro_is_refused_while_a_duo_is_held(self):
-        first, second = self.spawn(), self.spawn()
-        self.assertEqual(grant(self.take("duo", first.pid)), (0, "1"), "the duo take is not granted slot 1")
-        self.assertEqual(self.take("pro", second.pid).returncode, 1, "a pro take is granted while a duo is held")
+    def test_pro_is_granted_beside_a_held_duo_when_the_load_brake_allows(self):
+        # Ruling sims-load-brake-only (owner, 21:59 CST Nov 12): no pairing; only the load brake limits a grant.
+        holder, pro = self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the duo take is not granted slot 1")
+        self.assertEqual(grant(self.take("pro", pro.pid)), (0, "pro"),
+                         "a pro take beside the held duo is not granted pro at a load the brake allows")
+
+    def test_pro_beside_a_held_duo_is_refused_only_when_the_load_brake_refuses(self):
+        holder = self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the duo take is not granted slot 1")
+        for one, five, needle in (("0.50", "100.00", "100"), ("60.00", "0.50", "60")):
+            with self.subTest(one=one, five=five):
+                self.set_load(one, five, "0.50")
+                self.assert_waits_then_refused("pro", needle)
 
 
 class Queue(LeaseCase):
@@ -314,9 +324,11 @@ class Queue(LeaseCase):
     def test_a_timed_out_take_leaves_the_queue(self):
         holder, head, later = self.spawn(), self.spawn(), self.spawn()
         self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the first duo take is not granted slot 1")
+        self.set_load("0.50", "100.00", "0.50")
         r = self.take("pro", head.pid, wait=1)
-        self.assertEqual(r.returncode, 1, "a pro take with a duo held is not refused")
+        self.assertEqual(r.returncode, 1, "a pro take at a 5-minute load of 100 is not refused")
         self.assertFalse(mentions(self.status().stdout, head.pid), "the timed-out pro take is still on the queue")
+        self.set_load("0.50", "0.50", "0.50")
         self.assertEqual(grant(self.take("duo", later.pid)), (0, "2"),
                          "a timed-out waiter still blocks the next duo take")
 
