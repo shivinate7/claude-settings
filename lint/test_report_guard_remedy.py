@@ -51,7 +51,7 @@ FIXTURES = ("missing_report", "correction_tail", "done_format", "models", "unsta
             "lane", "pick_known_writer", "rewrite_stamp", "triage_hold", "unvetted_unreadable",
             "unvetted_cited", "rewrite_model", "rewrite_unstarted", "rewrite_answered", "rewrite_recovered",
             "recovered_no_source", "past_ruling_order", "refusal_two_tools",
-            "plain_time", "plain_contradiction", "plain_cite")
+            "plain_time", "plain_contradiction", "plain_cite", "hassio_path")
 FACT_SENTENCES = ("Pick guard: the page writer is session session_writer1 (decision guard-remedy-not-to-owner).",
                   "Names of the checks sit in the record. Keys are one option set per question.",
                   "The check reads the transcript, and a Done line holds one kind.")
@@ -290,6 +290,10 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
                 landed("> **Done** BUILT abc123\n> **Deviations** Contradiction: the two rows disagree.\n"
                        "> **Input Needed** none\n> **Next** ship it"), "contradiction", clean),
             "plain_cite": lambda: case(landed("Tracked as #2015 for now.\n\n" + trg.GOOD_REPORT), "gloss", clean),
+            # Page path: an old Home Assistant page path in a plain reply. The refusal names it with its owner line.
+            "hassio_path": lambda: case([trg.human("point me at the add-on page"),
+                                         trg.assistant_text("Open the add-on at /hassio/ingress/core_configurator "
+                                                            "to check the config.")], "page-path", clean),
             # Lane: the lane's own get_session record, then a question with no send to the parent or the writer.
             "lane": lambda: case([*trg.QuestionReachesPageTests.lane_record(self), trg.human("decide"),
                                   trg.assistant_text(trg.RELAY)], "lane", bare, env=lane_env),
