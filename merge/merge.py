@@ -3301,34 +3301,62 @@ def ci_job_run(wt, *args, notes=None, raw=None, head_sha=None, pr_body=None):
 LINT_JOB = "checks"  # the one job `merge --lane-lint` runs through ci_job_run
 SAVED_PASS_FOLDER = "lane-lint-pass"  # under the clone's git dir: one small file for each job that passed
 SAVED_PASS_MAX_BYTES = 4096
+SAVED_PASS_KEEP = 3  # the most saved results kept after a save: the new one and the newest others; older ones are deleted
+SAVED_PART_STALE_SECONDS = 3600  # a .part file this old is the leftover of a killed save; a younger one may be a live save's
+TOOL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # the tool's own tree: merge/merge.py sits two levels under it
+CI_JOB_IMPORT = re.compile(r"^(?:from|import)[ \t]+([A-Za-z_]\w*)", re.M)  # a top-level import line of bin/ci-job: its first module name
 
-def saved_pass_path(root, head, base_sha, job, pr_body=None):
-    """The file that holds the saved PASS of `job` at (head, base_sha, pr_body, this merge tool's bytes), or None when the clone's git dir cannot be read.
-    The key is the head sha, the base tip the lint merged, the job name, a hash of the PR body that ci-job reads as PR_BODY (None, a ref or commit with
-    no body, is told from an empty body) and a hash of this file's bytes, so a new head, a new base, an edited body or an edited tool names another file. The folder sits under the clone's git dir, which outlives a lint tree and holds no state of a lane's work."""
+def tool_files():
+    """The files whose bytes a saved PASS depends on, as paths under the tool's tree: merge/merge.py, bin/ci-job, bin/ste-changed (the lint step ci-job runs
+    for the ste-lint action), and each hooks/ or lint/ module that bin/ci-job imports. The imports are read from bin/ci-job's text and each module is
+    found by path in the tool's tree, never through sys.modules, which holds the running version and not a copy's. OSError when bin/ci-job cannot be read."""
+    ci_job = os.path.join(TOOL_ROOT, "bin", "ci-job")
+    with open(ci_job, encoding="utf-8") as f:
+        imported = sorted(set(CI_JOB_IMPORT.findall(f.read())))
+    found = [os.path.join(TOOL_ROOT, "merge", "merge.py"), ci_job, os.path.join(TOOL_ROOT, "bin", "ste-changed")]
+    for name in imported:
+        found.extend(p for p in (os.path.join(TOOL_ROOT, d, name + ".py") for d in ("hooks", "lint")) if os.path.isfile(p))
+    return found
+
+def tool_key():
+    """A hash of the bytes of tool_files(), each named by its path in the tree, or None when one cannot be read."""
+    digest = hashlib.sha256()
+    try:
+        for path in tool_files():
+            with open(path, "rb") as f:
+                body = f.read()
+            digest.update(os.path.relpath(path, TOOL_ROOT).replace(os.sep, "/").encode() + b"\0" + hashlib.sha256(body).digest())
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+def saved_pass_path(root, head, merged, base, job, pr_body=None):
+    """The file that holds the saved PASS of `job` at (head, merged tree, base name, base tip, pr_body, the tool's bytes), or None when the clone's git dir
+    cannot be read. `merged` is [the merged tree, the base tip] (merge_reason's list). The key is the head sha, the merged tree, the base name, the base tip
+    the lint merged, the job name, a hash of the PR body that ci-job reads as PR_BODY (None, a ref or commit with no body, is told from an empty body) and
+    tool_key, so a new head, base, body or an edit to a file the lint reads names another file. The base name is in the key since ci-job runs against
+    origin/<base>; the tip, since a tip that moves with no change to the merged tree is a new base. The folder sits under the clone's git dir, which outlives a lint tree and holds no state of a lane's work."""
     c, out = git(root, "rev-parse", "--git-common-dir")
-    if c or not out.strip():
+    if c or not out.strip() or len(merged) < 2:
         return None
     gitdir = out.strip()
     gitdir = gitdir if os.path.isabs(gitdir) else os.path.join(root, gitdir)
-    try:
-        with open(os.path.abspath(__file__), "rb") as f:
-            tool = hashlib.sha256(f.read()).hexdigest()
-    except OSError:
+    tool = tool_key()
+    if tool is None:
         return None
     body = "none" if pr_body is None else "body:" + hashlib.sha256(pr_body.encode()).hexdigest()
-    key = hashlib.sha256("\0".join([head, base_sha, job, body, tool]).encode()).hexdigest()
+    key = hashlib.sha256("\0".join([head, merged[0], merged[1], base, job, body, tool]).encode()).hexdigest()
     return os.path.join(gitdir, SAVED_PASS_FOLDER, key + ".json")
 
-def saved_pass_read(root, head, base_sha, job, pr_body=None):
+def saved_pass_read(root, head, merged, base, job, pr_body=None):
     """-> {"skipped": [...], "notes": [...]} of the saved PASS at this key, or None: no file, or one that is empty, unreadable or not a PASS record (a miss)."""
     try:
-        path = saved_pass_path(root, head, base_sha, job, pr_body)
+        path = saved_pass_path(root, head, merged, base, job, pr_body)
         if path is None:
             return None
         with open(path, "rb") as f:
             data = json.loads(f.read(SAVED_PASS_MAX_BYTES + 1).decode("utf-8"))
-        key = {"head": head, "base": base_sha, "job": job}
+        key = {"head": head, "tree": merged[0], "tip": merged[1], "base": base, "job": job}
         if (not isinstance(data, dict) or data.get("verdict") != "pass" or any(data.get(k) != v for k, v in key.items())
                 or not all(isinstance(data.get(k), list) and all(isinstance(x, str) for x in data[k]) for k in ("skipped", "notes"))):
             return None
@@ -3336,15 +3364,45 @@ def saved_pass_read(root, head, base_sha, job, pr_body=None):
     except (OSError, ValueError):  # a corrupt, empty or unreadable file is a miss; UnicodeDecodeError is a ValueError
         return None
 
-def saved_pass_write(root, head, base_sha, job, skipped, notes, pr_body=None):
-    """Save the PASS of `job` after a run that passed, and only then: a fail, a timeout, an unknown and a run with no verdict never reach this call.
-    The file is written whole and moved into place, so a reader never sees half of it. A record over SAVED_PASS_MAX_BYTES, or any write error, saves
-    nothing: the next lint runs the job, which costs time and never a wrong pass."""
+def saved_pass_prune(folder, keep_path):
+    """After a save: delete the .part files older than SAVED_PART_STALE_SECONDS, and all but SAVED_PASS_KEEP of the saved results: `keep_path` (the new
+    one) and the newest others by mtime. An OSError leaves the file (a failed delete costs disk, never a wrong pass)."""
     try:
-        path = saved_pass_path(root, head, base_sha, job, pr_body)
+        names = os.listdir(folder)
+    except OSError:
+        return
+    now = time.time()
+    results = []
+    for name in names:
+        path = os.path.join(folder, name)
+        try:
+            mtime = os.path.getmtime(path)
+            if name.endswith(".part"):
+                if now - mtime > SAVED_PART_STALE_SECONDS:
+                    os.remove(path)
+            elif name.endswith(".json") and path != keep_path:
+                results.append((mtime, name, path))
+        except OSError:
+            pass
+    results.sort(reverse=True)
+    for _, _, path in results[max(SAVED_PASS_KEEP - 1, 0):]:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+def saved_pass_write(root, head, merged, base, job, skipped, notes, pr_body=None):
+    """Save the PASS of `job` after a run that passed, and only then: a fail, a timeout, an unknown and a run with no verdict never reach this call.
+    The file is written whole and moved into place, so a reader never sees half of it, and its .part file is removed on any exit, a SIGTERM's SystemExit
+    included. A record over SAVED_PASS_MAX_BYTES, or any write error, saves nothing: the next lint runs the job, which costs time and never a wrong pass.
+    A save then prunes the folder (saved_pass_prune)."""
+    part = None
+    try:
+        path = saved_pass_path(root, head, merged, base, job, pr_body)
         if path is None:
             return
-        body = json.dumps({"verdict": "pass", "head": head, "base": base_sha, "job": job, "skipped": list(skipped), "notes": list(notes)}).encode("utf-8")
+        body = json.dumps({"verdict": "pass", "head": head, "tree": merged[0], "tip": merged[1], "base": base, "job": job,
+                           "skipped": list(skipped), "notes": list(notes)}).encode("utf-8")
         if len(body) >= SAVED_PASS_MAX_BYTES:
             return
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -3352,8 +3410,16 @@ def saved_pass_write(root, head, base_sha, job, skipped, notes, pr_body=None):
         with open(part, "wb") as f:
             f.write(body)
         os.replace(part, path)
+        part = None
+        saved_pass_prune(os.path.dirname(path), path)
     except OSError:
         pass
+    finally:
+        if part is not None:
+            try:
+                os.remove(part)
+            except OSError:
+                pass
 
 MUTATE_JOB, MUTATE_STEP = "checks-mutate-guard", "Guard mutation test"  # the old one-job head: its job and step, whose run: line and timeout-minutes the lint reads. A sharded head names each step MUTATE_STEP + ", shard i/M", one job each
 MUTATE_TEST_FILE = re.compile(r"hooks/mutate_[^/]*\.(?:py|mjs)")
@@ -3674,7 +3740,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     A hand-in of a pull request that is not an integration PR is refused while its body names an open replaced pull request (open_named); no override lifts it.
     On a batch integration PR, a PASS (after its lint comment) posts a pointer comment on each open lane its freeze block names, then closes it as replaced
     (close_replaced); the same PASS reopens each closed lane the block has dropped when the tool closed it, and posts a pointer after the reopen (reopen_dropped).
-    A job that passes is saved (saved_pass_write) under the clone's git dir, keyed by the head sha, the base tip, the job name, a hash of the PR body and a hash of this file's bytes. A rerun at
+    A job that passes is saved (saved_pass_write) under the clone's git dir, keyed by the head sha, the merged tree, the base name and tip, the job name, a hash of the PR body and a hash of the tool's files (tool_files). A rerun at
     the same key skips the job and prints "PASS (cached)"; it still posts the lane-lint comment. A fail, a timeout, an unknown and a lifted unknown are never saved,
     and a corrupt, empty or unreadable file is a miss. The mutation test run (mutate_run_check) does not go through this path and is not saved.
     Before any tree is made, refuse_full_disk refuses a drive under the guard's full disk floor, in a cloud session and a local one."""
@@ -3741,7 +3807,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the merge of the head with {base} could not be made the lint worktree's HEAD: {out} {LANE_LINT_CITE}")
         refuse_incomplete_tree(wt, head, base, merge_commit)
         body_for_job = (info.get("body") or "") if target.isdigit() else None  # a ref or commit has no PR body
-        saved = saved_pass_read(root, head, merged[0], LINT_JOB, body_for_job)
+        saved = saved_pass_read(root, head, merged, base, LINT_JOB, body_for_job)
         if saved is not None:
             state, lines, log, liftable = "pass", saved["skipped"], [], False
             pin_notes.extend(saved["notes"])
@@ -3750,7 +3816,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             state, lines, log, liftable = ci_job_run(wt, LINT_JOB, "--lint", "--base", f"origin/{base}", notes=pin_notes, head_sha=head,
                                                      pr_body=body_for_job)
             if state == "pass":
-                saved_pass_write(root, head, merged[0], LINT_JOB, lines, pin_notes, body_for_job)
+                saved_pass_write(root, head, merged, base, LINT_JOB, lines, pin_notes, body_for_job)
         if state == "pass" and touched_tests:
             touched = run_touched_tests(wt, base, head)
         mutate, mutate_fails, skipped = "", [], False
