@@ -18,6 +18,7 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
    `wait:` line per open item with `waits` (`ended`, `waiting` or `unknown`), and one `waiting` lane line per open item with
    `lane` and `lastAnswer` and no `waits`. Last, one `kept-answer:` line per closed item whose `answers/<id>` is still kept
    (never an arbiter ruling, a park answer or a routed closed item; an open item only when its answer is older than its `added`). A closed item with `waits` gets a line that says it is closed with waits; an open item with an older answer gets a line that says it is open. The exit code stays the page's.
+   Run it with the env `ROADMAP_STEPS_FOLDER` set to the `roadmap/data/steps` folder of the roadmap checkout (the record branch); it then also prints one `found-false:` line per open item whose `home` reads `step <id>` or is a bare step id, and whose step is done, dropped or done-obsolete (a folded step stays open; a bare id that is also a decision or debt id is left open) (SKILL.md, "Chat first"). Unset, it prints none.
 3. Keep a copy of the page in the repo, from the same file ("Keep a copy in the repo"). Do it before any
    republish, so the copy holds the page as it was.
 4. Before any republish, check the pictures of the open items, against the file about to be published (`<out>`, the `--write` output of
