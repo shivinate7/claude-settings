@@ -187,6 +187,8 @@ STALE_DRAFT_HOURS = 12
 PAIR_LINE = "todo step with an open PR"
 # Every stalled line starts with this. An unknown read prints `<STALLED_LINE>: unknown (<why>)` and exits 0.
 STALLED_LINE = "stalled step"
+# The line for a live file past STALE_LIVE_MINUTES while a step is doing; the build exits 1. It never starts with STALLED_LINE.
+STALE_LINE = "live file stale"
 # The upkeep row's label and the start of each printed drift line: `status drift: <id> (hand <x>, derived <y>)`.
 DRIFT_LINE = "status drift"
 # Every ready line starts with this. It never changes the exit code.
@@ -1185,7 +1187,7 @@ def main(argv=None):
     marks = add_marks(marks, pull_landed_marks(repo, ref, data["steps"] if data else None, info["live"]))
     info["landed"] = marks
     info["stalled"] = (stalled(data["steps"], marks, info["live"]) if data else
-                       {"why": "unknown (steps unknown)", "steps": None, "paused": [], "badPause": [],
+                       {"why": "unknown (steps unknown)", "steps": None, "paused": [], "badPause": [], "stale": None,
                         "items": None, "itemsWhy": "unknown (steps unknown)"})
     info["panels"].append({"name": "Live work", "home": "project threads and GitHub" if args.live else None,
                            "read": info["live"]["read"]})
@@ -1219,7 +1221,7 @@ def main(argv=None):
     lines = ready_lines(info["ready"])
     if lines:
         print("\n".join(lines))
-    if pairs or misses or info["stalled"]["steps"] or info["stalled"]["items"] or over_limit(info["ready"]):
+    if pairs or misses or info["stalled"]["steps"] or info["stalled"]["items"] or info["stalled"]["stale"] is not None or over_limit(info["ready"]):
         raise SystemExit(1)
 
 
@@ -1781,13 +1783,46 @@ def stalled_items(work):
             if r["status"] != "closed" and r["lane"] and not lane_live(work, r["lane"], item=True)], None
 
 
+def closed_unmerged(work, sid):
+    """The latest landedPulls row for step `sid`'s lane branch (lane_head_refs) that closed unmerged (`merged` false) and
+    has no open successor, else None. An open pull on a lane ref would hold the step, so it never reaches here; a row
+    whose `replacedBy` is an open pull has a successor and is skipped. The row's `closedAt` gives the date."""
+    refs, opened = lane_head_refs(sid), {p["number"] for p in work["pulls"]}
+    rows = [r for r in work.get("landedPulls") or []
+            if r.get("merged") is False and r["branch"] in refs and r.get("replacedBy") not in opened]
+    return max(rows, key=lambda r: zoned_time(r.get("closedAt")) or datetime.datetime.min.replace(tzinfo=datetime.timezone.utc),
+               default=None)
+
+
+def closed_note(row):
+    """`PR #N closed unmerged <date>` for a closed-unmerged row; the date is closedAt's own, or `(date unknown)`."""
+    at = zoned_time(row.get("closedAt"))
+    return "PR #%d closed unmerged %s" % (row["number"], at.date().isoformat() if at else "(date unknown)")
+
+
+def stale_live_minutes(steps, work):
+    """The live file's age in whole minutes when it is past STALE_LIVE_MINUTES and an open step is doing or active
+    without a valid `paused` field (a stale file cannot show that step's lane); else None. A step already disposed of,
+    a fresh file, and an unreadable readAt give None."""
+    if not work or zoned_time(work.get("read")) is None:
+        return None
+    age = live_age_minutes(work["read"])
+    if age is None or age <= STALE_LIVE_MINUTES:
+        return None
+    if not any(d.get("status") in LIVE_STATUS and ("paused" not in d or pause_why(d)) for _, d in open_steps(steps)):
+        return None
+    return age
+
+
 def stalled(steps, marks, work):
-    """The page's stalled block: {"why", "steps", "paused", "badPause", "items", "itemsWhy"}.
-    `steps` is a list of next_act entries plus "fix", or None only when `why` says the live read is unknown, never [].
+    """The page's stalled block: {"why", "steps", "paused", "badPause", "items", "itemsWhy", "stale"}. `stale` is
+    stale_live_minutes, or None.
+    `steps` is a list of next_act entries plus "fix" (and "closed", a closed-unmerged PR's note, when `fix` is "todo" and
+    closed_unmerged finds one), or None only when `why` says the live read is unknown, never [].
     A step with a valid `paused` field moves to `paused` (ids); a wrong-shaped one stays stalled and is listed in
     `badPause`. `items` is the open waiting-page items whose lane has no live work, or None with `itemsWhy`."""
     why, rows = laneless(open_steps(steps), marks, work)
-    out = {"why": why, "steps": None if why else [], "paused": [], "badPause": []}
+    out = {"why": why, "steps": None if why else [], "paused": [], "badPause": [], "stale": stale_live_minutes(steps, work)}
     read = None if why else live_read(work)
     for k, fix in rows:
         if "paused" in steps[k]:
@@ -1796,7 +1831,11 @@ def stalled(steps, marks, work):
                 out["paused"].append(k)
                 continue
             out["badPause"].append({"id": k, "why": bad})
-        out["steps"].append(dict(next_act(k, steps[k], fix, read), fix=fix))
+        entry = dict(next_act(k, steps[k], fix, read), fix=fix)
+        closed = closed_unmerged(work, k) if fix == "todo" else None
+        if closed:
+            entry["closed"] = closed_note(closed)
+        out["steps"].append(entry)
     out["items"], out["itemsWhy"] = stalled_items(work)
     return out
 
@@ -1808,7 +1847,11 @@ def stalled_lines(block):
     if block["steps"] is None:
         out.append("%s: %s" % (STALLED_LINE, block["why"]))
     for s in block["steps"] or []:
-        out.append("%s: %s (%s)" % (STALLED_LINE, s["id"], fix_act(s["fix"])))
+        out.append("%s: %s (%s%s)" % (STALLED_LINE, s["id"], fix_act(s["fix"]), "; " + s["closed"] if s.get("closed") else ""))
+    if block.get("stale") is not None:
+        # Not a STALLED_LINE entry: triage's Stop hold reads `stalled step: <id> (`, and a stale file names no one step.
+        out.append("%s: the live file was read %d minutes ago (limit %d); it cannot show whether a doing step has a lane, "
+                   "so read it again" % (STALE_LINE, block["stale"], STALE_LIVE_MINUTES))
     if block["items"] is None:
         out.append("%s: items %s" % (STALLED_LINE, block["itemsWhy"]))
     for i in block["items"] or []:
