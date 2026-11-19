@@ -253,13 +253,15 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        fragment); in roadmap/data/steps/<name>.json, `updatedAt` in a Write and every instant in an
                        Edit's or MultiEdit's new text; the last literal `updatedAt` in a Bash command, single- or double-quoted, read as text. The reason prints the time in Central and ISO. One clock read only when
                        a judged value is present. An override lifts it.
-  pick-reaches-page    deny. A send_message from a session whose own newest get_session record carries cs-build:coordinator,
-                       with a line that opens `Coordinator pick` (after optional markdown lead characters), to a session
-                       other than the page writer, when the turn (the records after the last human message) holds no
-                       delivered send to the page writer whose text also has a Coordinator pick line. The page writer is the
-                       writer of the newest meta/page read in the transcript. The reason steers to sending the pick to triage
-                       as a taken-pick card first. An unread record, writer or transcript passes. One transcript read, only
-                       for a message with a pick line. An override lifts it.
+  pick-reaches-page    deny. A send_message, or a create_session prompt, from a session whose own newest get_session record
+                       carries cs-build:coordinator, with a line that opens `Coordinator pick`, `Coordinator picks:` or
+                       `(Coordinator pick` (after optional markdown lead characters), to a session other than the page
+                       writer, when the turn (the records after the last human message) holds no delivered send to the page
+                       writer whose text also has a Coordinator pick line. The page writer is the writer of the newest
+                       meta/page read in the transcript; a transcript with no such read names none, and the pick is refused.
+                       The reason steers to sending the pick to triage as a taken-pick card first. An unread own record or
+                       transcript, or a code error, passes with one stderr line. One transcript read for a pick line; a second
+                       for a coordinator. An override lifts it.
   agent-no-remote-tools
                        deny. A call by an agent (the payload carries a non-empty agent_id) to a claude-code-remote
                        tool in shared_names.REMOTE_OUTWARD_TOOLS: starting, messaging, tagging or archiving sessions,

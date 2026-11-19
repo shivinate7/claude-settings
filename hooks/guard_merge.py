@@ -3134,7 +3134,9 @@ def target_roster_hit(tool: str, tool_input, cwd: str, transcript: str = ""):
 
 
 # ---- a coordinator's pick reaches the page writer in the same turn (rule pick-reaches-page)
-PICK_LINE = re.compile(r"^" + _MARKDOWN_LEAD + r"Coordinator pick\b", re.IGNORECASE | re.MULTILINE)
+# A line that opens `Coordinator pick`, `Coordinator picks:` or `(Coordinator pick`, in any case. A bare `Coordinator picks` is
+# no marker, since a line like "Coordinator picks up the lane" holds no pick.
+PICK_LINE = re.compile(r"^" + _MARKDOWN_LEAD + r"\(?Coordinator (?:pick\b|picks:)", re.IGNORECASE | re.MULTILINE)
 COORDINATOR_ROLE_TAG = BUILD_TAG + "coordinator"
 PICK_REACHES_REASON = (
     "this coordinator's message carries a Coordinator pick line, and the page writer has not been sent the pick in this "
@@ -3142,8 +3144,14 @@ PICK_REACHES_REASON = (
     "the same turn, send the pick to triage as a taken-pick card: send_message to the page writer (the writer of the "
     "page's meta/page record) with the same Coordinator pick line and the pick's what, changes and over, so the writer "
     "files a closed item with a `taken` object that the owner can overrule. Then send this message again. "
-    "(owner ruling 15 Nov, step page-no-preselected-pick: the owner overrules a taken pick, no option is chosen for them; step page-taken-picks-area)"
+    "(decision pick-reaches-page, a coordinator's pick reaches the page writer in the same turn; "
+    "owner ruling 15 Nov, step page-no-preselected-pick: the owner overrules a taken pick, no option is chosen for them; step page-taken-picks-area)"
 )
+PICK_NO_WRITER_NOTE = (
+    " This transcript holds no read of the page's meta/page record, so the page writer is not named: run an ArtifactData "
+    "get of meta/page first."
+)
+PICK_FAILS_OPEN_LINE = "pick-reaches-page: {why}, so the pick send is not checked"
 
 
 def _transcript_module():
@@ -3156,28 +3164,40 @@ def _transcript_module():
 
 
 def pick_reaches_page_hit(tool: str, tool_input, transcript: str = ""):
-    """Return (matched, reason) when a coordinator's send_message has a line that opens `Coordinator pick`, goes to a session
-    other than the page writer, and the same turn has sent the page writer no pick, else None. The page writer is the
-    writer named by the newest meta/page read in the transcript (_transcript.page_writer_id). The turn is the records after
-    the last human message. A writer send counts when it was delivered and its own text holds a Coordinator pick line.
-    Only a session whose own newest get_session record carries cs-build:coordinator is judged. Cost: for a message with no
-    pick line, none; else one transcript read and one record read, on a send_message only; no network, no file. Fails open
-    on any unread input (no id, no record, no writer read, no transcript): the rule judges a route, not an act."""
-    if tool != BRIEF_TOOL or not isinstance(tool_input, dict):
+    """Return (matched, reason) when a coordinator's send_message, or create_session prompt, has a line that opens
+    `Coordinator pick`, goes to a session other than the page writer, and the same turn has sent the page writer no pick,
+    else None. The page writer is the writer named by the newest meta/page read in the transcript
+    (_transcript.page_writer_id); a transcript with no such read names none, and the pick is refused. The turn is the
+    records after the last human message. A writer send counts when it was delivered and its own text holds a Coordinator
+    pick line. Only a session whose own newest get_session record carries cs-build:coordinator is judged. Cost: for a
+    message with no pick line, none; else one transcript read for the own record, and for a coordinator a second read for
+    the turn; no network, no file. Fails open, with one stderr line, on an unread id, record or transcript, or an error:
+    the rule judges a route, not an act."""
+    if not isinstance(tool_input, dict):
         return None
-    message, target = tool_input.get("message"), tool_input.get("session_id")
-    if not isinstance(message, str) or not PICK_LINE.search(message) or not isinstance(target, str):
+    if tool == BRIEF_TOOL:
+        message, target = tool_input.get("message"), tool_input.get("session_id")
+        if not isinstance(target, str):
+            return None
+    elif tool == CREATE_SESSION_TOOL:
+        message, target = tool_input.get("prompt"), None
+    else:
+        return None
+    if not isinstance(message, str) or not PICK_LINE.search(message):
         return None
     try:
         from override import remote_session_id
         own_id = remote_session_id()
         tags = _own_get_session_tags(transcript, own_id) if own_id and transcript else None
-        if tags is None or COORDINATOR_ROLE_TAG not in tags:
+        if tags is None:
+            print(PICK_FAILS_OPEN_LINE.format(why="the session's own get_session record could not be read"), file=sys.stderr)
+            return None
+        if COORDINATOR_ROLE_TAG not in tags:
             return None
         lib = _transcript_module()
         records = lib.read_transcript(transcript)
         writer = lib.page_writer_id(records)
-        if not writer or target == writer:
+        if writer and target == writer:
             return None
         turn = lib.records_after_last_human(records)
         delivered = lib.delivered_tool_use_ids(records)
@@ -3186,11 +3206,13 @@ def pick_reaches_page_hit(tool: str, tool_input, transcript: str = ""):
                 continue
             for use in lib.tool_uses(record):
                 sent = use.get("input")
-                if (writer in lib.send_targets(use) and use.get("id") in delivered and isinstance(sent, dict)
+                if (writer and writer in lib.send_targets(use) and use.get("id") in delivered and isinstance(sent, dict)
                         and isinstance(sent.get("message"), str) and PICK_LINE.search(sent["message"])):
                     return None
-        return "a Coordinator pick sent to a session other than the page writer", PICK_REACHES_REASON
+        return ("a Coordinator pick sent to a session other than the page writer",
+                PICK_REACHES_REASON + ("" if writer else PICK_NO_WRITER_NOTE))
     except Exception:
+        print(PICK_FAILS_OPEN_LINE.format(why="the judge raised an error"), file=sys.stderr)
         return None
 
 

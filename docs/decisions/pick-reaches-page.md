@@ -12,10 +12,10 @@ Rule `pick-reaches-page` makes a coordinator's pick reach that card. It reaches 
 
 ## Rule pick-reaches-page
 
-- Refuses (deny) a `send_message` from a coordinator when all of these hold:
+- Refuses (deny) a `send_message`, or a `create_session` whose prompt carries the pick, from a coordinator when all of these hold:
   - The sender's newest own `get_session` record in the transcript carries the coordinator build tag, `cs-build:coordinator`.
-  - The message has a line that opens `Coordinator pick`, after optional markdown marks, in any case.
-  - The target is a session other than the page writer. The page writer is the writer named by the newest meta/page read in the transcript.
+  - The message has a line that opens `Coordinator pick`, `Coordinator picks:` or `(Coordinator pick`, after optional markdown marks, in any case. A line such as `Coordinator picks up the lane` is no marker.
+  - The target is a session other than the page writer, or a `create_session` (which has no writer target). The page writer is the writer named by the newest meta/page read in the transcript. A transcript with no such read names no writer, and the pick is refused: the refusal says to read meta/page first.
   - The turn (the records after the last human message) holds no delivered send to the page writer whose text also has a `Coordinator pick` line. Agent records do not count.
 - The refusal names the route, not the item. It says to send the pick to the page writer first, as a taken-pick card, then send the message again. It names no `stands` item and no `pick` field. The 15 Nov ruling removed both.
 - Only a coordinator's sends are judged. A lane's message is not.
@@ -28,8 +28,9 @@ The rule passes when an input is unread:
 
 - no remote session id, or one of another shape;
 - no transcript, or no `get_session` record of the session's own id with the coordinator tag;
-- no meta/page read, so no page writer is named;
 - an error inside the judge.
+
+Each of these prints one stderr line that names the rule, so the owner can see the rule did not judge.
 
 Why: the rule judges a route. A route the guard cannot read cannot be shown broken. A refusal on a guess would teach the reader to scroll past it (decision `guard-that-cries-wolf-is-spent`). A guard that crashes lets the call through (decision `guard-hooks-fail-closed`).
 
@@ -37,8 +38,8 @@ Why: the rule judges a route. A route the guard cannot read cannot be shown brok
 
 Each hole is one Claude could fall into by mistake (decision `guard-guards-mistakes-only`).
 
-- The marker: a pick whose line does not open with `Coordinator pick`, such as `Pick:`, or a pick inside a sentence, is not judged.
-- The tool: only `send_message` is read. A pick sent through a Bash `mail send` or in a lane's `create_session` prompt is not judged.
+- The marker: a pick whose line does not open with one of the marker forms, such as `Pick:`, or a pick inside a sentence, is not judged.
+- The tool: only `send_message` and `create_session` are read. A pick sent through a Bash `mail send` is not judged.
 - The filing: the writer send passes on its marker alone. The rule does not check that the writer files an item.
 - A quote: a message that quotes an old pick at a line start is refused as a new pick. This is a false alarm. Move the quote off the line's start to lift it.
 
