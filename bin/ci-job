@@ -125,11 +125,12 @@
 # it misses 7 days after the save. Cost: per step that may be cached, one set of git processes (a temp index, add, write-tree, rev-parse); per run, one
 # read of those trees; per pass, one file of under 1 KB in $XDG_CACHE_HOME (else ~/.cache) /claude-settings/ci-job-pass. A save prunes files saved
 # over 7 days ago, and the store holds at most 300 files. No timer, no lasting process. CI_JOB_NO_CACHE=1 turns the cache off.
-import ast, concurrent.futures, hashlib, json, os, re, shutil, signal, subprocess, sys, tarfile, tempfile, threading, time
+import ast, concurrent.futures, hashlib, json, os, re, shutil, subprocess, sys, tempfile, threading, time
 BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+from tree_export import export_tree  # noqa: E402  the one home of the export of a commit's tree (hooks/tree_export.py)
 from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup (never the WSL launcher)
 from pin_note import ENV as PIN_NOTE_ENV, MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's names (hooks/pin_note.py)
 from action_pin import pin_regex  # noqa: E402  the one home of the sha pin's pattern (hooks/action_pin.py)
@@ -325,16 +326,7 @@ def pin_tree(sha):
     else:
         tree = tempfile.mkdtemp(prefix="ci-job-pin-%d-%s-" % (os.getpid(), sha[:7]))  # the pid lets merge.py's sweep remove it after a run that died
         PIN_TREES[sha] = (tree, None)  # recorded first, so the run's end deletes it even if the archive fails
-        try:
-            with _nowindow.Popen(["git", "archive", "--format=tar", sha], cwd=src, stdout=subprocess.PIPE,
-                                 stderr=subprocess.DEVNULL) as proc, tarfile.open(fileobj=proc.stdout, mode="r|") as tar:
-                for member in tar:  # the stream is read once; a member is extracted as it passes
-                    if member.issym():
-                        continue  # the harness reads no symlink, and a host that refuses os.symlink would fail the whole export
-                    tar.extract(member, tree, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
-            error = None if proc.returncode == 0 else "git archive exited %d" % proc.returncode
-        except (OSError, tarfile.TarError) as exc:
-            error = "%s: %s" % (type(exc).__name__, exc)
+        error = export_tree(src, sha, tree)
         if error:
             PIN_TREES[sha] = (tree, "git archive of %s in %s failed (%s)" % (sha[:7], src, error))
     return PIN_TREES[sha]
@@ -1173,23 +1165,8 @@ def main(argv):
     return 1 if tally["FAIL"] else 2 if tally["unknown"] else 0
 
 
-def end_on_signals():
-    """TERM and HUP end the run through the `finally` below, the path INT takes as a KeyboardInterrupt, so the log folder, the pin trees and
-    the work folder go. A second signal while it cleans up is ignored. Where handlers cannot be set (another thread), nothing changes."""
-    def stop(sig, frame):
-        for n in nums:
-            signal.signal(n, signal.SIG_IGN)
-        raise SystemExit(128 + sig)
-    nums = [getattr(signal, n) for n in ("SIGTERM", "SIGHUP") if hasattr(signal, n)]  # Windows has no SIGHUP
-    try:
-        for n in nums:
-            signal.signal(n, stop)
-    except ValueError:
-        pass
-
-
 if __name__ == "__main__":
-    end_on_signals()
+    _nowindow.end_on_signals()  # TERM and HUP end the run through the `finally` below, so the log folder, the pin trees and the work folder go
     try:
         sys.exit(main(sys.argv[1:]))
     finally:
