@@ -21313,6 +21313,24 @@ class ReviewedList(ReviewEnv):
         parse_text(self, full)
         self.assert_unparsed_case(full + "Thanks for the review.\n", ("Thanks for the review.", "CI line"))
 
+    # Each case below holds valid Kind and Guard or check lines, so the cause it names is the line that breaks.
+    def test_unparsed_record_bad_round_line_is_named_by_reviewed(self):
+        # a Round line whose verdict is none of PASS, FAIL or PARTIAL: the cause names that line
+        self.assert_unparsed_case(record_text(rounds=("Round 1: reviewer, sonnet, MAYBE",)), ("Round 1: reviewer, sonnet, MAYBE",))
+
+    def test_unparsed_record_docs_only_with_guard_yes_is_named_by_reviewed(self):
+        # a docs-only record touches no guard or check (decision docs-only-prs-skip-review, docs-only PRs skip review): the cause names that pairing
+        self.assert_unparsed_case(record_text(kind="docs-only", guard="yes"), ("a docs-only record cannot be Guard or check: yes",))
+
+    def test_unparsed_record_stray_line_mid_record_is_named_by_reviewed(self):
+        # a line between the rounds and Net value: the cause names that line
+        self.assert_unparsed_case(record_text(rounds=(*REVIEW_PASS, "Thanks for the review.")), ("Thanks for the review.",))
+
+    def test_unparsed_record_control_rule_above_pr_line_names_the_pr_line_by_reviewed(self):
+        # Control: a rule right under the marker cuts the record before its PR line, so the cause names the PR line as missing
+        body = REVIEW_MARKER + "\n---\n" + record_text(rounds=REVIEW_PASS).split("\n", 1)[1]
+        self.assert_unparsed_case(body, ("the PR: line is missing",))
+
     def test_unparsed_record_control_well_formed_reads_done_by_reviewed(self):
         # Control: the same comment id holds a record that parses, which reads done, so the naming above concerns the broken text alone.
         parse_text(self, record_text(rounds=REVIEW_PASS))
@@ -21376,6 +21394,15 @@ class UnparsedRecordStanding(CloudSession, ReviewEnv):
     def test_unparsed_record_with_only_its_marker_is_named_by_confirm(self):
         # the empty state: the marker and no field after it, so the first field, PR, is the missing one
         self.assert_refusal_names(REVIEW_MARKER + "\n", ("PR:", "missing"))
+
+    def test_unparsed_record_bad_round_line_is_named_by_confirm(self):
+        self.assert_refusal_names(record_text(rounds=("Round 1: reviewer, sonnet, MAYBE",)), ("Round 1: reviewer, sonnet, MAYBE",))
+
+    def test_unparsed_record_docs_only_with_guard_yes_is_named_by_confirm(self):
+        self.assert_refusal_names(record_text(kind="docs-only", guard="yes"), ("a docs-only record cannot be Guard or check: yes",))
+
+    def test_unparsed_record_stray_line_mid_record_is_named_by_confirm(self):
+        self.assert_refusal_names(record_text(rounds=(*REVIEW_PASS, "Thanks for the review.")), ("Thanks for the review.",))
 
     def test_unparsed_record_control_well_formed_failing_keeps_the_gate_words(self):
         # Control: a record that parses and fails gets the gate's own words. The same fixture then shows the naming above comes from the unparsed text.
