@@ -4754,15 +4754,15 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
         copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(name)))
         mutated = sources[target].replace(old, new, 1)
     if target in ("ruling", "decision"):
-        # ruling_home.py and decision_watch.py read `../lint/_transcript.py` beside itself. A bare copy in `work`
-        # would crash on that import and read as red on every case, whatever was mutated
-        # (a mutant's own cause of death must be checked). Lay out hooks/ and lint/ for the copy.
+        # ruling_home.py and decision_watch.py read `../lint/_transcript.py` beside itself. ruling_home.py also imports
+        # guard_core from the hooks folder. A bare copy in `work` would crash on that import and read as red on every
+        # case, whatever was mutated (a mutant's own cause of death must be checked). Lay out the guard family in
+        # hooks/ and lint/ for the copy.
         tree = os.path.join(work, "tree_%s" % mutate_shared.safe_name(name))
         os.makedirs(os.path.join(tree, "hooks"), exist_ok=True)
         os.makedirs(os.path.join(tree, "lint"), exist_ok=True)
         shutil.copy(os.path.join(HERE, "..", "lint", "_transcript.py"), os.path.join(tree, "lint"))
-        if target == "decision":
-            mutate_shared.guard_tree(os.path.join(tree, "hooks"))
+        mutate_shared.guard_tree(os.path.join(tree, "hooks"))
         copy_path = os.path.join(tree, "hooks", os.path.basename(TARGETS[target][0]))
     if target == "override":
         # The guard family, local_time.py and the mutated override.py share one folder: the
