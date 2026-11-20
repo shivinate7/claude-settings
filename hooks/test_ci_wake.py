@@ -83,10 +83,11 @@ when absent); without --all only active entries answer. The fixture key `workflo
 "garbage" or "empty") changes that one call and no other. "empty" prints nothing and exits 0: the answer
 gh 2.89.0 gives for a repo with no workflow. The fixture key `list_error_from` N makes every `run list`
 from the Nth call of the case on exit 1 (HTTP 403), so a re-list can be refused after a judged run.
-A gh api call that sends a non-GET method exits 1 with no output, as `method_of` reads the method gh sends
-(a field flag with no --method GET is a POST). The fixture key `api_writes_ok` is the only opt-in, for a case
-that truly writes. The run then reads every case's call log once at the end and fails one check per such call,
-so a read that forgets --method GET is red in any case, not only the case that checks it.
+A gh api call that sends a non-GET method exits 1 and prints nothing on stdout. It writes one stderr line that
+names the call, as `method_of` reads the method gh sends (a field flag with no --method GET is a POST). The
+fixture key `api_writes_ok` is the only opt-in, for a case that truly writes. The run then reads every case's
+call log once at the end and fails one check per distinct such call, with its count across the run, so a read
+that forgets --method GET is red in any case, not only the case that checks it.
 
 Draft run, then the real run: `gh pr create --draft` makes a run
 whose jobs all skip, and `gh pr ready` makes the real run seconds later. A hook that lists the head
@@ -2212,8 +2213,9 @@ def post_read_faults(calls, opt_in):
 
 
 def check_api_reads():
-    """Sweep every case's call log once, at the end of the run. A gh api call that sends a non-GET method fails here in
-    any case, even where the hook's verdict is the same with the refusal, so the run is red for it."""
+    """Sweep every case's call log once, at the end of the run. A gh api call that sends a non-GET method, in a case
+    without api_writes_ok, fails one check per distinct call, with its count across the run. The run is red for it,
+    even where the hook's own verdict does not change with the stub's refusal."""
     total, faults = 0, {}
     for opt_in, log in CALL_LOGS:
         calls = read_calls(log)
