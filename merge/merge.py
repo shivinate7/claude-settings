@@ -3538,8 +3538,9 @@ def mutate_run_check(wt):
         try:
             beat.start()
             c, out = sh(shlex.split(body), cwd=wt, env=env, timeout=cap * 60, live_stderr=True)
-        except subprocess.TimeoutExpired:
-            c, out = None, ""
+        except subprocess.TimeoutExpired as e:  # the stdout read before the timeout is bytes on POSIX even under text=True, and None when nothing was read
+            partial = e.stdout if e.stdout is not None else e.output
+            c, out = None, (partial.decode("utf-8", errors="replace") if isinstance(partial, bytes) else partial or "").strip()
         except (OSError, ValueError) as e:  # the command could not start (no such program, not executable, a bad quote): a FAIL, never a traceback or a pass
             c, out, start_error = None, "", f"{type(e).__name__}: {e}"
         finally:  # every path ends the thread, so none outlives the call or prints after the end line
