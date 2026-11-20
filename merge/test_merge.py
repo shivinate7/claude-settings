@@ -7592,7 +7592,7 @@ class CloseReplaced(Env):
         self.push_branch(merge.integration_branch("x"))
         body = "\n".join(["Carries #3302", *merge.freeze_lines("x", lanes, dropped=[3302])])
         rc, out = self.ready(7, body, named=[(3301, "open"), (3302, "open")], head_ref=merge.integration_branch("x"))
-        self.assert_closed_with_pointer(3301, 7, out)  # control: the kept lane still closes
+        self.assert_not_closed(3301, out)  # owner goal, 10:47 CST Nov 20: the kept lane closes after the integration PR merges, not at --ready
         self.assert_untouched(3302, out)
         self.assertEqual(rc, 0, out)
 
