@@ -4965,7 +4965,8 @@ LOAD_BUSY_NO_FOREGROUND = "A Workflow has no foreground form. "
 LOAD_FULL_REASON = "the machine is full (%s). No new lane or agent starts until the load drops. Wait, then retry. " + LOAD_CITE
 LOAD_SWEEP = "python3 ~/.claude/janitor/sweep.py --root <repo> --attended --fast"
 LOAD_FULL_CLOUD_REASON = ("the disk is full (%s). No new lane or agent starts until space is freed. Free it with "
-                          + LOAD_SWEEP + " (preview first, then add --confirm), then retry. " + LOAD_CITE)
+                          + LOAD_SWEEP + " (preview first, then add --confirm), then retry. "
+                          + 'On Windows, double-quote the root: --root "D:/a/repo". ' + LOAD_CITE)
 
 
 def _read_memory():
@@ -5152,6 +5153,10 @@ AUDIT_CLEANUP_SHELL_BAD = re.compile(r"[;&|<>`$()\n\r\\*?\[\]{}~]")
 AUDIT_CLEANUP_SWEEP_FLAGS = tuple(LOAD_SWEEP.split("<repo>", 1)[1].split())
 AUDIT_CLEANUP_SWEEP_CONFIRM = "--confirm"
 AUDIT_CLEANUP_TMP = "/tmp/"
+# On Windows the sweep's --root is a drive path. Bash strips an unquoted backslash (D:\a\repo arrives as D:arepo), so that
+# form cannot work and stays refused. Two forms arrive whole: a double-quoted drive path (it keeps its backslashes) and a
+# forward-slash drive path, quoted or not. Each is judged on its own charset, then stands in as a POSIX root below.
+AUDIT_CLEANUP_WIN_ROOT = re.compile(r'(?<=\s--root )(?:"[A-Za-z]:[\\/][\w.\-\\/]*"|[A-Za-z]:/[\w.\-/]*)(?=\s|$)')
 
 
 def audit_cleanup_form(tool: str, tool_input) -> bool:
@@ -5161,6 +5166,8 @@ def audit_cleanup_form(tool: str, tool_input) -> bool:
     if tool != "Bash" or not isinstance(command, str):
         return False
     sweep_script = LOAD_SWEEP.split()[1]
+    if sweep_script in command:
+        command = AUDIT_CLEANUP_WIN_ROOT.sub("/root", command, count=1)
     # The sweep's own script path, with its ~ left for the shell to expand, is the one place a ~ may sit.
     if AUDIT_CLEANUP_SHELL_BAD.search(command.replace(sweep_script, "", 1)):
         return False
