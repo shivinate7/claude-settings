@@ -27169,10 +27169,11 @@ class WorkFolderOnSignal(unittest.TestCase):
     a child with no mutation, and the mutant run is a block, so the folder exists while the run is up. A TERM or HUP skips the folder's cleanup
     unless the run handles the signal."""
 
-    def start_child(self, end=False):
-        """A run of the child with its TMPDIR in a folder of this run. end: the block returns at once, so the run ends by itself."""
+    def start_child(self, end=False, second_term=False):
+        """A run of the child with its TMPDIR in a folder of this run. end: the block returns at once, so the run ends by itself.
+        second_term: the child sends itself a TERM from inside the work folder's clean-up, as a group TERM does after the first."""
         tmp = tempfile.mkdtemp(prefix="mutate-sig-", dir=run_folder())
-        env = {**os.environ, "TMPDIR": tmp, "MUTATE_END": "1" if end else ""}
+        env = {**os.environ, "TMPDIR": tmp, "MUTATE_END": "1" if end else "", "MUTATE_SECOND_TERM": "1" if second_term else ""}
         proc = subprocess.Popen([sys.executable, os.path.abspath(__file__), "--mutate-child"], env=env, stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
         self.addCleanup(stop_group, proc)
@@ -27193,6 +27194,17 @@ class WorkFolderOnSignal(unittest.TestCase):
 
     def test_sighup_removes_the_work_folder(self):
         self.assert_signal_removes_work_folder(signal.SIGHUP)
+
+    def test_a_second_term_in_clean_up_still_removes_the_work_folder(self):
+        """A group TERM sends the child a second TERM while the work folder is removed. That TERM must not cut the removal short."""
+        proc, tmp = self.start_child(second_term=True)
+        self.assertEqual(len(self.work_folders(tmp, proc.pid)), 1, "scope: one work folder named with the run's pid must exist while the run is up")
+        proc.send_signal(signal.SIGTERM)
+        try:
+            proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            self.fail("the mutate_guard run did not exit within 60 s of a TERM")
+        self.assertEqual(self.work_folders(tmp, proc.pid), [], "a second TERM during clean-up cut the work folder's removal short")
 
     def assert_signal_removes_work_folder(self, sig):
         proc, tmp = self.start_child()
@@ -27273,6 +27285,13 @@ if __name__ == "__main__":
             if not os.environ.get("MUTATE_END"):
                 sys.stdin.read()
             return 0
+        if os.environ.get("MUTATE_SECOND_TERM"):
+            # The clean-up's rmtree gets a TERM first, as a group TERM sends the child a second one; the real rmtree then runs.
+            real_rmtree = mutate_guard.shutil.rmtree
+            def rmtree_after_a_term(path, *args, **kwargs):
+                os.kill(os.getpid(), signal.SIGTERM)
+                return real_rmtree(path, *args, **kwargs)
+            mutate_guard.shutil.rmtree = rmtree_after_a_term
         mutate_guard.MUTATIONS = []
         mutate_guard.mutate_shared.run_mutants = block
         sys.exit(mutate_guard.main())

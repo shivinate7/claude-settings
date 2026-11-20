@@ -4005,6 +4005,10 @@ def stop_on_signals():
     the caller removes its checkouts. The handlers and the stop flag are put back on the way out. Windows has no SIGHUP, so it is
     left out there."""
     def stop(signum, _frame):
+        # A later signal while the caller cleans up is ignored: a group TERM reaches the child too, and a second TERM
+        # would cut the work folder's rmtree short.
+        for number in stops:
+            signal.signal(number, signal.SIG_IGN)
         mutate_shared.request_stop()
         raise SystemExit(128 + signum)
 
