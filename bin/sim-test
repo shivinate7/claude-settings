@@ -7,7 +7,7 @@
 # It keeps no UDID: `sim-lease take --device <role> --udid` grants one (SLOT_UDID in bin/sim-lease is the one home).
 # Reuse: duo reuses the first booted device whose name contains "iPhone Duo", pro the first booted iPhone whose name does
 # not. Reuse takes no lease and shuts nothing down. It never shuts down a simulator it did not boot.
-# Cross-role (record sims-load-brake-only): a Duo may boot beside the 18 Pro and the reverse. The
+# Cross-role (ruling sims-load-brake-only): a Duo may boot beside the 18 Pro and the reverse. The
 # cap below and the load brake in bin/sim-lease are the only limits; a booted phone of the other kind is no reason to refuse.
 # Before its own boot it counts every booted device, owner-booted too. At the cap it boots nothing, runs no tests,
 # names the booted devices and exits 1: the guard sees only the command word, not the boot inside this tool. A simctl
