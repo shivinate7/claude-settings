@@ -216,7 +216,7 @@ class T(unittest.TestCase):
             with self.subTest(signal=sig.name):
                 self.assert_signal_ends_child_tree(sig)
 
-    def start_child_tree(self, d):
+    def start_child_tree(self, d, preexec=None):
         """Starts verdict in its own group, running a child that starts a grandchild. -> (the verdict Popen, child pid, grandchild pid).
         The pids are read from a marker the child writes once both run. A red run's pids are killed at cleanup."""
         ready = os.path.join(d, "ready.txt")
@@ -237,7 +237,7 @@ class T(unittest.TestCase):
         env.pop("STALL_WATCH_BEAT", None)
         env["VERDICT_LOG"] = os.path.join(d, "v.log")
         proc = subprocess.Popen([sys.executable, V, sys.executable, script], env=env, start_new_session=True,
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, preexec_fn=preexec)
         self.addCleanup(stop_group, proc)
         self.assertTrue(wait_for(ready, 60, proc), "fixture: verdict's child never wrote its pids")
         child, grand = (int(x) for x in open(ready, encoding="utf-8").read().split())
@@ -271,6 +271,22 @@ class T(unittest.TestCase):
                 self.fail("verdict did not exit within 60 s of a KILL to its group")
             self.assertTrue(wait_gone(child, 30), "a KILL to the group that started verdict did not end its child %d" % child)
             self.assertTrue(wait_gone(grand, 30), "a KILL to the group that started verdict did not end the child's child %d" % grand)
+
+    @unittest.skipIf(os.name == "nt", "POSIX signals")
+    def test_sigint_to_verdict_ends_the_child_tree(self):
+        """An INT to verdict alone ends its child and that child's child before verdict returns."""
+        # A process that inherits SIG_IGN for INT never gets Python's KeyboardInterrupt, so verdict starts with the default action.
+        default_int = lambda: signal.signal(signal.SIGINT, signal.SIG_DFL)
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            proc, child, grand = self.start_child_tree(d, preexec=default_int)
+            self.assertTrue(alive(child) and alive(grand), "scope: the child and its child must run before INT")
+            proc.send_signal(signal.SIGINT)
+            try:
+                proc.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                self.fail("verdict did not exit within 60 s of INT")
+            self.assertTrue(wait_gone(child, 30), "INT to verdict did not end its child %d, which runs after verdict returned" % child)
+            self.assertTrue(wait_gone(grand, 30), "INT to verdict did not end the child's child %d, which runs after verdict returned" % grand)
 
     def test_test_failed_marker_on_exit0_is_fail(self):
         r = run("print('Test Suite All tests')\nprint('** TEST FAILED **')")

@@ -27101,6 +27101,37 @@ class StaleMergeTrees(unittest.TestCase):
                 self.assertTrue(os.path.isdir(held[kind]), "a %s folder whose pid %d is dead must stay while a live child runs in it" % (kind, dead))
 
 
+class ProducerFolderNames(unittest.TestCase):
+    """A run folder that a real producer makes carries the run's pid in its name, so the merge tool's sweep can find it once the
+    run is dead. Each case calls the producer itself, so a producer that drops the pid goes red here."""
+
+    def test_mutate_guard_names_its_work_folder_with_the_run_pid(self):
+        """A default run of hooks/mutate_guard.py names its work folder with the pid of that run. The run stops once it has named it.
+        The mutation list is empty here: a stale anchor in the real list ends a run before its work folder, and that is not this case."""
+        import mutate_guard  # noqa: E402  the real tool, from hooks/ (on the path, see the top of this file)
+        made = []
+
+        class Stop(Exception):
+            """Ends the run as soon as the work folder is named: nothing past it is needed here."""
+
+        def mkdtemp(*args, **kwargs):
+            made.append(kwargs.get("prefix"))
+            raise Stop()
+
+        patches = [unittest.mock.patch.object(tempfile, "mkdtemp", mkdtemp), unittest.mock.patch.object(sys, "argv", ["mutate_guard.py"]),
+                   unittest.mock.patch.object(mutate_guard, "MUTATIONS", [])]
+        with contextlib.ExitStack() as stack:
+            for patch in patches:
+                stack.enter_context(patch)
+            try:
+                mutate_guard.main()
+            except Stop:
+                pass
+        self.assertEqual(len(made), 1, "scope: a default run must reach its work folder as its first temp folder, made %r" % made)
+        self.assertEqual(made[0], "mutate_guard_%d-" % os.getpid(),
+                         "mutate_guard must name its work folder with the run's pid, got prefix %r" % made[0])
+
+
 class VerifiedLine(RecordsEnv):
     """The claim commit and the records-page commit each carry a Verified line (lint/check_red_run.py)."""
 

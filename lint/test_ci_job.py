@@ -1649,6 +1649,36 @@ class ParallelLint(Job):
     def test_with_two_cpus_the_default_runs_a_pair_at_once(self):
         self.check_all_pass(["a", "b"], launch=cpus(2))
 
+    @unittest.skipUnless(os.path.isdir("/proc/self"), "the step reads its ancestors from /proc")
+    def test_the_lint_log_folder_names_the_ci_job_pid(self):
+        """The folder that holds a parallel run's step logs names the pid of the ci-job run that made it, so the merge tool's sweep
+        can tell, once that run is dead, that the pid is dead. The step reads its own ancestors to find that run."""
+        tmp = tempfile.mkdtemp(prefix="lint-tmp-", dir=RUN_FOLDER)  # this run's own temp folder: no other run's folder is listed
+        seen = os.path.join(self.root, "seen.json")
+        body = ("import json, os, tempfile\n"
+                "def argv_of(pid):\n"
+                "    with open('/proc/%d/cmdline' % pid, 'rb') as f:\n"
+                "        return [a.decode('utf-8', 'replace') for a in f.read().split(b'\\0') if a]\n"
+                "def parent_of(pid):\n"
+                "    with open('/proc/%d/status' % pid) as f:\n"
+                "        return int([ln for ln in f if ln.startswith('PPid:')][0].split()[1])\n"
+                "chain, pid = [], os.getpid()\n"
+                "while pid > 1:\n"
+                "    chain.append([pid, argv_of(pid)])\n"
+                "    pid = parent_of(pid)\n"
+                "names = sorted(n for n in os.listdir(tempfile.gettempdir()) if n.startswith('ci-job-lint-'))\n"
+                "with open(SEEN, 'w') as f:\n"
+                "    json.dump({'names': names, 'chain': chain}, f)\n").replace("SEEN", repr(seen))
+        rc, lines, out = self.run_lint(self.lint("a", body), workers=2, env={"TMPDIR": tmp})
+        self.assertEqual(rc, 0, out)
+        with open(seen, encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertEqual(len(data["names"]), 1, "scope: one lint log folder must exist while a parallel step runs, got %r" % data["names"])
+        ci = [pid for pid, argv in data["chain"] if any(os.path.basename(a) == "ci-job" for a in argv)]
+        self.assertTrue(ci, "scope: no ci-job process among the step's ancestors: %r" % data["chain"])
+        self.assertTrue(data["names"][0].startswith("ci-job-lint-%d-" % ci[0]),
+                        "the lint log folder %s does not name the pid %d of the ci-job run that made it" % (data["names"][0], ci[0]))
+
     def test_two_workers_never_run_three_at_once(self):
         self.check_cap(["a", "b", "c"], workers=2)
 
