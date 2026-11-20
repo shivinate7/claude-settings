@@ -46,20 +46,24 @@ class BranchNameError(LayoutError):
     """The extras file reads, and its "record-branch" key is not a branch name."""
 
 
-def _read(path):
+def _read(path, extras=False):
     try:
         with open(path, encoding="utf-8") as handle:
-            return _parse(handle.read(), path)
+            return _parse(handle.read(), path, extras)
     except OSError as err:
         raise LayoutError("cannot read %s: %s" % (path, err)) from err
 
 
-def _parse(text, path):
-    """The extras or layout text as a dict. `path` names the source in an error."""
+def _parse(text, path, extras=False):
+    """The extras or layout text as a dict. `path` names the source in an error. An extras file (`extras`) that holds
+    the "protected-paths" key may hold no "kinds" object; its kinds then read as {}. Any other extras file with no
+    "kinds" stays unreadable, as on main."""
     try:
         data = json.loads(text)
     except ValueError as err:
         raise LayoutError("cannot read %s: %s" % (path, err)) from err
+    if extras and isinstance(data, dict) and "kinds" not in data and PROTECTED_PATHS in data:
+        data = dict(data, kinds={})
     if not isinstance(data, dict) or not isinstance(data.get("kinds"), dict):
         raise LayoutError("%s: no \"kinds\" object" % path)
     for name, kind in data["kinds"].items():
@@ -88,14 +92,14 @@ def has_extras(root):
 def rolled_out(root):
     """True when `root` holds its extras file and the file's "rolled-out" key is true, so it keeps
     every kind at its layout path."""
-    return has_extras(root) and _read(_extras(root)).get(ROLLED_OUT) is True
+    return has_extras(root) and _read(_extras(root), True).get(ROLLED_OUT) is True
 
 
 def kinds(root=None):
     """{name: kind} from the layout, plus the kinds in the extras file of `root` when it has one."""
     found = {name: dict(kind) for name, kind in layout()["kinds"].items()}
     if root is not None and rolled_out(root):
-        for name, kind in _read(_extras(root))["kinds"].items():
+        for name, kind in _read(_extras(root), True)["kinds"].items():
             if name in found and kind["path"].strip("/") in _kept(name):
                 continue  # the extras file repeats a place legacy-repos keeps this kind
             if name in found:
@@ -206,7 +210,7 @@ def unmoved(root):
     name = repo_name(root)
     found = {kind: where.strip("/") for kind, where in (legacy_repos().get(name, {}) if name else {}).items()}
     if rolled_out(root):
-        for kind, entry in _read(_extras(root))["kinds"].items():
+        for kind, entry in _read(_extras(root), True)["kinds"].items():
             if kind not in found and isinstance(entry, dict) and entry["path"].strip("/") in _kept(kind):
                 found[kind] = entry["path"].strip("/")
     return found
@@ -401,6 +405,36 @@ def _default_branch_extras(root):
     return None
 
 
+PROTECTED_PATHS = "protected-paths"  # the extras key: a list of {path, why}, the paths a session may not write
+
+
+def protected_paths(root):
+    """[{path, why}] from the "protected-paths" key of `root`'s extras file, in order; [] for a repo with no
+    extras file or no key. `path` is a repo-relative POSIX prefix: a trailing slash names a folder, any other path
+    one file. `why` is the one line the guard quotes when it refuses a write (decision protected-path).
+    LayoutError, naming the key and the entry, for a list that is no list, an entry that is no object, a path
+    that is no non-empty string or lies outside the repo, or a missing or empty why."""
+    found = _repo_keys(root).get(PROTECTED_PATHS)
+    if found is None:
+        return []
+    where = _extras(root)
+    if not isinstance(found, list):
+        raise LayoutError("%s: %s is not a list" % (where, PROTECTED_PATHS))
+    out = []
+    for number, item in enumerate(found, 1):
+        shown = item.get("path") if isinstance(item, dict) else item
+        label = "%s: %s entry %d (%s)" % (where, PROTECTED_PATHS, number, shown)
+        if not isinstance(item, dict):
+            raise LayoutError("%s is not an object with a path and a why" % label)
+        entry_path, why = item.get("path"), item.get("why")
+        if not isinstance(entry_path, str) or not entry_path.strip("/\\"):
+            raise LayoutError("%s has no path" % label)
+        if not isinstance(why, str) or not why.strip():
+            raise LayoutError("%s has no why: say in one line why a session may not write it" % label)
+        out.append({"path": _safe(entry_path, label), "why": why})
+    return out
+
+
 def _page_in(root, keys, where):
     """The waiting page links held by the extras dict `keys` (read from `where`), [{account, url}]: the links of the
     registry entry whose role is "waiting-page"; with none, the old "waiting-page" key as one link with account ""; else []."""
@@ -415,7 +449,7 @@ def _page_links(root):
     """The waiting page links of `root`, [] when it has no page. A checkout with no extras file reads them from the
     default branch's (_default_branch_extras); its own file always wins. A ref's file that does not hold a page is no page."""
     if has_extras(root):
-        return _page_in(root, _read(_extras(root)), _extras(root))
+        return _page_in(root, _read(_extras(root), True), _extras(root))
     held = _default_branch_extras(root)
     if held is None:
         return []
@@ -448,7 +482,7 @@ def set_waiting_page(root, url, account):
         raise LayoutError("%s: %s %r is not a claude.ai artifact link with an id" % (_extras(root), WAITING_PAGE, url))
     _links([{"account": account, "url": url}], "%s: set-waiting-page" % _extras(root))
     if has_extras(root):
-        data = _read(_extras(root))
+        data = _read(_extras(root), True)
         found = artifacts(root)
         held = next((e for e in found if e["role"] == WAITING_ROLE), None)
         if held is not None:
@@ -543,7 +577,7 @@ def live_pages(roots):
 
 def _repo_keys(root):
     """The extras file of `root` as a dict, or {} when the repo has none."""
-    return _read(_extras(root)) if has_extras(root) else {}
+    return _read(_extras(root), True) if has_extras(root) else {}
 
 
 def _named(root, key, table):
@@ -737,6 +771,17 @@ def mockup_home_problem(root, file, home=None):
 def folders(root, flag):
     """The paths in `root` of each kind whose `flag` (record, listed) is true, in layout order."""
     return tuple(path(root, name) for name, kind in kinds(root).items() if kind.get(flag))
+
+
+def note_dir(root):
+    """The note folder of `root` with its trailing slash. Raises LayoutError when the layout cannot be read."""
+    return path(root, "notes") + "/"
+
+
+def fill_note_paths(root, text):
+    """`text` with {folder} (the note folder, with its slash) and {old} (the old notes file) filled from `root`'s layout.
+    The one filler for the agent-facing note rules (lint/check_record_slugs.py AGENT_FORM_RULES)."""
+    return text.replace("{folder}", note_dir(root)).replace("{old}", path(root, "debt-notes"))
 
 
 if __name__ == "__main__":
