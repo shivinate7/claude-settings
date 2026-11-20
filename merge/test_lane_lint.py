@@ -6050,6 +6050,75 @@ class MergedLintTree(LaneFixture):
         self.assertEqual(self.head("feat"), old, "the pre-join lint pushed over the head: " + text)
         self.assert_comments_name(old, text)
 
+    def saved_pass_count(self):
+        """How many saved PASS files the clone of the lane checkout holds (merge.saved_pass_write's folder)."""
+        folder = os.path.join(self.co, tm.sh(self.co, "git", "rev-parse", "--git-common-dir"), merge.SAVED_PASS_FOLDER)
+        return len([name for name in os.listdir(folder) if name.endswith(".json")]) if os.path.isdir(folder) else 0
+
+    def push_free_lint_first(self, pre_join):
+        """The first lint of the head behind main. It pushes nothing and saves its PASS: the batch runner's pre-join call when `pre_join`,
+        else a lint from a checkout that holds origin/main and not the head. -> (the head, origin/main's tip)."""
+        old, tip = self.behind_main()
+        if pre_join:
+            self.put_role("batch-runner")
+            scope = "batch runner pre-join"
+        else:
+            self.check_out(tip)
+            scope = "checkout does not hold the head"
+        self.use_ci_job(PASSING, 0)
+        if os.path.exists(self.log):
+            os.remove(self.log)
+        rc, text = self.run_lane("--lane-lint", "7", at_head=pre_join)
+        runs = self.lint_calls()
+        self.assertEqual(rc, 0, "precondition: the first lint did not pass: " + text)
+        self.assertIn("main-in not pushed (%s)" % scope, text, "precondition: the first lint did not stop its push for this reason, so the case probes nothing: " + text)
+        self.assertEqual(self.head("feat"), old, "precondition: the first lint pushed, so the case probes nothing: " + text)
+        self.assertEqual(len(runs), 1, "precondition: the first lint did not run ci-job once: " + text)
+        self.assertEqual(runs[0]["head_sha_env"], old, "precondition: the first lint did not hand ci-job the head: " + text)
+        self.assertGreater(self.saved_pass_count(), 0, "precondition: the first lint saved no PASS, so the case probes nothing: " + text)
+        return old, tip
+
+    def pushing_lint_after(self):
+        """The second lint of the same head, from the lane checkout with no batch-runner role: the call that may push.
+        -> (rc, text, the CI_JOB_HEAD_SHA of each ci-job run it made)."""
+        if os.path.exists(self.role_file):
+            os.remove(self.role_file)
+        if os.path.exists(self.log):
+            os.remove(self.log)
+        rc, text = self.run_lane("--lane-lint", "7")
+        return rc, text, [run["head_sha_env"] for run in self.lint_calls()]
+
+    def assert_pushed_merge_was_read(self, old, reads, text):
+        """A push of a merge commit M needs a ci-job run that read M as CI_JOB_HEAD_SHA. With no such run the push must not happen,
+        so origin's branch stays at `old`."""
+        pushed = self.head("feat")
+        if pushed == old:
+            return
+        self.assertIn(pushed, reads, "the run pushed %s, a merge of main that ci-job never read (its runs read %s): %s"
+                      % (pushed[:9], ", ".join(str(sha)[:9] for sha in reads) or "none", text))
+
+    def test_a_pass_saved_by_the_batch_runners_pre_join_lint_is_not_served_to_a_lint_that_pushes(self):
+        old, _ = self.push_free_lint_first(pre_join=True)
+        rc, text, reads = self.pushing_lint_after()
+        self.assertEqual(rc, 0, text)
+        self.assert_pushed_merge_was_read(old, reads, text)
+
+    def test_a_pass_saved_by_a_lint_from_a_checkout_without_the_head_is_not_served_to_a_lint_that_pushes(self):
+        old, _ = self.push_free_lint_first(pre_join=False)
+        rc, text, reads = self.pushing_lint_after()
+        self.assertEqual(rc, 0, text)
+        self.assert_pushed_merge_was_read(old, reads, text)
+
+    def test_a_pass_saved_by_a_pre_join_lint_still_serves_the_next_pre_join_lint(self):  # the control: the save still skips the job for a rerun that pushes nothing
+        old, _ = self.push_free_lint_first(pre_join=True)
+        if os.path.exists(self.log):
+            os.remove(self.log)
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(self.lint_calls(), [], "the pre-join rerun at the same key ran the job again: " + text)
+        self.assertIn("PASS (cached)", text, "the pre-join rerun did not read the saved PASS: " + text)
+        self.assertEqual(self.head("feat"), old, "the pre-join rerun pushed: " + text)
+
     def test_the_draft_run_is_read_for_the_pre_merge_head(self):
         old, _ = self.behind_main()
         asked = []
