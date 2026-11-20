@@ -3,13 +3,16 @@
 
   python3 merge/combine_train.py --queue FILE --root DIR [--lint] [--from-rest]
   python3 merge/combine_train.py --queue FILE --root DIR --build --name NAME
+  python3 merge/combine_train.py --root DIR --build --name NAME
 
 Standalone. merge.py never imports it, so it changes no merge verdict. It never runs `git push`, `gh pr ready`, `gh pr merge` or creates a pull request.
 Its writes are git objects (`git merge-tree`, `git commit-tree`) in the checkout DIR and one temporary worktree per batch, removed at the end.
 --build also writes one local branch ref, and the fetches it needs (below).
 
 --build (roadmap step combine-train-build; ruling 10:23 CST Nov 20: a backlog of 10 or more ready drafts combines, and the front PR stays alone):
-  the queued batches' members are the ready backlog. Under BUILD_THRESHOLD of them the run prints `merge alone` and builds nothing. At the threshold
+  with --queue, the queued batches' members are the ready backlog. With no --queue, the members are merge.reviewed_read's rows whose act is `batch`, in
+  number order, each at the head its row reads; the lowest-numbered `batch` row is the front PR (session reading, 11:41 CST Nov 20), which merges alone and
+  is never a member, and a row of any other act stays out. Under BUILD_THRESHOLD members the run prints `merge alone`, builds nothing and exits 3. At the threshold
   or over, it builds the local branch merge.integration_branch(NAME) from the newest origin/main (one fetch): one no-ff merge commit per kept member,
   in queue order, so the first-parent chain is the build order and each second parent is a member head. A member's live head is read at
   refs/pull/N/head on origin (one `git ls-remote`); one that is not the queued head leaves by name. A member that clashes with the batch so far leaves by
@@ -68,6 +71,10 @@ HEADER = ("combine-train: dry run, no push, no gh pr ready or merge. Readings us
 
 class QueueError(Exception):
     pass
+
+
+class ReadError(Exception):
+    """merge.reviewed_read could not give the members of --build with no --queue."""
 
 
 def git(root, *args):
@@ -357,20 +364,24 @@ def main(argv, clock=None):
     if args.from_rest:
         print("unknown (not built): --from-rest; give --queue FILE")
         return 2
-    if not args.queue:
+    if not args.queue and not args.build:
         print("unknown: no queue given; give --queue FILE")
         return 2
     if args.build and not (args.name and BATCH_NAME.fullmatch(args.name)):
         print("unknown: --build needs --name NAME, 1 to 32 characters of a-z, 0-9 and -")
         return 2
     try:
-        heads, batches = read_queue(args.queue)
-    except QueueError as e:
+        if args.queue:
+            heads, batches = read_queue(args.queue)
+            members = [m for _n, st, ms in batches if st == "queued" for m in ms]
+        else:
+            members, heads = batch_rows(args.root)
+    except (QueueError, ReadError) as e:
         print(f"unknown: {e}")
         return 2
     try:
         if args.build:
-            return build(args, heads, batches)
+            return build(args, heads, members)
         return run(args, heads, batches, clock)
     except OSError as e:  # a program that cannot start, in practice git missing from PATH
         print(f"unknown: a program cannot start ({e.filename or 'git'}: {e.strerror or e}); the dry fold needs git on PATH")
@@ -444,12 +455,27 @@ def live_heads(root, members):
     return live, None
 
 
-def build(args, heads, batches):
-    """--build: see the module docstring. -> the exit code: 0 built with nothing left out, or merge alone; 1 a member left out; 2 unknown."""
-    members = [m for _n, st, ms in batches if st == "queued" for m in ms]
+def batch_rows(root):
+    """The members of --build with no --queue. -> ([member numbers in order], {number: head sha}) from merge.reviewed_read's rows whose act is `batch`, the
+    lowest-numbered one (the front PR) left out. Raises ReadError when the read fails or a `batch` row has no pull request behind it."""
+    rows = []
+    try:
+        _lines, pulls, _totals = merge.reviewed_read(merge.Host(cwd=root), None, ledger=rows)
+    except Exception as e:  # merge.py's own stops (Stop, NetStop) are not in the tool's allowed merge.py names; any failed read is unknown, never a build
+        raise ReadError(f"merge.reviewed_read could not be read ({type(e).__name__}: {' '.join(str(e).split())[:200]}); give --queue FILE")
+    heads = {d["number"]: d["head"]["sha"] for d in pulls}
+    ready = sorted(r["number"] for r in rows if r["act"] == "batch")
+    gone = [n for n in ready if n not in heads]
+    if gone:
+        raise ReadError(f"merge.reviewed_read gave no head for {tag(gone)}")
+    return ready[1:], heads
+
+
+def build(args, heads, members):
+    """--build: see the module docstring. -> the exit code: 0 built with nothing left out; 1 a member left out; 2 unknown; 3 merge alone (under the backlog)."""
     if len(members) < BUILD_THRESHOLD:
-        print(f"merge alone: {len(members)} ready queued members, under the backlog of {BUILD_THRESHOLD}; no batch branch built")
-        return 0
+        print(f"merge alone: {len(members)} ready members, under the backlog of {BUILD_THRESHOLD}; no batch branch built")
+        return 3
     gone = [m for m in members if m not in heads]
     if gone:
         print(f"unknown (the queue file's prs hold no head for {tag(gone)})")
