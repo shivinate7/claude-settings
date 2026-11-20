@@ -467,6 +467,12 @@ def live_heartbeat_threads():
     return [t for t in threading.enumerate() if t.name == HEARTBEAT_THREAD]
 
 
+def stdout_tail_shown(text, marker):
+    """True when `marker` shows in a lint's output `text`. The FAIL of a failed mutation test run shows the last lines of its stdout in that
+    text. A file the text names is not read: a FAIL that points at a log does not show the line."""
+    return marker in text
+
+
 class WallClock:
     """The wall clock of one lint run: time.time, time.monotonic and time.perf_counter read it. It starts at the real time and moves only by advance()."""
 
@@ -1456,6 +1462,75 @@ class LaneLint(LaneFixture):
         self.assertNotEqual(rc, 0, "the lint passed a mutation test run that printed no report, so it read no count: " + text)
         self.assertEqual(pass_lines(text), [], "the lint printed a PASS line for a mutation test run with no report: " + text)
         self.assert_one_mutation_test_run(head)
+
+    # A run that exits non-zero with no readable report says why on stdout (hooks/mutate_guard.py prints `ERROR ...`). The lint reads that stdout
+    # for counts only, so the FAIL must carry its last lines, or the cause stays hidden.
+
+    def test_mutation_test_sharded_run_with_no_report_shows_the_stdout_tail_in_the_fail(self):  # main's three shard jobs: the usual head
+        """Why: with shards, the run that fails is one shard job, so the FAIL must name that job and show the cause its stdout prints."""
+        marker = "ERROR ambiguous mutation, anchor text matches 2 places: guard-case-7"
+        self.use_ci_job(PASSING, 0)
+        head = self.push_sharded_lane(shard_jobs(), shards={"2/3": (marker + "\n", "", 1)})
+        rc, text = self.timed_lint(60, "--lane-lint", "7")
+        self.assertEqual(rc, 1, "the lint passed a shard whose run exited 1 with no report: " + text)
+        self.assertTrue(any(SHARD_JOBS[1] in line and "printed no report" in line for line in text.splitlines()),
+                        "the FAIL does not name the shard job whose run printed no report: " + text)
+        self.assertTrue(stdout_tail_shown(text, marker),
+                        "the FAIL does not show the last stdout line of the run that printed no report, so its cause is not read: " + text)
+        self.assert_mutation_test_runs_at(head, 2)
+
+    def test_mutation_test_one_job_run_with_no_report_shows_the_stdout_tail_in_the_fail(self):
+        marker = "ERROR ambiguous mutation, anchor text matches 2 places: guard-case-7"
+        rc, text, head = self.lint_with_report(marker + "\n", rc=1)
+        self.assertEqual(rc, 1, "the lint passed a run that exited 1 with no report: " + text)
+        self.assertIn("printed no report that can be read", text, "the FAIL does not name the run that printed no report: " + text)
+        self.assertTrue(stdout_tail_shown(text, marker),
+                        "the FAIL does not show the last stdout line of the run that printed no report, so its cause is not read: " + text)
+        self.assert_one_mutation_test_run(head)
+
+    def test_mutation_test_long_stdout_tail_run_with_no_report_shows_the_last_lines_not_the_first(self):  # the full-size state: 200 stdout lines
+        """Why: the cause is the last stdout line. The FAIL shows the last TOUCHED_TAIL_LINES lines, the window a failing test's output uses: not
+        the whole stdout, which would bury the cause, and not only the last line, which would drop the lines that explain it."""
+        marker = "ERROR ambiguous mutation, anchor text matches 2 places: guard-case-7"
+        lines = ["mutate step line %d: reading the next file" % i for i in range(1, 200)] + [marker]
+        rc, text, head = self.lint_with_report("".join(line + "\n" for line in lines), rc=1)
+        self.assertEqual(rc, 1, "the lint passed a run that exited 1 with no report: " + text)
+        tail = merge.TOUCHED_TAIL_LINES
+        shown = [n for n, line in enumerate(lines, 1) if stdout_tail_shown(text, line)]
+        self.assertEqual(shown, list(range(len(lines) - tail + 1, len(lines) + 1)),
+                         "the FAIL shows stdout lines %s of a 200-line run, not its last %d (TOUCHED_TAIL_LINES): %s" % (shown, tail, text))
+        self.assert_one_mutation_test_run(head)
+
+    def test_mutation_test_readable_report_run_shows_no_stdout_tail_in_the_fail(self):  # the control: a readable report already names the cause, so no stdout line is added
+        marker = "STDOUT-TAIL-MARK: printed after a readable report"
+        rc, text, head = self.lint_with_report(mutate_report(694, 693, 0, 1) + marker + "\n", rc=1)
+        self.assertEqual(rc, 1, "the lint passed a readable report with 1 survivor: " + text)
+        self.assertEqual(counts_missing(text, {"survived": 1}), None, "the FAIL output does not name survived 1: " + text)
+        self.assertEqual(pass_lines(text), [], "the lint printed a PASS line for a readable report with 1 survivor: " + text)
+        self.assertFalse(stdout_tail_shown(text, marker),
+                         "the FAIL shows a stdout line after a readable report, where the report already names the cause: " + text)
+        self.assert_one_mutation_test_run(head)
+
+    def test_mutation_test_run_that_times_out_after_printing_shows_the_stdout_tail_in_the_fail(self):  # TimeoutExpired carries the stdout read so far
+        """Why: a run that prints its cause and then hits its cap keeps that cause in the TimeoutExpired it raises (.output, bytes on POSIX).
+        The FAIL must show the line, not say the run printed no stdout."""
+        marker = "ERROR early cause: guard-case-7 stopped before its report"
+        body, script = real_mutate_job()
+        self.use_ci_job(PASSING, 0)
+        self.push_lane({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0)), WORKFLOW_REL: workflow_of(body)})
+        real_sh = merge.sh
+
+        def sh_timing_out_after_printing(args, *rest, **kwargs):
+            if mutation_test_run(args):
+                raise subprocess.TimeoutExpired(args, kwargs.get("timeout"), output=(marker + "\n").encode())
+            return real_sh(args, *rest, **kwargs)
+
+        with unittest.mock.patch.object(merge, "sh", sh_timing_out_after_printing):
+            rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "the lint did not FAIL a mutation test run that timed out after printing: " + text)
+        self.assertTrue(stdout_tail_shown(text, marker),
+                        "the FAIL does not show the line the run printed before its timeout, so its cause is not read: " + text)
+        self.assertNotIn("printed no stdout", text, "the FAIL says the run printed no stdout, though it printed a line before its timeout: " + text)
 
     def test_mutation_test_touched_mjs_file_starts_the_run(self):
         body, script = real_mutate_job()

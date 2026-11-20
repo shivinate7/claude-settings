@@ -3538,8 +3538,9 @@ def mutate_run_check(wt):
         try:
             beat.start()
             c, out = sh(shlex.split(body), cwd=wt, env=env, timeout=cap * 60, live_stderr=True)
-        except subprocess.TimeoutExpired:
-            c, out = None, ""
+        except subprocess.TimeoutExpired as e:  # the stdout read before the timeout is bytes on POSIX even under text=True, and None when nothing was read
+            partial = e.stdout if e.stdout is not None else e.output
+            c, out = None, (partial.decode("utf-8", errors="replace") if isinstance(partial, bytes) else partial or "").strip()
         except (OSError, ValueError) as e:  # the command could not start (no such program, not executable, a bad quote): a FAIL, never a traceback or a pass
             c, out, start_error = None, "", f"{type(e).__name__}: {e}"
         finally:  # every path ends the thread, so none outlives the call or prints after the end line
@@ -3557,7 +3558,9 @@ def mutate_run_check(wt):
         if c is None or wall > cap * 60:
             failures.append(f"the mutation test run took {wall} s, past the {cap}-minute cap of job {job}")
         if counts is None:
-            failures.append(f"the mutation test run exited {'at its timeout' if c is None else c} and printed no report that can be read")
+            tail = out.splitlines()[-TOUCHED_TAIL_LINES:]  # the cause is the last stdout lines (mutate_guard prints `ERROR ...`); the whole stdout would bury it
+            failures.append("\n".join([f"the mutation test run exited {'at its timeout' if c is None else c} and printed no report that can be read"
+                                       + ("; last stdout lines:" if tail else "; it printed no stdout"), *tail]))
         # A table is judged on its counts at any exit code. A tally is the command's own verdict, so CI is red on its nonzero exit, and run_mutants exits 1 on any survivor, wrong cause or unknown.
         if tally and c:
             failures.append(f"the mutation test run exited {c} on a tally of killed {killed}, survived {survived}, wrong cause {wrong}, unknown {unknown}, and CI fails the job on that exit")
