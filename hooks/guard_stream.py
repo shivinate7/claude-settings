@@ -67,12 +67,20 @@ def live_stream_hit(segment: str) -> str:
                  if (h := live_stream_hit(part))), "")
 
 
+WAIT_UNTIL_AHEAD = 25   # a foreground wait-until that lasts this many seconds or more is refused
+
+# The wait-until remedy, said once for each reason that points at it. A foreground wait for a far time is refused,
+# so every reason that names the helper also names the background.
+WAIT_UNTIL_FAR_REFUSED = ("A foreground wait-until for a time %d seconds or more away is refused: "
+                          "run it with run_in_background." % WAIT_UNTIL_AHEAD)
+WAIT_UNTIL_REMEDY = "To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`. " + WAIT_UNTIL_FAR_REFUSED
+
 LIVE_STREAM_REASON = (
     "this command follows a stream and never ends on its own, so it outlives the turn "
     "and the agent that started it. "
     "Remedy: run the command in the foreground with a timeout, or in the background and "
     "wait for its completion notice. To wait on a pid, use `bin/wait-pid PID [--timeout SECS]`. "
-    "To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`."
+    + WAIT_UNTIL_REMEDY
 )
 
 
@@ -580,9 +588,6 @@ def clock_loop(token_rows) -> bool:
     return words[heads[0] + 1:heads[0] + 2] == ["do"] and clock_test(token_rows[heads[0]])
 
 
-WAIT_UNTIL_AHEAD = 25   # a foreground wait-until that lasts this many seconds or more is refused
-
-
 REDIRECT_WORD = re.compile(r"(?:\d*|&)(?:>>?|<)")   # a redirect operator at the start of a word
 
 
@@ -708,7 +713,7 @@ WAITER_REASON = (
     "loop whose test orders the date output against a literal time of the same kind: date +%s against an "
     "epoch with -gt or -ge, or an ISO date-time read against an ISO time with \\>. "
     "A single pause under 25 seconds is allowed in the foreground, and so is wait-until for a time under 25 "
-    "seconds away. A foreground wait-until for a time 25 seconds or more away is refused: run it with run_in_background. Avoid gh pr checks --watch in the "
+    "seconds away. " + WAIT_UNTIL_FAR_REFUSED + " Avoid gh pr checks --watch in the "
     "foreground, which serves a cached status. For a server warm-up, use a "
     "readiness check such as `curl --retry 5 --retry-connrefused http://localhost:3000`."
 )
@@ -1132,7 +1137,7 @@ PATTERN_POLLER_REASON = (
     "every process whose command line names it, including this session's own wrapper for the "
     "same wait, so the condition can stay true long after the work is done. "
     "Remedy: wait on one pid with `bin/wait-pid PID [--timeout SECS]`, which also takes a job a stall "
-    "left behind. To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`. "
+    "left behind. " + WAIT_UNTIL_REMEDY + " "
     "To wait for CI, wait for the CI-wake notice that follows gh pr ready."
 )
 
