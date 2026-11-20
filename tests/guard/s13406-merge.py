@@ -273,6 +273,18 @@ add("merge-checks: the merge tool of the host denies on a pending head", "deny",
 add("merge-checks: the merge tool of the host denies on a failed head", "deny", "merge-checks",
     carries="settled: red", tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12,
     repo="x", owner="y", env_path=GHRED + os.pathsep + PY_PATH, config=MERGECFG)
+# The host's auto-merge tool arms the same merge as the merge tool: GitHub merges it once the head's checks pass. So it is
+# judged by the same head read, and refused or allowed on the same heads as merge_pull_request above.
+AUTO_MERGE_TOOL = "mcp__github__enable_pr_auto_merge"
+add("merge-checks: the host auto-merge tool denies on a pending head", "deny", "merge-checks",
+    carries="pending", tool=AUTO_MERGE_TOOL, cwd=NOGIT, pullNumber=12,
+    repo="x", owner="y", env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+add("merge-checks: the host auto-merge tool denies on a failed head", "deny", "merge-checks",
+    carries="settled: red", tool=AUTO_MERGE_TOOL, cwd=NOGIT, pullNumber=12,
+    repo="x", owner="y", env_path=GHRED + os.pathsep + PY_PATH, config=MERGECFG)
+add("merge-checks: the host auto-merge tool allows a green head, as the merge tool does", "allow",
+    silent=True, tool=AUTO_MERGE_TOOL, cwd=NOGIT, pullNumber=12, repo="x", owner="y",
+    env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
 # The batch brake is removed: a merge is allowed while another ready pull request on the base has a required check pending,
 # by `gh pr merge` and by the host's merge tool. The merged pull request is 1, the other is 2 (its head is pr-two-head).
 BATCH_ON = GHBATCH + os.pathsep + PY_PATH
@@ -488,6 +500,9 @@ _BARE_GUARD = dict(env_path=GREEN_ON, config=MERGECFG)
 # ASK: the repo uses the merge tool, and the call skips it.
 sh("bare-merge: gh pr merge in a repo with a merge block asks",
    "gh pr merge 12 --squash", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, **_BARE_GUARD)
+# `--auto` queues the same merge, and merge_call_of judges it like any merge, so the same ask holds for it.
+sh("bare-merge: gh pr merge --auto in a repo with a merge block asks",
+   "gh pr merge 12 --auto --squash", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, **_BARE_GUARD)
 sh("bare-merge: a URL for the pull request asks",
    "gh pr merge --merge https://github.com/y/x/pull/12", "ask", BARE_MERGE, carries=BARE_SAYS,
    cwd=STAMPREPO, **_BARE_GUARD)

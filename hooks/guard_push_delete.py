@@ -13,7 +13,7 @@ from guard_core import (
     CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move, _segment_cd_target,
     _segment_git_c_target, shell_abs, CONTRACTION, quote_advance, _git_subcommand_index,
     _SHELLS, _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, inner_commands,
-    is_powershell, norm, resolve_command, segment_tokens, split_segments,
+    is_powershell, norm, resolve_command, segment_tokens, segment_with_vars, split_segments,
 )
 
 
@@ -89,7 +89,9 @@ def _push_default_branches(cwd: str, remote: str):
 
 class _QuotedText:
     """A quoted run with a space in it is text (a commit message, an echo), never a push. A quoted
-    single word stays: it is a refspec or a remote, and the shell would unquote it.
+    single word stays: it is a refspec or a remote, and the shell would unquote it. So does the
+    quoted value of `-C`, which is a folder, even with a space in it (`-C "my dir"`, `-C "$(cd sub && pwd)"`):
+    blanking it hides the push. A one-word value such as `-C "$(pwd)"` was never blanked.
 
     `sub(repl, text)` walks the quotes as the shell pairs them: an opening quote closes at its own
     mate, so the gap between two spans (`'%s\\n' "a b"`, `'x' --force 'y'`) is never read as a span.
@@ -111,7 +113,8 @@ class _QuotedText:
                     out.append(text[index:])
                     break
                 span = text[index:end + 1]
-                out.append(repl if re.search(r"\s", span) else span)
+                folder = re.search(r"(?:^|\s)-C\s*$", text[max(0, index - 16):index])
+                out.append(repl if re.search(r"\s", span) and not folder else span)
                 index = end + 1
             else:
                 out.append(char)
@@ -122,25 +125,65 @@ class _QuotedText:
 PUSH_QUOTED = _QuotedText()
 
 
+def _push_folder(segments, ends, number: int, cwd: str) -> str:
+    """The folder the push in `segments[number]` runs in: the command's last `cd`, moved by the segment's own
+    `git -C`. Each folder is read with the variables assigned before its own segment."""
+    run_dir = cwd
+    for at, other in enumerate(segments):
+        words = segment_tokens(other)
+        cd = _segment_cd_target(words) if words else None
+        if cd is not None:
+            read = segment_tokens(segment_with_vars(segments, at, ends))
+            cd = _segment_cd_target(read) if read else cd
+        if cd is not None:
+            run_dir = _absolute(_read_substitution(cd, run_dir), run_dir)
+    read = segment_tokens(segment_with_vars(segments, number, ends)) or segment_tokens(segments[number])
+    git_c = _segment_git_c_target(read)
+    return _absolute(_read_substitution(git_c, run_dir), run_dir) if git_c is not None else run_dir
+
+
+# The two substitutions a folder word may hold that need no command run: `$(pwd)` is the shell's folder at that
+# point, and `$(echo WORD)` is WORD. Any other substitution is the shell's to know.
+_ECHOED_FOLDER = re.compile(r"echo\s+([^\s$`()\\'\"|;&<>*?\[\]{}]+)")
+
+
+def _read_substitution(path: str, run_dir: str) -> str:
+    """`path` with a whole-word `$(pwd)`, `$(echo WORD)` or the backtick form read as its value, else as given."""
+    if len(path) > 2 and path.startswith("$(") and path.endswith(")"):
+        inner = path[2:-1].strip()
+    elif len(path) > 1 and path.startswith("`") and path.endswith("`"):
+        inner = path[1:-1].strip()
+    else:
+        return path
+    if inner == "pwd":
+        return run_dir
+    echoed = _ECHOED_FOLDER.fullmatch(inner)
+    return echoed.group(1) if echoed else path
+
+
 def push_target(segment: str, cmd: str, cwd: str):
     """(directory, config overrides) a `git push` in this segment runs against.
 
     The directory is the segment's own `git -C <dir>`, else the command's last `cd`, else the
-    session's cwd. A segment that cannot be read gives ('', {}): a directory that does not
-    exist, which the verdict reads as unknown, and unknown asks.
+    session's cwd. A variable in either folder is read as the last value an earlier segment of the
+    command assigned (`segment_with_vars`: `W+=x` appends, a piped assignment sets nothing), and a
+    whole-word `$(pwd)` or `$(echo WORD)` is read as its value. A segment that cannot be read gives
+    ('', {}): a directory that does not exist, which the verdict reads as unknown, and unknown asks.
+    So does a segment that the command repeats with a different folder each time, since its caller
+    cannot tell which repeat it holds.
     """
     tokens = segment_tokens(segment)
     if tokens is None:
         return "", {}
-    # The last `cd` only: `_run_dir` would also take the first `git -C` of ANY segment.
-    run_dir = cwd
-    for other in split_segments(_strip_heredoc_bodies_unconditionally(cmd)):
-        words = segment_tokens(other)
-        cd = _segment_cd_target(words) if words else None
-        if cd is not None:
-            run_dir = _absolute(cd, run_dir)
-    git_c = _segment_git_c_target(tokens)
-    where = _absolute(git_c, run_dir) if git_c is not None else run_dir
+    ends = []
+    segments = split_segments(_strip_heredoc_bodies_unconditionally(cmd), ends)
+    places = [at for at, other in enumerate(segments) if other == segment]
+    if not places:   # a segment the command's own split does not hold is read after all of it
+        segments, places = segments + [segment], [len(segments)]
+    wheres = {_push_folder(segments, ends, at, cwd) for at in places}
+    if len(wheres) != 1:
+        return "", {}
+    where = wheres.pop()
     overrides = {}
     index = resolve_command(tokens)
     cursor = index + 1 if index is not None else len(tokens)
