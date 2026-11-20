@@ -983,6 +983,15 @@ MUTATIONS = [
      '        return [], []',
      'test_darwin_processes_in_reads_one_table'),
 
+    # only_on="linux": the open-file read is processes_in's Linux arm. macOS reads lsof instead, so the
+    # arm does not exist there and the mutant would survive for no reason.
+    ('run dir: a holder with an open file under the run dir and no path in argv is not seen',
+     "sweep",
+     '_holds_open_under_linux(pid, real_root)',
+     'False',
+     'test_a_process_with_no_run_dir_path_in_argv_holding_an_open_file_keeps_the_tree',
+     "linux"),
+
     # only_on="posix": the sleep fixture is POSIX only.
     ("husks: a process inside no longer keeps the husk",
      "sweep",
