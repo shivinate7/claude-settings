@@ -862,6 +862,32 @@ lb_add("an agent's session tool that writes nothing reads no load under the wors
 lb_add("a Bash call whose agent_id is malformed reads no load under the worst reading",
        lb_no_read_check("Bash", {"command": "echo hi"}, agent="not an id!"))
 
+# A LINT START AT THE FULL DISK. `merge --lane-lint` already refuses at a full disk inside the merge tool, before it makes
+# its lint tree (merge/test_lane_lint.py), so no guard case pins it here. A direct `bin/ci-job --lint` has no disk floor
+# anywhere, so a background one is refused by the brake at a full disk. The lint start reads disk only, never memory
+# or the load average (decision machine-load-brake, owner pick a, 2026-11-17).
+LB_CI_LINT_BG = {"command": "bin/ci-job --lint", "run_in_background": True}
+LB_LANE_LINT_BG = {"command": "merge --lane-lint brake-reads-load-before-lint", "run_in_background": True,
+                   "timeout": 7200000}   # above the lint bound, so check-timeout passes the call
+LB_OVERRIDE_LINE = re.compile(re.escape("To allow this act, type `override` for this one act"))
+LB_LOAD_RULE = re.compile(r"^load-brake: ")
+LB_LOAD_CITE = re.compile(r"machine-load-brake")
+LB_SWEEP = re.compile(r"sweep\.py")   # the disk refusal names the sweep that frees space
+lb_add("bin/ci-job --lint, background, 3.1 GB free of 926 GB: full, refused, names the disk, the sweep and the override line",
+       lb_decision_check("Bash", lb_reading(disk_free_gb=3.1, disk_total_gb=926.0), "deny",
+                         (LB_LOAD_RULE, LB_LOAD_CITE, LB_SWEEP, LB_OVERRIDE_LINE, lb_gb(3.1, 926)),
+                         tool_input=LB_CI_LINT_BG))
+lb_add("bin/ci-job --lint, background, normal reading: allowed",
+       lb_decision_check("Bash", LB_NORMAL, "allow", tool_input=LB_CI_LINT_BG, reads=None))
+lb_add("merge --lane-lint, background, normal reading: allowed",
+       lb_decision_check("Bash", LB_NORMAL, "allow", tool_input=LB_LANE_LINT_BG, reads=None))
+lb_add("a Bash call that is no lint start, 97.2% memory and 3.1 GB free of 926 GB: allowed, and the reader does not run",
+       lb_decision_check("Bash", lb_reading(memory_pct=97.2, disk_free_gb=3.1, disk_total_gb=926.0), "allow",
+                         tool_input={"command": "echo hi"}, reads=0))
+lb_add("a Bash call that quotes bin/ci-job --lint in an echo, at a full disk: allowed, and the reader does not run",
+       lb_decision_check("Bash", lb_reading(disk_free_gb=3.1, disk_total_gb=926.0), "allow",
+                         tool_input={"command": 'echo "bin/ci-job --lint"'}, reads=0))
+
 # CLOUD. With CLAUDE_CODE_REMOTE=true, a new Agent, Task or Workflow start is refused at a full disk: free space under
 # the full point, which each case reads from guard.py rather than copying. A cloud lane that fills the disk makes its
 # writes fail, so the start is what gets stopped. Memory and busy never brake a cloud start. A running agent or lane is
