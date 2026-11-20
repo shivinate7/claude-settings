@@ -58,7 +58,7 @@ import merge  # noqa: E402  merge.CI_JOB is the one home of a ci-job run; these 
 TOOL = os.path.join(HERE, "combine_train.py")
 MERGE_PY = os.path.join(HERE, "merge.py")
 READY = ["STE lint", "split guard", "cost pins", "scaffold", "debt retire", "open-PR clash"]
-GIT_WRAPPERS = {"merge_tree", "conflicting_files", "ci_job_run", "ready_job_groups", "integration_branch", "freeze_lines", "reviewed_read", "Host"}  # the merge.py names the tool may reach; ready_job_groups splits the ready checks by job, no run; integration_branch and freeze_lines are the one home of the batch branch name and the freeze body (coordinator pick, rule building-one-home-per-capability); reviewed_read (merge.py:6230) is the queue's reader, and Host is the host it reads through, as the --reviewed path builds it (merge.py:7746)
+GIT_WRAPPERS = {"merge_tree", "conflicting_files", "ci_job_run", "ready_job_groups", "integration_branch", "freeze_lines", "reviewed_read", "Host"}  # the merge.py names the tool may reach; ready_job_groups splits the ready checks by job, no run; integration_branch and freeze_lines are the one home of the integration branch name and the freeze body (coordinator pick, rule building-one-home-per-capability); reviewed_read (merge.py:6230) is the queue's reader, and Host is the host it reads through, as the --reviewed path builds it (merge.py:7746)
 NO_HOME = "unknown (fast-checks-before-ready not landed)"
 SIX = ["members in", "members left out", "clash rate", "dry-round minutes", "lint minutes", "CI minutes"]
 PASS_WORD = re.compile(r"(?<!not a )(?<!not )(?<!no )\b(?:pass(?:es|ed)?|ok)\b", re.I)  # a claim of pass ("pass", "passed", "ok"), not "not a pass" or "not ok"
@@ -908,7 +908,7 @@ class BuildChain(unittest.TestCase):
 
 
 class BuildMergeAloneUnderTen(unittest.TestCase):
-    """Under the threshold of 10 ready members the run prints `merge alone` and builds no batch branch (ruling 10:23 CST Nov 20)."""
+    """Under the threshold of 10 ready members the run prints `merge alone` and builds no integration branch (ruling 10:23 CST Nov 20)."""
 
     def test_nine_members_print_merge_alone_and_build_no_branch(self):
         root = make_repo({"README.md": "x\n"}, checks=READY)
@@ -916,7 +916,9 @@ class BuildMergeAloneUnderTen(unittest.TestCase):
         rc, out, err, _ci = run_build(root, queue)
         self.assertTrue(any("merge alone" in line for line in out.splitlines()), "nine members under the threshold of 10 print no 'merge alone' line; the run ended with: %s" % shown(out, err))
         self.assertEqual(rc, 3, "nine members under the threshold of 10 exit %s, not 3 (merge alone has its own exit code): %s" % (rc, shown(out, err)))
-        self.assertFalse(branch_exists(root, merge.integration_branch(BUILD_NAME)), "nine members under the threshold of 10 made a batch branch")
+        alone = [line for line in out.splitlines() if "merge alone" in line]
+        self.assertTrue(alone and "no integration branch built" in alone[0], "the merge alone line does not say 'no integration branch built': %s" % shown(out, err))
+        self.assertFalse(branch_exists(root, merge.integration_branch(BUILD_NAME)), "nine members under the threshold of 10 made an integration branch")
 
     def test_empty_queue_prints_merge_alone_and_builds_no_branch(self):
         root = make_repo({"README.md": "x\n"}, checks=READY)
@@ -924,7 +926,9 @@ class BuildMergeAloneUnderTen(unittest.TestCase):
         rc, out, err, _ci = run_build(root, queue)
         self.assertTrue(any("merge alone" in line for line in out.splitlines()), "an empty queue prints no 'merge alone' line; the run ended with: %s" % shown(out, err))
         self.assertEqual(rc, 3, "an empty queue under the threshold of 10 exits %s, not 3 (merge alone has its own exit code): %s" % (rc, shown(out, err)))
-        self.assertFalse(branch_exists(root, merge.integration_branch(BUILD_NAME)), "an empty queue made a batch branch")
+        alone = [line for line in out.splitlines() if "merge alone" in line]
+        self.assertTrue(alone and "no integration branch built" in alone[0], "the merge alone line does not say 'no integration branch built': %s" % shown(out, err))
+        self.assertFalse(branch_exists(root, merge.integration_branch(BUILD_NAME)), "an empty queue made an integration branch")
 
 
 class BuildBoundaryAtTen(unittest.TestCase):
@@ -996,7 +1000,7 @@ class BuildMakesNoPush(unittest.TestCase):
         base = git_ok(root, "rev-parse", "origin/main").strip()
         shims, shim_log = write_shims()
         run_build(root, queue, shims=shims)
-        self.assertIsNotNone(first_parent_chain(root, merge.integration_branch(BUILD_NAME), base), "the build made no batch branch, so the push check below proves nothing")
+        self.assertIsNotNone(first_parent_chain(root, merge.integration_branch(BUILD_NAME), base), "the build made no integration branch, so the push check below proves nothing")
         shim = calls(shim_log)
         git_calls = [c[1:] for c in shim if c[0] == "git"]
         gh_calls = [c[1:] for c in shim if c[0] == "gh"]
@@ -1103,7 +1107,7 @@ class BuildExitCodes(unittest.TestCase):
         rc, out, err, _ci = run_build(root, queue, shims=shims)
         self.assertEqual(rc, 2, "a failed live-head read exits %s, not 2: %s" % (rc, shown(out, err)))
         self.assertIn("ls-remote", out, "the unknown line does not name the failed ls-remote read: %s" % shown(out, err))
-        self.assertFalse(branch_exists(root, merge.integration_branch(BUILD_NAME)), "a failed live-head read still built a batch branch")
+        self.assertFalse(branch_exists(root, merge.integration_branch(BUILD_NAME)), "a failed live-head read still built an integration branch")
 
 
 if __name__ == "__main__":
