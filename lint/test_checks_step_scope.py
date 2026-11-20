@@ -513,6 +513,7 @@ MAIN_STEPS = [
 # folder or repo, named in a comment, or a hook's payload: it is not read from the repo. A new name in a scoped entry
 # turns the guard red; so does a listed name the file no longer names.
 ALLOWED = {
+    "hooks/test_agent_brief.py": (["debts/notes.md", "docs/debts/notes.md"], "the old notes file names the brief is compared against, in its text and in a temp cwd; neither file is opened"),
     "hooks/test_call_judge.py": (["README.md", "docs/design/last-answer-notes.md"], "README.md is written into a temp repo; the other name is in comments"),
     "hooks/test_decision_watch.py": (["CLAUDE.md", "decisions/reply-judge-samples-never-refuses.md"], "CLAUDE.md is written into temp repos; the record name is in a comment"),
     "hooks/test_feedback_inbox.py": ([".claude/CLAUDE.md", "CLAUDE.md", "README.md", "docs/debts/notes.md", "docs/notes/README.md", "docs/todo.md"], "fixture repos track or write these names in temp dirs; docs/notes/README.md is written into a temp repo, and the suite never reads the root copy; the frozen notes file is named by the case that checks the home judge refuses it"),
@@ -565,6 +566,7 @@ TRANSITIVE_ALLOWED = {
     "hooks/guard.py": (["skills/impeccable/SKILL.md"], "impeccable_command_verbs opens it only when a command verb check runs; an in-process audit hook over the 83 scoped python suites saw no open (read 13:32 CST Nov 14; a suite's own child processes were not watched)"),
     "lint/rule_audit.py": (["test_guard.py"], "section_dir and _with_sections only parse hooks/test_guard.py and tests/guard/*.py as Python; nothing runs them or opens skills/impeccable"),
     "lint/test_rule_audit.py": (["test_guard.py", "tests/guard"], "builds its own hooks/test_guard.py and tests/guard fixture in a temp tree"),
+    "lint/test_check_hook_dup_names.py": (["tests/guard"], "writes its own tests/guard fixture sections in a temp tree; the check parses them as Python and opens no .md"),
     "hooks/mutate_guard.py": (["test_guard.py"], "strace, round 1 review: no open of skills/impeccable at run time"),
     "hooks/test_mutate_ci.py": (["test_guard.py"], "strace, round 1 review: no open of skills/impeccable at run time"),
     "lint/check_unknown_reads_contract.py": (["test_guard.py"], "strace, round 1 review: no open of skills/impeccable at run time"),

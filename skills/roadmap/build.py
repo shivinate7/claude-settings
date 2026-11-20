@@ -34,7 +34,7 @@ main (landed_marks) or by a row in the file's optional `landedPulls` list (pull_
 of the last 14 days with their head ref, head sha and merged flag, which the publisher fills from GitHub.
 
 After it runs, this script prints an upkeep list for the triage thread (step c55): open-step notes over
-NOTE_WORDS words; in phases that hold a doing or active step (a live phase), todo, ready, queued, doing and
+NOTE_WORDS words; in phases that hold a doing or active step (a live phase), todo, ready, doing and
 active steps untouched for STALE_DAYS days and with no note (blocked and folded steps, a step with no phase, and a
 later phase wait on purpose, so flagging them would cry wolf); and steps that
 entered the top TOP open places in the last day without a "Placed ahead of" line.
@@ -45,7 +45,7 @@ the live file's "sessions" list is not archived (any other status counts) and ca
 the tag cs-repo:<this repo's GitHub name> and the tag cs-step:<step id>, or when an open pull request's
 branch equals the step id or lane/<step id>. The step id matches exactly; the GitHub name ignores case. A session row
 with no tags key, or null tags, has no tags. The cs-repo tag is needed because list_sessions is
-account-wide and step ids repeat across repos. A step whose status is none of todo, ready, queued, blocked, folded,
+account-wide and step ids repeat across repos. A step whose status is none of todo, ready, blocked, folded,
 doing, active or done is listed as unknown status. The row reads one unknown entry, never an empty list, when the live
 file is missing or unreadable; its readAt is not an ISO time, has no time zone, is over STALE_LIVE_MINUTES
 old or is more than FUTURE_MINUTES ahead; it has no sessions list; the repo's GitHub name cannot be read;
@@ -238,9 +238,9 @@ FUTURE_MINUTES = 5
 # `ready` reads as todo.
 TODO_STATUS = ("todo", "ready")
 LIVE_STATUS = ("doing", "active")
-KNOWN_STATUS = TODO_STATUS + ("queued", "blocked", "folded") + LIVE_STATUS + ("done",)
+KNOWN_STATUS = TODO_STATUS + ("blocked", "folded") + LIVE_STATUS + ("done",)
 # The statuses the stale and empty rows read: blocked and folded steps wait on purpose, so they are never listed.
-LISTED_STATUS = TODO_STATUS + ("queued",) + LIVE_STATUS
+LISTED_STATUS = TODO_STATUS + LIVE_STATUS
 TOP = 5
 # ISO UTC: a done step updated before this time is not read for a Done check. Set to the first midnight after this
 # row ships: the 44 done steps updated Nov 7-8 CST (measured on origin/roadmap) carry no `Done check green on main:`

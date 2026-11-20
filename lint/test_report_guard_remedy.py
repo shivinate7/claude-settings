@@ -45,8 +45,8 @@ import test_report_guard_stalled as trs  # noqa: E402  the triage wake's build r
 
 CITE = "guard-remedy-not-to-owner"
 RECORD = os.path.join(HERE, "..", "docs", "decisions", CITE + ".md")
-FIXTURES = ("missing_report", "correction_tail", "done_format", "models", "unstarted", "unvetted",
-            "past_ruling", "keys", "pick",
+FIXTURES = ("missing_report", "correction_tail", "done_format", "models", "unstarted", "unstarted_file",
+            "unvetted", "past_ruling", "keys", "pick",
             "recovered", "departs_unlanded", "departs_landed", "answered", "mistake", "hand_off", "refusal",
             "lane", "pick_known_writer", "rewrite_stamp", "triage_hold", "unvetted_unreadable",
             "unvetted_cited", "rewrite_model", "rewrite_unstarted", "rewrite_answered", "rewrite_recovered",
@@ -242,6 +242,10 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
                                                 "> **Next** Unstarted: none"), "model", clean),
             "unstarted": lambda: case(builder_turn("sonnet", "> **Done** BUILT abc123 (builder sonnet)\n"
                                                    "> **Next** ship it"), "unstarted", clean),
+            # A wait on a PR that names no shared file: the Unstarted guard's file reason, not the missing-line one.
+            "unstarted_file": lambda: case(builder_turn("sonnet", "> **Done** BUILT abc123 (builder sonnet)\n"
+                                                        "> **Next** Unstarted: lint-stub waits on PR #3679 to merge"),
+                                           "shared file", clean),
             "unvetted": lambda: case([trg.human("decide"), *self.sent_to_writer(), trg.assistant_text(shaped_relay)],
                                      "unvetted", bare, env={"CJ_MODEL_FAIL": "1"}),
             "past_ruling": lambda: case([trg.human("decide"), *self.sent_to_writer(),

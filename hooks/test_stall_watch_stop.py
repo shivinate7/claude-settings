@@ -3065,7 +3065,9 @@ def ci_wake_gh(answers, pr_repo):
 
     def gh(args, cwd, timeout=None):
         calls.append(list(args))
-        if args[:1] == ["api"] and args[1:2] and args[1].endswith("/files"):
+        # ci_wake may put a flag before the path (--method GET), so the path is the repos/ argument, wherever it sits.
+        path = next((a for a in args[1:] if a.startswith("repos/")), "")
+        if args[:1] == ["api"] and path.endswith("/files"):
             return 0, "[]\n", ""
         if args[:1] == ["api"]:
             return 0, json.dumps(pr_body(pr_repo)), ""
