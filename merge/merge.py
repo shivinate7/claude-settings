@@ -68,7 +68,7 @@
                           The refusal of a restarting record offers, in order, carry by tree (this head holds the tree the earlier record reviewed: a new PR
                           whose body says `Replaces #N`), a fix verifier on the delta (the trees differ and no fix check failed), then a new branch as the last resort.
   merge --reviewed        one line per open PR, with its review state (bad when the newest record does not parse; no record when it has none),
-                          its one next act, owner and age (`; next: ACT, owner OWNER, age Nh[, RED]`; ACT is batch, lane round N, fix check,
+                          its one next act, owner and age (`; next: ACT, owner OWNER, age Nh[, RED]`; ACT is batch, in #N (a done lane that open integration PR #N carries), lane round N, fix check,
                           fresh full review, waits on debt:SLUG|page:ID, batch run, blocked on #N, lane lint or none; RED when the act is batch or batch run over its limit
                           in PR_STATE_AGE_HOURS, or none; a held, parked or replaced label with no valid Waits line reads none, even on a draft;
                           lane lint, owner lane, is a done record with no lane-lint PASS at its head; blocked on #N
@@ -219,8 +219,9 @@
                           own tree holds, reads UNKNOWN (exit 1, as every lane-lint refusal) and names the file; no step runs and --lint-unknown-ok never lifts it. Cost:
                           one `git ls-tree` of the head.
                           Replaced PRs: a hand-in that is not an integration PR is refused while its body names an open replaced PR (a
-                          `Replaces #N` or `Carries #N` line); no override lifts it. On a batch integration PR, a PASS posts a pointer
-                          comment on each open lane its freeze block names, then closes it as replaced (its branch stays); the same PASS
+                          `Replaces #N` or `Carries #N` line); no override lifts it. On a batch integration PR, a PASS closes no lane and
+                          posts no pointer on one, and the merge of the integration PR then posts a pointer comment on each open lane its freeze
+                          block names and closes it as replaced (its branch stays); a PASS on an integration PR
                           reopens each closed lane the block has dropped when the tool closed it (its own pointer is the newest on that lane),
                           and posts a pointer after the reopen. Cost: one open-list read, one read of each dropped lane not open, and one read
                           of the repo's comments when any is closed.
@@ -1498,12 +1499,12 @@ class Host:
         if c:
             raise Stop(f"posting the comment on #{n} failed {LANE_LINT_CITE}: {out}")
 
-    def set_pr_state(self, m, state, by):
-        """Set pull request m to `state` (REST PATCH state=<state>): "closed" as replaced by pull request `by`, or "open" as dropped from the batch of `by`.
+    def set_pr_state(self, m, state, by, merged=False):
+        """Set pull request m to `state` (REST PATCH state=<state>): "closed" as replaced by pull request `by` (as merged in `by` when `merged`), or "open" as dropped from the batch of `by`.
         The branch stays. A failed call is a Stop."""
         c, out = self.api(f"pulls/{m}", method="PATCH", fields={"state": state}, idempotent=True)
         if c:
-            act = f"closing #{m} as replaced by #{by}" if state == "closed" else f"reopening #{m}, dropped from the batch of #{by},"
+            act = (f"closing #{m} as merged in #{by}" if merged else f"closing #{m} as replaced by #{by}") if state == "closed" else f"reopening #{m}, dropped from the batch of #{by},"
             raise Stop(f"{act} failed {REPLACED_CITE}: {out}")
 
     def review_comments(self, since):
@@ -3905,8 +3906,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     `touched_tests` (--touched-tests): after a lint pass only, run_touched_tests runs the tests the head's diff touches in the same tree. A failing test refuses always;
     an unknown (timeout, unloadable selector, unreadable diff) refuses unless `unknown_ok` gives a reason. The PASS line then also names the run and skipped counts.
     A hand-in of a pull request that is not an integration PR is refused while its body names an open replaced pull request (open_named); no override lifts it.
-    On a batch integration PR, a PASS (after its lint comment) posts a pointer comment on each open lane its freeze block names, then closes it as replaced
-    (close_replaced); the same PASS reopens each closed lane the block has dropped when the tool closed it, and posts a pointer after the reopen (reopen_dropped).
+    On a batch integration PR, a PASS (after its lint comment) reopens each closed lane the block has dropped when the tool closed it, and posts a pointer after the reopen (reopen_dropped);
+    the PASS closes no lane and posts no pointer on one, because the merge of the integration PR closes each open lane its freeze block names, as replaced, after posting a pointer comment on it (close_members_after_merge).
     A job that passes is saved (saved_pass_write) under the clone's git dir, keyed by the head sha, the merged tree, the base name and tip, the job name, a hash of the PR body and a hash of the tool's folders, the files LINT_FILES names outside them, and the env they read (tool_files, tool_env), taken once before the job. A rerun at
     the same key skips the job and prints "PASS (cached)"; it still posts the lane-lint comment. A fail, a timeout, an unknown and a lifted unknown are never saved,
     and a corrupt, empty or unreadable file is a miss. The mutation test run (mutate_run_check) does not go through this path and is not saved.
@@ -3919,7 +3920,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         base = info["base"]
         info = fetch_pr_head(root, info, base, host, n)  # a lane lints right after its push, when GitHub may still show the old head
         head = info["head"]
-        if not is_integration_pr(info):  # an integration PR's lanes close at its own pass, below
+        if not is_integration_pr(info):  # an integration PR's lanes stay open until it merges
             still_open = open_named(host, info, n)
             if still_open:
                 raise Stop(f"the body of #{n} names {', '.join(f'#{m}' for m in still_open)} as replaced, and it is open. "
@@ -4053,8 +4054,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             except Stop as e:  # the lint stands; only the proof on the PR is missing, so say how to get it
                 say(f"merge: the lane-lint comment was not posted on #{n}: {' '.join(str(e).split())} The join and `merge --reviewed` read no PASS for {short} until it is. "
                     f"Run `merge --lane-lint {n}` again, or post this comment on #{n} as the repo's owner:", *lint_body(n, head).splitlines())
-            if is_integration_pr(info):  # after the proof, so a refused close or reopen still leaves the PASS on the pull request
-                close_replaced(host, n, info)
+            if is_integration_pr(info):  # after the proof, so a refused reopen still leaves the PASS on the pull request. The lanes close after the PR merges (close_members_after_merge), never here
                 reopen_dropped(host, n, info)
         return 0
     if state == "fail":
@@ -4885,13 +4885,47 @@ def open_named(host, info, n):
 def close_replaced(host, n, info):
     """Close each open pull request that pull request `n` names as replaced, with a pointer comment to `n` posted first (a retry after a refused close
     posts a second pointer; a retry after a refused comment closes nothing without one). Cost: one read of the open list, then one comment and one
-    close for each open one, only at --ready and at a batch integration PR's lane-lint pass."""
+    close for each open one, only at --ready. A batch integration PR's lanes close after it merges (close_members_after_merge), not here."""
     done = open_named(host, info, n)
     for m in done:
         host.post_comment(m, f"{REPLACED_MARKER}\nReplaced by #{n}, which carries this work. This PR is closed and its branch stays. The tool reopens it when the lane is dropped from the batch; otherwise reopen it by hand if #{n} is dropped.")
         host.set_pr_state(m, "closed", n)
     if done:
         say(f"merge: closed {', '.join(f'#{m}' for m in done)} as replaced by #{n}. Each branch stays; the tool reopens a lane dropped from the batch, and any other is reopened by hand. {REPLACED_CITE}")
+
+def members_of(info, n):
+    """-> the lanes of batch integration PR `n` (`info`) that its freeze block carries and has not dropped, in number order; [] for any other pull request."""
+    if not is_integration_pr(info):
+        return []
+    block = parse_freeze(info["body"])
+    return [m for m in sorted(block["lanes"]) if m != n and m not in block["dropped"]]
+
+def close_members_after_merge(host, n, info, commit):
+    """After integration PR `n` (`info`) has merged as `commit`: post `Merged in #n as <sha>` on each lane its freeze block carries and has not dropped, then close
+    the ones still open. A lane GitHub already marks MERGED (its commits are in the base) gets the comment and no close; a lane closed by hand or by another
+    route gets nothing; one that is not open and cannot be read gets an UNKNOWN line. A refused comment or close is a Stop; the merge has landed, so the caller reports it and goes on. Returns the numbers closed.
+    Cost: one read of the open list, one read of each member not in it, then one comment for each open or merged member and one close for each open one."""
+    members = members_of(info, n)
+    if not members:
+        return []
+    still_open = {m for m, _ in host.open_prs()}
+    closed = []
+    for m in members:
+        if m not in still_open:
+            try:
+                merged = host.read_pr(m)["state"] == "MERGED"
+            except Stop as e:  # not open, and unreadable: nothing to close, so the missing pointer is reported and never fails the landed merge
+                say(f"merge: #{m} UNKNOWN: it is not open and could not be read, so it got no `Merged in #{n}` pointer ({' '.join(str(e).split())})")
+                continue
+            if not merged:
+                continue
+        host.post_comment(m, f"Merged in #{n} as {commit[:9]}. This PR's work is on the base through #{n}. Its branch stays.")
+        if m in still_open:
+            host.set_pr_state(m, "closed", n, merged=True)
+            closed.append(m)
+    if closed:
+        say(f"merge: closed {', '.join(f'#{m}' for m in closed)}, merged in #{n} as {commit[:9]}. Each branch stays.")
+    return closed
 
 def closed_by_tool(pointers, n):
     """-> whether the newest pointer the tool posted on a pull request (`pointers`, oldest first, from issue_comments) is its close as replaced by `n`.
@@ -5435,6 +5469,12 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         if wt:
             drop_worktree(root, tmp, wt)
         lock.release(base, token)
+    if is_integration_pr(info):  # lock released; the merge has landed, so a refused comment or close prints and exits non-zero, and never undoes it
+        try:
+            close_members_after_merge(host, n, info, commit)
+        except Stop as e:
+            say(f"merge: the merge of #{n} landed, and a lane it carries was not closed: {' '.join(str(e).split())} Close each open lane by hand with a `Merged in #{n} as {commit[:9]}` pointer.")
+            code = 1
     if base == cfg["defaultBranch"]:  # a merge onto an integration branch owes no pass
         idle_lanes_after_merge(root, commit, host, n, info.get("body", ""), plan_base)  # lock released: it fetches and reads; the merge has landed, so it never moves `code`
     report = prose_judge_run(judge, n) + where_else_run(where_else, n)  # each model call waits up to MODEL_TIMEOUT, so it runs with the lock released
@@ -6191,8 +6231,9 @@ def pr_next_act(row, now):
     `row` holds: state (the newest record's review state at the live head, or None for no record), record_at (epoch the record was posted), next_round
     (of an open record), fix (the record's Fix check tuple, or None), lint (a lane-lint PASS names the live head), labels, waits (`debt:..`/`page:..` or
     None), label_at (epoch of the last `labeled` event of pr_event_label, or None), based_on (the open pull request this one stacks on: its head branch is
-    this one's base ref, or None), draft, touched (epoch of the last update).
-    The first match wins, in decision pr-ledger's order: a done record (act batch, owner batch runner; with no lane-lint PASS at the live head, act lane
+    this one's base ref, or None), draft, touched (epoch of the last update), carried_by (optional: the open integration PR whose freeze block carries this lane).
+    The first match wins, in decision pr-ledger's order: a done record (act batch, owner batch runner; `in #N` when an open integration PR #N carries the lane, so no
+    front PR route merges it alone; with no lane-lint PASS at the live head, act lane
     lint, owner lane: the join refuses it until the lane runs `merge --lane-lint`), an open record, a stale record, the hold label, the batch label, a
     stacked pull request, a hold label with no valid `Waits on:` line (act none, red, even on a draft: no hold rule holds it), a draft with no record,
     none. Blocked on #N is never red here: it is red while #N is red, which the caller resolves."""
@@ -6200,7 +6241,7 @@ def pr_next_act(row, now):
     if state in PR_RECORD_STATES:
         since = row["record_at"] or row["touched"]
         if state == "done":
-            act, owner = ("batch", "batch runner") if row["lint"] else ("lane lint", "lane")
+            act, owner = ("lane lint", "lane") if not row["lint"] else (f"in #{row['carried_by']}", "batch runner") if row.get("carried_by") else ("batch", "batch runner")
         elif state == "open":
             act, owner = f"lane round {row['next_round']}", "lane"
         else:
@@ -6257,8 +6298,14 @@ def reviewed_read(h, cfgrel=None, facts=None, ledger=None):
     records = {n: [r[0] for r in rs] for n, rs in rows.items()}  # reviewed_read needs the bodies only
     posted = {n: gh_epoch(rs[-1][1]) for n, rs in rows.items()}  # when each newest record was posted
     heads = {}  # head branch -> the open pull requests that hold it, so a pull request whose base ref is one of them is stacked on it
-    for d in pulls:
+    carried = {}  # lane number -> the lowest open integration PR whose freeze block carries it and has not dropped it (read from the bodies in hand: no call)
+    for d in sorted(pulls, key=lambda d: d["number"]):
         heads.setdefault(d["head"]["ref"], []).append(d["number"])
+        if is_integration_pr({"branch": d["head"]["ref"], "body": d.get("body") or ""}):
+            block = parse_freeze(d.get("body") or "")
+            for lane in block["lanes"]:
+                if lane not in block["dropped"] and lane != d["number"]:
+                    carried.setdefault(lane, d["number"])
     lines, bare, acts, longest = [], [], {}, 0.0
     for d in sorted(pulls, key=lambda d: d["number"]):
         n, sha, bodies = d["number"], d["head"]["sha"], records.get(d["number"])
@@ -6267,7 +6314,7 @@ def reviewed_read(h, cfgrel=None, facts=None, ledger=None):
         based = min((x for x in heads.get(d["base"]["ref"], []) if x != n), default=None)  # a base ref that is no open pull request's head blocks nothing
         row = {"state": None, "record_at": posted.get(n), "next_round": None, "fix": None, "lint": True, "draft": bool(d.get("draft")),
                "labels": [x.get("name") for x in d.get("labels") or []], "waits": pr_waits_item(waits.get(n)), "label_at": None,
-               "based_on": based, "touched": gh_epoch(d.get("updated_at")) or gh_epoch(d["created_at"]) or now}
+               "based_on": based, "touched": gh_epoch(d.get("updated_at")) or gh_epoch(d["created_at"]) or now, "carried_by": carried.get(n)}
         rec, source = None, None  # the record the act reads: the pull request's own newest one, else the one it carries from its source
         if not bodies:
             source = replaces_source(n, d.get("body"))
@@ -6308,7 +6355,7 @@ def reviewed_read(h, cfgrel=None, facts=None, ledger=None):
             row["label_at"] = max((t for t in stamps if t is not None), default=None)
         act, owner, age, red = pr_next_act(row, now)
         acts[n] = [act, owner, age, red, based]
-        if act in ("batch", "lane lint"):  # both wait from a done record
+        if act in ("batch", "lane lint") or act.startswith("in #"):  # each waits from a done record
             longest = max(longest, age)
         lines.append((n, f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}", ci))
     for n, got in acts.items():  # blocked on #N is red while #N is red; a loop of blocks has no one to move it
@@ -7158,9 +7205,8 @@ def replaced_names(info, n):
     """-> the numbers of the pull requests that the body of pull request `n` (`info`: its "branch" and "body") names as replaced, in order, once each.
     A line that starts `Replaces #N` or `Carries #N` names them (`PR #N`, a colon and bold marks may stand between; a list like `#1, #2, and #3` may follow), outside a fenced block, a quote line and a code span, so an example
     names none. The number list counts only when the line or its sentence ends right after it (`Replaces #1 in the docs`, `Replaces #12's polling`
-    and `Carries #5 forward` name nothing). A batch integration PR also names each lane of its freeze block, and never a lane it has dropped, not even
-    from a `Replaces` or `Carries` line. The PR itself and a reference to another repo (`org/repo#N`, a URL) are never named; `see #N` and `related #N`
-    start no line of either form."""
+    and `Carries #5 forward` name nothing). A batch integration PR never names a lane its freeze block has dropped, not even from a `Replaces` or `Carries` line. The PR itself and a reference to another repo (`org/repo#N`, a URL) are never named; `see #N` and `related #N`
+    start no line of either form. The lanes of a batch integration PR's freeze block are not named: they close after it merges (members_of, close_members_after_merge)."""
     rows = info["body"].replace("\r\n", "\n").split("\n")
     fenced = stale_cites.fenced_lines(rows)
     names = []
@@ -7169,11 +7215,7 @@ def replaced_names(info, n):
             continue
         m = NAMED_REPLACED_LINE.match(stale_cites.CODE_SPAN.sub("", row))
         names += [int(x) for x in re.findall(r"#(\d+)", m.group(1))] if m else []
-    dropped = ()
-    if is_integration_pr(info):
-        block = parse_freeze(info["body"])
-        names += list(block["lanes"])
-        dropped = block["dropped"]
+    dropped = parse_freeze(info["body"])["dropped"] if is_integration_pr(info) else ()
     return [x for x in dict.fromkeys(names) if x != n and x not in dropped]
 
 LANE_ROLE = "lane"  # a lane's merge role: its role record also names its step, and it merges only its own pull request (ruling own-lanes-merge-claude-settings-prs)
