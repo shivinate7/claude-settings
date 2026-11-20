@@ -22,6 +22,8 @@ import decision_watch  # noqa: E402  the one model caller (hooks/decision_watch.
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
+sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: testing/ shadows no module this suite imports
+from proc_fixture import stop_group  # noqa: E402  the one home of the signal-test helpers (testing/proc_fixture.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 from proc_fixture import stop_group, wait_for  # noqa: E402  the one home of the process helpers (testing/proc_fixture.py)
@@ -15060,9 +15062,27 @@ class RulesReadNetwork(unittest.TestCase):
 
 @unittest.skipIf(os.name == "nt", "a Windows process gets no SIGTERM handler run")
 class SignalReleasesLock(Env):
-    """c189 part 3: a run stopped by SIGTERM or SIGINT releases the merge lock (#746 left one live for 2.7 h)."""
-    def stop_with(self, sig):
-        child = subprocess.Popen([sys.executable, __file__, "--sigchild", self.co], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    """c189 part 3: a run stopped by SIGTERM, SIGHUP or SIGINT releases the merge lock and removes its temporary tree (#746 left one live for 2.7 h).
+    A launched run is the same child under merge/launch.py, the process a signal to a real run reaches first."""
+    def start_run(self, launched):
+        if not launched:
+            return subprocess.Popen([sys.executable, __file__, "--sigchild", self.co], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.launch_tmp = os.path.join(self.t, "launch-tmp")  # the TMPDIR of the launched run: its merge-wt folders show here
+        os.makedirs(self.launch_tmp)
+        tree = os.path.join(self.t, "launch-tree")
+        os.makedirs(os.path.join(tree, "merge"))
+        # The tree's merge.py execs this file's --sigchild child, so the launcher's child runs the real lock path and only the Host is faked.
+        put(os.path.join(tree, "merge", "merge.py"), "import os, sys\nos.execv(sys.executable, [sys.executable, %r, '--sigchild', %r])\n" % (os.path.abspath(__file__), self.co))
+        env = {**os.environ, "TMPDIR": self.launch_tmp}
+        return subprocess.Popen([sys.executable, os.path.join(HERE, "launch.py"), tree, "--dev"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, start_new_session=True)
+
+    def launch_trees(self):
+        """The merge-wt folders this run left in its TMPDIR."""
+        return [n for n in os.listdir(self.launch_tmp) if n.startswith("merge-wt-")]
+
+    def stop_with(self, sig, launched=False):
+        child = self.start_run(launched)
         try:
             for line in child.stdout:  # merge's own lines come first
                 if line.strip() == "READY":
@@ -15070,21 +15090,35 @@ class SignalReleasesLock(Env):
             else:
                 self.fail("the run never reached the wait: " + child.stderr.read())
             self.assertTrue(self.lock_ref())
+            if launched:
+                self.assertEqual(len(self.launch_trees()), 1, "scope: one merge-wt folder must exist while the run is up, got %r" % self.launch_trees())
             child.send_signal(sig)
             child.wait(timeout=60)
         finally:
             if child.poll() is None:
-                child.kill(); child.wait()
+                if launched:
+                    stop_group(child)  # the launcher leads its own group: the child it execs is in that group
+                else:
+                    child.kill(); child.wait()
         err = child.stderr.read()
         child.stdout.close(); child.stderr.close()
         self.assertNotEqual(child.returncode, 0)
-        self.assertFalse(self.lock_ref(), err)
+        self.assertFalse(self.lock_ref(), "%s did not release the merge lock:\n%s" % (sig.name, err))
+        if launched:
+            self.assertEqual(self.launch_trees(), [], "%s did not remove the merge-wt tree of the run" % sig.name)
+            self.assertEqual(self.worktrees(), 1, "%s left a worktree registered in the checkout" % sig.name)
 
     def test_sigterm_releases_the_lock(self):
         self.stop_with(signal.SIGTERM)
 
     def test_sigint_releases_the_lock(self):  # a control: Python's own KeyboardInterrupt already unwinds the finally; only SIGTERM needs the handler
         self.stop_with(signal.SIGINT)
+
+    def test_sigterm_to_the_launcher_releases_the_lock_and_tree(self):  # a control: TERM is handled, so the run's finally removes the tree too
+        self.stop_with(signal.SIGTERM, launched=True)
+
+    def test_sighup_to_the_launcher_releases_the_lock_and_tree(self):
+        self.stop_with(signal.SIGHUP, launched=True)
 
 
 # The batch brake (roadmap step c195): nothing merges to a base while another ready pull request on it has a required check pending.
