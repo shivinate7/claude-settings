@@ -1,0 +1,92 @@
+"""Process helpers for the fixture suites that start a tool and signal it: lint/test_verdict.py and
+merge/test_launch.py. One home, so no suite copies them. alive and wait_gone are posix only: a caller skips them on Windows.
+stop_group and kill_all have a Windows branch.
+"""
+import os
+import signal
+import subprocess
+import time
+
+
+def zombie(pid):
+    """True when pid has ended but not yet been reaped. /proc answers on Linux, ps elsewhere. Windows has neither: False."""
+    if os.name == "nt":
+        return False
+    try:
+        with open("/proc/%d/stat" % pid, encoding="utf-8") as handle:
+            return handle.read().rsplit(")", 1)[1].split()[0] == "Z"
+    except OSError:
+        pass
+    try:
+        # nowindow: posix-only fixture
+        out = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return out.strip().startswith("Z")
+
+
+def alive(pid):
+    """True when pid runs. A zombie has ended: a grandchild's zombie waits for init to reap it, so it reads as gone.
+    Posix only: on Windows signal 0 is CTRL_C_EVENT, which signals a console instead of probing the pid."""
+    if os.name == "nt":
+        raise NotImplementedError("testing/proc_fixture.alive is POSIX only: Windows has no signal-0 probe")
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return not zombie(pid)
+
+
+def wait_gone(pid, cap):
+    """True once pid no longer runs, within `cap` seconds. False at `cap`. A poll on the process, never a fixed sleep."""
+    end = time.monotonic() + cap
+    while alive(pid):
+        if time.monotonic() > end:
+            return False
+        time.sleep(0.05)
+    return True
+
+
+def wait_for(path, cap, proc=None):
+    """True once `path` exists. False at `cap` seconds, or when `proc` ends first. A poll on the marker, never a fixed sleep."""
+    end = time.monotonic() + cap
+    while not os.path.exists(path):
+        if (proc is not None and proc.poll() is not None) or time.monotonic() > end:
+            return False
+        time.sleep(0.05)
+    return True
+
+
+def default_sigint():
+    """A preexec_fn that gives a child the default INT action. A child that inherits SIG_IGN never sees an INT, so a case that
+    sends one resets it first. The one home of that reset (lint/test_verdict.py and merge/test_launch.py)."""
+    return lambda: signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+
+def kill_all(pids):
+    """SIGKILL each pid that is still set. A cleanup: a red run leaves no process behind. Windows has no SIGKILL, and os.kill
+    there ends the pid with TerminateProcess for any signal but the console ones, so SIGTERM ends it."""
+    sig = signal.SIGTERM if os.name == "nt" else signal.SIGKILL
+    for pid in pids:
+        try:
+            os.kill(pid, sig)
+        except OSError:
+            pass
+
+
+def stop_group(proc):
+    """SIGKILL the process group of a proc started with start_new_session=True, then reap proc. Windows has no killpg and no
+    process group here: proc.kill ends the proc alone."""
+    if os.name == "nt":
+        try:
+            proc.kill()
+        except OSError:
+            pass
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+    proc.wait()

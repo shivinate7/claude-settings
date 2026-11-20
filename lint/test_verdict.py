@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Fixture test for bin/verdict. Run: python lint/test_verdict.py -v"""
-import os, re, shlex, shutil, subprocess, sys, tempfile, time, unittest
+import os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+from proc_fixture import alive, default_sigint, kill_all, stop_group, wait_for, wait_gone  # noqa: E402  the one home of the signal-test helpers (testing/proc_fixture.py)
 RUN_FOLDER = _test_temp.run_folder()  # its sweep is proved in test_find_copies.py
 V = os.environ.get("VERDICT_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "verdict")
 # The Windows launcher. It always runs its sibling bin/verdict, so VERDICT_UNDER_TEST does not reach it.
@@ -11,10 +13,10 @@ CMD = [os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "ve
 UTF8 = {"PYTHONIOENCODING": "utf-8"}  # the child prints the real \u2714/\u2718 marks; a cp1252 stdout cannot
 HB_FORMAT = re.compile(r"^verdict: still running, [0-9][0-9.]*s?, log=")
 
-def run(code=None, log=None, extra=None, timeout=None, launcher=None, shell=None, argv=None, shim=None):
+def run(code=None, log=None, extra=None, timeout=None, launcher=None, shell=None, argv=None, shim=None, cwd=None):
     """`shell` is an sh -c line in which {cmd} stands for the verdict command, e.g. a pipe or a redirect.
     `argv` runs `verdict <argv...>` in place of the script. `shim` is (name, body): a fake executable `name`
-    in a folder that comes first on PATH, so verdict sees argv[0] as that fake."""
+    in a folder that comes first on PATH, so verdict sees argv[0] as that fake. `cwd` is the child's folder."""
     env = dict(os.environ)
     env.pop("VERDICT_LOG", None)
     env.pop("VERDICT_HEARTBEAT", None)
@@ -36,7 +38,7 @@ def run(code=None, log=None, extra=None, timeout=None, launcher=None, shell=None
             open(script, "w").write(code)
             cmd = (launcher or [sys.executable, V]) + [sys.executable, script]
         if shell: cmd = ["sh", "-c", shell.replace("{cmd}", " ".join(shlex.quote(p) for p in cmd))]
-        return subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout)
+        return subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout, cwd=cwd)
 
 def heartbeats(out):
     return [l for l in out.splitlines() if l.startswith("verdict: still running")]
@@ -48,12 +50,6 @@ def beats_on_stderr_only(case, r):
     case.assertGreaterEqual(len(beats), 1, (r.stdout, r.stderr))
     case.assertEqual(heartbeats(r.stdout), [], r.stdout)
     return beats
-
-def alive(pid):
-    try: os.kill(pid, 0)
-    except ProcessLookupError: return False
-    except PermissionError: return True
-    return True
 
 class T(unittest.TestCase):
     def test_pass(self):
@@ -211,6 +207,85 @@ class T(unittest.TestCase):
             self.assertFalse(alive(pid), f"child {pid} still running after verdict returned")
             self.assertNotIn("cannot run", open(log).read())
             self.assertNotIn("cannot run", r.stdout + r.stderr)
+
+    @unittest.skipIf(os.name == "nt", "POSIX signals")
+    def test_sigterm_forwards_to_child(self):
+        """A TERM or HUP to verdict ends its child and the child's child before verdict returns. Verdict killed alone
+        leaves its test run going."""
+        for sig in (signal.SIGTERM, signal.SIGHUP):
+            with self.subTest(signal=sig.name):
+                self.assert_signal_ends_child_tree(sig)
+
+    def start_child_tree(self, d, preexec=None):
+        """Starts verdict in its own group, running a child that starts a grandchild. -> (the verdict Popen, child pid, grandchild pid).
+        The pids are read from a marker the child writes once both run. A red run's pids are killed at cleanup."""
+        ready = os.path.join(d, "ready.txt")
+        script = os.path.join(d, "fx.py")
+        # The child starts a grandchild, then writes both pids. The marker is renamed into place, so a reader sees it whole.
+        body = ("import os, subprocess, sys, time\n"
+                "grand = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(300)'])\n"
+                "tmp = READY + '.tmp'\n"
+                "open(tmp, 'w').write('%d %d' % (os.getpid(), grand.pid))\n"
+                "os.replace(tmp, READY)\n"
+                "time.sleep(300)\n").replace("READY", repr(ready))
+        with open(script, "w", encoding="utf-8") as handle:
+            handle.write(body)
+        found = []
+        self.addCleanup(kill_all, found)  # the pids a red run leaves running are killed here
+        env = dict(os.environ)
+        env.pop("VERDICT_HEARTBEAT", None)
+        env.pop("STALL_WATCH_BEAT", None)
+        env["VERDICT_LOG"] = os.path.join(d, "v.log")
+        proc = subprocess.Popen([sys.executable, V, sys.executable, script], env=env, start_new_session=True,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, preexec_fn=preexec)
+        self.addCleanup(stop_group, proc)
+        self.assertTrue(wait_for(ready, 60, proc), "fixture: verdict's child never wrote its pids")
+        child, grand = (int(x) for x in open(ready, encoding="utf-8").read().split())
+        found += [child, grand]
+        return proc, child, grand
+
+    def assert_signal_ends_child_tree(self, sig):
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            proc, child, grand = self.start_child_tree(d)
+            self.assertTrue(alive(child) and alive(grand), "scope: the child and its child must run before %s" % sig.name)
+            proc.send_signal(sig)
+            try:
+                proc.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                self.fail("verdict did not exit within 60 s of %s" % sig.name)
+            self.assertFalse(alive(child), "%s to verdict did not reach its child %d, which runs after verdict returned" % (sig.name, child))
+            self.assertFalse(alive(grand), "%s to verdict did not reach the child's child %d, which runs after verdict returned" % (sig.name, grand))
+
+    @unittest.skipIf(os.name == "nt", "POSIX signals")
+    def test_sigkill_to_the_group_that_started_verdict_ends_the_child_tree(self):
+        """A KILL to the group that started verdict ends verdict's child and that child's child. The harness stops a background
+        task by its own group, and no handler runs on a KILL, so the group is the only reach."""
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            proc, child, grand = self.start_child_tree(d)
+            self.assertEqual(os.getpgid(proc.pid), proc.pid, "scope: verdict must lead its own group, the one the KILL goes to")
+            self.assertTrue(alive(child) and alive(grand), "scope: the child and its child must run before the KILL")
+            os.killpg(proc.pid, signal.SIGKILL)
+            try:
+                proc.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                self.fail("verdict did not exit within 60 s of a KILL to its group")
+            self.assertTrue(wait_gone(child, 30), "a KILL to the group that started verdict did not end its child %d" % child)
+            self.assertTrue(wait_gone(grand, 30), "a KILL to the group that started verdict did not end the child's child %d" % grand)
+
+    @unittest.skipIf(os.name == "nt", "POSIX signals")
+    def test_sigint_to_verdict_ends_the_child_tree(self):
+        """An INT to verdict alone ends its child and that child's child before verdict returns."""
+        # A process that inherits SIG_IGN for INT never gets Python's KeyboardInterrupt, so verdict starts with the default action.
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            proc, child, grand = self.start_child_tree(d, preexec=default_sigint())
+            self.assertTrue(alive(child) and alive(grand), "scope: the child and its child must run before INT")
+            proc.send_signal(signal.SIGINT)
+            try:
+                proc.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                self.fail("verdict did not exit within 60 s of INT")
+            self.assertTrue(wait_gone(child, 30), "INT to verdict did not end its child %d, which runs after verdict returned" % child)
+            self.assertTrue(wait_gone(grand, 30), "INT to verdict did not end the child's child %d, which runs after verdict returned" % grand)
 
     def test_test_failed_marker_on_exit0_is_fail(self):
         r = run("print('Test Suite All tests')\nprint('** TEST FAILED **')")
@@ -624,10 +699,10 @@ def case_runner_run(kinds):
 class Skips(unittest.TestCase):
     """A skip is counted and shown, never read as a pass (plan row S8, test-ci-standard plan)."""
 
-    def check(self, code, extra=None):
+    def check(self, code, extra=None, timeout=120):
         """Run one fixture with its log in this run's folder, never the system temp dir."""
         with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
-            return run(code, os.path.join(d, "v.log"), extra, timeout=120)
+            return run(code, os.path.join(d, "v.log"), extra, timeout=timeout)
 
     def assert_skip(self, r, count):
         first = r.stdout.splitlines()[0] if r.stdout.strip() else ""
@@ -988,6 +1063,410 @@ class NoTestCount(unittest.TestCase):
         r, full = self.run_case(code=printing(log_text, raw=True), newline="")
         self.assertIn(log_text, full, "the CRLF module skip never reached the log, so this run proves nothing")
         self.assert_skip(r, 1)
+
+
+# A cut run: pytest output that stops before its summary. The rule is in CutStream's docstring.
+PYTEST_START = "=" * 29 + " test session starts " + "=" * 30 + "\n"  # pytest's session header, captured here
+COLOURED_START = "\x1b[32m" + "=" * 29 + " \x1b[1mtest session starts\x1b[0m " + "\x1b[32m" + "=" * 30 + "\x1b[0m\n"  # the same header with --color=yes
+PYTEST_ALL_PASS = "=" * 30 + " 3 passed in 0.02s " + "=" * 30 + "\n"  # a summary with no skip; PYTEST_OUT reads SKIP
+PROGRESS = "tests/test_big.py " + "." * 1000 + "\n"  # one progress line, 1,019 bytes
+CUT_LINE = r"^FAIL .* rc=1[^(]*\bcut\b"  # the note sits between rc=1 and the timing
+QUIET_SUMMARY = "3 passed in 0.1s\n"  # the summary `pytest -q` prints: no bars
+COLLECT_ITEMS = "collected 3 items\n\n<Module tests/test_big.py>\n  <Function test_one>\n"  # what --collect-only prints after its header
+COLLECT_IDS = "tests/test_big.py::test_one\ntests/test_big.py::test_two\ntests/test_big.py::test_three\n"  # -q --collect-only lists node ids
+COLLECT_BARS = "=" * 30 + " 3 tests collected in 0.01s " + "=" * 30 + "\n"  # --collect-only's summary, in bars
+COLLECT_QUIET = "3 tests collected in 0.01s\n"  # the same summary with -q: no bars
+NO_TESTS_BARS = "=" * 30 + " no tests ran in 0.01s " + "=" * 30 + "\n"  # the summary of a run that collected nothing, in bars
+NO_TESTS_QUIET = "no tests ran in 0.01s\n"  # the same summary with -q: no bars
+FILTERED_BARS = "=" * 30 + " 3/103 tests collected (100 deselected) in 0.09s " + "=" * 30 + "\n"  # --collect-only under -k: a filtered count, in bars
+FILTERED_QUIET = "3/103 tests collected (100 deselected) in 0.09s\n"  # the same summary with -q: no bars
+QQ_LINE = "..." + " " * 70 + "[100%]\n"  # pytest 9.2's -qq output for three passing tests: progress and the percent, no summary line (80 bytes)
+QQ_FULL = ("." * 70 + " [ 50%]\n") * 14000 + QQ_LINE  # over one chunk of progress lines, ending in the same [100%] line
+QQ_CUT = "..." + " " * 70 + "[ 30%]\n"  # a -qq run cut at 30 percent: progress with no [100%] line
+SGR_DOT = "\x1b[32m.\x1b[0m"  # one green progress char, as --color=yes writes it (pytest 9.2)
+QQ_COLOUR = SGR_DOT * 3 + "\x1b[32m" + " " * 70 + "[100%]\x1b[0m\n"  # pytest 9.2's -qq --color=yes for three passing tests, captured: SGR between the chars
+QQ_COLOUR_FULL = ("\x1b[32m" + "." * 70 + "\x1b[0m [ 50%]\n") * 13000 + QQ_COLOUR  # over one chunk; one SGR pair per line, not per char
+QQ_COLOUR_CUT = "\x1b[32m..\x1b[0m\x1b[32m" + " " * 70 + "[ 30%]\x1b[0m\n"  # the coloured run cut at 30 percent, no [100%] line
+QQ_WIDE = "..." + " " * 190 + "[100%]\n"  # pytest 9.2's -qq at COLUMNS=200 for three passing tests, captured: 199 characters, 190 spaces before [100%]
+QQ_WIDE_FULL = ("." * 70 + " [ 50%]\n") * 14000 + QQ_WIDE  # over one chunk
+QQ_WIDE_CUT = "..." + " " * 190 + "[ 30%]\n"  # the padded line cut at 30 percent
+QQ_SUB = "..u" + " " * 70 + "[100%]\n"  # a subtest char u (subtests.py: the SUBPASSED and SUBFAILED progress char) in the last line; synthetic, no captured pytest 9.2 run holds a u on an rc-0 run
+QQ_SUB_FULL = ("." * 70 + " [ 50%]\n") * 14000 + QQ_SUB  # over one chunk, ending in the u line
+QQ_SUB_CUT = "..u" + " " * 70 + "[ 30%]\n"  # the subtest line cut at 30 percent
+QQ_CO = "test_plain.py: 3\n\n"  # pytest 9.2's -qq --co for a three-test module, captured: per-file counts, no progress, no summary line
+QQ_CO_FULL = "".join("test_%05d.py: 1\n" % i for i in range(65000))  # over one chunk, one count line per file
+POSIX_SKIP = "the form runs through a POSIX shell (bash -c), which Windows does not have"
+HANG_GUARD = 20  # seconds before a verdict counts as hung; a linear scan of one 1 MiB line finishes far below it
+
+
+def straddling_body():
+    """A complete run whose summary starts 40 bytes before the chunk edge, so the summary crosses that edge. Returns (body, offset)."""
+    offset = CHUNK - 40
+    n = (offset - len(PYTEST_START) - 1) // len(PROGRESS)
+    pad = offset - len(PYTEST_START) - n * len(PROGRESS)  # 1 to len(PROGRESS) bytes: the dots that end the filler
+    return PYTEST_START + PROGRESS * n + "." * (pad - 1) + "\n" + PYTEST_ALL_PASS, offset
+
+
+class CutStream(unittest.TestCase):
+    """A pytest run that exits 0 and stops before its summary reads FAIL, with `cut` in the note.
+    Rule: the argv is pytest's, as typed: `pytest`, `py.test`, `python -m pytest`, `python -mpytest`, `env pytest`,
+    `uv run pytest`, or `bash -c "python -m pytest ..."`. The argv has `-q` (not `-qq`) or the output has pytest's header
+    (`=` bars around `test session starts` at a line start), and no line starts with pytest's summary: `=` bars around
+    ` in <N>s`, or the bare `<counts> in <N>s` that `-q` prints. A `--collect-only` run ends `N tests collected in <N>s`,
+    an empty run ends `no tests ran in <N>s`, and a filtered one ends `N/M tests collected (K deselected) in <N>s`. All
+    of these count as summaries. A `-qq` run prints no summary: it reads PASS when its last progress line ends `[100%]`,
+    and is cut otherwise. A subtest char `u` in that line and any padding before `[100%]` do not change that. A
+    `-qq --collect-only` run prints per-file counts and no summary: it reads PASS when it prints some, and is cut when it
+    prints none. Where the header sits does not matter. Colour codes are ignored. A `bash -c` line runs pytest when a
+    newline or `do` starts its command, and a `#` that does not start a word is no comment. A quote in heredoc text is
+    text. A pytest run with neither `-q` nor a header is never cut. A run that is not pytest is never cut, even
+    when it prints pytest's header or progress lines, so `print('noisy')` reads PASS. A header quoted mid-line is no
+    header. Other runners are not covered."""
+    check = Skips.check  # one home for a fixture's run and its timeout
+    assert_pass = Skips.assert_pass
+    assert_skip = Skips.assert_skip
+    assert_fail = Skips.assert_fail
+
+    def pytest_case(self, text, args=(), form="module", timeout=120, hard=False, env=None, bash_line=None):
+        """Run `text` as the output of a pytest run, and return the run. The fake pytest writes `text`, exits 0 and
+        leaves a sentinel file, so a case knows the fake ran before it reads the verdict. `hard` ends the fake with
+        os._exit(0) after a flush, as a test that exits mid-run does. Each form is the argv as verdict receives it:
+        "module" runs `python -m pytest` and "glued" runs `python -mpytest`, through a fake package on PYTHONPATH;
+        "bash" runs `bash -c "python -m pytest <args>"` through the same package; "bare" runs `pytest` and "env" runs
+        `env pytest` through a fake on PATH; "uv" runs `uv run pytest` through a fake in a throwaway venv's bin.
+        `bash_line` runs that line as `bash -c`, with the fake on PATH, so the line's own words decide what runs; the
+        line names pytest and its args as a user types them. `env` adds variables to the run's environment."""
+        if form in ("bare", "env", "uv") and os.name == "nt": raise unittest.SkipTest(SHIM_SKIP)
+        if (form == "bash" or bash_line is not None) and os.name == "nt": raise unittest.SkipTest(POSIX_SKIP)
+        if form == "uv" and shutil.which("uv") is None: raise unittest.SkipTest("uv is not installed")
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            ran, log = os.path.join(d, "ran"), os.path.join(d, "v.log")
+            end = "import os, sys\nsys.stdout.write(%s)\nsys.stdout.flush()\nos._exit(0)\n" % ascii(text) if hard else printing(text)
+            fake = "open(%r, 'w').close()\n" % ran + end
+            script = "#!%s\n" % sys.executable + fake
+            if bash_line is not None:
+                os.mkdir(os.path.join(d, "d"))  # a line may `cd d` before it runs pytest
+                r = run(log=log, extra=env, shim=("pytest", script), argv=["bash", "-c", bash_line], timeout=timeout, cwd=d)
+            elif form in ("bare", "env"):
+                argv = {"bare": ["pytest"], "env": ["env", "pytest"]}[form] + list(args)
+                r = run(log=log, extra=env, shim=("pytest", script), argv=argv, timeout=timeout, cwd=d)
+            elif form == "uv":
+                # uv finds pytest in the environment's bin before PATH (a shim on PATH loses), so the fake goes in a throwaway venv
+                venv = os.path.join(d, "venv")
+                subprocess.run([sys.executable, "-m", "venv", "--without-pip", venv], check=True, capture_output=True)
+                with open(os.path.join(venv, "bin", "pytest"), "w") as g: g.write(script)
+                os.chmod(os.path.join(venv, "bin", "pytest"), 0o755)
+                r = run(log=log, extra=dict(env or {}, VIRTUAL_ENV=venv), argv=["uv", "run", "pytest"] + list(args), timeout=timeout, cwd=d)
+            else:
+                pkg = os.path.join(d, "pytest")
+                os.mkdir(pkg)
+                open(os.path.join(pkg, "__init__.py"), "w").close()
+                with open(os.path.join(pkg, "__main__.py"), "w") as g: g.write(fake)
+                path = os.pathsep.join(p for p in (d, os.environ.get("PYTHONPATH")) if p)
+                if form == "glued": argv = [sys.executable, "-mpytest"] + list(args)
+                elif form == "bash": argv = ["bash", "-c", " ".join(shlex.quote(p) for p in [sys.executable, "-m", "pytest"] + list(args))]
+                else: argv = [sys.executable, "-m", "pytest"] + list(args)
+                r = run(log=log, extra=dict(env or {}, PYTHONPATH=path), argv=argv, timeout=timeout, cwd=d)
+            self.assertTrue(os.path.exists(ran), "the fake pytest never ran, so this case proves nothing")
+        return r
+
+    def run_logged(self, code=None, argv=None, timeout=120):
+        """Run one fixture as `check` does, and return the run with its log text, so a case reads its output first."""
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            log = os.path.join(d, "v.log")
+            r = run(code, log, argv=argv, timeout=timeout)
+            with open(log, encoding="utf-8", errors="replace") as f: full = f.read()
+        return r, full
+
+    def assert_cut(self, r):
+        first = r.stdout.splitlines()[0] if r.stdout.strip() else ""
+        self.assertRegex(first, CUT_LINE, f"a run cut before its summary must read FAIL with cut, got: {first!r}")
+        self.assertEqual(r.returncode, 1, r.stdout[:300])
+
+    def test_header_only_run_that_exits_0_is_cut(self):
+        self.assert_cut(self.pytest_case(PYTEST_START))
+
+    def test_run_cut_after_progress_lines_is_cut(self):
+        self.assert_cut(self.pytest_case(PYTEST_START + PROGRESS * 3))
+
+    def test_coloured_run_cut_after_progress_lines_is_cut(self):
+        self.assert_cut(self.pytest_case(COLOURED_START + PROGRESS * 3))
+
+    def test_full_size_run_cut_after_2mib_is_cut(self):
+        body = PYTEST_START + PROGRESS * 2048
+        self.assertGreater(len(body), CHUNK, "the fixture must hold more than one chunk")
+        self.assert_cut(self.pytest_case(body))
+
+    def test_quiet_run_cut_before_its_summary_is_fail(self):
+        """`-q` prints no header, so a cut quiet run is progress lines with no summary. Its argv is pytest's, so it is cut."""
+        for form in ("module", "bare"):
+            with self.subTest(form=form):
+                self.assert_cut(self.pytest_case(PROGRESS * 3, args=("-q",), form=form))
+        with self.subTest(size="full"):
+            body = PROGRESS * 2048
+            self.assertGreater(len(body), CHUNK, "the fixture must hold more than one chunk")
+            self.assert_cut(self.pytest_case(body, args=("-q",)))
+
+    def test_quiet_complete_run_is_pass(self):
+        """The control for the quiet cut: the same progress lines, ending in the summary `-q` prints, read as complete."""
+        for form in ("module", "bare"):
+            with self.subTest(form=form):
+                self.assert_pass(self.pytest_case(PROGRESS * 3 + QUIET_SUMMARY, args=("-q",), form=form))
+        with self.subTest(size="full"):
+            self.assert_pass(self.pytest_case(PROGRESS * 2048 + QUIET_SUMMARY, args=("-q",)))
+
+    def test_collect_only_summary_with_bars_is_pass(self):
+        """`--collect-only` ends with `N tests collected in Ns`. In bars, that is a complete run."""
+        for form in ("module", "bare"):
+            with self.subTest(form=form):
+                self.assert_pass(self.pytest_case(PYTEST_START + COLLECT_ITEMS + COLLECT_BARS, args=("--collect-only",), form=form))
+
+    def test_collect_only_quiet_summary_is_pass(self):
+        """With `-q`, `--collect-only` prints node ids and the same count with no bars. That is a complete run."""
+        for form in ("module", "bare"):
+            with self.subTest(form=form):
+                self.assert_pass(self.pytest_case(COLLECT_IDS + COLLECT_QUIET, args=("--collect-only", "-q"), form=form))
+
+    def test_no_tests_ran_summary_is_pass(self):
+        """A run that collects nothing ends with `no tests ran in Ns`: in bars by default, bare with `-q`."""
+        with self.subTest(verbosity="default"):
+            self.assert_pass(self.pytest_case(PYTEST_START + "collected 0 items\n" + NO_TESTS_BARS))
+        with self.subTest(verbosity="quiet"):
+            self.assert_pass(self.pytest_case(NO_TESTS_QUIET, args=("-q",)))
+
+    def test_filtered_collect_summary_is_pass(self):
+        """A filtered `--collect-only` ends `N/M tests collected (K deselected) in Ns`. That is a complete run, in bars or with `-q`."""
+        for form in ("module", "bare"):
+            with self.subTest(form=form, verbosity="default"):
+                self.assert_pass(self.pytest_case(PYTEST_START + COLLECT_ITEMS + FILTERED_BARS, args=("--collect-only",), form=form))
+            with self.subTest(form=form, verbosity="quiet"):
+                self.assert_pass(self.pytest_case(COLLECT_IDS + FILTERED_QUIET, args=("--collect-only", "-q"), form=form))
+
+    def test_header_first_in_a_later_chunk_still_cuts(self):
+        body = PROGRESS * 1100 + PYTEST_START + PROGRESS * 3  # 1,100 progress lines first, so the header is past the first chunk
+        self.assertGreater(body.index(PYTEST_START), CHUNK, "the fixture must put the header past the first chunk")
+        self.assert_cut(self.pytest_case(body))
+
+    def test_run_with_a_summary_is_not_cut(self):
+        self.assert_pass(self.pytest_case(PYTEST_START + PROGRESS * 3 + PYTEST_ALL_PASS))
+
+    def test_coloured_complete_run_is_not_cut(self):
+        self.assert_skip(self.pytest_case(COLOURED_START + PROGRESS + PYTEST_COLOUR), 2)
+
+    def test_full_size_complete_run_is_not_cut(self):
+        body = PYTEST_START + PROGRESS * 2048 + PYTEST_ALL_PASS
+        self.assertGreater(len(body), CHUNK, "the fixture must hold more than one chunk")
+        self.assert_pass(self.pytest_case(body))
+
+    def test_summary_straddling_the_chunk_edge_is_not_cut(self):
+        body, offset = straddling_body()
+        self.assertEqual(body.index(PYTEST_ALL_PASS), offset, "the fixture must start the summary at its offset")
+        self.assertGreater(offset + len(PYTEST_ALL_PASS), CHUNK, "the fixture must run the summary past the edge")
+        self.assert_pass(self.pytest_case(body))
+
+    def test_non_pytest_run_with_a_pytest_header_is_pass(self):
+        """A command that is not pytest reads PASS, though its output is the output of a cut pytest run."""
+        body = PYTEST_START + PROGRESS * 3
+        commands = {"script": {"code": printing(body)},
+                    "c": {"argv": [sys.executable, "-c", "import sys; sys.stdout.write(%s)" % ascii(body)]}}
+        for name, kwargs in commands.items():
+            with self.subTest(command=name):
+                r, full = self.run_logged(**kwargs)
+                self.assertIn(PYTEST_START.strip(), full, "the header must reach the log, or this case proves nothing")
+                self.assert_pass(r)
+
+    def test_non_pytest_progress_run_with_no_summary_is_pass(self):
+        """A command that is not pytest is never cut, even with progress lines and no summary."""
+        self.assert_pass(self.check(printing(PROGRESS * 3)))
+
+    def test_one_mib_equals_line_finishes_under_the_guard(self):
+        """One 1 MiB line of `=` finishes, as a plain command and as a pytest run. The scan of such a line must be
+        linear, so a run still going at HANG_GUARD seconds is hung, and that is the failure."""
+        line = "=" * CHUNK + "\n"
+        runs = {"plain": lambda: self.check(printing(line), timeout=HANG_GUARD),
+                "pytest": lambda: self.pytest_case(line, timeout=HANG_GUARD)}
+        for name, go in runs.items():
+            with self.subTest(run=name):
+                try:
+                    r = go()
+                except subprocess.TimeoutExpired:
+                    self.fail(f"verdict hung: still running after {HANG_GUARD} s on one 1 MiB '=' line")
+                self.assertIn(r.stdout.split()[:1], (["PASS"], ["FAIL"]), r.stdout[:300])
+
+    def test_header_quoted_mid_line_is_no_header(self):
+        """A pytest run with no `-q` and a quoted header is not cut: the quoted text is no header."""
+        body = "note: the pytest header is '=== test session starts ===' here\n" + PROGRESS * 3
+        self.assert_pass(self.pytest_case(body))
+
+    def test_silent_run_is_not_cut(self):
+        """A pytest run with no output, no `-q` and no header is not cut. `pytest --version` has neither, so it reads PASS."""
+        self.assert_pass(self.pytest_case(""))
+
+    def test_header_then_log_truncated_under_verdict_keeps_log_unreadable(self):
+        code = ("import os\n"
+                f"print({PYTEST_START!r}, end='', flush=True)\n"
+                "open(os.environ['VERDICT_LOG'], 'w').close()\n")
+        self.assert_fail(self.check(code), 1, "log unreadable")
+
+    def assert_argv_cut(self, form, sizes=("empty", "three")):
+        """F2, a bypass: a pytest run that exits 0 mid-run reads FAIL with cut through `form`. The control for it is
+        test_quiet_run_cut_before_its_summary_is_fail, which reads the same cut through `python -m pytest -q`."""
+        bodies = {"empty": "", "three": PROGRESS * 3, "full": PROGRESS * 2048}
+        for size in sizes:
+            with self.subTest(form=form, size=size):
+                body = bodies[size]
+                if size == "full": self.assertGreater(len(body), CHUNK, "the full fixture must hold more than one chunk")
+                self.assert_cut(self.pytest_case(body, args=("-q",), form=form, hard=True))
+
+    def test_argv_glued_cut_run_is_fail(self):
+        """F2: `python -mpytest -q` is pytest's argv, so a run it cuts reads FAIL with cut."""
+        self.assert_argv_cut("glued", sizes=("empty", "three", "full"))
+
+    def test_argv_env_cut_run_is_fail(self):
+        """F2: `env pytest -q` is pytest's argv, so a run it cuts reads FAIL with cut."""
+        self.assert_argv_cut("env")
+
+    def test_argv_uv_run_cut_run_is_fail(self):
+        """F2: `uv run pytest -q` is pytest's argv, so a run it cuts reads FAIL with cut. Skipped when uv is missing."""
+        self.assert_argv_cut("uv")
+
+    def test_argv_bash_c_cut_run_is_fail(self):
+        """F2: `bash -c "python -m pytest -q"` is pytest's argv, so a run it cuts reads FAIL with cut."""
+        self.assert_argv_cut("bash")
+
+    def test_argv_forms_summary_run_is_pass(self):
+        """Control, green on the old code: a complete `-q` run through each new form reads PASS. A fix that cuts every
+        wrapped run fails here."""
+        for form in ("glued", "env", "uv", "bash"):
+            with self.subTest(form=form):
+                self.assert_pass(self.pytest_case(PROGRESS * 3 + QUIET_SUMMARY, args=("-q",), form=form))
+
+    def test_argv_bash_quoted_pytest_text_is_pass(self):
+        """Control, green on the old code: pytest's words inside a quoted `bash -c` string run no pytest, so the run reads PASS."""
+        if os.name == "nt": raise unittest.SkipTest(POSIX_SKIP)
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            r = run(log=os.path.join(d, "v.log"), argv=["bash", "-c", "echo 'python3 -m pytest -q'"], cwd=d)
+        self.assert_pass(r)
+
+    def test_argv_qq_complete_run_without_summary_is_pass(self):
+        """F1, a false alarm: a complete `-qq` run of passing tests prints no summary line in pytest 9.x, only progress
+        that ends `[100%]`, so it reads PASS. Today it reads FAIL, cut before the pytest summary. No empty state is
+        built: pytest 9.x exits 5 when `-qq` collects no test, so an rc-0 empty run is not a complete one."""
+        for form in ("module", "bare"):
+            with self.subTest(form=form, size="three"):
+                self.assert_pass(self.pytest_case(QQ_LINE, args=("-qq",), form=form))
+        with self.subTest(form="module", size="full"):
+            self.assertGreater(len(QQ_FULL), CHUNK, "the full fixture must hold more than one chunk")
+            self.assert_pass(self.pytest_case(QQ_FULL, args=("-qq",)))
+
+    def test_argv_qq_cut_run_is_fail(self):
+        """Control, green on the old code: a `-qq` run cut at 30 percent, with no `[100%]` line, reads FAIL with cut. A fix
+        that stops counting `-qq` as quiet would pass it, so this pins that a complete `-qq` run is the one ending `[100%]`."""
+        self.assert_cut(self.pytest_case(QQ_CUT, args=("-qq",), hard=True))
+
+    def assert_complete_qq(self, three, full, args, env=None):
+        """A complete run whose output is `three`, or `full` (over one chunk), reads PASS through the module and bare
+        forms. Each form and size is one subtest."""
+        for form in ("module", "bare"):
+            with self.subTest(form=form, size="three"):
+                self.assert_pass(self.pytest_case(three, args=args, form=form, env=env))
+            with self.subTest(form=form, size="full"):
+                self.assertGreater(len(full), CHUNK, "the full fixture must hold more than one chunk")
+                self.assert_pass(self.pytest_case(full, args=args, form=form, env=env))
+
+    def test_argv_qq_subtest_char_run_is_pass(self):
+        """A complete `-qq` run whose last progress line holds the subtest char `u` reads FAIL with cut. It must read PASS."""
+        self.assertRegex(QQ_SUB, r"\.\.u +\[100%\]\n\Z", "the fixture must hold u in its last progress line, or this case proves nothing")
+        self.assert_complete_qq(QQ_SUB, QQ_SUB_FULL, ("-qq",))
+
+    def test_argv_qq_coloured_run_is_pass(self):
+        """With `--color=yes`, SGR codes sit between the progress chars and around `[100%]`. A complete `-qq` run like that
+        reads FAIL with cut. It must read PASS."""
+        self.assertIn("\x1b[0m\x1b[32m.", QQ_COLOUR, "the fixture must hold SGR codes between the progress chars, or this case proves nothing")
+        self.assert_complete_qq(QQ_COLOUR, QQ_COLOUR_FULL, ("-qq", "--color=yes"))
+
+    def test_argv_qq_padding_over_120_run_is_pass(self):
+        """At COLUMNS=200 pytest pads the last progress line with more than 120 spaces before `[100%]`. The padding is no
+        limit: a complete `-qq` run like that must read PASS."""
+        self.assertGreater(QQ_WIDE.index("[100%]"), 3 + 120, "the fixture must pad past 120 spaces, or this case proves nothing")
+        self.assert_complete_qq(QQ_WIDE, QQ_WIDE_FULL, ("-qq",), env={"COLUMNS": "200"})
+
+    def test_argv_qq_collect_only_run_is_pass(self):
+        """`pytest -qq --co` prints per-file counts, with no progress line and no summary line. A complete collect-only run
+        must read PASS."""
+        self.assert_complete_qq(QQ_CO, QQ_CO_FULL, ("-qq", "--co"))
+
+    def test_argv_qq_cut_runs_of_those_shapes_stay_fail(self):
+        """Control: a `-qq` run cut at 30 percent, with no `[100%]` line, reads FAIL with cut in each shape the complete-run
+        cases above use: a subtest char, colour, and padding past 120. A `-qq --co` run that exits 0 before it prints
+        anything reads FAIL too."""
+        shapes = {"subtest char": (QQ_SUB_CUT, ("-qq",), None),
+                  "colour": (QQ_COLOUR_CUT, ("-qq", "--color=yes"), None),
+                  "padding": (QQ_WIDE_CUT, ("-qq",), {"COLUMNS": "200"})}
+        for shape, (body, args, env) in shapes.items():
+            with self.subTest(shape=shape):
+                self.assert_cut(self.pytest_case(body, args=args, hard=True, env=env))
+        with self.subTest(shape="collect only, no output"):
+            self.assert_cut(self.pytest_case("", args=("-qq", "--co"), hard=True))
+
+    def assert_line_cut(self, line, sizes=("empty", "three", "full")):
+        """A pytest run that exits 0 mid-run, started by the bash line `line`, reads FAIL with cut. The fake pytest is first
+        on PATH, so the sentinel proves the line ran it. A line with a newline in it prints its command name on more than
+        one line, so the note may sit on a later line than `FAIL`."""
+        bodies = {"empty": "", "three": PROGRESS * 3, "full": PROGRESS * 2048}
+        for size in sizes:
+            with self.subTest(line=line, size=size):
+                if size == "full": self.assertGreater(len(bodies[size]), CHUNK, "the full fixture must hold more than one chunk")
+                r = self.pytest_case(bodies[size], bash_line=line, hard=True)
+                self.assertTrue(r.stdout.startswith("FAIL "), f"a cut run must read FAIL, got: {r.stdout[:200]!r}")
+                self.assertRegex(r.stdout, r"rc=1[^(\n]*\bcut\b", "a cut run must carry rc=1 and the cut note")
+                self.assertEqual(r.returncode, 1, r.stdout[:300])
+
+    def test_bash_newline_before_pytest_cut_run_is_fail(self):
+        """In `bash -c`, a newline ends a command, so `pytest -q` on the line after `cd d` runs pytest. A scanner that reads
+        the two lines as one command, `cd d pytest -q`, finds no pytest and reads the cut run as PASS."""
+        self.assert_line_cut("cd d\npytest -q")
+
+    def test_bash_for_loop_pytest_cut_run_is_fail(self):
+        """`do` starts a command, so `pytest -q $f` in a `for` loop runs pytest. A scanner that reads the command as `do`
+        finds no pytest and reads the cut run as PASS."""
+        self.assert_line_cut("for f in a; do pytest -q $f; done")
+
+    def test_bash_newline_and_for_loop_summary_runs_are_pass(self):
+        """Control: a complete `-q` run through the newline line and the `for` line reads PASS, in three and full size. A fix
+        that cuts every run a shell wrapper starts fails here."""
+        for line in ("cd d\npytest -q", "for f in a; do pytest -q $f; done"):
+            for size, body in (("three", PROGRESS * 3 + QUIET_SUMMARY), ("full", PROGRESS * 2048 + QUIET_SUMMARY)):
+                with self.subTest(line=line, size=size):
+                    if size == "full": self.assertGreater(len(body), CHUNK, "the full fixture must hold more than one chunk")
+                    self.assert_pass(self.pytest_case(body, bash_line=line))
+
+    def test_scanner_hash_after_a_quoted_hash_is_cut(self):
+        """A `#` inside quotes is text, and so is a `#` that follows the quote in the same word, so `pytest -q` after
+        `echo 'a#b'#c;` runs pytest. A scanner that reads that second `#` as a comment drops the rest of the line."""
+        self.assert_line_cut("echo 'a#b'#c; pytest -q")
+
+    def test_scanner_apostrophe_in_heredoc_text_is_cut(self):
+        """An apostrophe in heredoc text (`Don't`) is text, not an open quote, so the `pytest -q` after the heredoc runs
+        pytest. A scanner that reads the apostrophe as an open quote never finds its close and reads no pytest. The heredoc
+        also holds newlines, which end commands in bash, so the newline fix is needed for this case too."""
+        self.assert_line_cut("cat <<EOF\nDon't\nEOF\npytest -q")
+
+    def test_scanner_hash_in_quotes_and_apostrophe_in_comment_are_cut(self):
+        """Control: a `#` inside quotes opens no comment, so `echo '#'; pytest -q` runs pytest. An apostrophe in a comment
+        after pytest is text, so `pytest -q # don't` runs it too. A fix that cuts a line at its first `#` before it reads
+        quotes fails the first line."""
+        for line in ("echo '#'; pytest -q", "pytest -q # don't"):
+            self.assert_line_cut(line)
+
+    def test_scanner_newline_inside_quotes_is_text_pass(self):
+        """Control: a newline inside single quotes is text, so the `pytest -q` in the quoted string runs no pytest, and the
+        run reads PASS. A fix that splits lines before it reads quotes cuts this run."""
+        if os.name == "nt": raise unittest.SkipTest(POSIX_SKIP)
+        line = "echo 'x\npytest -q'"
+        r, full = self.run_logged(argv=["bash", "-c", line])
+        self.assertIn("x\npytest -q\n", full, "the quoted text must reach the log, or this case proves nothing")
+        self.assert_pass(r)
 
 
 def tearDownModule():

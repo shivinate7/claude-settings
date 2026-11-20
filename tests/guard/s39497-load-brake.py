@@ -2,7 +2,8 @@
 FAMILY = "load-brake"
 # The machine-load brake. On a start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
 # the guard reads the machine's load once: memory in use as a share of this machine's memory, and disk free on
-# the home drive in GB against the drive's size. CPU is not read (decision machine-load-brake): a 200 ms CPU
+# the home drive (the root drive in a cloud session) in GB against the drive's size. CPU is not read
+# (decision machine-load-brake): a 200 ms CPU
 # sample is noise, and memory and disk are what stall a machine. It counts no claude process and no running
 # lane. A GB here is 2**30 bytes, as df -k and PowerShell 1GB give. The levels:
 #   busy  memory over 85%, or disk free under the smaller of 10% of the disk and 15 GB. An Agent or Task call
@@ -11,7 +12,7 @@ FAMILY = "load-brake"
 #         to make this an Agent call that leaves run_in_background out or sets it false. A disk reading
 #         names free disk space instead.
 #   full  memory over 95%, or disk free under the smaller of 5% of the disk and 5 GB. Every lane call is refused,
-#         an Agent or Task call too.
+#         an Agent or Task call too. In a cloud session a full disk or memory over 95% refuses a start (CLOUD, below).
 # The refusal names the reading that tripped it, and never names the CPU. A read that fails, or a reading left
 # unread, counts as normal. An agent's own shell or file write reads once and is refused at full only
 # (A RUNNING LANE, below). Every other tool reads no load. The read starts no child process, writes no file,
@@ -24,14 +25,16 @@ FAMILY = "load-brake"
 #   read_load()    a function in guard.py, or in a guard_*.py module that guard.py imports. It takes
 #                  no argument and does every OS read. It returns a dict with the keys memory_pct
 #                  (percent of physical memory IN USE), disk_free_gb and disk_total_gb (GB FREE and GB
-#                  TOTAL on the home drive, never clamped to 0-100). It returns no cpu_pct key. A
+#                  TOTAL on the home drive (the root drive in a cloud session), never clamped to 0-100). It returns no
+#                  cpu_pct key. A
 #                  missing key or a None is an unread reading, which counts as normal. read_load may
 #                  raise: every reading then counts as normal. It returns no claude_procs, and a
 #                  claude_procs key in a reading changes nothing. A cpu_pct key in a stub reading changes
 #                  nothing either: a change that still reads the CPU refuses on those stubs and fails here.
 #                  The OS sources, all faked by THE FAKE HOST: darwin reads memory through sysctlbyname;
-#                  linux reads memory unread; both read the disk through shutil.disk_usage on the home
-#                  folder. Neither reads the CPU ticks, the load average, or waits.
+#                  linux reads memory from /proc/meminfo (MemTotal and MemAvailable); both read the disk through
+#                  shutil.disk_usage: the home folder, or "/"
+#                  in a cloud session. Neither reads the CPU ticks, the load average, or waits.
 # The judge must call it by its bare name, so the probe's patch (set on every guard module that
 # holds the name) is the function that runs. A function the probe cannot replace fails every case.
 # The reading of a call is one read_load() per start call, and none on any other call.
@@ -52,6 +55,12 @@ from unittest import mock
 guard_path, side, spec = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
 children = []
 sleeps = []
+disk_paths = []   # each path that shutil.disk_usage is asked for under THE FAKE HOST, in order
+
+
+def disk_read(path, usage):
+    disk_paths.append(str(path))
+    return usage
 time.sleep = lambda seconds: sleeps.append(seconds)   # counted, never waited on
 real_popen = subprocess.Popen
 in_popen = [0]
@@ -128,6 +137,12 @@ def under_fake(read, fake):
         if str(file) == "/proc/stat":
             user, system, idle, nice = sample("stat")
             return io.StringIO("cpu  %d %d %d %d 0 0 0 0 0 0\n" % (user, nice, system, idle))
+        if str(file) == "/proc/meminfo":
+            # MemAvailable leaves fake["memory"] percent of MemTotal in use. "unreadable" makes the read fail.
+            if fake.get("meminfo") == "unreadable":
+                raise OSError("fake: /proc/meminfo is unreadable")
+            total = 1000000
+            return io.StringIO("MemTotal: %d kB\nMemAvailable: %d kB\n" % (total, total - int(total * fake["memory"] / 100.0)))
         return real_open(file, *args, **kwargs)
 
     total, free = int(fake["disk_total_gb"] * GB), int(fake["disk_free_gb"] * GB)
@@ -137,7 +152,7 @@ def under_fake(read, fake):
             mock.patch("ctypes.CDLL", cdll), \
             mock.patch("ctypes.cdll", types.SimpleNamespace(LoadLibrary=cdll)), \
             mock.patch("os.getloadavg", lambda: (load, load, load), create=True), \
-            mock.patch("shutil.disk_usage", lambda path: usage), \
+            mock.patch("shutil.disk_usage", lambda path: disk_read(path, usage)), \
             mock.patch("builtins.open", stat_open), mock.patch("io.open", stat_open):
         try:
             return read()
@@ -236,6 +251,7 @@ except Exception as exc:
     out["probe_error"] = type(exc).__name__ + ": " + str(exc)[:200]
 out["sleeps"] = len(sleeps)
 out["children"] = children
+out["disk_paths"] = disk_paths
 with open(side, "w", encoding="utf-8") as handle:
     json.dump(out, handle, default=str)
 if out.get("probe_error"):
@@ -271,12 +287,12 @@ def lb_gb(free, total):
     return re.compile(re.escape("disk %.1f GB free of %.0f GB" % (free, total)))
 
 
-def lb_fake(platform, busy=10.0, load=0.5, memory=40, disk_total=926.0, disk_free=500.0):
+def lb_fake(platform, busy=10.0, load=0.5, memory=40, disk_total=926.0, disk_free=500.0, meminfo="read"):
     """A fake host for THE FAKE HOST: `busy` the CPU share the tick samples would show, `load` the 1-minute
     load average, `memory` the percent in use, and the disk in GB. The defaults are a quiet host with room on
     the disk."""
     return {"platform": platform, "busy": busy, "load": load, "memory": memory,
-            "disk_total_gb": disk_total, "disk_free_gb": disk_free}
+            "disk_total_gb": disk_total, "disk_free_gb": disk_free, "meminfo": meminfo}
 
 
 def lb_reading(**changes):
@@ -382,7 +398,8 @@ def lb_names(word, *numbers, percent=True):
 
 
 def lb_decision_check(tool, reading, want, names=(), background=None, tool_input=None, reads=1, lacks=(),
-                      fake=None, agent=None, remote=None, own_env=None, transcript=None, spy=False):
+                      fake=None, agent=None, remote=None, own_env=None, transcript=None, spy=False,
+                      disk_paths=None, disk_reads=None):
     """A start call under a forced reading, or under THE FAKE HOST when `fake` is given (then `reading`
     is unused and the real read_load runs). `background` is the call's run_in_background: True, False, or
     None to leave it out. `tool_input` replaces the whole input. `remote` is CLAUDE_CODE_REMOTE (see lb_run),
@@ -402,6 +419,12 @@ def lb_decision_check(tool, reading, want, names=(), background=None, tool_input
             return False, "%s, want %s (the reader ran %s times): %s" % (got, want, called, reason[:80])
         if reads is not None and called != reads:
             return False, "%s as wanted, but the reader ran %s times, want %d" % (got, called, reads)
+        if disk_reads is not None and len(side.get("disk_paths", [])) != disk_reads:
+            return False, "the start read the disk %d time(s), want %d" % (len(side.get("disk_paths", [])), disk_reads)
+        if disk_paths is not None:
+            want_paths = disk_paths() if callable(disk_paths) else disk_paths
+            if side.get("disk_paths") != want_paths:
+                return False, "the disk reads %r, want %r" % (side.get("disk_paths"), want_paths)
         if got == "allow" and side["files"]:
             return False, "an allowed lane call wrote %d file(s)" % len(side["files"])
         for pattern in names:
@@ -628,6 +651,7 @@ lb_add("neutral default: a lane call in another family's case meets a neutral lo
 
 LB_MEM_BUSY = lb_names("memory", "91.7", "91", "92")
 LB_MEM_FULL = lb_names("memory", "97.2", "97")
+LB_MEM99 = lb_names("memory", "99.0", "99")
 LB_MEM90 = lb_names("memory", "90.0", "90")
 LB_CPU_WORD = re.compile(r"cpu", re.I)   # a refusal that names the CPU at all
 
@@ -846,20 +870,213 @@ lb_add("an agent's session tool that writes nothing reads no load under the wors
 lb_add("a Bash call whose agent_id is malformed reads no load under the worst reading",
        lb_no_read_check("Bash", {"command": "echo hi"}, agent="not an id!"))
 
-# CLOUD. decision session-tiers: the load brake is local-only. With CLAUDE_CODE_REMOTE=true a start call is
-# allowed at busy and full. These run end to end, so an allowed call's file writes are checked too (nothing reaches
-# guard.log). The section below already holds an Agent with run_in_background true, a Workflow and the writes at full,
-# so those are not repeated here.
+# A LINT START AT THE FULL DISK. `merge --lane-lint` already refuses at a full disk inside the merge tool, before it makes
+# its lint tree (merge/test_lane_lint.py), so no guard case pins it here. A direct `bin/ci-job --lint` has no disk floor
+# anywhere, so a background one is refused by the brake at a full disk. The lint start reads disk and memory, never
+# the load average (decision machine-load-brake).
+LB_CI_LINT_BG = {"command": "bin/ci-job --lint", "run_in_background": True}
+LB_LANE_LINT_BG = {"command": "merge --lane-lint brake-reads-load-before-lint", "run_in_background": True,
+                   "timeout": 7200000}   # above the lint bound, so check-timeout passes the call
+LB_OVERRIDE_LINE = re.compile(re.escape("To allow this act, type `override` for this one act"))
+LB_LOAD_RULE = re.compile(r"^load-brake: ")
+LB_LOAD_CITE = re.compile(r"machine-load-brake")
+LB_SWEEP = re.compile(r"sweep\.py")   # the disk refusal names the sweep that frees space
+lb_add("bin/ci-job --lint, background, 3.1 GB free of 926 GB: full, refused, names the disk, the sweep and the override line",
+       lb_decision_check("Bash", lb_reading(disk_free_gb=3.1, disk_total_gb=926.0), "deny",
+                         (LB_LOAD_RULE, LB_LOAD_CITE, LB_SWEEP, LB_OVERRIDE_LINE, lb_gb(3.1, 926)),
+                         tool_input=LB_CI_LINT_BG))
+lb_add("bin/ci-job --lint, background, normal reading: allowed, the reader runs once",
+       lb_decision_check("Bash", LB_NORMAL, "allow", tool_input=LB_CI_LINT_BG, reads=1))
+lb_add("merge --lane-lint, background, normal reading: allowed, the reader runs once",
+       lb_decision_check("Bash", LB_NORMAL, "allow", tool_input=LB_LANE_LINT_BG, reads=1))
+lb_add("a Bash call that is no lint start, 97.2% memory and 3.1 GB free of 926 GB: allowed, and the reader does not run",
+       lb_decision_check("Bash", lb_reading(memory_pct=97.2, disk_free_gb=3.1, disk_total_gb=926.0), "allow",
+                         tool_input={"command": "echo hi"}, reads=0))
+lb_add("a Bash call that quotes bin/ci-job --lint in an echo, at a full disk: allowed, and the reader does not run",
+       lb_decision_check("Bash", lb_reading(disk_free_gb=3.1, disk_total_gb=926.0), "allow",
+                         tool_input={"command": 'echo "bin/ci-job --lint"'}, reads=0))
+
+# A LINT START THAT NO run_in_background FLAG MARKS. A trailing `&` in a foreground call starts the lint in the background
+# all the same, and a lint wrapped in `bash -c`, `sh -c` or a subshell is still a lint start. The brake judges each at a
+# full disk, as it judges a plain background lint start, with one read. A `#` or an apostrophe inside quotes keeps its
+# own meaning, so the lint after it is still judged. A lint named only in a trailing comment is no start.
+LB_DISK_FULL = lb_reading(disk_free_gb=3.1, disk_total_gb=926.0)
+LB_LINT_FULL_NAMES = (LB_LOAD_RULE, LB_LOAD_CITE, LB_SWEEP, LB_OVERRIDE_LINE, lb_gb(3.1, 926))
+
+
+def lb_full_scope(reading, inner):
+    """An allow at a full disk means something only when the reading the case forces is full. Its free space must sit
+    under the full point, checked first, so a case whose reading drifts to a normal disk fails on its scope, not on the
+    allow."""
+    def check():
+        free, total = reading["disk_free_gb"], reading["disk_total_gb"]
+        point = lb_full_point(total)
+        if not free < point:
+            return False, "scope: %.2f GB free of %.0f GB is not under the full point %.2f GB" % (free, total, point)
+        return inner()
+    return check
+
+
+lb_add("foreground, bin/ci-job --lint & echo $!, full disk: refused, names the disk, the sweep and the override line",
+       lb_decision_check("Bash", LB_DISK_FULL, "deny", LB_LINT_FULL_NAMES,
+                         tool_input={"command": "bin/ci-job --lint & echo $!"}))
+lb_add('bash -c "bin/ci-job --lint", background, full disk: refused, names the disk, the sweep and the override line',
+       lb_decision_check("Bash", LB_DISK_FULL, "deny", LB_LINT_FULL_NAMES,
+                         tool_input={"command": 'bash -c "bin/ci-job --lint"', "run_in_background": True}))
+lb_add("sh -c 'merge --lane-lint 9', background, full disk: refused, names the disk, the sweep and the override line",
+       lb_decision_check("Bash", LB_DISK_FULL, "deny", LB_LINT_FULL_NAMES,
+                         tool_input={"command": "sh -c 'merge --lane-lint 9'", "run_in_background": True,
+                                     "timeout": 7200000}))   # above the lint bound, so check-timeout passes the call
+lb_add("(cd W && bin/ci-job --lint), background, full disk: refused, names the disk, the sweep and the override line",
+       lb_decision_check("Bash", LB_DISK_FULL, "deny", LB_LINT_FULL_NAMES,
+                         tool_input={"command": "(cd W && bin/ci-job --lint)", "run_in_background": True}))
+lb_add('echo "#"; bin/ci-job --lint, background, full disk: refused, names the disk (a hash in quotes is no comment)',
+       lb_decision_check("Bash", LB_DISK_FULL, "deny", LB_LINT_FULL_NAMES,
+                         tool_input={"command": 'echo "#"; bin/ci-job --lint', "run_in_background": True}))
+lb_add("echo \"it's\"; bin/ci-job --lint, background, full disk: refused, names the disk (a lone quote in text is no string)",
+       lb_decision_check("Bash", LB_DISK_FULL, "deny", LB_LINT_FULL_NAMES,
+                         tool_input={"command": "echo \"it's\"; bin/ci-job --lint", "run_in_background": True}))
+lb_add("echo hi # bin/ci-job --lint, background, full disk: allowed, and the reader does not run",
+       lb_full_scope(LB_DISK_FULL, lb_decision_check("Bash", LB_DISK_FULL, "allow",
+                                                     tool_input={"command": "echo hi # bin/ci-job --lint",
+                                                                 "run_in_background": True}, reads=0)))
+
+# THE ALLOW SIDE OF THE `&` GATE (decision machine-load-brake: "A foreground lint with no `&` is no start and reads
+# nothing."). A foreground lint at a full disk is allowed, and the reader does not run. A `>&` or `&&` cuts no
+# background list. `echo hi & ...` is refused by detached-launch, not by the brake, so its case pins only that the
+# brake does not refuse it. `merge --lane-lint` in the foreground is refused by check-timeout at any limit.
+lb_add("foreground, bin/ci-job --lint, full disk: allowed, and the reader does not run",
+       lb_full_scope(LB_DISK_FULL, lb_decision_check("Bash", LB_DISK_FULL, "allow",
+                                                     tool_input={"command": "bin/ci-job --lint"}, reads=0)))
+lb_add("foreground, bin/ci-job --lint 2>&1, full disk: allowed, and the reader does not run",
+       lb_full_scope(LB_DISK_FULL, lb_decision_check("Bash", LB_DISK_FULL, "allow",
+                                                     tool_input={"command": "bin/ci-job --lint 2>&1"}, reads=0)))
+lb_add("foreground, echo hi & bin/ci-job --lint, full disk: refused by detached-launch and not the load brake, the reader does not run",
+       lb_full_scope(LB_DISK_FULL, lb_decision_check("Bash", LB_DISK_FULL, "deny", (re.compile(r"^detached-launch: "),),
+                                                     tool_input={"command": "echo hi & bin/ci-job --lint"}, reads=0,
+                                                     lacks=(LB_LOAD_RULE, LB_LOAD_CITE))))
+lb_add("foreground, bin/ci-job --lint && echo ok, full disk: allowed, and the reader does not run",
+       lb_full_scope(LB_DISK_FULL, lb_decision_check("Bash", LB_DISK_FULL, "allow",
+                                                     tool_input={"command": "bin/ci-job --lint && echo ok"}, reads=0)))
+lb_add("foreground, merge --lane-lint 9, full disk: refused by check-timeout and not the load brake, the reader does not run",
+       lb_full_scope(LB_DISK_FULL, lb_decision_check("Bash", LB_DISK_FULL, "deny", (re.compile(r"^check-timeout: "),),
+                                                     tool_input={"command": "merge --lane-lint 9"}, reads=0,
+                                                     lacks=(LB_LOAD_RULE, LB_LOAD_CITE))))
+
+# LINUX MEMORY (decision machine-load-brake). On Linux the
+# reader reads memory from /proc/meminfo, so memory over 95% refuses a background Agent start and a background lint start
+# (merge --lane-lint, bin/ci-job --lint), locally and in a cloud session. Memory at 50% allows both. An unreadable
+# meminfo is unread and counts as normal, and a full disk still refuses through it. The fake host serves the file.
+LB_MEM96 = lb_names("memory", "96.0", "96")
+LB_MEM_LINUX_NAMES = LB_MEM96 + (LB_LOAD_RULE, LB_LOAD_CITE, LB_OVERRIDE_LINE)
+LB_BRAKE_NAMES_DISK = (lb_gb(3.1, 926), LB_LOAD_CITE)
+lb_add("linux, local, Agent run_in_background true, memory 96%: full, refused, names the memory and the override line",
+       lb_decision_check("Agent", None, "deny", LB_MEM_LINUX_NAMES, background=True,
+                         fake=lb_fake("linux", memory=96.0)))
+lb_add("linux, local, merge --lane-lint background, memory 96%: full, refused, names the memory and the override line",
+       lb_decision_check("Bash", None, "deny", LB_MEM_LINUX_NAMES, tool_input=LB_LANE_LINT_BG,
+                         fake=lb_fake("linux", memory=96.0)))
+lb_add("linux, local, bin/ci-job --lint background, memory 96%: full, refused, names the memory and the override line",
+       lb_decision_check("Bash", None, "deny", LB_MEM_LINUX_NAMES, tool_input=LB_CI_LINT_BG,
+                         fake=lb_fake("linux", memory=96.0)))
+lb_add("linux, local, Agent run_in_background true, memory 50%: allowed",
+       lb_decision_check("Agent", None, "allow", background=True, fake=lb_fake("linux", memory=50.0)))
+lb_add("linux, local, merge --lane-lint background, memory 50%: allowed, the reader runs once",
+       lb_decision_check("Bash", None, "allow", tool_input=LB_LANE_LINT_BG, fake=lb_fake("linux", memory=50.0),
+                         reads=1))
+lb_add("linux, local, bin/ci-job --lint background, memory 50%: allowed, the reader runs once",
+       lb_decision_check("Bash", None, "allow", tool_input=LB_CI_LINT_BG, fake=lb_fake("linux", memory=50.0),
+                         reads=1))
+# Between busy and full: a lint start is judged on full only, so memory over 85% and up to 95% passes it.
+lb_add("linux, local, bin/ci-job --lint background, memory 90%: allowed, the reader runs once",
+       lb_decision_check("Bash", None, "allow", tool_input=LB_CI_LINT_BG, fake=lb_fake("linux", memory=90.0),
+                         reads=1))
+lb_add("foreground, bin/ci-job --lint & echo $!, linux, local, memory 96%: refused, names the memory and the override line",
+       lb_decision_check("Bash", None, "deny", LB_MEM_LINUX_NAMES, tool_input={"command": "bin/ci-job --lint & echo $!"},
+                         fake=lb_fake("linux", memory=96.0)))
+lb_add("linux, local, Agent run_in_background true, meminfo unreadable at 96%: unread, allowed",
+       lb_decision_check("Agent", None, "allow", background=True,
+                         fake=lb_fake("linux", memory=96.0, meminfo="unreadable")))
+lb_add("linux, local, Agent run_in_background true, meminfo unreadable and 3.1 GB free of 926 GB: the disk still refuses",
+       lb_decision_check("Agent", None, "deny", LB_BRAKE_NAMES_DISK, background=True,
+                         fake=lb_fake("linux", memory=96.0, meminfo="unreadable", disk_free=3.1, disk_total=926.0)))
+lb_add("linux, cloud, Agent run_in_background true, memory 96%: full, refused, names the memory",
+       lb_decision_check("Agent", None, "deny", LB_MEM_LINUX_NAMES, background=True, remote="true",
+                         fake=lb_fake("linux", memory=96.0)))
+lb_add("linux, cloud, merge --lane-lint background, memory 96%: full, refused, names the memory",
+       lb_decision_check("Bash", None, "deny", LB_MEM_LINUX_NAMES, tool_input=LB_LANE_LINT_BG, remote="true",
+                         fake=lb_fake("linux", memory=96.0)))
+lb_add("linux, cloud, bin/ci-job --lint background, memory 96%: full, refused, names the memory",
+       lb_decision_check("Bash", None, "deny", LB_MEM_LINUX_NAMES, tool_input=LB_CI_LINT_BG, remote="true",
+                         fake=lb_fake("linux", memory=96.0)))
+lb_add("linux, cloud, Agent run_in_background true, memory 50%: allowed, and the reader runs once (the disk read)",
+       lb_decision_check("Agent", None, "allow", background=True, remote="true",
+                         fake=lb_fake("linux", memory=50.0), reads=1))
+
+# CLOUD. With CLAUDE_CODE_REMOTE=true, a new Agent, Task or Workflow start is refused at a full disk (free space under
+# the full point, which each case reads from guard.py rather than copying) or at memory over 95%. A cloud lane that fills the disk makes its writes fail,
+# so the start is what gets stopped. Busy never brakes a cloud start. A running agent or lane is never stopped, and
+# reads no load. Allowed calls run end to end, so their file writes are checked too.
 LB_CLOUD = "true"
-CLOUD_VALUES = ((None, False), ("true", True), ("TRUE", False), ("True", False), ("1", False), ("", False),
+def lb_sweep_text():
+    """guard.LOAD_SWEEP, the whole sweep command a refusal must name. None when guard holds no such name."""
+    return getattr(_load_guard_module(), "LOAD_SWEEP", None)
+
+
+class LB_SWEEP_NAMED:
+    """A refusal's reason holds guard.LOAD_SWEEP whole, read at each check. A bare `sweep.py` does not match."""
+    pattern = "guard.LOAD_SWEEP"
+
+    def search(self, text):
+        sweep = lb_sweep_text()
+        return bool(sweep) and sweep in text
+
+
+LB_SWEEP = LB_SWEEP_NAMED()
+LB_WAIT = re.compile(r"wait", re.I)   # and it never tells the session to wait
+LB_CLOUD_STARTS = (("Agent", True, "run_in_background true"), ("Agent", None, "run_in_background left out"),
+                   ("Agent", False, "run_in_background false"), ("Task", True, "run_in_background true"),
+                   ("Task", None, "run_in_background left out"), ("Task", False, "run_in_background false"),
+                   ("Workflow", None, "no run_in_background field"))
+
+
+def lb_full_point(total):
+    """The full point of a disk of `total` GB, in GB: the smaller of LOAD_FULL_DISK_SHARE percent of it and
+    LOAD_FULL_DISK_GB. Read from guard.py at each call, so a changed constant moves every case with it."""
+    guard = _load_guard_module()
+    return min(total * guard.LOAD_FULL_DISK_SHARE / 100.0, guard.LOAD_FULL_DISK_GB)
+
+
+def lb_cloud_disk_check(tool, free, total, want, side, tool_input=None, background=None, memory=None, fake=False,
+                        reads=1, names=(), lacks=(), agent=None, disk_paths=None, disk_reads=None, remote=LB_CLOUD):
+    """A cloud call on a disk of `total` GB with `free` GB free. `side` is "under" or "above": where the free space
+    must sit against the full point. That is checked first, so a case whose numbers drift past the point fails on its
+    scope, not on the verdict. `memory` None leaves memory unread. `fake` runs the real reader on a linux host."""
+    def check():
+        point = lb_full_point(total)
+        where = "under" if free < point else "above"
+        if where != side:
+            return False, "scope: %.2f GB free of %.0f GB is %s the full point %.2f GB, the case wants %s" % (
+                free, total, where, point, side)
+        spec_fake = lb_fake("linux", disk_total=total, disk_free=free) if fake else None
+        reading = None if fake else dict(LB_NORMAL, memory_pct=memory, disk_free_gb=free, disk_total_gb=total)
+        return lb_decision_check(tool, reading, want, names=names, background=background, tool_input=tool_input,
+                                 reads=reads, lacks=lacks, fake=spec_fake, agent=agent, remote=remote,
+                                 disk_paths=disk_paths, disk_reads=disk_reads)()
+    return check
+
+
+CLOUD_VALUES =((None, False), ("true", True), ("TRUE", False), ("True", False), ("1", False), ("", False),
                 ("false", False), (" true", False))
 for _tool, _bg, _say in (("Agent", False, "run_in_background false"),
                          ("Agent", None, "run_in_background left out"),
                          ("Task", True, "run_in_background true"),
                          ("Task", False, "run_in_background false"),
                          ("Task", None, "run_in_background left out")):
-    lb_add("cloud: %s, memory 99%%, disk 1.0 GB free of 926 GB, %s: allowed, nothing written" % (_tool, _say),
-           lb_decision_check(_tool, LB_ALL_HIGH, "allow", background=_bg, reads=None, remote=LB_CLOUD))
+    lb_add("cloud: %s, memory 99%%, disk 500 GB free of 926 GB, %s: refused, names the memory (owner, 2026-11-19 "
+           "21:30 CST, confirmed 22:25 CST)" % (_tool, _say),
+           lb_decision_check(_tool, lb_reading(memory_pct=99.0), "deny", LB_MEM99, background=_bg, reads=None,
+                             remote=LB_CLOUD))
 lb_add("cloud: start_session, memory 99%, disk 1.0 GB free of 926 GB: allowed, nothing written",
        lb_decision_check("mcp__ccd_session__start_session", LB_ALL_HIGH, "allow", reads=None, remote=LB_CLOUD))
 for _tool in ("Agent", "Task"):
@@ -869,15 +1086,61 @@ for _tool in ("Agent", "Task"):
 lb_add("cloud: an agent's Bash, memory 99%, disk 1.0 GB free of 926 GB: allowed, nothing written",
        lb_decision_check("Bash", LB_ALL_HIGH, "allow", tool_input={"command": "echo hi"}, agent=LB_AGENT,
                          reads=None, remote=LB_CLOUD))
-lb_add("cloud: an agent's Agent call, memory 97.2%: allowed",
-       lb_decision_check("Agent", lb_reading(memory_pct=97.2), "allow", agent=LB_AGENT, reads=None,
+# An agent's Agent call is a start call, not a running agent's write, so memory over 95% refuses it.
+lb_add("cloud: an agent's Agent call, memory 97.2%: refused, names the memory (owner, 2026-11-19 21:30 CST, confirmed "
+       "22:25 CST)",
+       lb_decision_check("Agent", lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL, agent=LB_AGENT, reads=None,
                          remote=LB_CLOUD))
-lb_add("cloud: Agent, darwin host at memory 97.2%, run_in_background false, the real reader: allowed",
-       lb_decision_check("Agent", None, "allow", background=False, fake=lb_fake("darwin", memory=97.2), reads=None,
-                         remote=LB_CLOUD))
-lb_add("cloud: Agent, linux disk 3.1 GB free of 926 GB, run_in_background true, the real reader: allowed",
-       lb_decision_check("Agent", None, "allow", background=True, fake=lb_fake("linux", disk_free=3.1), reads=None,
-                         remote=LB_CLOUD))
+# A cloud reader takes the /proc/meminfo path on any reported platform (guard.py's _read_memory tests is_cloud() before
+# the darwin arm), so this host reads meminfo, not the darwin counter. The fake serves both sources the same 97.2%, so
+# this case does not show which source was read. It pins that a cloud start at memory over 95% is refused.
+lb_add("cloud: Agent, a host that reports darwin reads /proc/meminfo, memory 97.2%, run_in_background false: refused, "
+       "names the memory "
+       "(owner, 2026-11-19 21:30 CST, confirmed 22:25 CST)",
+       lb_decision_check("Agent", None, "deny", LB_MEM_FULL, background=False, fake=lb_fake("darwin", memory=97.2),
+                         reads=None, remote=LB_CLOUD))
+# A cloud start at a full disk is refused. Memory is forced unread here, so the disk alone trips (a cloud host's memory
+# is read from /proc/meminfo; the cloud cases of that read are in the LINUX MEMORY block).
+# The refusal names the disk reading and the sweep command, and never tells the session to wait.
+for _tool, _bg, _say in LB_CLOUD_STARTS:
+    lb_add("cloud: %s, %s, memory unread, disk 4.0 GB free of 252 GB (under the full point): refused, names the disk "
+           "and sweep.py, never says wait" % (_tool, _say),
+           lb_cloud_disk_check(_tool, 4.0, 252.0, "deny", "under", background=_bg,
+                               names=(lb_gb(4.0, 252.0), LB_SWEEP), lacks=(LB_WAIT,)))
+lb_add("cloud: Agent, run_in_background left out, memory unread, disk 2.0 GB free of 60 GB (under the share point): "
+       "refused, names the disk and sweep.py, never says wait",
+       lb_cloud_disk_check("Agent", 2.0, 60.0, "deny", "under", names=(lb_gb(2.0, 60.0), LB_SWEEP),
+                           lacks=(LB_WAIT,)))
+lb_add("cloud: Agent, linux disk 3.1 GB free of 926 GB, run_in_background true, the real reader: refused, names the "
+       "disk and sweep.py, never says wait",
+       lb_cloud_disk_check("Agent", 3.1, 926.0, "deny", "under", background=True, fake=True,
+                           names=(lb_gb(3.1, 926.0), LB_SWEEP), lacks=(LB_WAIT,)))
+# The disk path. The probe records each path shutil.disk_usage is asked for. A cloud start reads the
+# root folder's drive, once. A local start reads the home folder's drive, once.
+lb_add("cloud: Agent, run_in_background true, disk 4.0 GB free of 252 GB, the real reader: the one disk read is \"/\"",
+       lb_cloud_disk_check("Agent", 4.0, 252.0, "deny", "under", background=True, fake=True, disk_paths=["/"],
+                           disk_reads=1, names=(lb_gb(4.0, 252.0), LB_SWEEP), lacks=(LB_WAIT,)))
+lb_add("cloud: Workflow, disk 4.0 GB free of 252 GB, the real reader: a start reads the disk once",
+       lb_cloud_disk_check("Workflow", 4.0, 252.0, "deny", "under", fake=True, disk_reads=1,
+                           names=(lb_gb(4.0, 252.0), LB_SWEEP), lacks=(LB_WAIT,)))
+lb_add("local: Agent, run_in_background true, disk 4.0 GB free of 252 GB, the real reader: the one disk read is "
+       "the home folder's drive",
+       lb_cloud_disk_check("Agent", 4.0, 252.0, "deny", "under", background=True, fake=True, remote=None,
+                           disk_paths=lambda: [os.path.expanduser("~")], disk_reads=1,
+                           names=(lb_gb(4.0, 252.0),)))
+# Above the full point a cloud start passes at busy when memory is unread. Memory over 95% refuses it (the cases above).
+# These do not pin the read.
+for _tool, _bg, _say in LB_CLOUD_STARTS:
+    lb_add("cloud: %s, %s, memory unread, disk 6.0 GB free of 252 GB (above the full point): allowed" % (_tool, _say),
+           lb_cloud_disk_check(_tool, 6.0, 252.0, "allow", "above", background=_bg, reads=None))
+lb_add("cloud: Agent, run_in_background true, memory unread, disk 10.0 GB free of 252 GB (busy, above the full point): "
+       "allowed", lb_cloud_disk_check("Agent", 10.0, 252.0, "allow", "above", background=True, reads=None))
+lb_add("cloud: Workflow, memory unread, disk 10.0 GB free of 252 GB (busy, above the full point): allowed",
+       lb_cloud_disk_check("Workflow", 10.0, 252.0, "allow", "above", reads=None))
+lb_add("cloud: Agent, memory unread, disk 500 GB free of 926 GB: allowed",
+       lb_cloud_disk_check("Agent", 500.0, 926.0, "allow", "above", reads=None))
+lb_add("cloud: Agent, memory unread, disk 3.5 GB free of 60 GB (above the share point of a small disk): allowed",
+       lb_cloud_disk_check("Agent", 3.5, 60.0, "allow", "above", reads=None))
 # Only the exact value "true" is cloud: the other values keep the local brake, so the refusal still stands.
 for _remote in ("1", "TRUE", ""):
     lb_add("CLAUDE_CODE_REMOTE=%r is local: Agent, memory 97.2%%, run_in_background false: full, refused" % _remote,
@@ -924,10 +1187,10 @@ lb_add('cloud check: guard_core.is_cloud exists and is True only for exactly "tr
 lb_add("cloud check: guard.py's brake guard holds guard_core.is_cloud, one home", cloud_one_home_check)
 
 
-# A CLOUD SESSION. The brake is specific to local sessions: with CLAUDE_CODE_REMOTE "true" it skips every lane
-# start and every running-lane call, and reads no load, so the reader is never called. Only the exact value
-# "true" is a cloud session. Unset and "false" are local and keep the brake. Every label names CLAUDE_CODE_REMOTE,
-# so MUTATE_ONLY=CLAUDE_CODE_REMOTE runs this section alone.
+# A CLOUD SESSION. With CLAUDE_CODE_REMOTE "true", a start call is refused at a full disk or at memory over 95%, and
+# reads the disk and memory once. A running agent or lane call skips the brake and reads no load. Only the exact value
+# "true" is a cloud session. Unset and "false" are local and keep the brake. Every label names CLAUDE_CODE_REMOTE, so
+# MUTATE_ONLY=CLAUDE_CODE_REMOTE runs this section alone.
 LB_FULL_READING = lb_reading(memory_pct=97.2)   # a full machine: memory over 95%
 
 
@@ -963,20 +1226,37 @@ def lb_hit_check(which, tool, reading, tool_input, remote=None, deny=None, reads
     return check
 
 
-# Cloud: the direct pairs are empty and the reader never runs.
-lb_add("CLAUDE_CODE_REMOTE=true, Agent run_in_background true, memory 97.2%: load_hit returns the empty pair, "
-       "the reader never runs",
-       lb_hit_check("load_hit", "Agent", LB_FULL_READING, lb_lane_input("Agent", True), remote="true", reads=0))
-lb_add("CLAUDE_CODE_REMOTE=true, Workflow, memory 97.2%: load_hit returns the empty pair, the reader never runs",
-       lb_hit_check("load_hit", "Workflow", LB_FULL_READING, lb_lane_input("Workflow"), remote="true", reads=0))
+# A foreground trailing `&` starts a lint the same way. The brake's own call (load_hit) refuses it at a full disk, so
+# the case does not depend on another rule that also refuses a detached merge.
+lb_add("foreground, merge --lane-lint 9 &, full disk: the brake's own call refuses, names the disk and the sweep, the "
+       "reader runs once",
+       lb_hit_check("load_hit", "Bash", LB_DISK_FULL, {"command": "merge --lane-lint 9 &"},
+                    deny=(lb_gb(3.1, 926), LB_SWEEP), reads=1))
+lb_add("foreground, merge --lane-lint 9 &, memory 96%: the brake's own call refuses, names the memory, the reader runs once",
+       lb_hit_check("load_hit", "Bash", lb_reading(memory_pct=96.0), {"command": "merge --lane-lint 9 &"},
+                    deny=LB_MEM96, reads=1))
+# Cloud: a start call reads the disk and memory once, and its pair is empty only at a disk that is not full and memory
+# not over 95%. A running agent's call reads nothing.
+lb_add("CLAUDE_CODE_REMOTE=true, Agent run_in_background true, memory 97.2%: load_hit refuses, names the memory, "
+       "the reader runs once (owner, 2026-11-19 21:30 CST, confirmed 22:25 CST)",
+       lb_hit_check("load_hit", "Agent", LB_FULL_READING, lb_lane_input("Agent", True), remote="true", reads=1,
+                    deny=LB_MEM_FULL))
+lb_add("CLAUDE_CODE_REMOTE=true, Workflow, memory 97.2%: load_hit refuses, names the memory, the reader runs once "
+       "(owner, 2026-11-19 21:30 CST, confirmed 22:25 CST)",
+       lb_hit_check("load_hit", "Workflow", LB_FULL_READING, lb_lane_input("Workflow"), remote="true", reads=1,
+                    deny=LB_MEM_FULL))
 lb_add("CLAUDE_CODE_REMOTE=true, an agent's Bash, memory 97.2%: running_agent_hit returns the empty pair, "
        "the reader never runs",
        lb_hit_check("running_agent_hit", "Bash", LB_FULL_READING, {"command": "echo hi"}, remote="true", reads=0,
                     agent=LB_AGENT))
-lb_add("CLAUDE_CODE_REMOTE=true, Agent run_in_background true, full reading: allowed, the reader never runs",
-       lb_no_read_check("Agent", lb_lane_input("Agent", True), remote="true"))
-lb_add("CLAUDE_CODE_REMOTE=true, Workflow, full reading: allowed, the reader never runs",
-       lb_no_read_check("Workflow", lb_lane_input("Workflow"), remote="true"))
+lb_add("CLAUDE_CODE_REMOTE=true, Agent run_in_background true, disk 1.0 GB free of 926 GB, memory 99%: refused, "
+       "names the disk and sweep.py, the reader runs once",
+       lb_decision_check("Agent", LB_ALL_HIGH, "deny", names=(lb_gb(1.0, 926.0), LB_SWEEP), lacks=(LB_WAIT,),
+                         tool_input=lb_lane_input("Agent", True), remote="true"))
+lb_add("CLAUDE_CODE_REMOTE=true, Workflow, disk 1.0 GB free of 926 GB, memory 99%: refused, names the disk and "
+       "sweep.py, the reader runs once",
+       lb_decision_check("Workflow", LB_ALL_HIGH, "deny", names=(lb_gb(1.0, 926.0), LB_SWEEP), lacks=(LB_WAIT,),
+                         remote="true"))
 for _tool, _given in LB_WRITES:   # the agent's Bash is the first of these
     lb_add("CLAUDE_CODE_REMOTE=true, an agent's %s, full reading: allowed, the reader never runs" % _tool,
            lb_no_read_check(_tool, _given, agent=LB_AGENT, remote="true"))

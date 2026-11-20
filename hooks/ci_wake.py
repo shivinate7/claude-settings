@@ -353,7 +353,7 @@ def adds_workflow(pr, repo, cwd):
     parts = repo.split("/") if repo else []
     host, slug = (parts[0], "/".join(parts[1:])) if len(parts) == 3 else ("", repo or "{owner}/{repo}")
     try:
-        files = gh_json(["api", "repos/%s/pulls/%s/files" % (slug, pr["number"]), "-F", "per_page=100",
+        files = gh_json(["api", "--method", "GET", "repos/%s/pulls/%s/files" % (slug, pr["number"]), "-F", "per_page=100",
                          *(["--hostname", host] if host else [])], cwd)
     except (Unknown, NoPR):
         return True
