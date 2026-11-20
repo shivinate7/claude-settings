@@ -22,8 +22,6 @@ import decision_watch  # noqa: E402  the one model caller (hooks/decision_watch.
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
-sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: testing/ shadows no module this suite imports
-from proc_fixture import stop_group  # noqa: E402  the one home of the signal-test helpers (testing/proc_fixture.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 from proc_fixture import stop_group, wait_for  # noqa: E402  the one home of the process helpers (testing/proc_fixture.py)
