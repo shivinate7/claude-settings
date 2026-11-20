@@ -17,7 +17,10 @@ A touched path selects:
   a test file (patterns TEST_PATTERNS)                                       -> itself
   dir/x.py                                                                   -> dir/test_x.py, and every tracked test_*.py (any
                                                                                folder) that imports the module x, by `import x` or
-                                                                               `from x import ...`, even inside a function. The
+                                                                               `from x import ...`, even inside a function, or by a
+                                                                               loader call: `import_module("x")`, or a
+                                                                               `spec_from_file_location` path that ends in x.py, as a
+                                                                               string, a module constant or a join of them. The
                                                                                imports are read with `ast`, so a name in a comment
                                                                                or a string selects nothing. A test it cannot read
                                                                                or parse is selected: unknown is not skip.
@@ -151,15 +154,92 @@ def reason(path, table):
     return None
 
 
-# {(root, test): (stat key, imported module names)}. A run asks about every tracked test once per touched .py path, so each
-# file is parsed once per size and mtime.
+# {(root, test): (stat key, module names)}, kept while the file's size and mtime hold. A run asks about each tracked test once per
+# touched .py path, and this parses it once.
 _IMPORTS = {}
+
+# Loader calls that name a module by its file path, and by its name: each maps to the position and the keyword of that argument.
+PATH_LOADERS = {"spec_from_file_location": (1, "location")}
+NAME_LOADERS = {"import_module": (0, "name"), "__import__": (0, "name")}
+# Calls whose last argument ends the path they build.
+PATH_BUILDERS = ("join", "joinpath", "Path", "PurePath", "abspath", "normpath", "fspath")
+
+
+def call_name(node):
+    func = node.func
+    return func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else None
+
+
+def call_arg(node, loader):
+    """The argument of the call `node` at the position or keyword `loader` gives, or None."""
+    position, keyword = loader
+    if len(node.args) > position and not isinstance(node.args[position], ast.Starred):
+        return node.args[position]
+    return next((k.value for k in node.keywords if k.arg == keyword), None)
+
+
+def module_constants(tree):
+    """The module-level `NAME = value` assignments of `tree`, by name. A name assigned twice is left out: its value is unknown."""
+    found, twice = {}, set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            name, value = node.targets[0].id, node.value
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value:
+            name, value = node.target.id, node.value
+        else:
+            continue
+        if name in found:
+            twice.add(name)
+        found[name] = value
+    return {name: value for name, value in found.items() if name not in twice}
+
+
+def last_part(node, constants, depth=0):
+    """The string that ends the path `node` builds, or None when it is unknown. It reads a string, a module constant, a join
+    (`os.path.join`, `Path(...)`, `.joinpath(...)`, `a / b`) and a wrapper such as `os.path.abspath`. The parts before the last
+    one need no value: the module name is the file name."""
+    if depth > 8:
+        return None
+    if isinstance(node, ast.Constant):
+        return node.value if isinstance(node.value, str) else None
+    if isinstance(node, ast.Name):
+        return last_part(constants[node.id], constants, depth + 1) if node.id in constants else None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return last_part(node.right, constants, depth + 1)
+    if isinstance(node, ast.Call) and node.args and call_name(node) in PATH_BUILDERS:
+        return last_part(node.args[-1], constants, depth + 1)
+    return None
+
+
+def loaded_modules(tree):
+    """The module names the parsed test loads by a loader call. A path to a .py file names the file's stem, and an import by name
+    names its top-level module."""
+    constants = module_constants(tree)
+    names = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        called = call_name(node)
+        if called in PATH_LOADERS:
+            arg = call_arg(node, PATH_LOADERS[called])
+            tail = last_part(arg, constants) if arg is not None else None
+            base = tail.replace("\\", "/").rpartition("/")[2] if tail else ""
+            if base.endswith(".py"):
+                names.add(base[:-3])
+        elif called in NAME_LOADERS:
+            arg = call_arg(node, NAME_LOADERS[called])
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                top = arg.value.partition(".")[0]
+                if top:
+                    names.add(top)
+    return names
 
 
 def imported_modules(test, root):
     """The top-level module names the Python test `test` imports, or None when it cannot be read or parsed. `import a.b` names a,
-    `from a import b` names a, and `from . import a` names a. The parser sees every import in the file, a lazy one inside a
-    function included, and no name in a comment or a string."""
+    `from a import b` names a, and `from . import a` names a. A loader call names its module too: `import_module("a.b")` names a,
+    and `spec_from_file_location(name, path)` names the stem of a .py path. The parser sees every import in the file, a lazy one
+    inside a function included, and no name in a comment or a string."""
     full = os.path.join(root, *test.split("/"))
     try:
         info = os.stat(full)
@@ -171,7 +251,7 @@ def imported_modules(test, root):
             tree = ast.parse(f.read(), filename=test)
     except (OSError, SyntaxError, ValueError):
         return None
-    names = set()
+    names = loaded_modules(tree)
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names.update(alias.name.partition(".")[0] for alias in node.names)
