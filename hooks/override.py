@@ -129,6 +129,14 @@ ROLE_WORDS = re.compile(r"[A-Za-z][\w\u2019'-]*")
 NEGATIONS = {"not", "no", "never", "except", "without", "dont", "don't", "don\u2019t",
              "excluding", "exclude", "skip", "ignore", "instead", "rather", "besides", "minus"}
 OVERRIDE_NEGATIONS = NEGATIONS | {"off"}  # the override ask also reads a request to turn an override off as a negation
+# The owner's model name (guard.owner_names_model) has its own negations. They are not the Opus-grant NEGATIONS: a
+# model word is negated only by a negation that stands in its own span, so "Instead use haiku" and "Skip the checks and
+# run it on haiku" name it. "instead" and "rather" negate only as the pairs in MODEL_NEGATION_PAIRS, before the model.
+MODEL_NEGATIONS = {"not", "no", "never", "except", "without", "dont", "don't", "don\u2019t", "excluding", "exclude",
+                   "skip", "ignore", "minus", "besides", "stop"}
+MODEL_NEGATION_PAIRS = {("instead", "of"), ("rather", "than")}  # negate only when they stand just before the model word
+# A span of the model word's clause ends at one of these: a negation before it reaches no further ("Not sonnet but haiku").
+MODEL_SPAN_BREAKS = {"and", "but"}
 NEGATION_SPAN = 3  # a negation within this many words before or after a role word negates it
 PLAIN_LIST = re.compile(r"(?:[\s,&]|\b(?:and|or|plus)\b)*", re.I)  # the only text that may join two role words
 SPELLED_UNIT = r"h(?:ours?|rs?)|m(?:ins?|inutes?)"
@@ -382,6 +390,37 @@ def _owner_text(rec):
     if text is None or text.lstrip().startswith(COMMAND_RECORDS) or FIRED_TASK.search(text):
         return None
     return text
+
+
+def latest_owner_text(transcript):
+    """The words of the owner's last typed turn in the transcript at path `transcript`, or None: no path, an unreadable or
+    empty transcript, or no owner turn in it. The one reader of the last turn for a guard that lets the owner's own word
+    through (hooks/guard.py owner_names_model). Reads backward from the end in SEED_READ_MAX chunks and stops at the first
+    owner turn, so the latest turn is found however far back it sits. Cost, on demand: one open and one chunk read (at
+    most 1 MiB) when the turn is in the last MiB, one more chunk per MiB of reply after it, and the whole file once when
+    it holds no owner turn."""
+    if not isinstance(transcript, str):  # no transcript_path in the payload; an int would open a descriptor
+        return None
+    try:
+        with open(transcript, "rb") as handle:
+            end, carry = handle.seek(0, os.SEEK_END), b""
+            while end > 0:
+                start = max(0, end - SEED_READ_MAX)
+                handle.seek(start)
+                lines = (handle.read(end - start) + carry).split(b"\n")
+                # lines[0] may be a cut line: it joins the next chunk back
+                carry, body = (lines[0], lines[1:]) if start else (b"", lines)
+                for line in reversed(body):
+                    try:
+                        text = _owner_text(json.loads(line))
+                    except ValueError:
+                        continue
+                    if text is not None:
+                        return text
+                end = start
+    except OSError:
+        return None
+    return None
 
 
 def _own_record(found, prompt):

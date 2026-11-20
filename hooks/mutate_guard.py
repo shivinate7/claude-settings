@@ -54,6 +54,7 @@ with a family row also prints its `hooks/test_guard.py::<family>` lines beside t
 
 import contextlib
 import functools
+import hashlib
 import os
 import shutil
 import signal
@@ -1267,11 +1268,11 @@ MUTATIONS = [
      '        if False:\n            change = cap_change_parts(write_content_parts(tool_input))', "guard",
      'cap: Write of a project local settings file setting an opus model asks'),
     ("floor: the model test is case-sensitive, so a mixed-case haiku id walks past",
-     '    return "haiku" in str(model).lower()',
-     '    return "haiku" in str(model)', "guard", 'floor: Agent with a mixed-case haiku spelling is denied'),
+     '    return FLOOR_WORD in str(model).lower()',
+     '    return FLOOR_WORD in str(model)', "guard", 'floor: Agent with a mixed-case haiku spelling is denied'),
     ("floor: a non-string model is skipped, so a list naming haiku walks past",
-     '    return "haiku" in str(model).lower()',
-     '    return isinstance(model, str) and "haiku" in model.lower()', "guard", 'floor: Agent with a list model naming haiku is denied'),
+     '    return FLOOR_WORD in str(model).lower()',
+     '    return isinstance(model, str) and FLOOR_WORD in model.lower()', "guard", 'floor: Agent with a list model naming haiku is denied'),
     ("role-model: the rank test is dropped, so a spawn above its role's row passes",
      '        if named > ROLE_MODEL_RANK.index(row):',
      '        if False:', "guard", 'role-model: test-author on sonnet is denied'),
@@ -3195,7 +3196,8 @@ MUTATIONS = [
      "guard", "lane-start-settings: lane tag with a non-text"),
     # ---- lane-floor. The floor's refusal names the lane remedy for a lane create_session and the no-model remedy for
     # every other spawn. Each mutant breaks that choice, or the one lane-tag reading the floor and the three lane checks
-    # share (is_lane_create_session). lane_tags holds no case handling; the casefold lives in is_lane_create_session.
+    # share (is_lane_create_session, which asks is_lane_tagged). lane_tags holds no case handling; the casefold lives
+    # in is_lane_tagged.
     ("lane-floor: a lane create_session below the floor gets the no-model remedy again",
      'hits.append(("agent-model-floor", LANE_MODEL_FLOOR_REASON, floor_model))',
      'hits.append(("agent-model-floor", MODEL_FLOOR_REASON, floor_model))',
@@ -3205,12 +3207,12 @@ MUTATIONS = [
      '        refuse(tool, "deny", "agent-model-floor", LANE_MODEL_FLOOR_REASON, floor_model)',
      "guard", "floor remedy: Agent on haiku keeps the no-model remedy"),
     ("lane-floor: is_lane_create_session is always False, so no lane check fires",
-     '    return tool == CREATE_SESSION_TOOL and any(',
-     '    return False and any(',
+     '    return tool == CREATE_SESSION_TOOL and is_lane_tagged(tool_input)',
+     '    return False and is_lane_tagged(tool_input)',
      "guard", "lane-start-settings: lane tag with no model is denied"),
     ("lane-floor: is_lane_create_session is always True, so every call is judged as a lane",
-     '    return tool == CREATE_SESSION_TOOL and any(',
-     '    return True or any(',
+     '    return tool == CREATE_SESSION_TOOL and is_lane_tagged(tool_input)',
+     '    return True or is_lane_tagged(tool_input)',
      "guard", "lane-start-settings: coordinator call with no model and no source_url is allowed"),
     ("lane-floor: the lane tag is matched without casefold, so an upper-case lane tag is no lane",
      'isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in lane_tags(tool_input))',
@@ -4174,15 +4176,21 @@ REPLAY_PROFILES = {
 
 @contextlib.contextmanager
 def stop_on_signals():
-    """SIGTERM and SIGINT become an exit, so the `finally` blocks of the caller run: the suite groups are killed first, then
-    the caller removes its checkouts. The handlers and the stop flag are put back on the way out."""
+    """SIGTERM, SIGHUP and SIGINT become an exit, so the `finally` blocks of the caller run: the suite groups are killed first, then
+    the caller removes its checkouts. The handlers and the stop flag are put back on the way out. Windows has no SIGHUP, so it is
+    left out there."""
     def stop(signum, _frame):
+        # A later signal while the caller cleans up is ignored: a group TERM reaches the child too, and a second TERM
+        # would cut the work folder's rmtree short.
+        for number in stops:
+            signal.signal(number, signal.SIG_IGN)
         mutate_shared.request_stop()
         raise SystemExit(128 + signum)
 
     saved = {}
+    stops = (signal.SIGTERM, signal.SIGINT) + ((signal.SIGHUP,) if hasattr(signal, "SIGHUP") else ())
     try:
-        for number in (signal.SIGTERM, signal.SIGINT):
+        for number in stops:
             saved[number] = signal.signal(number, stop)
     except ValueError:  # not the main thread: no handler, the default stays
         pass
@@ -4877,24 +4885,37 @@ def mutation_parts(entry):
     return label, old, new, target, required, only_on
 
 
+# The folders a copied guard reads beside its hooks folder. lay_out and main copy each one from git's own list of its
+# files (`tracked_tree.copy_tracked`), and the saved-verdict key digests the same folders, so the key cannot drift from the copy.
+# testing/ holds tracked_tree.py, which lays out those copies and which this module imports, so an edit there changes the key too.
+GUARD_READ_FOLDERS = ("lint", "janitor", "skills", "testing")
+# The files a copied guard reads, relative to the checkout: the simulator lease, the merge tool and the CI alarm's events.
+# guard_merge.py loads merge/merge.py (MERGE_TOOL_REL), which reads actions/ci-alarm/events.json (ALARM_EVENTS).
+# lay_out_guard_reads copies them, and the saved-verdict key digests the same files.
+GUARD_READ_FILES = (os.path.join("bin", "sim-lease"), os.path.join("merge", "merge.py"),
+                    os.path.join("actions", "ci-alarm", "events.json"))
+# The folder and file the suites read from the checkout and no copy holds: test_guard.py reads its section files from
+# tests/guard, and test_call_judge.py reads settings.json. lay_out copies neither. The saved-verdict key digests both, so an
+# edit to either misses the saved verdicts.
+KEY_ONLY_FOLDERS = ("tests/guard",)
+KEY_ONLY_FILES = ("settings.json",)
+
+
 def lay_out_guard_reads(root: str) -> None:
-    """Copy into `root` the three files outside hooks/, lint/, janitor/ and skills/ that a copied guard family
-    reads from beside its hooks folder: bin/sim-lease, the merge tool and the CI alarm's events. The folders
-    lint/, janitor/ and skills/ come from the callers, through `tracked_tree.copy_tracked` (git's own list, so no
-    file is hand-picked). The simulator refusal imports janitor/sweep.py and fails open without it.
+    """Copy into `root` the files of GUARD_READ_FILES, from the checkout, that a copied guard family reads from beside its
+    hooks folder: bin/sim-lease, the merge tool and the CI alarm's events. The folders of GUARD_READ_FOLDERS come from the
+    callers, through `tracked_tree.copy_tracked` (git's own list, so no file is hand-picked). The simulator refusal imports
+    janitor/sweep.py and fails open without it.
     A guard copy gets its own `root`. The override copies sit one folder below `work`, so `main` calls this
     once on `work`. Cost (rule outcomes-mechanize-rules): per guard-family copy, three files (about 275 KB), and
-    `main` makes one more under `work`. The folders copy_tracked lays out add git's list (225 files, about 4.8 MB,
+    `main` makes one more under `work`. The folders copy_tracked lays out add git's list (253 files, about 5.4 MB,
     at this commit) to each copy. They stay until the run ends, when `work` is removed. Without these, arms that
     read them fail on every mutant alike, and the clean-layout control (`run_controls`) reads red."""
-    os.makedirs(os.path.join(root, "bin"), exist_ok=True)
-    shutil.copy(SIM_LEASE, os.path.join(root, "bin"))
-    # guard_merge.py loads ../merge/merge.py (MERGE_TOOL_REL), which reads ../actions/ci-alarm/events.json (ALARM_EVENTS).
-    os.makedirs(os.path.join(root, "merge"), exist_ok=True)
-    shutil.copy(os.path.join(HERE, "..", "merge", "merge.py"), os.path.join(root, "merge"))
-    os.makedirs(os.path.join(root, "actions", "ci-alarm"), exist_ok=True)
-    shutil.copy(os.path.join(HERE, "..", "actions", "ci-alarm", "events.json"),
-                os.path.join(root, "actions", "ci-alarm"))
+    checkout = os.path.dirname(HERE)
+    for rel in GUARD_READ_FILES:
+        folder = os.path.join(root, os.path.dirname(rel))
+        os.makedirs(folder, exist_ok=True)
+        shutil.copy(os.path.join(checkout, rel), folder)
 
 
 def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> str:
@@ -4922,7 +4943,7 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
         # refusal fails open without sweep.py) and ../skills (waiting-page, impeccable). Git's own list of each
         # folder fills them, so a file the guard starts to read cannot be left out. git is read from the source
         # checkout, never from this scaffold.
-        tracked_tree.copy_tracked(root, "lint", "janitor", "skills", root=os.path.dirname(HERE))
+        tracked_tree.copy_tracked(root, *GUARD_READ_FOLDERS, root=os.path.dirname(HERE))
     else:
         copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(name)))
         mutated = sources[target].replace(old, new, 1)
@@ -5037,6 +5058,35 @@ def run_mutant(sources, work: str, entry):
     return label, code, red, required, None, seen
 
 
+def verdict_digest(sources):
+    """The key this run's saved verdicts are filed under. It digests the guarded text and the suite text of each target
+    the run judges, and every file a copied guard can read: the hooks folder the copies come from (mutate_shared.HOOKS_DIR,
+    read now so a test can point it elsewhere), then GUARD_READ_FOLDERS and GUARD_READ_FILES under the checkout, the roots
+    lay_out copies from, then KEY_ONLY_FOLDERS and KEY_ONLY_FILES, which the suites read there and no copy holds. An edit to
+    any of them misses the saved verdicts. Each file is keyed by its path relative to its root, never an absolute path, so
+    two checkouts with the same files share verdicts. Cost: a named run reads about 20 MB (511 files under hooks, lint,
+    janitor, skills and testing, plus three files), plus tests/guard (113 files, about 3.4 MB) and settings.json (48 KB) at
+    this commit, once, before its first mutant. None when no verdict folder is named: nothing is digested, saved or reused."""
+    if not os.environ.get(mutate_shared.VERDICT_DIR_ENV):
+        return None
+    digest = hashlib.sha256()
+    for target in sorted({mutation_parts(entry)[3] for entry in MUTATIONS}):
+        _path, suite, _variable, _stem = TARGETS[target]
+        with open(suite, encoding="utf-8") as handle:
+            digest.update(repr([target, sources[target], handle.read()]).encode("utf-8"))
+    mutate_shared.digest_tree(digest, "hooks", mutate_shared.HOOKS_DIR)
+    checkout = os.path.dirname(HERE)
+    for folder in GUARD_READ_FOLDERS:
+        mutate_shared.digest_tree(digest, folder, os.path.join(checkout, folder))
+    for rel in GUARD_READ_FILES:
+        mutate_shared.digest_tree(digest, rel.replace(os.sep, "/"), os.path.join(checkout, rel))
+    for folder in KEY_ONLY_FOLDERS:
+        mutate_shared.digest_tree(digest, folder, os.path.join(checkout, folder))
+    for rel in KEY_ONLY_FILES:
+        mutate_shared.digest_tree(digest, rel, os.path.join(checkout, rel))
+    return digest.hexdigest()
+
+
 def main() -> int:
     if "--report" in sys.argv[1:]:
         return report_main(sys.argv[1:])
@@ -5127,31 +5177,35 @@ def main() -> int:
             print("ERROR no mutation named: %s" % only)
             return 1
 
-    work = tempfile.mkdtemp(prefix="mutate_guard_")
-    # A "watch" mutant is a copy of config_watch.py that runs OUTSIDE hooks/, as its own
-    # subprocess, and it does a plain `import guard` (never GUARD_UNDER_TEST: a mutation of the
-    # watch must never be killed by a guard that moved with it, which is why
-    # `test_config_watch.py`'s own `Project.env()` strips that variable before it spawns the
-    # copy). Without the REAL guard.py sitting next to it, that import fails on every watch
-    # mutant alike, and the crash reads as "the watch missed it" for EVERY case regardless of
-    # which line was mutated: a kill with no bearing on the defect the mutation names, the exact
-    # failure this file exists to catch. MEASURED: before this line, all seven `watch` mutants
-    # printed the identical nine-case failure list, whatever the mutation.
-    mutate_shared.guard_tree(work)
-    # The override and calljudge copies sit one folder below `work`, so their `../lint` is work/lint:
-    # override.py reads it, and so does the decision_watch.py beside a calljudge copy. The decision copy reads its
-    # own tree/lint (above). The ruling copy reads work/lint through guard_core's lint_dir(). A guard copy carries
-    # its own lint folder (run_mutant).
-    # The override copies also read ../janitor (the simulator refusal, which fails open without it) and ../skills.
-    tracked_tree.copy_tracked(work, "lint", "janitor", "skills", root=os.path.dirname(HERE))
-    lay_out_guard_reads(work)  # the override copies' ../merge, ../actions and ../bin
+    # The pid in the name lets merge.py's sweep remove this folder after a run that died before its cleanup.
+    # The signal handlers go on before the folder is made, so a TERM, HUP or INT ends the run through the `finally` below.
+    with stop_on_signals():
+        work = tempfile.mkdtemp(prefix="mutate_guard_%d-" % os.getpid())
+        try:
+            # A "watch" mutant is a copy of config_watch.py that runs OUTSIDE hooks/, as its own
+            # subprocess, and it does a plain `import guard` (never GUARD_UNDER_TEST: a mutation of the
+            # watch must never be killed by a guard that moved with it, which is why
+            # `test_config_watch.py`'s own `Project.env()` strips that variable before it spawns the
+            # copy). Without the REAL guard.py sitting next to it, that import fails on every watch
+            # mutant alike, and the crash reads as "the watch missed it" for EVERY case regardless of
+            # which line was mutated: a kill with no bearing on the defect the mutation names, the exact
+            # failure this file exists to catch: every `watch` mutant would print the same nine-case
+            # failure list, whatever the mutation.
+            mutate_shared.guard_tree(work)
+            # The override and calljudge copies sit one folder below `work`, so their `../lint` is work/lint:
+            # override.py reads it, and so does the decision_watch.py beside a calljudge copy. The decision copy reads its
+            # own tree/lint (above). The ruling copy reads work/lint through guard_core's lint_dir(). A guard copy carries
+            # its own lint folder (run_mutant).
+            # The override copies also read ../janitor (the simulator refusal, which fails open without it) and ../skills.
+            tracked_tree.copy_tracked(work, *GUARD_READ_FOLDERS, root=os.path.dirname(HERE))
+            lay_out_guard_reads(work)  # the override copies' ../merge, ../actions and ../bin
 
-    try:
-        return mutate_shared.run_mutants(
-            chosen, lambda entry: run_mutant(sources, work, entry),
-            controls=run_controls(sources, work, chosen), control_of=lambda entry: mutation_parts(entry)[3])
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
+            return mutate_shared.run_mutants(
+                chosen, lambda entry: run_mutant(sources, work, entry),
+                controls=run_controls(sources, work, chosen), control_of=lambda entry: mutation_parts(entry)[3],
+                verdict_key=verdict_digest(sources))
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
 
 
 if __name__ == "__main__":

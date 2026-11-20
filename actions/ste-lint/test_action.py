@@ -1338,9 +1338,11 @@ check("pin note, failing lint: exit 1, never masked as a note", rc == 1, out)
 
 # ci-job's ste-lint step (bin/ci-job runs bin/ste-changed in place) in a child whose CI pins ste-lint. The job runs from
 # the scratch clone's own bin/ci-job, so the step's ste-changed and its pin check are that clone's too.
-def ci_job_case(change, pin="A", step=False):
+def ci_job_case(change, pin="A", step=False, home=None, knob=True):
     """`bin/ci-job l --lint --base origin/main` in a child repo whose CI pins ste-lint at `pin`. With `step`, the child's
     ste-lint step is named in its workflow and run as `--step NAME`, with no --lint, as merge's ready checks run it.
+    With `home`, the child's HOME is that folder and XDG_CACHE_HOME is unset. CI_JOB_NO_CACHE is set, so the job's rerun
+    cache saves nothing, unless `knob` is False: the control, which leaves it unset, so the cache saves under that folder.
     Returns (rc, stdout, the job's verdict log, {label: sha}, the step's name, or "" without `step`). The log is read
     before the run folder is removed."""
     with scratch("cijob") as d:
@@ -1356,6 +1358,14 @@ def ci_job_case(change, pin="A", step=False):
         log, tmp = os.path.join(d, "verdict.log"), os.path.join(d, "tmp")
         os.makedirs(tmp)
         env = {k: v for k, v in os.environ.items() if k not in STEP_ENV + ("CLAUDE_CONFIG_DIR",)}
+        if home:  # the caller's cache knobs are stripped first, so only the run's own settings decide where the cache saves
+            env.pop("XDG_CACHE_HOME", None)
+            env.pop("CI_JOB_NO_CACHE", None)
+            env["HOME"] = home
+        if knob:  # the suite's env: the rerun cache stays out of the real pass folder, in every case
+            env["CI_JOB_NO_CACHE"] = "1"
+        else:  # the control: the knob unset, so the rerun cache saves
+            env.pop("CI_JOB_NO_CACHE", None)
         env.update(VERDICT_LOG=log, TMPDIR=tmp)  # the job's logs and step scripts stay in this run's folder
         mode = ["--step", name] if step else ["--lint"]
         p = subprocess.run([sys.executable, os.path.join(cs, "bin", "ci-job"), "l", "--workflow",
@@ -1405,6 +1415,25 @@ check("ci-job --step, drifted pin: the job exits 1", rc == 1, stdout)
 rc, stdout, log, shas, name = ci_job_case(short_change, pin="C", step=True)
 check("ci-job --step, no drift: the named step reads PASS and the job exits 0",
       rc == 0 and step_line(stdout).startswith("PASS "), stdout)
+
+# The rerun cache (bin/ci-job) saves a passing step under XDG_CACHE_HOME or, with it unset, ~/.cache/claude-settings/ci-job-pass.
+# A run of this suite must leave that folder alone: ci_job_case sets CI_JOB_NO_CACHE. The control runs with that knob unset and
+# HOME at a fresh folder, and must save a pass there. So an empty folder after the suite run means the cache was off, not that
+# no pass was there to save.
+control_home = tempfile.mkdtemp(prefix="home-", dir=RUN_FOLDER)
+rc, stdout, log, shas, _ = ci_job_case(short_change, home=control_home, knob=False)
+control_folder = os.path.join(control_home, ".cache", "claude-settings", "ci-job-pass")
+control_saved = sorted(os.listdir(control_folder)) if os.path.isdir(control_folder) else []
+check("ci-job rerun cache, knob unset (control): scope, the lint passed, so a pass was there to save", "ste-lint: PASS" in log, log)
+check("ci-job rerun cache, knob unset (control): a pass is saved under the control's HOME, so the check below can see a save",
+      control_saved != [], "saved under %s: none\n%s" % (control_folder, stdout))
+home = tempfile.mkdtemp(prefix="home-", dir=RUN_FOLDER)
+rc, stdout, log, shas, _ = ci_job_case(short_change, home=home)
+saved_folder = os.path.join(home, ".cache", "claude-settings", "ci-job-pass")
+saved = sorted(os.listdir(saved_folder)) if os.path.isdir(saved_folder) else []
+check("ci-job rerun cache, suite run: scope, the lint passed, so a pass was there to save", "ste-lint: PASS" in log, log)
+check("ci-job rerun cache, suite run: no pass is saved in the default pass folder under the suite's HOME",
+      saved == [], "saved under %s: %r\n%s" % (saved_folder, saved, stdout))
 
 # The zizmor pin. The check reads `<owner>/claude-settings/actions/zizmor@<sha>` pins in the same workflows and compares
 # actions/zizmor/run.sh at each pinned commit with this copy's, with the same verdict lines, each naming its action.
