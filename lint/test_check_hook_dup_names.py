@@ -14,15 +14,18 @@ path. The sweep of old run folders is proved in lint/test_find_copies.py.
 A pass case also writes hooks/y.py with a real duplicate. The run must flag that sibling and nothing
 else, so a script that reads no files cannot pass the case.
 
-The cross-file cases (26 to 35) scan tests/guard/ sections. Each section's first line is
+The cross-file cases (26 to 40) scan tests/guard/ sections. Each section's first line is
 `# section <n>`, so its first statement sits on line 2. A name that two section files bind at
 module level fails, with the FAIL line `NAME assigned at FILE:LINE and FILE:LINE`, the first
-section in run order first. Two exceptions pass: a binding that reads its own name (an
-accumulator), and FAMILY or TEMP_DIR, which hooks/test_guard.py binds and each section sets.
-A rebind inside one section file is not counted. A pass case also writes a real clash in
+section in run order first. Two exceptions pass: a name that its own binding reads (an
+accumulator; a tuple target still names each other name it does not read, cases 36 and 37), and
+FAMILY or TEMP_DIR, which hooks/test_guard.py binds and each section sets. A rebind inside one
+section file is not counted, and neither is a name bound only inside if, try, with or for, or a
+bare annotation (cases 39 and 40). A section file that is not UTF-8 exits 2 (case 38). A pass case also writes a real clash in
 tests/guard/, so a scan that reads no section cannot pass it. setUp writes one default section,
 tests/guard/s00001-base.py, so the cases above it keep a section folder that holds a section.
 """
+import ast
 import glob
 import json
 import os
@@ -433,6 +436,84 @@ class DupNameTests(unittest.TestCase):
         self.assertEqual(rc, 1, "LANE_PROMPT in the first and the last of 300 section files was not reported\n" + out)
         self.assertEqual(self.fails(out), [guard_dup("LANE_PROMPT", "tests/guard/s00100-f000.py:2",
                                                      "tests/guard/s03090-f299.py:2")], out)
+
+    def assert_nested_only(self, text, names):
+        """Scope proof for the F4 cases: each name is bound in the fixture, and no top-level statement binds it."""
+        tree = ast.parse(text)
+        top = {t.id for node in tree.body if isinstance(node, ast.Assign)
+               for t in node.targets if isinstance(t, ast.Name)}
+        used = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+        self.assertFalse(top & names, "the fixture binds %s at top level, so it does not reach the body scope"
+                         % sorted(top & names))
+        self.assertTrue(names <= used, "the fixture never binds %s" % sorted(names - used))
+
+    def test_36_tuple_target_names_the_name_its_value_does_not_read(self):
+        # F1: the value reads NAME_A, not NAME_B. The self-read covers NAME_A only, so NAME_B still clashes.
+        self.with_clean_hook()
+        self.write_section("s00100-a.py", 100, "NAME_B = 1\n")
+        self.write_section("s00200-b.py", 200, "NAME_A, NAME_B = NAME_A.strip(), 2\n")
+        rc, out = self.check()
+        self.assertEqual(rc, 1, "NAME_B bound in a tuple whose value reads only NAME_A was not reported\n" + out)
+        self.assertEqual(self.fails(out), [guard_dup("NAME_B", "tests/guard/s00100-a.py:2",
+                                                     "tests/guard/s00200-b.py:2")],
+                         "expected the NAME_B FAIL line and no other: NAME_A has no earlier binding\n" + out)
+
+    def test_37_self_read_alone_after_an_earlier_binding_passes(self):
+        # Control for case 36: NAME_A reads its own name, so it extends the earlier binding and is no clash.
+        self.with_clean_hook()
+        self.with_guard_sibling()
+        self.write_section("s00100-a.py", 100, 'NAME_A = " a "\n')
+        self.write_section("s00200-b.py", 200, "NAME_A = NAME_A.strip()\n")
+        rc, out = self.check()
+        self.assert_only_guard_sibling(rc, out)
+
+    def test_38_section_that_is_not_utf8_is_unknown(self):
+        # F2: a section file that does not decode as UTF-8 exits 2 with an UNKNOWN line, never a traceback.
+        self.with_clean_hook()
+        data = b"# section 200\nNOTE = '\xff\xfe'\n"
+        with self.assertRaises(UnicodeDecodeError, msg="the fixture must not decode as UTF-8"):
+            data.decode("utf-8")
+        path = os.path.join(self.root, "tests", "guard", "s00200-latin.py")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(data)
+        rc, out = self.check()
+        self.assert_unknown(rc, out, "s00200-latin.py")
+
+    def test_39_names_bound_only_in_if_try_with_or_for_bodies_are_not_counted(self):
+        # F4: the same four names, each bound only in a body, in two section files. No clash.
+        self.with_clean_hook()
+        self.with_guard_sibling()
+        body = "\n".join([
+            "if True:",
+            "    SCOPE_IF = 1",
+            "try:",
+            "    SCOPE_TRY = 1",
+            "except Exception:",
+            "    pass",
+            "with ctx:",
+            "    SCOPE_WITH = 1",
+            "for _ in ():",
+            "    SCOPE_FOR = 1",
+        ]) + "\n"
+        self.assert_nested_only(body, {"SCOPE_IF", "SCOPE_TRY", "SCOPE_WITH", "SCOPE_FOR"})
+        self.write_section("s00100-a.py", 100, body)
+        self.write_section("s00200-b.py", 200, body)
+        rc, out = self.check()
+        self.assert_only_guard_sibling(rc, out)
+
+    def test_40_bare_annotation_binds_no_name(self):
+        # F4: `BARE_NOTE: int` binds nothing, so section a does not clash with section b's assignment.
+        self.with_clean_hook()
+        self.with_guard_sibling()
+        annotation = "BARE_NOTE: int\n"
+        tree = ast.parse(annotation)
+        self.assertIsInstance(tree.body[0], ast.AnnAssign, "scope: the fixture must be an annotation")
+        self.assertIsNone(tree.body[0].value, "scope: the fixture must carry no value")
+        self.write_section("s00100-a.py", 100, annotation)
+        self.write_section("s00200-b.py", 200, 'BARE_NOTE = "b"\n')
+        rc, out = self.check()
+        self.assert_only_guard_sibling(rc, out)
 
 
 if __name__ == "__main__":
