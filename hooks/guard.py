@@ -4962,10 +4962,12 @@ def load_full(reading, disk_only=False) -> list:
 
 # THE AUDIT'S DISK CLEANUP (decision machine-load-brake, with precompact-handoff). The owed audit refuses every shell call
 # until the audit spawn runs, and a full disk refuses that spawn: a session could neither spawn nor free the disk. While the
-# brake itself refuses the audit spawn for disk, one disk-cleanup shell call passes the compaction audit. It clears nothing:
-# the audit stays owed.
+# brake itself refuses the audit spawn for disk, every disk-cleanup shell call passes the compaction audit (no count limit).
+# A pass clears nothing: the audit stays owed.
 AUDIT_CLEANUP_SHELL_BAD = re.compile(r"[;&|<>`$()\n\r\\*?\[\]{}~]")
-AUDIT_CLEANUP_SWEEP_FLAGS = ("--attended", "--fast", "--confirm")
+# The sweep's flags are LOAD_SWEEP's own, the words after its <repo> placeholder; --confirm is the one it adds on top.
+AUDIT_CLEANUP_SWEEP_FLAGS = tuple(LOAD_SWEEP.split("<repo>", 1)[1].split())
+AUDIT_CLEANUP_SWEEP_CONFIRM = "--confirm"
 AUDIT_CLEANUP_TMP = "/tmp/"
 
 
@@ -4989,18 +4991,21 @@ def audit_cleanup_form(tool: str, tool_input) -> bool:
             word = rest.pop(0)
             if word == "--root" and rest and root is None and rest[0].startswith("/"):
                 root = rest.pop(0)
-            elif word in AUDIT_CLEANUP_SWEEP_FLAGS and word not in flags:
+            elif word in AUDIT_CLEANUP_SWEEP_FLAGS + (AUDIT_CLEANUP_SWEEP_CONFIRM,) and word not in flags:
                 flags.append(word)
             else:
                 return False
-        return root is not None and "--attended" in flags
+        # LOAD_SWEEP's exact flag set, or that set plus --confirm: no other mix is the sweep the load brake names.
+        return root is not None and set(flags) in (set(AUDIT_CLEANUP_SWEEP_FLAGS),
+                                                   set(AUDIT_CLEANUP_SWEEP_FLAGS) | {AUDIT_CLEANUP_SWEEP_CONFIRM})
     if len(words) >= 3 and words[0] == "rm":
         flags = [w for w in words[1:] if w.startswith("-")]
         paths = [w for w in words[1:] if not w.startswith("-")]
-        letters = "".join(f[1:] for f in flags)
+        letters = "".join(f[1:] for f in flags).replace("R", "r")
         if not paths or any(f.startswith("--") for f in flags) or set(letters) != {"r", "f"}:
             return False
-        return all(w.startswith(AUDIT_CLEANUP_TMP) and len(w) > len(AUDIT_CLEANUP_TMP) and ".." not in w.split("/")
+        # /tmp// and /tmp/// are /tmp itself: the part after /tmp/ must hold a name once the slashes are dropped.
+        return all(w.startswith(AUDIT_CLEANUP_TMP) and w[len(AUDIT_CLEANUP_TMP):].strip("/") and ".." not in w.split("/")
                    for w in paths)
     return False
 
