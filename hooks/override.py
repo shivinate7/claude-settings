@@ -336,7 +336,8 @@ def _file_role(roles):
 
 def _text_of(rec):
     """The owner text of one transcript record (lint/_transcript.py owner_text), or None."""
-    lint = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lint")
+    from guard_core import lint_dir  # lazy: the one home of where lint/ is
+    lint = lint_dir()
     if lint not in sys.path:
         sys.path.insert(0, lint)
     import _transcript
@@ -838,10 +839,8 @@ def take(session_id, agent_id, at, rule=None, spawn_role=None, cwd=None):
     return _take_override(session_id, agent_id, at) or opus or step
 
 
-def _take_override(session_id, agent_id, at):
-    path = _path(session_id)
-    if path is None:
-        return None
+def _read_override(path):
+    """(kind, until, raw) of a once or timed override file, None when it is absent, UNREAD when it cannot be read."""
     try:
         with open(path, "rb") as handle:
             raw = handle.read()
@@ -854,6 +853,25 @@ def _take_override(session_id, agent_id, at):
         return None
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return UNREAD
+    return kind, until, raw
+
+
+def timed_live(session_id, at):
+    """True when the session holds a timed override that is live at `at`. It only reads: a one-act override is never
+    spent, and an unreadable file is no grant."""
+    path = _path(session_id)
+    read = _read_override(path) if path else None
+    return isinstance(read, tuple) and read[0] == "timed" and at < read[1]
+
+
+def _take_override(session_id, agent_id, at):
+    path = _path(session_id)
+    if path is None:
+        return None
+    read = _read_override(path)
+    if not isinstance(read, tuple):
+        return read
+    kind, until, raw = read
     if at >= until or (kind == "once" and agent_id):
         return None
     if kind == "timed":
