@@ -8,7 +8,6 @@
 # $WAIT_UNTIL_HEARTBEAT s (default 120), so a quiet background run does not trip the stall watch.
 # The argument, heartbeat and poll parts are hooks/wait_common.py, shared with bin/wait-pid.
 import os, sys, time
-from datetime import datetime
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
 import wait_common  # noqa: E402  the one home of the argument, heartbeat and poll parts both wait helpers share
 PROG = "wait-until"
