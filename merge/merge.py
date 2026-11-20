@@ -7804,7 +7804,7 @@ def main(argv, host=None, lock=None, hosts=None):
                     if not plain and review_state(last, last["head"])[0] != "done":  # after a FAIL Fix check line, or any record that is not done, no merge qualifies
                         parents = []
                     ok = plain or (len(parents) == 2 and h.holds_head_gh(parents[1], info["base"]))
-                    if not ok and len(parents) == 2:  # a lane's merge of another open pull request's current head (owner, 2026-11-19 21:30 CST, q3-a): drafts count, an older head of that pull request does not. The tree rule below and the done gate above still apply
+                    if not ok and len(parents) == 2:  # a lane's merge of another open pull request's current head: drafts count, an older head of that pull request does not. The tree rule below and the done gate above still apply
                         ok = any(d["number"] != a.pr and d["head"]["sha"] == parents[1] for d in h.open_pulls())
                     if ok and plain and ancestor(h.cwd or ".", last["head"], a.head) is False:  # the verifier reads Head..head, so a head that git reads as not holding the Head is refused (real fix commits may lie between). Unknown keeps the rule that held before: a plain head takes the fix check
                         ok = False
