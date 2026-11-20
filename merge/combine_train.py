@@ -464,8 +464,8 @@ def batch_rows(root):
     except Exception as e:  # merge.py's own stops (Stop, NetStop) are not in the tool's allowed merge.py names; any failed read is unknown, never a build
         raise ReadError(f"merge.reviewed_read could not be read ({type(e).__name__}: {' '.join(str(e).split())[:200]}); give --queue FILE")
     heads = {d["number"]: d["head"]["sha"] for d in pulls}
-    on_main = {d["number"] for d in pulls if d["base"]["ref"] == "main"}  # a `batch` row on a stacked base would carry its base branch into main
-    ready = sorted(r["number"] for r in rows if r["act"] == "batch" and r["number"] in on_main)
+    stacked = {d["number"] for d in pulls if d["base"]["ref"] != "main"}  # a `batch` row on a stacked base would carry its base branch into main; a row with no pull stays, so `gone` still names it
+    ready = sorted(r["number"] for r in rows if r["act"] == "batch" and r["number"] not in stacked)
     gone = [n for n in ready if n not in heads]
     if gone:
         raise ReadError(f"merge.reviewed_read gave no head for {tag(gone)}")
