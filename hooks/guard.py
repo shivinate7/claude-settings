@@ -4866,12 +4866,14 @@ def _load_value(reading: dict, key: str):
 
 
 def lint_start_hit_of(tool: str, tool_input) -> str:
-    """The matched text when this call is a background lint start (`merge --lane-lint`, `bin/ci-job --lint`), else "".
-    A lint start is judged on the machine's load like an Agent start. Never raises: a call it cannot read is no lint start."""
-    if tool not in SHELL_TOOLS or not isinstance(tool_input, dict) or not tool_input.get("run_in_background"):
+    """The matched text when this call starts a lint in the background (`merge --lane-lint`, `bin/ci-job --lint`), else "".
+    A lint start is judged on the machine's load like an Agent start. A call with run_in_background, a lint ended by `&`,
+    and a lint in `bash -c` or `( ... )` all count. A foreground lint with no `&` is no start.
+    Never raises: a call it cannot read is no lint start."""
+    if tool not in SHELL_TOOLS or not isinstance(tool_input, dict):
         return ""
     try:
-        return lint_start_hit(strip_heredoc_bodies(tool_input.get("command") or ""))
+        return lint_start_hit(strip_heredoc_bodies(tool_input.get("command") or ""), bool(tool_input.get("run_in_background")))
     except Exception:
         return ""
 

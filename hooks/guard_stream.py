@@ -10,9 +10,9 @@ import re
 import shlex
 
 from guard_core import (
-    DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, _wrapper_flags, basename,
+    DURATION, PLAYWRIGHT_PS_SHELLS, PosixScript, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, _wrapper_flags, basename,
     bare_words, command_indexes, inline_script, inner_commands, is_powershell, resolve_command,
-    segment_tokens, split_segments,
+    segment_tokens, split_segments, walk_quotes,
 )
 from guard_env import _substitutions
 
@@ -251,17 +251,114 @@ def check_stage(segment: str, background: bool) -> str:
     return _roster_word(tokens, index, interpreter_only=True)
 
 
-def lint_start_hit(stripped: str) -> str:
-    """The matched text when a call starts a lint: `merge --lane-lint` or `ci-job --lint`, in any segment, else ''.
-    A bare `ci-job` with no --lint is no lint start. The caller has checked that the call is a background one."""
-    for segment in split_segments(stripped):
-        word = check_stage(segment, True)
-        if not word:
+LINT_NEST_DEPTH = 4   # `bash -c` or `( ... )` inside another is followed this far; a deeper lint is read as no start
+GROUP_MARK = "\x01"  # stands for one `( ... )` group in the text around it; the call's own text never holds it
+
+
+def _subshell_groups(text: str):
+    """(outer, inners): `text` with each top-level `( ... )` subshell group cut out and replaced by a word
+    `\x01N\x01`, and the N-th group's inner text. A `$(`, `<(` or `>(` is no group, and a paren in quotes, escaped
+    or in a comment is text, so the scan reads the call as walk_quotes does. A `(` never closed leaves the text as it is."""
+    outer, inners, stack = [], [], []
+    copied = start = skip = 0
+    for at, char, quote in walk_quotes(text):
+        if at < skip or quote:
             continue
-        flag = "--lint" if word in CHECK_COMMANDS else "--lane-lint"
-        if flag in (segment_tokens(segment) or ()):
-            return word + " " + flag
+        if char == "#" and (at == 0 or text[at - 1] in " \t\n;|&("):
+            end = text.find("\n", at)
+            skip = len(text) if end < 0 else end
+        elif char == "(":
+            kind = "other" if at and text[at - 1] in "$<>" else "group"
+            if not stack and kind == "group":
+                outer.append(text[copied:at])
+                start = at + 1
+            stack.append(kind)
+        elif char == ")" and stack:
+            if stack.pop() == "group" and not stack:
+                outer.append(" %s%d%s " % (GROUP_MARK, len(inners), GROUP_MARK))
+                inners.append(text[start:at])
+                copied = at + 1
+    if stack:   # an unclosed group: nothing was cut
+        return text, []
+    outer.append(text[copied:])
+    kind = type(text) if isinstance(text, (PosixScript, PowerShellScript)) else str
+    return kind("".join(outer)), [kind(inner) for inner in inners]
+
+
+def _background_split(segment: str):
+    """One segment cut at each unquoted `&` that sends the command before it to the background. A `&&`, `&>`, `>&`,
+    `<&`, a `|&` at the start of a segment and a quoted or escaped `&` cut nothing."""
+    parts, last = [], 0
+    for at, char, quote in walk_quotes(segment):
+        if char != "&" or quote or segment[at + 1:at + 2] in (">", "&") or segment[at - 1:at] in ("&", ">", "<"):
+            continue
+        if not segment[:at].strip():
+            continue
+        parts.append(segment[last:at])
+        last = at + 1
+    parts.append(segment[last:])
+    return parts
+
+
+def _lint_stage(part: str) -> str:
+    """The matched text when one command part names a lint start, `merge --lane-lint` or `ci-job --lint`, else ''."""
+    word = check_stage(part, True)
+    if not word:
+        return ""
+    flag = "--lint" if word in CHECK_COMMANDS else "--lane-lint"
+    return word + " " + flag if flag in (segment_tokens(part) or ()) else ""
+
+
+def _lint_start_in(text: str, background: bool, depth: int) -> str:
+    """The lint start in `text`, read list by list. A list is the commands joined by `&&`, `||` and `|`, and it ends at
+    `;`, a newline or a `&`. Only a list a `&` ends, or any list when the call itself runs in the background, starts a
+    background lint. A `( ... )` group and the script a `bash -c` or `sh -c` hands on are read the same way, in the
+    background state of the list that holds them."""
+    if depth > LINT_NEST_DEPTH:
+        return ""
+    powershell = is_powershell(text)   # `&` there is the call operator and `( )` an expression: no cut
+    outer, inners = (text, []) if powershell else _subshell_groups(text)
+    ends = []
+    pieces = []
+    for segment, end in zip(split_segments(outer, ends), ends):
+        parts = [segment] if powershell else _background_split(segment)
+        pieces += [(part, "&" if n < len(parts) - 1 else end) for n, part in enumerate(parts)]
+    group = []
+    for part, end in pieces:
+        group.append(part)
+        if end in ("&&", "||", "|"):
+            continue
+        listed_background = background or end == "&"
+        for member in group:
+            if listed_background:
+                hit = _lint_stage(member)
+                if hit:
+                    return hit
+            for number in (int(n) for n in _group_numbers(member)):
+                hit = _lint_start_in(inners[number], listed_background, depth + 1)
+                if hit:
+                    return hit
+            tokens = segment_tokens(member)
+            for script in inner_commands(tokens) if tokens else ():
+                hit = _lint_start_in(script, listed_background, depth + 1)
+                if hit:
+                    return hit
+        group = []
     return ""
+
+
+def _group_numbers(member: str):
+    """The numbers of the group marks a part holds, in order."""
+    return [word[1:-1] for word in member.split() if len(word) > 2 and word[0] == word[-1] == GROUP_MARK
+            and word[1:-1].isdigit()]
+
+
+def lint_start_hit(stripped: str, background: bool = True) -> str:
+    """The matched text when a call starts a lint in the background: `merge --lane-lint` or `ci-job --lint`, in any
+    segment, else ''. A bare `ci-job` with no --lint is no lint start, and a foreground lint with no `&` is none.
+    `background` is true when the call runs in the background; a trailing `&`, a `( ... )` group or a `bash -c`
+    script is read for its own background state (`_lint_start_in`)."""
+    return _lint_start_in(stripped.replace(GROUP_MARK, " "), background, 0)
 
 
 def _pipeline_hit(stages, background: bool) -> str:
