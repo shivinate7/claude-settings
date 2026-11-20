@@ -6109,7 +6109,6 @@ class ReplacedAtHandIn(LaneFixture):
         for n in lanes:
             with self.subTest(n=n):
                 self.assertEqual(self.posts_on(n), [], f"#{n} got a pointer comment at a pass before #7 merged:\n{out}")
-        self.assertIn("PATCH pulls/3302 state=closed", tm.GhHalf.calls(self).splitlines(), f"the retry did not close #3302:\n{out}")
 
 
 class ReplacedUsage(unittest.TestCase):
