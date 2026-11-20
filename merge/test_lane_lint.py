@@ -5179,6 +5179,13 @@ class LintCheckReviewed(tm.ReviewEnv):
         self.assertRegex(line, rf"^#7 feat7 {tm.REVIEW_HEAD[:9]} ready: ", "a reviewed draft with an unreadable lint does not read ready, though an unreadable lint is no finding:\n" + out)
         self.assertIn("next: merge --ready", line, "a reviewed draft with an unreadable lint names no `merge --ready` as its next act:\n" + out)
 
+    def test_a_reviewed_draft_with_a_lint_fail_does_not_read_ready_and_names_no_merge_ready_as_its_next_act(self):
+        rc, out, host = self.listing([lint_comment(2, tm.REVIEW_HEAD, verdict="FAIL")], draft=True)
+        self.assertEqual(rc, 0, out)
+        line = tm.list_line(self, out, 7)
+        self.assertNotRegex(line, rf"^#7 feat7 {tm.REVIEW_HEAD[:9]} ready: ", "a reviewed draft with a lint FAIL reads ready, though a lint FAIL is a finding:\n" + out)
+        self.assertNotIn("next: merge --ready", line, "a reviewed draft with a lint FAIL names `merge --ready` as its next act, though a lint FAIL is a finding:\n" + out)
+
 
 class LintCheckJoin(tm.CloudSession):
     """The batch runner's join: `merge <pr> --confirm` in a cloud session with the batch-runner role refuses a pull request whose live head has
