@@ -1,0 +1,1 @@
+- pass-claim-path-re-quadratic: `PATH_RE` in `hooks/pass_claim.py` is quadratic on a long unspaced token (10k characters take 1.0 s, 20k take 3.6 s). It bites only on a pasted minified blob. Decision: pass-claim-cites-verdict. Seen: 2026-11-18 x1

@@ -230,9 +230,9 @@ add("local-role: env -u CS_SESSION_ROLE is allowed", "allow", tool="Bash",
 add("local-role: unset CS_SESSION_ROLE is allowed", "allow", tool="Bash",
     command="unset CS_SESSION_ROLE", cwd=PUSHSSH, session=LT_SID, silent=True)
 add("local-role: python3 -m pytest -k CS_SESSION_ROLE is allowed", "allow", tool="Bash",
-    command="python3 -m pytest -k CS_SESSION_ROLE", cwd=PUSHSSH, session=LT_SID, silent=True)
+    command="verdict python3 -m pytest -k CS_SESSION_ROLE", cwd=PUSHSSH, session=LT_SID, silent=True)
 add("local-role: python3 lint/test_claude_role.py is allowed", "allow", tool="Bash",
-    command="python3 lint/test_claude_role.py", cwd=PUSHSSH, session=LT_SID, silent=True)
+    command="verdict python3 lint/test_claude_role.py", cwd=PUSHSSH, session=LT_SID, silent=True)
 # PowerShell reads of the variable are not judged, so each of these is allowed.
 for _cmd in (
     "Test-Path Env:CS_SESSION_ROLE",

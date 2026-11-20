@@ -1,0 +1,1 @@
+- pass-claim-module-flat: `hooks/pass_claim.py` is flat, so `land_guard_set` in `install.sh` can mix versions during an install. A `guard_pass_claim.py` name lands in the guard set but needs a row in `hooks/test_mutate_ci.py`. Decision: pass-claim-cites-verdict. Seen: 2026-11-18 x1

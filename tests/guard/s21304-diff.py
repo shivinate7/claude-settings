@@ -562,7 +562,7 @@ for _constant in REMEDY_CONSTANTS:
 CHECK_TIMEOUT_REMEDY_LABEL = "check-timeout remedy: every command form the CHECK_TIMEOUT_REASON names is allowed under the limit"
 LOG_CHECKS_EXTRA.append((CHECK_TIMEOUT_REMEDY_LABEL, remedy_check(
     "CHECK_TIMEOUT_REASON",
-    trigger=(CHECK_TIMEOUT_RULE, {"command": CHECK_TIMEOUT_LINT, "run_in_background": True,
+    trigger=(CHECK_TIMEOUT_RULE, {"command": "verdict " + CHECK_TIMEOUT_LINT, "run_in_background": True,
                                   "timeout": CHECK_TIMEOUT_LOW_MS, "description": TAIL_BG_UNTIL}),
     limit=CHECK_TIMEOUT_MS)))
 LOG_FAMILY[CHECK_TIMEOUT_REMEDY_LABEL] = "stream"

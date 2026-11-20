@@ -40,7 +40,7 @@ The lane can run it.
 [ci_only] A check marked `proved at batch CI` is proved only there; the lane does not fail on it.
 
 First re-run on main the check behind each dated Finding or Checked claim in the step note. If a claim fails, stop and report. Report each as "Checked <Mon D> on main <commit>: <result>".
-Before hand-in, run `~/.claude/bin/merge --lane-lint <pr>` (repos with `bin/ci-job`) and report its verdict; a red lane does not hand in. Run `merge --lane-lint` from the main checkout, never from a session or agent isolated in a worktree: Claude Code's worktree check can refuse it there.
+Before hand-in, run `verdict ~/.claude/bin/merge --lane-lint <pr>` (repos with `bin/ci-job`) and report its verdict; a red lane does not hand in. Run `verdict merge --lane-lint` from the main checkout, never from a session or agent isolated in a worktree: Claude Code's worktree check can refuse it there.
 A coordinator-started lane hands in a draft PR to the batch runner. Only in claude-settings does it merge its own PR (decision `session-tiers`, merge path).
 
 ## Report cap

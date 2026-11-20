@@ -114,6 +114,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        stage's, and a filter can cut verdict's FAIL line.
   background-end       deny. A background command with no end note. (background-needs-end-note)
   check-tail           deny. A named check piped into tail or head. (background-check-through-verdict)
+  bare-check           deny. A named check run in the foreground with no verdict wrapper.
+                       (background-check-through-verdict)
   check-timeout        deny. A `merge --lane-lint` run in the foreground, or in the background under a
                        time limit below its bound. (background-check-through-verdict)
   fg-bash-while-bg     deny. A foreground call that can run long (a test, lint, merge, build or install, or a time
@@ -262,6 +264,15 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        deny. A SendMessage whose `to` is a string starting `session_`: that is no agent name, and the
                        hand-off could go missing. A missing or non-string `to`, an agent name, @parent and the
                        mcp__claude-code-remote__send_message tool pass. An override lifts it.
+  pass-claim-cites-verdict
+                       deny. A SendMessage or send_message whose text says a check passed ("passed", "passes", "pass", "green"
+                       or "clean" within four words of lint, tests, checks, suite or ci-job) with no verbatim
+                       `PASS <cmd> (<secs>s)` line in a non-sidechain Bash call's result, from a `verdict` call of this
+                       session's transcript whose command matches the check (a roster command for lint and ci-job, a
+                       test command for tests and suite, either for checks). A sentence in backticks, a fence, a
+                       question, a negation or condition in the claim's clause, a named speaker and a count ("12
+                       passed") are no claim. A call with a non-empty agent_id (an agent's own report)
+                       and an unreadable transcript pass. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   gh-write-cloud       deny. In a cloud session, a gh write: `gh pr` create, merge, comment, edit, close, review or
                        ready; `gh issue` create, comment, edit or close; `gh api` with a write method, or with a field
@@ -729,6 +740,7 @@ while True:
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, OCTOPUS_PUSH_STALE, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, LANE_READY_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit, lane_ready_hit, lane_mcp_ready_hit, self_role_child_hit, self_role_hit,
+            BRIEF_TOOL,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, PRIOR_WORK_REASON, prior_work_lane_hit, prior_work_named, stamp_hit, step_dup_hit, step_pr_hit, target_roster_hit, trust_card_hit, written_time_hit,
             BRIEF_ID_REASON, BRIEF_TOPIC_REASON, STEP_DUP_REASON,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
@@ -758,9 +770,9 @@ while True:
         from guard_argv import PROCESS_ARGS_REASON, process_args_hit
         _loading = "guard_stream"
         from guard_stream import (
-            BACKGROUND_END_REASON, CHECK_TAIL_REASON, CHECK_TIMEOUT_TEMPLATE, FG_BACKGROUND_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
+            BACKGROUND_END_REASON, BARE_CHECK_REASON, CHECK_TAIL_REASON, CHECK_TIMEOUT_TEMPLATE, FG_BACKGROUND_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
             NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, UV_VALUE_FLAGS, VERDICT_PIPE_REASON, WAITER_REASON,
-            background_end_hit, background_work_running, check_tail_hit, check_timeout_hit, check_timeout_limit_text, fg_long_hit,
+            background_end_hit, background_work_running, bare_check_hit, check_tail_hit, check_timeout_hit, check_timeout_limit_text, fg_long_hit,
             live_stream_hit, ln_descends_hit,
             loop_condition_polls_a_pattern, narrated_tail_hit, verdict_pipe_hit, waiter_verdict,
         )
@@ -5656,6 +5668,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         matched = fg_long_hit(split_segments(stripped), timeout_ms)
         if matched and background_work_running(transcript):
             refuse(tool, "deny", "fg-bash-while-bg", FG_BACKGROUND_REASON, matched)
+    matched = bare_check_hit(stripped, background)
+    if matched:
+        refuse(tool, "deny", "bare-check", BARE_CHECK_REASON, matched)
     matched = check_timeout_hit(stripped, background, timeout_ms)
     if matched:
         refuse(tool, "deny", "check-timeout", CHECK_TIMEOUT_TEMPLATE % check_timeout_limit_text(), matched)
@@ -6167,6 +6182,14 @@ def page_design_hit(writes, tool_input, cwd):
                "unknown: the %d s budget of this call is spent, %d item(s) not checked"
                % (PAGE_ITEM_DESIGN_BATCH_SECONDS, left))
     return None
+
+
+PASS_CLAIM_REASON = ("Pass-claim guard (rule pass-claim-cites-verdict): this message says a check passed, and no verdict "
+                     "line of this session's transcript shows it. Remedy: run it through verdict, as `verdict <cmd>`; "
+                     "its PASS line is the cite. The verdict command must match the claim's check: a lint or checks "
+                     "claim needs a roster command such as `merge --lane-lint`, and a tests claim needs a command that "
+                     "names a test. A claim an agent made can be sent as its report, such as "
+                     "\"builder reports green\". (decision guard-remedy-not-to-owner)")
 
 
 # ------------------------------------------------------------------ SendMessage to a cloud session
@@ -8080,6 +8103,18 @@ def judge(payload) -> None:
         target = tool_input.get("to")
         if isinstance(target, str) and target.startswith("session_"):
             refuse(tool, "deny", "sendmessage-session-id", SENDMESSAGE_REASON, target[:120])
+
+    # A send that says a check passed with no verdict line in this session's transcript (rule pass-claim-cites-verdict).
+    # A call from an agent (non-empty agent_id) is the agent's own report, not the session's claim, so it is not judged.
+    if tool in ("SendMessage", BRIEF_TOOL) and not payload.get("agent_id"):
+        try:
+            import pass_claim
+            claimed = pass_claim.send_problem(tool_input.get("message"), payload.get("transcript_path"))
+        except Exception as exc:  # an ImportError too: the check fails open and the later checks still run
+            print("pass-claim guard failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+            claimed = ""
+        if claimed:
+            refuse(tool, "deny", "pass-claim-cites-verdict", PASS_CLAIM_REASON, claimed)
 
     # A send_message whose header stamp is off the clock (rule message-time-matches-clock).
     stamped = stamp_hit(tool, tool_input)

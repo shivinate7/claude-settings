@@ -3067,7 +3067,7 @@ def drop_worktree(root, tmp, wt):
 
 REPLACED_CITE = "(decision session-tiers, a pull request closes as replaced when the pull request that replaces it opens)"
 REPLACED_MARKER = "<!-- replaced-pointer -->"  # the whole first line of each pointer the tool posts (close_replaced, reopen_dropped); issue_comments reads it back
-LANE_LINT_REMEDY = "Fix it on the lane, push, and run `merge --lane-lint` again. Do not hand this head to the batch runner or join it to a batch until the lint passes. " + LANE_LINT_CITE
+LANE_LINT_REMEDY = "Fix it on the lane, push, and run `verdict merge --lane-lint` again. Do not hand this head to the batch runner or join it to a batch until the lint passes. " + LANE_LINT_CITE
 
 def lane_head_and_base(root, target, base):
     """-> (head sha, base branch) of a --lane-lint ref target: the commit or ref `target`, linted against `base` (default main).
@@ -3123,7 +3123,7 @@ def refuse_unstacked_head(root, head, base):
         raise Stop(f"the stack check of {head[:9]} against {base} is unknown: git could not say whether the head holds origin/{base}. Run again. {LANE_LINT_CITE}")
     if not held:
         raise Stop(f"the lint of {head[:9]} FAILs: the head lacks {base}'s current head {tip[:9]}. "
-                   f"Merge {base} into the lane with an ordinary merge commit, push, and run `merge --lane-lint` again. {LANE_LINT_CITE}")
+                   f"Merge {base} into the lane with an ordinary merge commit, push, and run `verdict merge --lane-lint` again. {LANE_LINT_CITE}")
 
 LANE_SESSION = re.compile(r"claude\.ai/code/(session_[A-Za-z0-9_-]+)")  # the session URL line a lane's PR body carries: the key of "same lane"
 
@@ -3945,7 +3945,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         if why is not None and is_unknown_reason(why):
             raise Stop("\n".join([f"the lint of {head[:9]} against {base} is unknown, not a pass: {why}", "Run again. " + LANE_LINT_REMEDY]))
         if why is not None:
-            fails.append(f"its head conflicts with {base}: {why}. Merge {base} into the lane with an ordinary merge commit, push, and run `merge --lane-lint` again.")
+            fails.append(f"its head conflicts with {base}: {why}. Merge {base} into the lane with an ordinary merge commit, push, and run `verdict merge --lane-lint` again.")
         if target.isdigit():
             cross_fails, reports, stop = cross_measure(root, head, int(target), info["body"], host, with_prs, base, fetched, why is None, is_integration_pr(info))
             fails += cross_fails
@@ -4055,7 +4055,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
                 host.post_comment(n, lint_body(n, head))
             except Stop as e:  # the lint stands; only the proof on the PR is missing, so say how to get it
                 say(f"merge: the lane-lint comment was not posted on #{n}: {' '.join(str(e).split())} The join and `merge --reviewed` read no PASS for {short} until it is. "
-                    f"Run `merge --lane-lint {n}` again, or post this comment on #{n} as the repo's owner:", *lint_body(n, head).splitlines())
+                    f"Run `verdict merge --lane-lint {n}` again, or post this comment on #{n} as the repo's owner:", *lint_body(n, head).splitlines())
             if is_integration_pr(info):  # after the proof, so a refused close or reopen still leaves the PASS on the pull request
                 close_replaced(host, n, info)
                 reopen_dropped(host, n, info)
@@ -5219,7 +5219,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         if expected_head and not relayed_head_holds(root, info["branch"], expected_head, info["head"], base, lambda: heal):  # moved between main's read and the lock: still before any claim
             raise Stop(HEAD_MOVED.format(n=n))
         if linted_head and info["head"] != linted_head:  # the lane-lint PASS names linted_head; a push since then was not linted
-            raise Stop(f"the head of #{n} moved from {linted_head[:9]} to {info['head'][:9]} after {linted_head[:9]} was checked. Run `merge --lane-lint {n}` on the new head, then join again. {LANE_LINT_CITE} Nothing was claimed or pushed.")
+            raise Stop(f"the head of #{n} moved from {linted_head[:9]} to {info['head'][:9]} after {linted_head[:9]} was checked. Run `verdict merge --lane-lint {n}` on the new head, then join again. {LANE_LINT_CITE} Nothing was claimed or pushed.")
         if info["base"] != base:
             raise Stop(f"the base of #{n} changed from {base} to {info['base']} while the lock was taken {BASE_CITE}. Nothing was claimed or pushed.")
         host.take_base = base
@@ -6121,7 +6121,7 @@ def lint_check(h, n, info, root, cfgrel):
         return
     lint = lint_verdict(h, n, info, root, cfgrel)
     if lint != "pass":
-        raise Stop(f"#{n} at {info['head'][:9]} is not ready to join: {LINT_NOT_READY[lint][1]}. Run `merge --lane-lint {n}`, then join again. {LANE_LINT_CITE}")
+        raise Stop(f"#{n} at {info['head'][:9]} is not ready to join: {LINT_NOT_READY[lint][1]}. Run `verdict merge --lane-lint {n}`, then join again. {LANE_LINT_CITE}")
 
 def lint_verdict(h, n, info, root, cfgrel):
     """-> "pass", "fail", "unknown" or "none": the lane lint of the live head info["head"], read from the repo's comment list. "pass" also when a PASS for an earlier
@@ -6130,7 +6130,7 @@ def lint_verdict(h, n, info, root, cfgrel):
     try:
         lints = h.issue_comments(info.get("created") or "1970-01-01T00:00:00Z")[1]
     except Stop as e:
-        raise Stop(f"lane lint unknown for #{n}: the comments could not be read ({' '.join(str(e).split())}). Run `merge --lane-lint {n}` when GitHub answers, then join again. {LANE_LINT_CITE}")
+        raise Stop(f"lane lint unknown for #{n}: the comments could not be read ({' '.join(str(e).split())}). Run `verdict merge --lane-lint {n}` when GitHub answers, then join again. {LANE_LINT_CITE}")
     lint = lint_state(lints.get(n, []), info["head"])
     if lint == "none":
         older = lint_passed(lints.get(n, []))
@@ -6300,7 +6300,7 @@ def reviewed_read(h, cfgrel=None, facts=None, ledger=None):
                     why = f"{why}; lint skipped: {ROLLUP_JOB} is green on {sha[:9]}, so CI already proved this head"
                 elif lint != "pass":  # a done record is not ready without the lane's lint at this head (decision lanes-run-no-full-ci-job)
                     row["lint"] = False
-                    state, why = LINT_NOT_READY[lint][0], f"{LINT_NOT_READY[lint][1]}. Run `merge --lane-lint {n}`"
+                    state, why = LINT_NOT_READY[lint][0], f"{LINT_NOT_READY[lint][1]}. Run `verdict merge --lane-lint {n}`"
             ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
             if facts is not None and bodies:
                 facts[n] = (log_state, rows[n][-1][1])
@@ -7265,7 +7265,7 @@ def write_merge_role(role, step=None):
     if not sid:
         raise Stop("--role needs CLAUDE_CODE_REMOTE_SESSION_ID, and it is not set. " + ROLE_CITE)
     if role not in MERGE_ROLES or (role == LANE_ROLE and not step):  # a bare lane gets the same hint-free refusal as a role outside the set
-        raise Stop("this session may not record a merge role. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)  # names no valid tier: a lane must not learn which to claim
+        raise Stop("this session may not record a merge role. Run `verdict merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)  # names no valid tier: a lane must not learn which to claim
     if role != LANE_ROLE and step:
         raise Stop("--step goes with the lane role alone. " + ROLE_CITE)
     path = role_path()
@@ -7729,7 +7729,7 @@ def main(argv, host=None, lock=None, hosts=None):
             say(*lines)
             return 0 if ok else 1
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock
-            raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)
+            raise Stop("this session may not merge. Run `verdict merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") != "true" and not local_role_allows_confirm():  # a local session the launcher started; before any host read or lock
             raise Stop(LOCAL_ROLE_REFUSAL)
         if a.confirm and not a.head and read_merge_role() in MERGE_ROLES - {STANDING_ROLE}:  # before the lock, a claim or any write

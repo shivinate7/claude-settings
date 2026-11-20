@@ -409,4 +409,4 @@ No watcher, no timer, no log.
 
 ## Tests
 
-`python3 skills/roadmap/test_build.py` and `python3 skills/roadmap/test_derived_status.py` in the claude-settings checkout.
+`verdict python3 skills/roadmap/test_build.py` and `verdict python3 skills/roadmap/test_derived_status.py` in the claude-settings checkout.

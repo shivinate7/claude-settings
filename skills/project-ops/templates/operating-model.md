@@ -94,13 +94,13 @@ A spawner is a session that starts its own agents. Each session role is a set of
   and sends the next version. Its handoff holds one pointer line and never the list, and before it ends a handoff it runs `python3 skills/project-ops/scripts/check_runner_state.py handoff <file>`.
   Of the merge work, the runner keeps only the merge itself and the CI wait for it. The merge lock serializes the merge. It hands the rest of that work to agents (Sonnet, the ceiling in decision `agent-model-cap`), and it builds only as rule `roles-orchestrator-never-builds` allows:
   - Each PR close comes from the PR ledger's replaced lines (decision `pr-ledger`, read by `merge --reviewed`; the act is in decision `session-tiers`, archiving lanes), with its comment: one agent per close. A step close stays with triage.
-  - It runs `merge --lane-lint <pr>` once per lane, all lanes in parallel, one agent per lane.
+  - It runs `verdict merge --lane-lint <pr>` once per lane, all lanes in parallel, one agent per lane.
   - Long reads go to agents: `merge --reviewed --root`, and the job minutes of a run. The agent returns the verdict, never the stream.
   - Before each merge, and before each batch build where a repo still batches, one pre-flight agent per lane reads four things. The base is main. The draft `lane-touched-tests` run at the head is not failed or cancelled (`merge --lane-lint` reads it). The step row is done at the live head. No open PR is stacked on the lane's branch. The runner learns each refusal in one pass, never one build at a time.
   - The per-PR fix verifiers and the records start at once, in parallel, never one after another.
   - A build it started in the background is never waited on in the foreground. It ends its turn and sets a one-time check-in, so the next hand-off gets a turn. This holds for a background build's wait, not for `--confirm`, which stays foreground (record `merge-confirm-repo`).
 - **Lane.** Runs one line of work, with its own builder and reviewer agents.
-  It opens its draft PR early, runs `merge --lane-lint <pr>` (with `--touched-tests` when it touches tests),
+  It opens its draft PR early, runs `verdict merge --lane-lint <pr>` (with `--touched-tests` when it touches tests),
   posts the review record, then hands in to the batch runner (decision `session-tiers`). It ends with the
   four-point check, commits its handoff to `roadmap/outbox/<slug>-handoff.md` and tags itself archive-ready
   (ruling R46). The owner never reads a lane: it sends each owner act and question to its parent with the
@@ -180,7 +180,7 @@ parent, or miss a message while busy.
   `Deferred (owner, <date>): <why>`, and waits. All other work runs, in roadmap order.
 - A lane that hits a question for the owner parks that part, and goes on.
 - A lane posts its review log on its PR after each round (claude-settings record
-  `pr-review-record`). The batch runner finds it. The lane first runs `merge --lane-lint <pr>`. The batch
+  `pr-review-record`). The batch runner finds it. The lane first runs `verdict merge --lane-lint <pr>`. The batch
   runner runs it again on each lane head before the join, and refuses a red lane (claude-settings record
   `lanes-run-no-full-ci-job`). A lane never rebases onto main. A lane marks its own draft PR ready once, after its review and lane lint pass, with `merge --role lane --step <slug> <pr> --ready` (claude-settings decision `draft-until-reviewed`, ruling Q2, owner, 12:58 CST Nov 16). A lane merges its own PR with the merge tool, under every merge check (claude-settings ruling `own-lanes-merge-claude-settings-prs`, widened by the owner's "everyone merges", 2026-11-16 12:58 CST). The merge tool checks the own-pull-request and own-repo limits only in a cloud session. On a local machine, the classifier alone holds that limit. In a cloud session the merge tool builds the lane role only in the claude-settings repo today (`LANE_MERGE_REPO`). Other repos are not built: there the merge tool refuses a lane's confirm, and the batch runner merges the lane's PR. After a batch merges, a handed-in PR that conflicts with the new main gets one main merge by its lane (step `post-batch-conflict-merge`; whether a review of only the resolved hunks suffices is the owner's open item 651).
 - A record that files an owner ruling gets a round 1 review before it merges. Round 1 checks two things only (claude-settings decision `docs-only-prs-skip-review`).

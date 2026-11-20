@@ -14,7 +14,7 @@ After the cutover, it merges each lane PR alone, on its own green run. After the
 that names the blamed lane of a red run, and the revert PR of a breaking merge.
 
 It owns the CI waits. It runs each `merge <pr> --confirm` in the foreground, never with `run_in_background`
-(decision `merge-confirm-repo`). Before it joins a lane, it runs `merge --lane-lint <pr>` and refuses a red lane.
+(decision `merge-confirm-repo`). Before it joins a lane, it runs `verdict merge --lane-lint <pr>` and refuses a red lane.
 
 It archives each lane after its merge, and each lane whose PR a replacement closed. For idle lanes, it runs
 `merge --idle-lanes --live FILE`, runs get_session on each listed lane, then archives it. It skips, and names in

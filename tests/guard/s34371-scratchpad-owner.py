@@ -495,11 +495,11 @@ SPO_RUNNER_FORMS = (
     ("npx-tsx", "npx tsx F", "probe2.ts", TS_TEXT, "npx tsx %s"),
     ("bun", "bun run F", "probe2.ts", TS_TEXT, "bun run %s"),
     ("deno", "deno run F", "probe2.ts", TS_TEXT, "deno run %s"),
-    ("pytest", "pytest F", "probe2.py", PY_TEXT, "pytest %s"),
-    ("pytest-m", "python3 -m pytest F", "probe2.py", PY_TEXT, "python3 -m pytest %s"),
-    ("pytest-k", "pytest -k expr F", "probe2.py", PY_TEXT, "pytest -k expr %s"),
-    ("pytest-mark", "pytest -m slow F", "probe2.py", PY_TEXT, "pytest -m slow %s"),
-    ("pytest-c", "pytest -c cfg.ini F", "probe2.py", PY_TEXT, "pytest -c cfg.ini %s"),
+    ("pytest", "pytest F", "probe2.py", PY_TEXT, "verdict pytest %s"),
+    ("pytest-m", "python3 -m pytest F", "probe2.py", PY_TEXT, "verdict python3 -m pytest %s"),
+    ("pytest-k", "pytest -k expr F", "probe2.py", PY_TEXT, "verdict pytest -k expr %s"),
+    ("pytest-mark", "pytest -m slow F", "probe2.py", PY_TEXT, "verdict pytest -m slow %s"),
+    ("pytest-c", "pytest -c cfg.ini F", "probe2.py", PY_TEXT, "verdict pytest -c cfg.ini %s"),
     ("py", "py F", "probe2.py", PY_TEXT, "py %s"),
     ("py-3", "py -3 F", "probe2.py", PY_TEXT, "py -3 %s"),
     ("stdbuf", "stdbuf -oL python3 F", "probe2.py", PY_TEXT, "stdbuf -oL python3 %s"),
@@ -511,8 +511,8 @@ SPO_RUNNER_FORMS = (
     ("sh-c", 'sh -c "python3 F"', "probe2.py", PY_TEXT, 'sh -c "python3 %s"'),
     # A flag whose value follows a space (`-n 2`, `--cov-report html`, `--with x`), and `ionice`, a wrapper no
     # runner list names. Each is a run of the file.
-    ("pytest-n", "pytest -n 2 F", "probe2.py", PY_TEXT, "pytest -n 2 %s"),
-    ("pytest-cov", "pytest --cov-report html F", "probe2.py", PY_TEXT, "pytest --cov-report html %s"),
+    ("pytest-n", "pytest -n 2 F", "probe2.py", PY_TEXT, "verdict pytest -n 2 %s"),
+    ("pytest-cov", "pytest --cov-report html F", "probe2.py", PY_TEXT, "verdict pytest --cov-report html %s"),
     ("uv-with", "uv run --with x F", "probe2.py", PY_TEXT, "uv run --with x %s"),
     ("ionice", "ionice -c3 python3 F", "probe2.py", PY_TEXT, "ionice -c3 python3 %s"),
     # The scanner must read through a quote, a `#` in a string and a line break, not stop at them.
@@ -1333,7 +1333,7 @@ for _tag, _form, _script, _text, _template in SPO_RUNNER_FORMS:
                  spo_runner_case(_tag, _form, _script, _text, _template))
 spo_register("scratchpad-owner: runner control, agent B's python3 -m pytest with no file is allowed",
              lambda: spo_text_case("ctl-pytest", "runner control, python3 -m pytest",
-                                   lambda probe, outside: "python3 -m pytest",
+                                   lambda probe, outside: "verdict python3 -m pytest",
                                    "agent B's python3 -m pytest with no file is allowed"))
 spo_register("scratchpad-owner: runner control, agent B's cat of agent A's script is allowed",
              lambda: spo_text_case("ctl-cat", "runner control, cat F",

@@ -63,13 +63,14 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    Until the cutover, every repo except degen and home batches lanes into one integration branch and one integration PR. A batch runs one
    CI run (rule `git-integration-branch-merge`, one CI run per batch). Only the integration PR goes
    ready. Each lane PR stays a draft until the integration PR merges. A lane runs
-   `~/.claude/bin/merge --lane-lint <pr>` before it hands off, and the batch runner runs it again on
+   `verdict ~/.claude/bin/merge --lane-lint <pr>` before it hands off (decision
+   `background-check-through-verdict`, a check runs through verdict), and the batch runner runs it again on
    each lane head before the build starts, once per lane, all lanes at once while the 5-minute load is under 4 per CPU (decision `lanes-run-no-full-ci-job`; owner, 2026-11-18 19:32 CST and 20:56 CST). A run the load holds back waits in a queue. A red lane does not join. Before it marks
-   the PR ready, the batch runner runs `~/.claude/bin/merge --lane-lint <PR number>`
+   the PR ready, the batch runner runs `verdict ~/.claude/bin/merge --lane-lint <PR number>`
    on the head, after the draft step's page push. The ready route (`merge <pr> --ready`) runs the records step and the repo's ready checks (`merge.readyChecks`).
    Before each run, read the 5-minute load and free disk. Start only while the load is under 4 per CPU and free disk is at or above the disk floor. Each `merge --lane-lint` run goes through `verdict` in the background, in its own command, with a Bash `timeout` above the merge tool's bound
    (`LINT_SECONDS` plus `PUSHED_HEAD_WAIT_MINUTES` times 60, in ms); a shorter limit ends it with no verdict (guard rule `check-timeout`). When the disk refuses one, free space first, then retry (decision `lanes-run-no-full-ci-job`).
-   A lane's `merge --lane-lint <pr> --touched-tests` runs each test file the diff touches, once, in the lint worktree, after the lint passes. That catches a test that fails only on that head before the CI run. A ref target posts no comment, so it cannot
+   A lane's `verdict merge --lane-lint <pr> --touched-tests` runs each test file the diff touches, once, in the lint worktree, after the lint passes. That catches a test that fails only on that head before the CI run. A ref target posts no comment, so it cannot
    satisfy the join. The integration PR's lint runs the mutation test when the batch touches a mutation test file. A FAIL keeps it a draft. The lint counts a clash between two heads only when both
    merge clean with their base (decision `lanes-run-no-full-ci-job`). A hand list of checks never stands in for that run: `bin/ci-job`
    reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job
@@ -149,7 +150,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
       then `--fix-check <reviewed head>:reviewer:sonnet:<PASS|FAIL>`. The tool posts nothing: post the
       printed text as a PR comment. The tool refuses a chain it cannot prove (record
       `pr-review-record`, the fix verifier order).
-   4. Run `merge --lane-lint <pr>` at the merge head. Then hand in again.
+   4. Run `verdict merge --lane-lint <pr>` at the merge head. Then hand in again.
    A passing round, or a PASS fix check after any round, ends review for every change, with no net value owed.
    A negative net value still holds the change (record `pr-review-record`). A PR that merges clean needs no fix verifier and no new log: the log
    stays valid (record `pr-review-record`, clean merge survival). It still needs item 4 of this list, because the

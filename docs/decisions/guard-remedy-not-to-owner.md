@@ -197,6 +197,15 @@ Text: `PLAIN_CONTRADICTION_REASON`. Rule `output-bring-decisions-as-question` (a
 - "Contradiction: resolved", "Contradiction: settled", "Contradiction: none" and "No contradiction:" claim no open choice, so they pass. "Contradiction: none of" is still a claim.
 - Add the question to Input Needed, with options and a recommendation, or drop the Contradiction line from Deviations.
 
+### Pass-claim guard (any reply with a report line that says a check passed; a SendMessage or send_message)
+
+Text: inline, in the main check, and `PASS_CLAIM_REASON` in `hooks/guard.py` for a send.
+
+- Run the check through verdict, as `verdict <cmd>`. Its `PASS <cmd> (<secs>s)` line, in the result of that call, is the cite.
+- The command must match the claim: a roster command (`merge --lane-lint`, `ci-job`) for lint, a test command for tests, either for checks.
+- A SKIP line, a FAIL after the PASS, a line in an Agent result or a sidechain, and a line you wrote yourself are no cite.
+- A claim an agent made reads as its own: write "builder reports green". A sentence in backticks, a negation in the claim's clause, a question and a count ("12 passed") are no claim.
+
 ## Shared tails
 
 - Every refusal, except a notes fix (R14; not built; step `notes-fix-no-owner-line`), opens with the owner line from `owner_line()`, which cites this record, and ends with ` (rule reports-order-of-labels)`, then, from a reply guard, the correction line below. That rule says the report's four labels go in order: Done, Deviations, Input Needed, Next. On the rewrite after a refusal, a triage hold gets the tail too.

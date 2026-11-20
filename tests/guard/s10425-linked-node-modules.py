@@ -244,7 +244,7 @@ NM_READ_ONLY = (
     "npm", "npm -v", "npm ls", "npm list", "npm -C . ls", "npm view x", "npm outdated", "npm audit",
     "npm audit signatures", "npm explain x", "npm fund", "npm exec -- tsc", "npm config get registry",
     "npm help install", "npm prune --dry-run", "npm audit fix --dry-run", "npm version patch",
-    "npm rebuild --help", "npm run build", "npm test",
+    "npm rebuild --help", "npm run build", "verdict npm test",  # behind verdict: a bare test run is bare-check's refusal
 )
 for _command in NM_READ_ONLY:
     nm_case("linked-nm: " + _command + " (Bash) in a linked folder is allowed", _command, "allow", NMLINKED)

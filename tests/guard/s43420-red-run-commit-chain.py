@@ -4,7 +4,7 @@ FAMILY = "red-run"  # the commit-time check on test commits (rule red-run, decis
 # A lone commit is judged alone, whatever runs before it in the same call. A read-only step that is not git, such as a
 # test run, must not switch the rule off for the commit that follows it. Each refused case has its trailer form allowed
 # on the same fixture beside it. RR_HEREDOC holds hooks/test_x.py staged and nothing committed.
-RC_TEST_RUN = "python3 -m pytest hooks/test_x.py -q"
+RC_TEST_RUN = "verdict python3 -m pytest hooks/test_x.py -q"
 
 # The control for the cause: `true` is a step the chain read passes, so the commit after it is still judged. Only the
 # test run, which the chain read does not pass, differs from it.

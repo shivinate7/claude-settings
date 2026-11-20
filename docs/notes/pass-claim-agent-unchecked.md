@@ -1,0 +1,1 @@
+- pass-claim-agent-unchecked: the send check of `hooks/guard.py` skips a call with a non-empty `agent_id`, so an agent's uncited "lint passed" reaches its parent. Decision: pass-claim-cites-verdict. Seen: 2026-11-18 x1
