@@ -31,6 +31,11 @@ its env, and the file part is what the profile's `tests` regex and the isfile ch
 The seventh part pins mutate_sweep's clean-layout control: one filtered control per suite that has a chosen, unskipped
 mutant, on an unmutated scaffold in its own folder, removed before the next job starts. A red, empty or raising control
 reads that suite's mutants UNKNOWN, never KILLED.
+
+The eighth part pins the resume of a shard: each mutant's verdict is saved as the shard judges it, in the folder
+MUTATE_VERDICT_DIR names, and a rerun skips each mutant judged at the same key (its id, the guarded file, the test
+file and the tool version). The cases drive `mutate_guard.main()` over a fixture target, so the key reads real files.
+The ninth part pins the saved-verdict key (`mutate_guard.verdict_digest`): an edit to any file a copied guard reads, testing/ included, changes it.
 """
 import contextlib
 import functools
@@ -1471,6 +1476,463 @@ class LinuxOnlySweepMutationsTests(unittest.TestCase):
                 with self.subTest(platform=platform):
                     self.assertEqual(mutate_shared.skip_reason("linux") is None, linux)
                     self.assertEqual(mutate_shared.skip_reason("posix") is None, posix)
+
+
+VERDICT_DIR_ENV = "MUTATE_VERDICT_DIR"  # the folder a shard saves each mutant's verdict in; read at call time, unset means no save
+RESUME_TARGET = "resume"  # a fixture target: its guarded file and its test file are written into the run folder
+RESUME_SOURCE = 'RULE_A = "allow"\nRULE_B = "allow"\nRULE_C = "allow"\n'
+RESUME_SUITE = "# the fixture suite: its text is hashed, its cases are the stub's\n"
+RESUME_SIBLING = "guard_resume_sibling.py"  # a guard module beside the copied guard tree: the fixture suite imports it
+SIBLING_BEFORE = "RESUME_SIBLING_RULE = 'allow'\n"  # its text while the suite kills both fixture mutants
+SIBLING_AFTER = "RESUME_SIBLING_RULE = 'deny'\n"  # its text once the suite lets both fixture mutants live
+HANG_GUARD = 10.0  # a stopped-shard case waits this long for the other mutants to end: far above their run
+RESUME_RUN_LIMIT = 30.0  # main must return within this long; a stopped-shard case can wait up to HANG_GUARD inside it
+SYNTHETIC_NOW = 1800000000.0  # the clock a pruning case reads: a fixed instant, never the real date
+HOUR = 3600
+DAY = 24 * HOUR
+
+
+class SyntheticClock:
+    """Stands in for the `time` module in mutate_shared: time() returns `now`, and every other attribute is the real module's."""
+
+    def __init__(self, now):
+        self.now = now
+
+    def time(self):
+        return self.now
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
+def set_mtime(path, when):
+    os.utime(path, (when, when))
+
+
+class LegStopped(RuntimeError):
+    """Stands in for the time limit that ends a shard: the first mutant raises it after the others have ended."""
+
+
+def resume_label(letter):
+    return "resume mutant %s: RULE_%s is denied" % (letter, letter)
+
+
+def resume_entry(letter):
+    return (resume_label(letter), 'RULE_%s = "allow"' % letter, 'RULE_%s = "deny"' % letter, RESUME_TARGET,
+            "case: resume rule %s" % letter)
+
+
+def saved_files(folder):
+    """Every file under `folder`, whatever the saved form is: a case reads a save by its effect on a rerun."""
+    return sorted(os.path.join(dirpath, name) for dirpath, _dirs, names in os.walk(folder) for name in names)
+
+
+def ran_mutants(suite):
+    """The keys of the mutant calls a run made, sorted. A clean-layout control is not a mutant call."""
+    return sorted(call["key"] for call in suite.calls if call["mutant"])
+
+
+def tally_of(lines):
+    return next((line for line in lines if re.match(r"\d+ of \d+ mutations killed", line)), "")
+
+
+def verdict_of(lines, label):
+    """The verdict a run printed for `label`: SURVIVED, KILLED, WRONG CAUSE or UNKNOWN, or "" when no line names it."""
+    for line in lines:
+        for word in ("SURVIVED", "KILLED", "WRONG CAUSE", "UNKNOWN"):
+            if line.startswith(word) and label in line:
+                return word
+    return ""
+
+
+class ResumeTests(unittest.TestCase):
+    """A shard resumes from the verdicts it saved. Each run is main() over the fixture target, with `_FakeSuite` as the
+    suite that answers each mutant. Every case reads a save by a rerun's calls, its exit code or its tally, never a file
+    layout. Each run is one main() call over three fixture mutants."""
+
+    BOTH = sorted(resume_label(letter) for letter in "AB")
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, self.run, True)
+        environ = mock.patch.dict(os.environ)
+        environ.start()
+        self.addCleanup(environ.stop)
+        for name in ("MUTATE_SHARD", VERDICT_DIR_ENV, "MUTATE_JOBS"):
+            os.environ.pop(name, None)
+        self.verdicts = os.path.join(self.run, "verdicts")
+        self.source = os.path.join(self.run, "resume_source.py")
+        self.suite = os.path.join(self.run, "resume_suite.py")
+        write_files(self.run, {"resume_source.py": RESUME_SOURCE, "resume_suite.py": RESUME_SUITE})
+        targets = mock.patch.dict(mutate_guard.TARGETS,
+                                  {RESUME_TARGET: (self.source, self.suite, "RESUME_UNDER_TEST", "resume_stem")})
+        targets.start()
+        self.addCleanup(targets.stop)
+
+    def suite_for(self, letters, control_passes=True, hooks=None):
+        return _FakeSuite([resume_entry(letter) for letter in letters], control_passes=control_passes, hooks=hooks)
+
+    def head(self, name, sibling_text):
+        """A head's hooks folder: its own absolute path, holding the guard sibling the fixture suite imports."""
+        folder = os.path.join(self.run, name)
+        os.makedirs(folder, exist_ok=True)
+        write_files(folder, {RESUME_SIBLING: sibling_text})
+        return folder
+
+    def suite_importing(self, letters, head):
+        """A suite that answers from the sibling it imports in `head`: each mutant is killed while the sibling reads
+        SIBLING_BEFORE, and survives once it reads SIBLING_AFTER. Scope is checked by each call's copied tree."""
+        sibling = os.path.join(head, RESUME_SIBLING)
+
+        def answer(letter):
+            def hook():
+                with open(sibling, encoding="utf-8") as handle:
+                    text = handle.read()
+                if text == SIBLING_AFTER:
+                    return pass_result(resume_entry(letter)[4])
+                return fail_result(resume_entry(letter)[4])
+            return hook
+
+        return self.suite_for(letters, hooks={resume_label(letter): answer(letter) for letter in letters})
+
+    def run_head(self, letters, suite, head):
+        """run_leg, with `head` as the hooks folder the run copies its guard siblings from."""
+        with mock.patch.object(mutate_shared, "HOOKS_DIR", head, create=True):
+            return self.run_leg(letters, suite)
+
+    def run_leg(self, letters, suite, jobs=None, limit=RESUME_RUN_LIMIT, saved=True):
+        """One run of the shard: main() over the mutants `letters`, saving into the folder VERDICT_DIR_ENV names when
+        `saved`. Return (exit code or None, stdout lines, exception or None)."""
+        env = {VERDICT_DIR_ENV: self.verdicts} if saved else {}
+        if jobs is not None:
+            env["MUTATE_JOBS"] = str(jobs)
+        return run_main_outcome_on(mutate_guard, self.run, [resume_entry(letter) for letter in letters], suite, env,
+                                   limit=limit)
+
+    def test_a_judged_mutant_is_saved_and_a_rerun_skips_it(self):
+        _code, _lines, error = self.run_leg("ABC", self.suite_for("ABC"))
+        self.assertIsNone(error, "the first run raised: %r" % error)
+        self.assertTrue(saved_files(self.verdicts),
+                        "the first run saved no verdict under %s, so a rerun has nothing to skip" % self.verdicts)
+        rerun = self.suite_for("ABC")
+        code, lines, error = self.run_leg("ABC", rerun)
+        self.assertIsNone(error, "the rerun raised: %r" % error)
+        self.assertEqual(ran_mutants(rerun), [],
+                         "the rerun ran %r again, though each was judged at the same key" % ran_mutants(rerun))
+        self.assertEqual(code, 0, "the rerun of three kills exits %r, not 0: %r" % (code, lines))
+        self.assertTrue(tally_of(lines).startswith("3 of 3 mutations killed"),
+                        "the rerun does not count the three reused kills: %r" % lines)
+
+    def test_without_a_verdict_folder_each_run_judges_every_mutant(self):
+        """The green control of this class: with no folder named, nothing is saved and every run judges every mutant.
+        It passes on the old code too, so a red case here would say the fixture itself is broken."""
+        first = self.suite_for("AB")
+        self.run_leg("AB", first, saved=False)
+        self.assertEqual(ran_mutants(first), self.BOTH, "precondition: the first run did not judge both mutants")
+        rerun = self.suite_for("AB")
+        _code, lines, error = self.run_leg("AB", rerun, saved=False)
+        self.assertIsNone(error, "the rerun raised: %r" % error)
+        self.assertEqual(ran_mutants(rerun), self.BOTH,
+                         "a run with no verdict folder named ran %r, want both mutants: %r" % (ran_mutants(rerun), lines))
+
+    def test_a_reused_survivor_still_fails_the_leg(self):
+        hooks = {resume_label("A"): lambda: pass_result(resume_entry("A")[4])}  # A's suite passes: A survives
+        code, lines, _error = self.run_leg("AB", self.suite_for("AB", hooks=hooks))
+        self.assertEqual(code, 1, "precondition: the first run's survivor exits %r, not 1: %r" % (code, lines))
+        rerun = self.suite_for("AB", hooks=hooks)
+        code, lines, _error = self.run_leg("AB", rerun)
+        self.assertEqual(ran_mutants(rerun), [],
+                         "the rerun ran %r again, though each was judged at the same key" % ran_mutants(rerun))
+        self.assertEqual(code, 1, "the rerun reuses a survivor and exits %r, not 1: a survivor still fails the leg: %r"
+                         % (code, lines))
+        self.assertIn("1 survived", tally_of(lines), "the rerun does not count the reused survivor: %r" % lines)
+
+    def test_a_new_mutant_alone_runs_on_a_rerun(self):
+        self.run_leg("AB", self.suite_for("AB"))
+        rerun = self.suite_for("ABC")
+        _code, lines, error = self.run_leg("ABC", rerun)
+        self.assertIsNone(error, "the rerun raised: %r" % error)
+        self.assertEqual(ran_mutants(rerun), [resume_label("C")],
+                         "the rerun ran %r, want only the new mutant C: %r" % (ran_mutants(rerun), lines))
+
+    def test_a_leg_stopped_at_its_time_limit_keeps_the_verdicts_it_judged(self):
+        suite = self.suite_for("ABC")
+        others = {resume_label("B"), resume_label("C")}
+
+        def stopped_at_the_limit():
+            # The first mutant holds until the other two have ended, then the shard stops, as its time limit would stop it.
+            with suite.cond:
+                suite.cond.wait_for(lambda: others <= set(suite.events), timeout=HANG_GUARD)
+            raise LegStopped("the time limit stopped the leg")
+
+        suite.hooks[resume_label("A")] = stopped_at_the_limit
+        _code, lines, error = self.run_leg("ABC", suite, jobs=4)
+        self.assertIsInstance(error, LegStopped,
+                              "the first run did not stop at the first mutant: %r, lines %r" % (error, lines))
+        rerun = self.suite_for("ABC")
+        _code, lines, error = self.run_leg("ABC", rerun)
+        self.assertIsNone(error, "the rerun raised: %r" % error)
+        self.assertEqual(ran_mutants(rerun), [resume_label("A")],
+                         "the rerun ran %r, want only A: the verdicts B and C judged before the stop were not kept"
+                         % ran_mutants(rerun))
+
+    def test_a_change_to_the_guarded_file_misses_the_saved_verdict(self):
+        self.run_leg("AB", self.suite_for("AB"))
+        write_files(self.run, {"resume_source.py": RESUME_SOURCE + "# edited: the guarded file changed\n"})
+        changed = self.suite_for("AB")
+        self.run_leg("AB", changed)
+        self.assertEqual(ran_mutants(changed), self.BOTH,
+                         "a change to the guarded file did not miss the saved verdicts: the run ran %r"
+                         % ran_mutants(changed))
+        unchanged = self.suite_for("AB")
+        self.run_leg("AB", unchanged)
+        self.assertEqual(ran_mutants(unchanged), [],
+                         "the run after the change ran %r again: the verdicts saved at the new key were not reused"
+                         % ran_mutants(unchanged))
+
+    def test_a_change_to_the_test_file_misses_the_saved_verdict(self):
+        self.run_leg("AB", self.suite_for("AB"))
+        write_files(self.run, {"resume_suite.py": RESUME_SUITE + "# edited: the test file changed\n"})
+        changed = self.suite_for("AB")
+        self.run_leg("AB", changed)
+        self.assertEqual(ran_mutants(changed), self.BOTH,
+                         "a change to the test file did not miss the saved verdicts: the run ran %r"
+                         % ran_mutants(changed))
+        unchanged = self.suite_for("AB")
+        self.run_leg("AB", unchanged)
+        self.assertEqual(ran_mutants(unchanged), [],
+                         "the run after the change ran %r again: the verdicts saved at the new key were not reused"
+                         % ran_mutants(unchanged))
+
+    def test_a_new_tool_version_misses_the_saved_verdict(self):
+        with mock.patch.object(mutate_shared, "MUTATE_TOOL_VERSION", "1", create=True):
+            self.run_leg("AB", self.suite_for("AB"))
+        with mock.patch.object(mutate_shared, "MUTATE_TOOL_VERSION", "2", create=True):
+            changed = self.suite_for("AB")
+            self.run_leg("AB", changed)
+            self.assertEqual(ran_mutants(changed), self.BOTH,
+                             "a new tool version did not miss the saved verdicts: the run ran %r"
+                             % ran_mutants(changed))
+            unchanged = self.suite_for("AB")
+            self.run_leg("AB", unchanged)
+            self.assertEqual(ran_mutants(unchanged), [],
+                             "the run under the same tool version ran %r again: the verdicts saved at the new version "
+                             "were not reused" % ran_mutants(unchanged))
+
+    def test_a_corrupt_saved_file_is_a_miss_and_the_run_does_not_crash(self):
+        self.run_leg("AB", self.suite_for("AB"))
+        saved = saved_files(self.verdicts)
+        self.assertTrue(saved, "the first run saved no verdict, so there is no saved file to corrupt")
+        for path in saved:
+            with open(path, "wb") as handle:
+                handle.write(b"\xff\x00{truncated")
+        corrupt = self.suite_for("AB")
+        code, lines, error = self.run_leg("AB", corrupt)
+        self.assertIsNone(error, "a corrupt saved file crashed the run: %r" % error)
+        self.assertEqual(ran_mutants(corrupt), self.BOTH,
+                         "a corrupt saved file was not a miss: the run ran %r, want both mutants" % ran_mutants(corrupt))
+        self.assertEqual(code, 0, "the run over corrupt saves exits %r, not 0: %r" % (code, lines))
+        after = self.suite_for("AB")
+        self.run_leg("AB", after)
+        self.assertEqual(ran_mutants(after), [],
+                         "the run after the corrupt save ran %r again: the miss did not save a readable verdict"
+                         % ran_mutants(after))
+
+    def test_a_red_control_saves_no_verdict(self):
+        _code, lines, _error = self.run_leg("AB", self.suite_for("AB", control_passes=False))
+        self.assertTrue(any(line.startswith("UNKNOWN") for line in lines),
+                        "precondition: a red clean layout reads no mutant UNKNOWN: %r" % lines)
+        green = self.suite_for("AB")
+        self.run_leg("AB", green)
+        self.assertEqual(ran_mutants(green), self.BOTH,
+                         "the green run after a red control ran %r, want both: the red run saved a verdict"
+                         % ran_mutants(green))
+        again = self.suite_for("AB")
+        self.run_leg("AB", again)
+        self.assertEqual(ran_mutants(again), [],
+                         "the run after the green run ran %r again: the green run's verdicts were not saved"
+                         % ran_mutants(again))
+
+    def test_a_saved_kill_misses_when_a_guard_sibling_the_suite_imports_changes(self):
+        head = self.head("head", SIBLING_BEFORE)
+        first = self.suite_importing("AB", head)
+        code, lines, error = self.run_head("AB", first, head)
+        self.assertIsNone(error, "the first run raised: %r" % error)
+        self.assertEqual(ran_mutants(first), self.BOTH, "precondition: the first run did not judge both mutants")
+        self.assertEqual(code, 0, "precondition: the first run's two kills exit %r, not 0: %r" % (code, lines))
+        write_files(head, {RESUME_SIBLING: SIBLING_AFTER})  # the suite imports this file, and now lets both mutants live
+        changed = self.suite_importing("AB", head)
+        code, lines, error = self.run_head("AB", changed, head)
+        self.assertIsNone(error, "the rerun raised: %r" % error)
+        self.assertTrue(changed.calls and all(SIBLING_AFTER in call["tree"] for call in changed.calls),
+                        "scope: the changed sibling did not reach the rerun's copied tree, so the rerun proves nothing")
+        self.assertEqual(ran_mutants(changed), self.BOTH,
+                         "a saved KILLED was reused after a guard sibling the suite imports changed: the rerun ran %r, "
+                         "want both" % ran_mutants(changed))
+        self.assertEqual(code, 1, "the rerun judges both survivors and exits %r, not 1: %r" % (code, lines))
+        unchanged = self.suite_importing("AB", head)
+        self.run_head("AB", unchanged, head)
+        self.assertEqual(ran_mutants(unchanged), [],
+                         "the run after the change ran %r again: the survivors judged at the new sibling text were not "
+                         "saved" % ran_mutants(unchanged))
+
+    def test_two_heads_share_saved_verdicts_only_when_the_whole_key_matches(self):
+        first_head = self.head("head-one", SIBLING_BEFORE)
+        same_head = self.head("head-two", SIBLING_BEFORE)  # the same content at another absolute path: another worktree
+        other_head = self.head("head-three", SIBLING_AFTER)  # differs only in the guard sibling the suite imports
+        first = self.suite_importing("AB", first_head)
+        self.run_head("AB", first, first_head)
+        self.assertEqual(ran_mutants(first), self.BOTH, "precondition: the first head did not judge both mutants")
+        twin = self.suite_importing("AB", same_head)
+        self.run_head("AB", twin, same_head)
+        self.assertEqual(ran_mutants(twin), [],
+                         "a head with the same content at another path ran %r, want none: its saved verdicts were not "
+                         "shared, so the key holds a path" % ran_mutants(twin))
+        changed = self.suite_importing("AB", other_head)
+        code, lines, error = self.run_head("AB", changed, other_head)
+        self.assertIsNone(error, "the third head's run raised: %r" % error)
+        self.assertTrue(changed.calls and all(SIBLING_AFTER in call["tree"] for call in changed.calls),
+                        "scope: the third head's sibling did not reach its copied tree, so the run proves nothing")
+        self.assertEqual(ran_mutants(changed), self.BOTH,
+                         "a head that differs only in a guard sibling reused another head's saved KILLED verdicts: its "
+                         "run ran %r, want both" % ran_mutants(changed))
+        self.assertEqual(code, 1, "the third head's run judges both survivors and exits %r, not 1: %r" % (code, lines))
+
+    def test_a_verdict_past_the_keep_window_is_pruned_when_a_run_starts_and_a_fresh_one_is_kept(self):
+        """Pruning on a synthetic clock: A's saved verdict is dated past VERDICT_KEEP_SECONDS, B's inside it. The rerun
+        judges A again and reuses B. Cost: three main() calls over the fixture, and no suite run beyond their mutants."""
+        with mock.patch.object(mutate_shared, "time", SyntheticClock(SYNTHETIC_NOW)):
+            self.run_leg("A", self.suite_for("A"))
+            first = saved_files(self.verdicts)
+            self.assertEqual(len(first), 1, "precondition: the run of A saved %r, want one file" % first)
+            set_mtime(first[0], SYNTHETIC_NOW - HOUR)  # inside the keep window, so the next run start keeps it
+            self.run_leg("B", self.suite_for("B"))
+            saved_a = first[0]
+            saved_b = [path for path in saved_files(self.verdicts) if path != saved_a]
+            self.assertEqual(len(saved_b), 1, "precondition: the run of B saved %r beside A, want one new file" % saved_b)
+            set_mtime(saved_a, SYNTHETIC_NOW - mutate_shared.VERDICT_KEEP_SECONDS - DAY)
+            set_mtime(saved_b[0], SYNTHETIC_NOW - HOUR)
+            rerun = self.suite_for("AB")
+            _code, lines, error = self.run_leg("AB", rerun)
+        self.assertIsNone(error, "the rerun raised: %r" % error)
+        self.assertIn(resume_label("A"), ran_mutants(rerun),
+                      "the verdict written past VERDICT_KEEP_SECONDS was not pruned when the run started: the rerun ran %r, "
+                      "want A judged again: %r" % (ran_mutants(rerun), lines))
+        self.assertNotIn(resume_label("B"), ran_mutants(rerun),
+                         "the verdict written inside VERDICT_KEEP_SECONDS was pruned when the run started: the rerun ran %r, "
+                         "want B reused" % ran_mutants(rerun))
+
+    def test_a_signal_kill_or_a_bare_nonzero_exit_saves_no_verdict(self):
+        """F1: a suite killed by a signal (A, exit -9) or one that exits 1 with no FAIL line (B) reads SURVIVED, and that
+        read was saved, so a rerun skipped it. Both must be judged again. C, a clean kill, is the control: it is saved and
+        reused. Cost: two main() calls over three fixture mutants."""
+        hooks = {resume_label("A"): lambda: (-9, [], [], []), resume_label("B"): lambda: (1, [], [], [])}
+        _code, lines, error = self.run_leg("ABC", self.suite_for("ABC", hooks=hooks))
+        self.assertIsNone(error, "the first run raised: %r" % error)
+        for letter in "AB":
+            self.assertEqual(verdict_of(lines, resume_label(letter)), "SURVIVED",
+                             "precondition: the first run did not read %s SURVIVED: %r" % (letter, lines))
+        rerun = self.suite_for("ABC", hooks=hooks)
+        _code, lines, error = self.run_leg("ABC", rerun)
+        self.assertIsNone(error, "the rerun raised: %r" % error)
+        self.assertIn(resume_label("A"), ran_mutants(rerun),
+                      "a suite killed by a signal was saved as SURVIVED, so the rerun skipped it: the rerun ran %r, "
+                      "want A judged again" % ran_mutants(rerun))
+        self.assertIn(resume_label("B"), ran_mutants(rerun),
+                      "a nonzero exit with no FAIL line was saved as SURVIVED, so the rerun skipped it: the rerun ran %r, "
+                      "want B judged again" % ran_mutants(rerun))
+        self.assertNotIn(resume_label("C"), ran_mutants(rerun),
+                         "the clean kill C was not reused: the rerun ran %r, want C skipped" % ran_mutants(rerun))
+
+    def test_a_wrong_cause_saves_no_verdict(self):
+        """F1, the named line: a suite whose only FAIL line names another case reads WRONG CAUSE. A rerun must judge the
+        mutant again, since only a clean KILLED (a FAIL line that names its case) or a clean SURVIVED is saved.
+        Cost: two main() calls over one fixture mutant."""
+        hooks = {resume_label("A"): lambda: fail_result("some other case")}
+        _code, lines, error = self.run_leg("A", self.suite_for("A", hooks=hooks))
+        self.assertIsNone(error, "the first run raised: %r" % error)
+        self.assertEqual(verdict_of(lines, resume_label("A")), "WRONG CAUSE",
+                         "precondition: the first run did not read A WRONG CAUSE: %r" % lines)
+        rerun = self.suite_for("A", hooks=hooks)
+        _code, lines, error = self.run_leg("A", rerun)
+        self.assertIsNone(error, "the rerun raised: %r" % error)
+        self.assertIn(resume_label("A"), ran_mutants(rerun),
+                      "a wrong-cause result was saved, so the rerun skipped A: the rerun ran %r, want A judged again"
+                      % ran_mutants(rerun))
+
+
+class VerdictKeyTests(unittest.TestCase):
+    """The saved-verdict key digests every file a copied guard reads beside its hooks folder (`mutate_guard.verdict_digest`).
+    Each case edits one file of a fixture checkout and reads the key. The cases call verdict_digest directly: main() copies
+    the read folders from git, and the fixture is no repo."""
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, self.run, True)
+        environ = mock.patch.dict(os.environ)
+        environ.start()
+        self.addCleanup(environ.stop)
+        os.environ[VERDICT_DIR_ENV] = os.path.join(self.run, "verdicts")
+        self.checkout = os.path.join(self.run, "checkout")
+        self.hooks = os.path.join(self.checkout, "hooks")
+        for folder in ("hooks", "lint", "janitor", "skills", "testing", "tests/guard"):
+            os.makedirs(os.path.join(self.checkout, folder))
+        write_files(self.checkout, {"hooks/guard_fixture.py": "GUARD = 1\n", "lint/layout.py": "LAYOUT = 1\n",
+                                    "testing/tracked_tree.py": "TRACKED = 1\n",
+                                    "tests/guard/s00442-misc.py": "SECTION = 1\n", "settings.json": "{}\n"})
+        for patch in (mock.patch.object(mutate_guard, "HERE", self.hooks),
+                      mock.patch.object(mutate_shared, "HOOKS_DIR", self.hooks),
+                      mock.patch.object(mutate_guard, "MUTATIONS", [])):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def key(self):
+        return mutate_guard.verdict_digest({})
+
+    def test_an_edit_to_a_guard_read_folder_changes_the_key(self):
+        """The green control: lint/ is a folder the key reads, so an edit to it misses the saved verdicts. It passes on
+        the old code too, so it shows the fixture reaches the key."""
+        before = self.key()
+        self.assertIsNotNone(before, "precondition: no key was made, so the verdict folder was not read")
+        write_files(self.checkout, {"lint/layout.py": "LAYOUT = 2\n"})
+        self.assertEqual(read_file(self.checkout, "lint/layout.py"), "LAYOUT = 2\n", "scope: the edit did not land in lint/")
+        self.assertNotEqual(self.key(), before, "an edit to lint/layout.py left the saved-verdict key unchanged")
+
+    def test_an_edit_to_the_tracked_tree_module_changes_the_key(self):
+        """F2: mutate_guard imports testing/tracked_tree.py, and the copied guard reads the testing folder. An edit to it
+        must miss the saved verdicts. The key ignores that folder on the old code, so an edit leaves it unchanged."""
+        before = self.key()
+        self.assertIsNotNone(before, "precondition: no key was made, so the verdict folder was not read")
+        write_files(self.checkout, {"testing/tracked_tree.py": "TRACKED = 2\n"})
+        self.assertEqual(read_file(self.checkout, "testing/tracked_tree.py"), "TRACKED = 2\n",
+                         "scope: the edit did not land in testing/")
+        self.assertNotEqual(self.key(), before,
+                            "an edit to testing/tracked_tree.py left the saved-verdict key unchanged, so a saved verdict "
+                            "would be reused")
+
+    def test_an_edit_to_a_guard_section_under_tests_changes_the_key(self):
+        """The guard's suite reads its section files from tests/guard (test_guard.py SECTION_DIR). An edit there must miss
+        the saved verdicts, so the key must digest that folder. On the old code it does not, so an edit leaves the key
+        unchanged."""
+        before = self.key()
+        self.assertIsNotNone(before, "precondition: no key was made, so the verdict folder was not read")
+        write_files(self.checkout, {"tests/guard/s00442-misc.py": "SECTION = 2\n"})
+        self.assertEqual(read_file(self.checkout, "tests/guard/s00442-misc.py"), "SECTION = 2\n",
+                         "scope: the edit did not land in tests/guard/")
+        self.assertNotEqual(self.key(), before,
+                            "an edit to tests/guard/s00442-misc.py left the saved-verdict key unchanged, so a saved verdict "
+                            "would be reused")
+
+    def test_an_edit_to_settings_json_changes_the_key(self):
+        """The call judge's suite reads settings.json (test_call_judge.py SETTINGS). An edit there must miss the saved
+        verdicts, so the key must digest that file. On the old code it does not, so an edit leaves the key unchanged."""
+        before = self.key()
+        self.assertIsNotNone(before, "precondition: no key was made, so the verdict folder was not read")
+        write_files(self.checkout, {"settings.json": '{"hooks": {}}\n'})
+        self.assertEqual(read_file(self.checkout, "settings.json"), '{"hooks": {}}\n',
+                         "scope: the edit did not land in settings.json")
+        self.assertNotEqual(self.key(), before,
+                            "an edit to settings.json left the saved-verdict key unchanged, so a saved verdict would be reused")
 
 
 if __name__ == "__main__":

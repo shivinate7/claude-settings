@@ -1,0 +1,1 @@
+- protected-path-restore-from-head: `git restore fixtures/a` and `git checkout -- fixtures/a` are refused even from HEAD, so a fixture a generator dirtied cannot be put back by a session (hooks/guard_frozen.py `writes_to`). Decision: protected-path. Seen: 2026-11-18 x1

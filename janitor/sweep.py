@@ -3288,6 +3288,7 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     # entry is removed in THIS run (confirm), or would be (preview: action reap). A removal
     # that failed (decision["error"]) keeps its entry. A primary checkout is never removed.
     removed = set()
+    holder_sessions = {}  # path -> session read taken just before confirm removed that tree
 
     def judge(entry):
         """The decision for one entry, or None when none is ever recorded against it."""
@@ -3325,6 +3326,10 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
             if _past_deadline():
                 decision.update(action="keep", reason="not removed: deadline")
             else:
+                if entry.get("branch"):
+                    # The removal deletes the folder, and a session read needs it. Read the
+                    # holder's session now, last before the delete, so the branch cut can use it.
+                    holder_sessions[entry["path"]] = git_reads.worktree_live_session(entry["path"])
                 remove_worktree(root, entry["path"], decision)
         gone = decision["action"] == "reap"
         gone = gone and not decision.get("error")
@@ -3334,6 +3339,14 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     checked_out_branches = {e["branch"] for e in entries
                             if e.get("branch") and e["path"] not in removed}
 
+    # The trees this run removed (or would remove) release their branch. Each tree's session was
+    # read before this point, and a session can start in a tree after that read, so a branch cut
+    # reads every such holder's session again (see `judge_branch`).
+    released_holders = {}
+    for e in entries:
+        if e.get("branch") and e["path"] in removed:
+            released_holders.setdefault(e["branch"], []).append(e["path"])
+
     def judge_branch(b):
         # The clock is read before the decision starts and again after it: a reap follows at
         # once, so a decision that ended past the deadline is not reaped.
@@ -3341,6 +3354,19 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
         if _past_deadline():
             return late
         decision = decide_branch(root, base, b, protected_prefixes, checked_out_branches, batch)
+        if decision["action"] == "reap":
+            # Cut only when every holder reads dead. True (live) and None (unknown) both keep.
+            # A tree this run removed carries the read taken just before its delete. A tree
+            # still on disk (preview) is read now. A tree gone before this run is not read.
+            for holder in released_holders.get(b, ()):
+                if holder in holder_sessions:
+                    live = holder_sessions[holder]
+                elif os.path.exists(holder):
+                    live = git_reads.worktree_live_session(holder)
+                else:
+                    continue
+                if live is not False:
+                    return {"name": b, "action": "keep", "reason": "checked-out: session read again"}
         return late if decision["action"] == "reap" and _past_deadline() else decision
 
     for branch, decision in zip(branches, _pmap(
