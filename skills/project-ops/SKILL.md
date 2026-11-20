@@ -17,7 +17,7 @@ Without a project, each session holds one or more roles, and the owner acts as t
   `templates/brief*.md`: `brief.md` for a lane, `brief-<role>.md` for each other role. Triage, the batch runner and the arbiter
   compact in routine use and are not replaced. The coordinator rotates a standing session only when it
   goes stale or breaks. The coordinator compacts in place and has no successor (owner, 2026-11-10 14:29 CST, G7, standing sessions compact).
-- **App sessions.** A desktop-app session gets its role from `CS_SESSION_ROLE` in the app's scoped environment. A terminal session gets its role from `bin/claude-role` (decision `session-tiers`, session roles). Proven 2026-11-15 19:31 CST and 2026-11-18 18:34 CST.
+- **App sessions.** A desktop-app session can get its role from `CS_SESSION_ROLE` in the app's scoped environment. How that env is keyed (to a preset or a folder), whether the app re-applies it on resume, and whether `start_session` gets a file with it are unmeasured. Desktop sessions on 2026-11-15 19:31 CST and 2026-11-18 18:34 CST wrote a role file (decision `session-tiers`, Known limits of the local file). A terminal session gets its role from `bin/claude-role`, which starts only `coordinator`, `triage` or `batch-runner`. Any other name exits 2, and a lane is never started there (`bin/claude-role`, `hooks/session_role.py`).
 - **The roster.** One list of who holds each standing session now. `templates/roster.md`.
 - **Autopilot.** An act that needs the owner's answer gets a "Deferred" line and waits. All other
   work runs. `templates/operating-model.md`.
