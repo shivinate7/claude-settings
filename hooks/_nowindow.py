@@ -72,31 +72,64 @@ def check_output(*args, **kwargs):
     return subprocess.check_output(*args, **kwargs)
 
 
-def kill_group(proc, sig):
-    """Send `sig` to the process group of `proc`, which a caller started with start_new_session=True, so its children get it too.
-    Windows has no process groups: the signal goes to proc alone, as terminate (or kill for SIGKILL)."""
+def descendants(pid):
+    """The pids below `pid`, children first, read once from the process table (Linux /proc, else `ps -A`). [] when the table cannot be read.
+    Own reader: hooks/guard_kill.py imports this module, so it cannot be the home of a reader this module calls."""
+    table = {}
+    try:
+        if sys.platform.startswith("linux"):
+            for name in os.listdir("/proc"):
+                try:
+                    with open("/proc/%s/stat" % name, "rb") as handle:
+                        data = handle.read().decode("utf-8", "replace")
+                    table[int(name)] = int(data[data.rindex(")") + 2:].split()[1])
+                except (OSError, ValueError, IndexError):
+                    continue  # not a pid, or it ended during the read
+        else:
+            for line in run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True, timeout=10).stdout.splitlines():
+                fields = line.split()
+                if len(fields) == 2 and all(f.isdigit() for f in fields):
+                    table[int(fields[0])] = int(fields[1])
+    except (OSError, subprocess.SubprocessError):
+        return []
+    found, frontier = [], [pid]
+    while frontier:
+        frontier = [p for parent in frontier for p, pp in table.items() if pp == parent and p not in found and p != pid]
+        found += frontier
+    return found
+
+
+def kill_tree(proc, sig, known=()):
+    """Send `sig` to `proc` and to every process below it, and to each pid in `known`. -> the pids it reached, to pass as `known` to a later
+    call, because a child that has exited leaves its own children with no parent to find them by. The caller leaves the child in the caller's
+    own process group, so a KILL to that group reaches it with no handler; this reaches the tree when only the caller is signalled.
+    Windows has no process tree to walk: the signal goes to proc alone, as terminate (or kill for SIGKILL)."""
     if not hasattr(os, "killpg"):
         proc.kill() if sig == getattr(signal, "SIGKILL", None) else proc.terminate()
-        return
-    try:
-        os.killpg(proc.pid, sig)
-    except OSError:
-        pass
+        return []
+    pids = ([proc.pid] if proc.returncode is None else []) + descendants(proc.pid)
+    pids += [p for p in known if p not in pids]
+    for pid in pids:
+        try:
+            os.kill(pid, sig)
+        except OSError:
+            pass
+    return pids
 
 
 @contextlib.contextmanager
 def forward_signals(proc, names=("SIGTERM", "SIGHUP"), grace=5):
-    """While the block runs, each signal in `names` that reaches this process goes to the process group of `proc`, which the caller
-    started with start_new_session=True. A caller killed alone would leave that group running. The block keeps waiting on `proc`, so its
-    own clean-up runs once the group ends; a group still alive `grace` seconds after the signal is killed. Handlers are restored on exit.
+    """While the block runs, each signal in `names` that reaches this process goes to `proc` and the processes below it (kill_tree).
+    A caller killed alone would leave them running. The block keeps waiting on `proc`, so its own clean-up runs once it ends; a process
+    still alive `grace` seconds after the signal is killed. Handlers are restored on exit.
     A non-main thread and Windows keep the default handling."""
     nums = [getattr(signal, n) for n in names if hasattr(signal, n)]
     timers = []
     def forward(sig, frame):
         if proc.returncode is not None:
             return  # reaped: its pid may be reused
-        kill_group(proc, sig)
-        timer = threading.Timer(grace, kill_group, (proc, getattr(signal, "SIGKILL", signal.SIGTERM)))
+        reached = kill_tree(proc, sig)
+        timer = threading.Timer(grace, kill_tree, (proc, getattr(signal, "SIGKILL", signal.SIGTERM), reached))
         timer.daemon = True
         timer.start()
         timers.append(timer)

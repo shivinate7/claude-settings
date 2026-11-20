@@ -27,9 +27,9 @@ def rmtree_retry(path):  # own copy: bin/merge is a standalone shim and can't im
 
 def run(tree, args):
     # nowindow: merge.py prints its report on the caller's terminal; the wrapper's no-window flag could hide that output
-    # Its own group and a forwarded TERM, HUP or INT: a signal to the launcher alone would leave merge.py running, holding the merge lock.
-    # INT is forwarded too because a child in its own session no longer gets the terminal's Ctrl-C.
-    proc = subprocess.Popen([sys.executable, os.path.join(tree, "merge", "merge.py"), *args], start_new_session=True)
+    # In the launcher's own group, so a KILL to that group reaches merge.py, which no handler could catch. A TERM, HUP or INT to the
+    # launcher alone is forwarded to merge.py and the processes below it, which would otherwise keep running and hold the merge lock.
+    proc = subprocess.Popen([sys.executable, os.path.join(tree, "merge", "merge.py"), *args])
     with _nowindow.forward_signals(proc, ("SIGTERM", "SIGHUP", "SIGINT")):
         return proc.wait()
 

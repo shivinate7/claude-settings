@@ -35,20 +35,20 @@ d = find()
 try:
     if not origin(d): sys.exit(f"merge: {d} is not a checkout of shivinate7/claude-settings; stopped before any PR read")
     # nowindow: launch.py and merge.py print the merge report on the caller's terminal; the wrapper's no-window flag could hide that output
-    # Its own group and a forwarded TERM, HUP or INT: a signal to this shim alone would leave the launcher and merge.py running.
-    # INT is forwarded too because a child in its own session no longer gets the terminal's Ctrl-C.
-    # Own copy of hooks/_nowindow.py's forward_signals: this standalone shim imports no repo code.
-    proc = subprocess.Popen([sys.executable, os.path.join(d, "merge", "launch.py"), d] + sys.argv[1:], start_new_session=True)
+    # The launcher stays in this process's group, so a KILL to the group reaches it and merge.py, which no handler could catch.
+    # A forwarded TERM, HUP or INT reaches the launcher, which forwards it to merge.py: a signal to this shim alone would leave them running.
+    # Own copy of hooks/_nowindow.py's forward_signals: this standalone shim imports no repo code, and the checkout at `d` may predate it.
+    proc = subprocess.Popen([sys.executable, os.path.join(d, "merge", "launch.py"), d] + sys.argv[1:])
     timers = []
-    def kill_group(sig):
-        try: os.killpg(proc.pid, sig)
+    def kill_child(sig):
+        try: os.kill(proc.pid, sig)
         except OSError: return False
         return True
     def forward(sig, frame):
-        if proc.returncode is None and kill_group(sig):
-            t = threading.Timer(5, kill_group, (signal.SIGKILL,)); t.daemon = True; t.start(); timers.append(t)  # a group that ignores the signal is killed
+        if proc.returncode is None and kill_child(sig):
+            t = threading.Timer(5, kill_child, (signal.SIGKILL,)); t.daemon = True; t.start(); timers.append(t)  # a launcher that ignores the signal is killed
     before = {}
-    if hasattr(os, "killpg"):
+    if hasattr(os, "killpg"):  # POSIX only: Windows keeps the default handling
         for n in ("SIGTERM", "SIGHUP", "SIGINT"):
             if hasattr(signal, n): before[getattr(signal, n)] = signal.signal(getattr(signal, n), forward)
     rc = proc.wait()
