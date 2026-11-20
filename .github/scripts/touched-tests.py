@@ -183,17 +183,23 @@ def _constants(node):
     return None
 
 
-def on_windows(test):
+def on_windows(test, env=None):
     """What the condition `test` evaluates to on Windows (os.name "nt", sys.platform "win32"): True, False, or None when it is
     not a plain os.name or sys.platform test. Three-valued, so `and`, `or` and `not` carry the unknown through. An `if` body
     runs only when its condition is true, so the body is safe on Windows when this is False, and the else arm when it is
     True. skipIf skips when true, so it excuses a suite when this is True; skipUnless, when False. Evaluating on Windows,
-    never matching a spelling, is what makes the direction count: skipIf(os.name == "posix") is False here."""
+    never matching a spelling, is what makes the direction count: skipIf(os.name == "posix") is False here.
+    `env` is {name: expression} for the flags in scope (scope_env): a name in it is read as its expression."""
+    env = env or {}
+    if isinstance(test, ast.Name):
+        if test.id not in env:
+            return None
+        return on_windows(env[test.id], {k: v for k, v in env.items() if k != test.id})
     if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
-        inner = on_windows(test.operand)
+        inner = on_windows(test.operand, env)
         return None if inner is None else not inner
     if isinstance(test, ast.BoolOp):
-        seen = [on_windows(v) for v in test.values]
+        seen = [on_windows(v, env) for v in test.values]
         decisive = isinstance(test.op, ast.Or)
         if decisive in seen:
             return decisive
@@ -217,49 +223,124 @@ def on_windows(test):
     return None
 
 
-def skip_decorator_excuses(decorator):
+def skip_decorator_excuses(decorator, env=None):
     """True when `decorator` is unittest's skipIf or skipUnless with a condition that skips the test on Windows."""
     if not isinstance(decorator, ast.Call) or not decorator.args:
         return False
     name = (_dotted(decorator.func) or "").rsplit(".", 1)[-1]
     if name not in ("skipIf", "skipUnless"):
         return False
-    return on_windows(decorator.args[0]) is (name == "skipIf")
+    return on_windows(decorator.args[0], env) is (name == "skipIf")
+
+
+def scope_env(outer, body, params=(), poisoned=frozenset()):
+    """The flags in scope inside a module or def body: `outer`, less each name this scope binds, plus each name this scope
+    binds once, by a plain `name = <expression>` (or an annotated one), as {name: expression}. A name bound twice, by a loop,
+    an import, a def or a global in any def (`poisoned`) is no flag. Bodies of nested defs, classes and lambdas are their own
+    scopes. on_windows() reads a flag's expression, so only an os.name or sys.platform test gives a value."""
+    counts, bound = {}, {}
+
+    def bind(name, n=1):
+        counts[name] = counts.get(name, 0) + n
+
+    def visit(node):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                bind(child.name)
+                continue
+            if isinstance(child, ast.Lambda):
+                continue
+            if isinstance(child, ast.Name) and isinstance(child.ctx, (ast.Store, ast.Del)):
+                bind(child.id)
+            elif isinstance(child, (ast.Import, ast.ImportFrom)):
+                for alias in child.names:
+                    bind((alias.asname or alias.name).split(".")[0])
+            elif isinstance(child, (ast.Global, ast.Nonlocal)):
+                for name in child.names:
+                    bind(name, 2)
+            elif isinstance(child, ast.Assign) and len(child.targets) == 1 and isinstance(child.targets[0], ast.Name):
+                bound[child.targets[0].id] = child.value
+            elif isinstance(child, ast.AnnAssign) and child.value is not None and isinstance(child.target, ast.Name):
+                bound[child.target.id] = child.value
+            visit(child)
+
+    for stmt in body:
+        visit(ast.Module(body=[stmt], type_ignores=[]))
+    for name in params:
+        bind(name, 2)
+    env = {k: v for k, v in outer.items() if k not in counts}
+    env.update({k: v for k, v in bound.items() if counts.get(k) == 1 and k not in poisoned})
+    return env
+
+
+def exits(stmts):
+    """True when the statement list `stmts` always ends the enclosing function, module, test or loop pass on reaching it: a
+    return, raise, continue or break, a call to skipTest (any receiver), sys.exit, exit or quit, or an `if` whose two arms both exit."""
+    for stmt in stmts:
+        if isinstance(stmt, (ast.Return, ast.Raise, ast.Continue, ast.Break)):
+            return True
+        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+            func = stmt.value.func
+            if (isinstance(func, ast.Attribute) and func.attr == "skipTest") or _dotted(func) in ("sys.exit", "exit", "quit"):
+                return True
+        if isinstance(stmt, ast.If) and exits(stmt.body) and exits(stmt.orelse):
+            return True
+    return False
 
 
 def posix_offences(path, source, added=None):
     """One `path:line: message` string for each POSIX_ONLY name that `source` uses outside a guard that excludes Windows, and
     one for a source that cannot be parsed (unknown is red, not skip). A guard is a def or class under skipIf or skipUnless
     that skips Windows, an `if` body whose condition is false on Windows, or the else arm of an `if` whose condition is true
-    on Windows. A guard covers everything nested in it. The source is read with `ast`, so a name in a comment or a string
+    on Windows, or each statement after an `if` whose Windows arm always exits (see exits). A guard covers everything nested in
+    it. A name bound once to an os.name or sys.platform test is read as that test (scope_env). The source is read with `ast`, so a name in a comment or a string
     counts for nothing. A name is `os.killpg`, `from os import killpg` (the import line is the offence: on Windows the import
     itself raises) or `s.SIGHUP` under `import signal as s`. With `added` (a set of line numbers), only a name on such a line
     counts: a call already on the base is an existing offence, and this change does not own it."""
     try:
         tree = ast.parse(source, filename=path)
-    except (SyntaxError, ValueError) as e:
+    except (SyntaxError, ValueError, RecursionError) as e:
         return [f"{path}:{getattr(e, 'lineno', None) or 1}: cannot parse this heavy suite, so its POSIX-only calls are unread ({e})"]
     found = []
     modules = {m: m for m in POSIX_ONLY}
+    poisoned = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             modules.update({a.asname: a.name for a in node.names if a.asname and a.name in POSIX_ONLY})
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            poisoned.update(node.names)
 
     def hit(line, name):
         if added is None or line in added:
-            found.append(f"{path}:{line}: {name} is POSIX-only and has no guard that excludes Windows "
-                         "(skipIf on os.name == 'nt', skipUnless on os.name != 'nt', or an if on os.name or sys.platform)")
+            found.append(f"{path}:{line}: {name} is POSIX-only and has no guard that excludes Windows (skipIf on os.name == 'nt', "
+                         "skipUnless on os.name != 'nt', an if on os.name or sys.platform, or an earlier `if` on Windows that "
+                         "returns, raises, continues, calls skipTest or sys.exit)")
 
-    def walk(node, guarded):
+    def block(stmts, guarded, env):
+        """Walk a statement list in order. An `if` whose Windows arm always exits guards each statement after it in this list."""
+        for stmt in stmts:
+            walk(stmt, guarded, env)
+            if not guarded and isinstance(stmt, ast.If):
+                verdict = on_windows(stmt.test, env)
+                arm = stmt.body if verdict is True else stmt.orelse if verdict is False else None
+                guarded = bool(arm) and exits(arm)
+
+    def walk(node, guarded, env):
         if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-            guarded = guarded or any(skip_decorator_excuses(d) for d in node.decorator_list)
+            guarded = guarded or any(skip_decorator_excuses(d, env) for d in node.decorator_list)
+            if isinstance(node, ast.ClassDef):
+                # A class body binds names that its methods do not read, so keep only the flags it leaves alone.
+                inner = scope_env(env, node.body, poisoned=poisoned)
+                env = {k: v for k, v in env.items() if inner.get(k) is v}
+            else:
+                args = node.args
+                names = [a.arg for a in args.posonlyargs + args.args + args.kwonlyargs] + [a.arg for a in (args.vararg, args.kwarg) if a]
+                env = scope_env(env, node.body, names, poisoned)
         if isinstance(node, ast.If):
-            verdict = on_windows(node.test)
-            walk(node.test, guarded)
-            for child in node.body:
-                walk(child, guarded or verdict is False)
-            for child in node.orelse:
-                walk(child, guarded or verdict is True)
+            verdict = on_windows(node.test, env)
+            walk(node.test, guarded, env)
+            block(node.body, guarded or verdict is False, env)
+            block(node.orelse, guarded or verdict is True, env)
             return
         if not guarded and isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
             module = modules.get(node.value.id)
@@ -269,10 +350,20 @@ def posix_offences(path, source, added=None):
             for alias in node.names:
                 if alias.name in POSIX_ONLY.get(node.module, ()):
                     hit(node.lineno, f"{node.module}.{alias.name}")
-        for child in ast.iter_child_nodes(node):
-            walk(child, guarded)
+        for field, value in ast.iter_fields(node):
+            if isinstance(value, list) and value and all(isinstance(v, ast.stmt) for v in value):
+                block(value, guarded, env)
+            elif isinstance(value, list):
+                for child in value:
+                    if isinstance(child, ast.AST):
+                        walk(child, guarded, env)
+            elif isinstance(value, ast.AST):
+                walk(value, guarded, env)
 
-    walk(tree, False)
+    try:
+        block(tree.body, False, scope_env({}, tree.body, poisoned=poisoned))
+    except RecursionError as e:
+        return [f"{path}:1: cannot read this heavy suite, so its POSIX-only calls are unread ({e})"]
     return found
 
 
