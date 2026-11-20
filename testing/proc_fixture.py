@@ -15,6 +15,7 @@ def zombie(pid):
     except OSError:
         pass
     try:
+        # nowindow: posix-only fixture
         out = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, timeout=10).stdout
     except (OSError, subprocess.SubprocessError):
         return False
