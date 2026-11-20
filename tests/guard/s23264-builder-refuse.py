@@ -147,9 +147,10 @@ def _rebase_clean(w):
 
 
 def _two_bases_test_edit(w):
-    """The long-lived worktree, then a builder's test edit that matches neither of its two bases."""
+    """The long-lived worktree, then a builder's test edit that changes a statement, so it matches neither of its
+    two bases. A comment-only edit is free under the rule, so the edit must change a body."""
     _long_lived_main_tests(w)
-    write(os.path.join(w, TEST_A), "pass\n")
+    write(os.path.join(w, TEST_A), "assert False\n")
 
 
 def _origin(w):
