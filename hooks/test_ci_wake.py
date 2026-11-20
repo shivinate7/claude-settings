@@ -83,6 +83,8 @@ when absent); without --all only active entries answer. The fixture key `workflo
 "garbage" or "empty") changes that one call and no other. "empty" prints nothing and exits 0: the answer
 gh 2.89.0 gives for a repo with no workflow. The fixture key `list_error_from` N makes every `run list`
 from the Nth call of the case on exit 1 (HTTP 403), so a re-list can be refused after a judged run.
+The fixture key `files_get_only` answers the PR file list route (`repos/O/R/pulls/N/files`) only to a GET,
+as `method_of` reads the method gh sends. Any other call gets 404, as GitHub answers a POST to that route.
 
 Draft run, then the real run: `gh pr create --draft` makes a run
 whose jobs all skip, and `gh pr ready` makes the real run seconds later. A hook that lists the head
@@ -191,6 +193,24 @@ def api_repo(args):
         return parts[1] + "/" + parts[2].split("?")[0]
     return None
 
+def method_of(args):
+    """The HTTP method gh sends for a `gh api` call. An explicit -X or --method names it, in any case, and
+    -XGET, --method=GET and -X=GET count too. With no explicit method, a field flag (-f, -F, --field,
+    --raw-field, --input) makes it a POST, and no field makes it a GET, as gh picks it."""
+    for i, a in enumerate(args):
+        if a in ("-X", "--method") and i + 1 < len(args):
+            return args[i + 1].upper()
+        if a.startswith("--method="):
+            return a[len("--method="):].upper()
+        if a.startswith("-X") and not a.startswith("--") and len(a) > 2:
+            return a[2:].lstrip("=").upper()
+    for a in args:
+        if a in ("-f", "-F", "--field", "--raw-field", "--input") or a.startswith(
+                ("--field=", "--raw-field=", "--input=")) or (
+                a[:2] in ("-f", "-F") and not a.startswith("--") and len(a) > 2):
+            return "POST"
+    return "GET"
+
 def repo_of(args):
     """The repo a gh call names with its own flag, in any spelling gh takes, or None."""
     if api_repo(args):
@@ -220,6 +240,10 @@ def here(entry, args, fx):
     return entry["repo"] == call_repo(args, fx)
 
 DEFAULT_WORKFLOWS = [{"id": 1, "name": "checks", "path": ".github/workflows/checks.yml", "state": "active"}]
+
+# The gh api flags that take a value. The word loop of main skips the value after each one.
+API_VALUE_FLAGS = ("-X", "--method", "-f", "-F", "--field", "--raw-field", "--input", "-H", "--header",
+                   "-q", "--jq", "--hostname")
 
 _SEQ = [0]
 
@@ -308,6 +332,11 @@ def rest(path, full, args, fx):
         sys.stdout.write(json.dumps(rest_pr(hits[0])) + "\n")
         return 0
     if len(parts) == 6 and parts[5] == "files":
+        if fx.get("files_get_only") and method_of(args) != "GET":
+            # GitHub answers a POST to this route with 404, so a call that sends fields with no --method fails here too.
+            sys.stdout.write('{"message":"Not Found","status":"404"}\n')
+            sys.stderr.write("gh: Not Found (HTTP 404)\n")
+            return 1
         hits = [p for p in mine if str(p["number"]) == parts[4]]
         names = hits[0].get("files", []) if hits else []
         sys.stdout.write(json.dumps([{"filename": n, "status": "added"} for n in names]) + "\n")
@@ -353,7 +382,7 @@ def main(args):
         for a in plain[1:]:
             if skip:
                 skip = False
-            elif a in ("-X", "-f", "-F", "--hostname"):
+            elif a in API_VALUE_FLAGS:
                 skip = True
             elif not a.startswith("-"):
                 words.append(a)
@@ -1697,6 +1726,39 @@ def case_pr_adding_a_workflow_file_is_not_no_ci():
     expect_watch(label, res, ["902"])
 
 
+def file_read_of(call, number):
+    """True when a gh call reads the file list of pull request <number>: `gh api repos/O/R/pulls/<n>/files`."""
+    plain = GH.strip_repo(call)
+    return plain[:1] == ["api"] and any(
+        re.fullmatch(r"repos/[^/]+/[^/]+/pulls/%d/files" % number, a) for a in plain[1:])
+
+
+def case_pr_file_list_read_as_get_so_no_workflow_repo_says_ci_none():
+    """The PR's file list is read as a GET. `gh api` sends a POST once a field flag is given with no --method
+    (`-F per_page=100`), and GitHub answers a POST to that route with 404. The hook then cannot tell whether the
+    PR adds a workflow, so it counts the PR as adding one and watches a head with no CI: it prints "CI unknown on
+    <sha7>: no run yet" where it must print "CI none". The fixture's files_get_only answers that route to a GET
+    alone. Rows: a PR that changes src/app.py, and a PR with no changed files (the empty state). In each row the
+    watch stops at the CI none line, with no run list and no run view."""
+    rows = (
+        ("src/app.py changed", ["src/app.py"]),
+        ("no changed files", []),
+    )
+    for name, files in rows:
+        label = "PR file list as GET, no workflow repo, %s" % name
+        p = dict(pr(7, repo=REPO_HOME), files=files)
+        fx = fixture([p], [], cwd_repo=REPO_HOME, workflow_list="empty", files_get_only=True)
+        res = run_hook(bash("gh pr ready 7"), fx, extra={"CI_WAKE_DEADLINE": "4"})
+        check("%s: scope, the hook reads the workflow list" % label, count(res, "workflow", "list") >= 1, why(res))
+        reads = [c for c in res.calls if file_read_of(c, 7)]
+        check("%s: the file list is read once" % label, len(reads) == 1, why(res))
+        sent = GH.method_of(reads[0]) if len(reads) == 1 else "no read"
+        check("%s: that read is a GET (sent %s)" % (label, sent), sent == "GET", why(res))
+        expect_closing_line(label, res)
+        check("%s: no run list or run view call" % label,
+              count(res, "run", "list") == 0 and count(res, "run", "view") == 0, why(res))
+
+
 # Selector forms that leave the repo out of the hook's own parse. The PR lives in REPO_APP, and the folder
 # is REPO_HOME, which has no workflow. Each form must give the PR's verdict, and every gh call after the
 # pr view must name REPO_APP with -R, taken from the PR's own url field.
@@ -2347,6 +2409,7 @@ def main():
     case_workflows_but_no_run_on_head_still_says_no_run_yet()
     case_failed_workflow_read_is_not_no_workflows()
     case_empty_workflow_list_is_no_workflows()
+    case_pr_file_list_read_as_get_so_no_workflow_repo_says_ci_none()
     case_workflow_list_with_stderr_is_unknown()
     case_pr_adding_a_workflow_file_is_not_no_ci()
 
