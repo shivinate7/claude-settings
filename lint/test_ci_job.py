@@ -3,7 +3,8 @@
 
 Red cases: a multi-line step whose last line fails, a missing tool (named, behind xargs, or exit 127),
 a `uses:` step, an `if:` or env expression the runner cannot read, and a pull-request step with no base.
-None of them may read PASS. The GithubBaseRef class: the GITHUB_BASE_REF each step gets from --base, unset with none.
+None of them may read PASS. A step whose verdict line never prints (verdict killed, cut or silent) reads unknown,
+never FAIL and never PASS. The GithubBaseRef class: the GITHUB_BASE_REF each step gets from --base, unset with none.
 The last class plans the real checks job: every step gets one line.
 The last two classes: the code-check step from a copied install, and a step quiet past the stall limit.
 PinnedHarness: --pinned runs a remote claude-settings harness from the tree at its pinned sha, never the local copy.
@@ -129,6 +130,33 @@ class Job(unittest.TestCase):
                 f.write("#!/bin/sh\n" + body + "\n")
             os.chmod(path, 0o755)
         return {"PATH": os.pathsep.join([bin_dir, os.environ.get("PATH", "")])}
+
+    VERDICT_EXITS_1 = "import sys\nsys.exit(1)\n"  # a verdict that prints nothing and exits 1
+    VERDICT_EXITS_0 = "import sys\nsys.exit(0)\n"  # a verdict that prints nothing and exits 0
+    VERDICT_CUT = ("import os, signal, sys\n"
+                   "print('verdict: still running, 120s, log=verdict.log', file=sys.stderr, flush=True)\n"
+                   "os.kill(os.getpid(), signal.SIGKILL)\n")  # a verdict killed after its heartbeat, before any verdict line
+
+    def verdict_stub(self, body):
+        """The `launch` of a run whose bin/verdict is a stub that runs `body`: ci-job starts the stub where it would start
+        verdict, so the stub's output and exit code stand for the verdict's. The stub first writes stub-verdict-ran.txt."""
+        path = os.path.join(self.root, "verdict_stub.py")
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write("open('stub-verdict-ran.txt', 'w').close()\n" + body)
+        patch = ("import os, sys\n"
+                 "sys.path.insert(0, %r)\n"
+                 "import _nowindow\n"
+                 "real_popen = _nowindow.Popen\n"
+                 "def stub_popen(argv, *a, **k):\n"
+                 "    if len(argv) > 1 and os.path.basename(argv[1]) == 'verdict':\n"
+                 "        argv = [argv[0], %r, *argv[2:]]\n"
+                 "    return real_popen(argv, *a, **k)\n"
+                 "_nowindow.Popen = stub_popen\n") % (os.path.join(HERE, "..", "hooks"), path)
+        return ("-c", launcher(patch))
+
+    def stub_ran(self):
+        """True when the stub verdict ran in this job's folder, so a verdict case tests the stub and not a real verdict."""
+        return os.path.exists(os.path.join(self.root, "stub-verdict-ran.txt"))
 
     def npm_calls(self):
         """What the npm stub recorded, or a note that it recorded nothing."""
@@ -289,6 +317,41 @@ class Unknowns(Job):
     def test_a_fail_outranks_an_unknown_in_the_exit_code(self):
         rc, lines, out = self.run_job(step("tool", "no-such-tool-c69"), step("bad", "false"))
         self.assertEqual((rc, self.verdicts(lines)), (1, ["unknown", "FAIL"]), out)
+
+    @unittest.skipUnless(os.name == "posix", "a bash step kills its verdict by pid: POSIX only")
+    def test_a_verdict_killed_before_its_line_reads_unknown_never_fail(self):
+        rc, lines, out = self.run_job(step("killed", "kill -9 $PPID"))
+        self.assertEqual(by_step(lines), {"killed": "unknown"}, "a verdict killed before its line reads FAIL, not unknown: " + out)
+        self.assertEqual(rc, 2, "a verdict killed before its line does not exit 2, the unknown code: " + out)
+
+    def test_a_verdict_that_exits_1_with_no_output_reads_unknown_never_fail(self):
+        rc, lines, out = self.run_job(step("empty", "true"), launch=self.verdict_stub(self.VERDICT_EXITS_1))
+        self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
+        self.assertEqual(by_step(lines), {"empty": "unknown"}, "a verdict with no output and exit 1 reads FAIL, not unknown: " + out)
+        self.assertEqual(rc, 2, "a verdict with no output does not exit 2, the unknown code: " + out)
+
+    def test_a_verdict_that_exits_0_with_no_output_reads_unknown_never_pass(self):
+        rc, lines, out = self.run_job(step("silent", "true"), launch=self.verdict_stub(self.VERDICT_EXITS_0))
+        self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
+        self.assertEqual(by_step(lines), {"silent": "unknown"}, "a verdict with no output and exit 0 reads PASS, not unknown: " + out)
+        self.assertEqual(rc, 2, "a verdict with no output does not exit 2, the unknown code: " + out)
+
+    @unittest.skipUnless(os.name == "posix", "the verdict stub is killed by signal: POSIX only")
+    def test_a_verdict_cut_after_its_heartbeat_reads_unknown_never_fail(self):
+        rc, lines, out = self.run_job(step("cut", "true"), launch=self.verdict_stub(self.VERDICT_CUT))
+        self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
+        self.assertEqual(by_step(lines), {"cut": "unknown"}, "a verdict cut after its heartbeat reads FAIL, not unknown: " + out)
+        self.assertEqual(rc, 2, "a verdict cut after its heartbeat does not exit 2, the unknown code: " + out)
+
+    @unittest.skipUnless(os.name == "posix", "a bash step kills its verdict by pid: POSIX only")
+    def test_a_killed_verdict_beside_a_real_fail_still_fails_the_job(self):
+        rc, lines, out = self.run_job(step("killed", "kill -9 $PPID"), step("bad", "false"))
+        self.assertEqual(by_step(lines), {"killed": "unknown", "bad": "FAIL"}, "a killed verdict beside a real FAIL reads otherwise than unknown and FAIL: " + out)
+        self.assertEqual(rc, 1, "a real FAIL beside a killed verdict did not exit 1: " + out)
+
+    def test_a_real_fail_verdict_still_fails_the_job(self):  # the control: a FAIL line that verdict printed is a verdict, not a dead read
+        rc, lines, out = self.run_job(step("bad", "exit 3"))
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
 
 
 class Conditions(Job):
@@ -1094,6 +1157,14 @@ class NotRunLines(Job):
         rc, lines, out = self.run_job(*self.NO_LINT, args=("--lint", "--base", "origin/main"))
         self.assertEqual(self.verdicts(lines), ["unknown"], out)
         self.assertEqual(rc, 2, out)
+
+    @unittest.skipUnless(os.name == "posix", "the verdict stub is killed by signal: POSIX only")
+    def test_a_lint_step_whose_verdict_is_cut_reads_unknown_and_the_lint_exits_two(self):
+        rc, lines, out = self.run_job(step("Python lint", "python3 lint/check_clean.py"), args=("--lint",),
+                                      launch=self.verdict_stub(self.VERDICT_CUT))
+        self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
+        self.assertEqual(by_step(lines), {"Python lint": "unknown"}, "a lint step whose verdict is cut reads FAIL, not unknown: " + out)
+        self.assertEqual(rc, 2, "a lint run with a cut verdict did not exit 2, the unknown code that lane lint lifts: " + out)
 
     def test_a_lint_step_that_runs_only_off_a_pull_request_reads_skipped_and_the_run_exits_zero(self):  # the control
         push_only = step("Push-only lint", "python3 lint/check_clean.py", **{"if": "${{ github.event_name != 'pull_request' }}"})
