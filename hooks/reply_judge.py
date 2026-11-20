@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""At Stop, a model (Haiku) judges the final reply against nine rules. It runs on every fifth Stop and on every Stop whose reply carries an Input Needed label, the words "blocked on", a Markdown table or a GitHub search total, and never refuses. A finding comes back as a note on the next turn and writes one guard.log line.
+"""At Stop, a model (Haiku) judges the final reply against ten rules. It runs on every fifth Stop and on every Stop whose reply carries an Input Needed label, the words "blocked on", a Markdown table, a GitHub search total or a cost ranking, and never refuses. A finding comes back as a note on the next turn and writes one guard.log line.
 
 It is a command hook, not a `type: prompt` hook, because a prompt hook cannot exit on a field
 in code. This hook does: `stop_hook_active` true means this Stop is already a rewrite, so it
@@ -87,11 +87,28 @@ COUNT_WORD = r"(?:\d|\b(?:none|zero|no)\b)"  # a digit, or a word that says ther
 SEARCH_TOTAL = re.compile(r"total_count|totalCount|issueCount|\bsearch/\w"
                           r"|" + SEARCH_WORD + r".{0,120}" + COUNT_WORD
                           + r"|" + COUNT_WORD + r".{0,120}" + SEARCH_WORD, re.I | re.S)
+# A cost ranking (rule measure-before-priority): code finds the ranking words, the model judges whether the
+# ranking names its measure. "most of the time" and "top priority" name no cost, so they never match.
+COST_NOUN = r"(?:cost|spend|drain|sink|driver|bottleneck)s?"
+COST_RANK = re.compile(r"\b(?:costs|spends|eats|burns|takes)\s+the\s+most\b"
+                       r"|\b(?:biggest|largest|main|dominant|top)\s+" + COST_NOUN + r"\b"
+                       r"|\bmost\s+expensive\b|\bcostliest\b"
+                       r"|\b(?:bulk|most)\s+of\s+the\s+(?:cost|spend|tokens|money)s?\b", re.I)
+QUOTED_TEXT = re.compile(r'"[^"\n]*"|“[^”\n]*”')
+SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+|\n")
+
+
+def has_cost_rank(reply):
+    """True when a sentence of the reply that is not a question and not quoted text ranks a cost."""
+    unquoted = QUOTED_TEXT.sub("", reply)
+    return any(COST_RANK.search(s) and not s.rstrip().endswith("?") for s in SENTENCE_BREAK.split(unquoted))
+
+
 JUDGED_RULES = ("output-start-with-point", "style-cut-narration",
                 "output-never-paste-passing-output", "output-never-hand-off-doable-step",
                 "style-table-gold-column", "questions-go-to-owner",
                 "style-limits-kept-silently", "style-question-form",
-                "verification-counts-from-rest")
+                "verification-counts-from-rest", "measure-before-priority")
 JUDGE_RULE = "reply-judge"  # the guard.log rule when the reason names none of JUDGED_RULES
 REPLY_MAX = 12000  # the prompt rides stdin, so no argv cap; the clip bounds cost and latency only (unmeasured)
 
@@ -102,7 +119,7 @@ GH_SWITCH_SENTENCE = ("A block that hands the owner a gh command starts, after a
                       % (GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN, GH_DEFAULT_LOGIN))
 
 INSTRUCTIONS = (
-    "Judge the final reply below against nine rules. "
+    "Judge the final reply below against ten rules. "
     "output-start-with-point: the first sentence is the point, not a preamble. "
     "style-cut-narration: cut narration and recaps; narration means lines like \"I will now...\" or \"Let me...\"; "
     "a Done/Deviations/Input Needed/Next report is never narration. "
@@ -161,6 +178,10 @@ INSTRUCTIONS = (
     "the fix is to read the count or state from REST and confirm each candidate with REST. "
     "Never flag a count read from REST. "
     "Never flag a reply that says a search total was not used or is wrong, and gives the REST count. "
+    "measure-before-priority: flag a reply that ranks a cost, such as the biggest cost, the most expensive lane or most of the spend, "
+    "and gives no measure; a ranking must cite a figure with its unit and a date, a run id or a sample count. "
+    "A ranking the reply marks unmeasured may stand, but flag the reply when it also ranks, orders or cuts work on that ranking. "
+    "Never flag a ranking that cites such a figure, a question, or quoted text. "
     "Flag only on a clear breach; when unsure answer {\"ok\": true}. "
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
 )
@@ -329,6 +350,7 @@ def main():
         stop_n = count_this_stop(hook.get("session_id"))
         if (stop_n - 1) % SAMPLE_EVERY and not TABLE_SEPARATOR.search(reply) \
                 and not BLOCKED_ON.search(reply) and not SEARCH_TOTAL.search(reply) \
+                and not has_cost_rank(reply) \
                 and not has_input_needed(reply):
             return 0
         import decision_watch

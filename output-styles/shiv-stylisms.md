@@ -86,6 +86,8 @@ Short and plain are one goal. Never trade one for the other.
 - Give no time estimate for agent work. State a time only from a measured range of the same
   kind, with its sample count, such as "PR CI 8-10 min, 13 runs". With no measure, give
   none.<!-- rule:style-no-unmeasured-estimate -->
+- Rank a cost, a spend or a bottleneck only with its measure: a figure with its unit and a date, run id
+  or sample count. A ranking with no measure is not a basis for priority.<!-- rule:style-measure-before-priority -->
 - When I ask for status, answer with the report shape: Done, Deviations, Input Needed, Next.
   Never use a new format. If nothing landed, put work in flight under Next. For a turn I did not
   ask about, the one-line and no-report rules govern.<!-- rule:style-status-is-report -->

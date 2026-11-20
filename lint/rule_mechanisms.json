@@ -759,6 +759,12 @@
         "reason": "No check can tell an estimate from a measured range, or know whether a sample count backs a duration. It is a content judgment on the reply."
       }
     },
+    "style-measure-before-priority": {
+      "mechanism": {
+        "kind": "judgment",
+        "reason": "Whether a cost ranking names its measure, a figure with its unit and a date, run id or sample count, is a content judgment. Code sends every Stop whose reply holds a ranking phrase to the Stop reply judge (hooks/reply_judge.py, a model, never blocks), which notes a ranking with no measure under the id measure-before-priority."
+      }
+    },
     "style-status-is-report": {
       "mechanism": {
         "kind": "judgment",
