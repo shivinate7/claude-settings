@@ -1579,9 +1579,53 @@ CAP_ASK_REASON = (
     "Rule (configuration): this write sets the agent model cap, which the owner's user settings "
     "hold. A project settings file overrides user settings, so the write lifts the cap for every "
     "agent started there. Requested: {change}. File: {where}. "
+    "Approve it only when a model above Sonnet is wanted for this project, or the cap lift's end "
+    "time shown here is the one you want. "
+    "(decision agent-model-cap, the owner's cap on the agent model lifts only with his word)"
+)
+CAP_MODEL_ASK_REASON = (
+    "Rule (configuration): this write sets the agent model cap, which the owner's user settings "
+    "hold. A project settings file overrides user settings, so the write lifts the cap for every "
+    "agent started there. Requested: {change}. File: {where}. "
     "Approve it only when a model above Sonnet is wanted for this project. "
     "(decision agent-model-cap, the owner's cap on the agent model lifts only with his word)"
 )
+CAP_ASK_REASON_COMPUTED = (
+    "Rule (configuration): this write sets the agent model cap, which the owner's user settings "
+    "hold. A project settings file overrides user settings, so the write lifts the cap for every "
+    "agent started there. Requested: {change}. File: {where}. "
+    "Approve it only when a model above Sonnet is wanted for this project, and compute the cap "
+    "lift's end first and check it: this ask does not show it. "
+    "(decision agent-model-cap, the owner's cap on the agent model lifts only with his word)"
+)
+CAP_END_ASK_REASON = (
+    "Rule (configuration): this write sets the cap-lift end, the time until which a project's "
+    "settings lift the owner's cap on the agent model. Requested: {change}. File: {where}. "
+    "Approve it only when the cap lift's end time shown here is the one you want. "
+    "(decision opus-grant-expires, the cap lift ends at a set time; decision agent-model-cap, the owner's cap on the agent model lifts only with his word)"
+)
+CAP_END_ASK_REASON_COMPUTED = (
+    "Rule (configuration): this write sets the cap-lift end, the time until which a project's "
+    "settings lift the owner's cap on the agent model. Requested: {change}. File: {where}. "
+    "This ask does not show the end: compute it first, check it, and approve only when it is the one you want. "
+    "(decision opus-grant-expires, the cap lift ends at a set time; decision agent-model-cap, the owner's cap on the agent model lifts only with his word)"
+)
+from shared_names import CAP_DEADLINE_FIELD, parse_deadline  # noqa: E402  the one home of the cap-lift deadline's field name, shared with hooks/config_watch.py
+
+# The cap-lift deadline a write sets: the field, then an ISO-8601 instant. Like AGENT_CAP_ASSIGN it reads a
+# JSON pair and a shell assignment, and the last one wins.
+CAP_DEADLINE_ASSIGN = re.compile(
+    r"['\"]?" + re.escape(CAP_DEADLINE_FIELD) + r"['\"]?\s*[:=]\s*['\"]?([0-9][0-9T:.+\-Zz]*(?: [0-9][0-9:.+\-Zz]*)?)"
+)
+
+# A cap-lift end a command takes from a variable or a substitution, not from text after the field. VALUE_REF reads
+# `$name` or `${name}` after the field, so a `jq --arg name LITERAL` can be read for its literal. COMPUTED_REF reads
+# a `$` or a backtick there: `$(date ...)`, `$D`, `$ENV.D`. Both are anchored on the field name and linear.
+_CAP_FIELD_VALUE = r"['\"]?" + re.escape(CAP_DEADLINE_FIELD) + r"['\"]?\s*[:=]\s*['\"]?"
+CAP_DEADLINE_VALUE_REF = re.compile(_CAP_FIELD_VALUE + r"\$\{?([A-Za-z_][A-Za-z0-9_]*)")
+CAP_DEADLINE_COMPUTED = re.compile(_CAP_FIELD_VALUE + r"[$`]")
+CAP_ISO_END = r"[0-9][0-9T:.+\-Zz]*(?: [0-9][0-9:.+\-Zz]*)?"
+CAP_END_COMPUTED = "computed at write time, not shown"
 
 
 def is_settings_file(path: str, cwd: str = "") -> bool:
@@ -1701,17 +1745,19 @@ def cap_change(text: str) -> str:
     return cap_change_parts([text])
 
 
-def write_content_parts(tool_input):
+def write_content_parts(tool_input, arriving=False):
     """Return the texts a write tool would put in the file, IN THE ORDER IT APPLIES THEM.
 
     A list, never one joined blob, so `cap_change_parts` can tell the value an edit leaves from the
     value it arrives at. Every edit of a `MultiEdit` is read: see the measurement beside
-    CAP_CONTENT_FIELDS.
+    CAP_CONTENT_FIELDS. `arriving` drops each `old_string`, the text an edit removes, so a reading
+    that must show only what the file will hold (`cap_deadline_end`) never shows a value being left.
     """
     if not isinstance(tool_input, dict):
         return []
+    fields = tuple(f for f in CAP_CONTENT_FIELDS if not (arriving and f == "old_string"))
     parts = []
-    for field in CAP_CONTENT_FIELDS:
+    for field in fields:
         value = tool_input.get(field, "")
         if isinstance(value, str):
             parts.append(value)
@@ -1720,23 +1766,239 @@ def write_content_parts(tool_input):
         for edit in edits:
             if not isinstance(edit, dict):
                 continue
-            for field in CAP_CONTENT_FIELDS:
+            for field in fields:
                 value = edit.get(field, "")
                 if isinstance(value, str):
                     parts.append(value)
     return parts
 
 
-def cap_ask_reason(change: str, where: str) -> str:
+def cap_deadline_text(parts) -> str:
+    """The last cap-lift deadline text the parts name, else ''. The last one is what the file will hold."""
+    text = ""
+    for part in parts:
+        if isinstance(part, str):
+            # A double-quoted shell write spells each JSON quote as a backslash and a quote. One
+            # replace, linear, un-escapes it so the pattern reads the pair the file will hold.
+            plain = part.replace('\\"', '"')
+            for found in CAP_DEADLINE_ASSIGN.finditer(plain):
+                text = found.group(1)
+            # A `jq --arg name 'LITERAL'` end reaches the field as `$name`: read the literal it binds.
+            for ref in CAP_DEADLINE_VALUE_REF.finditer(plain):
+                bound = re.search(r"--arg\s+" + re.escape(ref.group(1)) + r"\s+['\"]?(" + CAP_ISO_END + ")", plain)
+                if bound:
+                    text = bound.group(1)
+    return text
+
+
+def cap_deadline_computed(raw: str) -> bool:
+    """True when a shell command sets the cap-lift field to a value it computes at write time and names no literal end.
+
+    `$(date ...)`, a backtick, a shell variable, or a `jq --arg name "$VAR"` after the field: no readable end
+    follows, so the ask says so (owner R37, page item 602 pick a: the ask is the check on the length). A literal
+    end, readable or not, is not computed: an unparseable literal stays silent for `hooks/config_watch.py` to
+    revoke, and a `jq --arg name 'literal'` end is read by `cap_deadline_text`. Shell route only: the same text
+    in a Write is a literal string the file will hold.
+    """
+    plain = raw.replace('\\"', '"')
+    if cap_deadline_text([raw]) or not CAP_DEADLINE_COMPUTED.search(plain):
+        return False
+    for ref in CAP_DEADLINE_VALUE_REF.finditer(plain):
+        if re.search(r"--arg\s+" + re.escape(ref.group(1)) + r"\s+['\"]?[^\s'\"$`]", plain):
+            return False   # bound to some other literal: an unparseable one, which stays silent
+    return True
+
+
+# One shell word: quoted runs and plain characters, or one operator. Each alternative starts on a different
+# character, so a long backslash or quote run fails in linear time.
+CAP_SHELL_WORD = re.compile(r"""(?:'[^']*'|"(?:[^"\\]|\\.)*"|\\.|[^\s'"\\;|&<>])+|[;|&<>]""")
+CAP_PRINTF = re.compile(r"\bprintf\b")
+
+
+def cap_printf_end(raw: str) -> str:
+    """The cap-lift end a shell `printf` takes from an argument: CAP_END_COMPUTED, a literal ISO end, else ''.
+
+    The field sits in the format, or in a literal argument, and the end is a LATER argument, so
+    `cap_deadline_text` reads no end after the field. Each `printf` runs to the first operator. The words after
+    the last one that names the field are the arguments: one with `$` or a backtick computes the end, else one
+    that is an ISO instant is the literal end. A literal that is no date reads as ''. The last `printf` wins.
+    """
+    found = ""
+    pos = 0
+    while True:
+        start = CAP_PRINTF.search(raw, pos)
+        if not start:
+            return found
+        words = []
+        pos = start.end()
+        for word in CAP_SHELL_WORD.finditer(raw, start.end()):
+            pos = word.end()
+            if word.group(0)[0] in ";|&<>":
+                break
+            words.append(word.group(0).replace('\\"', '"').strip("'\""))
+        named = [i for i, word in enumerate(words) if CAP_DEADLINE_FIELD in word]
+        if not named:
+            continue
+        args = words[named[-1] + 1:]
+        if any("$" in arg or "`" in arg for arg in args):
+            found = CAP_END_COMPUTED
+        else:
+            literal = [arg for arg in args if re.fullmatch(CAP_ISO_END, arg)]
+            found = literal[-1] if literal else ""
+
+
+def cap_shell_end(raw: str, path: str, cwd: str = "") -> str:
+    """The cap-lift end a shell write sets, as `cap_deadline_end` prints it, CAP_END_COMPUTED, or ''."""
+    printed = cap_printf_end(raw)
+    if printed == CAP_END_COMPUTED:
+        return printed
+    parts = cap_sed_parts(raw, path, cwd)
+    if printed:
+        parts = parts + ['"' + CAP_DEADLINE_FIELD + '": "' + printed + '"']
+    return cap_deadline_end(parts) or (CAP_END_COMPUTED if cap_deadline_computed(raw) else "")
+
+
+def cap_deadline_end(parts) -> str:
+    """Return the end of the cap lift a write sets, as `YYYY-MM-DD HH:MM CST` or `CDT` in US Central, else ''.
+
+    The last deadline the parts name is the one the file will hold. A deadline that is not a readable
+    ISO-8601 instant, or one already passed, reads as '' and the write is not asked about for it:
+    `hooks/config_watch.py` revokes a lift with such a deadline. The instant is read by
+    `shared_names.parse_deadline`, the parser the watch calls too. The text is
+    `local_time.central_full`, the one home of the Central clock (rule style-time-central-24h). The
+    date is printed because a lift may run any length, so an end next year must not read as tonight.
+    """
+    text = cap_deadline_text(parts)
+    deadline = parse_deadline(text) if text else None
+    if deadline is None:
+        return ""
+    try:
+        import local_time   # inside the try: a missing file must reach the ask below, not main's fail-open
+        if deadline < local_time.clock():
+            return ""
+        return local_time.central_full(deadline)
+    except ImportError:
+        return text + " (clock unreadable, so the Central time is not shown)"   # fail closed: the write still asks, with the raw end
+    except (ValueError, OverflowError, TypeError):
+        return ""
+
+
+CAP_DISK_MAX = 1_000_000   # a settings file is small; a larger one is left unread
+
+
+def cap_disk_text(path: str, cwd: str = ""):
+    """The text of the file a write targets, or None when it is missing, too large or unreadable."""
+    try:
+        full = path if os.path.isabs(path) else os.path.join(cwd or os.getcwd(), path)
+        if os.path.getsize(full) > CAP_DISK_MAX:
+            return None
+        with open(full, encoding="utf-8", errors="replace") as handle:
+            return handle.read()
+    except OSError:
+        return None
+
+
+def cap_edited_text(disk: str, edits):
+    """The file text after the edits, applied in order as the Edit tool applies them (the first match, or each with replace_all).
+
+    None when an edit's old_string is not in the text it meets: the file on disk is not the one the
+    edit was written against, so the result says nothing about the end the file will hold.
+    """
+    for edit in edits:
+        if not isinstance(edit, dict):
+            continue
+        old, new = edit.get("old_string"), edit.get("new_string")
+        if not isinstance(old, str) or not isinstance(new, str) or not old:
+            continue
+        if old not in disk:
+            return None
+        disk = disk.replace(old, new) if edit.get("replace_all") is True else disk.replace(old, new, 1)
+    return disk
+
+
+def cap_arriving_parts(tool_input, target: str, cwd: str = "") -> list:
+    """The texts to read the cap-lift end from, for an Edit or MultiEdit: the file it arrives at.
+
+    A value-only edit names no field in its strings, and a second edit can move the end a first one
+    set, so the strings alone can show a wrong end or none. When the file on disk is readable, the
+    result of applying the edits is what counts: a changed deadline gives that one text, and an
+    unchanged one gives no text, so an edit that leaves the deadline alone adds no ask of its own,
+    even when its new_string repeats the deadline line. When the file cannot be read, or an edit's
+    old_string is not in it, the strings stand, as for a Write.
+    """
+    strings = write_content_parts(tool_input, arriving=True)
+    edits = tool_input.get("edits") if isinstance(tool_input.get("edits"), list) else []
+    if "old_string" in tool_input:
+        edits = [tool_input] + edits
+    disk = cap_disk_text(target, cwd) if edits else None
+    if disk is None:
+        return strings
+    arrived = cap_edited_text(disk, edits)
+    if arrived is None:
+        return strings
+    if cap_deadline_text([arrived]) == cap_deadline_text([disk]):
+        return []
+    return [arrived]
+
+
+# A `sed` substitution, `s/old/new/flags`, with any one of the usual delimiters. A backslash is read
+# only as the start of an escape pair, never as a plain character, so each character has one way to
+# match and a long backslash run with no closing delimiter fails in linear time, not exponential.
+SED_SUBST = re.compile(r"\bs([/|#,@:])((?:\\.|(?!\1|\\).)*)\1((?:\\.|(?!\1|\\).)*)\1[gIi0-9]*")
+
+
+def cap_sed_parts(raw: str, path: str, cwd: str = "") -> list:
+    """The texts to read the cap-lift end from, for a shell write: the command, or the file a `sed` leaves.
+
+    Best effort: each `s/old/new/` of a command that runs `sed` is applied, in order, to the file on
+    disk, the pattern read as a regular expression. When that changes the file's deadline, the
+    result is the text read. Any other command is read as itself.
+    """
+    if not re.search(r"\bsed\b", raw):
+        return [raw]
+    disk = cap_disk_text(path, cwd)
+    if disk is None:
+        return [raw]
+    arrived = disk
+    for found in SED_SUBST.finditer(raw):
+        delim, pattern, new = found.group(1), found.group(2), found.group(3)
+        new = new.replace("\\" + delim, delim)
+        try:
+            arrived = re.sub(pattern, lambda _match: new, arrived)
+        except re.error:
+            continue
+    if cap_deadline_text([arrived]) == cap_deadline_text([disk]):
+        return [raw]
+    return [arrived]
+
+
+def cap_with_deadline(change: str, end: str) -> str:
+    """Join the cap-lift end, when the write sets one, to the reading that the ask prints."""
+    if not end:
+        return change
+    if end == CAP_END_COMPUTED:
+        return (change + ", " if change else "") + "cap lift end " + end
+    return (change + ", " if change else "") + "cap lift ends " + end + " (US Central)"
+
+
+def cap_ask_reason(change: str, where: str, end_only: bool = False, computed: bool = False,
+                   end_shown: bool = True) -> str:
     """Build the printed ask, BOUNDED BY CONSTRUCTION.
 
     The template is fixed, the change holds at most the cap's two keys with a value of at most
     CAP_MAX_VALUE characters each, and the path is cut at CAP_MAX_PATH. So the reason cannot run
     past roughly 800 characters however long the value or the path a tool passed. `cap_safe` does
-    the cleaning and marks each cut.
+    the cleaning and marks each cut. `end_only` is a write that sets the cap-lift end and no model:
+    it says so, and never says it sets the model cap. `end_shown` is false for a model-only write: it
+    sets no end, so its ask must not point at an end "shown here".
     """
-    return CAP_ASK_REASON.format(change=cap_safe(change, CAP_MAX_CHANGE),
-                                 where=cap_safe(where, CAP_MAX_PATH))
+    if computed:
+        template = CAP_END_ASK_REASON_COMPUTED if end_only else CAP_ASK_REASON_COMPUTED
+    elif not end_only and not end_shown:
+        template = CAP_MODEL_ASK_REASON
+    else:
+        template = CAP_END_ASK_REASON if end_only else CAP_ASK_REASON
+    return template.format(change=cap_safe(change, CAP_MAX_CHANGE), where=cap_safe(where, CAP_MAX_PATH))
 
 
 # ---- a message that cites a record by path
@@ -5899,9 +6161,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # narrow, beats a bypass by a second segment.
     matched = shell_write_hit(raw, cwd, is_settings_file)
     if matched:
-        change = cap_change(raw)
+        model = cap_change(raw)
+        end = cap_shell_end(raw, matched, cwd)
+        change = cap_with_deadline(model, end)
         if change:
-            ask_command("agent-model-cap", cap_ask_reason(change, matched),
+            ask_command("agent-model-cap", cap_ask_reason(change, matched, end_only=not model, computed=end == CAP_END_COMPUTED,
+                                         end_shown=bool(end)),
                      log_path_and_text(matched, change), "settings write")
     settle_ask(tool, raw)
 
@@ -8271,9 +8536,11 @@ def judge(payload) -> None:
         # the alternative is a value test that a crafted spelling walks past. A write that does not
         # carry the name never fires, and no other file than a settings file reaches this rule.
         if is_settings_file(target, cwd):
-            change = cap_change_parts(write_content_parts(tool_input))
+            model = cap_change_parts(write_content_parts(tool_input))
+            end = cap_deadline_end(cap_arriving_parts(tool_input, target, cwd))
+            change = cap_with_deadline(model, end)
             if change:
-                refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, target),
+                refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, target, end_only=not model, end_shown=bool(end)),
                        log_path_and_text(target, change))
     scratchpad_owner_write(payload, tool, tool_input, cwd)   # every refusal above passed: refuse an overwrite, else record the writer
 

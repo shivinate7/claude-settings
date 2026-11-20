@@ -1259,14 +1259,15 @@ MUTATIONS = [
      '    if matched:\n'
      '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)', "guard", 'cap: a heredoc onto the config settings stays denied'),
     ("cap: the shell route reads the stripped command, so a heredoc body's cap change walks past",
-     '        change = cap_change(raw)',
-     '        change = cap_change(stripped)', "guard", 'cap: a heredoc writing a project settings file asks'),
+     '        model = cap_change(raw)',
+     '        model = cap_change(stripped)',
+     "guard", 'cap: a heredoc writing a project settings file asks'),
     ("cap: an earlier part wins, so an Edit names the value it leaves, not the one it arrives at",
      '            values[key] = value',
      '            values.setdefault(key, value)', "guard", 'cap: Edit turning the force flag off asks'),
     ("cap: a Write of a settings file never asks, so an opus lift lands unasked",
-     '        if is_settings_file(target, cwd):\n            change = cap_change_parts(write_content_parts(tool_input))',
-     '        if False:\n            change = cap_change_parts(write_content_parts(tool_input))', "guard",
+     '        if is_settings_file(target, cwd):\n            model = cap_change_parts(write_content_parts(tool_input))',
+     '        if False:\n            model = cap_change_parts(write_content_parts(tool_input))', "guard",
      'cap: Write of a project local settings file setting an opus model asks'),
     ("floor: the model test is case-sensitive, so a mixed-case haiku id walks past",
      '    return FLOOR_WORD in str(model).lower()',
@@ -1558,14 +1559,6 @@ MUTATIONS = [
     # ---- the expiry rule, added 2026-09-20. Nothing killed a mutant here before this block:
     # every case below is new, exercising `cap_lift_value`, `next_prior`, `expiry_problem`, and
     # the expiry tail of `judge_path` that `hooks/test_config_watch.py`'s "expiry" cases guard.
-    ("watch: the 24-hour ceiling runs backwards, so only a SAFE deadline reads as too far ahead",
-     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:',
-     '    if ahead < EXPIRY_MAX_AHEAD_HOURS * 3600:', "watch",
-     'more than 24h ahead is revoked'),
-    ("watch: the 24-hour bound is negated, so even a one-hour deadline reads as too far ahead",
-     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:',
-     '    if ahead > -(EXPIRY_MAX_AHEAD_HOURS * 3600):', "watch",
-     'a valid, current _agentCapUntil is NOT reverted'),
     ("watch: the passed-deadline test is inverted, so an expired deadline reads as current",
      '    if ahead < 0:\n        return "already passed"',
      '    if ahead > 0:\n        return "already passed"', "watch",
@@ -1580,30 +1573,135 @@ MUTATIONS = [
      '    if cap_lift_value(was):\n        return baseline["content"]', "watch",
      "keeps the ORIGINAL pre-lift content as prior"),
 
-    # ---- the 24-hour boundary itself, added 2026-09-20 (round 3). `expiry_problem` now takes
-    # an injectable `clock`, so `hooks/test_config_watch.py`'s boundary cases can pin a
-    # fixture's `_agentCapUntil` and the watch's own "now" to the SAME instant, and an
-    # off-by-one at the exact edge is no longer invisible to this mutation test.
-    ("watch: the too-far-ahead check admits its own edge, so a deadline exactly 24h out is "
-     "wrongly revoked",
-     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:',
-     '    if ahead >= EXPIRY_MAX_AHEAD_HOURS * 3600:', "watch",
-     "exactly 24 hours ahead is accepted"),
     ("watch: the passed-deadline check admits its own edge, so the deadline instant itself "
      "reads as already passed",
      '    if ahead < 0:',
      '    if ahead <= 0:', "watch",
      "exactly at the deadline instant is accepted"),
-    ("watch: the 24-hour ceiling is one second too loose, so a deadline one second over is "
-     "wrongly accepted",
-     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:',
-     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600 + 1:', "watch",
-     "one second outside the 24h bound is revoked"),
-    ("watch: the 24-hour ceiling is one second too tight, so a deadline exactly on it is "
-     "wrongly revoked",
-     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:',
-     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600 - 1:', "watch",
-     "exactly 24 hours ahead is accepted"),
+
+    # ---- the cap-lift deadline ask. Each mutant below breaks one link of the end a write's ask shows:
+    # the passed-deadline test, the zone, the Central text, the ask a Write or a shell write makes on
+    # the end, the text an Edit or MultiEdit arrives at, the sed reading, the space form of the
+    # assignment, the un-escape of a double-quoted shell write, the wording of an end-only ask, and the
+    # fallback when the clock module cannot be imported. Each required name is a case in
+    # tests/guard/s19328-model-cap.py.
+    ("guard: the deadline ask runs backwards, so a current end is silent and a passed one is asked",
+     '        if deadline < local_time.clock():\n            return ""',
+     '        if deadline > local_time.clock():\n            return ""', "guard",
+     "a Write that sets only the cap-lift end asks"),
+    ("guard: the end drops its zone, so it reads as a date and time with no CST or CDT",
+     '        return local_time.central_full(deadline)\n    except ImportError:',
+     '        return local_time.central_full(deadline).rsplit(" ", 1)[0]\n    except ImportError:', "guard",
+     "names the end in CST"),
+    ("guard: the end prints in UTC, not US Central, so the approver reads the wrong hour",
+     '        return local_time.central_full(deadline)\n    except ImportError:',
+     '        return deadline.strftime("%Y-%m-%d %H:%M UTC")\n    except ImportError:',
+     "guard", "names the end in CST"),
+    ("guard: a Write that sets the cap-lift end is not asked about, so its end is never shown",
+     '            change = cap_with_deadline(model, end)',
+     '            change = model', "guard",
+     "a Write that sets only the cap-lift end asks"),
+    ("guard: a shell write that sets the cap-lift end is not asked about, so its end is never shown",
+     '        change = cap_with_deadline(model, end)\n        if change:',
+     '        change = model\n        if change:', "guard",
+     "a shell write that sets only the cap-lift end asks"),
+    ("guard: a model-only cap ask says the end is shown here, though it sets no end",
+     '        template = CAP_MODEL_ASK_REASON',
+     '        template = CAP_ASK_REASON', "guard",
+     "cap: a Write that sets only the model, with no end"),
+    ("guard: the edits of an Edit or MultiEdit apply last-first, so the end the file arrives at is the first edit's",
+     '    for edit in edits:\n        if not isinstance(edit, dict):\n            continue\n        old, new = edit.get("old_string"), edit.get("new_string")',
+     '    for edit in reversed(edits):\n        if not isinstance(edit, dict):\n            continue\n        old, new = edit.get("old_string"), edit.get("new_string")', "guard",
+     "a MultiEdit whose second edit moves only the end's value asks with the end the file"),
+    ("guard: an Edit reads no file on disk, so the end it leaves is read from its strings alone",
+     '    disk = cap_disk_text(target, cwd) if edits else None',
+     '    disk = None', "guard",
+     "an Edit that changes only the end's value, with no field name in its strings"),
+    ("guard: an Edit that leaves the cap-lift end alone asks with the end on disk anyway",
+     '    if cap_deadline_text([arrived]) == cap_deadline_text([disk]):\n        return []\n    return [arrived]',
+     '    return [arrived]', "guard",
+     "an Edit that leaves a settings file's cap-lift end alone adds no ask"),
+    ("guard: a sed reads no substitution, so a sed's end is read from the command text alone",
+     '    if not re.search(r"\\bsed\\b", raw):',
+     '    if True:', "guard",
+     "a sed that changes only the end's value in a settings file"),
+    ("guard: the cap-lift end's assignment drops the space form, so a space-form end reads as its date",
+     '(?: [0-9][0-9:.+\\-Zz]*)?)"',
+     ')"', "guard",
+     "a Write that sets the cap-lift end in the space form asks"),
+    ("guard: a double-quoted shell write keeps its escaped quotes, so an escaped cap-lift end reads as no end",
+     r"""            plain = part.replace('\\"', '"')""",
+     '            plain = part', "guard",
+     "a double-quoted echo with escaped quotes that sets only the cap-lift end"),
+    ("guard: a deadline-only write is asked with the model wording, so it says it sets the model cap",
+     'template = CAP_END_ASK_REASON if end_only else CAP_ASK_REASON',
+     'template = CAP_ASK_REASON if end_only else CAP_ASK_REASON', "guard",
+     "a Write that sets only the cap-lift end does not say it sets the model cap"),
+    ("guard: a missing clock module makes a deadline write silent, so the fail-closed ask is swallowed",
+     'return text + " (clock unreadable, so the Central time is not shown)"',
+     'return ""', "guard",
+     "still asks when the clock module cannot be imported"),
+
+    # ---- the end a shell command computes at write time (`$(date ...)`, a backtick, a shell variable), and the
+    # end a jq --arg literal binds. A shell write with a computed end asks and says the end is computed. A
+    # literal bound by --arg is read and shown. Each required name is a case in tests/guard/s19328-model-cap.py.
+    ("guard: a jq --arg literal end is not read, so a literal instant bound by --arg reads as no end",
+     r"""            for ref in CAP_DEADLINE_VALUE_REF.finditer(plain):
+                bound = re.search(r"--arg\s+" + re.escape(ref.group(1)) + r"\s+['\"]?(" + CAP_ISO_END + ")", plain)
+                if bound:
+                    text = bound.group(1)
+""",
+     "            pass\n", "guard",
+     "a jq --arg whose cap-lift end is a literal instant asks"),
+    ("guard: a shell write with a computed end is not called computed, so its ask shows no end",
+     "def cap_deadline_computed(raw: str) -> bool:",
+     "def cap_deadline_computed(raw: str) -> bool:\n    return False", "guard",
+     "a shell echo whose cap-lift end is a $(date) substitution asks under agent-model-cap"),
+    ("guard: the computed-end ask drops its phrase, so the approver is not told the end is computed",
+     '        return (change + ", " if change else "") + "cap lift end " + end',
+     '        return (change + ", " if change else "") + "cap lift end"', "guard",
+     "a shell echo that sets the model and a $(date) cap-lift end"),
+    ("guard: the shell route drops the computed end, so a $(date) end is never named as computed",
+     '    return cap_deadline_end(parts) or (CAP_END_COMPUTED if cap_deadline_computed(raw) else "")',
+     '    return cap_deadline_end(parts)', "guard",
+     "a jq filter whose cap-lift end is a $(date) substitution, writing the settings file"),
+    ("guard: the computed end is read only after a $( substitution, so a bare variable or a backtick end reads as no end",
+     r'CAP_DEADLINE_COMPUTED = re.compile(_CAP_FIELD_VALUE + r"[$`]")',
+     r'CAP_DEADLINE_COMPUTED = re.compile(_CAP_FIELD_VALUE + r"\$\(")', "guard",
+     "an echo whose cap-lift end is a backtick substitution asks"),
+    ("guard: a jq --arg bound to an unparseable literal is not checked, so the cap-lift end reads as computed",
+     r"""    for ref in CAP_DEADLINE_VALUE_REF.finditer(plain):
+        if re.search(r"--arg\s+" + re.escape(ref.group(1)) + r"\s+['\"]?[^\s'\"$`]", plain):
+            return False   # bound to some other literal: an unparseable one, which stays silent
+    return True""",
+     "    return True", "guard",
+     "a jq --arg bound to an unparseable literal, set on the cap-lift field, stays silent"),
+
+    # ---- the end a shell printf takes from an argument, and the wording of an ask that holds a computed end.
+    # Each required name is a case in tests/guard/s19328-model-cap.py.
+    ("guard: a printf ignores a literal ISO end argument, so a literal cap-lift end reads as no end",
+     '            literal = [arg for arg in args if re.fullmatch(CAP_ISO_END, arg)]',
+     '            literal = []', "guard",
+     "a printf that names the cap-lift field in its format and takes a literal ISO end as its argument asks"),
+    ("guard: the shell end does not call the printf reader, so a printf's argument end reads as no end",
+     '    printed = cap_printf_end(raw)',
+     '    printed = ""', "guard",
+     "a printf that names the cap-lift field in its format and takes a literal ISO end as its argument asks"),
+    ("guard: the computed-end flag is ignored, so a computed end's ask is worded as if the end were shown",
+     '    if computed:',
+     '    if False:', "guard",
+     "a computed end with no model says the end is not shown"),
+
+    # ---- the one deadline parser, hooks/shared_names.py parse_deadline, which the guard and the config
+    # watch both call. These break its space form and its no-offset form.
+    ("parse-deadline: the space form is read as its date alone, so the end is midnight",
+     '    text = text.strip()\n    if text[-1:] in ("Z", "z"):',
+     '    text = text.strip().split(" ")[0]\n    if text[-1:] in ("Z", "z"):', "guard",
+     "a Write that sets the cap-lift end in the space form asks"),
+    ("parse-deadline: a text with no offset is read as the machine's local time, not UTC",
+     '    if deadline.tzinfo is None:\n        deadline = deadline.replace(tzinfo=timezone.utc)',
+     '    if deadline.tzinfo is None:\n        deadline = deadline.astimezone()', "guard",
+     "reads it as UTC on a machine east of UTC"),
 
     # ---- the liveness oracle's alive/dead/unreadable split, added for Windows parity. Each
     # mutant here folds the new third state back into one of the other two, the exact shape of

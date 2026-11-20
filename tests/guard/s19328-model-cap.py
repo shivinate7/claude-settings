@@ -504,4 +504,434 @@ chained_ask("cap var: a cap write to a settings path held in a shell variable, t
    "F=" + PROJ_SETTINGS + "; python3 -c \"import os; os.system('echo " + CAP_KEY + "=opus >> $F')\"",
    cwd=NOGIT, carries=("agent-model-cap",))
 
+# =========================================================================== the cap-lift deadline ask
+#
+# THE DEADLINE ASKS. A write that sets `_agentCapUntil` alone asks under agent-model-cap, and the ask names
+# the end in US Central: its date, a 24-hour clock and the zone (rule style-time-central-24h). A deadline has
+# no ceiling, so one far ahead asks too. A deadline already passed, or one that does not parse, stays silent.
+# A model raise still asks. The expected Central text comes from hooks/local_time.py, the one home of the
+# Central clock, so a reason that echoes the UTC reading, hard-codes CST, or drops the date reads as wrong.
+import datetime as _dt  # noqa: E402  the instants the Central helper reads (local_time is imported by test_guard)
+
+EXPIRY_KEY = "_agentCapUntil"
+DEADLINE_WINTER = "2099-01-15T03:30:00Z"   # a winter instant, read in CST
+DEADLINE_SUMMER = "2099-07-15T03:30:00Z"   # a summer instant, read in CDT
+DEADLINE_PAST = "2000-01-01T00:00:00Z"
+
+
+def _central_text(text):
+    """The Central reading of a Z-suffixed instant, date, time and zone, from the one helper."""
+    instant = _dt.datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=_dt.timezone.utc)
+    return local_time.central_full(instant)
+
+
+WANT_WINTER = _central_text(DEADLINE_WINTER)   # the CST reading of DEADLINE_WINTER
+WANT_SUMMER = _central_text(DEADLINE_SUMMER)   # the CDT reading of DEADLINE_SUMMER
+
+add("cap deadline: a Write that sets only the cap-lift end asks under agent-model-cap and names the end in CST",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
+    content=json.dumps({EXPIRY_KEY: DEADLINE_WINTER}), carries=(WANT_WINTER,))
+add("cap deadline: an Edit that moves only the cap-lift end to a summer time asks under agent-model-cap and names the end in CDT",
+    "ask", "agent-model-cap", tool="Edit", cwd=NOGIT, file_path=PROJ_LOCAL,
+    old_string='"%s": "%s"' % (EXPIRY_KEY, DEADLINE_WINTER),
+    new_string='"%s": "%s"' % (EXPIRY_KEY, DEADLINE_SUMMER), carries=(WANT_SUMMER,))
+add("cap deadline: a Write that sets only a cap-lift end already passed stays silent", "allow",
+    tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
+    content=json.dumps({EXPIRY_KEY: DEADLINE_PAST}), silent=True)
+add("cap deadline: a Write that sets an unparseable cap-lift end stays silent", "allow",
+    tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
+    content=json.dumps({EXPIRY_KEY: "next Tuesday"}), silent=True)
+add("cap deadline: a model raise whose end is already passed still asks under agent-model-cap and names the model",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL,
+    content=json.dumps({"env": {CAP_KEY: OPUS, CAP_FORCE: "1"}, EXPIRY_KEY: DEADLINE_PAST}),
+    carries=(CAP_KEY + " = " + OPUS,))
+sh("cap deadline: a shell write that sets only the cap-lift end asks under agent-model-cap and names the end in CST",
+   "printf '%s' '" + json.dumps({EXPIRY_KEY: DEADLINE_WINTER}) + "' > " + PROJ_SETTINGS,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(WANT_WINTER,))
+# The clock is pinned one hour before this deadline, so the end is near, not far. The ask must hold at
+# this distance too, which a case with only far ends would not check.
+NEAR_CLOCK = "2099-01-14T20:30:00+00:00"
+DEADLINE_NEAR = "2099-01-14T21:30:00Z"   # one hour after NEAR_CLOCK, read in CST
+add("cap deadline: a Write that sets a cap-lift end one hour ahead asks under agent-model-cap and names the end in CST",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
+    content=json.dumps({EXPIRY_KEY: DEADLINE_NEAR}), carries=(_central_text(DEADLINE_NEAR),),
+    env={"LOCAL_TIME_NOW": NEAR_CLOCK})
+
+# ----------------------------------------------------------- the end an edit leaves on disk
+#
+# An Edit or MultiEdit asks with the end the FILE ARRIVES AT: the file on disk with the edit applied.
+# The edit's own strings can hide that end. A value-only edit names no field, so the end it leaves is
+# not in its strings at all. A deletion's old text names an end the file no longer holds. A second
+# edit moves an end the first one set. Each on-disk file below holds the old text its edit replaces,
+# under this run folder, one folder per case.
+DEADLINE_DIR = os.path.join(ROOT, "deadline")
+CLOCK_FOR_DISK_CASES = "2026-11-12T13:47:00-06:00"   # Central, the clock the guard's LOCAL_TIME_NOW reads
+DISK_CLOCK = {"LOCAL_TIME_NOW": CLOCK_FOR_DISK_CASES}
+OLD_END_2026 = "2026-11-12T10:00:00Z"
+CAP_END_2030 = "2030-01-01T00:00:00Z"
+WANT_2030 = _central_text(CAP_END_2030)   # the CST reading of CAP_END_2030, the evening before the new year
+MULTI_START_2099 = "2099-03-01T00:00:00Z"
+
+
+def disk_settings(tag, text, beside=False):
+    """Write one project settings file under this run folder, for an edit case to read from disk.
+
+    `beside` puts the file at the folder's top, not in `.claude`, so a shell command can name it with no slash.
+    """
+    parts = [DEADLINE_DIR, tag] + ([] if beside else [".claude"]) + ["settings.local.json"]
+    path = os.path.join(*parts)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    return slash(path)
+
+
+OPUS_LIFT_2026 = json.dumps({"env": {CAP_KEY: OPUS, CAP_FORCE: "1"}, EXPIRY_KEY: OLD_END_2026})
+OPUS_LIFT_WINTER = json.dumps({"env": {CAP_KEY: OPUS, CAP_FORCE: "1"}, EXPIRY_KEY: DEADLINE_WINTER})
+SONNET_UNTIL_WINTER = json.dumps({"env": {CAP_KEY: "sonnet"}, EXPIRY_KEY: DEADLINE_WINTER})
+OPUS_UNTIL_MULTI = json.dumps({"env": {CAP_KEY: OPUS, CAP_FORCE: "1"}, EXPIRY_KEY: MULTI_START_2099})
+
+add("cap deadline: an Edit that changes only the end's value, with no field name in its strings, "
+    "asks under agent-model-cap and names the end in CST",
+    "ask", "agent-model-cap", tool="Edit", cwd=NOGIT,
+    file_path=disk_settings("value-only-2030", OPUS_LIFT_2026),
+    old_string='"%s"' % OLD_END_2026, new_string='"%s"' % CAP_END_2030,
+    carries=(WANT_2030,), env=DISK_CLOCK)
+sh("cap deadline: a sed that changes only the end's value in a settings file asks under agent-model-cap "
+   "and names the end in CST",
+   "sed -i 's/%s/%s/' %s" % (OLD_END_2026, CAP_END_2030, disk_settings("sed-2030", OPUS_LIFT_2026)),
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(WANT_2030,), env=DISK_CLOCK)
+add("cap deadline: an Edit that moves only the end's value from winter to summer asks under "
+    "agent-model-cap and names the end in CDT",
+    "ask", "agent-model-cap", tool="Edit", cwd=NOGIT,
+    file_path=disk_settings("winter-to-summer", OPUS_LIFT_WINTER),
+    old_string='"%s"' % DEADLINE_WINTER, new_string='"%s"' % DEADLINE_SUMMER,
+    carries=(WANT_SUMMER,), env=DISK_CLOCK)
+add("cap deadline: a MultiEdit whose second edit moves only the end's value asks with the end the file "
+    "arrives at, in CDT, and not the end the first edit set",
+    "ask", "agent-model-cap", tool="MultiEdit", cwd=NOGIT,
+    file_path=disk_settings("multi-edit", OPUS_UNTIL_MULTI),
+    edits=[{"old_string": '"%s": "%s"' % (EXPIRY_KEY, MULTI_START_2099),
+            "new_string": '"%s": "%s"' % (EXPIRY_KEY, DEADLINE_WINTER)},
+           {"old_string": '"%s"' % DEADLINE_WINTER, "new_string": '"%s"' % DEADLINE_SUMMER}],
+    carries=(WANT_SUMMER,), lacks=(WANT_WINTER,), env=DISK_CLOCK)
+add("cap deadline: a MultiEdit with one edit that sets the cap-lift end to summer asks and names it in CDT",
+    "ask", "agent-model-cap", tool="MultiEdit", cwd=NOGIT,
+    file_path=disk_settings("multi-edit-one", OPUS_UNTIL_MULTI),
+    edits=[{"old_string": '"%s": "%s"' % (EXPIRY_KEY, MULTI_START_2099),
+            "new_string": '"%s": "%s"' % (EXPIRY_KEY, DEADLINE_SUMMER)}],
+    carries=(WANT_SUMMER,), env=DISK_CLOCK)
+add("cap deadline: an Edit that raises the model and deletes the cap-lift end asks under agent-model-cap "
+    "and shows no end, as the raise alone does",
+    "ask", "agent-model-cap", tool="Edit", cwd=NOGIT,
+    file_path=disk_settings("raise-deletes-end", SONNET_UNTIL_WINTER),
+    old_string='"%s": "sonnet"}, "%s": "%s"' % (CAP_KEY, EXPIRY_KEY, DEADLINE_WINTER),
+    new_string='"%s": "%s"}' % (CAP_KEY, OPUS),
+    carries=(CAP_KEY + " = " + OPUS,), lacks=(" CST", " CDT"), env=DISK_CLOCK)
+add("cap deadline: an Edit that only deletes the cap-lift end stays silent, as on main",
+    "allow", tool="Edit", cwd=NOGIT, file_path=disk_settings("deletes-end-only", SONNET_UNTIL_WINTER),
+    old_string=', "%s": "%s"' % (EXPIRY_KEY, DEADLINE_WINTER), new_string="",
+    silent=True, env=DISK_CLOCK)
+add("cap deadline: an Edit that moves only the end's value to a passed time stays silent",
+    "allow", tool="Edit", cwd=NOGIT, file_path=disk_settings("value-passed", OPUS_LIFT_WINTER),
+    old_string='"%s"' % DEADLINE_WINTER, new_string='"2000-01-01T00:00:00Z"',
+    silent=True, env=DISK_CLOCK)
+add("cap deadline: an Edit that moves only the end's value to an unparseable time stays silent",
+    "allow", tool="Edit", cwd=NOGIT, file_path=disk_settings("value-malformed", OPUS_LIFT_WINTER),
+    old_string='"%s"' % DEADLINE_WINTER, new_string='"next Tuesday"',
+    silent=True, env=DISK_CLOCK)
+# AN EDIT THAT LEAVES THE END ALONE. The end is read from the file an edit arrives at only when the edit
+# changes the file's deadline text, so an unrelated edit to a file that already holds a current end adds
+# no ask of its own.
+UNRELATED_FILE = json.dumps({"env": {CAP_KEY: "sonnet", "TZ": "UTC"}, EXPIRY_KEY: DEADLINE_WINTER})
+add("cap deadline: an Edit that leaves a settings file's cap-lift end alone adds no ask, though the end is on disk",
+    "allow", tool="Edit", cwd=NOGIT, file_path=disk_settings("unrelated-edit", UNRELATED_FILE),
+    old_string='"TZ": "UTC"', new_string='"TZ": "CET"', silent=True, env=DISK_CLOCK)
+# AN EDIT THAT REPEATS THE END LINE. The edit's new text holds the cap-lift end line again, but the end on
+# disk does not move: the file arrives with the same end it had. The end the edit's strings show is not a
+# change, so the edit adds no ask.
+add("cap deadline: an Edit whose new_string repeats the cap-lift end line, with the end unchanged on disk, is silent",
+    "allow", tool="Edit", cwd=NOGIT, file_path=disk_settings("repeat-end-line", UNRELATED_FILE),
+    old_string='"TZ": "UTC"}, "%s": "%s"' % (EXPIRY_KEY, DEADLINE_WINTER),
+    new_string='"TZ": "CET"}, "%s": "%s"' % (EXPIRY_KEY, DEADLINE_WINTER), silent=True, env=DISK_CLOCK)
+
+# THE SAME CENTRAL DAY. This end falls later on the Central day that DISK_CLOCK reads. The date is printed
+# with the time, so a reader sees that the lift ends that day, not on another day.
+SAME_DAY_END = "2026-11-12T20:00:00Z"   # a later time on the same Central day as DISK_CLOCK
+add("cap deadline: a Write that sets a cap-lift end later the same Central day asks and names the date and time in CST",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
+    content=json.dumps({EXPIRY_KEY: SAME_DAY_END}), carries=(_central_text(SAME_DAY_END),), env=DISK_CLOCK)
+
+# A LONG BACKSLASH RUN IN A SED PATTERN, WITH NO SLASH AFTER IT. The regex that reads `s/old/new/` splits each
+# backslash two ways, so when nothing closes the pattern it backtracks over every split: an exponential run that
+# holds the guard for minutes. The second expression moves the cap-lift end, so the case pins the ask as well as
+# the speed. The file is named with no slash, so nothing after the run closes the pattern. The control is the
+# same shape with four backslashes: it must ask within the same limit, so the limit is not failing on startup.
+SED_LIMIT_S = 1
+
+
+def sed_run_case(count, tag):
+    """The settings file and the sed command for a `count`-backslash pattern, in its own folder."""
+    path = disk_settings(tag, OPUS_LIFT_2026, beside=True)
+    command = "sed -i -e 's/%s' -e 's#%s#%s#' settings.local.json" % ("\\" * count, OLD_END_2026, CAP_END_2030)
+    return os.path.dirname(path), command
+
+
+_folder, _command = sed_run_case(200, "sed-run-200")
+add("cap deadline: a sed whose pattern holds a 200-backslash run and no slash after it asks in under 1 s, "
+    "and names the end's date and time in CST",
+    "ask", "agent-model-cap", cwd=_folder, command=_command, carries=(WANT_2030,),
+    max_seconds=SED_LIMIT_S, env=DISK_CLOCK)
+_folder, _command = sed_run_case(4, "sed-run-4")
+# The control expects only the time of the end. It shows the limit does not fail on startup, not that the date is shown.
+add("control: a sed whose pattern holds a 4-backslash run in the same shape asks in under 1 s, "
+    "and names the end's time in CST",
+    "ask", "agent-model-cap", cwd=_folder, command=_command, carries=("18:00 CST",),
+    max_seconds=SED_LIMIT_S, env=DISK_CLOCK)
+
+# A DOUBLE-QUOTED SHELL WRITE WITH ESCAPED QUOTES. Each quote around the key and the value is a backslash
+# and a quote, so the end the file will hold is still in the command, and the ask must show it. The
+# single-quoted printf above is the control for the end, and the escaped echo of the model is the control
+# for the model key: it asks, as it always did.
+ESCAPED_DEADLINE_ECHO = 'echo "{\\"' + EXPIRY_KEY + '\\": \\"' + DEADLINE_WINTER + '\\"}" > ' + PROJ_LOCAL
+sh("cap deadline: a double-quoted echo with escaped quotes that sets only the cap-lift end asks under "
+   "agent-model-cap and names the end in CST",
+   ESCAPED_DEADLINE_ECHO, "ask", "agent-model-cap", cwd=NOGIT, carries=(WANT_WINTER,))
+ESCAPED_MODEL_ECHO = 'echo "{\\"env\\": {\\"' + CAP_KEY + '\\": \\"' + OPUS + '\\"}}" > ' + PROJ_LOCAL
+sh("cap: a double-quoted echo with escaped quotes that sets the model still asks [control]",
+   ESCAPED_MODEL_ECHO, "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
+
+# THE RETIRED FIELD NAME, `_subagentCapUntil`. The guard does not read it, as it reads no unknown key, so a
+# write that sets only the old name is silent, and a model raise that also sets it asks with no end shown.
+# The watch's own reading of the old name is pinned in hooks/test_config_watch.py.
+# The key is built in parts: the glossary check reads the whole word as a retired name in code, and this pin needs it.
+OLD_EXPIRY_KEY = "_" + "sub" + "agentCapUntil"
+add("cap deadline: a Write that sets only the retired _subagentCapUntil name is silent, as an unknown key is",
+    "allow", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
+    content=json.dumps({OLD_EXPIRY_KEY: DEADLINE_WINTER}), silent=True)
+add("cap deadline: a model raise that also sets the retired _subagentCapUntil name asks, and shows no end",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL,
+    content=json.dumps({"env": {CAP_KEY: OPUS, CAP_FORCE: "1"}, OLD_EXPIRY_KEY: DEADLINE_WINTER}),
+    carries=(CAP_KEY + " = " + OPUS,), lacks=(" CST", " CDT", "cap lift ends"))
+
+# THE ASK FOR A DEADLINE-ONLY WRITE. Such a write sets no model, so its ask must not say that it sets the
+# agent model cap, nor tell the approver to approve it only for a model above Sonnet. It says what it
+# sets: the cap-lift end, with the end named in Central.
+WRONG_FOR_END_ONLY = ("this write sets the agent model cap", "a model above Sonnet is wanted")
+END_SET_WORDS = ("sets the cap-lift end", "extends the cap-lift end", "sets the cap lift end",
+                 "extends the cap lift end")
+add("cap deadline: a Write that sets only the cap-lift end does not say it sets the model cap, or ask for a model",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
+    content=json.dumps({EXPIRY_KEY: DEADLINE_WINTER}), carries=(WANT_WINTER,), lacks=WRONG_FOR_END_ONLY)
+add("cap deadline: a Write that sets only the cap-lift end says that it sets or extends the end",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
+    content=json.dumps({EXPIRY_KEY: DEADLINE_WINTER}), carries=(END_SET_WORDS,))
+add("cap deadline: an Edit that moves only a settings file's cap-lift end does not say it sets the model cap, or ask for a model",
+    "ask", "agent-model-cap", tool="Edit", cwd=NOGIT,
+    file_path=disk_settings("copy-edit-end", SONNET_UNTIL_WINTER),
+    old_string='"%s"' % DEADLINE_WINTER, new_string='"%s"' % DEADLINE_SUMMER,
+    carries=(WANT_SUMMER,), lacks=WRONG_FOR_END_ONLY, env=DISK_CLOCK)
+sh("cap deadline: a printf that sets only the cap-lift end does not say it sets the model cap, or ask for a model",
+   "printf '%s' '" + json.dumps({EXPIRY_KEY: DEADLINE_WINTER}) + "' > " + PROJ_SETTINGS,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(WANT_WINTER,), lacks=WRONG_FOR_END_ONLY)
+# The model raise keeps its own wording: it says it sets the model cap, and asks for a model above Sonnet.
+add("cap deadline: a model raise keeps the model wording and asks for a model above Sonnet [control]",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL, content=cap_settings(),
+    carries=("this write sets the agent model cap", "a model above Sonnet is wanted", OPUS))
+
+# ------------------------------------------ a cap-lift end the shell computes at write time
+#
+# THE END IS NOT A LITERAL. A shell write may take its end from a command substitution, `$(date ...)`, a shell
+# variable, or a `--arg` variable. No literal instant follows the field name, so no end shows. The ask must say
+# that the end is computed at write time and is not shown, so the approver reads that the end is absent, not that
+# the write sets none. A model raise with such an end asks for the model and says the same. Each write below is one
+# standalone command: a command that chains a step which asks is refused, not asked (decision ask-commands-run-alone), so no case
+# chains a step ahead of the write. A literal end that does not parse stays silent, as a Write of one does.
+COMPUTED_NOTE = "end computed at write time, not shown"
+COMPUTED_NOW = "$(date -u -d '+30 days' +%FT%TZ)"
+sh("cap deadline: a shell echo whose cap-lift end is a $(date) substitution asks under agent-model-cap and says "
+   "the end is computed at write time",
+   'echo "{\\"%s\\": \\"%s\\"}" > %s' % (EXPIRY_KEY, COMPUTED_NOW, PROJ_LOCAL),
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(COMPUTED_NOTE,), lacks=WRONG_FOR_END_ONLY + (" CST", " CDT"),
+   env=DISK_CLOCK)
+sh("cap deadline: a jq filter whose cap-lift end is a $(date) substitution, writing the settings file, asks under "
+   "agent-model-cap and says the end is computed at write time",
+   "jq --arg d \"%s\" '.%s=$d' %s > %s" % (COMPUTED_NOW, EXPIRY_KEY, PROJ_LOCAL, PROJ_LOCAL),
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(COMPUTED_NOTE,), lacks=WRONG_FOR_END_ONLY + (" CST", " CDT"),
+   env=DISK_CLOCK)
+sh("cap deadline: a shell echo that sets the model and a $(date) cap-lift end asks for the model and says the end "
+   "is computed at write time",
+   'echo "{\\"env\\": {\\"%s\\": \\"%s\\"}, \\"%s\\": \\"%s\\"}" > %s' % (CAP_KEY, OPUS, EXPIRY_KEY, COMPUTED_NOW,
+                                                                  PROJ_LOCAL),
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY, COMPUTED_NOTE), lacks=(" CST", " CDT"),
+   env=DISK_CLOCK)
+sh("cap deadline: a jq filter that sets the model and a $(date) cap-lift end asks for the model and says the end "
+   "is computed at write time",
+   "jq --arg d \"%s\" '.env.%s=\"%s\" | .%s=$d' %s > %s" % (COMPUTED_NOW, CAP_KEY, OPUS, EXPIRY_KEY, PROJ_LOCAL,
+                                                       PROJ_LOCAL),
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY + " = " + OPUS, COMPUTED_NOTE), lacks=(" CST", " CDT"),
+   env=DISK_CLOCK)
+# A --arg that carries a literal instant: the end is read from the command text, so either the note or the end
+# the approver can check (WANT_WINTER) is acceptable. The choice between them is the ask's design, not pinned here.
+sh("cap deadline: a jq --arg whose cap-lift end is a literal instant asks under agent-model-cap and either names "
+   "the end in CST or says the end is computed at write time",
+   "jq -n --arg d '%s' '{\"%s\": $d}' > %s" % (DEADLINE_WINTER, EXPIRY_KEY, PROJ_LOCAL),
+   "ask", "agent-model-cap", cwd=NOGIT, carries=((COMPUTED_NOTE, WANT_WINTER),), lacks=WRONG_FOR_END_ONLY,
+   env=DISK_CLOCK)
+sh("control: a shell echo whose cap-lift end is a literal instant asks, shows the end in CST, and does not say the "
+   "end is computed at write time",
+   ESCAPED_DEADLINE_ECHO, "ask", "agent-model-cap", cwd=NOGIT, carries=(WANT_WINTER,), lacks=(COMPUTED_NOTE,),
+   env=DISK_CLOCK)
+sh("control: a shell echo whose cap-lift end is an unparseable literal stays silent, as the Write of one does",
+   'echo "{\\"%s\\": \\"next Tuesday\\"}" > %s' % (EXPIRY_KEY, PROJ_LOCAL),
+   "allow", cwd=NOGIT, silent=True, env=DISK_CLOCK)
+sh("control: a read-only grep of the cap-lift field asks nothing",
+   "grep %s %s" % (EXPIRY_KEY, PROJ_LOCAL), "allow", cwd=NOGIT, silent=True, env=DISK_CLOCK)
+sh("control: a jq that prints the cap-lift field with a $(date) value and no redirect writes nothing and asks nothing",
+   "jq --arg d \"%s\" '.%s=$d' %s" % (COMPUTED_NOW, EXPIRY_KEY, PROJ_LOCAL),
+   "allow", cwd=NOGIT, silent=True, env=DISK_CLOCK)
+sh("control: a shell echo that writes a $(date) value under another key, not the cap-lift field, asks nothing",
+   'echo "{\\"TZ\\": \\"%s\\"}" > %s' % (COMPUTED_NOW, PROJ_LOCAL),
+   "allow", cwd=NOGIT, silent=True, env=DISK_CLOCK)
+
+# THE PRINTF FORMAT. The end sits in a printf argument, not in the text after the field name, so the field
+# reads no end. Each ask case names the field in the format and takes the end from an argument. The controls are
+# a literal argument that is not a date, and a printf that never names the field.
+PRINTF_END_FORMAT = '{"' + EXPIRY_KEY + '": "%s"}'
+sh("cap deadline: a printf whose cap-lift end is a $(date) argument asks under agent-model-cap and says the end is "
+   "computed at write time",
+   "printf '" + PRINTF_END_FORMAT + "' \"" + COMPUTED_NOW + "\" > " + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(COMPUTED_NOTE,), lacks=WRONG_FOR_END_ONLY + (" CST", " CDT"),
+   env=DISK_CLOCK)
+sh("cap deadline: a printf whose cap-lift end is a shell variable argument asks under agent-model-cap and says the "
+   "end is computed at write time",
+   "printf '" + PRINTF_END_FORMAT + "' \"$D\" > " + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(COMPUTED_NOTE,), lacks=WRONG_FOR_END_ONLY + (" CST", " CDT"),
+   env=DISK_CLOCK)
+sh("cap deadline: a printf %s argument split from the field's text, with a $(date) end argument, asks under "
+   "agent-model-cap and says the end is computed at write time",
+   "printf '%s' '{\"" + EXPIRY_KEY + "\": \"' \"" + COMPUTED_NOW + "\" '\"}' > " + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(COMPUTED_NOTE,), lacks=WRONG_FOR_END_ONLY + (" CST", " CDT"),
+   env=DISK_CLOCK)
+# THE LITERAL END IN A PRINTF ARGUMENT. The field sits in the format and the end is a literal instant in the
+# argument, so no end follows the field in the text. The end is read from the argument and named in Central.
+# The model variant puts the model raise in the same format, so the ask names the model and the end together.
+PRINTF_MODEL_FORMAT = json.dumps({"env": {CAP_KEY: OPUS, CAP_FORCE: "1"}, EXPIRY_KEY: "%s"})
+sh("cap deadline: a printf that names the cap-lift field in its format and takes a literal ISO end as its argument "
+   "asks under agent-model-cap and names the end in CST",
+   "printf '" + PRINTF_END_FORMAT + "' '" + DEADLINE_WINTER + "' > " + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(WANT_WINTER,), lacks=WRONG_FOR_END_ONLY + (COMPUTED_NOTE,),
+   env=DISK_CLOCK)
+sh("cap deadline: a printf that sets the model and names the cap-lift field in its format, with a literal ISO end "
+   "argument, asks for the model and names the end in CST",
+   "printf '" + PRINTF_MODEL_FORMAT + "' '" + DEADLINE_WINTER + "' > " + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY + " = " + OPUS, WANT_WINTER), lacks=(COMPUTED_NOTE,),
+   env=DISK_CLOCK)
+# A SINGLE-QUOTED $D IS LITERAL TEXT. The shell does not expand '$D', so the file would hold "$D", not a date. The
+# guard cannot tell that from a computed end, so it asks and says the end is computed at write time. This is
+# ACCEPTED CONSERVATIVE BEHAVIOUR: a `$` in a printf argument reads as computed, so one harmless write is asked
+# rather than a computed end passing silently.
+sh("cap deadline: a printf whose cap-lift end is a single-quoted $D argument asks under agent-model-cap and says "
+   "the end is computed at write time (accepted conservative behaviour)",
+   "printf '" + PRINTF_END_FORMAT + "' '$D' > " + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(COMPUTED_NOTE,), lacks=WRONG_FOR_END_ONLY + (" CST", " CDT"),
+   env=DISK_CLOCK)
+sh("control: a printf whose cap-lift end argument is a literal that is not a date stays silent",
+   "printf '" + PRINTF_END_FORMAT + "' 'next Tuesday' > " + PROJ_LOCAL,
+   "allow", cwd=NOGIT, silent=True, env=DISK_CLOCK)
+sh("control: a printf that never names the cap-lift field, with a $(date) argument, asks nothing",
+   "printf '{\"TZ\": \"%s\"}' \"" + COMPUTED_NOW + "\" > " + PROJ_LOCAL,
+   "allow", cwd=NOGIT, silent=True, env=DISK_CLOCK)
+
+# THE COMPUTED END IN EACH SHELL SPELLING. A bare variable, a braced variable, a backtick substitution and a jq
+# `--arg` variable each compute the end, so each asks. A `--arg` bound to an unparseable literal stays silent.
+sh("cap deadline: an echo whose cap-lift end is a bare $D variable asks under agent-model-cap and says the end is "
+   "computed at write time",
+   'echo "{\\"' + EXPIRY_KEY + '\\": \\"$D\\"}" > ' + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(COMPUTED_NOTE,), lacks=WRONG_FOR_END_ONLY + (" CST", " CDT"),
+   env=DISK_CLOCK)
+sh("cap deadline: an echo whose cap-lift end is a braced ${D} variable asks under agent-model-cap and says the end is "
+   "computed at write time",
+   'echo "{\\"' + EXPIRY_KEY + '\\": \\"${D}\\"}" > ' + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(COMPUTED_NOTE,), lacks=WRONG_FOR_END_ONLY + (" CST", " CDT"),
+   env=DISK_CLOCK)
+sh("cap deadline: an echo whose cap-lift end is a backtick substitution asks under agent-model-cap and says the end is "
+   "computed at write time",
+   'echo "{\\"' + EXPIRY_KEY + '\\": \\"`date -u +%FT%TZ`\\"}" > ' + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(COMPUTED_NOTE,), lacks=WRONG_FOR_END_ONLY + (" CST", " CDT"),
+   env=DISK_CLOCK)
+sh("cap deadline: a jq --arg bound to a shell variable, set on the field, asks under agent-model-cap and says the end "
+   "is computed at write time",
+   "jq --arg d \"$D\" '." + EXPIRY_KEY + "=$d' f > " + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(COMPUTED_NOTE,), lacks=WRONG_FOR_END_ONLY + (" CST", " CDT"),
+   env=DISK_CLOCK)
+sh("control: a jq --arg bound to an unparseable literal, set on the cap-lift field, stays silent",
+   "jq --arg d 'unparseable' '." + EXPIRY_KEY + "=$d' f > " + PROJ_LOCAL,
+   "allow", cwd=NOGIT, silent=True, env=DISK_CLOCK)
+
+# THE WORDING OF A COMPUTED END. The end is not printed, so the ask must not say "shown here", which tells the
+# approver the end is on screen. Each ask names a computed end and states that it is not shown.
+sh("cap deadline: a computed end with no model says the end is not shown, and does not say it is shown here",
+   'echo "{\\"' + EXPIRY_KEY + '\\": \\"' + COMPUTED_NOW + '\\"}" > ' + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(COMPUTED_NOTE,), lacks=("shown here",), env=DISK_CLOCK)
+sh("cap deadline: a computed end with a model says the end is not shown, and does not say it is shown here",
+   'echo "{\\"env\\": {\\"' + CAP_KEY + '\\": \\"' + OPUS + '\\"}, \\"' + EXPIRY_KEY + '\\": \\"' + COMPUTED_NOW
+   + '\\"}" > ' + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY, COMPUTED_NOTE), lacks=("shown here",), env=DISK_CLOCK)
+
+# THE WORDING OF A MODEL-ONLY ASK. A write that sets no end shows none, so its ask must not say that an end is
+# "shown here". A write that sets a readable end shows it, so that ask may name the end.
+add("cap: a Write that sets only the model, with no end, asks and does not say the end is shown here",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL, content=cap_settings(),
+    carries=(OPUS,), lacks=("shown here",))
+sh("cap: a shell write that sets only the model, with no end, asks and does not say the end is shown here",
+   HIDDEN_CAP_WRITE, "ask", "agent-model-cap", cwd=NOGIT, carries=(OPUS,), lacks=("shown here",))
+add("cap deadline: a model raise that also sets a readable cap-lift end asks and names the end in CST",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL, content=OPUS_LIFT_WINTER,
+    carries=(OPUS, WANT_WINTER), env=DISK_CLOCK)
+
+# ----------------------------------------------------- one reading of each offset form of the end
+#
+# The same instant, 03:30 UTC on 15 January 2099 (21:30 CST on the 14th), written in each form. The
+# watch reads a form with no offset as UTC. The guard must show the same end for every form. The Z form
+# is the row above, "a Write that sets only the cap-lift end asks ... in CST".
+OFFSET_FORMS = {
+    "-05:00": "2099-01-14T22:30:00-05:00",
+    "space": "2099-01-15 03:30:00",
+    "naive": "2099-01-15T03:30:00",
+}
+for _form, _text in sorted(OFFSET_FORMS.items()):
+    add("cap deadline: a Write that sets the cap-lift end in the %s form asks under agent-model-cap and "
+        "names the end in CST" % _form,
+        "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
+        content=json.dumps({EXPIRY_KEY: _text}), carries=(WANT_WINTER,), env=DISK_CLOCK)
+# A NAIVE END IS UTC WHATEVER THE MACHINE'S ZONE. On a machine east of UTC, the naive 03:30 read as local
+# time is 18:30 UTC the day before, which shows 12:30 CST. The zone is set for this run's process only.
+add("cap deadline: a Write that sets the cap-lift end in the naive form reads it as UTC on a machine east of UTC",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
+    content=json.dumps({EXPIRY_KEY: OFFSET_FORMS["naive"]}), carries=(WANT_WINTER,),
+    env=dict(DISK_CLOCK, TZ="JST-9"))
+
+# THE CLOCK MODULE CANNOT BE IMPORTED. The end then reads as the raw text the file holds, and the write still
+# asks, with "clock unreadable" where the Central time would be. A missing clock must never turn a deadline
+# write silent (decision guard-hooks-fail-closed). The copy is the guard family, with a local_time.py that
+# raises ImportError, built once under this run's folder.
+CLOCKLESS_DIR = os.path.join(ROOT, "clockless")
+CLOCKLESS_GUARD = os.path.join(CLOCKLESS_DIR, "guard.py")
+
+
+def build_clockless():
+    os.makedirs(CLOCKLESS_DIR, exist_ok=True)
+    copy_guard_family(CLOCKLESS_DIR)
+    with open(os.path.join(CLOCKLESS_DIR, "local_time.py"), "w", encoding="utf-8") as handle:
+        handle.write('raise ImportError("local_time is unavailable in this copy")\n')
+
+
+lazy_fixture([CLOCKLESS_GUARD], build_clockless)
+add("cap deadline: a Write that sets only the cap-lift end still asks when the clock module cannot be imported, "
+    "and shows the raw end as clock unreadable",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
+    content=json.dumps({EXPIRY_KEY: DEADLINE_WINTER}), guard=CLOCKLESS_GUARD,
+    carries=(DEADLINE_WINTER, "clock unreadable"), lacks=(WANT_WINTER,))
+
 # =========================================================================== 6c. ask alone

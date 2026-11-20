@@ -1142,8 +1142,8 @@ class RepoGlossaryTests(unittest.TestCase):
 
 # o13 lane B retired these names (GLOSSARY.md rows agent, mutation test, red run, command). Claude
 # Code's own names stay: the hook events, `subagent_type`, the CLAUDE_CODE_* settings keys and the
-# `subagents/` transcript folder. Two old names stay readable until their end day, each in one file:
-# the `--subagent` flag of local_time.py and the `_subagentCapUntil` field of config_watch.py.
+# `subagents/` transcript folder. One old name stays readable until its end day, in one file: the
+# `--subagent` flag of local_time.py. The retired `_subagentCapUntil` field is read by no module; only its tests name it.
 RETIRED = (r"(?i)sub-?agent|harness[-_ ]scope|HARNESS_SCOPE|mutation harness|AUTHOR_HARNESS"
            r"|ask-steps-run-alone|\b(?:ask|count|harmless|background)_steps?\b|\b(?:ask|harmless|chained) steps?\b"
            r"|roles-one-role-per-worker|output-never-echo-worker-report|worker_transcript"
@@ -1152,9 +1152,9 @@ PLATFORM = (r"SubagentStop|SubagentStart|subagent_type|(?:\\u0043|C)LAUDE_CODE_\
             r"|[\"'/`]subagents(?=[\"'/`])|subagents/|SUBAGENT_MODEL")
 STAYS = {  # path: the one old name it may still hold, and why
     "hooks/local_time.py": "--subagent",            # read until OLD_FLAG_ENDS
-    "hooks/config_watch.py": "_subagentCapUntil",   # read until OLD_NAME_ENDS
     "hooks/test_local_time.py": "--subagent",       # pins the old flag until then
-    "hooks/test_config_watch.py": "_subagentCapUntil",
+    "hooks/test_config_watch.py": "_subagentCapUntil",  # pins that the retired field is not read
+    "tests/guard/s19328-model-cap.py": "_subagentCapUntil",  # pins that the guard does not read it
     "testing/skip-locally-fail-in-ci.test.mjs": "Red proof",  # header shared with copies in other repos
     "lint/test_find_copies.py": "Red proof",        # the fixture copy of that header
     "mods/plain-diff/docs/mockup.html": "red proof",  # sample diff text

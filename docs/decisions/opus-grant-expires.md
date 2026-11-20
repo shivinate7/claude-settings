@@ -1,4 +1,4 @@
-# An Opus grant expires within 24 hours
+# An Opus grant ends at the deadline the owner approves
 
 ## The ruling
 
@@ -6,10 +6,12 @@ An Opus agent is enabled for one repository, on the owner's grant in chat (`role
 
 A write that sets the fallback is always an ask (guard rule `agent-model-cap`). `hooks/config_watch.py` expires it, because a clock protects better than memory.
 
+The deadline has no length cap. Owner, 2026-11-12 12:54 CST (page item 602, pick a): the end time joins the existing ask and shows its end in US Central, 24-hour clock with the zone, and it allows any length. The ask is the check on the length, and the owner reads the end before he approves.
+
 The raise outlives the turn that wrote it. Two parts guard it. Both key on `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` alone.
 
-- Guard rule `agent-model-cap` asks on the write. It matches `_FORCE` too, so the ask still fires on a stale file, or another repository, that sets the flag.
-- `hooks/config_watch.py` lifts the cap for any value of either model key other than `sonnet`. The deadline `_agentCapUntil` is a top-level key of `.claude/settings.local.json`, outside `env`, at most 24 hours ahead. Only the watch reads it. A deadline that is missing, unparseable, passed or too far out gets the file reverted to the `prior` content the watch holds. With no `prior` on record the watch reports UNKNOWN and asks the owner to read the file by hand.
+- Guard rule `agent-model-cap` asks on the write. It matches `_FORCE` too, so the ask still fires on a stale file, or another repository, that sets the flag. A write that sets a current `_agentCapUntil`, with or without a model key, asks too. The ask prints the end's date, time and zone in US Central, such as `cap lift ends 2027-01-14 21:30 CST`. An Edit, a MultiEdit or a `sed` shows the end the file arrives at, read from the file on disk with the change applied. A write that sets only the end asks with its own wording: it sets the cap-lift end, with the end shown. A double-quoted shell write with escaped quotes is read after un-escaping. A shell write that sets the end from a command substitution, a backtick, a shell variable or a `jq --arg` variable asks, and the ask says the end is computed at write time and not shown, so compute and check it first. It never says the end is shown here. A shell `printf` that names the field takes the end from a later argument: a computed argument asks the same way, and a literal ISO argument asks and shows the end in Central, like any literal end. A literal argument that is no date, or a `printf` that never names the field, adds no ask. A `jq --arg` with a literal end is read and shown. A literal end that is passed or malformed, or a write that names no end, adds no ask: the watch handles it. Owner R37 and page item 602 pick a: the ask is the check on the length, and the owner reads the end before he approves.
+- `hooks/config_watch.py` lifts the cap for any value of either model key other than `sonnet`. The deadline `_agentCapUntil` is a top-level key of `.claude/settings.local.json`, outside `env`, at any length ahead. The field's former name is no longer read (its 2026-11-09 retirement date passed): a lift whose only end is under the former name reads as missing. The watch revokes on it, and the guard reads it only to show the end in the ask. A deadline that is missing, unparseable or passed gets the file reverted to the `prior` content the watch holds. With no `prior` on record the watch reports UNKNOWN and asks the owner to read the file by hand.
 
 The model per role, the default and the ceiling are in `agent-model-cap`.
 
