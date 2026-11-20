@@ -1066,6 +1066,95 @@ class Selector(unittest.TestCase):
         self.assertEqual(self.commands_of(outputs, "commands_macos"), {a: "bash"},
                          "commands_macos does not read the shell-macos job's /bin/bash line as bash")
 
+    # A test that imports a changed hook module is selected with it. A test is named by its module (test_<module>.py), so a
+    # change to ci_wake.py alone misses a test that imports ci_wake, such as hooks/test_stall_watch_stop.py. The import
+    # below is the form that file uses: beside the module, with a comment after it.
+    IMPORT_CI_WAKE = "import ci_wake  # noqa: E402  the one home of the no-workflows read, beside this file\n"
+
+    def test_a_change_to_a_hook_module_lists_the_test_that_imports_it(self):
+        own, importer, module = "hooks/test_ci_wake.py", "hooks/test_stall_watch_stop.py", "hooks/ci_wake.py"
+        base = with_ci({module: "old\n", own: "old\n", importer: self.IMPORT_CI_WAKE + "\n\ndef test_stop():\n    assert True\n"},
+                       [own, importer])
+        files, _ = self.listed(base, {module: "new\n"})
+        self.assertIn(own, files, f"{own} is not listed for a change to {module}, so this case probes nothing")
+        self.assertIn(importer, files, f"{importer} imports {module} and is not listed")
+        windows, _, _ = self.per_os(base, {module: "new\n"})
+        self.assertIn(importer, windows, f"{importer} imports {module} and is not in files_windows, so the Windows leg skips it")
+
+    def test_a_test_that_names_the_module_in_a_from_import_is_listed(self):
+        module, importer = "hooks/ci_wake.py", "hooks/test_wake_gh.py"
+        base = with_ci({module: "old\n", importer: "from ci_wake import gh\n\n\ndef test_gh():\n    assert gh\n"}, [importer])
+        files, _ = self.listed(base, {module: "new\n"})
+        self.assertIn(importer, files, f"{importer} does `from ci_wake import gh` and is not listed for a change to {module}")
+
+    def test_a_test_outside_hooks_that_imports_the_module_inside_a_function_is_listed(self):
+        """An indented import counts. lint/test_hook_platform_exit.py imports ci_wake inside its test functions."""
+        module, importer = "hooks/ci_wake.py", "lint/test_wake_lazy.py"
+        base = with_ci({module: "old\n", importer: "def test_lazy():\n    import ci_wake\n    assert ci_wake\n"}, [importer])
+        files, _ = self.listed(base, {module: "new\n"})
+        self.assertIn(importer, files, f"{importer} imports {module} inside a function and is not listed")
+
+    def test_an_import_after_a_lone_quote_and_a_quoted_hash_is_listed(self):
+        """A lone quote in a comment, a `#` inside a string and a triple quote inside a string open nothing that hides the
+        import after them."""
+        module, importer = "hooks/ci_wake.py", "hooks/test_quotes.py"
+        text = ("# don't stop at this quote\n"
+                'MARK = "# not a comment"\n'
+                "TRIPLE = '\"\"\"'\n"
+                "import ci_wake\n\n\ndef test_quotes():\n    assert ci_wake\n")
+        base = with_ci({module: "old\n", importer: text}, [importer])
+        files, _ = self.listed(base, {module: "new\n"})
+        self.assertIn(importer, files, f"{importer} imports {module} after a lone quote and a quoted hash, and is not listed")
+
+    def test_an_import_named_only_in_a_comment_or_a_string_is_not_listed(self):
+        """The control for the scanner: the module name appears in a docstring, a comment and a string, and no import."""
+        module, importer = "hooks/ci_wake.py", "hooks/test_mentions.py"
+        text = ('"""Covers ci_wake.\n\nimport ci_wake  is text here, not an import.\n"""\n'
+                "# import ci_wake\n"
+                'NOTE = """\nfrom ci_wake import gh\n"""\n\n\ndef test_mentions():\n    assert True\n')
+        base = with_ci({module: "old\n", importer: text}, [importer])
+        files, _ = self.listed(base, {module: "new\n"})
+        self.assertNotIn(importer, files, f"{importer} names {module} only in a comment or a string, and is listed")
+
+    def test_a_module_whose_name_starts_with_the_changed_name_is_not_an_importer(self):
+        """The control for the name match: ci_wake_extra and ci_wake_v2 are other modules."""
+        module, importer = "hooks/ci_wake.py", "hooks/test_wake_extra.py"
+        text = "import ci_wake_extra\nfrom ci_wake_v2 import gh\n\n\ndef test_extra():\n    assert True\n"
+        base = with_ci({module: "old\n", importer: text}, [importer])
+        files, _ = self.listed(base, {module: "new\n"})
+        self.assertNotIn(importer, files, f"{importer} imports other modules, not {module}, and is listed")
+
+    def test_a_product_module_that_imports_the_changed_module_is_not_listed(self):
+        """The control for the test-only list: hooks/guard_user.py imports ci_wake in a function, and it is no test."""
+        module, product = "hooks/ci_wake.py", "hooks/guard_user.py"
+        base = with_ci({module: "old\n", product: "def check():\n    import ci_wake\n    return ci_wake\n"})
+        files, _ = self.listed(base, {module: "new\n"})
+        self.assertNotIn(product, files, f"{product} imports {module} and is listed, though it is no test")
+        self.assertEqual(files, [], f"a change to {module} with no importing test listed {files}")
+
+    def test_a_hook_module_no_test_imports_lists_no_extra_test(self):
+        """The control for the brief's case: hooks/test_other.py is a test beside lonely.py, and it imports another module."""
+        module, other = "hooks/lonely.py", "hooks/test_other.py"
+        helper_test = "import helper\n\n\ndef test_other():\n    assert helper\n"
+        base = with_ci({module: "old\n", other: helper_test, "hooks/helper.py": "old\n"}, [other])
+        files, _ = self.listed(base, {module: "new\n"})
+        self.assertEqual(files, [], f"a change to {module}, which no test imports, listed {files}")
+
+    def test_every_test_that_imports_a_changed_hook_module_is_listed_and_no_other(self):
+        """The full state: three importers in two folders, one of them a from-import, and a bystander test with no import."""
+        module = "hooks/ci_wake.py"
+        importers = ["hooks/test_stall_watch_stop.py", "hooks/test_wake_gh.py", "lint/test_wake_lazy.py"]
+        bystander = "hooks/test_bystander.py"
+        base = with_ci({
+            module: "old\n",
+            importers[0]: self.IMPORT_CI_WAKE + "\n\ndef test_stop():\n    assert True\n",
+            importers[1]: "from ci_wake import gh\n\n\ndef test_gh():\n    assert gh\n",
+            importers[2]: "def test_lazy():\n    import ci_wake\n    assert ci_wake\n",
+            bystander: "def test_bystander():\n    assert True\n",
+        }, importers + [bystander])
+        files, _ = self.listed(base, {module: "new\n"})
+        self.assertEqual(files, sorted(importers), f"the listed tests are {files}, not the tests that import {module}")
+
 
 if __name__ == "__main__":
     unittest.main()
