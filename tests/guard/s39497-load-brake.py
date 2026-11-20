@@ -32,7 +32,8 @@ FAMILY = "load-brake"
 #                  claude_procs key in a reading changes nothing. A cpu_pct key in a stub reading changes
 #                  nothing either: a change that still reads the CPU refuses on those stubs and fails here.
 #                  The OS sources, all faked by THE FAKE HOST: darwin reads memory through sysctlbyname;
-#                  linux reads memory unread; both read the disk through shutil.disk_usage: the home folder, or "/"
+#                  linux reads memory from /proc/meminfo (MemTotal and MemAvailable; owner, 2026-11-19 21:30 CST, "read memory on
+#                  linux if u can"); both read the disk through shutil.disk_usage: the home folder, or "/"
 #                  in a cloud session. Neither reads the CPU ticks, the load average, or waits.
 # The judge must call it by its bare name, so the probe's patch (set on every guard module that
 # holds the name) is the function that runs. A function the probe cannot replace fails every case.
@@ -136,6 +137,12 @@ def under_fake(read, fake):
         if str(file) == "/proc/stat":
             user, system, idle, nice = sample("stat")
             return io.StringIO("cpu  %d %d %d %d 0 0 0 0 0 0\n" % (user, nice, system, idle))
+        if str(file) == "/proc/meminfo":
+            # MemAvailable leaves fake["memory"] percent of MemTotal in use. "unreadable" makes the read fail.
+            if fake.get("meminfo") == "unreadable":
+                raise OSError("fake: /proc/meminfo is unreadable")
+            total = 1000000
+            return io.StringIO("MemTotal: %d kB\nMemAvailable: %d kB\n" % (total, total - int(total * fake["memory"] / 100.0)))
         return real_open(file, *args, **kwargs)
 
     total, free = int(fake["disk_total_gb"] * GB), int(fake["disk_free_gb"] * GB)
@@ -280,12 +287,12 @@ def lb_gb(free, total):
     return re.compile(re.escape("disk %.1f GB free of %.0f GB" % (free, total)))
 
 
-def lb_fake(platform, busy=10.0, load=0.5, memory=40, disk_total=926.0, disk_free=500.0):
+def lb_fake(platform, busy=10.0, load=0.5, memory=40, disk_total=926.0, disk_free=500.0, meminfo="read"):
     """A fake host for THE FAKE HOST: `busy` the CPU share the tick samples would show, `load` the 1-minute
     load average, `memory` the percent in use, and the disk in GB. The defaults are a quiet host with room on
     the disk."""
     return {"platform": platform, "busy": busy, "load": load, "memory": memory,
-            "disk_total_gb": disk_total, "disk_free_gb": disk_free}
+            "disk_total_gb": disk_total, "disk_free_gb": disk_free, "meminfo": meminfo}
 
 
 def lb_reading(**changes):
@@ -888,6 +895,49 @@ lb_add("a Bash call that quotes bin/ci-job --lint in an echo, at a full disk: al
        lb_decision_check("Bash", lb_reading(disk_free_gb=3.1, disk_total_gb=926.0), "allow",
                          tool_input={"command": 'echo "bin/ci-job --lint"'}, reads=0))
 
+# LINUX MEMORY (owner, 2026-11-19 21:30 CST, "read memory on linux if u can"; decision machine-load-brake). On Linux the
+# reader reads memory from /proc/meminfo, so memory over 95% refuses a background Agent start and a background lint start
+# (merge --lane-lint, bin/ci-job --lint), locally and in a cloud session. Memory at 50% allows both. An unreadable
+# meminfo is unread and counts as normal, and a full disk still refuses through it. The fake host serves the file.
+LB_MEM96 = lb_names("memory", "96.0", "96")
+LB_MEM_LINUX_NAMES = LB_MEM96 + (LB_LOAD_RULE, LB_LOAD_CITE, LB_OVERRIDE_LINE)
+LB_BRAKE_NAMES_DISK = (lb_gb(3.1, 926), LB_LOAD_CITE)
+lb_add("linux, local, Agent run_in_background true, memory 96%: full, refused, names the memory and the override line",
+       lb_decision_check("Agent", None, "deny", LB_MEM_LINUX_NAMES, background=True,
+                         fake=lb_fake("linux", memory=96.0)))
+lb_add("linux, local, merge --lane-lint background, memory 96%: full, refused, names the memory and the override line",
+       lb_decision_check("Bash", None, "deny", LB_MEM_LINUX_NAMES, tool_input=LB_LANE_LINT_BG,
+                         fake=lb_fake("linux", memory=96.0)))
+lb_add("linux, local, bin/ci-job --lint background, memory 96%: full, refused, names the memory and the override line",
+       lb_decision_check("Bash", None, "deny", LB_MEM_LINUX_NAMES, tool_input=LB_CI_LINT_BG,
+                         fake=lb_fake("linux", memory=96.0)))
+lb_add("linux, local, Agent run_in_background true, memory 50%: allowed",
+       lb_decision_check("Agent", None, "allow", background=True, fake=lb_fake("linux", memory=50.0)))
+lb_add("linux, local, merge --lane-lint background, memory 50%: allowed",
+       lb_decision_check("Bash", None, "allow", tool_input=LB_LANE_LINT_BG, fake=lb_fake("linux", memory=50.0),
+                         reads=None))
+lb_add("linux, local, bin/ci-job --lint background, memory 50%: allowed",
+       lb_decision_check("Bash", None, "allow", tool_input=LB_CI_LINT_BG, fake=lb_fake("linux", memory=50.0),
+                         reads=None))
+lb_add("linux, local, Agent run_in_background true, meminfo unreadable at 96%: unread, allowed",
+       lb_decision_check("Agent", None, "allow", background=True,
+                         fake=lb_fake("linux", memory=96.0, meminfo="unreadable")))
+lb_add("linux, local, Agent run_in_background true, meminfo unreadable and 3.1 GB free of 926 GB: the disk still refuses",
+       lb_decision_check("Agent", None, "deny", LB_BRAKE_NAMES_DISK, background=True,
+                         fake=lb_fake("linux", memory=96.0, meminfo="unreadable", disk_free=3.1, disk_total=926.0)))
+lb_add("linux, cloud, Agent run_in_background true, memory 96%: full, refused, names the memory",
+       lb_decision_check("Agent", None, "deny", LB_MEM_LINUX_NAMES, background=True, remote="true",
+                         fake=lb_fake("linux", memory=96.0)))
+lb_add("linux, cloud, merge --lane-lint background, memory 96%: full, refused, names the memory",
+       lb_decision_check("Bash", None, "deny", LB_MEM_LINUX_NAMES, tool_input=LB_LANE_LINT_BG, remote="true",
+                         fake=lb_fake("linux", memory=96.0)))
+lb_add("linux, cloud, bin/ci-job --lint background, memory 96%: full, refused, names the memory",
+       lb_decision_check("Bash", None, "deny", LB_MEM_LINUX_NAMES, tool_input=LB_CI_LINT_BG, remote="true",
+                         fake=lb_fake("linux", memory=96.0)))
+lb_add("linux, cloud, Agent run_in_background true, memory 50%: allowed, and the reader does not run",
+       lb_decision_check("Agent", None, "allow", background=True, remote="true",
+                         fake=lb_fake("linux", memory=50.0), reads=None))
+
 # CLOUD. With CLAUDE_CODE_REMOTE=true, a new Agent, Task or Workflow start is refused at a full disk: free space under
 # the full point, which each case reads from guard.py rather than copying. A cloud lane that fills the disk makes its
 # writes fail, so the start is what gets stopped. Memory and busy never brake a cloud start. A running agent or lane is
@@ -966,8 +1016,9 @@ lb_add("cloud: an agent's Agent call, memory 97.2%: allowed",
 lb_add("cloud: Agent, darwin host at memory 97.2%, run_in_background false, the real reader: allowed",
        lb_decision_check("Agent", None, "allow", background=False, fake=lb_fake("darwin", memory=97.2), reads=None,
                          remote=LB_CLOUD))
-# A cloud start at a full disk is refused. Memory is unread here, as on the cloud's linux host, so the disk alone trips
-# it. The refusal names the disk reading and the sweep command, and never tells the session to wait.
+# A cloud start at a full disk is refused. Memory is forced unread here, so the disk alone trips (a cloud host's memory
+# is read from /proc/meminfo, owner, 2026-11-19 21:30 CST; the cloud cases of that read are in the LINUX MEMORY block).
+# The refusal names the disk reading and the sweep command, and never tells the session to wait.
 for _tool, _bg, _say in LB_CLOUD_STARTS:
     lb_add("cloud: %s, %s, memory unread, disk 4.0 GB free of 252 GB (under the full point): refused, names the disk "
            "and sweep.py, never says wait" % (_tool, _say),
