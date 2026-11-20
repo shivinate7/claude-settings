@@ -1834,6 +1834,11 @@ _RUN_DIR_OPEN_THEN_SLEEP = (
     "f = open(sys.argv[1], encoding='utf-8')\n"  # the file is open before the ready file is written
     "open(sys.argv[2], 'w', encoding='utf-8').write('open')\n"
     "time.sleep(120)\n")
+_RUN_DIR_ENV_OPEN_THEN_SLEEP = (  # the paths come from the environment, so argv names neither
+    "import os, time\n"
+    "f = open(os.environ['RUN_DIR_HELD'], encoding='utf-8')\n"
+    "open(os.environ['RUN_DIR_READY'], 'w', encoding='utf-8').write('open')\n"
+    "time.sleep(120)\n")
 
 
 class RunDirHolderTests(unittest.TestCase):
@@ -1868,17 +1873,22 @@ class RunDirHolderTests(unittest.TestCase):
         require(os.path.isfile(os.path.join(tree, "hooks", "guard.py")), "the run dir's tree lacks hooks/guard.py")
         return root, run, tree
 
-    def hold(self, cwd, argv=(), script=_RUN_DIR_SLEEP):
-        """A live child with cwd CWD, stopped at cleanup."""
-        proc = subprocess.Popen([sys.executable, "-c", script, *argv], cwd=cwd,
+    def hold(self, cwd, argv=(), script=_RUN_DIR_SLEEP, env=None):
+        """A live child with cwd CWD, stopped at cleanup. ENV, when given, is the child's whole environment."""
+        proc = subprocess.Popen([sys.executable, "-c", script, *argv], cwd=cwd, env=env,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.addCleanup(_stop_child, proc)
         return proc
 
-    def hold_open_file(self, name, path):
-        """A live child with PATH open, once it has opened it (a ready file is the wait)."""
+    def hold_open_file(self, name, path, via_env=False):
+        """A live child with PATH open, once it has opened it (a ready file is the wait). With VIA_ENV the
+        path reaches the child through its environment, so its argv names no path at all."""
         ready = os.path.join(self.base, name + "-ready")
-        proc = self.hold(self.base, [path, ready], _RUN_DIR_OPEN_THEN_SLEEP)
+        if via_env:
+            env = dict(os.environ, RUN_DIR_HELD=path, RUN_DIR_READY=ready)
+            proc = self.hold(self.base, (), _RUN_DIR_ENV_OPEN_THEN_SLEEP, env=env)
+        else:
+            proc = self.hold(self.base, [path, ready], _RUN_DIR_OPEN_THEN_SLEEP)
         _read_when_ready(ready)
         return proc
 
@@ -1905,6 +1915,20 @@ class RunDirHolderTests(unittest.TestCase):
     def test_a_process_holding_an_open_file_in_the_run_dir_keeps_the_tree(self):
         root, run, tree = self.build_run("open-file")
         proc = self.hold_open_file("open-file", os.path.join(tree, "hooks", "guard.py"))
+        self.assert_kept_for_holder(root, tree, proc)
+
+    @unittest.skipIf(os.name == "nt", "the open-file read is POSIX only in this check")
+    def test_a_process_with_no_run_dir_path_in_argv_holding_an_open_file_keeps_the_tree(self):
+        """The argv arm and the cwd arm both miss this holder. Its path comes from an environment variable,
+        so its argv names no path under the run dir, and its cwd is the suite's temp base, outside it. Only
+        the open-file read keeps the tree."""
+        root, run, tree = self.build_run("open-file-env")
+        proc = self.hold_open_file("open-file-env", os.path.join(tree, "hooks", "guard.py"), via_env=True)
+        for arg in proc.args:
+            require(run not in arg and os.path.realpath(run) not in arg,
+                    "the holder's argv names the run dir, so the argv arm could keep it: %r" % arg)
+        require(not os.path.realpath(self.base).startswith(os.path.realpath(run) + os.sep),
+                "the holder's cwd is inside the run dir, so the cwd arm could keep it")
         self.assert_kept_for_holder(root, tree, proc)
 
     def test_a_process_with_cwd_at_the_run_dir_itself_keeps_the_tree(self):
