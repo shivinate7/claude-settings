@@ -27687,12 +27687,15 @@ class WorkFolderOnSignal(unittest.TestCase):
         """The work folders of the run `pid` in its TMPDIR."""
         return [n for n in os.listdir(tmp) if n.startswith("mutate_guard_%d-" % pid)]
 
+    @unittest.skipIf(os.name == "nt", "a Windows process gets no SIGTERM handler run, so its work folder is not removed there")
     def test_sigterm_removes_the_work_folder(self):
         self.assert_signal_removes_work_folder(signal.SIGTERM)
 
+    @unittest.skipIf(os.name == "nt", "a Windows process gets no SIGHUP handler run, so its work folder is not removed there")
     def test_sighup_removes_the_work_folder(self):
         self.assert_signal_removes_work_folder(signal.SIGHUP)
 
+    @unittest.skipIf(os.name == "nt", "a Windows process gets no SIGTERM handler run, so its work folder is not removed there")
     def test_a_second_term_in_clean_up_still_removes_the_work_folder(self):
         """A group TERM sends the child a second TERM while the work folder is removed. That TERM must not cut the removal short."""
         proc, tmp = self.start_child(second_term=True)
