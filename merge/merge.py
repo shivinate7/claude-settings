@@ -5339,6 +5339,7 @@ REVIEW_KINDS, REVIEW_GUARDS = ("normal", "delete-only", "docs-only"), ("yes", "n
 REVIEW_ROLES, REVIEW_VERDICTS = ("reviewer", "design-reviewer"), ("PASS", "FAIL", "PARTIAL")
 REVIEW_NETS = ("not owed", "zero", "positive", "negative")
 REVIEW_MODEL = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+REVIEW_ROUND_LINE = rf"Round (\d+): ({'|'.join(REVIEW_ROLES)}), ({REVIEW_MODEL}), ({'|'.join(REVIEW_VERDICTS)})"  # the one form of a Round line, read by parse_review and unparsed_cause
 REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds. The cap no review row may pass (the guard's REVIEW_POLICY_CAP; this file does not load the guard at import). A change's own last round is its review row's.
 REVIEW_GRANT = r"item \d+ [a-z], owner, \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CST|CDT)"  # the owner's grant of one round past REVIEW_LAST_ROUND
 REVIEW_SHA = r"[0-9a-f]{40}"
@@ -5447,7 +5448,7 @@ def parse_review(text):
                 return None
             fix = f.group(1, 2, 3, 4)
             continue
-        m = re.fullmatch(rf"Round (\d+): ({'|'.join(REVIEW_ROLES)}), ({REVIEW_MODEL}), ({'|'.join(REVIEW_VERDICTS)})", line, re.ASCII)
+        m = re.fullmatch(REVIEW_ROUND_LINE, line, re.ASCII)
         if not m:
             return None
         i = int(m.group(1))
@@ -5461,8 +5462,9 @@ def parse_review(text):
 
 def unparsed_cause(text):
     """-> why parse_review(text) is None, as one phrase naming the offending line or the missing field, for a comment that opens with the marker.
-    It walks parse_review's checks in its order, so the first break it names is the first that parse_review hits: the marker, the four fields,
-    text after or before the CI line, the values, then the first line of the middle that is no Grant, Round, Fix check or Owner accepted line.
+    It names one real break, checking in this order: the marker, the four fields, text after or before the CI line, the values, then the first
+    line of the middle that is no Grant, Fix check, Owner accepted or well-formed Round line. parse_review checks the CI line and the length
+    before the fields, so on a record with two breaks the two may name different ones.
     A break it has no line for (rounds out of order, a skipped number, a misplaced optional line) gets the general phrase at the end."""
     lines = text.splitlines()
     if "---" in lines:
@@ -5486,13 +5488,13 @@ def unparsed_cause(text):
         return "the CI line is missing as the last line"
     if len(lines) < 7 or not re.fullmatch(r"Net value: (.+)", lines[-2]):
         return f"text before the CI line, where the Net value: line belongs: {quote(lines[-2])}"
-    kind, guard, net = lines[3][6:], lines[4][15:], lines[-2][11:]
+    kind, guard, net = lines[3][6:], lines[4][16:], lines[-2][11:]
     for label, value, allowed in (("Kind", kind, REVIEW_KINDS), ("Guard or check", guard, REVIEW_GUARDS), ("Net value", net, REVIEW_NETS)):
         if value not in allowed:
             return f"the {label}: value {quote(value)} is not one of {', '.join(sorted(allowed))}"
     if kind == "docs-only" and guard == "yes":
         return "a docs-only record cannot be Guard or check: yes"
-    known = (r"Grant: .*", r"Owner accepted: .*", rf"Fix check: .*", r"Round \d+: .*")
+    known = (r"Grant: .*", r"Owner accepted: .*", rf"Fix check: .*", REVIEW_ROUND_LINE)
     odd = next((l for l in lines[5:-2] if not any(re.fullmatch(k, l, re.ASCII) for k in known)), None)
     if odd is not None:
         return f"a line that is no Grant, Round, Fix check or Owner accepted line: {quote(odd)}"
