@@ -17525,6 +17525,7 @@ def review_comment(cid, number, body, created="2026-10-02T00:00:00Z", updated=No
     """A comment on issue or pull request `number`, as the repo-wide comment list gives it. `updated` is its updated_at; None means never edited."""
     return {"id": cid, "created_at": created, "updated_at": updated or created, "issue_url": f"https://api.github.com/repos/o/r/issues/{number}", "body": body}
 
+UNPARSED_CID = 9051724  # the id of a review-record comment that does not parse; distinctive, so no other output line holds it
 LANE_LINT_MARKER = "<!-- lane-lint -->"  # the first line of a lane's lint comment (decision lanes-run-no-full-ci-job); lint_body pins the rest of its form
 OWNER = {"login": "o", "association": "OWNER"}  # the repo's owner, as a comment object names its author
 NOT_OWNER = {"login": "mallory", "association": "NONE"}
@@ -21275,6 +21276,110 @@ class ReviewedList(ReviewEnv):
         host, rc, out, err = self.chain_listing(earlier, passed, newest)
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
+
+    # A comment that opens with the review-record marker but does not parse is named, not ignored: the line names its id and the cause (the
+    # offending line, or the field that is missing). The newest comment is the one that counts, so each case holds it alone.
+    def unparsed_listing(self, body):
+        """`merge --reviewed` over one open pull request whose only comment is `body`."""
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(UNPARSED_CID, 7, body)])
+        self.assertEqual(rc, 0, out + err)
+        return out
+
+    def assert_unparsed_case(self, body, causes):
+        """`body` does not parse (scope), and the output names its comment by id and holds one of `causes` (each a word the cause must carry)."""
+        self.assertIsNone(review_fn(self, "parse_review")(body), "fixture: the body parses, so the case tests nothing")
+        out = self.unparsed_listing(body)
+        self.assertIn(str(UNPARSED_CID), out, "merge --reviewed does not name the unparsed comment by its id:\n" + out)
+        self.assertTrue(any(cause in out for cause in causes), f"merge --reviewed does not name the cause (one of {causes!r}):\n" + out)
+
+    def test_unparsed_record_text_after_the_ci_line_is_named_by_reviewed(self):
+        self.assert_unparsed_case(record_text(rounds=REVIEW_PASS) + "Thanks for the review.\n", ("Thanks for the review.", "CI line"))
+
+    def test_unparsed_record_text_before_the_ci_line_is_named_by_reviewed(self):
+        body = record_text(rounds=REVIEW_PASS).replace(REVIEW_CI_LINE, "Reviewed by hand, see the thread.\n" + REVIEW_CI_LINE)
+        self.assert_unparsed_case(body, ("Reviewed by hand, see the thread.", "CI line"))
+
+    def test_unparsed_record_missing_its_kind_line_is_named_by_reviewed(self):
+        self.assert_unparsed_case(record_text(rounds=REVIEW_PASS).replace("Kind: normal\n", ""), ("Kind",))
+
+    def test_unparsed_record_with_only_its_marker_is_named_by_reviewed(self):
+        # the empty state: the marker and no field after it, so the first field, PR, is the missing one
+        self.assert_unparsed_case(REVIEW_MARKER + "\n", ("PR:", "missing"))
+
+    def test_unparsed_record_at_full_size_is_named_by_reviewed(self):
+        # the full-size state: three failed rounds and a granted fourth, a Grant line, and text after the CI line. Without that text it parses (scope).
+        full = record_text(rounds=(*REVIEW_FAILED_THREE, "Round 4: reviewer, opus, PASS"), grant=(f"Grant: {REVIEW_GRANT_TEXT}",), net="zero")
+        parse_text(self, full)
+        self.assert_unparsed_case(full + "Thanks for the review.\n", ("Thanks for the review.", "CI line"))
+
+    def test_unparsed_record_control_well_formed_reads_done_by_reviewed(self):
+        # Control: the same comment id holds a record that parses, which reads done, so the naming above concerns the broken text alone.
+        parse_text(self, record_text(rounds=REVIEW_PASS))
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(UNPARSED_CID, 7, record_text(rounds=REVIEW_PASS)), lint_of(7, REVIEW_HEAD)])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
+
+    def test_unparsed_record_control_marker_less_comment_is_not_named_by_reviewed(self):
+        # Control: a comment that does not open with the marker is no record. The pull request reads no record, and the id is not named.
+        body = record_text(rounds=REVIEW_PASS).replace(REVIEW_MARKER + "\n", "", 1) + "Thanks for the review.\n"
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(UNPARSED_CID, 7, body)])
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(no_record_numbers(out), {7}, out)
+        self.assertNotIn(str(UNPARSED_CID), out, "merge --reviewed named a comment that carries no review-record marker:\n" + out)
+
+class UnparsedRecordStanding(CloudSession, ReviewEnv):
+    """A standing session's `merge <pr> --confirm` on a code pull request, refused by the record gate (standing_refusal). The records come through
+    PullsHost, so each comment keeps the id GitHub gives it. A comment that opens with the marker and does not parse is named in the refusal, by its
+    id and its cause, and nothing is claimed. The controls keep the gate's words for a record that parses, and name no comment without the marker."""
+
+    def standing_refusal(self, *comments):
+        """-> (rc, stdout, stderr) of `merge 7 --confirm --head <live head>` as this cloud session, on a code pull request whose records are `comments`."""
+        self.put_role("standing")
+        green = {REVIEW_HEAD: [batch_run("checks", "completed", "success")]}  # the head's own checks pass, so the record gate is the one that refuses
+        host = PullsHost([batch_pull(7, REVIEW_HEAD)], green, comments=comments, files=[pr_file("tools/note.py", status="added")], bodies={7: OWN_PR_BODY})
+        with self.cloud():
+            return self.run_args("7", "--confirm", "--head", REVIEW_HEAD, host=host)
+
+    def assert_refusal_names(self, body, causes):
+        """`body` does not parse (scope). The refusal exits 1 with no traceback, names the comment by its id and holds one of `causes`, and claims nothing."""
+        self.assertIsNone(review_fn(self, "parse_review")(body), "fixture: the body parses, so the case tests nothing")
+        refs = self.refs()
+        rc, out, err = self.standing_refusal(review_comment(UNPARSED_CID, 7, body))
+        self.assertEqual(rc, 1, out + err)
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(self.refs(), refs, "the refused run took a claim or pushed")
+        self.assertIn(str(UNPARSED_CID), err, "the --confirm refusal does not name the unparsed comment by its id:\n" + err)
+        self.assertTrue(any(cause in err for cause in causes), f"the --confirm refusal does not name the cause (one of {causes!r}):\n" + err)
+
+    def test_unparsed_record_text_after_the_ci_line_is_named_by_confirm(self):
+        self.assert_refusal_names(record_text(rounds=REVIEW_PASS) + "Thanks for the review.\n", ("Thanks for the review.", "CI line"))
+
+    def test_unparsed_record_text_before_the_ci_line_is_named_by_confirm(self):
+        body = record_text(rounds=REVIEW_PASS).replace(REVIEW_CI_LINE, "Reviewed by hand, see the thread.\n" + REVIEW_CI_LINE)
+        self.assert_refusal_names(body, ("Reviewed by hand, see the thread.", "CI line"))
+
+    def test_unparsed_record_missing_its_kind_line_is_named_by_confirm(self):
+        self.assert_refusal_names(record_text(rounds=REVIEW_PASS).replace("Kind: normal\n", ""), ("Kind",))
+
+    def test_unparsed_record_with_only_its_marker_is_named_by_confirm(self):
+        # the empty state: the marker and no field after it, so the first field, PR, is the missing one
+        self.assert_refusal_names(REVIEW_MARKER + "\n", ("PR:", "missing"))
+
+    def test_unparsed_record_control_well_formed_failing_keeps_the_gate_words(self):
+        # Control: a record that parses and fails gets the gate's own words. The same fixture then shows the naming above comes from the unparsed text.
+        body = record_text(head=REVIEW_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
+        parse_text(self, body)
+        rc, out, err = self.standing_refusal(review_comment(UNPARSED_CID, 7, body))
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("its head has no passing review record", err)
+
+    def test_unparsed_record_control_marker_less_comment_is_not_named_by_confirm(self):
+        # Control: a comment that does not open with the marker is no record. The refusal keeps the gate's words and does not name the id.
+        body = record_text(rounds=REVIEW_PASS).replace(REVIEW_MARKER + "\n", "", 1) + "Thanks for the review.\n"
+        rc, out, err = self.standing_refusal(review_comment(UNPARSED_CID, 7, body))
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("its head has no passing review record", err)
+        self.assertNotIn(str(UNPARSED_CID), err, "the --confirm refusal named a comment that carries no review-record marker:\n" + err)
 
 class ReleaseHost(PullsHost):
     """A PullsHost for `merge --release-check`. A number in `closed` answers `pulls/<n>` as a closed pull request (the open list leaves it out),
