@@ -322,18 +322,21 @@ FRONT = 101  # the first batch row: the front PR, which merges alone and is no m
 MEMBERS = list(range(102, 112))  # ten batch rows behind the front: the backlog at the threshold, counted without the front
 BATCH_ROWS = [(n, "batch") for n in [FRONT] + MEMBERS]  # eleven batch rows, so the build runs under either reading of the count
 OTHER_ROWS = [(112, "lane lint"), (113, "none"), (114, "blocked on #111")]  # rows whose act is not batch: each has a real head, so one folded in shows as a second parent
+STACKED_BASE = "pr-99"  # a base ref that no open fixture PR holds as its head: a stacked PR on it reads act batch, not blocked on #N
+STACKED = {101: STACKED_BASE, 106: STACKED_BASE}  # batch rows whose pull's base ref is not main: the lowest one takes the front slot on old code, the other sits mid-list
 
 
-def reviewed_stub(rows, heads):
+def reviewed_stub(rows, heads, bases=None):
     """A stand-in for merge.reviewed_read (merge.py:6230), with its signature. `rows` is [(number, act)] in number order, and `heads`
-    {number: sha}, the heads the fixture serves. It fills `ledger` with one row per pull request, with the keys the reader gives
+    {number: sha}, the heads the fixture serves. `bases` is {number: base ref} for each pull whose base is not main (default: main).
+    It fills `ledger` with one row per pull request, with the keys the reader gives
     (number, act, owner, ageHours, red, blockedOn), and returns (lines, pulls, totals) with the pulls it read. Each call is kept in `.calls`."""
     def stub(h, cfgrel=None, facts=None, ledger=None):
         stub.calls.append(cfgrel)
         if ledger is not None:
             ledger.extend({"number": n, "act": act, "owner": "batch runner" if act == "batch" else "lane", "ageHours": 1.0, "red": False,
                            "blockedOn": int(act.split("#")[1]) if act.startswith("blocked on") else None} for n, act in rows)
-        pulls = [{"number": n, "head": {"sha": heads[n], "ref": "pr-%d" % n}, "base": {"ref": "main"}, "draft": True,
+        pulls = [{"number": n, "head": {"sha": heads[n], "ref": "pr-%d" % n}, "base": {"ref": (bases or {}).get(n, "main")}, "draft": True,
                   "created_at": "2026-11-20T00:00:00Z", "updated_at": "2026-11-20T00:00:00Z", "labels": [], "body": ""} for n, _act in rows]
         lines = ["#%d pr-%d %s: %s" % (n, n, heads[n][:9], act) for n, act in rows]
         return lines, pulls, ["longest wait from a done record: 0.0h", "open PRs with no next act: 0"]
@@ -1023,12 +1026,12 @@ class BuildReadsReviewedRows(unittest.TestCase):
     """--build with no --queue reads its members from merge.reviewed_read's rows whose act is batch, and the front PR (the first such
     row) is no member (ruling 10:23 CST Nov 20; merge.py:6230). Each case stubs the reader, and every PR head is served on the origin."""
 
-    def build_from(self, rows):
+    def build_from(self, rows, bases=None):
         root = make_repo({"README.md": "x\n"}, checks=READY)
         numbers = [n for n, _act in rows]
         heads = dict(add_members(root, numbers))
         publish_pull(root, numbers)
-        stub = reviewed_stub(rows, heads)
+        stub = reviewed_stub(rows, heads, bases)
         shims, _log = write_shims()
         base = git_ok(root, "rev-parse", "origin/main").strip()
         rc, out, err, _ci = run_reviewed_build(root, stub, shims=shims)
@@ -1053,6 +1056,29 @@ class BuildReadsReviewedRows(unittest.TestCase):
         folded = [p2 for _s, _p1, p2 in chain]
         self.assertNotIn(heads[FRONT], folded, "the front PR #%d is folded in as a member of the batch" % FRONT)
         self.assertEqual(folded, [heads[n] for n in MEMBERS], "the batch is not the members #%d to #%d in order behind the front" % (MEMBERS[0], MEMBERS[-1]))
+
+    def test_batch_row_on_a_stacked_base_is_no_member_and_no_front(self):
+        rows = [(n, "batch") for n in range(101, 114)]
+        heads, stub, rc, out, err, chain = self.build_from(rows, bases=STACKED)
+        self.assertTrue(stub.calls, "the build with no --queue did not read merge.reviewed_read; the run ended with: %s" % shown(out, err))
+        self.assertEqual(rc, 0, "the build with no --queue exits %s, not 0: %s" % (rc, shown(out, err)))
+        self.assertIsNotNone(chain, "the build left no %s branch in the root; the run ended with: %s" % (merge.integration_branch(BUILD_NAME), shown(out, err)))
+        on_main = [n for n in range(101, 114) if n not in STACKED]  # #102 is the first row on main, so the front; #103 to #113 on main are the members
+        by_head = {sha: n for n, sha in heads.items()}
+        folded = [p2 for _s, _p1, p2 in chain]
+        self.assertEqual([by_head.get(h, h) for h in folded], on_main[1:],
+                         "a batch row whose base is not main is in the batch: the batch folds %s, not the members %s behind the front #%d (the rows on %s are #%d and #%d)"
+                         % (["#%s" % by_head.get(h, h) for h in folded], ["#%d" % n for n in on_main[1:]], on_main[0], STACKED_BASE, *sorted(STACKED)))
+
+    def test_batch_row_on_main_stays_a_member(self):
+        on_main = {n: "main" for n in STACKED}  # the same rows as the case above, each base set to main: only the base differs
+        rows = [(n, "batch") for n in range(101, 114)]
+        heads, stub, rc, out, err, chain = self.build_from(rows, bases=on_main)
+        self.assertTrue(stub.calls, "the build with no --queue did not read merge.reviewed_read; the run ended with: %s" % shown(out, err))
+        self.assertEqual(rc, 0, "the build with no --queue exits %s, not 0: %s" % (rc, shown(out, err)))
+        self.assertIsNotNone(chain, "the build left no %s branch in the root; the run ended with: %s" % (merge.integration_branch(BUILD_NAME), shown(out, err)))
+        folded = [p2 for _s, _p1, p2 in chain]
+        self.assertEqual(folded, [heads[n] for n in range(102, 114)], "a batch row on main is not a member of the batch: the members #102 to #113 behind the front #101 are not all folded")
 
 
 class BuildExitCodes(unittest.TestCase):
