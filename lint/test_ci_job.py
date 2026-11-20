@@ -5,7 +5,7 @@ Red cases: a multi-line step whose last line fails, a missing tool (named, behin
 a `uses:` step, an `if:` or env expression the runner cannot read, and a pull-request step with no base.
 None of them may read PASS. A step whose verdict line never prints (verdict killed, cut or silent) never reads PASS: with no
 failure signal in its output it reads unknown; with one (a tool that could not start, a failed install, a failed line before
-a suite) it keeps that state and its note. The GithubBaseRef class: the GITHUB_BASE_REF each step gets from --base, unset with none.
+a suite, a printed ::error line) it keeps that state and its note. The GithubBaseRef class: the GITHUB_BASE_REF each step gets from --base, unset with none.
 The last class plans the real checks job: every step gets one line.
 The last two classes: the code-check step from a copied install, and a step quiet past the stall limit.
 PinnedHarness: --pinned runs a remote claude-settings harness from the tree at its pinned sha, never the local copy.
@@ -2142,12 +2142,19 @@ class LintTools(Job):
     # code_check.py's line for a tool that did not start, and a failure that needs no tool
     TOOL_MISS = "::error title=code-check::ruby could not start: [Errno 2] No such file or directory"
     REAL_ERROR = "::error title=code-check::a.py: F541 f-string without placeholders"
+    # a failure signal from a step that is not the code check: ste-lint prints the file form, and any step may print a titled one
+    STE_ERROR = "::error file=a.md,line=5,col=1,title=STE013::too long"
+    TITLED_ERROR = "::error title=other::boom"
+    STE_WARNING = "::warning file=a.md,line=5,col=1,title=STE013::too long"  # the control: the file-form line at warning level
 
     def killed_code_check(self, *log_lines):
         """Runs the code-check step under --lint with a verdict stub that writes log_lines and dies with no verdict line."""
         self.lane({"a.py": 'print("fine")\n'})
-        rc, lines, out = self.run_job(self.CODE, args=("--lint", "--base", "origin/main"),
-                                      launch=self.verdict_stub(self.killed_verdict(*log_lines)))
+        return self.killed_step(self.CODE, *log_lines, args=("--lint", "--base", "origin/main"))
+
+    def killed_step(self, step_text, *log_lines, args=()):
+        """Runs one step under a verdict stub that writes log_lines to the log and dies with no verdict line."""
+        rc, lines, out = self.run_job(step_text, args=args, launch=self.verdict_stub(self.killed_verdict(*log_lines)))
         self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
         with open(self.log, encoding="utf-8") as f:
             text = f.read()
@@ -2188,6 +2195,32 @@ class LintTools(Job):
         self.assertEqual(by_step(lines), {"Code check": "FAIL"},
                          "a verdict killed after a lone real error line reads something other than FAIL: " + out)
         self.assertEqual(rc, 1, "a lone real error with a killed verdict did not exit 1: " + out)
+
+    @unittest.skipUnless(os.name == "posix", "the verdict stub is killed by signal: POSIX only")
+    def test_a_verdict_killed_after_an_ste_file_error_line_reads_fail(self):
+        # a step that is not the code check: its printed file-form error line is a failure signal, so the dead verdict reads FAIL
+        rc, lines, out = self.killed_step(step("STE lint", "true"), self.STE_ERROR)
+        self.assertEqual(by_step(lines), {"STE lint": "FAIL"},
+                         "a verdict killed after an STE013 error line from a step that is not the code check reads "
+                         "something other than FAIL: " + out)
+        self.assertEqual(rc, 1, "a FAIL with a killed verdict did not exit 1: " + out)
+
+    @unittest.skipUnless(os.name == "posix", "the verdict stub is killed by signal: POSIX only")
+    def test_a_verdict_killed_after_a_titled_error_line_reads_fail(self):
+        # a step that is not the code check: a printed error line under any title is a failure signal, so the dead verdict reads FAIL
+        rc, lines, out = self.killed_step(step("STE lint", "true"), self.TITLED_ERROR)
+        self.assertEqual(by_step(lines), {"STE lint": "FAIL"},
+                         "a verdict killed after a title=other error line from a step that is not the code check reads "
+                         "something other than FAIL: " + out)
+        self.assertEqual(rc, 1, "a FAIL with a killed verdict did not exit 1: " + out)
+
+    @unittest.skipUnless(os.name == "posix", "the verdict stub is killed by signal: POSIX only")
+    def test_a_verdict_killed_after_a_lone_warning_line_reads_unknown(self):
+        # the control: the same line at warning level is no failure signal, so the dead verdict reads unknown
+        rc, lines, out = self.killed_step(step("STE lint", "true"), self.STE_WARNING)
+        self.assertEqual(by_step(lines), {"STE lint": "unknown"},
+                         "a verdict killed after a warning line reads something other than unknown: " + out)
+        self.assertEqual(rc, 2, "a warning with a killed verdict did not exit 2, the unknown code: " + out)
 
     @unittest.skipUnless(shutil.which("pipx"), "pipx is absent: the checks zizmor step runs through pipx")
     def test_a_template_injection_fails_the_zizmor_step(self):
