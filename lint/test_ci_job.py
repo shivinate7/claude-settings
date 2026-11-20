@@ -2659,16 +2659,18 @@ class PinnedHarness(Job):
     @staticmethod
     def git_stub(root):
         """A stub git first on PATH that logs each `git archive` and `git fetch` call, then runs the real git. A line for an
-        archive is `archive <n>`: n is how many export folders the run's TMPDIR held when the archive ran. -> (the env that
+        archive is `archive <n>`: n is how many export folders the run's TMPDIR held when the archive ran. Each export folder
+        it found also logs `pin-folder <pid of the git caller> <folder name>`. -> (the env that
         puts the stub first, the path of its call log). A shell script, so posix only."""
         bin_dir = tempfile.mkdtemp(prefix="gitstub-", dir=root)
         calls = os.path.join(bin_dir, "calls.txt")
         script = ('#!/bin/sh\n'
                   'case "$1" in\n'
-                  '  archive) echo "archive $(ls "${TMPDIR:-/tmp}" | grep -c \'^ci-job-pin-\')" >> "%s" ;;\n'
+                  '  archive) echo "archive $(ls "${TMPDIR:-/tmp}" | grep -c \'^ci-job-pin-\')" >> "%s"\n'
+                  '    for f in "${TMPDIR:-/tmp}"/ci-job-pin-*; do echo "pin-folder $PPID $(basename "$f")" >> "%s"; done ;;\n'
                   '  fetch) echo "fetch" >> "%s" ;;\n'
                   'esac\n'
-                  'exec "%s" "$@"\n') % (calls, calls, shutil.which("git"))
+                  'exec "%s" "$@"\n') % (calls, calls, calls, shutil.which("git"))
         with open(os.path.join(bin_dir, "git"), "w", encoding="utf-8", newline="\n") as f:
             f.write(script)
         os.chmod(os.path.join(bin_dir, "git"), 0o755)
@@ -2839,6 +2841,20 @@ class PinnedHarness(Job):
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS", "PASS"]), "the two pinned steps did not both PASS\n" + text)
         exports = self.stub_calls(calls, "archive")
         self.assertEqual(len(exports), 1, "two steps at one sha made %d exports, not one\n%s" % (len(exports), text))
+
+    def test_a_pin_export_folder_names_the_ci_job_pid(self):
+        """The export folder carries the pid of the ci-job run that made it, so a sweep can tell, after that run dies, that its pid is dead."""
+        env, calls = self.git_stub(RUN_FOLDER)
+        env = {**env, "TMPDIR": tempfile.mkdtemp(prefix="pin-tmp-", dir=RUN_FOLDER)}  # this run's own temp folder: other runs' exports stay out
+        steps = step("Code check", uses="shivinate7/claude-settings/actions/code-check@%s" % self.pin_a)
+        rc, lines, text = self.run_step(steps, "--step", "Code check", "--base", "origin/main", "--pinned", env=env)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the pinned step did not PASS\n" + text)
+        found = self.stub_calls(calls, "pin-folder")
+        self.assertEqual(len(found), 1, "scope: one export folder must exist when the archive runs, got %r; all calls %r\n%s"
+                         % (found, self.stub_calls(calls, ""), text))
+        _, pid, name = found[0].split(" ", 2)
+        self.assertTrue(name.startswith("ci-job-pin-%s-" % pid),
+                        "the export folder %s does not name the pid %s of the ci-job run that made it" % (name, pid))
 
 
 @unittest.skipUnless(os.name == "posix", "the stall watch and the process-group check are posix only")
