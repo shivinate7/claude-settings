@@ -18,9 +18,10 @@ A touched path selects:
   dir/x.py                                                                   -> dir/test_x.py, and every tracked test_*.py (any
                                                                                folder) that imports the module x, by `import x` or
                                                                                `from x import ...`, even inside a function, or by a
-                                                                               loader call: `import_module("x")`, or a
-                                                                               `spec_from_file_location` path that ends in x.py, as a
-                                                                               string, a module constant or a join of them. The
+                                                                               loader call that hooks/mutate_guard.py
+                                                                               `_load_profile` reads (import_module, a loader path
+                                                                               that ends in x.py as a string, a constant, a join, an
+                                                                               `or` or if-else default). The
                                                                                imports are read with `ast`, so a name in a comment
                                                                                or a string selects nothing. A test it cannot read
                                                                                or parse is selected: unknown is not skip.
@@ -46,6 +47,7 @@ with each backslash as a slash, and a trailing backtick joins its line to the ne
 """
 import ast
 import fnmatch
+import importlib.util
 import json
 import os
 import re
@@ -158,81 +160,28 @@ def reason(path, table):
 # touched .py path, and this parses it once.
 _IMPORTS = {}
 
-# Loader calls that name a module by its file path, and by its name: each maps to the position and the keyword of that argument.
-PATH_LOADERS = {"spec_from_file_location": (1, "location")}
-NAME_LOADERS = {"import_module": (0, "name"), "__import__": (0, "name")}
-# Calls whose last argument ends the path they build.
-PATH_BUILDERS = ("join", "joinpath", "Path", "PurePath", "abspath", "normpath", "fspath")
+# The scanner for "which module does this test load by a loader call" has one home, hooks/mutate_guard.py (`_load_profile`: import_module,
+# __import__, spec_from_file_location, SourceFileLoader, run_path, constants, joins, `or` and if-else defaults, parameters). It is
+# stdlib-only, so this script loads it by path from the checkout it sits in.
+_HOME = None
 
 
-def call_name(node):
-    func = node.func
-    return func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else None
+def load_profile(source):
+    """`_load_profile` of hooks/mutate_guard.py for `source`: (import stems, loader basenames, read basenames)."""
+    global _HOME
+    if _HOME is None:
+        hooks = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "hooks")
+        sys.path.insert(0, hooks)
+        spec = importlib.util.spec_from_file_location("mutate_guard_home", os.path.join(hooks, "mutate_guard.py"))
+        _HOME = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_HOME)
+    return _HOME._load_profile(source)
 
 
-def call_arg(node, loader):
-    """The argument of the call `node` at the position or keyword `loader` gives, or None."""
-    position, keyword = loader
-    if len(node.args) > position and not isinstance(node.args[position], ast.Starred):
-        return node.args[position]
-    return next((k.value for k in node.keywords if k.arg == keyword), None)
-
-
-def module_constants(tree):
-    """The module-level `NAME = value` assignments of `tree`, by name. A name assigned twice is left out: its value is unknown."""
-    found, twice = {}, set()
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
-            name, value = node.targets[0].id, node.value
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value:
-            name, value = node.target.id, node.value
-        else:
-            continue
-        if name in found:
-            twice.add(name)
-        found[name] = value
-    return {name: value for name, value in found.items() if name not in twice}
-
-
-def last_part(node, constants, depth=0):
-    """The string that ends the path `node` builds, or None when it is unknown. It reads a string, a module constant, a join
-    (`os.path.join`, `Path(...)`, `.joinpath(...)`, `a / b`) and a wrapper such as `os.path.abspath`. The parts before the last
-    one need no value: the module name is the file name."""
-    if depth > 8:
-        return None
-    if isinstance(node, ast.Constant):
-        return node.value if isinstance(node.value, str) else None
-    if isinstance(node, ast.Name):
-        return last_part(constants[node.id], constants, depth + 1) if node.id in constants else None
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
-        return last_part(node.right, constants, depth + 1)
-    if isinstance(node, ast.Call) and node.args and call_name(node) in PATH_BUILDERS:
-        return last_part(node.args[-1], constants, depth + 1)
-    return None
-
-
-def loaded_modules(tree):
-    """The module names the parsed test loads by a loader call. A path to a .py file names the file's stem, and an import by name
-    names its top-level module."""
-    constants = module_constants(tree)
-    names = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        called = call_name(node)
-        if called in PATH_LOADERS:
-            arg = call_arg(node, PATH_LOADERS[called])
-            tail = last_part(arg, constants) if arg is not None else None
-            base = tail.replace("\\", "/").rpartition("/")[2] if tail else ""
-            if base.endswith(".py"):
-                names.add(base[:-3])
-        elif called in NAME_LOADERS:
-            arg = call_arg(node, NAME_LOADERS[called])
-            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                top = arg.value.partition(".")[0]
-                if top:
-                    names.add(top)
-    return names
+def loaded_modules(source):
+    """The module names the test text `source` loads by a loader call or an import by name: a loader path that ends in x.py names x."""
+    stems, loads, _reads = load_profile(source)
+    return set(stems) | {base[:-3] for base in loads if base.endswith(".py")}
 
 
 def imported_modules(test, root):
@@ -248,10 +197,11 @@ def imported_modules(test, root):
         if cached and cached[0] == key:
             return cached[1]
         with open(full, "rb") as f:
-            tree = ast.parse(f.read(), filename=test)
+            raw = f.read()
+        tree = ast.parse(raw, filename=test)
     except (OSError, SyntaxError, ValueError):
         return None
-    names = loaded_modules(tree)
+    names = loaded_modules(raw.decode("utf-8", errors="replace"))
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names.update(alias.name.partition(".")[0] for alias in node.names)
