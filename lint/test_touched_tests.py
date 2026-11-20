@@ -1340,13 +1340,15 @@ def line_of(src, needle):
 class PosixOnlyInHeavySuites(SelectorBase):
     """The touched job fails a heavy suite that calls a POSIX-only API outside a guard that reads os.name or sys.platform.
     A red case expects exit 1, no output, and stderr that names the file, the call's line and the name. A green control
-    expects exit 0 and the suite's HEAVY skip, so the suite reached the scan and passed it."""
+    expects exit 0 and the suite's HEAVY skip, so the suite reached the scan and passed it. Only a call the change adds
+    fails the job: a call already on the base is an existing offence, and it passes the job (the diff-only rule)."""
 
-    def fails_at(self, path, src, needle, name, not_named=None):
+    def fails_at(self, path, src, needle, name, not_named=None, base=None):
         """Scope first: `path` is HEAVY. Then the touched job exits 1 and writes no output, and stderr names `path` at the line of
-        `needle` and names `name`. With `not_named`, stderr does not name the line of that other needle."""
+        `needle` and names `name`. With `not_named`, stderr does not name the line of that other needle. `base` is the file
+        before the change (a comment when None), so a case can put a call on the base."""
         self.assertTrue(covers(self.constant("HEAVY"), path), f"the selector's HEAVY constant does not name {path}, so this case probes nothing")
-        repo, sha, out = self.fixture({path: "# base\n"}, {path: src})
+        repo, sha, out = self.fixture({path: "# base\n" if base is None else base}, {path: src})
         r, outputs = self.select(repo, sha, out)
         self.assertEqual(r.returncode, 1, f"the touched job exited {r.returncode}, not 1, on {name} with no guard in {path}:\n{r.stdout}{r.stderr}")
         self.assertEqual(outputs, {}, f"the touched job wrote output on its exit 1: {outputs}")
@@ -1357,13 +1359,13 @@ class PosixOnlyInHeavySuites(SelectorBase):
             other = line_of(src, not_named)
             self.assertNotRegex(r.stderr, named_line(path, other), f"stderr names line {other}, which is not an offence: {r.stderr!r}")
 
-    def passes(self, path, src):
-        """Scope first: the touched suite is read and reaches its HEAVY skip. Then the touched job exits 0."""
-        repo, sha, out = self.fixture({path: "# base\n"}, {path: src})
+    def passes(self, path, src, base=None):
+        """Scope first: the touched suite is read and reaches its HEAVY skip. Then the touched job exits 0. `base` as in fails_at."""
+        repo, sha, out = self.fixture({path: "# base\n" if base is None else base}, {path: src})
         r, outputs = self.select(repo, sha, out)
         self.assertIn(f"touched {path}", r.stdout, f"the selector did not read the touched suite {path}, so this case probes nothing")
         self.assertTrue(skipped_on(r.stdout, path, HEAVY_KEY), f"{path} did not reach its HEAVY skip, so this case probes nothing")
-        self.assertEqual(r.returncode, 0, f"the touched job exited {r.returncode} on a POSIX-only call that is guarded in {path}:\n{r.stdout}{r.stderr}")
+        self.assertEqual(r.returncode, 0, f"the touched job exited {r.returncode}, not 0, on {path}, which holds no unguarded POSIX-only call the change adds:\n{r.stdout}{r.stderr}")
 
     def test_an_unguarded_sighup_in_a_touched_heavy_suite_fails_the_job(self):
         self.fails_at(POSIX_PATH, HEAD + CLASS + DEF + BODY, CALL, "signal.SIGHUP")
@@ -1446,6 +1448,49 @@ class PosixOnlyInHeavySuites(SelectorBase):
 
     def test_an_empty_heavy_suite_passes(self):
         self.passes(POSIX_PATH, "")
+
+    def test_a_skipif_os_name_posix_class_does_not_excuse_the_call(self):
+        src = HEAD + '@unittest.skipIf(os.name == "posix", "POSIX signals")\n' + CLASS + DEF + BODY
+        self.fails_at(POSIX_PATH, src, CALL, "signal.SIGHUP")
+
+    def test_a_skipunless_os_name_nt_class_does_not_excuse_the_call(self):
+        src = HEAD + '@unittest.skipUnless(os.name == "nt", "POSIX signals")\n' + CLASS + DEF + BODY
+        self.fails_at(POSIX_PATH, src, CALL, "signal.SIGHUP")
+
+    def test_a_skipif_sys_platform_not_win32_class_does_not_excuse_the_call(self):
+        src = HEAD + '@unittest.skipIf(sys.platform != "win32", "POSIX signals")\n' + CLASS + DEF + BODY
+        self.fails_at(POSIX_PATH, src, CALL, "signal.SIGHUP")
+
+    def test_an_if_os_name_nt_body_does_not_guard_the_call(self):
+        src = HEAD + CLASS + DEF + '        if os.name == "nt":\n            ' + CALL + "\n"
+        self.fails_at(POSIX_PATH, src, CALL, "signal.SIGHUP")
+
+    def test_the_else_arm_of_an_if_os_name_posix_does_not_guard_the_call(self):
+        src = HEAD + CLASS + DEF + '        if os.name == "posix":\n            pass\n        else:\n            ' + CALL + "\n"
+        self.fails_at(POSIX_PATH, src, CALL, "signal.SIGHUP")
+
+    def test_the_body_of_an_if_os_name_posix_guards_the_call(self):
+        self.passes(POSIX_PATH, HEAD + CLASS + DEF + '        if os.name == "posix":\n            ' + CALL + "\n")
+
+    def test_an_existing_unguarded_sighup_on_the_base_does_not_fail_an_unrelated_change(self):
+        base = HEAD + CLASS + DEF + BODY
+        src = HEAD + "UNRELATED = 1\n\n\n" + CLASS + DEF + BODY  # the added lines shift the call's line number
+        self.passes(POSIX_PATH, src, base=base)
+
+    def test_a_new_unguarded_sighup_fails_when_the_base_already_had_one(self):
+        base = HEAD + CLASS + DEF + BODY
+        src = base + "\n    def test_sighup_again(self):\n        os.kill(0, signal.SIGHUP)\n"
+        self.fails_at(POSIX_PATH, src, "os.kill(0, signal.SIGHUP)", "signal.SIGHUP", base=base)
+
+    def test_a_new_sighup_in_a_skipif_nt_class_passes_when_the_base_had_one(self):
+        base = HEAD + GUARD_NT + CLASS + DEF + BODY
+        src = base + "\n    def test_sighup_again(self):\n        os.kill(0, signal.SIGHUP)\n"
+        self.passes(POSIX_PATH, src, base=base)
+
+    def test_a_from_signal_import_of_sighup_used_unguarded_fails_on_the_import(self):
+        # On Windows the import itself raises ImportError when the suite loads, so the import line is the one pinned.
+        src = "import os\nimport unittest\nfrom signal import SIGHUP\n\n\n" + CLASS + DEF + "        self.assert_signal_removes_work_folder(SIGHUP)\n"
+        self.fails_at(POSIX_PATH, src, "from signal import SIGHUP", "SIGHUP")
 
 
 if __name__ == "__main__":
