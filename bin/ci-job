@@ -856,8 +856,8 @@ def run_step_uncached(name, step, install, detail, shell, env, cwd, ctx, log, su
         unstarted, only = could_not_start(log, start) if known_action(step) == "code-check" else ([], False)
     finally:
         os.remove(script)
-    first = next((ln.rstrip("\n") for ln in kept if ln.startswith(("PASS ", "SKIP ", "FAIL "))),
-                 "(verdict printed no verdict line)")
+    line = next((ln.rstrip("\n") for ln in kept if ln.startswith(("PASS ", "SKIP ", "FAIL "))), None)
+    first = line or "(verdict printed no verdict line)"
     if known_action(step) == "code-check":
         first += " (code_check.py: %s)" % code_check(top, step, pinned)[0]
     if rc == 127 or gone:
@@ -866,6 +866,8 @@ def run_step_uncached(name, step, install, detail, shell, env, cwd, ctx, log, su
     elif unstarted and only:
         state = "unknown"
         first = "tool missing (%s); %s" % ("; ".join(unstarted), first)
+    elif line is None:  # a verdict that died or went silent is a read that could not run, whatever its exit code (a signal kill too)
+        state = "unknown"
     else:
         state = "FAIL" if rc else "SKIP" if first.startswith("SKIP ") else "PASS"
         if install and state == "FAIL":  # the tree at fault, not the change: unknown, never FAIL
