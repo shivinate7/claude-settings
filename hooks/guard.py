@@ -4809,14 +4809,8 @@ def _read_memory():
         if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
             return None
         return 100.0 * (status.ullTotalPhys - status.ullAvailPhys) / status.ullTotalPhys
-    if sys.platform == "darwin":
-        # kern.memorystatus_level is the free share that `memory_pressure` prints.
-        level, size = ctypes.c_int(0), ctypes.c_size_t(ctypes.sizeof(ctypes.c_int))
-        if ctypes.CDLL(None).sysctlbyname(b"kern.memorystatus_level", ctypes.byref(level),
-                                          ctypes.byref(size), None, 0) != 0:
-            return None
-        return 100.0 - level.value
-    if sys.platform.startswith("linux"):
+    if sys.platform.startswith("linux") or is_cloud():
+        # A cloud host is Linux (decision machine-load-brake), so a cloud start reads meminfo on any reported platform.
         # MemAvailable is the kernel's own estimate of what a new process can use, caches included.
         fields = {}
         with open("/proc/meminfo", encoding="ascii", errors="replace") as handle:
@@ -4828,6 +4822,13 @@ def _read_memory():
         if not total or available is None:
             return None
         return 100.0 * (total - available) / total
+    if sys.platform == "darwin":
+        # kern.memorystatus_level is the free share that `memory_pressure` prints.
+        level, size = ctypes.c_int(0), ctypes.c_size_t(ctypes.sizeof(ctypes.c_int))
+        if ctypes.CDLL(None).sysctlbyname(b"kern.memorystatus_level", ctypes.byref(level),
+                                          ctypes.byref(size), None, 0) != 0:
+            return None
+        return 100.0 - level.value
     return None
 
 
@@ -4840,7 +4841,7 @@ def _read_disk(path=None):
 
 
 def read_load() -> dict:
-    """The readings: memory_pct (percent in use, clamped to 0-100), memory_proc_pct (the same share, Linux only, else None) and disk_free_gb
+    """The readings: memory_pct (percent in use, clamped to 0-100) and disk_free_gb
     and disk_total_gb (GB, not clamped). No child process and no file. A reading that fails or cannot be read
     is None, and one failure hides no other."""
     out = {}
@@ -4850,7 +4851,6 @@ def read_load() -> dict:
             out[key] = None if value is None else min(100.0, max(0.0, float(value)))
         except Exception:
             out[key] = None
-    out["memory_proc_pct"] = (sys.platform.startswith("linux") or None) and out["memory_pct"]   # not an if: no darwin arm
     try:
         # A cloud start reads "/": df "available" (f_bavail, the free that shutil reports) is what it can use.
         out["disk_free_gb"], out["disk_total_gb"] = _read_disk("/" if is_cloud() else None)
@@ -4881,7 +4881,7 @@ def lint_load_hit() -> tuple:
     Memory counts in a cloud session too: a lint is the heaviest call a session makes. A failed or unread
     reading counts as normal."""
     try:
-        full = load_full(read_load(), memory_key=_memory_key())
+        full = load_full(read_load())
     except Exception:
         return "", ""
     if not full:
@@ -4916,7 +4916,7 @@ def load_hit(tool: str, tool_input) -> tuple:
     def disk_under(share, gb):
         return disk_text is not None and disk < min(disk_total * share / 100.0, gb)
 
-    full = load_full(reading, memory_key=_memory_key())
+    full = load_full(reading)
     if full:
         disk_tripped = any(t.startswith("disk") for t in full)
         return (LOAD_FULL_CLOUD_REASON if cloud and disk_tripped else LOAD_FULL_REASON) % ", ".join(full), ", ".join(full)
@@ -4995,19 +4995,12 @@ def lane_session_hit(payload, tool: str) -> tuple:
     return LOAD_SESSION_FULL_REASON % ", ".join(full), ", ".join(full)
 
 
-def _memory_key() -> str:
-    """The reading a start call judges memory on. A local session reads the platform's own counter (memory_pct). A cloud
-    session judges only the /proc/meminfo share (memory_proc_pct, set on Linux alone), so a start there never trips on a
-    counter that no cloud host serves."""
-    return "memory_proc_pct" if is_cloud() else "memory_pct"
-
-
-def load_full(reading, disk_only=False, memory_key="memory_pct") -> list:
+def load_full(reading, disk_only=False) -> list:
     """The readings over the full point, as text, or []. An unread or malformed reading counts as normal. `disk_only`
-    leaves memory out. `memory_key` names the memory reading judged."""
+    leaves memory out."""
     if not isinstance(reading, dict):
         return []
-    memory = _load_value(reading, memory_key)
+    memory = _load_value(reading, "memory_pct")
     disk, disk_total = _load_value(reading, "disk_free_gb"), _load_value(reading, "disk_total_gb")
     disk_full = (disk is not None and disk_total is not None
                  and disk < min(disk_total * LOAD_FULL_DISK_SHARE / 100.0, LOAD_FULL_DISK_GB))
