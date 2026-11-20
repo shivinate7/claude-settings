@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from guard_core import (
     SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, GIT_WRITES, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
     REPLAY_MARKS, command_indexes, dir_before_segment, heredoc_heads, inline_script, inner_commands, own_heredoc_bodies, resolve_command, resolve_default_base, segment_tokens, split_segments,
-    is_cloud, shell_abs, strip_heredoc_bodies, strip_redirections,
+    is_cloud, lint_dir, shell_abs, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import opens_fence, BUILD_TAG, CONSULTANT_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_BRIEF_MARKER, LANE_GRANT_MARKER, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags, repo_tag_names  # the one home of the lane tags and head refs, shared with the roadmap build
@@ -106,7 +106,8 @@ def gh_call_of(segment: str):
 
 
 # ---- a merge made outside the merge tool
-MERGE_TOOLS = ("mcp__github__merge_pull_request",)
+# The auto-merge tool arms the same merge: GitHub merges once the head's checks pass, so it is judged on the same head read.
+MERGE_TOOLS = ("mcp__github__merge_pull_request", "mcp__github__enable_pr_auto_merge")
 MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject",
                      "--match-head-commit", "-A", "--author-email"}
 # Seconds for the WHOLE read, shared: Host.head_read makes 4 `gh` REST calls (5 with a branch selector, 1 more run-list read when the check runs link more than one run; a settled head adds the
@@ -934,7 +935,7 @@ def _red_run_module():
     """lint/check_red_run.py, imported from the lint folder beside this file's folder, the one home of the
     rule. It waits for the first push that needs it, and raises ImportError in a copy of the hooks with no lint
     folder beside it. The caller reads that as no hit."""
-    lint = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lint")
+    lint = lint_dir()
     if lint not in sys.path:
         sys.path.append(lint)
     import check_red_run
@@ -2056,11 +2057,12 @@ def lane_mcp_ready_hit(tool: str, tool_input, transcript: str) -> str:
 # ---- the record branch's one writer: only the triage session pushes to it (rule roadmap-one-writer)
 RECORD_WRITER_TIER = "triage"
 DEFAULT_RECORD_BRANCH = "roadmap"
+RECORD_DECISION_CITE = "(decision session-tiers, the triage session is the only writer of the record branch)"  # glossary-ok: session-tiers is the decision's file name
 RECORD_CITE = (
     "own turn, then retry. Before this session asks the owner to push a commit, run `git fetch origin <record "
     "branch>`, then `git merge-base --is-ancestor <commit> origin/<record branch>`: exit 0 means the commit is "
     "already there, so ask the owner only when it is not. "
-    "(decision session-tiers, the triage session is the only writer of the record branch)"  # glossary-ok: session-tiers is the decision's file name
+    + RECORD_DECISION_CITE
 )
 RECORD_REASON = (
     "roadmap-one-writer: the repo's record branch has one writer, the triage session, and this session's own "
@@ -2073,6 +2075,32 @@ RECORD_REASON = (
     "commit exists. If this session is triage: run get_session (no argument) alone in its "
     + RECORD_CITE
 )
+
+# A push whose folder still holds a variable or a substitution after the command's own assignments are read: the
+# folder is the shell's to know, so the push's repo and record branch are unknown. A cloud triage proof reads the
+# transcript, never the folder, so it still lets the push through.
+RECORD_FOLDER_MATCH = "git push to the record branch through an unreadable folder: "
+RECORD_FOLDER_REASON = (
+    "roadmap-one-writer: this push to the record branch runs in a folder this guard cannot read, because it holds "
+    "{names} that the command does not assign. The push's repo and record branch are unknown, so a local "
+    "role file cannot be matched to its repo. Write the folder as a literal path, or assign the variable earlier in the same command "
+    "(`W=<folder>; git -C \"$W\" push ...`), then retry. "
+    + RECORD_DECISION_CITE
+)
+UNREAD_FOLDER = re.compile(r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|\$\(|`")
+
+
+def _unread_folder_names(where: str) -> str:
+    """The variables and substitutions still in the folder WHERE, comma-joined, else ''."""
+    names = dict.fromkeys(UNREAD_FOLDER.findall(where or ""))
+    return ", ".join("a command substitution" if name in ("$(", "`") else name for name in names)
+
+
+def record_reason(matched: str) -> str:
+    """The refusal text for a record_writer_hit result, with its names filled in."""
+    if matched.startswith(RECORD_FOLDER_MATCH):
+        return RECORD_FOLDER_REASON.format(names=matched[len(RECORD_FOLDER_MATCH):])
+    return RECORD_REASON
 
 
 def _own_proved_tags(transcript: str):
@@ -2231,8 +2259,10 @@ def _lane_handoff_holds(args, where: str, overrides, root: str, destination, tag
 
 
 def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb, session_id: str = "") -> str:
-    """Return the matched push when a segment pushes to the checkout's record branch, or to the default
+    """Return the reason text when a segment pushes to the checkout's record branch, or to the default
     name `roadmap`, and the own record proves neither the triage role nor a lane's own handoff push, else ''.
+    The text is "git push to the record branch", or `RECORD_FOLDER_MATCH` plus the unread variable names when
+    the push goes to `roadmap` from a folder the command names with a variable or substitution it does not assign.
     `record_branch_of(root)` reads the checkout's branch (lint/layout.py); a read error means the default.
     `read_verb(subcommand, args)` is guard.py's own test for a dry run, which moves nothing. The proof is
     read only after a push reaches the branch. `session_id` is the hook payload's id, which a local session's
@@ -2253,6 +2283,9 @@ def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of
                 continue
             if _own_role_proved(transcript, RECORD_WRITER_TIER, session_id, root):  # glossary-ok: RECORD_WRITER_TIER is the existing name
                 continue
+            unread = _unread_folder_names(where)
+            if unread and DEFAULT_RECORD_BRANCH in destinations:
+                return RECORD_FOLDER_MATCH + unread
             tags = _own_proved_tags(transcript)
             if (tags is not None and LANE_TAG in tags and len(destinations) == 1 and root
                     and _lane_handoff_holds(args, where, overrides, root, destinations[0], tags)):
@@ -3063,7 +3096,7 @@ TARGET_UNKNOWN_LINE = ("target-id-in-roster: the roster is unknown (the roadmap 
 
 def _parent_targets():
     """PARENT_TARGETS of lint/layout.py, the one home of the send targets that name the parent."""
-    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    lint = lint_dir()
     if lint not in sys.path:
         sys.path.append(lint)
     import layout
@@ -3161,7 +3194,7 @@ def _minutes_ahead(then, now) -> int:
     return int((then.replace(second=0, microsecond=0) - now.replace(second=0, microsecond=0)).total_seconds() // 60)
 
 
-def stamp_hit(tool: str, tool_input):
+def header_time_hit(tool: str, tool_input):
     """Return (matched, reason) when this send_message opens with a header stamp that is wrong for the clock, else
     None. Only the first non-blank line is read, and only its header stamp. Wrong means one of three things. The
     zone name is not the clock's own (local_time's DST rule names the current zone), whatever the minutes. A dated
@@ -3333,7 +3366,7 @@ def written_time_hit(tool: str, tool_input, cwd: str = ""):
     roadmap/data/steps/<name>.json file: `updatedAt` in a Write, and each instant in an Edit's or MultiEdit's new
     text. In a shell command: the last literal `updatedAt` key with a single- or double-quoted value. Only a value
     with an offset is read. Cost: one clock read, and only when a judged value is present; one local file read,
-    only for an items write that carries `file_path` and no inline data; no transcript or process. Fails open, like stamp_hit."""
+    only for an items write that carries `file_path` and no inline data; no transcript or process. Fails open, like header_time_hit."""
     if not isinstance(tool_input, dict):
         return None
     judged = []
