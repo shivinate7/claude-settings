@@ -48,6 +48,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
+sys.path.append(os.path.join(HERE, "..", "testing"))  # append: the signal-test helpers (testing/proc_fixture.py)
+import proc_fixture  # noqa: E402  the one home of the signal-test helpers; this module's wait_for is the rendezvous helper, so call proc_fixture's qualified
 from workflow_steps import run_body, step_blocks, step_env, step_with  # noqa: E402  the one home of the step parser
 sys.path.append(os.path.join(HERE, "..", "hooks"))  # append: the pin note's names (hooks/pin_note.py)
 from pin_note import ENV as PIN_NOTE_ENV  # noqa: E402  the one home of the pin note's variable (hooks/pin_note.py)
@@ -1756,6 +1758,36 @@ class ParallelLint(Job):
     def test_with_two_cpus_the_default_runs_a_pair_at_once(self):
         self.check_all_pass(["a", "b"], launch=cpus(2))
 
+    @unittest.skipUnless(os.path.isdir("/proc/self"), "the step reads its ancestors from /proc")
+    def test_the_lint_log_folder_names_the_ci_job_pid(self):
+        """The folder that holds a parallel run's step logs names the pid of the ci-job run that made it, so the merge tool's sweep
+        can tell, once that run is dead, that the pid is dead. The step reads its own ancestors to find that run."""
+        tmp = tempfile.mkdtemp(prefix="lint-tmp-", dir=RUN_FOLDER)  # this run's own temp folder: no other run's folder is listed
+        seen = os.path.join(self.root, "seen.json")
+        body = ("import json, os, tempfile\n"
+                "def argv_of(pid):\n"
+                "    with open('/proc/%d/cmdline' % pid, 'rb') as f:\n"
+                "        return [a.decode('utf-8', 'replace') for a in f.read().split(b'\\0') if a]\n"
+                "def parent_of(pid):\n"
+                "    with open('/proc/%d/status' % pid) as f:\n"
+                "        return int([ln for ln in f if ln.startswith('PPid:')][0].split()[1])\n"
+                "chain, pid = [], os.getpid()\n"
+                "while pid > 1:\n"
+                "    chain.append([pid, argv_of(pid)])\n"
+                "    pid = parent_of(pid)\n"
+                "names = sorted(n for n in os.listdir(tempfile.gettempdir()) if n.startswith('ci-job-lint-'))\n"
+                "with open(SEEN, 'w') as f:\n"
+                "    json.dump({'names': names, 'chain': chain}, f)\n").replace("SEEN", repr(seen))
+        rc, lines, out = self.run_lint(self.lint("a", body), workers=2, env={"TMPDIR": tmp})
+        self.assertEqual(rc, 0, out)
+        with open(seen, encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertEqual(len(data["names"]), 1, "scope: one lint log folder must exist while a parallel step runs, got %r" % data["names"])
+        ci = [pid for pid, argv in data["chain"] if any(os.path.basename(a) == "ci-job" for a in argv)]
+        self.assertTrue(ci, "scope: no ci-job process among the step's ancestors: %r" % data["chain"])
+        self.assertTrue(data["names"][0].startswith("ci-job-lint-%d-" % ci[0]),
+                        "the lint log folder %s does not name the pid %d of the ci-job run that made it" % (data["names"][0], ci[0]))
+
     def test_two_workers_never_run_three_at_once(self):
         self.check_cap(["a", "b", "c"], workers=2)
 
@@ -2847,18 +2879,26 @@ class PinnedHarness(Job):
         write_lf(os.path.join(self.root, "actions", "code-check", "code_check.py"), "print('child harness')\n")
 
     @staticmethod
-    def git_stub(root):
+    def git_stub(root, hold=None):
         """A stub git first on PATH that logs each `git archive` and `git fetch` call, then runs the real git. A line for an
-        archive is `archive <n>`: n is how many export folders the run's TMPDIR held when the archive ran. -> (the env that
+        archive is `archive <n>`: n is how many export folders the run's TMPDIR held when the archive ran. Each export folder
+        it found also logs `pin-folder <pid of the git caller> <folder name>`. hold: the archive writes `<hold>.ready`, then waits
+        until `<hold>` exists (a bounded poll), so a case can stop a run inside its export. -> (the env that
         puts the stub first, the path of its call log). A shell script, so posix only."""
         bin_dir = tempfile.mkdtemp(prefix="gitstub-", dir=root)
         calls = os.path.join(bin_dir, "calls.txt")
+        wait = ""
+        if hold:
+            wait = ('    : > "%s.ready"; i=0\n'
+                    '    while [ ! -e "%s" ] && [ "$i" -lt 1200 ]; do sleep 0.05; i=$((i + 1)); done\n') % (hold, hold)
         script = ('#!/bin/sh\n'
                   'case "$1" in\n'
-                  '  archive) echo "archive $(ls "${TMPDIR:-/tmp}" | grep -c \'^ci-job-pin-\')" >> "%s" ;;\n'
+                  '  archive) echo "archive $(ls "${TMPDIR:-/tmp}" | grep -c \'^ci-job-pin-\')" >> "%s"\n'
+                  '    for f in "${TMPDIR:-/tmp}"/ci-job-pin-*; do echo "pin-folder $PPID $(basename "$f")" >> "%s"; done\n'
+                  '%s    ;;\n'
                   '  fetch) echo "fetch" >> "%s" ;;\n'
                   'esac\n'
-                  'exec "%s" "$@"\n') % (calls, calls, shutil.which("git"))
+                  'exec "%s" "$@"\n') % (calls, calls, wait, calls, shutil.which("git"))
         with open(os.path.join(bin_dir, "git"), "w", encoding="utf-8", newline="\n") as f:
             f.write(script)
         os.chmod(os.path.join(bin_dir, "git"), 0o755)
@@ -3029,6 +3069,70 @@ class PinnedHarness(Job):
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS", "PASS"]), "the two pinned steps did not both PASS\n" + text)
         exports = self.stub_calls(calls, "archive")
         self.assertEqual(len(exports), 1, "two steps at one sha made %d exports, not one\n%s" % (len(exports), text))
+
+    def test_a_pin_export_folder_names_the_ci_job_pid(self):
+        """The export folder carries the pid of the ci-job run that made it, so a sweep can tell, after that run dies, that its pid is dead."""
+        env, calls = self.git_stub(RUN_FOLDER)
+        env = {**env, "TMPDIR": tempfile.mkdtemp(prefix="pin-tmp-", dir=RUN_FOLDER)}  # this run's own temp folder: other runs' exports stay out
+        steps = step("Code check", uses="shivinate7/claude-settings/actions/code-check@%s" % self.pin_a)
+        rc, lines, text = self.run_step(steps, "--step", "Code check", "--base", "origin/main", "--pinned", env=env)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the pinned step did not PASS\n" + text)
+        found = self.stub_calls(calls, "pin-folder")
+        self.assertEqual(len(found), 1, "scope: one export folder must exist when the archive runs, got %r; all calls %r\n%s"
+                         % (found, self.stub_calls(calls, ""), text))
+        _, pid, name = found[0].split(" ", 2)
+        self.assertTrue(name.startswith("ci-job-pin-%s-" % pid),
+                        "the export folder %s does not name the pid %s of the ci-job run that made it" % (name, pid))
+
+    def held_export_run(self, hold, verdict=False):
+        """A pinned run whose export waits on `hold` (see git_stub). -> (the Popen, the run's TMPDIR). verdict: the run starts under
+        bin/verdict, so a signal to verdict reaches ci-job through its forward. The run has its own TMPDIR and its own group."""
+        tmp = tempfile.mkdtemp(prefix="ci-job-tmp-", dir=RUN_FOLDER)  # this run's temp folder: other runs' exports stay out
+        stub_env, _calls = self.git_stub(RUN_FOLDER, hold=hold)
+        argv, env = self.job_call(self.code_step(self.pin_a), args=(*self.LINT, "--pinned"), script=self.ci_job,
+                                  env={**stub_env, "CLAUDE_CONFIG_DIR": self.cfg, "TMPDIR": tmp,
+                                       "VERDICT_LOG": os.path.join(self.logs, "held.log")})
+        if verdict:
+            argv = [sys.executable, os.path.join(HERE, "..", "bin", "verdict"), *argv]
+        out = open(os.path.join(self.logs, "held.out"), "wb")
+        self.addCleanup(out.close)
+        proc = subprocess.Popen(argv, cwd=self.root, env=env, stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+        self.addCleanup(proc_fixture.stop_group, proc)
+        return proc, tmp
+
+    def export_run_ends(self, sig=None, verdict=False):
+        """A held run ends, and its export folder must be gone once it has exited. sig: the signal sent to the run, or None to let it end on
+        its own. The export waits on a file the test writes after the signal, so ci-job's own cleanup, which waits on its export, can finish."""
+        hold = os.path.join(tempfile.mkdtemp(prefix="hold-", dir=RUN_FOLDER), "go")
+        proc, tmp = self.held_export_run(hold, verdict=verdict)
+        self.assertTrue(proc_fixture.wait_for(hold + ".ready", 60, proc), "the export never started: the run did not reach its archive")
+        held = [n for n in os.listdir(tmp) if n.startswith("ci-job-pin-")]
+        self.assertEqual(len(held), 1, "scope: one export folder must exist while the export waits, got %r" % held)
+        if sig is not None:
+            proc.send_signal(sig)
+        open(hold, "w").close()
+        try:
+            proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            self.fail("the run did not exit within 60 s%s" % ("" if sig is None else " of %s" % sig.name))
+        left = [n for n in os.listdir(tmp) if n.startswith("ci-job-pin-")]
+        self.assertEqual(left, [], ("%s to ci-job" % sig.name if sig is not None else "a run that ended") + " left its export folder behind")
+
+    @unittest.skipUnless(os.name == "posix", "POSIX signals and a shell stub")
+    def test_a_run_that_ends_removes_its_export_folder(self):  # a control: no signal, the run's own cleanup removes the folder
+        self.export_run_ends()
+
+    @unittest.skipUnless(os.name == "posix", "POSIX signals and a shell stub")
+    def test_sigterm_to_ci_job_removes_its_export_folder(self):
+        self.export_run_ends(signal.SIGTERM)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX signals and a shell stub")
+    def test_sighup_to_ci_job_removes_its_export_folder(self):
+        self.export_run_ends(signal.SIGHUP)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX signals and a shell stub")
+    def test_sigterm_through_verdict_removes_the_export_folder(self):
+        self.export_run_ends(signal.SIGTERM, verdict=True)
 
 
 @unittest.skipUnless(os.name == "posix", "the stall watch and the process-group check are posix only")

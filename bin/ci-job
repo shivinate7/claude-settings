@@ -125,7 +125,7 @@
 # it misses 7 days after the save. Cost: per step that may be cached, one set of git processes (a temp index, add, write-tree, rev-parse); per run, one
 # read of those trees; per pass, one file of under 1 KB in $XDG_CACHE_HOME (else ~/.cache) /claude-settings/ci-job-pass. A save prunes files saved
 # over 7 days ago, and the store holds at most 300 files. No timer, no lasting process. CI_JOB_NO_CACHE=1 turns the cache off.
-import ast, concurrent.futures, hashlib, json, os, re, shutil, subprocess, sys, tarfile, tempfile, threading, time
+import ast, concurrent.futures, hashlib, json, os, re, shutil, signal, subprocess, sys, tarfile, tempfile, threading, time
 BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
@@ -323,7 +323,7 @@ def pin_tree(sha):
             env=dict(os.environ, GIT_TERMINAL_PROMPT="0")).returncode != 0:  # a credential prompt must fail, not hang the run
         PIN_TREES[sha] = (None, "commit %s is not in %s and could not be fetched" % (sha[:7], src))
     else:
-        tree = tempfile.mkdtemp(prefix="ci-job-pin-%s-" % sha[:7])
+        tree = tempfile.mkdtemp(prefix="ci-job-pin-%d-%s-" % (os.getpid(), sha[:7]))  # the pid lets merge.py's sweep remove it after a run that died
         PIN_TREES[sha] = (tree, None)  # recorded first, so the run's end deletes it even if the archive fails
         try:
             with _nowindow.Popen(["git", "archive", "--format=tar", sha], cwd=src, stdout=subprocess.PIPE,
@@ -1074,7 +1074,7 @@ def main(argv):
     ctx = (top, base, values, pinned)
     workers = lint_workers() if lint and not dry else 1
     pool = concurrent.futures.ThreadPoolExecutor(workers) if workers > 1 else None  # one worker is the serial path
-    logdir = tempfile.mkdtemp(prefix="ci-job-lint-") if pool else None  # each parallel step's own log, until it is added to the run's
+    logdir = tempfile.mkdtemp(prefix="ci-job-lint-%d-" % os.getpid()) if pool else None  # each parallel step's own log, until it is added to the run's
     kept_logs = False
     futures, logs = {}, {}  # by step index: the queued run, and its log
     try:
@@ -1173,7 +1173,23 @@ def main(argv):
     return 1 if tally["FAIL"] else 2 if tally["unknown"] else 0
 
 
+def end_on_signals():
+    """TERM and HUP end the run through the `finally` below, the path INT takes as a KeyboardInterrupt, so the log folder, the pin trees and
+    the work folder go. A second signal while it cleans up is ignored. Where handlers cannot be set (another thread), nothing changes."""
+    def stop(sig, frame):
+        for n in nums:
+            signal.signal(n, signal.SIG_IGN)
+        raise SystemExit(128 + sig)
+    nums = [getattr(signal, n) for n in ("SIGTERM", "SIGHUP") if hasattr(signal, n)]  # Windows has no SIGHUP
+    try:
+        for n in nums:
+            signal.signal(n, stop)
+    except ValueError:
+        pass
+
+
 if __name__ == "__main__":
+    end_on_signals()
     try:
         sys.exit(main(sys.argv[1:]))
     finally:

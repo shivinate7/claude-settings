@@ -24,6 +24,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
+from proc_fixture import stop_group, wait_for  # noqa: E402  the one home of the process helpers (testing/proc_fixture.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "skills", "roadmap"))  # append: no roadmap module shadows one this suite imports
 import test_build as roadmap  # noqa: E402  the roadmap fixture: STEP, session_row, BUCKET_* (one home: skills/roadmap/test_build.py)
 import fnmatch  # noqa: E402  the temp-file cases match merge-live names
@@ -15076,9 +15077,27 @@ class RulesReadNetwork(unittest.TestCase):
 
 @unittest.skipIf(os.name == "nt", "a Windows process gets no SIGTERM handler run")
 class SignalReleasesLock(Env):
-    """c189 part 3: a run stopped by SIGTERM or SIGINT releases the merge lock (#746 left one live for 2.7 h)."""
-    def stop_with(self, sig):
-        child = subprocess.Popen([sys.executable, __file__, "--sigchild", self.co], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    """c189 part 3: a run stopped by SIGTERM, SIGHUP or SIGINT releases the merge lock and removes its temporary tree (#746 left one live for 2.7 h).
+    A launched run is the same child under merge/launch.py, the process a signal to a real run reaches first."""
+    def start_run(self, launched):
+        if not launched:
+            return subprocess.Popen([sys.executable, __file__, "--sigchild", self.co], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.launch_tmp = os.path.join(self.t, "launch-tmp")  # the TMPDIR of the launched run: its merge-wt folders show here
+        os.makedirs(self.launch_tmp)
+        tree = os.path.join(self.t, "launch-tree")
+        os.makedirs(os.path.join(tree, "merge"))
+        # The tree's merge.py execs this file's --sigchild child, so the launcher's child runs the real lock path and only the Host is faked.
+        put(os.path.join(tree, "merge", "merge.py"), "import os, sys\nos.execv(sys.executable, [sys.executable, %r, '--sigchild', %r])\n" % (os.path.abspath(__file__), self.co))
+        env = {**os.environ, "TMPDIR": self.launch_tmp}
+        return subprocess.Popen([sys.executable, os.path.join(HERE, "launch.py"), tree, "--dev"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, start_new_session=True)
+
+    def launch_trees(self):
+        """The merge-wt folders this run left in its TMPDIR."""
+        return [n for n in os.listdir(self.launch_tmp) if n.startswith("merge-wt-")]
+
+    def stop_with(self, sig, launched=False):
+        child = self.start_run(launched)
         try:
             for line in child.stdout:  # merge's own lines come first
                 if line.strip() == "READY":
@@ -15086,21 +15105,35 @@ class SignalReleasesLock(Env):
             else:
                 self.fail("the run never reached the wait: " + child.stderr.read())
             self.assertTrue(self.lock_ref())
+            if launched:
+                self.assertEqual(len(self.launch_trees()), 1, "scope: one merge-wt folder must exist while the run is up, got %r" % self.launch_trees())
             child.send_signal(sig)
             child.wait(timeout=60)
         finally:
             if child.poll() is None:
-                child.kill(); child.wait()
+                if launched:
+                    stop_group(child)  # the launcher leads its own group: the child it execs is in that group
+                else:
+                    child.kill(); child.wait()
         err = child.stderr.read()
         child.stdout.close(); child.stderr.close()
         self.assertNotEqual(child.returncode, 0)
-        self.assertFalse(self.lock_ref(), err)
+        self.assertFalse(self.lock_ref(), "%s did not release the merge lock:\n%s" % (sig.name, err))
+        if launched:
+            self.assertEqual(self.launch_trees(), [], "%s did not remove the merge-wt tree of the run" % sig.name)
+            self.assertEqual(self.worktrees(), 1, "%s left a worktree registered in the checkout" % sig.name)
 
     def test_sigterm_releases_the_lock(self):
         self.stop_with(signal.SIGTERM)
 
     def test_sigint_releases_the_lock(self):  # a control: Python's own KeyboardInterrupt already unwinds the finally; only SIGTERM needs the handler
         self.stop_with(signal.SIGINT)
+
+    def test_sigterm_to_the_launcher_releases_the_lock_and_tree(self):  # a control: TERM is handled, so the run's finally removes the tree too
+        self.stop_with(signal.SIGTERM, launched=True)
+
+    def test_sighup_to_the_launcher_releases_the_lock_and_tree(self):
+        self.stop_with(signal.SIGHUP, launched=True)
 
 
 # The batch brake (roadmap step c195): nothing merges to a base while another ready pull request on it has a required check pending.
@@ -27232,9 +27265,10 @@ class StaleMergeTrees(unittest.TestCase):
         patch.start()
         self.addCleanup(patch.stop)
 
-    def make_tree(self, name, reason, root=None):
-        """A merge-wt-<name> folder with a locked worktree in it, as the merge tool makes one, under ROOT (default the temp folder). -> (folder, worktree)."""
-        tmp = os.path.join(root or self.tmpdir, "merge-wt-" + name)
+    def make_tree(self, name, reason, root=None, prefix="merge-wt-"):
+        """A <prefix><name> folder with a locked worktree in it, as the merge tool makes one (prefix merge-wt- or merge-fresh-),
+        under ROOT (default the temp folder). -> (folder, worktree)."""
+        tmp = os.path.join(root or self.tmpdir, prefix + name)
         wt = os.path.join(tmp, "tree")
         os.makedirs(tmp)
         sh(self.repo, "git", "worktree", "add", "-q", "--detach", "--lock", "--reason", reason, wt, self.head)
@@ -27298,6 +27332,223 @@ class StaleMergeTrees(unittest.TestCase):
         self.assertIn(os.path.realpath(far_wt), self.locked_trees(), "the dead-locked tree outside the temp folder must stay registered")
 
 
+    # The three run folders that a CI job or a guard run makes in the temp folder. Each name carries its maker's pid, as
+    # <prefix><pid><suffix>, so a folder whose maker died is found by its name. The forms are this test's contract.
+    PLAIN_KINDS = {
+        "ci-job-lint": "ci-job-lint-%d-run",
+        "ci-job-pin": "ci-job-pin-%d-0123abc-run",
+        "mutate_guard": "mutate_guard_%d-run",
+    }
+
+    def make_folder(self, name):
+        """A run folder with one file in it, directly under the temp folder. -> its path."""
+        folder = os.path.join(self.tmpdir, name)
+        os.makedirs(folder)
+        with open(os.path.join(folder, "run.log"), "w", encoding="utf-8") as handle:
+            handle.write("run\n")
+        return folder
+
+    def test_a_run_folder_whose_pid_is_dead_goes_and_a_live_one_stays(self):
+        """A merge-fresh tree names its maker's pid in its lock reason, and a ci-job-lint, ci-job-pin or mutate_guard folder
+        names it in its name. Once that pid is dead, the next add_worktree removes each kind. A folder whose pid lives stays,
+        and so does a folder that names no pid."""
+        dead, live = reaped_child_pid(), os.getpid()
+        dead_fresh_tmp, dead_fresh_wt = self.make_tree("dead", "merge tool, pid %d" % dead, prefix="merge-fresh-")
+        live_fresh_tmp, live_fresh_wt = self.make_tree("live", "merge tool, pid %d" % live, prefix="merge-fresh-")
+        dead_run = {"merge-fresh": dead_fresh_tmp}
+        live_run = {"merge-fresh": live_fresh_tmp}
+        legacy_run = {}
+        for kind, pattern in self.PLAIN_KINDS.items():
+            dead_run[kind] = self.make_folder(pattern % dead)
+            live_run[kind] = self.make_folder(pattern % live)
+            legacy_run[kind] = self.make_folder(pattern.replace("%d", "legacy"))
+
+        self.assertEqual(self.locked_trees().get(os.path.realpath(dead_fresh_wt)), "merge tool, pid %d" % dead,
+                         "scope: the dead merge-fresh tree must be locked with its reason before add_worktree runs")
+        for kind, folder in list(dead_run.items()) + list(legacy_run.items()):
+            self.assertTrue(os.path.isdir(folder), "scope: the %s folder must exist before add_worktree runs" % kind)
+
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        for kind, folder in dead_run.items():
+            with self.subTest(kind=kind, pid="dead"):
+                self.assertFalse(os.path.exists(folder), "a %s folder whose pid %d is dead must be removed when add_worktree starts" % (kind, dead))
+        with self.subTest(kind="merge-fresh", part="registration"):
+            self.assertNotIn(os.path.realpath(dead_fresh_wt), self.locked_trees(),
+                             "the dead merge-fresh tree's git registration must go with its folder")
+        for kind, folder in live_run.items():
+            with self.subTest(kind=kind, pid="live"):
+                self.assertTrue(os.path.isdir(folder), "a %s folder whose pid %d is alive must stay" % (kind, live))
+        for kind, folder in legacy_run.items():
+            with self.subTest(kind=kind, pid="none"):
+                self.assertTrue(os.path.isdir(folder), "a %s folder that names no pid must stay" % kind)
+
+    def start_holder(self, cwd, held=None, name="holder"):
+        """A live process, in its own group, whose working folder is `cwd`. With `held`, it also holds that file open. -> the Popen.
+        It writes its marker after it holds what it holds, so the sweep never runs before the holder does."""
+        ready = os.path.join(os.path.dirname(self.tmpdir), name + ".ready")
+        code = "import time\n" + ("f = open(%r)\n" % held if held else "") + ("open(%r, 'w').close()\ntime.sleep(300)\n" % ready)
+        proc = subprocess.Popen([sys.executable, "-c", code], cwd=cwd, start_new_session=True,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(stop_group, proc)
+        self.assertTrue(wait_for(ready, 60, proc), "fixture: the holder %s never started" % name)
+        return proc
+
+    @staticmethod
+    def holds_inside(proc, folder):
+        """True when proc's working folder, or a file it has open, is `folder` or lies under it. Reads /proc, so Linux only."""
+        base = os.path.realpath(folder)
+        fds = os.path.join("/proc", str(proc.pid), "fd")
+        paths = [os.path.realpath("/proc/%d/cwd" % proc.pid)] + [os.path.realpath(os.path.join(fds, n)) for n in os.listdir(fds)]
+        return any(p == base or p.startswith(base + os.sep) for p in paths)
+
+    @unittest.skipUnless(os.path.isdir("/proc/self"), "the holder's working folder is read from /proc")
+    def test_a_merge_fresh_tree_with_a_live_child_in_it_stays(self):
+        """A merge-fresh tree whose launcher pid is dead stays while a live process has its working folder in it. A dead tree with
+        no process in it, in the same sweep, goes."""
+        dead = reaped_child_pid()
+        control_tmp, _ = self.make_tree("gone", "merge tool, pid %d" % dead, prefix="merge-fresh-")
+        held_tmp, held_wt = self.make_tree("held", "merge tool, pid %d" % dead, prefix="merge-fresh-")
+        holder = self.start_holder(held_wt)
+        self.assertTrue(self.holds_inside(holder, held_tmp), "scope: the live child must have its working folder in the tree before add_worktree runs")
+
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        self.assertFalse(os.path.exists(control_tmp), "control: a dead merge-fresh tree with no process in it must be removed")
+        self.assertTrue(os.path.isdir(held_tmp), "a merge-fresh tree whose launcher pid is dead must stay while a live child runs in it")
+        self.assertIn(os.path.realpath(held_wt), self.locked_trees(), "a merge-fresh tree with a live child in it must stay registered")
+
+    @unittest.skipUnless(os.path.isdir("/proc/self"), "the holder's open files are read from /proc")
+    def test_a_merge_fresh_tree_with_a_live_child_holding_a_file_in_it_stays(self):
+        """A merge-fresh tree whose launcher pid is dead stays while a live process holds a file open in it, though the process's
+        working folder is elsewhere. A dead tree with no process in it, in the same sweep, goes."""
+        dead = reaped_child_pid()
+        control_tmp, _ = self.make_tree("gone", "merge tool, pid %d" % dead, prefix="merge-fresh-")
+        held_tmp, held_wt = self.make_tree("held", "merge tool, pid %d" % dead, prefix="merge-fresh-")
+        held_file = os.path.join(held_wt, "held.txt")
+        with open(held_file, "w", encoding="utf-8") as handle:
+            handle.write("held\n")
+        holder = self.start_holder(os.path.dirname(self.tmpdir), held=held_file)
+        self.assertTrue(self.holds_inside(holder, held_tmp), "scope: the live child must hold a file in the tree before add_worktree runs")
+
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        self.assertFalse(os.path.exists(control_tmp), "control: a dead merge-fresh tree with no process in it must be removed")
+        self.assertTrue(os.path.isdir(held_tmp), "a merge-fresh tree whose launcher pid is dead must stay while a live child holds a file in it")
+
+    @unittest.skipUnless(os.path.isdir("/proc/self"), "the holder's working folder is read from /proc")
+    def test_a_run_folder_of_each_kind_with_a_dead_pid_stays_while_a_live_child_is_in_it(self):
+        """A ci-job-lint, ci-job-pin or mutate_guard folder whose pid is dead stays while a live process has its working folder in
+        it. A dead folder with no process in it, in the same sweep, goes."""
+        dead = reaped_child_pid()
+        held, holders, control = {}, {}, {}
+        for kind, pattern in self.PLAIN_KINDS.items():
+            control[kind] = self.make_folder(pattern % dead)
+            held[kind] = self.make_folder((pattern % dead).replace("run", "held"))
+            holders[kind] = self.start_holder(held[kind], name=kind)
+            self.assertTrue(self.holds_inside(holders[kind], held[kind]), "scope: the %s live child must be in its folder before add_worktree runs" % kind)
+
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        for kind in self.PLAIN_KINDS:
+            with self.subTest(kind=kind, part="control"):
+                self.assertFalse(os.path.exists(control[kind]), "control: a dead %s folder with no process in it must be removed" % kind)
+            with self.subTest(kind=kind, part="held"):
+                self.assertTrue(os.path.isdir(held[kind]), "a %s folder whose pid %d is dead must stay while a live child runs in it" % (kind, dead))
+
+
+class ProducerFolderNames(unittest.TestCase):
+    """A run folder that a real producer makes carries the run's pid in its name, so the merge tool's sweep can find it once the
+    run is dead. Each case calls the producer itself, so a producer that drops the pid goes red here."""
+
+    def test_mutate_guard_names_its_work_folder_with_the_run_pid(self):
+        """A default run of hooks/mutate_guard.py names its work folder with the pid of that run. The run stops once it has named it.
+        The mutation list is empty here: a stale anchor in the real list ends a run before its work folder, and that is not this case."""
+        import mutate_guard  # noqa: E402  the real tool, from hooks/ (on the path, see the top of this file)
+        made = []
+
+        class Stop(Exception):
+            """Ends the run as soon as the work folder is named: nothing past it is needed here."""
+
+        def mkdtemp(*args, **kwargs):
+            made.append(kwargs.get("prefix"))
+            raise Stop()
+
+        patches = [unittest.mock.patch.object(tempfile, "mkdtemp", mkdtemp), unittest.mock.patch.object(sys, "argv", ["mutate_guard.py"]),
+                   unittest.mock.patch.object(mutate_guard, "MUTATIONS", [])]
+        with contextlib.ExitStack() as stack:
+            for patch in patches:
+                stack.enter_context(patch)
+            try:
+                mutate_guard.main()
+            except Stop:
+                pass
+        self.assertEqual(len(made), 1, "scope: a default run must reach its work folder as its first temp folder, made %r" % made)
+        self.assertEqual(made[0], "mutate_guard_%d-" % os.getpid(),
+                         "mutate_guard must name its work folder with the run's pid, got prefix %r" % made[0])
+
+
+class WorkFolderOnSignal(unittest.TestCase):
+    """hooks/mutate_guard.py's work folder is removed when a signal ends the run, as when it ends normally. Each case starts the real main() in
+    a child with no mutation, and the mutant run is a block, so the folder exists while the run is up. A TERM or HUP skips the folder's cleanup
+    unless the run handles the signal."""
+
+    def start_child(self, end=False, second_term=False):
+        """A run of the child with its TMPDIR in a folder of this run. end: the block returns at once, so the run ends by itself.
+        second_term: the child sends itself a TERM from inside the work folder's clean-up, as a group TERM does after the first."""
+        tmp = tempfile.mkdtemp(prefix="mutate-sig-", dir=run_folder())
+        env = {**os.environ, "TMPDIR": tmp, "MUTATE_END": "1" if end else "", "MUTATE_SECOND_TERM": "1" if second_term else ""}
+        proc = subprocess.Popen([sys.executable, os.path.abspath(__file__), "--mutate-child"], env=env, stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+        self.addCleanup(stop_group, proc)
+        for line in proc.stdout:  # the child prints READY once its work folder exists and the mutant run starts
+            if line.strip() == "READY":
+                break
+        else:
+            self.fail("the run never reached the mutant run: " + proc.stderr.read())
+        return proc, tmp
+
+    @staticmethod
+    def work_folders(tmp, pid):
+        """The work folders of the run `pid` in its TMPDIR."""
+        return [n for n in os.listdir(tmp) if n.startswith("mutate_guard_%d-" % pid)]
+
+    def test_sigterm_removes_the_work_folder(self):
+        self.assert_signal_removes_work_folder(signal.SIGTERM)
+
+    def test_sighup_removes_the_work_folder(self):
+        self.assert_signal_removes_work_folder(signal.SIGHUP)
+
+    def test_a_second_term_in_clean_up_still_removes_the_work_folder(self):
+        """A group TERM sends the child a second TERM while the work folder is removed. That TERM must not cut the removal short."""
+        proc, tmp = self.start_child(second_term=True)
+        self.assertEqual(len(self.work_folders(tmp, proc.pid)), 1, "scope: one work folder named with the run's pid must exist while the run is up")
+        proc.send_signal(signal.SIGTERM)
+        try:
+            proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            self.fail("the mutate_guard run did not exit within 60 s of a TERM")
+        self.assertEqual(self.work_folders(tmp, proc.pid), [], "a second TERM during clean-up cut the work folder's removal short")
+
+    def assert_signal_removes_work_folder(self, sig):
+        proc, tmp = self.start_child()
+        held = self.work_folders(tmp, proc.pid)
+        self.assertEqual(len(held), 1, "scope: one work folder named with the run's pid must exist while the run is up, got %r" % held)
+        proc.send_signal(sig)
+        try:
+            proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            self.fail("the mutate_guard run did not exit within 60 s of %s" % sig.name)
+        self.assertEqual(self.work_folders(tmp, proc.pid), [], "%s to the mutate_guard run left its work folder behind" % sig.name)
+
+    def test_a_normal_end_removes_the_work_folder(self):  # a control: the run's own finally removes the folder when no signal comes
+        proc, tmp = self.start_child(end=True)
+        self.assertEqual(len(self.work_folders(tmp, proc.pid)), 1, "scope: one work folder must exist while the run is up")
+        proc.wait(timeout=60)
+        self.assertEqual(proc.returncode, 0, proc.stderr.read())
+        self.assertEqual(self.work_folders(tmp, proc.pid), [], "a normal end left the work folder behind")
+
+
 class VerifiedLine(RecordsEnv):
     """The claim commit and the records-page commit each carry a Verified line (lint/check_red_run.py)."""
 
@@ -27349,6 +27600,25 @@ if __name__ == "__main__":
         if merge.main(["7", "--confirm"], host=host, lock=lock):  # the first confirm pushes the claim and stops
             sys.exit(1)
         sys.exit(merge.main(["7", "--confirm"], host=host, lock=lock))  # the second confirm merges the claim: its merge call dies
+    if len(sys.argv) == 2 and sys.argv[1] == "--mutate-child":
+        # hooks/mutate_guard.py's real main() with no mutation: it names and makes its work folder, then calls the mutant run, which is a
+        # block here. The block ends when stdin closes, or at once when MUTATE_END is set.
+        import mutate_guard
+        def block(*args, **kwargs):
+            print("READY", flush=True)
+            if not os.environ.get("MUTATE_END"):
+                sys.stdin.read()
+            return 0
+        if os.environ.get("MUTATE_SECOND_TERM"):
+            # The clean-up's rmtree gets a TERM first, as a group TERM sends the child a second one; the real rmtree then runs.
+            real_rmtree = mutate_guard.shutil.rmtree
+            def rmtree_after_a_term(path, *args, **kwargs):
+                os.kill(os.getpid(), signal.SIGTERM)
+                return real_rmtree(path, *args, **kwargs)
+            mutate_guard.shutil.rmtree = rmtree_after_a_term
+        mutate_guard.MUTATIONS = []
+        mutate_guard.mutate_shared.run_mutants = block
+        sys.exit(mutate_guard.main())
     class Slicer(unittest.TestLoader):
         def loadTestsFromModule(self, *a, **k):
             suite = select_shard(select_tests(super().loadTestsFromModule(*a, **k), os.environ.get("MERGE_TESTS", "")),

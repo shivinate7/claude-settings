@@ -893,9 +893,11 @@ def refuse_or_take_over(b, held, now):
 
 @contextlib.contextmanager
 def release_on_signals():
-    """SIGTERM and SIGINT end the run through its `finally`, which releases the merge lock. A second signal while it releases is ignored.
+    """SIGTERM, SIGHUP and SIGINT end the run through its `finally`, which releases the merge lock. A second signal while it releases is ignored.
+    The launcher forwards a HUP and follows it with a KILL after a grace; a run the KILL stops mid-release leaves a lock that expires at its
+    published time and that the next run takes over once its pid is dead, so the lock never stays live.
     Where signal handlers cannot be set (another thread), nothing changes."""
-    names = [signal.SIGTERM, signal.SIGINT]
+    names = [getattr(signal, n) for n in ("SIGTERM", "SIGHUP", "SIGINT") if hasattr(signal, n)]  # Windows has no SIGHUP
     def stop(sig, frame):
         for n in names:
             signal.signal(n, signal.SIG_IGN)
@@ -2974,15 +2976,66 @@ def open_worktree(root, info, base):
     return add_worktree(root, fetch_pr_head(root, info, base)["head"])
 
 MERGE_LOCK = re.compile(r"merge tool, pid (\d+)")
+# A run folder in the temp folder names its maker's pid: ci-job-lint-<pid>-, ci-job-pin-<pid>-<sha7>-, mutate_guard_<pid>-.
+# A folder from before the pid was added has no digits and a dash at that place, so it never matches.
+RUN_FOLDER = re.compile(r"(?:ci-job-lint-(\d+)-|ci-job-pin-(\d+)-[0-9a-f]{7}-|mutate_guard_(\d+)-)")
+
+
+def held_by_live_process(path):
+    """True when a live process has its working folder, or an open file, in PATH or under it, or when that cannot be read (unknown keeps the folder).
+    The working folder comes from the janitor's `sweep.processes_in`, the one reader of it. That reader skips open files, so on Linux each
+    /proc/<pid>/fd link is read here too: a child that outlives a dead launcher can hold a file in the folder while its cwd is elsewhere."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "janitor"))
+    try:
+        import sweep  # janitor/sweep.py
+        inside, _unreadable = sweep.processes_in(path)
+    except Exception:
+        return True
+    if inside is None or inside:
+        return True
+    base = os.path.realpath(path)
+    try:
+        pids = [n for n in os.listdir("/proc") if n.isdigit()]
+    except OSError:
+        return False  # no /proc (macOS, Windows): the working-folder read above is all there is
+    for pid in pids:
+        try:
+            links = [os.path.join("/proc", pid, "fd", n) for n in os.listdir(os.path.join("/proc", pid, "fd"))]
+        except OSError:
+            continue  # ended, or another user's process
+        for link in links:
+            try:
+                target = os.readlink(link)
+            except OSError:
+                continue
+            if target == base or target.startswith(base + os.sep):
+                return True
+    return False
+
+
+def sweep_dead_folders(temp):
+    """Remove each ci-job-lint, ci-job-pin and mutate_guard folder directly in TEMP whose name carries a dead pid: a run that died left it.
+    A live pid and a name with no pid stay, and so does a folder a live process holds (held_by_live_process)."""
+    try:
+        names = os.listdir(temp)
+    except OSError:
+        return
+    for name in names:
+        m = RUN_FOLDER.match(name)
+        path = os.path.join(temp, name)
+        if m and os.path.isdir(path) and not os.path.islink(path) and not pid_alive(int(next(g for g in m.groups() if g))) and not held_by_live_process(path):
+            shutil.rmtree(path, ignore_errors=True)
 
 
 def sweep_dead_trees(root):
     """Remove each locked worktree of ROOT in the temp folder whose lock reason is `merge tool, pid N` with N dead: a merge run that died left it.
-    The tree is this tool's own, so it is dropped with force, as drop_worktree does. A live pid, an unreadable pid and any other lock stay."""
+    The tree is this tool's own, so it is dropped with force, as drop_worktree does. A live pid, an unreadable pid and any other lock stay.
+    The trees are the merge-wt- ones this module makes and the merge-fresh- ones merge/launch.py makes. Run folders of dead runs go too (sweep_dead_folders)."""
+    temp = os.path.realpath(tempfile.gettempdir())
+    sweep_dead_folders(temp)
     c, out = git(root, "worktree", "list", "--porcelain")
     if c:
         return
-    temp = os.path.realpath(tempfile.gettempdir())
     path = None
     for line in out.splitlines():
         if line.startswith("worktree "):
@@ -2990,8 +3043,8 @@ def sweep_dead_trees(root):
         elif line.startswith("locked") and path:
             m = MERGE_LOCK.fullmatch(line[len("locked"):].strip())
             tmp = os.path.dirname(path)
-            if (m and os.path.basename(path) == "tree" and os.path.basename(tmp).startswith("merge-wt-")
-                    and os.path.dirname(tmp) == temp and not pid_alive(int(m.group(1)))):
+            if (m and os.path.basename(path) == "tree" and os.path.basename(tmp).startswith(("merge-wt-", "merge-fresh-"))
+                    and os.path.dirname(tmp) == temp and not pid_alive(int(m.group(1))) and not held_by_live_process(tmp)):
                 drop_worktree(root, tmp, path)
 
 

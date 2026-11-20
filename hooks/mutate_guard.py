@@ -4002,15 +4002,21 @@ REPLAY_PROFILES = {
 
 @contextlib.contextmanager
 def stop_on_signals():
-    """SIGTERM and SIGINT become an exit, so the `finally` blocks of the caller run: the suite groups are killed first, then
-    the caller removes its checkouts. The handlers and the stop flag are put back on the way out."""
+    """SIGTERM, SIGHUP and SIGINT become an exit, so the `finally` blocks of the caller run: the suite groups are killed first, then
+    the caller removes its checkouts. The handlers and the stop flag are put back on the way out. Windows has no SIGHUP, so it is
+    left out there."""
     def stop(signum, _frame):
+        # A later signal while the caller cleans up is ignored: a group TERM reaches the child too, and a second TERM
+        # would cut the work folder's rmtree short.
+        for number in stops:
+            signal.signal(number, signal.SIG_IGN)
         mutate_shared.request_stop()
         raise SystemExit(128 + signum)
 
     saved = {}
+    stops = (signal.SIGTERM, signal.SIGINT) + ((signal.SIGHUP,) if hasattr(signal, "SIGHUP") else ())
     try:
-        for number in (signal.SIGTERM, signal.SIGINT):
+        for number in stops:
             saved[number] = signal.signal(number, stop)
     except ValueError:  # not the main thread: no handler, the default stays
         pass
@@ -4945,31 +4951,34 @@ def main() -> int:
                 return 1
             seen_paths[candidate.lower()] = (control_index, label)
 
-    work = tempfile.mkdtemp(prefix="mutate_guard_")
-    # A "watch" mutant is a copy of config_watch.py that runs OUTSIDE hooks/, as its own
-    # subprocess, and it does a plain `import guard` (never GUARD_UNDER_TEST: a mutation of the
-    # watch must never be killed by a guard that moved with it, which is why
-    # `test_config_watch.py`'s own `Project.env()` strips that variable before it spawns the
-    # copy). Without the REAL guard.py sitting next to it, that import fails on every watch
-    # mutant alike, and the crash reads as "the watch missed it" for EVERY case regardless of
-    # which line was mutated: a kill with no bearing on the defect the mutation names, the exact
-    # failure this file exists to catch. MEASURED: before this line, all seven `watch` mutants
-    # printed the identical nine-case failure list, whatever the mutation.
-    mutate_shared.guard_tree(work)
-    # The override and calljudge copies sit one folder below `work`, so their `../lint` is work/lint:
-    # override.py reads it, and so does the decision_watch.py beside a calljudge copy. The decision copy reads its
-    # own tree/lint (above). The ruling copy reads work/lint through guard_core's lint_dir(). A guard copy carries
-    # its own lint folder (run_mutant).
-    # The override copies also read ../janitor (the simulator refusal, which fails open without it) and ../skills.
-    tracked_tree.copy_tracked(work, "lint", "janitor", "skills", root=os.path.dirname(HERE))
-    lay_out_guard_reads(work)  # the override copies' ../merge, ../actions and ../bin
+    # The pid in the name lets merge.py's sweep remove this folder after a run that died before its cleanup.
+    # The signal handlers go on before the folder is made, so a TERM, HUP or INT ends the run through the `finally` below.
+    with stop_on_signals():
+        work = tempfile.mkdtemp(prefix="mutate_guard_%d-" % os.getpid())
+        try:
+            # A "watch" mutant is a copy of config_watch.py that runs OUTSIDE hooks/, as its own
+            # subprocess, and it does a plain `import guard` (never GUARD_UNDER_TEST: a mutation of the
+            # watch must never be killed by a guard that moved with it, which is why
+            # `test_config_watch.py`'s own `Project.env()` strips that variable before it spawns the
+            # copy). Without the REAL guard.py sitting next to it, that import fails on every watch
+            # mutant alike, and the crash reads as "the watch missed it" for EVERY case regardless of
+            # which line was mutated: a kill with no bearing on the defect the mutation names, the exact
+            # failure this file exists to catch: every `watch` mutant would print the same nine-case
+            # failure list, whatever the mutation.
+            mutate_shared.guard_tree(work)
+            # The override and calljudge copies sit one folder below `work`, so their `../lint` is work/lint:
+            # override.py reads it, and so does the decision_watch.py beside a calljudge copy. The decision copy reads its
+            # own tree/lint (above). The ruling copy reads work/lint through guard_core's lint_dir(). A guard copy carries
+            # its own lint folder (run_mutant).
+            # The override copies also read ../janitor (the simulator refusal, which fails open without it) and ../skills.
+            tracked_tree.copy_tracked(work, "lint", "janitor", "skills", root=os.path.dirname(HERE))
+            lay_out_guard_reads(work)  # the override copies' ../merge, ../actions and ../bin
 
-    try:
-        return mutate_shared.run_mutants(
-            MUTATIONS, lambda entry: run_mutant(sources, work, entry),
-            controls=run_controls(sources, work, MUTATIONS), control_of=lambda entry: mutation_parts(entry)[3])
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
+            return mutate_shared.run_mutants(
+                MUTATIONS, lambda entry: run_mutant(sources, work, entry),
+                controls=run_controls(sources, work, MUTATIONS), control_of=lambda entry: mutation_parts(entry)[3])
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
 
 
 if __name__ == "__main__":
