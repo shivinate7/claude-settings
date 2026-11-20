@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """PostToolUse audit of a desktop session start (docs/decisions/start-session-not-pretooluse.md).
 
-After a start_session call, flags a start that earns any of five reasons: a model below the floor (guard.floor_hit, the
-one reading); the calling session's handoff unread (reread_check.unread_handoff, the guard's own read); a lane start (a
-prompt whose first line after the Grant line is the Lane brief line, as guard_merge reads it) that names no model; a lane
-start that names Opus when the calling session holds no Opus override (override._take_opus) and no live timed override
-(override.timed_live), both read only, so nothing is spent; and a top-level `env` that carries a session role key, since
-only bin/claude-role sets a role and a start never claims one. A lane's own Grant line is not an owner grant for Opus.
-An Opus override file that cannot be read adds no flag. A flagged start prints
+After a start_session call, flags a start that earns any of four reasons: the calling session's handoff unread
+(reread_check.unread_handoff, the guard's own read); a lane start (a prompt whose first line after the Grant line is the
+Lane brief line, as guard_merge reads it) that names no model; a lane start that names Opus when the calling session
+holds no Opus override (override._take_opus) and no live timed override (override.timed_live), both read only, so
+nothing is spent; and a top-level `env` that carries a session role key, since only bin/claude-role sets a role and a
+start never claims one. A lane's own Grant line is not an owner grant for Opus. An Opus override file that cannot be
+read adds no flag. It does not flag a Haiku start: the owner's model name lifts the floor, and a started session
+cannot read that word (decision start-checks-after-call). A flagged start prints
 PostToolUse additionalContext that tells the calling session to stop the new session with interrupt_session or
 archive_session. A start that passes prints nothing. It never refuses and never exits 2.
 
@@ -83,16 +84,12 @@ def lane_opus_without_grant(payload):
 
 
 def reasons(payload):
-    """The flags a start earns, as short phrases: the model below the floor, a lane start with no model or with Opus
-    and no owner grant, a role claimed in env, and an unread handoff. Empty for a start that passes."""
-    import guard
+    """The flags a start earns, as short phrases: a lane start with no model or with Opus and no owner grant, a role
+    claimed in env, and an unread handoff. Empty for a start that passes."""
     from reread_check import unread_handoff
-    tool_input = payload.get("tool_input")
     found = []
+    tool_input = payload.get("tool_input")
     if isinstance(tool_input, dict):
-        floor_model = guard.floor_hit(guard.SESSION_TOOL, tool_input)
-        if floor_model:
-            found.append("it names the model %s, below the Sonnet floor" % floor_model)
         if lane_from_prompt(tool_input):
             model = tool_input.get("model")
             if not (isinstance(model, str) and model.strip()):

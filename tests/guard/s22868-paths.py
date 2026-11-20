@@ -43,27 +43,27 @@ AUTHOR_RED = [
 for _name, _change in AUTHOR_RED:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
-    _repo = diff_repo("a-" + _name, _change)
+    _paths_repo = diff_repo("a-" + _name, _change)
     sh("author-diff: commit with a %s change is allowed and logged" % _name, COMMIT, "allow",
-       cwd=_repo, agent_id="auth1", agent_type="test-author")
+       cwd=_paths_repo, agent_id="auth1", agent_type="test-author")
     sh("author-diff: push with a %s change is allowed and logged" % _name, PUSH, "allow",
-       cwd=_repo, agent_id="auth1", agent_type="test-author")
+       cwd=_paths_repo, agent_id="auth1", agent_type="test-author")
     add("author-diff: stop with a %s change is allowed and logged" % _name, "allow",
-        event="SubagentStop", cwd=_repo, agent_id="auth1", agent_type="test-author")
+        event="SubagentStop", cwd=_paths_repo, agent_id="auth1", agent_type="test-author")
 for _name, _change in AUTHOR_GREEN:
-    _repo = diff_repo("ag-" + _name, _change)
-    sh("author-diff: commit with %s is allowed" % _name, COMMIT, "allow", cwd=_repo,
+    _paths_repo = diff_repo("ag-" + _name, _change)
+    sh("author-diff: commit with %s is allowed" % _name, COMMIT, "allow", cwd=_paths_repo,
        agent_id="auth1", agent_type="test-author")
     add("author-diff: stop with %s is allowed" % _name, "allow", event="SubagentStop",
-        cwd=_repo, agent_id="auth1", agent_type="test-author")
+        cwd=_paths_repo, agent_id="auth1", agent_type="test-author")
 
 
 # ---- workflow files at commit time: the diff a test-author or a builder would commit (role_offences). A
 # test-author's lint change is logged and allowed. A builder's test change is refused at commit.
 WF_BASE = LINT + TEST_LINUX
 WF_FILES = {**BASE_FILES, WF: WF_BASE}
-_repo = diff_repo("wfa-lint-run", _put(WF, LINT_RUN_CHANGED + TEST_LINUX), files=WF_FILES)
-sh("author-diff: commit with a workflow lint change is allowed and logged", COMMIT, "allow", cwd=_repo,
+_paths_repo = diff_repo("wfa-lint-run", _put(WF, LINT_RUN_CHANGED + TEST_LINUX), files=WF_FILES)
+sh("author-diff: commit with a workflow lint change is allowed and logged", COMMIT, "allow", cwd=_paths_repo,
    agent_id="auth1", agent_type="test-author")
 for _slug, _label, _text, _expect in (
     ("wfb-deselect", "a --deselect pytest line", LINT + DESELECT, "deny"),
@@ -71,12 +71,12 @@ for _slug, _label, _text, _expect in (
     ("wfb-delete-test-step", "a deleted test step", LINT, "deny"),
     ("wfb-ruff-tests", "a ruff --ignore line on tests/", LINT + TEST_LINUX + RUFF_TESTS, "allow"),
 ):
-    _repo = diff_repo(_slug, _put(WF, _text), files=WF_FILES)
+    _paths_repo = diff_repo(_slug, _put(WF, _text), files=WF_FILES)
     if _expect == "deny":
         sh("builder-diff: commit with %s in checks.yml is denied" % _label, COMMIT, "deny", rule=BDIFF,
-           cwd=_repo, agent_id="bld1", agent_type="builder")
+           cwd=_paths_repo, agent_id="bld1", agent_type="builder")
     else:
-        sh("builder-diff: commit with %s in checks.yml is allowed" % _label, COMMIT, "allow", cwd=_repo,
+        sh("builder-diff: commit with %s in checks.yml is allowed" % _label, COMMIT, "allow", cwd=_paths_repo,
            agent_id="bld1", agent_type="builder")
 
 
@@ -256,21 +256,21 @@ RW_GREEN = (
                                  write(os.path.join(w, "decisions/y.md"), "# y\n"))),
 )
 for _name, _change in RW_RED:
-    _repo = diff_repo("rw-" + _name, _change)
+    _paths_repo = diff_repo("rw-" + _name, _change)
     sh("record-writer-diff: commit with a %s change is allowed" % _name, COMMIT, "allow",
-       cwd=_repo, agent_id="rw1", agent_type="record-writer")
+       cwd=_paths_repo, agent_id="rw1", agent_type="record-writer")
     sh("record-writer-diff: push with a %s change is allowed" % _name, PUSH, "allow",
-       cwd=_repo, agent_id="rw1", agent_type="record-writer")
+       cwd=_paths_repo, agent_id="rw1", agent_type="record-writer")
     add("record-writer-diff: stop with a %s change is allowed" % _name, "allow",
-        event="SubagentStop", cwd=_repo, agent_id="rw1", agent_type="record-writer")
+        event="SubagentStop", cwd=_paths_repo, agent_id="rw1", agent_type="record-writer")
 for _name, _change in RW_GREEN:
-    _repo = diff_repo("rw-" + _name, _change)
+    _paths_repo = diff_repo("rw-" + _name, _change)
     sh("record-writer-diff: commit with an all-.md change is allowed", COMMIT, "allow",
-       cwd=_repo, agent_id="rw1", agent_type="record-writer", silent=True)
+       cwd=_paths_repo, agent_id="rw1", agent_type="record-writer", silent=True)
     sh("record-writer-diff: push with an all-.md change is allowed", PUSH, "allow",
-       cwd=_repo, agent_id="rw1", agent_type="record-writer", silent=True)
+       cwd=_paths_repo, agent_id="rw1", agent_type="record-writer", silent=True)
     add("record-writer-diff: stop with an all-.md change is allowed", "allow",
-        event="SubagentStop", cwd=_repo, agent_id="rw1", agent_type="record-writer", silent=True)
+        event="SubagentStop", cwd=_paths_repo, agent_id="rw1", agent_type="record-writer", silent=True)
 
 
 def rw_diff_logs_case():
