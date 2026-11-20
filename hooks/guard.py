@@ -5152,6 +5152,69 @@ def load_full(reading, disk_only=False) -> list:
                         disk_full and "disk %.1f GB free of %.0f GB" % (disk, disk_total)) if t]
 
 
+# THE AUDIT'S DISK CLEANUP (decision machine-load-brake, with precompact-handoff). The owed audit refuses every shell call
+# until the audit spawn runs, and a full disk refuses that spawn: a session could neither spawn nor free the disk. While the
+# brake itself refuses the audit spawn for disk, every disk-cleanup shell call passes the compaction audit (no count limit).
+# A pass clears nothing: the audit stays owed.
+AUDIT_CLEANUP_SHELL_BAD = re.compile(r"[;&|<>`$()\n\r\\*?\[\]{}~]")
+# The sweep's flags are LOAD_SWEEP's own, the words after its <repo> placeholder; --confirm is the one it adds on top.
+AUDIT_CLEANUP_SWEEP_FLAGS = tuple(LOAD_SWEEP.split("<repo>", 1)[1].split())
+AUDIT_CLEANUP_SWEEP_CONFIRM = "--confirm"
+AUDIT_CLEANUP_TMP = "/tmp/"
+
+
+def audit_cleanup_form(tool: str, tool_input) -> bool:
+    """True when this call is a disk cleanup: the janitor sweep (its preview, or --confirm), or an rm -rf of absolute
+    paths that all sit under /tmp. Anything chained, redirected, expanded or globbed is not one."""
+    command = tool_input.get("command") if isinstance(tool_input, dict) else None
+    if tool != "Bash" or not isinstance(command, str):
+        return False
+    sweep_script = LOAD_SWEEP.split()[1]
+    # The sweep's own script path, with its ~ left for the shell to expand, is the one place a ~ may sit.
+    if AUDIT_CLEANUP_SHELL_BAD.search(command.replace(sweep_script, "", 1)):
+        return False
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return False
+    if len(words) >= 2 and words[0] in ("python3", "python") and words[1] == sweep_script:
+        rest, flags, root = words[2:], [], None
+        while rest:
+            word = rest.pop(0)
+            if word == "--root" and rest and root is None and rest[0].startswith("/"):
+                root = rest.pop(0)
+            elif word in AUDIT_CLEANUP_SWEEP_FLAGS + (AUDIT_CLEANUP_SWEEP_CONFIRM,) and word not in flags:
+                flags.append(word)
+            else:
+                return False
+        # LOAD_SWEEP's exact flag set, or that set plus --confirm: no other mix is the sweep the load brake names.
+        return root is not None and set(flags) in (set(AUDIT_CLEANUP_SWEEP_FLAGS),
+                                                   set(AUDIT_CLEANUP_SWEEP_FLAGS) | {AUDIT_CLEANUP_SWEEP_CONFIRM})
+    if len(words) >= 3 and words[0] == "rm":
+        flags = [w for w in words[1:] if w.startswith("-")]
+        paths = [w for w in words[1:] if not w.startswith("-")]
+        letters = "".join(f[1:] for f in flags).replace("R", "r")
+        if not paths or any(f.startswith("--") for f in flags) or set(letters) != {"r", "f"}:
+            return False
+        # /tmp// and /tmp/// are /tmp itself: the part after /tmp/ must hold a name once the slashes are dropped.
+        return all(w.startswith(AUDIT_CLEANUP_TMP) and w[len(AUDIT_CLEANUP_TMP):].strip("/") and ".." not in w.split("/")
+                   for w in paths)
+    return False
+
+
+def audit_disk_cleanup_hit(tool: str, tool_input) -> bool:
+    """True when the compaction audit lets this call through: it is a disk cleanup (audit_cleanup_form), and the load
+    brake's own verdict on the audit spawn is a refusal for disk (one read, in load_hit). The form is judged first, so
+    an ordinary call reads no load."""
+    if not audit_cleanup_form(tool, tool_input):
+        return False
+    try:
+        _reason, matched = load_hit(SPAWN_TOOLS[0], {})
+    except Exception:
+        return False
+    return "disk" in matched
+
+
 OPUS_SPAWN_REASON = (
     "Rule (configuration): this spawn sets model Opus, above its role's model. Opus runs "
     "only on the owner's typed override or grant for this spawn, except Plan, the designer, the design "
@@ -7832,7 +7895,7 @@ def judge(payload) -> None:
     if pending:
         if audit_spawn(payload, SPAWN_TOOLS):
             AUDIT_SPAWN_PASSED.append(True)
-        else:
+        elif not audit_disk_cleanup_hit(tool, tool_input):   # a disk cleanup passes and leaves the audit owed
             refuse(tool, "deny", "compaction-audit", COMPACTION_AUDIT_REASON % pending, pending)
     # 0. Each agent stays inside its own worktree.
     home_hit = worktree_home_hit(payload, tool, tool_input, cwd)
