@@ -13,7 +13,7 @@ import os, shutil, signal, subprocess, sys, tempfile, unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
-from proc_fixture import alive, stop_group, wait_for  # noqa: E402  the one home of the signal-test helpers (testing/proc_fixture.py)
+from proc_fixture import alive, kill_all, stop_group, wait_for, wait_gone  # noqa: E402  the one home of the signal-test helpers (testing/proc_fixture.py)
 sys.path.insert(0, os.path.join(ROOT, "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 URL = "https://github.com/shivinate7/claude-settings"
@@ -27,10 +27,10 @@ def sh(cwd, *cmd, env=None):
     assert r.returncode == 0, (cmd, r.stdout, r.stderr)
     return r.stdout.strip()
 
-# A stub merge.py that writes its pid to READY_FILE, then blocks until the test closes its stdin.
+# A stub merge.py that writes its pid and its parent's pid (the launcher's) to READY_FILE, then blocks until the test closes its stdin.
 BLOCK = ("import os, sys\n"
          "tmp = os.environ['READY_FILE'] + '.tmp'\n"
-         "open(tmp, 'w').write(str(os.getpid()))\n"
+         "open(tmp, 'w').write('%d %d' % (os.getpid(), os.getppid()))\n"
          "os.replace(tmp, os.environ['READY_FILE'])\n"
          "sys.stdin.read()\n")
 # A stub merge.py that writes its parent's pid, then `git worktree list --porcelain` of its own tree, to LOCK_FILE.
@@ -362,12 +362,34 @@ class Launch(unittest.TestCase):
                 proc, ready = self.start_blocked_run(sig.name)
                 self.assertTrue(wait_for(ready, 60, proc), "the stub never started")
                 with open(ready, encoding="utf-8") as f:
-                    child = int(f.read())
+                    child = int(f.read().split()[0])
                 self.assertTrue(alive(child), "scope: the stub must run before %s" % sig.name)
                 proc.send_signal(sig)
                 self.await_exit(proc, "bin/merge after %s" % sig.name)
                 self.assertFalse(alive(child), "%s to bin/merge did not reach the stub %d, which runs after bin/merge returned"
                                  % (sig.name, child))
+
+    def start_killed_run(self, name):
+        """bin/merge started on the BLOCK stub, with a KILL sent to its group. -> (launcher pid, stub pid). Both are killed at cleanup,
+        so a red run leaves no process behind. The KILL is the one signal no handler sees: only the group reaches a child."""
+        self.release("v2", body=BLOCK)
+        proc, ready = self.start_blocked_run(name)
+        self.assertTrue(wait_for(ready, 60, proc), "the stub never started")
+        with open(ready, encoding="utf-8") as f:
+            stub, launcher = (int(x) for x in f.read().split())
+        self.addCleanup(kill_all, [stub, launcher])
+        self.assertTrue(alive(launcher) and alive(stub), "scope: the launcher and the stub must run before the KILL")
+        os.killpg(proc.pid, signal.SIGKILL)
+        self.await_exit(proc, "bin/merge after a KILL to its group")
+        return launcher, stub
+
+    def test_sigkill_to_bin_merge_group_ends_the_launcher(self):
+        launcher, _ = self.start_killed_run("kill-launcher")
+        self.assertTrue(wait_gone(launcher, 30), "a KILL to the group of bin/merge did not end the launcher %d, which runs beside it" % launcher)
+
+    def test_sigkill_to_bin_merge_group_ends_the_stub(self):
+        _, stub = self.start_killed_run("kill-stub")
+        self.assertTrue(wait_gone(stub, 30), "a KILL to the group of bin/merge did not end the stub %d, which runs after bin/merge is gone" % stub)
 
     def test_fresh_tree_is_locked_with_the_launcher_pid(self):
         """The fresh tree is locked while the run uses it, with the reason `merge tool, pid N`, where N is the launcher's pid,

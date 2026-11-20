@@ -32,6 +32,16 @@ def alive(pid):
     return not zombie(pid)
 
 
+def wait_gone(pid, cap):
+    """True once pid no longer runs, within `cap` seconds. False at `cap`. A poll on the process, never a fixed sleep."""
+    end = time.monotonic() + cap
+    while alive(pid):
+        if time.monotonic() > end:
+            return False
+        time.sleep(0.05)
+    return True
+
+
 def wait_for(path, cap, proc=None):
     """True once `path` exists. False at `cap` seconds, or when `proc` ends first. A poll on the marker, never a fixed sleep."""
     end = time.monotonic() + cap

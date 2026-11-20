@@ -24,6 +24,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
+from proc_fixture import stop_group, wait_for  # noqa: E402  the one home of the process helpers (testing/proc_fixture.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "skills", "roadmap"))  # append: no roadmap module shadows one this suite imports
 import test_build as roadmap  # noqa: E402  the roadmap fixture: STEP, session_row, BUCKET_* (one home: skills/roadmap/test_build.py)
 import fnmatch  # noqa: E402  the temp-file cases match merge-live names
@@ -27025,6 +27026,79 @@ class StaleMergeTrees(unittest.TestCase):
         for kind, folder in legacy_run.items():
             with self.subTest(kind=kind, pid="none"):
                 self.assertTrue(os.path.isdir(folder), "a %s folder that names no pid must stay" % kind)
+
+    def start_holder(self, cwd, held=None, name="holder"):
+        """A live process, in its own group, whose working folder is `cwd`. With `held`, it also holds that file open. -> the Popen.
+        It writes its marker after it holds what it holds, so the sweep never runs before the holder does."""
+        ready = os.path.join(os.path.dirname(self.tmpdir), name + ".ready")
+        code = "import time\n" + ("f = open(%r)\n" % held if held else "") + ("open(%r, 'w').close()\ntime.sleep(300)\n" % ready)
+        proc = subprocess.Popen([sys.executable, "-c", code], cwd=cwd, start_new_session=True,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(stop_group, proc)
+        self.assertTrue(wait_for(ready, 60, proc), "fixture: the holder %s never started" % name)
+        return proc
+
+    @staticmethod
+    def holds_inside(proc, folder):
+        """True when proc's working folder, or a file it has open, is `folder` or lies under it. Reads /proc, so Linux only."""
+        base = os.path.realpath(folder)
+        fds = os.path.join("/proc", str(proc.pid), "fd")
+        paths = [os.path.realpath("/proc/%d/cwd" % proc.pid)] + [os.path.realpath(os.path.join(fds, n)) for n in os.listdir(fds)]
+        return any(p == base or p.startswith(base + os.sep) for p in paths)
+
+    @unittest.skipUnless(os.path.isdir("/proc/self"), "the holder's working folder is read from /proc")
+    def test_a_merge_fresh_tree_with_a_live_child_in_it_stays(self):
+        """A merge-fresh tree whose launcher pid is dead stays while a live process has its working folder in it. A dead tree with
+        no process in it, in the same sweep, goes."""
+        dead = reaped_child_pid()
+        control_tmp, _ = self.make_tree("gone", "merge tool, pid %d" % dead, prefix="merge-fresh-")
+        held_tmp, held_wt = self.make_tree("held", "merge tool, pid %d" % dead, prefix="merge-fresh-")
+        holder = self.start_holder(held_wt)
+        self.assertTrue(self.holds_inside(holder, held_tmp), "scope: the live child must have its working folder in the tree before add_worktree runs")
+
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        self.assertFalse(os.path.exists(control_tmp), "control: a dead merge-fresh tree with no process in it must be removed")
+        self.assertTrue(os.path.isdir(held_tmp), "a merge-fresh tree whose launcher pid is dead must stay while a live child runs in it")
+        self.assertIn(os.path.realpath(held_wt), self.locked_trees(), "a merge-fresh tree with a live child in it must stay registered")
+
+    @unittest.skipUnless(os.path.isdir("/proc/self"), "the holder's open files are read from /proc")
+    def test_a_merge_fresh_tree_with_a_live_child_holding_a_file_in_it_stays(self):
+        """A merge-fresh tree whose launcher pid is dead stays while a live process holds a file open in it, though the process's
+        working folder is elsewhere. A dead tree with no process in it, in the same sweep, goes."""
+        dead = reaped_child_pid()
+        control_tmp, _ = self.make_tree("gone", "merge tool, pid %d" % dead, prefix="merge-fresh-")
+        held_tmp, held_wt = self.make_tree("held", "merge tool, pid %d" % dead, prefix="merge-fresh-")
+        held_file = os.path.join(held_wt, "held.txt")
+        with open(held_file, "w", encoding="utf-8") as handle:
+            handle.write("held\n")
+        holder = self.start_holder(os.path.dirname(self.tmpdir), held=held_file)
+        self.assertTrue(self.holds_inside(holder, held_tmp), "scope: the live child must hold a file in the tree before add_worktree runs")
+
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        self.assertFalse(os.path.exists(control_tmp), "control: a dead merge-fresh tree with no process in it must be removed")
+        self.assertTrue(os.path.isdir(held_tmp), "a merge-fresh tree whose launcher pid is dead must stay while a live child holds a file in it")
+
+    @unittest.skipUnless(os.path.isdir("/proc/self"), "the holder's working folder is read from /proc")
+    def test_a_run_folder_of_each_kind_with_a_dead_pid_stays_while_a_live_child_is_in_it(self):
+        """A ci-job-lint, ci-job-pin or mutate_guard folder whose pid is dead stays while a live process has its working folder in
+        it. A dead folder with no process in it, in the same sweep, goes."""
+        dead = reaped_child_pid()
+        held, holders, control = {}, {}, {}
+        for kind, pattern in self.PLAIN_KINDS.items():
+            control[kind] = self.make_folder(pattern % dead)
+            held[kind] = self.make_folder((pattern % dead).replace("run", "held"))
+            holders[kind] = self.start_holder(held[kind], name=kind)
+            self.assertTrue(self.holds_inside(holders[kind], held[kind]), "scope: the %s live child must be in its folder before add_worktree runs" % kind)
+
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        for kind in self.PLAIN_KINDS:
+            with self.subTest(kind=kind, part="control"):
+                self.assertFalse(os.path.exists(control[kind]), "control: a dead %s folder with no process in it must be removed" % kind)
+            with self.subTest(kind=kind, part="held"):
+                self.assertTrue(os.path.isdir(held[kind]), "a %s folder whose pid %d is dead must stay while a live child runs in it" % (kind, dead))
 
 
 class VerifiedLine(RecordsEnv):
