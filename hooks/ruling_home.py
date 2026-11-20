@@ -110,10 +110,10 @@ def _ensure_transcript_helpers():
     global is_last_human, tool_uses, records_after_last_human, read_transcript, read_turn
     if tool_uses is not None:
         return
-    here = os.path.dirname(os.path.realpath(__file__))
-    lint_dir = os.path.join(here, "..", "lint")
-    if lint_dir not in sys.path:
-        sys.path.insert(0, lint_dir)
+    from guard_core import lint_dir  # lazy: the one home of where lint/ is
+    lint = lint_dir()
+    if lint not in sys.path:
+        sys.path.insert(0, lint)
     from _transcript import (
         is_last_human as _ilh, tool_uses as _tu,
         records_after_last_human as _rah, read_transcript as _rt, read_turn as _rtn,

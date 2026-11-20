@@ -45,7 +45,7 @@ def _put(rel, text):
     return lambda w: write(os.path.join(w, rel), text)
 
 
-def _mv(src, dst):
+def _diff_mv(src, dst):
     def go(w):
         os.makedirs(os.path.dirname(os.path.join(w, dst)), exist_ok=True)
         os.rename(os.path.join(w, src), os.path.join(w, dst))
@@ -66,7 +66,7 @@ BUILDER_RED = [
     ("deleted", _rm("tests/test_a.py")),                      # rm, find -delete, xargs rm, dd
     ("rewritten", _put("tests/test_a.py", "pass\n")),         # sed -i, patch, apply, rsync, bash -c
     ("new-untracked", _put("tests/test_new.py", "pass\n")),   # cp -t, a redirect through a variable
-    ("moved-out", _mv("tests/test_a.py", "src/moved.py")),    # mv
+    ("moved-out", _diff_mv("tests/test_a.py", "src/moved.py")),    # mv
     ("symlink-file", _link("../tests/test_a.py", "src/link.py")),
     ("symlink-dir", _link("tests", "src/linkdir")),
     ("backslash-name", _put("tests\\foo.py", "pass\n")),
@@ -101,7 +101,7 @@ BUILDER_GREEN = [
     ("product-edit", _put("src/app.py", "x = 2\n")),
     ("contest-and-results", lambda w: (write(os.path.join(w, "src/contest.py"), "y = 2\n"),
                                        write(os.path.join(w, "latest_results.md"), "better\n"))),
-    ("product-rename", _mv("src/app.py", "src/main.py")),
+    ("product-rename", _diff_mv("src/app.py", "src/main.py")),
     ("product-delete", _rm("src/contest.py")),
     ("dependency-added", _put("pyproject.toml", "[project]\nname = 'x'\ndependencies = ['requests']\n")),
     ("script-added", _put("package.json", '{"name": "x", "scripts": {"build": "tsc"}}\n')),
