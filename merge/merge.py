@@ -1432,6 +1432,7 @@ class Host:
                 "state": "MERGED" if d.get("merged") else d["state"].upper(),
                 "mergeable": cls.MERGEABLE[d.get("mergeable")], "merge_state": (d.get("mergeable_state") or "unknown").upper(),
                 "draft": bool(d.get("draft")), "body": d.get("body") or "", "created": d.get("created_at"),
+                "merge_commit": d.get("merge_commit_sha"),  # set on an open pull request too: it names the merge only when the state reads MERGED
                 "changed_files": d.get("changed_files")}  # only --review-record reads the count; pr_files stops on a missing one
 
     def open_prs(self):
@@ -4927,6 +4928,16 @@ def close_members_after_merge(host, n, info, commit):
         say(f"merge: closed {', '.join(f'#{m}' for m in closed)}, merged in #{n} as {commit[:9]}. Each branch stays.")
     return closed
 
+def close_members_landed(host, n, info, commit):
+    """Run close_members_after_merge for integration PR `n` that has merged as `commit`. -> 0, or 1 after a refused comment or close, which it says on
+    stderr with the by-hand remedy: the merge has landed, so the refusal never undoes it. One home for the run that follows the merge call and the rerun of a merged PR."""
+    try:
+        close_members_after_merge(host, n, info, commit)
+    except Stop as e:
+        say(f"merge: the merge of #{n} landed, and a lane it carries was not closed: {' '.join(str(e).split())} Close each open lane by hand with a `Merged in #{n} as {commit[:9]}` pointer.")
+        return 1
+    return 0
+
 def closed_by_tool(pointers, n):
     """-> whether the newest pointer the tool posted on a pull request (`pointers`, oldest first, from issue_comments) is its close as replaced by `n`.
     A reopen pointer posted after it, a close by another pull request, or no pointer at all (a close by hand) reads False."""
@@ -5470,11 +5481,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             drop_worktree(root, tmp, wt)
         lock.release(base, token)
     if is_integration_pr(info):  # lock released; the merge has landed, so a refused comment or close prints and exits non-zero, and never undoes it
-        try:
-            close_members_after_merge(host, n, info, commit)
-        except Stop as e:
-            say(f"merge: the merge of #{n} landed, and a lane it carries was not closed: {' '.join(str(e).split())} Close each open lane by hand with a `Merged in #{n} as {commit[:9]}` pointer.")
-            code = 1
+        code = close_members_landed(host, n, info, commit) or code
     if base == cfg["defaultBranch"]:  # a merge onto an integration branch owes no pass
         idle_lanes_after_merge(root, commit, host, n, info.get("body", ""), plan_base)  # lock released: it fetches and reads; the merge has landed, so it never moves `code`
     report = prose_judge_run(judge, n) + where_else_run(where_else, n)  # each model call waits up to MODEL_TIMEOUT, so it runs with the lock released
@@ -7871,6 +7878,9 @@ def main(argv, host=None, lock=None, hosts=None):
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
             return 0
         if not a.reviewed:
+            if a.confirm and info["state"] == "MERGED" and info.get("merge_commit") and is_integration_pr(info):  # a rerun after a merge reply was lost: no merge call, only the lanes the first run never reached (a lane closed since reads closed, and gets nothing)
+                say(f"merge: #{a.pr} is already merged as {info['merge_commit'][:9]}. Closing each lane it carries that is still open.")
+                return close_members_landed(h, a.pr, info, info["merge_commit"])
             refuse_bad_pr(info)  # a closed PR stops before the config notice; a draft is previewed, or gets the records step under --confirm
             if (a.confirm or a.ready) and os.environ.get("CLAUDE_CODE_REMOTE") == "true":  # a lane's own-PR proof: before the lock, a claim or any write
                 why = lane_own_pr_refusal(info, h, marking_ready=a.ready)
