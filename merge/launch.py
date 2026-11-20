@@ -26,9 +26,9 @@ def rmtree_retry(path):  # own copy: bin/merge is a standalone shim and can't im
     else: shutil.rmtree(path, onerror=lambda f, p, ei: handler(f, p, ei[1]))
 
 def run(tree, args):
-    # nowindow: merge.py prints its report on the caller's terminal; the wrapper's no-window flag could hide that output
     # In the launcher's own group, so a KILL to that group reaches merge.py, which no handler could catch. A TERM, HUP or INT to the
     # launcher alone is forwarded to merge.py and the processes below it, which would otherwise keep running and hold the merge lock.
+    # nowindow: merge.py prints its report on the caller's terminal; the wrapper's no-window flag could hide that output
     proc = subprocess.Popen([sys.executable, os.path.join(tree, "merge", "merge.py"), *args])
     with _nowindow.forward_signals(proc, ("SIGTERM", "SIGHUP", "SIGINT")):
         return proc.wait()

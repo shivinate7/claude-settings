@@ -893,9 +893,11 @@ def refuse_or_take_over(b, held, now):
 
 @contextlib.contextmanager
 def release_on_signals():
-    """SIGTERM and SIGINT end the run through its `finally`, which releases the merge lock. A second signal while it releases is ignored.
+    """SIGTERM, SIGHUP and SIGINT end the run through its `finally`, which releases the merge lock. A second signal while it releases is ignored.
+    The launcher forwards a HUP and follows it with a KILL after a grace; a run the KILL stops mid-release leaves a lock that expires at its
+    published time and that the next run takes over once its pid is dead, so the lock never stays live.
     Where signal handlers cannot be set (another thread), nothing changes."""
-    names = [signal.SIGTERM, signal.SIGINT]
+    names = [getattr(signal, n) for n in ("SIGTERM", "SIGHUP", "SIGINT") if hasattr(signal, n)]  # Windows has no SIGHUP
     def stop(sig, frame):
         for n in names:
             signal.signal(n, signal.SIG_IGN)

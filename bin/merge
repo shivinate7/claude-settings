@@ -34,10 +34,10 @@ made = []
 d = find()
 try:
     if not origin(d): sys.exit(f"merge: {d} is not a checkout of shivinate7/claude-settings; stopped before any PR read")
-    # nowindow: launch.py and merge.py print the merge report on the caller's terminal; the wrapper's no-window flag could hide that output
     # The launcher stays in this process's group, so a KILL to the group reaches it and merge.py, which no handler could catch.
     # A forwarded TERM, HUP or INT reaches the launcher, which forwards it to merge.py: a signal to this shim alone would leave them running.
     # Own copy of hooks/_nowindow.py's forward_signals: this standalone shim imports no repo code, and the checkout at `d` may predate it.
+    # nowindow: launch.py and merge.py print the merge report on the caller's terminal; the wrapper's no-window flag could hide that output
     proc = subprocess.Popen([sys.executable, os.path.join(d, "merge", "launch.py"), d] + sys.argv[1:])
     timers = []
     def kill_child(sig):
