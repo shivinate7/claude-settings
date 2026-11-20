@@ -7431,6 +7431,21 @@ class CloseReplaced(Env):
             with self.subTest(n=n):
                 self.assert_not_closed(n, out)
 
+    def test_a_rerun_after_a_lost_merge_reply_closes_each_open_member(self):  # the lost reply stops the first run before any member; the rerun reads the merged PR and closes them
+        members = list(range(3301, 3311))  # ten open members: the backlog size that combines
+        rc, out = self.confirm_integration(members, merge_replies=[[NET_TLS, True], [NET_TLS, False]], state_read_fail=NOT_FOUND)  # the merge lands, its reply is lost, and the state read after it fails
+        self.assertEqual(self.calls().count(MERGE_CALL), 1, f"precondition: the merge call was not sent once, so the lost reply is not the one under test:\n{out}")
+        self.assertNotIn("reverted on", out, f"precondition: the first run reverted the merge, so the rerun is not the one under test:\n{out}")
+        oid = self.gh_state("oid")
+        self.assertTrue(oid, f"precondition: the merge did not land on the base, so there is no merge commit for the rerun to name:\n{out}")
+        self.set(state_read_fail=None)  # the rerun's read of pull request 7 answers: merged at the merge commit
+        _, rerun_out = self.go()
+        self.assertEqual(self.calls().count(MERGE_CALL), 1, f"the rerun sent a second merge call for a pull request that is merged:\n{rerun_out}")
+        for n in members:
+            with self.subTest(n=n):
+                self.assertIn(f"PATCH pulls/{n} state=closed", self.calls().splitlines(), f"#{n} stayed open after #7 merged, and the rerun did not close it:\n{rerun_out}")
+                self.assert_merged_pointer(n, 7, oid, rerun_out)
+
     def test_a_replaces_line_closes_the_named_open_pull_request_at_ready(self):
         rc, out = self.ready(3210, "Replaces #1636", named=[(1636, "open")])
         self.assert_closed_with_pointer(1636, 3210, out)
