@@ -172,15 +172,21 @@ def unchecked_feel_debts(root, moved):
     return out
 
 
+# The note rules an agent must follow, one list for the refusal below and the SubagentStart brief (hooks/agent_brief.py
+# imports it). {folder} is the note folder with its slash, {old} the old notes file; layout.fill_note_paths fills both.
+# The first entry holds the note form: a refusal prints it alone, so no refusal names the old notes file.
+AGENT_FORM_RULES = (
+    "A new or edited note is its own file, {folder}<slug>.md, one line `- <slug>: <text>`: the slug is the file name, "
+    "%d characters or fewer, and not digits only." % MAX,
+    "The old notes file {old} takes deletes only: add no line to it and edit none.",
+)
 NOTE_LINE = re.compile(r"^- ([a-z0-9-]+): +\S")  # the one line a note file holds: `- <slug>: <text>`, text not empty
 DIGITS = re.compile(r"[0-9]+")  # a digits-only slug reads as an old `note:<digits>` ref (hooks/feedback_guard.py)
 NOTE_README = "README.md"  # the note folder's own description: not a note
 CLIP = 60  # characters of a refused line that a message shows
 
 
-def note_dir(root):
-    """The note folder of `root` with its trailing slash. Raises layout.LayoutError when the layout cannot be read."""
-    return layout.path(root, "notes") + "/"
+note_dir = layout.note_dir  # the one home is lint/layout.py; kept here for the callers that read it from this check
 
 
 def note_files(files, folder):
@@ -500,6 +506,7 @@ def main(args):
         # Unknown is red in CI, and red anywhere once a section fault has printed: that fault is a verdict already.
         return 1 if os.environ.get("CI") or sections else 0
     bad = too_long(files, dirs + (folder,)) + too_long(note_files(renamed, folder), (folder,))
+    bad_long_note = [f for f in bad if f.startswith(folder)]
     for f in bad:
         print("check_record_slugs: FAIL: slug over %d characters: %s" % (MAX, f))
     for f, why in bad_form:
@@ -512,8 +519,9 @@ def main(args):
             print("check_record_slugs: FAIL: a note file holds one line `- <slug>: <text>`, its slug the file name: %s"
                   % f)
     for line in new_lines:
-        print("check_record_slugs: FAIL: a new or edited note is its own file, %s<slug>.md, as `- <slug>: <text>`: %s"
-              % (folder, line[:CLIP]))
+        print("check_record_slugs: FAIL: a new or edited note line is refused: %s" % line[:CLIP])
+    if new_lines or bad_form or bad_long_note:  # the remedy is the note form only: it never names the old notes file
+        print("check_record_slugs: note rule: " + layout.fill_note_paths(ROOT, AGENT_FORM_RULES[0]))
     for kind, f, why in seen:
         print("check_record_slugs: FAIL: %s %s: %s" % (kind, why, f))
     for f, how in feel:

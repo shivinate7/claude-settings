@@ -24,6 +24,11 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
+from proc_fixture import stop_group, wait_for  # noqa: E402  the one home of the process helpers (testing/proc_fixture.py)
+sys.path.append(os.path.join(os.path.dirname(HERE), "skills", "roadmap"))  # append: no roadmap module shadows one this suite imports
+import test_build as roadmap  # noqa: E402  the roadmap fixture: STEP, session_row, BUCKET_* (one home: skills/roadmap/test_build.py)
+import fnmatch  # noqa: E402  the temp-file cases match merge-live names
+from datetime import datetime as _datetime, timedelta as _timedelta, timezone as _timezone  # noqa: E402  the live file's readAt against the merge commit's time
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
 import stale_cites  # noqa: E402  the guard's rule dirs, one home (lint/stale_cites.py)
 import layout  # noqa: E402  where each kind of record lives, one home (lint/layout.py)
@@ -151,6 +156,7 @@ class FakeHost:
 
     def __init__(self, root, other, branch="feat"):
         self.root, self.other, self.branch = root, other, branch
+        self.cwd = root  # Host.cwd, the checkout that git reads run in (main sets it as Host(cwd=root))
         self.checks, self.refuse, self.on_wait, self.on_claim = (True, ""), None, None, None  # on_claim: fires once after the claim push, wait or no wait
         self.head_override, self.mergeable = None, "MERGEABLE"
         self.pr_state = "OPEN"
@@ -315,6 +321,23 @@ class RepoHost(FakeHost):
 
     def refuse_pinned_mismatch(self):  # the real Host reads the pinned checks from GitHub; a fake has none
         return None
+
+class GitCommitsHost(FakeHost):
+    """A FakeHost that answers a commit read and a main-holds read from the checkout's git, as GitHub answers them once the commits are pushed.
+    clean_merges_after walks a merge's parents and asks whether main holds the second one, so the plain FakeHost (no parents, holds nothing)
+    cannot carry a record over a merge of main. Its own `cwd` is the checkout, where merge_state runs git, as Host.cwd is."""
+    def __init__(self, root, other):
+        super().__init__(root, other)
+        self.cwd = root
+        self.unreadable = set()  # shas whose commit read fails, as the commits API fails when it cannot answer: that read raises Stop, as Host.commit_read does
+
+    def commit_read(self, sha):  # -> (parents, tree), as Host.commit_read gives them
+        if sha in self.unreadable:
+            raise merge.Stop(f"cannot read the parents of {sha[:9]} {merge.READ_CITE}: the commits API did not answer")
+        return sh(self.root, "git", "log", "-1", "--format=%P", sha).split(), sh(self.root, "git", "rev-parse", f"{sha}^{{tree}}")
+
+    def holds_head_gh(self, head, other):  # True when origin's branch `other` contains `head`: GitHub's compare reads ahead or identical
+        return subprocess.run(["git", "merge-base", "--is-ancestor", head, f"origin/{other}"], cwd=self.root, capture_output=True).returncode == 0
 
 def second_checkout(t):
     """Make a second checkout in folder t, the way copy_repos builds one: its own origin, a main whose stamp config names MAILAUDIT_CHECK, and
@@ -1095,6 +1118,661 @@ class ConfirmHead(Env):
         self.assertFalse(getattr(self.host, "merged", False), out + err)
         self.assertEqual(self.claims(), 0, "a claim was pushed for a bad head")
         self.assertFalse(self.lock_ref(), "the lock was left behind")
+
+# The idle-lanes pass after a batch merge (decision session-tiers). The cases read the live file on origin's roadmap branch, as triage
+# commits it, and the step record that the merged commit's Step trailer names. Fixtures: the roadmap suite's STEP and session_row.
+OWED_WORD = re.compile(r"owed|idle[- ]lanes")  # the owed line names the pass; no other line of a merge does
+ARCHIVE_SUMMARY = re.compile(r"^merge: \d+ lanes to archive\b")
+CHECK_LINE = "check this lane"  # the fallback's line: a lane to check by hand, never a lane to archive
+READ_ONLY_GIT = {"fetch", "show", "show-ref", "ls-remote", "rev-parse", "log", "cat-file", "ls-tree", "for-each-ref", "merge-base", "diff", "rev-list"}
+
+def roadmap_files(others=None, **step):
+    """origin's roadmap branch for a case: the repo's GitHub name, and step c1 (done unless `step` says otherwise). A `lane` field
+    in `step` names the session that did the step. `others` maps more step slugs to their fields, each written beside c1; a step
+    in `others` has no Step trailer on main unless a case commits one."""
+    fields = dict(roadmap.STEP, order=1, status="done")
+    fields.update(step)
+    files = {"roadmap/extras.json": json.dumps({"github": "owner/fixture"}), "roadmap/data/steps/c1.json": json.dumps(fields)}
+    for slug, more in (others or {}).items():
+        files["roadmap/data/steps/%s.json" % slug] = json.dumps(dict(roadmap.STEP, **more))
+    return files
+
+ROADMAP_BASE = roadmap_files()
+OTHER_DOING_STEP = {"c2": dict(order=2, status="doing", lane="session_a")}  # a step of lane session_a still working, in no merge
+IDLE_LANE = roadmap.session_row("session_a", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1", "cs-repo:owner/fixture",
+                                status_bucket=roadmap.BUCKET_COMPLETED)
+BODY_LANE = roadmap.session_row("session_body", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1", "cs-repo:owner/fixture",
+                                status_bucket=roadmap.BUCKET_COMPLETED)
+NO_STEP_LANE = roadmap.session_row("session_nostep", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-repo:owner/fixture",
+                                   status_bucket=roadmap.BUCKET_COMPLETED)
+WORKING_LANE = roadmap.session_row("session_b", "SESSION_STATUS_RUNNING", "cs-build:lane", "cs-step:c1", "cs-repo:owner/fixture",
+                                   status_bucket=roadmap.BUCKET_WORKING)
+RUNNING_LANE = roadmap.session_row("session_a", "SESSION_STATUS_RUNNING", "cs-build:lane", "cs-step:c1", "cs-repo:owner/fixture",
+                                   status_bucket=roadmap.BUCKET_WORKING)
+
+def live_json(read_at, *sessions, keep=None):
+    """The live file as triage writes it: readAt, the sessions, and the empty lists the reader needs beside them. `keep` is the
+    keepSessions value, written when given."""
+    value = {"readAt": read_at, "threads": [], "pulls": [], "items": [], "sessions": list(sessions)}
+    if keep is not None:
+        value["keepSessions"] = keep
+    return json.dumps(value)
+
+class LandedHost(FakeHost):
+    """The fake host with the step after a batch merge: triage commits the live file once the merge lands. `after` is called
+    with the merge commit's sha, and only when the merge lands. A refused merge calls nothing."""
+    after = None
+
+    def merge(self, n, method, sha):
+        commit, msg = super().merge(n, method, sha)
+        if commit and self.after:
+            self.after(commit)
+        return commit, msg
+
+class ConfirmIdleLanes(Env):
+    """After a landed batch merge, `merge --confirm` reads the live file on origin's roadmap branch (roadmap/live/live.json,
+    fetched). If its readAt is later than the merge commit's time, the report of `merge --idle-lanes` prints after the merged
+    line. Otherwise one line says the pass is owed and the file is stale or unread. An origin that cannot be read when the pass
+    runs owes the line too, saying unread. A refused merge prints neither. With no roadmap branch on origin, or a merge onto a
+    base that is not the default, no pass line prints at all. The exit code of a landed merge is 0, as before.
+
+    When the live file is stale, missing or unreadable, the merged step's record (roadmap/data/steps/<slug>.json on origin's
+    roadmap, its `lane` field) names the lane to check: one `check this lane` line, never a lane to archive. A blank `lane` falls
+    back to the session link at the foot of the pull request body. Neither source prints for a lane still working, and a kept
+    session (keepSessions, read from the live file whatever its age) prints nothing. Each case runs `merge 7 --confirm` once:
+    the live file is committed after the merge, as triage commits it at each batch merge."""
+
+    def setUp(self):
+        super().setUp()
+        self.host = LandedHost(self.co, self.other)
+        self.host.after = self.after_landed
+        self.landed = None  # the merge commit's sha, once this case's merge lands
+        self.live_at = None  # a case's function: the merge commit's time -> the live file's text, or None for no file
+        self.live_text = None  # the text publish_live last pushed
+
+    def after_landed(self, commit):
+        self.landed = commit
+        self.publish_live(commit)
+
+    def push_roadmap(self, files):
+        """Commit `files` ({path: text}) on origin's roadmap branch, on top of its tip when it has one, and push. The commit is
+        made in a scratch repo of its own, so no checkout of this case moves."""
+        scratch = os.path.join(self.t, "roadmap-push")
+        if not os.path.isdir(scratch):
+            sh(self.t, "git", "init", "-q", scratch)
+            sh(scratch, "git", "remote", "add", "origin", self.bare)
+        if sh(scratch, "git", "ls-remote", "origin", "refs/heads/roadmap"):
+            sh(scratch, "git", "fetch", "-q", "origin", "roadmap")
+            sh(scratch, "git", "checkout", "-q", "-B", "roadmap", "FETCH_HEAD")
+        else:
+            sh(scratch, "git", "checkout", "-q", "--orphan", "roadmap")
+        for path, text in files.items():
+            put(os.path.join(scratch, path), text)
+        sh(scratch, "git", "add", "-A")
+        sh(scratch, "git", "commit", "-q", "-m", "roadmap")
+        sh(scratch, "git", "push", "-q", "origin", "roadmap")
+
+    def publish_live(self, commit):
+        """Triage's step after a batch merge: the live file, as live_at gives it for the merge commit's time, goes on origin's roadmap."""
+        at = _datetime.fromisoformat(sh(self.other, "git", "show", "-s", "--format=%cI", commit))
+        self.live_text = self.live_at(at) if self.live_at else None
+        if self.live_text is not None:
+            self.push_roadmap({"roadmap/live/live.json": self.live_text})
+
+    def confirm(self, live_at=None, base=True, merged_at=None, files=None):
+        """`merge 7 --confirm`, with the roadmap base pushed first unless base is False (`files` replaces ROADMAP_BASE). merged_at,
+        an aware datetime, is the committer time the merge commit is written with (its offset too). -> (rc, stdout lines, stderr lines)."""
+        if base:
+            self.push_roadmap(ROADMAP_BASE if files is None else files)
+        self.live_at = live_at
+        if merged_at is not None:
+            self.merge_at(merged_at)
+        rc, out, err = self.run_args("7", "--confirm")
+        return rc, out.splitlines(), err.splitlines()
+
+    def step_commit(self, step):
+        """Push one commit to feat whose message ends in `Step: <step>`, the trailer a step's landed commit carries. The merge brings it onto main."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        put(os.path.join(o, "step-%s.txt" % step), "done\n")
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", "feat: step %s done\n\nStep: %s" % (step, step))
+        sh(o, "git", "push", "-q", "origin", "feat")
+
+    def main_step_commit(self, step):
+        """Push one commit to main whose message ends in `Step: <step>`: a step that landed in an earlier merge, so its trailer is on
+        main while its record may still read doing. The PR branch then takes main, as a lane does before its run."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, "landed-%s.txt" % step), "done\n")
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", "main: step %s landed\n\nStep: %s" % (step, step))
+        sh(o, "git", "push", "-q", "origin", "main")
+        head_takes_base(self)
+
+    def rebase_merge(self, n, method, sha):
+        """A fake of GitHub's rebase merge: each commit the pull adds is copied onto main, one after another, and no merge commit is
+        made. Then triage's step runs, as LandedHost.merge does after a merge commit. -> (tip, "")."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        for c in sh(o, "git", "rev-list", "--reverse", "--no-merges", f"origin/main..{sha}").split():
+            sh(o, "git", "cherry-pick", c)
+        sh(o, "git", "push", "-q", "origin", "main")
+        tip = sh(o, "git", "rev-parse", "HEAD")
+        self.after_landed(tip)
+        return tip, ""
+
+    def stale_merge(self, files, sessions=(), body="", keep=None, text=None):
+        """A landed merge of #7 on a live file read a minute before the merge: the owed path, where the merged step's record is the
+        second source. `files` is origin's roadmap branch, `body` the pull request's body. `text`, a function of the merge commit's
+        time, gives the live file's text in place of the readable file. -> (rc, out, err)."""
+        self.host.body = body
+        self.step_commit("c1")
+        live_at = text or (lambda at: live_json((at - _timedelta(seconds=60)).isoformat(), *sessions, keep=keep))
+        return self.confirm(files=files, live_at=live_at)
+
+    def merge_at(self, when):
+        """Make the merge commit's committer time `when`, offset included, for the merge call only. The host writes the merge
+        commit inside its merge(), so GIT_COMMITTER_DATE is set there and popped after it."""
+        real, commit_time = self.host.merge, when.replace(microsecond=0).isoformat()
+
+        def merge(n, method, sha):
+            os.environ["GIT_COMMITTER_DATE"] = commit_time
+            try:
+                return real(n, method, sha)
+            finally:
+                os.environ.pop("GIT_COMMITTER_DATE", None)
+        self.host.merge = merge
+
+    def temp_folder(self):
+        """The folder this case points the temp files at: a child of the case's own folder, so the run folder's teardown removes it."""
+        folder = os.path.join(self.t, "tmp")
+        os.makedirs(folder, exist_ok=True)
+        return folder
+
+    def confirm_in_folder(self, folder, live_at):
+        """`confirm` with the temp folder at `folder`. TMPDIR is read once per process, so the case sets tempfile.tempdir to the
+        value TMPDIR would give. -> (rc, out, err, made): made lists each merge-live temp file as tempfile.mkstemp returned it."""
+        made, real = [], tempfile.mkstemp
+
+        def spy(*a, **k):
+            fd, path = real(*a, **k)
+            made.append(path)
+            return fd, path
+        with unittest.mock.patch.object(tempfile, "tempdir", folder), unittest.mock.patch.object(tempfile, "mkstemp", spy):
+            rc, out, err = self.confirm(live_at=live_at)
+        return rc, out, err, [p for p in made if os.path.basename(p).startswith("merge-live-")]
+
+    def report_for(self, live_text):
+        """The lines `merge --idle-lanes --live` prints for `live_text` in this checkout: the report a confirm must print."""
+        path = os.path.join(self.t, "idle-lanes-live.json")
+        put(path, live_text)
+        sh(self.co, "git", "fetch", "-q", "origin", "roadmap:refs/remotes/origin/roadmap")
+        rc, out, err = self.run_args("--idle-lanes", "--live", path)
+        self.assertEqual(rc, 0, "the reference run of --idle-lanes failed: %s" % err)
+        return out.splitlines()
+
+    def assert_report_after_merge(self, rc, out, err):
+        """A landed merge that exits 0, then the report `merge --idle-lanes` prints for the same live file, in order after the merged line."""
+        merged = [i for i, line in enumerate(out) if line.startswith("merge: #7 merged as ")]
+        self.assertEqual(len(merged), 1, "the merge did not land: out %r, err %r" % (out, err))
+        self.assertEqual(rc, 0, "a landed merge exits %r: %s" % (rc, err))
+        report = self.report_for(self.live_text)
+        self.assertTrue(report and ARCHIVE_SUMMARY.match(report[-1]), "the reference report has no summary line: %r" % report)
+        self.assertIn(report[0], out, "no idle-lanes report is printed after the merge: %r" % out)
+        start = out.index(report[0])
+        self.assertGreater(start, merged[0], "the idle-lanes report is printed before the merged line: %r" % out)
+        self.assertEqual(out[start:start + len(report)], report, "the report after the merge is not the merge --idle-lanes report")
+
+    def assert_landed(self, rc, out, err):
+        """The merge of #7 landed and exits 0."""
+        merged = [line for line in out if line.startswith("merge: #7 merged as ")]
+        self.assertEqual(len(merged), 1, "the merge did not land: out %r, err %r" % (out, err))
+        self.assertEqual(rc, 0, "a landed merge exits %r: %s" % (rc, err))
+
+    def assert_no_pass_line(self, out, err):
+        """A landed merge that owes no pass prints no idle-lanes line on either stream: no owed line, no report line."""
+        noise = [line for line in out + err if OWED_WORD.search(line) or ARCHIVE_SUMMARY.match(line) or line.startswith(("hold (", "session_"))]
+        self.assertEqual(noise, [], "a merge that owes no pass printed an idle-lanes line: %r" % (out + err))
+
+    def assert_owed_path(self, rc, out, err):
+        """Scope for the fallback cases: the merge landed and the live file was read as stale, so the owed line printed."""
+        self.assert_landed(rc, out, err)
+        self.assertTrue([line for line in out + err if "owed" in line], "scope: the owed line did not print, so the fallback never ran: %r" % (out + err))
+
+    def assert_owed_after_merge(self, rc, out, err):
+        """A landed merge that exits 0, then exactly one line, on either stream, that says the pass is owed and the file is stale
+        or unread. No report line prints with it."""
+        self.assert_landed(rc, out, err)
+        owed = [line for line in out + err if OWED_WORD.search(line)]
+        self.assertEqual(len(owed), 1, "the idle-lanes owed line is not printed once after the merge: %r" % (out + err))
+        self.assertIn("owed", owed[0])
+        self.assertRegex(owed[0], r"stale|unread")
+        self.assertFalse([line for line in out if ARCHIVE_SUMMARY.match(line) or line.startswith(("hold (", "session_"))],
+                         "a report line prints with the owed line: %r" % out)
+
+    def check_lines(self, out, err):
+        return [line for line in out + err if CHECK_LINE in line]
+
+    def test_fresh_live_file_prints_the_idle_lanes_report_after_the_merge(self):
+        # readAt one second after the merge commit: one idle lane and one held lane, so the report has both kinds of line.
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE, NO_STEP_LANE))
+        self.assert_report_after_merge(rc, out, err)
+
+    def test_fresh_live_file_with_no_idle_lane_prints_the_zero_summary(self):
+        # The empty state: a live lane that is still working is not idle, so the report is the zero summary alone.
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), WORKING_LANE))
+        self.assert_report_after_merge(rc, out, err)
+
+    def test_fresh_live_file_with_an_unknown_report_falls_back_and_names_the_fixing_command(self):
+        # `merge --idle-lanes` never ends in a bare "unknown" with no command that fixes
+        # it. The file is fresh, but its one session row carries an unarchived_epoch of -5, so the report reads unknown. The pass then
+        # falls back to the merged step's record: the lane gets its check line, and an owed line names `merge --idle-lanes`. The merge
+        # landed, so the confirm exits 0 as before.
+        self.step_commit("c1")
+        rc, out, err = self.confirm(files=roadmap_files(lane="session_a"),
+                                    live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(),
+                                                                 dict(IDLE_LANE, unarchived_epoch=-5)))
+        self.assert_landed(rc, out, err)  # the merge landed and exits 0
+        # Scope first: the fresh read ran and reads unknown, so this is the bad-shape path.
+        unknown = [line for line in out + err if line.startswith("unknown (")]
+        self.assertEqual(len(unknown), 1, "scope: the fresh read did not print one unknown line: %r" % (out + err))
+        self.assertFalse([line for line in out if ARCHIVE_SUMMARY.match(line)], "a summary printed for an unknown report: %r" % out)
+        fixers = [line for line in out + err if OWED_WORD.search(line) and "merge --idle-lanes" in line]
+        self.assertEqual(len(fixers), 1, "a bad-shape fresh file printed no owed line that names the fixing command: %r" % (out + err))
+        checks = self.check_lines(out, err)
+        self.assertEqual(len(checks), 1, "the fallback printed %d check-this-lane lines, not one: %r" % (len(checks), out + err))
+        self.assertIn("session_a", checks[0], "the check line does not name the step's lane: %r" % checks[0])
+
+    def test_mixed_lane_and_unknown_report_prints_one_owed_line_that_names_the_command(self):
+        # A fresh file whose report holds a lane to archive beside an unknown line is only partly read. The owed line prints beside
+        # those lines, so the reader knows to run the pass again once the file is fixed. The second lane's archive slug is not a plain
+        # name, so its line reads unknown. Control: the merge lands, and the lane line prints as it does today.
+        self.step_commit("c1")
+        bad = roadmap.session_row("session_bad", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1", "cs-repo:owner/fixture",
+                                  "cs-archive-ready:a/b", status_bucket=roadmap.BUCKET_COMPLETED)
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE, bad))
+        self.assert_landed(rc, out, err)
+        # Scope first: the fresh read ran and printed a lane line beside an unknown line.
+        self.assertTrue([line for line in out if line.startswith("session_a (")], "scope: no lane line printed: %r" % out)
+        self.assertTrue([line for line in out if line.startswith("unknown (archive slug")], "scope: no unknown line printed: %r" % out)
+        owed = [line for line in out + err if OWED_WORD.search(line)]
+        self.assertEqual(len(owed), 1, "the mixed case printed %d owed lines, not one: %r" % (len(owed), out + err))
+        self.assertIn("merge --idle-lanes --live FILE", owed[0], "the mixed case's owed line does not name the fixing command: %r" % owed[0])
+
+    def test_stale_live_file_prints_the_owed_line(self):
+        # readAt one minute before the merge commit: the file was read before the batch landed.
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at - _timedelta(seconds=60)).isoformat(), IDLE_LANE))
+        self.assert_owed_after_merge(rc, out, err)
+
+    def test_stale_owed_line_cites_its_decision(self):
+        # The owed line tells the batch runner why the pass is owed, so it cites the decision that owes it.
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at - _timedelta(seconds=60)).isoformat(), IDLE_LANE))
+        self.assert_owed_after_merge(rc, out, err)  # scope: the stale read took the owed path
+        owed = [line for line in out + err if OWED_WORD.search(line)][0]
+        self.assertIn("(decision session-tiers", owed, "the stale owed line cites no decision: %r" % owed)
+
+    def test_read_at_equal_to_the_merge_time_prints_the_owed_line(self):
+        # The boundary: "later than" is strict, so a readAt at the merge commit's own second is owed.
+        rc, out, err = self.confirm(live_at=lambda at: live_json(at.isoformat(), IDLE_LANE))
+        self.assert_owed_after_merge(rc, out, err)
+
+    def test_missing_live_file_prints_the_owed_line(self):
+        rc, out, err = self.confirm(live_at=None)
+        self.assert_owed_after_merge(rc, out, err)
+
+    def test_unreadable_live_file_prints_the_owed_line(self):
+        # The file is cut off mid-object, so it is not JSON.
+        rc, out, err = self.confirm(live_at=lambda at: '{"readAt": "' + at.isoformat())
+        self.assert_owed_after_merge(rc, out, err)
+
+    def test_malformed_read_at_prints_the_owed_line(self):
+        rc, out, err = self.confirm(live_at=lambda at: live_json("yesterday at noon", IDLE_LANE))
+        self.assert_owed_after_merge(rc, out, err)
+
+    def test_read_at_without_a_time_zone_prints_the_owed_line(self):
+        # A naive time has no offset, so it cannot be put before or after the merge commit's time.
+        rc, out, err = self.confirm(live_at=lambda at: live_json(at.replace(tzinfo=None).isoformat(), IDLE_LANE))
+        self.assert_owed_after_merge(rc, out, err)
+
+    def test_no_roadmap_branch_on_origin_prints_no_pass_line(self):
+        # No live file exists to read, so no pass is owed and none is printed. Scope first: origin has no roadmap branch.
+        # Control: a merge with no roadmap branch has no pass, so the pass must not print a line.
+        self.assertEqual(sh(self.co, "git", "ls-remote", "origin", "refs/heads/roadmap"), "", "scope: origin has a roadmap branch")
+        rc, out, err = self.confirm(live_at=None, base=False)
+        self.assert_landed(rc, out, err)
+        self.assert_no_pass_line(out, err)
+
+    def test_a_refused_merge_prints_no_report_and_no_owed_line(self):
+        # The refusal lands nothing, so no live file is read after it. The file is on origin already, so a pass that ran
+        # before the refusal would find one and print. The exit code of a refused merge is 1, as before.
+        # Control: a refused merge has not landed, so the pass must not run.
+        self.push_roadmap(dict(ROADMAP_BASE, **{"roadmap/live/live.json": live_json("2026-11-13T00:00:00-06:00", IDLE_LANE)}))
+        self.host.refuse = "refused by the test"
+        rc, out, err = self.confirm(base=False)
+        self.assertEqual([line for line in out if line.startswith("merge: #7 merged as ")], [], "the refused merge landed: %r" % out)
+        self.assertEqual(rc, 1, "a refused merge exits %r: %s" % (rc, err))
+        noise = [line for line in out + err if OWED_WORD.search(line) or ARCHIVE_SUMMARY.match(line) or line.startswith(("hold (", "session_"))]
+        self.assertEqual(noise, [], "a refused merge printed an idle-lanes line")
+
+    # The two cases below anchor on the real clock, as the cases above do: idle_lanes reads the live file's age against it, so a
+    # readAt fixed in the past would read stale. Only the offsets are fixed.
+
+    def test_a_read_earlier_by_instant_prints_the_owed_line_across_offsets(self):
+        # The merge is stamped -06:00 and the read is UTC. The read is 54 min 32 s before the merge, but its wall clock reads
+        # 5 h 5 min 28 s later than the merge's. By instant it is owed; by wall clock it would not be.
+        landed = _datetime.now(_timezone.utc).replace(microsecond=0) - _timedelta(minutes=5)
+        read_text = (landed - _timedelta(minutes=54, seconds=32)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        rc, out, err = self.confirm(live_at=lambda at: live_json(read_text, IDLE_LANE),
+                                    merged_at=landed.astimezone(_timezone(_timedelta(hours=-6))))
+        self.assert_owed_after_merge(rc, out, err)
+
+    def test_a_read_later_by_instant_prints_the_report_across_offsets(self):
+        # The merge is stamped +14:00 and the read is -06:00. The read is 30 min after the merge by instant, but the merge's wall
+        # clock reads 19 h 30 min later than the read's. By instant it is later, so the report prints.
+        read = _datetime.now(_timezone.utc).replace(microsecond=0) - _timedelta(minutes=5)
+        read_text = read.astimezone(_timezone(_timedelta(hours=-6))).isoformat()
+        rc, out, err = self.confirm(live_at=lambda at: live_json(read_text, IDLE_LANE),
+                                    merged_at=(read - _timedelta(minutes=30)).astimezone(_timezone(_timedelta(hours=14))))
+        self.assert_report_after_merge(rc, out, err)
+
+    def test_a_merge_onto_a_base_that_is_not_the_default_prints_no_pass_line(self):
+        # The pull request targets integ, not main, so the merge lands on integ. A fresh live file would print the report after a
+        # merge onto main; a merge onto integ owes no pass, so no line prints.
+        # Control: a merge onto a non-default base must not run the pass.
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/integ")
+        self.host.base = "integ"
+        before = self.head("integ")
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE))
+        self.assertNotEqual(self.head("integ"), before, "scope: the merge did not move integ, so it did not land on the non-default base")
+        self.assert_landed(rc, out, err)
+        self.assert_no_pass_line(out, err)
+
+    def test_a_fresh_confirm_makes_no_live_temp_file(self):
+        # The pass passes its live data in memory, so a fresh read makes no temp file at all, not one that it later removes.
+        folder = self.temp_folder()
+        rc, out, err, made = self.confirm_in_folder(folder, live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE))
+        self.assert_report_after_merge(rc, out, err)  # scope: the fresh read ran the pass
+        self.assertEqual(made, [], "the fresh read made a temp file: %r" % made)
+        self.assertEqual([n for n in os.listdir(folder) if fnmatch.fnmatch(n, "merge-live-*.json")], [], "a merge-live file is in the case folder")
+
+    def test_a_stale_confirm_leaves_no_live_temp_file(self):
+        folder = self.temp_folder()
+        rc, out, err, _ = self.confirm_in_folder(folder, live_at=lambda at: live_json((at - _timedelta(seconds=60)).isoformat(), IDLE_LANE))
+        self.assert_owed_after_merge(rc, out, err)  # scope: the stale read took the owed path
+        self.assertEqual([n for n in os.listdir(folder) if fnmatch.fnmatch(n, "merge-live-*.json")], [], "a merge-live file is left in the case folder")
+
+    def test_an_origin_gone_before_the_idle_pass_owes_one_unread_line(self):
+        # The merge lands and origin is reachable until the lock is released. Then origin goes: the pass's fetch of origin/roadmap
+        # and its listing both fail, so the one line says unread and the merge still exits 0. Scope first: origin holds the
+        # roadmap branch, so no "no roadmap branch" reading explains the line.
+        self.push_roadmap(ROADMAP_BASE)
+        self.assertNotEqual(sh(self.t, "git", "ls-remote", self.bare, "refs/heads/roadmap"), "", "scope: origin has no roadmap branch")
+        real_release = self.lock.release
+
+        def release_then_origin_gone(base, token):
+            real_release(base, token)
+            if self.landed:  # the merge landed and the lock is released: the pass comes next, and origin is gone for it
+                sh(self.co, "git", "remote", "set-url", "origin", os.path.join(self.t, "gone.git"))
+        self.lock.release = release_then_origin_gone
+        rc, out, err = self.confirm(base=False, live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE))
+        self.assert_landed(rc, out, err)
+        owed = [line for line in out + err if OWED_WORD.search(line)]
+        self.assertEqual(len(owed), 1, "the idle-lanes owed line is not printed once after the merge: %r" % (out + err))
+        self.assertRegex(owed[0], r"owed.*unread|unread.*owed", "the owed line does not say unread: %r" % owed[0])
+        self.assertFalse([line for line in out if ARCHIVE_SUMMARY.match(line) or line.startswith(("hold (", "session_"))],
+                         "a report line prints with the owed line: %r" % out)
+
+    # The fallback: the merged step's record names the lane to check when the live file is stale.
+
+    def test_stale_live_file_falls_back_to_the_merged_steps_lane(self):
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a"), [IDLE_LANE])
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path, so the step's record is the lane's source
+        checks = self.check_lines(out, err)
+        self.assertEqual(len(checks), 1, "the stale path printed %d check-this-lane lines, not one: %r" % (len(checks), out + err))
+        self.assertIn("session_a", checks[0], "the check line does not name the step's lane: %r" % checks[0])
+        self.assertFalse([line for line in out if line.startswith("session_a (")], "the fallback printed a lane-to-archive line: %r" % out)
+
+    def test_a_blank_lane_falls_back_to_the_session_link_in_the_pr_body(self):
+        body = "Summary of the change.\n\nhttps://claude.ai/code/session_body"
+        rc, out, err = self.stale_merge(roadmap_files(lane=""), [BODY_LANE], body=body)
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path
+        checks = self.check_lines(out, err)
+        self.assertEqual(len(checks), 1, "a blank lane printed %d check-this-lane lines, not one: %r" % (len(checks), out + err))
+        self.assertIn("session_body", checks[0], "the check line does not name the session in the PR body: %r" % checks[0])
+        self.assertFalse([line for line in out if line.startswith("session_body (")], "the fallback printed a lane-to-archive line: %r" % out)
+
+    def test_the_fallback_holds_a_kept_session_with_a_hold_line(self):
+        # keepSessions is read from the stale file too (whatever its age). A kept session prints no check line and no lane line:
+        # one hold line that names the keep reason and the session.
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a"), [IDLE_LANE], keep=[{"id": "session_a", "reason": "kept for a reader"}])
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path, so the keep list was read there
+        self.assertEqual(self.check_lines(out, err), [], "the fallback named a kept session: %r" % (out + err))
+        self.assertFalse([line for line in out + err if line.startswith("session_a (")], "a kept session printed a lane-to-archive line: %r" % out)
+        holds = [line for line in out + err if line.startswith("hold (")]
+        self.assertEqual(len(holds), 1, "a kept session printed no hold line: %r" % (out + err))
+        self.assertIn("kept for a reader", holds[0], "the hold line does not name the keep reason: %r" % holds[0])
+        self.assertIn("session_a", holds[0], "the hold line does not name the session: %r" % holds[0])
+
+    def test_a_kept_session_after_a_fresh_merge_prints_a_hold_line_not_a_lane(self):
+        # The fresh read is the report of --idle-lanes. A kept session there prints one hold line and no lane line.
+        keep = [{"id": "session_a", "reason": "kept for a reader"}]
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE, keep=keep))
+        self.assert_landed(rc, out, err)  # scope: the merge landed
+        self.assertTrue([line for line in out if ARCHIVE_SUMMARY.match(line)], "scope: no report summary printed after the fresh merge: %r" % out)
+        self.assertFalse([line for line in out if line.startswith("session_a (")], "a kept session printed a lane line after the merge: %r" % out)
+        holds = [line for line in out if line.startswith("hold (")]
+        self.assertEqual(len(holds), 1, "a kept session printed no hold line after the merge: %r" % out)
+        self.assertIn("kept for a reader", holds[0], "the hold line does not name the keep reason: %r" % holds[0])
+        self.assertIn("session_a", holds[0], "the hold line does not name the session: %r" % holds[0])
+
+    def test_an_unreadable_keep_list_reads_unknown_after_a_fresh_merge(self):
+        # keepSessions is a bare string, not a list of {id, reason} rows: the report reads unknown, never an empty keep list.
+        # `merge --idle-lanes` never ends in a bare "unknown" with no command that
+        # fixes it. So the unknown line is followed by one owed line that names `merge --idle-lanes` as the fixing command.
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE, keep="session_a"))
+        self.assert_landed(rc, out, err)  # scope: the merge landed
+        unknown = [line for line in out + err if line.startswith("unknown (")]
+        self.assertEqual(len(unknown), 1, "the fresh read printed no unknown line for a malformed keepSessions: %r" % (out + err))
+        self.assertFalse([line for line in out if ARCHIVE_SUMMARY.match(line) or line.startswith("session_")],
+                         "a lane line or summary printed beside the unknown: %r" % out)
+        fixers = [line for line in out + err if OWED_WORD.search(line) and "merge --idle-lanes" in line]
+        self.assertEqual(len(fixers), 1, "a malformed keepSessions after a fresh merge printed no owed line naming the fixing command: %r"
+                         % (out + err))
+
+    def test_no_check_line_for_a_lane_whose_session_is_still_running(self):
+        # The lane's session row reads running in the stale file, so the lane is still working and the fallback names it to no one.
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a"), [RUNNING_LANE])
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path
+        self.assertEqual(self.check_lines(out, err), [], "a lane still running got a check-this-lane line: %r" % (out + err))
+
+    def test_no_check_line_while_a_step_is_still_doing_under_the_lane(self):
+        # Another step of the lane, c2, is still doing and no merge carries its Step trailer, so the lane is still working. The
+        # merged step c1 reads done here. The control is test_stale_live_file_falls_back_to_the_merged_steps_lane.
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a", others=OTHER_DOING_STEP), [IDLE_LANE])
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path
+        merged = sh(self.other, "git", "log", "--format=%B", "origin/main")
+        self.assertIn("Step: c1", merged, "scope: the merge does not carry the merged step's Step trailer: %r" % merged)
+        self.assertNotIn("Step: c2", merged, "scope: the doing step c2 carries a Step trailer on main, so it is in the merge")
+        self.assertEqual(self.check_lines(out, err), [], "a step still doing under the lane got a check-this-lane line: %r" % (out + err))
+
+    def test_a_merged_step_still_recorded_doing_does_not_hold_its_lane(self):
+        # The merged step's record still reads doing after its merge, and its lane session_a is completed. A step with a Step
+        # trailer on main does not hold its lane, so the lane gets its check line. The control is the case above: a doing step
+        # outside the merge holds the lane.
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a", status="doing"), [IDLE_LANE])
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path
+        record = json.loads(sh(self.t, "git", "--git-dir", self.bare, "show", "roadmap:roadmap/data/steps/c1.json"))
+        self.assertEqual(record["status"], "doing", "scope: the merged step's record does not read doing: %r" % record)
+        checks = self.check_lines(out, err)
+        self.assertEqual(len(checks), 1, "the merged step still doing held its lane: %d check-this-lane lines, not one: %r" % (len(checks), out + err))
+        self.assertIn("step c1 landed; lane session_a", checks[0], "the check line does not name the merged step and its lane: %r" % checks[0])
+        self.assertFalse([line for line in out if line.startswith("session_a (")], "the lane printed as a lane to archive: %r" % out)
+
+    def test_a_doing_step_whose_trailer_is_on_main_does_not_hold_its_lane(self):
+        # Step c2 is still recorded doing under lane session_a, but an earlier merge landed its Step trailer on main, so c2 is landed.
+        # The lane's only live step is then the merged one, so the lane gets its check line. The control is the case above that holds
+        # the lane: c2 with no trailer on main (test_no_check_line_while_a_step_is_still_doing_under_the_lane).
+        self.main_step_commit("c2")
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a", others=OTHER_DOING_STEP), [IDLE_LANE])
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path
+        landed = sh(self.t, "git", "--git-dir", self.bare, "log", "--format=%B", "main")
+        self.assertIn("Step: c2", landed, "scope: step c2's Step trailer is not on main: %r" % landed)
+        record = json.loads(sh(self.t, "git", "--git-dir", self.bare, "show", "roadmap:roadmap/data/steps/c2.json"))
+        self.assertEqual(record["status"], "doing", "scope: step c2's record does not read doing: %r" % record)
+        checks = self.check_lines(out, err)
+        self.assertEqual(len(checks), 1, "a doing step whose trailer is on main held its lane: %d check-this-lane lines, not one: %r"
+                         % (len(checks), out + err))
+        self.assertIn("step c1 landed; lane session_a", checks[0], "the check line does not name the merged step and its lane: %r" % checks[0])
+
+    def test_a_todo_step_under_the_lane_does_not_hold_it(self):
+        # Control: a step under the lane that is todo is not running, so it holds nothing, and the lane gets its check line.
+        others = {"c2": dict(order=2, status="todo", lane="session_a")}
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a", others=others), [IDLE_LANE])
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path
+        checks = self.check_lines(out, err)
+        self.assertEqual(len(checks), 1, "a todo step under the lane held it: %d check-this-lane lines, not one: %r" % (len(checks), out + err))
+        self.assertIn("step c1 landed; lane session_a", checks[0], "the check line does not name the merged step and its lane: %r" % checks[0])
+
+    def test_a_rebase_merge_names_the_lane_of_every_step_it_landed(self):
+        # A rebase merge copies each commit of the pull onto main, one after another, and makes no merge commit. The merge's
+        # commit^1..commit range then holds only the last copy, so the earlier copy's Step trailer is missed and its lane gets no
+        # check line. Step c0 is in lane session_c and step c1 in lane session_a: both must get a check line.
+        put_base_config(self, json.dumps({"defaultBranch": "main", "merge": {"method": "rebase"}}))
+        self.step_commit("c0")
+        self.step_commit("c1")
+        self.host.merge = self.rebase_merge
+        others = {"c0": dict(order=0, status="done", lane="session_c")}
+        rc, out, err = self.confirm(files=roadmap_files(lane="session_a", others=others),
+                                    live_at=lambda at: live_json((at - _timedelta(seconds=60)).isoformat(), IDLE_LANE))
+        self.assert_owed_path(rc, out, err)  # scope: the merge landed and the stale read took the owed path
+        parents = sh(self.t, "git", "--git-dir", self.bare, "rev-list", "--parents", "-n", "1", "main").split()
+        self.assertEqual(len(parents), 2, "scope: the tip of main has no single parent, so the fake made a merge commit: %r" % parents)
+        landed = sh(self.t, "git", "--git-dir", self.bare, "log", "--format=%B", "main")
+        self.assertIn("Step: c0", landed, "scope: step c0's trailer is not on main: %r" % landed)
+        checks = self.check_lines(out, err)
+        self.assertTrue(any("step c0 landed" in line and "lane session_c" in line for line in checks),
+                        "the rebase merge's step c0 got no check-this-lane line naming session_c: %r" % (out + err))
+        self.assertTrue(any("step c1 landed; lane session_a" in line for line in checks),
+                        "the rebase merge's step c1 got no check-this-lane line naming session_a: %r" % (out + err))
+
+    def test_no_check_line_while_an_open_pull_holds_the_lanes_head(self):
+        # The lane's session is complete and its step is done, but an open pull request is on its head ref lane/c1.
+        self.host.pulls = {8: REST.list_item(8, "2" * 40, "lane/c1", "main", body="")}
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a"), [IDLE_LANE])
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path
+        self.assertEqual(self.check_lines(out, err), [], "a lane with an open pull on its head got a check-this-lane line: %r" % (out + err))
+
+    def test_a_roadmap_ref_gone_as_the_pass_reads_it_keeps_the_merge_exit_0(self):
+        # The pass's fetch of origin/roadmap succeeds, then the ref is gone when the pass reads it. The live file cannot be read, so
+        # the owed line prints, and the merged step's record is read from the same ref, which no longer exists. That read must not
+        # raise: the merged line and exit code 0 stay as they were. The control is test_stale_live_file_prints_the_owed_line, with the
+        # ref in place.
+        real_fetch = merge.fetch_branch
+
+        def fetch_then_ref_gone(root, branch, cite=""):
+            sha = real_fetch(root, branch, cite)
+            if branch == "roadmap" and self.landed:  # the pass's own fetch, after the batch merge landed
+                sh(self.co, "git", "update-ref", "-d", "refs/remotes/origin/roadmap")
+            return sha
+        with unittest.mock.patch.object(merge, "fetch_branch", fetch_then_ref_gone):
+            rc, out, err = self.stale_merge(ROADMAP_BASE, [IDLE_LANE])  # a step commit with its Step trailer, so the record is read
+        owed = [line for line in out + err if OWED_WORD.search(line)]
+        self.assertEqual(len(owed), 1, "scope: the pass did not print its owed line once, so the step record was never read: %r" % (out + err))
+        self.assert_landed(rc, out, err)  # the merge landed and exits 0; the step record's read of the gone ref does not move either
+
+    def test_a_failed_merged_range_read_prints_unknown_not_silence(self):
+        # A shallow clone whose cut lies on the merge's first parent cannot read `commit^1..commit`. The fallback then reads the merge
+        # commit alone, which carries no Step trailer, so the pass printed nothing about the merged lane. The range read is forced to
+        # fail here; the fallback is the real git. The control is test_stale_live_file_falls_back_to_the_merged_steps_lane.
+        real_git, range_reads = merge.git, []
+
+        def git(cwd, *a, **k):
+            if a[:1] == ("log",) and a[-1:] and "^1.." in a[-1] and any("trailers:key=Step" in x for x in a):
+                range_reads.append(a[-1])
+                return 128, ""
+            return real_git(cwd, *a, **k)
+        with unittest.mock.patch.object(merge, "git", git):
+            rc, out, err = self.stale_merge(roadmap_files(lane="session_a"), [IDLE_LANE])
+        self.assertTrue(range_reads, "scope: the merged-range read never ran, so the fallback was never reached")
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path, so the step record is the next source
+        unknown = [line for line in out + err if line.startswith("unknown (")]
+        self.assertTrue(unknown, "the merged-range read failed and the fallback printed no unknown line, so the pass says nothing "
+                                 "about the merged lane: %r" % (out + err))
+
+    def test_an_unreadable_live_file_gives_a_kept_lane_an_unknown_or_hold_line_not_a_check_line(self):
+        # The live file is cut off mid-object, so its keepSessions cannot be read and the owner may keep this session. The lane gets
+        # an unknown or hold line that names it, never a check line. The control is test_stale_live_file_falls_back_to_the_merged_steps_lane:
+        # the same step with a readable file prints one check line.
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a"), text=lambda at: '{"readAt": "' + at.isoformat())
+        self.assert_owed_path(rc, out, err)  # scope: the file read as unread, so the owed path ran and the step record is the lane's source
+        self.assertEqual(self.check_lines(out, err), [], "a lane whose keep list cannot be read got a check-this-lane line: %r" % (out + err))
+        named = [line for line in out + err if line.startswith(("hold (", "unknown (")) and "session_a" in line]
+        self.assertTrue(named, "the lane got no hold or unknown line that names it: %r" % (out + err))
+
+    def test_a_malformed_keep_list_prints_no_unknown_line_for_a_lane_still_doing(self):
+        # Another step of the lane, c2, is doing under it, so the lane is still working and needs no keep list. Its keepSessions is
+        # malformed, so the keep list reads unknown. The lane prints no unknown line for it and no check line. The control is
+        # test_no_check_line_while_a_step_is_still_doing_under_the_lane, with a readable keep list.
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a", others=OTHER_DOING_STEP), [IDLE_LANE], keep="session_a")
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path, so the keep list was read there
+        unknown = [line for line in out + err if line.startswith("unknown (") and "session_a" in line]
+        self.assertEqual(unknown, [], "a lane still doing a step got an unknown line for its keep list: %r" % (out + err))
+        self.assertEqual(self.check_lines(out, err), [], "a lane still doing a step got a check-this-lane line: %r" % (out + err))
+
+    def tree_files(self, root):
+        """-> the files under `root`, except inside a git folder: a fetch writes refs and objects there, which the pass does not make as files."""
+        found = set()
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d != ".git"]
+            found.update(os.path.join(dirpath, name) for name in filenames)
+        return found
+
+    def test_the_idle_pass_after_a_merge_makes_reads_only(self):
+        # The pass starts git and no timer, each git call it makes is a read, and it makes no file in the repo or the temp dir.
+        # Its window opens at its fetch of origin's roadmap branch (the last one the run makes) and closes where the run reaches
+        # prose_judge_run, which runs after the pass. Process starts are seen through the one no-window run that merge's git and
+        # the roadmap build's git both start git with (hooks/_nowindow.run), and through threading.Timer.
+        git_calls, timers, start, end = [], [], {}, {}
+        real_run, real_timer, real_judge = merge._nowindow.run, threading.Timer, merge.prose_judge_run
+        temp = self.temp_folder()  # tempfile.tempdir is this folder, so a temp file the pass makes lands inside the case folder
+
+        def run(argv, *a, **k):
+            # sh() resolves the program to its full path, so the name is matched by its base name, not as the literal "git".
+            if isinstance(argv, (list, tuple)) and argv and os.path.splitext(os.path.basename(str(argv[0])))[0].lower() == "git":
+                args = tuple(argv[3:] if argv[1:2] == ["-C"] else argv[1:])  # ["git", "-C", repo, subcommand, ...]
+                if args[:1] == ("fetch",) and any("roadmap" in x for x in args):
+                    start["calls"], start["files"] = len(git_calls), self.tree_files(self.t)
+                git_calls.append(args)
+            return real_run(argv, *a, **k)
+
+        def timer(*a, **k):
+            timers.append(a)
+            return real_timer(*a, **k)
+
+        def judge_run(plan, n):
+            end["files"] = self.tree_files(self.t)
+            return real_judge(plan, n)
+        with unittest.mock.patch.object(merge._nowindow, "run", run), unittest.mock.patch.object(merge, "prose_judge_run", judge_run), \
+                unittest.mock.patch.object(threading, "Timer", timer), unittest.mock.patch.object(tempfile, "tempdir", temp):
+            rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE))
+        self.assertTrue("calls" in start and "files" in end,
+                        "scope: the run never reached the pass's roadmap fetch and its end (%d git calls, none a roadmap fetch)" % len(git_calls))
+        self.assert_report_after_merge(rc, out, err)  # scope: the fresh read ran the pass
+        window = git_calls[start["calls"]:]
+
+        def is_read(a):
+            if a[0] == "symbolic-ref":  # a read names one ref and sets none: one argument after its options
+                return len([x for x in a[1:] if not x.startswith("-")]) == 1
+            return a[0] in READ_ONLY_GIT
+        self.assertEqual([a for a in window if not is_read(a)], [], "the pass after the merge wrote to git: %r" % window)
+        created = sorted(end["files"] - start["files"])
+        self.assertEqual(created, [], "the pass after the merge created files: %r" % created)
+        self.assertEqual(timers, [], "the run started a timer: %r" % timers)
 
 class ShallowMain(unittest.TestCase):
     """ff_main in a shallow clone of origin. The commit it moves to is on origin/main, but the clone cuts the history
@@ -4677,7 +5355,7 @@ class GhHalf(Env):
     def spare_is_the_take(self):
         """The lock's spare is its take expiry, LOCK_TTL_SECONDS, as the rate-wait cases are sized. confirm's undo-check extension (UNDO_CHECK_LOCK_SECONDS)
         would lift the expiry to about 3900 s from the take, past the end of the 900 s rung, so no rung would need an extension. It is 0 here; its real
-        value is pinned by test_confirm_extends_the_lock_for_3600_s_before_each_undo_check. confirm runs no debt-check extension (ruling R2)."""
+        value is pinned by test_confirm_extends_the_lock_for_3600_s_before_each_undo_check. confirm runs no debt-check extension."""
         patch = unittest.mock.patch.object(merge, "UNDO_CHECK_LOCK_SECONDS", 0)
         patch.start()
         self.addCleanup(patch.stop)
@@ -7450,7 +8128,7 @@ class DebtRetire(Env):
         self.assertEqual(len(calls), 1, "preview did not call the Retire check once with unknown CI")
 
     # The lock outlasts the long check that confirm runs, undo_check, which has no bound. Each check call is preceded by its own extend_for, so the
-    # lock is never left to the take's fixed expiry under a check. confirm runs no debt check (ruling R2, owner 14:07 CST Nov 10).
+    # lock is never left to the take's fixed expiry under a check. confirm runs no debt check, because the Retire run runs in CI.
 
     LOCK_REFUSAL = "the fake lock refuses the extension"
 
@@ -7500,14 +8178,14 @@ class DebtRetire(Env):
 
     def assert_claimed_and_undo_checked_twice(self, events, out):
         """Scope before subject (P7): the claim was pushed and merged, and the undo check ran twice, before the claim and inside prove. confirm of a
-        ready PR runs no debt check (ruling R2, owner 14:07 CST Nov 10), so the debt check count is 0."""
+        ready PR runs no debt check (the Retire run runs in CI), so the debt check count is 0."""
         self.assertEqual(self.claims(), 1, out)
         self.assertTrue(getattr(self.host, "merged", False), out)
         self.assertEqual(events.count(("check", "debt")), 0, f"confirm ran a debt check, which ruling R2 removed from confirm (run order: {events})")
         self.assertGreaterEqual(events.count(("check", "undo")), 2, "the undo check ran fewer than twice, so the case misses the call inside prove")
 
     def test_confirm_of_a_ready_pr_runs_no_debt_check_and_extends_no_lock_for_one(self):
-        """Ruling R2 (owner, 14:07 CST Nov 10): the Retire run moved into CI, so confirm runs no debt check and extends the lock for none. The
+        """The Retire run runs in CI, so confirm runs no debt check and extends the lock for none. The
         debt-check length is patched to a value no undo extension uses, so an extension that carries it is a debt check's."""
         sentinel = 7777
         patch = unittest.mock.patch.object(merge, "debt_check_lock_seconds", lambda: sentinel, create=True)  # create: the name may go once no caller remains
@@ -14400,9 +15078,27 @@ class RulesReadNetwork(unittest.TestCase):
 
 @unittest.skipIf(os.name == "nt", "a Windows process gets no SIGTERM handler run")
 class SignalReleasesLock(Env):
-    """c189 part 3: a run stopped by SIGTERM or SIGINT releases the merge lock (#746 left one live for 2.7 h)."""
-    def stop_with(self, sig):
-        child = subprocess.Popen([sys.executable, __file__, "--sigchild", self.co], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    """c189 part 3: a run stopped by SIGTERM, SIGHUP or SIGINT releases the merge lock and removes its temporary tree (#746 left one live for 2.7 h).
+    A launched run is the same child under merge/launch.py, the process a signal to a real run reaches first."""
+    def start_run(self, launched):
+        if not launched:
+            return subprocess.Popen([sys.executable, __file__, "--sigchild", self.co], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.launch_tmp = os.path.join(self.t, "launch-tmp")  # the TMPDIR of the launched run: its merge-wt folders show here
+        os.makedirs(self.launch_tmp)
+        tree = os.path.join(self.t, "launch-tree")
+        os.makedirs(os.path.join(tree, "merge"))
+        # The tree's merge.py execs this file's --sigchild child, so the launcher's child runs the real lock path and only the Host is faked.
+        put(os.path.join(tree, "merge", "merge.py"), "import os, sys\nos.execv(sys.executable, [sys.executable, %r, '--sigchild', %r])\n" % (os.path.abspath(__file__), self.co))
+        env = {**os.environ, "TMPDIR": self.launch_tmp}
+        return subprocess.Popen([sys.executable, os.path.join(HERE, "launch.py"), tree, "--dev"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, start_new_session=True)
+
+    def launch_trees(self):
+        """The merge-wt folders this run left in its TMPDIR."""
+        return [n for n in os.listdir(self.launch_tmp) if n.startswith("merge-wt-")]
+
+    def stop_with(self, sig, launched=False):
+        child = self.start_run(launched)
         try:
             for line in child.stdout:  # merge's own lines come first
                 if line.strip() == "READY":
@@ -14410,21 +15106,35 @@ class SignalReleasesLock(Env):
             else:
                 self.fail("the run never reached the wait: " + child.stderr.read())
             self.assertTrue(self.lock_ref())
+            if launched:
+                self.assertEqual(len(self.launch_trees()), 1, "scope: one merge-wt folder must exist while the run is up, got %r" % self.launch_trees())
             child.send_signal(sig)
             child.wait(timeout=60)
         finally:
             if child.poll() is None:
-                child.kill(); child.wait()
+                if launched:
+                    stop_group(child)  # the launcher leads its own group: the child it execs is in that group
+                else:
+                    child.kill(); child.wait()
         err = child.stderr.read()
         child.stdout.close(); child.stderr.close()
         self.assertNotEqual(child.returncode, 0)
-        self.assertFalse(self.lock_ref(), err)
+        self.assertFalse(self.lock_ref(), "%s did not release the merge lock:\n%s" % (sig.name, err))
+        if launched:
+            self.assertEqual(self.launch_trees(), [], "%s did not remove the merge-wt tree of the run" % sig.name)
+            self.assertEqual(self.worktrees(), 1, "%s left a worktree registered in the checkout" % sig.name)
 
     def test_sigterm_releases_the_lock(self):
         self.stop_with(signal.SIGTERM)
 
     def test_sigint_releases_the_lock(self):  # a control: Python's own KeyboardInterrupt already unwinds the finally; only SIGTERM needs the handler
         self.stop_with(signal.SIGINT)
+
+    def test_sigterm_to_the_launcher_releases_the_lock_and_tree(self):  # a control: TERM is handled, so the run's finally removes the tree too
+        self.stop_with(signal.SIGTERM, launched=True)
+
+    def test_sighup_to_the_launcher_releases_the_lock_and_tree(self):
+        self.stop_with(signal.SIGHUP, launched=True)
 
 
 # The batch brake (roadmap step c195): nothing merges to a base while another ready pull request on it has a required check pending.
@@ -15794,6 +16504,147 @@ class StandingMergeRole(CloudSession):
         self.scripted_records(record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
         self.assert_standing_refused()
 
+    # ---- a clean merge of main over a passing record keeps the record (decision pr-review-record, "A clean merge of main keeps the record").
+    # The gate reads the record as merge --reviewed does, through live_review_state. A conflicted or an edited merge of main still refuses.
+    RECORD_REFUSAL = "has no passing review record"  # the end of the refusal standing_refusal gives a head with no passing record
+
+    def git_commit_reads(self):
+        """Serve this case's commit reads from the checkout's git. own_pr and scripted_records then set the pull request on that host."""
+        self.host = GitCommitsHost(self.co, self.other)
+
+    def record_head(self):
+        """The record's head: a rule-text commit on origin's feat. The passing record for it is served by the case."""
+        self.commit_files(["CLAUDE.md"])
+        return self.head()
+
+    def push_main(self, path, text):
+        """One commit on origin's main, pushed through origin, so the merge tool's base read sees it. -> its sha."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, path), text)
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", f"main: {path}")
+        sh(o, "git", "push", "-q", "origin", "main")
+        return sh(o, "git", "rev-parse", "HEAD")
+
+    def merge_main_into(self, record, main_sha, side, resolve=None, extra=None):
+        """A merge of `main_sha` into the record's head, made in the other clone and pushed to origin's side branch `side`, so this checkout
+        holds its commits. `resolve`: git's merge conflicts on CLAUDE.md, and the case resolves it to this text. `extra`: the merge commit also
+        adds this file, so its tree is no git clean merge. -> the merge's sha."""
+        o = self.other
+        sh(o, "git", "checkout", "-q", "-B", side, record)
+        merge_cmd = ["git", "merge", "-q", "--no-edit"] + (["--no-commit"] if extra else []) + [main_sha]
+        r = subprocess.run(merge_cmd, cwd=o, capture_output=True, text=True)
+        want = 1 if resolve is not None else 0  # only the conflicted merge is meant to conflict; every other merge must come out clean
+        assert r.returncode == want, f"the fixture's merge of main into {side} returned {r.returncode}, not {want}:\n{r.stdout}{r.stderr}"
+        if resolve is not None:
+            put(os.path.join(o, "CLAUDE.md"), resolve)
+        if extra:
+            put(os.path.join(o, extra), "extra\n")
+        sh(o, "git", "add", "-A")
+        if resolve is not None or extra:
+            sh(o, "git", "commit", "-q", "--no-edit")
+        sh(o, "git", "push", "-q", "origin", f"HEAD:refs/heads/{side}")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return sh(o, "git", "rev-parse", "HEAD")
+
+    def git_clean_tree(self, record, main_sha):
+        """-> the tree of git's clean merge of the record's head and main, or None when they conflict."""
+        r = subprocess.run(["git", "merge-tree", "--write-tree", record, main_sha], cwd=self.co, capture_output=True, text=True)
+        return r.stdout.split()[0] if r.returncode == 0 else None
+
+    def assert_clean_merge_of(self, record, main_sha, clean, body):
+        """P7, the scope before the gate reads it: `clean` is git's clean merge of the record's head and main, and the merge tool's own reader
+        (live_review_state, merge --reviewed) reads the record over it as passing. Both hold on the old code, so a red below comes from the gate alone."""
+        self.assertEqual(sh(self.co, "git", "log", "-1", "--format=%P", clean).split(), [record, main_sha],
+                         "the fixture's merge does not have the record's head and main as its parents")
+        self.assertEqual(self.git_clean_tree(record, main_sha), sh(self.co, "git", "rev-parse", f"{clean}^{{tree}}"),
+                         "the fixture's merge is not git's clean merge of the record's head and main")
+        self.assertTrue(merge.clean_merges_after(self.host, record, clean, "main"), "the merge tool's own walk does not reach the record through the clean merge")
+        self.assertEqual(merge.live_review_state(self.host, merge.parse_review(body), clean, "main")[0], "done",
+                         "the merge tool's own reader does not read the record over the clean merge of main as done")
+
+    def assert_guard_passes_clean_merge(self, clean):
+        """The red premise: standing_refusal, the gate, answers "" for the clean merge. On the old code it gives the record refusal."""
+        why = merge.standing_refusal(self.host, 7, self.host.pr(7), clean)
+        self.assertEqual(why, "", "the standing gate refuses a clean merge of main over a passing record, though the merge tool reads the record as done: " + why)
+
+    def test_a_clean_merge_of_main_over_a_passing_record_merges_under_standing(self):
+        self.git_commit_reads()
+        record = self.record_head()
+        early = self.push_main("docs/notes.md", "Notes.\n")
+        clean = self.merge_main_into(record, early, "fixture-clean")
+        body = record_text(head=record, rounds=REVIEW_PASS)
+        self.own_pr([("CLAUDE.md", "added", 1)])
+        self.scripted_records(body)
+        self.assert_clean_merge_of(record, early, clean, body)
+        sh(self.other, "git", "push", "-q", "origin", f"{clean}:refs/heads/feat")
+        self.assertEqual(self.head(), clean, "fixture: the clean merge is not the pull request's live head")
+        rc, out, err = self.standing_confirm()
+        self.assertNotIn(self.RECORD_REFUSAL, err, "the standing gate refused a clean merge of main over a passing record")
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+    def test_a_conflicted_merge_of_main_over_a_passing_record_is_refused_for_the_record_under_standing(self):
+        self.git_commit_reads()
+        record = self.record_head()
+        early = self.push_main("docs/notes.md", "Notes.\n")
+        clean = self.merge_main_into(record, early, "fixture-clean")
+        late = self.push_main("CLAUDE.md", "Main's rule text.\n")  # main moves on, and its CLAUDE.md conflicts with the record's
+        conflicted = self.merge_main_into(record, late, "fixture-conflicted", resolve="Resolved by hand.\n")
+        body = record_text(head=record, rounds=REVIEW_PASS)
+        self.own_pr([("CLAUDE.md", "added", 1)])
+        self.scripted_records(body)
+        self.assert_clean_merge_of(record, early, clean, body)
+        self.assert_guard_passes_clean_merge(clean)  # the red premise: the same record, over the clean merge
+        sh(self.other, "git", "push", "-q", "origin", f"{conflicted}:refs/heads/feat")
+        self.assertEqual(self.head(), conflicted, "fixture: the conflicted merge is not the pull request's live head")
+        rc, out, err = self.standing_confirm()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(self.RECORD_REFUSAL, err, "the conflicted merge of main was refused for another cause, not for its record")
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
+
+    def test_an_edited_clean_merge_of_main_over_a_passing_record_is_refused_for_the_record_under_standing(self):
+        self.git_commit_reads()
+        record = self.record_head()
+        early = self.push_main("docs/notes.md", "Notes.\n")
+        clean = self.merge_main_into(record, early, "fixture-clean")
+        edited = self.merge_main_into(record, early, "fixture-edited", extra="extra.txt")
+        body = record_text(head=record, rounds=REVIEW_PASS)
+        self.own_pr([("CLAUDE.md", "added", 1)])
+        self.scripted_records(body)
+        self.assert_clean_merge_of(record, early, clean, body)
+        self.assert_guard_passes_clean_merge(clean)  # the red premise: the same record, over the clean merge
+        self.assertNotEqual(sh(self.co, "git", "rev-parse", f"{edited}^{{tree}}"), self.git_clean_tree(record, early),
+                            "fixture: the edited merge has git's clean merge tree, so the case tests nothing")
+        self.own_pr([("CLAUDE.md", "added", 1), ("extra.txt", "added", 1)])  # the pull request now holds the edit too
+        sh(self.other, "git", "push", "-q", "origin", f"{edited}:refs/heads/feat")
+        self.assertEqual(self.head(), edited, "fixture: the edited merge is not the pull request's live head")
+        rc, out, err = self.standing_confirm()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(self.RECORD_REFUSAL, err, "the edited merge of main was refused for another cause, not for its record")
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
+
+    def test_a_clean_merge_whose_parents_cannot_be_read_is_refused_naming_that_read_under_standing(self):
+        self.git_commit_reads()
+        record = self.record_head()
+        early = self.push_main("docs/notes.md", "Notes.\n")
+        clean = self.merge_main_into(record, early, "fixture-clean")
+        body = record_text(head=record, rounds=REVIEW_PASS)
+        self.own_pr([("CLAUDE.md", "added", 1)])
+        self.scripted_records(body)
+        self.assert_clean_merge_of(record, early, clean, body)  # the premise: the merge tool reads the record over this clean merge as done
+        sh(self.other, "git", "push", "-q", "origin", f"{clean}:refs/heads/feat")
+        self.assertEqual(self.head(), clean, "fixture: the clean merge is not the pull request's live head")
+        self.host.unreadable.add(clean)  # the commits API cannot answer for the merge, so its parents, and whether main holds one, are unknown
+        state, why = merge.live_review_state(self.host, merge.parse_review(body), clean, "main")
+        self.assertNotEqual(state, "done", "fixture: the merge tool reads the record done though the clean-merge read cannot run")
+        self.assertIn(merge.REVIEW_SURVIVAL_UNKNOWN, why, "fixture: the merge tool's own reader does not name the unknown read")
+        err = self.assert_standing_refused()
+        self.assertIn(merge.REVIEW_SURVIVAL_UNKNOWN, err, "the refusal drops the why: the clean-merge read could not run, so the record is not missing")
+        self.assertNotIn(self.RECORD_REFUSAL, err, "the refusal says the head has no passing record, though the record passes and only the read failed")
+        self.assertNotRegex(err, r"(?i)\bpost\b", "the refusal tells the user to post a record")
+
     # ---- no size bound: a pull request past docs needs a passing reviewer record; a docs-only one needs none.
     RULE_PATHS = ("CLAUDE.md", "agents/a.md", "agents/b.md", "skills/b/SKILL.md", "skills/c/SKILL.md")
     DOC_PATHS = ("docs/a.md", "docs/b.md", "docs/c.md", "docs/d.md", "docs/e.md")
@@ -16866,6 +17717,8 @@ def review_comment(cid, number, body, created="2026-10-02T00:00:00Z", updated=No
     """A comment on issue or pull request `number`, as the repo-wide comment list gives it. `updated` is its updated_at; None means never edited."""
     return {"id": cid, "created_at": created, "updated_at": updated or created, "issue_url": f"https://api.github.com/repos/o/r/issues/{number}", "body": body}
 
+UNPARSED_CID = 9051724  # the id of a review-record comment that does not parse; distinctive, so no other output line holds it
+PASS_CID = 9051726  # the id of an older review-record comment that passes, beside UNPARSED_CID; distinctive, so no other output line holds it
 LANE_LINT_MARKER = "<!-- lane-lint -->"  # the first line of a lane's lint comment (decision lanes-run-no-full-ci-job); lint_body pins the rest of its form
 OWNER = {"login": "o", "association": "OWNER"}  # the repo's owner, as a comment object names its author
 NOT_OWNER = {"login": "mallory", "association": "NONE"}
@@ -19147,13 +20000,13 @@ class ReviewCleanMainMerge(ReviewEnv):
         self.assert_clean_merge_done(fx)
         self.reviewed_line(self.reviewed_host(fx, fx.octopus), fx.octopus, "stale", "a merge with three parents must not read done")
 
-    def test_f_a_lint_pass_on_the_reviewed_head_does_not_carry_to_a_clean_merge_of_main(self):
-        # The lint gate reads the live head only (decision lanes-run-no-full-ci-job). The default host's lint names the clean merge, so the control reads done.
+    def test_f_a_lint_pass_on_the_reviewed_head_carries_to_a_clean_merge_of_main(self):
+        # A lane-lint PASS carries across a clean merge of main that the merge tool proves: git's own merge of the two parents, so nothing else changed since the PASS.
         fx = self.real_commits()
         self.assert_clean_merge_done(fx)
         record = review_comment(1, 7, record_text(head=fx.fixed, rounds=REVIEW_PASS))
-        self.reviewed_line(self.reviewed_host(fx, fx.clean, comments=[record, lint_of(7, fx.fixed)]), fx.clean, "no lint",
-                           "a lane-lint PASS of the reviewed head must not make a clean merge of main read done: the lint names the live head")
+        self.reviewed_line(self.reviewed_host(fx, fx.clean, comments=[record, lint_of(7, fx.fixed)]), fx.clean, "done",
+                           "a lane-lint PASS of the reviewed head must carry across a clean merge of main that git proves: the merge reads no lint")
 
     def test_g_a_clean_merge_of_main_after_a_conflict_fixed_by_hand_reads_stale(self):
         fx = self.real_commits()
@@ -19191,6 +20044,179 @@ class ReviewCleanMainMerge(ReviewEnv):
                 comments = [review_comment(1, 7, earlier), review_comment(2, 7, newest), lint_of(7, fx.clean)]
                 self.reviewed_line(self.reviewed_host(fx, fx.clean, comments=comments), fx.clean, state,
                                    f"the newest record must read {state} at the clean merge of main, with the earlier design reviewer {design}")
+
+
+class LintCleanMainMergeCarry(ReviewEnv, RecordsEnv):
+    """A lane-lint PASS carries across a clean merge of main. The merge tool proves the merge: two
+    parents, the second on the base's main, git's own merge tree of its parents, and nothing else changed since the PASS. The lint carries across clean
+    merges of main only: a claim or records-page commit after a clean merge is not carried here. The old direct form, a claim or page straight on the
+    PASS, stays. Any other form is not carried, and a read that fails is not carried, never passed. The carry does not depend on the stamp config. Cases call lint_carried with its
+    current signature, through the scripted host of --reviewed (reviewed_host); lint_check and --reviewed each get one case."""
+
+    def setUp(self):
+        super().setUp()
+        self.use_fake_records()
+
+    def carry(self, fx, live, passed=None, source=(), host=None, root=None, base="main"):
+        """-> lint_carried's answer for pull request 7 at `live`, with a lane-lint PASS on `passed` (fx.fixed by default). `host` defaults to the
+        scripted host of --reviewed, which reads commits, trees and compares from fx. `root` is the checkout git reads the merges in."""
+        root = root or self.co
+        host = host or self.reviewed_host(fx, live, base=base)
+        host.cwd = root
+        return merge.lint_carried(root, merge.DEFAULT_CONFIG, base, 7, [fx.fixed] if passed is None else list(passed), live, host, list(source))
+
+    def test_a_a_lint_pass_carries_across_clean_merges_of_main(self):
+        fx = self.real_commits()
+        claim = self.claim_over(fx.fixed, {"docs/decisions/second.md": record("D-002", "second")})
+        self.facts(fx, [claim])
+        self.assertTrue(self.carry(fx, claim), "control: a claim commit over the reviewed head does not carry its PASS, so the cases below prove nothing about the host")
+        self.assertTrue(self.carry(fx, fx.clean), "a lane-lint PASS on the reviewed head does not carry across one clean merge of main")
+        self.assertTrue(self.carry(fx, fx.clean2), "a lane-lint PASS on the reviewed head does not carry across two clean merges of main")
+
+    def test_b_a_claim_after_a_clean_merge_is_not_carried(self):
+        fx = self.real_commits()
+        self.assertEqual(fx.parents[fx.clean], [fx.fixed, fx.main], "fixture: the clean merge's parents are not the reviewed head and main")
+        claim = self.claim_over(fx.clean, {"docs/decisions/second.md": record("D-002", "second")})
+        self.facts(fx, [claim])
+        self.assertFalse(self.carry(fx, claim), "a claim commit after a clean merge of main carried the PASS: the lint carries across clean merges of main only")
+
+    def test_b_a_records_page_after_a_clean_merge_is_not_carried(self):
+        fx = self.real_commits()
+        page = self.tool_page(fx.clean)
+        self.facts(fx, [page])
+        self.assert_page_scope(page, fx.clean)
+        self.assertFalse(self.carry(fx, page), "a generated records page after a clean merge of main carried the PASS: the lint carries across clean merges of main only")
+
+    def test_b_a_hand_edited_records_page_after_a_clean_merge_is_not_carried(self):
+        fx = self.real_commits()
+        generated = self.tool_page(fx.fixed)
+        self.facts(fx, [generated])
+        self.assert_page_scope(generated, fx.fixed)
+        self.assertTrue(self.carry(fx, generated), "control: a generated records page straight on the reviewed head does not carry, the old direct form")
+        hand = self.tool_page(fx.clean, hand="hand line\n")
+        self.facts(fx, [hand])
+        self.assert_page_scope(hand, fx.clean)
+        self.assertIn("hand line", sh(self.co, "git", "show", f"{hand}:{merge.RECORDS_PAGE}"), "fixture: the page commit does not hold the hand edit")
+        self.assertFalse(self.carry(fx, hand), "a hand-edited records page after a clean merge of main carried the PASS: the page is the generator's output or no carry")
+
+    def test_c_a_plain_commit_after_a_clean_merge_is_not_carried(self):
+        fx = self.real_commits()
+        self.assertEqual(fx.parents[fx.clean_plain], [fx.clean], "fixture: the plain commit's parent is not the clean merge")
+        self.assertFalse(self.carry(fx, fx.clean_plain), "a plain one-parent commit after a clean merge of main carried the PASS")
+        self.assertFalse(self.carry(fx, fx.clean, passed=[]), "a clean merge of main with no PASS to carry reads as carried")
+
+    def test_d_a_merge_with_a_hand_edit_is_not_carried(self):
+        fx = self.real_commits()
+        self.assertEqual(fx.parents[fx.edited], [fx.fixed, fx.main], "fixture: the edited merge's parents are not the reviewed head and main")
+        self.assertFalse(self.carry(fx, fx.edited), "a merge with a hand edit on top of git's merge carried the PASS")
+
+    def test_e_a_conflict_resolved_by_hand_is_not_carried(self):
+        fx = self.real_commits()
+        self.assertEqual(fx.parents[fx.conflicted], [fx.fixed, fx.main3], "fixture: the conflicted merge's parents are not the reviewed head and main3")
+        self.assertFalse(self.carry(fx, fx.conflicted), "a merge of a conflict resolved by hand carried the PASS")
+
+    def test_f_a_merge_of_a_branch_the_base_holds_but_main_does_not_is_not_carried(self):
+        fx = self.real_commits()
+        host = self.reviewed_host(fx, fx.stacked, base="feat-base", compares={**fx.on_main, **fx.on_stack})
+        self.assertFalse(self.carry(fx, fx.stacked, base="feat-base", host=host),
+                         "a merge of feat, which the pull request's base holds but origin's main does not, carried the PASS")
+
+    def test_g_a_merge_git_cannot_read_is_not_carried(self):
+        fx = self.real_commits()
+        live = self.fork_merge(fx)  # a merge of main into a commit only this checkout holds: origin, and so a clone of it, lacks the parent
+        fork = fx.parents[live][0]
+        clone = self.main_only_clone()
+        self.assertFalse(self.has_commit(clone, fork), "fixture: the main-only clone holds the unpushed parent, so git can read the merge")
+        self.assertFalse(self.carry(fx, live, root=clone), "a merge whose parent the checkout cannot read carried the PASS")
+        names_no_tree = PullsHost([batch_pull(7, fx.clean)], {}, commits=fx.parents,
+                                  trees={k: v for k, v in fx.trees.items() if k != fx.clean}, compares=fx.on_main)
+        self.assertIsNone(names_no_tree.commit_read(fx.clean)[1], "fixture: the host names a tree for the clean merge, so the case below tests nothing")
+        self.assertFalse(self.carry(fx, fx.clean, host=names_no_tree), "a merge whose tree the host cannot name carried the PASS")
+
+    def test_h_a_walk_of_clean_merges_reads_exactly_the_cap_and_no_more(self):
+        fx = self.real_commits()
+        cap = merge.REVIEW_MERGE_WALK
+        merges = self.clean_merges_after_fixed(fx, cap + 1)
+        self.assertTrue(self.is_ancestor(fx.fixed, merges[cap - 1]), "fixture: the cap-th merge does not sit on the reviewed head")
+        self.assertTrue(self.carry(fx, merges[cap - 1]), "%d clean merges of main after the reviewed head, the walk's cap, do not carry the PASS" % cap)
+        self.assertFalse(self.carry(fx, merges[cap]), "%d clean merges of main after the reviewed head, past the walk's cap, carried the PASS" % (cap + 1))
+
+    def test_i_an_equal_tree_source_pass_still_carries(self):
+        fx = self.real_commits()
+        twin = sh(self.co, "git", "commit-tree", fx.trees[fx.fixed], "-p", fx.main, "-m", "A replacement with the reviewed head's tree")
+        self.facts(fx, [twin])
+        self.assertEqual(fx.trees[twin], fx.trees[fx.fixed], "fixture: the replacement does not hold the reviewed head's tree")
+        self.assertTrue(self.carry(fx, twin, source=[fx.fixed]), "a replacement whose tree equals its source's reviewed head lost the source's PASS")
+        self.assertFalse(self.carry(fx, twin, source=[fx.clean]), "a source PASS on a head with another tree carried to the replacement")
+
+    def test_j_the_join_goes_ahead_on_a_clean_merge_of_main_with_the_lint_on_the_reviewed_head(self):
+        fx = self.real_commits()
+        host = self.reviewed_host(fx, fx.clean, comments=[lint_of(7, fx.clean)])
+        branch = host.pr(7)["branch"]
+        sh(self.co, "git", "push", "-q", "-f", "origin", f"{fx.clean}:refs/heads/{branch}")
+        self.assertEqual(sh(self.co, "git", "ls-remote", "origin", f"refs/heads/{branch}").split()[0], fx.clean, "fixture: origin's pull request branch is not the clean merge")
+        try:
+            merge.lint_check(host, 7, host.pr(7), self.co, merge.DEFAULT_CONFIG)  # control: the lint on the live head, no carry
+        except merge.Stop as e:
+            self.fail("control: the join refused a clean merge whose own lane lint PASS is on it: " + str(e))
+        host = self.reviewed_host(fx, fx.clean, comments=[lint_of(7, fx.fixed)])
+        try:
+            merge.lint_check(host, 7, host.pr(7), self.co, merge.DEFAULT_CONFIG)
+        except merge.Stop as e:
+            self.fail("the join refused a clean merge of main whose lane lint PASS is on the reviewed head: " + str(e))
+
+    def test_k_a_clean_merge_carries_when_the_base_has_no_record_kinds(self):
+        fx = self.real_commits()
+        no_kinds = self.git_commit(fx.main3, {".github/stamp.json": json.dumps(dict(CONFIG, kinds=[]))})
+        self.base_tip(no_kinds)
+        claim = self.claim_over(fx.fixed, {"docs/decisions/second.md": record("D-002", "second")})
+        self.facts(fx, [claim])
+        self.assertFalse(self.carry(fx, claim), "fixture: a claim carries under a base with no record kinds, so the case below proves nothing about the stamp config")
+        self.assertTrue(self.carry(fx, fx.clean), "a clean merge of main does not carry the PASS when the base has no record kinds")
+
+    def test_l_a_reviewed_line_reads_no_lint_when_the_live_merge_is_unreadable(self):
+        fx = self.real_commits()
+        live = self.fork_merge(fx)
+        clone = self.main_only_clone()
+
+        def line_with_lint(lint_head):
+            """-> the `merge --reviewed` line of pull request 7 at `live` in the clone: its record is at `live`, so it reads done at its own head."""
+            host = self.reviewed_host(fx, live, comments=[review_comment(1, 7, record_text(head=live, rounds=REVIEW_PASS)), lint_of(7, lint_head)])
+            host.cwd = clone
+            rc, out, err = self.run_args("--reviewed", host=host)
+            self.assertEqual(rc, 0, out + err)
+            return list_line(self, out, 7)
+        self.assertRegex(line_with_lint(live), rf"^#7 feat7 {live[:9]} done: ", "control: the record at the live head does not read done with its own lint")
+        self.assertRegex(line_with_lint(fx.fixed), rf"^#7 feat7 {live[:9]} no lint: ",
+                         "a lane-lint PASS on the reviewed head carried to a merge the checkout cannot read, so the line does not read no lint")
+
+    def test_m_a_plain_commit_before_a_clean_merge_is_not_carried(self):
+        fx = self.real_commits()
+        self.assertEqual(fx.parents[fx.after_plain], [fx.plain, fx.main], "fixture: the clean merge's first parent is not the plain commit")
+        self.assertFalse(self.carry(fx, fx.after_plain), "a clean merge of main on a plain commit carried the PASS of the reviewed head")
+
+    def test_p_a_default_branch_failure_is_not_carried_and_never_falls_back_to_the_pull_request_base(self):
+        fx = self.real_commits()
+        stacked = self.reviewed_host(fx, fx.stacked, base="feat-base", compares={**fx.on_main, **fx.on_stack})
+        clean = self.reviewed_host(fx, fx.clean, base="feat-base", compares={**fx.on_main, **fx.on_stack})
+        with unittest.mock.patch.object(merge, "default_branch", return_value="main"):
+            self.assertTrue(self.carry(fx, fx.clean, base="feat-base", host=clean), "control: a clean merge of main does not carry on a stacked pull request while the default branch reads main")
+        with unittest.mock.patch.object(merge, "default_branch", side_effect=merge.Stop("fixture: the default branch cannot be read")):
+            self.assertFalse(self.carry(fx, fx.stacked, base="feat-base", host=stacked),
+                             "a merge of the pull request's base carried the PASS when the default branch cannot be read: the carry must not fall back to the base")
+
+    def test_q_an_unknown_merge_state_in_the_walk_is_not_carried(self):
+        fx = self.real_commits()
+        fork = self.git_commit(fx.main, {"n.txt": "n\n"})  # a commit of main that only this checkout holds
+        fx.on_main[(fork, "main")] = "ahead"
+        tree = sh(self.co, "git", "merge-tree", "--write-tree", fx.fixed, fork).split()[0]  # git's own merge of the reviewed head and fork
+        live = sh(self.co, "git", "commit-tree", tree, "-p", fx.fixed, "-p", fork, "-m", "fixture")
+        self.facts(fx, [fork, live])
+        self.assertEqual(fx.parents[live], [fx.fixed, fork], "fixture: the merge's parents are not the reviewed head and the unpushed commit")
+        self.assertTrue(self.carry(fx, live), "control: git reads this merge in the checkout, and a clean merge of main on the reviewed head carries")
+        clone = self.main_only_clone()
+        self.assertFalse(self.has_commit(clone, fork), "fixture: the main-only clone holds the unpushed commit, so git can read the merge")
+        self.assertFalse(self.carry(fx, live, root=clone), "a merge whose merge state is unknown carried the PASS: an unknown read is no carry")
 
 
 class ReviewUnknownReads(ReviewEnv):
@@ -20616,6 +21642,170 @@ class ReviewedList(ReviewEnv):
         host, rc, out, err = self.chain_listing(earlier, passed, newest)
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
+
+    # A comment that opens with the review-record marker but does not parse is named, not ignored: the line names its id and the cause (the
+    # offending line, or the field that is missing). The newest comment is the one that counts, so each case holds it alone.
+    def unparsed_listing(self, body):
+        """`merge --reviewed` over one open pull request whose only comment is `body`."""
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(UNPARSED_CID, 7, body)])
+        self.assertEqual(rc, 0, out + err)
+        return out
+
+    def assert_unparsed_case(self, body, causes):
+        """`body` does not parse (scope), and the output names its comment by id and holds one of `causes` (each a word the cause must carry)."""
+        self.assertIsNone(review_fn(self, "parse_review")(body), "fixture: the body parses, so the case tests nothing")
+        out = self.unparsed_listing(body)
+        self.assertIn(str(UNPARSED_CID), out, "merge --reviewed does not name the unparsed comment by its id:\n" + out)
+        self.assertTrue(any(cause in out for cause in causes), f"merge --reviewed does not name the cause (one of {causes!r}):\n" + out)
+
+    def test_unparsed_record_text_after_the_ci_line_is_named_by_reviewed(self):
+        self.assert_unparsed_case(record_text(rounds=REVIEW_PASS) + "Thanks for the review.\n", ("Thanks for the review.", "CI line"))
+
+    def test_unparsed_record_text_before_the_ci_line_is_named_by_reviewed(self):
+        body = record_text(rounds=REVIEW_PASS).replace(REVIEW_CI_LINE, "Reviewed by hand, see the thread.\n" + REVIEW_CI_LINE)
+        self.assert_unparsed_case(body, ("Reviewed by hand, see the thread.", "CI line"))
+
+    def test_unparsed_record_missing_its_kind_line_is_named_by_reviewed(self):
+        self.assert_unparsed_case(record_text(rounds=REVIEW_PASS).replace("Kind: normal\n", ""), ("Kind",))
+
+    def test_unparsed_record_with_only_its_marker_is_named_by_reviewed(self):
+        # the empty state: the marker and no field after it, so the first field, PR, is the missing one
+        self.assert_unparsed_case(REVIEW_MARKER + "\n", ("PR:", "missing"))
+
+    def test_unparsed_record_at_full_size_is_named_by_reviewed(self):
+        # the full-size state: three failed rounds and a granted fourth, a Grant line, and text after the CI line. Without that text it parses (scope).
+        full = record_text(rounds=(*REVIEW_FAILED_THREE, "Round 4: reviewer, opus, PASS"), grant=(f"Grant: {REVIEW_GRANT_TEXT}",), net="zero")
+        parse_text(self, full)
+        self.assert_unparsed_case(full + "Thanks for the review.\n", ("Thanks for the review.", "CI line"))
+
+    # Each case below holds valid Kind and Guard or check lines, so the cause it names is the line that breaks.
+    def test_unparsed_record_bad_round_line_is_named_by_reviewed(self):
+        # a Round line whose verdict is none of PASS, FAIL or PARTIAL: the cause names that line
+        self.assert_unparsed_case(record_text(rounds=("Round 1: reviewer, sonnet, MAYBE",)), ("Round 1: reviewer, sonnet, MAYBE",))
+
+    def test_unparsed_record_docs_only_with_guard_yes_is_named_by_reviewed(self):
+        # a docs-only record touches no guard or check (decision docs-only-prs-skip-review, docs-only PRs skip review): the cause names that pairing
+        self.assert_unparsed_case(record_text(kind="docs-only", guard="yes"), ("a docs-only record cannot be Guard or check: yes",))
+
+    def test_unparsed_record_stray_line_mid_record_is_named_by_reviewed(self):
+        # a line between the rounds and Net value: the cause names that line
+        self.assert_unparsed_case(record_text(rounds=(*REVIEW_PASS, "Thanks for the review.")), ("Thanks for the review.",))
+
+    def test_unparsed_record_control_rule_above_pr_line_names_the_pr_line_by_reviewed(self):
+        # Control: a rule right under the marker cuts the record before its PR line, so the cause names the PR line as missing
+        body = REVIEW_MARKER + "\n---\n" + record_text(rounds=REVIEW_PASS).split("\n", 1)[1]
+        self.assert_unparsed_case(body, ("the PR: line is missing",))
+
+    def test_unparsed_record_control_well_formed_reads_done_by_reviewed(self):
+        # Control: the same comment id holds a record that parses, which reads done, so the naming above concerns the broken text alone.
+        parse_text(self, record_text(rounds=REVIEW_PASS))
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(UNPARSED_CID, 7, record_text(rounds=REVIEW_PASS)), lint_of(7, REVIEW_HEAD)])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
+
+    def test_unparsed_record_control_marker_less_comment_is_not_named_by_reviewed(self):
+        # Control: a comment that does not open with the marker is no record. The pull request reads no record, and the id is not named.
+        body = record_text(rounds=REVIEW_PASS).replace(REVIEW_MARKER + "\n", "", 1) + "Thanks for the review.\n"
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(UNPARSED_CID, 7, body)])
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(no_record_numbers(out), {7}, out)
+        self.assertNotIn(str(UNPARSED_CID), out, "merge --reviewed named a comment that carries no review-record marker:\n" + out)
+
+class UnparsedRecordStanding(CloudSession, ReviewEnv):
+    """A standing session's `merge <pr> --confirm` on a code pull request, refused by the record gate (standing_refusal). The records come through
+    PullsHost, so each comment keeps the id GitHub gives it. A comment that opens with the marker and does not parse is named in the refusal, by its
+    id and its cause, and nothing is claimed. The controls keep the gate's words for a record that parses, and name no comment without the marker."""
+
+    def standing_host(self, *comments):
+        """The host of a code pull request 7 at REVIEW_HEAD, whose review records are `comments`, oldest first."""
+        green = {REVIEW_HEAD: [batch_run("checks", "completed", "success")]}  # the head's own checks pass, so the record gate is the one that refuses
+        return PullsHost([batch_pull(7, REVIEW_HEAD)], green, comments=comments, files=[pr_file("tools/note.py", status="added")], bodies={7: OWN_PR_BODY})
+
+    def standing_refusal(self, *comments):
+        """-> (rc, stdout, stderr) of `merge 7 --confirm --head <live head>` as this cloud session, on a code pull request whose records are `comments`."""
+        self.put_role("standing")
+        host = self.standing_host(*comments)
+        with self.cloud():
+            return self.run_args("7", "--confirm", "--head", REVIEW_HEAD, host=host)
+
+    def guard_reason(self, *comments):
+        """-> the reason standing_refusal gives for pull request 7 at REVIEW_HEAD, with `comments` as its records: "" when the gate lets it through.
+        The gate reads the pull request as main does (Host.pr), then stops: no claim, no lock and no merge follow."""
+        host = self.standing_host(*comments)
+        with self.cloud():
+            return merge.standing_refusal(host, 7, host.pr(7), REVIEW_HEAD)
+
+    def assert_refusal_names(self, body, causes):
+        """`body` does not parse (scope). The refusal exits 1 with no traceback, names the comment by its id and holds one of `causes`, and claims nothing."""
+        self.assertIsNone(review_fn(self, "parse_review")(body), "fixture: the body parses, so the case tests nothing")
+        refs = self.refs()
+        rc, out, err = self.standing_refusal(review_comment(UNPARSED_CID, 7, body))
+        self.assertEqual(rc, 1, out + err)
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(self.refs(), refs, "the refused run took a claim or pushed")
+        self.assertIn(str(UNPARSED_CID), err, "the --confirm refusal does not name the unparsed comment by its id:\n" + err)
+        self.assertTrue(any(cause in err for cause in causes), f"the --confirm refusal does not name the cause (one of {causes!r}):\n" + err)
+
+    def test_unparsed_record_text_after_the_ci_line_is_named_by_confirm(self):
+        self.assert_refusal_names(record_text(rounds=REVIEW_PASS) + "Thanks for the review.\n", ("Thanks for the review.", "CI line"))
+
+    def test_unparsed_record_text_before_the_ci_line_is_named_by_confirm(self):
+        body = record_text(rounds=REVIEW_PASS).replace(REVIEW_CI_LINE, "Reviewed by hand, see the thread.\n" + REVIEW_CI_LINE)
+        self.assert_refusal_names(body, ("Reviewed by hand, see the thread.", "CI line"))
+
+    def test_unparsed_record_missing_its_kind_line_is_named_by_confirm(self):
+        self.assert_refusal_names(record_text(rounds=REVIEW_PASS).replace("Kind: normal\n", ""), ("Kind",))
+
+    def test_unparsed_record_with_only_its_marker_is_named_by_confirm(self):
+        # the empty state: the marker and no field after it, so the first field, PR, is the missing one
+        self.assert_refusal_names(REVIEW_MARKER + "\n", ("PR:", "missing"))
+
+    def test_unparsed_record_bad_round_line_is_named_by_confirm(self):
+        self.assert_refusal_names(record_text(rounds=("Round 1: reviewer, sonnet, MAYBE",)), ("Round 1: reviewer, sonnet, MAYBE",))
+
+    def test_unparsed_record_docs_only_with_guard_yes_is_named_by_confirm(self):
+        self.assert_refusal_names(record_text(kind="docs-only", guard="yes"), ("a docs-only record cannot be Guard or check: yes",))
+
+    def test_unparsed_record_stray_line_mid_record_is_named_by_confirm(self):
+        self.assert_refusal_names(record_text(rounds=(*REVIEW_PASS, "Thanks for the review.")), ("Thanks for the review.",))
+
+    def test_unparsed_record_control_well_formed_failing_keeps_the_guard_words(self):
+        # Control: a record that parses and fails gets the gate's own words. The same fixture then shows the naming above comes from the unparsed text.
+        body = record_text(head=REVIEW_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
+        parse_text(self, body)
+        rc, out, err = self.standing_refusal(review_comment(UNPARSED_CID, 7, body))
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("its head has no passing review record", err)
+
+    def test_unparsed_record_control_marker_less_comment_is_not_named_by_confirm(self):
+        # Control: a comment that does not open with the marker is no record. The refusal keeps the gate's words and does not name the id.
+        body = record_text(rounds=REVIEW_PASS).replace(REVIEW_MARKER + "\n", "", 1) + "Thanks for the review.\n"
+        rc, out, err = self.standing_refusal(review_comment(UNPARSED_CID, 7, body))
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("its head has no passing review record", err)
+        self.assertNotIn(str(UNPARSED_CID), err, "the --confirm refusal named a comment that carries no review-record marker:\n" + err)
+
+    def test_newest_unparsed_record_refuses_over_older_pass(self):
+        # The newest review-record comment does not parse, and an older one on the same head passes. The gate must not read the older pass as the
+        # record: it refuses, and names the newest comment by its id and its cause.
+        older, newest = record_text(rounds=REVIEW_PASS), record_text(rounds=REVIEW_PASS) + "Thanks for the review.\n"
+        self.assertIsNone(review_fn(self, "parse_review")(newest), "fixture: the newest body parses, so the case tests nothing")
+        parse_text(self, older)
+        self.assertEqual(record_state(self, older, REVIEW_HEAD), "done", "fixture: the older record is not a passing record on the head")
+        why = self.guard_reason(review_comment(PASS_CID, 7, older, created="2026-10-02T00:00:00Z"), review_comment(UNPARSED_CID, 7, newest, created="2026-10-03T00:00:00Z"))
+        self.assertTrue(why, "the gate let the pull request through on an older pass, over a newer record that does not parse")
+        self.assertIn(str(UNPARSED_CID), why, "the gate's refusal does not name the newest unparsed comment by its id:\n" + why)
+        self.assertTrue(any(cause in why for cause in ("Thanks for the review.", "CI line")), "the gate's refusal does not name the cause:\n" + why)
+
+    def test_older_unparsed_record_under_newer_pass_merges(self):
+        # Control: the newest record passes, and an older one on the same head does not parse. The gate reads the newest, so it lets the pull request
+        # through. This class's fixture stops at the gate, so the case asserts the gate's "" and no merge.
+        older, newest = record_text(rounds=REVIEW_PASS) + "Thanks for the review.\n", record_text(rounds=REVIEW_PASS)
+        self.assertIsNone(review_fn(self, "parse_review")(older), "fixture: the older body parses, so the case tests nothing")
+        parse_text(self, newest)
+        self.assertEqual(record_state(self, newest, REVIEW_HEAD), "done", "fixture: the newest record is not a passing record on the head")
+        why = self.guard_reason(review_comment(UNPARSED_CID, 7, older, created="2026-10-02T00:00:00Z"), review_comment(PASS_CID, 7, newest, created="2026-10-03T00:00:00Z"))
+        self.assertEqual(why, "", "the gate refused a pull request whose newest record passes:\n" + why)
 
 class ReleaseHost(PullsHost):
     """A PullsHost for `merge --release-check`. A number in `closed` answers `pulls/<n>` as a closed pull request (the open list leaves it out),
@@ -24797,7 +25987,7 @@ class DraftReady(CloudSession):
 
     def test_fast_checks_refuses_a_red_debt_close_even_with_green_head_ci(self):
         """The pre-ready route (--fast-checks: pre_ready_rows, debt_verdict, debt_check) runs the debt-close lint with no CI gate: a host that reads
-        green CI on the head does not lift a close whose Retire check is red. Ruling R2 (owner, 14:07 CST Nov 10) keeps the CI gate for the preview only."""
+        green CI on the head does not lift a close whose Retire check is red. The CI gate applies to the preview only."""
         self.ready_checks_on_main()
         self.debt_close_on_green_head(1)  # the close's own Retire test is red
         with self.ready_check_answers("pass") as ran:
@@ -26249,9 +27439,10 @@ class StaleMergeTrees(unittest.TestCase):
         patch.start()
         self.addCleanup(patch.stop)
 
-    def make_tree(self, name, reason, root=None):
-        """A merge-wt-<name> folder with a locked worktree in it, as the merge tool makes one, under ROOT (default the temp folder). -> (folder, worktree)."""
-        tmp = os.path.join(root or self.tmpdir, "merge-wt-" + name)
+    def make_tree(self, name, reason, root=None, prefix="merge-wt-"):
+        """A <prefix><name> folder with a locked worktree in it, as the merge tool makes one (prefix merge-wt- or merge-fresh-),
+        under ROOT (default the temp folder). -> (folder, worktree)."""
+        tmp = os.path.join(root or self.tmpdir, prefix + name)
         wt = os.path.join(tmp, "tree")
         os.makedirs(tmp)
         sh(self.repo, "git", "worktree", "add", "-q", "--detach", "--lock", "--reason", reason, wt, self.head)
@@ -26315,6 +27506,226 @@ class StaleMergeTrees(unittest.TestCase):
         self.assertIn(os.path.realpath(far_wt), self.locked_trees(), "the dead-locked tree outside the temp folder must stay registered")
 
 
+    # The three run folders that a CI job or a guard run makes in the temp folder. Each name carries its maker's pid, as
+    # <prefix><pid><suffix>, so a folder whose maker died is found by its name. The forms are this test's contract.
+    PLAIN_KINDS = {
+        "ci-job-lint": "ci-job-lint-%d-run",
+        "ci-job-pin": "ci-job-pin-%d-0123abc-run",
+        "mutate_guard": "mutate_guard_%d-run",
+    }
+
+    def make_folder(self, name):
+        """A run folder with one file in it, directly under the temp folder. -> its path."""
+        folder = os.path.join(self.tmpdir, name)
+        os.makedirs(folder)
+        with open(os.path.join(folder, "run.log"), "w", encoding="utf-8") as handle:
+            handle.write("run\n")
+        return folder
+
+    def test_a_run_folder_whose_pid_is_dead_goes_and_a_live_one_stays(self):
+        """A merge-fresh tree names its maker's pid in its lock reason, and a ci-job-lint, ci-job-pin or mutate_guard folder
+        names it in its name. Once that pid is dead, the next add_worktree removes each kind. A folder whose pid lives stays,
+        and so does a folder that names no pid."""
+        dead, live = reaped_child_pid(), os.getpid()
+        dead_fresh_tmp, dead_fresh_wt = self.make_tree("dead", "merge tool, pid %d" % dead, prefix="merge-fresh-")
+        live_fresh_tmp, live_fresh_wt = self.make_tree("live", "merge tool, pid %d" % live, prefix="merge-fresh-")
+        dead_run = {"merge-fresh": dead_fresh_tmp}
+        live_run = {"merge-fresh": live_fresh_tmp}
+        legacy_run = {}
+        for kind, pattern in self.PLAIN_KINDS.items():
+            dead_run[kind] = self.make_folder(pattern % dead)
+            live_run[kind] = self.make_folder(pattern % live)
+            legacy_run[kind] = self.make_folder(pattern.replace("%d", "legacy"))
+
+        self.assertEqual(self.locked_trees().get(os.path.realpath(dead_fresh_wt)), "merge tool, pid %d" % dead,
+                         "scope: the dead merge-fresh tree must be locked with its reason before add_worktree runs")
+        for kind, folder in list(dead_run.items()) + list(legacy_run.items()):
+            self.assertTrue(os.path.isdir(folder), "scope: the %s folder must exist before add_worktree runs" % kind)
+
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        for kind, folder in dead_run.items():
+            with self.subTest(kind=kind, pid="dead"):
+                self.assertFalse(os.path.exists(folder), "a %s folder whose pid %d is dead must be removed when add_worktree starts" % (kind, dead))
+        with self.subTest(kind="merge-fresh", part="registration"):
+            self.assertNotIn(os.path.realpath(dead_fresh_wt), self.locked_trees(),
+                             "the dead merge-fresh tree's git registration must go with its folder")
+        for kind, folder in live_run.items():
+            with self.subTest(kind=kind, pid="live"):
+                self.assertTrue(os.path.isdir(folder), "a %s folder whose pid %d is alive must stay" % (kind, live))
+        for kind, folder in legacy_run.items():
+            with self.subTest(kind=kind, pid="none"):
+                self.assertTrue(os.path.isdir(folder), "a %s folder that names no pid must stay" % kind)
+
+    def start_holder(self, cwd, held=None, name="holder"):
+        """A live process, in its own group, whose working folder is `cwd`. With `held`, it also holds that file open. -> the Popen.
+        It writes its marker after it holds what it holds, so the sweep never runs before the holder does."""
+        ready = os.path.join(os.path.dirname(self.tmpdir), name + ".ready")
+        code = "import time\n" + ("f = open(%r)\n" % held if held else "") + ("open(%r, 'w').close()\ntime.sleep(300)\n" % ready)
+        proc = subprocess.Popen([sys.executable, "-c", code], cwd=cwd, start_new_session=True,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(stop_group, proc)
+        self.assertTrue(wait_for(ready, 60, proc), "fixture: the holder %s never started" % name)
+        return proc
+
+    @staticmethod
+    def holds_inside(proc, folder):
+        """True when proc's working folder, or a file it has open, is `folder` or lies under it. Reads /proc, so Linux only."""
+        base = os.path.realpath(folder)
+        fds = os.path.join("/proc", str(proc.pid), "fd")
+        paths = [os.path.realpath("/proc/%d/cwd" % proc.pid)] + [os.path.realpath(os.path.join(fds, n)) for n in os.listdir(fds)]
+        return any(p == base or p.startswith(base + os.sep) for p in paths)
+
+    @unittest.skipUnless(os.path.isdir("/proc/self"), "the holder's working folder is read from /proc")
+    def test_a_merge_fresh_tree_with_a_live_child_in_it_stays(self):
+        """A merge-fresh tree whose launcher pid is dead stays while a live process has its working folder in it. A dead tree with
+        no process in it, in the same sweep, goes."""
+        dead = reaped_child_pid()
+        control_tmp, _ = self.make_tree("gone", "merge tool, pid %d" % dead, prefix="merge-fresh-")
+        held_tmp, held_wt = self.make_tree("held", "merge tool, pid %d" % dead, prefix="merge-fresh-")
+        holder = self.start_holder(held_wt)
+        self.assertTrue(self.holds_inside(holder, held_tmp), "scope: the live child must have its working folder in the tree before add_worktree runs")
+
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        self.assertFalse(os.path.exists(control_tmp), "control: a dead merge-fresh tree with no process in it must be removed")
+        self.assertTrue(os.path.isdir(held_tmp), "a merge-fresh tree whose launcher pid is dead must stay while a live child runs in it")
+        self.assertIn(os.path.realpath(held_wt), self.locked_trees(), "a merge-fresh tree with a live child in it must stay registered")
+
+    @unittest.skipUnless(os.path.isdir("/proc/self"), "the holder's open files are read from /proc")
+    def test_a_merge_fresh_tree_with_a_live_child_holding_a_file_in_it_stays(self):
+        """A merge-fresh tree whose launcher pid is dead stays while a live process holds a file open in it, though the process's
+        working folder is elsewhere. A dead tree with no process in it, in the same sweep, goes."""
+        dead = reaped_child_pid()
+        control_tmp, _ = self.make_tree("gone", "merge tool, pid %d" % dead, prefix="merge-fresh-")
+        held_tmp, held_wt = self.make_tree("held", "merge tool, pid %d" % dead, prefix="merge-fresh-")
+        held_file = os.path.join(held_wt, "held.txt")
+        with open(held_file, "w", encoding="utf-8") as handle:
+            handle.write("held\n")
+        holder = self.start_holder(os.path.dirname(self.tmpdir), held=held_file)
+        self.assertTrue(self.holds_inside(holder, held_tmp), "scope: the live child must hold a file in the tree before add_worktree runs")
+
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        self.assertFalse(os.path.exists(control_tmp), "control: a dead merge-fresh tree with no process in it must be removed")
+        self.assertTrue(os.path.isdir(held_tmp), "a merge-fresh tree whose launcher pid is dead must stay while a live child holds a file in it")
+
+    @unittest.skipUnless(os.path.isdir("/proc/self"), "the holder's working folder is read from /proc")
+    def test_a_run_folder_of_each_kind_with_a_dead_pid_stays_while_a_live_child_is_in_it(self):
+        """A ci-job-lint, ci-job-pin or mutate_guard folder whose pid is dead stays while a live process has its working folder in
+        it. A dead folder with no process in it, in the same sweep, goes."""
+        dead = reaped_child_pid()
+        held, holders, control = {}, {}, {}
+        for kind, pattern in self.PLAIN_KINDS.items():
+            control[kind] = self.make_folder(pattern % dead)
+            held[kind] = self.make_folder((pattern % dead).replace("run", "held"))
+            holders[kind] = self.start_holder(held[kind], name=kind)
+            self.assertTrue(self.holds_inside(holders[kind], held[kind]), "scope: the %s live child must be in its folder before add_worktree runs" % kind)
+
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        for kind in self.PLAIN_KINDS:
+            with self.subTest(kind=kind, part="control"):
+                self.assertFalse(os.path.exists(control[kind]), "control: a dead %s folder with no process in it must be removed" % kind)
+            with self.subTest(kind=kind, part="held"):
+                self.assertTrue(os.path.isdir(held[kind]), "a %s folder whose pid %d is dead must stay while a live child runs in it" % (kind, dead))
+
+
+class ProducerFolderNames(unittest.TestCase):
+    """A run folder that a real producer makes carries the run's pid in its name, so the merge tool's sweep can find it once the
+    run is dead. Each case calls the producer itself, so a producer that drops the pid goes red here."""
+
+    def test_mutate_guard_names_its_work_folder_with_the_run_pid(self):
+        """A default run of hooks/mutate_guard.py names its work folder with the pid of that run. The run stops once it has named it.
+        The mutation list is empty here: a stale anchor in the real list ends a run before its work folder, and that is not this case."""
+        import mutate_guard  # noqa: E402  the real tool, from hooks/ (on the path, see the top of this file)
+        made = []
+
+        class Stop(Exception):
+            """Ends the run as soon as the work folder is named: nothing past it is needed here."""
+
+        def mkdtemp(*args, **kwargs):
+            made.append(kwargs.get("prefix"))
+            raise Stop()
+
+        patches = [unittest.mock.patch.object(tempfile, "mkdtemp", mkdtemp), unittest.mock.patch.object(sys, "argv", ["mutate_guard.py"]),
+                   unittest.mock.patch.object(mutate_guard, "MUTATIONS", [])]
+        with contextlib.ExitStack() as stack:
+            for patch in patches:
+                stack.enter_context(patch)
+            try:
+                mutate_guard.main()
+            except Stop:
+                pass
+        self.assertEqual(len(made), 1, "scope: a default run must reach its work folder as its first temp folder, made %r" % made)
+        self.assertEqual(made[0], "mutate_guard_%d-" % os.getpid(),
+                         "mutate_guard must name its work folder with the run's pid, got prefix %r" % made[0])
+
+
+class WorkFolderOnSignal(unittest.TestCase):
+    """hooks/mutate_guard.py's work folder is removed when a signal ends the run, as when it ends normally. Each case starts the real main() in
+    a child with no mutation, and the mutant run is a block, so the folder exists while the run is up. A TERM or HUP skips the folder's cleanup
+    unless the run handles the signal."""
+
+    def start_child(self, end=False, second_term=False):
+        """A run of the child with its TMPDIR in a folder of this run. end: the block returns at once, so the run ends by itself.
+        second_term: the child sends itself a TERM from inside the work folder's clean-up, as a group TERM does after the first."""
+        tmp = tempfile.mkdtemp(prefix="mutate-sig-", dir=run_folder())
+        env = {**os.environ, "TMPDIR": tmp, "MUTATE_END": "1" if end else "", "MUTATE_SECOND_TERM": "1" if second_term else ""}
+        proc = subprocess.Popen([sys.executable, os.path.abspath(__file__), "--mutate-child"], env=env, stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+        self.addCleanup(stop_group, proc)
+        for line in proc.stdout:  # the child prints READY once its work folder exists and the mutant run starts
+            if line.strip() == "READY":
+                break
+        else:
+            self.fail("the run never reached the mutant run: " + proc.stderr.read())
+        return proc, tmp
+
+    @staticmethod
+    def work_folders(tmp, pid):
+        """The work folders of the run `pid` in its TMPDIR."""
+        return [n for n in os.listdir(tmp) if n.startswith("mutate_guard_%d-" % pid)]
+
+    @unittest.skipIf(os.name == "nt", "a Windows process gets no SIGTERM handler run, so its work folder is not removed there")
+    def test_sigterm_removes_the_work_folder(self):
+        self.assert_signal_removes_work_folder(signal.SIGTERM)
+
+    @unittest.skipIf(os.name == "nt", "a Windows process gets no SIGHUP handler run, so its work folder is not removed there")
+    def test_sighup_removes_the_work_folder(self):
+        self.assert_signal_removes_work_folder(signal.SIGHUP)
+
+    @unittest.skipIf(os.name == "nt", "a Windows process gets no SIGTERM handler run, so its work folder is not removed there")
+    def test_a_second_term_in_clean_up_still_removes_the_work_folder(self):
+        """A group TERM sends the child a second TERM while the work folder is removed. That TERM must not cut the removal short."""
+        proc, tmp = self.start_child(second_term=True)
+        self.assertEqual(len(self.work_folders(tmp, proc.pid)), 1, "scope: one work folder named with the run's pid must exist while the run is up")
+        proc.send_signal(signal.SIGTERM)
+        try:
+            proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            self.fail("the mutate_guard run did not exit within 60 s of a TERM")
+        self.assertEqual(self.work_folders(tmp, proc.pid), [], "a second TERM during clean-up cut the work folder's removal short")
+
+    def assert_signal_removes_work_folder(self, sig):
+        proc, tmp = self.start_child()
+        held = self.work_folders(tmp, proc.pid)
+        self.assertEqual(len(held), 1, "scope: one work folder named with the run's pid must exist while the run is up, got %r" % held)
+        proc.send_signal(sig)
+        try:
+            proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            self.fail("the mutate_guard run did not exit within 60 s of %s" % sig.name)
+        self.assertEqual(self.work_folders(tmp, proc.pid), [], "%s to the mutate_guard run left its work folder behind" % sig.name)
+
+    def test_a_normal_end_removes_the_work_folder(self):  # a control: the run's own finally removes the folder when no signal comes
+        proc, tmp = self.start_child(end=True)
+        self.assertEqual(len(self.work_folders(tmp, proc.pid)), 1, "scope: one work folder must exist while the run is up")
+        proc.wait(timeout=60)
+        self.assertEqual(proc.returncode, 0, proc.stderr.read())
+        self.assertEqual(self.work_folders(tmp, proc.pid), [], "a normal end left the work folder behind")
+
+
 class VerifiedLine(RecordsEnv):
     """The claim commit and the records-page commit each carry a Verified line (lint/check_red_run.py)."""
 
@@ -26366,6 +27777,25 @@ if __name__ == "__main__":
         if merge.main(["7", "--confirm"], host=host, lock=lock):  # the first confirm pushes the claim and stops
             sys.exit(1)
         sys.exit(merge.main(["7", "--confirm"], host=host, lock=lock))  # the second confirm merges the claim: its merge call dies
+    if len(sys.argv) == 2 and sys.argv[1] == "--mutate-child":
+        # hooks/mutate_guard.py's real main() with no mutation: it names and makes its work folder, then calls the mutant run, which is a
+        # block here. The block ends when stdin closes, or at once when MUTATE_END is set.
+        import mutate_guard
+        def block(*args, **kwargs):
+            print("READY", flush=True)
+            if not os.environ.get("MUTATE_END"):
+                sys.stdin.read()
+            return 0
+        if os.environ.get("MUTATE_SECOND_TERM"):
+            # The clean-up's rmtree gets a TERM first, as a group TERM sends the child a second one; the real rmtree then runs.
+            real_rmtree = mutate_guard.shutil.rmtree
+            def rmtree_after_a_term(path, *args, **kwargs):
+                os.kill(os.getpid(), signal.SIGTERM)
+                return real_rmtree(path, *args, **kwargs)
+            mutate_guard.shutil.rmtree = rmtree_after_a_term
+        mutate_guard.MUTATIONS = []
+        mutate_guard.mutate_shared.run_mutants = block
+        sys.exit(mutate_guard.main())
     class Slicer(unittest.TestLoader):
         def loadTestsFromModule(self, *a, **k):
             suite = select_shard(select_tests(super().loadTestsFromModule(*a, **k), os.environ.get("MERGE_TESTS", "")),
