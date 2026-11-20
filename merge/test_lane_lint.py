@@ -7140,6 +7140,79 @@ class CiJobHeadCopy(LaneFixture):
         tool, copy = self.copies()
         self.assertEqual(len(copy), 2, "the second lint did not run the head copy: " + text)
 
+    BASE_IMPORT = "git_reads"  # a hooks module the tool's bin/ci-job does not import (tool_ci_job_imports checks it); origin/main's bin/ci-job does
+
+    def make_base_import(self, module):
+        """origin/main's bin/ci-job imports hooks/<module>.py, as bin/ci-job reaches its own hooks/ modules: a sys.path line first. main holds that
+        module too, so the lint tree can run the import. The import list is read from this base copy, not from the tool checkout's."""
+        script = ("import os, sys\n"
+                  "sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), os.pardir, 'hooks'))\n"
+                  f"import {module}  # the base's own import, which the tool's copy does not make\n") + self.stub_text(PASSING, 0)
+        self.push_main({"bin/ci-job": script, f"hooks/{module}.py": "# a module the base's bin/ci-job imports\n"})
+        self.main_sha = tm.sh(self.other, "git", "rev-parse", "HEAD")
+
+    def tool_ci_job_imports(self):
+        """The module names this repo's bin/ci-job imports, read with ast: the case's precondition that the tool's copy makes no such import."""
+        with open(os.path.join(REPO, "bin", "ci-job"), encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        names = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names.update(a.name.split(".")[0] for a in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                names.add(node.module.split(".")[0])
+        return names
+
+    def test_import_list_reads_the_base_copy(self):
+        """The base's bin/ci-job imports a module the tool's copy does not. A lane that changes that module runs the head copy, so the import list
+        is read from the base's bin/ci-job, not from the tool checkout's."""
+        self.make_base_import(self.BASE_IMPORT)
+        self.assertNotIn(self.BASE_IMPORT, self.tool_ci_job_imports(), "the tool's bin/ci-job imports the module, so the case probes no base import")
+        head = self.push_lane({f"hooks/{self.BASE_IMPORT}.py": "# the lane's edit to a module the base's bin/ci-job imports\n"}, from_main=True)
+        scope = self.scope(head)
+        self.assertIn(f"hooks/{self.BASE_IMPORT}.py", scope, "the lane does not change the imported module, so the case probes no import")
+        self.assertNotIn("bin/ci-job", scope, "the lane changes bin/ci-job, so the run shows a touch, not an import")
+        rc, text = self.lint_run("--lane-lint", head, head=head, runs=None)
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+        tool, copy = self.copies()
+        self.assertEqual(len(copy), 1, "the head copy of bin/ci-job did not run for a module only the base's bin/ci-job imports: " + text)
+        self.assertEqual(copy[0]["script"], os.path.join(copy[0]["cwd"], "bin", "ci-job"), "the head copy is not the bin/ci-job of the lint tree")
+        self.assertEqual(copy[0]["head_sha_env"], head, "the head copy did not get the pushed head as CI_JOB_HEAD_SHA")
+
+    def test_unreadable_base_ci_job_is_unknown_not_a_pass(self):
+        """The base's bin/ci-job cannot be parsed, so its import list cannot be read. The lint stops as unknown: it does not pass by skipping the
+        head-copy check that the list decides."""
+        self.push_main({"bin/ci-job": "def broken(:\n"})
+        self.main_sha = tm.sh(self.other, "git", "rev-parse", "HEAD")
+        head = self.push_lane({"docs/lane-note.md": "# A lane note\n"}, from_main=True)
+        self.assertNotIn("bin/ci-job", self.scope(head), "the lane changes bin/ci-job, so the case reads the lane's own copy, not the base's")
+        rc, text = self.lint_run("--lane-lint", head, head=head, runs=None)
+        self.assertNotEqual(rc, 0, "the lint passed though the base's bin/ci-job cannot be read, so its import list was skipped: " + text)
+        self.assertEqual(pass_lines(text), [], "the lint printed a PASS line beside an unreadable import list: " + text)
+        self.assertIn("unknown", text, "the refusal does not say unknown: " + text)
+
+    def push_lane_rename(self, src, dst):
+        """The lane's push: one commit on feat, from origin/main, that moves src to dst with git mv. -> the pushed head."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", "feat", "origin/main")
+        tm.sh(o, "git", "mv", src, dst)
+        tm.sh(o, "git", "commit", "-q", "-m", f"lane: move {src} to {dst}")
+        tm.sh(o, "git", "push", "-q", "-f", "origin", "feat")
+        return tm.sh(o, "git", "rev-parse", "HEAD")
+
+    def test_a_renamed_ci_job_is_said_to_be_renamed(self):
+        """A lane that moves bin/ci-job to another name has no head copy, so the tool's copy runs alone. The lint says the file was renamed,
+        never that the lane deleted it."""
+        head = self.push_lane_rename("bin/ci-job", "bin/ci-job-moved")
+        renames = tm.sh(self.other, "git", "diff", "-M", "--name-status", f"{self.main_sha}...{head}").splitlines()
+        self.assertIn("R100\tbin/ci-job\tbin/ci-job-moved", renames, "the lane does not rename bin/ci-job, so the case probes no rename: " + str(renames))
+        rc, text = self.lint_run("--lane-lint", head, head=head, runs=1)
+        self.assertEqual(rc, 0, text)
+        self.assertRegex(text, "renam", "the lint does not say the lane renamed bin/ci-job: " + text)
+        self.assertNotRegex(text, "deletes bin/ci-job", "the lint says the lane deletes bin/ci-job, though the lane renamed it: " + text)
+
 
 if __name__ == "__main__":
     unittest.main()
