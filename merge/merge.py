@@ -34,7 +34,7 @@
                           check, and merges that head in the one run. A base that moves after the push refuses and keeps the commit. A relayed yes binds across the heal's page and base-merge commits.
                           A PR GitHub reads BLOCKED under "none" refuses and names the branch protection and requiredChecks, since the tool read no protection.
                           A head whose own run is still pending merges when a lane-lint PASS names its exact sha (a PASS carried over claim commits counts); main's run after
-                          the merge is the check. A finished red run and a PASS for another head still refuse, and a red main lets no PASS lift a pending run. GitHub reads a pending required check as BLOCKED,
+                          the merge is the check. A finished red run and a PASS for another head still refuse, and while main is red no PASS lifts a pending run. GitHub reads a pending required check as BLOCKED,
                           so the PUT goes on past that one read and GitHub refuses it or not; BEHIND still refuses.
                           A confirm in the cloud needs a lane-lint PASS for the head's sha. Any pull request skips it, a lane PR included, when the all-jobs-passed rollup is green on that exact head:
                           then it skips the lint and prints one `merge: lane lint skipped ...` line naming the rollup and the head's first 9 characters.
@@ -4555,6 +4555,11 @@ def red_line(host):
     return (f"Red checks: {', '.join(checks) or 'none named (the run ended red with no red job)'} (run {', '.join(str(i) for i in ids)}). "
             f"Failing tests: {shown or 'none named'}{why}")
 
+def red_beside(root, host, base, verdict):
+    """True when a red base reads unknown for the merge: a merged revert would lift the red but for a cancelled or running run beside it, and unknown never reads clear.
+    The one read red_base (confirm) and the preview share, so they print one verdict. Call it after base_verdict, which leaves the facts it reads on the host."""
+    return verdict == "red" and bool((getattr(host, "base_facts", None) or {}).get("others")) and revert_proven(root, host, base, beside_ok=True)
+
 def red_base(root, host, base, red_ok=""):
     """The red-main check (decision no-merge-onto-red-main): a base whose latest completed run is RED no longer refuses a merge (ruling Q5 v); the merge prints red_line, so a new break shows as a new name.
     The base's UNKNOWN read still refuses: unknown never reads clear.
@@ -4566,7 +4571,7 @@ def red_base(root, host, base, red_ok=""):
     if verdict == "green":
         return
     rerun = verdict == "unknown" and RERUN_IN_FLIGHT in detail
-    beside = verdict == "red" and bool((getattr(host, "base_facts", None) or {}).get("others")) and revert_proven(root, host, base, beside_ok=True)  # a revert would lift this red but for a cancelled or running run beside it: that base is unknown, and unknown never reads clear
+    beside = red_beside(root, host, base, verdict)
     cancelled = (verdict == "unknown" or beside) and not rerun and CANCELLED_NO_RED in detail
     what = (f"{base}'s latest completed run is red: {detail}" if verdict == "red" else f"{base}'s runs are UNKNOWN, a re-run is still running: {detail}" if rerun
             else f"{base}'s runs are UNKNOWN: {detail}" if cancelled
@@ -4707,11 +4712,12 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     m = cfg.get("merge", {})
     held = lock.read(base)
     verdict, detail = base_verdict(root, host, base)  # the red-main check's read
+    refused = verdict == "unknown" or red_beside(root, host, base, verdict)  # the cases red_base refuses; the rest of a red base merges
     say(f"merge: PREVIEW for #{n} ({info['branch']} at {info['head'][:9]}). Nothing was pressed.",
         "  lock:   " + (holder_text(base, held, lock.now()) if held and held[1] > lock.now() else "free"),
         f"  head checks: {host.head_state(n)}",
-        f"  {base} run: {verdict}" + ("" if verdict == "green" else f": {detail}. {red_line(host)}. --confirm merges onto the red {base} (ruling Q5 v)." if verdict == "red"
-                                     else f": {detail}. --confirm refuses it unless --base-red-ok \"<reason>\" is given."),
+        f"  {base} run: {verdict}" + ("" if verdict == "green" else f": {detail}. --confirm refuses it unless --base-red-ok \"<reason>\" is given." if refused
+                                     else f": {detail}. {red_line(host)}. --confirm merges onto the red {base} (ruling Q5 v)."),
         "  base:   " + (current or f"holds {base}'s tip"),
         "  claim:  " + (f"already claimed ({resumed}); " + ((f"run `merge {n} --confirm` on the draft first: it runs the ready checks (" + ", ".join(m["readyChecks"]) + "), then refuses this head, so mark it ready by hand after they pass (route pr-ready-mcp-cloud in cloud)"
                          if m.get("readyChecks") else "--confirm on the draft refuses this head, so mark it ready by hand (route pr-ready-mcp-cloud in cloud)") if info["draft"] else "a run resumes at the wait")
@@ -5168,7 +5174,7 @@ BATCH_RUNNER_NEEDS_HEAD = "the merge needs the head the CI ran on, so pass it wi
 def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok="", expected_head=None, linted_head=None, express=False, lint_proof=None):
     """`lint_proof`: a callable(info) -> True when a lane-lint PASS holds for that live head (lint_proves_head), None for a host that reads no comments. It is asked
     only when the head's own run is still pending: a PASS lifts a pending run, and main's run after the merge is the check
-    (a red main reverts the blamed commit). A finished red run, a PASS for another head, and any PASS on a red main are never lifted."""
+    (a red main's revert or fix is the top lane, and a PR may merge onto it: decision no-merge-onto-red-main). A finished red run and a PASS for another head are never lifted, and no PASS lifts a pending head while main is red."""
     m = cfg.get("merge", {})
     info = info or host.pr(n)  # main read it once already, and the config came from that base. A read; the head compare after the lock covers a head that moves before the lock is ours
     base = info["base"]  # the PR's own base; read again under the lock
