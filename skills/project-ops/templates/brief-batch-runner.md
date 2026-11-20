@@ -24,8 +24,7 @@ It keeps the merge itself and the CI wait. It hands the long reads and each lane
 Archiving stays its own act.
 
 Limits:
-- It merges no PR whose own run is red. It merges nothing onto a red main, except the revert of the blamed commit
-  (rule `git-red-main-reverts`: a red main is fixed by revert).
+- It merges no PR whose own run is red. It may merge onto a red main (owner ruling Q5 v). The red is the top lane at once: revert the blamed merge or fix it (rule `git-red-main-reverts`). It merges nothing while main reads UNKNOWN.
 - It merges nothing while a batch's CI run is in progress.
 - The merge grant covers the merge act only. Green CI, a fresh review and the net-value hold still apply.
 - It compacts in routine use. When it hands over to a successor, it writes a role handoff note
