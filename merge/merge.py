@@ -7066,7 +7066,10 @@ def standing_refusal(h, n, info, head, main=None, claims=None):
         # the pass that ends review, of any model (ruling own-review-any-model): the fix verifier's when the record has one, else the last reviewer round's
         last = (rec["fix"][2], rec["fix"][3]) if rec and rec["fix"] else next(((m, v) for _, role, m, v in reversed(rec["rounds"] if rec else []) if role == REVIEW_ROLES[0]), (None, None))
         passer = last[0] if last[1] == "PASS" else None  # a final round that failed reads done when no net value is owed, but it is no pass
-        if not passer or live_review_state(h, rec, head, main, claims, recs[:-1])[0] != "done":  # `head` is the relayed head, which relayed_head_holds ties to the live one: only this tool's own commits may sit above it (a claim, its revert, a page commit, and under requiredChecks none a clean merge of the base)
+        state, why = live_review_state(h, rec, head, main, claims, recs[:-1]) if passer else ("none", "")  # `head` is the relayed head, which relayed_head_holds ties to the live one: only this tool's own commits may sit above it (a claim, its revert, a page commit, and under requiredChecks none a clean merge of the base)
+        if state != "done":
+            if REVIEW_SURVIVAL_UNKNOWN in why:  # the record passes and only the clean-merge read failed: say so, since a new record would not mend it
+                return f"this pull request changes code, rule text or a guard path, and {why}."
             return "this pull request changes code, rule text or a guard path, and its head has no passing review record."
     return ""
 
