@@ -2285,7 +2285,103 @@ def _read_all_cwds_macos(timeout=60):
     return table or None
 
 
+def _run_dir_of(path: str):
+    """The merge tool's run dir when PATH is its tree: `<run dir>/tree`, the run dir named
+    `merge-*` (`merge-wt-*` for a PR head, `merge-fresh-*` for the launcher's own code). Else None.
+    The run's holders sit anywhere under the run dir, not only under `tree`: a lint's cwd is the
+    run dir itself, and the 2026-11-19 cleanup matched `<run dir>/tree` and deleted four live runs."""
+    norm = os.path.normpath(path)
+    run_dir = os.path.dirname(norm)
+    if os.path.basename(norm) == "tree" and os.path.basename(run_dir).startswith("merge-"):
+        return run_dir
+    return None
+
+
+def _spellings(path: str):
+    """PATH as given and as its real path, since a holder may name either (/var and /tmp are links on macOS)."""
+    return {os.path.normpath(path), os.path.realpath(path)}
+
+
+def _argv_names_under(pid: int, spellings) -> bool:
+    """True when PID's command line names a path at or under one of SPELLINGS (matched as a whole
+    path component, so `merge-a` never matches `merge-a2`). A relative argument is not resolved:
+    it needs the cwd, and a process whose cwd is under the run dir is kept by the cwd read."""
+    if sys.platform.startswith("linux"):
+        try:
+            with open("/proc/%d/cmdline" % pid, "rb") as handle:
+                text = handle.read().replace(b"\x00", b" ").decode("utf-8", "replace")
+        except Exception:
+            return False
+    else:
+        text = process_command(pid) or ""
+    return any(re.search(r"(?<![\w.-])" + re.escape(spelling) + r"(?![\w.-])", text)
+               for spelling in spellings)
+
+
+def _holds_open_under_linux(pid: int, real_root: str) -> bool:
+    """True when one of PID's open files lies at or under REAL_ROOT. An fd link is already a real
+    path (` (deleted)` appended for an unlinked file). A pid whose fd folder cannot be read is out of scope."""
+    base = "/proc/%d/fd" % pid
+    try:
+        names = os.listdir(base)
+    except Exception:
+        return False
+    for name in names:
+        try:
+            target = os.readlink(os.path.join(base, name))
+        except Exception:
+            continue
+        if target.endswith(" (deleted)"):
+            target = target[: -len(" (deleted)")]
+        if target == real_root or target.startswith(real_root + os.sep):
+            return True
+    return False
+
+
+def _open_files_under_macos(root: str):
+    """The pids that hold a file under ROOT open, from one `lsof -Fp +D ROOT` (it recurses the folder
+    alone). `None` when lsof could not answer: any exit code but 0 or 1 (1 is "no match")."""
+    try:
+        answer = _nowindow.run(["lsof", "-Fp", "+D", root], capture_output=True, text=True, timeout=60)
+    except Exception:
+        return None
+    if answer.returncode not in (0, 1):
+        return None
+    return [int(line[1:]) for line in answer.stdout.splitlines() if line.startswith("p") and line[1:].isdigit()]
+
+
 def processes_in(path: str):
+    """`_cwd_processes_in` read for PATH's holders. For a merge run's tree (`_run_dir_of`) the holders
+    are every live process whose cwd is under the run dir, whose command line names a path under it,
+    or that holds a file open under it, at any depth. Another tree is judged by cwd alone. The
+    argument and open-file reads run on Linux and macOS; Windows reads the cwd only."""
+    run_dir = _run_dir_of(path)
+    if run_dir is None:
+        return _cwd_processes_in(path)
+    inside, unreadable = _cwd_processes_in(run_dir)
+    if inside is None:
+        return None, None
+    holders = set(inside)
+    spellings = _spellings(run_dir)
+    if sys.platform == "darwin":
+        opened = _open_files_under_macos(os.path.realpath(run_dir))
+        if opened is None:
+            return None, None
+        holders.update(opened)
+    pids = list_all_pids()
+    if pids is None:
+        return None, None
+    real_root = os.path.realpath(run_dir)
+    for pid in pids:
+        if pid in holders:
+            continue
+        if _argv_names_under(pid, spellings) or (
+                sys.platform.startswith("linux") and _holds_open_under_linux(pid, real_root)):
+            holders.add(pid)
+    return sorted(holders), unreadable
+
+
+def _cwd_processes_in(path: str):
     """Return `(inside_pids, unreadable_pids)`, both lists (possibly empty), for the pre-removal
     check in `decide_worktree`. `inside_pids` is `None` (with `unreadable_pids` also `None`)
     when the pid ENUMERATION itself failed: keep everything and remove no worktree.

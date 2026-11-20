@@ -59,7 +59,9 @@ def main(co, args):
     tmp = os.path.realpath(tempfile.mkdtemp(prefix="merge-fresh-"))  # /var is a symlink on macOS
     wt = os.path.join(tmp, "tree")
     try:
-        c, o = git(co, "worktree", "add", "-q", "--detach", wt, want)
+        # Locked while the run lives, as merge.add_worktree locks its own: the janitor keeps a locked tree and judges an
+        # unlocked one by its cwd and idle clock alone, which a run dir held another way fails.
+        c, o = git(co, "worktree", "add", "-q", "--detach", "--lock", "--reason", f"merge tool, pid {os.getpid()}", wt, want)
         got = git(wt, "rev-parse", "HEAD")[1] if c == 0 else ""
         if got != want:
             warn(sha, behind, f"temporary worktree at origin/{ref} failed or did not match: " + (o or got))
@@ -77,6 +79,7 @@ def main(co, args):
         print(f"merge: running claude-settings {want[:12]} (origin/{ref})", file=sys.stderr)
         return run(wt, args)
     finally:
+        git(co, "worktree", "unlock", wt)  # git refuses to remove a locked tree, even with --force once
         git(co, "worktree", "remove", "--force", wt)
         rmtree_retry(tmp)  # belt-and-suspenders: Windows can leave read-only pack files behind git's own remove
         git(co, "worktree", "prune")  # drop the registration once the directory is actually gone

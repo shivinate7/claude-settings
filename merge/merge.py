@@ -2970,7 +2970,8 @@ MERGE_LOCK = re.compile(r"merge tool, pid (\d+)")
 
 
 def sweep_dead_trees(root):
-    """Remove each locked worktree of ROOT in the temp folder whose lock reason is `merge tool, pid N` with N dead: a merge run that died left it.
+    """Remove each locked worktree of ROOT in the temp folder whose lock reason is `merge tool, pid N` with N dead: a merge run that died left it
+    (`merge-wt-*`, a PR head's tree, and `merge-fresh-*`, the launcher's own).
     The tree is this tool's own, so it is dropped with force, as drop_worktree does. A live pid, an unreadable pid and any other lock stay."""
     c, out = git(root, "worktree", "list", "--porcelain")
     if c:
@@ -2983,7 +2984,7 @@ def sweep_dead_trees(root):
         elif line.startswith("locked") and path:
             m = MERGE_LOCK.fullmatch(line[len("locked"):].strip())
             tmp = os.path.dirname(path)
-            if (m and os.path.basename(path) == "tree" and os.path.basename(tmp).startswith("merge-wt-")
+            if (m and os.path.basename(path) == "tree" and os.path.basename(tmp).startswith(("merge-wt-", "merge-fresh-"))
                     and os.path.dirname(tmp) == temp and not pid_alive(int(m.group(1)))):
                 drop_worktree(root, tmp, path)
 
