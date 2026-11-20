@@ -1416,8 +1416,8 @@ def case_prompt_flags_a_pick_one_question_whose_options_could_combine():
           sentences)
     check("prompt: a sentence never flags options that exclude each other",
           has_pin(sentences, ("never flag",), ("exclude",)), sentences)
-    check("prompt: the prompt judges against nine rules",
-          has_pin(sentences, ("against nine rules",)), sentences[:2])
+    check("prompt: the prompt judges against ten rules",
+          has_pin(sentences, ("against ten rules",)), sentences[:2])
 
 
 def case_widens_finding_logs_its_rule():
@@ -1879,17 +1879,17 @@ def case_prompt_never_flags_a_search_used_only_for_candidates():
           has_pin(sentences, ("never flag",), ("search",), ("candidate",)), sentences)
 
 
-def case_prompt_says_nine_rules_with_the_counts_rule():
+def case_prompt_says_ten_rules_with_the_counts_rule():
     run = run_hook(SEARCH_COUNT_REPLY, answer=OK_ANSWER)
     sentences = rule_sentences(run, SEARCH_COUNT_REPLY)
-    check("nine rules: the prompt says against nine rules", has_pin(sentences, ("against nine rules",)),
+    check("ten rules: the prompt says against ten rules", has_pin(sentences, ("against ten rules",)),
           sentences[:2])
     rules = judged_rules()
-    check("nine rules: JUDGED_RULES holds nine rules", len(rules) == 9, rules)
-    check("nine rules: JUDGED_RULES holds %s" % SEARCH_RULE, SEARCH_RULE in rules, rules)
+    check("ten rules: JUDGED_RULES holds ten rules", len(rules) == 10, rules)
+    check("ten rules: JUDGED_RULES holds %s" % SEARCH_RULE, SEARCH_RULE in rules, rules)
     with open(MODULE_PATH, encoding="utf-8") as f:
         first = f.read().split("\n", 2)[1]
-    check("nine rules: the docstring says against nine rules", "against nine rules" in first, first[:120])
+    check("ten rules: the docstring says against ten rules", "against ten rules" in first, first[:120])
 
 
 # Cost. A Stop that the trigger does not match starts no process and writes no file beyond the count file. Stop 1
@@ -2127,16 +2127,22 @@ def case_searching_with_a_digit_is_judged_off_sample():
 # enough: the case also needs the "not a search" clause. No other test reads rule-line text, so this one lives here.
 COUNTS_ANCHOR = "<!-- rule:verification-counts-from-rest -->"
 CLAUDE_MD = os.path.join(REPO_ROOT, "CLAUDE.md")
+STYLE_FILE = os.path.join(REPO_ROOT, "output-styles", "shiv-stylisms.md")
 
 
-def counts_rule_text(text):
-    """The counts rule's words in CLAUDE.md, or "" when its anchor is absent."""
-    at = text.find(COUNTS_ANCHOR)
+def rule_text_before(text, anchor):
+    """The words of the rule that ends at `anchor` in `text`, or "" when the anchor is absent."""
+    at = text.find(anchor)
     if at < 0:
         return ""
     before = text[:at]
     prev = before.rfind("-->")  # the anchor of the rule before this one, if any
     return before[prev + 3:] if prev >= 0 else before
+
+
+def counts_rule_text(text):
+    """The counts rule's words in CLAUDE.md, or "" when its anchor is absent."""
+    return rule_text_before(text, COUNTS_ANCHOR)
 
 
 def case_claude_md_counts_rule_names_the_github_rest_api_and_not_a_search():
@@ -2159,6 +2165,209 @@ def case_glossary_check_passes_on_reply_judge():
                           cwd=REPO_ROOT, capture_output=True, text=True)
     check("glossary: lint/check_glossary.py exits 0 on hooks/reply_judge.py, read whole",
           proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr))
+
+
+# --------------------------------------------------------------------------- cost rank
+# measure-before-priority: a reply that ranks a cost (the biggest cost, the most expensive lane, most of the
+# spend) is judged off-sample, as a search total is. Code finds the ranking words (COST_RANK in reply_judge.py);
+# the model decides whether the ranking names its measure. COST_RULE is the test's pick, taken from the branch
+# slug. No ruling names the rule id yet, so the owner may rename it.
+COST_RULE = "measure-before-priority"
+COST_REPLY = "Done: the biggest cost is wakes, from the run."
+COST_FINDING = {"ok": False, "reason": COST_RULE + ": a cost ranking names no measure; give the figure with its unit "
+                "and a date, run id or sample count."}
+MOST_OF_TIME_REPLY = "Done: the wake check passes most of the time, so the lane rarely retries."
+
+# (label, reply, kind). A "judged" row makes Stop 2 call the model once. Every other row never calls it. The
+# "question" and "quoted" rows also check their scope first: a question ends in "?", a quote holds the phrase.
+# The controls sit beside a trigger row, so a regex that matches too much fails a control, and one that
+# matches too little fails a trigger.
+COST_ROWS = (
+    ("costs the most", "Done: the wake hook costs the most per turn.", "judged"),
+    ("spends the most", "Done: the Opus lane spends the most.", "judged"),
+    ("eats the most", "Done: the wake check eats the most of the run.", "judged"),
+    ("burns the most", "Done: the janitor burns the most.", "judged"),
+    ("takes the most", "Done: the doorbell takes the most.", "judged"),
+    ("biggest cost", "Done: the biggest cost is wakes.", "judged"),
+    ("largest spend", "Done: the largest spend is the Opus lanes.", "judged"),
+    ("main drain", "Done: the main drain is the janitor.", "judged"),
+    ("dominant sink", "Done: the dominant sink is the doorbell.", "judged"),
+    ("top driver", "Done: the top driver is the wake check.", "judged"),
+    ("top bottleneck", "Done: the top bottleneck is the merge lock.", "judged"),
+    ("top cost", "Done: the top cost is wakes.", "judged"),
+    ("most expensive", "Done: the most expensive lane is the Opus builder.", "judged"),
+    ("costliest", "Done: the costliest lane is the Opus builder.", "judged"),
+    ("bulk of the cost", "Done: the bulk of the cost is wakes.", "judged"),
+    ("most of the cost", "Done: most of the cost is wakes.", "judged"),
+    ("bulk of the spend", "Done: the bulk of the spend is the Opus lanes.", "judged"),
+    ("most of the spend", "Done: most of the spend is the Opus lanes.", "judged"),
+    ("bulk of the tokens", "Done: the bulk of the tokens go to wakes.", "judged"),
+    ("most of the tokens", "Done: most of the tokens go to wakes.", "judged"),
+    ("bulk of the money", "Done: the bulk of the money goes to the Opus lanes.", "judged"),
+    ("most of the money", "Done: most of the money goes to the Opus lanes.", "judged"),
+    ("top priority", "Done: the top priority is the Opus lane review.", "control"),
+    ("a question", "Which lane costs the most?", "question"),
+    ("quoted owner text", 'Done: the owner wrote "the biggest cost is wakes", so the lane took it as the task.', "quoted"),
+)
+
+FIGURE_WORDS = ("figure", "measure", "number")
+UNIT_WORDS = ("unit", "$", "usd", "token", "second", "minute", "hour", "percent", "%")
+FORM_WORDS = ("a date", "the date", "date,", "date:", "run id", "sample count", "sample size")
+
+
+def other_triggers(module, reply):
+    """The existing off-sample triggers that match the reply, by name. Empty when only the cost trigger could."""
+    found = []
+    if module.SEARCH_TOTAL.search(reply):
+        found.append("search total")
+    if module.TABLE_SEPARATOR.search(reply):
+        found.append("table")
+    if module.BLOCKED_ON.search(reply):
+        found.append("blocked on")
+    if module.has_input_needed(reply):
+        found.append("input needed")
+    return found
+
+
+def case_cost_rank_phrase_table_is_judged_off_sample():
+    module = reference_module()
+    for n, (phrase, reply, kind) in enumerate(COST_ROWS):
+        label = "cost-rank-%02d" % n
+        # Scope first: no other trigger matches the row, so a call here, or none, comes from the cost trigger alone.
+        others = other_triggers(module, reply)
+        check("cost rank, %s: no other trigger matches the reply" % phrase, not others, others)
+        if kind == "question":
+            check("cost rank, %s: the reply ends in a question mark" % phrase, reply.endswith("?"), reply)
+        if kind == "quoted":
+            check("cost rank, %s: the ranking phrase sits between double quotes" % phrase,
+                  re.search(r'"[^"]*biggest cost[^"]*"', reply) is not None, reply)
+        run, _ = second_stop(reply, label=label, session=label)
+        if kind == "judged":
+            check("cost rank, %s: Stop 2 calls the model once" % phrase, len(run.calls) == 1, run.calls)
+        else:
+            check("cost rank, %s: Stop 2 never calls the model" % phrase, not run.calls, run.calls)
+
+
+def case_cost_rank_reply_is_judged_off_sample():
+    run, _ = second_stop(COST_REPLY, label="cost-a", session="cost-a")
+    check("cost rank: Stop 2 exit 0", run.code == 0, run.code)
+    check("cost rank: Stop 2 calls the model once", len(run.calls) == 1, run.calls)
+
+
+def case_cost_rank_finding_is_a_note_logged_as_its_rule():
+    # Stop 1 is judged, so the finding prints here with no trigger involved: only the log line can name the wrong rule.
+    config = sample_config("cost-finding")
+    run = run_hook(COST_REPLY, answer=json.dumps(COST_FINDING), config=config, session="cost-finding")
+    got = parse_stdout(run)
+    specific = got.get("hookSpecificOutput") if got else None
+    note = specific.get("additionalContext") if isinstance(specific, dict) else None
+    check("cost rank finding: Stop 1 prints the reason as its note", note == COST_FINDING["reason"], run.out)
+    check("cost rank finding: exit 0", run.code == 0, run.code)
+    check("cost rank finding: never a decision block", "decision" not in (got or {}), run.out)
+    lines = guard_lines(config)
+    parts = lines[0].split("\t") if len(lines) == 1 else []
+    check("cost rank finding: guard.log holds one line, with rule %s" % COST_RULE,
+          len(parts) == 6 and parts[3] == COST_RULE, lines)
+
+
+def case_most_of_the_time_is_not_judged_off_sample():
+    run, _ = second_stop(MOST_OF_TIME_REPLY, label="cost-time", session="cost-time")
+    check("most of the time: Stop 2 exit 0 and silent", run.code == 0 and run.out == "", (run.code, run.out))
+    check("most of the time: Stop 2 never calls the model", not run.calls, run.calls)
+
+
+def case_cost_rank_phrase_past_the_clip_is_judged():
+    reply = "Done: shipped the check.\n" + LONG_FILLER + COST_REPLY + "\n" + LONG_FILLER
+    module = reference_module()
+    check("cost rank long reply: the reply is longer than the prompt clip", len(reply) > module.REPLY_MAX, len(reply))
+    check("cost rank long reply: the prompt clip cuts the phrase out of the prompt",
+          COST_REPLY not in module.build_prompt(reply), "the clip kept the phrase")
+    run, _ = second_stop(reply, label="cost-long", session="cost-long")
+    check("cost rank long reply: Stop 2 calls the model once, so the trigger read the whole reply",
+          len(run.calls) == 1, run.calls)
+
+
+def case_cost_rank_prompt_names_the_measure_forms():
+    run = run_hook(COST_REPLY, answer=OK_ANSWER)
+    sentences = rule_sentences(run, COST_REPLY)
+    check("cost rank prompt: names %s with a colon before the reply" % COST_RULE,
+          any(COST_RULE + ":" in s for s in sentences), run.prompt()[:300])
+    check("cost rank prompt: %s is one of the judged rules" % COST_RULE, COST_RULE in judged_rules(), judged_rules())
+    check("cost rank prompt: a sentence names a figure with its unit",
+          has_pin(sentences, FIGURE_WORDS, UNIT_WORDS), sentences)
+    check("cost rank prompt: a sentence names the date, run id or sample count of the figure",
+          has_pin(sentences, FIGURE_WORDS, FORM_WORDS), sentences)
+
+
+UNMEASURED_RANK_REPLY = ("Done: the likely biggest cost (unmeasured) is wakes. "
+                         "Next: cut the wake check first, then the janitor.")
+
+
+def case_unmeasured_cost_rank_is_judged_off_sample():
+    # The "(unmeasured)" marker does not hide the ranking: the trigger still fires, and the model judges the reply.
+    module = reference_module()
+    check("unmeasured cost rank: the reply holds the ranking verbatim",
+          "the likely biggest cost (unmeasured)" in UNMEASURED_RANK_REPLY, UNMEASURED_RANK_REPLY)
+    others = other_triggers(module, UNMEASURED_RANK_REPLY)
+    check("unmeasured cost rank: no other trigger matches the reply", not others, others)
+    run, _ = second_stop(UNMEASURED_RANK_REPLY, label="cost-unmeasured", session="cost-unmeasured")
+    check("unmeasured cost rank: Stop 2 calls the model once", len(run.calls) == 1, run.calls)
+
+
+def case_cost_rank_prompt_says_unmeasured_ranks_no_work():
+    run = run_hook(COST_REPLY, answer=OK_ANSWER)
+    sentences = rule_sentences(run, COST_REPLY)
+    check("unmeasured cost rank prompt: one sentence says an unmeasured ranking may stand",
+          has_pin(sentences, ("unmeasured",), ("may stand",)), sentences)
+    check("unmeasured cost rank prompt: one sentence flags a reply that ranks, orders or cuts work on it",
+          has_pin(sentences, ("unmeasured",), ("flag",), ("ranks",), ("orders",), ("cuts",), ("work",)), sentences)
+
+
+# A ranking with no measure, and no mark, is flagged only when the same reply ranks, orders or cuts work on it
+# (the session pick, 23:44 CST). One sentence of the prompt and one bullet of the output style each say it.
+NO_MEASURE_ONLY_WORK = (("no measure",), ("only",), ("ranks",), ("orders",), ("cuts",), ("work",))
+STYLE_COST_ANCHOR = "<!-- rule:style-measure-before-priority -->"
+
+
+def case_cost_rank_prompt_flags_no_measure_only_when_work_is_steered():
+    run = run_hook(COST_REPLY, answer=OK_ANSWER)
+    sentences = rule_sentences(run, COST_REPLY)
+    check("no measure cost rank prompt: the rule's own sentence is read (control)",
+          any(COST_RULE + ":" in s for s in sentences), run.prompt()[:300])
+    check("no measure cost rank prompt: one sentence flags a ranking with no measure only when the same reply "
+          "ranks, orders or cuts work on it",
+          has_pin(sentences, *NO_MEASURE_ONLY_WORK), sentences)
+
+
+def case_cost_rank_style_flags_no_measure_only_when_work_is_steered():
+    with open(STYLE_FILE, encoding="utf-8") as f:
+        bullet = rule_text_before(f.read(), STYLE_COST_ANCHOR).lower()
+    check("no measure cost rank style: the output style holds the measure-before-priority bullet (control)",
+          bullet.strip() != "", "the anchor %s is absent" % STYLE_COST_ANCHOR)
+    sentences = [s for s in bullet.split(".") if s.strip()]
+    check("no measure cost rank style: one sentence flags a ranking with no measure only when the same reply "
+          "ranks, orders or cuts work on it",
+          has_pin(sentences, *NO_MEASURE_ONLY_WORK), " ".join(bullet.split()))
+
+
+# A bold or a parenthesized question is a question, so its ranking words never fire the cost trigger. The plain
+# question is the control: it is already scoped out (it ends in a question mark) and must stay that way.
+PLAIN_QUESTION = "Which lane costs the most?"
+BOLD_QUESTION = "**Which lane costs the most?**"
+PAREN_QUESTION = "(Which lane costs the most?)"
+
+
+def case_bold_or_parenthesized_cost_question_is_not_judged_off_sample():
+    module = reference_module()
+    check("cost question control: the plain question is not a cost ranking",
+          not module.has_cost_rank(PLAIN_QUESTION), PLAIN_QUESTION)
+    for label, reply in (("bold", BOLD_QUESTION), ("parenthesized", PAREN_QUESTION)):
+        others = other_triggers(module, reply)
+        check("cost question, %s: no other trigger matches the reply" % label, not others, others)
+        check("cost question, %s: the ranking words in a question are not a cost ranking" % label,
+              not module.has_cost_rank(reply), reply)
+        run, _ = second_stop(reply, label="cost-q-" + label, session="cost-q-" + label)
+        check("cost question, %s: Stop 2 never calls the model" % label, not run.calls, run.calls)
 
 
 CASES = (
@@ -2242,7 +2451,7 @@ CASES = (
     case_prompt_never_flags_a_count_read_from_rest,
     case_prompt_names_the_fix_confirm_with_rest,
     case_prompt_never_flags_a_search_used_only_for_candidates,
-    case_prompt_says_nine_rules_with_the_counts_rule,
+    case_prompt_says_ten_rules_with_the_counts_rule,
     case_rest_count_stop_starts_no_process_and_writes_no_file,
     case_search_total_stop_starts_only_the_judge_call,
     case_searched_word_with_a_digit_is_judged_off_sample,
@@ -2264,6 +2473,17 @@ CASES = (
     case_prompt_flag_sentence_exempts_only_a_search_rest_confirms,
     case_claude_md_counts_rule_names_the_github_rest_api_and_not_a_search,
     case_glossary_check_passes_on_reply_judge,
+    case_cost_rank_reply_is_judged_off_sample,
+    case_cost_rank_phrase_table_is_judged_off_sample,
+    case_cost_rank_finding_is_a_note_logged_as_its_rule,
+    case_most_of_the_time_is_not_judged_off_sample,
+    case_cost_rank_phrase_past_the_clip_is_judged,
+    case_cost_rank_prompt_names_the_measure_forms,
+    case_unmeasured_cost_rank_is_judged_off_sample,
+    case_cost_rank_prompt_says_unmeasured_ranks_no_work,
+    case_cost_rank_prompt_flags_no_measure_only_when_work_is_steered,
+    case_cost_rank_style_flags_no_measure_only_when_work_is_steered,
+    case_bold_or_parenthesized_cost_question_is_not_judged_off_sample,
 )
 
 
