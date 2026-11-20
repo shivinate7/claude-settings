@@ -14736,18 +14736,20 @@ class RedMainBrake(Env):
         rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)}, heads={R: "unknown (HTTP 500: Internal Server Error)"})
         self.merged_onto_red(rc, out, "checks")
 
-    def cancelled_beside_failed_revert_read(self):
-        """The red base of a proven revert, with cancelled schedule run 905 on main's head beside the red, and the revert's check read failing.
-        Decision no-merge-onto-red-main, R4: a failed read is unknown. -> (runs, jobs, pulls, heads) as `go` takes them."""
+    def cancelled_beside_failed_revert_read(self, revert_check="unknown (HTTP 500: Internal Server Error)"):
+        """The red base of a proven revert, with cancelled schedule run 905 on main's head beside the red. The revert's check read is unknown by default
+        (decision no-merge-onto-red-main, R4: a failed read is unknown); a case that fails one git read gives "green". Sets `self.revert_shas` to the
+        breaking merge, the revert and main's head. -> (runs, jobs, pulls, heads) as `go` takes them."""
         B, A, R, M = self.land_proven_revert()
+        self.revert_shas = (B, R, M)
         sched = main_run(905, "cancelled", sha=M, event="schedule")
         runs, jobs = self.breaking_page(B, A, top=[(sched, [main_job("scope", "success"), main_job("checks", "cancelled", 2)]), self.merge_run_of(904, M, 2651)])
-        pulls, heads = {2651: self.revert_pull(2651, R)}, {R: "unknown (HTTP 500: Internal Server Error)"}
-        # scope first: the base is red with a cancelled run beside it, and the revert's own check read is the one that fails
+        pulls, heads = {2651: self.revert_pull(2651, R)}, {R: revert_check}
+        # scope first: the base is red with a cancelled run beside it, and the revert's own check read reads as the case says
         self.host = MainRunsHost(self.co, self.other, runs, jobs, pulls=pulls, heads=heads)
         self.red_detail()
         self.assertTrue(self.host.base_facts["others"], "the fixture has no cancelled run beside the red")
-        self.assertTrue(self.host.head_state(2651, sha=R).startswith("unknown"), "the fixture's revert check read does not fail")
+        self.assertEqual(self.host.head_state(2651, sha=R), revert_check, "the fixture's revert check read is not the one the case names")
         return runs, jobs, pulls, heads
 
     def test_a_failed_revert_check_read_beside_a_cancelled_run_refuses_the_red_main_merge(self):
@@ -14770,6 +14772,88 @@ class RedMainBrake(Env):
         lines = (getattr(self.host, "commit_message", None) or "").splitlines()
         self.assertIn(f"Reason flag: --base-red-ok: {reason}", lines,
                       "--base-red-ok lifted nothing: the failed revert check read was taken as a known red, so no lift reaches the merge commit")
+
+    # One git read of revert_proven fails beside a cancelled run. Each of the seven reads the proof makes has its case. A failed read is unknown, so each
+    # refuses and never merges (decision no-merge-onto-red-main, R4). The revert's checks read green here, so the failed read is the one unknown.
+    def revert_read_matches(self, which):
+        """-> the predicate on a git argv that picks revert_proven's read `which`. The shas are `self.revert_shas`. The holds read is R..M and the
+        read above it is M..M, because the landed commit is main's head in this fixture."""
+        _, R, M = self.revert_shas
+        matches = {
+            "base head": lambda a: a == ("rev-parse", "origin/main"),
+            "ancestor": lambda a: a[:2] == ("merge-base", "--is-ancestor"),
+            "commit walk": lambda a: a[:1] == ("log",) and "-z" in a,
+            "first-parent chain": lambda a: a[:2] == ("rev-list", "--first-parent"),
+            "holds": lambda a: a[:2] == ("rev-list", "--ancestry-path") and a[-1] == f"{R}..{M}",
+            "above": lambda a: a[:2] == ("rev-list", "--ancestry-path") and a[-1] == f"{M}..{M}",
+            "title": lambda a: a[:3] == ("log", "-1", "--format=%s"),
+        }
+        return matches[which]
+
+    def fail_revert_read(self, match, fired):
+        """Patch merge.git so each call that revert_proven makes and `match` picks returns (128, a fatal line) and nothing else. The call is matched by
+        its caller's frame, as the confirm seam is, so the merge's other reads run as they are. `fired` gets each argv the fault failed."""
+        real_git = merge.git
+
+        def git_with_one_failed_read(cwd, *a, **kw):
+            if sys._getframe(1).f_code.co_name == "revert_proven" and match(a):
+                fired.append(a)
+                return 128, "fatal: the read the case fails"
+            return real_git(cwd, *a, **kw)
+        return unittest.mock.patch.object(merge, "git", git_with_one_failed_read)
+
+    def assert_failed_revert_read_refuses(self, which):
+        """A failed read of revert_proven beside a cancelled run refuses the red-main merge as unknown, and never merges. Scope first: with no fault,
+        the revert is proven beside the cancelled run, so the failed read is the one thing that can make the base unknown."""
+        runs, jobs, pulls, heads = self.cancelled_beside_failed_revert_read(revert_check="green")
+        self.assertTrue(merge.revert_proven(self.co, self.host, "main", beside_ok=True),
+                        "with no fault the revert is not proven beside the cancelled run, so the case would pass without its read")
+        fired = []
+        with self.fail_revert_read(self.revert_read_matches(which), fired):
+            rc, out, before = self.go(runs, jobs, pulls=pulls, heads=heads)
+        self.assertTrue(fired, f"the fault for the {which} read never fired, so the case tests nothing")
+        self.assertEqual(rc, 1, f"the {which} read of the revert's proof failed beside a cancelled run, and the merge went onto the red main. "
+                                "A failed read is unknown and refuses (decision no-merge-onto-red-main, R4)\n" + out)
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 905", out, "the refusal does not name the cancelled run beside the red:\n" + out)
+
+    def test_a_failed_read_of_the_revert_proof_base_head_beside_a_cancelled_run_refuses_the_red_main_merge(self):
+        self.assert_failed_revert_read_refuses("base head")
+
+    def test_a_failed_read_of_the_revert_proof_ancestor_beside_a_cancelled_run_refuses_the_red_main_merge(self):
+        self.assert_failed_revert_read_refuses("ancestor")
+
+    def test_a_failed_read_of_the_revert_proof_commit_walk_beside_a_cancelled_run_refuses_the_red_main_merge(self):
+        self.assert_failed_revert_read_refuses("commit walk")
+
+    def test_a_failed_read_of_the_revert_proof_first_parent_chain_beside_a_cancelled_run_refuses_the_red_main_merge(self):
+        self.assert_failed_revert_read_refuses("first-parent chain")
+
+    def test_a_failed_read_of_the_revert_proof_holds_beside_a_cancelled_run_refuses_the_red_main_merge(self):
+        self.assert_failed_revert_read_refuses("holds")
+
+    def test_a_failed_read_of_the_revert_proof_above_beside_a_cancelled_run_refuses_the_red_main_merge(self):
+        self.assert_failed_revert_read_refuses("above")
+
+    def test_a_failed_read_of_the_revert_proof_title_beside_a_cancelled_run_refuses_the_red_main_merge(self):
+        self.assert_failed_revert_read_refuses("title")
+
+    def test_a_walk_past_the_cap_beside_a_cancelled_run_is_not_proven_and_merges_onto_the_red_main(self):
+        """A walk from the breaking merge up to main's head past REVERT_WALK_MAX is a true no: not proven, and not unknown. The cap is patched to 1,
+        so this fixture's walk (the revert and main's merge) passes it. Beside the cancelled run, a not-proven revert leaves the red a known red,
+        so the merge goes onto it with its red line, and no batch refuses it as unknown."""
+        runs, jobs, pulls, heads = self.cancelled_beside_failed_revert_read(revert_check="green")
+        B, _, M = self.revert_shas
+        # scope first: with the real cap the revert is proven beside the cancelled run, and the walk holds more commits than the patched cap
+        self.assertTrue(merge.revert_proven(self.co, self.host, "main", beside_ok=True),
+                        "with the real cap the revert is not proven beside the cancelled run, so the cap is not what this case tests")
+        self.assertGreater(int(sh(self.co, "git", "rev-list", "--count", f"{B}..{M}")), 1, "the walk from the breaking merge holds one commit, which a cap of 1 passes")
+        with unittest.mock.patch.object(merge, "REVERT_WALK_MAX", 1):
+            self.assertFalse(merge.revert_proven(self.co, self.host, "main", beside_ok=True),
+                             "a walk past the cap is not proven, but the proof read it as something else")
+            rc, out, before = self.go(runs, jobs, pulls=pulls, heads=heads)
+        self.merged_onto_red(rc, out)
+        self.assertNotIn("runs are UNKNOWN", out, "the merge refuses as unknown on a walk past the cap, where it is a known red:\n" + out)
 
     def test_a_revert_of_the_revert_merges_even_with_its_tree_proven(self):
         """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): a PR may merge onto a red main; a revert of a revert does not refuse it."""
