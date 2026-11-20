@@ -49,6 +49,18 @@ CD_FULL = {"memory_pct": 40.0, "disk_free_gb": 3.3, "disk_total_gb": 926.0}
 CD_BUSY = {"memory_pct": 40.0, "disk_free_gb": 7.0, "disk_total_gb": 100.0}
 CD_FINE = {"memory_pct": 40.0, "disk_free_gb": 500.0, "disk_total_gb": 926.0}
 CD_MEMORY_FULL = {"memory_pct": 96.0, "disk_free_gb": 500.0, "disk_total_gb": 926.0}
+# The Windows sweep roots, as bash passes them to the sweep. Inside double quotes bash keeps each backslash, so a
+# quoted drive path arrives whole. An unquoted backslash is stripped (D:\a\repo arrives as D:arepo), so it cannot work.
+# A forward slash survives both ways, quoted or not.
+CD_WIN_DQ_BS = r'"D:\a\repo"'
+CD_WIN_DQ_FWD = '"D:/a/repo"'
+CD_WIN_UQ_FWD = "D:/a/repo"
+CD_WIN_UQ_BS = r"D:\a\repo"
+
+
+def cd_sweep_root(root, confirm=False):
+    """The attended fast sweep on `root`, spelled as the disk cleanup names it, with --confirm when `confirm`."""
+    return "python3 ~/.claude/janitor/sweep.py --root %s --attended --fast%s" % (root, " --confirm" if confirm else "")
 
 
 def cd_owed(name):
@@ -60,15 +72,18 @@ def cd_owed(name):
     return folder, cfg, flag, why
 
 
-def cd_run(folder, cfg, spec, tool, tool_input, tag):
+def cd_run(folder, cfg, spec, tool, tool_input, tag, remote=False):
     """One call through the copy's guard, under LB_PROBE, with read_load answering spec["reading"]. The probe's temp
     folder sits in the config folder, and the remote-session id is stripped, so a lane-session read cannot change the
-    count. -> (run, side, why); run is None when the probe did not finish."""
+    count. remote=True runs it as a cloud session (CLAUDE_CODE_REMOTE=true). -> (run, side, why); run is None when
+    the probe did not finish."""
     side_file = os.path.join(cfg, "probe-%s.json" % tag)
     temp = os.path.join(cfg, "tmp")
     os.makedirs(temp, exist_ok=True)
     env = ca_env(cfg)
     env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+    if remote:
+        env["CLAUDE_CODE_REMOTE"] = "true"
     for name in ("TMPDIR", "TEMP", "TMP"):
         env[name] = temp
     body = {"tool_name": tool, "tool_input": tool_input, "cwd": NOGIT, "session_id": CA_SID}
@@ -88,10 +103,10 @@ def cd_run(folder, cfg, spec, tool, tool_input, tag):
     return run, side, ""
 
 
-def cd_brake(folder, cfg, reading):
+def cd_brake(folder, cfg, reading, remote=False):
     """What the load brake says of the audit spawn under `reading`: (reason, matched). The probe's hit mode judges the
     call and runs nothing, so no audit flag moves. -> (pair, why)."""
-    run, side, why = cd_run(folder, cfg, {"mode": "hit", "reading": reading}, "Agent", CA_AUDIT, "brake")
+    run, side, why = cd_run(folder, cfg, {"mode": "hit", "reading": reading}, "Agent", CA_AUDIT, "brake", remote)
     if why:
         return None, why
     hit = side.get("hit")
@@ -195,6 +210,24 @@ def cd_quiet_check():
     return True, "with no audit owed, a Bash call is allowed and reads no load"
 
 
+def cd_remedy_check():
+    """The cloud disk-full refusal names the sweep, and its --root is double-quoted, so a Windows shell passes a drive
+    root whole. Read through the load brake's own hit, as a cloud session at a full disk."""
+    folder = ca_copy("intact", drop_layout=False)
+    cfg = ca_config("disk-remedy-cfg", None)
+    hit, why = cd_brake(folder, cfg, CD_FULL, remote=True)
+    if why:
+        return False, why
+    reason, matched = hit
+    if "disk" not in matched:
+        return False, "as a cloud session at a full disk, the load brake did not refuse the Agent start for disk: %r" % (matched,)
+    if "sweep.py" not in reason:
+        return False, "the cloud disk-full refusal names no sweep command, so it shows no --root to quote"
+    if not re.search(r'--root "[^"\s]+"', reason):
+        return False, "the cloud disk-full refusal shows the sweep --root unquoted, which a Windows shell strips"
+    return True, "the cloud disk-full refusal shows the sweep with a double-quoted --root"
+
+
 # LOG_CHECKS_EXTRA joined at section 40805, so this section joins LOG_CHECKS directly, as section 43700 does.
 CD_CHECKS = (
     ("compaction-audit: an owed audit with a full disk lets the sweep preview through, as the disk cleanup",
@@ -257,6 +290,29 @@ CD_CHECKS = (
      lambda: cd_refused_check("disk-memory", CD_MEMORY_FULL, "memory", CD_SWEEP, "memory")),
     ("compaction-audit: with no audit owed, a Bash call under a full disk is allowed and reads no load",
      cd_quiet_check),
+    ("compaction-audit: an owed audit with a full disk lets the sweep preview through on a double-quoted backslash drive root",
+     lambda: cd_allowed_check("win-dq-bs-preview", CD_FULL, cd_sweep_root(CD_WIN_DQ_BS), "wdqbs")),
+    ("compaction-audit: an owed audit with a full disk lets the sweep --confirm through on a double-quoted backslash drive root",
+     lambda: cd_allowed_check("win-dq-bs-confirm", CD_FULL, cd_sweep_root(CD_WIN_DQ_BS, True), "wdqbsc")),
+    ("compaction-audit: an owed audit with a full disk lets the sweep preview through on a double-quoted forward-slash drive root",
+     lambda: cd_allowed_check("win-dq-fwd-preview", CD_FULL, cd_sweep_root(CD_WIN_DQ_FWD), "wdqfwd")),
+    ("compaction-audit: an owed audit with a full disk lets the sweep --confirm through on a double-quoted forward-slash drive root",
+     lambda: cd_allowed_check("win-dq-fwd-confirm", CD_FULL, cd_sweep_root(CD_WIN_DQ_FWD, True), "wdqfwdc")),
+    ("compaction-audit: an owed audit with a full disk lets the sweep preview through on an unquoted forward-slash drive root",
+     lambda: cd_allowed_check("win-uq-fwd-preview", CD_FULL, cd_sweep_root(CD_WIN_UQ_FWD), "wuqfwd")),
+    ("compaction-audit: an owed audit with a full disk lets the sweep --confirm through on an unquoted forward-slash drive root",
+     lambda: cd_allowed_check("win-uq-fwd-confirm", CD_FULL, cd_sweep_root(CD_WIN_UQ_FWD, True), "wuqfwdc")),
+    ("compaction-audit: an owed audit with a full disk refuses the sweep preview on an unquoted backslash drive root, which bash strips",
+     lambda: cd_refused_check("win-uq-bs-preview", CD_FULL, "disk", cd_sweep_root(CD_WIN_UQ_BS), "wuqbs")),
+    ("compaction-audit: an owed audit with a full disk refuses the sweep --confirm on an unquoted backslash drive root, which bash strips",
+     lambda: cd_refused_check("win-uq-bs-confirm", CD_FULL, "disk", cd_sweep_root(CD_WIN_UQ_BS, True), "wuqbsc")),
+    ("compaction-audit: an owed audit with a full disk refuses the sweep on a double-quoted backslash drive root with a $( ) inside",
+     lambda: cd_refused_check("win-dq-bs-subst", CD_FULL, "disk", cd_sweep_root(r'"D:\a\$(id)"'), "wdqsub")),
+    ("compaction-audit: an owed audit with a full disk refuses the sweep on a double-quoted backslash drive root chained with ;",
+     lambda: cd_refused_check("win-dq-bs-semi", CD_FULL, "disk",
+                              cd_sweep_root(CD_WIN_DQ_BS) + ";rm -rf /tmp/claude-disk-cleanup/run-2", "wdqsemi")),
+    ("compaction-audit: the cloud disk-full refusal shows the sweep with a double-quoted --root, so a Windows shell keeps its backslashes",
+     cd_remedy_check),
 )
 FIXTURELESS_CHECKS.update(check for _label, check in CD_CHECKS)   # each builds its own folders, no lazy fixture
 LOG_CHECKS = LOG_CHECKS + CD_CHECKS
