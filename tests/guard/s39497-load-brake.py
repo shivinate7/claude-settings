@@ -887,16 +887,61 @@ lb_add("bin/ci-job --lint, background, 3.1 GB free of 926 GB: full, refused, nam
        lb_decision_check("Bash", lb_reading(disk_free_gb=3.1, disk_total_gb=926.0), "deny",
                          (LB_LOAD_RULE, LB_LOAD_CITE, LB_SWEEP, LB_OVERRIDE_LINE, lb_gb(3.1, 926)),
                          tool_input=LB_CI_LINT_BG))
-lb_add("bin/ci-job --lint, background, normal reading: allowed",
-       lb_decision_check("Bash", LB_NORMAL, "allow", tool_input=LB_CI_LINT_BG, reads=None))
-lb_add("merge --lane-lint, background, normal reading: allowed",
-       lb_decision_check("Bash", LB_NORMAL, "allow", tool_input=LB_LANE_LINT_BG, reads=None))
+lb_add("bin/ci-job --lint, background, normal reading: allowed, the reader runs once",
+       lb_decision_check("Bash", LB_NORMAL, "allow", tool_input=LB_CI_LINT_BG, reads=1))
+lb_add("merge --lane-lint, background, normal reading: allowed, the reader runs once",
+       lb_decision_check("Bash", LB_NORMAL, "allow", tool_input=LB_LANE_LINT_BG, reads=1))
 lb_add("a Bash call that is no lint start, 97.2% memory and 3.1 GB free of 926 GB: allowed, and the reader does not run",
        lb_decision_check("Bash", lb_reading(memory_pct=97.2, disk_free_gb=3.1, disk_total_gb=926.0), "allow",
                          tool_input={"command": "echo hi"}, reads=0))
 lb_add("a Bash call that quotes bin/ci-job --lint in an echo, at a full disk: allowed, and the reader does not run",
        lb_decision_check("Bash", lb_reading(disk_free_gb=3.1, disk_total_gb=926.0), "allow",
                          tool_input={"command": 'echo "bin/ci-job --lint"'}, reads=0))
+
+# A LINT START THAT NO run_in_background FLAG MARKS. A trailing `&` in a foreground call starts the lint in the background
+# all the same, and a lint wrapped in `bash -c`, `sh -c` or a subshell is still a lint start. The brake judges each at a
+# full disk, as it judges a plain background lint start, with one read. A `#` or an apostrophe inside quotes keeps its
+# own meaning, so the lint after it is still judged. A lint named only in a trailing comment is no start.
+LB_DISK_FULL = lb_reading(disk_free_gb=3.1, disk_total_gb=926.0)
+LB_LINT_FULL_NAMES = (LB_LOAD_RULE, LB_LOAD_CITE, LB_SWEEP, LB_OVERRIDE_LINE, lb_gb(3.1, 926))
+
+
+def lb_full_scope(reading, inner):
+    """An allow at a full disk means something only when the reading the case forces is full. Its free space must sit
+    under the full point, checked first, so a case whose reading drifts to a normal disk fails on its scope, not on the
+    allow."""
+    def check():
+        free, total = reading["disk_free_gb"], reading["disk_total_gb"]
+        point = lb_full_point(total)
+        if not free < point:
+            return False, "scope: %.2f GB free of %.0f GB is not under the full point %.2f GB" % (free, total, point)
+        return inner()
+    return check
+
+
+lb_add("foreground, bin/ci-job --lint & echo $!, full disk: refused, names the disk, the sweep and the override line",
+       lb_decision_check("Bash", LB_DISK_FULL, "deny", LB_LINT_FULL_NAMES,
+                         tool_input={"command": "bin/ci-job --lint & echo $!"}))
+lb_add('bash -c "bin/ci-job --lint", background, full disk: refused, names the disk, the sweep and the override line',
+       lb_decision_check("Bash", LB_DISK_FULL, "deny", LB_LINT_FULL_NAMES,
+                         tool_input={"command": 'bash -c "bin/ci-job --lint"', "run_in_background": True}))
+lb_add("sh -c 'merge --lane-lint 9', background, full disk: refused, names the disk, the sweep and the override line",
+       lb_decision_check("Bash", LB_DISK_FULL, "deny", LB_LINT_FULL_NAMES,
+                         tool_input={"command": "sh -c 'merge --lane-lint 9'", "run_in_background": True,
+                                     "timeout": 7200000}))   # above the lint bound, so check-timeout passes the call
+lb_add("(cd W && bin/ci-job --lint), background, full disk: refused, names the disk, the sweep and the override line",
+       lb_decision_check("Bash", LB_DISK_FULL, "deny", LB_LINT_FULL_NAMES,
+                         tool_input={"command": "(cd W && bin/ci-job --lint)", "run_in_background": True}))
+lb_add('echo "#"; bin/ci-job --lint, background, full disk: refused, names the disk (a hash in quotes is no comment)',
+       lb_decision_check("Bash", LB_DISK_FULL, "deny", LB_LINT_FULL_NAMES,
+                         tool_input={"command": 'echo "#"; bin/ci-job --lint', "run_in_background": True}))
+lb_add("echo \"it's\"; bin/ci-job --lint, background, full disk: refused, names the disk (a lone quote in text is no string)",
+       lb_decision_check("Bash", LB_DISK_FULL, "deny", LB_LINT_FULL_NAMES,
+                         tool_input={"command": "echo \"it's\"; bin/ci-job --lint", "run_in_background": True}))
+lb_add("echo hi # bin/ci-job --lint, background, full disk: allowed, and the reader does not run",
+       lb_full_scope(LB_DISK_FULL, lb_decision_check("Bash", LB_DISK_FULL, "allow",
+                                                     tool_input={"command": "echo hi # bin/ci-job --lint",
+                                                                 "run_in_background": True}, reads=0)))
 
 # LINUX MEMORY (owner, 2026-11-19 21:30 CST, "read memory on linux if u can"; decision machine-load-brake). On Linux the
 # reader reads memory from /proc/meminfo, so memory over 95% refuses a background Agent start and a background lint start
@@ -916,12 +961,19 @@ lb_add("linux, local, bin/ci-job --lint background, memory 96%: full, refused, n
                          fake=lb_fake("linux", memory=96.0)))
 lb_add("linux, local, Agent run_in_background true, memory 50%: allowed",
        lb_decision_check("Agent", None, "allow", background=True, fake=lb_fake("linux", memory=50.0)))
-lb_add("linux, local, merge --lane-lint background, memory 50%: allowed",
+lb_add("linux, local, merge --lane-lint background, memory 50%: allowed, the reader runs once",
        lb_decision_check("Bash", None, "allow", tool_input=LB_LANE_LINT_BG, fake=lb_fake("linux", memory=50.0),
-                         reads=None))
-lb_add("linux, local, bin/ci-job --lint background, memory 50%: allowed",
+                         reads=1))
+lb_add("linux, local, bin/ci-job --lint background, memory 50%: allowed, the reader runs once",
        lb_decision_check("Bash", None, "allow", tool_input=LB_CI_LINT_BG, fake=lb_fake("linux", memory=50.0),
-                         reads=None))
+                         reads=1))
+# Between busy and full: a lint start is judged on full only, so memory over 85% and up to 95% passes it.
+lb_add("linux, local, bin/ci-job --lint background, memory 90%: allowed, the reader runs once",
+       lb_decision_check("Bash", None, "allow", tool_input=LB_CI_LINT_BG, fake=lb_fake("linux", memory=90.0),
+                         reads=1))
+lb_add("foreground, bin/ci-job --lint & echo $!, linux, local, memory 96%: refused, names the memory and the override line",
+       lb_decision_check("Bash", None, "deny", LB_MEM_LINUX_NAMES, tool_input={"command": "bin/ci-job --lint & echo $!"},
+                         fake=lb_fake("linux", memory=96.0)))
 lb_add("linux, local, Agent run_in_background true, meminfo unreadable at 96%: unread, allowed",
        lb_decision_check("Agent", None, "allow", background=True,
                          fake=lb_fake("linux", memory=96.0, meminfo="unreadable")))
@@ -937,9 +989,9 @@ lb_add("linux, cloud, merge --lane-lint background, memory 96%: full, refused, n
 lb_add("linux, cloud, bin/ci-job --lint background, memory 96%: full, refused, names the memory",
        lb_decision_check("Bash", None, "deny", LB_MEM_LINUX_NAMES, tool_input=LB_CI_LINT_BG, remote="true",
                          fake=lb_fake("linux", memory=96.0)))
-lb_add("linux, cloud, Agent run_in_background true, memory 50%: allowed, and the reader does not run",
+lb_add("linux, cloud, Agent run_in_background true, memory 50%: allowed, and the reader runs once (the disk read)",
        lb_decision_check("Agent", None, "allow", background=True, remote="true",
-                         fake=lb_fake("linux", memory=50.0), reads=None))
+                         fake=lb_fake("linux", memory=50.0), reads=1))
 
 # CLOUD. With CLAUDE_CODE_REMOTE=true, a new Agent, Task or Workflow start is refused at a full disk (free space under
 # the full point, which each case reads from guard.py rather than copying) or at memory over 95% (owner, 2026-11-19
@@ -1021,9 +1073,11 @@ lb_add("cloud: an agent's Agent call, memory 97.2%: refused, names the memory (o
        "22:25 CST)",
        lb_decision_check("Agent", lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL, agent=LB_AGENT, reads=None,
                          remote=LB_CLOUD))
-# No cloud host is darwin (decision machine-load-brake: a cloud session runs Linux). This fake pins the brake on memory
-# alone: the real reader reads 97.2% here, and a cloud start at memory over 95% is refused on any host.
-lb_add("cloud: Agent, darwin host at memory 97.2%, run_in_background false, the real reader: refused, names the memory "
+# A cloud reader takes the /proc/meminfo path on any reported platform (guard.py's _read_memory tests is_cloud() before
+# the darwin arm), so this host reads meminfo, not the darwin counter. The fake serves both sources the same 97.2%, so
+# this case does not show which source was read. It pins that a cloud start at memory over 95% is refused.
+lb_add("cloud: Agent, a host that reports darwin reads /proc/meminfo, memory 97.2%, run_in_background false: refused, "
+       "names the memory "
        "(owner, 2026-11-19 21:30 CST, confirmed 22:25 CST)",
        lb_decision_check("Agent", None, "deny", LB_MEM_FULL, background=False, fake=lb_fake("darwin", memory=97.2),
                          reads=None, remote=LB_CLOUD))
@@ -1154,6 +1208,15 @@ def lb_hit_check(which, tool, reading, tool_input, remote=None, deny=None, reads
     return check
 
 
+# A foreground trailing `&` starts a lint the same way. The brake's own call (load_hit) refuses it at a full disk, so
+# the case does not depend on another rule that also refuses a detached merge.
+lb_add("foreground, merge --lane-lint 9 &, full disk: the brake's own call refuses, names the disk and the sweep, the "
+       "reader runs once",
+       lb_hit_check("load_hit", "Bash", LB_DISK_FULL, {"command": "merge --lane-lint 9 &"},
+                    deny=(lb_gb(3.1, 926), LB_SWEEP), reads=1))
+lb_add("foreground, merge --lane-lint 9 &, memory 96%: the brake's own call refuses, names the memory, the reader runs once",
+       lb_hit_check("load_hit", "Bash", lb_reading(memory_pct=96.0), {"command": "merge --lane-lint 9 &"},
+                    deny=LB_MEM96, reads=1))
 # Cloud: a start call reads the disk and memory once, and its pair is empty only at a disk that is not full and memory
 # not over 95% (owner, 2026-11-19 21:30 CST, confirmed 22:25 CST). A running agent's call reads nothing.
 lb_add("CLAUDE_CODE_REMOTE=true, Agent run_in_background true, memory 97.2%: load_hit refuses, names the memory, "
