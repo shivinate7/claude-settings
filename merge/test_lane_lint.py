@@ -1519,6 +1519,27 @@ class LaneLint(LaneFixture):
                          "the FAIL shows a stdout line after a readable report, where the report already names the cause: " + text)
         self.assert_one_mutation_test_run(head)
 
+    def test_mutation_test_run_that_times_out_after_printing_shows_the_stdout_tail_in_the_fail(self):  # TimeoutExpired carries the stdout read so far
+        """Why: a run that prints its cause and then hits its cap keeps that cause in the TimeoutExpired it raises (.output, bytes on POSIX).
+        The FAIL must show the line, not say the run printed no stdout."""
+        marker = "ERROR early cause: guard-case-7 stopped before its report"
+        body, script = real_mutate_job()
+        self.use_ci_job(PASSING, 0)
+        self.push_lane({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0)), WORKFLOW_REL: workflow_of(body)})
+        real_sh = merge.sh
+
+        def sh_timing_out_after_printing(args, *rest, **kwargs):
+            if mutation_test_run(args):
+                raise subprocess.TimeoutExpired(args, kwargs.get("timeout"), output=(marker + "\n").encode())
+            return real_sh(args, *rest, **kwargs)
+
+        with unittest.mock.patch.object(merge, "sh", sh_timing_out_after_printing):
+            rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "the lint did not FAIL a mutation test run that timed out after printing: " + text)
+        self.assertTrue(stdout_tail_shown(text, marker),
+                        "the FAIL does not show the line the run printed before its timeout, so its cause is not read: " + text)
+        self.assertNotIn("printed no stdout", text, "the FAIL says the run printed no stdout, though it printed a line before its timeout: " + text)
+
     def test_mutation_test_touched_mjs_file_starts_the_run(self):
         body, script = real_mutate_job()
         self.use_ci_job(PASSING, 0)
