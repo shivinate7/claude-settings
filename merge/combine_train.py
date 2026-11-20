@@ -11,8 +11,8 @@ Its writes are git objects (`git merge-tree`, `git commit-tree`) in the checkout
 
 --build (roadmap step combine-train-build; ruling 10:23 CST Nov 20: a backlog of 10 or more ready drafts combines, and the front PR stays alone):
   with --queue, the queued batches' members are the ready backlog. With no --queue, the members are merge.reviewed_read's rows whose act is `batch`, in
-  number order, each at the head its row reads; the lowest-numbered `batch` row is the front PR (session reading, 11:41 CST Nov 20), which merges alone and
-  is never a member, and a row of any other act stays out. Under BUILD_THRESHOLD members the run prints `merge alone`, builds nothing and exits 3. At the threshold
+  number order, each at the head its row reads. A row whose pull's base ref is not main drops first (the base filter); the lowest-numbered `batch` row left is
+  the front PR (session reading, 11:41 CST Nov 20), which merges alone and is never a member. A row of any other act stays out. Under BUILD_THRESHOLD members the run prints `merge alone`, builds nothing and exits 3. At the threshold
   or over, it builds the local branch merge.integration_branch(NAME) from the newest origin/main (one fetch): one no-ff merge commit per kept member,
   in queue order, so the first-parent chain is the build order and each second parent is a member head. A member's live head is read at
   refs/pull/N/head on origin (one `git ls-remote`); one that is not the queued head leaves by name. A member that clashes with the batch so far leaves by
@@ -39,9 +39,9 @@ is not built as a rule. The header line names the readings:
 
 The clash rate is the members a pair clash left out, over the pairs tried (a group merge and each retry of its members are each a pair).
 A number the tool did not measure prints `unknown` or `n/a (reason)`, never 0 and never a guess.
-Exit: 0 ok, 1 a member left out or a check failed, 2 something unknown or a run that could not start (a git that is not on PATH included).
+Exit: 0 ok, 1 a member left out or a check failed, 2 something unknown or a run that could not start (a git that is not on PATH included), 3 --build merges alone (under the backlog).
 Cost: per fold, one `git merge-tree` start per member (against main) and per pair tried and one `git commit-tree` start per merge; per round, one ci-job run per job of the checks when they have a home;
-with --lint, one more ci-job run per batch. One temporary worktree per batch. Nothing is logged or left running.
+with --lint, one more ci-job run per batch. --build adds two fetches (origin/main, then refs/pull/N/head of the members), one `git ls-remote`, and the gh reads of merge.reviewed_read when it has no --queue. One temporary worktree per batch. Nothing is logged or left running.
 """
 import argparse
 import json
@@ -367,6 +367,9 @@ def main(argv, clock=None):
     if not args.queue and not args.build:
         print("unknown: no queue given; give --queue FILE")
         return 2
+    if args.build and args.lint:
+        print("unknown: --build runs no lint; drop --lint")
+        return 2
     if args.build and not (args.name and BATCH_NAME.fullmatch(args.name)):
         print("unknown: --build needs --name NAME, 1 to 32 characters of a-z, 0-9 and -")
         return 2
@@ -416,8 +419,7 @@ def run(args, heads, batches, clock):
 
 
 def fetch_heads(root, members, heads):
-    """One `git fetch` of refs/pull/N/head for every member. -> {member: why} for each member whose head is not in `root` afterwards (all of them on a failed fetch).
-    Taken from origin/lane/combine-train-rest, which has not merged: that branch drops it when it rebases on this one."""
+    """One `git fetch` of refs/pull/N/head for every member. -> {member: why} for each member whose head is not in `root` afterwards (all of them on a failed fetch)."""
     if not members:
         return {}
     code, out, err = git(root, "fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "origin", *[f"refs/pull/{m}/head" for m in members])
@@ -475,7 +477,7 @@ def batch_rows(root):
 def build(args, heads, members):
     """--build: see the module docstring. -> the exit code: 0 built with nothing left out; 1 a member left out; 2 unknown; 3 merge alone (under the backlog)."""
     if len(members) < BUILD_THRESHOLD:
-        print(f"merge alone: {len(members)} ready members, under the backlog of {BUILD_THRESHOLD}; no batch branch built")
+        print(f"merge alone: {len(members)} ready members, under the backlog of {BUILD_THRESHOLD}; no integration branch built")
         return 3
     gone = [m for m in members if m not in heads]
     if gone:
@@ -520,7 +522,7 @@ def build(args, heads, members):
             left.append((m, f"unknown (git commit-tree failed: {err or out})"))
             unknown = True
         elif state == "conflict":
-            against = "main" if merge.merge_tree(args.root, base, heads[m])[0] == "conflict" else f"the batch so far ({tag(built)})"
+            against = BASE.split("/", 1)[1] if merge.merge_tree(args.root, base, heads[m])[0] == "conflict" else f"the batch so far ({tag(built)})"
             left.append((m, f"{', '.join(files) or '(no file name read)'} (clash with {against})"))
         else:
             left.append((m, f"unknown ({' '.join(files)})"))
