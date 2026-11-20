@@ -56,7 +56,7 @@ import merge  # noqa: E402  merge.CI_JOB is the one home of a ci-job run; these 
 TOOL = os.path.join(HERE, "combine_train.py")
 MERGE_PY = os.path.join(HERE, "merge.py")
 READY = ["STE lint", "split guard", "cost pins", "scaffold", "debt retire", "open-PR clash"]
-GIT_WRAPPERS = {"merge_tree", "conflicting_files", "ci_job_run", "ready_job_groups"}  # the merge.py names the tool may reach; ready_job_groups splits the ready checks by job, no run
+GIT_WRAPPERS = {"merge_tree", "conflicting_files", "ci_job_run", "ready_job_groups", "integration_branch", "freeze_lines"}  # the merge.py names the tool may reach; ready_job_groups splits the ready checks by job, no run; integration_branch and freeze_lines are the one home of the batch branch name and the freeze body (coordinator pick, rule building-one-home-per-capability)
 NO_HOME = "unknown (fast-checks-before-ready not landed)"
 SIX = ["members in", "members left out", "clash rate", "dry-round minutes", "lint minutes", "CI minutes"]
 PASS_WORD = re.compile(r"(?<!not a )(?<!not )(?<!no )\b(?:pass(?:es|ed)?|ok)\b", re.I)  # a claim of pass ("pass", "passed", "ok"), not "not a pass" or "not ok"
@@ -274,6 +274,7 @@ BUILD_ARGS = ["--build", "--name", BUILD_NAME]
 BUILD_BATCH = "Q"  # the queued batch the build folds
 TWELVE = list(range(101, 113))  # full size: 12 members; the last one (112) is the member the moved-head and clash cases change
 NINE = list(range(101, 110))  # under the threshold of 10 (ruling 10:23 CST Nov 20)
+TEN = list(range(101, 111))  # at the threshold: a backlog of 10 ready drafts combines (ruling 10:23 CST Nov 20)
 LEFT_OUT = re.compile(r"^\s*left out #(\d+)\b")
 
 
@@ -885,6 +886,23 @@ class BuildMergeAloneUnderTen(unittest.TestCase):
         rc, out, err, _ci = run_build(root, queue)
         self.assertTrue(any("merge alone" in line for line in out.splitlines()), "an empty queue prints no 'merge alone' line; the run ended with: %s" % shown(out, err))
         self.assertFalse(branch_exists(root, merge.integration_branch(BUILD_NAME)), "an empty queue made a batch branch")
+
+
+class BuildBoundaryAtTen(unittest.TestCase):
+    """Ten ready members are the backlog the threshold names, so they build; nine print merge alone (BuildMergeAloneUnderTen) (ruling 10:23 CST Nov 20)."""
+
+    def test_ten_members_build_a_chain_of_ten_no_ff_merges(self):
+        root = make_repo({"README.md": "x\n"}, checks=READY)
+        heads = add_members(root, TEN)
+        queue = build_queue(root, heads)
+        base = git_ok(root, "rev-parse", "origin/main").strip()
+        rc, out, err, _ci = run_build(root, queue)
+        branch = merge.integration_branch(BUILD_NAME)
+        chain = first_parent_chain(root, branch, base)
+        self.assertIsNotNone(chain, "ten members left no %s branch in the root; the run ended with: %s" % (branch, shown(out, err)))
+        self.assertEqual(len(chain), 10, "%s holds %d commits above origin/main, not 10 merges; the run ended with: %s" % (branch, len(chain), shown(out, err)))
+        self.assertEqual([p2 for _s, _p1, p2 in chain], [h for _n, h in heads], "the second parents are not the 10 member heads in queue order")
+        self.assertFalse(any("merge alone" in line for line in out.splitlines()), "ten members at the threshold print 'merge alone'")
 
 
 class BuildLeavesMovedHeadByName(unittest.TestCase):
