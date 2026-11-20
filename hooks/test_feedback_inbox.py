@@ -2027,6 +2027,91 @@ def case_page_claude_artifacts_read_artifact_does_not_prove_the_filing():
                    "fb-0958-7", "98")
 
 
+def case_export_scan_does_not_count_a_claude_artifacts_db_write_with_no_collection():
+    """The export scan counts no claude-artifacts db_write that names no collection. The ArtifactData schema requires
+    `collection` for every action but batch, so the tool refuses such a write, and the fallback that counts an unnamed
+    batch must not take it. Two shapes are checked: a write with a doc_id and data, and a write whose writes name only
+    answers. The controls are a db_write naming items, which counts once, and an ArtifactData set with no collection,
+    which the export scan already leaves out."""
+    data = {"n": 98}
+    found = export_writes([used_rec(CLAUDE_ARTIFACTS + "db_write", tool_input(
+        None, collection="items", doc_id="disk-cleanup", data=data))])
+    check("export scan: control, a claude-artifacts db_write naming items is one export write to the page",
+          len(found) == 1 and found[0][2] == PAGE_URL, found)
+    control = export_writes([used_rec("ArtifactData", tool_input(
+        "set", collection=None, doc_id="disk-cleanup", data=data))])
+    check("export scan: control, an ArtifactData set with no collection is no export write", control == [], control)
+    no_collection = export_writes([used_rec(CLAUDE_ARTIFACTS + "db_write", tool_input(
+        None, collection=None, doc_id="disk-cleanup", data=data))])
+    check("export scan: a claude-artifacts db_write with no collection is no export write", no_collection == [],
+          no_collection)
+    names_answers = export_writes([used_rec(CLAUDE_ARTIFACTS + "db_write", tool_input(
+        None, collection=None, doc_id=None,
+        writes=[{"op": "set", "collection": "answers", "doc_id": "a-7k2", "data": data}]))])
+    check("export scan: a claude-artifacts db_write whose writes name only answers is no export write",
+          names_answers == [], names_answers)
+
+
+def case_export_scan_counts_an_artifactdata_str_replace_of_items():
+    """The export scan counts an ArtifactData str_replace of an items document as one export write to the page. The
+    schema lists str_replace as the action that changes a string field in place, and the guard's write verbs (set,
+    update, batch) leave it out. The ArtifactData update of the same document is the control."""
+    control = export_writes([used_rec("ArtifactData", tool_input(
+        "update", collection="items", doc_id="disk-cleanup", data={"n": 98}))])
+    check("export scan: control, an ArtifactData update of items is one export write to the page",
+          len(control) == 1 and control[0][2] == PAGE_URL, control)
+    found = export_writes([used_rec("ArtifactData", tool_input(
+        "str_replace", collection="items", doc_id="disk-cleanup", field="html", old_str="Ruling", new_str="Answer"))])
+    check("export scan: an ArtifactData str_replace of items is one export write to the page",
+          len(found) == 1 and found[0][2] == PAGE_URL, found)
+
+
+def case_artifactdata_get_list_and_query_of_items_are_reads():
+    """An ArtifactData get, list or query of the items collection is a read: the export scan counts no write, and the
+    page send check takes no read for the send. This is a control. The old code already reads these verbs, so it passes
+    there, and it must stay green once the write verbs grow."""
+    reads = (
+        ("get", tool_input("get", collection="items", doc_id="disk-cleanup")),
+        ("list", tool_input("list", collection="items", doc_id=None)),
+        ("query", tool_input("query", collection="items", doc_id=None, query={"where": [["n", "==", 98]]})),
+    )
+    for verb, inp in reads:
+        found = export_writes([used_rec("ArtifactData", inp)])
+        check("export scan: an ArtifactData %s of items is no export write" % verb, found == [], found)
+        p = page_run(new_cfg(), "page-ad-read-%s" % verb, [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL), used_rec("ArtifactData", inp, tool_id="r1"), result_rec("r1", "ok")])
+        expect_send_missing("page send: an ArtifactData %s of items with n 98 does not prove 98" % verb,
+                            p, "fb-0958-7", "98")
+
+
+def case_page_write_without_a_url_is_no_send_proof():
+    """A write that names no url does not prove the send of item 98. The ArtifactData schema describes `url` as
+    required, so the tool refuses such a call and no page takes the write. The control is the same ArtifactData update
+    with its url, which proves the send. The copy holds item 98, so the filing passes and only the send check can block.
+    The claude-artifacts db_write case applies the same url rule the export scan already applies to db_write; the
+    claude-artifacts input shape is not verified against a schema. The export scan's own url rule is the control."""
+    filed = record_repo("filed", copy_files(FILED))
+    with_url = tool_input("update", collection="items", doc_id="disk-cleanup", data={"n": 98})
+    p = page_run(new_cfg(), "page-url-control", [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL), used_rec("ArtifactData", with_url, tool_id="u1"), result_rec("u1", "ok")],
+                 cwd=filed)
+    expect_silent("page send: control, an ArtifactData update of items with its url and n 98 proves the send", p)
+    no_url = tool_input("update", collection="items", doc_id="disk-cleanup", data={"n": 98}, url=None)
+    p = page_run(new_cfg(), "page-url-none", [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL), used_rec("ArtifactData", no_url, tool_id="u2"), result_rec("u2", "ok")],
+                 cwd=filed)
+    expect_send_missing("page send: an ArtifactData update of items with no url does not prove 98", p,
+                        "fb-0958-7", "98")
+    ca_no_url = tool_input(None, collection="items", doc_id="disk-cleanup", data={"n": 98}, url=None)
+    p = page_run(new_cfg(), "page-url-ca", [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL), used_rec(CLAUDE_ARTIFACTS + "db_write", ca_no_url, tool_id="w2"),
+                  result_rec("w2", "ok")], cwd=filed)
+    expect_send_missing("page send: a claude-artifacts db_write of items with no url does not prove 98", p,
+                        "fb-0958-7", "98")
+    found = export_writes([used_rec("ArtifactData", no_url)])
+    check("export scan: control, an ArtifactData update of items with no url is no export write", found == [], found)
+
+
 # --------------------------------------------------------------------------- repo cases
 
 def case_repo_send_naming_the_repo_passes():
@@ -5088,6 +5173,10 @@ CASES = (
     case_page_claude_artifacts_db_write_with_action_get_proves_the_send,
     case_claude_artifacts_read_artifact_and_db_delete_do_not_prove_the_send,
     case_page_claude_artifacts_read_artifact_does_not_prove_the_filing,
+    case_export_scan_does_not_count_a_claude_artifacts_db_write_with_no_collection,
+    case_export_scan_counts_an_artifactdata_str_replace_of_items,
+    case_artifactdata_get_list_and_query_of_items_are_reads,
+    case_page_write_without_a_url_is_no_send_proof,
     case_repo_send_naming_the_repo_passes,
     case_repo_send_with_error_result_does_not_count,
     case_repo_slug_match_ignores_case,
