@@ -3,8 +3,9 @@
 
 Red cases: a multi-line step whose last line fails, a missing tool (named, behind xargs, or exit 127),
 a `uses:` step, an `if:` or env expression the runner cannot read, and a pull-request step with no base.
-None of them may read PASS. A step whose verdict line never prints (verdict killed, cut or silent) reads unknown,
-never FAIL and never PASS. The GithubBaseRef class: the GITHUB_BASE_REF each step gets from --base, unset with none.
+None of them may read PASS. A step whose verdict line never prints (verdict killed, cut or silent) never reads PASS: with no
+failure signal in its output it reads unknown; with one (a tool that could not start, a failed install, a failed line before
+a suite) it keeps that state and its note. The GithubBaseRef class: the GITHUB_BASE_REF each step gets from --base, unset with none.
 The last class plans the real checks job: every step gets one line.
 The last two classes: the code-check step from a copied install, and a step quiet past the stall limit.
 PinnedHarness: --pinned runs a remote claude-settings harness from the tree at its pinned sha, never the local copy.
@@ -157,6 +158,15 @@ class Job(unittest.TestCase):
     def stub_ran(self):
         """True when the stub verdict ran in this job's folder, so a verdict case tests the stub and not a real verdict."""
         return os.path.exists(os.path.join(self.root, "stub-verdict-ran.txt"))
+
+    @staticmethod
+    def killed_verdict(*log_lines):
+        """A verdict stub body that appends each line to $VERDICT_LOG, the file ci-job reads for a failure signal, then dies
+        by SIGKILL with no verdict line. With no lines it is the silent kill."""
+        writes = "".join("    log.write(%r)\n" % (ln + "\n") for ln in log_lines) or "    pass\n"
+        return ("import os, signal\n"
+                "with open(os.environ['VERDICT_LOG'], 'a', encoding='utf-8') as log:\n" + writes +
+                "os.kill(os.getpid(), signal.SIGKILL)\n")
 
     def npm_calls(self):
         """What the npm stub recorded, or a note that it recorded nothing."""
@@ -1059,6 +1069,18 @@ class InstallSteps(Job):
         self.assertFalse(os.path.exists(os.path.join(self.root, "lint-ran.txt")),
                          "a lint step ran after its install failed\n" + out)
 
+    @unittest.skipUnless(os.name == "posix", "the verdict stub is killed by signal: POSIX only")
+    def test_a_verdict_killed_after_a_failed_install_reads_unknown_with_the_install_note(self):
+        rc, lines, out = self.run_job(step("Install deps", "npm ci"), step("Lint check", self.LINT), args=("--lint",),
+                                      env=self.stub_path(npm=self.NPM_OK),
+                                      launch=self.verdict_stub(self.killed_verdict("npm ERR! code ELIFECYCLE")))
+        self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
+        self.assertEqual(by_step(lines), {"Install deps": "unknown", "Lint check": "unknown"},
+                         "a verdict killed after an install error reads something other than unknown: " + out)
+        self.assertIn("install failed, so each lint step after it is unknown", lines[0],
+                      "a killed install verdict drops the 'install failed' note: " + out)
+        self.assertEqual(rc, 2, "a failed install with a killed verdict did not exit 2, the unknown code: " + out)
+
     def test_a_framework_type_generation_is_selected_under_lint_plan(self):
         code, lines, out = plan_lint(self.root, workflow(step("Astro types", "npx astro sync"),
                                                          step("Lint check", self.LINT)))
@@ -1575,6 +1597,20 @@ class SuiteSteps(Job):
                          "a failed preamble of a picked suite must not block the lint step after it: --lint read that "
                          "lint step as something other than FAIL\n" + out)
         self.assertEqual(rc, 1, out)
+
+    @unittest.skipUnless(os.name == "posix", "the verdict stub is killed by signal: POSIX only")
+    def test_a_verdict_killed_behind_a_failed_preamble_reads_unknown_with_the_preamble_note(self):
+        self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",))},
+                       {"hooks/bridge.py": "V = 2\n"})
+        self.assertEqual(self.diff(), ["hooks/bridge.py"], "the scope: the diff holds only the file the suite opens")
+        rc, lines, out = self.run_job(step("Wiring suite", "false\npython3 hooks/test_wiring.py"), args=self.LINT,
+                                      launch=self.verdict_stub(self.killed_verdict()))
+        self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
+        self.assertEqual(by_step(lines), {"Wiring suite": "unknown"},
+                         "a verdict killed behind a failed preamble reads something other than unknown: " + out)
+        self.assertIn("a line before the suite failed, so the suite did not run", lines[0],
+                      "a killed verdict behind a failed preamble drops its note: " + out)
+        self.assertEqual(rc, 2, "a failed preamble with a killed verdict did not exit 2, the unknown code: " + out)
 
     def test_a_picked_suite_whose_preamble_passes_does_not_stop_the_lint_step_after_it_from_failing(self):
         # the control for the case above: `true` before the suite, so the lint step after it runs and reads its own FAIL
@@ -2102,6 +2138,48 @@ class LintTools(Job):
     def test_the_code_check_with_no_base_is_skipped(self):
         rc, lines, out = self.run_job(self.CODE)
         self.assertEqual(self.verdicts(lines), ["skipped"], out)
+
+    # code_check.py's line for a tool that did not start, and a failure that needs no tool
+    TOOL_MISS = "::error title=code-check::ruby could not start: [Errno 2] No such file or directory"
+    REAL_ERROR = "::error title=code-check::a.py: F541 f-string without placeholders"
+
+    def killed_code_check(self, *log_lines):
+        """Runs the code-check step under --lint with a verdict stub that writes log_lines and dies with no verdict line."""
+        self.lane({"a.py": 'print("fine")\n'})
+        rc, lines, out = self.run_job(self.CODE, args=("--lint", "--base", "origin/main"),
+                                      launch=self.verdict_stub(self.killed_verdict(*log_lines)))
+        self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
+        with open(self.log, encoding="utf-8") as f:
+            text = f.read()
+        for ln in log_lines:
+            self.assertIn(ln, text, "scope: the log lacks a line the stub should have written\n" + out)
+        return rc, lines, out
+
+    @unittest.skipUnless(os.name == "posix", "the verdict stub is killed by signal: POSIX only")
+    def test_a_verdict_killed_after_a_tool_miss_and_a_real_error_reads_fail_with_the_tool_note(self):
+        rc, lines, out = self.killed_code_check(self.TOOL_MISS, self.REAL_ERROR)
+        self.assertEqual(by_step(lines), {"Code check": "FAIL"},
+                         "a verdict killed after a tool-miss line and a real error reads unknown, and drops the "
+                         "'also tool missing' note: " + out)
+        self.assertIn("also tool missing (ruby could not start: ", lines[0], out)
+        self.assertEqual(rc, 1, "a FAIL with a killed verdict did not exit 1: " + out)
+
+    @unittest.skipUnless(os.name == "posix", "the verdict stub is killed by signal: POSIX only")
+    def test_a_verdict_killed_after_a_tool_miss_alone_reads_unknown_with_the_tool_note(self):
+        # the control: one tool miss and no real error is unknown, not FAIL
+        rc, lines, out = self.killed_code_check(self.TOOL_MISS)
+        self.assertEqual(by_step(lines), {"Code check": "unknown"},
+                         "a verdict killed after one tool-miss line reads something other than unknown: " + out)
+        self.assertIn("tool missing (ruby could not start: ", lines[0], out)
+        self.assertEqual(rc, 2, "a lone tool miss did not exit 2, the unknown code: " + out)
+
+    @unittest.skipUnless(os.name == "posix", "the verdict stub is killed by signal: POSIX only")
+    def test_a_code_check_verdict_killed_with_no_output_reads_unknown_never_fail(self):
+        # the control: no failure signal in the output, so unknown; main reads this FAIL
+        rc, lines, out = self.killed_code_check()
+        self.assertEqual(by_step(lines), {"Code check": "unknown"},
+                         "a code-check verdict killed with no output reads FAIL, not unknown: " + out)
+        self.assertEqual(rc, 2, "a code-check verdict with no output did not exit 2, the unknown code: " + out)
 
     @unittest.skipUnless(shutil.which("pipx"), "pipx is absent: the checks zizmor step runs through pipx")
     def test_a_template_injection_fails_the_zizmor_step(self):
