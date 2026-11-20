@@ -1164,6 +1164,11 @@ def wait_pushed_head(host, n, info, end, want=None):
         info = host.pr(n)
     return info
 
+class RecordBody(str):
+    """A review record comment's text, with the id of the comment it came from as `cid` (None when the read gave none). It is a str, so every reader of a
+    record body and every row of `records` keeps its shape; unparsed_note reads `cid` to name a record that does not parse."""
+    cid = None
+
 def sort_comment(c, records, lints, number=None):
     """Sort the issue comment `c` into `records` ({PR number: [(body, created_at, updated_at)]}) or `lints` ({PR number: [bodies]}): a review record
     when the review record marker is its whole first line, a lane-lint comment when the lint marker is and the author is the repo's owner. The
@@ -1172,6 +1177,8 @@ def sort_comment(c, records, lints, number=None):
     n = number if number is not None else int(m.group(1)) if m else None
     first = body.splitlines()[:1]
     if n is not None and first == [REVIEW_MARKER]:
+        body = RecordBody(body)
+        body.cid = c.get("id")
         records.setdefault(n, []).append((body, c.get("created_at"), c.get("updated_at")))
     elif n is not None and first == [LANE_LINT_MARKER] and c.get("author_association") == LANE_LINT_AUTHOR:
         lints.setdefault(n, []).append(body)
@@ -5452,6 +5459,51 @@ def parse_review(text):
         return None
     return {"n": int(n), "head": head, "kind": kind, "guard": guard, "rounds": rounds, "net": net.group(1), "fix": fix, "grant": grant, "accepted": accepted}
 
+def unparsed_cause(text):
+    """-> why parse_review(text) is None, as one phrase naming the offending line or the missing field, for a comment that opens with the marker.
+    It walks parse_review's checks in its order, so the first break it names is the first that parse_review hits: the marker, the four fields,
+    text after or before the CI line, the values, then the first line of the middle that is no Grant, Round, Fix check or Owner accepted line.
+    A break it has no line for (rounds out of order, a skipped number, a misplaced optional line) gets the general phrase at the end."""
+    lines = text.splitlines()
+    if "---" in lines:
+        lines = lines[:lines.index("---")]
+    while lines and not lines[-1].strip():
+        lines.pop()
+    quote = lambda line: '"' + (line if len(line) <= 80 else line[:77] + "...") + '"'
+    if not lines or lines[0] != REVIEW_MARKER:
+        return "the marker is not the whole first line"
+    if len(lines) == 1:
+        return "the record holds the marker and no field after it: the PR: line is missing"
+    fields = (("PR", r"PR: #(\d+)"), ("Head", rf"Head: ({REVIEW_SHA})"), ("Kind", r"Kind: (\S+)"), ("Guard or check", r"Guard or check: (\S+)"))
+    for i, (label, pat) in enumerate(fields, 1):
+        if i >= len(lines):
+            return f"the {label}: line is missing"
+        if not re.fullmatch(pat, lines[i], re.ASCII):
+            return f"the {label}: line is missing or malformed (line {i + 1} reads {quote(lines[i])})"
+    if lines[-1] != REVIEW_CI_LINE:
+        if REVIEW_CI_LINE in lines:
+            return f"text after the CI line: {quote(lines[lines.index(REVIEW_CI_LINE) + 1])}"
+        return "the CI line is missing as the last line"
+    if len(lines) < 7 or not re.fullmatch(r"Net value: (.+)", lines[-2]):
+        return f"text before the CI line, where the Net value: line belongs: {quote(lines[-2])}"
+    kind, guard, net = lines[3][6:], lines[4][15:], lines[-2][11:]
+    for label, value, allowed in (("Kind", kind, REVIEW_KINDS), ("Guard or check", guard, REVIEW_GUARDS), ("Net value", net, REVIEW_NETS)):
+        if value not in allowed:
+            return f"the {label}: value {quote(value)} is not one of {', '.join(sorted(allowed))}"
+    if kind == "docs-only" and guard == "yes":
+        return "a docs-only record cannot be Guard or check: yes"
+    known = (r"Grant: .*", r"Owner accepted: .*", rf"Fix check: .*", r"Round \d+: .*")
+    odd = next((l for l in lines[5:-2] if not any(re.fullmatch(k, l, re.ASCII) for k in known)), None)
+    if odd is not None:
+        return f"a line that is no Grant, Round, Fix check or Owner accepted line: {quote(odd)}"
+    return "a Grant, Round, Fix check or Owner accepted line is malformed, out of order, or breaks a rule of the form"
+
+def unparsed_note(body):
+    """-> `comment <id> does not parse: <cause>` for the review record comment `body` that parse_review refuses (unparsed_cause gives the cause).
+    The id is the one RecordBody carries; a body that carries none is named without it. The one home of the words, for merge --reviewed and the --confirm gate."""
+    cid = getattr(body, "cid", None)
+    return f"{'comment ' + str(cid) if cid is not None else 'a comment'} does not parse: {unparsed_cause(body)}"
+
 def last_design_line(recs):
     """-> (round, verdict) of the last design-reviewer line, by position, in the newest of the parsed records `recs` (oldest first, None skipped) that holds
     one, else None. The one home of the walk back through records with no design reviewer line, for review_state's reader and the --review-record refusal."""
@@ -6040,6 +6092,8 @@ def reviewed_read(h, cfgrel=None, facts=None, ledger=None):
             rec = parse_review(bodies[-1])
             rec = rec if rec and rec["n"] == n else None
             state, why = live_review_state(h, rec, sha, main, cfgrel, own_records(n, bodies[:-1]))
+            if parse_review(bodies[-1]) is None:  # unreadable, as against a record that names another pull request: name the comment and the cause
+                why += f" ({unparsed_note(bodies[-1])})"
         if state == "none":
             bare.append(f"#{n}")
             state, why, ci = "no record", "no review record comment", "draft, no run" if d.get("draft") else "not read"
@@ -6107,7 +6161,7 @@ def audit_prs(h):
         if not rows:
             review = "none"
         elif not rec:
-            review = "unreadable"
+            review = "unreadable" + (f" ({unparsed_note(rows[-1][0])})" if parse_review(rows[-1][0]) is None else "")  # a record for another pull request parses, and is named no further
         else:  # a record may hold a fix check and no round line (parse_review), so its fix check stands in for the last round
             i, role, _model, verdict = rec["rounds"][-1] if rec["rounds"] else (None, None, None, None)
             fix = rec["fix"]
@@ -7059,6 +7113,8 @@ def standing_refusal(h, n, info, head):
         return f"the head's own checks are not green: {not_green}."
     if kind_misfits("docs-only", files) or guard_hits(paths):  # any file past docs, code and guard paths included: one passing reviewer record on the live head (decision session-tiers)
         bodies = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(n, [])
+        if bodies and parse_review(bodies[-1]) is None:  # the newest record counts: an older pass stands behind a newer one that cannot be read
+            return f"this pull request's newest review record cannot be read, so its head has no passing review record ({unparsed_note(bodies[-1])})."
         recs = [r for r in map(parse_review, bodies) if r and r["n"] == n]
         rec = recs[-1] if recs else None
         # the pass that ends review, of any model (ruling own-review-any-model): the fix verifier's when the record has one, else the last reviewer round's
