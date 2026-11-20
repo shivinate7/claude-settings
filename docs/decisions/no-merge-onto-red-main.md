@@ -12,6 +12,16 @@ Owner ruling Q5 v (chat, 10:42 CST Nov 20, 2026): "PRs may merge onto a red main
 - `stable` moves only on green (decision `stable-branch`).
 - Cost of the line: on a red main only, one jobs read and one log read per failed job of each red run (unmeasured). Nothing on a green main.
 
+## Rulings Q5 v replaces
+
+Each ruling below stays on record. Q5 v replaces it.
+
+- Owner ruling 2026-11-17 09:20 CST (approved option, relayed by the consultant): a fix also merges onto a red main when it touches the failing test or its code, and its own run is green on the red test (route `fix_proven`). The same day's case was a flaky test file the breaking merge did not touch. Q5 v replaces it: a fix merges like any PR.
+- Owner ruling Q3 i (when the brake on a red main lifts), 2026-11-12 09:46 CST, relayed by the coordinator at 09:50 CST: "a red main stops merges only until the revert merges." Q5 v replaces it: a red main stops no merge.
+- Owner ruling 745 b (`own-745-b-resume-at-revert`, page item 745, pick b), 2026-11-13 13:20 CST, against the triage recommendation (a): after a red main, merges resume when the revert merges, with the revert's own run still going. Q5 v replaces it: no merge waits on a revert.
+- Ruling ow-29 (`ow-29-q-max-past-rates-a`, item 622 b, 2026-11-12 14:17 CST), which restated the 09:46 CST answer to Q3 i. Q5 v replaces it.
+- Owner ruling 746 b (`own-746-b-off-blamed-paths`, page item 746, pick b), 2026-11-13 13:20 CST, against the triage recommendation (a): while main is red, a lane that touches none of the blamed paths may merge. Q5 v replaces it: any PR may merge onto a red main. The blame step (bisect) that the ruling named was not built when written. Unsettled: the ruling places that step in PR #3152, act 3, and History names PR 2889.
+
 ## UNKNOWN still refuses
 
 Unknown never reads clear. The merge refuses while main reads UNKNOWN. UNKNOWN covers:
@@ -27,7 +37,7 @@ The way out is `--base-red-ok "<reason>"`. It lifts an UNKNOWN read, and never a
 
 A revert of the breaking merge lifts the red once its tree is proven. The tool then reads main green (`revert_proven`), so the red line stops. The lift holds for later merges that land above the revert. It stops when a red run sits on or above the revert's landing commit.
 
-Owner ruling 823 b (`own-823-b-revert-merge-lifts-red`, page item 823, pick b), 2026-11-14 15:04 CST, with no note: a revert merged with its tree already proven lifts red main. The owner chose it knowingly, since the option widens the rule. Accepted cost (ruled): a revert that does not fix the failure reads clear until the next full run. Options a and c are not chosen.
+Owner ruling 823 b (`own-823-b-revert-merge-lifts-red`, page item 823, pick b), 2026-11-14 15:04 CST, with no note: a revert merged with its tree already proven lifts red main. The owner chose it knowingly, since the option widens the rule. Q5 v replaces its brake: no merge waits on the lift. Accepted cost (ruled): a revert that does not fix the failure reads clear until the next full run. Options a and c are not chosen.
 
 Without the lift (a revert whose tree is not proven), the red clears when the revert's own push run on main is green and ran the suite. A green run with no suite is no verdict (the empty-run rule under the red-main check).
 
@@ -51,7 +61,7 @@ Design readings for the lift. The lane chose these. They are not rulings.
 
 - A breaking merge is a merge after which main's newest finished run is red.
 - A revert PR is the lane PR that undoes the commit of a breaking merge. It merges as an ordinary lane PR. A known red needs no flag.
-- Owner ruling Q4 g (how a revert merges), 2026-11-12 09:46 CST, relayed by the coordinator at 09:50 CST: a revert is an ordinary lane PR. There is no `merge --revert`, and none is added.
+- Owner ruling Q4 g (how a revert merges), 2026-11-12 09:46 CST, relayed by the coordinator at 09:50 CST: a revert is an ordinary lane PR, merged with `--base-red-ok`. Q5 v replaces that flag part: a known red needs no flag. There is no `merge --revert`, and none is added.
 - History: act 3 of R42 part 2 is pull request 2889, merged as commit f1b8031f.
 
 ## The red-main check

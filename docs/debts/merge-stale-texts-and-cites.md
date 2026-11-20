@@ -2,7 +2,7 @@
 
 **What.** `merge/merge.py` still cites and prints removed things.
 - Cite to a batch-CI decision: `READ_CITE` names `no-merge-during-batch-ci`.
-- Stale text: the help (line 22) and the docstring at line 3706 say "the batch runner's join". `LANE_LINT_REMEDY` (line 2313) and line 2663 say "join it to a batch". The draft step message (line 3021) says "a run resumes at the wait". The `--release-check` argument help (line 4031) names `--blame`.
+- Stale text: `LANE_LINT_REMEDY` and a comment tail in the merge tool say "join it to a batch". The draft step message says "a run resumes at the wait".
 
 **Where.** `merge/merge.py`, the cite constant `READ_CITE` and the texts named above.
 
