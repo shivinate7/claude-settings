@@ -35,6 +35,8 @@ A touched path selects:
   any non-.md, non-test path under a folder named tests                      -> every test under that folder
 Each selected test then lands in one of these places, each printed with its reason, none dropped silently:
   HEAVY           the batch shards it in its own jobs; running it per lane push is a cost blow-up
+                  A touched HEAVY .py suite is read with `ast` first, and the job exits 1 when it uses a POSIX_ONLY name outside a guard
+                  that excludes Windows (see posix_offences). No lane run reaches a HEAVY suite on Windows, so this is its only read.
   NEEDS_SETUP     needs a browser or a tool this workflow does not install, or runs on one OS only
   per OS          listed for an OS when a job of checks.yml at HEAD runs on that OS and names it (see os_runs);
                   skipped on each other OS, and on both with "no CI job runs it" when no Windows or macOS job names it
@@ -84,6 +86,12 @@ HEAVY = {
     "merge/test_merge.py": "heavy: runs in the batch's shard jobs (MERGE_SHARD)",
     "janitor/test_sweep.py": "heavy: runs in the batch's checks-windows-sweep job",
     "hooks/test_install_src.sh": "heavy: runs in the batch's shell-macos job under its own step cap",
+}
+
+# The POSIX-only names a HEAVY suite may use only inside a guard that excludes Windows (module -> attribute names).
+POSIX_ONLY = {
+    "os": ("killpg", "getpgid", "setsid"),
+    "signal": ("SIGHUP", "SIGKILL", "SIGQUIT", "SIGUSR1", "SIGUSR2"),
 }
 
 # Suites that need a browser or a tool this workflow does not install (glob -> reason).
@@ -154,6 +162,112 @@ def reason(path, table):
         if fnmatch.fnmatchcase(path, glob):
             return why
     return None
+
+
+def _dotted(node):
+    """The dotted name an Attribute or Name chain spells ("os.name"), or None."""
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    return ".".join([node.id, *reversed(parts)])
+
+
+def _constants(node):
+    """The values of a constant, or of a tuple, list or set of constants. None when any element is not a constant."""
+    items = node.elts if isinstance(node, (ast.Tuple, ast.List, ast.Set)) else [node]
+    if all(isinstance(i, ast.Constant) for i in items):
+        return [i.value for i in items]
+    return None
+
+
+def on_windows(test):
+    """What the condition `test` evaluates to on Windows (os.name "nt", sys.platform "win32"): True, False, or None when it is
+    not a plain os.name or sys.platform test. Three-valued, so `and`, `or` and `not` carry the unknown through. An `if` body
+    runs only when its condition is true, so the body is safe on Windows when this is False, and the else arm when it is
+    True. skipIf skips when true, so it excuses a suite when this is True; skipUnless, when False. Evaluating on Windows,
+    never matching a spelling, is what makes the direction count: skipIf(os.name == "posix") is False here."""
+    if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+        inner = on_windows(test.operand)
+        return None if inner is None else not inner
+    if isinstance(test, ast.BoolOp):
+        seen = [on_windows(v) for v in test.values]
+        decisive = isinstance(test.op, ast.Or)
+        if decisive in seen:
+            return decisive
+        return None if None in seen else not decisive
+    if isinstance(test, ast.Compare) and len(test.ops) == 1 and len(test.comparators) == 1:
+        windows = {"os.name": "nt", "sys.platform": "win32"}.get(_dotted(test.left))
+        values = _constants(test.comparators[0])
+        if windows is None or values is None:
+            return None
+        if isinstance(test.ops[0], (ast.Eq, ast.In)):
+            return windows in values
+        if isinstance(test.ops[0], (ast.NotEq, ast.NotIn)):
+            return windows not in values
+        return None
+    if (isinstance(test, ast.Call) and isinstance(test.func, ast.Attribute) and test.func.attr == "startswith"
+            and _dotted(test.func.value) == "sys.platform" and len(test.args) == 1 and not test.keywords):
+        prefixes = _constants(test.args[0])
+        if prefixes is None or not all(isinstance(p, str) for p in prefixes):
+            return None
+        return any("win32".startswith(p) for p in prefixes)
+    return None
+
+
+def skip_decorator_excuses(decorator):
+    """True when `decorator` is unittest's skipIf or skipUnless with a condition that skips the test on Windows."""
+    if not isinstance(decorator, ast.Call) or not decorator.args:
+        return False
+    name = (_dotted(decorator.func) or "").rsplit(".", 1)[-1]
+    if name not in ("skipIf", "skipUnless"):
+        return False
+    return on_windows(decorator.args[0]) is (name == "skipIf")
+
+
+def posix_offences(path, source):
+    """One `path:line: message` string for each POSIX_ONLY name that `source` uses outside a guard that excludes Windows, and
+    one for a source that cannot be parsed (unknown is red, not skip). A guard is a def or class under skipIf or skipUnless
+    that skips Windows, an `if` body whose condition is false on Windows, or the else arm of an `if` whose condition is true
+    on Windows. A guard covers everything nested in it. The source is read with `ast`, so a name in a comment or a string
+    counts for nothing."""
+    try:
+        tree = ast.parse(source, filename=path)
+    except (SyntaxError, ValueError) as e:
+        return [f"{path}:{getattr(e, 'lineno', None) or 1}: cannot parse this heavy suite, so its POSIX-only calls are unread ({e})"]
+    found = []
+
+    def walk(node, guarded):
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            guarded = guarded or any(skip_decorator_excuses(d) for d in node.decorator_list)
+        if isinstance(node, ast.If):
+            verdict = on_windows(node.test)
+            walk(node.test, guarded)
+            for child in node.body:
+                walk(child, guarded or verdict is False)
+            for child in node.orelse:
+                walk(child, guarded or verdict is True)
+            return
+        if not guarded and isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            if node.attr in POSIX_ONLY.get(node.value.id, ()):
+                found.append(f"{path}:{node.lineno}: {node.value.id}.{node.attr} is POSIX-only and has no guard that excludes Windows "
+                             "(skipIf on os.name == 'nt', skipUnless on os.name != 'nt', or an if on os.name or sys.platform)")
+        for child in ast.iter_child_nodes(node):
+            walk(child, guarded)
+
+    walk(tree, False)
+    return found
+
+
+def heavy_offences(test):
+    """posix_offences() of the touched HEAVY .py suite `test`, read from the checkout. An unreadable file is an offence."""
+    try:
+        with open(test, "rb") as f:
+            return posix_offences(test, f.read())
+    except OSError as e:
+        return [f"{test}:1: cannot read this heavy suite, so its POSIX-only calls are unread ({e})"]
 
 
 # {(root, test): (stat key, module names)}, kept while the file's size and mtime hold. A run asks about each tracked test once per
@@ -516,8 +630,11 @@ def main():
     lists = {word: [] for word in texts}
     cmds = {word: {} for word in texts}
     labels = {"windows": "Windows", "macos": "macOS"}
+    offences = []
     for test in sorted(selected):
         why = reason(test, HEAVY) or reason(test, NEEDS_SETUP)
+        if reason(test, HEAVY) and test.endswith(".py") and test in touched:
+            offences += heavy_offences(test)
         if why:
             print(f"skip {test}: {why}")
             continue
@@ -541,6 +658,10 @@ def main():
                 print(f"skip {test} on {word}: {CI_PATH} runs it on no {labels[word]} job")
         if listed:
             print(f"run {test} on {' and '.join(listed)}")
+    if offences:
+        for line in offences:
+            print(f"touched-tests: {line}", file=sys.stderr)
+        sys.exit(1)
     write_outputs(lists["windows"], lists["macos"], cmds)
 
 
