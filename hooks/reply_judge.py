@@ -95,13 +95,17 @@ COST_RANK = re.compile(r"\b(?:costs|spends|eats|burns|takes)\s+the\s+most\b"
                        r"|\bmost\s+expensive\b|\bcostliest\b"
                        r"|\b(?:bulk|most)\s+of\s+the\s+(?:cost|spend|tokens|money)s?\b", re.I)
 QUOTED_TEXT = re.compile(r'"[^"\n]*"|“[^”\n]*”')
-SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+|\n")
+# Markdown bold, italics, code and a closing bracket or quote may follow the end mark of a sentence.
+CLOSERS = "*_~`)]}\"' "
+SENTENCE_BREAK = re.compile(r"(?<=[.!?])[*_~`)\]}\"']*\s+|\n")
 
 
 def has_cost_rank(reply):
-    """True when a sentence of the reply that is not a question and not quoted text ranks a cost."""
+    """True when a sentence of the reply that is not a question and not quoted text ranks a cost. A question
+    wrapped in bold or parentheses is still a question."""
     unquoted = QUOTED_TEXT.sub("", reply)
-    return any(COST_RANK.search(s) and not s.rstrip().endswith("?") for s in SENTENCE_BREAK.split(unquoted))
+    return any(COST_RANK.search(s) and not s.rstrip(CLOSERS + "\t").endswith("?")
+               for s in SENTENCE_BREAK.split(unquoted))
 
 
 JUDGED_RULES = ("output-start-with-point", "style-cut-narration",
@@ -178,9 +182,10 @@ INSTRUCTIONS = (
     "the fix is to read the count or state from REST and confirm each candidate with REST. "
     "Never flag a count read from REST. "
     "Never flag a reply that says a search total was not used or is wrong, and gives the REST count. "
-    "measure-before-priority: flag a reply that ranks a cost, such as the biggest cost, the most expensive lane or most of the spend, "
-    "and gives no measure; a ranking must cite a figure with its unit and a date, a run id or a sample count. "
-    "A ranking the reply marks unmeasured may stand, but flag the reply when it also ranks, orders or cuts work on that ranking. "
+    "measure-before-priority: a cost claim with no measure may stand, and so may a ranking the reply marks unmeasured. "
+    "Flag a cost ranking, such as the biggest cost, the most expensive lane or most of the spend, with no measure, "
+    "marked unmeasured or not, only when the same reply also ranks, orders or cuts work on it; "
+    "the fix is to cite a figure with its unit and a date, a run id or a sample count, or to drop the work order. "
     "Never flag a ranking that cites such a figure, a question, or quoted text. "
     "Flag only on a clear breach; when unsure answer {\"ok\": true}. "
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
