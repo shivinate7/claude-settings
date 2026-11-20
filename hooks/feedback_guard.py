@@ -187,7 +187,7 @@ KINDS = ("ruling", "task", "question", "note", "standing", "page", "repo")
 JOT = re.compile(r"\[(%s)\]\s+->\s+\S" % "|".join(KINDS))
 PAGE_HOME = re.compile(r"page:(\d+)")
 SEND_TOOLS = _transcript.SEND_TOOLS  # the send predicates live in lint/_transcript.py, one home
-ARTIFACT_DATA = _transcript.ARTIFACT_DATA + (_transcript.CLAUDE_ARTIFACTS_DB,)  # read_artifact is no db tool, so it never matches
+ARTIFACT_DATA = _transcript.ARTIFACT_DATA  # the one home of the page db tool names
 _tool_verb = _transcript.tool_verb
 _writes_n = _transcript.writes_n
 _is_n = _transcript.is_n
@@ -799,14 +799,16 @@ def norm(text):
 
 def _proves(use, n):
     """True when a tool_use sends page item n: a message naming n as a whole token, or an
-    ArtifactData write with key n == n under collection `items`."""
+    ArtifactData write with key n == n under collection `items`. The write names a page url: the
+    schema requires it, so a call without one is refused and sends nothing."""
     name, tool_input = use.get("name") or "", use.get("input")
     if not isinstance(tool_input, dict):
         return False
     if name in SEND_TOOLS:
         msg = tool_input.get("message")
         return isinstance(msg, str) and re.search(r"(?<![A-Za-z0-9-])%s(?![A-Za-z0-9-])" % n, msg) is not None
-    return name.startswith(ARTIFACT_DATA) and _read_verb(use) is None and _writes_n(tool_input, n, _tool_verb(name))
+    return (name.startswith(ARTIFACT_DATA) and isinstance(tool_input.get("url"), str) and _read_verb(use) is None
+            and _writes_n(tool_input, n, _tool_verb(name)))
 
 
 def _read_verb(use):
@@ -1400,23 +1402,32 @@ def _ts(rec):
     return _transcript.parse_utc_timestamp(rec.get("timestamp"))
 
 
+def _named_collections(d):
+    """The collections a write dict names: its `collection`, else the `<collection>` head of a `doc_id` or `path`
+    of the form `<collection>/...`."""
+    if isinstance(d.get("collection"), str):
+        return [d["collection"]]
+    return [d[k].partition("/")[0] for k in ("doc_id", "path") if isinstance(d.get(k), str) and "/" in d[k]]
+
+
 def _exported_write(inp, collections, tool_verb=None):
-    """True when an ArtifactData input writes (set, update, batch or delete) a collection the waiting copy
-    exports: named by `collection`, or by a `doc_id` or `path` of the form `<collection>/...`. A batch that
-    names none is counted, since its writes are not read. `delete` is counted here and in no shared list.
+    """True when an ArtifactData input writes (set, update, batch, str_replace or delete) a collection the waiting
+    copy exports: named by `collection`, or by a `doc_id` or `path` of the form `<collection>/...`. A batch names
+    its collections in its `writes`, one per op. A write that names no collection is no write, since the schema
+    requires one outside a batch. `delete` is counted here and in no shared list.
     A claude-artifacts `tool_verb` wins over the input's action: db_write and db_delete count, db_get, db_list
-    and db_query do not. A db_write that names no collection counts like an unnamed batch."""
+    and db_query do not."""
     if tool_verb is not None:
         if tool_verb not in ("write", "delete"):
             return False
-        verb = "batch" if tool_verb == "write" else None
     else:
         verb = inp.get("action", inp.get("op"))
-    if isinstance(verb, str) and verb not in _transcript.WRITE_VERBS + ("delete",):
-        return False
-    named = [inp["collection"]] if isinstance(inp.get("collection"), str) else [
-        inp[k].partition("/")[0] for k in ("doc_id", "path") if isinstance(inp.get(k), str) and "/" in inp[k]]
-    return any(c in collections for c in named) or (not named and verb == "batch")
+        if isinstance(verb, str) and verb not in _transcript.WRITE_VERBS + ("delete",):
+            return False
+    named = _named_collections(inp)
+    for op in inp["writes"] if isinstance(inp.get("writes"), list) else ():
+        named += _named_collections(op) if isinstance(op, dict) else []
+    return any(c in collections for c in named)
 
 
 def _scan_transcript(records, collections):

@@ -12,9 +12,10 @@ import os
 import re
 
 SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
-ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData")
 CLAUDE_ARTIFACTS_DB = "mcp__claude-artifacts__db_"  # the claude-artifacts page db tools; the verb is the tool name's tail, never an input action
-WRITE_VERBS = ("set", "update", "batch")
+# The tool-name prefixes of the page db tools, for `name.startswith(ARTIFACT_DATA)`. read_artifact is no db tool, so it never matches.
+ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData", CLAUDE_ARTIFACTS_DB)
+WRITE_VERBS = ("set", "update", "batch", "str_replace")
 
 
 def read_transcript(path):
@@ -330,7 +331,7 @@ def tool_verb(name):
 
 
 def is_write(d, verb=None):
-    """False for a dict whose action or op is a verb other than set, update, batch. A tool-name `verb`
+    """False for a dict whose action or op is a verb other than a WRITE_VERBS one. A tool-name `verb`
     (see tool_verb) wins over the input's action: only db_write is a write, whatever the input says."""
     if verb is not None:
         return verb == "write"
@@ -364,11 +365,12 @@ def writes_n(node, n, verb=None):
     return isinstance(node, list) and any(writes_n(c, n) for c in node)
 
 
-def items_write(node):
-    """True when a set, update or batch call writes under the items collection at any depth: the page
-    writer's own write of an item. A get, a list or another collection is no write to items."""
+def items_write(node, verb=None):
+    """True when a write call writes under the items collection at any depth: the page writer's own write
+    of an item. A get, a list or another collection is no write to items. A tool-name `verb` (see
+    tool_verb) governs the top dict only, so a db_get with no action is no write."""
     if isinstance(node, dict):
-        if not is_write(node):
+        if not is_write(node, verb):
             return False
         return _in_items(node) or any(items_write(c) for c in node.values())
     return isinstance(node, list) and any(items_write(c) for c in node)
@@ -437,7 +439,7 @@ def _page_reads(records):
         for use in tool_uses(rec):
             inp = use.get("input")
             if (str(use.get("name", "")).startswith(ARTIFACT_DATA) and isinstance(inp, dict)
-                    and inp.get("action") == "get"
+                    and tool_verb(use.get("name")) is None and inp.get("action") == "get"
                     and (inp.get("path") == "meta/page"
                          or (inp.get("collection") == "meta" and inp.get("doc_id") == "page"))):
                 pending.add(use.get("id"))
