@@ -874,8 +874,9 @@ lb_add("a Bash call whose agent_id is malformed reads no load under the worst re
 # its lint tree (merge/test_lane_lint.py), so no guard case pins it here. A direct `bin/ci-job --lint` has no disk floor
 # anywhere, so a background one is refused by the brake at a full disk. The lint start reads disk and memory, never
 # the load average (decision machine-load-brake).
-LB_CI_LINT_BG = {"command": "bin/ci-job --lint", "run_in_background": True}
-LB_LANE_LINT_BG = {"command": "merge --lane-lint brake-reads-load-before-lint", "run_in_background": True,
+# `verdict` in front: bare-check (coordinator pick A, 2026-11-12 11:23 CST) refuses a bare lint run before the brake reads it.
+LB_CI_LINT_BG = {"command": "verdict bin/ci-job --lint", "run_in_background": True}
+LB_LANE_LINT_BG = {"command": "verdict merge --lane-lint brake-reads-load-before-lint", "run_in_background": True,
                    "timeout": 7200000}   # above the lint bound, so check-timeout passes the call
 LB_OVERRIDE_LINE = re.compile(re.escape("To allow this act, type `override` for this one act"))
 LB_LOAD_RULE = re.compile(r"^load-brake: ")
@@ -947,20 +948,20 @@ lb_add("echo hi # bin/ci-job --lint, background, full disk: allowed, and the rea
 # brake does not refuse it. `merge --lane-lint` in the foreground is refused by check-timeout at any limit.
 lb_add("foreground, bin/ci-job --lint, full disk: allowed, and the reader does not run",
        lb_full_scope(LB_DISK_FULL, lb_decision_check("Bash", LB_DISK_FULL, "allow",
-                                                     tool_input={"command": "bin/ci-job --lint"}, reads=0)))
+                                                     tool_input={"command": "verdict bin/ci-job --lint"}, reads=0)))
 lb_add("foreground, bin/ci-job --lint 2>&1, full disk: allowed, and the reader does not run",
        lb_full_scope(LB_DISK_FULL, lb_decision_check("Bash", LB_DISK_FULL, "allow",
-                                                     tool_input={"command": "bin/ci-job --lint 2>&1"}, reads=0)))
+                                                     tool_input={"command": "verdict bin/ci-job --lint 2>&1"}, reads=0)))
 lb_add("foreground, echo hi & bin/ci-job --lint, full disk: refused by detached-launch and not the load brake, the reader does not run",
        lb_full_scope(LB_DISK_FULL, lb_decision_check("Bash", LB_DISK_FULL, "deny", (re.compile(r"^detached-launch: "),),
                                                      tool_input={"command": "echo hi & bin/ci-job --lint"}, reads=0,
                                                      lacks=(LB_LOAD_RULE, LB_LOAD_CITE))))
 lb_add("foreground, bin/ci-job --lint && echo ok, full disk: allowed, and the reader does not run",
        lb_full_scope(LB_DISK_FULL, lb_decision_check("Bash", LB_DISK_FULL, "allow",
-                                                     tool_input={"command": "bin/ci-job --lint && echo ok"}, reads=0)))
+                                                     tool_input={"command": "verdict bin/ci-job --lint && echo ok"}, reads=0)))
 lb_add("foreground, merge --lane-lint 9, full disk: refused by check-timeout and not the load brake, the reader does not run",
        lb_full_scope(LB_DISK_FULL, lb_decision_check("Bash", LB_DISK_FULL, "deny", (re.compile(r"^check-timeout: "),),
-                                                     tool_input={"command": "merge --lane-lint 9"}, reads=0,
+                                                     tool_input={"command": "verdict merge --lane-lint 9"}, reads=0,
                                                      lacks=(LB_LOAD_RULE, LB_LOAD_CITE))))
 
 # LINUX MEMORY (decision machine-load-brake). On Linux the
