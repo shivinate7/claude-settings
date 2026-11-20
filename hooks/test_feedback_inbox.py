@@ -1940,11 +1940,11 @@ def case_export_scan_counts_a_claude_artifacts_db_write_batch_naming_items():
     ops = [{"op": "update", "collection": "items", "doc_id": "disk-cleanup", "data": {"n": 98}},
            {"op": "update", "collection": "items", "doc_id": "disk-cleanup-2", "data": {"n": 99}},
            {"op": "set", "collection": "answers", "doc_id": "a-7k2", "data": {"n": 5}}]
-    control = export_writes([used_rec("ArtifactData", tool_input("batch", collection=None, doc_id=None, batch=ops))])
+    control = export_writes([used_rec("ArtifactData", tool_input("batch", collection=None, doc_id=None, writes=ops))])
     check("export scan: control, an ArtifactData batch whose ops name items is one export write to the page",
           len(control) == 1 and control[0][2] == PAGE_URL, control)
     found = export_writes([used_rec(CLAUDE_ARTIFACTS + "db_write", tool_input(
-        None, collection=None, doc_id=None, batch=ops))])
+        None, collection=None, doc_id=None, writes=ops))])
     check("export scan: a claude-artifacts db_write batch whose ops name items is one export write to the page",
           len(found) == 1 and found[0][2] == PAGE_URL, found)
 
@@ -3118,13 +3118,17 @@ def response_of(docs, form="string", extra=()):
     return "\n".join(lines)
 
 
-def tool_input(action, collection="answers", doc_id="a-7k2", **extra):
-    """The tool_input of an ArtifactData call. doc_id None leaves the key out, as a list does. action None leaves
-    it out too: a claude-artifacts db tool carries its verb in its tool name, not in its input. collection None
-    leaves the key out, as a batch names its collections in its ops."""
-    obj = {"action": action, "url": PAGE_URL, "collection": collection}
+def tool_input(action, collection="answers", doc_id="a-7k2", url=PAGE_URL, **extra):
+    """The tool_input of an ArtifactData call, in the shape its schema gives: `url` is described as required, `action`
+    is the verb, `collection` is required for every action but batch, and a batch names its ops in `writes`. doc_id
+    None leaves the key out, as a list does. action None leaves it out too: a claude-artifacts db tool carries its
+    verb in its tool name, not in its input. collection None leaves the key out, as a batch names its collections in
+    its writes. url None leaves the key out."""
+    obj = {"action": action, "url": url, "collection": collection}
     if action is None:
         del obj["action"]
+    if url is None:
+        del obj["url"]
     if collection is None:
         del obj["collection"]
     if doc_id is not None:
