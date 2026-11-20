@@ -19598,7 +19598,8 @@ class ReviewRoundOneCompletes(ReviewEnv):
 class ReviewFixAfterMainMerge(ReviewEnv):
     """A fix check after a merge of main (decision pr-review-record). The newest earlier record holds a fix check, so the rule of ReviewFixBase
     refuses every fix check from its head. A lane that merges main into the fixed head has a new head: a merge commit whose second parent is on main,
-    and whose first parent is the fixed head or a commit after it, as git's ancestry reads it. A merge with a commit off main is refused. A plain
+    and whose first parent is the fixed head or a commit after it, as git's ancestry reads it. A merge with a commit off main is refused, unless
+    that commit is the head of another open pull request: a lane merged into this branch (the lane cases at the end of this class). A plain
     commit on the head is accepted after a PASS fix check. The newest record's fix check must have passed: a fix check after a FAIL one
     is refused, whatever the merge. The parents come from the commit read and the on-main test from the compare read, both scripted by PullsHost."""
 
@@ -19748,6 +19749,83 @@ class ReviewFixAfterMainMerge(ReviewEnv):
         body = posted_body(self, out)
         self.assertEqual(parse_text(self, body)["head"], m3, "the printed record names the wrong head")
         self.assertEqual(parse_text(self, body)["fix"], (fx.fixed, *REVIEW_FIX_PASS[1:]), "the printed record lacks the fix check from the reviewed head")
+
+    def lane_commits(self, fx):
+        """Add a lane branch and two merges of it into the fixed head to fx, shaped as a lane's merge into this branch is. `lane` adds a.txt and
+        b.txt off seed, so git's merge with fixed conflicts on a.txt alone and merges b.txt cleanly. `lane_merge` resolves a.txt by hand and edits
+        nothing else. `lane_edited` adds x.txt, which git's merge does not hold. The lane is pushed as feat8, as a pull request head is in origin.
+        -> fx, with lane, lane_merge and lane_edited added, and their parents and trees read from git."""
+        lane = self.git_commit(fx.seed, {"a.txt": "lane\n", "b.txt": "lane-b\n"})
+        sh(self.co, "git", "push", "-q", "origin", f"{lane}:refs/heads/feat8")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        lane_merge = self.git_commit(fx.fixed, {"a.txt": "resolved\n", "b.txt": "lane-b\n"}, lane)
+        lane_edited = self.git_commit(fx.fixed, {"a.txt": "resolved\n", "b.txt": "lane-b\n", "x.txt": "x\n"}, lane)
+        self.facts(fx, [lane, lane_merge, lane_edited])
+        fx.lane, fx.lane_merge, fx.lane_edited = lane, lane_merge, lane_edited
+        return fx
+
+    def lane_host(self, fx, live, lane_pr=True, verdict="PASS"):
+        """The pull request at `live`, with the newest record (head fx.fixed, fix from fx.pre) and the commits, trees and compares of fx. With
+        `lane_pr`, another open pull request, 8, has fx.lane as its head, as a lane's draft pull request does (decision draft-until-reviewed)."""
+        pulls = [batch_pull(7, live)]
+        if lane_pr:
+            pulls.append(batch_pull(8, fx.lane, draft=True, head_ref="feat8"))
+        return PullsHost(pulls, {}, comments=[self.newest_record(verdict, head=fx.fixed, pre=fx.pre)], commits=fx.parents, trees=fx.trees,
+                         compares=fx.on_main)
+
+    def test_i_a_fix_verifier_after_a_conflicted_merge_of_an_open_pr_head_is_accepted_and_reads_done(self):
+        # A lane's conflicting merge of another open pull request's head into this branch. The second parent is not on main, so the base check
+        # alone refuses it. The conflict is resolved by hand at a.txt, as a conflicting merge of main is, so the tree rule passes it.
+        fx = self.lane_commits(self.real_commits())
+        self.assertEqual(merge.conflicting_files(self.co, fx.fixed, fx.lane), ("conflict", ["a.txt"]), "fixture: fixed and the lane do not conflict on a.txt alone")
+        self.assertEqual(fx.parents[fx.lane_merge], [fx.fixed, fx.lane], "fixture: the lane merge is not a merge of the fixed head and the lane")
+        self.assertFalse(self.is_ancestor(fx.lane, "origin/main"), "fixture: the lane is on origin's main, so the base check accepts the case")
+        host = self.lane_host(fx, fx.lane_merge)
+        self.assertIn(fx.lane, [d["head"]["sha"] for d in host.pulls if d["number"] == 8], "fixture: pull request 8 does not have the lane as its head")
+        rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=fx.lane_merge)
+        self.assertEqual(rc, 0, "a fix verifier after a conflicted merge of an open pull request's head was refused:\n" + out + err)
+        body = posted_body(self, out)
+        self.assertEqual(parse_text(self, body)["head"], fx.lane_merge, "the printed record names the wrong head")
+        self.assertEqual(parse_text(self, body)["fix"], (fx.fixed, *REVIEW_FIX_PASS[1:]), "the printed record lacks the fix check")
+        self.assertEqual(record_state(self, body, head=fx.lane_merge), "done", "the record printed after the lane merge's fix check does not read done")
+
+    def test_j_a_fix_verifier_on_a_lane_merge_with_an_edit_outside_its_conflict_is_refused(self):
+        # The lane merge of case i, with x.txt added, which git's merge does not hold. Pull request 8 is open in both cases, so only the tree rule
+        # can refuse this one, as it refuses a conflicting merge of main with an extra edit.
+        fx = self.lane_commits(self.real_commits())
+        r = subprocess.run(["git", "merge-tree", "--write-tree", fx.fixed, fx.lane], cwd=self.co, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, "fixture: fixed and the lane do not conflict in git:\n" + r.stdout + r.stderr)
+        self.assertEqual(fx.parents[fx.lane_edited], [fx.fixed, fx.lane], "fixture: the edited lane merge is not a merge of the fixed head and the lane")
+        edits = sh(self.co, "git", "diff-tree", "-r", "--name-only", r.stdout.split()[0], fx.trees[fx.lane_edited]).split()
+        self.assertEqual(sorted(edits), ["a.txt", "x.txt"], "fixture: the edited lane merge does not add one file outside git's conflict")
+        rc, out, err = self.fix_from_fixed_head(self.lane_host(fx, fx.lane_edited), fixed=fx.fixed, live=fx.lane_edited)
+        self.assertEqual(rc, 2, "a fix verifier on a lane merge with an edit outside its conflict was accepted:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_k_a_fix_verifier_after_a_conflicted_merge_of_a_commit_no_open_pr_heads_is_refused(self):
+        # Control: the lane merge of case i, with no pull request at the lane's head. The only difference from case i is the open list, so the
+        # refusal is the one the base check made before the change.
+        fx = self.lane_commits(self.real_commits())
+        host = self.lane_host(fx, fx.lane_merge, lane_pr=False)
+        self.assertNotIn(fx.lane, [d["head"]["sha"] for d in host.pulls], "fixture: the lane is an open pull request's head, so the case tests nothing")
+        self.assertFalse(self.is_ancestor(fx.lane, "origin/main"), "fixture: the lane is on origin's main, so the base check accepts the case")
+        rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=fx.lane_merge)
+        self.assertEqual(rc, 2, "a fix verifier after a conflicted merge of a commit that no open pull request heads was accepted:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_l_a_fix_verifier_after_a_lane_merge_is_refused_when_the_newest_fix_verifier_failed(self):
+        # The lane merge of case i after a newest record whose fix verifier FAILed. The open record refuses the fix verifier before the merge's
+        # parents are read, so an open pull request at the lane's head does not admit it.
+        fx = self.lane_commits(self.real_commits())
+        host = self.lane_host(fx, fx.lane_merge, verdict="FAIL")
+        self.assertIn(fx.lane, [d["head"]["sha"] for d in host.pulls if d["number"] == 8], "fixture: pull request 8 does not have the lane as its head")
+        self.assertEqual(record_state(self, host.comments[0]["body"], head=fx.fixed), "open", "fixture: the newest record with a FAIL fix verifier does not read open")
+        rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=fx.lane_merge)
+        self.assertEqual(rc, 2, "a fix verifier after a lane merge was accepted though the newest record's fix verifier is FAIL:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
+        self.assertNotIn("Traceback", err)
 
 class ReviewCleanMainMerge(ReviewEnv):
     """A record stays done when the pull request head is one or more clean merges of main after the record's head (decision pr-review-record).
