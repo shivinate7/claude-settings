@@ -26908,9 +26908,10 @@ class StaleMergeTrees(unittest.TestCase):
         patch.start()
         self.addCleanup(patch.stop)
 
-    def make_tree(self, name, reason, root=None):
-        """A merge-wt-<name> folder with a locked worktree in it, as the merge tool makes one, under ROOT (default the temp folder). -> (folder, worktree)."""
-        tmp = os.path.join(root or self.tmpdir, "merge-wt-" + name)
+    def make_tree(self, name, reason, root=None, prefix="merge-wt-"):
+        """A <prefix><name> folder with a locked worktree in it, as the merge tool makes one (prefix merge-wt- or merge-fresh-),
+        under ROOT (default the temp folder). -> (folder, worktree)."""
+        tmp = os.path.join(root or self.tmpdir, prefix + name)
         wt = os.path.join(tmp, "tree")
         os.makedirs(tmp)
         sh(self.repo, "git", "worktree", "add", "-q", "--detach", "--lock", "--reason", reason, wt, self.head)
@@ -26972,6 +26973,58 @@ class StaleMergeTrees(unittest.TestCase):
         self.assertFalse(os.path.exists(stale_tmp), "control: the dead merge tree inside the temp folder must be removed in this run")
         self.assertTrue(os.path.isdir(far_tmp), "a dead-locked merge-wt tree outside the temp folder must stay")
         self.assertIn(os.path.realpath(far_wt), self.locked_trees(), "the dead-locked tree outside the temp folder must stay registered")
+
+
+    # The three run folders that a CI job or a guard run makes in the temp folder. Each name carries its maker's pid, as
+    # <prefix><pid><suffix>, so a folder whose maker died is found by its name. The forms are this test's contract.
+    PLAIN_KINDS = {
+        "ci-job-lint": "ci-job-lint-%d-run",
+        "ci-job-pin": "ci-job-pin-%d-0123abc-run",
+        "mutate_guard": "mutate_guard_%d-run",
+    }
+
+    def make_folder(self, name):
+        """A run folder with one file in it, directly under the temp folder. -> its path."""
+        folder = os.path.join(self.tmpdir, name)
+        os.makedirs(folder)
+        with open(os.path.join(folder, "run.log"), "w", encoding="utf-8") as handle:
+            handle.write("run\n")
+        return folder
+
+    def test_a_run_folder_whose_pid_is_dead_goes_and_a_live_one_stays(self):
+        """A merge-fresh tree names its maker's pid in its lock reason, and a ci-job-lint, ci-job-pin or mutate_guard folder
+        names it in its name. Once that pid is dead, the next add_worktree removes each kind. A folder whose pid lives stays,
+        and so does a folder that names no pid."""
+        dead, live = reaped_child_pid(), os.getpid()
+        dead_fresh_tmp, dead_fresh_wt = self.make_tree("dead", "merge tool, pid %d" % dead, prefix="merge-fresh-")
+        live_fresh_tmp, live_fresh_wt = self.make_tree("live", "merge tool, pid %d" % live, prefix="merge-fresh-")
+        dead_run = {"merge-fresh": dead_fresh_tmp}
+        live_run = {"merge-fresh": live_fresh_tmp}
+        legacy_run = {}
+        for kind, pattern in self.PLAIN_KINDS.items():
+            dead_run[kind] = self.make_folder(pattern % dead)
+            live_run[kind] = self.make_folder(pattern % live)
+            legacy_run[kind] = self.make_folder(pattern.replace("%d", "legacy"))
+
+        self.assertEqual(self.locked_trees().get(os.path.realpath(dead_fresh_wt)), "merge tool, pid %d" % dead,
+                         "scope: the dead merge-fresh tree must be locked with its reason before add_worktree runs")
+        for kind, folder in list(dead_run.items()) + list(legacy_run.items()):
+            self.assertTrue(os.path.isdir(folder), "scope: the %s folder must exist before add_worktree runs" % kind)
+
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        for kind, folder in dead_run.items():
+            with self.subTest(kind=kind, pid="dead"):
+                self.assertFalse(os.path.exists(folder), "a %s folder whose pid %d is dead must be removed when add_worktree starts" % (kind, dead))
+        with self.subTest(kind="merge-fresh", part="registration"):
+            self.assertNotIn(os.path.realpath(dead_fresh_wt), self.locked_trees(),
+                             "the dead merge-fresh tree's git registration must go with its folder")
+        for kind, folder in live_run.items():
+            with self.subTest(kind=kind, pid="live"):
+                self.assertTrue(os.path.isdir(folder), "a %s folder whose pid %d is alive must stay" % (kind, live))
+        for kind, folder in legacy_run.items():
+            with self.subTest(kind=kind, pid="none"):
+                self.assertTrue(os.path.isdir(folder), "a %s folder that names no pid must stay" % kind)
 
 
 class VerifiedLine(RecordsEnv):
