@@ -57,7 +57,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `git-cite-by-id` | Ids, not paths. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-record-own-file-per-kind` | Give each record its own file, one folder per kind. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-one-record-per-question` | One record per question. | [`CLAUDE.md`](../CLAUDE.md) |
-| `git-integration-branch-merge` | Each lane PR merges alone through the merge tool, on its own green run and the review its risk needs. | [`CLAUDE.md`](../CLAUDE.md) |
+| `git-integration-branch-merge` | A PR merges alone; it may combine several reviewed lanes. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-screens-verdict` | If the repo has screens, check each screen at every size and theme it ships in. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-browser-login-only-needed` | Prefer a headless or isolated browser over my own, and use my login only when needed. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-announce-own-screen` | Before a window or a screen capture lands on my screen, say so in one line. | [`CLAUDE.md`](../CLAUDE.md) |
