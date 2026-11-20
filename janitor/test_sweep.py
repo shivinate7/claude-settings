@@ -1811,6 +1811,133 @@ class WorktreeProcessPreCheckTests(unittest.TestCase):
         self.assertEqual(decision["reason"], "unreadable-subject")
 
 
+def worktree_entry_at(root, path):
+    """The `parse_worktree_list` entry whose path is PATH, compared as real paths, or None."""
+    entries = sweep.parse_worktree_list(root)
+    require(entries is not None, "worktree list did not build")
+    target = os.path.normcase(os.path.realpath(path))
+    for entry in entries:
+        if os.path.normcase(os.path.realpath(entry["path"])) == target:
+            return entry
+    return None
+
+
+def _stop_child(proc):
+    if proc.poll() is None:
+        proc.kill()
+    proc.wait(timeout=10)
+
+
+_RUN_DIR_SLEEP = "import time; time.sleep(120)"  # the cap sits well above a case; cleanup kills the child first
+_RUN_DIR_OPEN_THEN_SLEEP = (
+    "import sys, time\n"
+    "f = open(sys.argv[1], encoding='utf-8')\n"  # the file is open before the ready file is written
+    "open(sys.argv[2], 'w', encoding='utf-8').write('open')\n"
+    "time.sleep(120)\n")
+
+
+class RunDirHolderTests(unittest.TestCase):
+    """A merge-tool run dir, `<base>/merge-<name>/tree`, is judged by the sweep's pre-removal check,
+    `decide_worktree`. That check reads a live process's cwd and nothing else, and it tests the cwd
+    against the tree path alone. So a live process that holds the run dir another way is not seen:
+    its argv names a file under the run dir, it holds an open file under it, or its cwd is the run
+    dir itself, the parent of `tree`. The 2026-11-19 incident was that last miss: the in-use test
+    matched `<dir>/tree`, not `<dir>`, and two lints died. Each case builds the run dir with real git,
+    holds it with a real child, and asserts the keep. A cwd inside the tree keeps it on main already,
+    so that case is a green control, and so is a run dir whose holders have all exited."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.base = _test_temp.run_folder()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.base, ignore_errors=True)
+
+    def build_run(self, name):
+        """A repo with hooks/guard.py, pushed, and a detached worktree at main in `<base>/merge-<name>/tree`,
+        the shape `merge.add_worktree` makes. -> (repo root, run dir, tree)."""
+        root = os.path.join(self.base, name + "-repo")
+        make_repo(root, {"f.txt": "x\n", "hooks/guard.py": "print('x')\n"})
+        give_remote(root)
+        run = os.path.join(self.base, "merge-" + name)
+        tree = os.path.join(run, "tree")
+        os.makedirs(run)
+        added = run_vcs(root, "worktree", "add", "-q", "--detach", tree, "main")
+        require(added.returncode == 0, "worktree add failed: %s" % added.stderr.strip())
+        require(os.path.isfile(os.path.join(tree, "hooks", "guard.py")), "the run dir's tree lacks hooks/guard.py")
+        return root, run, tree
+
+    def hold(self, cwd, argv=(), script=_RUN_DIR_SLEEP):
+        """A live child with cwd CWD, stopped at cleanup."""
+        proc = subprocess.Popen([sys.executable, "-c", script, *argv], cwd=cwd,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(_stop_child, proc)
+        return proc
+
+    def hold_open_file(self, name, path):
+        """A live child with PATH open, once it has opened it (a ready file is the wait)."""
+        ready = os.path.join(self.base, name + "-ready")
+        proc = self.hold(self.base, [path, ready], _RUN_DIR_OPEN_THEN_SLEEP)
+        _read_when_ready(ready)
+        return proc
+
+    def assert_kept_for_holder(self, root, tree, proc):
+        entry = worktree_entry_at(root, tree)
+        require(entry is not None, "the run dir's tree is not a worktree of the repo")
+        require(os.path.isdir(tree), "the run dir's tree is gone before the verdict")
+        require(proc.poll() is None, "the holder (pid %d) exited before the verdict" % proc.pid)
+        decision = sweep.decide_worktree(root, entry, attended=True)
+        self.assertEqual(decision["action"], "keep",
+                         "a live process holds the run dir (pid %d), and the sweep would remove its tree: %s"
+                         % (proc.pid, decision["reason"]))
+        self.assertTrue(decision["reason"].startswith("process-inside:"),
+                        "the tree is kept, but not as held by a live process: %s" % decision["reason"])
+        self.assertIn(str(proc.pid), decision["reason"],
+                      "the keep reason does not name the holder pid %d: %s" % (proc.pid, decision["reason"]))
+
+    def test_a_process_whose_argv_names_a_file_in_the_run_dir_keeps_the_tree(self):
+        root, run, tree = self.build_run("argv")
+        proc = self.hold(self.base, [os.path.join(tree, "hooks", "guard.py")])
+        self.assert_kept_for_holder(root, tree, proc)
+
+    @unittest.skipIf(os.name == "nt", "the open-file read is POSIX only in this check")
+    def test_a_process_holding_an_open_file_in_the_run_dir_keeps_the_tree(self):
+        root, run, tree = self.build_run("open-file")
+        proc = self.hold_open_file("open-file", os.path.join(tree, "hooks", "guard.py"))
+        self.assert_kept_for_holder(root, tree, proc)
+
+    def test_a_process_with_cwd_at_the_run_dir_itself_keeps_the_tree(self):
+        """The incident's miss: the holder sits in `<dir>`, the parent of `tree`, which the `<dir>/tree`
+        test never matches."""
+        root, run, tree = self.build_run("cwd-run")
+        proc = self.hold(run)
+        self.assert_kept_for_holder(root, tree, proc)
+
+    def test_a_process_with_cwd_inside_the_tree_keeps_the_tree(self):
+        """Green on main already: the cwd is a prefix match on the tree path. It stops the reds above
+        from passing on a verdict that keeps for every holder."""
+        root, run, tree = self.build_run("cwd-tree")
+        proc = self.hold(os.path.join(tree, "hooks"))
+        self.assert_kept_for_holder(root, tree, proc)
+
+    def test_the_run_dir_is_removable_once_its_holders_exit(self):
+        """Green control: with every holder of each kind stopped, the same run dir is removable, so a keep
+        above is the holder's doing and not the fixture's."""
+        root, run, tree = self.build_run("exited")
+        holders = [self.hold(self.base, [os.path.join(tree, "hooks", "guard.py")]), self.hold(run)]
+        if os.name != "nt":
+            holders.append(self.hold_open_file("exited-open-file", os.path.join(tree, "hooks", "guard.py")))
+        for proc in holders:
+            _stop_child(proc)
+        entry = worktree_entry_at(root, tree)
+        require(entry is not None, "the run dir's tree is not a worktree of the repo")
+        require(os.path.isdir(tree), "the run dir's tree is gone before the verdict")
+        decision = sweep.decide_worktree(root, entry, attended=True)
+        self.assertEqual(decision["action"], "reap", "an exited holder left the run dir kept: %s" % decision["reason"])
+        self.assertEqual(decision["reason"], "removable")
+
+
 def _read_when_ready(path, timeout=10.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
