@@ -1080,8 +1080,8 @@ MUTATIONS = [
      "test_strict_removes_a_detached_merged_tree_and_keeps_a_detached_unmerged_one"),
     ("strict: sweep_repo defaults to the permissive person's rules",
      "sweep",
-     '               attended: bool = False):',
-     '               attended: bool = True):',
+     '               attended: bool = False, own_lock_rule: bool = True):',
+     '               attended: bool = True, own_lock_rule: bool = True):',
      "test_the_attended_flag_reaches_the_sweep"),
     ("strict: the check applies to a person's run too",
      "sweep",
@@ -1157,8 +1157,8 @@ MUTATIONS = [
      "test_strict_removes_a_merged_tree_idle_2_hours"),
     ("strict: sweep_repo drops the flag before it judges a worktree",
      "sweep",
-     'return decide_worktree(root, entry, attended, agent_rule, batch, mode == "fast")',
-     'return decide_worktree(root, entry, agent_rule=agent_rule, batch=batch, fast=mode == "fast")',
+     'return decide_worktree(root, entry, attended, agent_rule, batch, mode == "fast", own_lock_rule)',
+     'return decide_worktree(root, entry, agent_rule=agent_rule, batch=batch, fast=mode == "fast", own_lock_rule=own_lock_rule)',
      "test_the_attended_flag_reaches_the_sweep"),
     ("strict: main drops the flag before it sweeps",
      "sweep",
@@ -1206,9 +1206,11 @@ MUTATIONS = [
     ("stale lock: a lock reason of another form counts as stale",
      "sweep",
      '    if not found:\n'
-     '        return False',
+     '        return False\n'
+     '    pid, start = int(found.group(1)), found.group(2)',
      '    if not found:\n'
-     '        return True',
+     '        return True\n'
+     '    pid, start = int(found.group(1)), found.group(2)',
      "test_other_lock_reason_keeps"),
     ("stale lock: the decision no longer asks for an unlock",
      "sweep",
