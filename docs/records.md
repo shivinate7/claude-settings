@@ -363,7 +363,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `stale-cites-at-merge` | The ste-lint CI step refuses a pull request that leaves stale prose of one kind. | [`docs/decisions/stale-cites-at-merge.md`](../docs/decisions/stale-cites-at-merge.md) |
 | `stale-cites-whole-tree` | `lint/stale_cites.py --tree [REV]` reads every tracked Markdown file at REV. | [`docs/decisions/stale-cites-whole-tree.md`](../docs/decisions/stale-cites-whole-tree.md) |
 | `stalled-steps` | Nobody types a step's `doing` status. | [`docs/decisions/stalled-steps.md`](../docs/decisions/stalled-steps.md) |
-| `start-checks-after-call` | Every session that starts from source `startup` gets two checks at its own start. | [`docs/decisions/start-checks-after-call.md`](../docs/decisions/start-checks-after-call.md) |
+| `start-checks-after-call` | Every session that starts from source `startup` gets one check at its own start. | [`docs/decisions/start-checks-after-call.md`](../docs/decisions/start-checks-after-call.md) |
 | `start-session-not-pretooluse` | Owner, typed in the triage chat 00:12 CST Nov 14, 2026 (ruling `own-809-reopen-hook-card`, item 809 reopened): "Reopen 809." No PreToolUse matcher in `settings.json` lists `mcp__ccd_session__start_session`, and none is a regex or `*` that covers it. | [`docs/decisions/start-session-not-pretooluse.md`](../docs/decisions/start-session-not-pretooluse.md) |
 | `two-worktrees-one-branch` | Coordinator, 2026-11-07 14:29 CST, under lane override-plain-ask: the incident below gets its guard now. | [`docs/decisions/two-worktrees-one-branch.md`](../docs/decisions/two-worktrees-one-branch.md) |
 
