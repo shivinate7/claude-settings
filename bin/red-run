@@ -8,7 +8,7 @@
 # names the class of the run: pass, assert (a FAIL line, the red that counts), crash (red with no FAIL line) or timeout (hooks/mutate_shared.py
 # classify_run). The copy goes at the end of the run, whichever way it ends, and on TERM, HUP or INT, which stop the test command and the
 # processes below it first. A run folder that a live process holds is kept by the sweep (lint/_test_temp.py), so a long run keeps its copy.
-# Exit: 0 for a pass; 1 for any other end of the test command; 2 for a bad call, an unknown commit or a stale --replace.
+# Exit: 0 for a pass; 1 for any other end of the test command; 2 for a bad call, an unknown commit, a stale --replace or a test command that cannot start.
 import os
 import shutil
 import signal
@@ -112,7 +112,12 @@ def main(argv, state):
             except (StaleMutant, AmbiguousMutant) as exc:
                 raise BadCall(str(exc))
     with tempfile.TemporaryFile() as out:  # outside the copy, so the copy holds the commit's tree and what was added
-        state["proc"] = proc = _nowindow.Popen(cmd, cwd=folder, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT)
+        try:
+            state["proc"] = proc = _nowindow.Popen(cmd, cwd=folder, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT)
+        except OSError as exc:  # no such program, not executable: no test ran, so no red either; exit 2 apart from a test that went red
+            print("red-run: the test command cannot start: %s" % exc, file=sys.stderr)
+            print("red-run %s: %s" % (sha[:7], CLASSIFIERS["fail_line"](1, "", False)))
+            return 2
         code = proc.wait()
         out.seek(0)
         text = out.read().decode("utf-8", "replace")

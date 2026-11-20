@@ -2981,28 +2981,60 @@ MERGE_LOCK = re.compile(r"merge tool, pid (\d+)")
 RUN_FOLDER = re.compile(r"(?:ci-job-lint-(\d+)-|ci-job-pin-(\d+)-[0-9a-f]{7}-|mutate_guard_(\d+)-)")
 
 
-def held_by_live_process(path):
+def _descends_from(sweep, pid, owner):
+    """True when OWNER is PID's parent or an ancestor, None when a parent cannot be read on the way up, else False. A holder is its folder's
+    owner's child (red-run's test command, a lint's subprocess), so this is how an unreadable pid is tied to one folder."""
+    for _ in range(sweep.MAX_CLIMB):
+        if pid == owner:
+            return True
+        if pid <= 1:
+            return False
+        pid = sweep._parent_pid(pid)
+        if pid is None:
+            return None
+    return None
+
+
+RUN_COPY = re.compile(r"(\d+)-[0-9a-f]{32}")  # the run folder lint/_test_temp.py makes, and bin/red-run's copy: <pid>-<uuid>
+
+
+def folder_owner(path):
+    """The pid a run folder is named for, or None when its name carries none (RUN_FOLDER, RUN_COPY)."""
+    name = os.path.basename(os.path.normpath(path))
+    m = RUN_COPY.fullmatch(name) or RUN_FOLDER.match(name)
+    return int(next(g for g in m.groups() if g)) if m else None
+
+
+def held_by_live_process(path, owner=None):
     """True when a live process has its working folder, or an open file, in PATH or under it, or when that cannot be read (unknown keeps the folder).
     The working folder comes from the janitor's `sweep.processes_in`, the one reader of it. That reader skips open files, so on Linux each
-    /proc/<pid>/fd link is read here too: a child that outlives a dead launcher can hold a file in the folder while its cwd is elsewhere."""
+    /proc/<pid>/fd link is read here too: a child that outlives a dead launcher can hold a file in the folder while its cwd is elsewhere.
+    A pid whose cwd or fd list cannot be read keeps the folder only when it is below OWNER (the pid the folder is named for; the owner's own cwd is no hold): the
+    other pids this user cannot read (pid 1, another user's) are no holder of this folder. OWNER defaults to the pid in the folder's name
+    (folder_owner). A folder with no owner pid keeps for no unreadable pid."""
+    owner = folder_owner(path) if owner is None else owner
+    if owner is not None and owner <= 1:
+        owner = None  # init is every process's ancestor, so it ties none of them to this folder
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "janitor"))
     try:
         import sweep  # janitor/sweep.py
-        inside, _unreadable = sweep.processes_in(path)
+        inside, unreadable = sweep.processes_in(path)
     except Exception:
         return True
     if inside is None or inside:
         return True
+    unreadable = set(unreadable)
     base = os.path.realpath(path)
     try:
         pids = [n for n in os.listdir("/proc") if n.isdigit()]
     except OSError:
-        return False  # no /proc (macOS, Windows): the working-folder read above is all there is
-    for pid in pids:
+        pids = None  # no /proc (macOS, Windows): the working-folder read above is all there is
+    for pid in pids or ():
         try:
             links = [os.path.join("/proc", pid, "fd", n) for n in os.listdir(os.path.join("/proc", pid, "fd"))]
         except OSError:
-            continue  # ended, or another user's process
+            unreadable.add(int(pid))  # ended, or another user's process: the owner test below sorts it
+            continue
         for link in links:
             try:
                 target = os.readlink(link)
@@ -3010,7 +3042,12 @@ def held_by_live_process(path):
                 continue
             if target == base or target.startswith(base + os.sep):
                 return True
-    return False
+    if owner is None:
+        return False
+    try:
+        return any(pid != owner and _descends_from(sweep, pid, owner) is not False and pid_alive(pid) for pid in unreadable)  # a pid that ended since the read holds nothing
+    except Exception:
+        return True
 
 
 def sweep_dead_folders(temp):
@@ -3044,7 +3081,7 @@ def sweep_dead_trees(root):
             m = MERGE_LOCK.fullmatch(line[len("locked"):].strip())
             tmp = os.path.dirname(path)
             if (m and os.path.basename(path) == "tree" and os.path.basename(tmp).startswith(("merge-wt-", "merge-fresh-"))
-                    and os.path.dirname(tmp) == temp and not pid_alive(int(m.group(1))) and not held_by_live_process(tmp)):
+                    and os.path.dirname(tmp) == temp and not pid_alive(int(m.group(1))) and not held_by_live_process(tmp, int(m.group(1)))):
                 drop_worktree(root, tmp, path)
 
 
