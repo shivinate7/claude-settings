@@ -1,0 +1,1 @@
+- protected-cwd-in-folder-alarm: with the shell's folder inside a protected folder, a command word resolves under it, so `cp a.csv /tmp/x` and `touch -r fixtures/a /tmp/x` and a dry-run `rsync -n` are refused (hooks/guard_frozen.py `_shell_write_hit`). Safe direction. Decision: protected-path. Seen: 2026-11-18 x1
