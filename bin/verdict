@@ -8,7 +8,7 @@
 # Exit 0 is also FAIL (`cut`) for a pytest argv (`pytest`, `py.test`, `python -m pytest`, also through `env`, `uv run`, `uvx` and `bash -c`) with `-q` or a line-start session header, and no line-start summary: the run stopped early. A `-qq` run (no summary line) is complete when a line of progress chars ends `[100%]` (any padding, colour codes ignored), or, with `--co`, when it prints a `<file>: <count>` line. A `bash -c` script is read by its own scanner: a newline, `;`, `&`, `|` or `do`/`then`/`else`/`{`/`!` starts a command, a `#` starts a comment only at a word start, and heredoc text is no command.
 # A run with no $VERDICT_LOG deletes verdict-*.log files older than 1 day from the temp folder: regular files whose first line is our own header only; errors skipped.
 # Killed by signal N: exit 128+N. Ctrl-C: exit 130. Windows: bin/verdict.cmd.
-import os, re, shutil, subprocess, sys, tempfile, time
+import os, re, shutil, signal, subprocess, sys, tempfile, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 HOT = re.compile(r"FAIL|Error|assert|Traceback")
@@ -170,11 +170,12 @@ def main(argv):
         try: beat = int(os.environ.get("VERDICT_HEARTBEAT") or 120)
         except ValueError: beat = 120
         if beat < 1: beat = 120
-        try: proc = _nowindow.Popen(argv, stdout=f, stderr=subprocess.STDOUT)
+        try: proc = _nowindow.Popen(argv, stdout=f, stderr=subprocess.STDOUT)  # the caller's group, so a KILL to it reaches the child; a TERM or HUP to verdict alone is forwarded down the tree
         except OSError as e: proc = None; f.write(f"verdict: cannot run {argv[0]}: {e}\n".encode()); rc = 127
         if proc:
             say, beat_file = True, os.environ.get("STALL_WATCH_BEAT")
             try:
+              with _nowindow.forward_signals(proc):
                 while True:
                     try: rc = proc.wait(timeout=beat); break
                     except subprocess.TimeoutExpired:
@@ -187,12 +188,12 @@ def main(argv):
                                 with open(beat_file, "a", encoding="utf-8") as b: b.write(line + "\n")
                             except OSError: pass
             except KeyboardInterrupt:
-                rc = 130
+                rc, reached = 130, []
                 try:
-                    proc.terminate()
+                    reached = _nowindow.kill_tree(proc, signal.SIGTERM)  # an INT to verdict alone leaves the child's tree running
                     proc.wait(timeout=5)
                 except (subprocess.TimeoutExpired, KeyboardInterrupt): pass
-                finally: proc.kill(); proc.wait()
+                finally: _nowindow.kill_tree(proc, getattr(signal, "SIGKILL", signal.SIGTERM), reached); proc.kill(); proc.wait()
         f.flush(); end = f.tell()
     secs = f"{time.time() - t:.1f}s"
     if rc < 0: note, rc = f" killed by signal {-rc}", 128 - rc
