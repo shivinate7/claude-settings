@@ -27661,7 +27661,6 @@ class ProducerFolderNames(unittest.TestCase):
                          "mutate_guard must name its work folder with the run's pid, got prefix %r" % made[0])
 
 
-@unittest.skipIf(os.name == "nt", "a Windows process gets no SIGTERM or SIGHUP handler run, and stop_group needs os.killpg")
 class WorkFolderOnSignal(unittest.TestCase):
     """hooks/mutate_guard.py's work folder is removed when a signal ends the run, as when it ends normally. Each case starts the real main() in
     a child with no mutation, and the mutant run is a block, so the folder exists while the run is up. A TERM or HUP skips the folder's cleanup
@@ -27687,12 +27686,15 @@ class WorkFolderOnSignal(unittest.TestCase):
         """The work folders of the run `pid` in its TMPDIR."""
         return [n for n in os.listdir(tmp) if n.startswith("mutate_guard_%d-" % pid)]
 
+    @unittest.skipIf(os.name == "nt", "a Windows process gets no SIGTERM handler run, so its work folder is not removed there")
     def test_sigterm_removes_the_work_folder(self):
         self.assert_signal_removes_work_folder(signal.SIGTERM)
 
+    @unittest.skipIf(os.name == "nt", "a Windows process gets no SIGHUP handler run, so its work folder is not removed there")
     def test_sighup_removes_the_work_folder(self):
         self.assert_signal_removes_work_folder(signal.SIGHUP)
 
+    @unittest.skipIf(os.name == "nt", "a Windows process gets no SIGTERM handler run, so its work folder is not removed there")
     def test_a_second_term_in_clean_up_still_removes_the_work_folder(self):
         """A group TERM sends the child a second TERM while the work folder is removed. That TERM must not cut the removal short."""
         proc, tmp = self.start_child(second_term=True)

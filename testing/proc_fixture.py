@@ -1,5 +1,6 @@
 """Process helpers for the fixture suites that start a tool and signal it: lint/test_verdict.py and
-merge/test_launch.py. One home, so no suite copies them. Posix only: a caller skips on Windows.
+merge/test_launch.py. One home, so no suite copies them. alive and wait_gone are posix only: a caller skips them on Windows.
+stop_group and kill_all have a Windows branch.
 """
 import os
 import signal
@@ -65,18 +66,27 @@ def default_sigint():
 
 
 def kill_all(pids):
-    """SIGKILL each pid that is still set. A cleanup: a red run leaves no process behind."""
+    """SIGKILL each pid that is still set. A cleanup: a red run leaves no process behind. Windows has no SIGKILL, and os.kill
+    there ends the pid with TerminateProcess for any signal but the console ones, so SIGTERM ends it."""
+    sig = signal.SIGTERM if os.name == "nt" else signal.SIGKILL
     for pid in pids:
         try:
-            os.kill(pid, signal.SIGKILL)
+            os.kill(pid, sig)
         except OSError:
             pass
 
 
 def stop_group(proc):
-    """SIGKILL the process group of a proc started with start_new_session=True, then reap proc."""
-    try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except OSError:
-        pass
+    """SIGKILL the process group of a proc started with start_new_session=True, then reap proc. Windows has no killpg and no
+    process group here: proc.kill ends the proc alone."""
+    if os.name == "nt":
+        try:
+            proc.kill()
+        except OSError:
+            pass
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
     proc.wait()
