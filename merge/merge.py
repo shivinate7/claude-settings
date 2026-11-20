@@ -6196,13 +6196,16 @@ def pr_next_act(row, now):
     None), label_at (epoch of the last `labeled` event of pr_event_label, or None), based_on (the open pull request this one stacks on: its head branch is
     this one's base ref, or None), draft, touched (epoch of the last update).
     The first match wins, in decision pr-ledger's order: a done record (act batch, owner batch runner; with no lane-lint PASS at the live head, act lane
-    lint, owner lane: the join refuses it until the lane runs `merge --lane-lint`), an open record, a stale record, the hold label, the batch label, a
+    lint, owner lane: the join refuses it until the lane runs `merge --lane-lint`; on a draft, act `merge --ready`, owner lane, with or without a lint
+    PASS: decision draft-until-reviewed, ruling Q2; a lint FAIL keeps the draft on act lane lint), an open record, a stale record, the hold label, the batch label, a
     stacked pull request, a hold label with no valid `Waits on:` line (act none, red, even on a draft: no hold rule holds it), a draft with no record,
     none. Blocked on #N is never red here: it is red while #N is red, which the caller resolves."""
     state, hours = row["state"], lambda since: max(0.0, (now - since) / 3600)
     if state in PR_RECORD_STATES:
         since = row["record_at"] or row["touched"]
-        if state == "done":
+        if state == "done" and row["draft"] and row["lint"]:  # a reviewed draft: the lane's one act is `merge --ready`; a lint FAIL or unknown clears row["lint"] and reads the lane lint act below
+            act, owner = "merge --ready", "lane"
+        elif state == "done":
             act, owner = ("batch", "batch runner") if row["lint"] else ("lane lint", "lane")
         elif state == "open":
             act, owner = f"lane round {row['next_round']}", "lane"
@@ -6235,8 +6238,8 @@ def reviewed_read(h, cfgrel=None, facts=None, ledger=None):
     the two PR ledger number lines (decision pr-ledger). Each open pull request gets a line, `#<n> <branch> <sha9> <state>: <why>; next: <act>, owner <owner>,
     age <H>h[, RED]; CI <ci>`; one with no record of its own and no carried one too reads state `no record`, CI not read, and the `no record:` line names it as
     well. A pull request is stacked, and reads `blocked on #N`, when its base ref names the head branch of open pull request #N; a `Based on #N` body line
-    stacks nothing. A done record with no lane-lint PASS at the live head (and no `lint skipped`) reads act `lane lint`, owner lane; else act `batch`; the
-    longest wait from a done record counts both acts. On top of the reads below: one `issues/<n>/events` list for each pull request that pr_event_label names
+    stacks nothing. A done record on a ready pull request with no lane-lint PASS at the live head (and no `lint skipped`) reads act `lane lint`, owner lane; else act `batch`. A done record on a draft reads state `ready`, act `merge --ready`, owner lane, with or without a lane-lint PASS; a lint FAIL (or an unreadable lint) keeps it on act `lane lint`. The
+    longest wait from a done record counts all three acts. On top of the reads below: one `issues/<n>/events` list for each pull request that pr_event_label names
     (a batch label, or a hold label with a valid `Waits on:` line). Two list reads (the open pull requests, then the
     repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and the workflow run list (`head_state`'s `gh run list`) of its head,
     read once (the lint step's rollup read and the CI state share them through the memo; Host.runs keeps the run list there, so a head whose check rows link two runs reads it once too), and the ruleset and the branch protection once a run (decision pr-review-record, the cost;
@@ -6296,7 +6299,9 @@ def reviewed_read(h, cfgrel=None, facts=None, ledger=None):
                 lint = lint_state(lints.get(n, []), sha)
                 if lint == "none" and lint_carried(root, cfgrel, d["base"]["ref"], n, lint_passed(lints.get(n, [])), sha, h, source_lint_passed(h, n, d.get("body"))[1]):
                     lint = "pass"
-                if lint != "pass" and not d.get("draft") and rollup_green(h, n, sha):  # CI proved this head, so the join skips the lint (lint_check). A draft reads no head checks
+                if d.get("draft") and lint in ("pass", "none"):  # a reviewed draft goes ready by `merge --ready` with or without a lint PASS: only a lint FAIL holds it (decision draft-until-reviewed, ruling Q2)
+                    state = "ready"
+                elif lint != "pass" and not d.get("draft") and rollup_green(h, n, sha):  # CI proved this head, so the join skips the lint (lint_check). A draft reads no head checks
                     why = f"{why}; lint skipped: {ROLLUP_JOB} is green on {sha[:9]}, so CI already proved this head"
                 elif lint != "pass":  # a done record is not ready without the lane's lint at this head (decision lanes-run-no-full-ci-job)
                     row["lint"] = False
@@ -6311,7 +6316,7 @@ def reviewed_read(h, cfgrel=None, facts=None, ledger=None):
             row["label_at"] = max((t for t in stamps if t is not None), default=None)
         act, owner, age, red = pr_next_act(row, now)
         acts[n] = [act, owner, age, red, based]
-        if act in ("batch", "lane lint"):  # both wait from a done record
+        if act in ("batch", "lane lint", "merge --ready"):  # each waits from a done record
             longest = max(longest, age)
         lines.append((n, f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}", ci))
     for n, got in acts.items():  # blocked on #N is red while #N is red; a loop of blocks has no one to move it
