@@ -46,6 +46,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
+sys.path.append(os.path.join(HERE, "..", "testing"))  # append: the signal-test helpers (testing/proc_fixture.py)
+import proc_fixture  # noqa: E402  the one home of the signal-test helpers; this module's wait_for is the rendezvous helper, so call proc_fixture's qualified
 from workflow_steps import run_body, step_blocks, step_env, step_with  # noqa: E402  the one home of the step parser
 sys.path.append(os.path.join(HERE, "..", "hooks"))  # append: the pin note's names (hooks/pin_note.py)
 from pin_note import ENV as PIN_NOTE_ENV  # noqa: E402  the one home of the pin note's variable (hooks/pin_note.py)
@@ -2687,20 +2689,26 @@ class PinnedHarness(Job):
         write_lf(os.path.join(self.root, "actions", "code-check", "code_check.py"), "print('child harness')\n")
 
     @staticmethod
-    def git_stub(root):
+    def git_stub(root, hold=None):
         """A stub git first on PATH that logs each `git archive` and `git fetch` call, then runs the real git. A line for an
         archive is `archive <n>`: n is how many export folders the run's TMPDIR held when the archive ran. Each export folder
-        it found also logs `pin-folder <pid of the git caller> <folder name>`. -> (the env that
+        it found also logs `pin-folder <pid of the git caller> <folder name>`. hold: the archive writes `<hold>.ready`, then waits
+        until `<hold>` exists (a bounded poll), so a case can stop a run inside its export. -> (the env that
         puts the stub first, the path of its call log). A shell script, so posix only."""
         bin_dir = tempfile.mkdtemp(prefix="gitstub-", dir=root)
         calls = os.path.join(bin_dir, "calls.txt")
+        wait = ""
+        if hold:
+            wait = ('    : > "%s.ready"; i=0\n'
+                    '    while [ ! -e "%s" ] && [ "$i" -lt 1200 ]; do sleep 0.05; i=$((i + 1)); done\n') % (hold, hold)
         script = ('#!/bin/sh\n'
                   'case "$1" in\n'
                   '  archive) echo "archive $(ls "${TMPDIR:-/tmp}" | grep -c \'^ci-job-pin-\')" >> "%s"\n'
-                  '    for f in "${TMPDIR:-/tmp}"/ci-job-pin-*; do echo "pin-folder $PPID $(basename "$f")" >> "%s"; done ;;\n'
+                  '    for f in "${TMPDIR:-/tmp}"/ci-job-pin-*; do echo "pin-folder $PPID $(basename "$f")" >> "%s"; done\n'
+                  '%s    ;;\n'
                   '  fetch) echo "fetch" >> "%s" ;;\n'
                   'esac\n'
-                  'exec "%s" "$@"\n') % (calls, calls, calls, shutil.which("git"))
+                  'exec "%s" "$@"\n') % (calls, calls, wait, calls, shutil.which("git"))
         with open(os.path.join(bin_dir, "git"), "w", encoding="utf-8", newline="\n") as f:
             f.write(script)
         os.chmod(os.path.join(bin_dir, "git"), 0o755)
@@ -2885,6 +2893,56 @@ class PinnedHarness(Job):
         _, pid, name = found[0].split(" ", 2)
         self.assertTrue(name.startswith("ci-job-pin-%s-" % pid),
                         "the export folder %s does not name the pid %s of the ci-job run that made it" % (name, pid))
+
+    def held_export_run(self, hold, verdict=False):
+        """A pinned run whose export waits on `hold` (see git_stub). -> (the Popen, the run's TMPDIR). verdict: the run starts under
+        bin/verdict, so a signal to verdict reaches ci-job through its forward. The run has its own TMPDIR and its own group."""
+        tmp = tempfile.mkdtemp(prefix="ci-job-tmp-", dir=RUN_FOLDER)  # this run's temp folder: other runs' exports stay out
+        stub_env, _calls = self.git_stub(RUN_FOLDER, hold=hold)
+        argv, env = self.job_call(self.code_step(self.pin_a), args=(*self.LINT, "--pinned"), script=self.ci_job,
+                                  env={**stub_env, "CLAUDE_CONFIG_DIR": self.cfg, "TMPDIR": tmp,
+                                       "VERDICT_LOG": os.path.join(self.logs, "held.log")})
+        if verdict:
+            argv = [sys.executable, os.path.join(HERE, "..", "bin", "verdict"), *argv]
+        out = open(os.path.join(self.logs, "held.out"), "wb")
+        self.addCleanup(out.close)
+        proc = subprocess.Popen(argv, cwd=self.root, env=env, stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+        self.addCleanup(proc_fixture.stop_group, proc)
+        return proc, tmp
+
+    def export_run_ends(self, sig=None, verdict=False):
+        """A held run ends, and its export folder must be gone once it has exited. sig: the signal sent to the run, or None to let it end on
+        its own. The export waits on a file the test writes after the signal, so ci-job's own cleanup, which waits on its export, can finish."""
+        hold = os.path.join(tempfile.mkdtemp(prefix="hold-", dir=RUN_FOLDER), "go")
+        proc, tmp = self.held_export_run(hold, verdict=verdict)
+        self.assertTrue(proc_fixture.wait_for(hold + ".ready", 60, proc), "the export never started: the run did not reach its archive")
+        held = [n for n in os.listdir(tmp) if n.startswith("ci-job-pin-")]
+        self.assertEqual(len(held), 1, "scope: one export folder must exist while the export waits, got %r" % held)
+        if sig is not None:
+            proc.send_signal(sig)
+        open(hold, "w").close()
+        try:
+            proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            self.fail("the run did not exit within 60 s%s" % ("" if sig is None else " of %s" % sig.name))
+        left = [n for n in os.listdir(tmp) if n.startswith("ci-job-pin-")]
+        self.assertEqual(left, [], ("%s to ci-job" % sig.name if sig is not None else "a run that ended") + " left its export folder behind")
+
+    @unittest.skipUnless(os.name == "posix", "POSIX signals and a shell stub")
+    def test_a_run_that_ends_removes_its_export_folder(self):  # a control: no signal, the run's own cleanup removes the folder
+        self.export_run_ends()
+
+    @unittest.skipUnless(os.name == "posix", "POSIX signals and a shell stub")
+    def test_sigterm_to_ci_job_removes_its_export_folder(self):
+        self.export_run_ends(signal.SIGTERM)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX signals and a shell stub")
+    def test_sighup_to_ci_job_removes_its_export_folder(self):
+        self.export_run_ends(signal.SIGHUP)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX signals and a shell stub")
+    def test_sigterm_through_verdict_removes_the_export_folder(self):
+        self.export_run_ends(signal.SIGTERM, verdict=True)
 
 
 @unittest.skipUnless(os.name == "posix", "the stall watch and the process-group check are posix only")
