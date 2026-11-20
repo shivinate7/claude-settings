@@ -8,7 +8,9 @@ import time
 
 
 def zombie(pid):
-    """True when pid has ended but not yet been reaped. /proc answers on Linux, ps elsewhere."""
+    """True when pid has ended but not yet been reaped. /proc answers on Linux, ps elsewhere. Windows has neither: False."""
+    if os.name == "nt":
+        return False
     try:
         with open("/proc/%d/stat" % pid, encoding="utf-8") as handle:
             return handle.read().rsplit(")", 1)[1].split()[0] == "Z"
@@ -23,7 +25,10 @@ def zombie(pid):
 
 
 def alive(pid):
-    """True when pid runs. A zombie has ended: a grandchild's zombie waits for init to reap it, so it reads as gone."""
+    """True when pid runs. A zombie has ended: a grandchild's zombie waits for init to reap it, so it reads as gone.
+    Posix only: on Windows signal 0 is CTRL_C_EVENT, which signals a console instead of probing the pid."""
+    if os.name == "nt":
+        raise NotImplementedError("testing/proc_fixture.alive is POSIX only: Windows has no signal-0 probe")
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
