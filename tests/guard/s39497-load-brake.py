@@ -2,8 +2,8 @@
 FAMILY = "load-brake"
 # The machine-load brake. On a start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
 # the guard reads the machine's load once: memory in use as a share of this machine's memory, and disk free on
-# the home drive (the root drive in a cloud session) in GB against the drive's size. CPU is not read
-# (decision machine-load-brake): a 200 ms CPU
+# the home drive (the root drive in a cloud session) in GB against the drive's size. CPU is not read on a
+# start call (decision machine-load-brake): a 200 ms CPU
 # sample is noise, and memory and disk are what stall a machine. It counts no claude process and no running
 # lane. A GB here is 2**30 bytes, as df -k and PowerShell 1GB give. The levels:
 #   busy  memory over 85%, or disk free under the smaller of 10% of the disk and 15 GB. An Agent or Task call
@@ -14,11 +14,12 @@ FAMILY = "load-brake"
 #   full  memory over 95%, or disk free under the smaller of 5% of the disk and 5 GB. Every lane call is refused,
 #         an Agent or Task call too. In a cloud session a full disk or memory over 95% refuses a start (CLOUD, below;
 #         owner, 2026-11-19 21:30 CST, confirmed 22:25 CST).
-# The refusal names the reading that tripped it, and never names the CPU. A read that fails, or a reading left
+# The refusal names the reading that tripped it, and a memory or disk refusal never names the CPU. A read that fails, or a reading left
 # unread, counts as normal. An agent's own shell or file write reads once and is refused at full only
 # (A RUNNING LANE, below). Every other tool reads no load. The read starts no child process, writes no file,
 # and sleeps for no wait.
 # Not pinned: start_session at busy.
+# The one CPU read is a lint start's load per CPU on Linux (THE LINT LOAD, below).
 #
 # THE SEAM. The cases drive the guard in a probe process that imports guard.py (GUARD_UNDER_TEST
 # honored), patches the function below, and calls main() with the real stdin payload. The
@@ -35,13 +36,15 @@ FAMILY = "load-brake"
 #                  The OS sources, all faked by THE FAKE HOST: darwin reads memory through sysctlbyname;
 #                  linux reads memory from /proc/meminfo (MemTotal and MemAvailable; owner, 2026-11-19 21:30 CST, "read memory on
 #                  linux if u can"); both read the disk through shutil.disk_usage: the home folder, or "/"
-#                  in a cloud session. Neither reads the CPU ticks, the load average, or waits.
+#                  in a cloud session. On Linux it also reads the load average (/proc/loadavg) and the CPU count, for THE LINT LOAD.
+#                  Neither reads the CPU ticks or waits.
 # The judge must call it by its bare name, so the probe's patch (set on every guard module that
 # holds the name) is the function that runs. A function the probe cannot replace fails every case.
 # The reading of a call is one read_load() per start call, and none on any other call.
 # THE FAKE HOST. A case with a `fake` spec runs the real read_load under fakes, in the probe, and judges the
-# call on what it read. The fake sets sys.platform, ctypes.CDLL and ctypes.cdll, os.getloadavg (the load
-# average, which no reading uses), shutil.disk_usage, and the /proc/stat file (builtins.open and io.open).
+# call on what it read. The fake sets sys.platform, ctypes.CDLL and ctypes.cdll, os.getloadavg and /proc/loadavg
+# (the load average, which a Linux lint start reads), os.cpu_count and os.sched_getaffinity (`cpus`, 4 by default),
+# shutil.disk_usage, and the /proc/stat file (builtins.open and io.open).
 # Each source is restored before the judge runs. Tick samples: a base sample, then one that adds the case's
 # busy share, so a reader that reads the ticks would see that share. `tick_reads` counts each read of them.
 # THE WAITS. Every time.sleep the probe makes is counted in `sleeps`, and nothing waits. On Windows the probe
@@ -105,7 +108,8 @@ GB = 2 ** 30
 
 
 # Run `read` with every OS source faked, then restore each one: the platform, the Mach ticks and
-# memory level (darwin), the load average, the disk and /proc/stat. The waits stay counted, not waited on.
+# memory level (darwin), the load average and CPU count, the disk, /proc/loadavg and /proc/stat. The waits stay
+# counted, not waited on.
 def under_fake(read, fake):
     real_open = open
     busy = int(fake["busy"])
@@ -144,15 +148,20 @@ def under_fake(read, fake):
                 raise OSError("fake: /proc/meminfo is unreadable")
             total = 1000000
             return io.StringIO("MemTotal: %d kB\nMemAvailable: %d kB\n" % (total, total - int(total * fake["memory"] / 100.0)))
+        if str(file) == "/proc/loadavg":
+            return io.StringIO("%.2f %.2f %.2f 1/100 1234\n" % (load, load, load))
         return real_open(file, *args, **kwargs)
 
     total, free = int(fake["disk_total_gb"] * GB), int(fake["disk_free_gb"] * GB)
     usage = types.SimpleNamespace(total=total, used=total - free, free=free)
     load = fake["load"]
+    cpus = int(fake.get("cpus", 4))
     with mock.patch.object(sys, "platform", fake["platform"]), \
             mock.patch("ctypes.CDLL", cdll), \
             mock.patch("ctypes.cdll", types.SimpleNamespace(LoadLibrary=cdll)), \
             mock.patch("os.getloadavg", lambda: (load, load, load), create=True), \
+            mock.patch("os.cpu_count", lambda: cpus), \
+            mock.patch("os.sched_getaffinity", lambda pid: set(range(cpus)), create=True), \
             mock.patch("shutil.disk_usage", lambda path: disk_read(path, usage)), \
             mock.patch("builtins.open", stat_open), mock.patch("io.open", stat_open):
         try:
@@ -229,7 +238,7 @@ try:
             g.floor_hit = lambda tool, tool_input: "haiku"
         elif spec.get("patch_floor") == "read":
             g.floor_hit = lambda tool, tool_input: g.read_load() and ""
-        try:
+        def judge():
             if spec["mode"] == "hit":
                 # The brake's two functions, called direct on the call's own payload (the probe's stdin), so a
                 # case reads each pair they return, not only the decision.
@@ -245,6 +254,13 @@ try:
                 out["lane"] = None if direct is None else list(direct(body, body.get("tool_name")))
             else:
                 g.main()
+        try:
+            if "host" in spec:
+                # THE HOST: the judge's own reads see this host's load and CPU count, while the reader stays the stub
+                # above. A guard that reads the load outside read_load sees it; one that reads only through read_load does not.
+                under_fake(judge, spec["host"])
+            else:
+                judge()
         except SystemExit:
             pass
     out["files"] = [p for p in listing() if p not in before]
@@ -288,12 +304,12 @@ def lb_gb(free, total):
     return re.compile(re.escape("disk %.1f GB free of %.0f GB" % (free, total)))
 
 
-def lb_fake(platform, busy=10.0, load=0.5, memory=40, disk_total=926.0, disk_free=500.0, meminfo="read"):
-    """A fake host for THE FAKE HOST: `busy` the CPU share the tick samples would show, `load` the 1-minute
-    load average, `memory` the percent in use, and the disk in GB. The defaults are a quiet host with room on
-    the disk."""
+def lb_fake(platform, busy=10.0, load=0.5, memory=40, disk_total=926.0, disk_free=500.0, meminfo="read", cpus=4):
+    """A fake host for THE FAKE HOST: `busy` the CPU share the tick samples would show, `load` the load average
+    (every window reads it), `memory` the percent in use, the disk in GB, and `cpus` the CPU count. The defaults
+    are a quiet host with room on the disk."""
     return {"platform": platform, "busy": busy, "load": load, "memory": memory,
-            "disk_total_gb": disk_total, "disk_free_gb": disk_free, "meminfo": meminfo}
+            "disk_total_gb": disk_total, "disk_free_gb": disk_free, "meminfo": meminfo, "cpus": cpus}
 
 
 def lb_reading(**changes):
@@ -400,14 +416,17 @@ def lb_names(word, *numbers, percent=True):
 
 def lb_decision_check(tool, reading, want, names=(), background=None, tool_input=None, reads=1, lacks=(),
                       fake=None, agent=None, remote=None, own_env=None, transcript=None, spy=False,
-                      disk_paths=None, disk_reads=None):
+                      disk_paths=None, disk_reads=None, host=None):
     """A start call under a forced reading, or under THE FAKE HOST when `fake` is given (then `reading`
     is unused and the real read_load runs). `background` is the call's run_in_background: True, False, or
     None to leave it out. `tool_input` replaces the whole input. `remote` is CLAUDE_CODE_REMOTE (see lb_run),
-    and `own_env`, `transcript` and `spy` are lb_run's."""
+    and `own_env`, `transcript` and `spy` are lb_run's. `host` keeps the forced `reading` and runs the judge's
+    own reads under that fake host (see the probe's THE HOST)."""
     def check():
         given = lb_lane_input(tool, background) if tool_input is None else tool_input
         spec = {"mode": "judge", "fake": fake} if fake else {"mode": "judge", "reading": reading}
+        if host:
+            spec["host"] = host
         got, reason, side = lb_run(tool, spec, given, agent=agent, remote=remote, own_env=own_env,
                                    transcript=transcript, spy=spy)
         if got == "error":
@@ -730,7 +749,7 @@ lb_add("disk 100 GB, 12 GB free, run_in_background true: not busy, allowed",
                          fake=lb_fake("darwin", disk_total=100.0, disk_free=12.0)))
 lb_add("disk GB not clamped: a 926 GB disk with 119 GB free reads disk_total_gb 926 and disk_free_gb 119",
        lb_reader_fake(lb_fake("darwin", disk_total=926.0, disk_free=119.0), lb_gb_unclamped))
-# Memory 80% is under the 85% that memory alone needs, so it is not busy. The brake reads no CPU: the load average
+# Memory 80% is under the 85% that memory alone needs, so it is not busy. An Agent call reads no CPU: the load average
 # and the CPU ticks change nothing here. The darwin fake host shows the real reader's memory is what counts.
 lb_add("Agent, darwin host at memory 80%, load 107 and CPU ticks 50% busy, run_in_background true: not busy, allowed",
        lb_decision_check("Agent", None, "allow", background=True,
@@ -873,9 +892,9 @@ lb_add("a Bash call whose agent_id is malformed reads no load under the worst re
 
 # A LINT START AT THE FULL DISK. `merge --lane-lint` already refuses at a full disk inside the merge tool, before it makes
 # its lint tree (merge/test_lane_lint.py), so no guard case pins it here. A direct `bin/ci-job --lint` has no disk floor
-# anywhere, so a background one is refused by the brake at a full disk. The lint start reads disk and memory, never
-# the load average (decision machine-load-brake: the disk at owner pick a, 2026-11-17; memory at owner, 2026-11-19
-# 21:30 CST, confirmed 22:25 CST).
+# anywhere, so a background one is refused by the brake at a full disk. The lint start reads disk and memory (decision
+# machine-load-brake: the disk at owner pick a, 2026-11-17; memory at owner, 2026-11-19 21:30 CST, confirmed 22:25 CST),
+# and on Linux the load per CPU too (THE LINT LOAD, below).
 LB_CI_LINT_BG = {"command": "bin/ci-job --lint", "run_in_background": True}
 LB_LANE_LINT_BG = {"command": "merge --lane-lint brake-reads-load-before-lint", "run_in_background": True,
                    "timeout": 7200000}   # above the lint bound, so check-timeout passes the call
@@ -1168,6 +1187,51 @@ def cloud_one_home_check():
 lb_add('cloud check: guard_core.is_cloud exists and is True only for exactly "true"', cloud_name_check)
 lb_add("cloud check: guard.py's brake guard holds guard_core.is_cloud, one home", cloud_one_home_check)
 
+
+# THE LINT LOAD (Linux). A background lint start, or a lint with a trailing `&`, is refused when the load per CPU is over
+# 4.0 (the 4-per-CPU value of decision lanes-run-no-full-ci-job). On Linux, local and cloud, read_load reads the load and
+# the CPU count. The fake host sets every window to one load, so these cases hold for any window and do not pin which
+# window the brake reads. An Agent call is not braked on the CPU.
+def lb_load_fake(per_cpu, cpus=4):
+    """A fake Linux host with `per_cpu` load on each of `cpus` CPUs: the load average is per_cpu times cpus."""
+    return lb_fake("linux", load=per_cpu * cpus, cpus=cpus)
+
+
+def lb_load_names(*numbers):
+    """A refusal that names the load: the load-brake rule prefix, the decision cite, and one of `numbers` spelled whole
+    (the per-CPU figure or the raw load), not as part of a longer number."""
+    value = re.compile(r"(?<![\d.])(?:%s)(?![\d.])" % "|".join(re.escape(n) for n in numbers))
+    return (LB_LOAD_RULE, LB_LOAD_CITE, value)
+
+
+LB_LOAD14 = lb_load_names("14", "14.0", "14.00", "56", "56.0", "56.00")
+LB_LOAD42 = lb_load_names("4.2", "4.20", "16.8", "16.80")
+lb_add("bin/ci-job --lint, background, linux, local, load 14 per CPU on 4 CPUs: refused, names the load, not the sweep",
+       lb_decision_check("Bash", None, "deny", LB_LOAD14, tool_input=LB_CI_LINT_BG, fake=lb_load_fake(14.0),
+                         lacks=(LB_SWEEP,)))
+lb_add("merge --lane-lint, background, linux, local, load 14 per CPU: refused, names the load",
+       lb_decision_check("Bash", None, "deny", LB_LOAD14, tool_input=LB_LANE_LINT_BG, fake=lb_load_fake(14.0)))
+lb_add("foreground, bin/ci-job --lint & echo $!, linux, local, load 14 per CPU: refused, names the load",
+       lb_decision_check("Bash", None, "deny", LB_LOAD14, tool_input={"command": "bin/ci-job --lint & echo $!"},
+                         fake=lb_load_fake(14.0)))
+lb_add("linux, cloud, bin/ci-job --lint background, load 14 per CPU: refused, names the load",
+       lb_decision_check("Bash", None, "deny", LB_LOAD14, tool_input=LB_CI_LINT_BG, remote="true",
+                         fake=lb_load_fake(14.0)))
+lb_add("bin/ci-job --lint, background, linux, local, load 4.2 per CPU: just over the line, refused, names the load",
+       lb_decision_check("Bash", None, "deny", LB_LOAD42, tool_input=LB_CI_LINT_BG, fake=lb_load_fake(4.2)))
+lb_add("bin/ci-job --lint, background, linux, local, load 2 per CPU on 4 CPUs (8 raw): allowed, the reader runs once",
+       lb_decision_check("Bash", None, "allow", tool_input=LB_CI_LINT_BG, fake=lb_load_fake(2.0), reads=1))
+lb_add("bin/ci-job --lint, background, linux, local, load 4.0 per CPU: on the line, not over it, allowed",
+       lb_decision_check("Bash", None, "allow", tool_input=LB_CI_LINT_BG, fake=lb_load_fake(4.0), reads=1))
+lb_add("a background Bash call that is no lint start, linux, local, load 14 per CPU: allowed, and the reader does not run",
+       lb_decision_check("Bash", None, "allow", tool_input={"command": "echo hi", "run_in_background": True},
+                         fake=lb_load_fake(14.0), reads=0))
+lb_add("Agent, run_in_background true, linux, local, load 14 per CPU: not braked on the CPU, allowed, the reader runs once",
+       lb_decision_check("Agent", None, "allow", background=True, fake=lb_load_fake(14.0), reads=1))
+# The load is read only through read_load. A reading with no load value is unread, so a lint start judged under a
+# host at 14 per CPU still allows: a guard that reads the load on its own would refuse here.
+lb_add("bin/ci-job --lint, background, a reading with no load value, host load 14 per CPU: unread, allowed, the reader runs once",
+       lb_decision_check("Bash", LB_NORMAL, "allow", tool_input=LB_CI_LINT_BG, host=lb_load_fake(14.0), reads=1))
 
 # A CLOUD SESSION. With CLAUDE_CODE_REMOTE "true", a start call is refused at a full disk or at memory over 95%, and
 # reads the disk and memory once. A running agent or lane call skips the brake and reads no load. Only the exact value
