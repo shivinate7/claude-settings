@@ -17526,6 +17526,7 @@ def review_comment(cid, number, body, created="2026-10-02T00:00:00Z", updated=No
     return {"id": cid, "created_at": created, "updated_at": updated or created, "issue_url": f"https://api.github.com/repos/o/r/issues/{number}", "body": body}
 
 UNPARSED_CID = 9051724  # the id of a review-record comment that does not parse; distinctive, so no other output line holds it
+PASS_CID = 9051726  # the id of an older review-record comment that passes, beside UNPARSED_CID; distinctive, so no other output line holds it
 LANE_LINT_MARKER = "<!-- lane-lint -->"  # the first line of a lane's lint comment (decision lanes-run-no-full-ci-job); lint_body pins the rest of its form
 OWNER = {"login": "o", "association": "OWNER"}  # the repo's owner, as a comment object names its author
 NOT_OWNER = {"login": "mallory", "association": "NONE"}
@@ -21332,13 +21333,24 @@ class UnparsedRecordStanding(CloudSession, ReviewEnv):
     PullsHost, so each comment keeps the id GitHub gives it. A comment that opens with the marker and does not parse is named in the refusal, by its
     id and its cause, and nothing is claimed. The controls keep the gate's words for a record that parses, and name no comment without the marker."""
 
+    def standing_host(self, *comments):
+        """The host of a code pull request 7 at REVIEW_HEAD, whose review records are `comments`, oldest first."""
+        green = {REVIEW_HEAD: [batch_run("checks", "completed", "success")]}  # the head's own checks pass, so the record gate is the one that refuses
+        return PullsHost([batch_pull(7, REVIEW_HEAD)], green, comments=comments, files=[pr_file("tools/note.py", status="added")], bodies={7: OWN_PR_BODY})
+
     def standing_refusal(self, *comments):
         """-> (rc, stdout, stderr) of `merge 7 --confirm --head <live head>` as this cloud session, on a code pull request whose records are `comments`."""
         self.put_role("standing")
-        green = {REVIEW_HEAD: [batch_run("checks", "completed", "success")]}  # the head's own checks pass, so the record gate is the one that refuses
-        host = PullsHost([batch_pull(7, REVIEW_HEAD)], green, comments=comments, files=[pr_file("tools/note.py", status="added")], bodies={7: OWN_PR_BODY})
+        host = self.standing_host(*comments)
         with self.cloud():
             return self.run_args("7", "--confirm", "--head", REVIEW_HEAD, host=host)
+
+    def gate_reason(self, *comments):
+        """-> the reason standing_refusal gives for pull request 7 at REVIEW_HEAD, with `comments` as its records: "" when the gate lets it through.
+        The gate reads the pull request as main does (Host.pr), then stops: no claim, no lock and no merge follow."""
+        host = self.standing_host(*comments)
+        with self.cloud():
+            return merge.standing_refusal(host, 7, host.pr(7), REVIEW_HEAD)
 
     def assert_refusal_names(self, body, causes):
         """`body` does not parse (scope). The refusal exits 1 with no traceback, names the comment by its id and holds one of `causes`, and claims nothing."""
@@ -21380,6 +21392,28 @@ class UnparsedRecordStanding(CloudSession, ReviewEnv):
         self.assertEqual(rc, 1, out + err)
         self.assertIn("its head has no passing review record", err)
         self.assertNotIn(str(UNPARSED_CID), err, "the --confirm refusal named a comment that carries no review-record marker:\n" + err)
+
+    def test_newest_unparsed_record_refuses_over_older_pass(self):
+        # The newest review-record comment does not parse, and an older one on the same head passes. The gate must not read the older pass as the
+        # record: it refuses, and names the newest comment by its id and its cause.
+        older, newest = record_text(rounds=REVIEW_PASS), record_text(rounds=REVIEW_PASS) + "Thanks for the review.\n"
+        self.assertIsNone(review_fn(self, "parse_review")(newest), "fixture: the newest body parses, so the case tests nothing")
+        parse_text(self, older)
+        self.assertEqual(record_state(self, older, REVIEW_HEAD), "done", "fixture: the older record is not a passing record on the head")
+        why = self.gate_reason(review_comment(PASS_CID, 7, older, created="2026-10-02T00:00:00Z"), review_comment(UNPARSED_CID, 7, newest, created="2026-10-03T00:00:00Z"))
+        self.assertTrue(why, "the gate let the pull request through on an older pass, over a newer record that does not parse")
+        self.assertIn(str(UNPARSED_CID), why, "the gate's refusal does not name the newest unparsed comment by its id:\n" + why)
+        self.assertTrue(any(cause in why for cause in ("Thanks for the review.", "CI line")), "the gate's refusal does not name the cause:\n" + why)
+
+    def test_older_unparsed_record_under_newer_pass_merges(self):
+        # Control: the newest record passes, and an older one on the same head does not parse. The gate reads the newest, so it lets the pull request
+        # through. This class's fixture stops at the gate, so the case asserts the gate's "" and no merge.
+        older, newest = record_text(rounds=REVIEW_PASS) + "Thanks for the review.\n", record_text(rounds=REVIEW_PASS)
+        self.assertIsNone(review_fn(self, "parse_review")(older), "fixture: the older body parses, so the case tests nothing")
+        parse_text(self, newest)
+        self.assertEqual(record_state(self, newest, REVIEW_HEAD), "done", "fixture: the newest record is not a passing record on the head")
+        why = self.gate_reason(review_comment(UNPARSED_CID, 7, older, created="2026-10-02T00:00:00Z"), review_comment(PASS_CID, 7, newest, created="2026-10-03T00:00:00Z"))
+        self.assertEqual(why, "", "the gate refused a pull request whose newest record passes:\n" + why)
 
 class ReleaseHost(PullsHost):
     """A PullsHost for `merge --release-check`. A number in `closed` answers `pulls/<n>` as a closed pull request (the open list leaves it out),
