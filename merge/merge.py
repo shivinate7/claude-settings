@@ -5494,7 +5494,7 @@ def unparsed_cause(text):
             return f"the {label}: value {quote(value)} is not one of {', '.join(sorted(allowed))}"
     if kind == "docs-only" and guard == "yes":
         return "a docs-only record cannot be Guard or check: yes"
-    known = (r"Grant: .*", r"Owner accepted: .*", rf"Fix check: .*", REVIEW_ROUND_LINE)
+    known = (r"Grant: .*", r"Owner accepted: .*", r"Fix check: .*", REVIEW_ROUND_LINE)
     odd = next((l for l in lines[5:-2] if not any(re.fullmatch(k, l, re.ASCII) for k in known)), None)
     if odd is not None:
         return f"a line that is no Grant, Round, Fix check or Owner accepted line: {quote(odd)}"
