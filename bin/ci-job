@@ -419,17 +419,18 @@ def pin_notes(log, start):
 
 
 def could_not_start(log, start):
-    """(each 'could not start' failure, True when every failure is one) from code_check.py's ::error lines in this
-    run's part of the log. Only then is the step unknown: a failure that needed no tool is still a FAIL."""
+    """(each 'could not start' failure, True when every failure is one, True when any ::error line printed) from
+    code_check.py's ::error lines in this run's part of the log. Only the middle one makes the step unknown: a failure that
+    needed no tool is still a FAIL. Any printed error line is a failure signal for a dead verdict."""
     try:
         with open(log, "rb") as f:
             f.seek(start)
             text = f.read().decode("utf-8", "replace")
     except OSError:
-        return [], False
+        return [], False, False
     errors = re.findall(r"^::error title=code-check::(.*)$", text, re.M)
     unstarted = sorted(set(e for e in errors if re.match(r"\S+ could not start: ", e)))
-    return unstarted, bool(errors) and len(unstarted) == len(set(errors))
+    return unstarted, bool(errors) and len(unstarted) == len(set(errors)), bool(errors)
 
 
 def if_held(step, pr):
@@ -853,7 +854,7 @@ def run_step_uncached(name, step, install, detail, shell, env, cwd, ctx, log, su
         rc = proc.returncode
         gone = missing_in_log(log, start, script)
         preamble_ran = not marked or bool(re.search(r"(?m)^%s\r?$" % PREAMBLE_MARK, log_text(log, start)))
-        unstarted, only = could_not_start(log, start) if known_action(step) == "code-check" else ([], False)
+        unstarted, only, errored = could_not_start(log, start) if known_action(step) == "code-check" else ([], False, False)
     finally:
         os.remove(script)
     line = next((ln.rstrip("\n") for ln in kept if ln.startswith(("PASS ", "SKIP ", "FAIL "))), None)
@@ -869,9 +870,9 @@ def run_step_uncached(name, step, install, detail, shell, env, cwd, ctx, log, su
     else:
         state = "FAIL" if rc else "SKIP" if first.startswith("SKIP ") else "PASS"
         if line is None:  # a verdict that died or went silent never reads PASS or a bare FAIL, whatever its exit code (a signal kill too)
-            # It keeps FAIL only for a failure signal this branch knows: a real error beside a tool that did not start, a
-            # failed install, a line before the suite that failed. Those take their note below. Any other dead read is unknown.
-            state = "FAIL" if rc and (unstarted or install or not preamble_ran) else "unknown"
+            # It keeps FAIL only for a failure signal this branch knows: a printed code-check error line, a failed install,
+            # a line before the suite that failed. Those take their note below. Any other dead read is unknown.
+            state = "FAIL" if rc and (errored or install or not preamble_ran) else "unknown"
         if install and state == "FAIL":  # the tree at fault, not the change: unknown, never FAIL
             state, first = "unknown", "install failed, so each lint step after it is unknown; " + first
         elif state == "FAIL" and not preamble_ran:  # the same rule for a line before the suite of a CI step: the tree at fault
