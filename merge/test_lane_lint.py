@@ -3646,6 +3646,26 @@ class BatchLintFlags(tm.Env):
         self.assertEqual(len(lines), 1, text)
         self.assertIn(PUSH_ONLY, lines[0], text)
 
+    def test_a_lint_run_saves_no_pass_under_the_home_folder(self):
+        """ci-job's rerun cache saves each passing step under XDG_CACHE_HOME or, with it unset, ~/.cache/claude-settings/ci-job-pass.
+        A suite run must not write there: its env sets CI_JOB_NO_CACHE or a temporary XDG_CACHE_HOME. This case runs with HOME at a fresh
+        folder and both knobs unset, so the default pass folder under that HOME is the one a run could write."""
+        self.push_batch(BATCH)
+        home = os.path.join(self.t, "home")
+        os.makedirs(home)
+        out = io.StringIO()
+        with unittest.mock.patch.dict(os.environ, {"HOME": home}):
+            os.environ.pop("XDG_CACHE_HOME", None)
+            os.environ.pop("CI_JOB_NO_CACHE", None)
+            rc = self.lane_lint(BATCH, out)
+        text = out.getvalue()
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(len(pass_lines(text)), 1, "scope: the lint did not pass, so no pass was there to save: " + text)
+        folder = os.path.join(home, ".cache", "claude-settings", "ci-job-pass")
+        saved = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+        self.assertEqual(saved, [], "the lint run saved %d passes in the default pass folder under the suite's HOME: the run set neither "
+                         "CI_JOB_NO_CACHE nor XDG_CACHE_HOME, so it writes the real pass folder\n%s" % (len(saved), text))
+
 
 class LintTreeFileMain(LaneFixture):
     """`merge --lane-lint <ref>` through main(): a lint tree that lacks a file its head's git tree holds is UNKNOWN. The refusal exits 1
