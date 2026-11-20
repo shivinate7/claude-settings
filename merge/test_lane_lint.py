@@ -468,18 +468,9 @@ def live_heartbeat_threads():
 
 
 def stdout_tail_shown(text, marker):
-    """True when `marker` shows in a lint's output `text`, or in a log file the output names (a path ending in .log or .txt that exists) and holds it.
-    The FAIL of a failed mutation test run may show the last lines of its stdout in either place."""
-    if marker in text:
-        return True
-    for path in re.findall(r"[^\s'\"=:,()]+\.(?:log|txt)\b", text):
-        try:
-            with open(path, encoding="utf-8", errors="replace") as f:
-                if marker in f.read():
-                    return True
-        except OSError:
-            continue
-    return False
+    """True when `marker` shows in a lint's output `text`. The FAIL of a failed mutation test run shows the last lines of its stdout in that
+    text. A file the text names is not read: a FAIL that points at a log does not show the line."""
+    return marker in text
 
 
 class WallClock:
@@ -1497,16 +1488,17 @@ class LaneLint(LaneFixture):
                         "the FAIL does not show the last stdout line of the run that printed no report, so its cause is not read: " + text)
         self.assert_one_mutation_test_run(head)
 
-    def test_mutation_test_long_stdout_tail_run_with_no_report_shows_the_last_lines_not_the_first(self):  # the full-size state: 200 lines before the cause
-        """Why: the cause is the last stdout line. Showing the whole stdout would bury it, as TOUCHED_TAIL_LINES' comment says of a failing test's output."""
+    def test_mutation_test_long_stdout_tail_run_with_no_report_shows_the_last_lines_not_the_first(self):  # the full-size state: 200 stdout lines
+        """Why: the cause is the last stdout line. The FAIL shows the last TOUCHED_TAIL_LINES lines, the window a failing test's output uses: not
+        the whole stdout, which would bury the cause, and not only the last line, which would drop the lines that explain it."""
         marker = "ERROR ambiguous mutation, anchor text matches 2 places: guard-case-7"
-        noise = "".join("mutate step line %d: reading the next file\n" % i for i in range(1, 201))
-        rc, text, head = self.lint_with_report(noise + marker + "\n", rc=1)
+        lines = ["mutate step line %d: reading the next file" % i for i in range(1, 200)] + [marker]
+        rc, text, head = self.lint_with_report("".join(line + "\n" for line in lines), rc=1)
         self.assertEqual(rc, 1, "the lint passed a run that exited 1 with no report: " + text)
-        self.assertTrue(stdout_tail_shown(text, marker),
-                        "the FAIL does not show the last stdout line of a run with 200 lines before its cause: " + text)
-        self.assertFalse(stdout_tail_shown(text, "mutate step line 1:"),
-                         "the FAIL shows the first stdout line of a 201-line run, so it prints the whole stdout where the last lines show the cause: " + text)
+        tail = merge.TOUCHED_TAIL_LINES
+        shown = [n for n, line in enumerate(lines, 1) if stdout_tail_shown(text, line)]
+        self.assertEqual(shown, list(range(len(lines) - tail + 1, len(lines) + 1)),
+                         "the FAIL shows stdout lines %s of a 200-line run, not its last %d (TOUCHED_TAIL_LINES): %s" % (shown, tail, text))
         self.assert_one_mutation_test_run(head)
 
     def test_mutation_test_readable_report_run_shows_no_stdout_tail_in_the_fail(self):  # the control: a readable report already names the cause, so no stdout line is added
