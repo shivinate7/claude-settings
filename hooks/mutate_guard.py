@@ -3551,6 +3551,16 @@ MUTATIONS = [
      '        sid = payload.get("session_id")\n'
      '        if not sid or not isinstance(sid, str) or not os.path.isfile(ph.audit_flag_path(sid)):',
      "audit", "a Bash call whose payload carries agent_id is allowed"),
+    # ---- compaction-audit disk cleanup (tests/guard/s43721-compaction-audit-disk.py). Its cases are LOG_CHECKS of
+    # test_guard.py, not of test_handoff_wave2.py, so these two rows name target "guard".
+    ("compaction-audit: a disk cleanup passes whatever the load brake refuses for, memory included",
+     '    return "disk" in matched',
+     '    return True',
+     "guard", "an owed audit with memory full and a fine disk refuses the sweep"),
+    ("compaction-audit: any Bash command is a disk cleanup, so an ordinary call passes under a full disk",
+     '    if tool != "Bash" or not isinstance(command, str):\n        return False',
+     '    if tool != "Bash" or not isinstance(command, str):\n        return False\n    return True',
+     "guard", "after the disk cleanup call the audit stays owed"),
     ("handoff-unread: the flag is not read, so a set handoff alone refuses",
      '        if not sid or not isinstance(sid, str) or not os.path.isfile(ph.reread_flag_path(sid)):',
      '        if not sid or not isinstance(sid, str):',
@@ -3936,6 +3946,17 @@ MUTATIONS = [
      '    return clause\n\n\ndef _claim_clause',
      '    return None\n\n\ndef _claim_clause',
      "guard", 'brief-claim: test-author brief where main refuses all three today'),
+    # The machine-load brake's Linux memory and lint-start reads (decision machine-load-brake). Each row kills on its own
+    # case: the Linux read on a 96% Agent start, and the lint start on the disk-full bin/ci-job --lint case, which needs no
+    # memory reading.
+    ('load-brake: the Linux branch of _read_memory returns None, so memory is unread on Linux',
+     '        return 100.0 * (total - available) / total',
+     '        return None',
+     "guard", 'linux, local, Agent run_in_background true, memory 96%: full, refused'),
+    ('load-brake: lint_start_hit_of returns the empty string, so a background lint start is never read',
+     'def lint_start_hit_of(tool: str, tool_input) -> str:',
+     'def lint_start_hit_of(tool: str, tool_input) -> str:\n    return ""',
+     "guard", 'bin/ci-job --lint, background, 3.1 GB free of 926 GB: full, refused'),
 ]
 
 

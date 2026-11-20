@@ -338,6 +338,7 @@ class Launch(unittest.TestCase):
         except subprocess.TimeoutExpired:
             self.fail("%s did not exit within 60 s" % what)
 
+    @unittest.skipIf(os.name == "nt", "Windows has no SIGHUP, and TERM ends a process with no handler to clean up")
     def test_sigterm_removes_fresh_tree(self):
         """A TERM or HUP sent to bin/merge alone ends the run, and the run takes its fresh tree and its registration with it."""
         self.release("v2", body=BLOCK)
@@ -355,6 +356,7 @@ class Launch(unittest.TestCase):
                 registered = sh(self.co, "git", "worktree", "list", "--porcelain", env=self.env).count("worktree ")
                 self.assertEqual(registered, 1, "%s to bin/merge left a worktree registered in the checkout" % sig.name)
 
+    @unittest.skipIf(os.name == "nt", "Windows has no SIGHUP, and TERM ends bin/merge with no handler to forward it")
     def test_sigterm_forwards_to_child(self):
         """A TERM or HUP sent to bin/merge alone reaches the stub that the launcher runs, which is gone when bin/merge returns."""
         self.release("v2", body=BLOCK)
@@ -411,10 +413,12 @@ class Launch(unittest.TestCase):
         self.await_exit(proc, "bin/merge after a KILL to its group")
         return launcher, stub
 
+    @unittest.skipIf(os.name == "nt", "a KILL to a process group is POSIX only (os.killpg)")
     def test_sigkill_to_bin_merge_group_ends_the_launcher(self):
         launcher, _ = self.start_killed_run("kill-launcher")
         self.assertTrue(wait_gone(launcher, 30), "a KILL to the group of bin/merge did not end the launcher %d, which runs beside it" % launcher)
 
+    @unittest.skipIf(os.name == "nt", "a KILL to a process group is POSIX only (os.killpg)")
     def test_sigkill_to_bin_merge_group_ends_the_stub(self):
         _, stub = self.start_killed_run("kill-stub")
         self.assertTrue(wait_gone(stub, 30), "a KILL to the group of bin/merge did not end the stub %d, which runs after bin/merge is gone" % stub)
