@@ -1,4 +1,4 @@
-# section 43700
+# section 43701
 FAMILY = "sendmessage-session-id"
 #
 # Rule pass-claim-cites-verdict, on a send. A "passed", "green", "clean" or "passes" claim tied to a check noun (lint,
@@ -156,7 +156,7 @@ for _claim in ("No issues found: lint passed.", "No failures: lint passed.", "No
 pass_allow("control, lint did not pass, to @parent", "SendMessage", "Lint did not pass.", UNCITED, to=SEND_TO)
 for _msg in ("Ensure lint passes before you hand off.", "Confirm the tests pass.", "Verify the checks are green.",
              "Clean up the lint warnings in hooks/x.py.", "Run a second lint pass.",
-             "Files: tests/guard/s43700-pass-claim-send.py", 'the guard flags a "lint passed" claim.'):
+             "Files: tests/guard/s43701-pass-claim-send.py", 'the guard flags a "lint passed" claim.'):
     pass_allow("no claim, to @parent: " + _msg, "SendMessage", _msg, UNCITED, to=SEND_TO)
 for _msg in ("Lint passes before you hand off.", "The tests pass.", "The checks are green.", "Files: lint passed.",
              "the guard flags a lint passed claim.", 'Size 12" and lint passed.'):

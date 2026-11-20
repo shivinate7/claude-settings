@@ -6601,7 +6601,7 @@ class PassClaimCitesVerdictTests(unittest.TestCase):
 
     def test_control_a_path_token_is_no_claim_word(self):
         with self.subTest(item="a path token"):
-            self.assert_passes(self.report("Files: tests/guard/s43700-pass-claim-send.py"))
+            self.assert_passes(self.report("Files: tests/guard/s43701-pass-claim-send.py"))
         with self.subTest(item="the same line with a claim"):
             self.assert_blocked(self.report("Files: lint passed."))
 
