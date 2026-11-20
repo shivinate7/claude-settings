@@ -6,7 +6,7 @@ Owner ruling Q5 v (chat, 10:42 CST Nov 20, 2026): "PRs may merge onto a red main
 
 - A PR may merge onto a red main. Its own head still needs a green run (rule `git-never-merge-failing-ci`).
 - A merge onto a known red prints one line, `red_line` in `merge/merge.py`. It names main's red checks, the run ids and the failing tests that the red jobs' logs name (read through `Host.failed_lines`). A new break shows as a new name. A log that cannot be read in full says so, and the tests that were read still print.
-- The red becomes the top lane at once: a revert of the breaking merge, or a fix. Neither needs a flag on a known red. The fix route (`fix_proven`, ruling of 2026-11-17 09:20 CST) is gone. A fix merges like any PR.
+- The red becomes the top lane at once: a revert of the breaking merge, or a fix. Neither needs a flag on a known red. A fix merges like any PR.
 - A reason flag beside a known red lifts nothing. The merge echoes it and writes no `Reason flag` line.
 - A lane-lint PASS lifts no pending head while main is red.
 - `stable` moves only on green (decision `stable-branch`).
