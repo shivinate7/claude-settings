@@ -15,7 +15,8 @@ The contract these cases read:
   - The test command runs in a copy at <TMPDIR>/claude-settings-test-temp/<pid>-<uuid>. Each case sets TMPDIR to a
     folder beside its fixture repo, never inside it.
   - The output names the class of the run as one word: pass, assert, crash or timeout (mutate_shared classify_run).
-  - Exit 2 for a commit that does not exist, for a missing `--`, and for a --replace whose old text is missing (STALE).
+  - Exit 2 for a commit that does not exist, for a missing `--`, for a --replace whose old text is missing (STALE), and for
+    a test command that cannot start. That call prints one verdict line, and leaves no copy.
   - The exit codes of a pass and of a fail are not read here.
   - A signal to red-run (TERM, HUP or INT) removes the copy and stops the child.
 """
@@ -82,6 +83,8 @@ MARK = (
 CRASH_CODE = 'raise RuntimeError("boom")'
 FAIL_CODE = 'import sys\nprint("FAIL: probe")\nsys.exit(1)'
 PASS_CODE = 'print("green")'
+# The verdict line bin/red-run prints last: `red-run <sha7>: <class>`. A class word anywhere else in the output is the child's, not the verdict.
+VERDICT_LINE = re.compile(r"^red-run [0-9a-f]{7,}: (pass|assert|crash|timeout)$", re.M)
 
 
 def write(path, text):
@@ -119,6 +122,11 @@ def fixture_repo(repo, env):
     old = git(repo, env, "rev-parse", "HEAD").strip()
     commit(repo, env, {"src/widgets.py": WIDGET_NEW, "src/only_in_head.py": ONLY_IN_HEAD}, "new widget")
     return old
+
+
+def verdict_classes(out):
+    """The class word of each verdict line in OUT, in order."""
+    return VERDICT_LINE.findall(out)
 
 
 def reap(proc):
@@ -185,6 +193,12 @@ class RedRunFixture(unittest.TestCase):
     def status(self):
         return git(self.repo, self.env, "status", "--porcelain")
 
+    def assertVerdict(self, out, want, cause):
+        """OUT holds one verdict line and its class is WANT. Each failure names one cause: no single line, or another class."""
+        classes = verdict_classes(out)
+        self.assertEqual(len(classes), 1, "%s: %d verdict lines, want 1" % (cause, len(classes)))
+        self.assertEqual(classes[0], want, "%s: the verdict line reads %s, want %s" % (cause, classes[0], want))
+
 
 class RedRunCopyCases(RedRunFixture):
     """What the copy holds, and what the command does to the copy and to the caller's checkout."""
@@ -222,18 +236,15 @@ class RedRunCopyCases(RedRunFixture):
 
     def test_a_crashing_child_reads_as_crash(self):
         _, out = self.red_run(self.old, "--", sys.executable, "-c", CRASH_CODE)
-        self.assertRegex(out, r"\bcrash\b", "a child that raised an error was not named crash")
-        self.assertNotRegex(out, r"\bassert\b", "a child that raised an error was named assert, the red class")
+        self.assertVerdict(out, "crash", "a child that raised an error")
 
     def test_a_failing_child_reads_as_assert(self):
         _, out = self.red_run(self.old, "--", sys.executable, "-c", FAIL_CODE)
-        self.assertRegex(out, r"\bassert\b", "a child that printed a FAIL line was not named assert")
-        self.assertNotRegex(out, r"\bcrash\b", "a child that printed a FAIL line was named crash")
+        self.assertVerdict(out, "assert", "a child that printed a FAIL line")
 
     def test_a_passing_child_reads_as_pass(self):
         _, out = self.red_run(self.old, "--", sys.executable, "-c", PASS_CODE)
-        self.assertRegex(out, r"\bpass\b", "a child that exits 0 was not named pass")
-        self.assertNotRegex(out, r"\bassert\b", "a child that exits 0 was named assert")
+        self.assertVerdict(out, "pass", "a child that exits 0")
 
 
 class RedRunBadCallCases(RedRunFixture):
@@ -248,6 +259,14 @@ class RedRunBadCallCases(RedRunFixture):
         rc, _ = self.red_run(self.old, *self.probe("nodash.json"))
         self.assertEqual(rc, 2, "a call with no `--` exited %d, want 2" % rc)
         self.assertEqual(self.run_folders(), [], "a call with no `--` left a run folder")
+
+    def test_a_command_that_cannot_start_exits_2_with_one_verdict_line_and_leaves_no_folder(self):
+        rc, out = self.red_run("HEAD", "--", "no-such-test-runner-xyz")
+        self.assertEqual(rc, 2, "a test command that cannot start exited %d, want 2" % rc)
+        self.assertNotIn("Traceback (most recent call last)", out, "a test command that cannot start printed a traceback")
+        lines = verdict_classes(out)
+        self.assertEqual(len(lines), 1, "a test command that cannot start printed %d verdict lines, want 1" % len(lines))
+        self.assertEqual(self.run_folders(), [], "a test command that cannot start left a run folder")
 
 
 @unittest.skipIf(os.name == "nt", "proc_fixture's waits and kills are POSIX only, and the signal cases need a POSIX child")
