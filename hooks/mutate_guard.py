@@ -4962,8 +4962,8 @@ def main() -> int:
             # copy). Without the REAL guard.py sitting next to it, that import fails on every watch
             # mutant alike, and the crash reads as "the watch missed it" for EVERY case regardless of
             # which line was mutated: a kill with no bearing on the defect the mutation names, the exact
-            # failure this file exists to catch. MEASURED: before this line, all seven `watch` mutants
-            # printed the identical nine-case failure list, whatever the mutation.
+            # failure this file exists to catch: every `watch` mutant would print the same nine-case
+            # failure list, whatever the mutation.
             mutate_shared.guard_tree(work)
             # The override and calljudge copies sit one folder below `work`, so their `../lint` is work/lint:
             # override.py reads it, and so does the decision_watch.py beside a calljudge copy. The decision copy reads its
