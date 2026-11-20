@@ -2,9 +2,20 @@
 """The dry combine train (roadmap step combine-train-tool): fold the queued batches behind the frozen ones, in dry rounds, and print per-batch numbers.
 
   python3 merge/combine_train.py --queue FILE --root DIR [--lint] [--from-rest]
+  python3 merge/combine_train.py --queue FILE --root DIR --build --name NAME
 
 Standalone. merge.py never imports it, so it changes no merge verdict. It never runs `git push`, `gh pr ready`, `gh pr merge` or creates a pull request.
 Its writes are git objects (`git merge-tree`, `git commit-tree`) in the checkout DIR and one temporary worktree per batch, removed at the end.
+--build also writes one local branch ref, and the fetches it needs (below).
+
+--build (roadmap step combine-train-build; ruling 10:23 CST Nov 20: a backlog of 10 or more ready drafts combines, and the front PR stays alone):
+  the queued batches' members are the ready backlog. Under BUILD_THRESHOLD of them the run prints `merge alone` and builds nothing. At the threshold
+  or over, it builds the local branch merge.integration_branch(NAME) from the newest origin/main (one fetch): one no-ff merge commit per kept member,
+  in queue order, so the first-parent chain is the build order and each second parent is a member head. A member's live head is read at
+  refs/pull/N/head on origin (one `git ls-remote`); one that is not the queued head leaves by name. A member that clashes with the batch so far leaves by
+  name with its paths. No conflict is fixed by hand. A merge is made with merge.merge_tree and `git commit-tree`, the way the dry fold makes one, so
+  the checkout DIR keeps its branch and its files. The run prints merge.freeze_lines, the integration PR's body (ruling own-811-c-marker-line). The runner
+  pushes the branch and opens the draft PR, so the build pushes nothing. A branch of that name that exists is never replaced.
 
 The queue file's schema is this tool's own: skills/project-ops/scripts/check_runner_state.py, which the runner-queue step names as its home, is not in
 the repo, so there is no reader to reuse. The shape is
@@ -32,6 +43,7 @@ with --lint, one more ci-job run per batch. One temporary worktree per batch. No
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -46,6 +58,8 @@ BASE = "origin/main"
 STATES = ("in-ci", "next-in-line", "queued")
 FROZEN = ("in-ci", "next-in-line")
 NO_HOME = "unknown (fast-checks-before-ready not landed)"
+BUILD_THRESHOLD = 10  # ready queued members that make a backlog worth one integration PR (ruling 10:23 CST Nov 20); fewer merge alone
+BATCH_NAME = re.compile(r"[a-z0-9-]{1,32}")  # the batch name merge.parse_freeze reads
 HEADER = ("combine-train: dry run, no push, no gh pr ready or merge. Readings used: (a) in-ci and next-in-line batches are frozen and the queued "
           "batches behind them fold into one; (b) a clashing member leaves by name; (c) dry rounds ignore a move of main; "
           "(d) the fast checks run once per round on its leading tip; (e) --lint runs once on a folded batch's final tree; "
@@ -337,6 +351,8 @@ def main(argv, clock=None):
     p.add_argument("--root", required=True, help="a checkout of the repo that holds the PR heads")
     p.add_argument("--lint", action="store_true", help="run `ci-job checks --lint` once on each folded batch's final tree")
     p.add_argument("--from-rest", action="store_true", help="read the queue from GitHub (not built)")
+    p.add_argument("--build", action="store_true", help="build the local integration branch from the queued members (10 or more), push nothing")
+    p.add_argument("--name", help="the batch name of --build: the branch is merge.integration_branch(NAME)")
     args = p.parse_args(argv)
     if args.from_rest:
         print("unknown (not built): --from-rest; give --queue FILE")
@@ -344,12 +360,17 @@ def main(argv, clock=None):
     if not args.queue:
         print("unknown: no queue given; give --queue FILE")
         return 2
+    if args.build and not (args.name and BATCH_NAME.fullmatch(args.name)):
+        print("unknown: --build needs --name NAME, 1 to 32 characters of a-z, 0-9 and -")
+        return 2
     try:
         heads, batches = read_queue(args.queue)
     except QueueError as e:
         print(f"unknown: {e}")
         return 2
     try:
+        if args.build:
+            return build(args, heads, batches)
         return run(args, heads, batches, clock)
     except OSError as e:  # a program that cannot start, in practice git missing from PATH
         print(f"unknown: a program cannot start ({e.filename or 'git'}: {e.strerror or e}); the dry fold needs git on PATH")
@@ -381,6 +402,121 @@ def run(args, heads, batches, clock):
                 print("\n".join(lines))
                 left, failed, unknown = left or out > 0, failed or bad, unknown or unk
     return 2 if unknown else 1 if left or failed else 0
+
+
+def fetch_heads(root, members, heads):
+    """One `git fetch` of refs/pull/N/head for every member. -> {member: why} for each member whose head is not in `root` afterwards (all of them on a failed fetch).
+    Taken from origin/lane/combine-train-rest, which has not merged: that branch drops it when it rebases on this one."""
+    if not members:
+        return {}
+    code, out, err = git(root, "fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "origin", *[f"refs/pull/{m}/head" for m in members])
+    first = (err or out or "no output").splitlines()[0]
+    missing = {}
+    for m in members:
+        if code:
+            missing[m] = f"git fetch of refs/pull/{m}/head failed: {first}"
+        elif git(root, "cat-file", "-e", f"{heads[m]}^{{commit}}")[0]:
+            missing[m] = f"the head {heads[m][:9]} is not in the checkout after the fetch"
+    return missing
+
+
+def fetch_main(root):
+    """Fetch the newest BASE. -> (sha, None), or (None, why)."""
+    branch = BASE.split("/", 1)[1]
+    code, out, err = git(root, "fetch", "--quiet", "--no-tags", "origin", f"+refs/heads/{branch}:refs/remotes/{BASE}")
+    if code:
+        return None, f"git fetch of {branch} failed: {(err or out or 'no output').splitlines()[0]}"
+    code, out, err = git(root, "rev-parse", "--verify", f"{BASE}^{{commit}}")
+    return (out, None) if not code else (None, f"{BASE} cannot be read: {err or out}")
+
+
+def live_heads(root, members):
+    """-> ({member: sha of refs/pull/N/head on origin}, why or None). A member with no such ref is absent from the map; a failed read gives why."""
+    code, out, err = git(root, "ls-remote", "origin", *[f"refs/pull/{m}/head" for m in members])
+    if code:
+        return {}, f"git ls-remote of the pull heads failed: {(err or out or 'no output').splitlines()[0]}"
+    live = {}
+    for line in out.splitlines():
+        sha, _, ref = line.partition("\t")
+        m = re.fullmatch(r"refs/pull/(\d+)/head", ref)
+        if m:
+            live[int(m.group(1))] = sha
+    return live, None
+
+
+def build(args, heads, batches):
+    """--build: see the module docstring. -> the exit code: 0 built with nothing left out, or merge alone; 1 a member left out; 2 unknown."""
+    members = [m for _n, st, ms in batches if st == "queued" for m in ms]
+    if len(members) < BUILD_THRESHOLD:
+        print(f"merge alone: {len(members)} ready queued members, under the backlog of {BUILD_THRESHOLD}; no batch branch built")
+        return 0
+    gone = [m for m in members if m not in heads]
+    if gone:
+        print(f"unknown (the queue file's prs hold no head for {tag(gone)})")
+        return 2
+    branch = merge.integration_branch(args.name)
+    if not git(args.root, "rev-parse", "--verify", "-q", f"refs/heads/{branch}")[0]:
+        print(f"unknown: the branch {branch} already exists in {args.root}; this run replaces no branch. Pick another --name")
+        return 2
+    base, why = fetch_main(args.root)
+    if why:
+        print(f"unknown: {why}")
+        return 2
+    live, why = live_heads(args.root, members)
+    if why:
+        print(f"unknown: {why}")
+        return 2
+    left, kept = [], []  # left: (member, detail); kept: members whose live head is the queued head
+    unknown = False
+    for m in members:
+        if m not in live:
+            left.append((m, f"unknown (origin serves no refs/pull/{m}/head)"))
+            unknown = True
+        elif live[m] != heads[m]:
+            left.append((m, f"live head {live[m][:9]} is not the queued head {heads[m][:9]}"))
+        else:
+            kept.append(m)
+    missing = fetch_heads(args.root, kept, heads)
+    for m, detail in missing.items():
+        left.append((m, f"unknown ({detail})"))
+        unknown = True
+    kept = [m for m in kept if m not in missing]
+    tip, built = base, []
+    for m in kept:
+        state, tree, files = merge.merge_tree(args.root, tip, heads[m])
+        if state == "clean":
+            code, out, err = git(args.root, "commit-tree", tree, "-p", tip, "-p", heads[m], "-m", f"Merge #{m} ({heads[m][:9]}) into {branch}")
+            if not code:
+                tip = out
+                built.append(m)
+                continue
+            left.append((m, f"unknown (git commit-tree failed: {err or out})"))
+            unknown = True
+        elif state == "conflict":
+            against = "main" if merge.merge_tree(args.root, base, heads[m])[0] == "conflict" else f"the batch so far ({tag(built)})"
+            left.append((m, f"{', '.join(files) or '(no file name read)'} (clash with {against})"))
+        else:
+            left.append((m, f"unknown ({' '.join(files)})"))
+            unknown = True
+    if built:
+        code, out, err = git(args.root, "update-ref", f"refs/heads/{branch}", tip, "0" * 40)  # the zero old value refuses a branch that exists
+        if code:
+            print(f"unknown: the branch {branch} could not be written: {err or out}")
+            return 2
+    print(f"combine-train --build: local branch {branch} from {BASE} {base[:9]}. Pushes nothing; no gh pr create, ready or merge. "
+          "Readings: members in queue order; a live head that is not the queued head, or a clash with the batch so far, leaves by name; no conflict is fixed by hand.")
+    print(f"batch {args.name} (built): {tag(built) or '(none)'}")
+    for m, detail in sorted(left):
+        print(f"left out #{m}: {detail}")
+    print(f"members in: {len(members)}")
+    print(f"members left out: {len(left)}")
+    if not built:
+        print("no branch built: every member left out")
+        return 2 if unknown else 1
+    print(f"branch {branch} at {tip}")
+    print("integration PR body (the runner pushes the branch and opens the draft):")
+    print("\n".join(merge.freeze_lines(args.name, {m: heads[m] for m in built}, base=base)))
+    return 2 if unknown else 1 if left else 0
 
 
 if __name__ == "__main__":
