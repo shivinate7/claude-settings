@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Fixture test for bin/verdict. Run: python lint/test_verdict.py -v"""
-import os, re, shlex, shutil, subprocess, sys, tempfile, time, unittest
+import os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+from proc_fixture import alive, kill_all, stop_group, wait_for  # noqa: E402  the one home of the signal-test helpers (testing/proc_fixture.py)
 RUN_FOLDER = _test_temp.run_folder()  # its sweep is proved in test_find_copies.py
 V = os.environ.get("VERDICT_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "verdict")
 # The Windows launcher. It always runs its sibling bin/verdict, so VERDICT_UNDER_TEST does not reach it.
@@ -48,12 +50,6 @@ def beats_on_stderr_only(case, r):
     case.assertGreaterEqual(len(beats), 1, (r.stdout, r.stderr))
     case.assertEqual(heartbeats(r.stdout), [], r.stdout)
     return beats
-
-def alive(pid):
-    try: os.kill(pid, 0)
-    except ProcessLookupError: return False
-    except PermissionError: return True
-    return True
 
 class T(unittest.TestCase):
     def test_pass(self):
@@ -211,6 +207,48 @@ class T(unittest.TestCase):
             self.assertFalse(alive(pid), f"child {pid} still running after verdict returned")
             self.assertNotIn("cannot run", open(log).read())
             self.assertNotIn("cannot run", r.stdout + r.stderr)
+
+    @unittest.skipIf(os.name == "nt", "POSIX signals")
+    def test_sigterm_forwards_to_child(self):
+        """A TERM or HUP to verdict ends its child and the child's child before verdict returns. Verdict killed alone
+        leaves its test run going."""
+        for sig in (signal.SIGTERM, signal.SIGHUP):
+            with self.subTest(signal=sig.name):
+                self.assert_signal_ends_child_tree(sig)
+
+    def assert_signal_ends_child_tree(self, sig):
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            ready = os.path.join(d, "ready.txt")
+            script = os.path.join(d, "fx.py")
+            # The child starts a grandchild, then writes both pids. The marker is renamed into place, so a reader sees it whole.
+            body = ("import os, subprocess, sys, time\n"
+                    "grand = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(300)'])\n"
+                    "tmp = READY + '.tmp'\n"
+                    "open(tmp, 'w').write('%d %d' % (os.getpid(), grand.pid))\n"
+                    "os.replace(tmp, READY)\n"
+                    "time.sleep(300)\n").replace("READY", repr(ready))
+            with open(script, "w", encoding="utf-8") as handle:
+                handle.write(body)
+            found = []
+            self.addCleanup(kill_all, found)  # the pids a red run leaves running are killed here
+            env = dict(os.environ)
+            env.pop("VERDICT_HEARTBEAT", None)
+            env.pop("STALL_WATCH_BEAT", None)
+            env["VERDICT_LOG"] = os.path.join(d, "v.log")
+            proc = subprocess.Popen([sys.executable, V, sys.executable, script], env=env, start_new_session=True,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.addCleanup(stop_group, proc)
+            self.assertTrue(wait_for(ready, 60, proc), "fixture: verdict's child never wrote its pids")
+            child, grand = (int(x) for x in open(ready, encoding="utf-8").read().split())
+            found += [child, grand]
+            self.assertTrue(alive(child) and alive(grand), "scope: the child and its child must run before %s" % sig.name)
+            proc.send_signal(sig)
+            try:
+                proc.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                self.fail("verdict did not exit within 60 s of %s" % sig.name)
+            self.assertFalse(alive(child), "%s to verdict did not reach its child %d, which runs after verdict returned" % (sig.name, child))
+            self.assertFalse(alive(grand), "%s to verdict did not reach the child's child %d, which runs after verdict returned" % (sig.name, grand))
 
     def test_test_failed_marker_on_exit0_is_fail(self):
         r = run("print('Test Suite All tests')\nprint('** TEST FAILED **')")
