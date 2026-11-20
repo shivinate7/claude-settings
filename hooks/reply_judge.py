@@ -182,7 +182,7 @@ INSTRUCTIONS = (
     "the fix is to read the count or state from REST and confirm each candidate with REST. "
     "Never flag a count read from REST. "
     "Never flag a reply that says a search total was not used or is wrong, and gives the REST count. "
-    "measure-before-priority: a cost claim with no measure may stand, and so may a ranking the reply marks unmeasured. "
+    "measure-before-priority: a cost claim with no measure may stand, marked unmeasured or not. "
     "Flag a cost ranking, such as the biggest cost, the most expensive lane or most of the spend, with no measure, "
     "marked unmeasured or not, only when the same reply also ranks, orders or cuts work on it; "
     "the fix is to cite a figure with its unit and a date, a run id or a sample count, or to drop the work order. "
