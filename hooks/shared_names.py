@@ -135,15 +135,16 @@ def lane_tags(tool_input: dict[str, Any]) -> list[Any]:
     return tags if isinstance(tags, list) else []
 
 
-def is_lane_tagged(tool_input: dict[str, Any]) -> bool:
-    """True when a start call's tags hold a lane tag: any tag that, stripped and casefolded, is LANE_TAG. The one
-    reading of the lane tag; the lane checks and the floor's remedy choice share it."""
-    return any(isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in lane_tags(tool_input))
-
-
 def is_lane_create_session(tool: str, tool_input: dict[str, Any]) -> bool:
-    """True for a create_session call that tags a lane (is_lane_tagged)."""
-    return tool == CREATE_SESSION_TOOL and is_lane_tagged(tool_input)
+    """True for a create_session call that tags a lane: any tag that, stripped and casefolded, is LANE_TAG. The one
+    reading of the lane tag; the lane checks and the floor's remedy choice share it."""
+    return tool == CREATE_SESSION_TOOL and any(
+        isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in lane_tags(tool_input))
+
+
+def is_lane_tagged(tool_input: dict[str, Any]) -> bool:
+    """True when a start call's tags hold a lane tag (is_lane_create_session, for a create_session call)."""
+    return is_lane_create_session(CREATE_SESSION_TOOL, tool_input)
 
 
 def grant_line_holds_words(line: str) -> bool:
