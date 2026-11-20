@@ -106,7 +106,8 @@ def gh_call_of(segment: str):
 
 
 # ---- a merge made outside the merge tool
-MERGE_TOOLS = ("mcp__github__merge_pull_request",)
+# The auto-merge tool arms the same merge: GitHub merges once the head's checks pass, so it is judged on the same head read.
+MERGE_TOOLS = ("mcp__github__merge_pull_request", "mcp__github__enable_pr_auto_merge")
 MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject",
                      "--match-head-commit", "-A", "--author-email"}
 # Seconds for the WHOLE read, shared: Host.head_read makes 4 `gh` REST calls (5 with a branch selector, 1 more run-list read when the check runs link more than one run; a settled head adds the

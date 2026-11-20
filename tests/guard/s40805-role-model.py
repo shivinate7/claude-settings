@@ -1,6 +1,6 @@
 # section 40805
 FAMILY = "role-model"
-ROLE_RULE = "agent-role-model"
+ROLE_MODEL_RULE = "agent-role-model"
 ROLE_REMEDY = "drop the model field, or name the role's model"
 ROLE_DEFAULT_REMEDY = "name the role's model (sonnet)"
 # A refusal for this rule names its remedy and no other target: not the table, not the agents folder.
@@ -127,7 +127,7 @@ def role_spawn(config, spawn, tool="Agent", env=None):
 
 def role_model_refuse(name, role, model, prompt, tool="Agent", config=ROLE_REAL_CFG, carries=(ROLE_REMEDY,),
                       lacks=ROLE_LACKS, env=None):
-    add(name, "deny", ROLE_RULE, tool=tool, config=config, env=env, carries=carries, lacks=lacks,
+    add(name, "deny", ROLE_MODEL_RULE, tool=tool, config=config, env=env, carries=carries, lacks=lacks,
         **role_input(role, model, prompt))
 
 
@@ -138,7 +138,7 @@ def role_model_allow(name, role, model, prompt, tool="Agent", config=ROLE_REAL_C
 def role_opus_refuse(name, role, model, prompt, tool="Agent", config=ROLE_REAL_CFG):
     """An Opus spawn above its row is refused under agent-model-cap, not this rule. An owner override lifts it,
     so the case is not never-lifted."""
-    add(name, "deny", "agent-model-cap", tool=tool, config=config, lacks=(ROLE_RULE,),
+    add(name, "deny", "agent-model-cap", tool=tool, config=config, lacks=(ROLE_MODEL_RULE,),
         **role_input(role, model, prompt))
 
 
@@ -286,7 +286,7 @@ workflow_refuse("role-model: Workflow Explore on opus with no marker is denied u
                 _step_flow("'Find where X is defined.'", "agentType: 'Explore', model: 'opus'"))
 workflow_refuse("role-model: Workflow Explore on sonnet with no marker is denied under agent-role-model",
                 _step_flow("'Find where X is defined.'", "agentType: 'Explore', model: 'sonnet'"),
-                rule=ROLE_RULE, carries=(ROLE_REMEDY, EXPLORE_MARKER), lacks=ROLE_LACKS)
+                rule=ROLE_MODEL_RULE, carries=(ROLE_REMEDY, EXPLORE_MARKER), lacks=ROLE_LACKS)
 workflow_refuse("role-model: Workflow builder on opus as a prompt key is denied under agent-model-cap",
                 "await agent({prompt: 'Fix the failing case.', agentType: 'builder', model: 'opus'});")
 workflow_refuse("role-model: Workflow builder on opus with a lone quote in its brief is denied",
@@ -341,7 +341,7 @@ workflow_refuse("role-model: Workflow builder on opus with a variable brief is d
 workflow_refuse("role-model: Workflow Explore on sonnet with a variable brief is denied under agent-role-model and names the literal-brief remedy",
                 "const brief = 'Audit: check the glossary for meaning drift.';\n"
                 + _step_flow("brief", "agentType: 'Explore', model: 'sonnet'"),
-                rule=ROLE_RULE, carries=BRIEF_LITERAL_REMEDY, lacks=ROLE_LACKS)
+                rule=ROLE_MODEL_RULE, carries=BRIEF_LITERAL_REMEDY, lacks=ROLE_LACKS)
 
 # H4: a call whose agentType the scan cannot read is skipped, not judged as general-purpose (guard.py spawn_inputs).
 # A shorthand agentType is unread, so the designer and design-reviewer rows pass on opus.
@@ -429,13 +429,13 @@ def role_override_lift_check():
     def call(seconds):
         return ov_call("Agent", dict(ROLE_OV_TEST_AUTHOR), NOGIT, config, session, seconds)
 
-    ok, why = ov_story([("no override", lambda: call(0), "deny", ROLE_RULE)])
+    ok, why = ov_story([("no override", lambda: call(0), "deny", ROLE_MODEL_RULE)])
     if not ok:
         return False, why
     note = ov_type(config, session, "override")
     ok, why = ov_story([
-        ("the first spawn, under the override", lambda: call(60), "allow", ROLE_RULE),
-        ("the next spawn, override spent", lambda: call(120), "deny", ROLE_RULE),
+        ("the first spawn, under the override", lambda: call(60), "allow", ROLE_MODEL_RULE),
+        ("the next spawn, override spent", lambda: call(120), "deny", ROLE_MODEL_RULE),
     ], note)
     if not ok:
         return False, why
@@ -450,14 +450,14 @@ def role_override_no_model_check():
     def call(seconds, spawn, env=None):
         return ov_call("Agent", dict(spawn), NOGIT, config, session, seconds, env=env)
 
-    ok, why = ov_story([("no model, no override", lambda: call(0, ROLE_OV_NO_MODEL, ROLE_OV_UNSET), "deny", ROLE_RULE)])
+    ok, why = ov_story([("no model, no override", lambda: call(0, ROLE_OV_NO_MODEL, ROLE_OV_UNSET), "deny", ROLE_MODEL_RULE)])
     if not ok:
         return False, why
     note = ov_type(config, session, "override")
     ok, why = ov_story([
-        ("no model, under the override", lambda: call(60, ROLE_OV_NO_MODEL, ROLE_OV_UNSET), "deny", ROLE_RULE),
+        ("no model, under the override", lambda: call(60, ROLE_OV_NO_MODEL, ROLE_OV_UNSET), "deny", ROLE_MODEL_RULE),
         ("test-author on sonnet, the override not spent by the no-model refusal",
-         lambda: call(120, ROLE_OV_TEST_AUTHOR), "allow", ROLE_RULE),
+         lambda: call(120, ROLE_OV_TEST_AUTHOR), "allow", ROLE_MODEL_RULE),
     ], note)
     if not ok:
         return False, why
@@ -558,9 +558,9 @@ def role_live_check():
     """The table is read at each spawn: a row edited between two spawns changes the second verdict."""
     spawn = role_input("test-author", "sonnet", "Write the failing cases.")
     first = role_spawn(ROLE_LIVE_CFG, spawn)
-    if first[0] != "deny" or ROLE_RULE not in first[1]:
+    if first[0] != "deny" or ROLE_MODEL_RULE not in first[1]:
         return False, "with the row at haiku the spawn is %s (%s), want a %s deny" % (
-            first[0], first[1][:70], ROLE_RULE)
+            first[0], first[1][:70], ROLE_MODEL_RULE)
     write(os.path.join(ROLE_LIVE_POINTER, "docs", "decisions", "agent-model-cap.md"),
           ROLE_TABLE_TEST_AUTHOR_SONNET)
     second = role_spawn(ROLE_LIVE_CFG, spawn)
@@ -581,12 +581,12 @@ def role_unread_log_check(config, spawn, name):
     if not os.path.exists(path):
         return False, "no guard.log was written for the %s file" % name
     with open(path, encoding="utf-8") as handle:
-        lines = [line for line in handle.read().splitlines() if ROLE_RULE in line]
+        lines = [line for line in handle.read().splitlines() if ROLE_MODEL_RULE in line]
     if len(lines) != 1:
-        return False, "expected one %s line for the %s file, found %d" % (ROLE_RULE, name, len(lines))
+        return False, "expected one %s line for the %s file, found %d" % (ROLE_MODEL_RULE, name, len(lines))
     fields = lines[0].split("\t")
-    if len(fields) < 5 or fields[2] != "noted" or "unread" not in fields[3] or ROLE_RULE not in fields[3]:
-        return False, "the line does not read noted, with an unread %s rule: %r" % (ROLE_RULE, lines[0])
+    if len(fields) < 5 or fields[2] != "noted" or "unread" not in fields[3] or ROLE_MODEL_RULE not in fields[3]:
+        return False, "the line does not read noted, with an unread %s rule: %r" % (ROLE_MODEL_RULE, lines[0])
     return True, "the %s file allows the spawn, and logs one noted unread line" % name
 
 
@@ -1288,10 +1288,10 @@ workflow_guard_row_allow("role-model: Workflow reviewer on sonnet with the guard
                _step_flow("'%s. Check the guard diff.'" % REVIEW_GUARD_MARKER, "agentType: 'reviewer', model: 'sonnet'"))
 workflow_guard_row_refuse("role-model: Workflow reviewer on sonnet with the guard marker mid-line is denied under agent-role-model",
                 _step_flow("'Check the guard diff. %s'" % REVIEW_GUARD_MARKER, "agentType: 'reviewer', model: 'sonnet'"),
-                rule=ROLE_RULE, carries=(ROLE_REMEDY,), lacks=ROLE_LACKS)
+                rule=ROLE_MODEL_RULE, carries=(ROLE_REMEDY,), lacks=ROLE_LACKS)
 workflow_guard_row_refuse("role-model: Workflow reviewer on sonnet with Guard or check: no is denied under agent-role-model",
                 _step_flow("'%s. Check the docs.'" % GUARD_NO_LINE, "agentType: 'reviewer', model: 'sonnet'"),
-                rule=ROLE_RULE, carries=(ROLE_REMEDY,), lacks=ROLE_LACKS)
+                rule=ROLE_MODEL_RULE, carries=(ROLE_REMEDY,), lacks=ROLE_LACKS)
 workflow_refuse("role-model: Workflow reviewer on opus with the guard marker is denied under agent-model-cap",
                 _step_flow("'%s. Check the guard diff.'" % REVIEW_GUARD_MARKER, "agentType: 'reviewer', model: 'opus'"))
 
@@ -1314,7 +1314,7 @@ role_model_refuse("role-model: round row: a record whose reviewer round 2 row na
 ROUND_SONNET_ONE_POINTER = role_table("roundsonnetone", ROLE_TABLE_RULES + "\n" + ROUND_TABLE_HEAD + "| reviewer | 1 other | sonnet | xhigh |\n")
 ROUND_SONNET_ONE_CFG = role_config("roundsonnetone", ROUND_SONNET_ONE_POINTER)
 add("role-model: round 1 free: reviewer on sonnet names round 1 among the free rounds, and says the test-author runs on its role's model",
-    "deny", ROLE_RULE, tool="Agent", config=ROUND_SONNET_ONE_CFG,
+    "deny", ROLE_MODEL_RULE, tool="Agent", config=ROUND_SONNET_ONE_CFG,
     carries=("the test-author runs on its role's model", "review round 1 or 2 or 3", ROLE_REMEDY),
     lacks=ROLE_LACKS + (ROUND_ONE_SENTENCE,), **role_input("reviewer", "sonnet", "Check the diff for typos."))
 # The record's third-round row names haiku, the reviewer's own row, so a third-round reviewer on sonnet is not lifted. The step-up
@@ -1348,7 +1348,7 @@ role_model_refuse("role-model: round 1 reviewer on sonnet with a Round 1 line an
                   "is haiku)", "reviewer", "sonnet", "Round 1 of 3. Check the guard diff.\n" + REVIEW_GUARD_MARKER)
 workflow_refuse("role-model: Workflow round 1 reviewer on sonnet with the guard marker is denied under agent-role-model",
                 _step_flow("'%s. Check the guard diff.'" % REVIEW_GUARD_MARKER, "agentType: 'reviewer', model: 'sonnet'"),
-                rule=ROLE_RULE, carries=(ROLE_REMEDY,), lacks=ROLE_LACKS)
+                rule=ROLE_MODEL_RULE, carries=(ROLE_REMEDY,), lacks=ROLE_LACKS)
 # With no round rows in the record, the fallback row stands in for the `1 guard` row, so the fallback must read haiku too.
 role_model_refuse("role-model: round 1 reviewer on sonnet with the guard marker is denied with no round rows (the fallback row is "
                   "haiku)", "reviewer", "sonnet", REVIEW_GUARD_MARKER + "\nCheck the guard diff.", config=ROLE_UNPINNED_CFG)

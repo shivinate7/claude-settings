@@ -15,7 +15,7 @@ RO_RULE = "readonly-shell-write"
 RO_AGENT = "a3e9c0d17b52f4a68"          # an agent's id on the payload, in the shape AGENT_ID accepts (see s07779)
 RO_TEMP = os.path.join(ROOT, "tmp")     # the temp folder these cases read (TEMP_DIR), so the scratchpads sit under it
 RO_SCRATCH = os.path.join(RO_TEMP, FAKE_SESSION, "scratchpad")         # this session's own scratchpad
-RO_OTHER_SCRATCH = os.path.join(RO_TEMP, OTHER_SESSION, "scratchpad")  # another session's scratchpad
+RO_OTHER_SCRATCH = os.path.join(RO_TEMP, REAP_OTHER_SESSION, "scratchpad")  # another session's scratchpad
 # The same two folders as a shell command names them. os.path.join puts backslashes in a Windows path, and the
 # tokenizer and bash read a backslash as an escape, so a command carries the forward-slash form (slash, s00442).
 # The cwd stays native.

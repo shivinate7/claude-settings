@@ -323,7 +323,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (agent-model-cap)
                        deny. An Agent or Task spawn that sets model opus, unless Plan, designer,
                        design-reviewer, refuter, a builder's third-round marker or an Explore's `Audit:` marker
-                       covers it. The general override, `opus [role] <time>` or a step grant lifts the
+                       covers it. The owner's model name lifts agent-model-floor only (owner_names_model), never this ceiling. The general override, `opus [role] <time>` or a step grant lifts the
                        spawn refusal; none lifts the settings-write ask.
   ask-alone            deny. An ask command chained with other commands. (ask-commands-run-alone)
   guard-crash          crash. The guard itself raised. The call is allowed and the log shows it.
@@ -402,9 +402,10 @@ Other tools, in `judge` order:
                        cannot read is skipped, and an unread brief is judged as an empty brief.
                        (agent-model-cap)
   agent-model-floor, roles-third-round-steps-up
-                       deny. A spawn below the model floor, or a reviewer's later round on the wrong model. A
-                       start_session call never reaches this hook: settings.json lists it in no PreToolUse
-                       matcher, so hooks/start_session_audit.py checks its floor and handoff after the call.
+                       deny. A spawn below the model floor, or a reviewer's later round on the wrong model. The
+                       owner's last typed turn naming Haiku (owner_names_model) lifts the
+                       floor only, never the Opus ceiling. A start_session call never reaches this hook: settings.json
+                       lists it in no PreToolUse matcher, so hooks/start_session_audit.py checks its handoff after the call.
                        The Workflow scan is static. It reads string-literal `model` and
                        `agentType` keys, and a literal prompt, in each `agent()` call. A template
                        prompt reads its static text only. A step-up call whose prompt or model is
@@ -600,8 +601,9 @@ next refused act through, or every refused act for a time. The narrower Opus ove
 only the Opus spawn refusal, and so does a step grant on the lane's roadmap step (decision agent-model-cap).
 No override lifts `frozen-path`, `git-env-set`, a kill of pid 0, 1 or -1, the
 role and model guards (the settings-write ask of `agent-model-cap`,
-`agent-model-floor`, the no-model refusal of `agent-role-model`, `roles-third-round-steps-up`, `builder-test-edit` and the other role guards),
-or `worktree-home`. No override check reaches the missing-module deny, the `settings.json` deny list
+the no-model refusal of `agent-role-model`, `roles-third-round-steps-up`, `builder-test-edit` and the other role guards),
+or `worktree-home`. `agent-model-floor` reads no override: only the owner's typed word for the model lifts it
+(owner_names_model). No override check reaches the missing-module deny, the `settings.json` deny list
 or the `bin/rm` and `bin/merge` shims; each of those refusals says that no override lifts it. Every
 refusal that goes through refuse() ends with the line the owner types, or with that same sentence.
 The model judges (hooks/call_judge.py, hooks/prose_judge.py, hooks/sendmessage_state.py) refuse through
@@ -2621,6 +2623,144 @@ def builder_merge_write_ok(target: str, cwd: str, rel: str) -> bool:
     return bool(where) and norm(rel).lstrip("/") in {norm(c).lstrip("/") for c in merge_conflicts(where) or ()}
 
 
+def write_result_texts(tool_input, full: str):
+    """`(old, new)`: the whole file on disk and the whole text a write tool call leaves in it, or None when the
+    file is unreadable, an old string is not found, or the call carries no text. An Edit or a MultiEdit applies
+    each edit in order (every match with `replace_all`, else the first)."""
+    if not isinstance(tool_input, dict):
+        return None
+    try:
+        with open(full, encoding="utf-8") as handle:
+            old = handle.read()
+    except (OSError, ValueError):
+        return None
+    edits = tool_input.get("edits")
+    if isinstance(edits, list):
+        pairs = [(e.get("old_string"), e.get("new_string"), e.get("replace_all")) for e in edits if isinstance(e, dict)]
+    elif "old_string" in tool_input:
+        pairs = [(tool_input.get("old_string"), tool_input.get("new_string"), tool_input.get("replace_all"))]
+    elif isinstance(tool_input.get("content"), str):
+        return old, tool_input["content"]
+    else:
+        return None
+    text = old
+    for before, after, every in pairs:
+        if not isinstance(before, str) or not isinstance(after, str) or not before or before not in text:
+            return None
+        text = text.replace(before, after) if every is True else text.replace(before, after, 1)
+    return old, text
+
+
+def test_shape(text: str):
+    """`(shape, count, clashes)` of a python test file: its `ast` dump with each test function name and each
+    docstring blanked, the number of distinct test names (one per class path), and the test names that a non-def
+    statement of the same scope also binds (an assignment, an import, a class attribute, a class, a def that is no
+    test). A test is a def named `test` with no decorator or only `pytest.mark` ones. A fixture or any other
+    decorated def is no test: its name stays in the dump.
+    A comment is no node. None when the text does not parse."""
+    import ast
+
+    def is_mark(deco):
+        # `@pytest.mark.parametrize`, `@pytest.mark.skip(...)`: a mark leaves the def a test.
+        head = deco.func if isinstance(deco, ast.Call) else deco
+        return (isinstance(head, ast.Attribute) and isinstance(head.value, ast.Attribute)
+                and head.value.attr == "mark" and isinstance(head.value.value, ast.Name)
+                and head.value.value.id == "pytest")
+
+    def is_test(node):
+        return (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test")
+                and all(is_mark(deco) for deco in node.decorator_list))
+
+    def binds(owner):
+        # The names the scope's own statements bind: not what a def or a lambda binds inside itself.
+        found, stack = set(), list(owner.body)
+        while stack:
+            node = stack.pop()
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                if not is_test(node):
+                    found.add(node.name)
+                continue
+            if isinstance(node, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+                continue
+            if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+                found.add(node.id)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                found.update((alias.asname or alias.name).split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ExceptHandler) and node.name:
+                found.add(node.name)
+            elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+                found.add(node.name)
+            elif isinstance(node, ast.MatchMapping) and node.rest:
+                found.add(node.rest)
+            stack.extend(ast.iter_child_nodes(node))
+        return found
+
+    def blank_docstring(node):
+        first = node.body[0] if node.body else None
+        if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str):
+            node.body = node.body[1:] or [ast.Pass()]
+
+    names, bound = set(), set()
+
+    def strip(node, scope):
+        if isinstance(node, (ast.Module, ast.ClassDef)):
+            bound.update(scope + (name,) for name in binds(node))
+        for child in ast.iter_child_nodes(node):
+            inner = scope
+            if is_test(child):
+                names.add(scope + (child.name,))
+                child.name = ""
+            if isinstance(child, ast.ClassDef):
+                inner = scope + (child.name,)
+            strip(child, inner)
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                blank_docstring(child)
+
+    try:
+        tree = ast.parse(text)
+        strip(tree, ())
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return None
+    blank_docstring(tree)
+    return ast.dump(tree), len(names), frozenset(names & bound)
+
+
+def builder_rename_only(rel: str, tool_input, target: str, cwd: str) -> bool:
+    """True when a builder's write to the python test path `rel` renames tests or edits comments and docstrings
+    only: the parsed bodies and the count of distinct test names stay (decision builders-cannot-edit-tests). A mutation test, test config, a file that is not python, a file that is not on
+    disk, and text that does not parse are not. The rule reads the file once and parses both texts."""
+    if not python_test_rel(rel):
+        return False
+    texts = write_result_texts(tool_input, _expanded(target, cwd))
+    return texts is not None and same_test_shape(*texts)
+
+
+def python_test_rel(rel: str) -> bool:
+    """True for a python file the rename route reads: no mutation test, no test config."""
+    return rel.lower().endswith(".py") and not is_mutation_test_rel(rel) and not is_test_config_rel(rel)
+
+
+def same_test_shape(before, after) -> bool:
+    """True when two texts hold the same python test file but for test names, comments and docstrings, and the new
+    text binds no test name a second way that the old text did not (a rename onto a name an assignment, an import
+    or a class attribute holds). A text that is None (a file that does not exist there) or does not parse is not."""
+    if before is None or after is None:
+        return False
+    left, right = test_shape(before), test_shape(after)
+    return left is not None and right is not None and left[:2] == right[:2] and right[2] <= left[2]
+
+
+def builder_rename_diff(root: str, top: str, rel: str, names, old: str, new=None) -> bool:
+    """True when the builder's change of the test path `rel`, from `old` to `new` (see `own_changes`), renames
+    tests or edits comments and docstrings only (`same_test_shape`). The path must read the same through symlinks.
+    Cost: two `git show` or one working-tree read, and two `ast` parses, for each changed python test path."""
+    if not python_test_rel(rel) or any(norm(n) != norm(rel) for n in names):
+        return False
+    before, after = text_at(root, old, rel, top, missing=None), text_at(root, new, rel, top, missing=None)
+    # Equal texts mean the change is a mode or a byte the text read hides, so it is no rename.
+    return before != after and same_test_shape(before, after)
+
+
 def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:
     """The early warning for a write tool call: the target path a role may not change, else ''.
 
@@ -2656,7 +2796,8 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         return target
     if role == WRITER_ROLE:
         return "" if rel.lower().endswith(".md") else target
-    if builder_test_path(target, cwd) and not builder_merge_write_ok(target, cwd, rel):
+    if (builder_test_path(target, cwd) and not builder_merge_write_ok(target, cwd, rel)
+            and not builder_rename_only(rel, tool_input, target, cwd)):
         return target
     if is_test_config_rel(rel) and any(
             disables_tests(part.splitlines(), []) for part in write_content_parts(tool_input)):
@@ -3304,6 +3445,8 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None, con
             bad = any(is_builder_test_rel(n) for n in names) or (is_test_config_rel(rel) and disables_tests(
                 text_at(root, new, rel, top).splitlines(), text_at(root, old, rel, top).splitlines())) or (
                 is_workflow_rel(rel) and workflow_builder_refused(text_at(root, old, rel, top), text_at(root, new, rel, top)))
+            if bad and builder_rename_diff(root, top, rel, names, old, new):
+                bad = False
         why = ""
         if role == BUILDER_ROLE and builder_merge_test_path(rel, names, conflicts):
             # The merge route: a builder resolves a conflict in a test file when no test case of either parent
@@ -3417,9 +3560,8 @@ def judge_stop(payload) -> None:
 SPAWN_TOOLS = ("Agent", "Task")
 # The desktop start. No PreToolUse matcher in settings.json lists it: any hook on it makes the desktop app show the
 # "Allow Claude to start the session?" card on every start, even in Bypass (anthropics/claude-code#103832; decision
-# start-session-not-pretooluse). hooks/start_session_audit.py judges it after the call with floor_hit and
-# unread_handoff. The judge() branches below that name it run only if a matcher is added again, and the guard's cases
-# call them directly.
+# start-session-not-pretooluse). hooks/start_session_audit.py judges it after the call with unread_handoff only. The
+# judge() branches below that name it run only if a matcher is added again, and the guard's cases call them directly.
 SESSION_TOOL = "mcp__ccd_session__start_session"
 from shared_names import (  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER and LANE_EFFORT from here
     CREATE_SESSION_TOOL, LANE_EFFORT, REMOTE_OUTWARD_TOOLS, REMOTE_SERVER, is_lane_create_session, lane_tags,  # noqa: F401  REMOTE_SERVER and LANE_EFFORT re-exported: lint/check_agent_models.py reads guard.REMOTE_SERVER and guard.LANE_EFFORT
@@ -3568,8 +3710,11 @@ def script_agent_calls(script: str):
         yield prompt, bodies
 
 
+FLOOR_WORD = "haiku"  # the model word below the floor: below_the_floor and owner_names_model both read it
+
+
 def below_the_floor(model) -> bool:
-    return "haiku" in str(model).lower()
+    return FLOOR_WORD in str(model).lower()
 
 
 def floor_hit(tool: str, tool_input) -> str:
@@ -3587,6 +3732,52 @@ def floor_hit(tool: str, tool_input) -> str:
                 if below_the_floor(keys.get("model")) and keys.get("agentType") not in HAIKU_ROLES:
                     return keys["model"]
     return ""
+
+
+# The owner's own word for a model (ruling: "if i say haiku it should work, there shouldnt be any
+# guards on a FLOOR"). A spawn the floor would refuse passes when the owner's last typed turn names that model. The word
+# lifts the floor only: the Opus ceiling (agent-model-cap) never reads it (consultant pick, same time). It covers a lane
+# start too (lane_start_hits). A started session cannot read the word, so start_check.py flags no Haiku start. The audit
+# (start_session_audit.py) can read it through transcript_path, yet flags none either: it stops a start only for an unread handoff.
+MODEL_CLAUSE_BREAK = re.compile(r"[.;,!?:\n\u2013\u2014]+")  # a negation reaches only to the end of its own clause
+MODEL_MENTION = re.compile(r"(?<![A-Za-z])%s(?![A-Za-z])" % FLOOR_WORD, re.I)  # also inside claude-haiku-4-5, haiku-4.5
+
+
+def owner_names_model(payload, model) -> bool:
+    """True when the owner's last typed turn names the floor's model `model` (a Haiku name) and no mention of it is
+    negated. The turn is override.latest_owner_text, read from the payload's transcript_path on demand, with pasted and
+    machine blocks stripped (override._strip_blocks: that text is not the owner's words). A mention is a word that holds
+    FLOOR_WORD, so `claude-haiku-4-5` and `haiku-4.5` count. It is negated when, between it and the start of its clause or
+    the nearest word of override.MODEL_SPAN_BREAKS before it, stands a word of override.MODEL_NEGATIONS or one ending
+    n't. A pair of override.MODEL_NEGATION_PAIRS negates only when it stands just before the mention. So "Not sonnet but haiku", "Instead use haiku" and "Skip the checks and run it
+    on haiku" name the model, and "don't use haiku" does not. One negated mention refuses the whole turn ("use haiku. No,
+    not haiku, use sonnet"). No transcript_path, an unreadable transcript, no mention or a model that is not Haiku is
+    False, so the refusal stands."""
+    transcript = payload.get("transcript_path") if isinstance(payload, dict) else None
+    if not below_the_floor(model) or not isinstance(transcript, str) or not transcript:
+        return False
+    try:
+        import override
+        text = override.latest_owner_text(transcript)
+        words_by_clause = [[w.lower() for w in override.ROLE_WORDS.findall(clause)] for clause in
+                           MODEL_CLAUSE_BREAK.split(override._strip_blocks(text or ""))]
+        negations, pairs, breaks = override.MODEL_NEGATIONS, override.MODEL_NEGATION_PAIRS, override.MODEL_SPAN_BREAKS
+    except Exception:
+        return False
+    named = False
+    for words in words_by_clause:
+        for at, word in enumerate(words):
+            if not MODEL_MENTION.search(word):
+                continue
+            if tuple(words[max(at - 2, 0):at]) in pairs:
+                return False
+            for i in range(at - 1, -1, -1):
+                if words[i] in breaks:
+                    break
+                if words[i] in negations or words[i].endswith(("n't", "n\u2019t")):
+                    return False
+            named = True
+    return named
 
 
 def lane_effort_hit(tool: str, tool_input) -> str:
@@ -3677,7 +3868,8 @@ def lane_start_hits(tool: str, tool_input, cwd: str, transcript: str = "", judge
     if named_id:
         hits.append(("brief-ids-in-roster", named_id[1], named_id[0]))
     floor_model = floor_hit(tool, tool_input)
-    if floor_model:
+    # The owner's model name lifts the floor here as at step 9; the transcript is read only when the floor fires.
+    if floor_model and not owner_names_model({"transcript_path": transcript}, floor_model):
         hits.append(("agent-model-floor", LANE_MODEL_FLOOR_REASON, floor_model))
     lane_prompt = lane_effort_hit(tool, tool_input)
     if lane_prompt:
@@ -7470,7 +7662,8 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     check."""
     POWERSHELL_CALL[0] = tool == "PowerShell"
     # role_model_check's above-row refusal is liftable (item 127 pick a); only its no-model refusal is never lifted.
-    if (floor_hit(tool, tool_input) or step_up_hit(tool, tool_input)
+    floor_model = floor_hit(tool, tool_input)  # the owner's own word for that model leaves the floor out of this list (step 9)
+    if ((floor_model and not owner_names_model(payload, floor_model)) or step_up_hit(tool, tool_input)
             or role_model_check(tool, tool_input)[1].startswith(ROLE_NO_MODEL_MATCH)
             or worktree_home_hit(payload, tool, tool_input, cwd)):
         return True
@@ -7729,8 +7922,9 @@ def judge(payload) -> None:
 
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
     # model; the log holds what the call asked for. A lane start's floor is judged with the lane-start rules (8a).
+    # The owner's last turn naming the model lifts it (owner_names_model); the transcript is read only when the floor fires.
     floor_model = floor_hit(tool, tool_input)
-    if floor_model:
+    if floor_model and not owner_names_model(payload, floor_model):
         refuse(tool, "deny", "agent-model-floor", MODEL_FLOOR_REASON, floor_model)
 
     # 9b. Step-up: a reviewer's second round on Sonnet. A builder's third try has no step-up: it runs Sonnet, its role row (owner item 893). A reviewer's third round passes here on
