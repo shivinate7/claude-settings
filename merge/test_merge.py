@@ -16530,7 +16530,7 @@ class StandingMergeRole(CloudSession):
         self.assertEqual(merge.live_review_state(self.host, merge.parse_review(body), clean, "main")[0], "done",
                          "the merge tool's own reader does not read the record over the clean merge of main as done")
 
-    def assert_gate_passes_clean_merge(self, clean):
+    def assert_guard_passes_clean_merge(self, clean):
         """The red premise: standing_refusal, the gate, answers "" for the clean merge. On the old code it gives the record refusal."""
         why = merge.standing_refusal(self.host, 7, self.host.pr(7), clean)
         self.assertEqual(why, "", "the standing gate refuses a clean merge of main over a passing record, though the merge tool reads the record as done: " + why)
@@ -16562,7 +16562,7 @@ class StandingMergeRole(CloudSession):
         self.own_pr([("CLAUDE.md", "added", 1)])
         self.scripted_records(body)
         self.assert_clean_merge_of(record, early, clean, body)
-        self.assert_gate_passes_clean_merge(clean)  # the red premise: the same record, over the clean merge
+        self.assert_guard_passes_clean_merge(clean)  # the red premise: the same record, over the clean merge
         sh(self.other, "git", "push", "-q", "origin", f"{conflicted}:refs/heads/feat")
         self.assertEqual(self.head(), conflicted, "fixture: the conflicted merge is not the pull request's live head")
         rc, out, err = self.standing_confirm()
@@ -16580,7 +16580,7 @@ class StandingMergeRole(CloudSession):
         self.own_pr([("CLAUDE.md", "added", 1)])
         self.scripted_records(body)
         self.assert_clean_merge_of(record, early, clean, body)
-        self.assert_gate_passes_clean_merge(clean)  # the red premise: the same record, over the clean merge
+        self.assert_guard_passes_clean_merge(clean)  # the red premise: the same record, over the clean merge
         self.assertNotEqual(sh(self.co, "git", "rev-parse", f"{edited}^{{tree}}"), self.git_clean_tree(record, early),
                             "fixture: the edited merge has git's clean merge tree, so the case tests nothing")
         self.own_pr([("CLAUDE.md", "added", 1), ("extra.txt", "added", 1)])  # the pull request now holds the edit too
