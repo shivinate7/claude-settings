@@ -65,12 +65,14 @@ class Launch(unittest.TestCase):
         # Signing is on, as in a real checkout, so the import above is what keeps these commits off the signer.
         put(self.cfg, f'[user]\n\tname = t\n\temail = t@t\n[commit]\n\tgpgsign = true\n[tag]\n\tgpgsign = true\n[url "{target.replace(os.sep, "/")}"]\n\tinsteadOf = {URL}\n')
 
-    def release(self, tag, stable=True):
+    def release(self, tag, stable=True, body=None):
         # The stub prints its tag and, when ARGS_FILE is set, records the arguments it received.
+        # body, when given, replaces the stub's text (a case that reads the run from inside it).
         # stable=True moves origin's stable with main, so a case that expects the released tag still
         # checks the head the launcher fetches; stable=False leaves stable where it was.
-        put(os.path.join(self.work, "merge", "merge.py"), "import os, sys\nprint('RAN %s')\n"
-            "f = os.environ.get('ARGS_FILE')\nif f: open(f, 'w').write(repr(sys.argv[1:]))\n" % tag)
+        put(os.path.join(self.work, "merge", "merge.py"), body if body is not None else (
+            "import os, sys\nprint('RAN %s')\n"
+            "f = os.environ.get('ARGS_FILE')\nif f: open(f, 'w').write(repr(sys.argv[1:]))\n" % tag))
         sh(self.work, "git", "add", "-A", env=self.env)
         sh(self.work, "git", "commit", "-q", "-m", tag, env=self.env)
         if tag != "v1":
@@ -229,6 +231,30 @@ class Launch(unittest.TestCase):
         self.merge()
         self.assertEqual(len(sh(self.co, "git", "worktree", "list", env=self.env).splitlines()), 1)
         self.assertEqual(os.listdir(self.tmp), [])
+
+    def test_the_fresh_tree_is_locked_while_the_run_lives(self):
+        """The run's own tree, `merge-fresh-*/tree`, carries the lock `merge tool, pid N` while the run
+        lives. The janitor keeps a tree that holds that lock, while an unlocked one is judged by its
+        cwd and its idle clock alone. The stub lists the worktrees from inside the tree, mid-run."""
+        listing = os.path.join(self.t, "listing.txt")
+        self.release("v2", body=(
+            "import os, subprocess\n"
+            "tree = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))\n"
+            "out = subprocess.run(['git', '-C', tree, 'worktree', 'list', '--porcelain'], capture_output=True, text=True).stdout\n"
+            "open(os.environ['WT_LIST_FILE'], 'w').write(out)\n"
+            "print('RAN v2')\n"))
+        code, out, err = self.merge(WT_LIST_FILE=listing)
+        self.assertEqual(code, 0, err)
+        self.assertTrue(os.path.isfile(listing), "the run wrote no worktree listing")
+        with open(listing) as handle:
+            blocks = [b for b in handle.read().split("\n\n") if b.strip()]
+        fresh = [b for b in blocks
+                 if b.splitlines()[0].startswith("worktree ")
+                 and os.path.basename(b.splitlines()[0][len("worktree "):]) == "tree"
+                 and os.path.basename(os.path.dirname(b.splitlines()[0][len("worktree "):])).startswith("merge-fresh-")]
+        self.assertEqual(len(fresh), 1, "the run's own merge-fresh tree is not in the listing taken mid-run: %r" % blocks)
+        self.assertTrue(any(line.startswith("locked merge tool, pid ") for line in fresh[0].splitlines()),
+                        "the run's own tree is not locked while the run lives: %r" % fresh[0])
 
     def test_temp_clone_removed_after_run_and_after_failed_clone(self):
         e = {k: v for k, v in self.env.items() if k != "CLAUDE_SETTINGS_DIR"}
