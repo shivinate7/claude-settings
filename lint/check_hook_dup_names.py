@@ -14,7 +14,7 @@ name that two section files bind (assign, def or class) makes the later one repl
 FAIL line is `NAME assigned at FILE:LINE and FILE:LINE`, first section in run order (header number)
 first. Not counted: names inside if, try, with or for, a rebind inside one file, a binding that reads
 its own name (an accumulator such as `X = X + [1]`), and FAMILY and TEMP_DIR, which the runner binds
-and each section sets. No allowance applies to sections. A missing or empty tests/guard exits 2.
+and each section sets. No allowance applies to sections. A missing or empty tests/guard exits 2, and so does a section file that is not UTF-8.
 
 An allowance is `{"hooks/x.py": {"NAME": "<reason>"}}` in lint/hook_dup_names_allow.json. An empty
 reason fails, and so does an allowance for a name or file that is not duplicated now. A missing
@@ -92,19 +92,32 @@ def section_bindings(tree):
         else:
             continue
         for target in targets:
-            bound = list(target_names(target))
-            if reads_name(value, {n for n, _ in bound}):
-                continue
-            for name, line in bound:
-                seen.setdefault(name, line)
+            for name, line in target_names(target):
+                if not reads_name(value, {name}):  # per name: `A, B = A.strip(), 2` extends A and rebinds B
+                    seen.setdefault(name, line)
     return seen
+
+
+def bad_section(folder, error):
+    """Name the first section file that does not read as UTF-8; the shared reader's error omits the file."""
+    for name in sorted(os.listdir(folder)):
+        if name.endswith(".py"):
+            try:
+                with open(os.path.join(folder, name), encoding="utf-8") as f:
+                    f.read()
+            except (OSError, UnicodeDecodeError):
+                return "%s: %s" % (name, error)
+    return str(error)
 
 
 def scan_sections(root):
     """-> [(name, "FILE:LINE", "FILE:LINE")] for each later section file that rebinds a name an earlier
     one bound, in run order (header number, then file name)."""
     folder = os.path.join(root, *SECTION_DIR.split("/"))
-    sections = _guard_sections.read(folder)
+    try:
+        sections = _guard_sections.read(folder)
+    except (OSError, UnicodeDecodeError) as e:
+        raise Unknown("a guard section under %s does not read: %s" % (folder, bad_section(folder, e)))
     if not sections:
         raise Unknown("no guard section file under %s, so no section was scanned" % folder)
     order = sorted(sections, key=lambda s: (s[1] is None, s[1] or 0, s[0]))
