@@ -10,8 +10,8 @@
 #    exit 2, no lock, no boot.
 #  - A booted Duo (its name contains "iPhone Duo") is reused by UDID: no boot, no shutdown, no lease. With two, the first
 #    is used. An iPad is not an iPhone. pro reuses the first booted iPhone whose name does not contain "Duo".
-#  - Beside a booted phone: a duo run with the 18 Pro booted, or a pro run with a Duo booted, is allowed (ruling
-#    sims-load-brake-only, owner 2026-11-12 21:59 CST). It boots its own device, runs, and shuts down only that device.
+#  - Beside a booted phone: a duo run with the 18 Pro booted, or a pro run with a Duo booted, is allowed (record
+#    sims-load-brake-only). It boots its own device, runs, and shuts down only that device.
 #  - None booted, its own boot: the lease (bin/sim-lease, beside the script) grants the UDID for the role, duo slot 1 or
 #    2 or the pro UDID. The tool boots that UDID, tests, and shuts that same UDID down. The UDIDs are read from SLOT_UDID
 #    in bin/sim-lease, the one home of the device IDs.
@@ -925,8 +925,8 @@ tool_ended() { local st; st=$(ps -o stat= -p "$tool_pid" 2>/dev/null); [[ -z $st
 # holds neither a lease nor a place.
 lease_freed_after_reap() { env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME="$work/home" "$sim_lease" status > /dev/null 2>&1; lease_released; }
 
-# queued_duo_wait BOOTED [store]: a duo run queues behind the 5-minute load of 100, the limit a grant has now (ruling
-# sims-load-brake-only, owner 2026-11-12 21:59 CST). While it waits, BOOTED is booted: yes the 18 Pro, duo a Duo of
+# queued_duo_wait BOOTED [store]: a duo run queues behind the 5-minute load of 100, the limit a grant has now (record
+# sims-load-brake-only). While it waits, BOOTED is booted: yes the 18 Pro, duo a Duo of
 # slot 2 (with its store folder when the second argument is store), no nothing. Then the load falls, and the granted run
 # re-reads the booted list.
 queued_duo_wait() {
