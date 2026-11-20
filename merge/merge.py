@@ -2969,10 +2969,25 @@ def open_worktree(root, info, base):
 MERGE_LOCK = re.compile(r"merge tool, pid (\d+)")
 
 
+def tree_has_live_holder(tree):
+    """True when a live process holds merge tree TREE (cwd, argv path or open file under its run dir), or when the read could not run.
+    The one home of the holder read is janitor/sweep.py `processes_in`; a read that fails keeps the tree, as the sweep does."""
+    try:
+        janitor = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "janitor")  # this tree's own janitor, beside merge/
+        if janitor not in sys.path:
+            sys.path.append(janitor)
+        import sweep
+        inside, _unreadable = sweep.processes_in(tree)
+    except Exception:
+        return True
+    return inside is None or bool(inside)
+
+
 def sweep_dead_trees(root):
     """Remove each locked worktree of ROOT in the temp folder whose lock reason is `merge tool, pid N` with N dead: a merge run that died left it
     (`merge-wt-*`, a PR head's tree, and `merge-fresh-*`, the launcher's own).
-    The tree is this tool's own, so it is dropped with force, as drop_worktree does. A live pid, an unreadable pid and any other lock stay."""
+    The tree is this tool's own, so it is dropped with force, as drop_worktree does. A live pid, an unreadable pid and any other lock stay.
+    A tree with a live holder stays too, even when its pid is dead: a launcher killed alone leaves merge.py running from its tree."""
     c, out = git(root, "worktree", "list", "--porcelain")
     if c:
         return
@@ -2985,7 +3000,7 @@ def sweep_dead_trees(root):
             m = MERGE_LOCK.fullmatch(line[len("locked"):].strip())
             tmp = os.path.dirname(path)
             if (m and os.path.basename(path) == "tree" and os.path.basename(tmp).startswith(("merge-wt-", "merge-fresh-"))
-                    and os.path.dirname(tmp) == temp and not pid_alive(int(m.group(1)))):
+                    and os.path.dirname(tmp) == temp and not pid_alive(int(m.group(1))) and not tree_has_live_holder(path)):
                 drop_worktree(root, tmp, path)
 
 
