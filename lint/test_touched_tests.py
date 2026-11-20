@@ -115,7 +115,9 @@ def with_ci(base, paths=None):
     return with_checks(base, ci_for(paths) if paths is not None else FIXTURE_CI)
 
 
-class Selector(unittest.TestCase):
+class SelectorBase(unittest.TestCase):
+    """The fixture and the output readers that every selector case class shares. It holds no case."""
+
     @classmethod
     def setUpClass(cls):
         cls.run_dir = _test_temp.run_folder()
@@ -267,6 +269,10 @@ class Selector(unittest.TestCase):
         self.assertEqual(r.returncode, 1, f"the selector exited {r.returncode}, not 1, on a checks.yml it cannot read:\n{r.stderr}")
         self.assertEqual(outputs, {}, f"the selector wrote output on its exit 1: {outputs}")
         return r.stderr
+
+
+class Selector(SelectorBase):
+    """The selector's cases over the scratch repos that fixture() builds."""
 
     def test_control_the_fixture_diff_names_the_changed_path(self):
         """Green control: with no selector, the fixture's own diff still holds the path it changed, so each red case
@@ -1303,6 +1309,143 @@ class Selector(unittest.TestCase):
         self.assertEqual(listing.returncode, 0, f"git ls-files failed in the real tree: {listing.stderr}")
         found = self.selector_module().candidates(module, set(listing.stdout.splitlines()), repo)
         self.assertIn(importer, found, f"candidates({module!r}) does not include {importer}, which loads it through an `or` default")
+
+
+# Heavy suites: the touched job fails a heavy Python suite that calls a POSIX-only API outside a guard. A heavy suite is
+# skipped on a lane push, so no lane run reaches it on Windows (the incident of PR #3729). The fixture templates are copied
+# from archive/posix-tests-skip-windows lint/test_check_posix_tests.py. That archive's repo-wide lint is dropped: the
+# step lives in the selector, which reads the file it already selects.
+POSIX_PATH = "merge/test_merge.py"  # HEAVY, and the suite the incident hit
+HEAD = "import os\nimport signal\nimport sys\nimport unittest\n\n\n"
+CLASS = "class WorkFolderOnSignal(unittest.TestCase):\n"
+DEF = "    def test_sighup_removes_the_work_folder(self):\n"
+CALL = "self.assert_signal_removes_work_folder(signal.SIGHUP)"
+BODY = "        " + CALL + "\n"  # a call in a method body
+GUARD_NT = '@unittest.skipIf(os.name == "nt", "POSIX signals")\n'
+
+
+def named_line(path, line):
+    """A pattern that matches `path` followed by `line` in one message, as `path:line` or `path line N`, and not a longer number."""
+    return re.compile(rf"{re.escape(path)}\D{{0,12}}{line}(?!\d)")
+
+
+def line_of(src, needle):
+    """The 1-based line of the one line of `src` that holds `needle`. Two such lines are a fixture bug."""
+    hits = [n for n, text in enumerate(src.split("\n"), 1) if needle in text]
+    if len(hits) != 1:
+        raise AssertionError(f"fixture bug: {needle!r} is on {len(hits)} lines")
+    return hits[0]
+
+
+class PosixOnlyInHeavySuites(SelectorBase):
+    """The touched job fails a heavy suite that calls a POSIX-only API outside a guard that reads os.name or sys.platform.
+    A red case expects exit 1, no output, and stderr that names the file, the call's line and the name. A green control
+    expects exit 0 and the suite's HEAVY skip, so the suite reached the scan and passed it."""
+
+    def fails_at(self, path, src, needle, name, not_named=None):
+        """Scope first: `path` is HEAVY. Then the touched job exits 1 and writes no output, and stderr names `path` at the line of
+        `needle` and names `name`. With `not_named`, stderr does not name the line of that other needle."""
+        self.assertTrue(covers(self.constant("HEAVY"), path), f"the selector's HEAVY constant does not name {path}, so this case probes nothing")
+        repo, sha, out = self.fixture({path: "# base\n"}, {path: src})
+        r, outputs = self.select(repo, sha, out)
+        self.assertEqual(r.returncode, 1, f"the touched job exited {r.returncode}, not 1, on {name} with no guard in {path}:\n{r.stdout}{r.stderr}")
+        self.assertEqual(outputs, {}, f"the touched job wrote output on its exit 1: {outputs}")
+        line = line_of(src, needle)
+        self.assertRegex(r.stderr, named_line(path, line), f"stderr does not name {path} line {line}: {r.stderr!r}")
+        self.assertIn(name, r.stderr, f"stderr does not name {name}: {r.stderr!r}")
+        if not_named:
+            other = line_of(src, not_named)
+            self.assertNotRegex(r.stderr, named_line(path, other), f"stderr names line {other}, which is not an offence: {r.stderr!r}")
+
+    def passes(self, path, src):
+        """Scope first: the touched suite is read and reaches its HEAVY skip. Then the touched job exits 0."""
+        repo, sha, out = self.fixture({path: "# base\n"}, {path: src})
+        r, outputs = self.select(repo, sha, out)
+        self.assertIn(f"touched {path}", r.stdout, f"the selector did not read the touched suite {path}, so this case probes nothing")
+        self.assertTrue(skipped_on(r.stdout, path, HEAVY_KEY), f"{path} did not reach its HEAVY skip, so this case probes nothing")
+        self.assertEqual(r.returncode, 0, f"the touched job exited {r.returncode} on a POSIX-only call that is guarded in {path}:\n{r.stdout}{r.stderr}")
+
+    def test_an_unguarded_sighup_in_a_touched_heavy_suite_fails_the_job(self):
+        self.fails_at(POSIX_PATH, HEAD + CLASS + DEF + BODY, CALL, "signal.SIGHUP")
+
+    def test_each_other_posix_only_name_unguarded_fails_the_job(self):
+        calls = (("os.killpg", "os.killpg(0, signal.SIGTERM)"), ("os.getpgid", "os.getpgid(0)"),
+                 ("os.setsid", "os.setsid()"), ("signal.SIGKILL", "os.kill(0, signal.SIGKILL)"),
+                 ("signal.SIGQUIT", "os.kill(0, signal.SIGQUIT)"), ("signal.SIGUSR1", "os.kill(0, signal.SIGUSR1)"),
+                 ("signal.SIGUSR2", "os.kill(0, signal.SIGUSR2)"))
+        for name, call in calls:
+            with self.subTest(name=name):
+                self.fails_at(POSIX_PATH, HEAD + CLASS + DEF + "        " + call + "\n", call, name)
+
+    def test_a_skipif_that_reads_no_os_name_does_not_excuse_the_call(self):
+        src = HEAD + '@unittest.skipIf(os.environ.get("CI"), "a skip")\n' + CLASS + DEF + BODY
+        self.fails_at(POSIX_PATH, src, CALL, "signal.SIGHUP")
+
+    def test_an_if_that_reads_no_os_name_does_not_excuse_the_call(self):
+        src = HEAD + CLASS + DEF + '        if os.environ.get("CI"):\n            ' + CALL + "\n"
+        self.fails_at(POSIX_PATH, src, CALL, "signal.SIGHUP")
+
+    def test_a_guard_on_one_class_does_not_cover_a_call_in_another_class(self):
+        src = (HEAD + GUARD_NT + CLASS + DEF + BODY
+               + "\n\nclass Unguarded(unittest.TestCase):\n"
+               + "    def test_quit(self):\n"
+               + "        self.assert_signal_removes_work_folder(signal.SIGQUIT)\n")
+        self.fails_at(POSIX_PATH, src, "signal.SIGQUIT)", "signal.SIGQUIT", not_named=CALL)
+
+    def test_a_call_after_an_os_name_if_block_fails(self):
+        src = HEAD + CLASS + DEF + '        if os.name != "nt":\n            pass\n' + BODY
+        self.fails_at(POSIX_PATH, src, CALL, "signal.SIGHUP")
+
+    def test_a_call_after_a_multi_line_string_fails_on_its_own_line(self):
+        src = (HEAD + CLASS + DEF + '        text = """\nos.killpg(os.getpgid(0), signal.SIGTERM)\nsignal.SIGHUP\n"""\n'
+               + '        self.assertIn("killpg", text)\n' + BODY)
+        self.fails_at(POSIX_PATH, src, CALL, "signal.SIGHUP", not_named="os.killpg(os.getpgid(0)")
+
+    def test_a_lone_quote_in_text_does_not_hide_the_call(self):
+        src = HEAD + CLASS + DEF + '        """Don\'t run this on Windows."""\n' + "        # it's the POSIX stop path\n" + BODY
+        self.fails_at(POSIX_PATH, src, CALL, "signal.SIGHUP")
+
+    def test_an_unguarded_call_at_the_end_of_a_full_size_suite_fails(self):
+        filler = "".join(f"VALUE_{n} = {n}\n" for n in range(27000))  # merge/test_merge.py is 27806 lines
+        self.fails_at(POSIX_PATH, HEAD + filler + CLASS + DEF + BODY, CALL, "signal.SIGHUP")
+
+    def test_a_skipif_os_name_nt_class_passes(self):
+        self.passes(POSIX_PATH, HEAD + GUARD_NT + CLASS + DEF + BODY)
+
+    def test_a_skipunless_sys_platform_def_passes(self):
+        src = HEAD + CLASS + '    @unittest.skipUnless(sys.platform != "win32", "POSIX signals")\n' + DEF + BODY
+        self.passes(POSIX_PATH, src)
+
+    def test_an_if_os_name_not_nt_block_passes(self):
+        self.passes(POSIX_PATH, HEAD + CLASS + DEF + '        if os.name != "nt":\n            ' + CALL + "\n")
+
+    def test_an_if_sys_platform_block_passes(self):
+        self.passes(POSIX_PATH, HEAD + CLASS + DEF + '        if sys.platform != "win32":\n            ' + CALL + "\n")
+
+    def test_a_call_only_in_a_string_or_comment_passes(self):
+        src = (HEAD + CLASS + "    def test_names(self):\n"
+               + '        note = "os.killpg(os.getpgid(0), signal.SIGTERM)"  # signal.SIGHUP is text here\n'
+               + '        self.assertIn("killpg", note)\n')
+        self.passes(POSIX_PATH, src)
+
+    def test_a_call_in_a_multi_line_string_passes(self):
+        src = (HEAD + CLASS + "    def test_doc(self):\n"
+               + '        text = """\nos.killpg(os.getpgid(0), signal.SIGTERM)\nsignal.SIGHUP\n"""\n'
+               + '        self.assertIn("killpg", text)\n')
+        self.passes(POSIX_PATH, src)
+
+    def test_a_touched_non_heavy_suite_is_not_scanned_by_this_step(self):
+        path = "lint/test_posix_light.py"  # not HEAVY: this step reads the heavy suites only
+        self.assertFalse(covers(self.constant("HEAVY"), path), f"{path} is HEAVY, so this case probes nothing")
+        repo, sha, out = self.fixture(with_ci({path: "# base\n"}, [path]), {path: HEAD + CLASS + DEF + BODY})
+        r, outputs = self.select(repo, sha, out)
+        self.assertIn(f"touched {path}", r.stdout, f"the selector did not read the touched suite {path}, so this case probes nothing")
+        windows, _ = self.os_lists(outputs)
+        self.assertIn(path, windows, f"{path} is not in files_windows, so the Windows job would not run it")
+        self.assertEqual(r.returncode, 0, f"the touched job exited {r.returncode} on a non-heavy suite with an unguarded call:\n{r.stdout}{r.stderr}")
+
+    def test_an_empty_heavy_suite_passes(self):
+        self.passes(POSIX_PATH, "")
 
 
 if __name__ == "__main__":
