@@ -7191,9 +7191,11 @@ def own_session_link(body):
     own = remote_session_id()
     return bool(own) and own in re.findall(r"https://claude\.ai/code/(session_[A-Za-z0-9_-]+)", body or "", re.ASCII)
 
-def standing_refusal(h, n, info, head):
+def standing_refusal(h, n, info, head, main=None, claims=None):
     """-> why a standing session may not merge pull request `n`, or "" when it may (ruling own-tiny-fixes-b). It must be the session's own,
-    and the head's own checks must be green. A pull request past docs, code and guard paths included, needs one passing reviewer record, of any model, on the relayed head `head`.
+    and the head's own checks must be green. A pull request past docs, code and guard paths included, needs one passing reviewer record, of any model, on the relayed head `head`,
+    read as `merge --reviewed` reads it (live_review_state): a record carries across a clean merge of `main` (the default branch; None reads the host's base) and, with `claims`
+    (the stamp config path), a claim commit, never across a conflicted or edited merge (decision pr-review-record).
     No size bound (decision session-tiers). A docs-only one needs no record.
     The text names no tier and no flag, so a lane learns nothing from it (git-remedy-never-names-target)."""
     if not own_session_link(info.get("body")):
@@ -7214,7 +7216,10 @@ def standing_refusal(h, n, info, head):
         # the pass that ends review, of any model (ruling own-review-any-model): the fix verifier's when the record has one, else the last reviewer round's
         last = (rec["fix"][2], rec["fix"][3]) if rec and rec["fix"] else next(((m, v) for _, role, m, v in reversed(rec["rounds"] if rec else []) if role == REVIEW_ROLES[0]), (None, None))
         passer = last[0] if last[1] == "PASS" else None  # a final round that failed reads done when no net value is owed, but it is no pass
-        if not passer or review_state(rec, head, recs[:-1])[0] != "done":  # `head` is the relayed head, which relayed_head_holds ties to the live one: only this tool's own commits may sit above it (a claim, its revert, a page commit, and under requiredChecks none a clean merge of the base)
+        state, why = live_review_state(h, rec, head, main, claims, recs[:-1]) if passer else ("none", "")  # `head` is the relayed head, which relayed_head_holds ties to the live one: only this tool's own commits may sit above it (a claim, its revert, a page commit, and under requiredChecks none a clean merge of the base)
+        if state != "done":
+            if REVIEW_SURVIVAL_UNKNOWN in why:  # the record passes and only the clean-merge read failed: say so, since a new record would not mend it
+                return f"this pull request changes code, rule text or a guard path, and {why}."
             return "this pull request changes code, rule text or a guard path, and its head has no passing review record."
     return ""
 
@@ -7772,7 +7777,7 @@ def main(argv, host=None, lock=None, hosts=None):
             h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore
             h.refuse_pinned_mismatch()
         if a.confirm and not a.reviewed and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and read_merge_role() == STANDING_ROLE:  # after the config sets h.required and h.ignore (head_state reads them), before the lock or any claim
-            why = standing_refusal(h, a.pr, info, a.head)
+            why = standing_refusal(h, a.pr, info, a.head, cfg["defaultBranch"], a.config)
             if why:
                 raise Stop(why + " Nothing was claimed or pushed. " + ROLE_CITE)
         if a.fast_checks:  # before any lock: it reads a dry merge and writes nothing
