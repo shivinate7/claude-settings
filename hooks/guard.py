@@ -694,7 +694,7 @@ while True:
             path_is_inside, primary_checkout, record, refuse, resolve_command,
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
-            _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes,
+            _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes, segment_with_vars as _segment_with_vars,
             _checkout_root_by_stat, layout_module as _layout_module,
             _REDIRECT_OPERATOR, ssh_remote_script, strip_redirections,
         )
@@ -730,7 +730,7 @@ while True:
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, OCTOPUS_PUSH_STALE, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, LANE_READY_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit, lane_ready_hit, lane_mcp_ready_hit, self_role_child_hit, self_role_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, PRIOR_WORK_REASON, prior_work_lane_hit, prior_work_named, stamp_hit, step_dup_hit, step_pr_hit, target_roster_hit, trust_card_hit, written_time_hit,
+            DEFAULT_RECORD_BRANCH, record_reason, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, PRIOR_WORK_REASON, prior_work_lane_hit, prior_work_named, header_time_hit, step_dup_hit, step_pr_hit, target_roster_hit, trust_card_hit, written_time_hit,
             BRIEF_ID_REASON, BRIEF_TOPIC_REASON, STEP_DUP_REASON,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
@@ -1169,15 +1169,6 @@ def worktree_add_target(args):
     return words[0] if words else None
 
 
-def _segment_with_vars(segments, number: int) -> str:
-    """`segments[number]` with each variable read as the value an earlier segment of the same
-    command assigned (`_resolve_vars`, the one home). Unassigned variables stay as written."""
-    if "$" not in segments[number]:
-        return segments[number]
-    mark = " ;\x00; "
-    return _resolve_vars(mark.join(segments[:number + 1])).split(mark)[-1]
-
-
 def hand_made_worktree_hit(segments, number: int, cwd: str, ends=(), payload=None) -> str:
     """The new-tree path when `segments[number]` is a real worktree add whose tree lands
     outside `<primary>/.claude/worktrees/`, else "". The primary is the one of the repo the call
@@ -1191,7 +1182,7 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=(), payload=Non
     cwd) allow."""
     if "worktree" not in segments[number]:
         return ""   # early exit: resolving variables re-reads every earlier segment, so it runs only for a segment that holds the word `worktree`
-    read = _segment_with_vars(segments, number)
+    read = _segment_with_vars(segments, number, ends)
     tokens = segment_tokens(read)
     index = resolve_command(tokens) if tokens else None
     if index is None or basename(tokens[index]) not in ("git", "git.exe"):
@@ -4975,7 +4966,8 @@ LOAD_BUSY_NO_FOREGROUND = "A Workflow has no foreground form. "
 LOAD_FULL_REASON = "the machine is full (%s). No new lane or agent starts until the load drops. Wait, then retry. " + LOAD_CITE
 LOAD_SWEEP = "python3 ~/.claude/janitor/sweep.py --root <repo> --attended --fast"
 LOAD_FULL_CLOUD_REASON = ("the disk is full (%s). No new lane or agent starts until space is freed. Free it with "
-                          + LOAD_SWEEP + " (preview first, then add --confirm), then retry. " + LOAD_CITE)
+                          + LOAD_SWEEP + " (preview first, then add --confirm), then retry. "
+                          + 'On Windows, double-quote the root: --root "D:/a/repo". ' + LOAD_CITE)
 
 
 def _read_memory():
@@ -5162,6 +5154,10 @@ AUDIT_CLEANUP_SHELL_BAD = re.compile(r"[;&|<>`$()\n\r\\*?\[\]{}~]")
 AUDIT_CLEANUP_SWEEP_FLAGS = tuple(LOAD_SWEEP.split("<repo>", 1)[1].split())
 AUDIT_CLEANUP_SWEEP_CONFIRM = "--confirm"
 AUDIT_CLEANUP_TMP = "/tmp/"
+# On Windows the sweep's --root is a drive path. Bash strips an unquoted backslash (D:\a\repo arrives as D:arepo), so that
+# form cannot work and stays refused. Two forms arrive whole: a double-quoted drive path (it keeps its backslashes) and a
+# forward-slash drive path, quoted or not. Each is judged on its own charset, then stands in as a POSIX root below.
+AUDIT_CLEANUP_WIN_ROOT = re.compile(r'(?<=\s--root )(?:"[A-Za-z]:[\\/][\w.\-\\/]*"|[A-Za-z]:/[\w.\-/]*)(?=\s|$)')
 
 
 def audit_cleanup_form(tool: str, tool_input) -> bool:
@@ -5171,6 +5167,8 @@ def audit_cleanup_form(tool: str, tool_input) -> bool:
     if tool != "Bash" or not isinstance(command, str):
         return False
     sweep_script = LOAD_SWEEP.split()[1]
+    if sweep_script in command:
+        command = AUDIT_CLEANUP_WIN_ROOT.sub("/root", command, count=1)
     # The sweep's own script path, with its ~ left for the shell to expand, is the one place a ~ may sit.
     if AUDIT_CLEANUP_SHELL_BAD.search(command.replace(sweep_script, "", 1)):
         return False
@@ -5812,7 +5810,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # every pushed commit's paths (and one `git symbolic-ref` when no cs-step tag names the slug); a triage push, any other session's push and a push to another branch read no diff.
     matched = record_writer_hit(stripped, cwd, transcript, record_branch_of, read_verb, session_id)
     if matched:
-        refuse(tool, "deny", "roadmap-one-writer", RECORD_REASON, matched)
+        refuse(tool, "deny", "roadmap-one-writer", record_reason(matched), matched)
 
     # 6b. A pull request opened without --draft.
     for text, _in_message in _substitutions(stripped)[0]:
@@ -8083,7 +8081,7 @@ def judge(payload) -> None:
             refuse(tool, "deny", "sendmessage-session-id", SENDMESSAGE_REASON, target[:120])
 
     # A send_message whose header stamp is off the clock (rule message-time-matches-clock).
-    stamped = stamp_hit(tool, tool_input)
+    stamped = header_time_hit(tool, tool_input)
     if stamped:
         refuse(tool, "deny", "message-time-matches-clock", stamped[1], stamped[0])
 
