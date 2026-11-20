@@ -12,8 +12,7 @@ FAMILY = "load-brake"
 #         to make this an Agent call that leaves run_in_background out or sets it false. A disk reading
 #         names free disk space instead.
 #   full  memory over 95%, or disk free under the smaller of 5% of the disk and 5 GB. Every lane call is refused,
-#         an Agent or Task call too. In a cloud session a full disk or memory over 95% refuses a start (CLOUD, below;
-#         owner, 2026-11-19 21:30 CST, confirmed 22:25 CST).
+#         an Agent or Task call too. In a cloud session a full disk or memory over 95% refuses a start (CLOUD, below).
 # The refusal names the reading that tripped it, and never names the CPU. A read that fails, or a reading left
 # unread, counts as normal. An agent's own shell or file write reads once and is refused at full only
 # (A RUNNING LANE, below). Every other tool reads no load. The read starts no child process, writes no file,
@@ -33,8 +32,8 @@ FAMILY = "load-brake"
 #                  claude_procs key in a reading changes nothing. A cpu_pct key in a stub reading changes
 #                  nothing either: a change that still reads the CPU refuses on those stubs and fails here.
 #                  The OS sources, all faked by THE FAKE HOST: darwin reads memory through sysctlbyname;
-#                  linux reads memory from /proc/meminfo (MemTotal and MemAvailable; owner, 2026-11-19 21:30 CST, "read memory on
-#                  linux if u can"); both read the disk through shutil.disk_usage: the home folder, or "/"
+#                  linux reads memory from /proc/meminfo (MemTotal and MemAvailable); both read the disk through
+#                  shutil.disk_usage: the home folder, or "/"
 #                  in a cloud session. Neither reads the CPU ticks, the load average, or waits.
 # The judge must call it by its bare name, so the probe's patch (set on every guard module that
 # holds the name) is the function that runs. A function the probe cannot replace fails every case.
@@ -874,8 +873,7 @@ lb_add("a Bash call whose agent_id is malformed reads no load under the worst re
 # A LINT START AT THE FULL DISK. `merge --lane-lint` already refuses at a full disk inside the merge tool, before it makes
 # its lint tree (merge/test_lane_lint.py), so no guard case pins it here. A direct `bin/ci-job --lint` has no disk floor
 # anywhere, so a background one is refused by the brake at a full disk. The lint start reads disk and memory, never
-# the load average (decision machine-load-brake: the disk at owner pick a, 2026-11-17; memory at owner, 2026-11-19
-# 21:30 CST, confirmed 22:25 CST).
+# the load average (decision machine-load-brake).
 LB_CI_LINT_BG = {"command": "bin/ci-job --lint", "run_in_background": True}
 LB_LANE_LINT_BG = {"command": "merge --lane-lint brake-reads-load-before-lint", "run_in_background": True,
                    "timeout": 7200000}   # above the lint bound, so check-timeout passes the call
@@ -965,7 +963,7 @@ lb_add("foreground, merge --lane-lint 9, full disk: refused by check-timeout and
                                                      tool_input={"command": "merge --lane-lint 9"}, reads=0,
                                                      lacks=(LB_LOAD_RULE, LB_LOAD_CITE))))
 
-# LINUX MEMORY (owner, 2026-11-19 21:30 CST, "read memory on linux if u can"; decision machine-load-brake). On Linux the
+# LINUX MEMORY (decision machine-load-brake). On Linux the
 # reader reads memory from /proc/meminfo, so memory over 95% refuses a background Agent start and a background lint start
 # (merge --lane-lint, bin/ci-job --lint), locally and in a cloud session. Memory at 50% allows both. An unreadable
 # meminfo is unread and counts as normal, and a full disk still refuses through it. The fake host serves the file.
@@ -1016,8 +1014,7 @@ lb_add("linux, cloud, Agent run_in_background true, memory 50%: allowed, and the
                          fake=lb_fake("linux", memory=50.0), reads=1))
 
 # CLOUD. With CLAUDE_CODE_REMOTE=true, a new Agent, Task or Workflow start is refused at a full disk (free space under
-# the full point, which each case reads from guard.py rather than copying) or at memory over 95% (owner, 2026-11-19
-# 21:30 CST, confirmed 22:25 CST: "yes q1 covered cloud too"). A cloud lane that fills the disk makes its writes fail,
+# the full point, which each case reads from guard.py rather than copying) or at memory over 95%. A cloud lane that fills the disk makes its writes fail,
 # so the start is what gets stopped. Busy never brakes a cloud start. A running agent or lane is never stopped, and
 # reads no load. Allowed calls run end to end, so their file writes are checked too.
 LB_CLOUD = "true"
@@ -1089,8 +1086,7 @@ for _tool in ("Agent", "Task"):
 lb_add("cloud: an agent's Bash, memory 99%, disk 1.0 GB free of 926 GB: allowed, nothing written",
        lb_decision_check("Bash", LB_ALL_HIGH, "allow", tool_input={"command": "echo hi"}, agent=LB_AGENT,
                          reads=None, remote=LB_CLOUD))
-# An agent's Agent call is a start call, not a running agent's write, so memory over 95% refuses it (owner, 2026-11-19
-# 21:30 CST, confirmed 22:25 CST).
+# An agent's Agent call is a start call, not a running agent's write, so memory over 95% refuses it.
 lb_add("cloud: an agent's Agent call, memory 97.2%: refused, names the memory (owner, 2026-11-19 21:30 CST, confirmed "
        "22:25 CST)",
        lb_decision_check("Agent", lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL, agent=LB_AGENT, reads=None,
@@ -1104,7 +1100,7 @@ lb_add("cloud: Agent, a host that reports darwin reads /proc/meminfo, memory 97.
        lb_decision_check("Agent", None, "deny", LB_MEM_FULL, background=False, fake=lb_fake("darwin", memory=97.2),
                          reads=None, remote=LB_CLOUD))
 # A cloud start at a full disk is refused. Memory is forced unread here, so the disk alone trips (a cloud host's memory
-# is read from /proc/meminfo, owner, 2026-11-19 21:30 CST; the cloud cases of that read are in the LINUX MEMORY block).
+# is read from /proc/meminfo; the cloud cases of that read are in the LINUX MEMORY block).
 # The refusal names the disk reading and the sweep command, and never tells the session to wait.
 for _tool, _bg, _say in LB_CLOUD_STARTS:
     lb_add("cloud: %s, %s, memory unread, disk 4.0 GB free of 252 GB (under the full point): refused, names the disk "
@@ -1240,7 +1236,7 @@ lb_add("foreground, merge --lane-lint 9 &, memory 96%: the brake's own call refu
        lb_hit_check("load_hit", "Bash", lb_reading(memory_pct=96.0), {"command": "merge --lane-lint 9 &"},
                     deny=LB_MEM96, reads=1))
 # Cloud: a start call reads the disk and memory once, and its pair is empty only at a disk that is not full and memory
-# not over 95% (owner, 2026-11-19 21:30 CST, confirmed 22:25 CST). A running agent's call reads nothing.
+# not over 95%. A running agent's call reads nothing.
 lb_add("CLAUDE_CODE_REMOTE=true, Agent run_in_background true, memory 97.2%: load_hit refuses, names the memory, "
        "the reader runs once (owner, 2026-11-19 21:30 CST, confirmed 22:25 CST)",
        lb_hit_check("load_hit", "Agent", LB_FULL_READING, lb_lane_input("Agent", True), remote="true", reads=1,

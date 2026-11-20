@@ -3773,9 +3773,9 @@ MUTATIONS = [
      '    return clause\n\n\ndef _claim_clause',
      '    return None\n\n\ndef _claim_clause',
      "guard", 'brief-claim: test-author brief where main refuses all three today'),
-    # The machine-load brake's Linux memory and lint-start reads (decision machine-load-brake; owner, 2026-11-19 21:30 CST,
-    # confirmed 22:25 CST). Each row kills on its own case: the Linux read on a 96% Agent start, and the lint start on the
-    # disk-full bin/ci-job --lint case, which needs no memory reading.
+    # The machine-load brake's Linux memory and lint-start reads (decision machine-load-brake). Each row kills on its own
+    # case: the Linux read on a 96% Agent start, and the lint start on the disk-full bin/ci-job --lint case, which needs no
+    # memory reading.
     ('load-brake: the Linux branch of _read_memory returns None, so memory is unread on Linux',
      '        return 100.0 * (total - available) / total',
      '        return None',
