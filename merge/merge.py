@@ -4457,6 +4457,8 @@ def _shas(read):
         return None
     return lines
 
+UNREAD = "unread"  # revert_proven(beside_ok=True) answer for a proof it could not read
+
 def revert_proven(root, host, base, beside_ok=False):
     """True when a red base is lifted by a revert already merged with its tree proven (ruling own-823-b-revert-merge-lifts-red, decision no-merge-onto-red-main).
     Merges resume when the revert merges, with its run still going (ruling own-745-b-resume-at-revert), and stay resumed while unrelated commits land above it.
@@ -4470,10 +4472,13 @@ def revert_proven(root, host, base, beside_ok=False):
     - the red run sits on B or between B and the landing commit, never on the landing commit or above it (the revert's own run, or a later merge, failed).
     A first red names no breaking merge, so it never lifts. Any read that fails, or a walk past the cap, is not proven: unknown never reads clear.
     Skipped runs are no evidence here. Cost accepted by the owner: a revert that does not fix the failure reads clear until the next full run.
-    `beside_ok` leaves out the first condition's cancelled run and re-run in flight: red_base asks it, to learn whether the revert would have lifted the red but for a run that reads unknown."""
+    `beside_ok` leaves out the first condition's cancelled run and re-run in flight: red_base asks it, to learn whether the revert would have lifted the red but for a run that reads unknown.
+    With `beside_ok`, a proof that could not be read (the pull request or tree read fails, or the revert's checks read unknown) returns UNREAD, which is truthy: red_beside then
+    reads the base unknown, as decision no-merge-onto-red-main R4 says a failed read is. Without it, such a read is just not proven."""
     facts = getattr(host, "base_facts", None)
     if not facts or len(facts["blamed"]) != 1 or facts["red"] != 1 or (facts["others"] and not beside_ok):
         return False
+    unread = UNREAD if beside_ok else False
     sha = facts["blamed"][0]
     try:
         c, head = git(root, "rev-parse", f"origin/{base}")
@@ -4515,9 +4520,14 @@ def revert_proven(root, host, base, beside_ok=False):
             for k, v in kept.items():
                 setattr(host, k, v)
         trees = [git(root, "rev-parse", f"{x}^{{tree}}") for x in (landed, info["head"])]
-        return not any(c for c, _ in trees) and trees[0][1] == trees[1][1] and head_not_green(host.head_state(int(n), sha=info["head"])) is None
+        if any(c for c, _ in trees):
+            return unread
+        if trees[0][1] != trees[1][1]:
+            return False
+        state = host.head_state(int(n), sha=info["head"])
+        return unread if state.startswith("unknown") else head_not_green(state) is None
     except (Stop, subprocess.TimeoutExpired, OSError, KeyError, ValueError, IndexError, TypeError):
-        return False
+        return unread
 
 def base_verdict(root, host, base):
     """host.base_state over the workflow files on origin/<base>, with a red lifted to green when revert_proven says the revert of the breaking merge landed on the base with its
