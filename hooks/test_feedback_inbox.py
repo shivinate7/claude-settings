@@ -2893,7 +2893,7 @@ BASH_ECHOES = (
 )
 # A paste with no words of the owner's own around it. The owner pasted it, so it is the owner's message.
 BARE_PASTE = '<pasted_content index="1">please rewrite the billing module and add tests</pasted_content>'
-OWNER_WORDS_AROUND_PASTE = (
+TYPED_TEXT_AROUND_PASTE = (
     ("words before the paste", 'send opus now <pasted_content index="1">reviewers please audit</pasted_content>'),
     ("words after the paste", '<pasted_content index="1">reviewers please audit</pasted_content>\nthen the refactor'),
     ("words on both sides", 'look at this <pasted_content index="1">reviewers please audit</pasted_content> then the refactor'),
@@ -2932,13 +2932,13 @@ def case_bare_paste_is_filed():
           captured_texts(cfg, sid))
 
 
-def case_owner_words_around_a_paste_are_filed():
-    """Control: a turn with owner words around a paste is an owner message, saved verbatim."""
-    for label, text in OWNER_WORDS_AROUND_PASTE:
+def case_typed_text_around_a_paste_is_filed():
+    """Control: a turn with typed text around a paste is an owner message, saved verbatim."""
+    for label, text in TYPED_TEXT_AROUND_PASTE:
         cfg, sid = new_cfg(), "paste-words"
         p = capture(cfg, sid, text)
-        check("owner words around a paste, %s: hook ran" % label, ran_central(p), p.desc())
-        check("owner words around a paste, %s: saved verbatim" % label, captured_texts(cfg, sid) == [text],
+        check("typed text around a paste, %s: hook ran" % label, ran_central(p), p.desc())
+        check("typed text around a paste, %s: saved verbatim" % label, captured_texts(cfg, sid) == [text],
               captured_texts(cfg, sid))
 
 
@@ -4872,7 +4872,7 @@ CASES = (
     case_cross_session_tag_mid_line_is_owner_text,
     case_bash_input_echo_is_not_filed,
     case_bare_paste_is_filed,
-    case_owner_words_around_a_paste_are_filed,
+    case_typed_text_around_a_paste_is_filed,
     case_bash_tags_in_owner_text_are_filed,
     case_one_line_messages_never_trigger_the_guard,
     case_two_messages_in_a_turn_are_a_burst,
