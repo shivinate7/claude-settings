@@ -1,0 +1,1 @@
+- lane-lint-main-push-no-rollup: Before the plain push of a main merge, `lane_lint` reads only `host.draft_run_state(head)`. That read covers the lane-touched-tests job and the Windows and macOS test jobs. It reads no all-jobs rollup, no statuses and no review log. Harm: churn only, since the merge checks re-read CI on the new head. Decision: lanes-run-no-full-ci-job

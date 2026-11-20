@@ -1,0 +1,1 @@
+- lane-lint-tip-read-unknown: The `lacks_tip` read in `lane_lint` tests `ancestor(...) is False`. An unknown result (None) then reads as "the head holds main's tip". So no push runs, and the PASS line gives no "main-in not pushed" reason. The decision's "ancestry cannot be read" reason covers only the checkout read, not this one. Decision: lanes-run-no-full-ci-job
