@@ -1,0 +1,1 @@
+- hand-worktree-refuses-red-runs: reported, not re-run here: the hand-made worktree guard in hooks/guard.py refuses a red-run checkout, so agents used git archive instead. Seen: 2026-11-18 x1

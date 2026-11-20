@@ -1,0 +1,1 @@
+- narration-no-record-exempt: reported, not re-run here: lint/check_comment_narration.py never names a record format, so it has no record-format exemption. Seen: 2026-11-18 x1
