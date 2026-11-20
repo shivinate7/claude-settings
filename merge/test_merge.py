@@ -19971,14 +19971,14 @@ class LintCleanMainMergeCarry(ReviewEnv, RecordsEnv):
         except merge.Stop as e:
             self.fail("the join refused a clean merge of main whose lane lint PASS is on the reviewed head: " + str(e))
 
-    def test_k_a_clean_merge_carries_when_the_base_has_no_stamp_kinds(self):
+    def test_k_a_clean_merge_carries_when_the_base_has_no_record_kinds(self):
         fx = self.real_commits()
         no_kinds = self.git_commit(fx.main3, {".github/stamp.json": json.dumps(dict(CONFIG, kinds=[]))})
         self.base_tip(no_kinds)
         claim = self.claim_over(fx.fixed, {"docs/decisions/second.md": record("D-002", "second")})
         self.facts(fx, [claim])
-        self.assertFalse(self.carry(fx, claim), "fixture: a claim carries under a base with no stamp kinds, so the case below proves nothing about the stamp config")
-        self.assertTrue(self.carry(fx, fx.clean), "a clean merge of main does not carry the PASS when the base has no stamp kinds")
+        self.assertFalse(self.carry(fx, claim), "fixture: a claim carries under a base with no record kinds, so the case below proves nothing about the stamp config")
+        self.assertTrue(self.carry(fx, fx.clean), "a clean merge of main does not carry the PASS when the base has no record kinds")
 
     def test_l_a_reviewed_line_reads_no_lint_when_the_live_merge_is_unreadable(self):
         fx = self.real_commits()
