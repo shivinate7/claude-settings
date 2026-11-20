@@ -251,6 +251,19 @@ def check_stage(segment: str, background: bool) -> str:
     return _roster_word(tokens, index, interpreter_only=True)
 
 
+def lint_start_hit(stripped: str) -> str:
+    """The matched text when a call starts a lint: `merge --lane-lint` or `ci-job --lint`, in any segment, else ''.
+    A bare `ci-job` with no --lint is no lint start. The caller has checked that the call is a background one."""
+    for segment in split_segments(stripped):
+        word = check_stage(segment, True)
+        if not word:
+            continue
+        flag = "--lint" if word in CHECK_COMMANDS else "--lane-lint"
+        if flag in (segment_tokens(segment) or ()):
+            return word + " " + flag
+    return ""
+
+
 def _pipeline_hit(stages, background: bool) -> str:
     """The matched text when a named check in one pipeline's stages reaches `tail`/`head`. A `tee`
     between them does not end the reach, since the filter after it still cuts what the agent reads. A
