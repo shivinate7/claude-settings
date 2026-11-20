@@ -24,7 +24,7 @@ Coordinator's reading, not the owner's: until both are on main, rule d is not in
 
 Why: branch protection on `main` has `strict` false, so GitHub reports BEHIND only when `strict` is on (`main-branch-protection`). The tool's own reads are the gate.
 
-Residual risk: a clean merge can still break a suite, and a head can merge before its own run ends. Main's run after the merge finds it. A red main is then held under the red-main rule (`git-red-main-reverts`) until its revert merges with its tree proven.
+Residual risk: a clean merge can still break a suite, and a head can merge before its own run ends. Main's run after the merge finds it. The red does not hold merges. The red becomes the top lane at once, by revert or fix (decision `no-merge-onto-red-main`: a PR may merge onto a red main; UNKNOWN still refuses).
 
 Kind: process
 Home: merge/merge.py
