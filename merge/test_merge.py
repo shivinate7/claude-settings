@@ -483,6 +483,19 @@ def copy_repos(t):
 
 class Env(unittest.TestCase):
     def setUp(self):
+        self.new_repos()
+        self.addCleanup(lambda: os.environ.pop("MERGE_TEST_HOOK", None))
+        self.sweep_runs = []  # each sweep_repo call a merge makes; the stand-in reaps nothing, so no case sweeps a fixture repo
+        self.sweep_look = None  # a case's read, run inside each sweep call: its value, or the error it raised, lands on that call's record
+        sweep_patch = unittest.mock.patch.object(sweep, "sweep_repo", side_effect=self.record_sweep)
+        self.sweep_mock = sweep_patch.start()
+        self.addCleanup(sweep_patch.stop)
+        self.claim_fired = [False]  # one claim per run: reset by run_merge
+        self.claim_push_fires_on_claim()
+
+    def new_repos(self):
+        """A new origin and two clones in a new folder of this run, with the host and the lock on them. setUp makes the first; a case
+        that merges again makes another, because a merge deletes its feat from origin."""
         self.t = os.path.realpath(tempfile.mkdtemp(prefix="test-merge-", dir=run_folder()))
         self.addCleanup(shutil.rmtree, self.t, True)
         self.bare = os.path.join(self.t, "origin.git")
@@ -492,14 +505,6 @@ class Env(unittest.TestCase):
         self.now = time.time()
         self.host = FakeHost(self.co, self.other)
         self.lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)  # a retry pause is a no-op: a test never sleeps
-        self.addCleanup(lambda: os.environ.pop("MERGE_TEST_HOOK", None))
-        self.sweep_runs = []  # each sweep_repo call a merge makes; the stand-in reaps nothing, so no case sweeps a fixture repo
-        self.sweep_look = None  # a case's read, run inside each sweep call: its value, or the error it raised, lands on that call's record
-        sweep_patch = unittest.mock.patch.object(sweep, "sweep_repo", side_effect=self.record_sweep)
-        self.sweep_mock = sweep_patch.start()
-        self.addCleanup(sweep_patch.stop)
-        self.claim_fired = [False]  # one claim per run: reset by run_merge
-        self.claim_push_fires_on_claim()
 
     def claim_push_fires_on_claim(self):
         """Patch merge.git so that the claim push of a run marks the claim fired, once per run, right after the push succeeds. The flag is
@@ -4777,13 +4782,13 @@ class GhHalf(Env):
         self.assertNotIn("Reason flag: --base-red-ok", fields[0].get("commit_message", ""), "a red main lift is written into the merge commit message (ruling Q5 v)")
 
     def test_each_lift_writes_its_own_line_into_the_merge_commit_message(self):
-        # both flags lift a check in one run: one line for each lift
+        # both flags are given on a red main, and an unreadable history. --base-red-ok lifts nothing there, because a PR merges onto a red main
+        # (ruling Q5 v), so only the undo flag lifts a check and writes its line
         rc, out, fields = self.red_main_then_merge("--base-red-ok", "this batch carries the checks fix", "--undo-check-unknown-ok", "octopus read it", unreadable=True)
         self.assertEqual(rc, 0, out)
         self.assertEqual(len(fields), 1, "the merge call was sent once, so the fields below are its")
-        self.assertIn("commit_message", fields[0], "both lifts are written into the merge commit message")
-        self.assertEqual(set(fields[0]["commit_message"].splitlines()),
-                         {"Reason flag: --base-red-ok: this batch carries the checks fix", "Reason flag: --undo-check-unknown-ok: octopus read it"})
+        self.assertIn("commit_message", fields[0], "the undo lift is written into the merge commit message")
+        self.assertEqual(set(fields[0]["commit_message"].splitlines()), {"Reason flag: --undo-check-unknown-ok: octopus read it"})
 
     def test_no_commit_message_when_the_flags_lift_no_check(self):
         # the flags are given, but the base is green and the history readable: nothing is lifted, so GitHub's default message stays
@@ -13147,7 +13152,16 @@ class RedMainBrake(Env):
     """c166: no batch merge onto a red main. The red-main check judges main's latest completed run, job by job (decision no-merge-onto-red-main)."""
     def setUp(self):
         super().setUp()
-        push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW, LINKS_PATH: LINKS_WORKFLOW})  # the caps the timeout verdict reads, and the files judged
+        self.base_on_main()
+
+    def base_on_main(self):
+        """Main gets the files the timeout verdict and the judged paths read."""
+        push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW, LINKS_PATH: LINKS_WORKFLOW})
+
+    def fresh_repos(self):
+        """A new origin and clones with the same base on main. A merge deletes its feat, so each later merge in one case starts here."""
+        self.new_repos()
+        self.base_on_main()
 
     def go(self, runs, jobs, *flags, confirm=True, **kw):
         self.host = MainRunsHost(self.co, self.other, runs, jobs, **kw)
@@ -13323,6 +13337,7 @@ class RedMainBrake(Env):
         # a broken workflow file: startup_failure and no job; or failure with every job passing
         for conclusion, jobs in (("startup_failure", []), ("failure", [main_job("checks", "success", 20)])):
             with self.subTest(conclusion=conclusion, jobs=len(jobs)):
+                self.fresh_repos()
                 rc, out, before = self.go([main_run(913, conclusion)], {913: jobs})
                 self.merged_onto_red(rc, out)  # re-pointed by ruling Q5 v (owner, 10:42 CST Nov 20, 2026): a red run no longer refuses a PR
 
@@ -13473,10 +13488,13 @@ class RedMainBrake(Env):
         for variant, green_jobs in (("the red job is missing", [main_job("all-jobs-passed", "skipped")]),
                                     ("the red job is skipped", [main_job("checks-windows-merge-3", "skipped"), main_job("all-jobs-passed", "skipped")])):
             with self.subTest(variant=variant):
+                self.fresh_repos()
                 rc, out, before = self.go([main_run(1311, "success"), red_run], {1310: red_jobs, 1311: green_jobs},
                                           text_fail="HTTP 500: Internal Server Error (fake contents read)")
                 self.merged_onto_red(rc, out, "checks-windows-merge-3")
-                self.assertNotIn("UNKNOWN", out, "a certain red reads as unknown: the workflow read ran first, and its failure came before the red check")
+                red_line = printed(out, "main is RED")  # scope: the red verdict's line. After the merge, the prose and where-else judges print UNKNOWN on a model error
+                self.assertTrue(red_line, "no line states the red verdict:\n" + out)
+                self.assertNotIn("UNKNOWN", red_line, "a certain red reads as unknown: the workflow read ran first, and its failure came before the red check")
 
     def test_a_green_schedule_run_with_every_job_of_a_red_push_run_clears_it(self):
         rc, out, _ = self.go([main_run(941, "success", event="schedule"), main_run(940, "failure")],
@@ -13496,6 +13514,7 @@ class RedMainBrake(Env):
         # names match exactly: `checks` is not `checks-macos`, and `checks-macos` is not `checks`
         for red_job, green_job in (("checks", "checks-macos"), ("checks-macos", "checks"), ("old-checks", "checks"), ("checks", "old-checks")):
             with self.subTest(red=red_job, green=green_job):
+                self.fresh_repos()
                 rc, out, before = self.go([main_run(961, "success", event="workflow_dispatch"), main_run(960, "failure", event="schedule")],
                                           {960: [main_job(red_job, "failure", 20)], 961: [main_job(green_job, "success", 20)]})
                 self.merged_onto_red(rc, out, red_job)
@@ -13511,6 +13530,7 @@ class RedMainBrake(Env):
         # cancelled, failure, timed_out, neutral and skipped clear nothing, though the red run's job passes in the green one
         for conclusion in ("cancelled", "failure", "timed_out", "neutral", "skipped"):
             with self.subTest(conclusion=conclusion):
+                self.fresh_repos()
                 rc, out, before = self.go([main_run(981, conclusion, event="workflow_dispatch"), main_run(980, "failure", event="schedule")],
                                           {980: [main_job("checks", "failure", 20)], 981: [main_job("checks", "success", 20)]})
                 self.merged_onto_red(rc, out, "checks")
@@ -13593,7 +13613,9 @@ class RedMainBrake(Env):
         """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): a PR may merge onto a red main. It was a refusal."""
         rc, out, before = self.go([main_run(1091, "failure", event="schedule")], {1091: [main_job("checks", "failure", 20)]})
         self.merged_onto_red(rc, out, "checks")
-        self.assertEqual([r for r in self.host.reads if r.endswith("/jobs")], ["actions/runs/1091/jobs"])
+        # each run reads the red run's jobs twice: once for the verdict, then once more for red_line's failing-test read (its cost, on a red base only)
+        self.assertEqual([[r for r in reads if r.endswith("/jobs")] for reads in self.run_reads], [["actions/runs/1091/jobs"] * 2] * 2,
+                         "each run reads the red run's jobs twice, and no other run's jobs")
 
     def test_a_green_schedule_run_clears_an_older_red_schedule_run(self):
         rc, out, _ = self.go([main_run(923, "success", event="schedule"), main_run(922, "failure", event="schedule")], {922: [main_job("checks", "failure", 20)]})
@@ -13650,7 +13672,8 @@ class RedMainBrake(Env):
 
     def assert_red_stays_over_empty_green(self, rc, out, before):
         self.merged_onto_red(rc, out, "checks")
-        self.assertEqual(self.host.reads.count("actions/runs/1701/jobs"), 1, "the empty green run is not read once, to see that it is empty")
+        self.assertEqual([r.count("actions/runs/1701/jobs") for r in self.run_reads], [1, 1],
+                         "the empty green run: one read in each run of the two-step confirm, to see that it is empty")
 
     # A red push run, then a newer green push run that ran no suite job and carries no evidence. That run is no
     # verdict, so the older red run is the verdict, and main stays red. One method per shape: a merge that goes through empties the fixture.
@@ -14004,6 +14027,7 @@ class RedMainBrake(Env):
         """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): the red main merges; the pull request is the verdict's detail."""
         for style, message in (("merge commit", "Merge pull request #2650 from o/lane-2650"), ("squash", "Lane fix (#2650)")):
             with self.subTest(style=style):
+                self.fresh_repos()
                 runs = [main_run(903, "failure", sha=self.sha_of(903), run_attempt=2, message=message), main_run(902, "success", sha=self.sha_of(902))]
                 rc, out, before = self.go(runs, self.page_jobs(runs))
                 self.merged_onto_red(rc, out, "checks")
@@ -14023,6 +14047,7 @@ class RedMainBrake(Env):
         self.merged_onto_red(rc, out, "checks")
         self.assertNotIn("#2650", self.red_detail(), "run 903 is blamed on its first red, before its re-run")
         again = [self.merge_run(903, "failure", 2650, run_attempt=2), self.merge_run(902, "success", 2649)]
+        self.fresh_repos()
         rc, out, before = self.go(again, self.page_jobs(again))
         self.merged_onto_red(rc, out, "checks")
         self.assertIn("#2650", self.red_detail(), "run 903 is red again on its re-run, and the verdict blames its pull request")
@@ -14145,6 +14170,7 @@ class RedMainBrake(Env):
         # mutant: dropping "cancelled" from the stepped-over tuple (breaking_line) makes the cancelled run 902 the first red run
         for conclusion in ("cancelled", "skipped", "neutral"):
             with self.subTest(conclusion=conclusion):
+                self.fresh_repos()
                 runs = [self.merge_run(903, "failure", 2651, run_attempt=2), self.merge_run(902, conclusion, 2650), self.merge_run(901, "success", 2649)]
                 jobs = {**self.page_jobs(runs), 902: [main_job("scope", "success"), main_job("checks", "cancelled", 2)]}
                 rc, out, before = self.go(runs, jobs)
@@ -14548,7 +14574,7 @@ class RedMainBrake(Env):
     def test_a_fix_by_a_blamed_path_whose_head_lacks_mains_red_tip_merges_onto_a_red_main(self):
         """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): a PR may merge onto a red main whether or not its head holds the red tip."""
         B, runs, jobs = self.red_main_with_breaking_merge()
-        head = self.fix_on_feat("Fix lane 2650", "lane-2650.txt", start=f"{B}^1")
+        head = self.fix_on_feat("Fix lane 2650", "lane-2650.txt", start=f"{B}^2")  # the lane's own commit holds the file, so the fix merges clean with main
         sh(self.co, "git", "fetch", "-q", "origin")
         self.assertNotIn(B, sh(self.co, "git", "rev-list", "origin/feat").split(), "scope: the head holds main's red tip")
         rc, out, _ = self.go(runs, jobs, changed=[("lane-2650.txt", "modified", 1)], named_checks=[("checks", "pass", head)])
