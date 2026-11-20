@@ -327,8 +327,11 @@ class GitCommitsHost(FakeHost):
     def __init__(self, root, other):
         super().__init__(root, other)
         self.cwd = root
+        self.unreadable = set()  # shas whose commit read fails, as the commits API fails when it cannot answer: that read raises Stop, as Host.commit_read does
 
     def commit_read(self, sha):  # -> (parents, tree), as Host.commit_read gives them
+        if sha in self.unreadable:
+            raise merge.Stop(f"cannot read the parents of {sha[:9]} {merge.READ_CITE}: the commits API did not answer")
         return sh(self.root, "git", "log", "-1", "--format=%P", sha).split(), sh(self.root, "git", "rev-parse", f"{sha}^{{tree}}")
 
     def holds_head_gh(self, head, other):  # True when origin's branch `other` contains `head`: GitHub's compare reads ahead or identical
@@ -16587,6 +16590,26 @@ class StandingMergeRole(CloudSession):
         self.assertEqual(rc, 1, out + err)
         self.assertIn(self.RECORD_REFUSAL, err, "the edited merge of main was refused for another cause, not for its record")
         self.assertFalse(getattr(self.host, "merged", False), out + err)
+
+    def test_a_clean_merge_whose_parents_cannot_be_read_is_refused_naming_that_read_under_standing(self):
+        self.git_commit_reads()
+        record = self.record_head()
+        early = self.push_main("docs/notes.md", "Notes.\n")
+        clean = self.merge_main_into(record, early, "fixture-clean")
+        body = record_text(head=record, rounds=REVIEW_PASS)
+        self.own_pr([("CLAUDE.md", "added", 1)])
+        self.scripted_records(body)
+        self.assert_clean_merge_of(record, early, clean, body)  # the premise: the merge tool reads the record over this clean merge as done
+        sh(self.other, "git", "push", "-q", "origin", f"{clean}:refs/heads/feat")
+        self.assertEqual(self.head(), clean, "fixture: the clean merge is not the pull request's live head")
+        self.host.unreadable.add(clean)  # the commits API cannot answer for the merge, so its parents, and whether main holds one, are unknown
+        state, why = merge.live_review_state(self.host, merge.parse_review(body), clean, "main")
+        self.assertNotEqual(state, "done", "fixture: the merge tool reads the record done though the clean-merge read cannot run")
+        self.assertIn(merge.REVIEW_SURVIVAL_UNKNOWN, why, "fixture: the merge tool's own reader does not name the unknown read")
+        err = self.assert_standing_refused()
+        self.assertIn(merge.REVIEW_SURVIVAL_UNKNOWN, err, "the refusal drops the why: the clean-merge read could not run, so the record is not missing")
+        self.assertNotIn(self.RECORD_REFUSAL, err, "the refusal says the head has no passing record, though the record passes and only the read failed")
+        self.assertNotRegex(err, r"(?i)\bpost\b", "the refusal tells the user to post a record")
 
     # ---- no size bound: a pull request past docs needs a passing reviewer record; a docs-only one needs none.
     RULE_PATHS = ("CLAUDE.md", "agents/a.md", "agents/b.md", "skills/b/SKILL.md", "skills/c/SKILL.md")
