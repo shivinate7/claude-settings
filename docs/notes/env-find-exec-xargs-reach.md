@@ -1,0 +1,1 @@
+- env-find-exec-xargs-reach: `find -exec grep K {} +` and unnamed listers into xargs (`find . -type f | xargs cat`, `ls -a | xargs head`) reach env contents on main and on the branch; #2336 covers xargs into search programs only.

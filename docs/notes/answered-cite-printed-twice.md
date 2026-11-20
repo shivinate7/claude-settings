@@ -1,0 +1,1 @@
+- answered-cite-printed-twice: the refusal prints the answered-claim cite twice (hooks/guard.py, lines 7004 and 7222). Decision: `answered-claims-match-page` (a claim that a waiting-page item is answered matches the page).

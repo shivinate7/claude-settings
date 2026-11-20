@@ -1,0 +1,1 @@
+- red-run-marker-forms: List-marker forms outside the set, such as `(1) mutant A`, `[x] mutant A`, `a) mutant`, `• mutant` and `step 1: mutant A`, still pass. The record's 'Limits that stay' omits them (lint/check_red_run.py:88-91). A debt after a real incident.

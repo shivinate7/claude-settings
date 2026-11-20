@@ -1,0 +1,1 @@
+- retro-probe-branch-deleted: Step cloud-branch-delete: owner's local Windows helper deleted test/retro-delete-probe-1418 under the standing grant "Acts the cloud refuses" (coordinator 11:40 CST Nov 12; ls-remote 11:39 CST: gone).

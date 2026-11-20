@@ -1,0 +1,1 @@
+- gh-write-cloud-heredoc-text: (possible false alarm) the gh-write-cloud rule refused a python heredoc that only wrote a note quoting a gh API PATCH form into roadmap/outbox/triage.md; no gh ran.

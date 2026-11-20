@@ -1,0 +1,1 @@
+- time-pinned-marker-reader-copy: the Python keep-marker reader of the time-pinned finder (lint/find_time_pinned.py) repeats the tokenize COMMENT opt-out of the glossary check (lint/check_glossary.py, `OPT_OUT`). It has no stated reason. One home for each capability is better (rule building-one-home-per-capability). Fix: move to one shared reader when a third caller appears.

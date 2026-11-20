@@ -1,0 +1,1 @@
+- time-literal-in-four-places: Two items. (1) The `.claude` exemption in REASON_MAY_NAME passes an echoed `added` that names ~/.claude, which echoes Claude's own write. (2) The now-central path is a literal in 4 places: local_time NOW_CENTRAL_POINTER, two guard_merge reasons, and a test constant.

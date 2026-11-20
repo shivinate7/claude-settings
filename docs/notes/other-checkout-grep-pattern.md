@@ -1,0 +1,1 @@
+- other-checkout-grep-pattern: the other-checkout guard refused a test-author's read-only grep whose pattern text held `cp -r ../`. The test-author used the Grep tool instead. The exact command was not kept, so it is unmeasured; a possible false alarm from reading quoted text as a command.

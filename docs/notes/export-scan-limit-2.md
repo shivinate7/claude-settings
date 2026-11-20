@@ -1,0 +1,1 @@
+- export-scan-limit-2: a hyphen-word value with a -vN part passes under any separator; about 37% of random lowercase xxxx-vNN-xxxx values pass. Fix: none until a real incident. Decision: waiting-data-in-repo.

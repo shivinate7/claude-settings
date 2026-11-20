@@ -1,0 +1,1 @@
+- asmc-pinned-test-flips: The debt's pinned test, which checks that a posted round 2 Haiku record still parses, flips when the debt retires (PR #2442).

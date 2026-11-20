@@ -1,0 +1,1 @@
+- stamp-teardown-after-cap: the watchdog cases in actions/stamp/test_stamp.mjs do not bound teardown after the cap; a 26 s post-cap stall passes them, and main's elapsed assert reds on it (suite_watchdog.mjs stopTree). Fix: none — test-practices P5 bars a real-clock bound here; the review round accepted the loss.

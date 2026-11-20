@@ -1,0 +1,1 @@
+- mac-once-widened-f2-f3: 11:35 CST Nov 13 (coordinator): widened to cover F2 and F3: a push run skips jobs its batch PR run proved on the same tree, macOS first.

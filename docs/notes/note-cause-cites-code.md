@@ -1,0 +1,1 @@
+- note-cause-cites-code: (#2509 lane) a note that names a cause does not have to cite the code that proves it; the lane wrote a wrong cause on a reviewer's word. Note, not a step: a check cannot judge that a cause is proved, and a wrong cause costs one re-read.

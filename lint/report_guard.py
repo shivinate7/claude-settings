@@ -325,6 +325,23 @@ def owner_line(check, wrong):
     return check + ": " + wrong + " (" + REMEDY_CITE + ")."
 
 
+# The one shared line that ends every refusal of a reply but a missing report. `emit_stop` is its only writer, so a
+# new reply guard gets it with no work.
+CORRECTION_TAIL = "Post only the missing or corrected lines. Do not resend the reply."
+
+
+def emit_stop(payload, missing_report=False):
+    """The one emitter of the Stop hook's output. A block ends with CORRECTION_TAIL unless the reply is missing its
+    report, which asks for the report itself. A payload that is no block prints as it is. Every reply guard prints
+    through here, so none can forget the tail."""
+    if payload and payload.get("decision") == "block" and not missing_report:
+        reason = str(payload.get("reason") or "")
+        if CORRECTION_TAIL not in reason:
+            payload = dict(payload, reason=(reason + " " + CORRECTION_TAIL).strip())
+    if payload:
+        print(json.dumps(payload))
+
+
 # Wording that tells the session what to do. A refusal reaches the owner in chat, so it holds facts only.
 # `session_wording` is the one detector; the remedy suite imports it. A phrase here is matched case-insensitively.
 SESSION_PHRASES = (
@@ -354,7 +371,9 @@ _MODAL = re.compile(r"\b(?:must|should|need to|needs to|have to|has to|ought to)
 
 def session_wording(text):
     """The phrase in `text` that tells the session what to do, or '' when `text` holds facts only: a listed phrase,
-    a clause that opens with an order word, or a modal ("must", "should")."""
+    a clause that opens with an order word, or a modal ("must", "should"). CORRECTION_TAIL is the one ruled order
+    in a refusal, so it is read as no wording."""
+    text = text.replace(CORRECTION_TAIL, "")
     low = text.lower()
     for phrase in SESSION_PHRASES:
         if phrase in low:
@@ -389,6 +408,8 @@ MODELS_REASON = owner_line(
     "a Done item that agents built or reviewed does not name each one's role and model (%s)")
 UNSTARTED_REASON = owner_line(
     "Unstarted guard", "this turn ran a builder, and Next holds no \"Unstarted:\" line")
+UNSTARTED_FILE_REASON = owner_line(
+    "Unstarted guard", "an Unstarted item waits on another lane's merge or PR and names no shared file")
 
 
 # is_last_human and tool_uses live in lint/_transcript.py, imported above.
@@ -1072,15 +1093,74 @@ def done_models_problem(text, spawned, every=None):
 
 
 # reports-name-unstarted-items: a builder spawn marks an orchestrator's turn. Its report holds an
-# `Unstarted:` line, inline after Next, after a `;` or `.`, or on its own line, in any case. It lists
-# the ready items or says none. A bold `**Unstarted:**` is an unknown label, which the shape check refuses.
+# `Unstarted:` line, inline after Next, after a `;` or `.`, on its own line, or as an indented sub-bullet,
+# in any case. It lists the ready items or says none. A bold `**Unstarted:**` is an unknown label, which the
+# shape check refuses.
 UNSTARTED_RE = re.compile(
-    r"(?:^|[;.]\s+)(?:\*\*Next:?\*\*:?\s*)?(?:[-*+]\s+)?unstarted:", re.M | re.I)
+    r"(?:^[ \t]*|[;.]\s+)(?:\*\*Next:?\*\*:?\s*)?(?:[-*+]\s+)?unstarted:", re.M | re.I)
+
+
+# An item that waits on another lane's merge, PR or landing must name the file the two lanes share, so the wait is
+# checkable. No word exempts it: the owner or the load brake may also be in the sentence.
+_UNSTARTED_LANE_WAIT_RE = re.compile(
+    r"\b(?:PRs?|pull requests?|merges?|merged|merging|land(?:s|ed|ing)?)\b|#\d+", re.I)
+# "none" or "nothing", bare, in bold or in parentheses, says no item waits.
+_UNSTARTED_NONE_RE = re.compile(r"[\s*(]*(?:none|nothing)\b", re.I)
+_UNSTARTED_STOP_RE = re.compile(r"\s*(?:\*\*(?:Done|Deviations|Input Needed|Next)\b|$)")
+_BULLET_RE = re.compile(r"([ \t]*)[-*+]\s")
+# A shared file is `name.ext`, a build file with no extension, a dotfile, or a path with a slash. "e.g." and
+# "i.e." are not files, and neither are slash pairs such as "and/or" or a number pair such as "3679/3680".
+_SHARED_FILE_RE = re.compile(
+    r"\b[\w-]+\.[A-Za-z][A-Za-z0-9]{0,9}\b"
+    r"|\b(?:makefile|dockerfile|gemfile|rakefile|procfile|justfile|jenkinsfile|vagrantfile|codeowners)\b"
+    r"|(?<![\w.])\.[A-Za-z][\w.-]*"
+    r"|(?<![\w/])/?[\w.-]+(?:/[\w.-]*)+", re.I)
+_NOT_A_FILE = frozenset(("e.g", "i.e", "and/or", "either/or", "n/a", "w/o", "yes/no", "he/she", "his/her",
+                         "pass/fail", "read/write", "i/o"))
+
+
+def _unstarted_item(block, found):
+    """The Unstarted item's text: the rest of its line, then the wrapped or sub-bullet lines under it, up to
+    a blank line, a label, or a sibling bullet at its own indent or less. A bare `Unstarted:` line that is not
+    itself a bullet owns the bullets under it, at any indent."""
+    lines = block[found.end():].split("\n")
+    line = block[block.rfind("\n", 0, found.end()) + 1:].split("\n", 1)[0]
+    base = len(line) - len(line.lstrip())
+    if not lines[0].strip() and not _BULLET_RE.match(line):
+        base = -1
+    item = [lines[0]]
+    for line in lines[1:]:
+        if _UNSTARTED_STOP_RE.match(line):
+            break
+        bullet = _BULLET_RE.match(line)
+        if bullet and len(bullet.group(1)) <= base:
+            break
+        item.append(line)
+    return "\n".join(item)
+
+
+def _names_a_file(item):
+    for m in _SHARED_FILE_RE.finditer(item):
+        word = m.group(0).lower()
+        if word not in _NOT_A_FILE and not re.fullmatch(r"[\d/]+", word):
+            return True
+    return False
 
 
 def unstarted_problem(text, spawned):
-    """True when a builder ran this turn and the report holds no `Unstarted:` line."""
-    return "builder" in spawned and not UNSTARTED_RE.search(block_text(text))
+    """The refusal reason when a builder ran this turn and Next's `Unstarted:` line is missing, or waits on
+    another lane's merge, PR or landing and names no shared file. '' when the line is fine."""
+    if "builder" not in spawned:
+        return ""
+    block = block_text(text, keep_indent=True)
+    found = UNSTARTED_RE.search(block)
+    if not found:
+        return UNSTARTED_REASON
+    item = _unstarted_item(block, found)
+    if (not _UNSTARTED_NONE_RE.match(item) and _UNSTARTED_LANE_WAIT_RE.search(item)
+            and not _names_a_file(item)):
+        return UNSTARTED_FILE_REASON
+    return ""
 
 # decisions-reach-a-clickable-pick: "a pick with options" in the Input Needed item is either two or
 # more distinct option markers, or the phrase "A or B". A marker is a lettered or numbered item at
@@ -3130,7 +3210,7 @@ def rewrite_problems(hook):
         if models:
             reasons.append(MODELS_REASON % models)
         if unstarted_problem(text, spawned):
-            reasons.append(UNSTARTED_REASON)
+            reasons.append(unstarted_problem(text, spawned))
         answered = answered_problem(text)
         if answered:
             reasons.append(answered)
@@ -3480,12 +3560,12 @@ def main():
         reasons = rewrite_problems(hook)
         reasons += rewrite_relay(hook)
         if hold and not reasons:
-            print(json.dumps({"decision": "block", "reason": hold_reason(hold)}))
+            emit_stop({"decision": "block", "reason": hold_reason(hold)})
             return
         if hold:
             reasons.insert(0, hold_reason(hold))
         if reasons:
-            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)"}))
+            emit_stop({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)"})
         return
     # A marker left by a rewrite that never ran must not reach a later turn: only the Stop
     # straight after a missing-report block may consume one.
@@ -3498,12 +3578,11 @@ def main():
     # The refusals file is read for them before pending_refusals settles it.
     route = refusal_route_flags(hook)
 
-    def finish(payload):
+    def finish(payload, missing_report=False):
         if route:
             payload = dict(payload or {})
             payload["systemMessage"] = " ".join(filter(None, [payload.get("systemMessage"), *route]))
-        if payload:
-            print(json.dumps(payload))
+        emit_stop(payload, missing_report)
 
     # The hand-off cite reads the refusals file before pending_refusals settles it away.
     reply = last_reply(hook)  # one read of the reply for the hand-off cite, the refusals and the report checks
@@ -3623,7 +3702,7 @@ def main():
     if models:
         reasons.append(MODELS_REASON % models)
     if shape_ok and unstarted_problem(text, spawned):
-        reasons.append(UNSTARTED_REASON)
+        reasons.append(unstarted_problem(text, spawned))
     if pick_reason:
         reasons.append(pick_reason)
     try:
@@ -3665,7 +3744,7 @@ def main():
         reason = " ".join(reasons) + " (rule reports-order-of-labels)"
         if not shape_ok:
             write_marker(hook, last_human_idx)
-        finish({"decision": "block", "reason": reason})
+        finish({"decision": "block", "reason": reason}, missing_report=not shape_ok)
     else:
         finish({"systemMessage": note} if note else None)
 

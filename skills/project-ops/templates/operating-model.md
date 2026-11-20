@@ -17,6 +17,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   The arbiter is a separate role that holds a repo's ruling and grant voice (decision `session-tiers`, Arbiter).
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
+  The consultant is not a tier: the owner starts it, and no coordinator sets its tag. The guard reads the tag `cs-build:consultant`.
   A lane also gets `cs-topic:<topic slug>`, its one topic, and a `cs-step:<step id>` for each step it takes, so triage can see each step is live.
   It plans, briefs, verifies and reports, and builds only as rule `roles-orchestrator-never-builds` allows. It builds what the owner asks of it and lands it on main. Long reads go to read-only agents: the red-run reads, each `merge --touches` read of an open PR, and audits. It keeps lane state, the briefs and the talk with the owner.
 - **Triage.** A standing session. It writes the roadmap. Only triage writes a new step,
@@ -58,7 +59,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   It flags it only when the lane has sent no report or message since the last read (rulings R54 and R56 points 1 and 2). It writes each Opus grant on the step.
   It may run agents. It hands long reads to read-only agents: the whole-roadmap review, the proof for each close, and the reads for each outbox item. It writes the steps, the step closes and the page itself (rule `roles-orchestrator-never-builds`).
 - **Batch runner.** A standing session. It owns the integration batch until the cutover (claude-settings decision `all-repos-switch-together`); after it, it merges each lane PR alone, on its own green run (except a lane's own claude-settings PR, claude-settings ruling `own-lanes-merge-claude-settings-prs`). It also owns the CI waits, the merge
-  tool runs and archiving lanes. It runs the merge tool on a machine that can run it. After each merge it archives each lane that `merge --idle-lanes --live <file>` prints, for the coordinator (decision `session-tiers`, Archiving scope; ruling R46). Whoever starts a session answers for archiving it. The coordinator archives each other finished session it started.
+  tool runs and archiving lanes. It runs the merge tool on a machine that can run it. After each merge it reads the lane list that the merge prints (a `merge --idle-lanes` report, or an owed line with `check this lane` lines) and archives each lane that report lists (never a `check this lane` line), for the coordinator (decision `session-tiers`, Archiving scope; ruling R46). Whoever starts a session answers for archiving it. The coordinator archives each other finished session it started.
   In each wake it runs `merge --reviewed` once, with one `--root` per repo it owns (its `cs-repo:` tags), and
   opens or builds each batch the output names in that wake. It runs each `--confirm` in the foreground (see below). A foreground wait on one repo's CI held another repo's
   hand-offs for 1 h 16 min once (decision `session-tiers`, incident 2026-11-07). Batch steps are in skill `ci-hygiene`, step 8. The left-out list
@@ -106,6 +107,17 @@ A spawner is a session that starts its own agents. Each session role is a set of
   exact line. It ends with no step still doing under its id. It marks each part that is ruled but not built "ruled, not built".
   It reports up to the coordinator. Work that needs a local machine is a lane whose brief
   names the machine. It may drive a Remote Control session on the owner's machine.
+- **Arbiter.** A standing session and a decider only. It ranks below the owner in its repo. It makes rulings
+  and grants, each marked as its own, for its own repo only. The coordinator starts it only on the owner's grant,
+  such as the words "spawn arbiter", for a long run the owner does not want to sit through. It may start only
+  read-only agents (Explore, refuter), to gather evidence. It builds nothing, starts no lanes and grants no Opus.
+  Batch checks go to the batch runner. It compacts in place. Each ruling it makes goes to the page writer, which
+  adds a closed item with an Overturn choice (decision `session-tiers`, Arbiter).
+- **Consultant.** A session the owner starts on demand, in claude-settings. The consultant is not a tier: the owner starts
+  it, and no coordinator sets its tag. The guard reads the tag `cs-build:consultant`. It talks with the owner and runs read-only audits. It keeps one plan file, rewritten in place. It sends
+  each ruling to triage. A finding about another repo goes to that repo's triage. It builds what the owner asks of it and
+  merges its own pull requests under the standing merge role. It decides nothing: an arbiter decides, and a consultant helps the owner decide. It ends when its plan lands. The name
+  "advisor" is not used, since the built-in advisor (`advisorModel`) has it (decision `session-tiers`, Consultant).
 - **Batch runner's standing duty: a rolling combine train.** In a repo that still batches, the batch runner keeps it all the time (ruled, not in force or built; both routes stay, picked by speed per situation; the scope reading is the lane's, unchecked; a repo on per-lane merging, where each lane PR merges alone, does not)
   (claude-settings decision `session-tiers`, the session roles decision, bullet "Rolling combine train": the levels L1 to L4, what is
   frozen, what keeps folding, what a fold owes, the pre-merge reads and the fold checks (both relayed, not checked), and the per-batch report numbers).
@@ -170,7 +182,7 @@ parent, or miss a message while busy.
 - A lane posts its review log on its PR after each round (claude-settings record
   `pr-review-record`). The batch runner finds it. The lane first runs `merge --lane-lint <pr>`. The batch
   runner runs it again on each lane head before the join, and refuses a red lane (claude-settings record
-  `lanes-run-no-full-ci-job`). A lane never rebases onto main. A lane marks its own draft PR ready once, after its review and lane lint pass, with `merge --role lane --step <slug> <pr> --ready` (claude-settings decision `draft-until-reviewed`, ruling Q2, owner, 12:58 CST Nov 16). A lane merges only in claude-settings, its own PR (claude-settings ruling `own-lanes-merge-claude-settings-prs`; not built, the merge tool still refuses a lane's cloud confirm); in any other repo it never merges. After a batch merges, a handed-in PR that conflicts with the new main gets one main merge by its lane (step `post-batch-conflict-merge`; whether a review of only the resolved hunks suffices is the owner's open item 651).
+  `lanes-run-no-full-ci-job`). A lane never rebases onto main. A lane marks its own draft PR ready once, after its review and lane lint pass, with `merge --role lane --step <slug> <pr> --ready` (claude-settings decision `draft-until-reviewed`, ruling Q2, owner, 12:58 CST Nov 16). A lane merges its own PR with the merge tool, under every merge check (claude-settings ruling `own-lanes-merge-claude-settings-prs`, widened by the owner's "everyone merges", 2026-11-16 12:58 CST). The merge tool checks the own-pull-request and own-repo limits only in a cloud session. On a local machine, the classifier alone holds that limit. In a cloud session the merge tool builds the lane role only in the claude-settings repo today (`LANE_MERGE_REPO`). Other repos are not built: there the merge tool refuses a lane's confirm, and the batch runner merges the lane's PR. After a batch merges, a handed-in PR that conflicts with the new main gets one main merge by its lane (step `post-batch-conflict-merge`; whether a review of only the resolved hunks suffices is the owner's open item 651).
 - A record that files an owner ruling gets a round 1 review before it merges. Round 1 checks two things only (claude-settings decision `docs-only-prs-skip-review`).
 - Nobody pushes to a PR's head once a done review log is posted for that head, until the merge
   result is back. The exception is the fix that a FAIL round calls for, such as the round-1 fix on a

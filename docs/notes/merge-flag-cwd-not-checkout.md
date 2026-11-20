@@ -1,0 +1,1 @@
+- merge-flag-cwd-not-checkout: `merge --review-record` printed "not in a git checkout" when run from the home folder, but worked from the repo folder. The read depends on the working directory (merge/merge.py).

@@ -1,0 +1,1 @@
+- silent-undo-record-cost-gap: the cost section of decision silent-undo-check-design (about lines 102-106) omits the `git show` of the new path for a moved notes file (7 spawns pinned) and the file-absent-at-both-revisions case (4 spawns per candidate path plus one merge-base); one clause fixes it.

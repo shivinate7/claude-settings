@@ -1,0 +1,1 @@
+- desktop-lane-effort-unpinned: (#2566) on main and on #2566, mcp__ccd_session__start_session with tag cs-build:lane and `/effort high` is allowed; the lane-effort rule (owner 13:19 CST, item 495 a, effort medium) reads only create_session. Pre-existing, not #2566. Candidate debt: a desktop lane start can run at high effort by mistake.

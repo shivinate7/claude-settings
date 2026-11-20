@@ -1,0 +1,1 @@
+- merge-matcher-tools-copy: (#2513) the test's `MERGE_MATCHER_TOOLS` copies `MERGE_TOOLS` (building-allow-list-is-the-constant).

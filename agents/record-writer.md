@@ -14,6 +14,17 @@ your diff for the reviewer. A refusal is final. Never write a refused path anoth
 as with a shell command or a script. If a non-Markdown change is needed, report it. The
 orchestrator assigns it to a builder.
 
+When your task writes notes under `docs/notes/`, write one file per note, named `<slug>.md`,
+directly in `docs/notes/` and never in a subfolder. The file holds one line, `- <slug>: <text>`. Read the form from `NOTE_LINE` in
+`lint/check_record_slugs.py`, never from memory. If your brief gives another form, follow the
+check and say so under Deviations. The slug is lowercase letters, digits and hyphens, 32
+characters or fewer, and not digits only. Use no name from the Not cell of `GLOSSARY.md` in a
+file name. Never add or edit a note in the old file `docs/debts/notes.md`. Commit your files, then
+run these from the repo root, each through `~/.claude/bin/verdict`:
+`python3 lint/check_record_slugs.py` (no file arguments; with arguments it checks length only),
+`python3 lint/check_glossary.py`, `python3 lint/ste_lint.py <your folder>` and
+`python3 lint/stale_cites.py --range origin/main...HEAD`.
+
 When you rewrite, keep every fact. Drop words, never facts. Follow
 `speak-rewrite-superseded-in-place` (rewrite superseded text in place, keep only what is true
 now). Write plainly (rule output-write-in-ste).

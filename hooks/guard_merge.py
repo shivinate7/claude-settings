@@ -14,9 +14,9 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 from guard_core import (
-    SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
+    SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, GIT_WRITES, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
     REPLAY_MARKS, command_indexes, dir_before_segment, heredoc_heads, inline_script, inner_commands, own_heredoc_bodies, resolve_command, resolve_default_base, segment_tokens, split_segments,
-    is_cloud, strip_heredoc_bodies, strip_redirections,
+    is_cloud, lint_dir, shell_abs, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import opens_fence, BUILD_TAG, CONSULTANT_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_BRIEF_MARKER, LANE_GRANT_MARKER, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags, repo_tag_names  # the one home of the lane tags and head refs, shared with the roadmap build
@@ -106,7 +106,8 @@ def gh_call_of(segment: str):
 
 
 # ---- a merge made outside the merge tool
-MERGE_TOOLS = ("mcp__github__merge_pull_request",)
+# The auto-merge tool arms the same merge: GitHub merges once the head's checks pass, so it is judged on the same head read.
+MERGE_TOOLS = ("mcp__github__merge_pull_request", "mcp__github__enable_pr_auto_merge")
 MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject",
                      "--match-head-commit", "-A", "--author-email"}
 # Seconds for the WHOLE read, shared: Host.head_read makes 4 `gh` REST calls (5 with a branch selector, 1 more run-list read when the check runs link more than one run; a settled head adds the
@@ -405,6 +406,32 @@ READY_PAGE_UNKNOWN_REASON = (
     "(decision guard-hooks-fail-closed, a guard that cannot run its read refuses)"
 )
 
+READY_PAGE_BEHIND_REASON = (
+    "Rule (Git, guard-hooks-fail-closed): the records page on the head of this pull request could not be read, so it is "
+    "unknown whether it is stale: %s. The merge tool the guard loaded is behind origin/main, and a tool that old can "
+    "fail this read. A read that cannot run refuses the ready mark. "
+    "Remedy: from the claude-settings clone, run merge/install_from_main.sh (the reinstall from main), then retry. "
+    "(decision guard-hooks-fail-closed, a guard that cannot run its read refuses)"
+)
+
+
+def merge_tool_behind_main() -> bool:
+    """True when the checkout that holds the loaded merge tool is behind origin/main (its HEAD is an ancestor of
+    origin/main and not equal to it). Any read that fails is False: the plain unknown reason then stands."""
+    module = merge_module()
+    path = getattr(module, "__file__", None)
+    if not path:
+        return False
+    root = os.path.dirname(os.path.dirname(os.path.realpath(path)))
+    ref = resolve_default_base(root) or "origin/main"  # the short ref name already holds the remote
+    if not ref.startswith("origin/"):
+        return False
+    head, tip = _git(root, "rev-parse", "HEAD"), _git(root, "rev-parse", ref)
+    if not head or not tip or head.returncode or tip.returncode or head.stdout.strip() == tip.stdout.strip():
+        return False
+    ancestor = _git(root, "merge-base", "--is-ancestor", "HEAD", ref)
+    return ancestor is not None and ancestor.returncode == 0
+
 
 def ready_page_calls(tool: str, tool_input: dict, command: str):
     """[(selector, repo)], one per call in this tool call that marks a pull request ready. The shell form is read by
@@ -452,7 +479,8 @@ def ready_page_hit(tool: str, tool_input: dict, command: str, where: str):
             remedy = merge_module().stale_page_remedy(int(detail))
             return READY_PAGE_STALE_REASON % (detail, remedy), "ready on a stale page #" + detail
         if state == "unknown":
-            return READY_PAGE_UNKNOWN_REASON % cap_safe(detail, 200), "ready, page read unknown"
+            reason = READY_PAGE_BEHIND_REASON if merge_tool_behind_main() else READY_PAGE_UNKNOWN_REASON
+            return reason % cap_safe(detail, 200), "ready, page read unknown"
     return None
 
 
@@ -740,6 +768,13 @@ CONFLICT_MARKERS_CHAIN_REASON = (
     "the guard cannot read, so it cannot be checked for conflict markers before this push sends it. "
     "Remedy: run the push in a call of its own, after the commit has landed."
 )
+CONFLICT_MARKERS_CD_REASON = (
+    "Rule (Git, conflict-markers; decision commit-refuses-conflict-markers, decision refuse-git-after-missing-cd; "
+    "ruling own-476-c-refuse-cd-missing-folder): "
+    "the cd before this git write names a folder that does not exist, so the cd failed and the shell stays in the "
+    "current folder. The write would land in the current folder's repository, which is not the one you named. "
+    "Remedy: check the folder path, or join the cd to the git command with `&&`, then retry."
+)
 RED_RUN_PUSH_REASON = (
     "Rule (Git, red-run; decision red-run-trailer-on-test-commits): this push would send test commits with no "
     "valid Red-run trailer: {flagged}. Remedy: {fix}"
@@ -900,7 +935,7 @@ def _red_run_module():
     """lint/check_red_run.py, imported from the lint folder beside this file's folder, the one home of the
     rule. It waits for the first push that needs it, and raises ImportError in a copy of the hooks with no lint
     folder beside it. The caller reads that as no hit."""
-    lint = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lint")
+    lint = lint_dir()
     if lint not in sys.path:
         sys.path.append(lint)
     import check_red_run
@@ -1253,7 +1288,8 @@ def _commit_red_run(args, bodies, check_red_run, top, read_adds):
 
 def _chain_safe(segment):
     """True when the segment cannot change the tree a later commit reads: a git add, a git read,
-    `true`, `false`, `cd` (the root already resolves through a cd) or a plain `VAR=value`. A commit is judged on its own, so
+    `true`, `false`, `cd` (the root already resolves through a cd), `mkdir` (git tracks no empty folder) or a plain
+    `VAR=value`. A commit is judged on its own, so
     the caller never asks about one."""
     call = git_call_of(segment)
     if call is not None:
@@ -1262,6 +1298,8 @@ def _chain_safe(segment):
     if tokens and all(ASSIGNMENT.match(token) for token in tokens) and not set(segment) & set("`("):
         return True   # a plain `VAR=value` runs nothing; a substitution could, so it stays unsafe
     index = resolve_command(tokens) if tokens else None
+    if index is not None and basename(tokens[index]) == "mkdir":
+        return not set(segment) & set("`(")   # a substitution in its operands could run anything
     return index is not None and basename(tokens[index]) in ("true", "false", "cd")
 
 
@@ -1294,10 +1332,92 @@ def _repo_of(repos, where):
     return repos[where]
 
 
+def _after_missing_cd(segments, number, cwd, ends, made=frozenset()):
+    """True when a `cd` ahead of `segments[number]` named a folder that is missing now and the segment still runs: the
+    shell stayed where it was. The walk that reads a failed cd as staying (`failed_cd_stays`) and the one that does
+    not trust it (None) differ only there, so a folder in the first and None in the second marks that cd. A folder in
+    `made` (`_made_folders`) is read as present."""
+    return (dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True, made=made) is not None
+            and dir_before_segment(segments, number, cwd, ends, made=made) is None)
+
+
+_MKDIR_VALUE_FLAGS = ("-m", "--mode", "--context")
+_CLONE_VALUE_FLAGS = ("-b", "--branch", "-o", "--origin", "-c", "--config", "-u", "--upload-pack", "-j", "--jobs",
+                      "--depth", "--reference", "--reference-if-able", "--separate-git-dir", "--template", "--filter",
+                      "--shallow-since", "--shallow-exclude", "--server-option", "--bundle-uri", "--ref-format")
+_WORKTREE_ADD_VALUE_FLAGS = ("-b", "-B", "--reason")
+_INIT_VALUE_FLAGS = ("-b", "--initial-branch", "--template", "--separate-git-dir", "--object-format", "--ref-format")
+
+
+def _operands(args, value_flags):
+    """The operands of a command's args: a flag is skipped, and so is the value of one in `value_flags`. After `--`
+    every arg is an operand."""
+    found, skip, ended = [], False, False
+    for arg in args:
+        if skip:
+            skip = False
+        elif ended or not arg.startswith("-") or arg == "-":
+            found.append(arg)
+        elif arg == "--":
+            ended = True
+        else:
+            skip = arg in value_flags
+    return found
+
+
+def _made_folders(segments, number, cwd, ends):
+    """The normalized folders that a segment ahead of `segments[number]` makes: a `mkdir`'s operands, a `git clone`'s
+    target (git's default name when none is given), a `git init`'s folder and a `git worktree add`'s path, each with its
+    parents. A `mkdir`'s parents count only with `-p`; without it the folder counts only when its parent is present
+    (a folder on disk, or one made earlier), because the mkdir fails otherwise. Each is resolved against the folder its own segment runs in. Parsing only: no process is
+    spawned."""
+    made = set()
+    for at in range(number):
+        tokens = segment_tokens(segments[at]) if segments[at].strip() else None
+        index = resolve_command(tokens) if tokens else None
+        if index is None:
+            continue
+        paths, call, parents = [], git_call_of(segments[at]), True
+        if basename(tokens[index]) == "mkdir":
+            paths = _operands(tokens[index + 1:], _MKDIR_VALUE_FLAGS)
+            parents = any(arg == "--parents" or re.match(r"-[a-zA-Z]*p", arg) for arg in tokens[index + 1:])
+        elif call is not None and call[0] == "clone":
+            operands = _operands(call[1], _CLONE_VALUE_FLAGS)
+            if len(operands) > 1:
+                paths = [operands[1]]
+            elif operands:
+                default = operands[0].rstrip("/").rsplit("/", 1)[-1].rsplit(":", 1)[-1]
+                paths = [default[:-4] if default.endswith(".git") else default]
+        elif call is not None and call[0] == "init":
+            paths = _operands(call[1], _INIT_VALUE_FLAGS)[:1]
+        elif call is not None and call[0] == "worktree" and call[1][:1] == ["add"]:
+            paths = _operands(call[1][1:], _WORKTREE_ADD_VALUE_FLAGS)[:1]
+        if not paths:
+            continue
+        base = dir_before_segment(segments, at, cwd, ends, failed_cd_stays=True, made=frozenset(made))
+        c_target = _segment_git_c_target(tokens) if call is not None else None
+        if c_target is not None:
+            base = _absolute(c_target, base or "")
+        for path in paths:
+            target = shell_abs(path, base)
+            while target and os.path.isabs(target):
+                target = os.path.normpath(target)
+                if target in made or os.path.dirname(target) == target:
+                    break
+                parent = os.path.dirname(target)
+                if not parents and parent not in made and not os.path.isdir(parent):
+                    break   # a mkdir without -p fails when its parent is missing, so nothing is made
+                made.add(target)
+                target = os.path.dirname(target) if parents else None
+    return frozenset(made)
+
+
 def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
     """Return `(kind, file)` for the first commit or push that would carry all three conflict markers
-    in one file, else `('', '')`. The kind is `commit`, `push`, or `chain` (a push after a commit the
-    guard could not judge; the file is then `git push`). A push that carries no marker but sends a test
+    in one file, else `('', '')`. The kind is `commit`, `push`, `chain` (a push after a commit the
+    guard could not judge; the file is then `git push`), or `cd` (a git write, any verb in `GIT_WRITES`, after a `cd`
+    into a folder that is missing now and that no earlier segment makes (`_made_folders`), which the shell survives:
+    the file is then `git <verb>`; the reason prints no folder, ruling own-476-c-refuse-cd-missing-folder). A push that carries no marker but sends a test
     commit with no valid Red-run trailer returns `('red-run', (found, last, rewritten))` (`_red_run_found`); a caller that
     passes no `is_test_rel` reads no red-run hit. A lone commit (no push after it in the call) that adds test lines with no
     valid trailer in its `-m` returns `('red-run-commit', (found, 'new', False))` (`_commit_red_run`). Each segment is judged from its own command word. `raw` is the
@@ -1318,6 +1438,11 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
             continue
         call = calls[number]
         before, heads_before = heads_before, heads_before + len(heredoc_heads(segment)[0])
+        if call is not None and call[0] in GIT_WRITES and _segment_git_c_target(segment_tokens(segment) or []) is None:
+            if (_after_missing_cd(segments, number, cwd, ends)
+                    and _after_missing_cd(segments, number, cwd, ends, _made_folders(segments, number, cwd, ends))
+                    and _repo_of(repos, dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True)) is not None):
+                return "cd", "git " + call[0]
         if call is not None and call[0] == "push":
             if blind_commit and (blind_triplet or conflict_step):
                 return "chain", "git push"
@@ -2184,11 +2309,10 @@ ARCHIVE_TAGS_REASON = (
     "the target's record is a lane with no cs-step tag or no cs-repo tag, so the guard cannot find its "
     "records pull request. Fix the lane's tags, run get_session on each target in one message, then archive them in the next message. " + ARCHIVE_CITE
 )
-# A template: %s is the lane's cs-repo repos, comma-separated.
+# A template: {remedy} is archive_read_remedy's wording.
 ARCHIVE_READ_REASON = (
-    "the open pull requests of the lane's repo (%s) could not be read, so the guard cannot tell whether its "  # glossary-ok: session-tiers is the decision's file name
-    "records have landed. If the repo is not attached to this session, attach it read-only with `add_repo` "
-    "(access read), then retry; if gh itself failed, retry when it answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
+    "the open pull requests of the lane's repo could not be read, so the guard cannot tell whether its "  # glossary-ok: session-tiers is the decision's file name
+    "records have landed. {remedy} (decision session-tiers, a lane closes only after its records pull request has landed)"  # glossary-ok: session-tiers is the decision's file name
 )
 ARCHIVE_NO_PR_REASON = (
     "a branch of the lane is ahead of its repo's default branch and has no pull request that covers it, so closing "
@@ -2199,10 +2323,57 @@ ARCHIVE_NO_PR_REASON = (
 )
 # A template, as ARCHIVE_READ_REASON.
 ARCHIVE_BRANCH_READ_REASON = (
-    "the lane's branches or their pull requests (repo %s) could not be read, so the guard cannot tell whether any work of "  # glossary-ok: session-tiers is the decision's file name
-    "the lane is stranded. If a repo of the lane is not attached to this session, attach it read-only with `add_repo` "
-    "(access read), then retry; if gh itself failed, retry when it answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
+    "the lane's branches or their pull requests could not be read, so the guard cannot tell whether any work of "  # glossary-ok: session-tiers is the decision's file name
+    "the lane is stranded. {remedy} (decision session-tiers, a lane closes only after its records pull request has landed)"  # glossary-ok: session-tiers is the decision's file name
 )
+
+
+_ATTACH_STATUSES = (403, 404)  # the answers of a repo this session cannot read: 403 for an unattached repo (measured), 404 for one gh cannot find
+
+
+def archive_read_remedy(repo, status) -> str:
+    """The remedy of an unreadable archive read. Only a 403 or 404 on the read of `repo` names its add_repo act; every other
+    failure (a 500, a timeout, no gh, text that is not JSON, a shape the read does not know) says to retry. The one home of the wording."""
+    if repo and status in _ATTACH_STATUSES:
+        # Push access, not read: a lane that archives must push an archive/ branch, so a read-only attach would only move the refusal.
+        return "This session cannot read that repo until it is attached: add_repo " + repo + " access push, then retry."
+    return "Retry once gh answers."
+
+
+_HTTP_TAIL = re.compile(r"\bHTTP (\d{3})\)?\s*\Z")  # the end of a failed `gh api` reply: "gh: <message> (HTTP 403)"
+
+
+def _http_status(out: str):
+    """The HTTP status that a failed gh reply ends with, or None."""
+    match = _HTTP_TAIL.search(out)
+    return int(match.group(1)) if match else None
+
+
+class _GhReadFailed(RuntimeError):
+    """A gh read failed. `status` is the HTTP status gh printed, None when the read failed another way (a reply that is no JSON, a shape the read does not know)."""
+
+    def __init__(self, message: str, status=None):
+        super().__init__(message)
+        self.status = status
+
+
+class _ArchiveReadFailed(Exception):
+    """A gh read of the branch arm failed in `repo` with HTTP `status` (None when it has none), so archive_hit can word the remedy."""
+
+    def __init__(self, repo: str, status=None):
+        super().__init__(repo)
+        self.repo, self.status = repo, status
+
+
+def _read_status(module, exc):
+    """The HTTP status of a failed read, or None. A network error (NetStop, a rate limit included) has none: it is no answer about the repo."""
+    if isinstance(exc, (_ArchiveReadFailed, _GhReadFailed)):
+        return exc.status
+    if module is not None and isinstance(exc, module.Stop) and not isinstance(exc, module.NetStop):
+        return _http_status(str(exc))  # Host.pages raises a Stop whose message ends with the failed reply
+    return None
+
+
 ARCHIVE_STRANDED_MATCH = "archive of a lane with a branch that has no pull request"
 _REPO_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 # A source URL on github.com (https, ssh or scp form, an optional www., any case, an optional path after owner/name): `repo`
@@ -2217,14 +2388,14 @@ _CONTAINED = ("behind", "identical")  # a compare of base...head where the head 
 
 
 def _read_json(host, rel: str, what: str):
-    """The parsed JSON of one REST read of `host`; a failed read or a reply that is not JSON raises RuntimeError."""
+    """The parsed JSON of one REST read of `host`; a failed read or a reply that is not JSON raises _GhReadFailed."""
     code, out = host.api(rel)
     try:
         if code:
             raise ValueError(out)
         return json.loads(out)
     except ValueError as e:
-        raise RuntimeError("the " + what + " read failed: " + str(e))
+        raise _GhReadFailed("the " + what + " read failed: " + str(e), _http_status(out) if code else None)
 
 
 def _compare_status(module, host, base: str, head: str, missing_ok: bool = False):
@@ -2238,7 +2409,7 @@ def _compare_status(module, host, base: str, head: str, missing_ok: bool = False
             raise ValueError(out)
         return str(json.loads(out)["status"])
     except (ValueError, KeyError, TypeError) as e:
-        raise RuntimeError("the compare read failed: " + str(e))
+        raise _GhReadFailed("the compare read failed: " + str(e), _http_status(out) if code else None)
 
 
 def _head_landed(module, repo: str, row) -> bool:
@@ -2253,9 +2424,11 @@ def _head_landed(module, repo: str, row) -> bool:
 
 
 def open_pull_rows(module, repo: str):
-    """The open pull request rows of `repo`, every page, through the merge tool's page reader `module`. The one home of
-    this read: rules lane-closes-after-records and lane-step-dup call it. A failed read raises. The caller holds the
-    one shared deadline over the read (a nested shared_deadline would reset it)."""
+    """The open pull request rows of `repo`, every page, read through the merge tool's page reader `module` with the
+    session's token. The one home of this read: rules lane-closes-after-records and lane-step-dup call it. A repo the
+    session has not attached is not read. On the archive caller's 403 or 404 the refusal names the add_repo access push
+    (owner, page item 937 b, 14:20 CST Nov 17); step_pr_hit keeps its own STEP_PR_READ_REASON. A failed read raises. The caller holds the one shared deadline over the read (a nested
+    shared_deadline would reset it). Cost: one gh call per page."""
     return module.Host(repo=repo).pages("pulls", fields={"state": "open"})
 
 
@@ -2336,7 +2509,7 @@ def _stranded_branch(module, ccrs, tag_repos, slugs, open_rows) -> bool:
     branch field, an empty list or map, or only null values names none. A branch field that is not a map, and a
     value that is neither null nor a string, are shapes the read does not know, so they raise. A 404 on the compare
     means the branch is not in that repo, so it is skipped in that repo. Any other failed read raises, and
-    archive_hit refuses on it. The caller holds one shared deadline over all the reads here (a nested
+    archive_hit refuses on it, naming the repo whose read failed (_ArchiveReadFailed). The caller holds one shared deadline over all the reads here (a nested
     shared_deadline would reset it). `open_rows` is each repo's open pull request list, already read. Every pull
     request read of a repo is judged together, so a replacement on another branch of the lane is in hand."""
     branches, repos = [], list(tag_repos)
@@ -2354,40 +2527,44 @@ def _stranded_branch(module, ccrs, tag_repos, slugs, open_rows) -> bool:
     branches = list(dict.fromkeys(branches))
     defaults = {}
     for repo in repos:
-        host = module.Host(repo=repo)
-        owner = repo.split("/")[0]
-        pool = [row for row in open_rows.get(repo, []) if _on_lane_form(str(row["head"]["ref"]), slugs)]
-        pending = []  # (branch, tip or None, rows) of each branch ahead of the default: judged once every row is read
+        try:
+            host = module.Host(repo=repo)
+            owner = repo.split("/")[0]
+            pool = [row for row in open_rows.get(repo, []) if _on_lane_form(str(row["head"]["ref"]), slugs)]
+            pending = []  # (branch, tip or None, rows) of each branch ahead of the default: judged once every row is read
 
-        def ahead(branch):
-            """True when `branch` is not the default or an archive copy, and its compare with the default reads ahead."""
-            if repo not in defaults:
-                defaults[repo] = str(_read_json(host, "", "repo")["default_branch"])
-            if branch.startswith("archive/") or branch == defaults[repo]:
-                return False
-            return _compare_status(module, host, defaults[repo], branch, missing_ok=True) in _AHEAD
+            def ahead(branch):
+                """True when `branch` is not the default or an archive copy, and its compare with the default reads ahead."""
+                if repo not in defaults:
+                    defaults[repo] = str(_read_json(host, "", "repo")["default_branch"])
+                if branch.startswith("archive/") or branch == defaults[repo]:
+                    return False
+                return _compare_status(module, host, defaults[repo], branch, missing_ok=True) in _AHEAD
 
-        for branch in branches:
-            if ahead(branch):
-                rows = host.pages("pulls", fields={"state": "all", "head": owner + ":" + branch})
-                pool += rows
-                pending.append((branch, None, rows))
-        seen = set(branches)
-        for slug in slugs:
-            for form in lane_head_refs(slug):
-                for ref in host.pages("git/matching-refs/heads/" + form):
-                    name = str(ref["ref"])[len("refs/heads/"):]
-                    if name in seen or not _on_lane_form(name, [slug]):
-                        continue
-                    seen.add(name)
-                    # The branch exists (the refs read just listed it), so an open pull request covers it before any
-                    # default-branch read; its tip is on the row already in hand.
-                    rows = host.pages("pulls", fields={"state": "all", "head": owner + ":" + name})
+            for branch in branches:
+                if ahead(branch):
+                    rows = host.pages("pulls", fields={"state": "all", "head": owner + ":" + branch})
                     pool += rows
-                    if not _is_open(rows) and ahead(name):
-                        pending.append((name, str(ref["object"]["sha"]), rows))
-        if any(not _covered(module, host, branch, tip, rows, pool) for branch, tip, rows in pending):
-            return True
+                    pending.append((branch, None, rows))
+            seen = set(branches)
+            for slug in slugs:
+                for form in lane_head_refs(slug):
+                    for ref in host.pages("git/matching-refs/heads/" + form):
+                        name = str(ref["ref"])[len("refs/heads/"):]
+                        if name in seen or not _on_lane_form(name, [slug]):
+                            continue
+                        seen.add(name)
+                        # The branch exists (the refs read just listed it), so an open pull request covers it before any
+                        # default-branch read; its tip is on the row already in hand.
+                        rows = host.pages("pulls", fields={"state": "all", "head": owner + ":" + name})
+                        pool += rows
+                        if not _is_open(rows) and ahead(name):
+                            pending.append((name, str(ref["object"]["sha"]), rows))
+            if any(not _covered(module, host, branch, tip, rows, pool) for branch, tip, rows in pending):
+                return True
+        except (Exception, SystemExit) as exc:
+            raise _ArchiveReadFailed(repo, _read_status(module, exc)) from exc
+
     return False
 
 
@@ -2452,6 +2629,8 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
         return "archive of a lane with no step or repo tag", ARCHIVE_TAGS_REASON
     lanes = [c for c in ccrs if isinstance(c, dict) and isinstance(c.get("tags"), list) and ARCHIVE_LANE_TAG in c["tags"]]
     reading_branches = False  # picks the reason a failed read refuses with
+    reading = None  # the repo whose read is under way, the one an unreadable read's remedy may name
+    module = None
     try:  # cost, all under one shared MERGE_READ_TIMEOUT: one paged gh REST read per cs-repo tag (one in practice), through
         # the merge tool's page reader; one compare read per open draft of the lane; per repo, one matching-refs read per
         # slug form (a paged read); and, for each branch the records name, one repo read per repo, one compare read per
@@ -2464,6 +2643,7 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
         open_rows = {}
         with module.shared_deadline(MERGE_READ_TIMEOUT):
             for repo in repos:
+                reading = repo
                 rows = open_rows[repo] = open_pull_rows(module, repo)
                 for row in rows:
                     ref = str(row["head"]["ref"])
@@ -2472,12 +2652,15 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
                         continue
                     if slug:
                         return "archive of lane " + slug + " with open pull request " + str(row.get("number", "?")), ARCHIVE_OPEN_REASON
-            reading_branches = True
+            reading_branches, reading = True, None
             stranded = _stranded_branch(module, lanes, repos, slugs, open_rows)
-    except (Exception, SystemExit):
+    except (Exception, SystemExit) as exc:
+        if isinstance(exc, _ArchiveReadFailed):
+            reading = exc.repo
+        remedy = archive_read_remedy(reading, _read_status(module, exc))
         if reading_branches:
-            return "archive with an unreadable branch read", ARCHIVE_BRANCH_READ_REASON % ", ".join(repos)
-        return "archive with an unreadable pull request list", ARCHIVE_READ_REASON % ", ".join(repos)
+            return "archive with an unreadable branch read", ARCHIVE_BRANCH_READ_REASON.format(remedy=remedy)
+        return "archive with an unreadable pull request list", ARCHIVE_READ_REASON.format(remedy=remedy)
     if stranded:
         return ARCHIVE_STRANDED_MATCH, ARCHIVE_NO_PR_REASON
     return None
@@ -2881,7 +3064,7 @@ TARGET_UNKNOWN_LINE = ("target-id-in-roster: the roster is unknown (the roadmap 
 
 def _parent_targets():
     """PARENT_TARGETS of lint/layout.py, the one home of the send targets that name the parent."""
-    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    lint = lint_dir()
     if lint not in sys.path:
         sys.path.append(lint)
     import layout

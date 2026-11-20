@@ -1,0 +1,1 @@
+- roles-check-other-limits: lint/check_project_ops_roles.py has four limits. A role list that holds "and" before a stray period drops the later roles. A nested parenthetical reads as a made-up role. A non-UTF-8 template raises a traceback. A wrapped `- **Consultant.**` label, with its words on the next line, fails as no role text. Decision: session-tiers (session roles).

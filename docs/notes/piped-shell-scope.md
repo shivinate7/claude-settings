@@ -1,0 +1,1 @@
+- piped-shell-scope: add `print > f; sh f` and `| xargs sh -c` to the piped-shell debt's scope. No debt file by that name is on main at 6e8d6ccf9 (triage grep of docs/debts, 11:18 CST); the notes lane finds it on #1186's branch or writes it. Item 473 a (one fix pass for #1186 and #2489) is done for #1186 by its fix pass.

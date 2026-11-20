@@ -1,0 +1,1 @@
+- sha-hex-followups: Three findings (#1781). merge/merge.py line 44 says no gh flag beyond `api -X GET -f`, but Host.pages passes -i (line 731). hooks/git_reads.py line 10 says a patch to the other names reaches merge; only branch_is_ancestor does. ci-job-caps counts green runs only, so the record's '26 runs' means 26 green runs.

@@ -1,0 +1,1 @@
+- six-windows-jobs-batch-pr: 11:46 CST Nov 13 (coordinator, audit finding 4): widened: move the six after-merge-only Windows jobs onto batch PRs too.

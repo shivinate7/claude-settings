@@ -1,0 +1,1 @@
+- fan-prose-unmapped-3-asks: Lane fan-prose-unmapped-3 asks, notes only (the lane is archived; post only if a lane needs the answer): (1) a GLOSSARY row for `Keep:` needs the owner's grant; (2) owner check of page item 165's scope; (3) lost-login line once per session or every Stop (note streak-line-repeats-every-stop).

@@ -1,0 +1,1 @@
+- hold-missed-before-close: Own mistake: the coordinator's 09:49 CST hold on #1755 and #1725 sat unread while triage closed them in a bulk run. No harm (lane fan-code-handoffs-2 carries both from their kept branches). Guard: read notifications before each bulk-close batch; a step if it recurs (coordinator 10:11 CST).

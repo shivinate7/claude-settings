@@ -1,0 +1,1 @@
+- page-question-reads-main-grant: page item 407 asked the owner for a branch delete that main's standing grant (item 219 a, Nov 4) already allowed; triage cited the older grant text from its own session-start copy of .claude/CLAUDE.md. Fix: a page question that cites a grant reads it with `git show FETCH_HEAD:.claude/CLAUDE.md`, never from the session's loaded copy.

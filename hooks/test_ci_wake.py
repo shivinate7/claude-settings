@@ -24,6 +24,8 @@ Decision ci-wait-reads-run-status, section "The CI wake-up":
 - One watcher runs per PR. A second watcher for the same PR exits 0 with no output and no watch.
   A killed watcher, or a finished one, releases the PR.
 - Any uncaught error exits 2 with one "unknown" line, never exit 1.
+- A repo with no active workflow wakes once, exit 2, with one CI line on the head sha7. That line is
+  what closes the CI wait in the transcript. An unreadable workflow list writes no such line.
 
 Decision ci-wait-reads-run-status ("CI waits read the run status"): the hook never runs
 `gh run watch` (one watch made 131 API calls in 60 s). `watch_run` reads `gh run view <id> --json
@@ -77,9 +79,15 @@ A prs, runs or workflows entry with a `repo` field answers only a call that reac
 with its own -R or --repo (any spelling gh takes), else a PR URL selector's repo, else GH_REPO, else the
 fixture's `cwd_repo`. An entry with no
 `repo` answers every call. `workflows` is the `gh workflow list` answer (one active `checks` workflow
-when absent); without --all only active entries answer. The fixture key `workflow_list` ("error" or
-"garbage") fails that one call and no other. The fixture key `list_error_from` N makes every `run list`
+when absent); without --all only active entries answer. The fixture key `workflow_list` ("error",
+"garbage" or "empty") changes that one call and no other. "empty" prints nothing and exits 0: the answer
+gh 2.89.0 gives for a repo with no workflow. The fixture key `list_error_from` N makes every `run list`
 from the Nth call of the case on exit 1 (HTTP 403), so a re-list can be refused after a judged run.
+A gh api call that sends a non-GET method exits 1 and prints nothing on stdout. It writes one stderr line that
+names the call, as `method_of` reads the method gh sends (a field flag with no --method GET is a POST). The
+fixture key `api_writes_ok` is the only opt-in, for a case that truly writes. The run then reads every case's
+call log once at the end and fails one check per distinct such call, with its count across the run, so a read
+that forgets --method GET is red in any case, not only the case that checks it.
 
 Draft run, then the real run: `gh pr create --draft` makes a run
 whose jobs all skip, and `gh pr ready` makes the real run seconds later. A hook that lists the head
@@ -188,6 +196,24 @@ def api_repo(args):
         return parts[1] + "/" + parts[2].split("?")[0]
     return None
 
+def method_of(args):
+    """The HTTP method gh sends for a `gh api` call. An explicit -X or --method names it, in any case, and
+    -XGET, --method=GET and -X=GET count too. With no explicit method, a field flag (-f, -F, --field,
+    --raw-field, --input) makes it a POST, and no field makes it a GET, as gh picks it."""
+    for i, a in enumerate(args):
+        if a in ("-X", "--method") and i + 1 < len(args):
+            return args[i + 1].upper()
+        if a.startswith("--method="):
+            return a[len("--method="):].upper()
+        if a.startswith("-X") and not a.startswith("--") and len(a) > 2:
+            return a[2:].lstrip("=").upper()
+    for a in args:
+        if a in ("-f", "-F", "--field", "--raw-field", "--input") or a.startswith(
+                ("--field=", "--raw-field=", "--input=")) or (
+                a[:2] in ("-f", "-F") and not a.startswith("--") and len(a) > 2):
+            return "POST"
+    return "GET"
+
 def repo_of(args):
     """The repo a gh call names with its own flag, in any spelling gh takes, or None."""
     if api_repo(args):
@@ -217,6 +243,10 @@ def here(entry, args, fx):
     return entry["repo"] == call_repo(args, fx)
 
 DEFAULT_WORKFLOWS = [{"id": 1, "name": "checks", "path": ".github/workflows/checks.yml", "state": "active"}]
+
+# The gh api flags that take a value. The word loop of main skips the value after each one.
+API_VALUE_FLAGS = ("-X", "--method", "-f", "-F", "--field", "--raw-field", "--input", "-H", "--header",
+                   "-q", "--jq", "--hostname")
 
 _SEQ = [0]
 
@@ -304,6 +334,11 @@ def rest(path, full, args, fx):
             return 1
         sys.stdout.write(json.dumps(rest_pr(hits[0])) + "\n")
         return 0
+    if len(parts) == 6 and parts[5] == "files":
+        hits = [p for p in mine if str(p["number"]) == parts[4]]
+        names = hits[0].get("files", []) if hits else []
+        sys.stdout.write(json.dumps([{"filename": n, "status": "added"} for n in names]) + "\n")
+        return 0
     query = {}
     for i, a in enumerate(args):
         if a in ("-f", "-F") and i + 1 < len(args) and "=" in args[i + 1]:
@@ -340,12 +375,18 @@ def main(args):
         # The cloud proxy refuses every GraphQL call: `gh pr view|list|checks|status` and `gh api graphql`.
         sys.stderr.write("GitHub GraphQL is not available from Claude Code sessions; use the REST API (HTTP 403)\n")
         return 1
+    if obj == "api" and method_of(args) != "GET" and not fx.get("api_writes_ok"):
+        # A read that gh sends as a POST (a field flag with no --method GET) fails in every case. Only a case
+        # that truly writes sets api_writes_ok in its fixture.
+        sys.stderr.write("stub gh: a gh api call that sends a non-GET method needs api_writes_ok in its fixture: %s\n"
+                         % " ".join(args))
+        return 1
     if obj == "api":
         words, skip = [], False
         for a in plain[1:]:
             if skip:
                 skip = False
-            elif a in ("-X", "-f", "-F", "--hostname"):
+            elif a in API_VALUE_FLAGS:
                 skip = True
             elif not a.startswith("-"):
                 words.append(a)
@@ -367,6 +408,11 @@ def main(args):
         if fx.get("workflow_list") == "garbage":
             sys.stdout.write("<html>not json</html>\n")
             return 0
+        if fx.get("workflow_list") == "empty_stderr":
+            sys.stderr.write("warning: the workflow answer is not complete\n")
+            return 0   # exit 0 and 0 bytes on stdout, with a message on stderr: not a repo with no workflow
+        if fx.get("workflow_list") == "empty":
+            return 0   # gh 2.89.0 prints 0 bytes and exits 0 for a repo with no workflow, not "[]"
         # gh lists the active workflows unless --all; the fixture's repo field is not gh's, so it is dropped
         wf = [{k: v for k, v in w.items() if k != "repo"} for w in fx.get("workflows", DEFAULT_WORKFLOWS)
               if here(w, args, fx) and ("--all" in args or w.get("state") == "active")]
@@ -566,7 +612,8 @@ PUSH_FORMS = [
 
 FAILS = []
 COUNT = [0]
-LINE = re.compile(r"^CI (green|red|cancelled|unknown) on (\S+?): ?(.*)$")
+CALL_LOGS = []  # (the fixture's api_writes_ok, the call log) of every case, swept once at the end of the run
+LINE = re.compile(r"^CI (green|red|cancelled|unknown|none) on (\S+?): ?(.*)$")
 
 
 def check(label, ok, detail=""):
@@ -600,6 +647,7 @@ def new_case(scen):
     log = os.path.join(case, "gh.log")
     with open(fixture_path, "w", encoding="utf-8") as f:
         json.dump(scen, f)
+    CALL_LOGS.append((bool(scen.get("api_writes_ok")), log))
     return case, fixture_path, log
 
 
@@ -711,6 +759,16 @@ def expect_verdict(label, res, verdict, names_in=(), names_out=()):
 
 def expect_silent(label, res):
     check("%s: exit 0, no output" % label, res.rc == 0 and not res.hung and res.lines == [], why(res))
+
+
+def expect_closing_line(label, res):
+    """A repo with no active workflow wakes once: exit 2, and one CI line on the head sha7. The line reads
+    `CI none on <sha7>: no active workflow`, never green: a green line would say CI passed. The line reaches
+    the transcript only through that exit-2 wake, and the Stop cases read whether a none line closes the wait."""
+    v = verdict_of(res)
+    check("%s: exit 2, one CI none line on sha7 (the wake line)" % label,
+          res.rc == 2 and not res.hung and v is not None and v[0] == "none" and v[1] == SHA7
+          and "no active workflow" in v[2], why(res))
 
 
 def expect_no_watch(label, res):
@@ -1575,9 +1633,9 @@ def case_wrong_repo_every_gh_call_names_the_pr_repo():
 
 
 def case_repo_without_ci_starts_no_watch():
-    """A repo with no active workflow starts no watch: silent, exit 0, no run read. The rows: no repo
-    flag (the incident form), no workflows, and only a disabled workflow. The --repo rows also check
-    that the hook asked the PR's repo for its workflows."""
+    """A repo with no active workflow starts no watch: it wakes once with its CI line (exit 2, on the head
+    sha7), and makes no run read. The rows: no repo flag (the incident form), no workflows, and only a
+    disabled workflow. The --repo rows also check that the hook asked the PR's repo for its workflows."""
     rows = (
         ("no repo flag, no workflows", "gh pr ready 7", [], False),
         ("--repo, no workflows", "gh pr ready 7 --repo " + REPO_HOME, [], True),
@@ -1588,7 +1646,7 @@ def case_repo_without_ci_starts_no_watch():
         label = "no CI, %s" % name
         fx = fixture([pr(7, repo=REPO_HOME)], [], cwd_repo=REPO_HOME, workflows=workflows)
         res = run_hook(bash(command), fx, extra={"CI_WAKE_DEADLINE": "4"})
-        expect_silent(label, res)
+        expect_closing_line(label, res)
         expect_no_watch(label, res)
         check("%s: no run list or run view call" % label,
               count(res, "run", "list") == 0 and count(res, "run", "view") == 0, why(res))
@@ -1613,7 +1671,9 @@ def case_workflows_but_no_run_on_head_still_says_no_run_yet():
 
 def case_failed_workflow_read_is_not_no_workflows():
     """Pins existing behaviour (a control). A failed `gh workflow list` read is not "no workflows": the watch
-    runs as it does today, so a red run still wakes the session with its failing jobs. Rows: exit 1, non-JSON."""
+    runs as it does today, so a red run still wakes the session with its failing jobs. Rows: exit 1, non-JSON.
+    The red verdict is the only line: verdict_of needs exactly one, so a closing line written beside it fails
+    here. An unknown read writes no closing line."""
     for name, switch in (("exit 1", "error"), ("non-JSON", "garbage")):
         label = "workflow list %s, red run (control)" % name
         fx = fixture([pr(214, repo=REPO_APP)], [in_repo(RED, REPO_APP)], cwd_repo=REPO_APP,
@@ -1621,6 +1681,88 @@ def case_failed_workflow_read_is_not_no_workflows():
         res = run_hook(bash("gh pr ready 214 --repo " + REPO_APP), fx, extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
         expect_verdict(label, res, "red", names_in=["unit", "e2e"])
         expect_watch(label, res, ["902"])
+
+
+def case_empty_workflow_list_is_no_workflows():
+    """A repo with no workflow starts no watch, and wakes once with its CI line. The answer that shows it is
+    gh 2.89.0's, probed on shivinate7/session-mailbox (REST total_count 0, no .github/workflows): `gh workflow
+    list --json id` writes 0 bytes to stdout and exits 0. It does not write "[]". A repo with a workflow prints
+    a JSON list. An empty answer is no workflow, so the hook must not read it as unknown and watch. Rows: no
+    repo flag, --repo."""
+    rows = (
+        ("no repo flag", "gh pr ready 7", False),
+        ("--repo", "gh pr ready 7 --repo " + REPO_HOME, True),
+    )
+    for name, command, asks in rows:
+        label = "empty workflow list, %s" % name
+        fx = fixture([pr(7, repo=REPO_HOME)], [], cwd_repo=REPO_HOME, workflow_list="empty")
+        res = run_hook(bash(command), fx, extra={"CI_WAKE_DEADLINE": "4"})
+        check("%s: the hook reads the workflow list" % label, count(res, "workflow", "list") >= 1, why(res))
+        if asks:
+            check("%s: the list reads -R %s" % (label, REPO_HOME),
+                  any(GH.strip_repo(c)[:2] == ["workflow", "list"] and GH.repo_of(c) == REPO_HOME
+                      for c in res.calls), why(res))
+        expect_closing_line(label, res)
+        expect_no_watch(label, res)
+        check("%s: no run list or run view call" % label,
+              count(res, "run", "list") == 0 and count(res, "run", "view") == 0, why(res))
+
+
+def case_workflow_list_with_stderr_is_unknown():
+    """An answer with exit 0, 0 bytes on stdout and a message on stderr is not the answer of a repo with no
+    workflow. It is unknown, so the watch runs and the one line is the red verdict. A none line beside it
+    would make two lines, and verdict_of would fail it."""
+    fx = fixture([pr(214, repo=REPO_APP)], [in_repo(RED, REPO_APP)], cwd_repo=REPO_APP,
+                 workflow_list="empty_stderr")
+    res = run_hook(bash("gh pr ready 214 --repo " + REPO_APP), fx, extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+    label = "workflow list exit 0, empty stdout, message on stderr"
+    expect_verdict(label, res, "red", names_in=["unit", "e2e"])
+    expect_watch(label, res, ["902"])
+
+
+def case_pr_adding_a_workflow_file_is_not_no_ci():
+    """A PR whose own diff adds a .github/workflows file has CI on its head, though the default branch has no
+    active workflow. The watch runs and reads that head's red run. The PR's file list is the fixture's `files`
+    key, answered for the REST route repos/O/R/pulls/N/files."""
+    p = dict(pr(214, repo=REPO_APP), files=[".github/workflows/ci.yml"])
+    fx = fixture([p], [in_repo(RED, REPO_APP)], cwd_repo=REPO_APP, workflows=[])
+    res = run_hook(bash("gh pr ready 214 --repo " + REPO_APP), fx, extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+    label = "PR adds a workflow file, no active workflow on the default branch"
+    expect_verdict(label, res, "red", names_in=["unit", "e2e"])
+    expect_watch(label, res, ["902"])
+
+
+def file_read_of(call, number):
+    """True when a gh call reads the file list of pull request <number>: `gh api repos/O/R/pulls/<n>/files`."""
+    plain = GH.strip_repo(call)
+    return plain[:1] == ["api"] and any(
+        re.fullmatch(r"repos/[^/]+/[^/]+/pulls/%d/files" % number, a) for a in plain[1:])
+
+
+def case_pr_file_list_read_as_get_so_no_workflow_repo_says_ci_none():
+    """The PR's file list is read as a GET. `gh api` sends a POST once a field flag is given with no --method
+    (`-F per_page=100`), and GitHub answers a POST to that route with 404. The hook then cannot tell whether the
+    PR adds a workflow, so it counts the PR as adding one and watches a head with no CI: it prints "CI unknown on
+    <sha7>: no run yet" where it must print "CI none". A POST here is refused by the stub, and the run fails for it.
+    Rows: a PR that changes src/app.py, and a PR with no changed files (the empty state). In each row the
+    watch stops at the CI none line, with no run list and no run view."""
+    rows = (
+        ("src/app.py changed", ["src/app.py"]),
+        ("no changed files", []),
+    )
+    for name, files in rows:
+        label = "PR file list as GET, no workflow repo, %s" % name
+        p = dict(pr(7, repo=REPO_HOME), files=files)
+        fx = fixture([p], [], cwd_repo=REPO_HOME, workflow_list="empty")
+        res = run_hook(bash("gh pr ready 7"), fx, extra={"CI_WAKE_DEADLINE": "4"})
+        check("%s: scope, the hook reads the workflow list" % label, count(res, "workflow", "list") >= 1, why(res))
+        reads = [c for c in res.calls if file_read_of(c, 7)]
+        check("%s: the file list is read once" % label, len(reads) == 1, why(res))
+        sent = GH.method_of(reads[0]) if len(reads) == 1 else "no read"
+        check("%s: that read is a GET (sent %s)" % (label, sent), sent == "GET", why(res))
+        expect_closing_line(label, res)
+        check("%s: no run list or run view call" % label,
+              count(res, "run", "list") == 0 and count(res, "run", "view") == 0, why(res))
 
 
 # Selector forms that leave the repo out of the hook's own parse. The PR lives in REPO_APP, and the folder
@@ -2062,6 +2204,78 @@ class CostTests(unittest.TestCase):
                         "the watch budget %s s ends before the row timeout %s s" % (self.mod.DEFAULT_DEADLINE, row))
 
 
+def post_read_faults(calls, opt_in):
+    """The gh api calls in calls that send a non-GET method, unless the case set api_writes_ok. A read that gh sends
+    as a POST (a field flag with no --method GET) is one of them. No calls, or an opted-in case, give none."""
+    if opt_in:
+        return []
+    return [c for c in calls if GH.strip_repo(c)[:1] == ["api"] and GH.method_of(c) != "GET"]
+
+
+def check_api_reads():
+    """Sweep every case's call log once, at the end of the run. A gh api call that sends a non-GET method, in a case
+    without api_writes_ok, fails one check per distinct call, with its count across the run. The run is red for it,
+    even where the hook's own verdict does not change with the stub's refusal."""
+    total, faults = 0, {}
+    for opt_in, log in CALL_LOGS:
+        calls = read_calls(log)
+        total += sum(1 for c in calls if GH.strip_repo(c)[:1] == ["api"])
+        for c in post_read_faults(calls, opt_in):
+            argv = "gh " + " ".join(c)
+            faults[argv] = faults.get(argv, 0) + 1
+    if not faults:
+        check("gh api calls: %d in the run, none sent a non-GET method without api_writes_ok" % total, True)
+    for argv, n in faults.items():
+        check("gh api call sent a non-GET method with no api_writes_ok (%d in the run): %s" % (n, argv), False)
+
+
+def stub_once(args, fixture_obj):
+    """One run of the stub on a folder that no case registers, so its call is never swept. -> (exit code, stdout, calls)."""
+    folder = tempfile.mkdtemp(prefix="stub-", dir=TMP)
+    fixture_path, log = os.path.join(folder, "fixture.json"), os.path.join(folder, "gh.log")
+    with open(fixture_path, "w", encoding="utf-8") as f:
+        json.dump(fixture_obj, f)
+    env = base_env(BIN, fixture_path, log, folder, None)
+    p = subprocess.run([PY, os.path.join(TMP, "gh_stub.py")] + args, env=env, capture_output=True,
+                       encoding="utf-8", timeout=TIMEOUT)
+    return p.returncode, p.stdout, read_calls(log)
+
+
+def case_api_reads_are_gets_unless_the_case_opts_in():
+    """A gh api call that sends a non-GET method is a fault unless its case sets api_writes_ok. The stub refuses it, and
+    post_read_faults judges the same argv list that check_api_reads sweeps. Rows: a POST in each spelling gh takes, and
+    an explicit non-GET method. The GET spellings pass. An empty call list is no fault."""
+    path = "repos/%s/pulls/7/files" % REPO_HOME
+    posts = (
+        ("a field flag -F", ["api", path, "-F", "per_page=100"]),
+        ("an attached -Ffield", ["api", path, "-Fper_page=100"]),
+        ("--field=", ["api", path, "--field=per_page=100"]),
+        ("--input", ["api", path, "--input", "body.json"]),
+        ("an explicit -X POST", ["api", "-X", "POST", path]),
+    )
+    gets = (
+        ("--method GET with a field", ["api", "--method", "GET", path, "-F", "per_page=100"]),
+        ("-XGET with a field", ["api", "-XGET", path, "-F", "per_page=100"]),
+        ("--method=GET with -f", ["api", "--method=GET", path, "-f", "per_page=100"]),
+        ("no field", ["api", path]),
+    )
+    check("an empty call list is no fault", post_read_faults([], False) == [], repr(post_read_faults([], False)))
+    for name, args in posts:
+        label = "%s is a fault without api_writes_ok" % name
+        rc, out, calls = stub_once(args, fixture([]))
+        check("%s: the stub logs the call" % label, calls == [args], repr(calls))
+        check("%s: the stub refuses it, exit 1 and no output" % label, rc == 1 and out == "", "rc=%s out=%r" % (rc, out))
+        check("%s: the sweep judges it a fault" % label, post_read_faults([args], False) == [args])
+        check("%s: with api_writes_ok the sweep passes it" % label, post_read_faults([args], True) == [])
+        rc_ok, _, _ = stub_once(args, fixture([], api_writes_ok=True))
+        check("%s: with api_writes_ok the stub answers it, exit 0" % label, rc_ok == 0, "rc=%s" % rc_ok)
+    for name, args in gets:
+        label = "%s is a GET" % name
+        rc, _, _ = stub_once(args, fixture([]))
+        check("%s: the stub answers it, exit 0" % label, rc == 0, "rc=%s" % rc)
+        check("%s: the sweep passes it" % label, post_read_faults([args], False) == [])
+
+
 def main():
     hook_exists = os.path.isfile(MODULE)
     check("module under test exists (missing module = red for this reason)", hook_exists, MODULE)
@@ -2272,6 +2486,10 @@ def main():
     case_repo_without_ci_starts_no_watch()
     case_workflows_but_no_run_on_head_still_says_no_run_yet()
     case_failed_workflow_read_is_not_no_workflows()
+    case_empty_workflow_list_is_no_workflows()
+    case_pr_file_list_read_as_get_so_no_workflow_repo_says_ci_none()
+    case_workflow_list_with_stderr_is_unknown()
+    case_pr_adding_a_workflow_file_is_not_no_ci()
 
     # Selector forms that leave the repo blank, and the folder without workflows.
     case_url_selector_pins_pr_repo_on_later_calls()
@@ -2290,8 +2508,10 @@ def main():
     case_empty_selector_without_a_branch_is_unknown()
     case_read_pr_maps_rest_fields()
     case_hash_number_selector_reads_the_number_route()
+    case_api_reads_are_gets_unless_the_case_opts_in()
     if not cost_probe.run_class(CostTests):
         FAILS.append("CostTests")
+    check_api_reads()
 
     print()
     print("%d checks, %d failed" % (COUNT[0], len(FAILS)))

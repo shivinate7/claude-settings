@@ -1,0 +1,1 @@
+- encoded-retry-not-read-forms: (lane encoded-retry, coordinator 01:41 CST Nov 10) hooks/guard_encoded.py allows `cmd=$'\x63d'; $cmd /tmp`, `| while read l; do sh -c "$l"` and `| xargs sh -c` after a refusal; the decision's Not read list omits them.

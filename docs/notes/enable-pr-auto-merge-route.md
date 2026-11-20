@@ -1,0 +1,1 @@
+- enable-pr-auto-merge-route: (lint/report_guard.py:1939) enable_pr_auto_merge is a merge route that no rule routes. It is allowed.

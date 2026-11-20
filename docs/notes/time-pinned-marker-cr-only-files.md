@@ -1,0 +1,1 @@
+- time-pinned-marker-cr-only-files: in a Python file with CR-only line ends, the marker reader of the time-pinned finder (lint/find_time_pinned.py) shifts comment lines onto line 1. So a keep marker on line 2 can keep a sleep on line 1. CRLF line ends are correct. Fix: none; no such test file exists.

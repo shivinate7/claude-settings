@@ -1,0 +1,1 @@
+- own-session-no-blob-skip: (#2561 round 1) hooks/own_session.py _scan reads raw message.content with no blob skip and feeds guard_merge and report_guard; unmeasured, a note until a real wrong verdict.

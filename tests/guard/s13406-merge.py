@@ -273,6 +273,18 @@ add("merge-checks: the merge tool of the host denies on a pending head", "deny",
 add("merge-checks: the merge tool of the host denies on a failed head", "deny", "merge-checks",
     carries="settled: red", tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12,
     repo="x", owner="y", env_path=GHRED + os.pathsep + PY_PATH, config=MERGECFG)
+# The host's auto-merge tool arms the same merge as the merge tool: GitHub merges it once the head's checks pass. So it is
+# judged by the same head read, and refused or allowed on the same heads as merge_pull_request above.
+AUTO_MERGE_TOOL = "mcp__github__enable_pr_auto_merge"
+add("merge-checks: the host auto-merge tool denies on a pending head", "deny", "merge-checks",
+    carries="pending", tool=AUTO_MERGE_TOOL, cwd=NOGIT, pullNumber=12,
+    repo="x", owner="y", env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+add("merge-checks: the host auto-merge tool denies on a failed head", "deny", "merge-checks",
+    carries="settled: red", tool=AUTO_MERGE_TOOL, cwd=NOGIT, pullNumber=12,
+    repo="x", owner="y", env_path=GHRED + os.pathsep + PY_PATH, config=MERGECFG)
+add("merge-checks: the host auto-merge tool allows a green head, as the merge tool does", "allow",
+    silent=True, tool=AUTO_MERGE_TOOL, cwd=NOGIT, pullNumber=12, repo="x", owner="y",
+    env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
 # The batch brake is removed: a merge is allowed while another ready pull request on the base has a required check pending,
 # by `gh pr merge` and by the host's merge tool. The merged pull request is 1, the other is 2 (its head is pr-two-head).
 BATCH_ON = GHBATCH + os.pathsep + PY_PATH
@@ -488,6 +500,9 @@ _BARE_GUARD = dict(env_path=GREEN_ON, config=MERGECFG)
 # ASK: the repo uses the merge tool, and the call skips it.
 sh("bare-merge: gh pr merge in a repo with a merge block asks",
    "gh pr merge 12 --squash", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, **_BARE_GUARD)
+# `--auto` queues the same merge, and merge_call_of judges it like any merge, so the same ask holds for it.
+sh("bare-merge: gh pr merge --auto in a repo with a merge block asks",
+   "gh pr merge 12 --auto --squash", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, **_BARE_GUARD)
 sh("bare-merge: a URL for the pull request asks",
    "gh pr merge --merge https://github.com/y/x/pull/12", "ask", BARE_MERGE, carries=BARE_SAYS,
    cwd=STAMPREPO, **_BARE_GUARD)
@@ -692,6 +707,8 @@ ARCH_TRIAGE_TAGS = ["cs-build:triage", "cs-repo:o/r"]
 # A target that is no lane, yet carries a step slug and a repo: a read of its open list would find a slug.
 ARCH_TRIAGE_SLUG_TAGS = ["cs-build:triage", "cs-step:" + ARCHIVE_SLUG, "cs-repo:o/r"]
 ARCH_UNTAGGED_TAGS = ["cs-repo:o/r"]
+# A lane with its step and no cs-repo tag: the guard has no repo to read, so its refusal has no repo to name.
+ARCH_LANE_NO_REPO_TAGS = ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG]
 # The branch read: a lane tagged for both repos of the incident, and the sources its session started on.
 ARCH_INC_TAGS = ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_SETTINGS, "cs-repo:" + ARCH_REPO_QMAX]
 ARCH_QMAX_SOURCE = {"git_repository": {"url": "https://github.com/" + ARCH_REPO_QMAX}}
@@ -776,6 +793,7 @@ ROLE_LINES = {
     "archive-triage-slug": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_TRIAGE_SLUG_TAGS),
     "archive-no-target": role_call("r0", RUNNER_TAGS),
     "archive-own-lane": role_call("r0", LANE_TAGS),
+    "archive-lane-no-repo": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_LANE_NO_REPO_TAGS),
     "archive-stale-then-lane": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_UNTAGGED_TAGS)
                                + role_target_call("t2", ARCH_LANE_TAGS),
     # merge-confirm-repo shapes (section 5h): a lane that names o/a, a runner that names claude-settings, a runner whose

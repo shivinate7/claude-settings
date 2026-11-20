@@ -1,0 +1,1 @@
+- stall-marker-write-ignored: hooks/stall_watch.py:325-326 ignores an OSError on the stall-marker write. So the STALL report can say the log is 'kept 7 days' while the exit trap removes it. Decision: stall-watch.

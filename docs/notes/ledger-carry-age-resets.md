@@ -1,0 +1,1 @@
+- ledger-carry-age-resets: a carried record's age in the ledger runs from the PR's `updated_at`, so any comment resets the batch clock, and a carried read that failed reads `none` and RED, which counts an unread read as a defect. Found in review round 2 of lane pr-state-is-on-the-pr. Decision: pr-ledger.
