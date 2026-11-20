@@ -5163,6 +5163,7 @@ class LintCheckReviewed(tm.ReviewEnv):
     def test_a_reviewed_draft_with_no_lint_pass_names_no_lane_lint_before_ready(self):
         rc, out, host = self.listing([], draft=True)
         self.assertEqual(rc, 0, out)
+        tm.list_line(self, out, 7)  # the #7 line must exist first: with no such line, the absence below passes
         self.assertNotIn("merge --lane-lint 7", out, "a reviewed draft with no lint PASS is told to lint before it goes ready, though `merge --ready` reads no lint:\n" + out)
 
     def test_a_reviewed_draft_with_a_lint_pass_reads_ready_with_merge_ready_as_its_next_act(self):
