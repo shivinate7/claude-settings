@@ -2293,6 +2293,30 @@ def case_cost_rank_prompt_names_the_measure_forms():
           has_pin(sentences, FIGURE_WORDS, FORM_WORDS), sentences)
 
 
+UNMEASURED_RANK_REPLY = ("Done: the likely biggest cost (unmeasured) is wakes. "
+                         "Next: cut the wake check first, then the janitor.")
+
+
+def case_unmeasured_cost_rank_is_judged_off_sample():
+    # The "(unmeasured)" marker does not hide the ranking: the trigger still fires, and the model judges the reply.
+    module = reference_module()
+    check("unmeasured cost rank: the reply holds the ranking verbatim",
+          "the likely biggest cost (unmeasured)" in UNMEASURED_RANK_REPLY, UNMEASURED_RANK_REPLY)
+    others = other_triggers(module, UNMEASURED_RANK_REPLY)
+    check("unmeasured cost rank: no other trigger matches the reply", not others, others)
+    run, _ = second_stop(UNMEASURED_RANK_REPLY, label="cost-unmeasured", session="cost-unmeasured")
+    check("unmeasured cost rank: Stop 2 calls the model once", len(run.calls) == 1, run.calls)
+
+
+def case_cost_rank_prompt_says_unmeasured_ranks_no_work():
+    run = run_hook(COST_REPLY, answer=OK_ANSWER)
+    sentences = rule_sentences(run, COST_REPLY)
+    check("unmeasured cost rank prompt: one sentence says an unmeasured ranking may stand",
+          has_pin(sentences, ("unmeasured",), ("may stand",)), sentences)
+    check("unmeasured cost rank prompt: one sentence flags a reply that ranks, orders or cuts work on it",
+          has_pin(sentences, ("unmeasured",), ("flag",), ("ranks",), ("orders",), ("cuts",), ("work",)), sentences)
+
+
 CASES = (
     case_stop_hook_active_never_calls_model,
     case_ignored_stop_imports_no_guard_family_module,
@@ -2402,6 +2426,8 @@ CASES = (
     case_most_of_the_time_is_not_judged_off_sample,
     case_cost_rank_phrase_past_the_clip_is_judged,
     case_cost_rank_prompt_names_the_measure_forms,
+    case_unmeasured_cost_rank_is_judged_off_sample,
+    case_cost_rank_prompt_says_unmeasured_ranks_no_work,
 )
 
 
