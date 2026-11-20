@@ -324,20 +324,24 @@ BATCH_ROWS = [(n, "batch") for n in [FRONT] + MEMBERS]  # eleven batch rows, so 
 OTHER_ROWS = [(112, "lane lint"), (113, "none"), (114, "blocked on #111")]  # rows whose act is not batch: each has a real head, so one folded in shows as a second parent
 STACKED_BASE = "pr-99"  # a base ref that no open fixture PR holds as its head: a stacked PR on it reads act batch, not blocked on #N
 STACKED = {101: STACKED_BASE, 106: STACKED_BASE}  # batch rows whose pull's base ref is not main: the lowest one takes the front slot on old code, the other sits mid-list
+NO_PULL = 110  # a batch row in the middle of the twelve with no pull behind it: the reader names it, and the build exits 2 with no branch
 
 
-def reviewed_stub(rows, heads, bases=None):
+def reviewed_stub(rows, heads, bases=None, no_pull=(), fail=None):
     """A stand-in for merge.reviewed_read (merge.py:6230), with its signature. `rows` is [(number, act)] in number order, and `heads`
     {number: sha}, the heads the fixture serves. `bases` is {number: base ref} for each pull whose base is not main (default: main).
+    `no_pull` numbers keep their ledger row but get no pull. `fail` is an exception the read raises before it fills anything.
     It fills `ledger` with one row per pull request, with the keys the reader gives
     (number, act, owner, ageHours, red, blockedOn), and returns (lines, pulls, totals) with the pulls it read. Each call is kept in `.calls`."""
     def stub(h, cfgrel=None, facts=None, ledger=None):
         stub.calls.append(cfgrel)
+        if fail is not None:
+            raise fail
         if ledger is not None:
             ledger.extend({"number": n, "act": act, "owner": "batch runner" if act == "batch" else "lane", "ageHours": 1.0, "red": False,
                            "blockedOn": int(act.split("#")[1]) if act.startswith("blocked on") else None} for n, act in rows)
         pulls = [{"number": n, "head": {"sha": heads[n], "ref": "pr-%d" % n}, "base": {"ref": (bases or {}).get(n, "main")}, "draft": True,
-                  "created_at": "2026-11-20T00:00:00Z", "updated_at": "2026-11-20T00:00:00Z", "labels": [], "body": ""} for n, _act in rows]
+                  "created_at": "2026-11-20T00:00:00Z", "updated_at": "2026-11-20T00:00:00Z", "labels": [], "body": ""} for n, _act in rows if n not in no_pull]
         lines = ["#%d pr-%d %s: %s" % (n, n, heads[n][:9], act) for n, act in rows]
         return lines, pulls, ["longest wait from a done record: 0.0h", "open PRs with no next act: 0"]
     stub.calls = []
@@ -1030,12 +1034,12 @@ class BuildReadsReviewedRows(unittest.TestCase):
     """--build with no --queue reads its members from merge.reviewed_read's rows whose act is batch, and the front PR (the first such
     row) is no member (ruling 10:23 CST Nov 20; merge.py:6230). Each case stubs the reader, and every PR head is served on the origin."""
 
-    def build_from(self, rows, bases=None):
+    def build_from(self, rows, bases=None, no_pull=()):
         root = make_repo({"README.md": "x\n"}, checks=READY)
         numbers = [n for n, _act in rows]
         heads = dict(add_members(root, numbers))
         publish_pull(root, numbers)
-        stub = reviewed_stub(rows, heads, bases)
+        stub = reviewed_stub(rows, heads, bases, no_pull=no_pull)
         shims, _log = write_shims()
         base = git_ok(root, "rev-parse", "origin/main").strip()
         rc, out, err, _ci = run_reviewed_build(root, stub, shims=shims)
@@ -1084,6 +1088,14 @@ class BuildReadsReviewedRows(unittest.TestCase):
         folded = [p2 for _s, _p1, p2 in chain]
         self.assertEqual(folded, [heads[n] for n in range(102, 114)], "a batch row on main is not a member of the batch: the members #102 to #113 behind the front #101 are not all folded")
 
+    def test_batch_row_with_no_pull_exits_2_naming_it_and_makes_no_branch(self):
+        heads, stub, rc, out, err, chain = self.build_from([(n, "batch") for n in TWELVE], no_pull=(NO_PULL,))
+        self.assertTrue(stub.calls, "the build with no --queue did not read merge.reviewed_read; the run ended with: %s" % shown(out, err))
+        self.assertEqual(rc, 2, "a batch row with no pull exits %s, not 2: %s" % (rc, shown(out, err)))
+        unknown = [line for line in out.splitlines() if line.startswith("unknown")]
+        self.assertTrue(unknown and ("#%d" % NO_PULL) in unknown[0], "the unknown line does not name #%d, the batch row with no pull: %s" % (NO_PULL, shown(out, err)))
+        self.assertIsNone(chain, "a batch row with no pull still made the %s branch" % merge.integration_branch(BUILD_NAME))
+
 
 class BuildExitCodes(unittest.TestCase):
     """Green controls on the old code too: the exit codes the build keeps for an existing branch (2, and the branch kept) and for a failed
@@ -1108,6 +1120,32 @@ class BuildExitCodes(unittest.TestCase):
         self.assertEqual(rc, 2, "a failed live-head read exits %s, not 2: %s" % (rc, shown(out, err)))
         self.assertIn("ls-remote", out, "the unknown line does not name the failed ls-remote read: %s" % shown(out, err))
         self.assertFalse(branch_exists(root, merge.integration_branch(BUILD_NAME)), "a failed live-head read still built an integration branch")
+
+    def test_failed_reviewed_read_exits_2_unknown_and_makes_no_branch(self):
+        import combine_train  # the tool; imported in the case, so a missing tool fails this case alone
+        root = make_repo({"README.md": "x\n"}, checks=READY)
+        heads = dict(add_members(root, TWELVE))
+        publish_pull(root, TWELVE)
+        stub = reviewed_stub([(n, "batch") for n in TWELVE], heads, fail=OSError("the reader is down"))
+        try:
+            rc, out, err, _ci = run_reviewed_build(root, stub)
+        except combine_train.ReadError as e:
+            self.fail("a failed merge.reviewed_read left main as ReadError instead of exiting 2 unknown: %s" % e)
+        self.assertEqual(rc, 2, "a failed merge.reviewed_read exits %s, not 2: %s" % (rc, shown(out, err)))
+        self.assertTrue(any(line.startswith("unknown") for line in out.splitlines()), "a failed merge.reviewed_read prints no unknown line: %s" % shown(out, err))
+        self.assertFalse(branch_exists(root, merge.integration_branch(BUILD_NAME)), "a failed merge.reviewed_read still built an integration branch")
+
+    def test_failed_main_fetch_exits_2_names_it_and_makes_no_branch(self):
+        import combine_train  # the tool; imported in the case, so a missing tool fails this case alone
+        root = make_repo({"README.md": "x\n"}, checks=READY)
+        queue = build_queue(root, add_members(root, TWELVE))
+        refspec = "+refs/heads/%s:refs/remotes/%s" % (combine_train.BASE.split("/", 1)[1], combine_train.BASE)
+        shims, shim_log = write_shims(refuse=("push", refspec))
+        rc, out, err, _ci = run_build(root, queue, shims=shims)
+        self.assertTrue([c for c in calls(shim_log) if c[0] == "git" and refspec in c[1:]], "the build never ran the fetch of main, so the refusal proves nothing: %s" % shown(out, err))
+        self.assertEqual(rc, 2, "a failed fetch of main exits %s, not 2: %s" % (rc, shown(out, err)))
+        self.assertTrue(any(line.startswith("unknown") and "fetch of main failed" in line for line in out.splitlines()), "the unknown line does not name the failed fetch of main: %s" % shown(out, err))
+        self.assertFalse(branch_exists(root, merge.integration_branch(BUILD_NAME)), "a failed fetch of main still built an integration branch")
 
 
 if __name__ == "__main__":
