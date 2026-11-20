@@ -27036,6 +27036,35 @@ class StaleMergeTrees(unittest.TestCase):
 
         self.assertFalse(os.path.exists(fresh_tmp), "control: a merge-fresh tree whose launcher pid is dead and no process holds must be removed")
 
+    def unread_holder_keeps_dead_tree(self, label, **read):
+        """A merge-wt tree whose lock pid is dead, with no process in it, stays when the janitor's holder read gives no answer (READ kwargs).
+        The read is patched only around add_worktree. The scope asserts show that the real read finds no holder and that merge.py's read
+        reached this tree, so only the unread holder can keep it."""
+        dead = reaped_child_pid()
+        stale_tmp, stale_wt = self.make_tree("stale", "merge tool, pid %d" % dead)
+        self.assertEqual(self.locked_trees().get(os.path.realpath(stale_wt)), "merge tool, pid %d" % dead,
+                         "scope: the dead tree must be locked with its merge reason before add_worktree runs")
+        self.assertEqual(sweep.processes_in(stale_wt)[0] or [], [], "scope: no live process may hold the tree before the read is patched")
+
+        with unittest.mock.patch.object(sweep, "processes_in", **read) as holder_read:
+            tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+
+        self.assertIn(unittest.mock.call(os.path.realpath(stale_wt)), holder_read.call_args_list,
+                      "scope: merge.py's holder read must reach the dead tree, or the case proves nothing about the read")
+        self.assertTrue(os.path.isdir(stale_tmp),
+                        "a dead merge-wt tree must stay when the holder read %s: an unread holder keeps the tree" % label)
+        self.assertIn(os.path.realpath(stale_wt), self.locked_trees(),
+                      "a dead merge-wt tree must stay registered when the holder read %s" % label)
+
+    def test_a_dead_merge_tree_stays_when_the_holder_read_raises(self):
+        """tree_has_live_holder returns True when processes_in raises, so the sweep keeps the tree."""
+        self.unread_holder_keeps_dead_tree("raises", side_effect=OSError("holder read failed"))
+
+    def test_a_dead_merge_tree_stays_when_the_holder_read_reports_unknown(self):
+        """processes_in returns (None, None) when a holder read cannot run, and tree_has_live_holder reads that None as a holder."""
+        self.unread_holder_keeps_dead_tree("reports unknown", return_value=(None, None))
+
 
 class VerifiedLine(RecordsEnv):
     """The claim commit and the records-page commit each carry a Verified line (lint/check_red_run.py)."""
