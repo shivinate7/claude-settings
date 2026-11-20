@@ -1878,12 +1878,12 @@ def case_page_claude_artifacts_read_of_another_collection_does_not_prove_the_fil
                        "fb-0958-7", "98")
 
 
-CA_STAMP = "2026-10-13T10:05:00Z"  # a transcript time: the export scan reads a record's time and skips a record without one
+CA_TIME = "2026-10-13T10:05:00Z"  # a transcript time: the export scan reads a record's time and skips a record without one
 
 
 def timed_rec(rec):
     """`rec` with the transcript timestamp the export scan needs before it counts a write."""
-    return dict(rec, timestamp=CA_STAMP)
+    return dict(rec, timestamp=CA_TIME)
 
 
 def export_writes(records):
