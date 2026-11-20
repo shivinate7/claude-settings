@@ -26,6 +26,10 @@ closed-stdout pair (a control run and the raising run); unmeasured.
 BatchHeadMutation (class BatchHeadMutation) lints a touched lane's head at the batch runner's pre-join call, `--lane-lint <pr>`, through the gh shim,
 in a cloud session with the batch-runner role or with none; the shim's comment list holds the hand-off PASS record. Cost per case: one ci-job stub
 start, and one mutate stub start where the run starts. Its times are unmeasured since the batch-build cases were removed.
+CiJobHeadCopy (class CiJobHeadCopy) runs the head's own bin/ci-job too, when a lane changes the tool. Its base is the lane-merge repo, which holds
+bin/ci-job and merge/merge.py. The cases: a lane that changes bin/ci-job runs its copy; a head copy's FAIL fails the lint; a lane that changes an imported
+module runs the base's copy; a lane that changes neither runs the tool's copy alone (the control); and a second lint of a head whose tool copy passed still
+runs the head copy. Cost per case: one stub start per copy, one lint tree, and two or three starts in all (unmeasured).
 LintResumesPassedJobs (class LintResumesPassedJobs) covers the saved PASS of a job: a rerun at the same key skips it, and every other key or state that is
 not a pass runs the job again. The key is the head sha, the base name and tip ci-job reads, the job name, the PR body, the TREE_CITES env that the
 ste-lint step reads, and the tool's files: merge.py, and every file the checks job runs from the tool's tree (the family cases name them). Most cases
@@ -87,7 +91,8 @@ files = {p: watched(p) for p in WATCH}
 with open(LOG, "a", encoding="utf-8") as f:
     print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached, "files": files,
                       "status": git("status", "--porcelain"), "first_parent": git("rev-parse", "--verify", "-q", "HEAD^1"),
-                      "head_sha_env": os.environ.get("CI_JOB_HEAD_SHA"), "pr_body_env": os.environ.get("PR_BODY")}), file=f)
+                      "head_sha_env": os.environ.get("CI_JOB_HEAD_SHA"), "pr_body_env": os.environ.get("PR_BODY"),
+                      "script": os.path.realpath(sys.argv[0])}), file=f)
 JOB = sys.argv[1] if len(sys.argv) > 1 else ""  # a run names its job first, as ci-job does
 if isinstance(STEPS, dict):  # a dict names each job's steps: a run of job J prints STEPS[J], and a job the dict does not name prints none
     STEPS = STEPS.get(JOB, [])
@@ -608,20 +613,24 @@ class LaneFixture(CiJobStub, tm.CloudSession):
         if os.path.isdir(folder):
             shutil.rmtree(folder)
 
-    def lint_run(self, *argv, base="main", head=None, cloud=False):
-        """Run merge in the lane checkout. -> (rc, stdout and stderr together). The lint must have run once, as
-        `checks --lint --base origin/<base>`, detached, on the merge of origin/<base> and the head, and that tree must be gone afterwards."""
+    def lint_run(self, *argv, base="main", head=None, cloud=False, runs=1):
+        """Run merge in the lane checkout. -> (rc, stdout and stderr together). The lint must have run `runs` times (1 for the tool's copy of ci-job,
+        2 with a head copy; None when a FAIL may stop the lint before its last copy, so the count is not read), each as `checks --lint --base origin/<base>`,
+        detached, on the merge of origin/<base> and the head, and that tree must be gone afterwards."""
         head = head or self.head("feat")
         if os.path.exists(self.log):
             os.remove(self.log)
         rc, text = self.run_lane(*argv, cloud=cloud)
-        runs = self.lint_calls()
-        self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
-        run = runs[0]
-        self.assertEqual(run["argv"], ["checks", "--lint", "--base", "origin/" + base])
-        self.assert_lint_merge(run["head"], head, base)
-        self.assertTrue(run["detached"], "the lint ran on a branch, not a detached tree")
-        self.assertNotEqual(run["cwd"], os.path.realpath(self.co), "the lint ran in the lane checkout")
+        calls = self.lint_calls()
+        if runs is not None:
+            self.assertEqual(len(calls), runs, "the lint ran %d times, want %d: %s" % (len(calls), runs, text))
+        self.assertTrue(calls, "the lint ran no ci-job copy: " + text)
+        for run in calls:
+            self.assertEqual(run["argv"], ["checks", "--lint", "--base", "origin/" + base])
+            self.assert_lint_merge(run["head"], head, base)
+            self.assertTrue(run["detached"], "the lint ran on a branch, not a detached tree")
+            self.assertNotEqual(run["cwd"], os.path.realpath(self.co), "the lint ran in the lane checkout")
+        run = calls[0]
         self.assertFalse(os.path.exists(run["cwd"]), "the lint tree is still on disk")
         self.assertFalse(tm.tree_listed(self.co, run["cwd"]), "git still lists the lint tree")
         self.assertEqual(self.worktrees(), 1)
@@ -7161,6 +7170,160 @@ class LintResumesPassedJobs(LaneFixture):
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.ran(), ran + 1, "scope: the next save did not run its job: " + out)
         self.assertFalse(os.path.exists(stale), "the next save left the .part file of a killed run: " + stale)
+
+
+class CiJobHeadCopy(LaneFixture):
+    """The lane lint runs the head's own bin/ci-job as well, when the lane changes the tool. The base is the lane-merge repo: origin/main holds bin/ci-job
+    and merge/merge.py (make_main_the_lane_merge_repo). The tool copy is the stub of CiJobStub, at self.stub. A head copy is the bin/ci-job of the lint
+    tree: the lane's own, or the base's when the lane leaves bin/ci-job alone. Each stub logs its script path, so a case tells the copies apart."""
+
+    def setUp(self):
+        super().setUp()
+        self.use_ci_job(PASSING, 0)
+        self.make_main_the_lane_merge_repo()
+
+    def make_main_the_lane_merge_repo(self):
+        """origin/main gets bin/ci-job, a logging stub that passes, and merge/merge.py: the two files of the repo that carries the tool."""
+        self.push_main({"bin/ci-job": self.stub_text(PASSING, 0),
+                        "merge/merge.py": "# the lane-merge tool's file, held by the fixture\n"})
+        self.main_sha = tm.sh(self.other, "git", "rev-parse", "HEAD")
+
+    def scope(self, head):
+        """The files the head changes against main, by sha, read in the second clone. Each case reads it before its runs: a run means something only
+        when the lane touches what the case says."""
+        return tm.sh(self.other, "git", "diff", "--name-only", f"{self.main_sha}...{head}").split()
+
+    def copies(self):
+        """-> (the tool copy's runs, the head copy's runs), from the stub's log. The tool copy runs self.stub; a head copy runs any other script."""
+        calls = self.lint_calls()
+        tool = [c for c in calls if c["script"] == os.path.realpath(self.stub)]
+        return tool, [c for c in calls if c["script"] != os.path.realpath(self.stub)]
+
+    def test_pr_touching_ci_job_runs_head_copy(self):
+        head = self.push_lane({"bin/ci-job": self.stub_text(PASSING, 0) + "# the lane's edit of the tool\n"}, from_main=True)
+        self.assertIn("bin/ci-job", self.scope(head), "the lane does not change bin/ci-job, so the case probes no head copy")
+        rc, text = self.lint_run("--lane-lint", head, head=head, runs=2)
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+        tool, copy = self.copies()
+        self.assertEqual(len(copy), 1, "the head copy of bin/ci-job did not run: " + text)
+        self.assertEqual(copy[0]["script"], os.path.join(copy[0]["cwd"], "bin", "ci-job"), "the head copy is not the bin/ci-job of the lint tree")
+        self.assertEqual(copy[0]["head_sha_env"], head, "the head copy did not get the pushed head as CI_JOB_HEAD_SHA")
+
+    def test_head_copy_fail_fails_lint(self):
+        head = self.push_lane({"bin/ci-job": self.stub_text([("FAIL", "head-only step")], 1)}, from_main=True)
+        self.assertIn("bin/ci-job", self.scope(head), "the lane does not change bin/ci-job, so the case probes no head copy")
+        rc, text = self.lint_run("--lane-lint", head, head=head, runs=None)
+        self.assertNotEqual(rc, 0, "the lint passed though the head copy's own step FAILed: " + text)
+        self.assertIn("head-only step", text, "the refusal does not name the head copy's FAIL: " + text)
+        self.assertEqual(pass_lines(text), [], "the lint printed a PASS line beside the head copy's FAIL: " + text)
+
+    def test_pr_touching_ci_job_import_runs_head_copy(self):
+        head = self.push_lane({"hooks/pin_note.py": "# the lane's edit to a module that ci-job imports\n"}, from_main=True)
+        scope = self.scope(head)
+        self.assertIn("hooks/pin_note.py", scope, "the lane does not change the imported module, so the case probes no import")
+        self.assertNotIn("bin/ci-job", scope, "the lane changes bin/ci-job, so the run shows a touch, not an import")
+        rc, text = self.lint_run("--lane-lint", head, head=head, runs=2)
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+        tool, copy = self.copies()
+        self.assertEqual(len(copy), 1, "the head copy of bin/ci-job did not run for an imported module: " + text)
+        self.assertEqual(copy[0]["script"], os.path.join(copy[0]["cwd"], "bin", "ci-job"), "the head copy is not the bin/ci-job of the lint tree")
+        self.assertEqual(copy[0]["head_sha_env"], head, "the head copy did not get the pushed head as CI_JOB_HEAD_SHA")
+
+    def test_untouched_ci_job_runs_tool_copy(self):
+        head = self.push_lane({"docs/lane-note.md": "# A lane note\n"}, from_main=True)
+        touched = [p for p in self.scope(head) if p == "bin/ci-job" or p == "bin/verdict" or p.startswith(("hooks/", "lint/"))]
+        self.assertEqual(touched, [], "the lane touches a file the head copy's trigger names, so the case is no control")
+        rc, text = self.lint_run("--lane-lint", head, head=head)
+        self.assertEqual(rc, 0, text)
+        tool, copy = self.copies()
+        self.assertEqual(copy, [], "a lane that changes nothing the tool reads ran a head copy: " + text)
+
+    def test_a_head_copy_fail_is_not_hidden_by_a_saved_tool_pass(self):
+        head = self.push_lane({"bin/ci-job": self.stub_text([("FAIL", "head-only step")], 1)}, from_main=True)
+        self.assertIn("bin/ci-job", self.scope(head), "the lane does not change bin/ci-job, so the case probes no head copy")
+        rc, text = self.lint_run("--lane-lint", head, head=head, runs=None)
+        self.assertNotEqual(rc, 0, "the first lint passed though the head copy's own step FAILed: " + text)
+        # A saved PASS of the tool copy may let the second lint skip that copy. The head copy has no saved PASS, so it must run and fail again.
+        rc, text = self.run_lane("--lane-lint", head)
+        self.assertNotEqual(rc, 0, "the second lint of the same head passed, so a saved PASS stood for the head copy: " + text)
+        self.assertIn("head-only step", text, "the second lint does not name the head copy's FAIL: " + text)
+        tool, copy = self.copies()
+        self.assertEqual(len(copy), 2, "the second lint did not run the head copy: " + text)
+
+    BASE_IMPORT = "git_reads"  # a hooks module the tool's bin/ci-job does not import (tool_ci_job_imports checks it); origin/main's bin/ci-job does
+
+    def make_base_import(self, module):
+        """origin/main's bin/ci-job imports hooks/<module>.py, as bin/ci-job reaches its own hooks/ modules: a sys.path line first. main holds that
+        module too, so the lint tree can run the import. The import list is read from this base copy, not from the tool checkout's."""
+        script = ("import os, sys\n"
+                  "sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), os.pardir, 'hooks'))\n"
+                  f"import {module}  # the base's own import, which the tool's copy does not make\n") + self.stub_text(PASSING, 0)
+        self.push_main({"bin/ci-job": script, f"hooks/{module}.py": "# a module the base's bin/ci-job imports\n"})
+        self.main_sha = tm.sh(self.other, "git", "rev-parse", "HEAD")
+
+    def tool_ci_job_imports(self):
+        """The module names this repo's bin/ci-job imports, read with ast: the case's precondition that the tool's copy makes no such import."""
+        with open(os.path.join(REPO, "bin", "ci-job"), encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        names = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names.update(a.name.split(".")[0] for a in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                names.add(node.module.split(".")[0])
+        return names
+
+    def test_import_list_reads_the_base_copy(self):
+        """The base's bin/ci-job imports a module the tool's copy does not. A lane that changes that module runs the head copy, so the import list
+        is read from the base's bin/ci-job, not from the tool checkout's."""
+        self.make_base_import(self.BASE_IMPORT)
+        self.assertNotIn(self.BASE_IMPORT, self.tool_ci_job_imports(), "the tool's bin/ci-job imports the module, so the case probes no base import")
+        head = self.push_lane({f"hooks/{self.BASE_IMPORT}.py": "# the lane's edit to a module the base's bin/ci-job imports\n"}, from_main=True)
+        scope = self.scope(head)
+        self.assertIn(f"hooks/{self.BASE_IMPORT}.py", scope, "the lane does not change the imported module, so the case probes no import")
+        self.assertNotIn("bin/ci-job", scope, "the lane changes bin/ci-job, so the run shows a touch, not an import")
+        rc, text = self.lint_run("--lane-lint", head, head=head, runs=None)
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+        tool, copy = self.copies()
+        self.assertEqual(len(copy), 1, "the head copy of bin/ci-job did not run for a module only the base's bin/ci-job imports: " + text)
+        self.assertEqual(copy[0]["script"], os.path.join(copy[0]["cwd"], "bin", "ci-job"), "the head copy is not the bin/ci-job of the lint tree")
+        self.assertEqual(copy[0]["head_sha_env"], head, "the head copy did not get the pushed head as CI_JOB_HEAD_SHA")
+
+    def test_unreadable_base_ci_job_is_unknown_not_a_pass(self):
+        """The base's bin/ci-job cannot be parsed, so its import list cannot be read. The lint stops as unknown: it does not pass by skipping the
+        head-copy check that the list decides."""
+        self.push_main({"bin/ci-job": "def broken(:\n"})
+        self.main_sha = tm.sh(self.other, "git", "rev-parse", "HEAD")
+        head = self.push_lane({"docs/lane-note.md": "# A lane note\n"}, from_main=True)
+        self.assertNotIn("bin/ci-job", self.scope(head), "the lane changes bin/ci-job, so the case reads the lane's own copy, not the base's")
+        rc, text = self.lint_run("--lane-lint", head, head=head, runs=None)
+        self.assertNotEqual(rc, 0, "the lint passed though the base's bin/ci-job cannot be read, so its import list was skipped: " + text)
+        self.assertEqual(pass_lines(text), [], "the lint printed a PASS line beside an unreadable import list: " + text)
+        self.assertIn("unknown", text, "the refusal does not say unknown: " + text)
+
+    def push_lane_rename(self, src, dst):
+        """The lane's push: one commit on feat, from origin/main, that moves src to dst with git mv. -> the pushed head."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", "feat", "origin/main")
+        tm.sh(o, "git", "mv", src, dst)
+        tm.sh(o, "git", "commit", "-q", "-m", f"lane: move {src} to {dst}")
+        tm.sh(o, "git", "push", "-q", "-f", "origin", "feat")
+        return tm.sh(o, "git", "rev-parse", "HEAD")
+
+    def test_a_renamed_ci_job_is_said_to_be_renamed(self):
+        """A lane that moves bin/ci-job to another name has no head copy, so the tool's copy runs alone. The lint says the file was renamed,
+        never that the lane deleted it."""
+        head = self.push_lane_rename("bin/ci-job", "bin/ci-job-moved")
+        renames = tm.sh(self.other, "git", "diff", "-M", "--name-status", f"{self.main_sha}...{head}").splitlines()
+        self.assertIn("R100\tbin/ci-job\tbin/ci-job-moved", renames, "the lane does not rename bin/ci-job, so the case probes no rename: " + str(renames))
+        rc, text = self.lint_run("--lane-lint", head, head=head, runs=1)
+        self.assertEqual(rc, 0, text)
+        self.assertRegex(text, "renam", "the lint does not say the lane renamed bin/ci-job: " + text)
+        self.assertNotRegex(text, "deletes bin/ci-job", "the lint says the lane deletes bin/ci-job, though the lane renamed it: " + text)
 
 
 if __name__ == "__main__":
