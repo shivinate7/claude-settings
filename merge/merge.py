@@ -3304,24 +3304,41 @@ HEAD_COPY_JOB = LINT_JOB + " (head copy of bin/ci-job)"  # the saved-PASS label 
 CI_JOB_REL = "bin/ci-job"
 LANE_MERGE_TOOL_FILES = (CI_JOB_REL, "merge/merge.py")  # the files that make a base the repo that carries the tool (LANE_MERGE_REPO); a ref or commit target reads no repo name
 
-def ci_job_import_paths():
-    """The tool-tree paths of what bin/ci-job imports directly, read at run time from the tool's own copy with ast, so a new import needs no edit here:
-    `<folder>/<module>.py` for a module and `<folder>/<package>/` for a package, in each folder of TOOL_TREE_FOLDERS. A name found in none (the standard library)
-    adds nothing. Raises OSError when the file cannot be read or parsed."""
-    path = os.path.join(TOOL_ROOT, *CI_JOB_REL.split("/"))
+def ci_job_import_names(text, origin):
+    """The top-level module names the bin/ci-job source `text` imports, read with ast. `origin` names the file in an error. Raises OSError when it cannot be parsed."""
     try:
-        with open(path, encoding="utf-8") as f:
-            tree = ast.parse(f.read())
+        tree = ast.parse(text)
     except (SyntaxError, ValueError) as e:
-        raise OSError(f"{path} cannot be parsed: {e}")
+        raise OSError(f"{origin} cannot be parsed: {e}")
     names = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names.update(a.name.split(".")[0] for a in node.names)
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             names.add(node.module.split(".")[0])
+    return names
+
+def ci_job_import_paths(root, base):
+    """The paths of what bin/ci-job imports directly, read at run time with ast, so a new import needs no edit here: `<folder>/<module>.py` for a module and
+    `<folder>/<package>/` for a package, in each folder of TOOL_TREE_FOLDERS. A name found in none (the standard library) adds nothing. Two lists join. The base's
+    copy (`origin/<base>:bin/ci-job`, its modules found in `origin/<base>`) comes first: the lane under lint may edit the tool checkout's list, never the base's.
+    The tool's own copy (its modules found in the tool's tree) joins it, because it is the copy the lint runs. The head's list needs no read: a head copy that
+    differs from the base's already touches bin/ci-job. Raises OSError when either file cannot be read or parsed."""
+    c, base_text = git(root, "show", f"origin/{base}:{CI_JOB_REL}")
+    if c:
+        raise OSError(f"origin/{base}:{CI_JOB_REL} cannot be read: {base_text}")
+    base_names = ci_job_import_names(base_text, f"origin/{base}:{CI_JOB_REL}")
+    tool_path = os.path.join(TOOL_ROOT, *CI_JOB_REL.split("/"))
+    with open(tool_path, encoding="utf-8") as f:
+        tool_names = ci_job_import_names(f.read(), tool_path)
     found = []
-    for name in sorted(names):
+    for name in sorted(base_names):
+        for folder in TOOL_TREE_FOLDERS:
+            if git(root, "cat-file", "-t", f"origin/{base}:{folder}/{name}.py") == (0, "blob"):
+                found.append(f"{folder}/{name}.py")
+            elif git(root, "cat-file", "-t", f"origin/{base}:{folder}/{name}") == (0, "tree"):
+                found.append(f"{folder}/{name}/")
+    for name in sorted(tool_names):
         for folder in TOOL_TREE_FOLDERS:
             if os.path.isfile(os.path.join(TOOL_ROOT, folder, name + ".py")):
                 found.append(f"{folder}/{name}.py")
@@ -3330,14 +3347,14 @@ def ci_job_import_paths():
     return found
 
 def lane_changes_the_tool(root, base, head):
-    """True when the lane-merge repo's lane changes bin/ci-job or a file it imports directly (ci_job_import_paths): `origin/<base>...head` lists it. A base that
+    """True when the lane-merge repo's lane changes bin/ci-job or a file the base's bin/ci-job imports directly (ci_job_import_paths): `origin/<base>...head` lists it. A base that
     lacks a file of LANE_MERGE_TOOL_FILES is not the repo that carries the tool, so the answer is False and no diff is read. A diff or an import list that cannot
     be read is an UnknownStop, never a guess."""
     for rel in LANE_MERGE_TOOL_FILES:
         if git(root, "cat-file", "-e", f"origin/{base}:{rel}")[0]:
             return False
     try:
-        watched = [CI_JOB_REL, *ci_job_import_paths()]
+        watched = [CI_JOB_REL, *ci_job_import_paths(root, base)]
     except OSError as e:
         raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the files bin/ci-job imports cannot be read: {e} {LANE_LINT_CITE}")
     c, changed = git(root, "diff", "--no-renames", "--name-only", f"origin/{base}...{head}")
@@ -3897,7 +3914,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         if state == "pass" and lane_changes_the_tool(root, base, head):  # the lane's own bin/ci-job lints it too; the lint passes only when both copies pass
             head_copy = os.path.join(wt, *CI_JOB_REL.split("/"))
             if not os.path.isfile(head_copy):
-                say(f"merge: the lane deletes {CI_JOB_REL}, so it has no copy of its own to run: only the tool's copy linted {head[:9]}.")
+                c, status = git(root, "diff", "-M", "--name-status", f"origin/{base}...{head}")
+                moved = not c and any(l.startswith("R") and l.split("\t")[1:2] == [CI_JOB_REL] for l in status.splitlines())  # a rename is not a delete
+                say(f"merge: the lane {'renames' if moved else 'deletes'} {CI_JOB_REL}, so it has no copy of its own to run: only the tool's copy linted {head[:9]}.")
             else:
                 head_notes = []
                 saved = saved_pass_read(root, head, merged, base, HEAD_COPY_JOB, body_for_job, tool)
