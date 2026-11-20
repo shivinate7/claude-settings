@@ -1,0 +1,1 @@
+- pr3747-header-timeout-class: on the PR 3747 head, the red-run header lists a timeout class that red-run never prints. A crash and a failed assert both exit 1. Found in PR 3747 review; not on main. Seen: 2026-11-20 x1

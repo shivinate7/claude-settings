@@ -1,0 +1,1 @@
+- pr3747-homes-end-on-signals: on the PR 3747 head, homes.md has no line for `_nowindow.end_on_signals`. Found in PR 3747 review; not on main. Seen: 2026-11-20 x1

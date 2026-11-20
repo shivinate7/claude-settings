@@ -1,0 +1,1 @@
+- pr3741-proxy-assert-checks: on the PR 3741 head, merge/test_merge.py:4763 asserts a bare checks substring that is always true, and :13966 asserts UNKNOWN, which the template always prints. Found in PR 3741 review; the text is not on main. Seen: 2026-11-20 x1

@@ -1,0 +1,1 @@
+- pr3747-ps-before-pid-alive: on the PR 3747 head, the ps spawn runs before pid_alive. Found in PR 3747 review; not on main. Seen: 2026-11-20 x1

@@ -1,0 +1,1 @@
+- pr3741-shallow-merge-base-rc: on the PR 3741 head, in a shallow clone a return code of 1 from git merge-base should read as unknown, not as no. Found in PR 3741 review; the review cites no line, so not confirmed on main. Seen: 2026-11-20 x1
