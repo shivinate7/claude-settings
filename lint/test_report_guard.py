@@ -6395,6 +6395,16 @@ class HassioPagePathTests(unittest.TestCase):
             with self.subTest(reply=reply):
                 self.assert_flagged(reply, "/hassio/addon/")
 
+    def test_an_old_page_path_in_a_full_url_is_flagged(self):
+        # A full URL puts a word character before /hassio/, so only the URL alternative in HASSIO_PATH_RE flags it.
+        replies = [
+            "Open http://homeassistant.local:8123/hassio/addon/x to check the add-on.",
+            "The add-on page is at http://homeassistant.local:8123/hassio/addon/x.",
+        ]
+        for reply in replies:
+            with self.subTest(reply=reply):
+                self.assert_flagged(reply, "/hassio/addon/x")
+
     def test_the_supervisor_api_path_is_not_flagged(self):
         # Green on the old code. The lookbehind must read the path start as /hassio/, not any /hassio/ in it.
         replies = [
