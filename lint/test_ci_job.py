@@ -3137,7 +3137,7 @@ class RerunCache(unittest.TestCase):
                 found.update(os.path.join(dirpath, name) for name in names)
         return found
 
-    def test_a_first_run_runs_every_step_and_prints_no_cached_line(self):  # the control: passes on main
+    def test_a_first_run_runs_every_step_and_prints_no_cached_line(self):  # the premise of the rerun cases below: a first run runs and passes every step, with no (cached) line
         self.fixture()
         rc, lines, ran, out = self.lane_run(rerun_step("check-a"), rerun_step("check-b"))
         self.assertEqual(sorted(ran), ["check-a", "check-b"], "the first run should run every step, got %r\n%s" % (ran, out))
