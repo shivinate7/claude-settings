@@ -13,7 +13,7 @@ import os, shutil, signal, subprocess, sys, tempfile, unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
-from proc_fixture import alive, kill_all, stop_group, wait_for, wait_gone  # noqa: E402  the one home of the signal-test helpers (testing/proc_fixture.py)
+from proc_fixture import alive, default_sigint, kill_all, stop_group, wait_for, wait_gone  # noqa: E402  the one home of the signal-test helpers (testing/proc_fixture.py)
 sys.path.insert(0, os.path.join(ROOT, "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 URL = "https://github.com/shivinate7/claude-settings"
@@ -311,15 +311,16 @@ class Launch(unittest.TestCase):
         """The merge-fresh folders in this test's temp folder."""
         return sorted(n for n in os.listdir(self.tmp) if n.startswith("merge-fresh-"))
 
-    def start_blocked_run(self, name):
+    def start_blocked_run(self, name, preexec=None):
         """bin/merge started on the BLOCK stub. -> (the Popen, the ready file). The run gets its own process group, so a
-        cleanup reaches every process it started, and its stub reads to EOF, so closing stdin ends it."""
+        cleanup reaches every process it started, and its stub reads to EOF, so closing stdin ends it.
+        preexec: a child start hook, such as default_sigint() for a case that sends INT."""
         ready = os.path.join(self.t, name + ".ready")
         err = open(os.path.join(self.t, name + ".err"), "w", encoding="utf-8")
         self.addCleanup(err.close)
         e = {**self.env, "CLAUDE_SETTINGS_DIR": self.co, "READY_FILE": ready}
         proc = subprocess.Popen([sys.executable, os.path.join(ROOT, "bin", "merge")], env=e, stdin=subprocess.PIPE,
-                                stdout=subprocess.DEVNULL, stderr=err, start_new_session=True)
+                                stdout=subprocess.DEVNULL, stderr=err, start_new_session=True, preexec_fn=preexec)
         self.addCleanup(self.stop_run, proc)
         return proc, ready
 
@@ -368,6 +369,33 @@ class Launch(unittest.TestCase):
                 self.await_exit(proc, "bin/merge after %s" % sig.name)
                 self.assertFalse(alive(child), "%s to bin/merge did not reach the stub %d, which runs after bin/merge returned"
                                  % (sig.name, child))
+
+    @unittest.skipIf(os.name == "nt", "POSIX signals")
+    def test_int_to_bin_merge_removes_fresh_tree(self):
+        """An INT sent to bin/merge alone ends the run, and the run takes its fresh tree with it, as a TERM does."""
+        self.release("v2", body=BLOCK)
+        before = self.fresh_trees()
+        proc, ready = self.start_blocked_run("int-bin", preexec=default_sigint())
+        self.assertTrue(wait_for(ready, 60, proc), "the stub never started")
+        fresh = [n for n in self.fresh_trees() if n not in before]
+        self.assertEqual(len(fresh), 1, "scope: one merge-fresh folder must exist while the run is up, got %r" % fresh)
+        proc.send_signal(signal.SIGINT)
+        self.await_exit(proc, "bin/merge after INT")
+        left = [n for n in self.fresh_trees() if n not in before]
+        self.assertEqual(left, [], "INT to bin/merge left its fresh tree behind")
+
+    @unittest.skipIf(os.name == "nt", "POSIX signals")
+    def test_int_to_bin_merge_reaches_the_stub(self):
+        """An INT sent to bin/merge alone reaches the stub that the launcher runs, which is gone when bin/merge returns."""
+        self.release("v2", body=BLOCK)
+        proc, ready = self.start_blocked_run("int-bin-stub", preexec=default_sigint())
+        self.assertTrue(wait_for(ready, 60, proc), "the stub never started")
+        with open(ready, encoding="utf-8") as f:
+            child = int(f.read().split()[0])
+        self.assertTrue(alive(child), "scope: the stub must run before INT")
+        proc.send_signal(signal.SIGINT)
+        self.await_exit(proc, "bin/merge after INT")
+        self.assertFalse(alive(child), "INT to bin/merge did not reach the stub %d, which runs after bin/merge returned" % child)
 
     def start_killed_run(self, name):
         """bin/merge started on the BLOCK stub, with a KILL sent to its group. -> (launcher pid, stub pid). Both are killed at cleanup,
