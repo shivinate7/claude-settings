@@ -15,7 +15,12 @@ Stdout also names every touched path and what became of it, so the run log shows
 
 A touched path selects:
   a test file (patterns TEST_PATTERNS)                                       -> itself
-  dir/x.py                                                                   -> dir/test_x.py
+  dir/x.py                                                                   -> dir/test_x.py, and every tracked test_*.py (any
+                                                                               folder) that imports the module x, by `import x` or
+                                                                               `from x import ...`, even inside a function. The
+                                                                               imports are read with `ast`, so a name in a comment
+                                                                               or a string selects nothing. A test it cannot read
+                                                                               or parse is selected: unknown is not skip.
   dir/x.sh                                                                   -> dir/test_x.sh, dir/x.test.sh
   dir/x.ps1                                                                  -> dir/x.test.ps1, dir/x-*.test.ps1
   any non-.md, non-test path under mods/<mod>/                               -> every *.test.mjs, *.test.js and check.mjs under
@@ -36,6 +41,7 @@ an interpreter (`FOO=x node t`, `cd a && node t`) or after a chain (`&&`, `;`, `
 The exit names the line. A trailing backslash joins a line to the next. A step with `shell: powershell` or `pwsh` is read
 with each backslash as a slash, and a trailing backtick joins its line to the next.
 """
+import ast
 import fnmatch
 import json
 import os
@@ -145,8 +151,54 @@ def reason(path, table):
     return None
 
 
-def candidates(path, tracked):
-    """The test files `path` selects, from the tracked paths at HEAD."""
+# {(root, test): (stat key, imported module names)}. A run asks about every tracked test once per touched .py path, so each
+# file is parsed once per size and mtime.
+_IMPORTS = {}
+
+
+def imported_modules(test, root):
+    """The top-level module names the Python test `test` imports, or None when it cannot be read or parsed. `import a.b` names a,
+    `from a import b` names a, and `from . import a` names a. The parser sees every import in the file, a lazy one inside a
+    function included, and no name in a comment or a string."""
+    full = os.path.join(root, *test.split("/"))
+    try:
+        info = os.stat(full)
+        key = (info.st_size, info.st_mtime_ns)
+        cached = _IMPORTS.get((root, test))
+        if cached and cached[0] == key:
+            return cached[1]
+        with open(full, "rb") as f:
+            tree = ast.parse(f.read(), filename=test)
+    except (OSError, SyntaxError, ValueError):
+        return None
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(alias.name.partition(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                names.add(node.module.partition(".")[0])
+            elif node.level:
+                names.update(alias.name.partition(".")[0] for alias in node.names)
+    _IMPORTS[(root, test)] = (key, frozenset(names))
+    return _IMPORTS[(root, test)][1]
+
+
+def importers(module, tracked, root):
+    """The tracked Python tests, in any folder, that import the module named `module`. A test whose imports cannot be read is
+    listed: a test the selector cannot read must not read as a test that does not import it."""
+    found = set()
+    for t in tracked:
+        if t.endswith(".py") and is_test(t):
+            names = imported_modules(t, root)
+            if names is None or module in names:
+                found.add(t)
+    return found
+
+
+def candidates(path, tracked, root="."):
+    """The test files `path` selects, from the tracked paths at HEAD. `root` is the checkout the tracked paths sit in: the selector
+    reads each test's imports there, not in the current folder."""
     # A file that a HEAVY glob names is selected even when its name is no test name (a section file), so the log skips it with its reason.
     if is_test(path) or reason(path, HEAVY):
         return {path}
@@ -156,6 +208,7 @@ def candidates(path, tracked):
     stem, dot, ext = name.rpartition(".")
     if dot and ext == "py":
         found.add(f"{prefix}test_{stem}.py")
+        found |= importers(stem, tracked, root)
     elif dot and ext == "sh":
         found.add(f"{prefix}test_{stem}.sh")
         found.add(f"{prefix}{stem}.test.sh")
