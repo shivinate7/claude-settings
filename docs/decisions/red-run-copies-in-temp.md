@@ -19,7 +19,7 @@ Mistake: 69 `git archive` copies of old commits sat in the session scratchpad. T
 
 Why: a copy that its run removes on exit cannot pile up. The retired routes left a folder that each agent had to remove by hand, and 69 of them stayed in the scratchpad.
 
-Cost: one copy per run, made by one tree export and removed when the run ends. The copy's size is unmeasured. No long-lived process, no log, no timer. Each run starts one child process, the test command.
+Cost: a copy per run, made by a tree export and removed when the run ends. The copy's size is unmeasured. No long-lived process, no log, no timer. Each run starts git child processes, then the test command.
 
 Kind: process
 Home: bin/red-run
