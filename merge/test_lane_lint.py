@@ -5161,6 +5161,13 @@ class LintCheckReviewed(tm.ReviewEnv):
         self.assertEqual(rc, 0, out)
         self.assertNotIn("merge --lane-lint 7", out, "a reviewed draft with no lint PASS is told to lint before it goes ready, though `merge --ready` reads no lint:\n" + out)
 
+    def test_a_reviewed_draft_with_a_lint_pass_reads_ready_with_merge_ready_as_its_next_act(self):
+        rc, out, host = self.listing([lint_comment(2, tm.REVIEW_HEAD)], draft=True)
+        self.assertEqual(rc, 0, out)
+        line = tm.list_line(self, out, 7)
+        self.assertRegex(line, rf"^#7 feat7 {tm.REVIEW_HEAD[:9]} ready: ", "a reviewed draft with a lint PASS at its head does not read ready:\n" + out)
+        self.assertIn("next: merge --ready", line, "a reviewed draft with a lint PASS at its head names no `merge --ready` as its next act:\n" + out)
+
 
 class LintCheckJoin(tm.CloudSession):
     """The batch runner's join: `merge <pr> --confirm` in a cloud session with the batch-runner role refuses a pull request whose live head has
