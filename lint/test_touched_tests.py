@@ -1492,6 +1492,89 @@ class PosixOnlyInHeavySuites(SelectorBase):
         src = "import os\nimport unittest\nfrom signal import SIGHUP\n\n\n" + CLASS + DEF + "        self.assert_signal_removes_work_folder(SIGHUP)\n"
         self.fails_at(POSIX_PATH, src, "from signal import SIGHUP", "SIGHUP")
 
+    def test_a_skiptest_on_nt_before_the_call_passes(self):
+        src = (HEAD + CLASS + "    def test_stop_group(self):\n"
+               + '        if os.name == "nt":\n            self.skipTest("posix only")\n'
+               + "        os.killpg(0, signal.SIGTERM)\n")
+        self.passes(POSIX_PATH, src)
+
+    def test_a_skiptest_on_posix_before_the_call_fails(self):
+        src = (HEAD + CLASS + "    def test_stop_group(self):\n"
+               + '        if os.name == "posix":\n            self.skipTest("nt only")\n'
+               + "        os.killpg(0, signal.SIGTERM)\n")
+        self.fails_at(POSIX_PATH, src, "os.killpg(0, signal.SIGTERM)", "os.killpg")
+
+    def test_an_early_return_on_nt_before_the_call_in_a_function_passes(self):
+        src = HEAD + "def stop_group():\n" + '    if os.name == "nt":\n        return\n' + "    os.killpg(0, signal.SIGTERM)\n"
+        self.passes(POSIX_PATH, src)
+
+    def test_an_early_return_on_posix_before_the_call_in_a_function_fails(self):
+        src = HEAD + "def stop_group():\n" + '    if os.name == "posix":\n        return\n' + "    os.killpg(0, signal.SIGTERM)\n"
+        self.fails_at(POSIX_PATH, src, "os.killpg(0, signal.SIGTERM)", "os.killpg")
+
+    def test_a_flag_from_os_name_not_nt_tested_in_the_same_function_passes(self):
+        src = (HEAD + CLASS + "    def test_stop_group(self):\n" + '        posix = os.name != "nt"\n'
+               + "        if posix:\n            os.killpg(0, signal.SIGTERM)\n")
+        self.passes(POSIX_PATH, src)
+
+    def test_a_flag_from_os_name_eq_nt_tested_in_the_same_function_fails(self):
+        src = (HEAD + CLASS + "    def test_stop_group(self):\n" + '        posix = os.name == "nt"\n'
+               + "        if posix:\n            os.killpg(0, signal.SIGTERM)\n")
+        self.fails_at(POSIX_PATH, src, "os.killpg(0, signal.SIGTERM)", "os.killpg")
+
+    def test_a_module_flag_from_os_name_not_nt_tested_in_a_method_passes(self):
+        src = (HEAD + 'posix = os.name != "nt"\n\n\n' + CLASS + "    def test_stop_group(self):\n"
+               + "        if posix:\n            os.killpg(0, signal.SIGTERM)\n")
+        self.passes(POSIX_PATH, src)
+
+    def test_a_module_raise_on_nt_before_a_module_level_call_passes(self):
+        src = HEAD + 'if os.name == "nt":\n    raise unittest.SkipTest("posix only")\n\n\n' + "GROUP = os.getpgid(0)\n"
+        self.passes(POSIX_PATH, src)
+
+    def test_a_module_raise_on_posix_before_a_module_level_call_fails(self):
+        src = HEAD + 'if os.name == "posix":\n    raise unittest.SkipTest("nt only")\n\n\n' + "GROUP = os.getpgid(0)\n"
+        self.fails_at(POSIX_PATH, src, "GROUP = os.getpgid(0)", "os.getpgid")
+
+    def test_a_module_raise_on_nt_before_a_class_level_call_passes(self):
+        src = (HEAD + 'if os.name == "nt":\n    raise unittest.SkipTest("posix only")\n\n\n'
+               + "class WorkGroup(unittest.TestCase):\n    GROUP = os.getpgid(0)\n")
+        self.passes(POSIX_PATH, src)
+
+    def test_a_not_os_name_eq_nt_guard_passes(self):
+        src = (HEAD + CLASS + "    def test_stop_group(self):\n" + '        if not os.name == "nt":\n'
+               + "            os.killpg(0, signal.SIGTERM)\n")
+        self.passes(POSIX_PATH, src)
+
+    def test_an_and_of_os_name_and_sys_platform_guard_passes(self):
+        src = (HEAD + CLASS + "    def test_stop_group(self):\n" + '        if os.name != "nt" and sys.platform != "win32":\n'
+               + "            os.killpg(0, signal.SIGTERM)\n")
+        self.passes(POSIX_PATH, src)
+
+    def test_a_sys_platform_startswith_guard_passes(self):
+        src = (HEAD + CLASS + "    def test_stop_group(self):\n" + '        if sys.platform.startswith("linux"):\n'
+               + "            os.killpg(0, signal.SIGTERM)\n")
+        self.passes(POSIX_PATH, src)
+
+    def test_an_elif_os_name_guard_passes(self):
+        src = (HEAD + CLASS + "    def test_stop_group(self):\n" + '        if os.name == "nt":\n            pass\n'
+               + '        elif os.name != "nt":\n            os.killpg(0, signal.SIGTERM)\n')
+        self.passes(POSIX_PATH, src)
+
+    def test_the_else_arm_of_an_os_name_eq_nt_guard_passes(self):
+        src = (HEAD + CLASS + "    def test_stop_group(self):\n" + '        if os.name == "nt":\n            pass\n'
+               + "        else:\n            os.killpg(0, signal.SIGTERM)\n")
+        self.passes(POSIX_PATH, src)
+
+    def test_a_hash_in_a_string_before_a_guarded_call_passes(self):
+        src = (HEAD + CLASS + "    def test_stop_group(self):\n" + '        note = "# runs on POSIX only"\n'
+               + '        if os.name != "nt":\n            os.killpg(0, signal.SIGTERM)\n')
+        self.passes(POSIX_PATH, src)
+
+    def test_a_hash_in_a_string_before_an_unguarded_call_fails(self):
+        src = (HEAD + CLASS + "    def test_stop_group(self):\n" + '        note = "# runs on POSIX only"\n'
+               + "        os.killpg(0, signal.SIGTERM)\n")
+        self.fails_at(POSIX_PATH, src, "os.killpg(0, signal.SIGTERM)", "os.killpg")
+
 
 if __name__ == "__main__":
     unittest.main()
