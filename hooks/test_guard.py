@@ -385,6 +385,8 @@ MACOS_REACH = {
     ("hooks/guard_kill.py", "_pid_cwd"): lambda family, session: family == "kill",
     ("hooks/guard_kill.py", "_ps_ppid"): lambda family, session: family == "kill",
     ("hooks/guard_kill.py", "session_root_pid"): lambda family, session: family == "kill",
+    # Reached by the descendants check in section 21305: kill_tree walks a kill's tree through this reader.
+    ("hooks/_nowindow.py", "descendants"): lambda family, session: family == "kill",
 }
 
 
