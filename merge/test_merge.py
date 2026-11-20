@@ -26888,10 +26888,11 @@ def reaped_child_pid():
 
 
 class StaleMergeTrees(unittest.TestCase):
-    """merge.add_worktree sweeps the merge-wt-* trees a dead merge run left in the temp folder. A tree goes, with its git
-    registration, when its lock reason names `merge tool, pid N` and N is dead. A tree whose pid is alive stays, and so
-    does a locked tree whose reason names no merge pid. The temp folder is this test's own fixture, so no case reaches the
-    real temp folder."""
+    """merge.add_worktree sweeps the merge-wt-* and merge-fresh-* trees a dead merge run left in the temp folder. A tree goes, with
+    its git registration, when its lock reason names `merge tool, pid N`, N is dead, and no live process runs in it. A tree whose
+    pid is alive stays, and so does a locked tree whose reason names no merge pid. A tree with a live holder stays even when its
+    pid is dead: a launcher killed alone leaves merge.py running from its tree. The temp folder is this test's own fixture, so no
+    case reaches the real temp folder."""
 
     def setUp(self):
         work = os.path.realpath(tempfile.mkdtemp(dir=run_folder()))
@@ -26908,9 +26909,10 @@ class StaleMergeTrees(unittest.TestCase):
         patch.start()
         self.addCleanup(patch.stop)
 
-    def make_tree(self, name, reason, root=None):
-        """A merge-wt-<name> folder with a locked worktree in it, as the merge tool makes one, under ROOT (default the temp folder). -> (folder, worktree)."""
-        tmp = os.path.join(root or self.tmpdir, "merge-wt-" + name)
+    def make_tree(self, name, reason, root=None, prefix="merge-wt-"):
+        """A PREFIX<name> folder with a locked worktree in it, as the merge tool makes one: merge-wt- for a PR head's tree (the default),
+        merge-fresh- for the launcher's own tree. Under ROOT (default the temp folder). -> (folder, worktree)."""
+        tmp = os.path.join(root or self.tmpdir, prefix + name)
         wt = os.path.join(tmp, "tree")
         os.makedirs(tmp)
         sh(self.repo, "git", "worktree", "add", "-q", "--detach", "--lock", "--reason", reason, wt, self.head)
@@ -26927,6 +26929,19 @@ class StaleMergeTrees(unittest.TestCase):
             elif line == "locked" or line.startswith("locked "):
                 trees[path] = line[len("locked"):].strip()
         return trees
+
+    def hold_process(self, cwd, argv=()):
+        """A live child in CWD with ARGV on its command line. It waits on stdin, so cleanup kills it and no case sleeps. -> the Popen.
+        A second copy of janitor/test_sweep.py's RunDirHolderTests.hold: that module is not importable here without loading all of it."""
+        proc = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()", *argv], cwd=cwd,
+                                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        def stop():
+            proc.kill()
+            proc.wait(timeout=60)  # the cap sits well above a kill
+            proc.stdin.close()
+        self.addCleanup(stop)  # registered after make_tree's drop, so cleanup kills the holder before the tree is removed
+        return proc
 
     def test_a_tree_whose_merge_pid_is_dead_goes_and_a_live_one_stays(self):
         dead = reaped_child_pid()
@@ -26972,6 +26987,54 @@ class StaleMergeTrees(unittest.TestCase):
         self.assertFalse(os.path.exists(stale_tmp), "control: the dead merge tree inside the temp folder must be removed in this run")
         self.assertTrue(os.path.isdir(far_tmp), "a dead-locked merge-wt tree outside the temp folder must stay")
         self.assertIn(os.path.realpath(far_wt), self.locked_trees(), "the dead-locked tree outside the temp folder must stay registered")
+
+    def test_a_merge_fresh_tree_whose_launcher_died_stays_while_merge_py_runs_from_it(self):
+        """A launcher killed alone leaves merge.py running. Its argv names the script in the tree, and its cwd is the caller's checkout."""
+        dead = reaped_child_pid()
+        fresh_tmp, fresh_wt = self.make_tree("stale", "merge tool, pid %d" % dead, prefix="merge-fresh-")
+        holder = self.hold_process(self.repo, [os.path.join(fresh_wt, "merge", "merge.py")])
+        self.assertEqual(self.locked_trees().get(os.path.realpath(fresh_wt)), "merge tool, pid %d" % dead,
+                         "scope: the dead merge-fresh tree must be locked with its launcher's reason before add_worktree runs")
+        self.assertNotEqual(holder.pid, dead, "scope: the holder must be a live process, not the dead launcher")
+        self.assertTrue(merge.pid_alive(holder.pid), "scope: the holder must be alive before add_worktree runs")
+        self.assertIn(holder.pid, sweep.processes_in(fresh_wt)[0] or [],
+                      "scope: the janitor's holder read must see the live process whose argv names the tree")
+
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+
+        self.assertTrue(os.path.isdir(fresh_tmp),
+                        "a merge-fresh tree whose launcher pid %d is dead must stay while a live process (pid %d) runs from its argv" % (dead, holder.pid))
+
+    def test_a_merge_wt_tree_whose_merge_pid_is_dead_stays_while_a_process_runs_in_it(self):
+        dead = reaped_child_pid()
+        wt_tmp, wt_in = self.make_tree("stale", "merge tool, pid %d" % dead)
+        holder = self.hold_process(wt_in)
+        self.assertEqual(self.locked_trees().get(os.path.realpath(wt_in)), "merge tool, pid %d" % dead,
+                         "scope: the dead merge-wt tree must be locked with its merge reason before add_worktree runs")
+        self.assertNotEqual(holder.pid, dead, "scope: the holder must be a live process, not the dead merge pid")
+        self.assertTrue(merge.pid_alive(holder.pid), "scope: the holder must be alive before add_worktree runs")
+        self.assertIn(holder.pid, sweep.processes_in(wt_in)[0] or [],
+                      "scope: the janitor's holder read must see the live process whose cwd is the tree")
+
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+
+        self.assertTrue(os.path.isdir(wt_tmp),
+                        "a merge-wt tree whose merge pid %d is dead must stay while a live process (pid %d) runs in it" % (dead, holder.pid))
+
+    def test_a_merge_fresh_tree_whose_launcher_died_goes_when_no_process_runs_in_it(self):
+        """The control for the holder cases: the same dead launcher and no holder. The tree goes."""
+        dead = reaped_child_pid()
+        fresh_tmp, fresh_wt = self.make_tree("stale", "merge tool, pid %d" % dead, prefix="merge-fresh-")
+        self.assertEqual(self.locked_trees().get(os.path.realpath(fresh_wt)), "merge tool, pid %d" % dead,
+                         "scope: the dead merge-fresh tree must be locked with its launcher's reason before add_worktree runs")
+        self.assertEqual(sweep.processes_in(fresh_wt)[0] or [], [], "scope: no live process may hold the tree in this control")
+
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+
+        self.assertFalse(os.path.exists(fresh_tmp), "control: a merge-fresh tree whose launcher pid is dead and no process holds must be removed")
 
 
 class VerifiedLine(RecordsEnv):
