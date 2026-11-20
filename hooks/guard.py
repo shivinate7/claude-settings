@@ -2623,6 +2623,144 @@ def builder_merge_write_ok(target: str, cwd: str, rel: str) -> bool:
     return bool(where) and norm(rel).lstrip("/") in {norm(c).lstrip("/") for c in merge_conflicts(where) or ()}
 
 
+def write_result_texts(tool_input, full: str):
+    """`(old, new)`: the whole file on disk and the whole text a write tool call leaves in it, or None when the
+    file is unreadable, an old string is not found, or the call carries no text. An Edit or a MultiEdit applies
+    each edit in order (every match with `replace_all`, else the first)."""
+    if not isinstance(tool_input, dict):
+        return None
+    try:
+        with open(full, encoding="utf-8") as handle:
+            old = handle.read()
+    except (OSError, ValueError):
+        return None
+    edits = tool_input.get("edits")
+    if isinstance(edits, list):
+        pairs = [(e.get("old_string"), e.get("new_string"), e.get("replace_all")) for e in edits if isinstance(e, dict)]
+    elif "old_string" in tool_input:
+        pairs = [(tool_input.get("old_string"), tool_input.get("new_string"), tool_input.get("replace_all"))]
+    elif isinstance(tool_input.get("content"), str):
+        return old, tool_input["content"]
+    else:
+        return None
+    text = old
+    for before, after, every in pairs:
+        if not isinstance(before, str) or not isinstance(after, str) or not before or before not in text:
+            return None
+        text = text.replace(before, after) if every is True else text.replace(before, after, 1)
+    return old, text
+
+
+def test_shape(text: str):
+    """`(shape, count, clashes)` of a python test file: its `ast` dump with each test function name and each
+    docstring blanked, the number of distinct test names (one per class path), and the test names that a non-def
+    statement of the same scope also binds (an assignment, an import, a class attribute, a class, a def that is no
+    test). A test is a def named `test` with no decorator or only `pytest.mark` ones. A fixture or any other
+    decorated def is no test: its name stays in the dump.
+    A comment is no node. None when the text does not parse."""
+    import ast
+
+    def is_mark(deco):
+        # `@pytest.mark.parametrize`, `@pytest.mark.skip(...)`: a mark leaves the def a test.
+        head = deco.func if isinstance(deco, ast.Call) else deco
+        return (isinstance(head, ast.Attribute) and isinstance(head.value, ast.Attribute)
+                and head.value.attr == "mark" and isinstance(head.value.value, ast.Name)
+                and head.value.value.id == "pytest")
+
+    def is_test(node):
+        return (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test")
+                and all(is_mark(deco) for deco in node.decorator_list))
+
+    def binds(owner):
+        # The names the scope's own statements bind: not what a def or a lambda binds inside itself.
+        found, stack = set(), list(owner.body)
+        while stack:
+            node = stack.pop()
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                if not is_test(node):
+                    found.add(node.name)
+                continue
+            if isinstance(node, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+                continue
+            if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+                found.add(node.id)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                found.update((alias.asname or alias.name).split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ExceptHandler) and node.name:
+                found.add(node.name)
+            elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+                found.add(node.name)
+            elif isinstance(node, ast.MatchMapping) and node.rest:
+                found.add(node.rest)
+            stack.extend(ast.iter_child_nodes(node))
+        return found
+
+    def blank_docstring(node):
+        first = node.body[0] if node.body else None
+        if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str):
+            node.body = node.body[1:] or [ast.Pass()]
+
+    names, bound = set(), set()
+
+    def strip(node, scope):
+        if isinstance(node, (ast.Module, ast.ClassDef)):
+            bound.update(scope + (name,) for name in binds(node))
+        for child in ast.iter_child_nodes(node):
+            inner = scope
+            if is_test(child):
+                names.add(scope + (child.name,))
+                child.name = ""
+            if isinstance(child, ast.ClassDef):
+                inner = scope + (child.name,)
+            strip(child, inner)
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                blank_docstring(child)
+
+    try:
+        tree = ast.parse(text)
+        strip(tree, ())
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return None
+    blank_docstring(tree)
+    return ast.dump(tree), len(names), frozenset(names & bound)
+
+
+def builder_rename_only(rel: str, tool_input, target: str, cwd: str) -> bool:
+    """True when a builder's write to the python test path `rel` renames tests or edits comments and docstrings
+    only: the parsed bodies and the count of distinct test names stay (decision builders-cannot-edit-tests). A mutation test, test config, a file that is not python, a file that is not on
+    disk, and text that does not parse are not. The rule reads the file once and parses both texts."""
+    if not python_test_rel(rel):
+        return False
+    texts = write_result_texts(tool_input, _expanded(target, cwd))
+    return texts is not None and same_test_shape(*texts)
+
+
+def python_test_rel(rel: str) -> bool:
+    """True for a python file the rename route reads: no mutation test, no test config."""
+    return rel.lower().endswith(".py") and not is_mutation_test_rel(rel) and not is_test_config_rel(rel)
+
+
+def same_test_shape(before, after) -> bool:
+    """True when two texts hold the same python test file but for test names, comments and docstrings, and the new
+    text binds no test name a second way that the old text did not (a rename onto a name an assignment, an import
+    or a class attribute holds). A text that is None (a file that does not exist there) or does not parse is not."""
+    if before is None or after is None:
+        return False
+    left, right = test_shape(before), test_shape(after)
+    return left is not None and right is not None and left[:2] == right[:2] and right[2] <= left[2]
+
+
+def builder_rename_diff(root: str, top: str, rel: str, names, old: str, new=None) -> bool:
+    """True when the builder's change of the test path `rel`, from `old` to `new` (see `own_changes`), renames
+    tests or edits comments and docstrings only (`same_test_shape`). The path must read the same through symlinks.
+    Cost: two `git show` or one working-tree read, and two `ast` parses, for each changed python test path."""
+    if not python_test_rel(rel) or any(norm(n) != norm(rel) for n in names):
+        return False
+    before, after = text_at(root, old, rel, top, missing=None), text_at(root, new, rel, top, missing=None)
+    # Equal texts mean the change is a mode or a byte the text read hides, so it is no rename.
+    return before != after and same_test_shape(before, after)
+
+
 def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:
     """The early warning for a write tool call: the target path a role may not change, else ''.
 
@@ -2658,7 +2796,8 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         return target
     if role == WRITER_ROLE:
         return "" if rel.lower().endswith(".md") else target
-    if builder_test_path(target, cwd) and not builder_merge_write_ok(target, cwd, rel):
+    if (builder_test_path(target, cwd) and not builder_merge_write_ok(target, cwd, rel)
+            and not builder_rename_only(rel, tool_input, target, cwd)):
         return target
     if is_test_config_rel(rel) and any(
             disables_tests(part.splitlines(), []) for part in write_content_parts(tool_input)):
@@ -3306,6 +3445,8 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None, con
             bad = any(is_builder_test_rel(n) for n in names) or (is_test_config_rel(rel) and disables_tests(
                 text_at(root, new, rel, top).splitlines(), text_at(root, old, rel, top).splitlines())) or (
                 is_workflow_rel(rel) and workflow_builder_refused(text_at(root, old, rel, top), text_at(root, new, rel, top)))
+            if bad and builder_rename_diff(root, top, rel, names, old, new):
+                bad = False
         why = ""
         if role == BUILDER_ROLE and builder_merge_test_path(rel, names, conflicts):
             # The merge route: a builder resolves a conflict in a test file when no test case of either parent

@@ -3037,7 +3037,8 @@ MUTATIONS = [
      "guard", "lane-start-settings: lane tag with a non-text"),
     # ---- lane-floor. The floor's refusal names the lane remedy for a lane create_session and the no-model remedy for
     # every other spawn. Each mutant breaks that choice, or the one lane-tag reading the floor and the three lane checks
-    # share (is_lane_create_session). lane_tags holds no case handling; the casefold lives in is_lane_create_session.
+    # share (is_lane_create_session, which asks is_lane_tagged). lane_tags holds no case handling; the casefold lives
+    # in is_lane_tagged.
     ("lane-floor: a lane create_session below the floor gets the no-model remedy again",
      'hits.append(("agent-model-floor", LANE_MODEL_FLOOR_REASON, floor_model))',
      'hits.append(("agent-model-floor", MODEL_FLOOR_REASON, floor_model))',
@@ -3047,12 +3048,12 @@ MUTATIONS = [
      '        refuse(tool, "deny", "agent-model-floor", LANE_MODEL_FLOOR_REASON, floor_model)',
      "guard", "floor remedy: Agent on haiku keeps the no-model remedy"),
     ("lane-floor: is_lane_create_session is always False, so no lane check fires",
-     '    return tool == CREATE_SESSION_TOOL and any(',
-     '    return False and any(',
+     '    return tool == CREATE_SESSION_TOOL and is_lane_tagged(tool_input)',
+     '    return False and is_lane_tagged(tool_input)',
      "guard", "lane-start-settings: lane tag with no model is denied"),
     ("lane-floor: is_lane_create_session is always True, so every call is judged as a lane",
-     '    return tool == CREATE_SESSION_TOOL and any(',
-     '    return True or any(',
+     '    return tool == CREATE_SESSION_TOOL and is_lane_tagged(tool_input)',
+     '    return True or is_lane_tagged(tool_input)',
      "guard", "lane-start-settings: coordinator call with no model and no source_url is allowed"),
     ("lane-floor: the lane tag is matched without casefold, so an upper-case lane tag is no lane",
      'isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in lane_tags(tool_input))',

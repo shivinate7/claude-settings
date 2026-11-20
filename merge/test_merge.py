@@ -320,6 +320,23 @@ class RepoHost(FakeHost):
     def refuse_pinned_mismatch(self):  # the real Host reads the pinned checks from GitHub; a fake has none
         return None
 
+class GitCommitsHost(FakeHost):
+    """A FakeHost that answers a commit read and a main-holds read from the checkout's git, as GitHub answers them once the commits are pushed.
+    clean_merges_after walks a merge's parents and asks whether main holds the second one, so the plain FakeHost (no parents, holds nothing)
+    cannot carry a record over a merge of main. Its own `cwd` is the checkout, where merge_state runs git, as Host.cwd is."""
+    def __init__(self, root, other):
+        super().__init__(root, other)
+        self.cwd = root
+        self.unreadable = set()  # shas whose commit read fails, as the commits API fails when it cannot answer: that read raises Stop, as Host.commit_read does
+
+    def commit_read(self, sha):  # -> (parents, tree), as Host.commit_read gives them
+        if sha in self.unreadable:
+            raise merge.Stop(f"cannot read the parents of {sha[:9]} {merge.READ_CITE}: the commits API did not answer")
+        return sh(self.root, "git", "log", "-1", "--format=%P", sha).split(), sh(self.root, "git", "rev-parse", f"{sha}^{{tree}}")
+
+    def holds_head_gh(self, head, other):  # True when origin's branch `other` contains `head`: GitHub's compare reads ahead or identical
+        return subprocess.run(["git", "merge-base", "--is-ancestor", head, f"origin/{other}"], cwd=self.root, capture_output=True).returncode == 0
+
 def second_checkout(t):
     """Make a second checkout in folder t, the way copy_repos builds one: its own origin, a main whose stamp config names MAILAUDIT_CHECK, and
     a feat that holds main's tip and has one commit of its own, so its head differs from the first checkout's. -> (co, other)."""
@@ -16453,6 +16470,147 @@ class StandingMergeRole(CloudSession):
         self.scripted_records(record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
         self.assert_standing_refused()
 
+    # ---- a clean merge of main over a passing record keeps the record (decision pr-review-record, "A clean merge of main keeps the record").
+    # The gate reads the record as merge --reviewed does, through live_review_state. A conflicted or an edited merge of main still refuses.
+    RECORD_REFUSAL = "has no passing review record"  # the end of the refusal standing_refusal gives a head with no passing record
+
+    def git_commit_reads(self):
+        """Serve this case's commit reads from the checkout's git. own_pr and scripted_records then set the pull request on that host."""
+        self.host = GitCommitsHost(self.co, self.other)
+
+    def record_head(self):
+        """The record's head: a rule-text commit on origin's feat. The passing record for it is served by the case."""
+        self.commit_files(["CLAUDE.md"])
+        return self.head()
+
+    def push_main(self, path, text):
+        """One commit on origin's main, pushed through origin, so the merge tool's base read sees it. -> its sha."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, path), text)
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", f"main: {path}")
+        sh(o, "git", "push", "-q", "origin", "main")
+        return sh(o, "git", "rev-parse", "HEAD")
+
+    def merge_main_into(self, record, main_sha, side, resolve=None, extra=None):
+        """A merge of `main_sha` into the record's head, made in the other clone and pushed to origin's side branch `side`, so this checkout
+        holds its commits. `resolve`: git's merge conflicts on CLAUDE.md, and the case resolves it to this text. `extra`: the merge commit also
+        adds this file, so its tree is no git clean merge. -> the merge's sha."""
+        o = self.other
+        sh(o, "git", "checkout", "-q", "-B", side, record)
+        merge_cmd = ["git", "merge", "-q", "--no-edit"] + (["--no-commit"] if extra else []) + [main_sha]
+        r = subprocess.run(merge_cmd, cwd=o, capture_output=True, text=True)
+        want = 1 if resolve is not None else 0  # only the conflicted merge is meant to conflict; every other merge must come out clean
+        assert r.returncode == want, f"the fixture's merge of main into {side} returned {r.returncode}, not {want}:\n{r.stdout}{r.stderr}"
+        if resolve is not None:
+            put(os.path.join(o, "CLAUDE.md"), resolve)
+        if extra:
+            put(os.path.join(o, extra), "extra\n")
+        sh(o, "git", "add", "-A")
+        if resolve is not None or extra:
+            sh(o, "git", "commit", "-q", "--no-edit")
+        sh(o, "git", "push", "-q", "origin", f"HEAD:refs/heads/{side}")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return sh(o, "git", "rev-parse", "HEAD")
+
+    def git_clean_tree(self, record, main_sha):
+        """-> the tree of git's clean merge of the record's head and main, or None when they conflict."""
+        r = subprocess.run(["git", "merge-tree", "--write-tree", record, main_sha], cwd=self.co, capture_output=True, text=True)
+        return r.stdout.split()[0] if r.returncode == 0 else None
+
+    def assert_clean_merge_of(self, record, main_sha, clean, body):
+        """P7, the scope before the gate reads it: `clean` is git's clean merge of the record's head and main, and the merge tool's own reader
+        (live_review_state, merge --reviewed) reads the record over it as passing. Both hold on the old code, so a red below comes from the gate alone."""
+        self.assertEqual(sh(self.co, "git", "log", "-1", "--format=%P", clean).split(), [record, main_sha],
+                         "the fixture's merge does not have the record's head and main as its parents")
+        self.assertEqual(self.git_clean_tree(record, main_sha), sh(self.co, "git", "rev-parse", f"{clean}^{{tree}}"),
+                         "the fixture's merge is not git's clean merge of the record's head and main")
+        self.assertTrue(merge.clean_merges_after(self.host, record, clean, "main"), "the merge tool's own walk does not reach the record through the clean merge")
+        self.assertEqual(merge.live_review_state(self.host, merge.parse_review(body), clean, "main")[0], "done",
+                         "the merge tool's own reader does not read the record over the clean merge of main as done")
+
+    def assert_guard_passes_clean_merge(self, clean):
+        """The red premise: standing_refusal, the gate, answers "" for the clean merge. On the old code it gives the record refusal."""
+        why = merge.standing_refusal(self.host, 7, self.host.pr(7), clean)
+        self.assertEqual(why, "", "the standing gate refuses a clean merge of main over a passing record, though the merge tool reads the record as done: " + why)
+
+    def test_a_clean_merge_of_main_over_a_passing_record_merges_under_standing(self):
+        self.git_commit_reads()
+        record = self.record_head()
+        early = self.push_main("docs/notes.md", "Notes.\n")
+        clean = self.merge_main_into(record, early, "fixture-clean")
+        body = record_text(head=record, rounds=REVIEW_PASS)
+        self.own_pr([("CLAUDE.md", "added", 1)])
+        self.scripted_records(body)
+        self.assert_clean_merge_of(record, early, clean, body)
+        sh(self.other, "git", "push", "-q", "origin", f"{clean}:refs/heads/feat")
+        self.assertEqual(self.head(), clean, "fixture: the clean merge is not the pull request's live head")
+        rc, out, err = self.standing_confirm()
+        self.assertNotIn(self.RECORD_REFUSAL, err, "the standing gate refused a clean merge of main over a passing record")
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+    def test_a_conflicted_merge_of_main_over_a_passing_record_is_refused_for_the_record_under_standing(self):
+        self.git_commit_reads()
+        record = self.record_head()
+        early = self.push_main("docs/notes.md", "Notes.\n")
+        clean = self.merge_main_into(record, early, "fixture-clean")
+        late = self.push_main("CLAUDE.md", "Main's rule text.\n")  # main moves on, and its CLAUDE.md conflicts with the record's
+        conflicted = self.merge_main_into(record, late, "fixture-conflicted", resolve="Resolved by hand.\n")
+        body = record_text(head=record, rounds=REVIEW_PASS)
+        self.own_pr([("CLAUDE.md", "added", 1)])
+        self.scripted_records(body)
+        self.assert_clean_merge_of(record, early, clean, body)
+        self.assert_guard_passes_clean_merge(clean)  # the red premise: the same record, over the clean merge
+        sh(self.other, "git", "push", "-q", "origin", f"{conflicted}:refs/heads/feat")
+        self.assertEqual(self.head(), conflicted, "fixture: the conflicted merge is not the pull request's live head")
+        rc, out, err = self.standing_confirm()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(self.RECORD_REFUSAL, err, "the conflicted merge of main was refused for another cause, not for its record")
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
+
+    def test_an_edited_clean_merge_of_main_over_a_passing_record_is_refused_for_the_record_under_standing(self):
+        self.git_commit_reads()
+        record = self.record_head()
+        early = self.push_main("docs/notes.md", "Notes.\n")
+        clean = self.merge_main_into(record, early, "fixture-clean")
+        edited = self.merge_main_into(record, early, "fixture-edited", extra="extra.txt")
+        body = record_text(head=record, rounds=REVIEW_PASS)
+        self.own_pr([("CLAUDE.md", "added", 1)])
+        self.scripted_records(body)
+        self.assert_clean_merge_of(record, early, clean, body)
+        self.assert_guard_passes_clean_merge(clean)  # the red premise: the same record, over the clean merge
+        self.assertNotEqual(sh(self.co, "git", "rev-parse", f"{edited}^{{tree}}"), self.git_clean_tree(record, early),
+                            "fixture: the edited merge has git's clean merge tree, so the case tests nothing")
+        self.own_pr([("CLAUDE.md", "added", 1), ("extra.txt", "added", 1)])  # the pull request now holds the edit too
+        sh(self.other, "git", "push", "-q", "origin", f"{edited}:refs/heads/feat")
+        self.assertEqual(self.head(), edited, "fixture: the edited merge is not the pull request's live head")
+        rc, out, err = self.standing_confirm()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(self.RECORD_REFUSAL, err, "the edited merge of main was refused for another cause, not for its record")
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
+
+    def test_a_clean_merge_whose_parents_cannot_be_read_is_refused_naming_that_read_under_standing(self):
+        self.git_commit_reads()
+        record = self.record_head()
+        early = self.push_main("docs/notes.md", "Notes.\n")
+        clean = self.merge_main_into(record, early, "fixture-clean")
+        body = record_text(head=record, rounds=REVIEW_PASS)
+        self.own_pr([("CLAUDE.md", "added", 1)])
+        self.scripted_records(body)
+        self.assert_clean_merge_of(record, early, clean, body)  # the premise: the merge tool reads the record over this clean merge as done
+        sh(self.other, "git", "push", "-q", "origin", f"{clean}:refs/heads/feat")
+        self.assertEqual(self.head(), clean, "fixture: the clean merge is not the pull request's live head")
+        self.host.unreadable.add(clean)  # the commits API cannot answer for the merge, so its parents, and whether main holds one, are unknown
+        state, why = merge.live_review_state(self.host, merge.parse_review(body), clean, "main")
+        self.assertNotEqual(state, "done", "fixture: the merge tool reads the record done though the clean-merge read cannot run")
+        self.assertIn(merge.REVIEW_SURVIVAL_UNKNOWN, why, "fixture: the merge tool's own reader does not name the unknown read")
+        err = self.assert_standing_refused()
+        self.assertIn(merge.REVIEW_SURVIVAL_UNKNOWN, err, "the refusal drops the why: the clean-merge read could not run, so the record is not missing")
+        self.assertNotIn(self.RECORD_REFUSAL, err, "the refusal says the head has no passing record, though the record passes and only the read failed")
+        self.assertNotRegex(err, r"(?i)\bpost\b", "the refusal tells the user to post a record")
+
     # ---- no size bound: a pull request past docs needs a passing reviewer record; a docs-only one needs none.
     RULE_PATHS = ("CLAUDE.md", "agents/a.md", "agents/b.md", "skills/b/SKILL.md", "skills/c/SKILL.md")
     DOC_PATHS = ("docs/a.md", "docs/b.md", "docs/c.md", "docs/d.md", "docs/e.md")
@@ -17525,6 +17683,8 @@ def review_comment(cid, number, body, created="2026-10-02T00:00:00Z", updated=No
     """A comment on issue or pull request `number`, as the repo-wide comment list gives it. `updated` is its updated_at; None means never edited."""
     return {"id": cid, "created_at": created, "updated_at": updated or created, "issue_url": f"https://api.github.com/repos/o/r/issues/{number}", "body": body}
 
+UNPARSED_CID = 9051724  # the id of a review-record comment that does not parse; distinctive, so no other output line holds it
+PASS_CID = 9051726  # the id of an older review-record comment that passes, beside UNPARSED_CID; distinctive, so no other output line holds it
 LANE_LINT_MARKER = "<!-- lane-lint -->"  # the first line of a lane's lint comment (decision lanes-run-no-full-ci-job); lint_body pins the rest of its form
 OWNER = {"login": "o", "association": "OWNER"}  # the repo's owner, as a comment object names its author
 NOT_OWNER = {"login": "mallory", "association": "NONE"}
@@ -21275,6 +21435,170 @@ class ReviewedList(ReviewEnv):
         host, rc, out, err = self.chain_listing(earlier, passed, newest)
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
+
+    # A comment that opens with the review-record marker but does not parse is named, not ignored: the line names its id and the cause (the
+    # offending line, or the field that is missing). The newest comment is the one that counts, so each case holds it alone.
+    def unparsed_listing(self, body):
+        """`merge --reviewed` over one open pull request whose only comment is `body`."""
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(UNPARSED_CID, 7, body)])
+        self.assertEqual(rc, 0, out + err)
+        return out
+
+    def assert_unparsed_case(self, body, causes):
+        """`body` does not parse (scope), and the output names its comment by id and holds one of `causes` (each a word the cause must carry)."""
+        self.assertIsNone(review_fn(self, "parse_review")(body), "fixture: the body parses, so the case tests nothing")
+        out = self.unparsed_listing(body)
+        self.assertIn(str(UNPARSED_CID), out, "merge --reviewed does not name the unparsed comment by its id:\n" + out)
+        self.assertTrue(any(cause in out for cause in causes), f"merge --reviewed does not name the cause (one of {causes!r}):\n" + out)
+
+    def test_unparsed_record_text_after_the_ci_line_is_named_by_reviewed(self):
+        self.assert_unparsed_case(record_text(rounds=REVIEW_PASS) + "Thanks for the review.\n", ("Thanks for the review.", "CI line"))
+
+    def test_unparsed_record_text_before_the_ci_line_is_named_by_reviewed(self):
+        body = record_text(rounds=REVIEW_PASS).replace(REVIEW_CI_LINE, "Reviewed by hand, see the thread.\n" + REVIEW_CI_LINE)
+        self.assert_unparsed_case(body, ("Reviewed by hand, see the thread.", "CI line"))
+
+    def test_unparsed_record_missing_its_kind_line_is_named_by_reviewed(self):
+        self.assert_unparsed_case(record_text(rounds=REVIEW_PASS).replace("Kind: normal\n", ""), ("Kind",))
+
+    def test_unparsed_record_with_only_its_marker_is_named_by_reviewed(self):
+        # the empty state: the marker and no field after it, so the first field, PR, is the missing one
+        self.assert_unparsed_case(REVIEW_MARKER + "\n", ("PR:", "missing"))
+
+    def test_unparsed_record_at_full_size_is_named_by_reviewed(self):
+        # the full-size state: three failed rounds and a granted fourth, a Grant line, and text after the CI line. Without that text it parses (scope).
+        full = record_text(rounds=(*REVIEW_FAILED_THREE, "Round 4: reviewer, opus, PASS"), grant=(f"Grant: {REVIEW_GRANT_TEXT}",), net="zero")
+        parse_text(self, full)
+        self.assert_unparsed_case(full + "Thanks for the review.\n", ("Thanks for the review.", "CI line"))
+
+    # Each case below holds valid Kind and Guard or check lines, so the cause it names is the line that breaks.
+    def test_unparsed_record_bad_round_line_is_named_by_reviewed(self):
+        # a Round line whose verdict is none of PASS, FAIL or PARTIAL: the cause names that line
+        self.assert_unparsed_case(record_text(rounds=("Round 1: reviewer, sonnet, MAYBE",)), ("Round 1: reviewer, sonnet, MAYBE",))
+
+    def test_unparsed_record_docs_only_with_guard_yes_is_named_by_reviewed(self):
+        # a docs-only record touches no guard or check (decision docs-only-prs-skip-review, docs-only PRs skip review): the cause names that pairing
+        self.assert_unparsed_case(record_text(kind="docs-only", guard="yes"), ("a docs-only record cannot be Guard or check: yes",))
+
+    def test_unparsed_record_stray_line_mid_record_is_named_by_reviewed(self):
+        # a line between the rounds and Net value: the cause names that line
+        self.assert_unparsed_case(record_text(rounds=(*REVIEW_PASS, "Thanks for the review.")), ("Thanks for the review.",))
+
+    def test_unparsed_record_control_rule_above_pr_line_names_the_pr_line_by_reviewed(self):
+        # Control: a rule right under the marker cuts the record before its PR line, so the cause names the PR line as missing
+        body = REVIEW_MARKER + "\n---\n" + record_text(rounds=REVIEW_PASS).split("\n", 1)[1]
+        self.assert_unparsed_case(body, ("the PR: line is missing",))
+
+    def test_unparsed_record_control_well_formed_reads_done_by_reviewed(self):
+        # Control: the same comment id holds a record that parses, which reads done, so the naming above concerns the broken text alone.
+        parse_text(self, record_text(rounds=REVIEW_PASS))
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(UNPARSED_CID, 7, record_text(rounds=REVIEW_PASS)), lint_of(7, REVIEW_HEAD)])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
+
+    def test_unparsed_record_control_marker_less_comment_is_not_named_by_reviewed(self):
+        # Control: a comment that does not open with the marker is no record. The pull request reads no record, and the id is not named.
+        body = record_text(rounds=REVIEW_PASS).replace(REVIEW_MARKER + "\n", "", 1) + "Thanks for the review.\n"
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(UNPARSED_CID, 7, body)])
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(no_record_numbers(out), {7}, out)
+        self.assertNotIn(str(UNPARSED_CID), out, "merge --reviewed named a comment that carries no review-record marker:\n" + out)
+
+class UnparsedRecordStanding(CloudSession, ReviewEnv):
+    """A standing session's `merge <pr> --confirm` on a code pull request, refused by the record gate (standing_refusal). The records come through
+    PullsHost, so each comment keeps the id GitHub gives it. A comment that opens with the marker and does not parse is named in the refusal, by its
+    id and its cause, and nothing is claimed. The controls keep the gate's words for a record that parses, and name no comment without the marker."""
+
+    def standing_host(self, *comments):
+        """The host of a code pull request 7 at REVIEW_HEAD, whose review records are `comments`, oldest first."""
+        green = {REVIEW_HEAD: [batch_run("checks", "completed", "success")]}  # the head's own checks pass, so the record gate is the one that refuses
+        return PullsHost([batch_pull(7, REVIEW_HEAD)], green, comments=comments, files=[pr_file("tools/note.py", status="added")], bodies={7: OWN_PR_BODY})
+
+    def standing_refusal(self, *comments):
+        """-> (rc, stdout, stderr) of `merge 7 --confirm --head <live head>` as this cloud session, on a code pull request whose records are `comments`."""
+        self.put_role("standing")
+        host = self.standing_host(*comments)
+        with self.cloud():
+            return self.run_args("7", "--confirm", "--head", REVIEW_HEAD, host=host)
+
+    def guard_reason(self, *comments):
+        """-> the reason standing_refusal gives for pull request 7 at REVIEW_HEAD, with `comments` as its records: "" when the gate lets it through.
+        The gate reads the pull request as main does (Host.pr), then stops: no claim, no lock and no merge follow."""
+        host = self.standing_host(*comments)
+        with self.cloud():
+            return merge.standing_refusal(host, 7, host.pr(7), REVIEW_HEAD)
+
+    def assert_refusal_names(self, body, causes):
+        """`body` does not parse (scope). The refusal exits 1 with no traceback, names the comment by its id and holds one of `causes`, and claims nothing."""
+        self.assertIsNone(review_fn(self, "parse_review")(body), "fixture: the body parses, so the case tests nothing")
+        refs = self.refs()
+        rc, out, err = self.standing_refusal(review_comment(UNPARSED_CID, 7, body))
+        self.assertEqual(rc, 1, out + err)
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(self.refs(), refs, "the refused run took a claim or pushed")
+        self.assertIn(str(UNPARSED_CID), err, "the --confirm refusal does not name the unparsed comment by its id:\n" + err)
+        self.assertTrue(any(cause in err for cause in causes), f"the --confirm refusal does not name the cause (one of {causes!r}):\n" + err)
+
+    def test_unparsed_record_text_after_the_ci_line_is_named_by_confirm(self):
+        self.assert_refusal_names(record_text(rounds=REVIEW_PASS) + "Thanks for the review.\n", ("Thanks for the review.", "CI line"))
+
+    def test_unparsed_record_text_before_the_ci_line_is_named_by_confirm(self):
+        body = record_text(rounds=REVIEW_PASS).replace(REVIEW_CI_LINE, "Reviewed by hand, see the thread.\n" + REVIEW_CI_LINE)
+        self.assert_refusal_names(body, ("Reviewed by hand, see the thread.", "CI line"))
+
+    def test_unparsed_record_missing_its_kind_line_is_named_by_confirm(self):
+        self.assert_refusal_names(record_text(rounds=REVIEW_PASS).replace("Kind: normal\n", ""), ("Kind",))
+
+    def test_unparsed_record_with_only_its_marker_is_named_by_confirm(self):
+        # the empty state: the marker and no field after it, so the first field, PR, is the missing one
+        self.assert_refusal_names(REVIEW_MARKER + "\n", ("PR:", "missing"))
+
+    def test_unparsed_record_bad_round_line_is_named_by_confirm(self):
+        self.assert_refusal_names(record_text(rounds=("Round 1: reviewer, sonnet, MAYBE",)), ("Round 1: reviewer, sonnet, MAYBE",))
+
+    def test_unparsed_record_docs_only_with_guard_yes_is_named_by_confirm(self):
+        self.assert_refusal_names(record_text(kind="docs-only", guard="yes"), ("a docs-only record cannot be Guard or check: yes",))
+
+    def test_unparsed_record_stray_line_mid_record_is_named_by_confirm(self):
+        self.assert_refusal_names(record_text(rounds=(*REVIEW_PASS, "Thanks for the review.")), ("Thanks for the review.",))
+
+    def test_unparsed_record_control_well_formed_failing_keeps_the_guard_words(self):
+        # Control: a record that parses and fails gets the gate's own words. The same fixture then shows the naming above comes from the unparsed text.
+        body = record_text(head=REVIEW_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
+        parse_text(self, body)
+        rc, out, err = self.standing_refusal(review_comment(UNPARSED_CID, 7, body))
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("its head has no passing review record", err)
+
+    def test_unparsed_record_control_marker_less_comment_is_not_named_by_confirm(self):
+        # Control: a comment that does not open with the marker is no record. The refusal keeps the gate's words and does not name the id.
+        body = record_text(rounds=REVIEW_PASS).replace(REVIEW_MARKER + "\n", "", 1) + "Thanks for the review.\n"
+        rc, out, err = self.standing_refusal(review_comment(UNPARSED_CID, 7, body))
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("its head has no passing review record", err)
+        self.assertNotIn(str(UNPARSED_CID), err, "the --confirm refusal named a comment that carries no review-record marker:\n" + err)
+
+    def test_newest_unparsed_record_refuses_over_older_pass(self):
+        # The newest review-record comment does not parse, and an older one on the same head passes. The gate must not read the older pass as the
+        # record: it refuses, and names the newest comment by its id and its cause.
+        older, newest = record_text(rounds=REVIEW_PASS), record_text(rounds=REVIEW_PASS) + "Thanks for the review.\n"
+        self.assertIsNone(review_fn(self, "parse_review")(newest), "fixture: the newest body parses, so the case tests nothing")
+        parse_text(self, older)
+        self.assertEqual(record_state(self, older, REVIEW_HEAD), "done", "fixture: the older record is not a passing record on the head")
+        why = self.guard_reason(review_comment(PASS_CID, 7, older, created="2026-10-02T00:00:00Z"), review_comment(UNPARSED_CID, 7, newest, created="2026-10-03T00:00:00Z"))
+        self.assertTrue(why, "the gate let the pull request through on an older pass, over a newer record that does not parse")
+        self.assertIn(str(UNPARSED_CID), why, "the gate's refusal does not name the newest unparsed comment by its id:\n" + why)
+        self.assertTrue(any(cause in why for cause in ("Thanks for the review.", "CI line")), "the gate's refusal does not name the cause:\n" + why)
+
+    def test_older_unparsed_record_under_newer_pass_merges(self):
+        # Control: the newest record passes, and an older one on the same head does not parse. The gate reads the newest, so it lets the pull request
+        # through. This class's fixture stops at the gate, so the case asserts the gate's "" and no merge.
+        older, newest = record_text(rounds=REVIEW_PASS) + "Thanks for the review.\n", record_text(rounds=REVIEW_PASS)
+        self.assertIsNone(review_fn(self, "parse_review")(older), "fixture: the older body parses, so the case tests nothing")
+        parse_text(self, newest)
+        self.assertEqual(record_state(self, newest, REVIEW_HEAD), "done", "fixture: the newest record is not a passing record on the head")
+        why = self.guard_reason(review_comment(UNPARSED_CID, 7, older, created="2026-10-02T00:00:00Z"), review_comment(PASS_CID, 7, newest, created="2026-10-03T00:00:00Z"))
+        self.assertEqual(why, "", "the gate refused a pull request whose newest record passes:\n" + why)
 
 class ReleaseHost(PullsHost):
     """A PullsHost for `merge --release-check`. A number in `closed` answers `pulls/<n>` as a closed pull request (the open list leaves it out),
