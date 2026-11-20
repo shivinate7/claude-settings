@@ -5161,6 +5161,9 @@ AUDIT_CLEANUP_SHELL_BAD = re.compile(r"[;&|<>`$()\n\r\\*?\[\]{}~]")
 AUDIT_CLEANUP_SWEEP_FLAGS = tuple(LOAD_SWEEP.split("<repo>", 1)[1].split())
 AUDIT_CLEANUP_SWEEP_CONFIRM = "--confirm"
 AUDIT_CLEANUP_TMP = "/tmp/"
+# On Windows the sweep's --root is a drive path with backslashes (D:\a\repo). The shell-character check and shlex read a
+# backslash as an escape, so that one value is judged on its own charset and stands in as a POSIX root below.
+AUDIT_CLEANUP_WIN_ROOT = re.compile(r"(?<=\s--root )[A-Za-z]:[\\/][\w.\-\\/]*(?=\s|$)")
 
 
 def audit_cleanup_form(tool: str, tool_input) -> bool:
@@ -5170,6 +5173,8 @@ def audit_cleanup_form(tool: str, tool_input) -> bool:
     if tool != "Bash" or not isinstance(command, str):
         return False
     sweep_script = LOAD_SWEEP.split()[1]
+    if sweep_script in command:
+        command = AUDIT_CLEANUP_WIN_ROOT.sub("/root", command, count=1)
     # The sweep's own script path, with its ~ left for the shell to expand, is the one place a ~ may sit.
     if AUDIT_CLEANUP_SHELL_BAD.search(command.replace(sweep_script, "", 1)):
         return False
