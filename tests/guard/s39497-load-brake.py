@@ -943,6 +943,28 @@ lb_add("echo hi # bin/ci-job --lint, background, full disk: allowed, and the rea
                                                      tool_input={"command": "echo hi # bin/ci-job --lint",
                                                                  "run_in_background": True}, reads=0)))
 
+# THE ALLOW SIDE OF THE `&` GATE (decision machine-load-brake: "A foreground lint with no `&` is no start and reads
+# nothing."). A foreground lint at a full disk is allowed, and the reader does not run. A `>&` or `&&` cuts no
+# background list. `echo hi & ...` is refused by detached-launch, not by the brake, so its case pins only that the
+# brake does not refuse it. `merge --lane-lint` in the foreground is refused by check-timeout at any limit.
+lb_add("foreground, bin/ci-job --lint, full disk: allowed, and the reader does not run",
+       lb_full_scope(LB_DISK_FULL, lb_decision_check("Bash", LB_DISK_FULL, "allow",
+                                                     tool_input={"command": "bin/ci-job --lint"}, reads=0)))
+lb_add("foreground, bin/ci-job --lint 2>&1, full disk: allowed, and the reader does not run",
+       lb_full_scope(LB_DISK_FULL, lb_decision_check("Bash", LB_DISK_FULL, "allow",
+                                                     tool_input={"command": "bin/ci-job --lint 2>&1"}, reads=0)))
+lb_add("foreground, echo hi & bin/ci-job --lint, full disk: refused by detached-launch and not the load brake, the reader does not run",
+       lb_full_scope(LB_DISK_FULL, lb_decision_check("Bash", LB_DISK_FULL, "deny", (re.compile(r"^detached-launch: "),),
+                                                     tool_input={"command": "echo hi & bin/ci-job --lint"}, reads=0,
+                                                     lacks=(LB_LOAD_RULE, LB_LOAD_CITE))))
+lb_add("foreground, bin/ci-job --lint && echo ok, full disk: allowed, and the reader does not run",
+       lb_full_scope(LB_DISK_FULL, lb_decision_check("Bash", LB_DISK_FULL, "allow",
+                                                     tool_input={"command": "bin/ci-job --lint && echo ok"}, reads=0)))
+lb_add("foreground, merge --lane-lint 9, full disk: refused by check-timeout and not the load brake, the reader does not run",
+       lb_full_scope(LB_DISK_FULL, lb_decision_check("Bash", LB_DISK_FULL, "deny", (re.compile(r"^check-timeout: "),),
+                                                     tool_input={"command": "merge --lane-lint 9"}, reads=0,
+                                                     lacks=(LB_LOAD_RULE, LB_LOAD_CITE))))
+
 # LINUX MEMORY (owner, 2026-11-19 21:30 CST, "read memory on linux if u can"; decision machine-load-brake). On Linux the
 # reader reads memory from /proc/meminfo, so memory over 95% refuses a background Agent start and a background lint start
 # (merge --lane-lint, bin/ci-job --lint), locally and in a cloud session. Memory at 50% allows both. An unreadable
