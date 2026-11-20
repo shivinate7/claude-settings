@@ -1271,14 +1271,14 @@ def case_page_artifactdata_error_result_does_not_count():
 def case_page_artifactdata_n_proof_passes():
     for label, name, tool_input in (
             ("doc_id items/disk-cleanup, data n 98", "ArtifactData",
-             {"action": "update", "doc_id": "items/disk-cleanup", "data": {"n": 98}}),
+             {"action": "update", "url": PAGE_URL, "doc_id": "items/disk-cleanup", "data": {"n": 98}}),
             ("collection items, data n \"98\"", "ArtifactData",
-             {"action": "update", "collection": "items", "doc_id": "disk-cleanup",
+             {"action": "update", "url": PAGE_URL, "collection": "items", "doc_id": "disk-cleanup",
               "data": {"n": "98"}}),
             ("set, doc_id items/disk-cleanup, data n 98", "ArtifactData",
-             {"action": "set", "doc_id": "items/disk-cleanup", "data": {"n": 98}}),
+             {"action": "set", "url": PAGE_URL, "doc_id": "items/disk-cleanup", "data": {"n": 98}}),
             ("batch, op with data n 98", "mcp__ArtifactData",
-             {"action": "batch", "batch": [{"op": "update", "doc_id": "items/disk-cleanup",
+             {"action": "batch", "url": PAGE_URL, "batch": [{"op": "update", "doc_id": "items/disk-cleanup",
                                            "data": {"n": 98}}]})):
         p = page_run(new_cfg(), "page-artifact", [("98: a", (PAGE_ITEM,))],
                      [owner_rec("98: a"), used_rec(name, tool_input)])
@@ -2495,7 +2495,7 @@ def case_chat_pick_with_a_send_passes():
             ("143 b", [owner_rec("143 b"), send_rec("Ruling on page item 143: b")]),
             ("137 a, 138 b", [owner_rec("137 a, 138 b"), send_rec("Ruling on pages 137 and 138: a, b")]),
             ("99 a (done)", [owner_rec("99 a (done)"), used_rec("ArtifactData", {
-                "action": "set", "collection": "items", "doc_id": "99", "data": {"n": 99}})])):
+                "action": "set", "url": PAGE_URL, "collection": "items", "doc_id": "99", "data": {"n": 99}})])):
         p = page_run(new_cfg(), "pick-sent", [(text, ())], records, cwd=repo)
         expect_silent("pick answer: %r with a send proving its numbers passes" % text, p)
 
