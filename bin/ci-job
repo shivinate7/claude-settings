@@ -764,7 +764,8 @@ def cache_key(name, install, detail, shell, env, cwd, ctx, suite):
     if install or os.environ.get("CI_JOB_NO_CACHE") or not detail:
         return None
     # The commit, as the pushed head plus HEAD's parents and message, never HEAD's own sha: the lane lint makes a new merge commit of one
-    # pushed head on each run, and its sha would never repeat. A step may read the message, which an amend changes under one tree.
+    # pushed head on each run, and its sha would never repeat. A step may read the message, which an amend changes under one tree, and HEAD's committer date
+    # (lint/check_hook_stubs.py ends its window there); the key holds the message and not the date, because a new lint merge of one pushed head has a new date.
     tree, tool, commit = tree_key(top), tool_key(), git("show", "-s", "--format=%P%n%B", "HEAD", cwd=top)
     head = values.get("github.event.pull_request.head.sha", "")
     if tree is None or tool is None or not commit or not head:
