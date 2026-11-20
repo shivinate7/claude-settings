@@ -20,12 +20,17 @@ def _git(where, *args):
     return _nowindow.run(["git", "-C", where, *args], capture_output=True, text=True)
 
 
-def make(source, dest, pin):
+def make(source, dest, pin, branch=None):
     """A shallow clone of `source`'s HEAD at `dest` (a path that does not exist yet), with the commit `pin` fetched at
-    depth 1. Sets `uploadpack.allowAnySHA1InWant` on `source`, which the fetch of a bare sha needs. Returns the git
+    depth 1. `branch` clones that branch instead, with every branch at depth 1 (`--no-single-branch`): the other
+    branches' tips are present, and their merge base with `branch` is cut, as a pull request's base is in CI.
+    Sets `uploadpack.allowAnySHA1InWant` on `source`, which the fetch of a bare sha needs. Returns the git
     error text, "" when both calls worked."""
     _git(source, "config", "uploadpack.allowAnySHA1InWant", "true")
-    made = _nowindow.run(["git", "clone", "-q", "--depth", "1", "--no-local", source, dest], capture_output=True, text=True)
+    clone = ["clone", "-q", "--depth", "1", "--no-local"]
+    if branch:
+        clone += ["--no-single-branch", "--branch", branch]
+    made = _nowindow.run(["git", *clone, source, dest], capture_output=True, text=True)
     if made.returncode:
         return made.stderr.strip() or "git clone failed"
     fetched = _git(dest, "fetch", "-q", "--depth", "1", "origin", pin)

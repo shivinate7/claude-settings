@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from guard_core import (
     SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, GIT_WRITES, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
     REPLAY_MARKS, command_indexes, dir_before_segment, heredoc_heads, inline_script, inner_commands, own_heredoc_bodies, resolve_command, resolve_default_base, segment_tokens, split_segments,
-    is_cloud, shell_abs, strip_heredoc_bodies, strip_redirections,
+    is_cloud, lint_dir, shell_abs, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import opens_fence, BUILD_TAG, CONSULTANT_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_BRIEF_MARKER, LANE_GRANT_MARKER, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags, repo_tag_names  # the one home of the lane tags and head refs, shared with the roadmap build
@@ -106,7 +106,8 @@ def gh_call_of(segment: str):
 
 
 # ---- a merge made outside the merge tool
-MERGE_TOOLS = ("mcp__github__merge_pull_request",)
+# The auto-merge tool arms the same merge: GitHub merges once the head's checks pass, so it is judged on the same head read.
+MERGE_TOOLS = ("mcp__github__merge_pull_request", "mcp__github__enable_pr_auto_merge")
 MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject",
                      "--match-head-commit", "-A", "--author-email"}
 # Seconds for the WHOLE read, shared: Host.head_read makes 4 `gh` REST calls (5 with a branch selector, 1 more run-list read when the check runs link more than one run; a settled head adds the
@@ -934,7 +935,7 @@ def _red_run_module():
     """lint/check_red_run.py, imported from the lint folder beside this file's folder, the one home of the
     rule. It waits for the first push that needs it, and raises ImportError in a copy of the hooks with no lint
     folder beside it. The caller reads that as no hit."""
-    lint = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lint")
+    lint = lint_dir()
     if lint not in sys.path:
         sys.path.append(lint)
     import check_red_run
@@ -3063,7 +3064,7 @@ TARGET_UNKNOWN_LINE = ("target-id-in-roster: the roster is unknown (the roadmap 
 
 def _parent_targets():
     """PARENT_TARGETS of lint/layout.py, the one home of the send targets that name the parent."""
-    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    lint = lint_dir()
     if lint not in sys.path:
         sys.path.append(lint)
     import layout

@@ -13,7 +13,19 @@ path. The sweep of old run folders is proved in lint/test_find_copies.py.
 
 A pass case also writes hooks/y.py with a real duplicate. The run must flag that sibling and nothing
 else, so a script that reads no files cannot pass the case.
+
+The cross-file cases (26 to 40) scan tests/guard/ sections. Each section's first line is
+`# section <n>`, so its first statement sits on line 2. A name that two section files bind at
+module level fails, with the FAIL line `NAME assigned at FILE:LINE and FILE:LINE`, the first
+section in run order first. Two exceptions pass: a name that its own binding reads (an
+accumulator; a tuple target still names each other name it does not read, cases 36 and 37), and
+FAMILY or TEMP_DIR, which hooks/test_guard.py binds and each section sets. A rebind inside one
+section file is not counted, and neither is a name bound only inside if, try, with or for, or a
+bare annotation (cases 39 and 40). A section file that is not UTF-8 exits 2 (case 38). A pass case also writes a real clash in
+tests/guard/, so a scan that reads no section cannot pass it. setUp writes one default section,
+tests/guard/s00001-base.py, so the cases above it keep a section folder that holds a section.
 """
+import ast
 import glob
 import json
 import os
@@ -34,6 +46,10 @@ UNKNOWN = "check_hook_dup_names: UNKNOWN, "
 ALLOW = "lint/hook_dup_names_allow.json"
 SIBLING = "hooks/y.py"
 SIBLING_LINE = FAIL + "hooks/y.py: Z assigned at lines 1, 2"
+GUARD_BASE = "s00001-base.py"  # setUp writes it: it binds BASE, which no case reads
+GUARD_SIBLING_A = "tests/guard/s09000-sib-a.py"
+GUARD_SIBLING_B = "tests/guard/s09100-sib-b.py"
+GUARD_SIBLING_LINE = FAIL + "GUARD_SIBLING assigned at %s:2 and %s:2" % (GUARD_SIBLING_A, GUARD_SIBLING_B)
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
 
@@ -50,15 +66,39 @@ def dup_line(rel, name, *lines):
     return FAIL + "%s: %s assigned at lines %s" % (rel, name, ", ".join(str(n) for n in lines))
 
 
+def guard_dup(name, first, second):
+    """The FAIL line for a name two section files bind: `first` and `second` are FILE:LINE."""
+    return FAIL + "%s assigned at %s and %s" % (name, first, second)
+
+
 class DupNameTests(unittest.TestCase):
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="dup_", dir=RUN_FOLDER)
+        self.with_base()
 
     def write(self, rel, text, root=None):
         path = os.path.join(root or self.root, *rel.split("/"))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
+
+    def write_section(self, fname, number, body, root=None):
+        self.write("tests/guard/" + fname, "# section %d\n%s" % (number, body), root=root)
+
+    def with_base(self, root=None):
+        self.write_section(GUARD_BASE, 1, "BASE = 1\n", root=root)
+
+    def with_clean_hook(self):
+        self.write("hooks/clean.py", "CLEAN = 1\n")
+
+    def with_guard_sibling(self):
+        self.write_section("s09000-sib-a.py", 9000, "GUARD_SIBLING = 1\n")
+        self.write_section("s09100-sib-b.py", 9100, "GUARD_SIBLING = 2\n")
+
+    def assert_only_guard_sibling(self, rc, out):
+        self.assertEqual(rc, 1, "the sibling clash in tests/guard/ must fail the run\n" + out)
+        self.assertEqual(self.fails(out), [GUARD_SIBLING_LINE],
+                         "expected the sibling FAIL line and no other: the subject passes or the sibling is unread\n" + out)
 
     def check(self, root=None):
         cmd = [sys.executable, MODULE, "--root", root or self.root]
@@ -290,6 +330,7 @@ class DupNameTests(unittest.TestCase):
     def test_23_root_path_with_brackets_is_still_scanned(self):
         # The root's path must reach the scan as a literal path, not as a glob pattern.
         root = os.path.join(self.root, "r[x]")
+        self.with_base(root=root)
         self.write("hooks/m.py", "NAME = 1\nNAME = 2\n", root=root)
         rc, out = self.check(root=root)
         self.assertEqual(rc, 1, "a duplicate under a root named r[x] went unread\n" + out)
@@ -304,6 +345,175 @@ class DupNameTests(unittest.TestCase):
         self.write("hooks/test_x.py", "NAME = 1\nNAME = 2\n")
         rc, out = self.check()
         self.assert_unknown(rc, out, "hooks")
+
+    def test_26_two_sections_bind_one_name_fail(self):
+        self.with_clean_hook()
+        self.write_section("s00100-a.py", 100, 'LANE_PROMPT = "a"\n')
+        self.write_section("s00200-b.py", 200, 'LANE_PROMPT = "b"\n')
+        rc, out = self.check()
+        self.assertEqual(rc, 1, "LANE_PROMPT bound in two section files was not reported\n" + out)
+        self.assertEqual(self.fails(out), [guard_dup("LANE_PROMPT", "tests/guard/s00100-a.py:2",
+                                                     "tests/guard/s00200-b.py:2")], out)
+
+    def test_27_def_in_one_section_and_assign_in_another_fail(self):
+        self.with_clean_hook()
+        self.write_section("s00100-a.py", 100, "def LANE_PROMPT():\n    return 'a'\n")
+        self.write_section("s00200-b.py", 200, 'LANE_PROMPT = "b"\n')
+        rc, out = self.check()
+        self.assertEqual(rc, 1, "a def in one section and an assign in another were not reported\n" + out)
+        self.assertEqual(self.fails(out), [guard_dup("LANE_PROMPT", "tests/guard/s00100-a.py:2",
+                                                     "tests/guard/s00200-b.py:2")], out)
+
+    def test_28_self_read_accumulator_passes(self):
+        self.with_clean_hook()
+        self.with_guard_sibling()
+        self.write_section("s00100-a.py", 100, "LOG_CHECKS = [1]\n")
+        self.write_section("s00200-b.py", 200, "LOG_CHECKS = LOG_CHECKS + [2]\n")
+        self.write_section("s00300-c.py", 300, "LOG_CHECKS = LOG_CHECKS + [3]\n")
+        rc, out = self.check()
+        self.assert_only_guard_sibling(rc, out)
+
+    def test_29_rebind_that_does_not_read_its_name_fails(self):
+        self.with_clean_hook()
+        self.write_section("s00100-a.py", 100, "LOG_CHECKS = [1]\n")
+        self.write_section("s00200-b.py", 200, "LOG_CHECKS = [2]\n")
+        rc, out = self.check()
+        self.assertEqual(rc, 1, "a second LOG_CHECKS that does not read the first was not reported\n" + out)
+        self.assertEqual(self.fails(out), [guard_dup("LOG_CHECKS", "tests/guard/s00100-a.py:2",
+                                                     "tests/guard/s00200-b.py:2")], out)
+
+    def test_30_family_and_temp_dir_may_be_set_by_sections(self):
+        self.with_clean_hook()
+        self.with_guard_sibling()
+        self.write("hooks/test_guard.py", 'FAMILY = "misc"\nTEMP_DIR = None\n')  # the runner binds both
+        self.write_section("s00100-a.py", 100, 'FAMILY = "a"\nTEMP_DIR = None\n')
+        self.write_section("s00200-b.py", 200, 'FAMILY = "b"\nTEMP_DIR = "x"\n')
+        rc, out = self.check()
+        self.assert_only_guard_sibling(rc, out)
+
+    def test_31_rebind_inside_one_section_is_not_counted(self):
+        self.with_clean_hook()
+        self.with_guard_sibling()
+        self.write_section("s00100-a.py", 100, "NAME = 1\nNAME = 2\n")
+        rc, out = self.check()
+        self.assert_only_guard_sibling(rc, out)
+
+    def test_32_names_in_strings_and_comments_are_not_bindings(self):
+        self.with_clean_hook()
+        self.with_guard_sibling()
+        self.write_section("s00100-a.py", 100, "\n".join([
+            'DOC = """',
+            'LANE_PROMPT = "a"',
+            '"""',
+            "# LANE_PROMPT = \"b\", and don't count it",
+            "NOTE = \"LANE_PROMPT = 'c'  # not a binding\"",
+        ]) + "\n")
+        self.write_section("s00200-b.py", 200, 'LANE_PROMPT = "b"\n')
+        rc, out = self.check()
+        self.assert_only_guard_sibling(rc, out)
+
+    def test_33_missing_section_folder_is_unknown(self):
+        self.with_clean_hook()
+        shutil.rmtree(os.path.join(self.root, "tests"))
+        rc, out = self.check()
+        self.assert_unknown(rc, out, "guard")
+
+    def test_34_empty_section_folder_is_unknown(self):
+        self.with_clean_hook()
+        os.remove(os.path.join(self.root, "tests", "guard", GUARD_BASE))
+        rc, out = self.check()
+        self.assert_unknown(rc, out, "guard")
+
+    def test_35_full_size_section_set_names_first_and_last(self):
+        self.with_clean_hook()
+        last = 299  # 300 section files here, and the default one from setUp makes 301
+        for i in range(last + 1):
+            number = 100 + 10 * i
+            name = "s%05d-f%03d.py" % (number, i)
+            body = 'LANE_PROMPT = "%d"\n' % i if i in (0, last) else "VALUE_%03d = %d\n" % (i, i)
+            self.write_section(name, number, body)
+        rc, out = self.check()
+        self.assertEqual(rc, 1, "LANE_PROMPT in the first and the last of 300 section files was not reported\n" + out)
+        self.assertEqual(self.fails(out), [guard_dup("LANE_PROMPT", "tests/guard/s00100-f000.py:2",
+                                                     "tests/guard/s03090-f299.py:2")], out)
+
+    def assert_nested_only(self, text, names):
+        """Scope proof for the F4 cases: each name is bound in the fixture, and no top-level statement binds it."""
+        tree = ast.parse(text)
+        top = {t.id for node in tree.body if isinstance(node, ast.Assign)
+               for t in node.targets if isinstance(t, ast.Name)}
+        used = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+        self.assertFalse(top & names, "the fixture binds %s at top level, so it does not reach the body scope"
+                         % sorted(top & names))
+        self.assertTrue(names <= used, "the fixture never binds %s" % sorted(names - used))
+
+    def test_36_tuple_target_names_the_name_its_value_does_not_read(self):
+        # F1: the value reads NAME_A, not NAME_B. The self-read covers NAME_A only, so NAME_B still clashes.
+        self.with_clean_hook()
+        self.write_section("s00100-a.py", 100, "NAME_B = 1\n")
+        self.write_section("s00200-b.py", 200, "NAME_A, NAME_B = NAME_A.strip(), 2\n")
+        rc, out = self.check()
+        self.assertEqual(rc, 1, "NAME_B bound in a tuple whose value reads only NAME_A was not reported\n" + out)
+        self.assertEqual(self.fails(out), [guard_dup("NAME_B", "tests/guard/s00100-a.py:2",
+                                                     "tests/guard/s00200-b.py:2")],
+                         "expected the NAME_B FAIL line and no other: NAME_A has no earlier binding\n" + out)
+
+    def test_37_self_read_alone_after_an_earlier_binding_passes(self):
+        # Control for case 36: NAME_A reads its own name, so it extends the earlier binding and is no clash.
+        self.with_clean_hook()
+        self.with_guard_sibling()
+        self.write_section("s00100-a.py", 100, 'NAME_A = " a "\n')
+        self.write_section("s00200-b.py", 200, "NAME_A = NAME_A.strip()\n")
+        rc, out = self.check()
+        self.assert_only_guard_sibling(rc, out)
+
+    def test_38_section_that_is_not_utf8_is_unknown(self):
+        # F2: a section file that does not decode as UTF-8 exits 2 with an UNKNOWN line, never a traceback.
+        self.with_clean_hook()
+        data = b"# section 200\nNOTE = '\xff\xfe'\n"
+        with self.assertRaises(UnicodeDecodeError, msg="the fixture must not decode as UTF-8"):
+            data.decode("utf-8")
+        path = os.path.join(self.root, "tests", "guard", "s00200-latin.py")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(data)
+        rc, out = self.check()
+        self.assert_unknown(rc, out, "s00200-latin.py")
+
+    def test_39_names_bound_only_in_if_try_with_or_for_bodies_are_not_counted(self):
+        # F4: the same four names, each bound only in a body, in two section files. No clash.
+        self.with_clean_hook()
+        self.with_guard_sibling()
+        body = "\n".join([
+            "if True:",
+            "    SCOPE_IF = 1",
+            "try:",
+            "    SCOPE_TRY = 1",
+            "except Exception:",
+            "    pass",
+            "with ctx:",
+            "    SCOPE_WITH = 1",
+            "for _ in ():",
+            "    SCOPE_FOR = 1",
+        ]) + "\n"
+        self.assert_nested_only(body, {"SCOPE_IF", "SCOPE_TRY", "SCOPE_WITH", "SCOPE_FOR"})
+        self.write_section("s00100-a.py", 100, body)
+        self.write_section("s00200-b.py", 200, body)
+        rc, out = self.check()
+        self.assert_only_guard_sibling(rc, out)
+
+    def test_40_bare_annotation_binds_no_name(self):
+        # F4: `BARE_NOTE: int` binds nothing, so section a does not clash with section b's assignment.
+        self.with_clean_hook()
+        self.with_guard_sibling()
+        annotation = "BARE_NOTE: int\n"
+        tree = ast.parse(annotation)
+        self.assertIsInstance(tree.body[0], ast.AnnAssign, "scope: the fixture must be an annotation")
+        self.assertIsNone(tree.body[0].value, "scope: the fixture must carry no value")
+        self.write_section("s00100-a.py", 100, annotation)
+        self.write_section("s00200-b.py", 200, 'BARE_NOTE = "b"\n')
+        rc, out = self.check()
+        self.assert_only_guard_sibling(rc, out)
 
 
 if __name__ == "__main__":

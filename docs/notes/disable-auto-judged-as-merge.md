@@ -1,0 +1,1 @@
+- disable-auto-judged-as-merge: the `--disable-auto` form of the pull request merge call is judged as a merge, because `merge_call_of` in `hooks/guard_merge.py` skips every flag it does not know and reads the call as a plain merge. It merges nothing, so the guard's refusal is a false alarm, on main too. Fix: none until seen. Seen: 2026-11-18 x1
