@@ -2,6 +2,8 @@
 
 ## The ruling
 
+Owner ruling Q5 v (chat, 10:42 CST Nov 20, 2026), which replaces every refusal of a red main below: a PR may merge onto a red main. The red becomes the top lane at once (a revert or a fix). Each merge prints one line that names main's red checks and their failing tests (`red_line` in `merge/merge.py`, read through `Host.failed_lines`), so a new break shows as a new name. `stable` still moves only on green. A red main needs no flag, a reason flag beside a known red lifts nothing, and the fix route (`fix_proven`) is gone. A lane-lint PASS lifts no pending head while main is red. A cancelled or running run beside a red that a merged revert would lift still refuses (it reads unknown). An UNKNOWN read of main (a failed read, a cancelled run with no red job, a re-run in flight) still refuses, and `--base-red-ok` still lifts it. The revert lift (`revert_proven`) is unchanged: a proven revert reads main green, so the red line stops. Cost of the line: on a red main only, one jobs read and one log read per failed job of each red run (unmeasured); nothing on a green main. The text below holds the earlier rulings. Where it says a red main refuses a merge, this ruling replaces it.
+
 Owner ruling 2026-11-17 09:20 CST (approved option, relayed by the consultant): "main allows only a revert onto red main" becomes "a fix also merges onto red main when it touches the failing test or its code, and its own run is green on the red test." The same day's case was a flaky test file the breaking merge did not touch. The consultant's picks serve that ruling:
 
 - A fix touches the failing test or its code when the pull request changes the failing test file (read from the red job's log or test id), or any path the blamed merge changed.

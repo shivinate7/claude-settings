@@ -34,7 +34,7 @@
                           check, and merges that head in the one run. A base that moves after the push refuses and keeps the commit. A relayed yes binds across the heal's page and base-merge commits.
                           A PR GitHub reads BLOCKED under "none" refuses and names the branch protection and requiredChecks, since the tool read no protection.
                           A head whose own run is still pending merges when a lane-lint PASS names its exact sha (a PASS carried over claim commits counts); main's run after
-                          the merge is the check. A finished red run, a red main and a PASS for another head still refuse. GitHub reads a pending required check as BLOCKED,
+                          the merge is the check. A finished red run and a PASS for another head still refuse, and a red main lets no PASS lift a pending run. GitHub reads a pending required check as BLOCKED,
                           so the PUT goes on past that one read and GitHub refuses it or not; BEHIND still refuses.
                           A confirm in the cloud needs a lane-lint PASS for the head's sha. Any pull request skips it, a lane PR included, when the all-jobs-passed rollup is green on that exact head:
                           then it skips the lint and prints one `merge: lane lint skipped ...` line naming the rollup and the head's first 9 characters.
@@ -338,12 +338,12 @@ STAMP_CITE = "(decision one-shared-record-stamp, the claim runs only on the defa
 RECORDS_CITE = "(decision records-index-at-merge, only the merge tool rebuilds the records page, before the branch goes ready)"
 UNDO_CITE = "(decision silent-undo-check-design, a branch that silently undoes earlier work does not merge)"
 DEBT_CITE = "(decision debt-close-runs-retire, a debt closes only when its Retire check passes on the head)"
-RED_CITE = "(rule git-red-main-reverts, a red main takes only the revert of the blamed commit or a fix)"
+RED_CITE = "(rule git-red-main-reverts, a red main: its revert or fix is the top lane, and a PR may merge onto it)"
+RED_TESTS_SHOWN = 12  # the failing tests the merge line on a red main names before it says "and N more"
 CANCELLED_NO_RED = "was cancelled with no red job"  # base_state words an unknown cancelled run with it; red_base reads it back to give the cancelled run its own headline
 RERUN_REMEDY = "gh run rerun"  # base_state names it for a cancelled run on the base's head; red_base reads it back to name the remedy in its way out
 RERUN_IN_FLIGHT = "is a re-run still going"  # base_state words an unknown re-run with it; red_base reads it back to give the re-run its own headline
-BREAKING_MERGE = "breaking merge:"  # base_state words the first red run with a green parent, once its re-run is red again, with it; red_base reads it back to name the revert route
-FIRST_RED_RERUN = re.compile(rf"`{RERUN_REMEDY} (\d+) --failed`")  # base_state names a first red run's re-run with it; red_base reads the run id back to name the re-run before the reason flag
+BREAKING_MERGE = "breaking merge:"  # base_state words the first red run with a green parent, once its re-run is red again, with it
 DROP_CITE = "(decision silent-undo-check-design, a branch that silently undoes earlier work does not merge)"
 BATCH_CITE = "(decision main-branch-protection, the merge tool reads the required checks from the ruleset or the protection; decision private-repos-no-ci, merge.requiredChecks \"none\" merges a repo with no required check)"
 EXPRESS_CITE = "(decision owner-override, ruling R59 part 5 of 15:05 CST Nov 12, a ruled prose change skips the batch queue and runs only the checks that read its files)"
@@ -1898,7 +1898,7 @@ class Host:
                     and r["event"] in self.BASE_EVENTS and r["name"] not in self.ignore and r["path"].split("@")[0] in flows]
             red, unknown, read = [], [], {}
             red_runs = []  # the runs behind `red`, one per file and group: each starts its own walk to the breaking run
-            red_names = {}  # run id -> the names of that run's red jobs, which fix_proven reads back from a fix's head
+            red_names = {}  # run id -> the names of that run's red jobs, which red_line prints and base_facts keeps
             cancelled = []  # the cancelled runs with no red job that no run cleared: unknown alone, and named beside a red verdict, with their re-run when they are on the base's head
             base_head = next((r.get("head_sha") for r in json.loads(out)["workflow_runs"] if r["event"] in self.BASE_EVENTS), None)  # the newest run on the page starts at the base's head
 
@@ -2099,7 +2099,7 @@ class Host:
 
     def check_state(self, n, sha, name):
         """-> the state of the one check `name` on head `sha`: "pass", "fail", "pending", or None when the head has no row for it that ran (absent, or skipped
-        only). The per-check read fix_proven uses for the failing check of the base's run: head_state is green when every row is, and a check that never runs on pull
+        only). The per-check read: head_state is green when every row is, and a check that never runs on pull
         request heads has no row, which head_state cannot tell from a pass. A cancel beside a pass or pending row of the name is dropped, as classify drops it. A failed read is a Stop."""
         rows = self.checks(n, warn=False, sha=sha).get(name) or []
         rows = [b for b, _ in rows]
@@ -4457,7 +4457,7 @@ def _shas(read):
         return None
     return lines
 
-def revert_proven(root, host, base):
+def revert_proven(root, host, base, beside_ok=False):
     """True when a red base is lifted by a revert already merged with its tree proven (ruling own-823-b-revert-merge-lifts-red, decision no-merge-onto-red-main).
     Merges resume when the revert merges, with its run still going (ruling own-745-b-resume-at-revert), and stay resumed while unrelated commits land above it.
     Read from the facts base_state left on the host (`base_facts`), never from its prose. All must hold:
@@ -4469,9 +4469,10 @@ def revert_proven(root, host, base):
     - the landing commit's tree is the tree of N's head, and that head's checks read green (Host.head_state, the one reader);
     - the red run sits on B or between B and the landing commit, never on the landing commit or above it (the revert's own run, or a later merge, failed).
     A first red names no breaking merge, so it never lifts. Any read that fails, or a walk past the cap, is not proven: unknown never reads clear.
-    Skipped runs are no evidence here. Cost accepted by the owner: a revert that does not fix the failure reads clear until the next full run."""
+    Skipped runs are no evidence here. Cost accepted by the owner: a revert that does not fix the failure reads clear until the next full run.
+    `beside_ok` leaves out the first condition's cancelled run and re-run in flight: red_base asks it, to learn whether the revert would have lifted the red but for a run that reads unknown."""
     facts = getattr(host, "base_facts", None)
-    if not facts or len(facts["blamed"]) != 1 or facts["red"] != 1 or facts["others"]:
+    if not facts or len(facts["blamed"]) != 1 or facts["red"] != 1 or (facts["others"] and not beside_ok):
         return False
     sha = facts["blamed"][0]
     try:
@@ -4518,45 +4519,6 @@ def revert_proven(root, host, base):
     except (Stop, subprocess.TimeoutExpired, OSError, KeyError, ValueError, IndexError, TypeError):
         return False
 
-def fix_proven(root, host, base, n, info):
-    """-> why pull request `n` is a fix that merges onto a red base with no reason flag (a phrase for the message), or None when it is not (decision no-merge-onto-red-main). Read from the facts base_facts left on the host (`base_facts`), never from its prose. All must hold:
-    - exactly one red run, no cancelled run, no re-run in flight and no other red read beside it, and exactly one breaking merge B, named by its full sha;
-    - the pull request's head holds the head the red run was read at, so the head's own run tested the breaking merge too;
-    - one of two routes. Path: the pull request changes a path that B changed (B against its first parent, each path whole, renames by both names). Test file: the pull
-      request changes a test file that a failing line of the red run's log names (Host.failed_lines) and keeps it: a file the head deletes or renames away is no fix. Both routes need the red run to have red jobs, and each of them to
-      read "pass" on the head (Host.check_state: a missing or pending row is no pass); the path route also needs the head's own checks green (Host.head_state, the one reader).
-    Any read that fails is not proven: unknown never reads clear, and a log that Host.failed_lines cannot account for gives no test file."""
-    facts = getattr(host, "base_facts", None)
-    if not facts or len(facts["blamed"]) != 1 or facts["red"] != 1 or facts["others"]:
-        return None
-    sha = facts["blamed"][0]
-    try:
-        c, out = git(root, "diff", "--name-only", "--no-renames", "-z", f"{sha}^1", sha)
-        if c:
-            return None
-        blamed = {p for p in out.split("\0") if p}
-        files = host.pr_files(n, info.get("changed_files"))
-        changed = {posixpath.normpath(p) for p, _, _ in files}
-        kept = {posixpath.normpath(p) for p, status, _ in files if status != "removed"}  # a test file the head deletes or renames away is no fix of it
-        info = fetch_pr_head(root, info, base)  # the head's commits are local, and the head is the one gh named
-        if not facts["head"] or git(root, "merge-base", "--is-ancestor", facts["head"], info["head"])[0]:
-            return None
-        names = facts["red_jobs"][0]
-        same_check_passes = bool(names) and all(host.check_state(n, info["head"], name) == "pass" for name in names)
-        if blamed & changed and same_check_passes and head_not_green(host.head_state(n, info["head"])) is None:
-            return f"a path of the breaking merge (its own head is green, and its own check {', '.join(names)} is pass on its head)"
-        try:
-            parsed = [failing_line(t) for t in host.failed_lines(facts["red_ids"][0])]
-            tests = {posixpath.normpath(p[0]) for p in parsed if p and p[0]}
-        except UnreadJobs:
-            return None
-        hit = sorted(tests & kept)
-        if hit and same_check_passes:
-            return f"the failing test file {hit[0]} (its own check {', '.join(names)} is pass on its head)"
-        return None
-    except (Stop, subprocess.TimeoutExpired, OSError, KeyError, ValueError, IndexError, TypeError):
-        return None
-
 def base_verdict(root, host, base):
     """host.base_state over the workflow files on origin/<base>, with a red lifted to green when revert_proven says the revert of the breaking merge landed on the base with its
     tree proven and no red run on it or above it. The one place both the preview and red_base read, so they print one verdict. A failed read of the workflow files is unknown."""
@@ -4569,41 +4531,57 @@ def base_verdict(root, host, base):
         return "green", ""
     return verdict, detail
 
-def red_base(root, host, base, red_ok="", pr=None):
-    """The red-main check (decision no-merge-onto-red-main): refuse while the base's latest completed run has a red job, or cannot be read.
-    --base-red-ok "<reason>" is a reason flag, as --undo-check-unknown-ok is, and Claude may type it with a reason: the way out for the batch that carries the fix (a revert PR of the breaking merge among them), or for an unknown read whose cause the reason names. A lift is logged and returns its reason, for record_lift.
-    `pr` is (number, info) of the pull request being merged: a fix that changes a path of the breaking merge or the failing test file, with its own proof green and its head holding the red tip, merges with no flag (fix_proven).
-    Once that revert is merged with its tree proven, base_verdict reads the base green (revert_proven), so no flag is needed after it, for later merges too, until a run on the
+def red_line(host):
+    """The text of the one line a merge or a preview prints for a red base (ruling Q5 v, owner, chat, 10:42 CST Nov 20, 2026): each red check of the base's red runs, and the failing tests the red
+    jobs' logs name, read through Host.failed_lines. A new break then shows as a new name. A log that cannot be read in full says so, and the tests that were read still print.
+    Cost: one jobs read and one log read per failed job, per red run, on a red base only; nothing on a green one."""
+    facts = getattr(host, "base_facts", None) or {}
+    ids, jobs = facts.get("red_ids") or [], facts.get("red_jobs") or []
+    checks = sorted({name for names in jobs for name in names})
+    tests, why = [], ""
+    for run_id in ids:
+        try:
+            lines = host.failed_lines(run_id)
+        except UnreadJobs as e:
+            lines, why = e.lines, "; some failing tests could not be read"
+        except (Stop, subprocess.TimeoutExpired, OSError, KeyError, ValueError, TypeError):
+            lines, why = [], "; the failing tests could not be read"
+        for text in lines:
+            parsed = failing_line(text)
+            name = "::".join(x for x in (parsed or (None, None)) if x)
+            if name and name not in tests:
+                tests.append(name)
+    shown = ", ".join(tests[:RED_TESTS_SHOWN]) + (f" and {len(tests) - RED_TESTS_SHOWN} more" if len(tests) > RED_TESTS_SHOWN else "")
+    return (f"Red checks: {', '.join(checks) or 'none named (the run ended red with no red job)'} (run {', '.join(str(i) for i in ids)}). "
+            f"Failing tests: {shown or 'none named'}{why}")
+
+def red_base(root, host, base, red_ok=""):
+    """The red-main check (decision no-merge-onto-red-main): a base whose latest completed run is RED no longer refuses a merge (ruling Q5 v); the merge prints red_line, so a new break shows as a new name.
+    The base's UNKNOWN read still refuses: unknown never reads clear.
+    --base-red-ok "<reason>" is a reason flag, as --undo-check-unknown-ok is, and Claude may type it with a reason: for an unknown read whose cause the reason names (and for a revert PR, which merges with no flag now). A lift is logged and returns its reason, for record_lift.
+    Once a revert of the breaking merge is merged with its tree proven, base_verdict reads the base green (revert_proven), so the red line stops, for later merges too, until a run on the
     revert or above it is red; a revert whose tree is not proven leaves the base red until its own run on the base is green."""
     verdict, detail = base_verdict(root, host, base)
+    host.on_red_base = verdict == "red"  # confirm reads it: a lane-lint PASS lifts no pending head on a red base
     if verdict == "green":
         return
     rerun = verdict == "unknown" and RERUN_IN_FLIGHT in detail
-    cancelled = verdict == "unknown" and not rerun and CANCELLED_NO_RED in detail
+    beside = verdict == "red" and bool((getattr(host, "base_facts", None) or {}).get("others")) and revert_proven(root, host, base, beside_ok=True)  # a revert would lift this red but for a cancelled or running run beside it: that base is unknown, and unknown never reads clear
+    cancelled = (verdict == "unknown" or beside) and not rerun and CANCELLED_NO_RED in detail
     what = (f"{base}'s latest completed run is red: {detail}" if verdict == "red" else f"{base}'s runs are UNKNOWN, a re-run is still running: {detail}" if rerun
             else f"{base}'s runs are UNKNOWN: {detail}" if cancelled
             else f"{base}'s runs are UNKNOWN, the read failed: {detail}")
+    if verdict == "red" and not beside:  # a known red needs no lift: a reason flag beside it is echoed and lifts nothing, so no Reason flag line reaches the merge commit
+        if red_ok.strip():
+            say(f"merge: {what}. {RED_FLAG}, reason: {red_ok.strip()}. A red {base} needs no lift (ruling Q5 v), so none is recorded.")
+        say(f"merge: {base} is RED. {red_line(host)}. This merge goes onto the red {base}; a new name in this list is a new break {RED_CITE}")
+        return
     if red_ok.strip():
         say(f"merge: {what}. {RED_FLAG}, reason: {red_ok.strip()}")
         return red_ok.strip()
-    proof = fix_proven(root, host, base, pr[0], pr[1]) if verdict == "red" and pr else None
-    if proof:  # a fix for the red merges on its own proof: no flag, so no reason to carry
-        say(f"merge: {base}'s latest completed run is red: {detail}. #{pr[0]} changes {proof}, and its head holds {base}'s red tip, so it merges onto the red {base} (decision no-merge-onto-red-main)")
-        return
-    first_red = FIRST_RED_RERUN.search(detail) if verdict == "red" else None
-    broke = verdict == "red" and BREAKING_MERGE in detail
-    carries = f"if this batch carries the fix, or the unknown read has a known cause, run again with the reason flag {RED_FLAG} \"<reason>\"."
-    if broke:  # the revert PR is the batch that carries the fix: its own Drops-lines trailer covers each file the silent-undo check names, and the reason flag lifts no silent-undo finding
-        way = (f"Open a revert PR for the breaking merge named above (`git revert -m 1 <commit>` for a merge commit) and merge it with the reason flag {RED_FLAG} \"<reason>\". "
-               f"Merges resume at once when that revert is on {base} with its tree proven (the revert's PR checks are green and the tree of the merge that landed it is the revert PR's tree), and stay resumed until a run on that merge or above it is red; "
-               f"any other revert waits until its run on main is green (a green run that ran the suite), and until then its run is pending and the breaking red stays the newest. "
-               f"The revert PR needs a Drops-lines trailer for each file the silent-undo check names (a revert of a merge that edits and adds files is flagged \"whole file restored\" and \"file deleted\"), "
-               f"and so does a re-land that reverts the revert; the reason flag {RED_FLAG} does not lift that check. "
-               f"Or, {carries}")
-    else:
-        way = (f"Re-run the first red run: `{RERUN_REMEDY} {first_red.group(1)} --failed`, then run again. Or, " if first_red else
-               "Wait for the re-run to finish, then run again. Or, " if rerun else "Re-run the cancelled run named above, then run again. Or, " if cancelled and RERUN_REMEDY in detail else "") + carries
-    raise Liftable(f"{what}\nNo batch merges onto a red {base}. {way[0].upper() + way[1:]} {RED_CITE}")
+    way = ("Wait for the re-run to finish, then run again. Or, " if rerun else "Re-run the cancelled run named above, then run again. Or, " if cancelled and RERUN_REMEDY in detail else "") \
+        + f"if the unknown read has a known cause, run again with the reason flag {RED_FLAG} \"<reason>\"."
+    raise Liftable(f"{what}\nNo batch merges onto a red {base} while a run of it reads UNKNOWN, or sits unread beside a red that a merged revert lifts (ruling Q5 v lets a PR merge onto a known red only). {way[0].upper() + way[1:]} {RED_CITE}")
 
 def head_not_green(state):
     """-> why `state`, the one read of a head's own checks (Host.head_state), is not green; None when it is green. The read never waits:
@@ -4729,12 +4707,10 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     m = cfg.get("merge", {})
     held = lock.read(base)
     verdict, detail = base_verdict(root, host, base)  # the red-main check's read
-    proof = fix_proven(root, host, base, n, info) if verdict == "red" else None
     say(f"merge: PREVIEW for #{n} ({info['branch']} at {info['head'][:9]}). Nothing was pressed.",
         "  lock:   " + (holder_text(base, held, lock.now()) if held and held[1] > lock.now() else "free"),
         f"  head checks: {host.head_state(n)}",
-        f"  {base} run: {verdict}" + ("" if verdict == "green" else f": {detail}. --confirm merges it onto the red {base}: it is a fix that changes {proof}, and its head holds {base}'s red tip."
-                                     if proof
+        f"  {base} run: {verdict}" + ("" if verdict == "green" else f": {detail}. {red_line(host)}. --confirm merges onto the red {base} (ruling Q5 v)." if verdict == "red"
                                      else f": {detail}. --confirm refuses it unless --base-red-ok \"<reason>\" is given."),
         "  base:   " + (current or f"holds {base}'s tip"),
         "  claim:  " + (f"already claimed ({resumed}); " + ((f"run `merge {n} --confirm` on the draft first: it runs the ready checks (" + ", ".join(m["readyChecks"]) + "), then refuses this head, so mark it ready by hand after they pass (route pr-ready-mcp-cloud in cloud)"
@@ -5192,7 +5168,7 @@ BATCH_RUNNER_NEEDS_HEAD = "the merge needs the head the CI ran on, so pass it wi
 def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok="", expected_head=None, linted_head=None, express=False, lint_proof=None):
     """`lint_proof`: a callable(info) -> True when a lane-lint PASS holds for that live head (lint_proves_head), None for a host that reads no comments. It is asked
     only when the head's own run is still pending: a PASS lifts a pending run, and main's run after the merge is the check
-    (a red main reverts the blamed commit). A finished red run, a red main and a PASS for another head are never lifted."""
+    (a red main reverts the blamed commit). A finished red run, a PASS for another head, and any PASS on a red main are never lifted."""
     m = cfg.get("merge", {})
     info = info or host.pr(n)  # main read it once already, and the config came from that base. A read; the head compare after the lock covers a head that moves before the lock is ours
     base = info["base"]  # the PR's own base; read again under the lock
@@ -5224,7 +5200,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             return draft_step(root, cfg, n, host, info)
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
         with timed_phase("main-run"):
-            record_lift(lifts, RED_FLAG, red_base(root, host, base, red_ok, (n, info)))
+            record_lift(lifts, RED_FLAG, red_base(root, host, base, red_ok))
         if express:  # the worktree opens early: the classifier reads the head's diff
             tmp, wt = open_worktree(root, info, base)
             no_express = express_refusal(root, wt, base_ref, info)
@@ -5250,7 +5226,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             say("merge: checking the head's checks and runs ...")  # before the read, which can block
             state = "green" if no_ci else host.head_state(n, info["head"])  # a resumed claim is the head: the claim commit's own checks are read, never the head under it. Under none no run is read, whatever host answers
             not_green = head_not_green(state)
-            if not_green and state.startswith("pending: ") and lint_proof and lint_proof(info):
+            if not_green and state.startswith("pending: ") and not getattr(host, "on_red_base", False) and lint_proof and lint_proof(info):  # a red base keeps its pending head waiting: the PASS rests on a green base
                 say(f"merge: the head's run is still pending ({state[len('pending: '):]}), and a lane-lint PASS names {info['head'][:9]}, so the run does not hold the merge "
                     f"(owner, 2026-11-15 18:21 CST: {base}'s run after the merge is the check, and a red {base} reverts it).")
                 host.pending_lifted = True
