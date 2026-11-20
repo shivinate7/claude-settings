@@ -11,7 +11,8 @@ the output a reader reads. The clock is Host.now, held at NOW, so no case reads 
 THE OUTPUT CONTRACT these cases read (merge.py builds it):
   one line per open pull request, starting `#<n> <branch> <sha9> `. Its review state stays as it is today. Before `; CI` it carries
     `; next: <act>, owner <owner>, age <H>h` and `, RED` after the age when the act is red.
-    <act> is one of: batch | lane round <n> | fix check | fresh full review | waits on <item> | batch run | blocked on #<n> | lane lint | none
+    <act> is one of: batch | in #<n> | lane round <n> | fix check | fresh full review | waits on <item> | batch run | blocked on #<n> | lane lint | none
+    `in #<n>`: a done record whose pull request an open integration PR #<n> carries in its freeze block (not batch; owner goal, 10:47 CST Nov 20)
     `lane lint` (owner lane) is a done record with no lane-lint PASS at its head; `lane` is accepted too.
   after the lines, two numbers, each on its own line:
     `longest wait from a done record: <H>h`
@@ -234,6 +235,14 @@ class NextActReds(LedgerCase):
                                  f"control: #9 is an unlabelled draft with no record, so it reads lane round 1, not RED:\n{out}")
                 _act, red = self.next_act(out, 7)
                 self.assertTrue(red, f"#7 is a draft labelled {label} with no `Waits on:` line, so no hold rule holds it, and its line does not read RED:\n{out}")
+
+    def test_a_done_member_of_an_open_integration_pr_reads_in_that_pr_and_not_batch(self):  # owner goal, 10:47 CST Nov 20: members close only after it merges
+        body = "\n".join(tm.merge.freeze_lines("x", {9: LIVE}))  # #7 is the integration PR of batch x, and its freeze block carries lane #9
+        integration = {**tm.batch_pull(7, LIVE, created_at=iso(5), head_ref=tm.merge.integration_branch("x")), "updated_at": iso(5), "body": body, "labels": []}
+        out = self.reviewed(LedgerHost([integration, pull(9)], comments=[record(9, 30), lint(9)]))
+        self.assertRegex(self.line_of(out, 9), rf"^#9 feat9 {LIVE[:9]} done: ", "control: #9 is done at the live head, with its record and lint PASS")
+        act, _red = self.next_act(out, 9)
+        self.assertEqual(act, "in #7", f"#9 is a done member that the open integration PR #7 carries, so its act is `in #7`, not batch:\n{out}")
 
 
 class NextActShapes(LedgerCase):

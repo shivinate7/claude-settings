@@ -4141,7 +4141,7 @@ def ref(name):
     except OSError:
         pass
     return ""
-def feat_head(): return ref("refs/heads/feat")
+def feat_head(): return ref("refs/heads/" + S.get("head_ref", "feat"))  # the pull request's head branch: feat, or the case's head_ref (a batch integration PR's batch-x, whose claim commit moves it)
 RUN_FIELDS = ("databaseId", "name", "workflowName", "workflowDatabaseId", "status", "conclusion", "headSha", "headBranch", "event", "url")
 def next_runs():
     """The next answer to a workflow-run read: runs_seq, one entry a read, the last one again. An entry is (name, status, conclusion[, databaseId[, workflowDatabaseId]]).
@@ -7320,7 +7320,9 @@ class CloseReplaced(Env):
     repo, and not as `see #N` or `related #N`. A number list counts only when the line or sentence ends right after it, so `Replaces #1 in the docs`
     names nothing. Each case reads the fake gh's calls: at most one read of each named pull request, one
     `PATCH pulls/<N> state=closed` and one pointer comment for each open one, and no call at all to a pull request the body does not close.
-    The close does not wait on the ready mark: the real Host's ready returns False, and the step still closes. Not a GhHalf subclass: the GhHalf tests must not run twice."""
+    The close does not wait on the ready mark: the real Host's ready returns False, and the step still closes. A batch integration PR closes none
+    of its members at --ready; a landed `--confirm` of it closes each open member, with a `Merged in #N as <sha>` pointer (owner goal, 10:47 CST
+    Nov 20: members close only after it merges). Not a GhHalf subclass: the GhHalf tests must not run twice."""
     set, calls, gh_host, go, gh_state = GhHalf.set, GhHalf.calls, GhHalf.gh_host, GhHalf.go, GhHalf.gh_state
 
     def setUp(self):
@@ -7358,6 +7360,76 @@ class CloseReplaced(Env):
         """Nothing read, closed or commented on pull request n: the body does not name it as replaced."""
         self.assertEqual(self.lines_naming(n), [], f"#{n} was read or changed, though the body does not name it as replaced:\n{out}")
         self.assertEqual(self.posts_on(n), [], f"#{n} got a comment, though the body does not name it as replaced:\n{out}")
+
+    def confirm_integration(self, numbers, dropped=(), merged=(), **state):
+        """`merge 7 --confirm` on batch integration PR #7 (head `batch-x`), whose freeze block names `numbers` (`dropped` marked). Each member is
+        open, except those in `merged`: GitHub marks them MERGED, so they are listed and read closed and merged. `state` sets more fields of the
+        fake gh (checks_seq, merge_fail). -> (rc, stdout and stderr together)."""
+        self.push_branch(merge.integration_branch("x"))
+        extra = {str(n): {"state": "closed", "merged": True} for n in merged}
+        self.set(pr_number=7, body="\n".join(merge.freeze_lines("x", {n: f"{n:040x}" for n in numbers}, dropped=dropped)),
+                 head_ref=merge.integration_branch("x"), open_prs=[[f"named-{n}", f"{n:040x}", "main", n] for n in numbers], pr_extra=extra, **state)
+        self.host.branch = merge.integration_branch("x")  # the claim hook (claim_push_fires_on_claim) reads the branch a claim lands on, so the second step runs
+        return self.go()
+
+    def assert_not_closed(self, n, out):
+        """Pull request n got no close and no comment: nothing in this step closes it, and nothing points to it."""
+        self.assertNotIn(f"PATCH pulls/{n} state=closed", self.calls().splitlines(), f"#{n} was closed by this step, though it is not closed by it:\n{out}")
+        self.assertEqual(self.posts_on(n), [], f"#{n} got a comment from this step, though it gets none:\n{out}")
+
+    def assert_merged_pointer(self, n, by, oid, out):
+        """Pull request n got one comment that says `Merged in #by as <sha>`, and the sha is the merge commit `oid` (a prefix of 7 or more digits names it too)."""
+        posted = self.posts_on(n)
+        self.assertEqual(len(posted), 1, f"#{n} got {len(posted)} comments, want one that says #{by} merged as its commit:\n{out}")
+        m = re.search(rf"Merged in #{by} as ([0-9a-f]{{7,40}})\b", posted[0])
+        self.assertIsNotNone(m, f"the comment on #{n} does not say `Merged in #{by} as <sha>`:\n{posted[0]}")
+        self.assertTrue(oid.startswith(m.group(1)), f"the comment on #{n} names {m.group(1)}, and the merge commit is {oid}:\n{posted[0]}")
+
+    def test_a_landed_confirm_closes_each_open_member_with_a_merged_pointer(self):  # owner goal, 10:47 CST Nov 20: members close only after it merges
+        members = list(range(3301, 3311))  # ten open members: the backlog size that combines
+        rc, out = self.confirm_integration(members)
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls(), "precondition: the integration PR did not merge, so no member can close after it:\n" + out)
+        oid = self.gh_state("oid")
+        for n in members:
+            with self.subTest(n=n):
+                self.assertIn(f"PATCH pulls/{n} state=closed", self.calls().splitlines(), f"#{n} stayed open after #7 merged:\n{out}")
+                self.assert_merged_pointer(n, 7, oid, out)
+
+    def test_a_landed_confirm_leaves_a_dropped_member_open(self):  # owner goal, 10:47 CST Nov 20; the dropped lane is the control
+        rc, out = self.confirm_integration([3301, 3302], dropped=[3302])
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls(), "precondition: the integration PR did not merge, so no member can close after it:\n" + out)
+        self.assert_merged_pointer(3301, 7, self.gh_state("oid"), out)
+        self.assert_not_closed(3302, out)
+
+    def test_a_member_github_marks_merged_gets_only_the_pointer_and_no_close(self):  # C5: the close is skipped for a MERGED member
+        rc, out = self.confirm_integration([3301, 3302], merged=[3302])
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls(), "precondition: the integration PR did not merge, so no member can close after it:\n" + out)
+        oid = self.gh_state("oid")
+        self.assert_merged_pointer(3302, 7, oid, out)
+        self.assertNotIn("PATCH pulls/3302 state=closed", self.calls().splitlines(), f"#3302 was closed, though GitHub already marks it merged:\n{out}")
+        self.assertIn("PATCH pulls/3301 state=closed", self.calls().splitlines(), f"the open member #3301 stayed open after #7 merged:\n{out}")
+        self.assert_merged_pointer(3301, 7, oid, out)
+
+    def test_a_refused_confirm_closes_no_member(self):  # owner goal, 10:47 CST Nov 20; green on the old code, a guard for the close after a landed merge
+        rc, out = self.confirm_integration([3301, 3302], merge_fail=NOT_MERGEABLE)
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls(), "precondition: the merge call was never sent, so the refusal is not the one under test:\n" + out)
+        self.assertIn("not mergeable", out, "precondition: the confirm did not stop at GitHub's refusal of the merge:\n" + out)
+        for n in (3301, 3302):
+            with self.subTest(n=n):
+                self.assert_not_closed(n, out)
+
+    def test_a_red_confirm_closes_no_member(self):  # owner goal, 10:47 CST Nov 20; green on the old code, a guard for the close after a landed merge
+        rc, out = self.confirm_integration([3301, 3302], checks_seq=[[("checks", "fail", "https://x/y")]])
+        self.assertNotEqual(rc, 0, out)
+        self.assertNotIn(MERGE_CALL, self.calls(), f"precondition: the merge was sent though a required check is red, so the red is not the one under test:\n{out}")
+        self.assertIn("checks: fail", out, f"precondition: the confirm did not stop at the red check:\n{out}")
+        for n in (3301, 3302):
+            with self.subTest(n=n):
+                self.assert_not_closed(n, out)
 
     def test_a_replaces_line_closes_the_named_open_pull_request_at_ready(self):
         rc, out = self.ready(3210, "Replaces #1636", named=[(1636, "open")])
@@ -7471,15 +7543,15 @@ class CloseReplaced(Env):
         self.assertEqual(rc, 0, out)
         self.assert_untouched(1636, out)
 
-    def test_an_integration_pr_at_ready_closes_its_open_lanes_and_not_a_dropped_one(self):  # control: green on the old code
+    def test_an_integration_pr_at_ready_closes_none_of_its_open_lanes(self):  # owner goal, 10:47 CST Nov 20: members close only after it merges
         lanes = {3301: "a" * 40, 3302: "b" * 40, 3303: "c" * 40}
         self.push_branch(merge.integration_branch("x"))
         body = "\n".join(merge.freeze_lines("x", lanes, dropped=[3303]))
         rc, out = self.ready(7, body, named=[(3301, "open"), (3302, "open"), (3303, "open")], head_ref=merge.integration_branch("x"))
         self.assertEqual(rc, 0, out)
-        for n in (3301, 3302):
-            self.assert_closed_with_pointer(n, 7, out)
-        self.assert_untouched(3303, out)
+        for n in (3301, 3302, 3303):
+            with self.subTest(n=n):
+                self.assert_not_closed(n, out)
 
     def test_a_name_with_words_after_its_number_closes_nothing(self):  # step 4: a number list counts only at the end of its line or sentence
         rc, out = self.ready(3210, "Replaces #1636 in the docs", named=[(1636, "open")])
