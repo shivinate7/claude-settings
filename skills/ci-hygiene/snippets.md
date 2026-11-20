@@ -238,9 +238,8 @@ to `/dev/null`.
 ## 10. Prove a check red
 
 ```sh
-cp -R . "$(mktemp -d)/scratch" && cd "$_"   # scratch copy
-# break one target, for example replace one pinned SHA with a tag
-ZIZMOR_PATHS=".github/ actions/" bash actions/zizmor/run.sh   # must exit non-zero
+# break one target in a copy of HEAD, for example replace one pinned SHA with a tag
+~/.claude/bin/red-run HEAD --replace <file> <pinned SHA> <tag> -- env ZIZMOR_PATHS=".github/ actions/" bash actions/zizmor/run.sh   # must not exit 0
 ```
 
 Decide a commit on the check's own exit code. A pipe takes the exit code of its last command:
