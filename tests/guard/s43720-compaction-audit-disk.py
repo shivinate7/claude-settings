@@ -1,8 +1,8 @@
 # section 43720
 FAMILY = "compaction-audit"
 # The audit owes one Audit: spawn. The load brake refuses that spawn at a full disk (free under the smaller of 5% of the
-# disk and 5 GB), so a session on a full disk could neither spawn the audit nor run the shell call that frees the disk.
-# That deadlocked on 2026-11-19 at 19:41 CST (disk 3.3 GB free). These cases hold the exemption: while the audit is owed
+# disk and 5 GB), so a session on a full disk could neither spawn the audit nor run the shell call that frees the disk:
+# a deadlock. These cases hold the exemption: while the audit is owed
 # AND the brake refuses the audit spawn for disk, compaction-audit lets through one disk-cleanup shell call (the janitor
 # sweep, or rm -rf of an absolute /tmp path). Every other shell call stays refused. The cleanup clears nothing: the audit
 # stays owed. A disk that is not full, or memory that is full, changes nothing: a sweep frees disk, not memory.
@@ -14,9 +14,23 @@ CD_SWEEP_CONFIRM = CD_SWEEP + " --confirm"
 CD_RM_TMP = "rm -rf /tmp/claude-disk-cleanup/run-1"
 CD_RM_OTHER = "rm -rf /home/user/keep-me"
 CD_RM_MIXED = CD_RM_TMP + " /home/user/keep-me"
+# The sweep without --fast is not the cleanup: only the attended fast preview (and its --confirm) is.
+CD_SWEEP_NOFAST = "python3 ~/.claude/janitor/sweep.py --root %s --attended" % SWEEP_ROOT
+CD_SWEEP_NOFAST_CONFIRM = CD_SWEEP_NOFAST + " --confirm"
+# rm -Rf is rm -rf: the same recursive force delete, so it is the same cleanup.
+CD_RM_CAPITAL_R = "rm -Rf /tmp/claude-disk-cleanup/run-1"
+# A /tmp path spelled with a trailing slash is /tmp itself, which is not a cleanup target.
+CD_RM_TMP_ROOT = "rm -rf /tmp//"
+# Shell chaining, expansion and traversal. Each form stays refused: the shell runs more than the one path it names.
+CD_RM_SEMI = "rm -rf /tmp/claude-disk-cleanup/run-1;rm -rf /tmp/claude-disk-cleanup/run-2"
+CD_RM_AND = "rm -rf /tmp/claude-disk-cleanup/run-1&&rm -rf /tmp/claude-disk-cleanup/run-2"
+CD_RM_DOLLAR = "rm -rf /tmp/claude-disk-cleanup/$RUN"
+CD_RM_GLOB = "rm -rf /tmp/*"
+CD_RM_TILDE = "rm -rf /tmp/~/claude-disk-cleanup"
+CD_RM_DOTDOT = "rm -rf /tmp/../home/user/keep-me"
 CD_ORDINARY = "echo hi"
 # The readings. The brake's floors: busy under the smaller of 10% of the disk and 15 GB, full under the smaller of 5%
-# and 5 GB. CD_FULL is the incident's reading (3.3 GB free of 926 GB). CD_BUSY is under the busy floor, over the full one.
+# and 5 GB. CD_FULL is a full disk. CD_BUSY is under the busy floor, over the full one.
 CD_FULL = {"memory_pct": 40.0, "disk_free_gb": 3.3, "disk_total_gb": 926.0}
 CD_BUSY = {"memory_pct": 40.0, "disk_free_gb": 7.0, "disk_total_gb": 100.0}
 CD_FINE = {"memory_pct": 40.0, "disk_free_gb": 500.0, "disk_total_gb": 926.0}
@@ -105,16 +119,17 @@ def cd_bash(folder, cfg, reading, command, tag):
 
 
 def cd_allowed_check(name, reading, command, tag):
-    """A disk cleanup call while the audit is owed and the disk is full: compaction-audit lets it through."""
+    """A disk cleanup call while the audit is owed and the disk is full: the call is allowed, with nothing printed."""
     folder, cfg, flag, why = cd_setup(name, reading, "disk")
     if why:
         return False, why
     decision, reason, _side, why = cd_bash(folder, cfg, reading, command, tag)
     if why:
         return False, why
-    if decision == "deny" and "compaction-audit" in reason:
-        return False, ("compaction-audit refused the disk cleanup call %r while the audit is owed and the disk is full: %s"
-                       % (command[:60], reason[:90]))
+    problem = ov_want(decision, reason, "allow", "compaction-audit")
+    if problem:
+        return False, ("the disk cleanup call %r was not allowed while the audit is owed and the disk is full: %s"
+                       % (command[:60], problem))
     return True, "compaction-audit lets the disk cleanup call %r through while the audit is owed and the disk is full" % command[:60]
 
 
@@ -180,6 +195,26 @@ CD_CHECKS = (
      lambda: cd_refused_check("disk-rm-other", CD_FULL, "disk", CD_RM_OTHER, "rmother")),
     ("compaction-audit: an owed audit with a full disk refuses an rm -rf that mixes a /tmp path and another path",
      lambda: cd_refused_check("disk-rm-mixed", CD_FULL, "disk", CD_RM_MIXED, "rmmixed")),
+    ("compaction-audit: an owed audit with a full disk lets an rm -Rf of an absolute /tmp path through",
+     lambda: cd_allowed_check("disk-rm-capital", CD_FULL, CD_RM_CAPITAL_R, "rmcap")),
+    ("compaction-audit: an owed audit with a full disk refuses the sweep without --fast, with --confirm",
+     lambda: cd_refused_check("disk-nofast-confirm", CD_FULL, "disk", CD_SWEEP_NOFAST_CONFIRM, "nofastconfirm")),
+    ("compaction-audit: an owed audit with a full disk refuses the sweep with --attended alone, without --fast",
+     lambda: cd_refused_check("disk-nofast", CD_FULL, "disk", CD_SWEEP_NOFAST, "nofast")),
+    ("compaction-audit: an owed audit with a full disk refuses an rm -rf of /tmp itself, written as /tmp//",
+     lambda: cd_refused_check("disk-rm-root", CD_FULL, "disk", CD_RM_TMP_ROOT, "rmroot")),
+    ("compaction-audit: an owed audit with a full disk refuses an rm -rf chained with ; to a second rm",
+     lambda: cd_refused_check("disk-rm-semi", CD_FULL, "disk", CD_RM_SEMI, "rmsemi")),
+    ("compaction-audit: an owed audit with a full disk refuses an rm -rf chained with && to a second rm",
+     lambda: cd_refused_check("disk-rm-and", CD_FULL, "disk", CD_RM_AND, "rmand")),
+    ("compaction-audit: an owed audit with a full disk refuses an rm -rf of a path with a $ expansion",
+     lambda: cd_refused_check("disk-rm-dollar", CD_FULL, "disk", CD_RM_DOLLAR, "rmdollar")),
+    ("compaction-audit: an owed audit with a full disk refuses an rm -rf of a glob under /tmp",
+     lambda: cd_refused_check("disk-rm-glob", CD_FULL, "disk", CD_RM_GLOB, "rmglob")),
+    ("compaction-audit: an owed audit with a full disk refuses an rm -rf of a path with a ~ in it",
+     lambda: cd_refused_check("disk-rm-tilde", CD_FULL, "disk", CD_RM_TILDE, "rmtilde")),
+    ("compaction-audit: an owed audit with a full disk refuses an rm -rf of a path that climbs out with ..",
+     lambda: cd_refused_check("disk-rm-dotdot", CD_FULL, "disk", CD_RM_DOTDOT, "rmdotdot")),
     ("compaction-audit: an owed audit with a disk that is busy but not full refuses the sweep (the spawn passes busy)",
      lambda: cd_refused_check("disk-busy", CD_BUSY, "pass", CD_SWEEP, "busy")),
     ("compaction-audit: an owed audit with a fine disk refuses the sweep, so nothing changes",
