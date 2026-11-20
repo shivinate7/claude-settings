@@ -18756,6 +18756,20 @@ class ReviewEnv(Env):
         self.assertRegex(line, rf"^#7 feat7 {head[:9]} {state}: ", msg)
         return out
 
+    def carry(self, fx, live, passed=None, source=(), host=None, root=None, base="main"):
+        """-> lint_carried's answer for pull request 7 at `live`, with a lane-lint PASS on `passed` (fx.fixed by default). `host` defaults to the
+        scripted host of --reviewed, which reads commits, trees and compares from fx. `root` is the checkout git reads the merges in."""
+        root = root or self.co
+        host = host or self.reviewed_host(fx, live, base=base)
+        host.cwd = root
+        return merge.lint_carried(root, merge.DEFAULT_CONFIG, base, 7, [fx.fixed] if passed is None else list(passed), live, host, list(source))
+
+    def no_kinds_base(self, fx):
+        """Move origin's main to real_commits' main3 with a stamp config that has no kinds, so the base's stamp read finds none. -> that commit."""
+        no_kinds = self.git_commit(fx.main3, {".github/stamp.json": json.dumps(dict(CONFIG, kinds=[]))})
+        self.base_tip(no_kinds)
+        return no_kinds
+
     def main_only_clone(self):
         """A clone of origin that holds main's history alone, as a single-branch clone does: the commits of the other branches are absent until a fetch.
         --no-local makes git send only the objects reachable from main, where a local clone would copy every object of origin."""
@@ -20056,14 +20070,6 @@ class LintCleanMainMergeCarry(ReviewEnv, RecordsEnv):
         super().setUp()
         self.use_fake_records()
 
-    def carry(self, fx, live, passed=None, source=(), host=None, root=None, base="main"):
-        """-> lint_carried's answer for pull request 7 at `live`, with a lane-lint PASS on `passed` (fx.fixed by default). `host` defaults to the
-        scripted host of --reviewed, which reads commits, trees and compares from fx. `root` is the checkout git reads the merges in."""
-        root = root or self.co
-        host = host or self.reviewed_host(fx, live, base=base)
-        host.cwd = root
-        return merge.lint_carried(root, merge.DEFAULT_CONFIG, base, 7, [fx.fixed] if passed is None else list(passed), live, host, list(source))
-
     def test_a_a_lint_pass_carries_across_clean_merges_of_main(self):
         fx = self.real_commits()
         claim = self.claim_over(fx.fixed, {"docs/decisions/second.md": record("D-002", "second")})
@@ -20166,8 +20172,7 @@ class LintCleanMainMergeCarry(ReviewEnv, RecordsEnv):
 
     def test_k_a_clean_merge_carries_when_the_base_has_no_record_kinds(self):
         fx = self.real_commits()
-        no_kinds = self.git_commit(fx.main3, {".github/stamp.json": json.dumps(dict(CONFIG, kinds=[]))})
-        self.base_tip(no_kinds)
+        self.no_kinds_base(fx)
         claim = self.claim_over(fx.fixed, {"docs/decisions/second.md": record("D-002", "second")})
         self.facts(fx, [claim])
         self.assertFalse(self.carry(fx, claim), "fixture: a claim carries under a base with no record kinds, so the case below proves nothing about the stamp config")
@@ -20216,6 +20221,83 @@ class LintCleanMainMergeCarry(ReviewEnv, RecordsEnv):
         clone = self.main_only_clone()
         self.assertFalse(self.has_commit(clone, fork), "fixture: the main-only clone holds the unpushed commit, so git can read the merge")
         self.assertFalse(self.carry(fx, live, root=clone), "a merge whose merge state is unknown carried the PASS: an unknown read is no carry")
+
+
+class LintPageCarryWithoutStampKinds(ReviewEnv, RecordsEnv):
+    """A records-page commit the merge tool wrote carries a lane-lint PASS whether or not the base holds stamp kinds. The generator proves the page,
+    and the stamp config is no part of that proof. A page with a hand edit, or with another file, is not carried under either base. A claim-shaped
+    commit is not carried under a base with no kinds: no folder there is a stamp kind's, so no file there is a record. Each guard has a control on
+    the default base, which holds kinds, so its refusal is the one under test."""
+
+    def setUp(self):
+        super().setUp()
+        self.use_fake_records()
+
+    def test_a_a_generated_page_on_the_reviewed_head_carries_when_the_base_has_no_stamp_kinds(self):
+        fx = self.real_commits()
+        page = self.tool_page(fx.fixed)
+        self.facts(fx, [page])
+        self.assert_page_scope(page, fx.fixed)
+        self.assertTrue(self.carry(fx, page), "control: a generated records page on the reviewed head does not carry on the default base, so the case below proves nothing")
+        self.no_kinds_base(fx)
+        self.assertTrue(self.carry(fx, page), "a generated records page after the reviewed head is not carried when the base holds no stamp kinds")
+
+    def test_b_a_hand_edited_page_is_not_carried_when_the_base_has_no_stamp_kinds(self):
+        fx = self.real_commits()
+        generated = self.tool_page(fx.fixed)
+        hand = self.tool_page(fx.fixed, hand="hand line\n")
+        self.facts(fx, [generated, hand])
+        self.assert_page_scope(generated, fx.fixed)
+        self.assert_page_scope(hand, fx.fixed)
+        self.assertIn("hand line", sh(self.co, "git", "show", f"{hand}:{merge.RECORDS_PAGE}"), "fixture: the page commit does not hold the hand edit")
+        self.assertTrue(self.carry(fx, generated), "control: a generated records page on the reviewed head does not carry on the default base, so the case below proves nothing")
+        self.no_kinds_base(fx)
+        self.assertFalse(self.carry(fx, hand), "a hand-edited records page carried the PASS when the base holds no stamp kinds: the page must be the generator's output")
+
+    def test_c_a_records_page_commit_that_also_touches_another_file_is_not_carried_when_the_base_has_no_stamp_kinds(self):
+        fx = self.real_commits()
+        generated = self.tool_page(fx.fixed)
+        extra = self.tool_page(fx.fixed, changes={"notes.txt": "notes\n"})
+        self.facts(fx, [generated, extra])
+        self.assert_page_scope(generated, fx.fixed)
+        self.assert_page_scope(extra, fx.fixed, files=[merge.RECORDS_PAGE, "notes.txt"])
+        self.assertTrue(self.carry(fx, generated), "control: a generated records page on the reviewed head does not carry on the default base, so the case below proves nothing")
+        self.assertFalse(self.carry(fx, extra), "control: a records-page commit that touches notes.txt carried on the default base, so the refusal below is not the file rule")
+        self.no_kinds_base(fx)
+        self.assertFalse(self.carry(fx, extra), "a records-page commit that also touches notes.txt carried the PASS when the base holds no stamp kinds")
+
+    def test_d_a_page_commit_whose_read_fails_is_not_carried_when_the_base_has_no_stamp_kinds(self):
+        fx = self.real_commits()
+        page = self.tool_page(fx.fixed)
+        self.facts(fx, [page])
+        self.assert_page_scope(page, fx.fixed)
+        self.assertTrue(self.carry(fx, page), "control: a generated records page on the reviewed head does not carry on the default base, so the case below proves nothing")
+        self.reviewed_line(self.reviewed_host(fx, page, comments=[review_comment(1, 7, record_text(head=page, rounds=REVIEW_PASS)), lint_of(7, fx.fixed)]),
+                           page, "done", "control: the --reviewed line does not read done for a page the default base carries")
+        self.no_kinds_base(fx)
+        real = merge.git
+
+        def git(root, *a, **k):
+            if a[:3] == ("log", "-1", "--format=%P%x09%s"):  # page_only's read of the commit
+                return 1, "fixture: git cannot read the commit"
+            return real(root, *a, **k)
+        patch = unittest.mock.patch.object(merge, "git", git)
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.assertFalse(self.carry(fx, page), "a records page whose commit read fails carried the PASS when the base holds no stamp kinds")
+        host = self.reviewed_host(fx, page, comments=[review_comment(1, 7, record_text(head=page, rounds=REVIEW_PASS)), lint_of(7, fx.fixed)])
+        rc, out, err = self.run_args("--reviewed", host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotIn(" done: ", list_line(self, out, 7), "a page whose commit read fails carried the lint PASS into the --reviewed line:\n" + out)
+        self.assertIn("merge --lane-lint 7", out, out)
+
+    def test_e_a_claim_shaped_commit_is_not_carried_when_the_base_has_no_stamp_kinds(self):
+        fx = self.real_commits()
+        claim = self.claim_over(fx.fixed, {"docs/decisions/second.md": record("D-002", "second")})
+        self.facts(fx, [claim])
+        self.assertTrue(self.carry(fx, claim), "control: a claim commit on the reviewed head does not carry on the default base, so the case below proves nothing")
+        self.no_kinds_base(fx)
+        self.assertFalse(self.carry(fx, claim), "a claim commit carried the PASS when the base holds no stamp kinds: no file there is a record")
 
 
 class ReviewUnknownReads(ReviewEnv):

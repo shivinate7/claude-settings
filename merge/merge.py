@@ -2267,13 +2267,15 @@ def claim_only(root, cfgrel, base, linted, live):
     review when the page goes stale, so it moves the head by nothing a record or a lint read. That holds only for a page the generator wrote, so a
     page-only commit counts when page_is_generated proves it, and is False when the page differs (a hand edit is a change a review must see, never a
     carry). A generator that cannot run raises Stop (unknown), never True: the callers keep it at stale or unknown, never done. Any other commit is
-    False. Any other read that fails is False. Commits come from the clone, so the caller fetches the branch first.
-    Cost: per page-only commit one temporary worktree, one `git show` and one generator run (page_is_generated; measured median 0.56 s, n=5, on a real tool page commit)."""
+    False. Any other read that fails is False. Commits come from the clone, so the caller fetches the branch first. A base with no stamp kinds
+    still carries a generated page, because the generator proves the page alone; it carries no claim, since no folder there holds records.
+    Cost: per page-only commit one temporary worktree, one `git show` and one generator run (page_is_generated; measured median 0.56 s, n=5, on a real tool page commit).
+    A base with no kinds costs the merge-base and rev-list reads once, then page_only's reads per commit (one, two for the PAGE_SUBJECT subject) until the first commit that is no page commit."""
     try:
         _, kinds = base_stamp(root, cfgrel, f"origin/{base}")
     except Stop:
         return False
-    if not kinds or git(root, "merge-base", "--is-ancestor", linted, live)[0]:
+    if git(root, "merge-base", "--is-ancestor", linted, live)[0]:
         return False
     c, rows = git(root, "rev-list", "--parents", f"{linted}..{live}")
     if c or not rows.strip():
@@ -2288,6 +2290,8 @@ def claim_only(root, cfgrel, base, linted, live):
             if page_is_generated(root, sha):  # the generator, never the subject line, proves a records page: a hand edit under the subject is no carry
                 continue
             return False  # a page commit is never a claim either: it has no Record-claim trailer to read
+        if not kinds:  # no stamp kinds: no folder is a record's, so no claim, and no read to make
+            return False
         c, files = git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", sha)
         if len(parents) != 1 or c or not head_claim(root, sha) or not all(is_record(f) for f in files.splitlines()):
             return False
