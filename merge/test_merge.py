@@ -13939,6 +13939,32 @@ class RedMainBrake(Env):
         self.assertIn("unknown", line[0].lower())
         self.assert_rerun_remedy(line[0], self.CAN_CANCELLED)
 
+    def test_the_preview_refuses_a_red_base_beside_a_cancelled_run_even_with_its_revert_proven(self):
+        """Decision no-merge-onto-red-main: a merged revert would lift the red, but a cancelled run beside it reads UNKNOWN, so the base refuses.
+        The preview says confirm refuses it unless --base-red-ok, and confirm refuses it as UNKNOWN."""
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        sched = main_run(905, "cancelled", sha=M, event="schedule")
+        runs, jobs = self.breaking_page(B, A, top=[(sched, [main_job("scope", "success"), main_job("checks", "cancelled", 2)]), self.merge_run_of(904, M, 2651)])
+        pulls = {2651: self.revert_pull(2651, R)}
+        # scope first: the base reads red, a run sits beside it, and the revert is proven beside that run: the case the preview branches on
+        self.host = MainRunsHost(self.co, self.other, runs, jobs, pulls=pulls)
+        self.red_detail()
+        self.assertTrue(self.host.base_facts["others"], "the fixture has no cancelled run beside the red")
+        self.assertTrue(merge.revert_proven(self.co, self.host, "main", beside_ok=True), "the fixture's revert is not proven beside the cancelled run")
+        rc, out, before = self.go(runs, jobs, pulls=pulls, confirm=False)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.refs(), before, "a preview pushes nothing")
+        line = [l for l in out.splitlines() if l.strip().startswith("main run:")]
+        self.assertEqual(len(line), 1, out)
+        self.assertIn("refuses it unless --base-red-ok", line[0],
+                      "the preview says confirm merges onto the red main, but confirm refuses it beside the cancelled run:\n" + out)
+        rc, out, before = self.go(runs, jobs, pulls=pulls)
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("UNKNOWN", out, "confirm refuses the red base, but does not call it UNKNOWN")
+
     # Pins: these pass on the code as it is. The red run gets no re-run remedy, a re-run still going keeps its wait, and a re-run that
     # passes reads green. Each is the green control beside the red cases above.
 
