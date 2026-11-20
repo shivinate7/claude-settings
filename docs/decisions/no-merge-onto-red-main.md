@@ -1,4 +1,4 @@
-# No batch merges onto a red main
+# A PR may merge onto a red main; UNKNOWN still refuses
 
 ## The ruling
 
