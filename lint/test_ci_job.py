@@ -2181,6 +2181,14 @@ class LintTools(Job):
                          "a code-check verdict killed with no output reads FAIL, not unknown: " + out)
         self.assertEqual(rc, 2, "a code-check verdict with no output did not exit 2, the unknown code: " + out)
 
+    @unittest.skipUnless(os.name == "posix", "the verdict stub is killed by signal: POSIX only")
+    def test_a_verdict_killed_after_a_lone_real_error_reads_fail(self):
+        # a real error line is a failure signal on its own, so a killed verdict that printed one reads FAIL
+        rc, lines, out = self.killed_code_check(self.REAL_ERROR)
+        self.assertEqual(by_step(lines), {"Code check": "FAIL"},
+                         "a verdict killed after a lone real error line reads something other than FAIL: " + out)
+        self.assertEqual(rc, 1, "a lone real error with a killed verdict did not exit 1: " + out)
+
     @unittest.skipUnless(shutil.which("pipx"), "pipx is absent: the checks zizmor step runs through pipx")
     def test_a_template_injection_fails_the_zizmor_step(self):
         self.lane({".github/workflows/bad.yml": self.INJECTION, "actions/a/action.yml": self.ACTION})
