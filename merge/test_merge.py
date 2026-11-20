@@ -27166,6 +27166,55 @@ class ProducerFolderNames(unittest.TestCase):
                          "mutate_guard must name its work folder with the run's pid, got prefix %r" % made[0])
 
 
+class WorkFolderOnSignal(unittest.TestCase):
+    """hooks/mutate_guard.py's work folder is removed when a signal ends the run, as when it ends normally. Each case starts the real main() in
+    a child with no mutation, and the mutant run is a block, so the folder exists while the run is up. A TERM or HUP skips the folder's cleanup
+    unless the run handles the signal."""
+
+    def start_child(self, end=False):
+        """A run of the child with its TMPDIR in a folder of this run. end: the block returns at once, so the run ends by itself."""
+        tmp = tempfile.mkdtemp(prefix="mutate-sig-", dir=run_folder())
+        env = {**os.environ, "TMPDIR": tmp, "MUTATE_END": "1" if end else ""}
+        proc = subprocess.Popen([sys.executable, os.path.abspath(__file__), "--mutate-child"], env=env, stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+        self.addCleanup(stop_group, proc)
+        for line in proc.stdout:  # the child prints READY once its work folder exists and the mutant run starts
+            if line.strip() == "READY":
+                break
+        else:
+            self.fail("the run never reached the mutant run: " + proc.stderr.read())
+        return proc, tmp
+
+    @staticmethod
+    def work_folders(tmp, pid):
+        """The work folders of the run `pid` in its TMPDIR."""
+        return [n for n in os.listdir(tmp) if n.startswith("mutate_guard_%d-" % pid)]
+
+    def test_sigterm_removes_the_work_folder(self):
+        self.assert_signal_removes_work_folder(signal.SIGTERM)
+
+    def test_sighup_removes_the_work_folder(self):
+        self.assert_signal_removes_work_folder(signal.SIGHUP)
+
+    def assert_signal_removes_work_folder(self, sig):
+        proc, tmp = self.start_child()
+        held = self.work_folders(tmp, proc.pid)
+        self.assertEqual(len(held), 1, "scope: one work folder named with the run's pid must exist while the run is up, got %r" % held)
+        proc.send_signal(sig)
+        try:
+            proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            self.fail("the mutate_guard run did not exit within 60 s of %s" % sig.name)
+        self.assertEqual(self.work_folders(tmp, proc.pid), [], "%s to the mutate_guard run left its work folder behind" % sig.name)
+
+    def test_a_normal_end_removes_the_work_folder(self):  # a control: the run's own finally removes the folder when no signal comes
+        proc, tmp = self.start_child(end=True)
+        self.assertEqual(len(self.work_folders(tmp, proc.pid)), 1, "scope: one work folder must exist while the run is up")
+        proc.wait(timeout=60)
+        self.assertEqual(proc.returncode, 0, proc.stderr.read())
+        self.assertEqual(self.work_folders(tmp, proc.pid), [], "a normal end left the work folder behind")
+
+
 class VerifiedLine(RecordsEnv):
     """The claim commit and the records-page commit each carry a Verified line (lint/check_red_run.py)."""
 
@@ -27217,6 +27266,18 @@ if __name__ == "__main__":
         if merge.main(["7", "--confirm"], host=host, lock=lock):  # the first confirm pushes the claim and stops
             sys.exit(1)
         sys.exit(merge.main(["7", "--confirm"], host=host, lock=lock))  # the second confirm merges the claim: its merge call dies
+    if len(sys.argv) == 2 and sys.argv[1] == "--mutate-child":
+        # hooks/mutate_guard.py's real main() with no mutation: it names and makes its work folder, then calls the mutant run, which is a
+        # block here. The block ends when stdin closes, or at once when MUTATE_END is set.
+        import mutate_guard
+        def block(*args, **kwargs):
+            print("READY", flush=True)
+            if not os.environ.get("MUTATE_END"):
+                sys.stdin.read()
+            return 0
+        mutate_guard.MUTATIONS = []
+        mutate_guard.mutate_shared.run_mutants = block
+        sys.exit(mutate_guard.main())
     class Slicer(unittest.TestLoader):
         def loadTestsFromModule(self, *a, **k):
             suite = select_shard(select_tests(super().loadTestsFromModule(*a, **k), os.environ.get("MERGE_TESTS", "")),
