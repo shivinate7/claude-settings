@@ -6238,7 +6238,7 @@ def reviewed_read(h, cfgrel=None, facts=None, ledger=None):
     the two PR ledger number lines (decision pr-ledger). Each open pull request gets a line, `#<n> <branch> <sha9> <state>: <why>; next: <act>, owner <owner>,
     age <H>h[, RED]; CI <ci>`; one with no record of its own and no carried one too reads state `no record`, CI not read, and the `no record:` line names it as
     well. A pull request is stacked, and reads `blocked on #N`, when its base ref names the head branch of open pull request #N; a `Based on #N` body line
-    stacks nothing. A done record on a ready pull request with no lane-lint PASS at the live head (and no `lint skipped`) reads act `lane lint`, owner lane; else act `batch`. A done record on a draft reads state `ready`, act `merge --ready`, owner lane, with or without a lane-lint PASS; a lint FAIL (or an unreadable lint) keeps it on act `lane lint`. The
+    stacks nothing. A done record on a ready pull request with no lane-lint PASS at the live head (and no `lint skipped`) reads act `lane lint`, owner lane; else act `batch`. A done record on a draft reads state `ready`, act `merge --ready`, owner lane, with or without a lane-lint PASS, and with an unreadable lint too, which is no finding; only a lint FAIL keeps it on act `lane lint`. The
     longest wait from a done record counts all three acts. On top of the reads below: one `issues/<n>/events` list for each pull request that pr_event_label names
     (a batch label, or a hold label with a valid `Waits on:` line). Two list reads (the open pull requests, then the
     repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and the workflow run list (`head_state`'s `gh run list`) of its head,
@@ -6299,7 +6299,7 @@ def reviewed_read(h, cfgrel=None, facts=None, ledger=None):
                 lint = lint_state(lints.get(n, []), sha)
                 if lint == "none" and lint_carried(root, cfgrel, d["base"]["ref"], n, lint_passed(lints.get(n, [])), sha, h, source_lint_passed(h, n, d.get("body"))[1]):
                     lint = "pass"
-                if d.get("draft") and lint in ("pass", "none"):  # a reviewed draft goes ready by `merge --ready` with or without a lint PASS: only a lint FAIL holds it (decision draft-until-reviewed, ruling Q2)
+                if d.get("draft") and lint != "fail":  # a reviewed draft goes ready by `merge --ready` with or without a lint PASS, an unreadable lint included (no finding): only a lint FAIL holds it (decision draft-until-reviewed, ruling Q2; owner, 13:06 CST Nov 20)
                     state = "ready"
                 elif lint != "pass" and not d.get("draft") and rollup_green(h, n, sha):  # CI proved this head, so the join skips the lint (lint_check). A draft reads no head checks
                     why = f"{why}; lint skipped: {ROLLUP_JOB} is green on {sha[:9]}, so CI already proved this head"
