@@ -4271,6 +4271,8 @@ try:
 
     elif method == "GET" and m_pr:
         n = int(m_pr.group(1))
+        if n != num and refused(S.get("pr_read_fail"), n):  # a case's failed read of another pull request: a member read after the merge
+            raise Refused(refused(S["pr_read_fail"], n))
         if n in numbered and n != num:
             r, ex = numbered[n], named_pr(n)
             finish(one(pull(n, r[1], r[0], r[2], state=ex["state"], merged=ex["merged"], body=ex["body"]), jq), 0, include)
@@ -7361,12 +7363,14 @@ class CloseReplaced(Env):
         self.assertEqual(self.lines_naming(n), [], f"#{n} was read or changed, though the body does not name it as replaced:\n{out}")
         self.assertEqual(self.posts_on(n), [], f"#{n} got a comment, though the body does not name it as replaced:\n{out}")
 
-    def confirm_integration(self, numbers, dropped=(), merged=(), **state):
+    def confirm_integration(self, numbers, dropped=(), merged=(), closed=(), **state):
         """`merge 7 --confirm` on batch integration PR #7 (head `batch-x`), whose freeze block names `numbers` (`dropped` marked). Each member is
-        open, except those in `merged`: GitHub marks them MERGED, so they are listed and read closed and merged. `state` sets more fields of the
-        fake gh (checks_seq, merge_fail). -> (rc, stdout and stderr together)."""
+        open, except those in `merged`: GitHub marks them MERGED, so they are listed and read closed and merged. Those in `closed` are closed by
+        hand, not merged. `state` sets more fields of the fake gh (checks_seq, merge_fail, post_fail, close_fail, pr_read_fail).
+        -> (rc, stdout and stderr together)."""
         self.push_branch(merge.integration_branch("x"))
         extra = {str(n): {"state": "closed", "merged": True} for n in merged}
+        extra.update({str(n): {"state": "closed", "merged": False} for n in closed})
         self.set(pr_number=7, body="\n".join(merge.freeze_lines("x", {n: f"{n:040x}" for n in numbers}, dropped=dropped)),
                  head_ref=merge.integration_branch("x"), open_prs=[[f"named-{n}", f"{n:040x}", "main", n] for n in numbers], pr_extra=extra, **state)
         self.host.branch = merge.integration_branch("x")  # the claim hook (claim_push_fires_on_claim) reads the branch a claim lands on, so the second step runs
@@ -7445,6 +7449,40 @@ class CloseReplaced(Env):
             with self.subTest(n=n):
                 self.assertIn(f"PATCH pulls/{n} state=closed", self.calls().splitlines(), f"#{n} stayed open after #7 merged, and the rerun did not close it:\n{rerun_out}")
                 self.assert_merged_pointer(n, 7, oid, rerun_out)
+
+    def assert_refused_after_the_landed_merge(self, knob, text):
+        """Integration PR #7 with two open members, and GitHub refuses (`text`, through `knob`) the post-merge pointer or close of member 3301. The merge
+        lands before that refusal: the run exits non-zero, names the landed merge and the member, and reverts nothing."""
+        rc, out = self.confirm_integration([3301, 3302], **{knob: {"3301": text}})
+        self.assertEqual(self.calls().count(MERGE_CALL), 1, f"precondition: the merge call was not sent once, so the refusal after it is not the one under test:\n{out}")
+        self.assertNotIn("reverted on", out, f"the merge landed, and a refusal after it reverted it:\n{out}")
+        self.assertNotEqual(rc, 0, f"a refused post-merge call on #3301 exited 0:\n{out}")
+        self.assertRegex(out, r"the merge of #7 landed, and a lane it carries was not closed: .*#3301",
+                         f"the output does not name the landed merge and the member #3301 that was refused:\n{out}")
+
+    def test_a_refused_comment_after_the_landed_merge_exits_nonzero_and_keeps_the_merge(self):  # F3: the post-merge refusal is reported, and never undoes the merge
+        self.assert_refused_after_the_landed_merge("post_fail", rest_err(403, "Resource not accessible by integration"))
+
+    def test_a_refused_close_after_the_landed_merge_exits_nonzero_and_keeps_the_merge(self):  # F3: the post-merge refusal is reported, and never undoes the merge
+        self.assert_refused_after_the_landed_merge("close_fail", rest_err(422, "Unprocessable Entity"))
+
+    def test_a_member_unreadable_after_the_merge_gets_an_unknown_line_and_no_pointer(self):  # F4: the unknown member is named, and the open sibling still closes
+        rc, out = self.confirm_integration([3301, 3302], closed=[3302], pr_read_fail={"3302": NOT_FOUND})
+        self.assertEqual(self.calls().count(MERGE_CALL), 1, f"precondition: the merge call was not sent once:\n{out}")
+        self.assertIn("PATCH pulls/3301 state=closed", self.calls().splitlines(), f"control: the open member #3301 stayed open after #7 merged, so the loop did not go on:\n{out}")
+        self.assert_merged_pointer(3301, 7, self.gh_state("oid"), out)
+        self.assertIn("#3302 UNKNOWN", out, f"the closed and unreadable member #3302 has no UNKNOWN line:\n{out}")
+        self.assertEqual(rc, 0, f"an unreadable member exited the landed merge non-zero:\n{out}")
+        self.assert_not_closed(3302, out)
+
+    def test_a_member_closed_by_hand_gets_no_pointer_and_no_close(self):  # F4: a member closed by hand is skipped without a line
+        rc, out = self.confirm_integration([3301, 3302], closed=[3302])
+        self.assertEqual(self.calls().count(MERGE_CALL), 1, f"precondition: the merge call was not sent once:\n{out}")
+        self.assertIn("PATCH pulls/3301 state=closed", self.calls().splitlines(), f"control: the open member #3301 stayed open after #7 merged:\n{out}")
+        self.assert_merged_pointer(3301, 7, self.gh_state("oid"), out)
+        self.assertEqual(rc, 0, f"a member closed by hand exited the landed merge non-zero:\n{out}")
+        self.assert_not_closed(3302, out)
+        self.assertNotIn("#3302 UNKNOWN", out, f"a member closed by hand got an UNKNOWN line, though it is closed and merged nowhere:\n{out}")
 
     def test_a_replaces_line_closes_the_named_open_pull_request_at_ready(self):
         rc, out = self.ready(3210, "Replaces #1636", named=[(1636, "open")])
