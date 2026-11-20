@@ -3050,7 +3050,8 @@ class RerunCache(unittest.TestCase):
     and a rerun at the same key runs no saved step and prints PASS (cached). A failed or unknown step is never saved. An edit to
     a script, a rename, or a corrupt saved result misses. A changed ambient variable, a changed tool file ci-job runs, or a changed
     tree that an earlier step wrote into also misses. A hit does not refresh a saved pass: it ages out seven days after its save.
-    The key holds the HEAD commit, so an amend with the same tree misses. It holds the base commit, so a moved base misses. It
+    The key holds the pushed head (CI_JOB_HEAD_SHA) and HEAD's parents and message, not HEAD's own sha: so an amend that changes
+    the message misses, and a new lane lint merge of one pushed head hits. It holds the base commit, so a moved base misses. It
     does not hold the checkout's path, so the same commit in another worktree hits. A volatile variable never changes the key.
     An action file that a remote uses: step runs from the install or the pointer checkout, so an edit to that file misses.
     Past 300 saved passes, the oldest are pruned.
@@ -3087,6 +3088,16 @@ class RerunCache(unittest.TestCase):
     def rev(self, what, cwd=None):
         return subprocess.run(["git", "rev-parse", what], cwd=cwd or self.root, check=True, capture_output=True,
                               text=True, env=ENV).stdout.strip()
+
+    def commit_tree(self, tree, when, message, parents=()):
+        """`git commit-tree` of `tree` with its author and committer dates set to the epoch second `when`: a fixed value, never the clock."""
+        env = {**ENV, "GIT_AUTHOR_DATE": "%d +0000" % when, "GIT_COMMITTER_DATE": "%d +0000" % when}
+        args = ["git", "commit-tree", tree, *[x for parent in parents for x in ("-p", parent)], "-m", message]
+        return subprocess.run(args, cwd=self.root, check=True, capture_output=True, text=True, env=env).stdout.strip()
+
+    def checkout(self, sha):
+        """Detach the fixture repo at `sha`. Only commits of one tree are checked out here, so no file changes."""
+        subprocess.run(["git", "checkout", "-q", "--detach", sha], cwd=self.root, check=True, env=ENV)
 
     def plant_run_sh(self, folder):
         """The probe run.sh of the zizmor action, at folder/actions/zizmor/run.sh. Returns its path."""
@@ -3394,6 +3405,47 @@ class RerunCache(unittest.TestCase):
         self.assertEqual((self.rev("HEAD"), self.rev("HEAD^{tree}")), (head, tree), "scope: moving the base changed HEAD")
         _, _, ran, out = self.lane_run(*steps, args=base)
         self.assertEqual(ran, ["check-a"], "check-a printed PASS (cached) after its base moved to a new commit: the key holds no base commit\n%s" % out)
+
+    def test_a_new_lane_lint_merge_of_the_same_pushed_head_hits_the_saved_pass(self):
+        """A lane lint makes a new merge commit on each run, so a key that holds HEAD's own sha never repeats. The key holds the pushed
+        head (CI_JOB_HEAD_SHA) and HEAD's parents and message, so the second merge of one pushed head reads the first one's pass."""
+        self.fixture()
+        steps = (rerun_step("check-a"),)
+        tree, head = self.rev("HEAD^{tree}"), self.rev("HEAD")
+        base = self.commit_tree(tree, 1700000000, "base")
+        message = "lane-lint merge of %s into main" % head[:9]
+        first = self.commit_tree(tree, 1700000000, message, parents=(base, head))
+        second = self.commit_tree(tree, 1700000060, message, parents=(base, head))
+        self.assertNotEqual(first, second, "scope: the two lint merges are one commit")
+        ambient = {"CI_JOB_HEAD_SHA": head}
+        self.checkout(first)
+        _, _, ran, out = self.lane_run(*steps, ambient=ambient)
+        self.assertEqual(ran, ["check-a"], "scope: the first lint run should run check-a, got %r\n%s" % (ran, out))
+        _, _, ran, out = self.lane_run(*steps, ambient=ambient)
+        self.assertEqual(ran, [], "scope: a rerun at the same merge commit ran %r again\n%s" % (ran, out))
+        self.checkout(second)
+        rc, lines, ran, out = self.lane_run(*steps, ambient=ambient)
+        self.assertEqual(ran, [], "check-a ran again at a new lane lint merge of the same pushed head: the key holds HEAD's own sha, "
+                         "so each lane lint misses the saved pass\n%s" % out)
+        self.assertEqual(state_of(lines, "check-a"), "PASS (cached)", out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_saved_pass_under_one_pushed_head_misses_under_another(self):
+        """A step reads its ${{ github.event.pull_request.head.sha }} from CI_JOB_HEAD_SHA, so a pass saved under one pushed head
+        must miss under another, even at the same HEAD. The key holds the pushed head, not HEAD alone."""
+        self.fixture()
+        steps = (rerun_step("check-a"),)
+        tree, head = self.rev("HEAD^{tree}"), self.rev("HEAD")
+        other = self.commit_tree(tree, 1700000120, "pushed head 2", parents=(head,))
+        self.assertNotEqual(other, head, "scope: the second pushed head is the first one")
+        _, _, ran, out = self.lane_run(*steps, ambient={"CI_JOB_HEAD_SHA": head})
+        self.assertEqual(ran, ["check-a"], "scope: the first lint run should run check-a, got %r\n%s" % (ran, out))
+        _, _, ran, out = self.lane_run(*steps, ambient={"CI_JOB_HEAD_SHA": head})
+        self.assertEqual(ran, [], "scope: a rerun under the same pushed head ran %r again\n%s" % (ran, out))
+        rc, lines, ran, out = self.lane_run(*steps, ambient={"CI_JOB_HEAD_SHA": other})
+        self.assertEqual(ran, ["check-a"], "check-a printed PASS (cached) under another pushed head: the key holds no CI_JOB_HEAD_SHA, "
+                         "so a step's head.sha reads a pass saved for a different head\n%s" % out)
+        self.assertEqual(rc, 0, out)
 
     def test_past_three_hundred_saved_passes_the_oldest_are_pruned(self):
         self.fixture()
