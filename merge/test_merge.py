@@ -21363,7 +21363,7 @@ class UnparsedRecordStanding(CloudSession, ReviewEnv):
         with self.cloud():
             return self.run_args("7", "--confirm", "--head", REVIEW_HEAD, host=host)
 
-    def gate_reason(self, *comments):
+    def guard_reason(self, *comments):
         """-> the reason standing_refusal gives for pull request 7 at REVIEW_HEAD, with `comments` as its records: "" when the gate lets it through.
         The gate reads the pull request as main does (Host.pr), then stops: no claim, no lock and no merge follow."""
         host = self.standing_host(*comments)
@@ -21404,7 +21404,7 @@ class UnparsedRecordStanding(CloudSession, ReviewEnv):
     def test_unparsed_record_stray_line_mid_record_is_named_by_confirm(self):
         self.assert_refusal_names(record_text(rounds=(*REVIEW_PASS, "Thanks for the review.")), ("Thanks for the review.",))
 
-    def test_unparsed_record_control_well_formed_failing_keeps_the_gate_words(self):
+    def test_unparsed_record_control_well_formed_failing_keeps_the_guard_words(self):
         # Control: a record that parses and fails gets the gate's own words. The same fixture then shows the naming above comes from the unparsed text.
         body = record_text(head=REVIEW_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
         parse_text(self, body)
@@ -21427,7 +21427,7 @@ class UnparsedRecordStanding(CloudSession, ReviewEnv):
         self.assertIsNone(review_fn(self, "parse_review")(newest), "fixture: the newest body parses, so the case tests nothing")
         parse_text(self, older)
         self.assertEqual(record_state(self, older, REVIEW_HEAD), "done", "fixture: the older record is not a passing record on the head")
-        why = self.gate_reason(review_comment(PASS_CID, 7, older, created="2026-10-02T00:00:00Z"), review_comment(UNPARSED_CID, 7, newest, created="2026-10-03T00:00:00Z"))
+        why = self.guard_reason(review_comment(PASS_CID, 7, older, created="2026-10-02T00:00:00Z"), review_comment(UNPARSED_CID, 7, newest, created="2026-10-03T00:00:00Z"))
         self.assertTrue(why, "the gate let the pull request through on an older pass, over a newer record that does not parse")
         self.assertIn(str(UNPARSED_CID), why, "the gate's refusal does not name the newest unparsed comment by its id:\n" + why)
         self.assertTrue(any(cause in why for cause in ("Thanks for the review.", "CI line")), "the gate's refusal does not name the cause:\n" + why)
@@ -21439,7 +21439,7 @@ class UnparsedRecordStanding(CloudSession, ReviewEnv):
         self.assertIsNone(review_fn(self, "parse_review")(older), "fixture: the older body parses, so the case tests nothing")
         parse_text(self, newest)
         self.assertEqual(record_state(self, newest, REVIEW_HEAD), "done", "fixture: the newest record is not a passing record on the head")
-        why = self.gate_reason(review_comment(UNPARSED_CID, 7, older, created="2026-10-02T00:00:00Z"), review_comment(PASS_CID, 7, newest, created="2026-10-03T00:00:00Z"))
+        why = self.guard_reason(review_comment(UNPARSED_CID, 7, older, created="2026-10-02T00:00:00Z"), review_comment(PASS_CID, 7, newest, created="2026-10-03T00:00:00Z"))
         self.assertEqual(why, "", "the gate refused a pull request whose newest record passes:\n" + why)
 
 class ReleaseHost(PullsHost):
