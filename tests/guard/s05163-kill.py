@@ -131,7 +131,7 @@ sh("kill: any other pid with the root unknown is unknown, so it passes", "kill %
 # `transcript_path` is `<dir>/<session>.jsonl`, and that folder is `<dir>/<session>/subagents/`.
 # A worktree of another session, or one not named `agent-<id>`, stays foreign.
 SUB_SESSION = "reapbatch-session-0001"   # SESSION_ID_RE: 8 to 200 of [A-Za-z0-9._-]
-OTHER_SESSION = "reapbatch-other-0002"
+REAP_OTHER_SESSION = "reapbatch-other-0002"
 SUBCFG = os.path.join(ROOT, "subcfg")    # a config dir that holds only transcripts
 SUBWT = os.path.join(ROOT, "subwt")
 OWN_ID, OTHER_ID, PLAIN_ID = "a0246dbf02b4a0327", "b1357ecf13c5b1438", "c2468fd024d6c2549"
@@ -183,7 +183,7 @@ PROJECT_DIR = os.path.join(SUBCFG, "projects", "-reapbatch-slug")
 SUB_TRANSCRIPT = os.path.join(PROJECT_DIR, SUB_SESSION + ".jsonl")   # the payload's transcript_path
 if ORPHAN_CASES:
     write(SUB_TRANSCRIPT, "{}\n")
-    for session, agent_id in ((SUB_SESSION, OWN_ID), (OTHER_SESSION, OTHER_ID),
+    for session, agent_id in ((SUB_SESSION, OWN_ID), (REAP_OTHER_SESSION, OTHER_ID),
                               (SUB_SESSION, PLAIN_ID)):
         write(os.path.join(PROJECT_DIR, session, "subagents", "agent-" + agent_id + ".jsonl"),
               "{}\n")
@@ -327,7 +327,7 @@ for _who, _kw in AGENT_CALLS:
     tag_case("kill: a PPID-1 pid with this session's id, called by an agent (%s)" % _who, "deny",
              env_entries=[TAG + "=" + SUB_SESSION], carries="did not start", **_kw)
 tag_case("kill: a PPID-1 pid whose environment holds another session's id", "deny",
-         env_entries=[TAG + "=" + OTHER_SESSION], carries="did not start")
+         env_entries=[TAG + "=" + REAP_OTHER_SESSION], carries="did not start")
 tag_case("kill: a PPID-1 pid with no session id in its environment", "deny",
          carries="did not start")
 tag_case("kill: a PPID-1 pid with this session's id only in its argv", "deny",
@@ -365,7 +365,7 @@ for _who, _kw in AGENT_CALLS:
              % _who, "deny", holder=stranded_job(["env", TAG + "=" + SUB_SESSION]), job=True,
              carries="did not start", **_kw)
 tag_case("kill: a job under an untagged PPID-1 stub, holding another session's id, stays refused",
-         "deny", holder=stranded_job(["env", TAG + "=" + OTHER_SESSION]), job=True,
+         "deny", holder=stranded_job(["env", TAG + "=" + REAP_OTHER_SESSION]), job=True,
          carries="did not start")
 tag_case("kill: a tagged job two levels under an untagged PPID-1 stub, from the main session, stays refused",
          "deny", holder=stranded_job(["env", TAG + "=" + SUB_SESSION], wrappers=1), job=True, depth=2,
