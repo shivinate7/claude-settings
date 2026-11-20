@@ -8,7 +8,8 @@ FAMILY = "compaction-audit"
 # stays owed. A disk that is not full, or memory that is full, changes nothing: a sweep frees disk, not memory.
 # The helpers are the compaction-audit ones of section 43700 (ca_copy, ca_config, ca_owed, ca_env) and the load-brake
 # probe of section 39497 (LB_PROBE, which patches read_load). Nothing here copies them.
-SWEEP_ROOT = REPO
+# Double-quoted: bash strips an unquoted backslash, so a Windows REPO (D:\a\...) must arrive whole.
+SWEEP_ROOT = '"%s"' % REPO
 CD_SWEEP = "python3 ~/.claude/janitor/sweep.py --root %s --attended --fast" % SWEEP_ROOT
 CD_SWEEP_CONFIRM = CD_SWEEP + " --confirm"
 CD_RM_TMP = "rm -rf /tmp/claude-disk-cleanup/run-1"
