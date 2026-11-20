@@ -17,7 +17,7 @@ status  prints one line per lease, one per waiter, and the load.
 Limits on every grant: the 5-minute load is under 100 and the 1-minute load is under 60.
   duo: slot 1 when it is free; slot 2 only while slot 1 is held and the 5-minute load is under 60.
   pro: the pro slot, while it is free. A held duo or pro never refuses the other device; only the load brake limits
-       a grant (ruling sims-load-brake-only, owner 2026-11-12 21:59 CST).
+       a grant (record sims-load-brake-only).
 The queue is strict FIFO: only its head is granted, so a later take never passes an earlier one.
 Reaping, on every call: a lease or waiter whose pid is dead, or whose `ps -o lstart=` start time differs from the one
 recorded at take, is dropped. A holder that dies therefore never needs to give.
