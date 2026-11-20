@@ -358,7 +358,7 @@ def main(argv, clock=None):
     p.add_argument("--root", required=True, help="a checkout of the repo that holds the PR heads")
     p.add_argument("--lint", action="store_true", help="run `ci-job checks --lint` once on each folded batch's final tree")
     p.add_argument("--from-rest", action="store_true", help="read the queue from GitHub (not built)")
-    p.add_argument("--build", action="store_true", help="build the local integration branch from the queued members (10 or more), push nothing")
+    p.add_argument("--build", action="store_true", help="build the local integration branch from the queued members, or with no --queue from the reviewed `batch` rows on main (10 or more), push nothing")
     p.add_argument("--name", help="the batch name of --build: the branch is merge.integration_branch(NAME)")
     args = p.parse_args(argv)
     if args.from_rest:
@@ -456,7 +456,7 @@ def live_heads(root, members):
 
 
 def batch_rows(root):
-    """The members of --build with no --queue. -> ([member numbers in order], {number: head sha}) from merge.reviewed_read's rows whose act is `batch`, the
+    """The members of --build with no --queue. -> ([member numbers in order], {number: head sha}) from merge.reviewed_read's rows whose act is `batch` and whose pull's base ref is main, the
     lowest-numbered one (the front PR) left out. Raises ReadError when the read fails or a `batch` row has no pull request behind it."""
     rows = []
     try:
@@ -464,7 +464,8 @@ def batch_rows(root):
     except Exception as e:  # merge.py's own stops (Stop, NetStop) are not in the tool's allowed merge.py names; any failed read is unknown, never a build
         raise ReadError(f"merge.reviewed_read could not be read ({type(e).__name__}: {' '.join(str(e).split())[:200]}); give --queue FILE")
     heads = {d["number"]: d["head"]["sha"] for d in pulls}
-    ready = sorted(r["number"] for r in rows if r["act"] == "batch")
+    on_main = {d["number"] for d in pulls if d["base"]["ref"] == "main"}  # a `batch` row on a stacked base would carry its base branch into main
+    ready = sorted(r["number"] for r in rows if r["act"] == "batch" and r["number"] in on_main)
     gone = [n for n in ready if n not in heads]
     if gone:
         raise ReadError(f"merge.reviewed_read gave no head for {tag(gone)}")
