@@ -69,7 +69,7 @@ import uuid
 from collections import Counter
 from datetime import datetime, timezone
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
 import git_reads  # noqa: E402  (the preview cache patches the reads where they live; no guard module loads)
@@ -2087,10 +2087,11 @@ def _on_windows():
 
 
 def temp_tier(confirm):
-    """The Windows temp-folder step: removes the temp folder of a session idle over 24 hours (preview
-    without CONFIRM). Windows only. It stops at the sweep deadline. Returns the number of
-    failures: folders it could not remove or folders it could not read."""
-    if temp_sweep is None or not _on_windows():
+    """The session temp-folder step: removes the temp folder of a session idle over 24 hours (preview
+    without CONFIRM), under the Windows temp root and the POSIX `claude-<uid>` root. Every OS. It
+    stops at the sweep deadline. Returns the number of failures: folders it could not remove or
+    folders it could not read."""
+    if temp_sweep is None:
         return 0
     print("")
     print("== session temp folders ==")
@@ -3082,13 +3083,14 @@ def _fetch_prune(root: str) -> bool:
 
 
 def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "full",
-               attended: bool = False):
+               attended: bool = False, own_lock_rule: bool = True):
     """One repository. `mode` "full" is the whole sweep. "tier1" acts for real, with no
     --confirm, and only on stale registrations and husks: no worktree, branch or process work.
     "branches" reaps branches only (preview without --confirm), removes no worktree, and holds
     every branch any worktree has checked out. "fast" judges worktrees only, with no fetch, no
     remote read and no branch work: a tree goes only when its HEAD is already in the default
-    branch, and the default branch must be a remote-tracking ref."""
+    branch, and the default branch must be a remote-tracking ref. `own_lock_rule` False keeps a tree
+    that the caller's own agent lock holds (decide_worktree), for a caller still reading its tree."""
     if mode == "tier1":
         confirm = True
     result = {"root": root, "refused": None, "branches": [], "worktrees": [], "listeners": [],
@@ -3151,6 +3153,7 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     # entry is removed in THIS run (confirm), or would be (preview: action reap). A removal
     # that failed (decision["error"]) keeps its entry. A primary checkout is never removed.
     removed = set()
+    holder_sessions = {}  # path -> session read taken just before confirm removed that tree
 
     def judge(entry):
         """The decision for one entry, or None when none is ever recorded against it."""
@@ -3169,7 +3172,7 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
             # Could not tell whether this IS the primary checkout. Rule 7's direction: an
             # unreadable subject means keep, never a guess that it is safe to evaluate.
             return {"path": entry["path"], "action": "keep", "reason": "unreadable-subject"}
-        return decide_worktree(root, entry, attended, agent_rule, batch, mode == "fast")
+        return decide_worktree(root, entry, attended, agent_rule, batch, mode == "fast", own_lock_rule)
 
     judged = _oldest_idle_first(entries) if mode in ("full", "fast") else []
     if judged and mode == "full" and not _past_deadline():
@@ -3188,6 +3191,10 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
             if _past_deadline():
                 decision.update(action="keep", reason="not removed: deadline")
             else:
+                if entry.get("branch"):
+                    # The removal deletes the folder, and a session read needs it. Read the
+                    # holder's session now, last before the delete, so the branch cut can use it.
+                    holder_sessions[entry["path"]] = git_reads.worktree_live_session(entry["path"])
                 remove_worktree(root, entry["path"], decision)
         gone = decision["action"] == "reap"
         gone = gone and not decision.get("error")
@@ -3197,6 +3204,14 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     checked_out_branches = {e["branch"] for e in entries
                             if e.get("branch") and e["path"] not in removed}
 
+    # The trees this run removed (or would remove) release their branch. Each tree's session was
+    # read before this point, and a session can start in a tree after that read, so a branch cut
+    # reads every such holder's session again (see `judge_branch`).
+    released_holders = {}
+    for e in entries:
+        if e.get("branch") and e["path"] in removed:
+            released_holders.setdefault(e["branch"], []).append(e["path"])
+
     def judge_branch(b):
         # The clock is read before the decision starts and again after it: a reap follows at
         # once, so a decision that ended past the deadline is not reaped.
@@ -3204,6 +3219,19 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
         if _past_deadline():
             return late
         decision = decide_branch(root, base, b, protected_prefixes, checked_out_branches, batch)
+        if decision["action"] == "reap":
+            # Cut only when every holder reads dead. True (live) and None (unknown) both keep.
+            # A tree this run removed carries the read taken just before its delete. A tree
+            # still on disk (preview) is read now. A tree gone before this run is not read.
+            for holder in released_holders.get(b, ()):
+                if holder in holder_sessions:
+                    live = holder_sessions[holder]
+                elif os.path.exists(holder):
+                    live = git_reads.worktree_live_session(holder)
+                else:
+                    continue
+                if live is not False:
+                    return {"name": b, "action": "keep", "reason": "checked-out: session read again"}
         return late if decision["action"] == "reap" and _past_deadline() else decision
 
     for branch, decision in zip(branches, _pmap(
@@ -3579,7 +3607,7 @@ def _sweep_roots(args, roots, restore_log_path, mode):
         if any(_removed_count(r["worktrees"]) + _removed_count(r["branches"]) for r in results):
             try:
                 free = min(shutil.disk_usage(r["root"]).free for r in results)
-                print("  free disk: %.1f GB" % (free / 1e9))
+                print("  free disk: %.1f GB" % (free / 2 ** 30))
             except (OSError, ValueError):
                 print("  free disk: unknown")
     if mode != "full":

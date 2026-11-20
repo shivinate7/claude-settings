@@ -54,6 +54,13 @@ Text: `UNSTARTED_REASON`. It applies when the turn ran a builder.
 - Next holds an "Unstarted:" line. Name each queued item with every question answered that you left unstarted, with its reason.
 - If none, write "Unstarted: none".
 
+Text: `UNSTARTED_FILE_REASON`. It applies when an Unstarted item waits on another lane's merge, PR or landing and names no shared file.
+
+- Name the file the two lanes share, like `lint/report_guard.py`, `bin/merge`, `.gitignore`, `docs/decisions` or `Makefile`, in the same item. A path with a slash, or a leading dot, counts.
+- Or say what the item waits on in other words, with no merge, PR, "#<n>", land, lands, landed or landing in it. A wait on the owner or the load brake also needs the file when it names a PR or merge.
+- "Unstarted: none" needs no file, even when it adds "all merged". "none" in bold or in parentheses, and "nothing", read the same way.
+- "e.g.", "i.e.", "and/or" and a number pair like "3679/3680" are not files. The item runs to the end of its wrapped lines and its sub-bullets. Bullets under a bare "Unstarted:" line are its items.
+
 ### Answered guard (any reply)
 
 Text: `ANSWERED_REASON`, rule `answered-needs-source` (a claim of "answered" needs its source).
@@ -192,8 +199,8 @@ Text: `PLAIN_CONTRADICTION_REASON`. Rule `output-bring-decisions-as-question` (a
 
 ## Shared tails
 
-- Every refusal, except a notes fix (R14; not built; step `notes-fix-no-owner-line`), opens with the owner line from `owner_line()`, which cites this record, and ends with ` (rule reports-order-of-labels)`. That rule says the report's four labels go in order: Done, Deviations, Input Needed, Next. On the rewrite after a refusal, a triage hold alone has no tail.
-- Correction rule, no text in any refusal: after any refusal but a missing report, post only the corrected lines, as a short correction, and post none for a fix to a session's own notes (not built; step `notes-fix-no-owner-line`; see the ruling). Never send the report again. The owner has read the report before a refusal lands, so a resent report doubles it. A missing report asks for the report itself, and its reply carries every other fix too.
+- Every refusal, except a notes fix (R14; not built; step `notes-fix-no-owner-line`), opens with the owner line from `owner_line()`, which cites this record, and ends with ` (rule reports-order-of-labels)`, then, from a reply guard, the correction line below. That rule says the report's four labels go in order: Done, Deviations, Input Needed, Next. On the rewrite after a refusal, a triage hold gets the tail too.
+- Correction rule: every refusal of a reply but a missing report ends with one shared line, "Post only the missing or corrected lines. Do not resend the reply." (owner, 2026-11-17 09:30 CST). `report_guard.emit_stop` writes it, so each reply guard that prints through it carries the line, and a new guard needs no work. The correction line is not the owner line, so a session's own notes refusal still carries it, and the notes fix (not built; step `notes-fix-no-owner-line`; see the ruling) drops only the owner line. The owner has read the report before a refusal lands, so a resent report doubles it. A missing report asks for the report itself, and its reply carries every other fix too, so it gets no line.
 - The system message notes (`NO_PAGE_NOTE`, the hand-off guard's UNKNOWN lines and the route flags) and the stderr lines are not refusals. They never stop a reply, and they fall outside this record.
 
 Kind: process

@@ -1,0 +1,1 @@
+- fan-code-workflows-nits: Nits, block nothing: #2875 Cost text ("one append", "at least one"); #2920 duplicate GITHUB_STEP_SUMMARY sentence in no-merge-onto-red-main.md and the Retire line should read !cancelled().

@@ -1,0 +1,1 @@
+- ci-mac-safety-holes-r62-part3: Retrospective 22:36 CST Nov 12: plan restart-plan 352e35f1 holds both CI safety holes (21:44 and 22:07 CST) in R62 part 3.

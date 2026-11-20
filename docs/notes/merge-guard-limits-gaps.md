@@ -1,0 +1,1 @@
+- merge-guard-limits-gaps: (#2513) the MCP file-write tools to main and the `bash -c` wrapper are not in the decision's Limits.

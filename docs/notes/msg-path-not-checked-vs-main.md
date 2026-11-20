@@ -1,0 +1,1 @@
+- msg-path-not-checked-vs-main: Coordinator, note only: it sent the retrospective a command with a guessed script path (hooks/protect.py; real skills/project-ops/scripts/protect.py), fixed one minute later. Guard candidate: a send_message carrying a repo path in a command block is checked against origin/main's tree. Becomes a step if it repeats.

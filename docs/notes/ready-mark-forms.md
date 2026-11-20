@@ -1,0 +1,1 @@
+- ready-mark-forms: (#2542) ready-mark forms the guard misses, which main also allows: a ready mark inside bash -c or eval, a GitHub API PATCH that sets draft to false, and -R other-repo from a cwd that is not the merge checkout.

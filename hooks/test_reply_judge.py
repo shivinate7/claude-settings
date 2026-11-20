@@ -1376,6 +1376,27 @@ def case_prompt_flags_a_recommended_option_that_widens():
           has_pin(sentences, ("never flag",), ("describes the rule",)), sentences)
 
 
+# A change to the shared tool that every repo gets alike is not widening, so the judge never flags it. Widening is a
+# form, allow entry or exception made so that one repo's differing form passes (decision uniform-over-variants: one
+# shared tool for every repo).
+def case_prompt_spares_a_tool_wide_change_with_no_repo_named():
+    run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
+    sentences = rule_sentences(run, WIDENS_ASK)
+    check("prompt: a sentence never flags a tool-wide change with no repo named as its reason",
+          has_pin(sentences, ("never flag", "not flag", "not widen"), ("tool-wide", "every repo", "alike"),
+                  ("no repo", "names no", "repo named", "without a repo")),
+          sentences)
+
+
+def case_prompt_says_widening_is_a_form_that_passes_one_repos_variant():
+    run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
+    sentences = rule_sentences(run, WIDENS_ASK)
+    check("prompt: a sentence says widening is a form, allow entry or exception made so that one repo's differing form passes",
+          has_pin(sentences, ("widen",), ("form", "allow", "exception"), ("differ", "variant"),
+                  ("pass", "accept", "through")),
+          sentences)
+
+
 # Roadmap c135, item 31's shape: options that can all be done together, asked as pick-one. The prompt
 # flags it and says to ask it as a multi-select item (`multi: true`). Options that exclude each other,
 # such as now or later, stay a pick-one question.
@@ -2195,6 +2216,8 @@ CASES = (
     case_port_finding_is_a_note_with_its_rule,
     case_prompt_count_matches_judged_rules,
     case_prompt_flags_a_recommended_option_that_widens,
+    case_prompt_spares_a_tool_wide_change_with_no_repo_named,
+    case_prompt_says_widening_is_a_form_that_passes_one_repos_variant,
     case_widens_finding_logs_its_rule,
     case_prompt_flags_a_pick_one_question_whose_options_could_combine,
     case_route_cite_carries_cited_same_act_and_alternate_rows,

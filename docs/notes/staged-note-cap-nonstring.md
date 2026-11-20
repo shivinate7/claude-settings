@@ -1,0 +1,1 @@
+- staged-note-cap-nonstring: A non-string truthy note in a step file crashes roadmap/build.py with a traceback that names no step (from lane upkeep-keys-live-status).

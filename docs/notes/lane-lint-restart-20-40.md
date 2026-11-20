@@ -1,0 +1,1 @@
+- lane-lint-restart-20-40: 20:40 CST Nov 13 (consultant): lane lane-lint-bg-timeout restarted, session_013NEJKyhVmjcmShi7KhxEFH. Read-only lane lane-lint-time-measure, session_013NEJL3jvUzCNc8kGSYkprg, finds where the 17 minutes of lane lint go. Triage has not checked either session. Step lane-lint-bg-timeout's note is over the cap, so this line lives here.

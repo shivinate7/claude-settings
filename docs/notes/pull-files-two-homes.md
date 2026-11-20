@@ -1,0 +1,1 @@
+- pull-files-two-homes: (#2431 red-fix-finds-open-pr) Host.pull_files duplicates main's Host.pr_files and lacks its 3000-file cap check, so a PR over 3000 files could read clear. One-home defect.

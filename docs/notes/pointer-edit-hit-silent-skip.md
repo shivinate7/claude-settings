@@ -1,0 +1,1 @@
+- pointer-edit-hit-silent-skip: pointer_edit_hit in hooks/guard_pointer.py skips a path that cannot resolve with no log (`except Exception: continue`). This matches the guard's fail-open convention.

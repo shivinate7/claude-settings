@@ -73,7 +73,9 @@ REWRITE_CAP; no file written, no timer, no log.
 The answered-source check (rule `answered-needs-source`): on any turn, landed or not, it refuses each line of the last reply
 that holds the whole word "answered" (any case, outside fences and inline code spans, not hyphen-joined to another word)
 unless the same line cites a source: a URL, `#<n>`, a commit hash, a repo path, `item <n>`, `page:<n>`, an `fb-` id, a
-`session_` id or `HH:MM`. A negator in the same clause before the word exempts it, as does `[question] -> answered`. One
+`session_` id or `HH:MM`. A negator in the same clause before the word exempts it, as do `[question] -> answered`, the
+guard's own name "Answered guard", an adjective in a condition, a modal followed by a condition word, "a claim that" with
+no third-person owner after it, and the writer's own act on an object that names no person. One
 refusal per turn lists the lines and joins any other reason. A rewrite after a missing-report refusal is checked too. Risk
 kind and incident: decision answered-needs-source. Cost: regex over the reply, no file, no process.
 
@@ -181,7 +183,7 @@ import os
 import re
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
     ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender,
@@ -323,6 +325,23 @@ def owner_line(check, wrong):
     return check + ": " + wrong + " (" + REMEDY_CITE + ")."
 
 
+# The one shared line that ends every refusal of a reply but a missing report. `emit_stop` is its only writer, so a
+# new reply guard gets it with no work.
+CORRECTION_TAIL = "Post only the missing or corrected lines. Do not resend the reply."
+
+
+def emit_stop(payload, missing_report=False):
+    """The one emitter of the Stop hook's output. A block ends with CORRECTION_TAIL unless the reply is missing its
+    report, which asks for the report itself. A payload that is no block prints as it is. Every reply guard prints
+    through here, so none can forget the tail."""
+    if payload and payload.get("decision") == "block" and not missing_report:
+        reason = str(payload.get("reason") or "")
+        if CORRECTION_TAIL not in reason:
+            payload = dict(payload, reason=(reason + " " + CORRECTION_TAIL).strip())
+    if payload:
+        print(json.dumps(payload))
+
+
 # Wording that tells the session what to do. A refusal reaches the owner in chat, so it holds facts only.
 # `session_wording` is the one detector; the remedy suite imports it. A phrase here is matched case-insensitively.
 SESSION_PHRASES = (
@@ -352,7 +371,9 @@ _MODAL = re.compile(r"\b(?:must|should|need to|needs to|have to|has to|ought to)
 
 def session_wording(text):
     """The phrase in `text` that tells the session what to do, or '' when `text` holds facts only: a listed phrase,
-    a clause that opens with an order word, or a modal ("must", "should")."""
+    a clause that opens with an order word, or a modal ("must", "should"). CORRECTION_TAIL is the one ruled order
+    in a refusal, so it is read as no wording."""
+    text = text.replace(CORRECTION_TAIL, "")
     low = text.lower()
     for phrase in SESSION_PHRASES:
         if phrase in low:
@@ -387,6 +408,8 @@ MODELS_REASON = owner_line(
     "a Done item that agents built or reviewed does not name each one's role and model (%s)")
 UNSTARTED_REASON = owner_line(
     "Unstarted guard", "this turn ran a builder, and Next holds no \"Unstarted:\" line")
+UNSTARTED_FILE_REASON = owner_line(
+    "Unstarted guard", "an Unstarted item waits on another lane's merge or PR and names no shared file")
 
 
 # is_last_human and tool_uses live in lint/_transcript.py, imported above.
@@ -801,10 +824,54 @@ def plain_form_reasons(text):
 # file extension or a known top dir, or a bare file name with a known extension, so "and/or" is no source.
 # The word is not part of a hyphen-joined name (a rule anchor such as answered-needs-source). A negator in the
 # same clause before it (a clause breaks at . ; : ! ? , or a dash) exempts it: not, n't, no, none, nothing,
-# nobody, never, cannot, yet to. A line that ends in `?` asks and claims nothing.
+# nobody, never, cannot, yet to. A line that ends in `?` asks and claims nothing. Four uses pass: "answered" as an
+# adjective after a determiner and before a noun in a condition ("when an answered page item"); a modal clause with a
+# condition word after the modal ("should end once the items are answered"); "a claim that" with no third-person owner
+# after it; and the writer's own act ("I answered", "I sent ... and answered") on an object that names no person.
+# The guard's printed name ("the answered guard") is removed before the read.
 ANSWERED_RE = re.compile(r"(?<![\w-])answered(?![\w-])", re.I)
 ANSWERED_INBOX_RE = re.compile(r"\[question\]\s*(?:->|\u2192)\s*answered\b", re.I)
 ANSWERED_NEGATOR_RE = re.compile(r"\bnot\b|n['\u2019]t\b|\bno(?:ne|thing|body)?\b|\bnever\b|\bcannot\b|\byet\s+to\b", re.I)
+ANSWERED_MODAL_RE = re.compile(r"\b(?:should|would|could|might|may|will|must|shall)\b", re.I)
+ANSWERED_CHECK = "Answered guard (rule answered-needs-source)"  # the check name the refusal prints
+ANSWERED_GUARD_NAME = ANSWERED_CHECK.split(" (")[0]  # a reply that names the guard claims nothing
+_ANSWERED_DET = r"(?:the|this|that|these|those|an?|its|their|his|her|my|our|your|any|each|every|all|some|one|other)"
+# the printed name only at a line start or after a determiner or preposition, so "The owner answered guard questions" still claims
+ANSWERED_GUARD_NAME_RE = re.compile(
+    r"(?:^|(?<![\w-])(?:" + _ANSWERED_DET + r"|on|of|in|for|to|with|by|per|fix(?:ing)?)\s+)"
+    + r"\s+".join(map(re.escape, ANSWERED_GUARD_NAME.split())) + r"\b", re.I)
+# "answered" as an adjective in a rule or condition: a condition word in its clause, a determiner before it, a noun-like word after it
+ANSWERED_CONDITION_RE = re.compile(r"\b(?:when|whenever|if|unless|once|while|until|after|before|whichever|any\s+time|each\s+time|every\s+time)\b", re.I)
+ANSWERED_BEFORE_ADJ_RE = re.compile(r"(?<![\w-])" + _ANSWERED_DET + r"\s+$", re.I)
+# the words that follow "answered" when it is a verb, not an adjective before a noun
+ANSWERED_FUNCTION_WORDS = (
+    "in", "on", "at", "by", "for", "to", "with", "from", "of", "as", "and", "or", "but", "so", "it", "that", "the", "a",
+    "an", "its", "their", "his", "her", "my", "our", "your", "them", "him", "too", "also", "again", "already", "yet",
+    "now", "then", "today", "yesterday", "once", "after", "before", "when", "while", "if", "because", "since", "until",
+    "is", "was", "were", "are", "be", "been", "has", "have", "had", "here", "there", "not", "all", "both", "this",
+    "these", "those")
+ANSWERED_AFTER_FUNCTION_RE = re.compile(r"\s+(?:" + "|".join(ANSWERED_FUNCTION_WORDS) + r")\b", re.I)
+ANSWERED_NOUN_START_RE = re.compile(r"\s+[A-Za-z]")
+# "a claim that X were answered" talks about a claim, unless a named third-person owner follows "that"
+ANSWERED_CLAIM_NOUN_RE = re.compile(r"\ban?\s+claims?\s+that\b", re.I)
+ANSWERED_THIRD_OWNER_RE = re.compile(r"\b(?:owner|user|shivam|he|she|they)\b", re.I)
+# a person who could have answered: the owner by any name or pronoun
+ANSWERED_PERSON_RE = re.compile(r"\b(?:owner|user|shivam|he|him|she|her|they|them|you)\b", re.I)
+# a modal clause proposes a condition only with one of these words in it; a narrower list than ANSWERED_CONDITION_RE,
+# because "while" or "before" after a modal ("may have answered it while I slept") hedges a claim
+ANSWERED_MODAL_CONDITION_RE = re.compile(r"\b(?:when|whenever|once|after|if|until)\b", re.I)
+# the writer's subject words come from _clause, the one home of them
+_ANSWERED_WRITER = _clause.WRITER_PATTERN + r"(?:['\u2019](?:ve|d|ll))?(?!\w)"
+ANSWERED_FIRST_PERSON_RE = re.compile(r"\b" + _ANSWERED_WRITER, re.I)
+_ANSWERED_ADVERB = r"(?:%s|already|then|again|first|since)" % _clause.ADVERB_PATTERN
+# "I answered" or "we already answered": the first person, at most one adverb, then the word
+ANSWERED_I_BEFORE_RE = re.compile(r"\b" + _ANSWERED_WRITER + r"\s+(?:" + _ANSWERED_ADVERB + r"\s+)?$", re.I)
+# "I sent ... and answered": a verb joined to a first-person subject by "and"
+ANSWERED_AND_BEFORE_RE = re.compile(r"\band\s+(?:" + _ANSWERED_ADVERB + r"\s+)?$", re.I)
+# a person word and "and" right before the writer's word: a joint subject
+ANSWERED_JOINT_BEFORE_RE = re.compile(ANSWERED_PERSON_RE.pattern + r"\s+and\s+$", re.I)
+ANSWERED_OBJECT_AFTER_RE = re.compile(
+    r"\s+(?:(?:its|their|his|her|my|our|your|the|an?|all|both|some|any|each|every|it|them)\b|\d)", re.I)
 ANSWERED_CLAUSE_BREAK_RE = re.compile(r"[.;:!?,\u2014\u2013]|\s-{1,2}\s")
 ANSWERED_TOP_DIRS = {"docs", "hooks", "lint", "bin", "skills", "agents", "roadmap"}
 ANSWERED_FILE_RE = re.compile(
@@ -812,7 +879,7 @@ ANSWERED_FILE_RE = re.compile(
 ANSWERED_SOURCE_RE = re.compile(
     r"https?://\S+|\bitem\s+\d+|\bpage:\d+|\bfb-\w+|\bsession_\w+|\b\d{1,2}:\d{2}\b", re.I)
 ANSWERED_REASON = owner_line(
-    "Answered guard (rule answered-needs-source)",
+    ANSWERED_CHECK,
     "each line below says \"answered\" and cites no source; a mention of the word in an inline code span is no claim") + " Lines: "
 
 
@@ -823,12 +890,46 @@ def _has_path(line):
     return bool(ANSWERED_FILE_RE.search(line))
 
 
+def _first_person_act(clause, after):
+    """True when the writer answered something that is not the owner: "I" or "we" with at most an adverb before the
+    word, or "and" before it in a clause that a first-person word opens with no person after that word, and an object
+    after it that names no person."""
+    if not ANSWERED_OBJECT_AFTER_RE.match(after):
+        return False
+    if ANSWERED_PERSON_RE.search(ANSWERED_CLAUSE_BREAK_RE.split(after)[0]):
+        return False
+    writer = ANSWERED_I_BEFORE_RE.search(clause)
+    if writer:
+        # "Shivam and I answered" is a joint act: the person before "and" shares the verb, so it is not the writer's alone
+        return not ANSWERED_JOINT_BEFORE_RE.search(clause[:writer.start()])
+    opening = re.sub(r"^[\s*+-]+", "", clause)  # a list marker before the subject
+    first = ANSWERED_FIRST_PERSON_RE.match(opening)
+    rest = opening[first.end():] if first else ""
+    return bool(first and ANSWERED_AND_BEFORE_RE.search(clause) and not ANSWERED_PERSON_RE.search(rest))
+
+
 def _claims_answered(plain):
-    """True when `plain` holds the word with no negator in its clause before it."""
+    """True when `plain` holds the word as a claim that the owner, an item or a question was answered: it has no negator
+    in its clause, and it is no adjective in a condition, no modal followed by a condition word, no "a claim that" with
+    no third-person owner after it, and no first-person act on an object that names no person."""
     for m in ANSWERED_RE.finditer(plain):
-        clause = ANSWERED_CLAUSE_BREAK_RE.split(plain[:m.start()])[-1]
-        if not ANSWERED_NEGATOR_RE.search(clause):
-            return True
+        before = plain[:m.start()]
+        after = plain[m.end():]
+        clause = ANSWERED_CLAUSE_BREAK_RE.split(before)[-1]
+        if ANSWERED_NEGATOR_RE.search(clause):
+            continue
+        if (ANSWERED_CONDITION_RE.search(clause) and ANSWERED_BEFORE_ADJ_RE.search(before)
+                and ANSWERED_NOUN_START_RE.match(after) and not ANSWERED_AFTER_FUNCTION_RE.match(after)):
+            continue
+        claim = ANSWERED_CLAIM_NOUN_RE.search(clause)
+        if claim and not ANSWERED_THIRD_OWNER_RE.search(clause[claim.end():]):
+            continue
+        modal = ANSWERED_MODAL_RE.search(clause)
+        if modal and ANSWERED_MODAL_CONDITION_RE.search(clause[modal.end():]):
+            continue
+        if _first_person_act(clause, after):
+            continue
+        return True
     return False
 
 
@@ -860,7 +961,7 @@ def answered_problem(text):
         return ""
     bad = []
     for body in _prose_lines(text):
-        plain = ANSWERED_INBOX_RE.sub(" ", CODE_SPAN.sub(" ", body))
+        plain = ANSWERED_GUARD_NAME_RE.sub(" ", ANSWERED_INBOX_RE.sub(" ", CODE_SPAN.sub(" ", body)))
         if not _claims_answered(plain):
             continue
         kept = CODE_SPAN.sub(lambda m: m.group(2), body)
@@ -992,15 +1093,74 @@ def done_models_problem(text, spawned, every=None):
 
 
 # reports-name-unstarted-items: a builder spawn marks an orchestrator's turn. Its report holds an
-# `Unstarted:` line, inline after Next, after a `;` or `.`, or on its own line, in any case. It lists
-# the ready items or says none. A bold `**Unstarted:**` is an unknown label, which the shape check refuses.
+# `Unstarted:` line, inline after Next, after a `;` or `.`, on its own line, or as an indented sub-bullet,
+# in any case. It lists the ready items or says none. A bold `**Unstarted:**` is an unknown label, which the
+# shape check refuses.
 UNSTARTED_RE = re.compile(
-    r"(?:^|[;.]\s+)(?:\*\*Next:?\*\*:?\s*)?(?:[-*+]\s+)?unstarted:", re.M | re.I)
+    r"(?:^[ \t]*|[;.]\s+)(?:\*\*Next:?\*\*:?\s*)?(?:[-*+]\s+)?unstarted:", re.M | re.I)
+
+
+# An item that waits on another lane's merge, PR or landing must name the file the two lanes share, so the wait is
+# checkable. No word exempts it: the owner or the load brake may also be in the sentence.
+_UNSTARTED_LANE_WAIT_RE = re.compile(
+    r"\b(?:PRs?|pull requests?|merges?|merged|merging|land(?:s|ed|ing)?)\b|#\d+", re.I)
+# "none" or "nothing", bare, in bold or in parentheses, says no item waits.
+_UNSTARTED_NONE_RE = re.compile(r"[\s*(]*(?:none|nothing)\b", re.I)
+_UNSTARTED_STOP_RE = re.compile(r"\s*(?:\*\*(?:Done|Deviations|Input Needed|Next)\b|$)")
+_BULLET_RE = re.compile(r"([ \t]*)[-*+]\s")
+# A shared file is `name.ext`, a build file with no extension, a dotfile, or a path with a slash. "e.g." and
+# "i.e." are not files, and neither are slash pairs such as "and/or" or a number pair such as "3679/3680".
+_SHARED_FILE_RE = re.compile(
+    r"\b[\w-]+\.[A-Za-z][A-Za-z0-9]{0,9}\b"
+    r"|\b(?:makefile|dockerfile|gemfile|rakefile|procfile|justfile|jenkinsfile|vagrantfile|codeowners)\b"
+    r"|(?<![\w.])\.[A-Za-z][\w.-]*"
+    r"|(?<![\w/])/?[\w.-]+(?:/[\w.-]*)+", re.I)
+_NOT_A_FILE = frozenset(("e.g", "i.e", "and/or", "either/or", "n/a", "w/o", "yes/no", "he/she", "his/her",
+                         "pass/fail", "read/write", "i/o"))
+
+
+def _unstarted_item(block, found):
+    """The Unstarted item's text: the rest of its line, then the wrapped or sub-bullet lines under it, up to
+    a blank line, a label, or a sibling bullet at its own indent or less. A bare `Unstarted:` line that is not
+    itself a bullet owns the bullets under it, at any indent."""
+    lines = block[found.end():].split("\n")
+    line = block[block.rfind("\n", 0, found.end()) + 1:].split("\n", 1)[0]
+    base = len(line) - len(line.lstrip())
+    if not lines[0].strip() and not _BULLET_RE.match(line):
+        base = -1
+    item = [lines[0]]
+    for line in lines[1:]:
+        if _UNSTARTED_STOP_RE.match(line):
+            break
+        bullet = _BULLET_RE.match(line)
+        if bullet and len(bullet.group(1)) <= base:
+            break
+        item.append(line)
+    return "\n".join(item)
+
+
+def _names_a_file(item):
+    for m in _SHARED_FILE_RE.finditer(item):
+        word = m.group(0).lower()
+        if word not in _NOT_A_FILE and not re.fullmatch(r"[\d/]+", word):
+            return True
+    return False
 
 
 def unstarted_problem(text, spawned):
-    """True when a builder ran this turn and the report holds no `Unstarted:` line."""
-    return "builder" in spawned and not UNSTARTED_RE.search(block_text(text))
+    """The refusal reason when a builder ran this turn and Next's `Unstarted:` line is missing, or waits on
+    another lane's merge, PR or landing and names no shared file. '' when the line is fine."""
+    if "builder" not in spawned:
+        return ""
+    block = block_text(text, keep_indent=True)
+    found = UNSTARTED_RE.search(block)
+    if not found:
+        return UNSTARTED_REASON
+    item = _unstarted_item(block, found)
+    if (not _UNSTARTED_NONE_RE.match(item) and _UNSTARTED_LANE_WAIT_RE.search(item)
+            and not _names_a_file(item)):
+        return UNSTARTED_FILE_REASON
+    return ""
 
 # decisions-reach-a-clickable-pick: "a pick with options" in the Input Needed item is either two or
 # more distinct option markers, or the phrase "A or B". A marker is a lettered or numbered item at
@@ -3050,7 +3210,7 @@ def rewrite_problems(hook):
         if models:
             reasons.append(MODELS_REASON % models)
         if unstarted_problem(text, spawned):
-            reasons.append(UNSTARTED_REASON)
+            reasons.append(unstarted_problem(text, spawned))
         answered = answered_problem(text)
         if answered:
             reasons.append(answered)
@@ -3400,12 +3560,12 @@ def main():
         reasons = rewrite_problems(hook)
         reasons += rewrite_relay(hook)
         if hold and not reasons:
-            print(json.dumps({"decision": "block", "reason": hold_reason(hold)}))
+            emit_stop({"decision": "block", "reason": hold_reason(hold)})
             return
         if hold:
             reasons.insert(0, hold_reason(hold))
         if reasons:
-            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)"}))
+            emit_stop({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)"})
         return
     # A marker left by a rewrite that never ran must not reach a later turn: only the Stop
     # straight after a missing-report block may consume one.
@@ -3418,12 +3578,11 @@ def main():
     # The refusals file is read for them before pending_refusals settles it.
     route = refusal_route_flags(hook)
 
-    def finish(payload):
+    def finish(payload, missing_report=False):
         if route:
             payload = dict(payload or {})
             payload["systemMessage"] = " ".join(filter(None, [payload.get("systemMessage"), *route]))
-        if payload:
-            print(json.dumps(payload))
+        emit_stop(payload, missing_report)
 
     # The hand-off cite reads the refusals file before pending_refusals settles it away.
     reply = last_reply(hook)  # one read of the reply for the hand-off cite, the refusals and the report checks
@@ -3543,7 +3702,7 @@ def main():
     if models:
         reasons.append(MODELS_REASON % models)
     if shape_ok and unstarted_problem(text, spawned):
-        reasons.append(UNSTARTED_REASON)
+        reasons.append(unstarted_problem(text, spawned))
     if pick_reason:
         reasons.append(pick_reason)
     try:
@@ -3585,7 +3744,7 @@ def main():
         reason = " ".join(reasons) + " (rule reports-order-of-labels)"
         if not shape_ok:
             write_marker(hook, last_human_idx)
-        finish({"decision": "block", "reason": reason})
+        finish({"decision": "block", "reason": reason}, missing_report=not shape_ok)
     else:
         finish({"systemMessage": note} if note else None)
 

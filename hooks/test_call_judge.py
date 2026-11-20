@@ -112,10 +112,12 @@ with open(os.path.join(PAGE_REPO, ".claude", "layout-extras.json"), "w", encodin
 # make_repo builds a real git repo under ROOT. `decisions` maps a slug to its ruling paragraph (docs/decisions/<slug>.md).
 # `steps` maps a step id to its note (roadmap/data/steps/<id>.json on a local `roadmap` branch). Every repo carries the
 # waiting page (PAGE_URL) in .claude/layout-extras.json, unless the `page` option names another url or None
-# (no page key). These git calls run in the test process, not in the hook.
+# (no page key). The `visibility` option ("public" or "private") writes the repo's visibility key, which lint/layout.py
+# reads; None writes no such key. These git calls run in the test process, not in the hook.
 GIT_ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
 REPOS = {}
 REPO_PAGES = {}
+REPO_VISIBILITY = {}
 
 
 def git(repo, *args):
@@ -124,19 +126,27 @@ def git(repo, *args):
                           capture_output=True, text=True, env=GIT_ENV, check=True)
 
 
-def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL):
+def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL, visibility=None):
     """`page` is the repo's waiting-page url. None writes no page key: a repo with no page, which layout reads as unknown.
-    A name is cached, so a second call must name the same page: a different one would silently get the first repo."""
+    `visibility` is "public" or "private", or None for no visibility key (layout reads that as unknown).
+    A name is cached, so a second call must name the same page and visibility: a different one would silently get the
+    first repo."""
     if name in REPOS:
         if REPO_PAGES[name] != page:
             raise ValueError("make_repo %r was made with page %r, not %r" % (name, REPO_PAGES[name], page))
+        if REPO_VISIBILITY[name] != visibility:
+            raise ValueError("make_repo %r was made with visibility %r, not %r"
+                             % (name, REPO_VISIBILITY[name], visibility))
         return REPOS[name]
     repo = os.path.join(ROOT, "repo-" + name)
     os.makedirs(os.path.join(repo, ".claude"))
     extras = {"kinds": {}} if page is None else {"kinds": {}, "waiting-page": page}
+    if visibility is not None:
+        extras["visibility"] = visibility
     with open(os.path.join(repo, ".claude", "layout-extras.json"), "w", encoding="utf-8") as f:
         json.dump(extras, f)
     REPO_PAGES[name] = page
+    REPO_VISIBILITY[name] = visibility
     git(repo, "init", "-q")
     git(repo, "commit", "-q", "--allow-empty", "-m", "init")
     if decisions:
@@ -428,7 +438,7 @@ def good_page_item(mark=PAGE_MARK, **over):
     in the prompt. `over` replaces fields, for a case that changes one. Its options carry ids and `shown` (see
     with_frozen_fields), so a case that replaces `options` gets a matching `shown` too."""
     context = "\n".join((GOAL_LINE, PROBLEM_LINE, *BASED_LINES, DEPARTS_LINE, WAITING_LINE))
-    item = {"kind": "decision", "title": "Ship the change today?", "status": "open", "context": context,
+    item = {"n": 928, "kind": "decision", "title": "Ship the change today?", "status": "open", "context": context,
             "recommended": "a", "why": "A ships the change today, and nothing else waits on it.",
             "options": [{"key": "a", "label": "Ship it", "gain": "The change lands today. " + mark,
                          "lose": "Nobody reads it first."},
@@ -451,7 +461,7 @@ TASK_FLAG = '{"ok": false, "reason": "a step that replaces text quotes the whole
 def good_task_item(step=GOOD_TASK_STEP, **over):
     """A task item that passes question_form.item_hit: its Why yours line in `context`, and one step. `over`
     replaces fields, for a case that changes one."""
-    item = {"kind": "task", "title": "Set the guard skip", "status": "open", "context": TASK_WHY, "steps": [step]}
+    item = {"n": 928, "kind": "task", "title": "Set the guard skip", "status": "open", "context": TASK_WHY, "steps": [step]}
     item.update(over)
     return item
 
@@ -1394,6 +1404,44 @@ def case_widening_rule_names_the_mark():
     check("widening key: WIDENING_RULE contains WIDENS_KEY", bool(rule) and bool(key) and key in rule, cause)
 
 
+def widening_sentences(prompt):
+    """The lowercase sentences of a judged prompt's widening slot. [] when the slot is absent."""
+    region = widening_region(prompt, "PAGE_PROMPT") or ""
+    return [s for s in re.split(r"[.\n]", region.lower()) if s.strip()]
+
+
+def widening_pin(sentences, *groups):
+    """True when one sentence holds at least one word from each group."""
+    return any(all(any(w in s for w in group) for group in groups) for s in sentences)
+
+
+# A change to the shared tool that every repo gets alike is not widening, so the judge never flags it. Widening is a
+# form, allow entry or exception made so that one repo's differing form passes (decision uniform-over-variants: one
+# shared tool for every repo). The judge reads both in its widening slot, so the cases read that slot.
+def case_widening_rule_spares_a_tool_wide_change_with_no_repo_named():
+    r = run_hook(page_input("set", good_page_item()), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    sentences = widening_sentences(prompt)
+    check("widening slot: the judged prompt carries the widening slot after the question-format prompt",
+          bool(sentences), prompt[:200])
+    check("widening: a sentence never flags a tool-wide change with no repo named as its reason",
+          widening_pin(sentences, ("never flag", "not flag", "not widen"), ("tool-wide", "every repo", "alike"),
+                       ("no repo", "names no", "repo named", "without a repo")),
+          sentences or prompt[:200])
+
+
+def case_widening_rule_says_widening_is_a_form_that_passes_one_repos_variant():
+    r = run_hook(page_input("set", good_page_item()), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    sentences = widening_sentences(prompt)
+    check("widening slot: the judged prompt carries the widening slot after the question-format prompt",
+          bool(sentences), prompt[:200])
+    check("widening: a sentence says widening is a form, allow entry or exception made so that one repo's differing form passes",
+          widening_pin(sentences, ("widen",), ("form", "allow", "exception"), ("differ", "variant"),
+                       ("pass", "accept", "through")),
+          sentences or prompt[:200])
+
+
 def case_fail_open():
     for label, inp, kwargs in (
         ("a model failure on a spawn", spawn_input("builder", model="sonnet"), {"model_fail": True}),
@@ -1825,6 +1873,8 @@ def main():
                  case_widening_set_holds_rule_once, case_widening_batch_holds_rule_once,
                  case_widening_absent_without_options, case_widening_refusal_names_the_option,
                  case_widening_fair_option_passes_code_path, case_widening_rule_names_the_mark,
+                 case_widening_rule_spares_a_tool_wide_change_with_no_repo_named,
+                 case_widening_rule_says_widening_is_a_form_that_passes_one_repos_variant,
                  case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,

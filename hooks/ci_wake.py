@@ -12,8 +12,11 @@ ran shows (a skipped draft run is no run), waits on it, lists once more at once 
     CI <green|red|cancelled> on <sha7>: <failing job names>
     CI unknown on <sha7 or PR>: <reason>        (also "still running" at the deadline)
 
-Then it exits 2 once, which wakes the session. It prints nothing and exits 0 when no watch starts,
-when the repo has no active workflow, or when another watcher already holds every PR it would watch. Any error exits 2 with an unknown
+Then it exits 2 once, which wakes the session. A repo with no active workflow, whose PR adds no
+.github/workflows file, has no CI to wait for, so it wakes with `CI none on <sha7>: no active workflow`. The
+Stop check closes its CI wait on that line and reads only the transcript (stall_watch `open_ci_wait`). A workflow
+list with stderr output reads unknown, and the watch runs. It prints nothing and exits 0 when no watch starts, for a
+draft or when another watcher already holds every PR it would watch. Any error exits 2 with an unknown
 line, never 1. It lists runs, and reads a run's status, 30 s apart for the first 4 minutes, then at
 gaps that grow to 120 s (`pauses`). One extra list comes at once after the first judged run, to catch a
 run that shows late (debt ci-wake-lists-runs-once). It never loops on a red run.
@@ -32,7 +35,7 @@ import tempfile
 import threading
 import time
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
@@ -52,6 +55,9 @@ PR_URL = re.compile(r"^https?://([^/]+)/([^/]+/[^/]+)/pull/(\d+)")
 # A word-internal apostrophe (don't) opens no quote. Masked here, so split_segments does not read it as one.
 APOSTROPHE = re.compile(r"(?<=[A-Za-z])'(?=[A-Za-z])")
 HELD = []   # open lock files, kept until the process ends: the OS drops the locks then, kill included
+
+
+NO_CI_LINE = "CI none on %s: no active workflow"   # CI_VERDICT in stall_watch closes the Stop wait on it
 
 
 class Unknown(Exception):
@@ -331,11 +337,28 @@ def verdict(sha, runs):
 
 def no_workflows(cwd, repo):
     """True only when `gh workflow list` reads cleanly and shows no active workflow: no CI, so no
-    watch. A failed or non-JSON read is unknown, not "no workflows" (the watch runs)."""
+    watch. gh 2.89.0 prints 0 bytes and exits 0 for a repo with no workflow, never "[]", so empty output
+    with exit 0 and nothing on stderr counts as none. A failed, non-JSON or noisy read is unknown, not
+    "no workflows" (the watch runs)."""
     try:
-        return gh_json(["workflow", "list", *(["-R", repo] if repo else []), "--json", "id"], cwd) == []
-    except (Unknown, NoPR):
+        rc, out, err = gh(["workflow", "list", *(["-R", repo] if repo else []), "--json", "id"], cwd)
+        return rc == 0 and (not out.strip() and not err.strip() or bool(out.strip()) and json.loads(out) == [])
+    except (Unknown, ValueError):
         return False
+
+
+def adds_workflow(pr, repo, cwd):
+    """True when the PR's own files touch .github/workflows, or the file list cannot be read in full: the PR's head
+    has CI that the default branch's workflow list does not show. One page of 100 files; a full page may hide it."""
+    parts = repo.split("/") if repo else []
+    host, slug = (parts[0], "/".join(parts[1:])) if len(parts) == 3 else ("", repo or "{owner}/{repo}")
+    try:
+        files = gh_json(["api", "--method", "GET", "repos/%s/pulls/%s/files" % (slug, pr["number"]), "-F", "per_page=100",
+                         *(["--hostname", host] if host else [])], cwd)
+    except (Unknown, NoPR):
+        return True
+    return not isinstance(files, list) or len(files) >= 100 or any(
+        str(f.get("filename", "")).startswith(".github/workflows/") for f in files if isinstance(f, dict))
 
 
 def pr_fields(p):
@@ -406,10 +429,10 @@ def watch_pr(selector, repo, cwd, deadline, lock_dir):
         repo = repo_of_url(pr.get("url")) or repo   # the PR's own repo, whatever form named it
         if pr.get("isDraft"):
             return None   # gh pr ready did not take: a draft runs no CI
-        if no_workflows(cwd, repo):
-            return None   # a repo with no active workflow runs no CI: nothing to wait for
         if not lock_pr(pr, lock_dir):
             return None
+        if no_workflows(cwd, repo) and not adds_workflow(pr, repo, cwd):
+            return NO_CI_LINE % ident   # no CI to wait for; the line closes the Stop's CI wait
         return verdict(pr["headRefOid"], wait_for(pr["headRefOid"], cwd, deadline, repo))
     except NoPR:
         return None

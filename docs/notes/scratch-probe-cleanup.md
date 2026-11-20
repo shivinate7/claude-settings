@@ -1,0 +1,1 @@
+- scratch-probe-cleanup: Dropped Degen guard step with no incident on record. Only its slug survived the stopped session's handoff. The owner may name an incident to revive it. Source: origin/roadmap-guards-degen, the step of the same slug. Seen: 2026-11-19 x1

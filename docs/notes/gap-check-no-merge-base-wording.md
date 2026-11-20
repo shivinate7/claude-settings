@@ -1,0 +1,1 @@
+- gap-check-no-merge-base-wording: the gap check's "did not run" line also prints when the two branches share no merge-base, so the wording names the wrong cause. A note, not a debt.

@@ -22,7 +22,10 @@ Verdict, one line per page, then a total line:
            read, or its page has a .notfound or .unreadable marker in <fetched-dir> (so a not-found page that is
            the claude-settings page names no target). The check never repoints a page.
 The total line reads `waiting pages: N current, N behind, N unknown, N not-found`.
-Exit 0 only when every page is current. A behind, unknown or not-found page exits 1: an unread page is never
+A read page whose roadmap block holds only white space (no build baked it) gets one more line,
+`roadmap block: empty on <owner> page (bake it: skill waiting-page, "Update the roadmap block")`, in both modes
+(page mode says `this page`), and the run exits 1; the verdict word and the total line stay. A block baked with null data is not empty.
+Exit 0 only when every page is current and holds no empty roadmap block. A behind, unknown or not-found page exits 1: an unread page is never
 counted current. A host wrapper is tolerated, in both modes: the template must appear inside the
 page. The text before it may hold only a document skeleton (doctype, html, head, meta, title and
 body tags, white space) and style elements inside the leading head, before body opens. The text
@@ -62,6 +65,11 @@ answers/<id> is kept`, then the remedy: when its wait has ended, drop `waits` an
 a closed item with a `lane` and a `lastAnswer` (routed: its answer stays until the done report), an item with `arbiter` true, a park answer (`park.<id>`, `parked: true` or `act: "park"`), an answer with no item. An unreadable file, a folder without the marker,
 unreadable items, an items folder without the marker, or --answers without --items print one `kept-answer: unknown (...)` line, with no other kept-answer line.
 The folder loader is export_page.docs_in, the one home of reading that folder.
+With --items and the env ROADMAP_STEPS_FOLDER naming the record's roadmap/data/steps folder (no CLI flag), an open item whose `home` reads `step <id>` (the keyword in any case) or is a bare <id>
+names a step whose status is done, dropped or done-obsolete prints `found-false: item <n> (<id>): ...` after the other lines. A folded step waits on purpose, so it is never flagged.
+A bare id may also be a decision or debt id, so its line adds "if <id> is a decision or debt id, leave it open". The line names the home, its
+status and the close (status closed, closed, replied, reply); the item is moot, so the owner is never asked. Unset, the check does nothing; an unreadable folder prints
+one `found-false: unknown (...)` line. The exit code stays the verdict's.
 Session-start mode, run by hooks/session_start.sh in a repo whose extras name a waiting page:
 
     python3 ~/.claude/skills/waiting-page/stale_pages.py --session-line <repo toplevel> [--main-checkout <dir>]
@@ -109,8 +117,29 @@ not a list), an unreadable `woke`, an answer with no readable `at`
 or a compared receipt with no readable `read` prints an `unknown:` line and exits 2.
 The mode reads no clock and has no time bound: what it lists depends on the saved files alone. `woke` is the writer's
 own optional field in meta/page. The incident: an answer that sat unread 10.5 h (owner's report).
+A listed answer on an item with a non-empty `lane` ends its parentheses with `, lane <slug>`, so the wake can message that lane.
+An answer already routed is not listed: its item has a non-empty `lane` and a `lastAnswer.at` equal to the answer's `at` (the busy-lane path), and a receipt with a `read` at or after the answer's `at` exists (the routing session writes it at routing time). A routed answer with no such receipt is listed as usual.
+Two more lines, after the answer lines and before any unknown line:
+`answer-needs-reply <id> (item <n>, owner <owner>, answered <at>)` for an item answer of `choice` `none` whose `note` is not blank, when
+the item has no `reply` with text and a `replied` later than the answer's `at` (read or unread, whatever the wake). A `replied` that is
+not an ISO time, with a `reply` text, is unknown. On an item with `waits`, `replied` is not trusted, since a wait moves it too: the line clears once a receipt for the answer has a `read` at or after the answer's `at`.
+`lane-missing <id> (item <n>, owner <owner>)` for an open item with `holdsLane` true and no `lane` text, whatever its `waits` and with or without `holds` text.
+An item with `holds` alone (a merge or PR wait) never gets it, and neither does a closed item.
 Write `read` and `filed` as ISO UTC with a trailing Z: a time with no zone is read in the host's zone.
 Cost: one python process, reads 4 files, writes none, starts no git, no timer.
+
+Close-batch mode, run by the item's owner at step 1 and 2 of "Route and close" (SKILL.md):
+
+    python3 ~/.claude/skills/waiting-page/stale_pages.py --close-batch --item <file> --answer <file> [--receipt <file>] [--reply <text>] [--now <iso>] [--done] [--item-version <n>] [--answer-version <n>] [--receipt-version <n>]
+
+Each file is a doc `ArtifactData get` saved ({id, data, version}) or bare data. It prints one `ArtifactData batch` payload, {"writes": [...]}:
+a `set` of receipts/<id> with `read` and `filed` at --now (default: the clock, ISO UTC with a Z), an `update` of items/<id> that closes it
+(`status`, `closed`, `lastAnswer` from the answer's `choice`, `done`, `note`, `at`; with --reply text also `reply` and `replied`), and a `delete` of
+answers/<id>, with `"pinned"` true or false beside `writes`. A write carries `if_version` from --item-version, --answer-version or --receipt-version, else from
+the fetched wrapper's `version`, else none (--receipt names the receipt already stored). With the item or answer (or a named receipt) unpinned, the first line
+on stderr is `unpinned: <docs>` and `pinned` is false; the payload still prints. Exit 0.
+Exit 2 with one `unknown:` line and no payload when the item is open and routed, awaiting a done report, and --done is not passed (`item waits for a done report`): it has `waits`, or a non-empty `lane` and a `lastAnswer.at` equal to the answer's `at`. An open item with `lane` and a plain pick (no matching `lastAnswer`) closes without --done, and the helper then prints `notify-lane <slug>` on stderr and `"notify": "<slug>"` in the payload: the closer messages that lane. Also when a file cannot be read, the ids differ, the answer has no readable `at`, or the answer is a
+`none` that asks a question and --reply has no text. Cost: one python process, reads up to 3 files, writes none, starts no git, no timer.
 
 Awaiting mode, run by the writer at a comment wake (SKILL.md, "Read the answers"), after it saves its report.
 
@@ -176,6 +205,9 @@ DESIGN_BODY = re.compile(r'(<script type="application/json" id="designData">)(.*
 TEMPLATE_IN_GIT = "skills/waiting-page/page.html"
 GIT_TIMEOUT = 30
 WAIT_CAP = 50  # most gh calls one --items run makes
+FOUND_ENV = "ROADMAP_STEPS_FOLDER"  # the folder of step files the --items run reads for found-false items; unset, the check does nothing
+FOUND_BULLET = "- An item found false"  # the start of the SKILL.md bullet that holds the found-false rule; the printed cite names the section holding it
+FOUND_DONE = ("done", "dropped", "done-obsolete")  # the step statuses that make an item's premise moot; a folded step waits on purpose, so it is not one
 REPO_NAME = re.compile(r"[\w.-]+/[\w.-]+")
 WAIT_NUMBER = re.compile(r"[1-9][0-9]*")  # a run id or PR number: a whole number above zero, with no leading zero (page.html waitsOf reads the same form)
 # One piece of the text before the template: white space or a document skeleton tag (no event-handler
@@ -188,12 +220,27 @@ PIECE = re.compile(r'\s+|<!doctype[^<>]*>|<(?P<close>/?)(?P<tag>html|head|body)%
 TAIL = re.compile(r'(?:\s|</(?:body|html)\s*>)*', re.I)
 
 
-def empty_roadmap_block(text):
-    """`text` with the body of its roadmap block cut out, markers kept; unchanged when it has no one block."""
+def block_body(text):
+    """(start, end) of the body of the one roadmap block in `text`, markers excluded; None when it has no one block."""
     found = splice.markers(text)
     if [m[0] for m in found] != [splice.OPEN, splice.CLOSE]:
-        return text
-    return text[:found[0][2]] + text[found[1][1]:]
+        return None
+    return found[0][2], found[1][1]
+
+
+def empty_roadmap_block(text):
+    """`text` with the body of its roadmap block cut out, markers kept; unchanged when it has no one block."""
+    span = block_body(text)
+    return text if span is None else text[:span[0]] + text[span[1]:]
+
+
+def unbaked_line(text, owner):
+    """The line for a page whose roadmap block holds only white space (no build baked it), else None. A block
+    build.py baked with no record branch holds null data, so it is not empty."""
+    span = block_body(text)
+    if span is None or text[span[0]:span[1]].strip():
+        return None
+    return 'roadmap block: empty on %s page (bake it: skill waiting-page, "Update the roadmap block")' % owner
 
 
 def empty_title(text):
@@ -285,9 +332,18 @@ def refile_target(fetched):
     return "unknown" if url == "unknown" or marker(url, fetched) else url
 
 
+def fetched_text(url, fetched):
+    """The text saved for `url` in <fetched>/<artifact id>.html, or None when there is no such file."""
+    import layout  # batch mode only
+    name = os.path.join(fetched, layout.artifact_id(url)) + ".html"
+    if not os.path.isfile(name):
+        return None
+    with open(name, encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
 def verdict(url, fetched, template):
     """(word, why) for one page: current, behind, unknown or not-found."""
-    import layout  # batch mode only
     found = marker(url, fetched)
     if found == "notfound":
         target = refile_target(fetched)
@@ -296,11 +352,9 @@ def verdict(url, fetched, template):
         return "not-found", "not found from this account (deleted, or another account's); %s" % where
     if found == "unreadable":
         return "unknown", "the read failed"
-    name = os.path.join(fetched, layout.artifact_id(url))
-    if not os.path.isfile(name + ".html"):
+    live = fetched_text(url, fetched)
+    if live is None:
         return "unknown", "no fetched file"
-    with open(name + ".html", encoding="utf-8", errors="replace") as f:
-        live = f.read()
     if not normal(live):
         return "unknown", "the fetched file is empty"
     return ("current", "") if matches(template, live) else ("behind", "differs from page.html")
@@ -664,10 +718,75 @@ def kept_answer_lines(items, answers, complete=True, answers_complete=True):
     return reopened + lines  # the stale open items lead, as they hold the page's wrong state
 
 
+def read_steps(folder):
+    """{step id: status} from the `<step id>.json` files in `folder` (the record's roadmap/data/steps). A step's id is its file name; an `id` field,
+    when present, names it too. Raises ValueError with the cause. A file that is not a JSON object with a string status reads as no status."""
+    steps = {}
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError as err:
+        raise ValueError("%s cannot be read (%s)" % (FOUND_ENV, err.strerror or err))
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(folder, name), encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        status = data.get("status") if isinstance(data, dict) else None
+        if not isinstance(status, str):
+            continue
+        steps[name[:-len(".json")]] = status
+        if isinstance(data.get("id"), str):
+            steps.setdefault(data["id"], status)
+    return steps
+
+
+def found_false_cite():
+    """`SKILL.md, "<section>"`, where <section> is the SKILL.md `## ` section that holds the found-false bullet, so a cite follows the bullet when it moves."""
+    try:
+        with open(os.path.join(HERE, "SKILL.md"), encoding="utf-8") as f:
+            sections = re.split(r"(?m)^## ", f.read())
+    except OSError:
+        return "SKILL.md"
+    for section in sections:
+        if FOUND_BULLET in section:
+            return 'SKILL.md, "%s"' % section.split("\n", 1)[0]
+    return "SKILL.md"
+
+
+def found_false_lines(items, steps):
+    """One line per open item, in `n` order, whose `home` names a step that is done, dropped or done-obsolete: its premise is moot, so the
+    writer closes it the same turn (SKILL.md, "Chat first", an item found false). `home` reads as `step <id>` (the keyword in any case) or as a bare <id>, the form
+    SKILL.md "The database" tells writers to use. A bare id may also be a decision or debt id, so its line says to leave the item open then. Any other home (a record path,
+    a pointer to a live or folded step) is never flagged. `steps` is {step id: status} from read_steps."""
+    lines = []
+    cite = found_false_cite()
+    # The folder lists docs by file name ("10" before "2"), so order by `n`, which is the order the page shows; an item with no whole `n` goes last.
+    ordered = sorted((i for i in items if isinstance(i, dict)), key=lambda i: (not isinstance(i.get("n"), int), i.get("n") if isinstance(i.get("n"), int) else 0))
+    for item in ordered:
+        if item.get("status") == "closed" or not isinstance(item.get("home"), str):
+            continue
+        home = item["home"].strip()
+        keyword = re.match(r"step\s+(\S.*)$", home, re.IGNORECASE)
+        if keyword:
+            home = keyword.group(1).strip()
+        status = steps.get(home)
+        if status in FOUND_DONE:
+            caveat = "" if keyword else "; if %s is a decision or debt id, leave it open" % home
+            lines.append("found-false: item %s (%s): its home step %s is %s, so the item is moot%s; close it this turn: write status closed, closed, replied, reply "
+                         "(the reply names the record that shows it false) (%s)"
+                         % (item.get("n", item.get("id", "?")), item.get("id", "?"), home, status, caveat, cite))
+    return lines
+
+
 def single_page(argv):
     """Exit 0 current, 1 behind, 2 unknown for one fetched page. Writes a file only with --write, never on unknown.
     With --items, prints after the verdict line one wait line per open item with a `waits` field, and one lane line per open
     item with a `lane` and a `lastAnswer` and no `waits`. With --answers too, one kept-answer line per closed item whose answer is kept, and per open item whose answer is older than its `added`.
+    With --items and the env ROADMAP_STEPS_FOLDER (the record's roadmap/data/steps), one found-false line per open item whose home (`step <id>` or a bare id) is done, dropped
+    or done-obsolete; unset, none.
     The exit code stays the verdict's."""
     ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
     ap.add_argument("--page", required=True)
@@ -680,9 +799,10 @@ def single_page(argv):
     if args.items is not None:
         try:
             items, complete = load_docs(args.items, keyed=True)
-            lines = wait_lines([dict(d, id=k) if k and isinstance(d, dict) else d for k, d in items], complete)
+            named = [dict(d, id=k) if k and isinstance(d, dict) else d for k, d in items]
+            lines = wait_lines(named, complete)
         except ValueError as err:
-            items, lines = None, ["wait: the items cannot be read: unknown (%s)" % err]
+            items, named, lines = None, [], ["wait: the items cannot be read: unknown (%s)" % err]
         if args.answers is not None:
             try:
                 if items is None:
@@ -691,6 +811,11 @@ def single_page(argv):
                 lines += kept_answer_lines(items, answers, complete, answers_complete)
             except ValueError as err:
                 lines.append("kept-answer: unknown (%s)" % err)
+        if os.environ.get(FOUND_ENV):
+            try:
+                lines += found_false_lines(named, read_steps(os.environ[FOUND_ENV]))
+            except ValueError as err:
+                lines.append("found-false: unknown (%s)" % err)
         for line in lines:
             print(line)
     elif args.answers is not None:
@@ -727,6 +852,7 @@ def page_verdict(args):
         print("unknown: the template has no single designData block (%s)" % source)
         return 2
     current = matches(template, live)
+    unbaked = unbaked_line(live, "this")
     if args.write:
         try:
             text = splice.carry(template, live)  # the one carry home: live designData and roadmap blocks, byte for byte
@@ -740,11 +866,10 @@ def page_verdict(args):
             print("unknown: the --write file cannot be written (%s)" % (err.strerror or err))
             return 2
         print("stale_pages: wrote %s" % args.write, file=sys.stderr)
-    if current:
-        print("current: matches the template (%s)" % source)
-        return 0
-    print("behind: differs from the template (%s)" % source)
-    return 1
+    print(("current: matches the template (%s)" if current else "behind: differs from the template (%s)") % source)
+    if unbaked:
+        print(unbaked)
+    return 0 if current and not unbaked else 1
 
 
 def session_mode(argv):
@@ -861,21 +986,158 @@ def unread_mode(argv):
         if at is None:  # an unreadable time is never counted read or unread
             unknown.append("unknown: the answer %s has no readable at" % key)
             continue
-        if woke is not None and at >= woke:
-            continue
-        times = [parse_utc(read) for read in reads.get(key, []) if read is not None]
-        if any(t is not None and t >= at for t in times):
-            continue
-        if any(t is None for t in times):
-            unknown.append("unknown: the receipt of answer %s has no readable read" % key)
-            continue
         item = item_data[key]
-        lines.append("answer-unread %s (item %s, owner %s, answered %s, %s)" % (
-            key, item.get("n", "?"), item.get("owner", "?"), data(r)["at"],
-            "before wake %s" % woke_text if woke is not None else "before wake: none recorded"))
+        if routed_answer(item, at) and any(t is not None and t >= at for t in map(parse_utc, reads.get(key, []))):
+            pass  # sent to the lane already, and the routing receipt says so: listing it again would re-message the lane
+        elif woke is None or at < woke:
+            times = [parse_utc(read) for read in reads.get(key, []) if read is not None]
+            if any(t is not None and t >= at for t in times):
+                pass
+            elif any(t is None for t in times):
+                unknown.append("unknown: the receipt of answer %s has no readable read" % key)
+            else:
+                lane = item.get("lane")
+                lines.append("answer-unread %s (item %s, owner %s, answered %s, %s%s)" % (
+                    key, item.get("n", "?"), item.get("owner", "?"), data(r)["at"],
+                    "before wake %s" % woke_text if woke is not None else "before wake: none recorded",
+                    ", lane %s" % lane if isinstance(lane, str) and lane else ""))
+        if asks_question(data(r)):
+            reply_at = parse_utc(item.get("replied")) if item.get("replied") is not None else None
+            if item.get("replied") is not None and reply_at is None and has_text(item.get("reply")):
+                unknown.append("unknown: the reply on item %s has no readable replied" % key)
+            # With `waits` set, `replied` may be only the wait's own change, so a receipt with `read` at or after the answer clears the line instead:
+            # the writer's reply and that receipt come in one wake, and the answer is kept during the wait.
+            elif ("waits" in item and not any(parse_utc(read) is not None and parse_utc(read) >= at for read in reads.get(key, []) if read is not None)) or (
+                    "waits" not in item and not (has_text(item.get("reply")) and reply_at is not None and reply_at > at)):
+                lines.append("answer-needs-reply %s (item %s, owner %s, answered %s)" % (
+                    key, item.get("n", "?"), item.get("owner", "?"), data(r)["at"]))
+    # An open item whose lane wait is flagged (`holdsLane` true) names its lane, whatever its `waits`. `holds` alone is a merge or PR wait: no lane to name.
+    for r in entries(items):
+        item = data(r)
+        if item.get("status") != "closed" and item.get("holdsLane") is True and not has_text(item.get("lane")):
+            lines.append("lane-missing %s (item %s, owner %s)" % (r.get("id"), item.get("n", "?"), item.get("owner", "?")))
     out = lines + unknown
     print("\n".join(out) if out else "unread: clean")
     return 2 if unknown else 1 if lines else 0
+
+
+def routed_answer(item, at):
+    """True when the item has a `lane` and a `lastAnswer` whose `at` is the answer's `at` (parsed time `at`): the busy-lane path routed it (SKILL.md, "Already routed")."""
+    last = item.get("lastAnswer")
+    return has_text(item.get("lane")) and isinstance(last, dict) and at is not None and parse_utc(last.get("at")) == at
+
+
+def has_text(value):
+    """True for a string with a non-blank character."""
+    return isinstance(value, str) and bool(value.strip())
+
+
+def asks_question(answer):
+    """True for a `none` answer whose note says something: it needs a written reply on the item (SKILL.md, "Route and close")."""
+    return answer.get("choice") == "none" and has_text(answer.get("note"))
+
+
+def read_doc(path):
+    """(id, data, version) of one fetched document: {id, data, version} as ArtifactData get saves it, or bare data. The id and
+    version are None when the file does not say. ValueError with the cause when the file cannot be read as an object."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError) as err:
+        raise ValueError("cannot read %s (%s)" % (path, getattr(err, "strerror", None) or err))
+    if not isinstance(doc, dict):
+        raise ValueError("%s is not a JSON object" % path)
+    if isinstance(doc.get("data"), dict) and ("id" in doc or "version" in doc):
+        doc_id, version, doc = doc.get("id"), doc.get("version"), doc["data"]
+    else:
+        doc_id, version = doc.get("id"), None
+    if version is not None and not (isinstance(version, int) and not isinstance(version, bool) and version >= 1):
+        raise ValueError("%s has a version that is not a whole number above zero" % path)
+    return (doc_id if isinstance(doc_id, str) and doc_id else None), doc, version
+
+
+def close_batch_mode(argv):
+    """`--close-batch --item <file> --answer <file> [--receipt <file>] [--reply <text>] [--now <iso>] [--done] [--item-version <n>]
+    [--answer-version <n>] [--receipt-version <n>]`: print the one ArtifactData batch payload, {"writes": [...], "pinned": bool}, that closes the item: the receipt set (read and filed), the item update (closed, lastAnswer, and reply with
+    replied) and the answer delete. A version flag, else the fetched wrapper's version, pins its write. With a doc unpinned, stderr
+    starts with `unpinned: <docs>` and `pinned` is false. An open item with `waits`, or with `lane` and a `lastAnswer.at` equal to the answer's `at`, is refused unless --done."""
+    ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
+    ap.add_argument("--close-batch", action="store_true")
+    ap.add_argument("--item", required=True)
+    ap.add_argument("--answer", required=True)
+    ap.add_argument("--receipt")
+    ap.add_argument("--reply")
+    ap.add_argument("--now")
+    ap.add_argument("--done", action="store_true")
+    for name in ("item", "answer", "receipt"):
+        ap.add_argument("--%s-version" % name, type=int)
+    args = ap.parse_args(argv)
+    docs, ids, errors = {}, set(), []
+    for name in ("item", "answer", "receipt"):
+        path = getattr(args, name)
+        if path is None:
+            continue
+        try:
+            doc_id, body, version = read_doc(path)
+        except ValueError as err:
+            errors.append("the %s: %s" % (name, err))
+            continue
+        docs[name] = (body, version)
+        ids.add(doc_id or (body.get("item") if name == "answer" else None))
+    ids = {i for i in ids if isinstance(i, str) and i}
+    if errors:  # name the id when any readable doc gives it, so the refusal says which close failed
+        print("unknown: close of %s refused: %s" % (", ".join(sorted(ids)) or "the item", "; ".join(errors)))
+        return 2
+    if len(ids) != 1:
+        print("unknown: the item, answer and receipt do not name one id (%s)" % (", ".join(sorted(ids)) or "none named"))
+        return 2
+    doc_id = next(iter(ids))
+    answer, answer_version = docs["answer"]
+    item, item_version = docs["item"]
+    for name in ("item", "answer", "receipt"):
+        given = getattr(args, name + "_version")
+        if given is not None and given < 1:
+            print("unknown: --%s-version of %s is not a whole number above zero" % (name, doc_id))
+            return 2
+    # A flag version wins over the wrapper's.
+    versions = {"item": args.item_version or item_version, "answer": args.answer_version or answer_version,
+                "receipt": args.receipt_version or (docs["receipt"][1] if "receipt" in docs else None)}
+    # An item with a wait, or one routed to its lane, stays open until the receiver reports the act done (SKILL.md, "Route and close").
+    # A lane with a plain pick (no matching lastAnswer) is not routed, so it closes.
+    if ("waits" in item or routed_answer(item, parse_utc(answer.get("at")))) and item.get("status") != "closed" and not args.done:
+        print("unknown: item waits for a done report (%s has waits or is routed to its lane; pass --done once the act is done)" % doc_id)
+        return 2
+    if parse_utc(answer.get("at")) is None:
+        print("unknown: the answer of %s has no readable at" % doc_id)
+        return 2
+    now = args.now if args.now else datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if parse_utc(now) is None:
+        print("unknown: --now is not an ISO time (%s)" % now)
+        return 2
+    reply = args.reply
+    if asks_question(answer) and not has_text(reply):
+        print("unknown: the answer of %s is a none that asks a question: it needs a written reply (--reply <text>)" % doc_id)
+        return 2
+    last = {k: answer[k] for k in ("choice", "done", "note", "at") if k in answer}
+    closed = {"status": "closed", "closed": now, "lastAnswer": last}
+    if has_text(reply):
+        closed.update(reply=reply, replied=now)
+    receipt = {"op": "set", "collection": "receipts", "doc_id": doc_id, "data": {"read": now, "filed": now}}
+    update = {"op": "update", "collection": "items", "doc_id": doc_id, "data": closed}
+    delete = {"op": "delete", "collection": "answers", "doc_id": doc_id}
+    unpinned = [name for name in ("item", "answer", "receipt") if versions[name] is None and (name != "receipt" or "receipt" in docs)]
+    for name, write in (("receipt", receipt), ("item", update), ("answer", delete)):
+        if versions[name] is not None:
+            write["if_version"] = versions[name]
+    if unpinned:  # the live get shape is unverified, so an unpinned close is printed, never refused
+        print("unpinned: %s" % ", ".join(unpinned), file=sys.stderr)
+    payload = {"writes": [receipt, update, delete], "pinned": not unpinned}
+    # A plain pick on an item with a lane was never relayed: the closer tells that lane (SKILL.md, step 1 of "Route and close").
+    if has_text(item.get("lane")) and item.get("status") != "closed" and not routed_answer(item, parse_utc(answer.get("at"))):
+        payload["notify"] = item["lane"].strip()
+        print("notify-lane %s" % payload["notify"], file=sys.stderr)
+    print(json.dumps(payload, indent=1))
+    return 0
 
 
 AWAITING_ROW = re.compile(r"  \[(?P<who>.+) — (?P<at>\d{4}-\d\d-\d\dT\S+)\]")  # exactly two spaces: a text line has six
@@ -1009,6 +1271,8 @@ def awaiting_mode(argv):
 
 
 def main(argv):
+    if "--close-batch" in argv:
+        return close_batch_mode(argv)
     if "--unread" in argv:
         return unread_mode(argv)
     if "--awaiting" in argv:
@@ -1024,6 +1288,8 @@ def main(argv):
                  "       stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>]\n"
                  "       stale_pages.py --parked <dir> [--now <iso>]\n"
                  "       stale_pages.py --unread <dir>\n"
+                 "       stale_pages.py --close-batch --item <file> --answer <file> [--receipt <file>] [--reply <text>] [--now <iso>] [--done]\n"
+                 "                      [--item-version <n>] [--answer-version <n>] [--receipt-version <n>]\n"
                  "       stale_pages.py --awaiting <dir>")
     import layout  # batch mode only
     fetched, roots = argv[0], argv[1:] or default_roots()
@@ -1034,13 +1300,19 @@ def main(argv):
     except layout.LayoutError as err:
         sys.exit("stale_pages: %s" % err)
     counts = {"current": 0, "behind": 0, "unknown": 0, "not-found": 0}
+    unbaked = 0
     for owner, url in pages:
         word, why = verdict(url, fetched, template)
         counts[word] += 1
         print("%s: %s%s (%s)" % (word, owner, " - " + why if why else "", url))
+        if word in ("current", "behind"):  # the page was read, so the fetched file exists
+            line = unbaked_line(fetched_text(url, fetched), owner)
+            if line:
+                unbaked += 1
+                print(line)
     print("waiting pages: %d current, %d behind, %d unknown, %d not-found"
           % (counts["current"], counts["behind"], counts["unknown"], counts["not-found"]))
-    return 0 if counts["current"] == len(pages) else 1
+    return 0 if counts["current"] == len(pages) and not unbaked else 1
 
 
 if __name__ == "__main__":

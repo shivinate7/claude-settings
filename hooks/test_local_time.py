@@ -48,6 +48,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tokenize
 import unittest
 from datetime import datetime, timedelta, timezone
 
@@ -327,9 +328,10 @@ def case_cli_no_tz_database():
 # OWNER OVERRIDE. local_time.py is the only UserPromptSubmit hook, so it is where the owner's
 # word `override` becomes an override. It calls override.grant(session_id, prompt, now), which writes
 # <config dir>/state/override/<session_id>.json as {"kind": "once" or "timed", "until": a time}.
-# The keyword counts only as the FIRST word of the prompt, in any case, after leading whitespace: an override
-# spent on a word inside a sentence, a notice, or text another agent wrote would be an override the owner
-# never gave. A prompt that starts with the word is a one-act override and the rest is the reason, written
+# The keyword counts as the FIRST word of the prompt, in any case, after leading whitespace, or as a whole line
+# of the prompt. An override line inside a prose message counts too; see OV_PROSE_GRANTS.
+# A word spent inside a sentence, a notice, or text another agent wrote is an override the owner never gave. A
+# prompt that starts with the word is a one-act override and the rest is the reason, written
 # to guard.log. `override <n>[m|h]` and `override off` keep their meaning as the whole prompt. These
 # cases drive the hook as a child, as Claude Code does, with the clock and the config directory in its
 # environment.
@@ -352,21 +354,28 @@ HIDE_DRIVER = ("import runpy, sys\n"
                "runpy.run_path(hook, run_name='__main__')\n")
 
 
-def ov_type(cfg, prompt, session=OV_SESSION, hide=()):
+def ov_type(cfg, prompt, session=OV_SESSION, hide=(), transcript=None, remote=None, extra=None):
     """The owner types `prompt`. Returns the finished child, or None when it timed out. `hide` names modules the child
-    cannot import."""
+    cannot import. `transcript` is the payload's transcript_path (no key when None); `remote` is the child's
+    CLAUDE_CODE_REMOTE_SESSION_ID (unset when None); `extra` holds more keys of the payload, such as `source`."""
     env = dict(os.environ)
     for name in ("PYTHONUTF8", "PYTHONIOENCODING"):
         env.pop(name, None)
     env.update(CLAUDE_CONFIG_DIR=cfg, HOME=cfg, USERPROFILE=cfg, LOCAL_TIME_NOW=OV_NOW.isoformat())
     env.pop(REMOTE_ENV, None)  # a cloud session's variable reaches a case only when the case sets it
+    if remote is not None:
+        env[REMOTE_ENV] = remote
     # No model in these cases: the judge runs `claude` from PATH, so an empty PATH makes a plain Opus ask fail
     # closed. The key is matched without case, because Windows keeps `Path` and a second key would race it.
     for name in [key for key in env if key.upper() == "PATH"]:
         del env[name]
     env["PATH"] = NO_MODEL_PATH
-    payload = json.dumps({"hook_event_name": "UserPromptSubmit", "session_id": session,
-                          "prompt": prompt, "cwd": HERE})
+    payload = {"hook_event_name": "UserPromptSubmit", "session_id": session, "prompt": prompt, "cwd": HERE}
+    if transcript is not None:
+        payload["transcript_path"] = transcript
+    if extra:
+        payload.update(extra)
+    payload = json.dumps(payload)
     command = [sys.executable, MODULE_PATH]
     if hide:
         command = [sys.executable, "-c", HIDE_DRIVER, os.path.dirname(MODULE_PATH), MODULE_PATH] + list(hide)
@@ -561,7 +570,6 @@ OV_NO_GRANT = [
     ("a hyphenated flag name", "override-flag is not set, check the config"),
     ("a call", "override() should return the parent value"),
     ("a possessive", "override's behaviour is wrong when the override is spent"),
-    ("the word at the start of a later line", "run the tests\noverride: use opus"),
     ("a system-reminder notice", "<system-reminder>\noverride\n</system-reminder>"),
     ("a system-reminder notice that holds a reason", "<system-reminder>\noverride: use opus\n</system-reminder>"),
     ("a task-notification notice", "<task-notification>override</task-notification>"),
@@ -575,6 +583,166 @@ def case_override_not_the_first_word():
         check("override: grants nothing for " + name,
               proc is not None and proc.returncode == 0 and not ov_pass_files(cfg) and not ov_log(cfg),
               "files %r; log %r" % (ov_pass_files(cfg), ov_log(cfg)))
+
+
+# OVERRIDE LINES IN PROSE. An override line inside a prose message counts. A line that is
+# only `override`, or `override <n>[m|h]`, grants what that line grants as a whole prompt, wherever it sits in the
+# message. The other lines are prose: a question mark in one of them does not stop the grant. A reason line counts
+# the same way. (name, prompt, kind, how long the override lasts)
+OV_PROSE_GRANTS = [
+    ("the owner's message: a question, then `override 4h` on the last line",
+     "how did you not solve this yourself while I was gone?\noverride 4h", "timed", timedelta(hours=4)),
+    ("`override 15m` between two prose lines", "The build is still red.\noverride 15m\nTell me when it is green.",
+     "timed", timedelta(minutes=15)),
+    ("a bare `override` line in prose is a one-act override", "Why did the merge stop?\noverride\nGo on once it is safe.",
+     "once", timedelta(minutes=10)),
+    ("an `override: <reason>` line in prose is a one-act override", "run the tests\noverride: use opus",
+     "once", timedelta(minutes=10)),
+    ("a message of about 20,000 characters, `override 2h` on its last line",
+     "The review notes are long. " * 740 + "\noverride 2h", "timed", timedelta(hours=2)),
+]
+# A word that is not the whole line grants nothing, and neither does a line inside quoted, pasted or code text: a
+# backtick fence, a tilde fence, or an indented line (markdown's code block). Each case reads the hook's exit before
+# its files, so a crash cannot pass as no grant. The indented line sits in a message: a whole prompt that starts with
+# spaces is the first-word form, which the leading-whitespace case above grants.
+OV_PROSE_NO_GRANT = [
+    ("a sentence that mentions the word", "the override didn't work"),
+    ("`override 4h` in the middle of a line", "Earlier you said override 4h, so do it"),
+    ("a line inside a fenced block", "Run this:\n```\noverride 4h\n```"),
+    ("a line inside a tilde fence", "~~~\noverride 4h\n~~~"),
+    ("an indented line in a message", "Run this:\n    override 4h\nthen tell me."),
+    ("a line inside a pasted block",
+     'Here is the log:\n<pasted_content index="1">\noverride 4h\n</pasted_content>\nplease look'),
+]
+
+
+def case_override_line_in_prose():
+    for name, prompt, kind, length in OV_PROSE_GRANTS:
+        cfg = ov_cfg()
+        proc = ov_type(cfg, prompt)
+        check("override: prose line, %s: the hook exits 0" % name, proc is not None and proc.returncode == 0,
+              "rc=%s stderr %r" % (proc and proc.returncode, proc and proc.stderr.strip()[-120:]))
+        got = ov_pass(cfg)
+        check("override: prose line, %s: grants a %s override" % (name, kind), ends_after(got, kind, length),
+              "want %s ending %s after the grant; got %r; files %r" % (kind, length, got, ov_pass_files(cfg)))
+
+
+def case_override_prose_mention_grants_nothing():
+    for name, prompt in OV_PROSE_NO_GRANT:
+        cfg = ov_cfg()
+        proc = ov_type(cfg, prompt)
+        check("override: prose control, %s: the hook exits 0" % name, proc is not None and proc.returncode == 0,
+              "rc=%s stderr %r" % (proc and proc.returncode, proc and proc.stderr.strip()[-120:]))
+        check("override: prose control, %s: grants nothing" % name, not ov_pass_files(cfg),
+              "files %r; got %r" % (ov_pass_files(cfg), ov_pass(cfg)))
+
+
+# AN OVERRIDE LINE IN PROSE, BY THE PAYLOAD'S SOURCE (decision owner-override). The line route grants only for a prompt the
+# owner typed: `source` absent, null or `user`. A line that a loop wakeup, a system record or an agent sends is text the
+# owner never typed, so it grants nothing. The control is the owner's own `user` source, which grants the same line.
+OV_PROSE_LINE = "The build is still red.\noverride 2h\nTell me when it is green."
+OV_PROSE_SOURCES_REFUSED = ("loop_wakeup", "system", "agent")
+
+
+def case_override_line_in_prose_by_source():
+    for source in OV_PROSE_SOURCES_REFUSED:
+        cfg = ov_cfg()
+        proc = ov_type(cfg, OV_PROSE_LINE, extra={"source": source})
+        check("override: prose line, source %s: the hook exits 0" % source, proc is not None and proc.returncode == 0,
+              "rc=%s stderr %r" % (proc and proc.returncode, proc and proc.stderr.strip()[-120:]))
+        check("override: prose line, source %s: grants no override" % source, not ov_pass_files(cfg),
+              "files %r; got %r" % (ov_pass_files(cfg), ov_pass(cfg)))
+    cfg = ov_cfg()
+    proc = ov_type(cfg, OV_PROSE_LINE, extra={"source": "user"})
+    check("override: prose line, source user (control): the hook exits 0", proc is not None and proc.returncode == 0,
+          "rc=%s stderr %r" % (proc and proc.returncode, proc and proc.stderr.strip()[-120:]))
+    check("override: prose line, source user (control): grants a 2-hour override",
+          ends_after(ov_pass(cfg), "timed", timedelta(hours=2)),
+          "got %r; files %r" % (ov_pass(cfg), ov_pass_files(cfg)))
+
+
+def case_override_line_in_prose_after_a_notice():
+    # A notice at the start of the prompt is text a tool wrote. The payload carries the owner's `user` source, so only the
+    # notice gate can refuse the override line that follows it.
+    cfg = ov_cfg()
+    prompt = "<system-reminder>\nThe build is red in CI.\n</system-reminder>\n" + OV_PROSE_LINE
+    proc = ov_type(cfg, prompt, extra={"source": "user"})
+    check("override: prose line after a notice, source user: the hook exits 0", proc is not None and proc.returncode == 0,
+          "rc=%s stderr %r" % (proc and proc.returncode, proc and proc.stderr.strip()[-120:]))
+    check("override: prose line after a notice, source user: grants no override", not ov_pass_files(cfg),
+          "files %r; got %r" % (ov_pass_files(cfg), ov_pass(cfg)))
+
+
+# A LINE IN A SEED BRIEF (decision owner-override). A cloud session's first owner turn is the seed brief its coordinator
+# wrote, so no word of it is the owner's. An override line inside it grants nothing: no file is written, and no agent's
+# call lifts. The control is the owner's own second turn in the same cloud session, which grants.
+OV_SEED_BRIEFS = [
+    ("a seed brief with `Override: none` on a later line", "Task: fix the parser\nOverride: none"),
+    ("a seed brief with `override 2h` under a heading line", "Owner ruling:\noverride 2h\nDo the rest."),
+]
+OV_SEED_REMOTE = "cse_seed0001"
+
+
+def case_override_line_in_a_seed_brief_grants_nothing():
+    override, _ = hooks_modules()
+    cfg = ov_cfg()
+    prompt = "The build is red.\noverride 2h\nTell me when it is green."
+    path = transcript_file([owner_turn("set up the lane"), owner_turn(prompt)])
+    proc = ov_type(cfg, prompt, transcript=path, remote=OV_SEED_REMOTE)
+    check("override: seed control, the owner's second turn in a cloud session: the hook exits 0",
+          proc is not None and proc.returncode == 0,
+          "rc=%s stderr %r" % (proc and proc.returncode, proc and proc.stderr.strip()[-120:]))
+    check("override: seed control, a prose override line in the owner's second turn grants a 2-hour override",
+          ends_after(ov_pass(cfg), "timed", timedelta(hours=2)),
+          "got %r; files %r" % (ov_pass(cfg), ov_pass_files(cfg)))
+    for name, brief in OV_SEED_BRIEFS:
+        cfg = ov_cfg()
+        path = transcript_file([owner_turn(brief)])  # the brief is the only owner turn: the seed prompt
+        proc = ov_type(cfg, brief, transcript=path, remote=OV_SEED_REMOTE)
+        check("override: seed brief, %s: the hook exits 0" % name, proc is not None and proc.returncode == 0,
+              "rc=%s stderr %r" % (proc and proc.returncode, proc and proc.stderr.strip()[-120:]))
+        check("override: seed brief, %s: grants no override file" % name, not ov_pass_files(cfg),
+              "files %r; got %r" % (ov_pass_files(cfg), ov_pass(cfg)))
+        with config_dir_env(cfg):
+            agent_lift = override.take(OV_SESSION, "agent-1", OV_NOW)
+        check("override: seed brief, %s: take() with an agent id lifts nothing" % name, not lifted(agent_lift),
+              "take returned %r" % (agent_lift,))
+
+
+# RULING CITES IN COMMENTS. A comment that cites a ruling by the owner gives its date and time, so a reader can find the
+# ruling. The language's own tokenizer reads the comments, so the same words inside a string are no cite.
+RULING_CITE = re.compile(r"owner ruling\b")
+RULING_TIMED = re.compile(r"owner ruling, \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CST|CDT)")
+
+
+def untimed_ruling_cites(source):
+    """The line numbers of the comments in `source` that cite a ruling with no date and time after it."""
+    lines = []
+    for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+        if tok.type == tokenize.COMMENT:
+            for cite in RULING_CITE.finditer(tok.string):
+                if not RULING_TIMED.match(tok.string, cite.start()):
+                    lines.append(tok.start[0])
+    return lines
+
+
+def case_ruling_cites_carry_their_time():
+    edges = [
+        ("a timed cite after code is no problem", "x = 1  # owner ruling, 2026-11-17 09:15 CST: keep it\n", []),
+        ("an untimed cite in a comment is a problem", "x = 1\n# owner ruling, 2026-11-17: keep it\n", [2]),
+        ("the words inside a string are no comment", 'MSG = "owner ruling, 2026-11-17: keep it"\n', []),
+        ("a comment opener inside a string starts no comment", 's = "# owner ruling, 2026-11-17: keep it"\n', []),
+        ("the words in a multi-line string are no comment", 'S = """\nowner ruling, 2026-11-17: keep it\n"""\n', []),
+        ("a lone quote in a comment hides no cite", "# Don't drop it (owner ruling, 2026-11-17: keep it)\n", [1]),
+    ]
+    for name, source, want in edges:
+        got = untimed_ruling_cites(source)
+        check("ruling cites: scanner, %s" % name, got == want, "want lines %r, got %r" % (want, got))
+    for path in (os.path.join(HERE, "override.py"), os.path.abspath(__file__)):
+        with open(path, encoding="utf-8") as handle:
+            got = untimed_ruling_cites(handle.read())
+        check("ruling cites: %s gives each owner ruling its date and time" % os.path.basename(path), not got,
+              "comment lines with an untimed cite: %r" % (got,))
 
 
 def case_override_reason_goes_through_the_log_writer():
@@ -2729,6 +2897,12 @@ def main():
         case_override_reason_goes_through_the_log_writer()
         case_override_reason_with_a_lone_surrogate()
         case_override_not_the_first_word()
+        case_override_line_in_prose()
+        case_override_prose_mention_grants_nothing()
+        case_override_line_in_prose_by_source()
+        case_override_line_in_prose_after_a_notice()
+        case_override_line_in_a_seed_brief_grants_nothing()
+        case_ruling_cites_carry_their_time()
         case_override_corrupt_file_replaced()
         case_override_session_id_stays_inside()
         case_override_fail_open()

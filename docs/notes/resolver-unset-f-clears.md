@@ -1,0 +1,1 @@
+- resolver-unset-f-clears: `D=T; unset -f D; echo y > $D` is refused on main and allowed on #2374's head, because the resolver treats `unset -f D` as clearing the variable. `unset -f` removes a function, not the variable. Claude does not write it. File after #2374 merges.

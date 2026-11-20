@@ -1,0 +1,1 @@
+- feedback-guard-after-compact: after a compaction, the Stop feedback guard said "page sends not checked (the transcript has no owner record 1 for the message at 10:55 CST)", though the inbox holds fb-1055-1 -> page:486, so the send happened; the guard read only the post-compaction transcript. Possible false alarm; a debt only after a real incident.

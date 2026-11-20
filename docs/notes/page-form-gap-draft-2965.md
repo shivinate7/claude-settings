@@ -1,0 +1,1 @@
+- page-form-gap-draft-2965: page-feedback-to-template 14:58 CST Nov 12: Lane 14:55 CST Nov 12: draft #2965 closes the page-form-to-template gap (other repos need a "[repo] -> repo:shivinate7/claude-settings" route or "[note] -> not-page-form"); handed to runner 10. The aggregate plan (owner ask with pick 493 a) moves to step outbox-aggregate-plan.

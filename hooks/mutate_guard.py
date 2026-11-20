@@ -351,8 +351,8 @@ MUTATIONS = [
      '        return named',
      '        return DEFAULT_BRANCH_FALLBACK', "guard", 'named by origin/HEAD, not by name'),
     ("force-push: the fallback forgets master",
-     '    return DEFAULT_BRANCH_FALLBACK + named\n\n\n# A quoted',
-     '    return ("main",) + named\n\n\n# A quoted', "guard", 'forced to master when no origin/HEAD'),
+     '    return DEFAULT_BRANCH_FALLBACK + named\n\n\nclass _QuotedText:',
+     '    return ("main",) + named\n\n\nclass _QuotedText:', "guard", 'forced to master when no origin/HEAD'),
     ("force-push: HEAD as a destination is not resolved",
      '    if target in ("HEAD", "@"):',
      '    if target in ("@",):', "guard", 'lease with includes, HEAD, on main'),
@@ -1372,20 +1372,16 @@ MUTATIONS = [
     ("step-up: round 3 must name its row's model exactly, so an opus reviewer is refused",
      'ROLE_ROUND_EXACT = ("2",)',
      'ROLE_ROUND_EXACT = ("2", "3")', "guard", 'floor step-up: reviewer Round 3 of 3 on opus is denied (the grant is per spawn, not standing)'),
-    ("step-up: a builder round 3 on a non-opus model is no longer refused",
-     '        want = role_round_model(rounds, role, "3")\n        if want and (',
-     '        want = role_round_model(rounds, role, "3")\n        if False and want and (',
-     "guard", 'floor step-up: builder Round 3 of 3 on sonnet is denied'),
-    ("step-up: the builder marker drops Round, so a Round 3 of 3 builder on sonnet walks past",
+    ("step-up: the builder marker drops Round, so a Round 3 of 3 builder on opus loses its standing grant",
      'BUILDER_MARKERS = ("round", "try")',
-     'BUILDER_MARKERS = ("try",)', "guard", 'floor step-up: builder Round 3 of 3 on sonnet is denied'),
-    ("step-up: the builder marker drops Try before its sunset, so a Try 3 of 3 builder on sonnet walks past",
+     'BUILDER_MARKERS = ("try",)', "guard", 'floor step-up: builder Round 3 of 3 on opus is allowed (standing grant)'),
+    ("step-up: the builder marker drops Try before its sunset, so a Try 3 of 3 builder on opus loses its standing grant",
      'BUILDER_MARKERS = ("round", "try")',
-     'BUILDER_MARKERS = ("round",)', "guard", 'floor step-up: builder Try 3 of 3 on sonnet is denied'),
-    ("step-up: any builder round steps up, so a Round 2 of 3 builder on sonnet is refused",
+     'BUILDER_MARKERS = ("round",)', "guard", 'floor step-up: builder Try 3 of 3 on opus is allowed (standing grant)'),
+    ("ceiling: any builder round earns the standing grant, so a Round 2 of 3 builder on opus passes unrefused",
      'kind.lower() in BUILDER_MARKERS and n == "3"',
      'kind.lower() in BUILDER_MARKERS and n in "23"', "guard",
-     'floor step-up: builder Round 2 of 3 on sonnet is allowed'),
+     'first-line marker: builder on opus with Round 2 of 3 on line one is denied'),
     ("ceiling: the Opus spawn denial never fires, so an Opus spawn passes unrefused",
      'if "opus" not in str(tool_input.get("model") or "").lower():\n        return False',
      'if True:\n        return False', "guard", 'ceiling: Agent with model opus and no role is denied'),
@@ -3807,6 +3803,7 @@ GUARD_MODULE_FAMILIES = {
     "hooks/guard_merge.py": ["merge"],
     "hooks/guard_mask_script.py": ["mask-script"],
     "hooks/guard_argv.py": ["argv"],
+    "hooks/guard_review_log.py": ["review-log"],
     # hooks/guard.py holds the rules that no guard_<x>.py module owns. A mutant of it meets six families that read those rules.
     "hooks/guard.py": ["write", "paths", "diff", "model-cap", "cite", "hook-bypass"],
 }
@@ -4757,15 +4754,16 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
         copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(name)))
         mutated = sources[target].replace(old, new, 1)
     if target in ("ruling", "decision"):
-        # ruling_home.py and decision_watch.py read `../lint/_transcript.py` beside itself. A bare copy in `work`
-        # would crash on that import and read as red on every case, whatever was mutated
-        # (a mutant's own cause of death must be checked). Lay out hooks/ and lint/ for the copy.
+        # decision_watch.py reads `../lint/_transcript.py` beside its hooks folder, so its copy needs tree/lint.
+        # ruling_home.py imports guard_core, whose lint_dir() walks up to the lint/ that main() lays out in `work`,
+        # not to tree/lint. A bare copy in `work` would crash on the guard_core import and read as red on every case,
+        # whatever was mutated (a mutant's own cause of death must be checked). Lay out the guard family in hooks/
+        # and lint/ for the copy.
         tree = os.path.join(work, "tree_%s" % mutate_shared.safe_name(name))
         os.makedirs(os.path.join(tree, "hooks"), exist_ok=True)
         os.makedirs(os.path.join(tree, "lint"), exist_ok=True)
         shutil.copy(os.path.join(HERE, "..", "lint", "_transcript.py"), os.path.join(tree, "lint"))
-        if target == "decision":
-            mutate_shared.guard_tree(os.path.join(tree, "hooks"))
+        mutate_shared.guard_tree(os.path.join(tree, "hooks"))
         copy_path = os.path.join(tree, "hooks", os.path.basename(TARGETS[target][0]))
     if target == "override":
         # The guard family, local_time.py and the mutated override.py share one folder: the
@@ -4958,8 +4956,9 @@ def main() -> int:
     # printed the identical nine-case failure list, whatever the mutation.
     mutate_shared.guard_tree(work)
     # The override and calljudge copies sit one folder below `work`, so their `../lint` is work/lint:
-    # override.py reads it, and so does the decision_watch.py beside a calljudge copy. The ruling and
-    # decision copies read their own tree/lint instead (above). A guard copy carries its own lint folder (run_mutant).
+    # override.py reads it, and so does the decision_watch.py beside a calljudge copy. The decision copy reads its
+    # own tree/lint (above). The ruling copy reads work/lint through guard_core's lint_dir(). A guard copy carries
+    # its own lint folder (run_mutant).
     # The override copies also read ../janitor (the simulator refusal, which fails open without it) and ../skills.
     tracked_tree.copy_tracked(work, "lint", "janitor", "skills", root=os.path.dirname(HERE))
     lay_out_guard_reads(work)  # the override copies' ../merge, ../actions and ../bin

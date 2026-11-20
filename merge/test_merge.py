@@ -9,12 +9,14 @@ No network, no real repo. Every run uses a local bare origin in a temp dir, the 
 actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
 """
-import ast, atexit, base64, contextlib, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
+import argparse, ast, atexit, base64, calendar, contextlib, inspect, io, pathlib, json, os, random, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
 import ctypes  # the Windows-branch test patches os.name; ctypes' own import would then take the Windows path on Linux, so it loads here first
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import merge  # noqa: E402
+sys.path.append(os.path.join(HERE, "..", "janitor"))  # noqa: E402  janitor/sweep.py: the one sweep a confirm runs after a merge
+import sweep  # noqa: E402
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import decision_watch  # noqa: E402  the one model caller (hooks/decision_watch.py); merge.py puts hooks on sys.path
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
@@ -22,6 +24,10 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
+sys.path.append(os.path.join(os.path.dirname(HERE), "skills", "roadmap"))  # append: no roadmap module shadows one this suite imports
+import test_build as roadmap  # noqa: E402  the roadmap fixture: STEP, session_row, BUCKET_* (one home: skills/roadmap/test_build.py)
+import fnmatch  # noqa: E402  the temp-file cases match merge-live names
+from datetime import datetime as _datetime, timedelta as _timedelta, timezone as _timezone  # noqa: E402  the live file's readAt against the merge commit's time
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
 import stale_cites  # noqa: E402  the guard's rule dirs, one home (lint/stale_cites.py)
 import layout  # noqa: E402  where each kind of record lives, one home (lint/layout.py)
@@ -131,6 +137,8 @@ CONFIG = {
 def record(id_, slug):
     return f"---\nid: {id_}\nslug: {slug}\ntitle: {slug.title()}\n---\nbody\n"
 
+FAKE_NOW = calendar.timegm((2026, 10, 2, 0, 0, 0))  # the clock of every FakeHost, one day after batch_pull's default created_at: Host.now, pinned
+
 def complete_config(**fields):
     """CONFIG with a complete merge block (requiredChecks set), so no defaults notice prints on the base; `fields` replace its merge keys.
     CONFIG itself leaves requiredChecks out, and the notice is printed above the stop line a case reads."""
@@ -140,6 +148,10 @@ class FakeHost:
     """The GitHub half, scripted. `other` is a second clone that plays a competing pusher and the merger."""
     built = True
     own_number = 7  # the lane's own PR: pr() serves its head from the branch; the lane-lint cases name it 7
+
+    def now(self):
+        # A method, not an instance attribute: a subclass that moves its own clock (LagHost) overrides it.
+        return FAKE_NOW  # Host.now: reviewed_read reads it, so an age is the same on every run
 
     def __init__(self, root, other, branch="feat"):
         self.root, self.other, self.branch = root, other, branch
@@ -158,6 +170,7 @@ class FakeHost:
         self.changed, self.files_error = [("README.md", "modified", 0)], None  # changed: the (path, status, additions) triples pr_files reports; files_error: raised by pr_files instead
         self.changed_files = None  # the changed_files count pr reports; None is the length of changed. The count check is the real Host's, so this fake does not check it
         self.draft_rows, self.draft_reads = None, []  # draft_rows: {sha: check-run rows} a case scripts for the draft's touched-tests read; None reads a pass. draft_reads: each read path
+        self.named_checks = []  # (name, state, head) rows of the check runs a head holds, state a gh bucket (pass, fail, pending); check_state reads them
 
     def pr_files(self, n, changed=None):  # the (path, status, additions) triples of the pull request, as Host.pr_files reports them
         if self.files_error:
@@ -198,6 +211,10 @@ class FakeHost:
 
     def head_state(self, n, sha=None):  # the real Host.head_state takes the head's sha too
         return self.state
+
+    def check_state(self, n, sha, name):  # the fake of the per-check read: the state of check `name` on head `sha`, or None when that check has no row there
+        rows = [state for row_name, state, head in self.named_checks if row_name == name and head == sha]
+        return rows[-1] if rows else None
 
     def holds_head(self, head, other):  # no base holds a head this fake reads: a record's head is a past head only where a case says so
         return False
@@ -457,6 +474,11 @@ class Env(unittest.TestCase):
         self.host = FakeHost(self.co, self.other)
         self.lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)  # a retry pause is a no-op: a test never sleeps
         self.addCleanup(lambda: os.environ.pop("MERGE_TEST_HOOK", None))
+        self.sweep_runs = []  # each sweep_repo call a merge makes; the stand-in reaps nothing, so no case sweeps a fixture repo
+        self.sweep_look = None  # a case's read, run inside each sweep call: its value, or the error it raised, lands on that call's record
+        sweep_patch = unittest.mock.patch.object(sweep, "sweep_repo", side_effect=self.record_sweep)
+        self.sweep_mock = sweep_patch.start()
+        self.addCleanup(sweep_patch.stop)
         self.claim_fired = [False]  # one claim per run: reset by run_merge
         self.claim_push_fires_on_claim()
 
@@ -543,6 +565,21 @@ class Env(unittest.TestCase):
     def per_run_count(self, needle):
         """How many times `needle` appears in each run's output, in run order: the claim run, then the merge run."""
         return [t.count(needle) for t in self.run_texts]
+
+    def record_sweep(self, root, confirm, restore_log_path, mode="full", attended=False, own_lock_rule=True):
+        """The stand-in for janitor/sweep.py's sweep_repo: it records the call with where stdout stands, and reaps nothing. -> sweep_repo's result shape.
+        `own_lock_rule` is sweep_repo's keyword, which run_safe_sweep passes; the stand-in takes it and reads no lock."""
+        out = sys.stdout
+        run = {"root": root, "confirm": confirm, "mode": mode, "attended": attended,
+               "stdout_at": len(out.getvalue()) if hasattr(out, "getvalue") else None}
+        if self.sweep_look is not None:
+            try:
+                run["look"] = self.sweep_look()
+            except Exception as e:  # run_safe_sweep swallows an error, so a case asserts on this value, never on a raise here
+                run["look"] = e
+        self.sweep_runs.append(run)
+        return {"root": root, "refused": None, "branches": [], "worktrees": [], "listeners": [], "pruned": None,
+                "husks": [], "strays": [], "trash": []}
 
     def run_merge(self, *args, host=None, lock=None, stdout=None, stderr=None, hosts=None, cwd=None):
         """-> (rc, stdout + stderr). Pass a StringIO as stderr to read the error stream on its own afterwards. `hosts` is the --root seam, one
@@ -1062,6 +1099,661 @@ class ConfirmHead(Env):
         self.assertFalse(getattr(self.host, "merged", False), out + err)
         self.assertEqual(self.claims(), 0, "a claim was pushed for a bad head")
         self.assertFalse(self.lock_ref(), "the lock was left behind")
+
+# The idle-lanes pass after a batch merge (decision session-tiers). The cases read the live file on origin's roadmap branch, as triage
+# commits it, and the step record that the merged commit's Step trailer names. Fixtures: the roadmap suite's STEP and session_row.
+OWED_WORD = re.compile(r"owed|idle[- ]lanes")  # the owed line names the pass; no other line of a merge does
+ARCHIVE_SUMMARY = re.compile(r"^merge: \d+ lanes to archive\b")
+CHECK_LINE = "check this lane"  # the fallback's line: a lane to check by hand, never a lane to archive
+READ_ONLY_GIT = {"fetch", "show", "show-ref", "ls-remote", "rev-parse", "log", "cat-file", "ls-tree", "for-each-ref", "merge-base", "diff", "rev-list"}
+
+def roadmap_files(others=None, **step):
+    """origin's roadmap branch for a case: the repo's GitHub name, and step c1 (done unless `step` says otherwise). A `lane` field
+    in `step` names the session that did the step. `others` maps more step slugs to their fields, each written beside c1; a step
+    in `others` has no Step trailer on main unless a case commits one."""
+    fields = dict(roadmap.STEP, order=1, status="done")
+    fields.update(step)
+    files = {"roadmap/extras.json": json.dumps({"github": "owner/fixture"}), "roadmap/data/steps/c1.json": json.dumps(fields)}
+    for slug, more in (others or {}).items():
+        files["roadmap/data/steps/%s.json" % slug] = json.dumps(dict(roadmap.STEP, **more))
+    return files
+
+ROADMAP_BASE = roadmap_files()
+OTHER_DOING_STEP = {"c2": dict(order=2, status="doing", lane="session_a")}  # a step of lane session_a still working, in no merge
+IDLE_LANE = roadmap.session_row("session_a", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1", "cs-repo:owner/fixture",
+                                status_bucket=roadmap.BUCKET_COMPLETED)
+BODY_LANE = roadmap.session_row("session_body", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1", "cs-repo:owner/fixture",
+                                status_bucket=roadmap.BUCKET_COMPLETED)
+NO_STEP_LANE = roadmap.session_row("session_nostep", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-repo:owner/fixture",
+                                   status_bucket=roadmap.BUCKET_COMPLETED)
+WORKING_LANE = roadmap.session_row("session_b", "SESSION_STATUS_RUNNING", "cs-build:lane", "cs-step:c1", "cs-repo:owner/fixture",
+                                   status_bucket=roadmap.BUCKET_WORKING)
+RUNNING_LANE = roadmap.session_row("session_a", "SESSION_STATUS_RUNNING", "cs-build:lane", "cs-step:c1", "cs-repo:owner/fixture",
+                                   status_bucket=roadmap.BUCKET_WORKING)
+
+def live_json(read_at, *sessions, keep=None):
+    """The live file as triage writes it: readAt, the sessions, and the empty lists the reader needs beside them. `keep` is the
+    keepSessions value, written when given."""
+    value = {"readAt": read_at, "threads": [], "pulls": [], "items": [], "sessions": list(sessions)}
+    if keep is not None:
+        value["keepSessions"] = keep
+    return json.dumps(value)
+
+class LandedHost(FakeHost):
+    """The fake host with the step after a batch merge: triage commits the live file once the merge lands. `after` is called
+    with the merge commit's sha, and only when the merge lands. A refused merge calls nothing."""
+    after = None
+
+    def merge(self, n, method, sha):
+        commit, msg = super().merge(n, method, sha)
+        if commit and self.after:
+            self.after(commit)
+        return commit, msg
+
+class ConfirmIdleLanes(Env):
+    """After a landed batch merge, `merge --confirm` reads the live file on origin's roadmap branch (roadmap/live/live.json,
+    fetched). If its readAt is later than the merge commit's time, the report of `merge --idle-lanes` prints after the merged
+    line. Otherwise one line says the pass is owed and the file is stale or unread. An origin that cannot be read when the pass
+    runs owes the line too, saying unread. A refused merge prints neither. With no roadmap branch on origin, or a merge onto a
+    base that is not the default, no pass line prints at all. The exit code of a landed merge is 0, as before.
+
+    When the live file is stale, missing or unreadable, the merged step's record (roadmap/data/steps/<slug>.json on origin's
+    roadmap, its `lane` field) names the lane to check: one `check this lane` line, never a lane to archive. A blank `lane` falls
+    back to the session link at the foot of the pull request body. Neither source prints for a lane still working, and a kept
+    session (keepSessions, read from the live file whatever its age) prints nothing. Each case runs `merge 7 --confirm` once:
+    the live file is committed after the merge, as triage commits it at each batch merge."""
+
+    def setUp(self):
+        super().setUp()
+        self.host = LandedHost(self.co, self.other)
+        self.host.after = self.after_landed
+        self.landed = None  # the merge commit's sha, once this case's merge lands
+        self.live_at = None  # a case's function: the merge commit's time -> the live file's text, or None for no file
+        self.live_text = None  # the text publish_live last pushed
+
+    def after_landed(self, commit):
+        self.landed = commit
+        self.publish_live(commit)
+
+    def push_roadmap(self, files):
+        """Commit `files` ({path: text}) on origin's roadmap branch, on top of its tip when it has one, and push. The commit is
+        made in a scratch repo of its own, so no checkout of this case moves."""
+        scratch = os.path.join(self.t, "roadmap-push")
+        if not os.path.isdir(scratch):
+            sh(self.t, "git", "init", "-q", scratch)
+            sh(scratch, "git", "remote", "add", "origin", self.bare)
+        if sh(scratch, "git", "ls-remote", "origin", "refs/heads/roadmap"):
+            sh(scratch, "git", "fetch", "-q", "origin", "roadmap")
+            sh(scratch, "git", "checkout", "-q", "-B", "roadmap", "FETCH_HEAD")
+        else:
+            sh(scratch, "git", "checkout", "-q", "--orphan", "roadmap")
+        for path, text in files.items():
+            put(os.path.join(scratch, path), text)
+        sh(scratch, "git", "add", "-A")
+        sh(scratch, "git", "commit", "-q", "-m", "roadmap")
+        sh(scratch, "git", "push", "-q", "origin", "roadmap")
+
+    def publish_live(self, commit):
+        """Triage's step after a batch merge: the live file, as live_at gives it for the merge commit's time, goes on origin's roadmap."""
+        at = _datetime.fromisoformat(sh(self.other, "git", "show", "-s", "--format=%cI", commit))
+        self.live_text = self.live_at(at) if self.live_at else None
+        if self.live_text is not None:
+            self.push_roadmap({"roadmap/live/live.json": self.live_text})
+
+    def confirm(self, live_at=None, base=True, merged_at=None, files=None):
+        """`merge 7 --confirm`, with the roadmap base pushed first unless base is False (`files` replaces ROADMAP_BASE). merged_at,
+        an aware datetime, is the committer time the merge commit is written with (its offset too). -> (rc, stdout lines, stderr lines)."""
+        if base:
+            self.push_roadmap(ROADMAP_BASE if files is None else files)
+        self.live_at = live_at
+        if merged_at is not None:
+            self.merge_at(merged_at)
+        rc, out, err = self.run_args("7", "--confirm")
+        return rc, out.splitlines(), err.splitlines()
+
+    def step_commit(self, step):
+        """Push one commit to feat whose message ends in `Step: <step>`, the trailer a step's landed commit carries. The merge brings it onto main."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        put(os.path.join(o, "step-%s.txt" % step), "done\n")
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", "feat: step %s done\n\nStep: %s" % (step, step))
+        sh(o, "git", "push", "-q", "origin", "feat")
+
+    def main_step_commit(self, step):
+        """Push one commit to main whose message ends in `Step: <step>`: a step that landed in an earlier merge, so its trailer is on
+        main while its record may still read doing. The PR branch then takes main, as a lane does before its run."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, "landed-%s.txt" % step), "done\n")
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", "main: step %s landed\n\nStep: %s" % (step, step))
+        sh(o, "git", "push", "-q", "origin", "main")
+        head_takes_base(self)
+
+    def rebase_merge(self, n, method, sha):
+        """A fake of GitHub's rebase merge: each commit the pull adds is copied onto main, one after another, and no merge commit is
+        made. Then triage's step runs, as LandedHost.merge does after a merge commit. -> (tip, "")."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        for c in sh(o, "git", "rev-list", "--reverse", "--no-merges", f"origin/main..{sha}").split():
+            sh(o, "git", "cherry-pick", c)
+        sh(o, "git", "push", "-q", "origin", "main")
+        tip = sh(o, "git", "rev-parse", "HEAD")
+        self.after_landed(tip)
+        return tip, ""
+
+    def stale_merge(self, files, sessions=(), body="", keep=None, text=None):
+        """A landed merge of #7 on a live file read a minute before the merge: the owed path, where the merged step's record is the
+        second source. `files` is origin's roadmap branch, `body` the pull request's body. `text`, a function of the merge commit's
+        time, gives the live file's text in place of the readable file. -> (rc, out, err)."""
+        self.host.body = body
+        self.step_commit("c1")
+        live_at = text or (lambda at: live_json((at - _timedelta(seconds=60)).isoformat(), *sessions, keep=keep))
+        return self.confirm(files=files, live_at=live_at)
+
+    def merge_at(self, when):
+        """Make the merge commit's committer time `when`, offset included, for the merge call only. The host writes the merge
+        commit inside its merge(), so GIT_COMMITTER_DATE is set there and popped after it."""
+        real, commit_time = self.host.merge, when.replace(microsecond=0).isoformat()
+
+        def merge(n, method, sha):
+            os.environ["GIT_COMMITTER_DATE"] = commit_time
+            try:
+                return real(n, method, sha)
+            finally:
+                os.environ.pop("GIT_COMMITTER_DATE", None)
+        self.host.merge = merge
+
+    def temp_folder(self):
+        """The folder this case points the temp files at: a child of the case's own folder, so the run folder's teardown removes it."""
+        folder = os.path.join(self.t, "tmp")
+        os.makedirs(folder, exist_ok=True)
+        return folder
+
+    def confirm_in_folder(self, folder, live_at):
+        """`confirm` with the temp folder at `folder`. TMPDIR is read once per process, so the case sets tempfile.tempdir to the
+        value TMPDIR would give. -> (rc, out, err, made): made lists each merge-live temp file as tempfile.mkstemp returned it."""
+        made, real = [], tempfile.mkstemp
+
+        def spy(*a, **k):
+            fd, path = real(*a, **k)
+            made.append(path)
+            return fd, path
+        with unittest.mock.patch.object(tempfile, "tempdir", folder), unittest.mock.patch.object(tempfile, "mkstemp", spy):
+            rc, out, err = self.confirm(live_at=live_at)
+        return rc, out, err, [p for p in made if os.path.basename(p).startswith("merge-live-")]
+
+    def report_for(self, live_text):
+        """The lines `merge --idle-lanes --live` prints for `live_text` in this checkout: the report a confirm must print."""
+        path = os.path.join(self.t, "idle-lanes-live.json")
+        put(path, live_text)
+        sh(self.co, "git", "fetch", "-q", "origin", "roadmap:refs/remotes/origin/roadmap")
+        rc, out, err = self.run_args("--idle-lanes", "--live", path)
+        self.assertEqual(rc, 0, "the reference run of --idle-lanes failed: %s" % err)
+        return out.splitlines()
+
+    def assert_report_after_merge(self, rc, out, err):
+        """A landed merge that exits 0, then the report `merge --idle-lanes` prints for the same live file, in order after the merged line."""
+        merged = [i for i, line in enumerate(out) if line.startswith("merge: #7 merged as ")]
+        self.assertEqual(len(merged), 1, "the merge did not land: out %r, err %r" % (out, err))
+        self.assertEqual(rc, 0, "a landed merge exits %r: %s" % (rc, err))
+        report = self.report_for(self.live_text)
+        self.assertTrue(report and ARCHIVE_SUMMARY.match(report[-1]), "the reference report has no summary line: %r" % report)
+        self.assertIn(report[0], out, "no idle-lanes report is printed after the merge: %r" % out)
+        start = out.index(report[0])
+        self.assertGreater(start, merged[0], "the idle-lanes report is printed before the merged line: %r" % out)
+        self.assertEqual(out[start:start + len(report)], report, "the report after the merge is not the merge --idle-lanes report")
+
+    def assert_landed(self, rc, out, err):
+        """The merge of #7 landed and exits 0."""
+        merged = [line for line in out if line.startswith("merge: #7 merged as ")]
+        self.assertEqual(len(merged), 1, "the merge did not land: out %r, err %r" % (out, err))
+        self.assertEqual(rc, 0, "a landed merge exits %r: %s" % (rc, err))
+
+    def assert_no_pass_line(self, out, err):
+        """A landed merge that owes no pass prints no idle-lanes line on either stream: no owed line, no report line."""
+        noise = [line for line in out + err if OWED_WORD.search(line) or ARCHIVE_SUMMARY.match(line) or line.startswith(("hold (", "session_"))]
+        self.assertEqual(noise, [], "a merge that owes no pass printed an idle-lanes line: %r" % (out + err))
+
+    def assert_owed_path(self, rc, out, err):
+        """Scope for the fallback cases: the merge landed and the live file was read as stale, so the owed line printed."""
+        self.assert_landed(rc, out, err)
+        self.assertTrue([line for line in out + err if "owed" in line], "scope: the owed line did not print, so the fallback never ran: %r" % (out + err))
+
+    def assert_owed_after_merge(self, rc, out, err):
+        """A landed merge that exits 0, then exactly one line, on either stream, that says the pass is owed and the file is stale
+        or unread. No report line prints with it."""
+        self.assert_landed(rc, out, err)
+        owed = [line for line in out + err if OWED_WORD.search(line)]
+        self.assertEqual(len(owed), 1, "the idle-lanes owed line is not printed once after the merge: %r" % (out + err))
+        self.assertIn("owed", owed[0])
+        self.assertRegex(owed[0], r"stale|unread")
+        self.assertFalse([line for line in out if ARCHIVE_SUMMARY.match(line) or line.startswith(("hold (", "session_"))],
+                         "a report line prints with the owed line: %r" % out)
+
+    def check_lines(self, out, err):
+        return [line for line in out + err if CHECK_LINE in line]
+
+    def test_fresh_live_file_prints_the_idle_lanes_report_after_the_merge(self):
+        # readAt one second after the merge commit: one idle lane and one held lane, so the report has both kinds of line.
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE, NO_STEP_LANE))
+        self.assert_report_after_merge(rc, out, err)
+
+    def test_fresh_live_file_with_no_idle_lane_prints_the_zero_summary(self):
+        # The empty state: a live lane that is still working is not idle, so the report is the zero summary alone.
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), WORKING_LANE))
+        self.assert_report_after_merge(rc, out, err)
+
+    def test_fresh_live_file_with_an_unknown_report_falls_back_and_names_the_fixing_command(self):
+        # `merge --idle-lanes` never ends in a bare "unknown" with no command that fixes
+        # it. The file is fresh, but its one session row carries an unarchived_epoch of -5, so the report reads unknown. The pass then
+        # falls back to the merged step's record: the lane gets its check line, and an owed line names `merge --idle-lanes`. The merge
+        # landed, so the confirm exits 0 as before.
+        self.step_commit("c1")
+        rc, out, err = self.confirm(files=roadmap_files(lane="session_a"),
+                                    live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(),
+                                                                 dict(IDLE_LANE, unarchived_epoch=-5)))
+        self.assert_landed(rc, out, err)  # the merge landed and exits 0
+        # Scope first: the fresh read ran and reads unknown, so this is the bad-shape path.
+        unknown = [line for line in out + err if line.startswith("unknown (")]
+        self.assertEqual(len(unknown), 1, "scope: the fresh read did not print one unknown line: %r" % (out + err))
+        self.assertFalse([line for line in out if ARCHIVE_SUMMARY.match(line)], "a summary printed for an unknown report: %r" % out)
+        fixers = [line for line in out + err if OWED_WORD.search(line) and "merge --idle-lanes" in line]
+        self.assertEqual(len(fixers), 1, "a bad-shape fresh file printed no owed line that names the fixing command: %r" % (out + err))
+        checks = self.check_lines(out, err)
+        self.assertEqual(len(checks), 1, "the fallback printed %d check-this-lane lines, not one: %r" % (len(checks), out + err))
+        self.assertIn("session_a", checks[0], "the check line does not name the step's lane: %r" % checks[0])
+
+    def test_mixed_lane_and_unknown_report_prints_one_owed_line_that_names_the_command(self):
+        # A fresh file whose report holds a lane to archive beside an unknown line is only partly read. The owed line prints beside
+        # those lines, so the reader knows to run the pass again once the file is fixed. The second lane's archive slug is not a plain
+        # name, so its line reads unknown. Control: the merge lands, and the lane line prints as it does today.
+        self.step_commit("c1")
+        bad = roadmap.session_row("session_bad", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1", "cs-repo:owner/fixture",
+                                  "cs-archive-ready:a/b", status_bucket=roadmap.BUCKET_COMPLETED)
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE, bad))
+        self.assert_landed(rc, out, err)
+        # Scope first: the fresh read ran and printed a lane line beside an unknown line.
+        self.assertTrue([line for line in out if line.startswith("session_a (")], "scope: no lane line printed: %r" % out)
+        self.assertTrue([line for line in out if line.startswith("unknown (archive slug")], "scope: no unknown line printed: %r" % out)
+        owed = [line for line in out + err if OWED_WORD.search(line)]
+        self.assertEqual(len(owed), 1, "the mixed case printed %d owed lines, not one: %r" % (len(owed), out + err))
+        self.assertIn("merge --idle-lanes --live FILE", owed[0], "the mixed case's owed line does not name the fixing command: %r" % owed[0])
+
+    def test_stale_live_file_prints_the_owed_line(self):
+        # readAt one minute before the merge commit: the file was read before the batch landed.
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at - _timedelta(seconds=60)).isoformat(), IDLE_LANE))
+        self.assert_owed_after_merge(rc, out, err)
+
+    def test_stale_owed_line_cites_its_decision(self):
+        # The owed line tells the batch runner why the pass is owed, so it cites the decision that owes it.
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at - _timedelta(seconds=60)).isoformat(), IDLE_LANE))
+        self.assert_owed_after_merge(rc, out, err)  # scope: the stale read took the owed path
+        owed = [line for line in out + err if OWED_WORD.search(line)][0]
+        self.assertIn("(decision session-tiers", owed, "the stale owed line cites no decision: %r" % owed)
+
+    def test_read_at_equal_to_the_merge_time_prints_the_owed_line(self):
+        # The boundary: "later than" is strict, so a readAt at the merge commit's own second is owed.
+        rc, out, err = self.confirm(live_at=lambda at: live_json(at.isoformat(), IDLE_LANE))
+        self.assert_owed_after_merge(rc, out, err)
+
+    def test_missing_live_file_prints_the_owed_line(self):
+        rc, out, err = self.confirm(live_at=None)
+        self.assert_owed_after_merge(rc, out, err)
+
+    def test_unreadable_live_file_prints_the_owed_line(self):
+        # The file is cut off mid-object, so it is not JSON.
+        rc, out, err = self.confirm(live_at=lambda at: '{"readAt": "' + at.isoformat())
+        self.assert_owed_after_merge(rc, out, err)
+
+    def test_malformed_read_at_prints_the_owed_line(self):
+        rc, out, err = self.confirm(live_at=lambda at: live_json("yesterday at noon", IDLE_LANE))
+        self.assert_owed_after_merge(rc, out, err)
+
+    def test_read_at_without_a_time_zone_prints_the_owed_line(self):
+        # A naive time has no offset, so it cannot be put before or after the merge commit's time.
+        rc, out, err = self.confirm(live_at=lambda at: live_json(at.replace(tzinfo=None).isoformat(), IDLE_LANE))
+        self.assert_owed_after_merge(rc, out, err)
+
+    def test_no_roadmap_branch_on_origin_prints_no_pass_line(self):
+        # No live file exists to read, so no pass is owed and none is printed. Scope first: origin has no roadmap branch.
+        # Control: a merge with no roadmap branch has no pass, so the pass must not print a line.
+        self.assertEqual(sh(self.co, "git", "ls-remote", "origin", "refs/heads/roadmap"), "", "scope: origin has a roadmap branch")
+        rc, out, err = self.confirm(live_at=None, base=False)
+        self.assert_landed(rc, out, err)
+        self.assert_no_pass_line(out, err)
+
+    def test_a_refused_merge_prints_no_report_and_no_owed_line(self):
+        # The refusal lands nothing, so no live file is read after it. The file is on origin already, so a pass that ran
+        # before the refusal would find one and print. The exit code of a refused merge is 1, as before.
+        # Control: a refused merge has not landed, so the pass must not run.
+        self.push_roadmap(dict(ROADMAP_BASE, **{"roadmap/live/live.json": live_json("2026-11-13T00:00:00-06:00", IDLE_LANE)}))
+        self.host.refuse = "refused by the test"
+        rc, out, err = self.confirm(base=False)
+        self.assertEqual([line for line in out if line.startswith("merge: #7 merged as ")], [], "the refused merge landed: %r" % out)
+        self.assertEqual(rc, 1, "a refused merge exits %r: %s" % (rc, err))
+        noise = [line for line in out + err if OWED_WORD.search(line) or ARCHIVE_SUMMARY.match(line) or line.startswith(("hold (", "session_"))]
+        self.assertEqual(noise, [], "a refused merge printed an idle-lanes line")
+
+    # The two cases below anchor on the real clock, as the cases above do: idle_lanes reads the live file's age against it, so a
+    # readAt fixed in the past would read stale. Only the offsets are fixed.
+
+    def test_a_read_earlier_by_instant_prints_the_owed_line_across_offsets(self):
+        # The merge is stamped -06:00 and the read is UTC. The read is 54 min 32 s before the merge, but its wall clock reads
+        # 5 h 5 min 28 s later than the merge's. By instant it is owed; by wall clock it would not be.
+        landed = _datetime.now(_timezone.utc).replace(microsecond=0) - _timedelta(minutes=5)
+        read_text = (landed - _timedelta(minutes=54, seconds=32)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        rc, out, err = self.confirm(live_at=lambda at: live_json(read_text, IDLE_LANE),
+                                    merged_at=landed.astimezone(_timezone(_timedelta(hours=-6))))
+        self.assert_owed_after_merge(rc, out, err)
+
+    def test_a_read_later_by_instant_prints_the_report_across_offsets(self):
+        # The merge is stamped +14:00 and the read is -06:00. The read is 30 min after the merge by instant, but the merge's wall
+        # clock reads 19 h 30 min later than the read's. By instant it is later, so the report prints.
+        read = _datetime.now(_timezone.utc).replace(microsecond=0) - _timedelta(minutes=5)
+        read_text = read.astimezone(_timezone(_timedelta(hours=-6))).isoformat()
+        rc, out, err = self.confirm(live_at=lambda at: live_json(read_text, IDLE_LANE),
+                                    merged_at=(read - _timedelta(minutes=30)).astimezone(_timezone(_timedelta(hours=14))))
+        self.assert_report_after_merge(rc, out, err)
+
+    def test_a_merge_onto_a_base_that_is_not_the_default_prints_no_pass_line(self):
+        # The pull request targets integ, not main, so the merge lands on integ. A fresh live file would print the report after a
+        # merge onto main; a merge onto integ owes no pass, so no line prints.
+        # Control: a merge onto a non-default base must not run the pass.
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/integ")
+        self.host.base = "integ"
+        before = self.head("integ")
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE))
+        self.assertNotEqual(self.head("integ"), before, "scope: the merge did not move integ, so it did not land on the non-default base")
+        self.assert_landed(rc, out, err)
+        self.assert_no_pass_line(out, err)
+
+    def test_a_fresh_confirm_makes_no_live_temp_file(self):
+        # The pass passes its live data in memory, so a fresh read makes no temp file at all, not one that it later removes.
+        folder = self.temp_folder()
+        rc, out, err, made = self.confirm_in_folder(folder, live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE))
+        self.assert_report_after_merge(rc, out, err)  # scope: the fresh read ran the pass
+        self.assertEqual(made, [], "the fresh read made a temp file: %r" % made)
+        self.assertEqual([n for n in os.listdir(folder) if fnmatch.fnmatch(n, "merge-live-*.json")], [], "a merge-live file is in the case folder")
+
+    def test_a_stale_confirm_leaves_no_live_temp_file(self):
+        folder = self.temp_folder()
+        rc, out, err, _ = self.confirm_in_folder(folder, live_at=lambda at: live_json((at - _timedelta(seconds=60)).isoformat(), IDLE_LANE))
+        self.assert_owed_after_merge(rc, out, err)  # scope: the stale read took the owed path
+        self.assertEqual([n for n in os.listdir(folder) if fnmatch.fnmatch(n, "merge-live-*.json")], [], "a merge-live file is left in the case folder")
+
+    def test_an_origin_gone_before_the_idle_pass_owes_one_unread_line(self):
+        # The merge lands and origin is reachable until the lock is released. Then origin goes: the pass's fetch of origin/roadmap
+        # and its listing both fail, so the one line says unread and the merge still exits 0. Scope first: origin holds the
+        # roadmap branch, so no "no roadmap branch" reading explains the line.
+        self.push_roadmap(ROADMAP_BASE)
+        self.assertNotEqual(sh(self.t, "git", "ls-remote", self.bare, "refs/heads/roadmap"), "", "scope: origin has no roadmap branch")
+        real_release = self.lock.release
+
+        def release_then_origin_gone(base, token):
+            real_release(base, token)
+            if self.landed:  # the merge landed and the lock is released: the pass comes next, and origin is gone for it
+                sh(self.co, "git", "remote", "set-url", "origin", os.path.join(self.t, "gone.git"))
+        self.lock.release = release_then_origin_gone
+        rc, out, err = self.confirm(base=False, live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE))
+        self.assert_landed(rc, out, err)
+        owed = [line for line in out + err if OWED_WORD.search(line)]
+        self.assertEqual(len(owed), 1, "the idle-lanes owed line is not printed once after the merge: %r" % (out + err))
+        self.assertRegex(owed[0], r"owed.*unread|unread.*owed", "the owed line does not say unread: %r" % owed[0])
+        self.assertFalse([line for line in out if ARCHIVE_SUMMARY.match(line) or line.startswith(("hold (", "session_"))],
+                         "a report line prints with the owed line: %r" % out)
+
+    # The fallback: the merged step's record names the lane to check when the live file is stale.
+
+    def test_stale_live_file_falls_back_to_the_merged_steps_lane(self):
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a"), [IDLE_LANE])
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path, so the step's record is the lane's source
+        checks = self.check_lines(out, err)
+        self.assertEqual(len(checks), 1, "the stale path printed %d check-this-lane lines, not one: %r" % (len(checks), out + err))
+        self.assertIn("session_a", checks[0], "the check line does not name the step's lane: %r" % checks[0])
+        self.assertFalse([line for line in out if line.startswith("session_a (")], "the fallback printed a lane-to-archive line: %r" % out)
+
+    def test_a_blank_lane_falls_back_to_the_session_link_in_the_pr_body(self):
+        body = "Summary of the change.\n\nhttps://claude.ai/code/session_body"
+        rc, out, err = self.stale_merge(roadmap_files(lane=""), [BODY_LANE], body=body)
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path
+        checks = self.check_lines(out, err)
+        self.assertEqual(len(checks), 1, "a blank lane printed %d check-this-lane lines, not one: %r" % (len(checks), out + err))
+        self.assertIn("session_body", checks[0], "the check line does not name the session in the PR body: %r" % checks[0])
+        self.assertFalse([line for line in out if line.startswith("session_body (")], "the fallback printed a lane-to-archive line: %r" % out)
+
+    def test_the_fallback_holds_a_kept_session_with_a_hold_line(self):
+        # keepSessions is read from the stale file too (whatever its age). A kept session prints no check line and no lane line:
+        # one hold line that names the keep reason and the session.
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a"), [IDLE_LANE], keep=[{"id": "session_a", "reason": "kept for a reader"}])
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path, so the keep list was read there
+        self.assertEqual(self.check_lines(out, err), [], "the fallback named a kept session: %r" % (out + err))
+        self.assertFalse([line for line in out + err if line.startswith("session_a (")], "a kept session printed a lane-to-archive line: %r" % out)
+        holds = [line for line in out + err if line.startswith("hold (")]
+        self.assertEqual(len(holds), 1, "a kept session printed no hold line: %r" % (out + err))
+        self.assertIn("kept for a reader", holds[0], "the hold line does not name the keep reason: %r" % holds[0])
+        self.assertIn("session_a", holds[0], "the hold line does not name the session: %r" % holds[0])
+
+    def test_a_kept_session_after_a_fresh_merge_prints_a_hold_line_not_a_lane(self):
+        # The fresh read is the report of --idle-lanes. A kept session there prints one hold line and no lane line.
+        keep = [{"id": "session_a", "reason": "kept for a reader"}]
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE, keep=keep))
+        self.assert_landed(rc, out, err)  # scope: the merge landed
+        self.assertTrue([line for line in out if ARCHIVE_SUMMARY.match(line)], "scope: no report summary printed after the fresh merge: %r" % out)
+        self.assertFalse([line for line in out if line.startswith("session_a (")], "a kept session printed a lane line after the merge: %r" % out)
+        holds = [line for line in out if line.startswith("hold (")]
+        self.assertEqual(len(holds), 1, "a kept session printed no hold line after the merge: %r" % out)
+        self.assertIn("kept for a reader", holds[0], "the hold line does not name the keep reason: %r" % holds[0])
+        self.assertIn("session_a", holds[0], "the hold line does not name the session: %r" % holds[0])
+
+    def test_an_unreadable_keep_list_reads_unknown_after_a_fresh_merge(self):
+        # keepSessions is a bare string, not a list of {id, reason} rows: the report reads unknown, never an empty keep list.
+        # `merge --idle-lanes` never ends in a bare "unknown" with no command that
+        # fixes it. So the unknown line is followed by one owed line that names `merge --idle-lanes` as the fixing command.
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE, keep="session_a"))
+        self.assert_landed(rc, out, err)  # scope: the merge landed
+        unknown = [line for line in out + err if line.startswith("unknown (")]
+        self.assertEqual(len(unknown), 1, "the fresh read printed no unknown line for a malformed keepSessions: %r" % (out + err))
+        self.assertFalse([line for line in out if ARCHIVE_SUMMARY.match(line) or line.startswith("session_")],
+                         "a lane line or summary printed beside the unknown: %r" % out)
+        fixers = [line for line in out + err if OWED_WORD.search(line) and "merge --idle-lanes" in line]
+        self.assertEqual(len(fixers), 1, "a malformed keepSessions after a fresh merge printed no owed line naming the fixing command: %r"
+                         % (out + err))
+
+    def test_no_check_line_for_a_lane_whose_session_is_still_running(self):
+        # The lane's session row reads running in the stale file, so the lane is still working and the fallback names it to no one.
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a"), [RUNNING_LANE])
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path
+        self.assertEqual(self.check_lines(out, err), [], "a lane still running got a check-this-lane line: %r" % (out + err))
+
+    def test_no_check_line_while_a_step_is_still_doing_under_the_lane(self):
+        # Another step of the lane, c2, is still doing and no merge carries its Step trailer, so the lane is still working. The
+        # merged step c1 reads done here. The control is test_stale_live_file_falls_back_to_the_merged_steps_lane.
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a", others=OTHER_DOING_STEP), [IDLE_LANE])
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path
+        merged = sh(self.other, "git", "log", "--format=%B", "origin/main")
+        self.assertIn("Step: c1", merged, "scope: the merge does not carry the merged step's Step trailer: %r" % merged)
+        self.assertNotIn("Step: c2", merged, "scope: the doing step c2 carries a Step trailer on main, so it is in the merge")
+        self.assertEqual(self.check_lines(out, err), [], "a step still doing under the lane got a check-this-lane line: %r" % (out + err))
+
+    def test_a_merged_step_still_recorded_doing_does_not_hold_its_lane(self):
+        # The merged step's record still reads doing after its merge, and its lane session_a is completed. A step with a Step
+        # trailer on main does not hold its lane, so the lane gets its check line. The control is the case above: a doing step
+        # outside the merge holds the lane.
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a", status="doing"), [IDLE_LANE])
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path
+        record = json.loads(sh(self.t, "git", "--git-dir", self.bare, "show", "roadmap:roadmap/data/steps/c1.json"))
+        self.assertEqual(record["status"], "doing", "scope: the merged step's record does not read doing: %r" % record)
+        checks = self.check_lines(out, err)
+        self.assertEqual(len(checks), 1, "the merged step still doing held its lane: %d check-this-lane lines, not one: %r" % (len(checks), out + err))
+        self.assertIn("step c1 landed; lane session_a", checks[0], "the check line does not name the merged step and its lane: %r" % checks[0])
+        self.assertFalse([line for line in out if line.startswith("session_a (")], "the lane printed as a lane to archive: %r" % out)
+
+    def test_a_doing_step_whose_trailer_is_on_main_does_not_hold_its_lane(self):
+        # Step c2 is still recorded doing under lane session_a, but an earlier merge landed its Step trailer on main, so c2 is landed.
+        # The lane's only live step is then the merged one, so the lane gets its check line. The control is the case above that holds
+        # the lane: c2 with no trailer on main (test_no_check_line_while_a_step_is_still_doing_under_the_lane).
+        self.main_step_commit("c2")
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a", others=OTHER_DOING_STEP), [IDLE_LANE])
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path
+        landed = sh(self.t, "git", "--git-dir", self.bare, "log", "--format=%B", "main")
+        self.assertIn("Step: c2", landed, "scope: step c2's Step trailer is not on main: %r" % landed)
+        record = json.loads(sh(self.t, "git", "--git-dir", self.bare, "show", "roadmap:roadmap/data/steps/c2.json"))
+        self.assertEqual(record["status"], "doing", "scope: step c2's record does not read doing: %r" % record)
+        checks = self.check_lines(out, err)
+        self.assertEqual(len(checks), 1, "a doing step whose trailer is on main held its lane: %d check-this-lane lines, not one: %r"
+                         % (len(checks), out + err))
+        self.assertIn("step c1 landed; lane session_a", checks[0], "the check line does not name the merged step and its lane: %r" % checks[0])
+
+    def test_a_todo_step_under_the_lane_does_not_hold_it(self):
+        # Control: a step under the lane that is todo is not running, so it holds nothing, and the lane gets its check line.
+        others = {"c2": dict(order=2, status="todo", lane="session_a")}
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a", others=others), [IDLE_LANE])
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path
+        checks = self.check_lines(out, err)
+        self.assertEqual(len(checks), 1, "a todo step under the lane held it: %d check-this-lane lines, not one: %r" % (len(checks), out + err))
+        self.assertIn("step c1 landed; lane session_a", checks[0], "the check line does not name the merged step and its lane: %r" % checks[0])
+
+    def test_a_rebase_merge_names_the_lane_of_every_step_it_landed(self):
+        # A rebase merge copies each commit of the pull onto main, one after another, and makes no merge commit. The merge's
+        # commit^1..commit range then holds only the last copy, so the earlier copy's Step trailer is missed and its lane gets no
+        # check line. Step c0 is in lane session_c and step c1 in lane session_a: both must get a check line.
+        put_base_config(self, json.dumps({"defaultBranch": "main", "merge": {"method": "rebase"}}))
+        self.step_commit("c0")
+        self.step_commit("c1")
+        self.host.merge = self.rebase_merge
+        others = {"c0": dict(order=0, status="done", lane="session_c")}
+        rc, out, err = self.confirm(files=roadmap_files(lane="session_a", others=others),
+                                    live_at=lambda at: live_json((at - _timedelta(seconds=60)).isoformat(), IDLE_LANE))
+        self.assert_owed_path(rc, out, err)  # scope: the merge landed and the stale read took the owed path
+        parents = sh(self.t, "git", "--git-dir", self.bare, "rev-list", "--parents", "-n", "1", "main").split()
+        self.assertEqual(len(parents), 2, "scope: the tip of main has no single parent, so the fake made a merge commit: %r" % parents)
+        landed = sh(self.t, "git", "--git-dir", self.bare, "log", "--format=%B", "main")
+        self.assertIn("Step: c0", landed, "scope: step c0's trailer is not on main: %r" % landed)
+        checks = self.check_lines(out, err)
+        self.assertTrue(any("step c0 landed" in line and "lane session_c" in line for line in checks),
+                        "the rebase merge's step c0 got no check-this-lane line naming session_c: %r" % (out + err))
+        self.assertTrue(any("step c1 landed; lane session_a" in line for line in checks),
+                        "the rebase merge's step c1 got no check-this-lane line naming session_a: %r" % (out + err))
+
+    def test_no_check_line_while_an_open_pull_holds_the_lanes_head(self):
+        # The lane's session is complete and its step is done, but an open pull request is on its head ref lane/c1.
+        self.host.pulls = {8: REST.list_item(8, "2" * 40, "lane/c1", "main", body="")}
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a"), [IDLE_LANE])
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path
+        self.assertEqual(self.check_lines(out, err), [], "a lane with an open pull on its head got a check-this-lane line: %r" % (out + err))
+
+    def test_a_roadmap_ref_gone_as_the_pass_reads_it_keeps_the_merge_exit_0(self):
+        # The pass's fetch of origin/roadmap succeeds, then the ref is gone when the pass reads it. The live file cannot be read, so
+        # the owed line prints, and the merged step's record is read from the same ref, which no longer exists. That read must not
+        # raise: the merged line and exit code 0 stay as they were. The control is test_stale_live_file_prints_the_owed_line, with the
+        # ref in place.
+        real_fetch = merge.fetch_branch
+
+        def fetch_then_ref_gone(root, branch, cite=""):
+            sha = real_fetch(root, branch, cite)
+            if branch == "roadmap" and self.landed:  # the pass's own fetch, after the batch merge landed
+                sh(self.co, "git", "update-ref", "-d", "refs/remotes/origin/roadmap")
+            return sha
+        with unittest.mock.patch.object(merge, "fetch_branch", fetch_then_ref_gone):
+            rc, out, err = self.stale_merge(ROADMAP_BASE, [IDLE_LANE])  # a step commit with its Step trailer, so the record is read
+        owed = [line for line in out + err if OWED_WORD.search(line)]
+        self.assertEqual(len(owed), 1, "scope: the pass did not print its owed line once, so the step record was never read: %r" % (out + err))
+        self.assert_landed(rc, out, err)  # the merge landed and exits 0; the step record's read of the gone ref does not move either
+
+    def test_a_failed_merged_range_read_prints_unknown_not_silence(self):
+        # A shallow clone whose cut lies on the merge's first parent cannot read `commit^1..commit`. The fallback then reads the merge
+        # commit alone, which carries no Step trailer, so the pass printed nothing about the merged lane. The range read is forced to
+        # fail here; the fallback is the real git. The control is test_stale_live_file_falls_back_to_the_merged_steps_lane.
+        real_git, range_reads = merge.git, []
+
+        def git(cwd, *a, **k):
+            if a[:1] == ("log",) and a[-1:] and "^1.." in a[-1] and any("trailers:key=Step" in x for x in a):
+                range_reads.append(a[-1])
+                return 128, ""
+            return real_git(cwd, *a, **k)
+        with unittest.mock.patch.object(merge, "git", git):
+            rc, out, err = self.stale_merge(roadmap_files(lane="session_a"), [IDLE_LANE])
+        self.assertTrue(range_reads, "scope: the merged-range read never ran, so the fallback was never reached")
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path, so the step record is the next source
+        unknown = [line for line in out + err if line.startswith("unknown (")]
+        self.assertTrue(unknown, "the merged-range read failed and the fallback printed no unknown line, so the pass says nothing "
+                                 "about the merged lane: %r" % (out + err))
+
+    def test_an_unreadable_live_file_gives_a_kept_lane_an_unknown_or_hold_line_not_a_check_line(self):
+        # The live file is cut off mid-object, so its keepSessions cannot be read and the owner may keep this session. The lane gets
+        # an unknown or hold line that names it, never a check line. The control is test_stale_live_file_falls_back_to_the_merged_steps_lane:
+        # the same step with a readable file prints one check line.
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a"), text=lambda at: '{"readAt": "' + at.isoformat())
+        self.assert_owed_path(rc, out, err)  # scope: the file read as unread, so the owed path ran and the step record is the lane's source
+        self.assertEqual(self.check_lines(out, err), [], "a lane whose keep list cannot be read got a check-this-lane line: %r" % (out + err))
+        named = [line for line in out + err if line.startswith(("hold (", "unknown (")) and "session_a" in line]
+        self.assertTrue(named, "the lane got no hold or unknown line that names it: %r" % (out + err))
+
+    def test_a_malformed_keep_list_prints_no_unknown_line_for_a_lane_still_doing(self):
+        # Another step of the lane, c2, is doing under it, so the lane is still working and needs no keep list. Its keepSessions is
+        # malformed, so the keep list reads unknown. The lane prints no unknown line for it and no check line. The control is
+        # test_no_check_line_while_a_step_is_still_doing_under_the_lane, with a readable keep list.
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a", others=OTHER_DOING_STEP), [IDLE_LANE], keep="session_a")
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path, so the keep list was read there
+        unknown = [line for line in out + err if line.startswith("unknown (") and "session_a" in line]
+        self.assertEqual(unknown, [], "a lane still doing a step got an unknown line for its keep list: %r" % (out + err))
+        self.assertEqual(self.check_lines(out, err), [], "a lane still doing a step got a check-this-lane line: %r" % (out + err))
+
+    def tree_files(self, root):
+        """-> the files under `root`, except inside a git folder: a fetch writes refs and objects there, which the pass does not make as files."""
+        found = set()
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d != ".git"]
+            found.update(os.path.join(dirpath, name) for name in filenames)
+        return found
+
+    def test_the_idle_pass_after_a_merge_makes_reads_only(self):
+        # The pass starts git and no timer, each git call it makes is a read, and it makes no file in the repo or the temp dir.
+        # Its window opens at its fetch of origin's roadmap branch (the last one the run makes) and closes where the run reaches
+        # prose_judge_run, which runs after the pass. Process starts are seen through the one no-window run that merge's git and
+        # the roadmap build's git both start git with (hooks/_nowindow.run), and through threading.Timer.
+        git_calls, timers, start, end = [], [], {}, {}
+        real_run, real_timer, real_judge = merge._nowindow.run, threading.Timer, merge.prose_judge_run
+        temp = self.temp_folder()  # tempfile.tempdir is this folder, so a temp file the pass makes lands inside the case folder
+
+        def run(argv, *a, **k):
+            # sh() resolves the program to its full path, so the name is matched by its base name, not as the literal "git".
+            if isinstance(argv, (list, tuple)) and argv and os.path.splitext(os.path.basename(str(argv[0])))[0].lower() == "git":
+                args = tuple(argv[3:] if argv[1:2] == ["-C"] else argv[1:])  # ["git", "-C", repo, subcommand, ...]
+                if args[:1] == ("fetch",) and any("roadmap" in x for x in args):
+                    start["calls"], start["files"] = len(git_calls), self.tree_files(self.t)
+                git_calls.append(args)
+            return real_run(argv, *a, **k)
+
+        def timer(*a, **k):
+            timers.append(a)
+            return real_timer(*a, **k)
+
+        def judge_run(plan, n):
+            end["files"] = self.tree_files(self.t)
+            return real_judge(plan, n)
+        with unittest.mock.patch.object(merge._nowindow, "run", run), unittest.mock.patch.object(merge, "prose_judge_run", judge_run), \
+                unittest.mock.patch.object(threading, "Timer", timer), unittest.mock.patch.object(tempfile, "tempdir", temp):
+            rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE))
+        self.assertTrue("calls" in start and "files" in end,
+                        "scope: the run never reached the pass's roadmap fetch and its end (%d git calls, none a roadmap fetch)" % len(git_calls))
+        self.assert_report_after_merge(rc, out, err)  # scope: the fresh read ran the pass
+        window = git_calls[start["calls"]:]
+
+        def is_read(a):
+            if a[0] == "symbolic-ref":  # a read names one ref and sets none: one argument after its options
+                return len([x for x in a[1:] if not x.startswith("-")]) == 1
+            return a[0] in READ_ONLY_GIT
+        self.assertEqual([a for a in window if not is_read(a)], [], "the pass after the merge wrote to git: %r" % window)
+        created = sorted(end["files"] - start["files"])
+        self.assertEqual(created, [], "the pass after the merge created files: %r" % created)
+        self.assertEqual(timers, [], "the run started a timer: %r" % timers)
 
 class ShallowMain(unittest.TestCase):
     """ff_main in a shallow clone of origin. The commit it moves to is on origin/main, but the clone cuts the history
@@ -1749,6 +2441,7 @@ class Guards(Env):
             merge.drop_worktree(self.co, tmp, wt)
 
 SCOPE_SCRIPT = os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")  # the real script: the one home of which jobs read which paths
+GUARD_INPUTS = os.path.join(HERE, "..", ".github", "guard-inputs.txt")  # the real list ci-scope.sh reads for windows_guard; an empty or missing list turns it on
 def scope_line(name):
     """The words of ci-scope.sh's `NAME="..."` line (JOBS, LINTS, ALL). A fixture that fakes the script's flags takes its names here, so it cannot drift from the script."""
     with open(SCOPE_SCRIPT, encoding="utf-8") as f:
@@ -1793,6 +2486,8 @@ class ScopedRepo:
         if scope:
             with open(SCOPE_SCRIPT, encoding="utf-8") as f:
                 put_lf(os.path.join(o, ".github/scripts/ci-scope.sh"), f.read())
+            with open(GUARD_INPUTS, encoding="utf-8") as f:
+                put_lf(os.path.join(o, ".github/guard-inputs.txt"), f.read())
         put(os.path.join(o, ".github/workflows", name), workflow)
         put(os.path.join(o, "landed-dirs.txt"), "hooks\n")
         put(os.path.join(o, "lint/check_slugs.py"), SLUG_LINT)
@@ -1835,9 +2530,10 @@ class ScopedRepo:
 
     @staticmethod
     def turned_on(flags):
-        """The job and suite flags that are on. Not mutation_report (it is set only for a batch branch), and not the lint_* flags: merge
-        counts no lint as a job, since every merge runs the lints anyway (ci-job checks --lint)."""
-        return sorted(k for k, v in flags.items() if k != "mutation_report" and not k.startswith("lint_") and v != "false")
+        """The job and suite flags that are on. Not mutation_report (it is set only for a batch branch), not the lint_* flags: merge
+        counts no lint as a job, since every merge runs the lints anyway (ci-job checks --lint), and not the doc_* flags, which a prose
+        change sets and the express check lets through."""
+        return sorted(k for k, v in flags.items() if k != "mutation_report" and not k.startswith(("lint_", "doc_")) and v != "false")
 
     @staticmethod
     def lints_on(flags):
@@ -2026,6 +2722,82 @@ class PerLaneMerge(Env):
         self.assertEqual(held, [], "a check wait ran while the merge lock was held: %s" % held)
         self.assertEqual(self.host.waits, [], "the head or its claim was waited on under the lock: %s" % (self.host.waits,))
         self.assertEqual(rc, 0, out)
+
+    def test_a_confirm_that_merges_runs_the_safe_sweep_once_on_the_checkout_after_the_merged_as_line(self):
+        put_base_config(self, complete_config())  # the base's config is complete, so no defaults notice precedes the stop line
+        self.main_moves()  # main gains elsewhere.txt, a path no lane touches
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)  # scope first: the merge landed
+        self.assertIn("merge: #7 merged as ", out)
+        self.assertEqual(len(self.sweep_runs), 1, "the sweep ran %d times after the merge, want once: %s" % (len(self.sweep_runs), out))
+        run = self.sweep_runs[0]
+        self.assertEqual(os.path.realpath(run["root"]), os.path.realpath(self.co), "the sweep ran on %s, not on the checkout" % run["root"])
+        self.assertIs(run["confirm"], True, "the sweep after the merge did not reap: confirm is %r" % (run["confirm"],))  # the args the lane lint's floor sweep takes (test_lane_lint.py)
+        self.assertIs(run["attended"], False, "the sweep after the merge ran attended, which skips the merged and idle keeps")
+        self.assertIsNotNone(run["stdout_at"], "the sweep did not run in this process, so its place in the output is unknown")
+        self.assertGreater(run["stdout_at"], out.index("merge: #7 merged as "), "the sweep ran before the merged-as line was printed: " + out)
+
+    def test_a_confirm_refused_on_a_conflict_runs_no_sweep(self):  # control: a refused merge has nothing to sweep for
+        self.feat_edits_the_title()
+        self.push_on("main", self.FIRST.replace("title: First", "title: Main"), "main: title")  # the same line: the head will not merge
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)  # scope first: the merge was refused
+        self.assertNotIn("merged as", out)
+        self.assertEqual(self.sweep_runs, [], "a refused merge ran the sweep %d times: %s" % (len(self.sweep_runs), out))
+
+    def test_a_confirm_on_a_draft_runs_no_sweep(self):  # control: the draft step marks ready and never merges
+        put_base_config(self, complete_config())
+        self.host.draft = True
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertIn("No pull request was merged.", out, "scope first: the draft step did not run, so this control proves nothing: " + out)
+        self.assertFalse(getattr(self.host, "merged", False), "scope first: the draft step merged the pull request: " + out)
+        self.assertEqual(self.sweep_runs, [], "the draft step ran the sweep %d times: %s" % (len(self.sweep_runs), out))
+
+    def test_the_safe_sweep_runs_after_the_merge_lock_on_main_is_released(self):
+        put_base_config(self, complete_config())
+        self.main_moves()  # main gains elsewhere.txt, a path no lane touches
+        self.sweep_look = lambda: self.lock.read("main")  # read inside the sweep call: the lock ref as the sweep finds it
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)  # scope first: the merge landed
+        self.assertIn("merge: #7 merged as ", out)
+        self.assertEqual(len(self.sweep_runs), 1, "the sweep ran %d times after the merge, want once: %s" % (len(self.sweep_runs), out))
+        look = self.sweep_runs[0]["look"]
+        self.assertNotIsInstance(look, Exception, "the lock read inside the sweep failed: %r" % (look,))
+        self.assertTrue(look is None or look[1] <= self.now,
+                        "the sweep ran while the merge lock on main was held, until %r: %s" % (look[1] if look else None, out))
+
+    def test_a_safe_sweep_that_raises_leaves_a_landed_merge_exit_zero_with_one_line(self):
+        put_base_config(self, complete_config())
+        self.main_moves()
+        self.sweep_mock.side_effect = RuntimeError("the sweep broke")
+        try:
+            rc, out = self.run_merge("7", "--confirm", stderr=io.StringIO())
+        except RuntimeError as e:  # the error left the merge command: a named failure, not an error
+            self.fail("a raising sweep escaped run_safe_sweep and the merge command: %s" % e)
+        self.assertIn("merge: #7 merged as ", out)  # scope first: the merge landed
+        self.assertEqual(self.sweep_mock.call_count, 1, "scope first: the sweep did not run once after the merge: " + out)
+        self.assertEqual(rc, 0, "a sweep that raised changed the exit of a landed merge to %d: %s" % (rc, out))
+        lines = [line for line in out.splitlines() if line.startswith("merge: the safe sweep")]
+        self.assertEqual(len(lines), 1, "the sweep's failure printed %d lines, want one: %s" % (len(lines), out))
+        self.assertIn("RuntimeError: the sweep broke", lines[0])
+        self.assertNotIn("Traceback", out)
+
+    def test_a_safe_sweep_that_refuses_leaves_a_landed_merge_exit_zero_with_one_line(self):
+        put_base_config(self, complete_config())
+        self.main_moves()
+
+        def refuse(root, confirm, restore_log_path, mode="full", attended=False, own_lock_rule=True):
+            return {"root": root, "refused": "no-default-base"}  # a refusal names its reason; it runs nothing
+
+        self.sweep_mock.side_effect = refuse
+        rc, out = self.run_merge("7", "--confirm", stderr=io.StringIO())
+        self.assertIn("merge: #7 merged as ", out)  # scope first: the merge landed
+        self.assertEqual(self.sweep_mock.call_count, 1, "scope first: the sweep did not run once after the merge: " + out)
+        self.assertEqual(rc, 0, "a sweep that refused changed the exit of a landed merge to %d: %s" % (rc, out))
+        lines = [line for line in out.splitlines() if line.startswith("merge: the safe sweep")]
+        self.assertEqual(len(lines), 1, "the sweep's refusal printed %d lines, want one: %s" % (len(lines), out))
+        self.assertIn("refused: no-default-base", lines[0])
+
 
 class CutBranch(Env):
     def local_branch(self, extra):
@@ -3184,6 +3956,9 @@ class GhLockTest(unittest.TestCase):
 #   - the cloud agent proxy refuses a numeric-ID path: when a case sets `proxy_refuses_paged`, a `--paginate` read of more than one page
 #     answers HTTP 403 on `repositories/<id>/...`, the path gh follows from the Link header. Off unless a case sets it.
 #   - `issues/comments` answers a case's `issue_comments` (oldest first) once the case sets them; with none set it stays a 404.
+#   - `echo_posts`: `issues/comments` answers the seeded comments, then each post as GitHub files it (owner OWNER, the post's body). Off unless a case sets it.
+#   - `pull_files`: `pulls/<n>/files` answers the case's files, and `GET pulls/<n>` then carries `changed_files` with their count. Off unless a case sets it.
+#   - `full_name`: the repo name `GET repos` answers (default o/r). Every pull request carries `created_at`.
 #   - a case's `fail_page` ({"page", "text"}) answers every read of that page with the error text (rest_err), so a later page of a list read fails.
 #   - a list read under `-i` prints the header block gh prints, with a `Link` header (rel="next" and rel="last", on the numeric route) while pages
 #     follow, and none on the last page. A `--paginate` read prints no Link header: gh follows it itself.
@@ -3314,7 +4089,7 @@ def combined_state(statuses):
 
 def pull(number, head, head_ref, base_ref, state="open", merged=False, draft=False, mergeable=True, mergeable_state="clean", body="", merge_commit_sha=TEST_MERGE_SHA):
     """A pull request as `GET pulls/<n>` returns it. An empty body is null, as on GitHub."""
-    return {"number": number, "state": state, "merged": merged, "draft": draft, "body": body or None, "mergeable": mergeable,
+    return {"number": number, "state": state, "merged": merged, "draft": draft, "body": body or None, "mergeable": mergeable, "created_at": "2026-10-02T00:00:00Z",
             "mergeable_state": mergeable_state, "merge_commit_sha": merge_commit_sha, "html_url": "https://github.com/o/r/pull/%d" % number,
             "head": {"ref": head_ref, "sha": head, "label": "o:" + head_ref}, "base": {"ref": base_ref, "sha": "b" * 40, "label": "o:" + base_ref}}
 
@@ -3465,7 +4240,7 @@ try:
         raise Refused(rf["msg"])
 
     if method == "GET" and not rel:
-        finish(one({"default_branch": S.get("default_branch", "main"), "full_name": "o/r"}, jq), 0, include)
+        finish(one({"default_branch": S.get("default_branch", "main"), "full_name": S.get("full_name", "o/r")}, jq), 0, include)
 
     elif method == "GET" and rel == "pulls":
         if S.get("open_pulls_fail"):
@@ -3506,6 +4281,8 @@ try:
             locked = bool(ref("refs/heads/merge-lock/main"))
             draft = bool(S.get("draft")) or (bool(S.get("draft_when_locked")) and locked)  # draft_when_locked: the PR turns draft once the merge lock is taken
             pr = pull(n, head, S.get("head_ref", "feat"), S.get("base", "main"), "open", False, draft, val, {True: "clean", False: "dirty", None: "unknown"}[val], S.get("body", ""))
+            if "pull_files" in S:  # opt-in: the count of the files the case seeds, as GET pulls/<n> reports it
+                pr["changed_files"] = len(S["pull_files"])
             if locked and S.get("merge_state_when_locked"):  # mergeable_state once the merge lock is taken: clean for the preview read, this for every read after it
                 pr["mergeable_state"] = S["merge_state_when_locked"]
             S["shown"] = S.get("shown", []) + [head]; save()
@@ -3590,6 +4367,10 @@ try:
         finish(one({"id": 555, "body": params.get("body")}, jq), 0, include)
     elif method == "GET" and rel == "issues/comments" and S.get("comments_fail"):  # a case's failed comment read: the text gh prints
         raise Refused(S["comments_fail"])
+    elif method == "GET" and re.fullmatch(r"pulls/\d+/files", rel) and "pull_files" in S:  # opt-in: the files a case seeds (the review record and the guard read them)
+        answer_list(S["pull_files"], None)
+    elif method == "GET" and rel == "issues/comments" and S.get("echo_posts"):  # opt-in: the seeded comments, then each post as GitHub files it (a lane's post reads back)
+        answer_list(S.get("issue_comments", []) + [{"id": 600 + k, "created_at": "2026-10-02T00:00:00Z", "updated_at": "2026-10-02T00:00:00Z", "issue_url": f"https://api.github.com/repos/o/r/issues/{p['n']}", "body": p["body"], "user": {"login": "o"}, "author_association": "OWNER"} for k, p in enumerate(S.get("posted", []))], None)
     elif method == "GET" and rel == "issues/comments" and "issue_comments" in S:  # the repo's issue comments, seeded by a case (the review record reads them)
         answer_list(S["issue_comments"], None)
 
@@ -5447,7 +6228,7 @@ class GhHalf(Env):
 OLD_RUN, NEW_RUN, CI_RUN = 41368432206, 41368432483, 41368432300
 MID_RUN = 41368432350  # a run of the same workflow between OLD_RUN and NEW_RUN
 
-class NoneRequiredChecks(Env):
+class NoneRequiredChecks(ScopedRepo, Env):
     """merge.requiredChecks "none": the base names no required check, so the head reads from the checks and runs it has. Each case
     runs through the fake gh, as GhHalf does. Borrows GhHalf's helpers, as SilentWait does, so GhHalf's tests do not run twice."""
     set, calls, gh_host, go = GhHalf.set, GhHalf.calls, GhHalf.gh_host, GhHalf.go
@@ -5466,10 +6247,12 @@ class NoneRequiredChecks(Env):
         self.assertEqual((host.checks(7, warn=False, sha=head), host.runs(head)), ({}, []), "the fixture's head holds a check or a run")
         self.assertEqual(host.head_state(7), "green")
 
-    def test_a_red_check_row_on_the_head_still_reads_red(self):
+    def test_a_red_check_row_on_the_head_reads_green_under_none(self):
+        # Under none the tool reads no CI run at all (decision private-repos-no-ci), so a failed check row holds nothing.
         self.set(checks_seq=[[("checks", "fail", "https://x/y")]])
-        state = self.none_host().head_state(7)
-        self.assertTrue(state.startswith("red: checks: fail"), state)
+        host = self.none_host()
+        self.assertTrue(host.checks(7, warn=False, sha=host.pr(7)["head"]), "scope: the head reads no check row")
+        self.assertEqual(host.head_state(7), "green")
 
     def test_confirm_does_not_stop_on_required_checks_when_none_is_set(self):
         self.set(checks_seq=[[]])
@@ -5478,14 +6261,187 @@ class NoneRequiredChecks(Env):
         self.assertIn(MERGE_CALL, self.calls())
         self.assertNotIn("branches/main/protection", self.calls(), "under requiredChecks none, the confirm read the base's branch protection")
 
-    def test_a_pending_run_with_no_workflow_folder_refuses_at_once_under_none(self):
-        # The base has no workflow folder, so the run's file cannot be read. A run whose file cannot be read holds the head.
+    def test_a_pending_run_with_no_workflow_folder_does_not_hold_the_merge_under_none(self):
+        # Under none the tool reads no CI run at all (decision private-repos-no-ci), so a run still pending holds nothing.
         self.set(checks_seq=[[]], runs_seq=[[("docs", "in_progress", "")]])
+        host = self.none_host()
+        self.assertTrue(host.run_state(host.pr(7)["head"])[1], "scope: the head's run does not read pending")
         rc, out = self.go(required="none")
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls())
+        self.assertEqual(self.paused, [], "the pending run waited before the merge")
+
+    def test_an_old_red_run_on_the_head_does_not_refuse_the_merge_under_none(self):
+        # Under none the tool reads no CI run at all (decision private-repos-no-ci), so a red run left on the head
+        # from before its workflows were disabled holds nothing.
+        self.set(checks_seq=[[]], runs_seq=[[("checks", "completed", "failure")]])
+        host = self.none_host()
+        self.assertTrue(host.run_state(host.pr(7)["head"])[0], "scope: the head's run does not read red")
+        rc, out = self.go(required="none")
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls())
+
+    def test_an_old_red_run_on_the_head_still_refuses_under_a_listed_check(self):  # control: green on the old code
+        self.set(checks_seq=[[("checks", "pass", "")]], runs_seq=[[("checks", "completed", "failure")]])
+        rc, out = self.go(required=["checks"])
         self.assertEqual(rc, 1, out)
-        self.assertIn("a check is pending: workflow docs", out)
-        self.assertEqual(self.paused, [], "the pending run waited before it refused")
+        self.assertIn("not green", out)
         self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_red_main_run_does_not_refuse_the_merge_under_none(self):
+        # Under none the tool reads no CI run at all (decision private-repos-no-ci), main's runs included.
+        push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})  # only a workflow file on main is judged
+        self.set(checks_seq=[[]], base_runs=[main_run(901, "failure")], base_jobs={"901": [main_job("scope", "success"), main_job("checks", "failure", 20)]})
+        rc, out = self.go(required="none")
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls())
+
+    def test_a_red_main_run_still_refuses_the_merge_under_a_listed_check(self):  # control: green on the old code
+        push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})
+        self.set(base_runs=[main_run(901, "failure")], base_jobs={"901": [main_job("scope", "success"), main_job("checks", "failure", 20)]})
+        rc, out = self.go(required=["checks"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("latest completed run is red", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def run_main_with_gh_host(self, *args, required="protection"):
+        """merge.main with no host argument, so main reads the required checks from the config of the base, as in production. The gh host of
+        this case stands in for the Host main builds. -> (rc, stdout and stderr together)."""
+        host = self.gh_host(required=required)
+        out, err = io.StringIO(), io.StringIO()
+        cwd = os.getcwd()
+        os.chdir(self.co)
+        try:
+            with unittest.mock.patch.object(merge, "Host", lambda **kw: host), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = merge.main(list(args), lock=self.lock)
+        finally:
+            os.chdir(cwd)
+        return rc, out.getvalue() + err.getvalue()
+
+    def test_a_setup_pr_whose_head_stamp_says_none_merges_with_no_flag(self):
+        # A setup PR (decision private-repos-no-ci) whose own head stamp says "none" lints and merges from that
+        # stamp, with no flag. Main still pins protection, and that protection requires a check the head does not run.
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="protection"))))
+        self.on("feat", {".github/stamp.json": json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="none")))})
+        self.set(contexts=["checks"], checks_seq=[[]])
+        self.assertEqual(self.gh_host(required="protection").required_names(), ["checks"], "scope: main's protection does not require checks")
+        rc, out = self.run_main_with_gh_host("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls())
+
+    def test_a_setup_pr_whose_head_stamp_sets_a_bad_deadline_is_refused(self):
+        # The head's stamp is the one main reads, so its deadline is validated too: the only reader of merge.deadlineMinutes is the config check.
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="protection"))))
+        self.on("feat", {".github/stamp.json": json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="none", deadlineMinutes=0)))})
+        self.set(contexts=["checks"], checks_seq=[[]])
+        rc, out = self.run_main_with_gh_host("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("deadlineMinutes", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_head_stamp_that_is_not_none_does_not_replace_the_base_stamp(self):
+        # Only a setup PR's own head stamp that says "none" counts (decision private-repos-no-ci). A head stamp
+        # that names other checks is not the config, so main's stamp decides, and it names checks.
+        put_base_config(self, complete_config())
+        self.on("feat", {".github/stamp.json": json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=["gate"])))})
+        head = sh(self.other, "git", "rev-parse", "feat")
+        self.assertEqual(json.loads(sh(self.other, "git", "show", f"{head}:.github/stamp.json"))["merge"]["requiredChecks"], ["gate"], "scope: the head's stamp does not name gate")
+        self.assertEqual(json.loads(sh(self.other, "git", "show", "origin/main:.github/stamp.json"))["merge"]["requiredChecks"], ["checks"], "scope: main's stamp does not name checks")
+        cfg = merge.load_config(self.co, "main", merge.DEFAULT_CONFIG, head=head, branch="feat")
+        self.assertEqual(cfg["merge"]["requiredChecks"], ["checks"], "a head stamp with requiredChecks ['gate'] replaced main's stamp")
+
+    def base_fields_stamp(self):
+        """Main's stamp, with each merge field that a setup head's stamp must not replace set off its default, so a case sees each one come from main."""
+        return json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="protection", method="squash", deleteBranch=False,
+                                                  standingGrant=False, afterMerge=["make release"],
+                                                  ignoreChecks=[{"name": "lint", "reason": "a known flake"}],
+                                                  keepBranches=["release"], readyChecks=["check invariants"])))
+
+    def assert_base_fields(self, m, source):
+        """-> each merge field that main's stamp sets (base_fields_stamp) reads as main sets it. `source` names the stamp that must not replace it."""
+        kept = (("standingGrant", False), ("afterMerge", ["make release"]), ("ignoreChecks", [{"name": "lint", "reason": "a known flake"}]),
+                ("keepBranches", ["release"]), ("readyChecks", ["check invariants"]), ("deleteBranch", False), ("method", "squash"))
+        for field, want in kept:
+            with self.subTest(field=field):
+                self.assertEqual(m.get(field), want, f"the {source} replaced main's merge.{field}")
+
+    def head_setup_config(self, head_merge):
+        """Put main's base_fields_stamp on origin, then commit `head_merge` as the feat branch's stamp. -> the head sha, read from the other clone."""
+        put_base_config(self, self.base_fields_stamp())
+        self.on("feat", {".github/stamp.json": json.dumps(dict(CONFIG, merge=head_merge))})
+        return sh(self.other, "git", "rev-parse", "feat")
+
+    def test_a_setup_head_none_stamp_still_sets_required_checks(self):  # control: green on the old code
+        head = self.head_setup_config({"requiredChecks": "none"})
+        cfg = merge.load_config(self.co, "main", merge.DEFAULT_CONFIG, head=head, branch="feat")
+        self.assertEqual(cfg["merge"]["requiredChecks"], "none", "a setup head's none stamp did not set requiredChecks")
+
+    def test_a_setup_head_none_stamp_keeps_each_field_of_main_merge_block(self):
+        # A PR never loosens its own gate (decision private-repos-no-ci). The head's stamp sets requiredChecks
+        # only, so every other merge field is main's.
+        head = self.head_setup_config({"requiredChecks": "none"})
+        self.assertEqual(json.loads(sh(self.other, "git", "show", f"{head}:.github/stamp.json"))["merge"], {"requiredChecks": "none"}, "scope: the head's stamp sets more than requiredChecks")
+        self.assertIs(json.loads(sh(self.other, "git", "show", "origin/main:.github/stamp.json"))["merge"]["standingGrant"], False, "scope: main's stamp does not set standingGrant false")
+        cfg = merge.load_config(self.co, "main", merge.DEFAULT_CONFIG, head=head, branch="feat")
+        self.assertEqual(cfg["merge"]["requiredChecks"], "none", "scope: the head's none stamp was not the config")
+        self.assert_base_fields(cfg["merge"], "head's none stamp")
+
+    def test_a_setup_head_none_stamp_sets_no_base_field_of_its_own(self):
+        # A PR never loosens its own gate (decision private-repos-no-ci). The head sets values for the base's
+        # fields too, and none of them reaches the config: only requiredChecks comes from the head.
+        head = self.head_setup_config({"requiredChecks": "none", "method": "rebase", "deleteBranch": True, "standingGrant": True,
+                                       "afterMerge": ["make nothing"], "keepBranches": ["other"]})
+        self.assertEqual(json.loads(sh(self.other, "git", "show", f"{head}:.github/stamp.json"))["merge"]["method"], "rebase", "scope: the head's stamp does not set method")
+        cfg = merge.load_config(self.co, "main", merge.DEFAULT_CONFIG, head=head, branch="feat")
+        self.assertEqual(cfg["merge"]["requiredChecks"], "none", "scope: the head's none stamp was not the config")
+        self.assert_base_fields(cfg["merge"], "head's own stamp")
+
+    def requiredChecks_at(self, ref):
+        """-> requiredChecks as the stamp at `ref` (a commit, or origin/main) says it, read from the other clone."""
+        return json.loads(sh(self.other, "git", "show", f"{ref}:.github/stamp.json"))["merge"].get("requiredChecks")
+
+    def test_a_none_head_stamp_the_pr_did_not_change_yields_to_main(self):
+        # A PR never loosens its own gate (decision private-repos-no-ci). The base said "none" when the PR was cut,
+        # and the PR left it there. Main says "protection" now, so main's stamp decides.
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="none"))))
+        self.on("feat", {"docs/notes.md": "a note\n"})  # the PR's own change: its stamp still says none
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="protection"))), takes_head=False)
+        head = sh(self.other, "git", "rev-parse", "feat")
+        base = sh(self.other, "git", "merge-base", head, "origin/main")
+        self.assertEqual(self.requiredChecks_at(base), "none", "scope: the merge base does not say none")
+        self.assertEqual(self.requiredChecks_at(head), "none", "scope: the head does not say none")
+        self.assertEqual(self.requiredChecks_at("origin/main"), "protection", "scope: main does not say protection")
+        cfg = merge.load_config(self.co, "main", merge.DEFAULT_CONFIG, head=head, branch="feat")
+        self.assertEqual(cfg["merge"]["requiredChecks"], "protection", "the head's none stamp, which the PR did not change, replaced main's stamp")
+
+    def test_a_none_head_stamp_the_pr_changed_still_counts_over_a_protection_base(self):  # control: green on the old code
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="protection"))))
+        self.on("feat", {".github/stamp.json": json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="none")))})  # the PR changes it
+        head = sh(self.other, "git", "rev-parse", "feat")
+        base = sh(self.other, "git", "merge-base", head, "origin/main")
+        self.assertEqual(self.requiredChecks_at(base), "protection", "scope: the merge base does not say protection")
+        self.assertEqual(self.requiredChecks_at(head), "none", "scope: the head does not say none")
+        cfg = merge.load_config(self.co, "main", merge.DEFAULT_CONFIG, head=head, branch="feat")
+        self.assertEqual(cfg["merge"]["requiredChecks"], "none", "a none stamp the PR changed did not set requiredChecks")
+
+    def test_head_read_does_not_take_an_unchanged_none_stamp_over_main(self):
+        # The guard reads the head through head_read, which takes the same stamp rule as load_config. The base said "none" when the PR was cut
+        # and says "protection" now, so the head reads as its checks and runs say: none, so pending.
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="none"))))
+        self.on("feat", {"docs/notes.md": "a note\n"})
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="protection"))), takes_head=False)
+        self.set(checks_seq=[[]])
+        sh(self.co, "git", "fetch", "-q", "origin")  # head_read reads the stamp in the checkout gh runs in: the head must be there
+        head = sh(self.other, "git", "rev-parse", "feat")
+        self.assertEqual(self.requiredChecks_at(head), "none", "scope: the head does not say none")
+        self.assertEqual(self.requiredChecks_at("origin/main"), "protection", "scope: main does not say protection")
+        cwd = os.getcwd()
+        os.chdir(self.co)
+        try:
+            verdict, detail = self.gh_host().head_read(7)
+        finally:
+            os.chdir(cwd)
+        self.assertEqual(verdict, "pending", f"the head's unchanged none stamp read the head green over main's protection ({detail!r})")
 
     def test_a_blocked_pull_request_under_none_refuses_and_names_the_branch_protection(self):
         # GitHub reads the pull request BLOCKED: the base's branch protection still requires a check that this head does not report.
@@ -6622,15 +7578,17 @@ class ReadyUsage(unittest.TestCase):
         self.assert_names_the_close("\n".join(lines[start:end]), "the module docstring")
 
 
-def put_base_config(env, text):
-    """Commit `text` as .github/stamp.json on origin's main from the other clone. env.co keeps its local checkout."""
+def put_base_config(env, text, takes_head=True):
+    """Commit `text` as .github/stamp.json on origin's main from the other clone. env.co keeps its local checkout. takes_head=False leaves the
+    PR branch where it is, so a case can move main past a branch that holds the stamp as it was when the branch was cut."""
     o = env.other
     sh(o, "git", "fetch", "-q", "origin")
     sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
     put(os.path.join(o, ".github/stamp.json"), text)
     sh(o, "git", "commit", "-qam", "base config")
     sh(o, "git", "push", "-q", "origin", "main")
-    head_takes_base(env)
+    if takes_head:
+        head_takes_base(env)
 
 def head_takes_base(env):
     """Merge origin's main into the PR branch, as a lane does before its run, so a setup push to main is not a moved base (merge-needs-current-base)."""
@@ -9612,16 +10570,15 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.rev("origin/main^2"), pushed, "the merge did not take the head that was pushed")
         self.assert_healed_merge(out, main_tip, before)
 
-    def test_under_none_a_red_head_refuses_before_any_push(self):
-        # A control: base already reads the head's own checks before it rebuilds or pushes anything, and the heal must keep that order.
+    def test_under_none_a_red_head_does_not_refuse_the_heal_and_merge(self):
+        # Under none the tool reads no CI run at all (decision private-repos-no-ci), so a red run on the head holds no heal.
         self.set_required("none")
         self.drop_pending_record()
         self.on("feat", {"docs/records.md": page("ghost")})
-        self.host.state = "red: checks: fail"  # the head's own run failed
-        refs_before = self.refs()
-        rc, out = self.run_merge_once("7", "--confirm")
-        self.assert_refused_untouched(rc, out, refs_before)
-        self.assertIn("not green", out)
+        self.host.state = "red: checks: fail"  # an old run on the head, which none does not read
+        rc, out = self.run_merge_once("7", "--confirm")  # one run: the case pins the single confirm, as the heal case above does
+        self.assertEqual(rc, 0, "under none a red run on the head refused the heal and merge:\n" + out)
+        self.assertNotIn("not green", out)
 
     def test_under_none_a_base_that_moves_after_the_heal_push_refuses_and_keeps_the_page_commit(self):
         self.set_required("none")
@@ -12106,16 +13063,23 @@ class MainRunsHost(FakeHost, merge.Host):
     """FakeHost for the flow; the real Host.base_state over scripted REST. `main_runs`: main's push runs, newest first. `jobs`: run id -> jobs.
     `runs_fail` / `jobs_fail`: that read fails with this text. `jobs_fail_of`: run id -> the text its jobs read fails with.
     `texts`: head sha -> the workflow file's text on that head (a head not in it reads as NO_IF_WORKFLOW). `text_fail`: every file read fails with this text.
-    `pulls`: {number: REST row} of the pull requests the page holds (None: the own one only). `heads`: head sha -> the checks state head_state reads for it."""
+    `pulls`: {number: REST row} of the pull requests the page holds (None: the own one only). `heads`: head sha -> the checks state head_state reads for it.
+    `changed`: the (path, status, additions) triples of the own pull request's diff (pr_files reads them); None keeps FakeHost's README.md.
+    `named_checks`: the (name, state, head) rows check_state reads. `job_logs`: job id -> the text `actions/jobs/N/logs` returns; a job with none is a 404. `required`: the merge.requiredChecks the real Host holds, "protection" by default."""
     base_state = getattr(merge.Host, "base_state", None)
 
-    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None, jobs_fail_of=None, texts=None, text_fail=None, pulls=None, heads=None):
+    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None, jobs_fail_of=None, texts=None, text_fail=None, pulls=None, heads=None, changed=None,
+                 named_checks=None, job_logs=None, required="protection"):
         FakeHost.__init__(self, root, other)
+        self.required = required  # base_state branches on it; "protection" is what the real Host gets for a protected main (merge.MERGE_DEFAULTS)
         self.ignore, self.cwd, self.warned = {}, root, set()
         self.main_runs, self.jobs, self.runs_fail, self.jobs_fail, self.reads = main_runs, jobs, runs_fail, jobs_fail, []
         self.jobs_fail_of = jobs_fail_of or {}
         self.texts, self.text_fail = texts or {}, text_fail
         self.pulls, self.head_states = pulls, heads or {}
+        if changed is not None:
+            self.changed = list(changed)
+        self.named_checks, self.job_logs = list(named_checks or []), dict(job_logs or {})
 
     def file_at_head(self, rel, extra, fields):
         """`contents/<path>` read at a head: the ref is a field or a query. Raw when the Accept header asks for raw, else the JSON reply with base64 content."""
@@ -12132,6 +13096,9 @@ class MainRunsHost(FakeHost, merge.Host):
         self.reads.append(rel)
         if rel.startswith("contents/"):
             return self.file_at_head(rel, extra, fields or {})
+        m = re.fullmatch(r"actions/jobs/(\d+)/logs", rel)
+        if m:  # a job's log text; a job with no log scripted is a 404, which the reader takes as unknown
+            return (0, self.job_logs[int(m.group(1))]) if int(m.group(1)) in self.job_logs else (1, "HTTP 404: Not Found")
         assert (rel, method, fields.get("branch")) == ("actions/runs", "GET", "main"), (rel, fields)
         if self.runs_fail:
             return 1, self.runs_fail
@@ -13361,6 +14328,200 @@ class RedMainBrake(Env):
         RedMainBrake.refused(self, rc, out, before)
         self.assertIn("No batch merges onto a red main", out, "the merge is refused, but not by the red-main check")
 
+    # A fix that touches the blamed paths also merges onto a red main, when its own head is green (decision no-merge-onto-red-main, no batch merges
+    # onto a red main). The blamed paths are the paths the breaking merge changed: lane 2650's merge changes lane-2650.txt alone.
+    def fix_on_feat(self, subject, name, start="origin/main", act="append", to=None):
+        """One lane commit on a fresh feat cut from `start`, so the diff is the fix alone. `act` is "append" (the default: `subject` becomes a line of `name`,
+        and an append keeps the lines the breaking merge wrote, so the silent-undo check reads no undo), "delete" (`name` is removed) or "rename" (`name`
+        moves to `to`). The push is forced, as reland_after_revert does for its fresh branch. -> feat's head."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", start)
+        path = os.path.join(o, name)
+        if act == "append":
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "a") as f:
+                f.write(f"{subject}\n")
+        elif act == "delete":
+            sh(o, "git", "rm", "-q", name)
+        elif act == "rename":
+            os.makedirs(os.path.dirname(os.path.join(o, to)), exist_ok=True)
+            sh(o, "git", "mv", name, to)
+        else:
+            raise ValueError(f"fix_on_feat has no act {act!r}")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", subject); sh(o, "git", "push", "-q", "-f", "origin", "feat")
+        return sh(o, "git", "rev-parse", "HEAD")
+
+    def red_main_with_breaking_merge(self):
+        """Main's breaking merge B (lane 2650), red again on its re-run, and the page that shows it. -> (B, runs, jobs)."""
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        runs, jobs = self.breaking_page(B, A)
+        return B, runs, jobs
+
+    def test_a_fix_touching_the_breaking_merges_paths_merges_onto_a_red_main_when_its_own_head_is_green(self):
+        B, runs, jobs = self.red_main_with_breaking_merge()
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "diff", "--name-only", f"{B}^1", B), "lane-2650.txt", "scope: the breaking merge does not change lane-2650.txt alone")
+        head = self.fix_on_feat("Fix lane 2650", "lane-2650.txt")
+        rc, out, _ = self.go(runs, jobs, changed=[("lane-2650.txt", "modified", 1)], named_checks=[("checks", "pass", head)])
+        self.assertEqual(rc, 0, "a fix that touches the breaking merge's path, with its own head green, is refused on a red main:\n" + out)
+        self.merged(rc, out)
+
+    def test_a_fix_whose_own_head_is_not_green_stays_refused_on_a_red_main(self):
+        _, runs, jobs = self.red_main_with_breaking_merge()
+        head = self.fix_on_feat("Fix lane 2650", "lane-2650.txt")
+        for state in ("red: checks: fail", "pending: checks"):
+            with self.subTest(head_state=state):
+                rc, out, before = self.go(runs, jobs, changed=[("lane-2650.txt", "modified", 1)], heads={head: state}, named_checks=[("checks", "pass", head)])
+                self.refused_by_red_main(rc, out, before)
+
+    def assert_path_fix_refused_when_its_red_check_is_not_pass(self, state):
+        """A fix to the breaking merge's path stays refused on a red main when the head's overall read is green and its red check `checks` reads `state`
+        on the head (a bucket), or when the head has no row for it (None; a passing row of another check stands beside it). The overall read is scripted
+        green on purpose: the case pins the per-check read on the path route, not the overall one (decision no-merge-onto-red-main)."""
+        _, runs, jobs = self.red_main_with_breaking_merge()
+        head = self.fix_on_feat("Fix lane 2650", "lane-2650.txt")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "diff", "--name-only", "origin/main", "origin/feat"), "lane-2650.txt", "scope: the fix does not change only the blamed path")
+        named = [("scope", "pass", head)] if state is None else [("checks", state, head)]
+        rc, out, before = self.go(runs, jobs, changed=[("lane-2650.txt", "modified", 1)], heads={head: "green"}, named_checks=named)
+        self.assertNotEqual(rc, 0, f"a fix to the breaking merge's path merged onto a red main while its own red check reads {state or 'no row'}:\n" + out)
+        self.refused_by_red_main(rc, out, before)
+
+    def test_a_fix_on_the_breaking_merges_path_stays_refused_on_a_red_main_when_its_red_check_is_pending(self):
+        self.assert_path_fix_refused_when_its_red_check_is_not_pass("pending")
+
+    def test_a_fix_on_the_breaking_merges_path_stays_refused_on_a_red_main_when_its_red_check_fails(self):
+        self.assert_path_fix_refused_when_its_red_check_is_not_pass("fail")
+
+    def test_a_fix_on_the_breaking_merges_path_stays_refused_on_a_red_main_when_its_red_check_has_no_row(self):
+        self.assert_path_fix_refused_when_its_red_check_is_not_pass(None)
+
+    def assert_touch_refused_on_red_main(self, name, log_names_test=False):
+        """A fix that changes `name` and no breaking path stays refused on a red main, with its own head green and its red check passing. With `log_names_test`,
+        the red job's log names the failing test file, so the test-file route reads it (red_main_with_flaky_test)."""
+        if log_names_test:
+            _, runs, jobs, logs = self.red_main_with_flaky_test()
+        else:
+            _, runs, jobs = self.red_main_with_breaking_merge()
+            logs = {}
+        head = self.fix_on_feat(f"Change {name}", name)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "diff", "--name-only", "origin/main", "origin/feat"), name, f"scope: the fix does not change only {name}")
+        rc, out, before = self.go(runs, jobs, job_logs=logs, changed=[(name, "added", 1)], named_checks=[("checks", "pass", head)])
+        self.assertNotEqual(rc, 0, f"a change to {name} merged onto a red main:\n" + out)
+        self.refused_by_red_main(rc, out, before)
+        if log_names_test:
+            self.assertIn(f"actions/jobs/{self.FLAKY_JOB}/logs", self.host.reads, "the refusal never read the red job's log, so the test-file route was not reached")
+
+    def test_a_change_to_an_unrelated_file_stays_refused_on_a_red_main(self):
+        self.assert_touch_refused_on_red_main("unrelated.txt")
+
+    def test_a_change_to_an_unrelated_file_stays_refused_on_a_red_main_when_the_log_names_the_failing_test_file(self):
+        self.assert_touch_refused_on_red_main("unrelated.txt", log_names_test=True)
+
+    def test_a_change_to_a_file_whose_name_only_starts_like_the_breaking_path_stays_refused_on_a_red_main(self):
+        self.assert_touch_refused_on_red_main("lane-2650.txt.orig")
+
+    def test_a_change_to_the_breaking_file_name_in_another_folder_stays_refused_on_a_red_main(self):
+        self.assert_touch_refused_on_red_main("old/lane-2650.txt")
+
+    def test_a_revert_of_the_breaking_merge_still_merges_on_a_red_main_with_the_reason_flag(self):
+        B, runs, jobs = self.red_main_with_breaking_merge()
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/main")
+        sh(o, "git", "revert", "--no-edit", "-m", "1", B)
+        sh(o, "git", "commit", "--amend", "-q", "-m", f"{sh(o, 'git', 'log', '-1', '--format=%B')}\n\nDrops-lines: lane-2650.txt -- revert of the breaking merge")
+        sh(o, "git", "push", "-q", "-f", "origin", "feat")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertIn(f"This reverts commit {B}", sh(self.co, "git", "log", "-1", "--format=%B", "origin/feat"), "scope: the head is not the revert of the breaking merge")
+        rc, out, _ = self.go(runs, jobs, "--base-red-ok", "revert of the breaking merge", changed=[("lane-2650.txt", "removed", 0)])
+        self.merged(rc, out)
+
+    # The cases check that a fix to the failing test file merges onto a red main when its own check is green on its head (decision
+    # no-merge-onto-red-main). The red job's log names the failing test. The breaking merge changes lane-2650.txt alone, so the test file is no blamed
+    # path, and only the log read and the per-check read can admit this fix.
+    FLAKY_FILE = "tests/test_flaky.py"
+    FLAKY_JOB = 9903  # the id of the breaking run's red job; its log is served by that id
+    FLAKY_LOG = "FAILED tests/test_flaky.py::FlakyTest::test_once - AssertionError: 1 != 0\n"
+
+    def red_main_with_flaky_test(self):
+        """The breaking merge's red run, as red_main_with_breaking_merge leaves it. The flaky test file is on main before the breaking merge, so the merge
+        does not change it, and the red job's log names a failing test in it. -> (B, runs, jobs, job_logs) as `go` takes them."""
+        self.commit_on_main("Add the flaky test", self.FLAKY_FILE)
+        B, runs, jobs = self.red_main_with_breaking_merge()
+        jobs = {**jobs, 903: [main_job("scope", "success"), {**main_job("checks", "failure", 20), "id": self.FLAKY_JOB}]}  # 903: breaking_page's red run
+        return B, runs, jobs, {self.FLAKY_JOB: self.FLAKY_LOG}
+
+    def test_a_fix_to_the_failing_test_file_merges_onto_a_red_main_when_its_own_check_is_green(self):
+        B, runs, jobs, logs = self.red_main_with_flaky_test()
+        head = self.fix_on_feat("Fix the flaky test", self.FLAKY_FILE)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "diff", "--name-only", f"{B}^1", B), "lane-2650.txt", "scope: the breaking merge does not change lane-2650.txt alone")
+        self.assertEqual(sh(self.co, "git", "diff", "--name-only", "origin/main", "origin/feat"), self.FLAKY_FILE, "scope: the fix does not change only the failing test file")
+        rc, out, _ = self.go(runs, jobs, job_logs=logs, named_checks=[("checks", "pass", head)], changed=[(self.FLAKY_FILE, "modified", 1)])
+        self.assertEqual(rc, 0, "a fix to the failing test file, with its own check green on its head, is refused on a red main:\n" + out)
+        self.merged(rc, out)
+
+    def test_a_fix_to_the_failing_test_file_whose_check_never_ran_on_its_head_stays_refused_on_a_red_main(self):
+        _, runs, jobs, logs = self.red_main_with_flaky_test()
+        head = self.fix_on_feat("Fix the flaky test", self.FLAKY_FILE)
+        # the head's overall read is green (the fake's default), and only the named check has no row on the head
+        rc, out, before = self.go(runs, jobs, job_logs=logs, named_checks=[("scope", "pass", head)], changed=[(self.FLAKY_FILE, "modified", 1)])
+        self.assertIsNone(self.host.check_state(7, head, "checks"), "scope: the fixture gives the failing check a row on the head")
+        self.refused_by_red_main(rc, out, before)
+
+    def test_a_fix_by_a_blamed_path_whose_head_lacks_mains_red_tip_stays_refused_on_a_red_main(self):
+        B, runs, jobs = self.red_main_with_breaking_merge()
+        head = self.fix_on_feat("Fix lane 2650", "lane-2650.txt", start=f"{B}^1")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertNotIn(B, sh(self.co, "git", "rev-list", "origin/feat").split(), "scope: the head holds main's red tip")
+        rc, out, before = self.go(runs, jobs, changed=[("lane-2650.txt", "modified", 1)], named_checks=[("checks", "pass", head)])
+        self.refused_by_red_main(rc, out, before)
+
+    def test_a_fix_to_the_failing_test_file_whose_head_lacks_mains_red_tip_stays_refused_on_a_red_main(self):
+        B, runs, jobs, logs = self.red_main_with_flaky_test()
+        head = self.fix_on_feat("Fix the flaky test", self.FLAKY_FILE, start=f"{B}^1")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertNotIn(B, sh(self.co, "git", "rev-list", "origin/feat").split(), "scope: the head holds main's red tip")
+        rc, out, before = self.go(runs, jobs, job_logs=logs, named_checks=[("checks", "pass", head)], changed=[(self.FLAKY_FILE, "modified", 1)])
+        self.refused_by_red_main(rc, out, before)
+
+    def test_the_preview_of_a_fix_to_the_failing_test_file_names_that_file_as_its_route(self):
+        _, runs, jobs, logs = self.red_main_with_flaky_test()
+        head = self.fix_on_feat("Fix the flaky test", self.FLAKY_FILE)
+        _rc, out, _ = self.go(runs, jobs, confirm=False, job_logs=logs, named_checks=[("checks", "pass", head)], changed=[(self.FLAKY_FILE, "modified", 1)])
+        self.assertFalse(getattr(self.host, "merged", False), "a preview merged the pull request:\n" + out)
+        line = printed(out, "main run:")
+        self.assertTrue(line, "the preview prints no main run line:\n" + out)
+        self.assertIn(self.FLAKY_FILE, line, "the preview's main run line does not name the failing test file that the fix route reads: " + line)
+        self.assertNotIn("--base-red-ok", line, "the preview asks for a reason flag on a fix that merges with none: " + line)
+
+    def assert_failing_test_file_weakened_refused(self, act, changed, scope, to=None):
+        """A head that `act`s on the failing test file, with its own check green and the red job's log naming the file, stays refused on a red main. Removing
+        or moving the failing test weakens it, and no fix does that (decision no-merge-onto-red-main). `changed` is the pull request's triples as pr_files
+        reads them. `scope` is the name-status lines of the head's diff against main, which the case asserts before it runs the merge."""
+        _, runs, jobs, logs = self.red_main_with_flaky_test()
+        head = self.fix_on_feat(f"{act.capitalize()} the flaky test", self.FLAKY_FILE, act=act, to=to)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "diff", "--name-status", "--no-renames", "origin/main", "origin/feat").split("\n"), scope,
+                         "scope: the head's diff against main is not the change the case names")
+        rc, out, before = self.go(runs, jobs, job_logs=logs, changed=changed, named_checks=[("checks", "pass", head)])
+        self.assertNotEqual(rc, 0, f"a head that {act}s the failing test file merged onto a red main with its own check green:\n" + out)
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn(f"actions/jobs/{self.FLAKY_JOB}/logs", self.host.reads, "the refusal never read the red job's log, so the test-file route was not reached")
+
+    def test_deleting_the_failing_test_file_stays_refused_on_a_red_main_when_its_own_check_is_green(self):
+        self.assert_failing_test_file_weakened_refused("delete", [(self.FLAKY_FILE, "removed", 0)], [f"D\t{self.FLAKY_FILE}"])
+
+    def test_renaming_the_failing_test_file_away_stays_refused_on_a_red_main_when_its_own_check_is_green(self):
+        moved = "tests/moved/test_flaky.py"
+        # the triples pr_files reads for a rename: the new path as renamed, and the old path as removed
+        self.assert_failing_test_file_weakened_refused("rename", [(moved, "renamed", 0), (self.FLAKY_FILE, "removed", 0)],
+                                                       [f"A\t{moved}", f"D\t{self.FLAKY_FILE}"], to=moved)
+
     def test_a_revert_merged_with_its_tree_proven_lifts_a_red_main(self):
         # class 1: the revert of the breaking merge is on main, its tree is the revert's and its checks are green: the red main lifts, with no flag
         B = self.land_breaking_merge()
@@ -14128,8 +15289,10 @@ class ExpressPath(ScopedRepo, Env):
     SILENT_PRELUDE = "exit 0\n"  # for stub_scope: exits 0 and writes no flag
     JOB_FLAGS_OFF = ('checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos '
                      'pointer_windows checks_guard code mods guard sweep shoot')  # the script's JOBS and suite names, minus the lint flags
-    ALL_OFF_PRELUDE = ('for n in %s %s; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 0\n' % (JOB_FLAGS_OFF, scope_line("LINTS")))  # for stub_scope: every flag off, the lint flags too, exits 0
-    NO_LINT_PRELUDE = ('for n in %s; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 0\n' % JOB_FLAGS_OFF)  # for stub_scope: every job and suite flag off, no lint flag written, exits 0
+    ALL_OFF_PRELUDE = ('for n in %s %s %s; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 0\n'
+                       % (JOB_FLAGS_OFF, scope_line("LINTS"), scope_line("DOCS")))  # for stub_scope: every flag off, the lint and doc flags too, exits 0
+    NO_LINT_PRELUDE = ('for n in %s %s; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 0\n'
+                       % (JOB_FLAGS_OFF, scope_line("DOCS")))  # for stub_scope: every job, suite and doc flag off, no lint flag written, exits 0
 
     def setUp(self):
         super().setUp()
@@ -14139,16 +15302,42 @@ class ExpressPath(ScopedRepo, Env):
         """origin/roadmap holds rulings/<id>.json for each id. The branch is made after co's clone, so a read that does not fetch it sees no entry."""
         self.on("roadmap", {f"roadmap/rulings/{i}.json": json.dumps({"id": i}) + "\n" for i in ids}, start="main")
 
-    def stub_scope(self, prelude, branch="feat"):
-        """ci-scope.sh is main's, with `prelude` put in after its shebang line, committed to `branch`. Only an insertion: the silent-undo
-        check reads no removed line. On main, feat then merges it: the classifier runs origin/main's copy, and a head that touches the
+    def stub_scope(self, prelude, branch="feat", drop=None):
+        """ci-scope.sh is main's, with `prelude` put in after its shebang line, committed to `branch`. Without `drop` it only inserts: the
+        silent-undo check reads no removed line. `drop` names one `NAME="..."` line of the script to remove as well (asserted: exactly one).
+        On main, feat then merges it: the classifier runs origin/main's copy, and a head that touches the
         script turns every flag on through main's own arm, so the head must not diff the script against main."""
         with open(SCOPE_SCRIPT, encoding="utf-8") as f:
             first, rest = f.read().split("\n", 1)
+        if drop:
+            lines = rest.split("\n")
+            kept = [ln for ln in lines if not ln.startswith(f'{drop}="')]
+            self.assertEqual(len(lines) - len(kept), 1, f"ci-scope.sh has no single {drop}= line to drop")
+            rest = "\n".join(kept)
         self.on(branch, {".github/scripts/ci-scope.sh": first + "\n" + prelude + rest})
         if branch == "main":
             o = self.other
             sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
+
+    def stub_flags_prelude(self, on=(), doc_on=()):
+        """A stub ci-scope.sh body for stub_scope: every job, suite, lint and doc flag the script names, off (the names come from the
+        script's own lines, so they cannot drift), then `true` for each name in `on` and `doc_on`, written last so it wins. A name the
+        script does not yet name is written too, so the stub stands in for the script the express reader reads."""
+        off = " ".join([self.JOB_FLAGS_OFF, scope_line("LINTS"), scope_line("DOCS")])
+        lines = ['for n in %s; do echo "$n=false" >> "$GITHUB_OUTPUT"; done' % off]
+        if on or doc_on:
+            lines.append('for n in %s; do echo "$n=true" >> "$GITHUB_OUTPUT"; done' % " ".join(list(on) + list(doc_on)))
+        return "\n".join(lines) + "\nexit 0\n"
+
+    def assert_doc_flags_on(self, *names):
+        """The scope assert, before a doc case relies on it (P7): the real ci-scope.sh writes each named doc flag as true, and turns on
+        no job and no suite for the fixture's feat."""
+        rc, flags = self.scope_run()
+        self.assertEqual(rc, 0, "the real ci-scope.sh exits %d on the fixture's feat" % rc)
+        for n in names:
+            self.assertIn(n, flags, "the real ci-scope.sh writes no %s line for the fixture: %r" % (n, flags))
+            self.assertEqual(flags[n], "true", "the real ci-scope.sh sets %s off for the fixture: %r" % (n, flags))
+        self.assertEqual(self.turned_on(flags), [], "the fixture is not prose-only: the real ci-scope.sh turns on %r" % self.turned_on(flags))
 
     def test_scope_run_finds_bash_through_resolve_program(self):
         """A bare `bash` on a Windows runner is the WSL stub in System32, which exits 1 on any script (decision
@@ -14308,6 +15497,60 @@ class ExpressPath(ScopedRepo, Env):
         self.assertIn("lint_ruling_kind", self.lints_on(flags), "the decision record no longer sets its lint flag: %r" % flags)
         self.assertIn("code", self.turned_on(flags), "the code path no longer turns the code job on beside a lint flag: %r" % flags)
 
+    def test_a_prose_pr_across_two_doc_groups_merges(self):
+        """A rules file and a docs file set two doc flags and no job flag: the express check reads the doc flags as prose and merges."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.on("feat", {"CLAUDE.md": "# Rules\n", "docs/shared.md": "one\ntwo\nthree\nfour\nsix\n"})
+        self.assert_doc_flags_on("doc_rules", "doc_other")
+        calls = self.record_express()
+        rc, out = self.run_express()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertEqual(calls, [None, None], "express_refusal should run once per run (the claim run, the merge run) and return None on a pass: %r" % (calls,))
+
+    def test_a_doc_flag_on_is_no_job_for_express(self):
+        """A script that turns only a doc flag on: express reads it as prose and merges. The doc flags pick which .md-reading steps of
+        the pull request's own run start, and express relies on those steps, so a doc flag never refuses a diff."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope(self.stub_flags_prelude(doc_on=("doc_decisions",)), branch="main")
+        rc_scope, flags = self.scope_run(base=True)
+        self.assertEqual(rc_scope, 0, "the stub scope script does not exit 0: %d" % rc_scope)
+        self.assertEqual(flags.get("doc_decisions"), "true", "the stub does not turn doc_decisions on, so the case proves nothing: %r" % flags)
+        self.on("feat", {"docs/decisions/x.md": record("pending", "x")})
+        calls = self.record_express()
+        rc, out = self.run_express()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertEqual(calls, [None, None], "express_refusal should run once per run (the claim run, the merge run) and return None on a pass: %r" % (calls,))
+
+    def test_a_job_flag_beside_a_doc_flag_refuses_and_names_only_the_job_flag(self):
+        """A script that turns checks_windows and doc_any on: the refusal names checks_windows, and does not name doc_any, a doc flag."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope(self.stub_flags_prelude(on=("checks_windows",), doc_on=("doc_any",)), branch="main")
+        rc_scope, flags = self.scope_run(base=True)
+        self.assertEqual(rc_scope, 0, "the stub scope script does not exit 0: %d" % rc_scope)
+        self.assertEqual((flags.get("checks_windows"), flags.get("doc_any")), ("true", "true"),
+                         "the stub does not turn both flags on, so the case proves nothing: %r" % flags)
+        self.on("feat", {"CLAUDE.md": "# Rules\n"})
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "checks_windows", "CLAUDE.md")
+        self.assertNotIn("doc_any", out, "the refusal names doc_any, a doc flag, as a job: %s" % out)
+
+    def test_a_script_that_writes_no_doc_flag_is_refused_as_unknown(self):
+        """Control: a script whose ALL names the doc flags, and that writes none of them, is refused as unknown. On main the reader
+        reports the name it cannot expand; once the doc flags are named, it reports each one missing. Either way the refusal holds."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope('ALL="$JOBS $LINTS $DOCS"\nfor n in %s %s; do echo "$n=false" >> "$GITHUB_OUTPUT"; done\nexit 0\n'
+                        % (self.JOB_FLAGS_OFF, scope_line("LINTS")), branch="main")
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "unknown", "wrote no flag for")
+
     def test_a_code_file_in_the_pr_is_refused(self):
         self.store(self.RULINGS)
         self.host.body = "Ruling: r55\n"
@@ -14368,6 +15611,36 @@ class ExpressPath(ScopedRepo, Env):
         before = self.refs()
         rc, out = self.run_express()
         self.assert_refused(rc, out, before, "unknown", *scope_line("LINTS").split())
+
+    def assert_main_script_lacks(self, name):
+        """The scope assert, before a case relies on it (P7): origin/main's ci-scope.sh has no `NAME="` line, and its ALL line still names
+        $NAME, so the reader meets the name with no line behind it."""
+        script = sh(self.other, "git", "show", "origin/main:.github/scripts/ci-scope.sh")
+        self.assertIsNone(re.search(r'^%s="' % name, script, re.M), f"origin/main's ci-scope.sh still has a {name}= line")
+        every = re.search(r'^ALL="([^"]*)"', script, re.M)
+        self.assertIsNotNone(every, "origin/main's ci-scope.sh has no ALL line")
+        self.assertIn("$" + name, every.group(1).split(), f"origin/main's ALL line does not name ${name}")
+
+    # The real DOCS= line is removed on main, not a prelude added: ALL still names $DOCS, so the reader cannot tell which doc flags the
+    # script names, and it refuses as unknown. Named failure: a script with a missing DOCS= line is read as naming no doc flag, and passes.
+    def test_a_scope_script_with_no_docs_line_is_refused_naming_docs(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope("", branch="main", drop="DOCS")
+        self.assert_main_script_lacks("DOCS")
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "unknown", "$DOCS", "the script has no DOCS= line")
+
+    # The same for the LINTS= line: ALL names $LINTS and the script has no LINTS= line, so the refusal names LINTS.
+    def test_a_scope_script_with_no_lints_line_is_refused_naming_lints(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope("", branch="main", drop="LINTS")
+        self.assert_main_script_lacks("LINTS")
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "unknown", "$LINTS", "the script has no LINTS= line")
 
     def test_a_missing_store_entry_is_refused(self):
         self.store(self.RULINGS)
@@ -14828,13 +16101,20 @@ class MergeRoleCheck(CloudSession):
 OWN_SESSION_LINK ="https://claude.ai/code/session_" + ROLE_SESSION[len("cse_"):]  # the link a session's pull request ends with: session_<x> for cse_<x> (hooks/override.py remote_session_id)
 OWN_PR_BODY = "Small edit.\n\n" + OWN_SESSION_LINK + "\n"
 OTHER_PR_BODY = "Small edit.\n\nhttps://claude.ai/code/session_another_session\n"
+CARRIED_BODY = OTHER_PR_BODY + "Carried by: " + OWN_SESSION_LINK + "\n"  # another session's pull request, carried here by a line that names this session (owner pick a, standing-merges-stragglers)
+CARRIED_ELSEWHERE_BODY = OTHER_PR_BODY + "Carried by: https://claude.ai/code/session_third_session\n"  # the same, with the carry line naming a third session
+BARE_MENTION_BODY = "Small edit, raised in " + OWN_SESSION_LINK + ".\n\nhttps://claude.ai/code/session_another_session\n"  # this session's link named in the text, with no carry line; the closing link is another session's
 
 class StandingMergeRole(CloudSession):
     """Ruling own-tiny-fixes-b: a standing session (a coordinator, a triage or a consultant, decision session-tiers)
-    records the `standing` merge role and merges its OWN pull request through the merge tool, on green. The gate sits after the pull request
-    read and before the lock or any claim. The pull request is this session's own when its body names this session's link. CI is green.
-    A docs-only pull request with no guard path needs no record. Any other pull request needs one passing Sonnet review record on the live
-    head. No pull request is bounded by line or file counts. The batch runner is not judged by this gate. A refusal names no tier word and no command."""
+    records the `standing` merge role and merges a pull request through the merge tool, on green. The gate sits after the pull request
+    read and before the lock or any claim. The pull request is this session's when its body names this session's link anywhere: its closing link,
+    a `Carried by:` line that a carrying session adds (owner pick a, standing-merges-stragglers), or any other mention. The owner's messages of
+    10:27 CST say a straggling pull request may be merged under any standing session's purview, by whichever route is faster, and that the
+    batch runner, consultant, triage or coordinator may merge one whose opening lane ended. A body that names another session's link only,
+    or no link, is refused. CI is green. A docs-only pull request with no guard path needs no
+    record. Any other pull request needs one passing reviewer record on the live head, whatever its model (owner, pick A). No pull request is
+    bounded by line or file counts. The batch runner is not judged by this gate. A refusal names no tier word and no command."""
 
     def own_pr(self, changed, body=OWN_PR_BODY):
         """Make pull request 7 a case's pull request: its body is `body`, its files are `changed`, and this session records standing."""
@@ -14867,13 +16147,27 @@ class StandingMergeRole(CloudSession):
         self.assertEqual(self.refs(), refs, "the refused run took the lock or pushed a claim")
         return err
 
-    def assert_passing_sonnet_record(self, body, changed):
-        """P7, the scope before the gate reads it: `body` is one passing Sonnet record on the live head, and `changed` holds a code path
-        (not a doc). A case that passes calls this first, so its red comes from the gate alone."""
+    def assert_passing_record(self, body, changed):
+        """P7, the scope before the gate reads it: `body` is one passing reviewer record on the live head, whatever its model, and `changed`
+        holds a code path (not a doc). A case that passes calls this first, so its red comes from the gate alone."""
         rec = merge.parse_review(body)
         self.assertIsNotNone(rec, "the case's review record does not parse")
         self.assertEqual(merge.review_state(rec, self.head())[0], "done", "the case's review record is not a passing record on the live head")
         self.assertTrue(any(not merge.is_doc(p) for p, _, _ in changed), "the case holds no code path")
+
+    def assert_standing_merges(self, changed, body):
+        """The gate lets `body` through: the case's pull request is this session's own (own_pr), `changed` holds a code path, and one passing
+        reviewer record on the live head is served. The case commits its files first."""
+        self.assert_passing_record(body, changed)
+        self.assert_standing_merge_served(body)
+
+    def assert_standing_merge_served(self, body):
+        """Serve `body` as pull request 7's record, then `merge 7 --confirm --head <live head>` as a standing session must merge. A refusal
+        fails by its own line: stderr's first line can be a stamp warning, and the refusal is the last line."""
+        self.scripted_records(body)
+        rc, out, err = self.standing_confirm()
+        self.assertEqual(rc, 0, (err.strip().splitlines() or [out])[-1])
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
 
     # ---- the writer and the reader: standing is a merge role, recorded like the batch runner's
     def test_a_standing_role_is_recorded_like_a_batch_runner_role(self):
@@ -14905,7 +16199,7 @@ class StandingMergeRole(CloudSession):
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(getattr(self.host, "merged", False), out + err)
 
-    # ---- the gate refuses: not this session's pull request
+    # ---- the gate refuses: a body that names another session's link only, or no link
     def test_another_sessions_pr_is_refused_under_standing(self):
         self.own_pr([("docs/notes.md", "modified", 1)], body=OTHER_PR_BODY)
         self.assert_standing_refused()
@@ -14915,16 +16209,93 @@ class StandingMergeRole(CloudSession):
         self.own_pr([("docs/notes.md", "modified", 1)], body="Small edit.\n")
         self.assert_standing_refused()
 
-    # ---- a code pull request, guard paths included, merges under standing with one passing Sonnet
-    # record on the live head. Without that record it is refused, whatever its size.
-    def test_an_own_code_pr_with_no_passing_sonnet_record_is_refused_under_standing(self):
+    # ---- a carried pull request: a `Carried by:` line naming this session stands for its own link (owner pick a, standing-merges-stragglers;
+    # the owner's messages of 10:27 CST, straggling pull requests merged by whichever standing session is faster)
+    def assert_carried_scope(self, body):
+        """P7, the scope before the gate reads it: `body` holds a carry line for this session, and its closing link is another session's, so a
+        pass comes from the carry line. Read from the strings, not from the gate's own reader, so the verdict stays the gate's."""
+        self.assertIn("Carried by: " + OWN_SESSION_LINK, body, "the case's body holds no carry line for this session")
+        self.assertNotIn(OWN_SESSION_LINK, OTHER_PR_BODY, "the case's closing link is this session's, so the pass is not the carry line's")
+
+    def test_carried_docs_pr_merges_under_standing(self):
+        # owner pick a, standing-merges-stragglers: a carry line naming this session passes as the session's own closing link does
+        self.commit_feat({"docs/notes.md": "Notes.\n"})
+        self.own_pr([("docs/notes.md", "modified", 1)], body=CARRIED_BODY)
+        self.assert_carried_scope(CARRIED_BODY)
+        rc, out, err = self.standing_confirm()
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+    def test_carried_code_pr_with_a_passing_sonnet_record_merges_under_standing(self):
+        self.commit_feat({"tools/note.py": "X = 1\n"})
+        changed = [("tools/note.py", "added", 1)]
+        self.own_pr(changed, body=CARRIED_BODY)
+        self.assert_carried_scope(CARRIED_BODY)
+        self.assert_standing_merges(changed, record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, PASS",)))
+
+    def test_a_bare_mention_of_this_session_link_merges_under_standing(self):
+        # the gate reads the whole body for this session's link, so a link named in the text passes with no carry line (own_session_link)
+        self.commit_feat({"docs/notes.md": "Notes.\n"})
+        self.own_pr([("docs/notes.md", "modified", 1)], body=BARE_MENTION_BODY)
+        self.assertNotIn("Carried by:", BARE_MENTION_BODY, "the case's body holds a carry line, so the pass is not a bare mention's")
+        self.assertIn(OWN_SESSION_LINK, BARE_MENTION_BODY, "the case's body does not name this session")
+        self.assertTrue(BARE_MENTION_BODY.rstrip().endswith("session_another_session"), "the case's closing link is this session's, so the pass is not the bare mention's")
+        rc, out, err = self.standing_confirm()
+        self.assertEqual(rc, 0, (err.strip().splitlines() or [out])[-1])  # the refusal is the last line; the stamp warning comes first
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+    # ---- a carry line that names another session, and the other checks on a carried pull request still refuse
+    def test_carried_pr_naming_another_session_is_refused_under_standing(self):
+        # owner pick, option a: a carry line naming another session is no proof that this session carries the pull request
+        self.own_pr([("docs/notes.md", "modified", 1)], body=CARRIED_ELSEWHERE_BODY)
+        self.assertNotIn(OWN_SESSION_LINK, CARRIED_ELSEWHERE_BODY, "P7, the scope before the subject: the case's body names this session")
+        err = self.assert_standing_refused()
+        self.assertIn("this session did not open this pull request, so it may not merge it.", err)
+
+    def test_carried_docs_pr_with_red_ci_is_refused_under_standing(self):
+        self.commit_feat({"docs/notes.md": "Notes.\n"})
+        self.own_pr([("docs/notes.md", "modified", 1)], body=CARRIED_BODY)
+        self.assert_carried_scope(CARRIED_BODY)
+        self.host.checks = (False, "a check is red: checks: fail")
+        self.host.state = "red: checks: fail"  # the head reads red, as the red-head cases above set it (head_state reads this)
+        err = self.assert_standing_refused()
+        # the gate's own words, "not green: <state>.": confirm's head check words the same fact with a comma, so this line holds the gate's refusal alone
+        self.assertIn("the head's own checks are not green: ", err)
+
+    def assert_carried_code_refused_without_record(self, *bodies):
+        """The record check still runs on a carried code pull request: `bodies` are its only records, and none passes on the live head. Each
+        case is its own fixture, because a merge that slips past the gate moves the head, and a later read would see no head at all."""
+        self.own_pr([("tools/note.py", "added", 1)], body=CARRIED_BODY)
+        self.assert_carried_scope(CARRIED_BODY)
+        self.scripted_records(*bodies)
+        err = self.assert_standing_refused()
+        self.assertIn("its head has no passing review record", err)
+
+    def test_carried_code_pr_with_no_record_is_refused_under_standing(self):
+        self.assert_carried_code_refused_without_record()
+
+    def test_carried_code_pr_with_a_sonnet_record_on_an_old_head_is_refused_under_standing(self):
+        self.assert_carried_code_refused_without_record(record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+
+    def test_carried_code_pr_with_a_failing_sonnet_record_is_refused_under_standing(self):
+        self.assert_carried_code_refused_without_record(record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, FAIL",)))
+
+    def test_carried_pr_with_no_changed_file_is_refused_under_standing(self):
+        self.own_pr([], body=CARRIED_BODY)
+        self.assert_carried_scope(CARRIED_BODY)
+        err = self.assert_standing_refused()
+        self.assertIn("this pull request changes no file.", err)
+
+    # ---- a code pull request, guard paths included, merges under standing with one passing reviewer
+    # record on the live head, whatever its model. Without that record it is refused, whatever its size.
+    def test_an_own_code_pr_with_no_passing_record_is_refused_under_standing(self):
+        # control, case 3 (owner, pick A): no record, and no record that passes on the live head, whatever its model
         head = self.head()
         records = {
             "no record": None,
-            "a haiku record": record_text(head=head, rounds=("Round 1: reviewer, haiku, PASS",)),
-            "an opus record": record_text(head=head, rounds=("Round 1: reviewer, opus, PASS",)),
             "a sonnet record on an old head": record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS),
             "a failing sonnet record": record_text(head=head, rounds=("Round 1: reviewer, sonnet, FAIL",)),
+            "a failing haiku record": record_text(head=head, rounds=("Round 1: reviewer, haiku, FAIL",)),
         }
         for name, body in records.items():
             for changed in ([("tools/note.py", "added", 1)],
@@ -14936,7 +16307,7 @@ class StandingMergeRole(CloudSession):
 
     def test_an_own_guard_path_pr_with_no_review_log_is_refused_under_standing(self):
         # the model record is a doc under docs/, yet a guard path (decision agent-model-cap); hooks/ is a guard path too.
-        # A guard path is a code change, so it needs a passing Sonnet record, and this one has none.
+        # A guard path is a code change, so it needs a passing reviewer record, and this one has none.
         for path in ("docs/decisions/agent-model-cap.md", "hooks/rules.md"):
             with self.subTest(path=path):
                 self.own_pr([(path, "modified", 1)])
@@ -14944,14 +16315,14 @@ class StandingMergeRole(CloudSession):
                 self.assert_standing_refused()
 
     def test_an_own_guard_path_pr_with_a_passing_sonnet_record_merges_under_standing(self):
-        # a guard path is code, so one passing Sonnet record on the live head is its proof
+        # a guard path is code, so one passing reviewer record on the live head is its proof
         paths = ("hooks/rules.md", "merge/x.py", "settings.json")  # the model record fails the stamp check as a stub; the no-record case covers it
         self.commit_files(paths)
         changed = [(p, "modified", 1) for p in paths]
         self.own_pr(changed)
         body = record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, PASS",), guard="yes")
         self.assertTrue(merge.guard_hits([p for p, _, _ in changed]), "the case's paths hold no guard path")  # the scope, before the gate reads it
-        self.assert_passing_sonnet_record(body, changed)
+        self.assert_passing_record(body, changed)
         self.scripted_records(body)
         rc, out, err = self.standing_confirm()
         self.assertEqual(rc, 0, out + err)
@@ -14964,7 +16335,7 @@ class StandingMergeRole(CloudSession):
         self.host.state = "red: checks: fail"  # the head reads red, as the red-head cases above set it (head_state reads this)
         self.assert_standing_refused()
 
-    # ---- one passing Sonnet record on the live head is the proof for a code pull request
+    # ---- one passing reviewer record on the live head is the proof for a code pull request, whatever its model
     def test_an_own_code_pr_whose_round_one_failed_and_a_sonnet_fix_verifier_passed_merges_under_standing(self):
         # the fail-then-fix cycle: a failed haiku review followed by a passing sonnet fix verifier ends review
         self.commit_feat({"tools/note.py": "X = 1\n"})
@@ -14974,10 +16345,32 @@ class StandingMergeRole(CloudSession):
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(getattr(self.host, "merged", False), out + err)
 
-    def test_an_own_code_pr_whose_haiku_round_one_passed_alone_is_refused_under_standing(self):
+    def test_an_own_code_pr_whose_haiku_round_two_passed_after_a_round_one_fail_merges_under_standing(self):
+        # re-pointed from the refused "haiku round one passed alone" case (owner, pick A): the pass that ends review is the gate's, whatever its model
+        self.commit_feat({"tools/note.py": "X = 1\n"})
+        changed = [("tools/note.py", "added", 1)]
+        self.own_pr(changed)
+        self.assert_standing_merges(changed, record_text(head=self.head(), rounds=("Round 1: reviewer, haiku, FAIL", "Round 2: reviewer, haiku, PASS")))
+
+    def test_an_own_code_pr_with_a_passing_haiku_round_one_record_merges_under_standing(self):
+        # case 1 (owner, pick A): a round-one haiku pass ends review, and the gate reads the pass, not its model
+        self.commit_feat({"tools/note.py": "X = 1\n"})
+        changed = [("tools/note.py", "added", 1)]
+        self.own_pr(changed)
+        self.assert_standing_merges(changed, record_text(head=self.head(), rounds=("Round 1: reviewer, haiku, PASS",)))
+
+    def test_an_own_code_pr_with_a_passing_opus_round_one_record_merges_under_standing(self):
+        # re-pointed from the refused "an opus record" subtest (owner, pick A): the gate reads the pass, not its model
+        self.commit_feat({"tools/note.py": "X = 1\n"})
+        changed = [("tools/note.py", "added", 1)]
+        self.own_pr(changed)
+        self.assert_standing_merges(changed, record_text(head=self.head(), rounds=("Round 1: reviewer, opus, PASS",)))
+
+    def test_an_own_code_pr_whose_sonnet_round_failed_and_a_haiku_fix_verifier_passed_is_refused_under_standing(self):
+        # control (owner item 444 a; the pick A ruling keeps fix checks on sonnet): a haiku fix check PASS does not end review
         self.commit_feat({"tools/note.py": "X = 1\n"})
         self.own_pr([("tools/note.py", "added", 1)])
-        self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, haiku, FAIL", "Round 2: reviewer, haiku, PASS")))
+        self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, FAIL",), fix=(fix_verifier_line(model="haiku"),)))
         self.assert_standing_refused()
 
     def test_an_own_code_pr_whose_three_rounds_all_failed_is_refused_under_standing(self):
@@ -14987,12 +16380,19 @@ class StandingMergeRole(CloudSession):
         self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, haiku, FAIL", "Round 2: reviewer, sonnet, FAIL", "Round 3: reviewer, sonnet, FAIL")))
         self.assert_standing_refused()
 
+    def test_an_own_code_pr_whose_final_round_failed_on_haiku_is_refused_under_standing(self):
+        # control, case 4 (owner, pick A): a failed final round is no pass, whatever its model
+        self.commit_feat({"tools/note.py": "X = 1\n"})
+        self.own_pr([("tools/note.py", "added", 1)])
+        self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, haiku, FAIL", "Round 2: reviewer, haiku, FAIL", "Round 3: reviewer, haiku, FAIL")))
+        self.assert_standing_refused()
+
     def test_an_own_code_pr_with_a_passing_sonnet_record_merges_under_standing(self):
         self.commit_feat({"tools/note.py": "X = 1\n"})
         changed = [("tools/note.py", "added", 1)]
         self.own_pr(changed)
         body = record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, PASS",))
-        self.assert_passing_sonnet_record(body, changed)
+        self.assert_passing_record(body, changed)
         self.scripted_records(body)
         rc, out, err = self.standing_confirm()
         self.assertEqual(rc, 0, out + err)
@@ -15022,31 +16422,38 @@ class StandingMergeRole(CloudSession):
         body = record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, PASS",))
         self.assertGreater(len(changed), files, "the case does not exceed the file bound")  # the scope, before the gate reads it
         self.assertGreater(sum(a for _, _, a in changed), lines, "the case does not exceed the line bound")
-        self.assert_passing_sonnet_record(body, changed)
+        self.assert_passing_record(body, changed)
         self.scripted_records(body)
         rc, out, err = self.standing_confirm()
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(getattr(self.host, "merged", False), out + err)
 
-    # ---- the gate refuses: rule text needs one Sonnet review record on the live head
+    # ---- the gate refuses: rule text needs one passing reviewer record on the live head, and no record is refused
     def test_a_rule_text_pr_with_no_review_log_is_refused_under_standing(self):
         self.own_pr([("CLAUDE.md", "modified", 1)])
         self.scripted_records()
         self.assert_standing_refused()
 
-    def test_a_rule_text_pr_whose_record_is_not_sonnet_is_refused_under_standing(self):
-        self.own_pr([("CLAUDE.md", "modified", 1)])
-        for model in ("haiku", "opus"):
-            with self.subTest(model=model):
-                self.scripted_records(record_text(head=self.head(), rounds=(f"Round 1: reviewer, {model}, PASS",)))
-                self.assert_standing_refused()
+    def test_a_rule_text_pr_with_a_passing_haiku_record_merges_under_standing(self):
+        # re-pointed from the refused non-sonnet case (owner, pick A): the gate reads the pass, not its model
+        self.commit_feat({"CLAUDE.md": "Rule text.\n"})
+        changed = [("CLAUDE.md", "modified", 1)]
+        self.own_pr(changed)
+        self.assert_standing_merges(changed, record_text(head=self.head(), rounds=("Round 1: reviewer, haiku, PASS",)))
+
+    def test_a_rule_text_pr_with_a_passing_opus_record_merges_under_standing(self):
+        # re-pointed from the refused non-sonnet case (owner, pick A): the gate reads the pass, not its model
+        self.commit_feat({"CLAUDE.md": "Rule text.\n"})
+        changed = [("CLAUDE.md", "modified", 1)]
+        self.own_pr(changed)
+        self.assert_standing_merges(changed, record_text(head=self.head(), rounds=("Round 1: reviewer, opus, PASS",)))
 
     def test_a_rule_text_pr_whose_sonnet_record_names_an_old_head_is_refused_under_standing(self):
         self.own_pr([("CLAUDE.md", "modified", 1)])
         self.scripted_records(record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
         self.assert_standing_refused()
 
-    # ---- no size bound: a pull request past docs needs a passing sonnet record; a docs-only one needs none.
+    # ---- no size bound: a pull request past docs needs a passing reviewer record; a docs-only one needs none.
     RULE_PATHS = ("CLAUDE.md", "agents/a.md", "agents/b.md", "skills/b/SKILL.md", "skills/c/SKILL.md")
     DOC_PATHS = ("docs/a.md", "docs/b.md", "docs/c.md", "docs/d.md", "docs/e.md")
 
@@ -15065,7 +16472,7 @@ class StandingMergeRole(CloudSession):
             self.assertNotIn(named, err.lower(), f"the refusal names {named}")
 
     def test_a_large_rule_text_pr_with_a_sonnet_record_merges_under_standing(self):
-        # no size bound: a passing sonnet record is the gate
+        # no size bound: a passing reviewer record is the gate
         paths = self.RULE_PATHS
         self.commit_files(paths)
         self.own_pr(self.spread(paths, 400))
@@ -15293,7 +16700,7 @@ def role_tuple_in_source(text, name):
     return None
 
 
-class NoneLaneLint(CloudSession):
+class NoneLaneLint(ScopedRepo, CloudSession):
     """`merge --lane-lint <pr>` under merge.requiredChecks "none" (decision private-repos-no-ci: a repo with no CI names no check). The config is
     written to origin's main, so the lint reads "none" as a run in production does. A lane head with no check run has no touched job, so the
     lint reads no draft run and the local lint decides. A case scripts the head's check runs (FakeHost.draft_rows, read by the real judge) and the
@@ -15350,6 +16757,18 @@ class NoneLaneLint(CloudSession):
         self.assertIn("is unknown, not a pass", text, "a named check list let a head with no touched job through without the unknown refusal: " + text)
         self.assertIn("no `touched` job", text, "the unknown refusal does not name the missing touched job: " + text)
         self.assertEqual(self.host.posted, [], "an unknown lint posted a PASS comment")
+
+    def test_a_setup_lane_head_whose_stamp_says_none_takes_the_lint_with_no_draft_run(self):
+        # A setup PR (decision private-repos-no-ci) whose own head stamp says "none" lints from that stamp. Main still
+        # pins protection, so the lint reads the base's stamp and would wait on a draft run of lane-touched-tests that this head never has.
+        self.lane_head("protection", [])
+        self.on("feat", {".github/stamp.json": json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="none")))})
+        self.host.draft_rows = {self.head("feat"): []}
+        self.assertFalse(merge.is_integration_pr(self.host.pr(7)), "precondition: pull request 7 is an integration PR, so the lane path does not run")
+        with self.local_lint_answers("pass"):
+            rc, text = self.lane_lint_run()
+        self.assertEqual(check_run_reads(self.host.draft_reads), [], "the lane lint read the check runs of the head, so it read the base's stamp, not the head's: " + text)
+        self.assertEqual(rc, 0, text)
 
     def test_a_failing_lint_step_under_none_with_no_check_run_still_fails_and_names_the_step(self):
         self.lane_head("none", [])
@@ -15864,22 +17283,29 @@ def shell_views(text):
     return "".join(code), "".join(masked)
 
 def settings_branches(text):
-    """-> (head, cloud, local): the code of install.sh's settings.json step. head runs from the TARGET_JSON line to the cloud `if`.
-    cloud and local are its two branches, cut at the `else` and `fi` that stand at a line start. Comments are blank."""
+    """-> (head, cloud, local) of install.sh's settings.json step, comments blank. head runs from the TARGET_JSON line to the
+    `cloud_settings() {` line. cloud is that function, to its closing `}` at a line start. local runs from there to the `fi` that
+    closes the local link block, after its `log "linked ..."` line. That span also holds cloud-gated lines, and none names the rules file."""
     code, masked = shell_views(text)
     start = code.index('TARGET_JSON="$CLAUDE_DIR/settings.json"')
     found = []
-    for pattern, view in ((r'^if \[ "\$CLOUD" = 1 \]; then$', code), (r"^else$", masked), (r"^fi$", masked)):
+    for pattern, view in ((r"^cloud_settings\(\) \{$", masked), (r"^\}$", masked),
+                          (r'^    log "linked \$TARGET_JSON -> \$SRC/settings\.json"$', code), (r"^fi$", masked)):
         m = re.compile(pattern, re.M).search(view, found[-1].end() if found else start)
         assert m, f"install.sh's settings step has no line matching {pattern!r}"
         found.append(m)
-    opener, other, close = found
-    return code[start:opener.start()], code[opener.end():other.start()], code[other.end():close.start()]
+    opener, close, linked, end = found
+    return code[start:opener.start()], code[opener.start():close.end()], code[close.end():end.end()]
+
+def assert_local_branch_names_no_rules_file(test, text):
+    """Fails with one cause, "the local path names the rules file", when the local branch of install.sh's settings step mentions it."""
+    local = settings_branches(text)[2]
+    test.assertNotIn("cloud_allow", local, "the local path names the rules file")
 
 class ShellScan(unittest.TestCase):
     """settings_branches on small scripts: comment openers in strings, a multi-line string and a lone quote must not move a branch edge."""
     NAME = "merge/cloud_allow.json"
-    SCRIPT = 'TARGET_JSON="$CLAUDE_DIR/settings.json"\n%s\nif [ "$CLOUD" = 1 ]; then\n%s\nelse\n%s\nfi\necho after\n'
+    SCRIPT = 'TARGET_JSON="$CLAUDE_DIR/settings.json"\n%s\ncloud_settings() {\n%s\n}\n%s\n    log "linked $TARGET_JSON -> $SRC/settings.json"\n  fi\nfi\necho after\n'
 
     def branches(self, head="", cloud="", local=""):
         return settings_branches(self.SCRIPT % (head, cloud, local))
@@ -15896,13 +17322,21 @@ class ShellScan(unittest.TestCase):
         self.assertIn(self.NAME, cloud)
         self.assertNotIn(self.NAME, head + local)
 
-    def test_a_multi_line_string_hides_an_else_and_a_fi(self):
-        cloud_body = f"  jq '\nelse\nfi\n# not a comment: {self.NAME}\n' in.json"
+    def test_a_multi_line_string_hides_a_closing_brace(self):
+        cloud_body = f"  jq '\n}}\n# not a comment: {self.NAME}\n' in.json"
         head, cloud, local = self.branches(cloud=cloud_body, local="  ln -sfn a b")
         self.assertIn(self.NAME, cloud)
         self.assertIn("ln -sfn a b", local)
         self.assertNotIn(self.NAME, head + local)
         self.assertNotIn("after", cloud + local)
+
+    def test_a_rules_file_named_on_the_local_path_fails_the_local_check(self):
+        clean = self.SCRIPT % ("", "  ok", "  ln -sfn a b")
+        assert_local_branch_names_no_rules_file(self, clean)  # the control: this shape parses, and a clean local path passes
+        for local in (f"  ln -sfn a b\n  jq . {self.NAME}", f'  ln -sfn a b\n  echo "{self.NAME}"'):
+            with self.subTest(local=local):
+                with self.assertRaisesRegex(AssertionError, "the local path names the rules file"):
+                    assert_local_branch_names_no_rules_file(self, self.SCRIPT % ("", "  ok", local))
 
     def test_a_lone_quote_in_a_comment_or_after_a_backslash_opens_no_string(self):
         head, cloud, local = self.branches(head="# it's the head", cloud=f"  # don't stop\n  echo don\\'t {self.NAME}",
@@ -15919,7 +17353,7 @@ def bash_rule_matches(rule, command):
 
 class CloudAllow(unittest.TestCase):
     """merge/cloud_allow.json holds the `merge --confirm` and `merge --role` allow rules that only a cloud session's settings.json gets
-    (install.sh's cloud branch). A local settings.json is a link to the repo's settings.json and gets none."""
+    (install.sh's cloud_settings function). A local settings.json is a link to the repo's settings.json and gets none."""
 
     def allow(self):
         with open(CLOUD_ALLOW_FILE, encoding="utf-8") as f:
@@ -15999,14 +17433,19 @@ class CloudAllow(unittest.TestCase):
 
     def test_install_sh_names_the_rules_file_in_its_cloud_branch(self):
         with open(os.path.join(REPO_ROOT, "install.sh"), encoding="utf-8") as f:
-            head, cloud, local = settings_branches(f.read())
-        self.assertIn("merge/cloud_allow.json", head + cloud)  # head: a path the branch gets from a variable set above its `if`
+            cloud = settings_branches(f.read())[1]
+        self.assertTrue(cloud.startswith("cloud_settings() {"), "the cloud branch is not the cloud_settings function")  # scope before subject
+        # a log line names the file too, so pin the read: the variable set to the file, and the jq that reads that variable
+        self.assertIn('ALLOW_FILE="$SRC/merge/cloud_allow.json"', cloud, "the cloud branch does not set the rules file as the file to read")
+        self.assertIn('--slurpfile extra "$ALLOW_FILE"', cloud, "the cloud branch does not read the rules file")
 
     def test_install_sh_names_the_rules_file_nowhere_in_its_local_branch(self):
         with open(os.path.join(REPO_ROOT, "install.sh"), encoding="utf-8") as f:
-            head, cloud, local = settings_branches(f.read())
-        self.assertNotIn("cloud_allow", local)
-        self.assertTrue(local.strip(), "the local branch of the settings step was not found")
+            text = f.read()
+        local = settings_branches(text)[2]
+        self.assertIn('done < "$SRC/landed-dirs.txt"', local, "the local branch does not hold the landing loop")  # scope before subject
+        self.assertIn('ln -sfn "$SRC/settings.json"', local, "the local branch does not reach the link block")
+        assert_local_branch_names_no_rules_file(self, text)
 
     def test_the_repo_settings_json_has_no_merge_allow_rule(self):
         # The repo's settings.json is what a local session reads (a link to it). Not matched on a bare "merge": `Bash(gh pr merge:*)` is there.
@@ -16298,6 +17737,256 @@ class ReviewRecordForm(unittest.TestCase):
         self.assertIsNone(review_fn(self, "parse_review")(with_note), "parse_review read a note line below the CI line as part of the record")
         self.assertEqual(record_state(self, no_note, head=head), "done", "the record without the note is not done at its head")
         self.assertEqual(parse_text(self, no_note).get("fix"), (fix_head, "reviewer", "sonnet", "PASS"), "the fix check did not parse")
+
+# ---- A2: seeded draws through the review-record form. Each method draws from its own stream, random.Random(f"{REVIEW_DRAW_SEED}:{method}"),
+# so a failure names the seed, the method, the draw number and the argv. The argument types and parse_review predict each draw: main takes
+# an argv exactly when they do, and what it prints reads back as drawn.
+REVIEW_DRAW_SEED = "review-record-form"
+REVIEW_DRAW_COUNT = 20  # draws per method, and seeded line mutants
+DRAW_GRANTS = (None, "#7, item 1 a, owner, 2026-11-08 06:08 CST", "#7, item 2 b, owner, 2026-11-08 06:08 CST",
+               "#8, item 1 a, owner, 2026-11-08 06:08 CST", "#7, item 1 A, owner, 2026-11-08 06:08 CST",
+               "#7, item 1 a, owner, 2026-13-08 06:08 CST", "#7, item 1 a, owner, 2026-11-08 06:08 PST")
+DRAW_ACCEPTED = (None, "own-3381-a,2026-11-15 01:50 CST", "own-3381-a, 2026-11-15 01:50 CDT",
+                 "own-3381-a,2026-02-30 01:50 CST", "BAD ID,2026-11-15 01:50 CST", "own-3381-a,2026-11-15 1:50 CST")
+DRAW_ROUNDS = ("1:reviewer:sonnet:PASS", "1:reviewer:sonnet:FAIL", "1:design-reviewer:opus:PASS", "2:reviewer:sonnet:PASS",
+               "2:reviewer:sonnet:FAIL", "3:reviewer:opus:PASS", "3:design-reviewer:opus:PARTIAL", "4:reviewer:opus:PASS",
+               "0:reviewer:sonnet:PASS", "5:reviewer:sonnet:PASS", "1:qa-reviewer:sonnet:PASS", "1:reviewer:sonnet:MAYBE",
+               "1:reviewer:bad model:PASS", "1:reviewer:unknown:PASS")
+
+# A mutant the form reads as the same record, though its text is not the printed form. parse_review takes the digits of `PR: #(\d+)`, so a
+# zero-padded number is the same pull request, and the record reads back equal. The reprint differs, so the converse checks the read instead.
+# A finding, not a weakened check: the reader accepts non-canonical digits. Named here, never skipped.
+SAME_RECORD_READS = ("a zero-padded pull request number",)
+
+def form_variants(body):
+    """A printed record as a GitHub post carries it: as printed, with the attribution footer, with CRLF line ends, and with trailing blank lines."""
+    return (("as printed", body), ("with the footer", body.rstrip("\n") + REVIEW_FOOTER), ("with CRLF line ends", body.replace("\n", "\r\n")),
+            ("with trailing blank lines", body + "\n\n"))
+
+def as_read(text):
+    """The lines the form reads of a record: those before the first line that is exactly `---`, without trailing blank lines (the two allowances
+    parse_review documents)."""
+    lines = text.splitlines()
+    if "---" in lines:
+        lines = lines[:lines.index("---")]
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return lines
+
+class ReviewLogDraws(Env):
+    """Seeded draws through the review form's flags, run through the real main on FakeHost. The live head is the head of the feature branch, so an
+    accepted draw prints its record. A draw the form takes must read back as drawn, in every variant form_variants names; a draw it refuses exits 2
+    or 1 and prints no record."""
+
+    def setUp(self):
+        super().setUp()
+        self.live = self.head()
+
+    def run_draws(self, method, make):
+        rng = random.Random(f"{REVIEW_DRAW_SEED}:{method}")
+        taken = [self.check_draw(method, k, make(rng)) for k in range(REVIEW_DRAW_COUNT)]
+        self.assertTrue(any(taken) and not all(taken), f"seed {REVIEW_DRAW_SEED!r}, {method}: the {REVIEW_DRAW_COUNT} draws must reach both a taken "
+                        f"and a refused argv (taken {sum(taken)})")
+
+    def base_draw(self, rng):
+        def mostly(valid, junk):  # the valid value four times in five, so a stream takes some draws as well as refuses some
+            return rng.choice(valid) if rng.random() < 0.8 else rng.choice(junk)
+        return {"head": mostly((self.live,), (self.live[:39], self.live.upper())), "kind": mostly(merge.REVIEW_KINDS, ("bogus",)),
+                "guard": mostly(merge.REVIEW_GUARDS, ("maybe",)), "net": mostly(merge.REVIEW_NETS, ("huge",)), "rounds": ["1:reviewer:sonnet:PASS"]}
+
+    def round_draw(self, rng):
+        if rng.random() < 0.5:  # a chain that reads as drawn, one token of it maybe changed
+            chain = [f"{i}:reviewer:sonnet:{rng.choice(('PASS', 'FAIL'))}" for i in range(1, rng.randint(1, 3) + 1)]
+            if rng.random() < 0.3:
+                chain[rng.randrange(len(chain))] = rng.choice(DRAW_ROUNDS)
+        else:
+            chain = [rng.choice(DRAW_ROUNDS) for _ in range(rng.randint(1, 3))]
+        return {"head": self.live, "kind": "normal", "guard": "no", "net": "not owed", "rounds": chain}
+
+    def fix_tokens(self):
+        return (None, f"{REVIEW_OLD_HEAD}:reviewer:sonnet:PASS", f"{REVIEW_OLD_HEAD}:reviewer:haiku:FAIL", f"{REVIEW_OLD_HEAD}:reviewer:sonnet:PARTIAL",
+                f"{REVIEW_OLD_HEAD}:design-reviewer:sonnet:PASS", f"{self.live}:reviewer:sonnet:PASS", f"{REVIEW_OLD_HEAD[:38]}:reviewer:sonnet:PASS")
+
+    def fix_draw(self, rng):
+        return {"head": self.live, "kind": "normal", "guard": "no", "net": "not owed", "rounds": ["1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS"],
+                "fix": rng.choice(self.fix_tokens())}
+
+    def grant_draw(self, rng):
+        return {"head": self.live, "kind": "normal", "guard": "yes", "net": "not owed",
+                "rounds": ["1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:sonnet:FAIL", "4:reviewer:sonnet:PASS"],
+                "grant": rng.choice(DRAW_GRANTS)}
+
+    def accepted_draw(self, rng):
+        return {"head": self.live, "kind": "normal", "guard": "yes", "net": "negative",
+                "rounds": ["1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:sonnet:FAIL"], "accepted": rng.choice(DRAW_ACCEPTED)}
+
+    def test_the_base_flags_are_taken_exactly_when_the_form_takes_them(self):
+        self.run_draws("base", self.base_draw)
+
+    def test_the_round_flags_are_taken_exactly_when_the_form_takes_them(self):
+        self.run_draws("rounds", self.round_draw)
+
+    def test_the_fix_verifier_flag_is_taken_exactly_when_the_form_takes_it(self):
+        self.run_draws("fix", self.fix_draw)
+
+    def test_the_grant_flag_is_taken_exactly_when_the_form_takes_it(self):
+        self.run_draws("grant", self.grant_draw)
+
+    def test_the_accepted_flag_is_taken_exactly_when_the_form_takes_it(self):
+        self.run_draws("accepted", self.accepted_draw)
+
+    def test_a_line_mutant_parses_to_none_or_reads_back_as_it_was_printed(self):
+        canon = self.canonical_record()
+        rec = review_fn(self, "parse_review")(canon)
+        self.assertIsNotNone(rec, "control: the canonical record does not parse:\n" + canon)
+        self.assertEqual(self.form_failures(rec), [], "control: the canonical record holds a failure")
+        for label, text in form_variants(canon)[1:]:
+            self.assertEqual(review_fn(self, "parse_review")(text), rec, f"seed {REVIEW_DRAW_SEED!r}, variant {label!r}: reads back other than the canonical record")
+        refused = 0
+        for label, text in self.line_mutants(canon):
+            where = f"seed {REVIEW_DRAW_SEED!r}, mutant {label!r}, text {text!r}"
+            got = review_fn(self, "parse_review")(text)
+            if got is None:
+                refused += 1
+                continue
+            self.assertEqual(self.form_failures(got), [], f"{where}: parsed, and holds a failure")
+            if label in SAME_RECORD_READS:  # the form reads the text as the same record, though its printed form differs
+                self.assertEqual(got, rec, f"{where}: parsed as another record")
+                continue
+            self.assertEqual(review_fn(self, "review_body")(**got).splitlines(), as_read(text), f"{where}: parsed, and reprints other than it read")
+        self.assertGreater(refused, 0, "no mutant was refused: the mutants never reach the form's refusals")
+
+    def canonical_record(self):
+        rounds = [(1, "reviewer", "sonnet", "FAIL"), (2, "reviewer", "sonnet", "FAIL"), (3, "reviewer", "opus", "FAIL"), (4, "reviewer", "opus", "PASS")]
+        return review_fn(self, "review_body")(7, REVIEW_HEAD, "normal", "yes", rounds, "zero", fix=(REVIEW_OLD_HEAD, "reviewer", "sonnet", "PASS"),
+                                              grant=REVIEW_GRANT_TEXT, accepted=(ACCEPT_ID, ACCEPT_AT))
+
+    def line_mutants(self, canon):
+        """Each line dropped, repeated and swapped with its neighbour; one named edit per refusal the form makes; the line after the CI line;
+        and REVIEW_DRAW_COUNT seeded single-character edits."""
+        lines = canon.splitlines()
+        for i in range(len(lines)):
+            yield f"drop line {i}", "\n".join(lines[:i] + lines[i + 1:]) + "\n"
+            yield f"repeat line {i}", "\n".join(lines[:i + 1] + lines[i:]) + "\n"
+        for i in range(len(lines) - 1):
+            yield f"swap lines {i} and {i + 1}", "\n".join(lines[:i] + [lines[i + 1], lines[i]] + lines[i + 2:]) + "\n"
+        for label, old, new in (
+                ("another pull request's number", "PR: #7", "PR: #8"),
+                ("a zero-padded pull request number", "PR: #7", "PR: #007"),
+                ("another pull request's grant", "Grant: #7,", "Grant: #8,"),
+                ("a round above the ceiling", "Round 4:", "Round 5:"),
+                ("a round out of order", "Round 2:", "Round 4:"),
+                ("a lower-case verdict", "PASS", "pass"),
+                ("a trailing space on Kind", "Kind: normal", "Kind: normal "),
+                ("a fix check on the record's own head", REVIEW_OLD_HEAD, REVIEW_HEAD),
+                ("an upper-case head", REVIEW_HEAD, REVIEW_HEAD.upper()),
+                ("an impossible accepted time", "01:50", "25:50")):
+            yield label, canon.replace(old, new, 1)
+        yield "a field after the CI line", canon + "Net value: positive\n"
+        yield "a blank line inside the record", canon.replace("\n", "\n\n", 1)
+        rng = random.Random(f"{REVIEW_DRAW_SEED}:line-mutants")
+        for k in range(REVIEW_DRAW_COUNT):
+            i = rng.randrange(len(canon))
+            c = rng.choice(" ,:#\t.0aZ-")
+            yield f"seeded edit {k}: character {i} to {c!r}", canon[:i] + c + canon[i + 1:]
+
+    def form_failures(self, rec):
+        """What a parsed record may not hold beyond its text, since each one claims a review the form does not show: a grant for another pull
+        request, a fix verifier that reviews the record's own head, rounds that open at neither the first nor the last allowed round, rounds
+        past the ceiling (the last round, or one more with a grant), and rounds that do not rise by 0 or 1 at each step."""
+        bad = []
+        if rec["grant"] is not None:
+            bound = review_fn(self, "grant_pr")(rec["grant"])
+            if bound is None or bound[0] != rec["n"]:
+                bad.append(f"the grant binds to another pull request ({rec['grant']!r}), not #{rec['n']}")
+        if rec["fix"] is not None and rec["fix"][0] == rec["head"]:
+            bad.append("the fix check reviews the record's own head")
+        nums = [r[0] for r in rec["rounds"]]
+        ceiling = merge.REVIEW_LAST_ROUND + (rec["grant"] is not None)
+        if nums and nums[0] not in (1, merge.REVIEW_LAST_ROUND):
+            bad.append(f"the rounds open at {nums[0]}")
+        if any(i < 1 or i > ceiling for i in nums):
+            bad.append(f"a round is outside 1..{ceiling}: {nums}")
+        if any(b - a not in (0, 1) for a, b in zip(nums, nums[1:])):  # a round may repeat: a reviewer and a design reviewer share one
+            bad.append(f"the rounds do not rise by 0 or 1: {nums}")
+        return bad
+
+    def type_refuses(self, name, text):
+        try:
+            review_fn(self, name)(text)
+        except argparse.ArgumentTypeError:
+            return True
+        return False
+
+    def drawn_fields(self, d):
+        """The values a draw names, each through its own argument type; None where the draw names none."""
+        def typed(name, text):
+            return None if text is None else review_fn(self, name)(text)
+        return {"rounds": [review_fn(self, "round_arg")(r) for r in d["rounds"]], "fix": typed("fix_verifier_arg", d.get("fix")),
+                "grant": typed("grant_arg", d.get("grant")), "accepted": typed("accepted_arg", d.get("accepted"))}
+
+    def form_accepts(self, d):
+        """-> (accepts, why): whether the form takes draw d, from each value's own argument type and from parse_review of the body it would print."""
+        if d["kind"] not in merge.REVIEW_KINDS or d["guard"] not in merge.REVIEW_GUARDS or d["net"] not in merge.REVIEW_NETS:
+            return False, "a choice flag takes no such value"
+        typed = [("head_arg", [d["head"]]), ("round_arg", d["rounds"])]
+        for name, key in (("fix_verifier_arg", "fix"), ("grant_arg", "grant"), ("accepted_arg", "accepted")):
+            if d.get(key) is not None:
+                typed.append((name, [d[key]]))
+        for name, texts in typed:
+            for text in texts:
+                if self.type_refuses(name, text):
+                    return False, f"{name} refuses {text!r}"
+        fields = self.drawn_fields(d)
+        # The model rules the --review-record branch of merge.main applies before parse_review (decision agent-model-cap, the round rows): every
+        # fix verifier runs the fix model, a reviewer's second and later rounds run its row's model, and a grant names this pull request.
+        if fields["fix"] is not None and fields["fix"][2].lower() != review_fn(self, "review_round_model")(merge.REVIEW_FIX_ROW):
+            return False, "the fix check names a model other than the fix model"
+        for n, role, model, _verdict in fields["rounds"]:
+            if role == merge.REVIEW_ROLES[0] and n >= 2 and review_fn(self, "review_round_model")(n) not in model.lower():
+                return False, f"round {n} names a model other than its row's"
+        if fields["grant"] is not None and review_fn(self, "grant_pr")(fields["grant"])[0] != 7:
+            return False, "the grant names another pull request"
+        shown = types.SimpleNamespace(round=fields["rounds"], head=d["head"], kind=d["kind"], guard=d["guard"], net_value=d["net"])
+        if review_fn(self, "round_three_refusal")(shown, []):  # the round chain, read from the draw alone: this fixture holds no earlier record
+            return False, "round_three_refusal: a round 3 follows a round 2 that reads done"
+        body = review_fn(self, "review_body")(7, d["head"], d["kind"], d["guard"], fields["rounds"], d["net"], fix=fields["fix"],
+                                              grant=fields["grant"], accepted=fields["accepted"])
+        if review_fn(self, "parse_review")(body) is None:
+            return False, "parse_review refuses the body the form would print"
+        return True, ""
+
+    def argv_of(self, d):
+        argv = ["7", "--review-record", "--head", d["head"], "--kind", d["kind"], "--guard", d["guard"], "--net-value", d["net"]]
+        for r in d["rounds"]:
+            argv += ["--round", r]
+        for flag, key in (("--fix-check", "fix"), ("--grant", "grant"), ("--accepted", "accepted")):
+            if d.get(key) is not None:
+                argv += [flag, d[key]]
+        return argv
+
+    def check_draw(self, method, k, d):
+        argv = self.argv_of(d)
+        where = f"seed {REVIEW_DRAW_SEED!r}, {method} draw {k}, argv {argv!r}"
+        rc, out, err = self.run_args(*argv)
+        self.assertNotIn("Traceback", err, where)
+        for old in OLD_PARSER_ERRORS:
+            self.assertNotIn(old, err, f"{where}: a parser that lacks the flag refused it")
+        accepts, why = self.form_accepts(d)
+        if not accepts:  # every refusal the form makes before any host read exits 2
+            self.assertEqual(rc, 2, f"{where}: the form refuses it ({why}), and main exited {rc}; stderr {err.strip()!r}")
+            return False
+        if d.get("fix") is not None and rc != 0 and "usage:" not in err and "--fix-check" in err:
+            return False  # the fix check's history rule (the newest earlier log, git's descent) is a host read: this fixture has no earlier log to pass it
+        self.assertEqual(rc, 0, f"{where}: the form takes it, and main exited {rc}; stderr {err.strip()!r}")
+        fields = self.drawn_fields(d)
+        want = {"n": 7, "head": d["head"], "kind": d["kind"], "guard": d["guard"], "net": d["net"], **fields}
+        body = posted_body(self, out)
+        for label, text in form_variants(body):
+            got = review_fn(self, "parse_review")(text)
+            self.assertEqual(got, want, f"{where}: the printed record ({label}) reads back other than drawn")
+        self.assertEqual(self.form_failures(got), [], f"{where}: the printed record holds a failure")
+        return True
 
 class ReviewRecordRules(unittest.TestCase):
     """review_state over records the form gives (owner, page item 471 a). A change with Guard or check no is done by the review cap rule
@@ -17406,6 +19095,107 @@ class ReviewArgs(ReviewEnv):
         self.assertTrue(any("first round" in s and "row" in s and "unknown" in s for s in sentences),
                         "the usage text does not say round 1 takes its row's model or unknown")
 
+def flow_row(test, out, n=7):
+    """-> (branch, sha9, state) of pull request n's `merge --reviewed` line. The state is the words before the first colon of the line's rest."""
+    _, branch, sha9, rest = list_line(test, out, n).split(" ", 3)
+    return branch, sha9, rest.split(":", 1)[0]
+
+class MergeFlow(CloudSession):
+    """The merge flow end to end on the gh shim: a lane posts its review record, marks its draft ready,
+    the batch reads the record with --reviewed, and --confirm merges the pull request at the head the record names. The fixture is GhHalf's,
+    but its helpers are called unbound, so GhHalf's own cases do not run a second time. One stand-in: merge.Host.ready sends no REST route
+    (route pr-ready-gh-api-cloud is unmeasured), so the host's mark is answered here and kept in self.marked."""
+
+    def setUp(self):
+        super().setUp()
+        gh_case_setup(self)
+        self.marked = []
+        head = self.head()
+        self.set(draft=True, echo_posts=True, full_name=merge.LANE_MERGE_REPO, open_prs=[["feat", head, "main", 7]], pull_files=self.feat_files(head),
+                 issue_comments=[lint_comment(501, head)])  # the lane-lint PASS at the live head, seeded: --lane-lint is not run here
+
+    def feat_files(self, head):
+        """The files `head` changes against main, from the fixture's own diff, in the files route's shape."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        status = {"A": "added", "M": "modified", "D": "removed"}
+        counts = {}
+        for line in sh(self.co, "git", "diff", "--numstat", "origin/main", head).splitlines():
+            add, dele, path = line.split("\t")
+            counts[path] = (int(add), int(dele))
+        files = []
+        for line in sh(self.co, "git", "diff", "--name-status", "origin/main", head).splitlines():
+            code, path = line.split("\t", 1)
+            files.append({"filename": path, "status": status[code], "additions": counts[path][0], "deletions": counts[path][1]})
+        return files
+
+    def set(self, **kw):
+        return GhHalf.set(self, **kw)
+
+    def gh_state(self, key):
+        return GhHalf.gh_state(self, key)
+
+    def gh_host(self):
+        host = GhHalf.gh_host(self)
+        host.ready = self.mark_ready  # the stand-in named in the class docstring
+        return host
+
+    def mark_ready(self, n):
+        self.marked.append(n)
+        self.set(draft=False)
+        return True, ""
+
+    def call(self, *argv):
+        """-> (rc, stdout, stderr) of merge on the gh host, as a cloud session: the --role call needs the cloud env, and the role file stays in this case's config dir."""
+        out, err = io.StringIO(), io.StringIO()
+        with self.cloud():
+            rc = self.run_merge(*argv, host=self.gh_host(), stdout=out, stderr=err)[0]
+        return rc, out.getvalue(), err.getvalue()
+
+    def lane_posts(self, body):
+        """The lane's post of its record: the body as --review-record printed it, with the footer GitHub adds."""
+        self.gh_host().post_comment(7, body + REVIEW_FOOTER)
+
+    def test_a_lane_merges_at_the_head_its_logged_record_names(self):
+        head = self.head()
+        rc, record, err = self.call("7", "--review-record", *REVIEW_FLAGS, "--head", head)
+        self.assertEqual(rc, 0, "--review-record was refused: " + record + err)
+        self.assertTrue(record.startswith(REVIEW_MARKER + "\n"), "--review-record did not print the record: " + record + err)
+        self.lane_posts(record)
+
+        rc, out, err = self.call("--role", "lane", "--step", "feat", "7", "--ready")
+        self.assertEqual(rc, 0, "the lane's --ready was refused: " + out + err)
+        self.assertEqual(self.marked, [7], "the lane's --ready did not mark #7 ready: " + out + err)
+
+        rc, out, err = self.call("--reviewed")
+        self.assertEqual(rc, 0, "--reviewed was refused: " + out + err)
+        branch, sha9, state = flow_row(self, out)
+        self.assertEqual((branch, sha9), ("feat", head[:9]), "the #7 row names another branch or head:\n" + out)
+        self.assertEqual(state, "done", "the logged record did not read as done:\n" + out)
+
+        rc, out, err = self.call("7", "--confirm", "--head", head)
+        self.assertEqual(rc, 0, "--confirm was refused after a done record: " + out + err)
+        merged = [f.get("sha") for f in self.gh_state("merge_fields") or []]
+        self.assertEqual(len(merged), 1, "--confirm did not merge #7 once: " + out + err)
+        self.assertIn(head, (merged[0], self.rev(merged[0] + "^")), "the merge carried neither the logged head nor a claim commit on it: " + out + err)
+        self.assertEqual(self.claims("main"), 1, "the merge did not claim exactly one record number: " + out + err)
+
+    def test_a_pull_request_with_no_record_is_not_done(self):
+        head = self.head()
+        rc, out, err = self.call("--reviewed")
+        self.assertEqual(rc, 0, "--reviewed was refused: " + out + err)
+        branch, sha9, state = flow_row(self, out)
+        self.assertEqual((branch, sha9), ("feat", head[:9]), "the #7 row names another branch or head:\n" + out)
+        self.assertEqual(state, "no record", "a pull request with no record did not read as no record:\n" + out)
+
+    def test_a_record_for_an_older_head_is_not_done(self):
+        head = self.head()
+        self.lane_posts(record_text(head=REVIEW_OLD_HEAD))
+        rc, out, err = self.call("--reviewed")
+        self.assertEqual(rc, 0, "--reviewed was refused: " + out + err)
+        branch, sha9, state = flow_row(self, out)
+        self.assertEqual((branch, sha9), ("feat", head[:9]), "the #7 row names another branch or head:\n" + out)
+        self.assertEqual(state, "stale", "a record for an older head did not read as stale:\n" + out)
+
 class ReviewRecordWrite(ReviewEnv):
     """`merge <pr> --review-record` prints the record for the pull request's live head. It posts nothing and pushes nothing: the lane posts it."""
 
@@ -17522,15 +19312,19 @@ class ReviewFixFlag(ReviewEnv):
                 self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (REVIEW_OLD_HEAD, "reviewer", model, "PASS"))
 
 class ReviewFixBase(ReviewEnv):
-    """`--fix-check BASE:...` with --review-record refuses unless BASE is the head of the newest review record already on the pull request, and
-    that record has no fix check line, or its fix check passed (owner, page item 741: a fix check after a passing one is accepted). The
-    earlier records come from review_comments, which PullsHost serves from its comment list, oldest first. A refusal exits 2 and prints no record."""
+    """`--fix-check BASE:...` with --review-record refuses unless BASE is the head of an earlier record on the pull request. That record must parse,
+    and have no fix check line or a passing one (owner, page item 741: a fix check after a passing one is accepted). The newest record must parse
+    too, since an unreadable one may hold a FAILed fix check. An older record's head starts the fix check only when the new record posts that
+    record's rounds as they are. The earlier records come from review_comments, which PullsHost serves from its comment list, oldest first. A
+    refusal exits 2 and prints no record."""
 
     EARLIER_HEAD = "1e" * 20  # a head that an earlier record reviewed, and that is not the newest record's
     OTHER_HEAD = "2e" * 20  # a head that no record reviewed
+    MID_HEAD = "3e" * 20  # a head that a middle record reviewed, between the oldest record and the newest
+    LATER_HEAD = "4e" * 20  # the head of a later review log, which FAILed a round or a fix verifier, and is not the base
 
-    def review_with_base(self, base, host):
-        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *REVIEW_FLAGS, "--fix-check", f"{base}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS", host=host)
+    def review_with_base(self, base, host, flags=REVIEW_FLAGS):
+        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *flags, "--fix-check", f"{base}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS", host=host)
 
     def assert_refused(self, rc, out, err):
         self.assertEqual(rc, 2, "the fix check was not refused:\n" + out + err)
@@ -17544,14 +19338,153 @@ class ReviewFixBase(ReviewEnv):
         self.assertEqual(rc, 0, "a base that is the newest record's head was refused:\n" + out + err)
         self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
 
-    def test_a_base_that_is_not_the_head_of_the_newest_earlier_record_is_refused(self):
-        # only the newest record's head counts, so a head that just an older record reviewed is refused as well as a head no record reviewed
+    def test_a_base_no_record_names_is_refused_beside_an_older_record_head(self):
+        # the start must be a head that a parseable record names, so a head no record reviewed is refused with an older record beside the newest one.
+        # The head that the older record names is taken in, by the case below.
         older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
         newest = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
-        for base in (self.OTHER_HEAD, self.EARLIER_HEAD):
-            with self.subTest(base=base):
-                rc, out, err = self.review_with_base(base, self.record_host(older, newest))
-                self.assert_refused(rc, out, err)
+        rc, out, err = self.review_with_base(self.OTHER_HEAD, self.record_host(older, newest))
+        self.assert_refused(rc, out, err)
+
+    def test_a_base_an_older_record_names_is_accepted_when_the_newest_record_names_another_head(self):
+        # The start may be any head that a parseable record on this pull request names, not only the newest record's (the --fix-check rule in the
+        # review-record decision). The control is the newest record's own head, which stays accepted beside it. A hand-written body and a tool-made one both count.
+        for label, body in (("hand-written", record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS)),
+                            ("tool-made, with its footer", record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS) + REVIEW_FOOTER)):
+            with self.subTest(body=label):
+                older = review_comment(1, 7, body)
+                newest = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+                self.assertEqual(parse_text(self, body)["head"], self.EARLIER_HEAD, "fixture: the older record does not name the earlier head")
+                rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, newest))
+                self.assertEqual(rc, 0, "control: a fix check from the newest record's own head was refused:\n" + out + err)
+                rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(older, newest))
+                self.assertEqual(rc, 0, f"a fix check from the head that an older {label} record names was refused:\n" + out + err)
+                self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (self.EARLIER_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS"),
+                                 "the printed record does not carry the fix check from the older head")
+
+    def test_a_base_an_older_record_names_is_accepted_among_three_earlier_records_and_an_unnamed_head_is_refused(self):
+        # Full size: three earlier records, each on its own head. The newest head is the control. The oldest and the middle head are accepted,
+        # and a head that no record names is refused.
+        comments = (review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS)),
+                    review_comment(2, 7, record_text(head=self.MID_HEAD, rounds=REVIEW_PASS)),
+                    review_comment(3, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)))
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(*comments))
+        self.assertEqual(rc, 0, "control: a fix check from the newest record's own head was refused:\n" + out + err)
+        for label, base in (("the oldest record's head", self.EARLIER_HEAD), ("the middle record's head", self.MID_HEAD)):
+            with self.subTest(base=label):
+                rc, out, err = self.review_with_base(base, self.record_host(*comments))
+                self.assertEqual(rc, 0, f"a fix check from {label}, which an earlier record names, was refused:\n" + out + err)
+        rc, out, err = self.review_with_base(self.OTHER_HEAD, self.record_host(*comments))
+        self.assert_refused(rc, out, err)
+
+    def test_a_base_named_only_by_a_record_on_another_pull_request_is_refused(self):
+        # Scope: a record of pull request 8 is no earlier record of pull request 7, so the head it names is no start here. The control is this
+        # pull request's newest head, which stays accepted.
+        other = review_comment(1, 8, record_text(n=8, head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        mine = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(other, mine))
+        self.assertEqual(rc, 0, "control: a fix check from this pull request's newest head was refused:\n" + out + err)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(other, mine))
+        self.assert_refused(rc, out, err)
+
+    def test_a_base_named_only_by_a_review_log_posted_on_another_pull_request_thread_is_refused(self):
+        # Scope: a log of pull request 8 posted on pull request 7's thread is listed under 7 and names the base. The filter that reads a log for another
+        # pull request as no earlier log here drops it, so the base starts nothing. The control is this pull request's newest head.
+        def comments():
+            return (review_comment(1, 7, record_text(n=8, head=self.EARLIER_HEAD, rounds=REVIEW_PASS)),
+                    review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)))
+        listed = self.record_host(*comments()).review_comments("1970-01-01T00:00:00Z").get(7, [])
+        self.assertIn(record_text(n=8, head=self.EARLIER_HEAD, rounds=REVIEW_PASS), listed,
+                      "fixture: the log of pull request 8 is not listed under 7, so the filter is not what the case tests")
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(*comments()))
+        self.assertEqual(rc, 0, "control: a fix verifier from this pull request's newest head was refused:\n" + out + err)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(*comments()))
+        self.assert_refused_for_start(rc, out, err)
+
+    def test_a_base_an_older_record_names_is_accepted_only_when_the_new_record_carries_its_rounds(self):
+        # The older record names the base and holds a FAIL entry, then a PASS entry. A new record that repeats both entries as the older record
+        # holds them starts a fix check from that head. One that turns the FAIL entry into a PASS rewrites an entry the older record carries, so it
+        # is refused. One that holds a single PASS entry is a restart, and the restart refusal stops it first.
+        two_rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")
+        comments = (review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=two_rounds)),
+                    review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)))
+        carried = ("--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:FAIL", "--round", "2:reviewer:sonnet:PASS")
+        rewritten = ("--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:PASS", "--round", "2:reviewer:sonnet:PASS")
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(*comments), flags=carried)
+        self.assertEqual(rc, 0, "control: a record that carries the rounds, from the newest head, was refused:\n" + out + err)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(*comments), flags=carried)
+        self.assertEqual(rc, 0, "a record that carries the older record's rounds, from that record's head, was refused:\n" + out + err)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(*comments), flags=rewritten)
+        self.assert_refused(rc, out, err)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(*comments), flags=REVIEW_FLAGS)
+        self.assert_refused(rc, out, err)
+        self.assertIn("restarts the review", err, "the refusal of a record that posts round 1 alone is not the restart refusal:\n" + err)
+
+    def test_a_base_an_older_record_names_is_refused_when_a_newer_fix_verifier_failed_from_it(self):
+        # control: the newer record's fix check FAILed from the head the older record names, so that head starts no fix check. A fix check after a
+        # FAIL gets the fresh full review (the fix-verifier rule of the review-record decision), not a fix verifier from the same start
+        older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        newest = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, fix=(fix_verifier_line(verdict="FAIL", head=self.EARLIER_HEAD),)))
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(older, newest))
+        self.assert_refused(rc, out, err)
+
+    def assert_refused_for_start(self, rc, out, err):
+        """assert_refused, and the refusal names the start, so another refusal cannot pass for it."""
+        self.assert_refused(rc, out, err)
+        self.assertIn("the reviewed head must be the Head of", err, "the refusal is not the start refusal:\n" + err)
+
+    def test_a_base_an_older_review_log_names_is_refused_when_a_later_review_log_fails_a_round_on_another_head(self):
+        # A later round that FAILed on another head starts no fix verifier from an older head, as a later FAILed fix verifier does. The control is the
+        # newest head itself, with the same FAILed round, which starts the fix verifier beside it.
+        failed = ("Round 1: reviewer, sonnet, FAIL",)
+        carried = ("--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:FAIL")
+        older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=failed))
+        newest = review_comment(2, 7, record_text(head=self.LATER_HEAD, rounds=failed))
+        rc, out, err = self.review_with_base(self.LATER_HEAD, self.record_host(older, newest), flags=carried)
+        self.assertEqual(rc, 0, "control: a fix verifier from the newest head, after its failed round, was refused:\n" + out + err)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(older, newest), flags=carried)
+        self.assert_refused_for_start(rc, out, err)
+
+    def test_a_base_an_older_review_log_names_is_refused_when_a_later_fix_verifier_failed_from_another_head(self):
+        # A FAILed fix verifier that started at another head blocks the older head too. The control is the same newest log with no fix line, which
+        # leaves the older head its start.
+        older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        no_fix = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        failed = fix_verifier_line(verdict="FAIL", head=self.LATER_HEAD)
+        newest = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, fix=(failed,)))
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(older, no_fix))
+        self.assertEqual(rc, 0, "control: a fix verifier from the older head was refused with no later fix line:\n" + out + err)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(older, newest))
+        self.assert_refused_for_start(rc, out, err)
+
+    def test_a_base_an_older_review_log_names_is_refused_when_an_unreadable_review_log_lies_between_them(self):
+        # An unreadable log between the named log and the newest may hold a FAILed fix verifier from the base, so the base starts none. The control is
+        # the same pull request with a readable middle log that holds no fix line. Scope: the middle text does not parse, and the newest log parses
+        # and names the other head, so the refusal comes from the middle log alone.
+        middle_text = record_text(head=self.MID_HEAD, rounds=REVIEW_PASS, kind="bogus")
+        self.assertIsNone(review_fn(self, "parse_review")(middle_text), "fixture: the middle log parses, so the case tests nothing")
+        newest_text = record_text(head=self.LATER_HEAD, rounds=REVIEW_PASS)
+        self.assertEqual(parse_text(self, newest_text)["head"], self.LATER_HEAD, "fixture: the newest log does not name its head")
+        older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        newest = review_comment(3, 7, newest_text)
+        readable = review_comment(2, 7, record_text(head=self.MID_HEAD, rounds=REVIEW_PASS))
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(older, readable, newest))
+        self.assertEqual(rc, 0, "control: a fix verifier from the older head was refused with a readable middle log:\n" + out + err)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(older, review_comment(2, 7, middle_text), newest))
+        self.assert_refused_for_start(rc, out, err)
+
+    def test_a_base_an_older_review_log_names_is_refused_when_another_earlier_log_naming_it_is_not_carried(self):
+        # Each earlier record that names the base must have its entries carried, not only the newest one that names it. The first names the base with a
+        # FAIL entry, the second with a PASS entry, and the newest names another head. The new record carries a PASS entry, which the second record
+        # holds. So the FAIL entry in the first record alone refuses the start. The control gives the first record a PASS entry too.
+        second = review_comment(2, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        newest = review_comment(3, 7, record_text(head=self.LATER_HEAD, rounds=REVIEW_PASS))
+        same_first = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        failed_first = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",)))
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(same_first, second, newest))
+        self.assertEqual(rc, 0, "control: a fix verifier from the older head was refused with both earlier logs at round 1 PASS:\n" + out + err)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(failed_first, second, newest))
+        self.assert_refused_for_start(rc, out, err)
 
     def test_a_newest_earlier_record_with_a_passing_fix_line_accepts_its_head_as_the_base(self):
         # owner, page item 741: the newest record's fix check passed, so a further fix check from its head is accepted; the new head is a plain commit
@@ -17589,7 +19522,7 @@ class ReviewFixBase(ReviewEnv):
         self.assertNotIn(REVIEW_MARKER, out, "a failed comments read still printed a record")
 
     def test_a_malformed_newest_earlier_record_refuses_the_base(self):
-        # the newest record does not parse, so it cannot name a head, and the base is refused even when an older record has that head
+        # the newest record does not parse, so the tool cannot read whether it holds a FAILed fix check on that head: the base is refused even when an older record names it
         older = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
         malformed = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, kind="bogus"))
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, malformed))
@@ -17664,9 +19597,9 @@ class ReviewRoundOneCompletes(ReviewEnv):
 
 class ReviewFixAfterMainMerge(ReviewEnv):
     """A fix check after a merge of main (decision pr-review-record). The newest earlier record holds a fix check, so the rule of ReviewFixBase
-    refuses every fix check from its head. A lane that merges main into the fixed head has a new head: a merge commit whose first parent is that
-    head and whose second parent is on main. Only that shape gets a fix check. A plain commit on the head, a merge with a commit off main, or a
-    merge whose first parent is not the fixed head, is refused. The newest record's fix check must have passed: a fix check after a FAIL one
+    refuses every fix check from its head. A lane that merges main into the fixed head has a new head: a merge commit whose second parent is on main,
+    and whose first parent is the fixed head or a commit after it, as git's ancestry reads it. A merge with a commit off main is refused. A plain
+    commit on the head is accepted after a PASS fix check. The newest record's fix check must have passed: a fix check after a FAIL one
     is refused, whatever the merge. The parents come from the commit read and the on-main test from the compare read, both scripted by PullsHost."""
 
     PRE_FIX_HEAD = "1e" * 20  # the head the newest record's fix diff started from
@@ -17739,19 +19672,20 @@ class ReviewFixAfterMainMerge(ReviewEnv):
         self.assertNotIn("Traceback", err)
         self.assertNotIn("is unknown", err, "the refusal is a failed read, not the base check")
 
-    def test_d_a_fix_verifier_after_a_merge_of_main_whose_first_parent_is_not_the_fixed_head_is_refused(self):
-        # Control: a clean merge of main two merges past the fixed head is accepted, since the walk reads clean merges back to the fixed head.
-        # The case differs in its first parent alone: a plain commit on the fixed head that changes a file. The walk stops there and refuses.
+    def test_d_a_fix_verifier_after_a_merge_of_main_whose_first_parent_is_a_plain_commit_on_the_fixed_head_is_accepted(self):
+        # Control: a clean merge of main two merges past the fixed head is accepted, since the fixed head is an ancestor of it.
+        # The case differs in its first parent alone: a plain commit on the fixed head that changes a file. The fixed head is still an ancestor
+        # of the live head, so the fix check starts there and is accepted.
         fx = self.real_commits()
         rc, out, err = self.fix_from_fixed_head(self.real_fixed_host(fx, fx.clean2), fixed=fx.fixed, live=fx.clean2)
         self.assertEqual(rc, 0, "control: a fix verifier after two clean merges of main was refused:\n" + out + err)
         self.assertEqual(fx.parents[fx.after_plain], [fx.plain, fx.main], "fixture: the merge is not a merge of the plain commit and main")
-        self.assertNotEqual(fx.trees[fx.plain], fx.trees[fx.fixed], "fixture: the plain commit changes no file, so the walk has nothing to refuse")
+        self.assertNotEqual(fx.trees[fx.plain], fx.trees[fx.fixed], "fixture: the plain commit changes no file, so the case tests nothing")
         rc, out, err = self.fix_from_fixed_head(self.real_fixed_host(fx, fx.after_plain), fixed=fx.fixed, live=fx.after_plain)
-        self.assertEqual(rc, 2, "a fix verifier after a merge of main whose first parent is a plain commit was not refused:\n" + out + err)
-        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
-        self.assertNotIn("Traceback", err)
-        self.assertNotIn("is unknown", err, "the refusal is a failed read, not the walk")
+        self.assertEqual(rc, 0, "a fix verifier after a merge of main whose first parent is a plain commit on the fixed head was refused:\n" + out + err)
+        body = posted_body(self, out)
+        self.assertEqual(parse_text(self, body)["head"], fx.after_plain, "the printed record names the wrong head")
+        self.assertEqual(parse_text(self, body)["fix"], (fx.fixed, *REVIEW_FIX_PASS[1:]), "the printed record does not name the fix check from fx.fixed")
 
     def test_e_a_fix_verifier_after_a_merge_of_main_is_refused_when_the_newest_fix_verifier_failed(self):
         # Control: the same conflicted merge after a PASS fix verifier is accepted. The case differs in the newest fix verifier's FAIL alone. That
@@ -17797,17 +19731,23 @@ class ReviewFixAfterMainMerge(ReviewEnv):
         self.assertEqual(parse_text(self, body)["head"], m2, "the printed record names the wrong head")
         self.assertEqual(parse_text(self, body)["fix"], (fx.fixed, *REVIEW_FIX_PASS[1:]), "the printed record lacks the fix check")
 
-    def test_h_a_conflicted_merge_of_main_after_a_plain_commit_on_the_reviewed_head_is_refused(self):
-        # Control: a plain commit between the reviewed head and the conflicted merge is no clean merge of main, so that fix check stays refused.
+    def test_h_a_conflicted_merge_of_main_after_a_plain_commit_on_the_reviewed_head_is_accepted(self):
+        # The fix verifier starts at fx.fixed, the reviewed head. It is an ancestor of the live head through the plain commit. The hand resolution keeps every
+        # path git's merge keeps, so the conflict is the only edit: a.txt.
         fx = self.real_commits()
-        m3 = self.git_commit(fx.plain, {"a.txt": "resolved\n", "c.txt": "c\n"}, fx.main3)
+        m3 = self.git_commit(fx.plain, {"a.txt": "resolved\n", "b.txt": "b\n", "c.txt": "c\n"}, fx.main3)
         self.facts(fx, [m3])
         self.assertEqual(fx.parents[fx.plain], [fx.fixed], "fixture: the plain commit is not on the reviewed head")
+        r = subprocess.run(["git", "merge-tree", "--write-tree", fx.plain, fx.main3], cwd=self.co, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, "fixture: the plain commit and main3 do not conflict in git:\n" + r.stdout + r.stderr)
+        edits = sh(self.co, "git", "diff-tree", "-r", "--name-only", r.stdout.split()[0], fx.trees[m3]).split()
+        self.assertEqual(sorted(set(edits) - {"a.txt"}), [], "fixture: the hand resolution edits a path outside git's conflict")
         host = self.record_host(self.newest_record(head=fx.fixed, pre=fx.pre), head=m3, commits=fx.parents, trees=fx.trees, compares=fx.on_main)
         rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=m3)
-        self.assertEqual(rc, 2, "a fix check after a plain commit and a conflicted merge of main was not refused:\n" + out + err)
-        self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
-        self.assertNotIn("Traceback", err)
+        self.assertEqual(rc, 0, "a fix check after a plain commit on the reviewed head and a conflicted merge of main was refused:\n" + out + err)
+        body = posted_body(self, out)
+        self.assertEqual(parse_text(self, body)["head"], m3, "the printed record names the wrong head")
+        self.assertEqual(parse_text(self, body)["fix"], (fx.fixed, *REVIEW_FIX_PASS[1:]), "the printed record lacks the fix check from the reviewed head")
 
 class ReviewCleanMainMerge(ReviewEnv):
     """A record stays done when the pull request head is one or more clean merges of main after the record's head (decision pr-review-record).
@@ -18191,19 +20131,20 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
     starts at that record's head. The fix check takes a conflicted merge only: a merge with an extra edit is refused. An earlier record that reads open
     or held refuses the fix check. Each refusal runs the same conflicted merge after a sonnet PASS record first, which must be admitted (exit 0)."""
 
-    def prior_text(self, fx, *, verdict="PASS", model=merge.REVIEW_FIX_GUARD_MODEL, net="not owed", rounds=REVIEW_PASS):
-        """The record text of the newest earlier record: its head is fx.fixed, and its fix check starts at fx.pre."""
-        return record_text(head=fx.fixed, rounds=rounds, net=net, fix=(fix_verifier_line(verdict=verdict, head=fx.pre, model=model),))
+    def prior_text(self, fx, *, verdict="PASS", model=merge.REVIEW_FIX_GUARD_MODEL, net="not owed", rounds=REVIEW_PASS, guard="no", head=None):
+        """The record text of the newest earlier record: its head is `head`, fx.fixed by default, and its fix check starts at fx.pre."""
+        return record_text(head=head or fx.fixed, rounds=rounds, net=net, guard=guard, fix=(fix_verifier_line(verdict=verdict, head=fx.pre, model=model),))
 
-    def prior_host(self, fx, prior, head):
-        """The pull request at `head`, whose one earlier record is `prior`, with the commits, trees and compares of fx."""
-        return PullsHost([batch_pull(7, head)], {}, comments=[review_comment(1, 7, prior)], commits=fx.parents, trees=fx.trees, compares=fx.on_main)
+    def prior_host(self, fx, prior, head, later=()):
+        """The pull request at `head`, whose earlier records are `prior`, then each of `later`, oldest first, with the commits, trees and compares of fx."""
+        comments = [review_comment(1, 7, prior), *(review_comment(i, 7, body) for i, body in enumerate(later, start=2))]
+        return PullsHost([batch_pull(7, head)], {}, comments=comments, commits=fx.parents, trees=fx.trees, compares=fx.on_main)
 
-    def run_fix_after_prior(self, fx, prior, head, base=None, model=merge.REVIEW_FIX_GUARD_MODEL):
-        """-> (rc, out, err) of --review-record on `head`, with a fix check after the `prior` record. The fix check starts at `base`, which
-        defaults to the fixed head."""
-        return self.run_args("7", "--review-record", "--head", head, *REVIEW_FLAGS, "--fix-check", f"{base or fx.fixed}:reviewer:{model}:PASS",
-                             host=self.prior_host(fx, prior, head))
+    def run_fix_after_prior(self, fx, prior, head, base=None, model=merge.REVIEW_FIX_GUARD_MODEL, flags=REVIEW_FLAGS, later=()):
+        """-> (rc, out, err) of --review-record on `head`, with a fix check after the `prior` record and the records of `later` after it. The fix
+        check starts at `base`, which defaults to the fixed head. `flags` are the record's own flags (the guard and the round), REVIEW_FLAGS by default."""
+        return self.run_args("7", "--review-record", "--head", head, *flags, "--fix-check", f"{base or fx.fixed}:reviewer:{model}:PASS",
+                             host=self.prior_host(fx, prior, head, later))
 
     def chained_head(self, fx, base, name):
         """-> the sha of a commit with one parent, `base`, that adds the file `name`: a head a chain case reviews. facts() records its parents and tree."""
@@ -18284,7 +20225,7 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
 
     def test_a_fix_verifier_started_at_a_plain_commit_above_the_reviewed_head_is_refused(self):
         # The head is one plain commit on `plain`, so it descends from `plain` and from the reviewed head. Control: the fix check started at the
-        # reviewed head is accepted. The start must be the newest record's Head, so a start at `plain` is refused, with the start refusal's text.
+        # reviewed head is accepted. `plain` is the Head of no record, so a start there is refused although the head descends from it, with the start refusal's text.
         fx = self.real_commits()
         prior = self.prior_text(fx)
         head = self.chained_head(fx, fx.plain, "chain.txt")
@@ -18293,7 +20234,7 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
         self.assertEqual(rc, 0, "control: a fix check started at the reviewed head was refused:\n" + out + err)
         rc, out, err = self.run_fix_after_prior(fx, prior, head, base=fx.plain)
         self.assertEqual(rc, 2, "a fix check started at plain, a commit above the reviewed head, was accepted:\n" + out + err)
-        self.assertIn("the reviewed head must be the Head of the newest earlier review log", err, "the refusal is not the start refusal:\n" + err)
+        self.assertIn("the reviewed head must be the Head of", err, "the refusal is not the start refusal:\n" + err)
         self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
         self.assertNotIn("Traceback", err)
 
@@ -18374,6 +20315,132 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
                 self.assertEqual(rc, 2, f"a record with {label} and no fix check was accepted:\n" + out + err)
                 self.assertIn("restarts the review", err, "the refusal is not the restart refusal:\n" + err)
                 self.assertNotIn(REVIEW_MARKER, out, "a refused record still printed a record")
+
+    # Start-head cases. The fix verifier starts at the newest record's Head. A merge whose first parent is a lane commit, or a lane chain longer than
+    # the walk, is accepted when git reads that Head as an ancestor of the head. The other cases are controls: old and new code agree on them.
+    # The empty state (zero lane commits) is test (a) of ReviewFixAfterMainMerge.
+
+    INCIDENT_FLAGS = ("--kind", "normal", "--guard", "yes", "--round", "1:reviewer:sonnet:PASS")  # a guard change whose one round passes
+
+    def guard_fix_after(self, fx, prior, head, start=None):
+        """--review-record of `head` as a guard change whose round passes, with the fix verifier from `start` (fx.fixed by default). -> (rc, out, err)."""
+        return self.run_fix_after_prior(fx, prior, head, base=start, flags=self.INCIDENT_FLAGS)
+
+    def assert_refused_start(self, rc, out, err, why):
+        """The refusal of a fix verifier: exit 2, no record printed, no traceback."""
+        self.assertEqual(rc, 2, f"{why}:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_a_fix_verifier_from_the_newest_head_over_a_lane_commit_on_a_merge_of_main_is_accepted(self):
+        # The newest record passes and holds a passing fix verifier. The live head is a merge of main whose first parent is a lane commit after that
+        # Head, so the fix verifier's diff covers the lane commit and the merge.
+        fx = self.real_commits()
+        prior = self.prior_text(fx, guard="yes")
+        self.assertEqual(record_state(self, prior, head=fx.fixed), "done", "fixture: the newest record does not read done, so the case tests nothing")
+        self.assertEqual(fx.parents[fx.plain], [fx.fixed], "fixture: the lane commit is not one commit on the reviewed head")
+        self.assertEqual(fx.parents[fx.after_plain], [fx.plain, fx.main], "fixture: the merge is not a merge of the lane commit and main")
+        self.assertTrue(self.is_ancestor(fx.fixed, fx.after_plain), "fixture: the reviewed head is not an ancestor of the merge")
+        rc, out, err = self.guard_fix_after(fx, prior, fx.after_plain)
+        self.assertEqual(rc, 0, "a fix verifier from the newest reviewed head was refused on a merge of main whose first parent is a lane commit after it:\n" + out + err)
+        self.assertNotIn("Traceback", err)
+        body = parse_text(self, posted_body(self, out))
+        self.assertEqual(body["head"], fx.after_plain, "the printed record names the wrong head")
+        self.assertEqual(body["fix"], (fx.fixed, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS"), "the printed record lacks the fix verifier from the reviewed head")
+
+    def test_a_fix_verifier_over_a_lane_chain_longer_than_the_merge_walk_is_accepted(self):
+        # Full size: the lane chain holds one commit more than clean_merges_after walks. A read bounded by that walk cannot reach the reviewed head,
+        # and git's ancestry does, so the fix verifier is accepted.
+        fx = self.real_commits()
+        prior = self.prior_text(fx, guard="yes")
+        tip = fx.fixed
+        for i in range(merge.REVIEW_MERGE_WALK + 1):
+            tip = self.chained_head(fx, tip, f"lane{i}.txt")
+        merged = self.git_commit(tip, {"b.txt": "b\n"}, fx.main)
+        self.facts(fx, [merged])
+        self.assertEqual(fx.parents[merged], [tip, fx.main], "fixture: the merge is not a merge of the lane chain and main")
+        r = subprocess.run(["git", "merge-tree", "--write-tree", tip, fx.main], cwd=self.co, capture_output=True, text=True)
+        self.assertEqual((r.returncode, r.stdout.split()[:1]), (0, [fx.trees[merged]]), "fixture: the merge is not git's clean merge of the lane chain and main")
+        self.assertTrue(self.is_ancestor(fx.fixed, merged), "fixture: the reviewed head is not an ancestor of the merge")
+        rc, out, err = self.guard_fix_after(fx, prior, merged)
+        self.assertEqual(rc, 0, f"a fix verifier from the newest reviewed head was refused over a lane chain of {merge.REVIEW_MERGE_WALK + 1} commits:\n" + out + err)
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["head"], merged, "the printed record names the wrong head")
+
+    def test_a_fix_verifier_from_the_newest_head_on_a_plain_lane_commit_is_accepted(self):  # control: a plain commit on the reviewed head
+        fx = self.real_commits()
+        prior = self.prior_text(fx, guard="yes")
+        self.assertEqual(fx.parents[fx.plain], [fx.fixed], "fixture: the lane commit is not one commit on the reviewed head")
+        rc, out, err = self.guard_fix_after(fx, prior, fx.plain)
+        self.assertEqual(rc, 0, "control: a fix verifier from the newest reviewed head on a plain lane commit was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (fx.fixed, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS"), "control: the printed record lacks the fix verifier")
+
+    def test_a_fix_verifier_from_a_real_ancestor_that_no_record_names_as_its_head_is_refused(self):  # control
+        fx = self.real_commits()
+        prior = self.prior_text(fx, guard="yes")
+        self.assertNotEqual(parse_text(self, prior)["head"], fx.plain, "fixture: a record's Head is the lane commit, so the case tests nothing")
+        self.assertTrue(self.is_ancestor(fx.plain, fx.after_plain), "fixture: the lane commit is not an ancestor of the merge, so the case tests nothing")
+        rc, out, err = self.guard_fix_after(fx, prior, fx.after_plain, start=fx.plain)
+        self.assert_refused_start(rc, out, err, "a fix verifier from a lane commit that no record names as its Head was not refused")
+
+    def test_a_fix_verifier_from_a_head_that_only_the_newest_fix_verifier_line_names_is_refused(self):  # control
+        fx = self.real_commits()
+        prior = self.prior_text(fx, guard="yes")
+        self.assertIn(fx.pre, prior, "fixture: the newest record's Fix check line does not name the pre head, so the case tests nothing")
+        self.assertTrue(self.is_ancestor(fx.pre, fx.after_plain), "fixture: the pre head is not an ancestor of the merge, so the case tests nothing")
+        rc, out, err = self.guard_fix_after(fx, prior, fx.after_plain, start=fx.pre)
+        self.assert_refused_start(rc, out, err, "a fix verifier from a head that only a Fix check line names was not refused")
+
+    def test_a_fix_verifier_from_a_newest_head_that_is_not_an_ancestor_of_the_merge_is_refused(self):  # control: a sibling of the pre head
+        fx = self.real_commits()
+        sibling = self.git_commit(fx.pre, {"s.txt": "s\n"})
+        self.facts(fx, [sibling])
+        prior = self.prior_text(fx, guard="yes", head=sibling)
+        self.assertEqual(record_state(self, prior, head=sibling), "done", "fixture: the sibling's newest record does not read done, so the refusal is not the one under test")
+        self.assertTrue(self.is_ancestor(fx.pre, sibling), "fixture: the sibling is not on the pre head")
+        self.assertFalse(self.is_ancestor(sibling, fx.after_plain), "fixture: the sibling is an ancestor of the merge, so the case tests nothing")
+        rc, out, err = self.guard_fix_after(fx, prior, fx.after_plain, start=sibling)
+        self.assert_refused_start(rc, out, err, "a fix verifier from a newest head that is not an ancestor of the merge was not refused")
+
+    def test_a_fix_verifier_from_the_newest_head_on_a_head_that_does_not_descend_from_it_is_refused(self):  # control
+        fx = self.real_commits()
+        prior = self.prior_text(fx, guard="yes")
+        self.assertFalse(self.is_ancestor(fx.fixed, fx.feat), "fixture: the reviewed head is an ancestor of feat, so the case tests nothing")
+        rc, out, err = self.guard_fix_after(fx, prior, fx.feat)
+        self.assert_refused_start(rc, out, err, "a fix verifier on a head that does not descend from the newest reviewed head was not refused")
+
+    def test_a_fix_verifier_from_the_head_an_older_record_names_is_accepted_when_the_newest_record_names_another_head(self):
+        # The start is a head that an older record names with a sonnet PASS fix check, while the newest record names another head (the --fix-check rule
+        # for --fix-check). The head is a plain commit above that start, so git's ancestry holds. Two controls stay refused: a head no record names,
+        # and a head off main that does not descend from the named head.
+        fx = self.real_commits()
+        older = self.prior_text(fx)
+        newest = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)
+        self.assertEqual(record_state(self, older, head=fx.fixed), "done", "fixture: the older record does not read done, so the case tests nothing")
+        self.assertEqual(parse_text(self, newest)["head"], REVIEW_OLD_HEAD, "fixture: the newest record does not name the other head")
+        head = self.chained_head(fx, fx.fixed, "named.txt")
+        self.assertTrue(self.is_ancestor(fx.fixed, head), "fixture: the head does not descend from the older record's head, so the case tests nothing")
+        off_main = self.chained_head(fx, fx.main, "outside.txt")
+        self.assertFalse(self.is_ancestor(fx.fixed, off_main), "fixture: the head off main holds the named head, so the case tests nothing")
+        rc, out, err = self.run_fix_after_prior(fx, older, head, base=fx.plain, later=(newest,))
+        self.assert_refused_start(rc, out, err, "a fix verifier from plain, a head no record names, was not refused")
+        rc, out, err = self.run_fix_after_prior(fx, older, off_main, base=fx.fixed, later=(newest,))
+        self.assert_refused_start(rc, out, err, "a fix verifier from the older head, on a head off main that does not descend from it, was not refused")
+        rc, out, err = self.run_fix_after_prior(fx, older, head, base=fx.fixed, later=(newest,))
+        self.assertEqual(rc, 0, "a fix verifier from the head an older record names was refused, though the newest record names another head:\n" + out + err)
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (fx.fixed, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS"),
+                         "the printed record does not carry the fix check from the older head")
+
+    def test_a_fix_verifier_from_an_older_record_head_is_refused_when_that_records_fix_verifier_failed(self):
+        # The control for the case above: an older record whose fix check FAILed names no start, even while the newest record names another head.
+        fx = self.real_commits()
+        older = self.prior_text(fx, verdict="FAIL")
+        newest = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)
+        self.assertEqual(record_state(self, older, head=fx.fixed), "open", "fixture: the older record with a FAIL fix check does not read open, so the case tests nothing")
+        head = self.chained_head(fx, fx.fixed, "failed.txt")
+        rc, out, err = self.run_fix_after_prior(fx, older, head, base=fx.fixed, later=(newest,))
+        self.assert_refused_start(rc, out, err, "a fix verifier from the head of an older record whose fix check FAILED was not refused")
 
 class ReviewRoundModel(ReviewEnv):
     """The --round values against the reviewer row (agent-model-cap): a review after the first round, the last round included, names sonnet, the first
@@ -19109,12 +21176,14 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} stale: ")
 
+    # A PR with no record gets its own line with `next: none ... RED`, because the PR ledger gives every open PR one
+    # next act (decision pr-ledger). The `no record:` line is still printed for the same PR.
     def test_a_pr_with_no_record_is_named_on_the_no_record_line(self):
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD), batch_pull(8, REVIEW_OLD_HEAD)], comments)
         self.assertEqual(rc, 0, out + err)
         self.assertIn(8, no_record_numbers(out), out)
-        self.assertFalse([l for l in out.splitlines() if l.startswith("#8 ")], out)
+        self.assertRegex(list_line(self, out, 8), r"^#8 feat8 \w{9} no record: .*; next: none, owner triage, age .*, RED; CI not read$")
         list_line(self, out, 7)
 
     def test_a_comment_without_the_marker_is_not_a_record(self):
@@ -19126,8 +21195,8 @@ class ReviewedList(ReviewEnv):
     def test_a_record_on_a_pr_that_is_not_open_is_not_listed(self):
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 99, record_text(n=99, rounds=REVIEW_PASS))])
         self.assertEqual(rc, 0, out + err)
-        self.assertNotIn("99", out)
         self.assertEqual(no_record_numbers(out), {7}, out)
+        self.assertNotIn("#99", out)  # "#99", not "99": an age in hours printed by the real clock can hold 99
 
     def test_a_draft_is_listed_with_no_ci_read(self):
         host, rc, out, err = self.listing([batch_pull(9, REVIEW_HEAD, draft=True)], [review_comment(1, 9, record_text(n=9, rounds=REVIEW_PASS)), lint_of(9, REVIEW_HEAD)])
@@ -24982,6 +27051,126 @@ class AuditPrs(Env):
         line = printed(text, f"#1 feat1 {head[:9]}")
         self.assertTrue(line, f"the audit printed no line for #1 at its head (exit {rc}): {text[-200:]}")  # scope first
         self.assertIn("review: round 1 PASS (reviewer)", line, "the line does not name the newest record's round and verdict: " + line)
+
+
+def reaped_child_pid():
+    """A pid whose process has run to its end, so no live process holds it."""
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait(timeout=60)
+    return child.pid
+
+
+class StaleMergeTrees(unittest.TestCase):
+    """merge.add_worktree sweeps the merge-wt-* trees a dead merge run left in the temp folder. A tree goes, with its git
+    registration, when its lock reason names `merge tool, pid N` and N is dead. A tree whose pid is alive stays, and so
+    does a locked tree whose reason names no merge pid. The temp folder is this test's own fixture, so no case reaches the
+    real temp folder."""
+
+    def setUp(self):
+        work = os.path.realpath(tempfile.mkdtemp(dir=run_folder()))
+        self.addCleanup(shutil.rmtree, work, True)
+        self.repo = os.path.join(work, "repo")
+        self.tmpdir = os.path.join(work, "tmp")
+        os.makedirs(self.repo)
+        os.makedirs(self.tmpdir)
+        sh(self.repo, "git", "init", "-q", "-b", "main")
+        sh(self.repo, "git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
+           "commit", "-q", "--allow-empty", "-m", "base")
+        self.head = sh(self.repo, "git", "rev-parse", "HEAD")
+        patch = unittest.mock.patch.object(tempfile, "tempdir", self.tmpdir)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def make_tree(self, name, reason, root=None):
+        """A merge-wt-<name> folder with a locked worktree in it, as the merge tool makes one, under ROOT (default the temp folder). -> (folder, worktree)."""
+        tmp = os.path.join(root or self.tmpdir, "merge-wt-" + name)
+        wt = os.path.join(tmp, "tree")
+        os.makedirs(tmp)
+        sh(self.repo, "git", "worktree", "add", "-q", "--detach", "--lock", "--reason", reason, wt, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        return tmp, wt
+
+    def locked_trees(self):
+        """Each registered worktree's real path -> its lock reason, or None when it is not locked."""
+        trees, path = {}, None
+        for line in sh(self.repo, "git", "worktree", "list", "--porcelain").splitlines():
+            if line.startswith("worktree "):
+                path = os.path.realpath(line[len("worktree "):])
+                trees[path] = None
+            elif line == "locked" or line.startswith("locked "):
+                trees[path] = line[len("locked"):].strip()
+        return trees
+
+    def test_a_tree_whose_merge_pid_is_dead_goes_and_a_live_one_stays(self):
+        dead = reaped_child_pid()
+        stale_tmp, stale_wt = self.make_tree("stale", "merge tool, pid %d" % dead)
+        live_tmp, live_wt = self.make_tree("live", "merge tool, pid %d" % os.getpid())
+        before = self.locked_trees()
+        self.assertEqual(before.get(os.path.realpath(stale_wt)), "merge tool, pid %d" % dead,
+                         "scope: the dead tree must be locked with its merge reason before add_worktree runs")
+        self.assertEqual(before.get(os.path.realpath(live_wt)), "merge tool, pid %d" % os.getpid(),
+                         "scope: the live tree must be locked with its merge reason before add_worktree runs")
+
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+
+        self.assertFalse(os.path.exists(stale_tmp),
+                         "a merge-wt tree whose merge pid %d is dead must be removed when add_worktree starts" % dead)
+        self.assertNotIn(os.path.realpath(stale_wt), self.locked_trees(),
+                         "the dead tree's git registration must go with its folder")
+        self.assertTrue(os.path.isdir(live_tmp), "a merge-wt tree whose merge pid is alive must stay")
+        self.assertIn(os.path.realpath(live_wt), self.locked_trees(), "the live tree must stay registered")
+        self.assertTrue(os.path.isdir(tmp), "add_worktree must return the tree it made")
+
+    def test_a_locked_tree_whose_reason_names_no_merge_pid_stays(self):
+        dead = reaped_child_pid()
+        stale_tmp, _ = self.make_tree("stale", "merge tool, pid %d" % dead)
+        other_tmp, _ = self.make_tree("other", "someone else's tree")
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        self.assertFalse(os.path.exists(stale_tmp), "control: the dead merge tree must be removed in this run")
+        self.assertTrue(os.path.isdir(other_tmp), "a merge-wt tree whose lock reason names no merge pid must stay")
+
+    def test_a_dead_merge_tree_outside_the_temp_folder_stays(self):
+        """The sweep reaches only a merge-wt folder that is a direct child of the temp folder. A dead-locked one elsewhere stays."""
+        dead = reaped_child_pid()
+        stale_tmp, _ = self.make_tree("stale", "merge tool, pid %d" % dead)
+        outside = os.path.join(os.path.dirname(self.tmpdir), "outside")
+        os.makedirs(outside)
+        far_tmp, far_wt = self.make_tree("far", "merge tool, pid %d" % dead, root=outside)
+        self.assertEqual(self.locked_trees().get(os.path.realpath(far_wt)), "merge tool, pid %d" % dead,
+                         "scope: the dead tree outside the temp folder must be locked with its merge reason before add_worktree runs")
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        self.assertFalse(os.path.exists(stale_tmp), "control: the dead merge tree inside the temp folder must be removed in this run")
+        self.assertTrue(os.path.isdir(far_tmp), "a dead-locked merge-wt tree outside the temp folder must stay")
+        self.assertIn(os.path.realpath(far_wt), self.locked_trees(), "the dead-locked tree outside the temp folder must stay registered")
+
+
+class VerifiedLine(RecordsEnv):
+    """The claim commit and the records-page commit each carry a Verified line (lint/check_red_run.py)."""
+
+    def test_claim_commit_carries_a_verified_line(self):
+        info = self.host.pr(7)
+        tmp, wt = merge.open_worktree(self.co, info, "main")
+        try:
+            trailer = merge.do_claim(wt, ".github/stamp.json", "origin/main")
+            sha = merge.commit_claim(wt, trailer)
+            subject = sh(self.co, "git", "log", "-1", "--format=%s", sha)
+            message = sh(self.co, "git", "log", "-1", "--format=%B", sha)
+        finally:
+            merge.drop_worktree(self.co, tmp, wt)
+        self.assertEqual(subject, "Claim record numbers", "fixture: the commit is not the claim")  # scope before subject
+        self.assertIn("Record-claim: ", message, "fixture: the claim commit holds no Record-claim trailer")
+        self.assertRegex(message, r"(?m)^Verified: \S", "the claim commit has no Verified line:\n" + message)
+
+    def test_page_commit_carries_a_verified_line(self):
+        parent = sh(self.co, "git", "rev-parse", "origin/main")
+        page = self.tool_page(parent, rebuild=False, hand="# Records\n\nwritten by the Verified line case\n")
+        subject = sh(self.co, "git", "log", "-1", "--format=%s", page)
+        message = sh(self.co, "git", "log", "-1", "--format=%B", page)
+        self.assertEqual(subject, merge.PAGE_SUBJECT, "fixture: the commit is not the records-page commit")  # scope before subject
+        self.assertRegex(message, r"(?m)^Verified: \S", "the records-page commit has no Verified line:\n" + message)
 
 
 if __name__ == "__main__":

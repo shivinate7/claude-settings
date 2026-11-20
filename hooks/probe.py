@@ -51,7 +51,7 @@ import subprocess
 import sys
 import tempfile
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 GUARD = os.path.join(HERE, "guard.py")
 sys.dont_write_bytecode = True  # the import below must not write __pycache__ beside hooks/
 if HERE not in sys.path:

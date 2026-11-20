@@ -1,0 +1,1 @@
+- mtmc-sendmessage-unjudged: (#1447) SendMessage (agent to agent) stamps are not judged and are not listed as a known miss.

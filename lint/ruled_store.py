@@ -3,13 +3,15 @@
 
     python3 lint/ruled_store.py --session-line REPO   the lines the session-start hook prints, or nothing
     python3 lint/ruled_store.py list REPO             every open entry in full
-    python3 lint/ruled_store.py check REPO            exit 1 on a store problem (check_store)
+    python3 lint/ruled_store.py check REPO            exit 1 on a store problem (check_store), exit 3 and a line that
+                                                      starts "unknown" when the store cannot be read
 
 The store is the folder roadmap/rulings on origin/roadmap of REPO, one JSON file per ruling. An entry holds `id`,
 `at` (ISO 8601 with a zone), `ruling`, `source`, `status` ("open" or "closed"), `supersedes` (a list of
 {"kind", "ref"}) or `supersedes_none` (the reason it supersedes nothing; a reason that starts with "unread" means
 triage has not read it yet), and optionally `quote` (the owner's own words), `step` (the roadmap step that lands the
-ruling) and `lands_in` ({"path", "contains"}).
+ruling), `lands_in` ({"path", "contains"}) and `scope` ({"visibility": "public" or "private", "repos": [names]}).
+check_entry validates the whole scope. in_scope(entry, repo) reads only the visibility; no reader uses `repos` yet.
 
 An entry is open until its ruling is on main. It closes when `status` is "closed", or when the text of
 `lands_in.contains` is found, whitespace-normalised, in the blob of `lands_in.path` on origin/main. Triage writes
@@ -22,10 +24,19 @@ unchecked. guard_ruling_line(entry) words the note a guard prints when it lets t
 every entry text only. A guard rule id is the first token of the ref, with a trailing ":" cut, in kebab-case
 (guard_rule_id); a ref with no such token names no rule.
 
+An entry whose store file was added or changed in a commit on STORE_REF made at or after CUTOFF_AT must name what it
+supersedes when the kind is "ruling": the first token of the ref is the exact `id` of an entry in the store whose `at` is
+strictly earlier than its own (check_store). A file last changed before CUTOFF_AT is not checked. `check` reads that
+scope with one `git log --diff-merges=first-parent` over the store folder, filtered by commit date here: a merge counts
+only what it adds to the store ref's main line. A pure rename (same text, new name) is not a change to an entry whose file was already old; a rename with edits is. A failed log, or a shallow repo (its log ends early), reads unknown,
+like an unreadable store; `check` then names the cause in its unknown line.
+
 Cost: this module keeps no process and no timer and writes no file. ruled_entries starts two read-only git processes
-(one ls-tree, one cat-file --batch). open_entries starts one more cat-file --batch, and only when an open entry
-names `lands_in`. check_store adds one more cat-file --batch, only when an open entry names a `step`. A missing ref, a
-missing folder or a failed git start gives [], never an error.
+(one ls-tree, one cat-file --batch). open_entries starts one more cat-file --batch, and only when an open entry names
+`lands_in`. check_store adds, only when the store has entries, one rev-parse (the shallow test) and one git log (oldest first, renames detected, same process), and,
+only when an open entry names a `step`, one more cat-file --batch; its listing, when it fails, costs one more
+rev-parse, to tell a missing ref from a lost commit or tree. A missing ref, a missing folder or a failed git start
+gives [], never an error.
 
 An unchecked entry (`supersedes_none` starts with "unread": triage has not read what it supersedes) informs a session
 and is marked "(unchecked, not law)" in the past-ruling search. It never governs a guard: ruling_for_guard and
@@ -37,9 +48,9 @@ import re
 import shlex
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 # A caller that already put hooks/ on the path (report_guard puts a stamped guard.d copy first) keeps its order: this
 # module adds hooks/ last, and only when _nowindow is not importable yet, as a script run from lint/ needs.
 try:
@@ -57,6 +68,7 @@ STEP_SLUG = re.compile(r"^[\w.-]+$")
 RULE_ID = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 STATUSES = ("open", "closed")
 REQUIRED = ("id", "at", "ruling", "source")
+SCOPE_KEYS = ("visibility", "repos")
 SESSION_ENTRIES = 5  # entry lines after the header; with the header and the command line, at most 7 of the 8 allowed
 RULING_CUT = 100
 REF_CUT = 80
@@ -64,6 +76,19 @@ GIT_TIMEOUT = 30
 # A git start must read REPO, never an outer repo that a hook or CI step points at through these.
 STRIPPED = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_NAMESPACE")
 _FAR_PAST = datetime.min.replace(tzinfo=timezone.utc)
+# A store file last changed in a commit before this instant keeps the refs it was written with; the ruling-ref rule
+# starts here (owner grant, waiting-page item 877 option a; scope by commit, item 881 b).
+CUTOFF_AT = datetime(2026, 11, 15, 11, 33, tzinfo=timezone(timedelta(hours=-6)))
+EXIT_UNKNOWN = 3  # the store could not be read: neither clean nor flawed
+# The cause `check` names in its unknown line, one per way the store or its history fails to read.
+CAUSE_NO_GIT = "git cannot start or timed out"
+CAUSE_LOST_TREE = "the store ref resolves but its commit or rulings tree is lost"
+CAUSE_LOST_BLOB = "the object of a ruling file is lost"
+CAUSE_NO_BLOBS = "git could not read the ruling files"
+CAUSE_SHALLOW = "the repo is shallow, so the store's history ends early"
+CAUSE_NO_SHALLOW_TEST = "git could not say whether the repo is shallow"
+CAUSE_NO_LOG = "git log of the store failed (a lost commit in its history, or git older than 2.31)"
+CAUSE_ERROR = "an error while reading the store"
 
 
 def _git(repo_dir, args, text=None):
@@ -77,18 +102,21 @@ def _git(repo_dir, args, text=None):
     return done.returncode, done.stdout
 
 
-def _batch_blobs(repo_dir, specs):
+def _batch_blobs(repo_dir, specs, missing=None):
     """{spec: bytes} for each `ref:path` spec that names a blob, from one cat-file --batch. A missing spec is absent
-    from the answer. Returns {} when git fails."""
+    from the answer. Returns {} when git fails. A caller that must tell a lost object from a path that is not there
+    passes a list as `missing`: it gets each spec that cat-file answered "missing" or did not answer at all."""
     if not specs:
         return {}
     code, out = _git(repo_dir, ["cat-file", "--batch"], ("\n".join(specs) + "\n").encode("utf-8"))
     found, pos = {}, 0
     if code != 0:
         return found
-    for spec in specs:
+    for index, spec in enumerate(specs):
         end = out.find(b"\n", pos)
         if end < 0:
+            if missing is not None:
+                missing.extend(specs[index:])  # a cut-short answer reads none of the specs after it
             break
         head = out[pos:end].split()
         pos = end + 1
@@ -96,6 +124,8 @@ def _batch_blobs(repo_dir, specs):
             size = int(head[2])
             found[spec] = out[pos:pos + size]
             pos += size + 1  # the blob is followed by one newline
+        elif missing is not None and head[-1:] == [b"missing"]:
+            missing.append(spec)
     return found
 
 
@@ -114,20 +144,32 @@ def entry_instant(entry):
     return parse_at(entry.get("at")) or _FAR_PAST
 
 
-def _load(repo_dir, ref):
-    """(entries, state, bad) of the store at `ref` in repo_dir. `bad` lists a problem line for each store file that is
-    not a JSON object. See read_store for the rest."""
+def _load(repo_dir, ref, strict=False):
+    """(entries, state, bad, files, cause) of the store at `ref` in repo_dir. `bad` lists a problem line for each store
+    file that is not a JSON object; `files` is each entry's path in the store, in the order of `entries`; `cause` says
+    why the state is "unreadable", else "". `strict` is the `check` read. It makes a listing that fails on a ref that
+    resolves read "unreadable" (a lost commit or tree), at the cost of one rev-parse, and a lost blob of any one entry
+    read "unreadable". Without it that listing reads "absent" and a lost blob is skipped while others read, so the
+    session-start hook starts no extra git process and still shows the rest. See read_store for the rest."""
     try:
         code, listing = _git(repo_dir, ["ls-tree", "-z", "--name-only", ref, STORE_DIR])
         if code is None:
-            return [], "unreadable", []
+            return [], "unreadable", [], [], CAUSE_NO_GIT
         names = [n.decode("utf-8", "replace") for n in listing.split(b"\0") if n.endswith(b".json")]
-        if code != 0 or not names:
-            return [], "absent", []
+        if code != 0:
+            # The ref is read without a peel: a ref whose commit is lost still resolves, and only a ref that does not
+            # resolve at all is absent.
+            lost = strict and _git(repo_dir, ["rev-parse", "--verify", "--quiet", ref])[0] == 0
+            return [], "unreadable" if lost else "absent", [], [], CAUSE_LOST_TREE if lost else ""
+        if not names:
+            return [], "absent", [], [], ""
         specs = ["%s:%s" % (ref, name) for name in names]
-        blobs = _batch_blobs(repo_dir, specs)
+        missing = []
+        blobs = _batch_blobs(repo_dir, specs, missing)
+        if missing and (strict or not blobs):
+            return [], "unreadable", [], [], CAUSE_LOST_BLOB
         if not blobs:
-            return [], "unreadable", []
+            return [], "unreadable", [], [], CAUSE_NO_BLOBS
         entries, bad = [], []
         for name, spec in zip(names, specs):
             if spec not in blobs:
@@ -138,18 +180,20 @@ def _load(repo_dir, ref):
                 bad.append("%s is not valid JSON" % name)
                 continue
             if isinstance(body, dict):
-                entries.append(body)
+                entries.append((body, name))
             else:
                 bad.append("%s is not a JSON object" % name)
-        return sorted(entries, key=entry_instant), "ok", bad
+        entries.sort(key=lambda pair: entry_instant(pair[0]))
+        return [e for e, _n in entries], "ok", bad, [n for _e, n in entries], ""
     except Exception:
-        return [], "unreadable", []
+        return [], "unreadable", [], [], CAUSE_ERROR
 
 
 def read_store(repo_dir, ref=STORE_REF):
     """(entries, state) of the store at `ref` in repo_dir, oldest first by instant. state is "ok" (also an empty
     folder that exists), "absent" (no such ref, folder or repo) or "unreadable" (git cannot start, or fails after the
-    listing worked). A file that is not a JSON object is skipped. Never raises."""
+    listing worked; `check` also reads a lost commit, tree or single blob so, see _load). A file that is not a JSON
+    object is skipped. Never raises."""
     return _load(repo_dir, ref)[:2]
 
 
@@ -258,7 +302,48 @@ def check_entry(entry):
     reason = entry.get("supersedes_none")
     if not _supersedes(entry) and not (isinstance(reason, str) and reason.strip()):
         problems.append("neither supersedes nor supersedes_none is set")
+    if "scope" in entry:
+        problems.extend(_scope_problems(entry["scope"]))
     return problems
+
+
+def _visibilities():
+    """The visibility words a scope may name: the keys layout.json maps to a caution level, bar "default"."""
+    import layout  # lint/layout.py, the one reader of the visibility key
+    return tuple(key for key in layout.layout()["visibility-caution"] if key != "default")
+
+
+def _scope_problems(scope):
+    """One problem line per defect in an entry's optional `scope`: not an object, a key outside SCOPE_KEYS, a
+    `visibility` that is not a word layout.json maps, or `repos` that is not a list of text."""
+    if not isinstance(scope, dict):
+        return ["scope is not an object: %r" % (scope,)]
+    problems = ["scope has an unknown key: %r" % key for key in scope if key not in SCOPE_KEYS]
+    if "visibility" in scope and scope["visibility"] not in _visibilities():
+        problems.append("scope visibility is not one of %s: %r" % (", ".join(_visibilities()), scope["visibility"]))
+    repos = scope.get("repos", [])
+    if not isinstance(repos, list) or not all(isinstance(r, str) and r.strip() for r in repos):
+        problems.append("scope repos is not a list of repo names: %r" % (repos,))
+    return problems
+
+
+def in_scope(entry, repo_dir):
+    """False when the entry's `scope.visibility` names a visibility other than the one lint/layout.py reads for
+    REPO_DIR. A repo whose visibility is unread, an entry with no scope or a scope check_entry refuses all stay
+    in scope: nothing is hidden on a guess."""
+    scope = entry.get("scope")
+    if not isinstance(scope, dict) or "visibility" not in scope:
+        return True
+    import layout
+    try:
+        if _scope_problems(scope):  # reads layout.json, so it sits inside the guarded read
+            return True
+        mapped = layout.layout()["visibility-caution"]
+        level = layout.caution(repo_dir)["level"]
+    except (layout.LayoutError, OSError):
+        return True
+    known = {v for k, v in mapped.items() if k != "default"}
+    return level not in known or level == mapped[scope["visibility"]]
 
 
 def is_unchecked(entry):
@@ -337,18 +422,116 @@ def _steps_of(entry):
     return [s for s in raw if isinstance(s, str) and STEP_SLUG.match(s)]
 
 
-def check_store(repo_dir):
-    """One problem line per defect in the store: a file that is not a JSON object; each check_entry problem (prefixed by
-    the entry's id); a guard-rule ref that names no rule id; two or more open entries that supersede one ref of one
-    kind; an open entry whose `step` (or, with a `steps` list, every listed step) is done on origin/roadmap. A step file
-    that is missing or unreadable is not done. [] when the store is clean or absent."""
-    entries, _state, bad = _load(repo_dir, STORE_REF)
+def _apply_commit(recent, tokens):
+    """Update `recent`, the set of paths in scope, with one commit's `--name-status -z` tokens. The tokens run status,
+    path; a rename or copy (R or C) carries the old path, then the new one. A deleted file leaves the set. A pure
+    rename or copy (score 100) carries scope from the old path to the new one, and adds the new path only when the old
+    path is in the set. A rename with edits adds the new path. A rename and a delete drop the old path. Any other status
+    adds its path."""
+    # git ends the format line of a commit that has names with a newline, which the first token carries.
+    tokens = [t for t in tokens if t]
+    if tokens:
+        tokens[0] = tokens[0].removeprefix(b"\n")
+    before = set(recent)
+    drop, add = set(), set()
+    i = 0
+    while i < len(tokens):
+        kind = tokens[i][:1]
+        if kind in (b"R", b"C"):
+            if i + 2 >= len(tokens):
+                break
+            old, new = (t.decode("utf-8", "replace") for t in tokens[i + 1:i + 3])
+            if kind == b"R":
+                drop.add(old)
+            if tokens[i][1:] != b"100" or old in before:
+                add.add(new)
+            i += 3
+        else:
+            if i + 1 >= len(tokens):
+                break
+            path = tokens[i + 1].decode("utf-8", "replace")
+            (drop if kind == b"D" else add).add(path)
+            i += 2
+    recent.difference_update(drop)
+    recent.update(add)
+
+
+def _recent_files(repo_dir):
+    """(paths, cause): the set of store paths added or changed in a commit on STORE_REF made at or after CUTOFF_AT, and
+    "". paths is None, and cause names why, when that cannot be read: a shallow repo (its log ends early), git that
+    cannot start, or a log that exits nonzero.
+    One git log walks the whole history oldest first, with renames detected: a pure rename moves an entry's scope to its
+    new path and adds nothing for a file that was already old; a rename with edits is a change.
+    A merge is diffed against its first parent only, so it counts as what it adds to the store ref's main line; against the other parent it would also list every file the main line changed, and
+    flag an old entry. A side-branch commit is still walked and counts on its own date. The commits are filtered by
+    committer date here, never by --since: git stops a --since walk at the first older commit, which hides a file
+    changed on a branch whose commits are dated before the cutoff but merged after it. --diff-merges needs git 2.31;
+    an older git fails the log, which reads unknown, never clean."""
+    code, out = _git(repo_dir, ["rev-parse", "--is-shallow-repository"])
+    if code is None:
+        return None, CAUSE_NO_GIT
+    if code != 0:
+        return None, CAUSE_NO_SHALLOW_TEST
+    if out.strip() != b"false":
+        return None, CAUSE_SHALLOW
+    code, out = _git(repo_dir, ["log", "--diff-merges=first-parent", "--find-renames", "--name-status", "-z",
+                                "--reverse", "--format=%x01%ct", STORE_REF, "--", STORE_DIR])
+    if code is None:
+        return None, CAUSE_NO_GIT
+    if code != 0:
+        return None, CAUSE_NO_LOG
+    cutoff = int(CUTOFF_AT.timestamp())
+    recent = set()
+    for record in out.split(b"\1")[1:]:
+        stamp, *tokens = record.split(b"\0")
+        if int(stamp) >= cutoff:
+            _apply_commit(recent, tokens)
+    return recent, ""
+
+
+def _ruling_ref_problems(entries, files, recent):
+    """Problem lines for each "ruling" ref, on entries whose file is in `recent`, whose first token is not the exact
+    id of a store entry with an earlier `at`. A ref is judged on its id alone, so prose after the id never matters."""
+    instants = {}
+    for entry in entries:
+        if isinstance(entry.get("id"), str):
+            instants.setdefault(entry["id"], []).append(entry_instant(entry))
+    problems = []
+    for entry, name in zip(entries, files):
+        if name not in recent:
+            continue
+        at = entry_instant(entry)
+        rid = entry.get("id", "?")
+        for item in _supersedes(entry):
+            if item.get("kind") != "ruling":
+                continue
+            ref = item.get("ref")
+            parts = ref.split() if isinstance(ref, str) else []
+            if not parts:
+                problems.append("%s: ruling ref is empty or not a string" % rid)
+            elif parts[0] not in instants:
+                problems.append("%s: ruling ref %s names no ruling in the store" % (rid, parts[0]))
+            elif not any(moment < at for moment in instants[parts[0]]):
+                problems.append("%s: ruling ref %s names a ruling not earlier than it" % (rid, parts[0]))
+    return problems
+
+
+def _check_state(repo_dir):
+    """(problems, state, cause) of the store: the problem lines of check_store, the read state of read_store, and why
+    the state is "unreadable" ("" otherwise)."""
+    entries, state, bad, files, cause = _load(repo_dir, STORE_REF, strict=True)
     problems = list(bad)
     for entry in entries:
         rid = entry.get("id", "?")
         problems += ["%s: %s" % (rid, p) for p in check_entry(entry)]
         if any(not rule for rule in _guard_ids(entry)):
             problems.append("entry %s: guard-rule ref names no rule id" % rid)
+    if entries:
+        recent, log_cause = _recent_files(repo_dir)
+        if recent is None:
+            state, cause = "unreadable", log_cause
+        else:
+            problems += _ruling_ref_problems(entries, files, recent)
     opened = open_entries(entries, repo_dir)
     shared = {}
     for entry in opened:
@@ -376,13 +559,28 @@ def check_store(repo_dir):
         if slugs and all(is_done(slug) for slug in slugs):
             noun = "step %s is" % slugs[0] if len(slugs) == 1 else "steps %s are" % _joined(slugs)
             problems.append("%s done but entry %s is still open" % (noun, entry.get("id", "?")))
-    return problems
+    return problems, state, cause
+
+
+def check_store(repo_dir):
+    """One problem line per defect in the store: a file that is not a JSON object; each check_entry problem (prefixed by
+    the entry's id); a guard-rule ref that names no rule id; on an entry whose file was added or changed in a commit made
+    at or after CUTOFF_AT, a "ruling" ref whose first token is empty, is not a string, names no entry in the store, or
+    names an entry whose `at` is not strictly earlier; two or more open entries that supersede one ref of one kind; an open entry whose `step` (or, with a
+    `steps` list, every listed step) is done on origin/roadmap. A step file that is missing or unreadable is not done.
+    [] when the store is clean or absent, and also when it is unreadable: a caller that must tell the two apart uses
+    _check_state, as _check does."""
+    return _check_state(repo_dir)[0]
 
 
 def _check(repo_dir):
-    problems = check_store(repo_dir)
+    problems, state, cause = _check_state(repo_dir)
     for problem in problems:
         print(problem)
+    if state == "unreadable":
+        print("unknown: the ruled store or its history could not be read (%s), so it is neither clean nor flawed"
+              % (cause or CAUSE_ERROR))
+        return EXIT_UNKNOWN
     return 1 if problems else 0
 
 

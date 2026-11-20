@@ -1,0 +1,1 @@
+- page-update-ranked-false: A page update with `ranked: false` and a `recommended` list is refused when the stored item is multi. Reported by a lane, not measured.

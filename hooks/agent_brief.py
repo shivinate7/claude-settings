@@ -11,7 +11,7 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # a runner other than `python agent_brief.py` still finds guard_core
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # a runner other than `python agent_brief.py` still finds guard_core
 try:
     from guard_core import REFUTER_ROLE  # noqa: E402  the one home of the refuter role's name
 except Exception as e:  # fail open, as the docstring says: READ_ONLY and SCOPE need the name, so stop here with exit 0
@@ -67,11 +67,27 @@ def cite_form(cwd):
         return None
 
 
-def build(agent_type, form=None):
+def note_rules(cwd):
+    """The note rules for the brief, each filled from the layout of the session's repo at `cwd`. They come from
+    check_record_slugs.AGENT_FORM_RULES, the list that check prints on a refusal: the brief holds no copy of the text.
+    Empty when that repo's layout cannot be read. Raises when the list cannot be read."""
+    from guard_core import lint_dir  # noqa: E402  the one home of where lint/ is
+    sys.path.append(lint_dir())  # appended: a module already in sys.modules wins
+    import check_record_slugs  # noqa: E402
+    import layout  # noqa: E402  the one home of where records live
+    try:
+        return [layout.fill_note_paths(cwd, rule) for rule in check_record_slugs.AGENT_FORM_RULES]
+    except layout.LayoutError:  # a repo whose layout does not read gets no note line, never the hook's own paths
+        return []
+
+
+def build(agent_type, form=None, notes=()):
     key = agent_type.lower() if isinstance(agent_type, str) else agent_type  # the match ignores case
     writes = key not in {t.lower() for t in READ_ONLY}
     lines = [t for always, t in COMMON if always or writes]
     text = "\n".join(lines).format(scope=next((v for k, v in SCOPE.items() if k.lower() == key), GENERAL))
+    for rule in notes:  # appended after format(): a rule may hold braces
+        text += "\n- " + rule
     if form:  # appended after format(): a form may hold braces
         text += "\n- Cite a record in this repo's form: %s. Any other wrapper around a slug stays dead text." % form
     return text
@@ -87,8 +103,13 @@ def main():
             agent_type = agent_type.rsplit(":", 1)[-1]  # plugin prefix: my-plugin:builder
         cwd = data.get("cwd") if isinstance(data, dict) else None
         form = cite_form(cwd) if isinstance(cwd, str) and cwd else None
+        try:
+            notes = note_rules(cwd) if isinstance(cwd, str) and cwd else ()
+        except Exception as e:  # the rest of the brief still goes out; one stderr line says the note rules did not
+            notes = ()
+            print(f"agent_brief: note rules not read: {e}", file=sys.stderr)
         out = {"hookSpecificOutput": {"hookEventName": "SubagentStart",
-                                      "additionalContext": build(agent_type, form)}}
+                                      "additionalContext": build(agent_type, form, notes)}}
         print(json.dumps(out))
     except Exception as e:  # advisory hook: fail open; one stderr line shows in --debug
         print(f"agent_brief: {e}", file=sys.stderr)

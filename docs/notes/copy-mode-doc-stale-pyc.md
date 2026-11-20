@@ -1,0 +1,1 @@
+- copy-mode-doc-stale-pyc: Stale text (lane install-hash-skips-pycache 14:34 CST Nov 12): docs/decisions/copy-mode-overwrites-no-backup.md line 11 omits the .pyc exclusion once branch install-hash-skips-pycache lands; fix in that lane or the next records lane.

@@ -1,0 +1,1 @@
+- scratchpad-owner-safety-hole: docs/decisions/scratchpad-owner.md:5 "opens no safety hole" overstates; say "opens no unconditional hole".

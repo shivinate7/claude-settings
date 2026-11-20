@@ -1,0 +1,1 @@
+- item-542-close-button-ask: item-reply-back 15:47 CST Nov 12: Owner page save 15:46 CST Nov 12: item 542 none: "is there a button ill be able to click that closes it faster than 7 days". Coordinator asked 15:47 CST whether #2778 gives a close button before the 7 days; item stays open for a reword.

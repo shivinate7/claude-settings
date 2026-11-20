@@ -34,7 +34,7 @@ main (landed_marks) or by a row in the file's optional `landedPulls` list (pull_
 of the last 14 days with their head ref, head sha and merged flag, which the publisher fills from GitHub.
 
 After it runs, this script prints an upkeep list for the triage thread (step c55): open-step notes over
-NOTE_WORDS words; in phases that hold a doing or active step (a live phase), todo, ready, queued, doing and
+NOTE_WORDS words; in phases that hold a doing or active step (a live phase), todo, ready, doing and
 active steps untouched for STALE_DAYS days and with no note (blocked and folded steps, a step with no phase, and a
 later phase wait on purpose, so flagging them would cry wolf); and steps that
 entered the top TOP open places in the last day without a "Placed ahead of" line.
@@ -45,7 +45,7 @@ the live file's "sessions" list is not archived (any other status counts) and ca
 the tag cs-repo:<this repo's GitHub name> and the tag cs-step:<step id>, or when an open pull request's
 branch equals the step id or lane/<step id>. The step id matches exactly; the GitHub name ignores case. A session row
 with no tags key, or null tags, has no tags. The cs-repo tag is needed because list_sessions is
-account-wide and step ids repeat across repos. A step whose status is none of todo, ready, queued, blocked, folded,
+account-wide and step ids repeat across repos. A step whose status is none of todo, ready, blocked, folded,
 doing, active or done is listed as unknown status. The row reads one unknown entry, never an empty list, when the live
 file is missing or unreadable; its readAt is not an ISO time, has no time zone, is over STALE_LIVE_MINUTES
 old or is more than FUTURE_MINUTES ahead; it has no sessions list; the repo's GitHub name cannot be read;
@@ -170,6 +170,7 @@ import argparse
 import datetime
 import http.client
 import json
+import math
 import os
 import pathlib
 import re
@@ -237,9 +238,9 @@ FUTURE_MINUTES = 5
 # `ready` reads as todo.
 TODO_STATUS = ("todo", "ready")
 LIVE_STATUS = ("doing", "active")
-KNOWN_STATUS = TODO_STATUS + ("queued", "blocked", "folded") + LIVE_STATUS + ("done",)
+KNOWN_STATUS = TODO_STATUS + ("blocked", "folded") + LIVE_STATUS + ("done",)
 # The statuses the stale and empty rows read: blocked and folded steps wait on purpose, so they are never listed.
-LISTED_STATUS = TODO_STATUS + ("queued",) + LIVE_STATUS
+LISTED_STATUS = TODO_STATUS + LIVE_STATUS
 TOP = 5
 # ISO UTC: a done step updated before this time is not read for a Done check. Set to the first midnight after this
 # row ships: the 44 done steps updated Nov 7-8 CST (measured on origin/roadmap) carry no `Done check green on main:`
@@ -295,13 +296,15 @@ def step_tag_ids(tags):
     return {t[len(STEP_TAG):].strip() for t in stripped if t.startswith(STEP_TAG)} - {""}
 
 
-def git(repo, *args, stdin=None):
-    """git's stdout, or None when git cannot run or fails."""
+def git(repo, *args, stdin=None, err=None):
+    """git's stdout, or None when git cannot run or fails. A list `err` takes (exit code, stderr) when it fails."""
     try:
         done = _nowindow.run(["git", "-C", str(repo), *args], input=stdin, capture_output=True, text=True,
                               encoding="utf-8", errors="replace")
     except OSError:
         return None
+    if done.returncode != 0 and err is not None:
+        err.append((done.returncode, done.stderr.strip()))
     return done.stdout if done.returncode == 0 else None
 
 
@@ -371,14 +374,56 @@ class Ref:
         return found
 
 
-def record_source(repo, branch):
-    """(source, why): the record branch to read, or None and the reason it cannot be read."""
+def fetch_origin_record(repo, branch):
+    """origin/<branch>, fetched by explicit refspec, or None when there is no origin or origin lacks the branch.
+
+    A single-branch clone's `git fetch origin <branch>` writes only FETCH_HEAD, so the refspec names the
+    remote-tracking ref. Origin holding the branch but not answering, or not fetching, exits non-zero: a page
+    baked from an unread branch would claim the repo has no roadmap.
+    """
+    err = []
+    if git(repo, "remote", "get-url", "origin", err=err) is None:
+        if err and err[0][0] == 2:  # "No such remote": the only failure that means there is no origin
+            return None
+        raise SystemExit("Cannot read the origin remote, so nothing was written: %s" % (err[0][1] if err else "git did not run"))
+    err = []
+    heads = git(repo, "ls-remote", "--heads", "origin", branch, err=err)
+    if heads is None:
+        raise SystemExit("Cannot ask origin whether it has the %s branch, so nothing was written: %s"
+                         % (branch, err[0][1] if err else "git ls-remote failed"))
+    want = "refs/heads/" + branch
+    if not any(line.split("\t")[-1] == want for line in heads.splitlines()):
+        return None
+    if git(repo, "fetch", "--quiet", "origin", "+%s:refs/remotes/origin/%s" % (want, branch), err=err) is None:
+        raise SystemExit("Origin has the %s branch but fetching it failed, so nothing was written: %s"
+                         % (branch, err[0][1] if err else "git fetch failed"))
+    return "origin/" + branch
+
+
+def record_source(repo, branch, fetch=False):
+    """(source, why): the record branch to read, or None and the reason it cannot be read.
+
+    `fetch` (the build) asks origin on every call, because the build's own fetch leaves origin/<branch> behind and a
+    later build would read that ref as current. When origin cannot be asked or read, a local record is read with a
+    warning on stderr; with no local record the build exits non-zero. A read-only caller never starts network.
+    """
     here = git(repo, "symbolic-ref", "--quiet", "--short", "HEAD")
     if here is not None and here.strip() == branch and (repo / DATA).is_dir():
         return Tree(repo), None
-    for ref in ("origin/" + branch, branch):
-        if git(repo, "rev-parse", "--verify", "--quiet", ref + "^{commit}") is not None:
-            return Ref(repo, ref), None
+    local = next((ref for ref in ("origin/" + branch, branch)
+                  if git(repo, "rev-parse", "--verify", "--quiet", ref + "^{commit}") is not None), None)
+    if fetch:
+        try:
+            fetched = fetch_origin_record(repo, branch)
+        except SystemExit as stop:
+            if local is None:
+                raise
+            print("warning: %s. Reading the local %s, which may be behind origin." % (stop, local), file=sys.stderr)
+            return Ref(repo, local), None
+        if fetched:
+            return Ref(repo, fetched), None
+    if local:
+        return Ref(repo, local), None
     return None, "no %s branch in this checkout" % branch
 
 
@@ -723,6 +768,12 @@ def health(repo, extra, where, slug, branch):
             {"name": "Session board", "home": None, "read": BOARD_WHY}]
 
 
+def session_row_ok(row):
+    """The shape a sessions row must have to be read: a string id and session_status, and tags absent or a list. One home for live_work's keep and live_ledger's lane reason."""
+    return (isinstance(row.get("id"), str) and isinstance(row.get("session_status"), str)
+            and (row.get("tags") is None or isinstance(row["tags"], list)))
+
+
 def live_work(path, steps, slug=None):
     """window.ROADMAP_BUILD.live: the publisher's threads, pull requests and branches, or why unknown.
 
@@ -761,13 +812,19 @@ def live_work(path, steps, slug=None):
     A pulls row's optional `held` (the batch runner's hand-in or hold list names the pull) and `reviewLog` (the
     pull carries a posted review log) are JSON bools that triage fills; a present non-bool value skips the row.
     stale_drafts skips a draft pull whose `held` or `reviewLog` is true.
+    `path` is a file path, or the live file already parsed (a dict).
+    One more optional key, `keepSessions` ([{"id", "reason"?}], the lane sessions the owner keeps), is read by keep_sessions:
+    `keepSessions` holds {id: reason}; a value that is not a list of {id} rows sets `keepWhy`, which only idle_lanes reads.
     """
-    if not path:
+    if isinstance(path, dict):  # the live file already parsed (merge reads it from origin's record branch): no file is made
+        raw = path
+    elif not path:
         return {"read": "unknown (no --live file: the publisher writes it from the project threads and GitHub)"}
-    try:
-        raw = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as err:
-        return {"read": "unknown (the live file could not be read: %s)" % err}
+    else:
+        try:
+            raw = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as err:
+            return {"read": "unknown (the live file could not be read: %s)" % err}
     if not isinstance(raw, dict):
         return {"read": "unknown (the live file is not a JSON object)"}
     read = raw.get("readAt")
@@ -839,9 +896,7 @@ def live_work(path, steps, slug=None):
         why.append("unknown (the repo's GitHub name could not be read)")
     else:
         before = len(skipped)
-        sessions = keep("session", raw["sessions"], lambda r: isinstance(r.get("id"), str)
-                        and isinstance(r.get("session_status"), str)
-                        and (r.get("tags") is None or isinstance(r["tags"], list)))
+        sessions = keep("session", raw["sessions"], session_row_ok)
         # list_sessions is account-wide and step ids repeat across repos, so a session counts only with this repo's tag.
         # GitHub names ignore case, so the slug compare does too.
         ours = lambda t: repo_tag_names(t, slug)
@@ -868,6 +923,7 @@ def live_work(path, steps, slug=None):
         why.append("unknown (%d landedPulls rows skipped)" % landed_skipped)
         pull_why = pull_why or why[-1]
     stale_why = why[0] if why else None
+    keep, keep_why = keep_sessions(raw)
     page_items, items_why = None, None
     if read_why:
         items_why = read_why
@@ -887,7 +943,20 @@ def live_work(path, steps, slug=None):
             "branches": branches, "skipped": skipped, "strays": strays,
             "sessionSteps": session_steps, "liveSteps": live_steps, "liveRows": live_rows, "laneTags": lane_tags, "staleWhy": stale_why, "pullWhy": pull_why,
             "pageItems": page_items, "itemsWhy": items_why, "laneSessions": lane_rows,  # glossary-ok: the returned key stays laneSessions, the name its readers use
-            "landedPulls": landed_pulls}
+            "landedPulls": landed_pulls, "keepSessions": keep, "keepWhy": keep_why}
+
+
+def keep_sessions(raw):
+    """({session id: reason}, why) from the live file's optional `keepSessions` ([{"id": str, "reason"?: str}]), whatever the
+    file's age. An absent key keeps nothing. A value that is not a list of objects with a text id gives why, never an empty
+    keep list: an unreadable keep list is unknown. A padded id still names its session."""
+    if "keepSessions" not in raw:
+        return {}, None
+    rows = raw["keepSessions"]
+    if not (isinstance(rows, list) and all(isinstance(r, dict) and isinstance(r.get("id"), str) and r["id"].strip() for r in rows)):
+        return {}, "unknown (the live file's keepSessions is not a list of {id, reason} rows)"
+    return {r["id"].strip(): (r["reason"].strip() if isinstance(r.get("reason"), str) and r["reason"].strip() else "no reason given")
+            for r in rows}, None
 
 
 def live_age_minutes(read):
@@ -896,6 +965,116 @@ def live_age_minutes(read):
     if at.tzinfo is None:
         return None
     return int((datetime.datetime.now(datetime.timezone.utc) - at).total_seconds() // 60)
+
+
+LEDGER_ACT_UNKNOWN = "act unknown"  # a pull request whose act the build cannot read: never blank, never "none"
+LEDGER_NO_LIVE_LANE = "no live lane"  # a round-1 draft that no live lane holds; the coordinator owns it
+LEDGER_LANE_UNKNOWN = "lane unknown"  # the same draft when no lane hold can be told: sessions unread or skipped, or the draft has no branch
+LEDGER_ROW_WRONG_SHAPE = "its ledger row has the wrong shape"  # a pull whose row exists but failed ledger_shape_why: the row's own reason, not "no row"
+# live_work's own words for a sessions list it could not read (its body is the one home; it appends them to `why` inline, so these repeat them).
+LANE_WHY_NO_LIST = "unknown (the live file has no sessions list)"
+LANE_WHY_NO_NAME = "unknown (the repo's GitHub name could not be read)"
+LANE_WHY_SKIPPED = "unknown (a session row was skipped)"
+LANE_WHY_NO_BRANCH = "unknown (the draft has no branch)"
+
+
+def ledger_shape_why(row):
+    """Why a ledger row is unusable, or None: {number: int, act: text, owner: text, ageHours: number, red: bool, blockedOn: int or null}."""
+    if not isinstance(row, dict):
+        return "not an object"
+    # JSON reads NaN and Infinity as numbers, and a negative age is no age: each is a wrong shape, so no page prints "waited NaN days".
+    num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0
+    if type(row.get("number")) is not int:
+        return "number is not an int"
+    if not (isinstance(row.get("act"), str) and row["act"].strip() and isinstance(row.get("owner"), str) and row["owner"].strip()):
+        return "act or owner is not text"
+    if not num(row.get("ageHours")) or not isinstance(row.get("red"), bool):
+        return "ageHours is not a number or red is not a bool"
+    if row.get("blockedOn") is not None and type(row["blockedOn"]) is not int:
+        return "blockedOn is not an int or null"
+    return None
+
+
+def ledger_read(raw):
+    """(rows by pull number, readAt text, why or None, skipped row names, numbers of the wrong-shaped rows) of the live file's `ledger` value: `merge --reviewed --json`
+    whole, {readAt, rows}. The reason is the ledger's own: it is missing, not an object, has no rows list, or its readAt is not an
+    ISO time with a zone, is over STALE_LIVE_MINUTES old, or is in the future. It reads no other key of the live file, so a
+    skipped landedPulls row cannot blank the acts. A row with the wrong shape is left out and named in the skipped list, and its pull number
+    (when it has an int one) in the last value, so that pull reads its own reason; the first row for a number wins."""
+    skipped, wrong = [], set()
+    if not isinstance(raw, dict):
+        return {}, None, "unknown (the live file has no ledger, so no act is known)", skipped, wrong
+    at = raw.get("readAt")
+    if zoned_time(at) is None:
+        return {}, None, "unknown (the ledger's readAt is not an ISO time with a zone: %r)" % (at,), skipped, wrong
+    minutes = live_age_minutes(at)
+    if not isinstance(raw.get("rows"), list):
+        return {}, at, "unknown (the ledger has no rows list)", skipped, wrong
+    if minutes > STALE_LIVE_MINUTES:
+        return {}, at, "unknown (the ledger was read %d minutes ago, past the %d-minute limit)" % (minutes, STALE_LIVE_MINUTES), skipped, wrong
+    if minutes < -FUTURE_MINUTES:
+        return {}, at, "unknown (the ledger's readAt is in the future)", skipped, wrong
+    rows = {}
+    for n, row in enumerate(raw["rows"]):
+        if ledger_shape_why(row):
+            skipped.append("ledger row %d" % (n + 1))
+            if isinstance(row, dict) and type(row.get("number")) is int:
+                wrong.add(row["number"])
+        else:
+            rows.setdefault(row["number"], row)
+    return rows, at, None, skipped, wrong
+
+
+def live_ledger(path, work):
+    """Bake each open pull's next act into `work` (live_work's result), from the live file's `ledger` key (step status-tab-lists-coord-prs).
+
+    Every row of work["pulls"] gains `act`, `owner`, `ageHours` and `red`; `work` gains `ledgerAt` (the ledger's readAt, when it is a
+    time), `ledgerWhy` (None, or why every act reads unknown: said once, for the list head, never on a row) and `laneWhy` (None, or why
+    a draft reads `lane unknown`, shaped like ledgerWhy). A pull with no ledger row reads act `act unknown`, owner None; one whose row has
+    the wrong shape reads the same, with `actWhy` naming that. A draft whose ledger act is the lane's first act (merge.py pr_next_act sets it for a draft) is the parked mark: with the sessions list read,
+    no live lane holding its branch (live_lane_holds) reads act `no live lane`, owner `coordinator`, never red; with the sessions list
+    unread, a session row skipped, or no branch on the draft, it reads act `lane unknown`, owner `unknown`. A ledger row with the wrong shape is added to `skipped`. A live file that gave
+    no pulls list (work has no `pulls`) is left alone. The ledger comes from `merge --reviewed --json`; this reads the live file again
+    and nothing else: no GitHub read, no process."""
+    if "pulls" not in work:
+        return work
+    try:
+        raw = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raw = {}
+    rows, at, why, skipped, wrong = ledger_read(raw.get("ledger") if isinstance(raw, dict) else None)
+    work["ledgerAt"], work["ledgerWhy"] = at if zoned_time(at) else None, why
+    work["skipped"] = list(work.get("skipped") or []) + skipped
+    # Why no lane hold can be told, from the sessions list alone. A malformed session row may be the lane that holds a draft, and its tags were never
+    # read. live_work skips such a row only when it can read the GitHub name, so the row is judged here by the same shape test, whatever the name.
+    sessions = raw.get("sessions") if isinstance(raw, dict) else None
+    if not isinstance(sessions, list):
+        list_why = LANE_WHY_NO_LIST
+    elif not all(isinstance(r, dict) and session_row_ok(r) for r in sessions):
+        list_why = LANE_WHY_SKIPPED
+    elif work.get("laneSessions") is None:  # glossary-ok: the key live_work returns, the name its readers use
+        list_why = LANE_WHY_NO_NAME
+    else:
+        list_why = None
+    work["laneWhy"] = None
+    for pull in work["pulls"]:
+        row = rows.get(pull["number"])
+        if row is None:
+            pull.update(act=LEDGER_ACT_UNKNOWN, owner=None, ageHours=None, red=False)
+            if pull["number"] in wrong:
+                pull["actWhy"] = LEDGER_ROW_WRONG_SHAPE
+            continue
+        pull.update(act=row["act"], owner=row["owner"], ageHours=row["ageHours"], red=row["red"])
+        if pull.get("draft") is True and row["act"] == "lane round 1":
+            branch = pull.get("branch")
+            no_branch = not (isinstance(branch, str) and branch)  # with no branch no lane's hold can be told, so it is unknown, never absent
+            lane_why = list_why or (LANE_WHY_NO_BRANCH if no_branch else None)
+            if lane_why:
+                pull.update(act=LEDGER_LANE_UNKNOWN, owner="unknown")
+                work["laneWhy"] = work["laneWhy"] or lane_why
+            elif not live_lane_holds(work, branch):
+                pull.update(act=LEDGER_NO_LIVE_LANE, owner="coordinator", red=False)
+    return work
 
 
 def build_info(repo, source, why):
@@ -997,7 +1176,7 @@ def main(argv=None):
     repo = pathlib.Path(args.repo).resolve()
     if args.record_branch is None:
         args.record_branch = default_record_branch(repo)
-    source, why = record_source(repo, args.record_branch)
+    source, why = record_source(repo, args.record_branch, fetch=True)
     if args.block and not args.out:
         raise SystemExit("--block writes the data block to a file, so name it with --out FILE.")
     if args.out:
@@ -1022,7 +1201,7 @@ def main(argv=None):
     slug, found = github_slug(repo, extra), homes(repo)
     info["records"] = records(repo, found, slug, args.main_branch)
     info["health"] = health(repo, extra, where, slug, args.main_branch)
-    info["live"] = live_work(args.live, data["steps"] if data else None, slug)
+    info["live"] = live_ledger(args.live, live_work(args.live, data["steps"] if data else None, slug))
     marks = add_marks(marks, pull_landed_marks(repo, ref, data["steps"] if data else None, info["live"]))
     info["landed"] = marks
     info["stalled"] = (stalled(data["steps"], marks, info["live"]) if data else
@@ -1893,6 +2072,11 @@ def on_lane_form(ref, slugs):
                                         for slug in slugs for form in lane_head_refs(slug))
 
 
+def kept_hold(reason, sid):
+    """The hold line for a session the live file's keepSessions names: the owner keeps it, so it is never a lane to archive."""
+    return "hold (kept: %s; lane %s)" % (reason, sid)
+
+
 def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=None, record_ref=None, trailer_ids=None):
     """Entries for each idle lane of this repo, sorted: `<session id> (<steps>; topic <topic or ->)` to archive, or
     `hold (<reason>; lane <session id>)` for a lane not to archive now: no cs-step tag, a step that is neither on the
@@ -1924,6 +2108,9 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
     `idle_since` over STALE_DRAFT_HOURS before the live read, its `unarchived_epoch` the int 0 (joint_pulls), and no open
     pull whose title or branch holds the word records. A stale draft with no head sha gives no joint line: the lane
     keeps waiting. The merge summary counts a joint line among the lanes to archive.
+    A session the live file's keepSessions names (owner keeps it) and that would be read as idle prints one
+    `hold (kept: <reason>; lane <id>)` line, never a lane line. A keepSessions that could not be read makes the whole list
+    unknown. A live lane row whose `unarchived_epoch` is an int below 0 makes the whole list unknown.
     Cost: it reads the live file's rows already loaded, and runs no process and opens no file of its own. A joint
     lane tagged cs-archive-ready:<slug> takes the handoff check above like a plain entry: it adds the one batched
     `git cat-file`, and its joint line ends with the HOLD flag when the handoff is not on the record branch.
@@ -1931,6 +2118,8 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
     why = live_why(work)
     if why:
         return [why]
+    if work.get("keepWhy"):
+        return [work["keepWhy"]]
     if steps is None:
         return ["unknown (the steps could not be read)"]
     if not steps:
@@ -1960,12 +2149,21 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
     live = [row for row in ours if row["session_status"] != ARCHIVED_SESSION]
     if live and not any(row.get("status_bucket") in SESSION_BUCKETS for row in live):
         return ["unknown (no live lane session row carries a status_bucket enum name)"]
+    kept = work.get("keepSessions") or {}
+    for row in live:
+        epoch = row.get("unarchived_epoch")
+        # A negative count is not a time that could be read as "nothing unarchived". Other wrong types stay as joint_pulls reads them (no joint line).
+        if row["id"] not in kept and type(epoch) is int and epoch < 0:
+            return ["unknown (session %s has an unarchived_epoch below 0: %r)" % (row["id"], epoch)]
     out, listed = [], []
     for row in ours:
         tags = [t.strip() for t in row["tags"] if isinstance(t, str)]
         if row["session_status"] == ARCHIVED_SESSION or row.get("status_bucket") not in IDLE_BUCKETS:
             continue
         sid = row["id"]
+        if sid in kept:
+            out.append(kept_hold(kept[sid], sid))
+            continue
         mine = sorted(step_tag_ids(tags))
         if not mine:
             # The archive guard (hooks/guard_merge.py) refuses a lane with no cs-step tag, so archiving is not the act.
@@ -2056,6 +2254,72 @@ def idle_lanes_report(repo, live, record_branch=None, main_branch="main"):
     work = live_work(live, steps, slug)
     marks = add_marks(marks, pull_landed_marks(repo, ref, steps, work))
     return idle_lanes(work, steps, marks, slug, repo, main_branch, unread, source.ref)
+
+
+SESSION_LINK = re.compile(r"claude\.ai/code/(session_[A-Za-z0-9_]+)")
+
+
+def lanes_to_check(steps, slugs, body, raw, landed, open_heads):
+    """Lines for the lanes behind the merged steps `slugs`, for a merge whose live file could not list the idle lanes
+    (stale, missing or unreadable). The lane is the step record's `lane`, else the last session link in the pull request
+    `body`. `raw` is the live file parsed, or None; `landed` is the set of steps whose Step trailer is on main (landed_marks), or None
+    when main could not be read; `open_heads` is a function that returns the set of head refs with an
+    open pull (it may raise: the read then counts as not read). It runs once, and only for a lane no earlier test skipped. Each line says to check the lane by hand, and none says to archive it: a stale file cannot prove
+    the lane is done. No line for a lane that is still working (its row is not completed or review ready, a step outside `slugs` is doing
+    under it and has no Step trailer on main, or an open pull is on its head; a step in `slugs` just landed, so its doing record does not hold the lane) or archived. A session in keepSessions (read at any age) prints one hold
+    line; a keepSessions that could not be read, or a live file that could not be read (`raw` None), prints an unknown line for a lane not already
+    skipped as working. Reads only what the caller loaded."""
+    keep, keep_why = keep_sessions(raw) if raw is not None else ({}, None)
+    rows = {r["id"]: r for r in raw.get("sessions") or [] if isinstance(r, dict) and isinstance(r.get("id"), str)} \
+        if raw is not None and isinstance(raw.get("sessions"), list) else {}
+    out, seen, read = [], set(), []
+
+    def heads_read():
+        if not read:
+            try:
+                read.append(open_heads())
+            except Exception:  # a failed read is unread, not empty
+                read.append(None)
+        return read[0]
+    for slug in sorted(set(slugs)):
+        step = steps.get(slug)
+        if step is None:
+            out.append("unknown (step %s has no record on the record branch, so its lane is not named)" % slug)
+            continue
+        lane = step.get("lane")
+        sid = lane.strip() if isinstance(lane, str) else ""
+        if not sid:
+            links = SESSION_LINK.findall(body or "")
+            sid = links[-1] if links else ""
+        if not sid:
+            out.append("unknown (step %s names no lane and the pull request body has no session link)" % slug)
+            continue
+        if sid in seen:
+            continue
+        seen.add(sid)
+        row = rows.get(sid)
+        if row and (row.get("session_status") == ARCHIVED_SESSION or row.get("status_bucket") not in IDLE_BUCKETS):
+            continue
+        holding = [k for k, d in steps.items() if k not in slugs and running_under(d, sid)]
+        if holding and landed is None:  # without main's trailers a doing step cannot be shown landed, and a lane is not dropped unread
+            out.append("unknown (the Step trailers on main could not be read, so lane %s is not named)" % sid)
+            continue
+        if any(k not in landed for k in holding):
+            continue  # a lane still working needs no keep list; a step in `slugs` just landed, and a doing step with a trailer on main is landed (as idle_lanes reads it)
+        if raw is None or keep_why:  # an unreadable file has no keep list: the owner may keep this lane
+            out.append("unknown (the keep list could not be read, so lane %s is not named)" % sid)
+            continue
+        if sid in keep:
+            out.append(kept_hold(keep[sid], sid))
+            continue
+        mine = {slug} | {k for k, d in steps.items() if isinstance(d.get("lane"), str) and d["lane"].strip() == sid}
+        heads = heads_read()
+        if heads is not None and {h for k in mine for h in lane_head_refs(k)} & heads:
+            continue
+        unread = [why for why, missing in (("its session state is not in the live file", row is None),
+                                          ("open pull requests were not read", heads is None)) if missing]
+        out.append("check this lane (step %s landed%s; lane %s)" % (slug, "; " + "; ".join(unread) if unread else "", sid))
+    return out
 
 
 def status_drift(steps, work, repo, main_branch, ref):

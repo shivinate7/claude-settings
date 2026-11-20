@@ -31,7 +31,7 @@ from git_reads import (  # noqa: F401
 
 def is_cloud() -> bool:
     """True in a Claude Code cloud session: CLAUDE_CODE_REMOTE is exactly "true". Read at each call. The one home of the
-    cloud check; the load brake and its report stand down here, because the brake is local-only."""
+    cloud check; the load brake and its report read it. A cloud session is braked at a full disk only."""
     return os.environ.get("CLAUDE_CODE_REMOTE") == "true"
 
 
@@ -1176,6 +1176,11 @@ _MAIN_HEADER = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 # `git checkout main` move a branch and keep every file, so they pass. `git checkout <path>`
 # overwrites a file from the index, so it is refused.
 
+# The git subcommands that change a repository or the tree. Some read in one form (`stash list`, `tag -l`,
+# `config --get`): a reader of this list counts those as writes (debt stamp-read-false-alarms).
+GIT_WRITES = ("commit", "push", "add", "tag", "merge", "rebase", "reset", "restore", "checkout", "switch", "stash",
+              "cherry-pick", "apply", "am", "rm", "mv", "clean", "pull", "revert", "init", "clone", "config")
+
 # `git` reads these options before the subcommand, and each one takes a value.
 GIT_OPT_WITH_VALUE = {
     "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path",
@@ -1503,7 +1508,7 @@ def _read_cd_variable(known, segment: str, move: str, ran: bool) -> str:
     return read if isinstance(read, str) and read else move
 
 
-def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False, made=frozenset()):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
@@ -1519,14 +1524,20 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
     leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
     worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
-    a segment in it gets None, and its own `cd` moves nothing. Off by default, so a rule that
-    fails closed on an untrusted `cd` keeps doing so."""
+    a segment in it gets None, and its own `cd` moves nothing. A failed cd then `|| exit`
+    ends the shell: every later segment gets None. A `return` does not: outside a function bash reports an error and
+    the next command runs. A brace group after the `||` is not read. Off by
+    default, so a rule that fails closed on an untrusted `cd` keeps doing so.
+    `made` holds normalized folders an earlier segment of the same call makes (a mkdir, a clone): a `cd`
+    into one is read as one that works, though the folder is missing at check time. Empty by default."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
     known = {}         # the variables the shell holds: plain assignments that ran here (`_track_variables`)
     doubt = False      # the last cd may have failed in an `&&` chain: a segment after it may not run
     unsure = False     # the last segment may have failed or not run: an assignment after its `&&` may not run
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
+    bail = False       # a failed cd ended in `||`: an `exit` next ends the shell
+    gone = False       # the shell has ended: nothing after runs
     last_end = ""      # the operator that ended the last non-empty segment
     for at, segment in enumerate(segments[:number + 1]):
         marks = [(index, char) for index, char, quote in walk_quotes(segment) if not quote and char in "()"]
@@ -1535,9 +1546,11 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         closes = sum(1 for _, char in marks if char == ")")
         end = ends[at] if at < len(ends) else ""
         if at == number:
-            return None if skipping else where
+            return None if skipping or gone else where
         if not segment.strip():
             continue   # an operator at end of line then the newline leaves an empty part: it changes nothing
+        if gone:
+            continue
         if skipping:
             last_end = end
             skipping = end in ("&&", "|")
@@ -1551,6 +1564,12 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         move = _segment_cd_move(tokens) if tokens else None
         before = last_end
         last_end = end
+        if bail and before == "||" and not stack and tokens:
+            word = resolve_command(tokens)
+            gone = word is not None and basename(tokens[word]) == "exit"
+            if gone:
+                continue
+        bail = False
         piped = "|" in (end, before)
         if move is not None and not is_powershell(segment) and piped:
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
@@ -1572,10 +1591,11 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                 where = None
             else:
                 target = shell_abs(move or "~", where)
-                if target and os.path.isdir(target):
+                if target and (os.path.isdir(target) or os.path.normpath(target) in made):
                     where = target
                 elif target and failed_cd_stays:
                     skipping = end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops
+                    bail = end == "||"
                     old = prev   # a failed cd leaves the folder `cd -` goes back to alone
                 else:
                     where = None
@@ -2221,6 +2241,49 @@ def path_is_inside(path: str, root: str):
     if p == r:
         return True
     return (p + os.sep).startswith(r + os.sep)
+
+
+def _checkout_root_by_stat(folder: str) -> str:
+    """The nearest folder at or above `folder` that holds a `.git` entry (a folder, or a linked
+    worktree's file), found by stat alone, else ''. No git is spawned."""
+    while folder:
+        if os.path.exists(os.path.join(folder, ".git")):
+            return folder
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            return ""
+        folder = parent
+    return ""
+
+
+def lint_dir():
+    """The lint folder, the one home of where lint/ is. It walks up from this file's folder to the first ancestor that
+    holds lint/layout.py: a guard loaded from an install's guard.d/<id> set sits two folders below the hooks folder, so
+    the lint folder is beside hooks, not beside the set. Then it tries $CLAUDE_CONFIG_DIR/lint (default ~/.claude/lint).
+    When none holds layout.py it returns the folder beside this file's folder, which does not exist in a copy with no
+    lint: the import that follows raises, as it always did."""
+    here = os.path.dirname(os.path.realpath(__file__))
+    folder = here
+    while True:
+        if os.path.isfile(os.path.join(folder, "lint", "layout.py")):
+            return os.path.join(folder, "lint")
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            break
+        folder = parent
+    config = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    if os.path.isfile(os.path.join(config, "lint", "layout.py")):
+        return os.path.join(config, "lint")
+    return os.path.join(here, "..", "lint")
+
+
+def layout_module():
+    """lint/layout.py, imported from lint_dir(). The one home of the import."""
+    lint = lint_dir()
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import layout
+    return layout
 
 
 # A directory change that is the WHOLE call, as a recovery step: an agent whose shell cwd has left

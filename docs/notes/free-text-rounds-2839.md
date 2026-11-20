@@ -1,0 +1,1 @@
+- free-text-rounds-2839: record-before-fix-push 15:56 CST Nov 12: Incident 15:51 CST Nov 12 (coordinator): #2839 (lane ci-wait-cap-55-fix-prose) posted rounds 1-3 as free text at 26c0e7af8, so --fix-check has no chain; coordinator pick b: fresh round 1 at 62594d5fd in the tool's format.

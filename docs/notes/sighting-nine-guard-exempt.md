@@ -1,0 +1,1 @@
+- sighting-nine-guard-exempt: Sighting 9, 09:05 CST Nov 13: at 08:00 CST triage picked a guard.py family row for mutation-tests-for-cost without reading GUARD_MODULE_EXEMPT in hooks/mutate_guard.py, which already exempts guard_core.py for the same cause. The lane spent one measure round on it. A triage pick on a code question should first read the code home that the pick extends.

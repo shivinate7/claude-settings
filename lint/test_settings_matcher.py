@@ -85,6 +85,12 @@ MERGE_NAMES = ("MERGE_TOOLS", "TRUST_TOOLS", "ARCHIVE_TOOL", "BRIEF_TOOL")
 GITHUB_WRITE_TOOLS = tuple("mcp__github__" + short for short in (
     "merge_pull_request", "create_pull_request", "push_files", "create_or_update_file", "delete_file",
     "update_pull_request"))
+# The two GitHub comment tools a review record is posted by. Rules review-log-form and review-log-sha judge
+# their body, so the guard's matcher must see both (the body is the record's form, read by merge/merge.py).
+GITHUB_COMMENT_TOOLS = tuple("mcp__github__" + short for short in ("add_issue_comment", "update_issue_comment"))
+# The GitHub tool that arms auto-merge on a pull request. The merge it arms is judged as merge_pull_request is, so the
+# guard's matcher must see the call. Kept apart from GITHUB_WRITE_TOOLS, which is the six the owner named.
+GITHUB_AUTO_MERGE_TOOLS = ("mcp__github__enable_pr_auto_merge",)
 
 
 def load_hook(name, path):
@@ -191,6 +197,18 @@ class JudgedToolMatcher(unittest.TestCase):
     def test_guard_matcher_covers_the_six_github_write_tools(self):
         self.assertTrue(self.matchers, "no guard.py entry in settings.json PreToolUse")
         missed = self.unmatched(GITHUB_WRITE_TOOLS)
+        if missed:
+            self.fail("no guard matcher covers: %s" % ", ".join(missed))
+
+    def test_guard_matcher_covers_the_github_comment_tools(self):
+        self.assertTrue(self.matchers, "no guard.py entry in settings.json PreToolUse")
+        missed = self.unmatched(GITHUB_COMMENT_TOOLS)
+        if missed:
+            self.fail("no guard matcher covers: %s" % ", ".join(missed))
+
+    def test_guard_matcher_covers_the_auto_merge_tool(self):
+        self.assertTrue(self.matchers, "no guard.py entry in settings.json PreToolUse")
+        missed = self.unmatched(GITHUB_AUTO_MERGE_TOOLS)
         if missed:
             self.fail("no guard matcher covers: %s" % ", ".join(missed))
 

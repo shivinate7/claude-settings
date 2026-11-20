@@ -1,0 +1,1 @@
+- fan-code-lint-1-notes: Notes from lane fan-code-lint-1: a moved block plus a rename reads as a possible later step; three nits on #2734 (decision line 22 attribution, the wording of note lane-undo-net-zero-blocked, decision line 90); docs/plans/debate-model-tiers.md:32 still says Opus for a close read; worktree agent-aa8c3317974c1e202 is left dirty in that lane's container.

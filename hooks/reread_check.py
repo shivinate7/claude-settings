@@ -25,7 +25,8 @@ Spec: docs/decisions/precompact-handoff.md, items 9 and 16. Two flag files per s
       the main session's, else "".
   audit_spawn(payload, spawn_tools) (import)  true for a spawn from the main session whose brief's
       first non-blank line carries the audit marker (shared_names.EXPLORE_AUDIT_MARKER, `Audit:`).
-      audit_clear(payload) drops the audit flag; the guard calls it once the spawn has passed every rule.
+      audit_clear(payload) drops the audit flag; the guard's main() calls it when judge() returns, or when a later
+      rule crashes after the spawn was marked.
   --stop (Stop)  with the flag set and the handoff file present, prints
       {"decision": "block", "reason": ...} naming the handoff path. Exits quietly on
       stop_hook_active, so it cannot loop. The flag stays set until the handoff is read,
@@ -41,7 +42,7 @@ import re
 import sys
 
 try:
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
     import precompact_handoff as ph  # one home for the handoff and flag paths
 except Exception as e:
     ph = None

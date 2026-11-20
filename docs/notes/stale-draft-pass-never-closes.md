@@ -1,0 +1,1 @@
+- stale-draft-pass-never-closes: 11:56 CST Nov 13, rule gap: the pass closes any draft no lane names, without testing whether its work is on main. Closing now belongs to runner 10 from the evidence ledger (ruling pr-close-by-batch-runner), so the pass lists and never closes.
