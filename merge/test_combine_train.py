@@ -23,6 +23,14 @@ The contract these cases read (the tool's own output; the labels are exact):
   a fast check with no home: `unknown (fast-checks-before-ready not landed)`.
   a git that is not on PATH: exit 2, one `unknown` line that names git, no traceback.
   exit: 0 ok, 1 something left out or a failed check, 2 unknown or cannot run.
+  --build (roadmap step combine-train-build): with --name NAME, the queued batch's members fold into the local branch
+    merge.integration_branch(NAME), built from the newest origin/main: one `git merge --no-ff` per member, in queue order.
+    A member's live head is the ref GitHub serves a pull head at, refs/pull/N/head on origin. A member whose live head is not
+    its queued head, or that clashes with the newest main, leaves by name (`left out #N: ...`, with its paths); no conflict is
+    fixed by hand. Under 10 ready members (ruling 10:23 CST Nov 20: a backlog of 10 or more combines) the run prints
+    `merge alone` and builds nothing. The run prints the integration PR's freeze block, from merge.BATCH_BEGIN to
+    merge.BATCH_END: the body the PR carries (ruling own-811-c-marker-line, the combined PR's marker line). It pushes nothing
+    and makes no gh pr create, ready or merge call.
 """
 import ast
 import atexit
@@ -52,6 +60,7 @@ GIT_WRAPPERS = {"merge_tree", "conflicting_files", "ci_job_run", "ready_job_grou
 NO_HOME = "unknown (fast-checks-before-ready not landed)"
 SIX = ["members in", "members left out", "clash rate", "dry-round minutes", "lint minutes", "CI minutes"]
 PASS_WORD = re.compile(r"(?<!not a )(?<!not )(?<!no )\b(?:pass(?:es|ed)?|ok)\b", re.I)  # a claim of pass ("pass", "passed", "ok"), not "not a pass" or "not ok"
+CALLER_ENV = ("GH_REPO", "CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CODE_SESSION_ID")  # the caller's env that merge.py reads for a repo or a session role; run_tool strips these and GITHUB_*
 
 os.environ.update(LC_ALL="C", GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull,
                   GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
@@ -233,10 +242,11 @@ def ticking_clock(step=60.0):
     return clock
 
 
-def run_tool(queue, root, mode="pass", lint=False, clock=None, ci_job=None, shims=None, job_steps=None):
+def run_tool(queue, root, mode="pass", lint=False, clock=None, ci_job=None, shims=None, job_steps=None, extra=()):
     """Run the tool in-process: main() with merge.CI_JOB at the fake ci-job (or `ci_job`), FAKE_CI_MODE set, and the folder
     `shims` first on PATH. `job_steps` ({job: [steps]}) is the steps each job holds: the fake reads a step another job holds as unknown.
-    None lets every step through. -> (exit code, stdout, stderr, ci_calls), where each ci-job argv is a list."""
+    None lets every step through. `extra` is more argv (the --build cases). -> (exit code, stdout, stderr, ci_calls), where each ci-job argv is a list.
+    A flag the tool does not know ends the run with argparse's exit 2 and its message on stderr: the case reads that run, it does not crash."""
     import combine_train  # the tool; imported here so a missing tool fails the case that runs it, not the whole suite
     log = os.path.join(scratch("ci-"), "ci-calls.jsonl")
     env = {"FAKE_CI_MODE": mode, "FAKE_CI_LOG": log}
@@ -244,13 +254,102 @@ def run_tool(queue, root, mode="pass", lint=False, clock=None, ci_job=None, shim
         env["FAKE_CI_JOB_STEPS"] = json.dumps(job_steps)
     if shims:
         env["PATH"] = shims + os.pathsep + os.environ.get("PATH", "")
-    argv = ["--queue", queue, "--root", root] + (["--lint"] if lint else [])
+    argv = ["--queue", queue, "--root", root] + (["--lint"] if lint else []) + list(extra)
     out, err = io.StringIO(), io.StringIO()
-    with unittest.mock.patch.dict(os.environ, env), \
-            unittest.mock.patch.object(merge, "CI_JOB", ci_job or fake_ci_job()), \
-            contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        rc = combine_train.main(argv, clock=clock)
+    try:
+        with unittest.mock.patch.dict(os.environ, env), \
+                unittest.mock.patch.object(merge, "CI_JOB", ci_job or fake_ci_job()), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            for name in list(os.environ):  # the caller's environment, stripped for this run only (patch.dict restores it)
+                if name.startswith("GITHUB_") or name in CALLER_ENV:
+                    del os.environ[name]
+            rc = combine_train.main(argv, clock=clock)
+    except SystemExit as e:  # argparse exits on a flag it does not know: the run ended, and its output says so
+        rc = e.code
     return rc, out.getvalue(), err.getvalue(), calls(log)
+
+
+BUILD_NAME = "combine"  # the --name the build cases pass; the branch the build makes is merge.integration_branch(BUILD_NAME)
+BUILD_ARGS = ["--build", "--name", BUILD_NAME]
+BUILD_BATCH = "Q"  # the queued batch the build folds
+TWELVE = list(range(101, 113))  # full size: 12 members; the last one (112) is the member the moved-head and clash cases change
+NINE = list(range(101, 110))  # under the threshold of 10 (ruling 10:23 CST Nov 20)
+LEFT_OUT = re.compile(r"^\s*left out #(\d+)\b")
+
+
+def add_members(root, numbers):
+    """One real PR per number, each adding its own file on origin/main. -> [(number, head sha)] in queue order."""
+    return [(n, add_pr(root, n, {"f%d.txt" % n: "%d\n" % n})) for n in numbers]
+
+
+def publish_pull(root, numbers):
+    """Serve each PR's head at refs/pull/N/head on the fixture origin, the ref GitHub serves a pull head at. The build reads the live head there."""
+    if not numbers:
+        return
+    seed = git_ok(root, "config", "--get", "remote.origin.url").strip()
+    git_ok(seed, "fetch", "-q", "--no-tags", root, *["+refs/heads/pr-%d:refs/pull/%d/head" % (n, n) for n in numbers])
+
+
+def move_pr(root, number, edits):
+    """A new commit on PR `number`, served as its live head. The queued head stays its ancestor. -> the new head sha."""
+    git_ok(root, "checkout", "-q", "pr-%d" % number)
+    for path, text in edits.items():
+        write(root, path, text)
+    git_ok(root, "add", "-A")
+    git_ok(root, "commit", "-q", "-m", "pr %d moves" % number)
+    publish_pull(root, [number])
+    return git_ok(root, "rev-parse", "HEAD").strip()
+
+
+def build_queue(root, heads):
+    """The queue file: `heads` as one queued batch. Each head is served on the origin, where the build reads the live head."""
+    publish_pull(root, [n for n, _ in heads])
+    return queue_file(heads, [(BUILD_BATCH, "queued", [n for n, _ in heads])])
+
+
+def run_build(root, queue, shims=None):
+    """The tool run with --build --name, in-process. -> run_tool's four values."""
+    return run_tool(queue, root, clock=ticking_clock(), shims=shims, extra=BUILD_ARGS)
+
+
+def left_out_lines(out):
+    """-> {member number: its line} for each `left out #N` line of a run."""
+    found = {}
+    for line in out.splitlines():
+        m = LEFT_OUT.match(line)
+        if m:
+            found[int(m.group(1))] = line.strip()
+    return found
+
+
+def shown(out, err):
+    """The last line a run printed, for a failure message: stdout, else stderr. argparse puts its refusal last."""
+    lines = (out or err or "").strip().splitlines()
+    return lines[-1][:160] if lines else "(no output)"
+
+
+def branch_exists(root, branch):
+    return git(root, "rev-parse", "--verify", "-q", "refs/heads/" + branch)[0] == 0
+
+
+def first_parent_chain(root, branch, base):
+    """-> the merges from `base` up the first parents of `branch`, oldest first, as (sha, first parent, second parent or None).
+    None when `branch` does not exist."""
+    rc, out = git(root, "rev-list", "--first-parent", "--parents", "%s..%s" % (base, branch))
+    if rc:
+        return None
+    rows = [line.split() for line in out.splitlines() if line.strip()]
+    return [(r[0], r[1] if len(r) > 1 else None, r[2] if len(r) > 2 else None) for r in reversed(rows)]
+
+
+def printed_block(out):
+    """-> (begin markers, end markers, block text). The block runs from the printed begin marker to the end marker. It is the freeze block
+    the PR carries, and merge.parse_freeze reads nothing else of a body. The text is None unless the markers make exactly one pair."""
+    lines = [line.rstrip("\r") for line in out.splitlines()]
+    begins = [i for i, line in enumerate(lines) if line == merge.BATCH_BEGIN]
+    ends = [i for i, line in enumerate(lines) if line == merge.BATCH_END]
+    one_pair = len(begins) == 1 and len(ends) == 1 and ends[0] > begins[0]
+    return len(begins), len(ends), "\n".join(lines[begins[0]:ends[0] + 1]) if one_pair else None
 
 
 BATCH_RE = re.compile(r"^\s*batch\s+([^\s:(,]+)", re.I)
@@ -729,6 +828,140 @@ class MergeWrapperOnly(unittest.TestCase):
                         "the dry folds must use merge.merge_tree or merge.conflicting_files, it uses %s" % sorted(used))
         self.assertLessEqual(used, GIT_WRAPPERS,
                              "the tool reaches into merge.py beyond the git wrapper and the one ci-job run: %s" % sorted(used - GIT_WRAPPERS))
+
+
+class BuildControls(unittest.TestCase):
+    """Green on the old code too: the fixtures fold the way the dry run reads them, so a red elsewhere is the build's."""
+
+    def test_control_twelve_member_queue_folds_clean_in_the_dry_run(self):
+        root = make_repo({"README.md": "x\n"}, checks=READY)
+        queue = build_queue(root, add_members(root, TWELVE))
+        rc, out, err, _ci = run_tool(queue, root, clock=ticking_clock())
+        self.assertIn("members in: 12", out, "the dry run does not read 12 members in: %s" % shown(out, err))
+        self.assertIn("members left out: 0", out, "the dry run leaves a member of the clean 12-member fixture out")
+
+    def test_control_clash_with_newest_main_leaves_by_name_in_the_dry_run(self):
+        root = make_repo({"README.md": "x\n", "shared.txt": "line a\n"}, checks=READY)
+        clash = TWELVE[-1]
+        heads = add_members(root, TWELVE[:-1]) + [(clash, add_pr(root, clash, {"shared.txt": "line b\n"}))]
+        queue = build_queue(root, heads)
+        advance_main(root, {"shared.txt": "line c\n"})
+        rc, out, err, _ci = run_tool(queue, root, clock=ticking_clock())
+        self.assertIn(clash, left_out_lines(out), "the dry run does not leave #%d out by name when it clashes with main: %s" % (clash, shown(out, err)))
+
+
+class BuildChain(unittest.TestCase):
+    """Twelve members build a first-parent chain of no-ff merges onto the newest main, in queue order (roadmap step combine-train-build)."""
+
+    def test_twelve_members_build_a_first_parent_chain_of_no_ff_merges(self):
+        root = make_repo({"README.md": "x\n"}, checks=READY)
+        heads = add_members(root, TWELVE)
+        queue = build_queue(root, heads)
+        base = git_ok(root, "rev-parse", "origin/main").strip()
+        rc, out, err, _ci = run_build(root, queue)
+        branch = merge.integration_branch(BUILD_NAME)
+        chain = first_parent_chain(root, branch, base)
+        self.assertIsNotNone(chain, "the build left no %s branch in the root; the run ended with: %s" % (branch, shown(out, err)))
+        self.assertEqual(len(chain), 12, "%s holds %d commits above origin/main, not 12 merges; the run ended with: %s" % (branch, len(chain), shown(out, err)))
+        self.assertTrue(all(p2 for _sha, _p1, p2 in chain), "%s has a commit on its first-parent chain with one parent: not a no-ff merge" % branch)
+        self.assertEqual(chain[0][1], base, "the chain does not start at origin/main: its oldest merge's first parent is another commit")
+        self.assertEqual([p1 for _s, p1, _p2 in chain[1:]], [s for s, _p1, _p2 in chain[:-1]], "the first parents do not chain: a merge does not sit on the one before it")
+        self.assertEqual([p2 for _s, _p1, p2 in chain], [h for _n, h in heads], "the second parents are not the 12 member heads in queue order")
+
+
+class BuildMergeAloneUnderTen(unittest.TestCase):
+    """Under the threshold of 10 ready members the run prints `merge alone` and builds no batch branch (ruling 10:23 CST Nov 20)."""
+
+    def test_nine_members_print_merge_alone_and_build_no_branch(self):
+        root = make_repo({"README.md": "x\n"}, checks=READY)
+        queue = build_queue(root, add_members(root, NINE))
+        rc, out, err, _ci = run_build(root, queue)
+        self.assertTrue(any("merge alone" in line for line in out.splitlines()), "nine members under the threshold of 10 print no 'merge alone' line; the run ended with: %s" % shown(out, err))
+        self.assertFalse(branch_exists(root, merge.integration_branch(BUILD_NAME)), "nine members under the threshold of 10 made a batch branch")
+
+    def test_empty_queue_prints_merge_alone_and_builds_no_branch(self):
+        root = make_repo({"README.md": "x\n"}, checks=READY)
+        queue = build_queue(root, [])
+        rc, out, err, _ci = run_build(root, queue)
+        self.assertTrue(any("merge alone" in line for line in out.splitlines()), "an empty queue prints no 'merge alone' line; the run ended with: %s" % shown(out, err))
+        self.assertFalse(branch_exists(root, merge.integration_branch(BUILD_NAME)), "an empty queue made a batch branch")
+
+
+class BuildLeavesMovedHeadByName(unittest.TestCase):
+    """A member whose live head moved after it was queued leaves by name; the chain keeps the other eleven and neither head of that member."""
+
+    def test_member_whose_live_head_moved_since_folding_leaves_by_name(self):
+        root = make_repo({"README.md": "x\n"}, checks=READY)
+        heads = add_members(root, TWELVE)
+        queue = build_queue(root, heads)
+        moved_number, folded = TWELVE[-1], heads[-1][1]
+        moved = move_pr(root, moved_number, {"f%d.txt" % moved_number: "moved\n"})
+        rc, out, err, _ci = run_build(root, queue)
+        self.assertIn(moved_number, left_out_lines(out), "the build did not leave #%d out by name though its live head moved; the run ended with: %s" % (moved_number, shown(out, err)))
+        base = git_ok(root, "rev-parse", "origin/main").strip()
+        chain = first_parent_chain(root, merge.integration_branch(BUILD_NAME), base)
+        self.assertIsNotNone(chain, "the build left no %s branch in the root, so the other members cannot be checked" % merge.integration_branch(BUILD_NAME))
+        self.assertEqual(len(chain), 11, "the batch holds %d merges, not the 11 members whose heads did not move" % len(chain))
+        seconds = [p2 for _s, _p1, p2 in chain]
+        self.assertNotIn(folded, seconds, "the queued head of #%d is a second parent though its live head moved" % moved_number)
+        self.assertNotIn(moved, seconds, "the moved live head of #%d is a second parent of the batch" % moved_number)
+
+
+class BuildLeavesClashByName(unittest.TestCase):
+    """A member that clashes with the newest main leaves by name with its path. No conflict is fixed by hand: the batch keeps main's text."""
+
+    def test_member_that_clashes_with_newest_main_leaves_by_name_and_no_conflict_is_fixed_by_hand(self):
+        root = make_repo({"README.md": "x\n", "shared.txt": "line a\n"}, checks=READY)
+        clash = TWELVE[-1]
+        heads = add_members(root, TWELVE[:-1]) + [(clash, add_pr(root, clash, {"shared.txt": "line b\n"}))]
+        queue = build_queue(root, heads)
+        newest = advance_main(root, {"shared.txt": "line c\n"})
+        rc, out, err, _ci = run_build(root, queue)
+        left = left_out_lines(out)
+        self.assertIn(clash, left, "the build did not leave #%d out by name though it clashes with the newest main; the run ended with: %s" % (clash, shown(out, err)))
+        self.assertIn("shared.txt", left[clash], "the left-out line of #%d does not name its conflicting path: %r" % (clash, left[clash]))
+        branch = merge.integration_branch(BUILD_NAME)
+        chain = first_parent_chain(root, branch, newest)
+        self.assertIsNotNone(chain, "the build left no %s branch in the root, so no clash can be checked" % branch)
+        self.assertEqual(len(chain), 11, "the batch holds %d merges, not the 11 members that clash with nothing" % len(chain))
+        self.assertNotIn(heads[-1][1], [p2 for _s, _p1, p2 in chain], "the clashing head of #%d is a second parent of the batch" % clash)
+        self.assertEqual(git_ok(root, "show", "%s:shared.txt" % branch), "line c\n", "shared.txt on the batch is not the newest main's text: a conflict was fixed by hand, or the clash went in")
+
+
+class BuildMakesNoPush(unittest.TestCase):
+    """The build pushes nothing and opens, readies and merges no pull request: the git and gh shims log every call."""
+
+    def test_build_makes_no_git_push_and_no_gh_pr_create_ready_or_merge_call(self):
+        root = make_repo({"README.md": "x\n"}, checks=READY)
+        heads = add_members(root, TWELVE)
+        queue = build_queue(root, heads)
+        base = git_ok(root, "rev-parse", "origin/main").strip()
+        shims, shim_log = write_shims()
+        run_build(root, queue, shims=shims)
+        self.assertIsNotNone(first_parent_chain(root, merge.integration_branch(BUILD_NAME), base), "the build made no batch branch, so the push check below proves nothing")
+        shim = calls(shim_log)
+        git_calls = [c[1:] for c in shim if c[0] == "git"]
+        gh_calls = [c[1:] for c in shim if c[0] == "gh"]
+        self.assertEqual([a for a in git_calls if "push" in a], [], "the build ran git push")
+        self.assertEqual([a for a in gh_calls if a[:2] in (["pr", "create"], ["pr", "ready"], ["pr", "merge"])], [], "the build ran gh pr create, ready or merge")
+
+
+class BuildPrintsFreezeBlock(unittest.TestCase):
+    """The printed body is the freeze block: it reads back through merge.parse_freeze and is an integration PR of its batch (ruling own-811-c-marker-line)."""
+
+    def test_printed_freeze_block_round_trips_through_parse_freeze_and_is_integration_pr(self):
+        root = make_repo({"README.md": "x\n"}, checks=READY)
+        heads = add_members(root, TWELVE)
+        queue = build_queue(root, heads)
+        rc, out, err, _ci = run_build(root, queue)
+        begins, ends, body = printed_block(out)
+        self.assertEqual((begins, ends), (1, 1), "the build printed %d begin and %d end markers, not one pair; the run ended with: %s" % (begins, ends, shown(out, err)))
+        self.assertIsNotNone(body, "the printed freeze block does not run from its begin marker to its end marker")
+        block = merge.parse_freeze(body)
+        self.assertEqual(block["name"], BUILD_NAME, "parse_freeze reads the batch name as %r, not %r" % (block["name"], BUILD_NAME))
+        self.assertEqual(block["lanes"], dict(heads), "parse_freeze reads the lanes as %r, not the 12 member heads" % (block["lanes"],))
+        branch = merge.integration_branch(BUILD_NAME)
+        self.assertTrue(merge.is_integration_pr({"branch": branch, "body": body}), "is_integration_pr says the printed body is not an integration PR of %s" % branch)
 
 
 if __name__ == "__main__":
