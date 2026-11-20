@@ -13165,17 +13165,58 @@ class RedMainBrake(Env):
         self.assertEqual(rc, 0, out)
         self.assertTrue(getattr(self.host, "merged", False), out)
 
-    # Oct 13-14: the latest main run has one failed job among passes, and a job cancelled at its cap.
-    OCT14 = {901: [main_job("scope", "success"), main_job("checks", "failure", 20), main_job("checks-macos", "cancelled", 30)]}
+    # Ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): a PR may merge onto a red main, and the merge tool prints main's red checks and their
+    # failing tests on each merge. The helpers below replace the refusal this class used to assert for a red verdict.
+    def merged_onto_red(self, rc, out, *names):
+        """A PR merges onto a red main (ruling Q5 v). One printed line names every one of `names`, when given."""
+        self.assertEqual(rc, 0, "a PR was refused on a red main, and ruling Q5 v lets it merge:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), "the merge call was not sent:\n" + out)
+        self.assertNotIn("No batch merges onto a red main", out, "the red main still refuses the merge")
+        if names:
+            self.assertTrue(any(all(n in line for n in names) for line in out.splitlines()),
+                            f"no one printed line names {', '.join(names)}:\n{out}")
 
-    def test_a_red_main_refuses_and_names_the_red_job_and_the_run(self):
-        rc, out, before = self.go([main_run(901, "failure")], self.OCT14)
-        self.refused(rc, out, before)
-        self.assertIn("checks: fail", out)
-        self.assertIn("run 901", out)
-        self.assertIn("https://github.com/o/r/actions/runs/901", out)
+    def refused_by_head(self, rc, out, before):
+        """A PR whose own checks are not green is refused by its head, never by the red main (ruling Q5 v)."""
+        RedMainBrake.refused(self, rc, out, before)
+        self.assertNotIn("No batch merges onto a red main", out, "the red main refused a PR whose own head is not green")
+
+    def red_detail(self):
+        """The detail of main's red verdict, as base_verdict reads it on this case's host: the blamed run, its pull request, and the walk's stops."""
+        verdict, detail = merge.base_verdict(self.co, self.host, "main")
+        self.assertEqual(verdict, "red", detail)
+        return detail
+
+    # Ruling Q5 v. An ordinary PR (no revert, no fix) with green checks merges onto a red main, and the one line the merge prints names main's red
+    # check and the failing test that the red job's log names. The breaking merge is lane 2650's; the PR touches notes.txt, which it did not change.
+    def test_an_ordinary_pr_with_green_checks_merges_onto_a_red_main(self):
+        """Ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): a PR may merge onto a red main. This PR is no revert and no fix."""
+        _, runs, jobs, logs = self.red_main_with_flaky_test()
+        rc, out, _ = self.go(runs, jobs, job_logs=logs, changed=[("notes.txt", "added", 1)])
+        self.merged_onto_red(rc, out)
+
+    def test_a_merge_onto_a_red_main_prints_one_line_naming_the_red_check_and_its_failing_test(self):
+        """Ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): the merge prints main's red check names and the failing test names read from the red job's log, in one line."""
+        _, runs, jobs, logs = self.red_main_with_flaky_test()
+        _rc, out, _ = self.go(runs, jobs, job_logs=logs, changed=[("notes.txt", "added", 1)])
+        self.assertTrue(any(all(n in line for n in ("checks", "tests/test_flaky.py", "test_once")) for line in out.splitlines()),
+                        "no one printed line names the red check `checks` and its failing test tests/test_flaky.py::FlakyTest::test_once:\n" + out)
+
+    def test_a_merge_onto_a_green_main_prints_no_red_line(self):
+        """Ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): control. A green main has no red line, so the merge prints no failing test name."""
+        rc, out, _ = self.go([main_run(908, "success")], {908: self.RAN_PUSH}, job_logs={self.FLAKY_JOB: self.FLAKY_LOG})
+        self.merged(rc, out)
+        self.assertNotIn("No batch merges onto a red main", out)
+        self.assertFalse(any("tests/test_flaky.py" in line for line in out.splitlines()), "a green main prints a failing test name:\n" + out)
+
+    # Oct 13-14: the latest main run has one failed job among passes, and a job cancelled at its cap.
+    OCT14 ={901: [main_job("scope", "success"), main_job("checks", "failure", 20), main_job("checks-macos", "cancelled", 30)]}
+
+    def test_a_red_main_merges_an_ordinary_pr_and_names_the_red_job(self):
+        """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): a PR may merge onto a red main. It was a refusal."""
+        rc, out, _ = self.go([main_run(901, "failure")], self.OCT14)
+        self.merged_onto_red(rc, out, "checks")
         self.assertNotIn("checks-macos", out, "a job cancelled at its cap is not a red step")
-        self.assertIn("--base-red-ok", out)
 
     def test_a_main_run_red_only_by_a_timeout_does_not_refuse(self):
         jobs = {902: [main_job("scope", "success"), main_job("checks", "success", 20), main_job("checks-macos", "cancelled", 30)]}
@@ -13243,8 +13284,7 @@ class RedMainBrake(Env):
         for variant, n_jobs in variants.items():
             with self.subTest(variant=variant):
                 rc, out, before = self.go(*self.incident(n_jobs=n_jobs))
-                self.refused(rc, out, before)
-                self.assertIn(f"run {self.INC_R} of checks", out)
+                self.refused(rc, out, before)  # unknown, not red: a cancelled run with no red job stays refused
 
     def test_a_cancelled_run_is_not_cleared_while_the_newer_run_of_another_group_is_still_going(self):
         rc, out, before = self.go(*self.incident(n_status="in_progress"))
@@ -13259,11 +13299,10 @@ class RedMainBrake(Env):
         self.assertIn(f"run {self.INC_R} of checks", out)
 
     def test_a_cancelled_run_with_a_red_job_is_refused_naming_it_when_no_run_covers_it(self):
+        """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): a PR may merge onto a red main. It was a refusal."""
         r_jobs = [main_job("scope", "success"), main_job("checks", "failure", 20), main_job("checks-macos", "success")]
         rc, out, before = self.go(*self.incident(r_jobs=r_jobs, n_jobs=[j for j in self.N_JOBS if j["name"] != "checks"]))
-        self.refused(rc, out, before)
-        self.assertIn("checks: fail", out)
-        self.assertIn(f"run {self.INC_R} of checks", out)
+        self.merged_onto_red(rc, out, "checks")  # re-pointed by ruling Q5 v (owner, 10:42 CST Nov 20, 2026): a red PR may merge onto a red main
 
     def test_a_covering_run_that_lacks_a_job_the_cancelled_run_skipped_does_not_clear_it(self):
         rc, out, before = self.go(*self.incident(n_jobs=[j for j in self.N_JOBS if j["name"] != "ci-done"]))
@@ -13280,13 +13319,12 @@ class RedMainBrake(Env):
         self.assertIn(f"run {self.INC_R} of checks", out)
 
     def test_a_failed_run_with_no_judged_job_is_red(self):
+        """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): a PR may merge onto a red main. It was a refusal."""
         # a broken workflow file: startup_failure and no job; or failure with every job passing
         for conclusion, jobs in (("startup_failure", []), ("failure", [main_job("checks", "success", 20)])):
             with self.subTest(conclusion=conclusion, jobs=len(jobs)):
                 rc, out, before = self.go([main_run(913, conclusion)], {913: jobs})
-                self.refused(rc, out, before)
-                self.assertIn("run 913", out)
-                self.assertIn(conclusion, out)
+                self.merged_onto_red(rc, out)  # re-pointed by ruling Q5 v (owner, 10:42 CST Nov 20, 2026): a red run no longer refuses a PR
 
     def test_a_run_of_a_workflow_file_gone_from_main_is_not_judged(self):
         # a renamed or deleted workflow: its last red run stays in the page, but no new run will ever replace it
