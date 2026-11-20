@@ -64,7 +64,7 @@ Each open PR gets exactly one next act. The tool reads it from GitHub alone. The
 - Review log stale, newest record has a PASS Fix check, and the live head is a conflicted merge of main into the fixed head: one more fix verifier (decision pr-review-record). Its prior record must be a PASS that `review_state` accepts. Not built.
 - Review log stale, in any other case: the fresh full review at the live head, as decision pr-review-record (The review a changed head owes) sets it.
 - Label `held`, `parked` or `replaced`, with a `Waits on: debt:<slug>` or `Waits on: page:<item id>` comment line: `waits on` that debt or item. With no valid `Waits on:` line, the label holds nothing: no next act, shown red, even on a draft (lane pick, 12:13 CST Nov 12). This check runs after the stacked rule.
-- Label `batch` on an integration PR: `batch run`. It counts against the batch limit, aged from the label's last `labeled` event. Until the cutover only; after it, no integration PR exists and this rule goes.
+- Label `batch` on an integration PR: `batch run`. It counts against the batch limit, aged from the label's last `labeled` event. Until the cutover only, as written. After it, an integration PR still forms when the situation calls for one (decision `session-tiers`, the owner's 10:23 CST Nov 20 ruling), so whether this rule goes is open.
 - The PR's base ref names an open PR's head branch (#N): blocked on #N. A `Based on #N` body line does not stack (coordinator pick, 12:01 CST Nov 12, from review round 1).
 - Draft with no record: `lane round 1`.
 - None of these: no next act, shown red.
