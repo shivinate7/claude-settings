@@ -5104,10 +5104,10 @@ class LintCheckReviewed(tm.ReviewEnv):
     the pull request not done, and name `merge --lane-lint 7`. The lint comments come from the one comment list read the records use (decision
     pr-review-record, the cost)."""
 
-    def listing(self, comments, head=tm.REVIEW_HEAD):
-        """-> (rc, stdout and stderr, host) of `merge --reviewed` for pull request 7 at `head`: one done review record, then `comments`."""
+    def listing(self, comments, head=tm.REVIEW_HEAD, draft=False):
+        """-> (rc, stdout and stderr, host) of `merge --reviewed` for pull request 7 at `head`: one done review record, then `comments`. `draft` marks pull request 7 as a draft."""
         record = tm.review_comment(1, 7, tm.record_text(rounds=tm.REVIEW_PASS))
-        host = tm.PullsHost([tm.batch_pull(7, head)], {}, comments=[record, *comments])
+        host = tm.PullsHost([tm.batch_pull(7, head, draft=draft)], {}, comments=[record, *comments])
         rc, out, err = self.run_args("--reviewed", host=host)
         return rc, out + err, host
 
@@ -5148,6 +5148,18 @@ class LintCheckReviewed(tm.ReviewEnv):
         rc, out, host = self.listing([lint_comment(2, tm.REVIEW_HEAD, by=NOT_OWNER)])
         self.assertEqual(rc, 0, out)
         self.assert_not_ready(out)
+
+    def test_a_reviewed_draft_with_no_lint_pass_reads_ready_with_merge_ready_as_its_next_act(self):
+        rc, out, host = self.listing([], draft=True)
+        self.assertEqual(rc, 0, out)
+        line = tm.list_line(self, out, 7)
+        self.assertRegex(line, rf"^#7 feat7 {tm.REVIEW_HEAD[:9]} ready: ", "a reviewed draft with no lint PASS does not read ready:\n" + out)
+        self.assertIn("next: merge --ready", line, "a reviewed draft with no lint PASS names no `merge --ready` as its next act:\n" + out)
+
+    def test_a_reviewed_draft_with_no_lint_pass_names_no_lane_lint_before_ready(self):
+        rc, out, host = self.listing([], draft=True)
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("merge --lane-lint 7", out, "a reviewed draft with no lint PASS is told to lint before it goes ready, though `merge --ready` reads no lint:\n" + out)
 
 
 class LintCheckJoin(tm.CloudSession):
