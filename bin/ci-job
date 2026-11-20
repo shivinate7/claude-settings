@@ -116,7 +116,7 @@
 # the summary and each CI step's `start: <name>` line on stderr (before it runs, so a caller sees which CI step is running)
 # are one print.
 # Rerun cache: a step that passed is saved under its name, its script, the whole environment it runs with (VOLATILE_ENV aside), shell, directory, base
-# commit, the HEAD commit (an amend with the same tree misses; the checkout's path is not keyed, so the same commit in another worktree hits), a hash
+# commit, the pushed head (CI_JOB_HEAD_SHA, else HEAD) and HEAD's parents and message (an amend with a new message misses; a new lane lint merge of one pushed head hits; the checkout's path is not keyed, so the same commit in another worktree hits), a hash
 # of the tree it tests as it stands when the step starts (the committed files plus uncommitted and untracked ones, minus ignored ones, so a step that
 # follows a writing step keys on what that step wrote) and a hash of the bin/, hooks/ and lint/ trees of this install plus, in this install and the
 # pointer checkout, the actions/ tree and the files bin/ste-changed names in LINT_FILES (never __pycache__ or .pyc). A rerun at the same key runs no
@@ -765,11 +765,15 @@ def cache_key(name, install, detail, shell, env, cwd, ctx, suite):
     top, base, values, pinned = ctx
     if install or os.environ.get("CI_JOB_NO_CACHE") or not detail:
         return None
-    tree, tool, head = tree_key(top), tool_key(), git("rev-parse", "HEAD", cwd=top)  # the commit too: a step may read its message, which an amend changes under one tree
-    if tree is None or tool is None or not head:
+    # The commit, as the pushed head plus HEAD's parents and message, never HEAD's own sha: the lane lint makes a new merge commit of one
+    # pushed head on each run, and its sha would never repeat. A step may read the message, which an amend changes under one tree, and HEAD's committer date
+    # (lint/check_hook_stubs.py ends its window there); the key holds the message and not the date, because a new lint merge of one pushed head has a new date.
+    tree, tool, commit = tree_key(top), tool_key(), git("show", "-s", "--format=%P%n%B", "HEAD", cwd=top)
+    head = values.get("github.event.pull_request.head.sha", "")
+    if tree is None or tool is None or not commit or not head:
         return None
     parts = [name, detail, shell[0], cwd or "", str(bool(suite)), str(bool(pinned)), values.get("base", ""),
-             values.get("github.event.pull_request.base.sha", ""), head, tree, tool,
+             values.get("github.event.pull_request.base.sha", ""), head, commit, tree, tool,
              *("%s=%s" % kv for kv in sorted(child_env(env, base, values).items()) if kv[0] not in VOLATILE_ENV)]
     return hashlib.sha256("\0".join(parts).encode("utf-8", "replace")).hexdigest()
 
