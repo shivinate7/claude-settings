@@ -3,7 +3,7 @@ FAMILY = "compaction-audit"
 # The audit owes one Audit: spawn. The load brake refuses that spawn at a full disk (free under the smaller of 5% of the
 # disk and 5 GB), so a session on a full disk could neither spawn the audit nor run the shell call that frees the disk:
 # a deadlock. These cases hold the exemption: while the audit is owed
-# AND the brake refuses the audit spawn for disk, compaction-audit lets through one disk-cleanup shell call (the janitor
+# AND the brake refuses the audit spawn for disk, compaction-audit lets through each disk-cleanup shell call (the janitor
 # sweep, or rm -rf of an absolute /tmp path). Every other shell call stays refused. The cleanup clears nothing: the audit
 # stays owed. A disk that is not full, or memory that is full, changes nothing: a sweep frees disk, not memory.
 # The helpers are the compaction-audit ones of section 43700 (ca_copy, ca_config, ca_owed, ca_env) and the load-brake
@@ -28,6 +28,15 @@ CD_RM_DOLLAR = "rm -rf /tmp/claude-disk-cleanup/$RUN"
 CD_RM_GLOB = "rm -rf /tmp/*"
 CD_RM_TILDE = "rm -rf /tmp/~/claude-disk-cleanup"
 CD_RM_DOTDOT = "rm -rf /tmp/../home/user/keep-me"
+# Pipes, redirects, substitution and a newline. A joined | or > makes one word, so only the character set refuses it.
+# A spaced | or 2>&1 makes its own word, which the /tmp path check refuses too.
+CD_RM_PIPE_SPACED = "rm -rf /tmp/a | sh"
+CD_RM_PIPE = "rm -rf /tmp/a|sh"
+CD_RM_REDIRECT = "rm -rf /tmp/a>/home/user/.bashrc"
+CD_RM_FD_REDIRECT = "rm -rf /tmp/a 2>&1"
+CD_RM_BACKTICK = "rm -rf /tmp/claude-disk-cleanup/`echo run-1`"
+CD_RM_SUBST = "rm -rf $(echo /tmp/a)"
+CD_RM_NEWLINE = "rm -rf /tmp/claude-disk-cleanup/run-1\nrm -rf /tmp/claude-disk-cleanup/run-2"
 CD_ORDINARY = "echo hi"
 # The readings. The brake's floors: busy under the smaller of 10% of the disk and 15 GB, full under the smaller of 5%
 # and 5 GB. CD_FULL is a full disk. CD_BUSY is under the busy floor, over the full one.
@@ -215,6 +224,20 @@ CD_CHECKS = (
      lambda: cd_refused_check("disk-rm-tilde", CD_FULL, "disk", CD_RM_TILDE, "rmtilde")),
     ("compaction-audit: an owed audit with a full disk refuses an rm -rf of a path that climbs out with ..",
      lambda: cd_refused_check("disk-rm-dotdot", CD_FULL, "disk", CD_RM_DOTDOT, "rmdotdot")),
+    ("compaction-audit: an owed audit with a full disk refuses an rm -rf of a /tmp path piped to sh, with spaces around |",
+     lambda: cd_refused_check("disk-rm-pipe-spaced", CD_FULL, "disk", CD_RM_PIPE_SPACED, "rmpipesp")),
+    ("compaction-audit: an owed audit with a full disk refuses an rm -rf of a /tmp path piped to sh, with no spaces",
+     lambda: cd_refused_check("disk-rm-pipe", CD_FULL, "disk", CD_RM_PIPE, "rmpipe")),
+    ("compaction-audit: an owed audit with a full disk refuses an rm -rf of a /tmp path redirected to a file outside /tmp",
+     lambda: cd_refused_check("disk-rm-redirect", CD_FULL, "disk", CD_RM_REDIRECT, "rmredir")),
+    ("compaction-audit: an owed audit with a full disk refuses an rm -rf of a /tmp path with 2>&1 after it",
+     lambda: cd_refused_check("disk-rm-fd", CD_FULL, "disk", CD_RM_FD_REDIRECT, "rmfd")),
+    ("compaction-audit: an owed audit with a full disk refuses an rm -rf whose path holds a backtick command",
+     lambda: cd_refused_check("disk-rm-backtick", CD_FULL, "disk", CD_RM_BACKTICK, "rmbacktick")),
+    ("compaction-audit: an owed audit with a full disk refuses an rm -rf whose path holds a $( ) substitution",
+     lambda: cd_refused_check("disk-rm-subst", CD_FULL, "disk", CD_RM_SUBST, "rmsubst")),
+    ("compaction-audit: an owed audit with a full disk refuses two rm -rf calls split by a newline",
+     lambda: cd_refused_check("disk-rm-newline", CD_FULL, "disk", CD_RM_NEWLINE, "rmnewline")),
     ("compaction-audit: an owed audit with a disk that is busy but not full refuses the sweep (the spawn passes busy)",
      lambda: cd_refused_check("disk-busy", CD_BUSY, "pass", CD_SWEEP, "busy")),
     ("compaction-audit: an owed audit with a fine disk refuses the sweep, so nothing changes",
