@@ -36,7 +36,7 @@ A touched path selects:
 Each selected test then lands in one of these places, each printed with its reason, none dropped silently:
   HEAVY           the batch shards it in its own jobs; running it per lane push is a cost blow-up
                   A touched HEAVY .py suite is read with `ast` first, and the job exits 1 when it uses a POSIX_ONLY name outside a guard
-                  that excludes Windows (see posix_offences). No lane run reaches a HEAVY suite on Windows, so this is its only read.
+                  that excludes Windows, on a line the change adds (see posix_offences). No lane run reaches a HEAVY suite on Windows, so this is its only read.
   NEEDS_SETUP     needs a browser or a tool this workflow does not install, or runs on one OS only
   per OS          listed for an OS when a job of checks.yml at HEAD runs on that OS and names it (see os_runs);
                   skipped on each other OS, and on both with "no CI job runs it" when no Windows or macOS job names it
@@ -227,17 +227,28 @@ def skip_decorator_excuses(decorator):
     return on_windows(decorator.args[0]) is (name == "skipIf")
 
 
-def posix_offences(path, source):
+def posix_offences(path, source, added=None):
     """One `path:line: message` string for each POSIX_ONLY name that `source` uses outside a guard that excludes Windows, and
     one for a source that cannot be parsed (unknown is red, not skip). A guard is a def or class under skipIf or skipUnless
     that skips Windows, an `if` body whose condition is false on Windows, or the else arm of an `if` whose condition is true
     on Windows. A guard covers everything nested in it. The source is read with `ast`, so a name in a comment or a string
-    counts for nothing."""
+    counts for nothing. A name is `os.killpg`, `from os import killpg` (the import line is the offence: on Windows the import
+    itself raises) or `s.SIGHUP` under `import signal as s`. With `added` (a set of line numbers), only a name on such a line
+    counts: a call already on the base is an existing offence, and this change does not own it."""
     try:
         tree = ast.parse(source, filename=path)
     except (SyntaxError, ValueError) as e:
         return [f"{path}:{getattr(e, 'lineno', None) or 1}: cannot parse this heavy suite, so its POSIX-only calls are unread ({e})"]
     found = []
+    modules = {m: m for m in POSIX_ONLY}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update({a.asname: a.name for a in node.names if a.asname and a.name in POSIX_ONLY})
+
+    def hit(line, name):
+        if added is None or line in added:
+            found.append(f"{path}:{line}: {name} is POSIX-only and has no guard that excludes Windows "
+                         "(skipIf on os.name == 'nt', skipUnless on os.name != 'nt', or an if on os.name or sys.platform)")
 
     def walk(node, guarded):
         if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -251,9 +262,13 @@ def posix_offences(path, source):
                 walk(child, guarded or verdict is True)
             return
         if not guarded and isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
-            if node.attr in POSIX_ONLY.get(node.value.id, ()):
-                found.append(f"{path}:{node.lineno}: {node.value.id}.{node.attr} is POSIX-only and has no guard that excludes Windows "
-                             "(skipIf on os.name == 'nt', skipUnless on os.name != 'nt', or an if on os.name or sys.platform)")
+            module = modules.get(node.value.id)
+            if module and node.attr in POSIX_ONLY[module]:
+                hit(node.lineno, f"{module}.{node.attr}")
+        if not guarded and isinstance(node, ast.ImportFrom) and node.level == 0:
+            for alias in node.names:
+                if alias.name in POSIX_ONLY.get(node.module, ()):
+                    hit(node.lineno, f"{node.module}.{alias.name}")
         for child in ast.iter_child_nodes(node):
             walk(child, guarded)
 
@@ -261,11 +276,21 @@ def posix_offences(path, source):
     return found
 
 
-def heavy_offences(test):
-    """posix_offences() of the touched HEAVY .py suite `test`, read from the checkout. An unreadable file is an offence."""
+def added_lines(base, path):
+    """The set of line numbers the change from `base` to HEAD adds or rewrites in `path`, from the zero-context diff hunks."""
+    added = set()
+    for start, count in re.findall(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", git("diff", "-U0", "--no-renames", f"{base}...HEAD", "--", path),
+                                   re.MULTILINE):
+        added.update(range(int(start), int(start) + (1 if count == "" else int(count))))
+    return added
+
+
+def heavy_offences(test, base):
+    """posix_offences() of the touched HEAVY .py suite `test`, read from the checkout, for the lines the change from `base` adds.
+    An unreadable file is an offence."""
     try:
         with open(test, "rb") as f:
-            return posix_offences(test, f.read())
+            return posix_offences(test, f.read(), added_lines(base, test))
     except OSError as e:
         return [f"{test}:1: cannot read this heavy suite, so its POSIX-only calls are unread ({e})"]
 
@@ -634,7 +659,7 @@ def main():
     for test in sorted(selected):
         why = reason(test, HEAVY) or reason(test, NEEDS_SETUP)
         if reason(test, HEAVY) and test.endswith(".py") and test in touched:
-            offences += heavy_offences(test)
+            offences += heavy_offences(test, base)
         if why:
             print(f"skip {test}: {why}")
             continue
