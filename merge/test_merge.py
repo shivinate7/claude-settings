@@ -13963,7 +13963,9 @@ class RedMainBrake(Env):
                       "the preview says confirm merges onto the red main, but confirm refuses it beside the cancelled run:\n" + out)
         rc, out, before = self.go(runs, jobs, pulls=pulls)
         self.refused_by_red_main(rc, out, before)
-        self.assertIn("UNKNOWN", out, "confirm refuses the red base, but does not call it UNKNOWN")
+        # the template prints UNKNOWN on every refusal, so the cancelled run's own headline and its base-head remedy are what show this base's cause
+        self.assertIn("was cancelled with no red job", out, "confirm refuses the red base beside a cancelled run, but does not name that run as cancelled with no red job")
+        self.assertIn("gh run rerun 905", out, "confirm refuses the red base beside a cancelled run on the base's head, but does not name its re-run")
 
     # Pins: these pass on the code as it is. The red run gets no re-run remedy, a re-run still going keeps its wait, and a re-run that
     # passes reads green. Each is the green control beside the red cases above.
@@ -14733,6 +14735,41 @@ class RedMainBrake(Env):
         runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)])
         rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)}, heads={R: "unknown (HTTP 500: Internal Server Error)"})
         self.merged_onto_red(rc, out, "checks")
+
+    def cancelled_beside_failed_revert_read(self):
+        """The red base of a proven revert, with cancelled schedule run 905 on main's head beside the red, and the revert's check read failing.
+        Decision no-merge-onto-red-main, R4: a failed read is unknown. -> (runs, jobs, pulls, heads) as `go` takes them."""
+        B, A, R, M = self.land_proven_revert()
+        sched = main_run(905, "cancelled", sha=M, event="schedule")
+        runs, jobs = self.breaking_page(B, A, top=[(sched, [main_job("scope", "success"), main_job("checks", "cancelled", 2)]), self.merge_run_of(904, M, 2651)])
+        pulls, heads = {2651: self.revert_pull(2651, R)}, {R: "unknown (HTTP 500: Internal Server Error)"}
+        # scope first: the base is red with a cancelled run beside it, and the revert's own check read is the one that fails
+        self.host = MainRunsHost(self.co, self.other, runs, jobs, pulls=pulls, heads=heads)
+        self.red_detail()
+        self.assertTrue(self.host.base_facts["others"], "the fixture has no cancelled run beside the red")
+        self.assertTrue(self.host.head_state(2651, sha=R).startswith("unknown"), "the fixture's revert check read does not fail")
+        return runs, jobs, pulls, heads
+
+    def test_a_failed_revert_check_read_beside_a_cancelled_run_refuses_the_red_main_merge(self):
+        """Decision no-merge-onto-red-main, R4: a failed read is unknown, and unknown refuses. The revert of the breaking merge would lift the red,
+        but its check read fails beside a cancelled run, so main is UNKNOWN for this merge and confirm refuses it."""
+        runs, jobs, pulls, heads = self.cancelled_beside_failed_revert_read()
+        rc, out, before = self.go(runs, jobs, pulls=pulls, heads=heads)
+        self.assertEqual(rc, 1, "the merge went onto the red main beside a cancelled run whose revert check read failed. A failed read is unknown and refuses "
+                                "(decision no-merge-onto-red-main, R4)\n" + out)
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 905", out, "the refusal does not name the cancelled run beside the red:\n" + out)
+
+    def test_base_red_ok_is_the_way_through_a_failed_revert_check_read_beside_a_cancelled_run(self):
+        """Decision no-merge-onto-red-main: --base-red-ok "<reason>" lifts an UNKNOWN read, and that is the way through it. The lift is written
+        into the merge commit message as a Reason flag line."""
+        runs, jobs, pulls, heads = self.cancelled_beside_failed_revert_read()
+        reason = "revert check read failed; checked by hand"
+        rc, out, before = self.go(runs, jobs, "--base-red-ok", reason, pulls=pulls, heads=heads)
+        self.merged(rc, out)
+        lines = (getattr(self.host, "commit_message", None) or "").splitlines()
+        self.assertIn(f"Reason flag: --base-red-ok: {reason}", lines,
+                      "--base-red-ok lifted nothing: the failed revert check read was taken as a known red, so no lift reaches the merge commit")
 
     def test_a_revert_of_the_revert_merges_even_with_its_tree_proven(self):
         """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): a PR may merge onto a red main; a revert of a revert does not refuse it."""
