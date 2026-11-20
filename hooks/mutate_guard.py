@@ -3381,7 +3381,7 @@ MUTATIONS = [
      '        sid = payload.get("session_id")\n'
      '        if not sid or not isinstance(sid, str) or not os.path.isfile(ph.audit_flag_path(sid)):',
      "audit", "a Bash call whose payload carries agent_id is allowed"),
-    # ---- compaction-audit disk cleanup (tests/guard/s43720-compaction-audit-disk.py). Its cases are LOG_CHECKS of
+    # ---- compaction-audit disk cleanup (tests/guard/s43721-compaction-audit-disk.py). Its cases are LOG_CHECKS of
     # test_guard.py, not of test_handoff_wave2.py, so these two rows name target "guard".
     ("compaction-audit: a disk cleanup passes whatever the load brake refuses for, memory included",
      '    return "disk" in matched',
