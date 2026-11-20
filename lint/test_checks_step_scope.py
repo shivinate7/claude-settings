@@ -125,7 +125,6 @@ NO_MD = [
     'Waiting page question source suite',
     'Artifact cite fixture suite',
     'Roadmap builder fixture suite',
-    'Layout readers hold no record path',
     'Shared resource declaration fixture suite',
     'Shared resource declaration check',
     'iPhone mockup check fixture suite',
@@ -179,6 +178,7 @@ MUST_STAY_UNSCOPED = [
     'Record stamp engine fixture suite',  # not audited: a multi-line, node or bash run that the in-process audit hook could not watch (fail safe)
     'Scanner trap lint',  # not audited: a multi-line, node or bash run that the in-process audit hook could not watch (fail safe)
     'Record stamp action fixture suite',  # not audited: a multi-line, node or bash run that the in-process audit hook could not watch (fail safe)
+    'Layout readers hold no record path',  # reads two tracked .md files at run time (check_layout.py), so a docs-only pull request must run it
 ]
 
 # The doc steps. Each reads the doc groups listed (ci-scope.sh's doc_<group> flags), so its `if:` is the scope condition of those

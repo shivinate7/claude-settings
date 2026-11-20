@@ -534,7 +534,6 @@ jobs:
         run: python3 lint/check_artifact_cites.py --steps list
 
       - name: Layout readers hold no record path
-        if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/check_layout.py
 
       - name: Shared resource declaration fixture suite
