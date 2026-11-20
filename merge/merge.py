@@ -3262,7 +3262,7 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
         stop = "\n".join([f"the cross-measure of {head[:9]} is unknown, not a pass:", *unknown, "Run again. " + LANE_LINT_REMEDY])
     return fails, reports, stop
 
-def ci_job_run(wt, *args, notes=None, raw=None, head_sha=None, pr_body=None):
+def ci_job_run(wt, *args, notes=None, raw=None, head_sha=None, pr_body=None, script=None):
     """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     -> (state, lines, log, liftable). state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
@@ -3274,14 +3274,15 @@ def ci_job_run(wt, *args, notes=None, raw=None, head_sha=None, pr_body=None):
     head_sha: the pushed head, given to ci-job as CI_JOB_HEAD_SHA when the HEAD of `wt` is not that head (lane_lint's merge commit). With none, ci-job
     reads HEAD, and an inherited CI_JOB_HEAD_SHA is dropped, so it never names another tree's head.
     pr_body: the description of the pull request being linted, given to ci-job as PR_BODY, which the aligned probe reads (a record and its rules move together)
-    when it has no event file. "" is a body that is present and empty. With none, an inherited PR_BODY is dropped, so it never names another PR's body."""
+    when it has no event file. "" is a body that is present and empty. With none, an inherited PR_BODY is dropped, so it never names another PR's body.
+    script: the ci-job file to run; with none, CI_JOB, the tool's own copy. lane_lint passes the head's bin/ci-job to run a lane's own copy of the tool."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_") and k not in (CI_JOB_HEAD_SHA_ENV, PR_BODY_ENV)}  # as the merge's own lint run reads it
     if head_sha:
         env[CI_JOB_HEAD_SHA_ENV] = head_sha
     if pr_body is not None:
         env[PR_BODY_ENV] = pr_body
     try:
-        c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
+        c, out = sh([sys.executable, script or CI_JOB, *args], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
     except subprocess.TimeoutExpired:
         return "unknown", [f"ci-job did not finish in {LINT_SECONDS} s"], [], False
     lines = out.splitlines()
@@ -3299,6 +3300,50 @@ def ci_job_run(wt, *args, notes=None, raw=None, head_sha=None, pr_body=None):
     return "unknown", [f"ci-job exited {c}"], log, False
 
 LINT_JOB = "checks"  # the one job `merge --lane-lint` runs through ci_job_run
+HEAD_COPY_JOB = LINT_JOB + " (head copy of bin/ci-job)"  # the saved-PASS label of the head's own ci-job: the tool copy's saved PASS (LINT_JOB) never stands for it
+CI_JOB_REL = "bin/ci-job"
+LANE_MERGE_TOOL_FILES = (CI_JOB_REL, "merge/merge.py")  # the files that make a base the repo that carries the tool (LANE_MERGE_REPO); a ref or commit target reads no repo name
+
+def ci_job_import_paths():
+    """The tool-tree paths of what bin/ci-job imports directly, read at run time from the tool's own copy with ast, so a new import needs no edit here:
+    `<folder>/<module>.py` for a module and `<folder>/<package>/` for a package, in each folder of TOOL_TREE_FOLDERS. A name found in none (the standard library)
+    adds nothing. Raises OSError when the file cannot be read or parsed."""
+    path = os.path.join(TOOL_ROOT, *CI_JOB_REL.split("/"))
+    try:
+        with open(path, encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+    except (SyntaxError, ValueError) as e:
+        raise OSError(f"{path} cannot be parsed: {e}")
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names.add(node.module.split(".")[0])
+    found = []
+    for name in sorted(names):
+        for folder in TOOL_TREE_FOLDERS:
+            if os.path.isfile(os.path.join(TOOL_ROOT, folder, name + ".py")):
+                found.append(f"{folder}/{name}.py")
+            elif os.path.isdir(os.path.join(TOOL_ROOT, folder, name)):
+                found.append(f"{folder}/{name}/")
+    return found
+
+def lane_changes_the_tool(root, base, head):
+    """True when the lane-merge repo's lane changes bin/ci-job or a file it imports directly (ci_job_import_paths): `origin/<base>...head` lists it. A base that
+    lacks a file of LANE_MERGE_TOOL_FILES is not the repo that carries the tool, so the answer is False and no diff is read. A diff or an import list that cannot
+    be read is an UnknownStop, never a guess."""
+    for rel in LANE_MERGE_TOOL_FILES:
+        if git(root, "cat-file", "-e", f"origin/{base}:{rel}")[0]:
+            return False
+    try:
+        watched = [CI_JOB_REL, *ci_job_import_paths()]
+    except OSError as e:
+        raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the files bin/ci-job imports cannot be read: {e} {LANE_LINT_CITE}")
+    c, changed = git(root, "diff", "--no-renames", "--name-only", f"origin/{base}...{head}")
+    if c:
+        raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: cannot list the files the head changes against {base}: {changed} {LANE_LINT_CITE}")
+    return any(f == w or (w.endswith("/") and f.startswith(w)) for f in changed.splitlines() for w in watched)
 SAVED_PASS_FOLDER = "lane-lint-pass"  # under the clone's git dir: one small file for each job that passed
 SAVED_PASS_MAX_BYTES = 4096
 SAVED_PASS_KEEP = 3  # the most saved results kept after a save: the new one and the newest others; older ones are deleted
@@ -3759,6 +3804,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names.
     A PASS on a pull request number posts the lane-lint comment (lint_body) naming the head it read, which `--reviewed` and the join require; a failed post
     prints a reason line and still exits 0. A FAIL, an unknown and a ref or commit target post nothing.
+    A lane of the repo that carries the tool (a base that holds bin/ci-job and merge/merge.py) that changes bin/ci-job, or a file it imports directly
+    (ci_job_import_paths), also runs the head's own bin/ci-job after the tool's copy passes, and passes only when both pass. The head copy's saved PASS
+    keys under HEAD_COPY_JOB. A lane that deletes bin/ci-job runs the tool's copy alone and says so.
     A head whose diff touches a mutation test file runs the mutation test at the hand-off lint. The batch runner's pre-join lint (`pre_join`, a recorded
     batch-runner role) skips it when a hand-off PASS comment names the live head, and runs it for any other head; a local batch runner records no role, so it always runs it.
     `mutate_run` False skips the run. A skip prints MUTATE_SKIPPED.
@@ -3846,6 +3894,28 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
                                                      pr_body=body_for_job)
             if state == "pass":
                 saved_pass_write(root, head, merged, base, LINT_JOB, lines, pin_notes, body_for_job, tool)
+        if state == "pass" and lane_changes_the_tool(root, base, head):  # the lane's own bin/ci-job lints it too; the lint passes only when both copies pass
+            head_copy = os.path.join(wt, *CI_JOB_REL.split("/"))
+            if not os.path.isfile(head_copy):
+                say(f"merge: the lane deletes {CI_JOB_REL}, so it has no copy of its own to run: only the tool's copy linted {head[:9]}.")
+            else:
+                head_notes = []
+                saved = saved_pass_read(root, head, merged, base, HEAD_COPY_JOB, body_for_job, tool)
+                if saved is not None:
+                    h_state, h_lines, h_log, h_liftable = "pass", saved["skipped"], [], False
+                    head_notes.extend(saved["notes"])
+                    say(f"PASS (cached): the head's own {CI_JOB_REL} passed at head {head[:9]} on base {merged[1][:9]} with this merge tool; it is not run again.")
+                else:
+                    h_state, h_lines, h_log, h_liftable = ci_job_run(wt, LINT_JOB, "--lint", "--base", f"origin/{base}", notes=head_notes, head_sha=head,
+                                                                      pr_body=body_for_job, script=head_copy)
+                    if h_state == "pass":
+                        saved_pass_write(root, head, merged, base, HEAD_COPY_JOB, h_lines, head_notes, body_for_job, tool)
+                if h_state == "pass":
+                    lines = lines + [l for l in h_lines if l not in lines]
+                    pin_notes.extend(n for n in head_notes if n not in pin_notes)
+                else:
+                    state, liftable, log = h_state, h_liftable, h_log
+                    lines = [f"(the head's own {CI_JOB_REL} ran too, because this lane changes the tool)", *h_lines]
         if state == "pass" and touched_tests:
             touched = run_touched_tests(wt, base, head)
         mutate, mutate_fails, skipped = "", [], False
