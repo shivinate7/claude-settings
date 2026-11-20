@@ -8,11 +8,12 @@ repo. "Upstream" holds the real bin/merge and merge/launch.py plus a marker merg
 suite proves the code in this repo, and a mutant of either file goes red.
 """
 from pathlib import Path
-import os, shutil, subprocess, sys, tempfile, unittest
+import os, shutil, signal, subprocess, sys, tempfile, unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
+from proc_fixture import alive, stop_group, wait_for  # noqa: E402  the one home of the signal-test helpers (testing/proc_fixture.py)
 sys.path.insert(0, os.path.join(ROOT, "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 URL = "https://github.com/shivinate7/claude-settings"
@@ -25,6 +26,29 @@ def sh(cwd, *cmd, env=None):
     r = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, (cmd, r.stdout, r.stderr)
     return r.stdout.strip()
+
+# A stub merge.py that writes its pid to READY_FILE, then blocks until the test closes its stdin.
+BLOCK = ("import os, sys\n"
+         "tmp = os.environ['READY_FILE'] + '.tmp'\n"
+         "open(tmp, 'w').write(str(os.getpid()))\n"
+         "os.replace(tmp, os.environ['READY_FILE'])\n"
+         "sys.stdin.read()\n")
+# A stub merge.py that writes its parent's pid, then `git worktree list --porcelain` of its own tree, to LOCK_FILE.
+LOCK_STUB = ("import os, subprocess\n"
+             "here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))\n"
+             "listing = subprocess.run(['git', '-C', here, 'worktree', 'list', '--porcelain'], capture_output=True, text=True).stdout\n"
+             "open(os.environ['LOCK_FILE'], 'w').write('%d\\n%s' % (os.getppid(), listing))\n")
+
+def worktrees(listing):
+    """{real path: lock reason, or None when the tree is not locked} from `git worktree list --porcelain`."""
+    trees, path = {}, None
+    for line in listing.splitlines():
+        if line.startswith("worktree "):
+            path = os.path.realpath(line[len("worktree "):])
+            trees[path] = None
+        elif line == "locked" or line.startswith("locked "):
+            trees[path] = line[len("locked"):].strip()
+    return trees
 
 class Launch(unittest.TestCase):
     def setUp(self):
@@ -65,12 +89,12 @@ class Launch(unittest.TestCase):
         # Signing is on, as in a real checkout, so the import above is what keeps these commits off the signer.
         put(self.cfg, f'[user]\n\tname = t\n\temail = t@t\n[commit]\n\tgpgsign = true\n[tag]\n\tgpgsign = true\n[url "{target.replace(os.sep, "/")}"]\n\tinsteadOf = {URL}\n')
 
-    def release(self, tag, stable=True):
+    def release(self, tag, stable=True, body=None):
         # The stub prints its tag and, when ARGS_FILE is set, records the arguments it received.
         # stable=True moves origin's stable with main, so a case that expects the released tag still
         # checks the head the launcher fetches; stable=False leaves stable where it was.
-        put(os.path.join(self.work, "merge", "merge.py"), "import os, sys\nprint('RAN %s')\n"
-            "f = os.environ.get('ARGS_FILE')\nif f: open(f, 'w').write(repr(sys.argv[1:]))\n" % tag)
+        text = "import os, sys\nprint('RAN %s')\n" "f = os.environ.get('ARGS_FILE')\nif f: open(f, 'w').write(repr(sys.argv[1:]))\n" % tag
+        put(os.path.join(self.work, "merge", "merge.py"), text if body is None else body)  # body: a stub a case needs instead
         sh(self.work, "git", "add", "-A", env=self.env)
         sh(self.work, "git", "commit", "-q", "-m", tag, env=self.env)
         if tag != "v1":
@@ -281,6 +305,83 @@ class Launch(unittest.TestCase):
         self.assertEqual((rc, out.strip()), (0, "RAN v2"), err)
         self.assertEqual(self.head(self.co), before)
         self.assertIn("ff-only merge refused", err)
+
+    # ---- a run that a signal ends --------------------------------------------------------
+    def fresh_trees(self):
+        """The merge-fresh folders in this test's temp folder."""
+        return sorted(n for n in os.listdir(self.tmp) if n.startswith("merge-fresh-"))
+
+    def start_blocked_run(self, name):
+        """bin/merge started on the BLOCK stub. -> (the Popen, the ready file). The run gets its own process group, so a
+        cleanup reaches every process it started, and its stub reads to EOF, so closing stdin ends it."""
+        ready = os.path.join(self.t, name + ".ready")
+        err = open(os.path.join(self.t, name + ".err"), "w", encoding="utf-8")
+        self.addCleanup(err.close)
+        e = {**self.env, "CLAUDE_SETTINGS_DIR": self.co, "READY_FILE": ready}
+        proc = subprocess.Popen([sys.executable, os.path.join(ROOT, "bin", "merge")], env=e, stdin=subprocess.PIPE,
+                                stdout=subprocess.DEVNULL, stderr=err, start_new_session=True)
+        self.addCleanup(self.stop_run, proc)
+        return proc, ready
+
+    @staticmethod
+    def stop_run(proc):
+        try:
+            proc.stdin.close()
+        except OSError:
+            pass
+        stop_group(proc)
+
+    def await_exit(self, proc, what):
+        try:
+            proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            self.fail("%s did not exit within 60 s" % what)
+
+    def test_sigterm_removes_fresh_tree(self):
+        """A TERM or HUP sent to bin/merge alone ends the run, and the run takes its fresh tree and its registration with it."""
+        self.release("v2", body=BLOCK)
+        for sig in (signal.SIGTERM, signal.SIGHUP):
+            with self.subTest(signal=sig.name):
+                before = self.fresh_trees()
+                proc, ready = self.start_blocked_run(sig.name)
+                self.assertTrue(wait_for(ready, 60, proc), "the stub never started")
+                fresh = [n for n in self.fresh_trees() if n not in before]
+                self.assertEqual(len(fresh), 1, "scope: one merge-fresh folder must exist while the run is up, got %r" % fresh)
+                proc.send_signal(sig)
+                self.await_exit(proc, "bin/merge after %s" % sig.name)
+                left = [n for n in self.fresh_trees() if n not in before]
+                self.assertEqual(left, [], "%s to bin/merge left its fresh tree behind" % sig.name)
+                registered = sh(self.co, "git", "worktree", "list", "--porcelain", env=self.env).count("worktree ")
+                self.assertEqual(registered, 1, "%s to bin/merge left a worktree registered in the checkout" % sig.name)
+
+    def test_sigterm_forwards_to_child(self):
+        """A TERM or HUP sent to bin/merge alone reaches the stub that the launcher runs, which is gone when bin/merge returns."""
+        self.release("v2", body=BLOCK)
+        for sig in (signal.SIGTERM, signal.SIGHUP):
+            with self.subTest(signal=sig.name):
+                proc, ready = self.start_blocked_run(sig.name)
+                self.assertTrue(wait_for(ready, 60, proc), "the stub never started")
+                with open(ready, encoding="utf-8") as f:
+                    child = int(f.read())
+                self.assertTrue(alive(child), "scope: the stub must run before %s" % sig.name)
+                proc.send_signal(sig)
+                self.await_exit(proc, "bin/merge after %s" % sig.name)
+                self.assertFalse(alive(child), "%s to bin/merge did not reach the stub %d, which runs after bin/merge returned"
+                                 % (sig.name, child))
+
+    def test_fresh_tree_is_locked_with_the_launcher_pid(self):
+        """The fresh tree is locked while the run uses it, with the reason `merge tool, pid N`, where N is the launcher's pid,
+        so a sweep that finds the tree after a dead run can tell whose it is."""
+        lock_file = os.path.join(self.t, "lock.txt")
+        self.release("v2", body=LOCK_STUB)
+        rc, out, err = self.merge(LOCK_FILE=lock_file)
+        self.assertEqual(rc, 0, err)
+        with open(lock_file, encoding="utf-8") as f:
+            launcher, listing = f.read().split("\n", 1)
+        fresh = [p for p in worktrees(listing) if p.startswith(os.path.realpath(self.tmp) + os.sep)]
+        self.assertEqual(len(fresh), 1, "scope: one fresh tree must be registered while the run is up:\n" + listing)
+        reason = worktrees(listing)[fresh[0]]
+        self.assertEqual(reason, "merge tool, pid %s" % launcher, "the fresh tree must be locked with the launcher's pid, got %r" % reason)
 
 if __name__ == "__main__":
     unittest.main()
