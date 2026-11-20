@@ -83,8 +83,11 @@ when absent); without --all only active entries answer. The fixture key `workflo
 "garbage" or "empty") changes that one call and no other. "empty" prints nothing and exits 0: the answer
 gh 2.89.0 gives for a repo with no workflow. The fixture key `list_error_from` N makes every `run list`
 from the Nth call of the case on exit 1 (HTTP 403), so a re-list can be refused after a judged run.
-The fixture key `files_get_only` answers the PR file list route (`repos/O/R/pulls/N/files`) only to a GET,
-as `method_of` reads the method gh sends. Any other call gets 404, as GitHub answers a POST to that route.
+A gh api call that sends a non-GET method exits 1 and prints nothing on stdout. It writes one stderr line that
+names the call, as `method_of` reads the method gh sends (a field flag with no --method GET is a POST). The
+fixture key `api_writes_ok` is the only opt-in, for a case that truly writes. The run then reads every case's
+call log once at the end and fails one check per distinct such call, with its count across the run, so a read
+that forgets --method GET is red in any case, not only the case that checks it.
 
 Draft run, then the real run: `gh pr create --draft` makes a run
 whose jobs all skip, and `gh pr ready` makes the real run seconds later. A hook that lists the head
@@ -332,11 +335,6 @@ def rest(path, full, args, fx):
         sys.stdout.write(json.dumps(rest_pr(hits[0])) + "\n")
         return 0
     if len(parts) == 6 and parts[5] == "files":
-        if fx.get("files_get_only") and method_of(args) != "GET":
-            # GitHub answers a POST to this route with 404, so a call that sends fields with no --method fails here too.
-            sys.stdout.write('{"message":"Not Found","status":"404"}\n')
-            sys.stderr.write("gh: Not Found (HTTP 404)\n")
-            return 1
         hits = [p for p in mine if str(p["number"]) == parts[4]]
         names = hits[0].get("files", []) if hits else []
         sys.stdout.write(json.dumps([{"filename": n, "status": "added"} for n in names]) + "\n")
@@ -376,6 +374,12 @@ def main(args):
     if obj == "pr" or (obj == "api" and verb == "graphql"):
         # The cloud proxy refuses every GraphQL call: `gh pr view|list|checks|status` and `gh api graphql`.
         sys.stderr.write("GitHub GraphQL is not available from Claude Code sessions; use the REST API (HTTP 403)\n")
+        return 1
+    if obj == "api" and method_of(args) != "GET" and not fx.get("api_writes_ok"):
+        # A read that gh sends as a POST (a field flag with no --method GET) fails in every case. Only a case
+        # that truly writes sets api_writes_ok in its fixture.
+        sys.stderr.write("stub gh: a gh api call that sends a non-GET method needs api_writes_ok in its fixture: %s\n"
+                         % " ".join(args))
         return 1
     if obj == "api":
         words, skip = [], False
@@ -608,6 +612,7 @@ PUSH_FORMS = [
 
 FAILS = []
 COUNT = [0]
+CALL_LOGS = []  # (the fixture's api_writes_ok, the call log) of every case, swept once at the end of the run
 LINE = re.compile(r"^CI (green|red|cancelled|unknown|none) on (\S+?): ?(.*)$")
 
 
@@ -642,6 +647,7 @@ def new_case(scen):
     log = os.path.join(case, "gh.log")
     with open(fixture_path, "w", encoding="utf-8") as f:
         json.dump(scen, f)
+    CALL_LOGS.append((bool(scen.get("api_writes_ok")), log))
     return case, fixture_path, log
 
 
@@ -1737,8 +1743,8 @@ def case_pr_file_list_read_as_get_so_no_workflow_repo_says_ci_none():
     """The PR's file list is read as a GET. `gh api` sends a POST once a field flag is given with no --method
     (`-F per_page=100`), and GitHub answers a POST to that route with 404. The hook then cannot tell whether the
     PR adds a workflow, so it counts the PR as adding one and watches a head with no CI: it prints "CI unknown on
-    <sha7>: no run yet" where it must print "CI none". The fixture's files_get_only answers that route to a GET
-    alone. Rows: a PR that changes src/app.py, and a PR with no changed files (the empty state). In each row the
+    <sha7>: no run yet" where it must print "CI none". A POST here is refused by the stub, and the run fails for it.
+    Rows: a PR that changes src/app.py, and a PR with no changed files (the empty state). In each row the
     watch stops at the CI none line, with no run list and no run view."""
     rows = (
         ("src/app.py changed", ["src/app.py"]),
@@ -1747,7 +1753,7 @@ def case_pr_file_list_read_as_get_so_no_workflow_repo_says_ci_none():
     for name, files in rows:
         label = "PR file list as GET, no workflow repo, %s" % name
         p = dict(pr(7, repo=REPO_HOME), files=files)
-        fx = fixture([p], [], cwd_repo=REPO_HOME, workflow_list="empty", files_get_only=True)
+        fx = fixture([p], [], cwd_repo=REPO_HOME, workflow_list="empty")
         res = run_hook(bash("gh pr ready 7"), fx, extra={"CI_WAKE_DEADLINE": "4"})
         check("%s: scope, the hook reads the workflow list" % label, count(res, "workflow", "list") >= 1, why(res))
         reads = [c for c in res.calls if file_read_of(c, 7)]
@@ -2198,6 +2204,78 @@ class CostTests(unittest.TestCase):
                         "the watch budget %s s ends before the row timeout %s s" % (self.mod.DEFAULT_DEADLINE, row))
 
 
+def post_read_faults(calls, opt_in):
+    """The gh api calls in calls that send a non-GET method, unless the case set api_writes_ok. A read that gh sends
+    as a POST (a field flag with no --method GET) is one of them. No calls, or an opted-in case, give none."""
+    if opt_in:
+        return []
+    return [c for c in calls if GH.strip_repo(c)[:1] == ["api"] and GH.method_of(c) != "GET"]
+
+
+def check_api_reads():
+    """Sweep every case's call log once, at the end of the run. A gh api call that sends a non-GET method, in a case
+    without api_writes_ok, fails one check per distinct call, with its count across the run. The run is red for it,
+    even where the hook's own verdict does not change with the stub's refusal."""
+    total, faults = 0, {}
+    for opt_in, log in CALL_LOGS:
+        calls = read_calls(log)
+        total += sum(1 for c in calls if GH.strip_repo(c)[:1] == ["api"])
+        for c in post_read_faults(calls, opt_in):
+            argv = "gh " + " ".join(c)
+            faults[argv] = faults.get(argv, 0) + 1
+    if not faults:
+        check("gh api calls: %d in the run, none sent a non-GET method without api_writes_ok" % total, True)
+    for argv, n in faults.items():
+        check("gh api call sent a non-GET method with no api_writes_ok (%d in the run): %s" % (n, argv), False)
+
+
+def stub_once(args, fixture_obj):
+    """One run of the stub on a folder that no case registers, so its call is never swept. -> (exit code, stdout, calls)."""
+    folder = tempfile.mkdtemp(prefix="stub-", dir=TMP)
+    fixture_path, log = os.path.join(folder, "fixture.json"), os.path.join(folder, "gh.log")
+    with open(fixture_path, "w", encoding="utf-8") as f:
+        json.dump(fixture_obj, f)
+    env = base_env(BIN, fixture_path, log, folder, None)
+    p = subprocess.run([PY, os.path.join(TMP, "gh_stub.py")] + args, env=env, capture_output=True,
+                       encoding="utf-8", timeout=TIMEOUT)
+    return p.returncode, p.stdout, read_calls(log)
+
+
+def case_api_reads_are_gets_unless_the_case_opts_in():
+    """A gh api call that sends a non-GET method is a fault unless its case sets api_writes_ok. The stub refuses it, and
+    post_read_faults judges the same argv list that check_api_reads sweeps. Rows: a POST in each spelling gh takes, and
+    an explicit non-GET method. The GET spellings pass. An empty call list is no fault."""
+    path = "repos/%s/pulls/7/files" % REPO_HOME
+    posts = (
+        ("a field flag -F", ["api", path, "-F", "per_page=100"]),
+        ("an attached -Ffield", ["api", path, "-Fper_page=100"]),
+        ("--field=", ["api", path, "--field=per_page=100"]),
+        ("--input", ["api", path, "--input", "body.json"]),
+        ("an explicit -X POST", ["api", "-X", "POST", path]),
+    )
+    gets = (
+        ("--method GET with a field", ["api", "--method", "GET", path, "-F", "per_page=100"]),
+        ("-XGET with a field", ["api", "-XGET", path, "-F", "per_page=100"]),
+        ("--method=GET with -f", ["api", "--method=GET", path, "-f", "per_page=100"]),
+        ("no field", ["api", path]),
+    )
+    check("an empty call list is no fault", post_read_faults([], False) == [], repr(post_read_faults([], False)))
+    for name, args in posts:
+        label = "%s is a fault without api_writes_ok" % name
+        rc, out, calls = stub_once(args, fixture([]))
+        check("%s: the stub logs the call" % label, calls == [args], repr(calls))
+        check("%s: the stub refuses it, exit 1 and no output" % label, rc == 1 and out == "", "rc=%s out=%r" % (rc, out))
+        check("%s: the sweep judges it a fault" % label, post_read_faults([args], False) == [args])
+        check("%s: with api_writes_ok the sweep passes it" % label, post_read_faults([args], True) == [])
+        rc_ok, _, _ = stub_once(args, fixture([], api_writes_ok=True))
+        check("%s: with api_writes_ok the stub answers it, exit 0" % label, rc_ok == 0, "rc=%s" % rc_ok)
+    for name, args in gets:
+        label = "%s is a GET" % name
+        rc, _, _ = stub_once(args, fixture([]))
+        check("%s: the stub answers it, exit 0" % label, rc == 0, "rc=%s" % rc)
+        check("%s: the sweep passes it" % label, post_read_faults([args], False) == [])
+
+
 def main():
     hook_exists = os.path.isfile(MODULE)
     check("module under test exists (missing module = red for this reason)", hook_exists, MODULE)
@@ -2430,8 +2508,10 @@ def main():
     case_empty_selector_without_a_branch_is_unknown()
     case_read_pr_maps_rest_fields()
     case_hash_number_selector_reads_the_number_route()
+    case_api_reads_are_gets_unless_the_case_opts_in()
     if not cost_probe.run_class(CostTests):
         FAILS.append("CostTests")
+    check_api_reads()
 
     print()
     print("%d checks, %d failed" % (COUNT[0], len(FAILS)))
