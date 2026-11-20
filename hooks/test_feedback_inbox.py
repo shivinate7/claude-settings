@@ -1278,8 +1278,8 @@ def case_page_artifactdata_n_proof_passes():
             ("set, doc_id items/disk-cleanup, data n 98", "ArtifactData",
              {"action": "set", "url": PAGE_URL, "doc_id": "items/disk-cleanup", "data": {"n": 98}}),
             ("batch, op with data n 98", "mcp__ArtifactData",
-             {"action": "batch", "url": PAGE_URL, "batch": [{"op": "update", "doc_id": "items/disk-cleanup",
-                                           "data": {"n": 98}}]})):
+             {"action": "batch", "url": PAGE_URL, "writes": [{"op": "update", "collection": "items",
+                                                             "doc_id": "disk-cleanup", "data": {"n": 98}}]})):
         p = page_run(new_cfg(), "page-artifact", [("98: a", (PAGE_ITEM,))],
                      [owner_rec("98: a"), used_rec(name, tool_input)])
         expect_silent("page: %s, %s, passes" % (name, label), p)
@@ -1308,13 +1308,14 @@ def case_page_send_naming_other_numbers_blocks():
 
 
 def case_page_artifactdata_n_other_numbers_blocks():
+    """Each write names the page url the schema requires, so only its n can block it."""
     for label, tool_input in (
-            ("data n 980 on items/disk-cleanup", {"action": "update", "doc_id": "items/disk-cleanup",
-                                                 "data": {"n": 980}}),
-            ("data n 198 in a batch op", {"action": "batch", "batch": [{"op": "update",
-                                                    "doc_id": "items/disk-cleanup", "data": {"n": 198}}]}),
-            ("collection items and doc_id 98, no n key", {"action": "update", "collection": "items",
-                                                          "doc_id": "98"})):
+            ("data n 980 on items/disk-cleanup", {"action": "update", "url": PAGE_URL,
+                                                 "doc_id": "items/disk-cleanup", "data": {"n": 980}}),
+            ("data n 198 in a batch op", {"action": "batch", "url": PAGE_URL, "writes": [{"op": "update",
+                                          "collection": "items", "doc_id": "disk-cleanup", "data": {"n": 198}}]}),
+            ("collection items and doc_id 98, no n key", {"action": "update", "url": PAGE_URL,
+                                                          "collection": "items", "doc_id": "98"})):
         p = page_run(new_cfg(), "page-artifact-other", [("98: a", (PAGE_ITEM,))],
                      [owner_rec("98: a"), used_rec("ArtifactData", tool_input)])
         expect_send_missing("page: ArtifactData, %s, does not prove item 98" % label, p,
