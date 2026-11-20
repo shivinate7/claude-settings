@@ -246,7 +246,7 @@ def tag_orphan(env_entries=(), argv_extra=(), holder=None):
                 return None
             if holder or pgid == str(pid):
                 return pid
-            time.sleep(0.05)
+            time.sleep(0.05)  # poll gap of a condition wait: ends when the pgid reads back, not on elapsed time
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
     return None
@@ -273,7 +273,7 @@ def child_of(parent):
             if len(fields) == 2 and fields[1] == str(parent) and fields[0].isdigit():
                 ORPHAN_PIDS.append(int(fields[0]))
                 return int(fields[0])
-        time.sleep(0.05)
+        time.sleep(0.05)  # poll gap of a condition wait: ends when a child shows in ps, not on elapsed time
     return None
 
 
@@ -293,7 +293,7 @@ def stub_job(stub, depth=1):
             return None
         if comm == "sleep":
             return pid
-        time.sleep(0.05)
+        time.sleep(0.05)  # poll gap of a condition wait: ends when comm reads sleep, not on elapsed time
     return None
 
 
