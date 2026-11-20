@@ -4599,10 +4599,10 @@ READY_CHECKS_CITE = "(decision lanes-run-no-full-ci-job, the ready checks: a dra
 
 READY_JOB_PREFIX = re.compile(r"^([a-z][a-z0-9_-]*):(.+)$")  # a `<job>:<step>` ready check; a step name that does not open this way is a step of job `checks`
 
-STEP_LINE = re.compile(r"^(PASS|FAIL|SKIP|skipped|unknown|not run)\s+(.*)$")
+STEP_LINE = re.compile(r"^(PASS \(cached\)|PASS|FAIL|SKIP|skipped|unknown|not run)\s+(.*)$")  # PASS (cached): a pass that ci-job's rerun cache answered
 
 def step_verdicts(raw, checks, state):
-    """-> one (verdict, name, detail) per declared check, read from ci-job's stdout lines `raw`, each check by its own line alone: `pass` for a PASS line, or a SKIP
+    """-> one (verdict, name, detail) per declared check, read from ci-job's stdout lines `raw`, each check by its own line alone: `pass` for a PASS or PASS (cached) line, or a SKIP
     line (the step ran and skipped tests, exit 0: bin/ci-job's verdict list), `fail` for a FAIL line, `unknown` for any other line (a `skipped` or `not run` line
     means the step did not run) and for a check with no line at all, even when ci-job exited 0: a step it never printed was not proven.
     `state` is ci-job's own verdict. It does not change a line: in a failing run a PASS line stays pass and a FAIL line stays fail, so the lines name which
@@ -4612,7 +4612,7 @@ def step_verdicts(raw, checks, state):
         hit = next((m for m in (STEP_LINE.match(l.rstrip()) for l in raw) if m and (m.group(2) == name or m.group(2).startswith(name + ":"))), None)
         word = hit.group(1) if hit else None
         detail = hit.group(2)[len(name):].lstrip(": ") if hit else f"ci-job printed no line for this check (ci-job: {state})"
-        if word == "PASS":
+        if word in ("PASS", "PASS (cached)"):
             rows.append(("pass", name, detail))
         elif word == "SKIP":
             rows.append(("pass", name, "the step ran and skipped tests: " + detail))
