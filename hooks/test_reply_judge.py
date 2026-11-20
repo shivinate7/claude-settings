@@ -2127,16 +2127,22 @@ def case_searching_with_a_digit_is_judged_off_sample():
 # enough: the case also needs the "not a search" clause. No other test reads rule-line text, so this one lives here.
 COUNTS_ANCHOR = "<!-- rule:verification-counts-from-rest -->"
 CLAUDE_MD = os.path.join(REPO_ROOT, "CLAUDE.md")
+STYLE_FILE = os.path.join(REPO_ROOT, "output-styles", "shiv-stylisms.md")
 
 
-def counts_rule_text(text):
-    """The counts rule's words in CLAUDE.md, or "" when its anchor is absent."""
-    at = text.find(COUNTS_ANCHOR)
+def rule_text_before(text, anchor):
+    """The words of the rule that ends at `anchor` in `text`, or "" when the anchor is absent."""
+    at = text.find(anchor)
     if at < 0:
         return ""
     before = text[:at]
     prev = before.rfind("-->")  # the anchor of the rule before this one, if any
     return before[prev + 3:] if prev >= 0 else before
+
+
+def counts_rule_text(text):
+    """The counts rule's words in CLAUDE.md, or "" when its anchor is absent."""
+    return rule_text_before(text, COUNTS_ANCHOR)
 
 
 def case_claude_md_counts_rule_names_the_github_rest_api_and_not_a_search():
@@ -2317,6 +2323,53 @@ def case_cost_rank_prompt_says_unmeasured_ranks_no_work():
           has_pin(sentences, ("unmeasured",), ("flag",), ("ranks",), ("orders",), ("cuts",), ("work",)), sentences)
 
 
+# A ranking with no measure, and no mark, is flagged only when the same reply ranks, orders or cuts work on it
+# (the session pick, 23:44 CST). One sentence of the prompt and one bullet of the output style each say it.
+NO_MEASURE_ONLY_WORK = (("no measure",), ("only",), ("ranks",), ("orders",), ("cuts",), ("work",))
+STYLE_COST_ANCHOR = "<!-- rule:style-measure-before-priority -->"
+
+
+def case_cost_rank_prompt_flags_no_measure_only_when_work_is_steered():
+    run = run_hook(COST_REPLY, answer=OK_ANSWER)
+    sentences = rule_sentences(run, COST_REPLY)
+    check("no measure cost rank prompt: the rule's own sentence is read (control)",
+          any(COST_RULE + ":" in s for s in sentences), run.prompt()[:300])
+    check("no measure cost rank prompt: one sentence flags a ranking with no measure only when the same reply "
+          "ranks, orders or cuts work on it",
+          has_pin(sentences, *NO_MEASURE_ONLY_WORK), sentences)
+
+
+def case_cost_rank_style_flags_no_measure_only_when_work_is_steered():
+    with open(STYLE_FILE, encoding="utf-8") as f:
+        bullet = rule_text_before(f.read(), STYLE_COST_ANCHOR).lower()
+    check("no measure cost rank style: the output style holds the measure-before-priority bullet (control)",
+          bullet.strip() != "", "the anchor %s is absent" % STYLE_COST_ANCHOR)
+    sentences = [s for s in bullet.split(".") if s.strip()]
+    check("no measure cost rank style: one sentence flags a ranking with no measure only when the same reply "
+          "ranks, orders or cuts work on it",
+          has_pin(sentences, *NO_MEASURE_ONLY_WORK), " ".join(bullet.split()))
+
+
+# A bold or a parenthesized question is a question, so its ranking words never fire the cost trigger. The plain
+# question is the control: it is already scoped out (it ends in a question mark) and must stay that way.
+PLAIN_QUESTION = "Which lane costs the most?"
+BOLD_QUESTION = "**Which lane costs the most?**"
+PAREN_QUESTION = "(Which lane costs the most?)"
+
+
+def case_bold_or_parenthesized_cost_question_is_not_judged_off_sample():
+    module = reference_module()
+    check("cost question control: the plain question is not a cost ranking",
+          not module.has_cost_rank(PLAIN_QUESTION), PLAIN_QUESTION)
+    for label, reply in (("bold", BOLD_QUESTION), ("parenthesized", PAREN_QUESTION)):
+        others = other_triggers(module, reply)
+        check("cost question, %s: no other trigger matches the reply" % label, not others, others)
+        check("cost question, %s: the ranking words in a question are not a cost ranking" % label,
+              not module.has_cost_rank(reply), reply)
+        run, _ = second_stop(reply, label="cost-q-" + label, session="cost-q-" + label)
+        check("cost question, %s: Stop 2 never calls the model" % label, not run.calls, run.calls)
+
+
 CASES = (
     case_stop_hook_active_never_calls_model,
     case_ignored_stop_imports_no_guard_family_module,
@@ -2428,6 +2481,9 @@ CASES = (
     case_cost_rank_prompt_names_the_measure_forms,
     case_unmeasured_cost_rank_is_judged_off_sample,
     case_cost_rank_prompt_says_unmeasured_ranks_no_work,
+    case_cost_rank_prompt_flags_no_measure_only_when_work_is_steered,
+    case_cost_rank_style_flags_no_measure_only_when_work_is_steered,
+    case_bold_or_parenthesized_cost_question_is_not_judged_off_sample,
 )
 
 
