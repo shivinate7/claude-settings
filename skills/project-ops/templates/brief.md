@@ -43,6 +43,8 @@ First re-run on main the check behind each dated Finding or Checked claim in the
 Before hand-in, run `~/.claude/bin/merge --lane-lint <pr>` (repos with `bin/ci-job`) and report its verdict; a red lane does not hand in. Run `merge --lane-lint` from the main checkout, never from a session or agent isolated in a worktree: Claude Code's worktree check can refuse it there.
 A coordinator-started lane hands in a draft PR to the batch runner. Only in claude-settings does it merge its own PR (decision `session-tiers`, merge path).
 
+A hold, freeze or "waiting" line in this brief carries `Ends: <the event that ends it>` in the same line.
+
 ## Report cap
 
 Time: `~/.claude/bin/now-central`. Cap {{cap}} lines: Done, Deviations, Input Needed, Next, "Port to other repos: yes or no, and why". Send questions to triage, and the green head and branch to the coordinator.
