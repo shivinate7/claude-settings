@@ -3773,6 +3773,17 @@ MUTATIONS = [
      '    return clause\n\n\ndef _claim_clause',
      '    return None\n\n\ndef _claim_clause',
      "guard", 'brief-claim: test-author brief where main refuses all three today'),
+    # The machine-load brake's Linux memory and lint-start reads (decision machine-load-brake). Each row kills on its own
+    # case: the Linux read on a 96% Agent start, and the lint start on the disk-full bin/ci-job --lint case, which needs no
+    # memory reading.
+    ('load-brake: the Linux branch of _read_memory returns None, so memory is unread on Linux',
+     '        return 100.0 * (total - available) / total',
+     '        return None',
+     "guard", 'linux, local, Agent run_in_background true, memory 96%: full, refused'),
+    ('load-brake: lint_start_hit_of returns the empty string, so a background lint start is never read',
+     'def lint_start_hit_of(tool: str, tool_input) -> str:',
+     'def lint_start_hit_of(tool: str, tool_input) -> str:\n    return ""',
+     "guard", 'bin/ci-job --lint, background, 3.1 GB free of 926 GB: full, refused'),
 ]
 
 
