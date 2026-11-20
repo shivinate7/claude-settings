@@ -45,8 +45,7 @@ Limits:
 
 - Pressing GitHub's own Merge button is not refused by a hook.
 - A raw `gh api -X PUT .../pulls/<n>/merge` is not refused by a hook.
-- GitHub auto-merge, turned on with the MCP tool `enable_pr_auto_merge`, is not refused by a hook. Main has the same gap.
-- The guard stops `gh pr merge` and the MCP merge tool. For the rest, the rule binds the owner by the owner's own word.
+- The guard stops `gh pr merge`, the MCP merge tool and the MCP tool `enable_pr_auto_merge`, which arms GitHub auto-merge. It judges all three on the same head read, at the moment of the call only. An armed auto-merge can fire on a later head, because the guard does not look again after a push. What GitHub does with an armed auto-merge after a push is unverified. For the rest, the rule binds the owner by the owner's own word.
 - A required check with no entry and no workflow run on the other head does not count. So in the seconds after a PR goes ready, before GitHub creates its runs, a merge is not refused.
 
 Why: batch 13's lanes, roadmap steps c182 and c187 (PRs #777 and #778), each conflicted with batch 12 (PR #779). A merge to main under a running batch run moves the base that run tests. This rule is roadmap step c195.

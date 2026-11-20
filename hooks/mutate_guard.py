@@ -4927,18 +4927,17 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
         copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(name)))
         mutated = sources[target].replace(old, new, 1)
     if target in ("ruling", "decision"):
-        # ruling_home.py and decision_watch.py read `../lint/_transcript.py` beside itself. A bare copy in `work`
-        # would crash on that import and read as red on every case, whatever was mutated
-        # (a mutant's own cause of death must be checked). Lay out hooks/ and lint/ for the copy.
+        # decision_watch.py reads `../lint/_transcript.py` beside its hooks folder, so its copy needs tree/lint.
+        # ruling_home.py imports guard_core, whose lint_dir() walks up to the lint/ that main() lays out in `work`,
+        # not to tree/lint. A bare copy in `work` would crash on the guard_core import and read as red on every case,
+        # whatever was mutated (a mutant's own cause of death must be checked). Lay out the guard family in hooks/
+        # and lint/ for the copy.
         tree = os.path.join(work, "tree_%s" % mutate_shared.safe_name(name))
         os.makedirs(os.path.join(tree, "hooks"), exist_ok=True)
         os.makedirs(os.path.join(tree, "lint"), exist_ok=True)
         shutil.copy(os.path.join(HERE, "..", "lint", "_transcript.py"), os.path.join(tree, "lint"))
-        if target == "ruling":
-            # ruling_home.py imports shared_names beside itself (its install-root lookup), so a bare copy crashes too.
-            shutil.copy(os.path.join(HERE, "shared_names.py"), os.path.join(tree, "hooks"))
-        if target == "decision":
-            mutate_shared.guard_tree(os.path.join(tree, "hooks"))
+        # guard_tree also copies shared_names.py, which ruling_home.py imports beside itself.
+        mutate_shared.guard_tree(os.path.join(tree, "hooks"))
         copy_path = os.path.join(tree, "hooks", os.path.basename(TARGETS[target][0]))
     if target == "override":
         # The guard family, local_time.py and the mutated override.py share one folder: the
@@ -5140,8 +5139,9 @@ def main() -> int:
     # printed the identical nine-case failure list, whatever the mutation.
     mutate_shared.guard_tree(work)
     # The override and calljudge copies sit one folder below `work`, so their `../lint` is work/lint:
-    # override.py reads it, and so does the decision_watch.py beside a calljudge copy. The ruling and
-    # decision copies read their own tree/lint instead (above). A guard copy carries its own lint folder (run_mutant).
+    # override.py reads it, and so does the decision_watch.py beside a calljudge copy. The decision copy reads its
+    # own tree/lint (above). The ruling copy reads work/lint through guard_core's lint_dir(). A guard copy carries
+    # its own lint folder (run_mutant).
     # The override copies also read ../janitor (the simulator refusal, which fails open without it) and ../skills.
     tracked_tree.copy_tracked(work, "lint", "janitor", "skills", root=os.path.dirname(HERE))
     lay_out_guard_reads(work)  # the override copies' ../merge, ../actions and ../bin
