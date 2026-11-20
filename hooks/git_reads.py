@@ -438,14 +438,59 @@ def branch_is_empty(where: str, base: str, branch: str):
 #     its absence for a deletion) in ONE candidate commit, and that commit is on a remote-tracking
 #     ref. Candidates: HEAD, HEAD's merge-base with the default branch, HEAD's reflog (capped).
 #     A blob found only in a local-only commit never counts.
-# No `--find-object` and no history walk: the candidate set is bounded.
+# No `--find-object` and no history walk: the candidate set is bounded. The count of dirty paths is
+# not a limit: a large tree is judged by the same proof. A read that cannot run (a timeout, or a
+# command line too long) answers None, except a candidate's `ls-tree` and the reads that list the
+# candidates (merge-base, reflog): those only drop the candidate, so the paths stay unmatched and
+# the proof answers False. An unreadable budget also answers None. The guard refuses both answers.
+# A timed-out guard lets the call through, so the proof owns a clock: a path whose worktree entry
+# differs from its index entry can match no commit and answers False before any candidate read, and
+# once the proof has run past its budget it answers False before the next candidate read.
 #
 # COST, per call, and only on `git worktree remove` with a dirty tree: at most 14 fixed git process
 # starts, then one `ls-tree` per candidate tried (stops once every path matched; at most
-# 2 + BASE_COPY_REFLOG_CAP) and one `for-each-ref --contains` per candidate a match uses. Files
+# 2 + BASE_COPY_REFLOG_CAP) and one `for-each-ref --contains` per candidate a match uses. One read of
+# settings.json, once per call that reaches a candidate, and one clock read per candidate. Files
 # written: none. No timer, no log, no long-lived process.
 BASE_COPY_REFLOG_CAP = 20
-BASE_COPY_PATH_CAP = 200  # one command line carries the paths; more than this is not judged
+
+# The clock of the proof's budget, in seconds. A seam: a test installs its own.
+_now = time.monotonic
+
+
+def _install_settings_path():
+    """The settings.json one level above the folder named `hooks` that holds this module, or None when no
+    folder on the way up is named `hooks`. The module sits flat in `hooks/` (the repo, or a local install) or in
+    `hooks/guard.d/<id>/` (the guard set folder guard.py loads it from), so the look-up walks up to the folder
+    by name and does not count levels."""
+    folder = os.path.dirname(os.path.realpath(__file__))
+    while os.path.basename(folder) != "hooks":
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            return None
+        folder = parent
+    return os.path.join(os.path.dirname(folder), "settings.json")
+
+
+def _proof_budget():
+    """Seconds the proof may spend before it refuses: half the guard hook's own `timeout` in the
+    settings.json that sits above the hooks folder (the installed copy in the cloud, the repo's file
+    behind a local symlink). Half, because a candidate read that starts just before the deadline may
+    run to its own timeout, and the guard has work of its own before and after the proof.
+    None when the timeout cannot be read: the caller answers None, which the guard refuses."""
+    path = _install_settings_path()
+    if path is None:
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            rows = json.load(f)["hooks"]["PreToolUse"]
+        for row in rows:
+            for hook in row["hooks"]:
+                if "/hooks/guard.py" in (hook.get("command") or ""):
+                    return float(hook["timeout"]) / 2
+    except Exception:
+        return None
+    return None
 
 
 def _z_names(answer):
@@ -515,6 +560,7 @@ def dirty_paths_are_pushed_copies(where: str, lines):
     """True when every dirty path of the worktree at WHERE equals a copy held by a pushed commit
     (see the block comment above), False when one does not or the tree is not judged, None when a
     read failed. LINES are the `git status --porcelain` lines the caller already holds."""
+    started = _now()
     for line in lines:
         if line.startswith("?? ") or "U" in line[:2] or line[:2] in ("AA", "DD"):
             return False
@@ -527,14 +573,15 @@ def dirty_paths_are_pushed_copies(where: str, lines):
     edited = _z_names(_git(where, "diff-files", "--name-only", "-z"))
     if staged is None or edited is None:
         return None
-    paths = sorted(set(staged) | set(edited))
+    edited_set = set(edited)
+    paths = sorted(set(staged) | edited_set)
     # A name git printed that this decode altered cannot be looked up again, so it proves nothing.
-    if not paths or len(paths) > BASE_COPY_PATH_CAP or any("�" in path for path in paths):
+    if not paths or any("�" in path for path in paths):
         return False
     index = _index_entries(where, paths)
     if index is None:
         return None
-    changed = _worktree_entries(where, [p for p in paths if p in set(edited)])
+    changed = _worktree_entries(where, [p for p in paths if p in edited_set])
     if changed is None:
         return None
     if changed is False:
@@ -543,6 +590,11 @@ def dirty_paths_are_pushed_copies(where: str, lines):
     held = {p: (index.get(p), changed[p] if p in changed else index.get(p)) for p in paths}
     if any(entry and entry[0] == "160000" for pair in held.values() for entry in pair):
         return False  # a submodule is not a blob
+    if any(pair[0] != pair[1] for pair in held.values()):
+        return False  # an edit past the index matches no commit, so no candidate read can help
+    budget = _proof_budget()
+    if budget is None:
+        return None
     head = _git(where, "rev-parse", "HEAD")
     if head is None or head.returncode != 0:
         return None
@@ -562,10 +614,12 @@ def dirty_paths_are_pushed_copies(where: str, lines):
         if commit in tried:
             continue
         tried.add(commit)
+        if _now() - started > budget:
+            return False
         tree = _tree_entries(where, commit, sorted(remaining))
         if tree is None:
             continue
-        matched = {p for p in remaining if held[p][0] == held[p][1] == tree.get(p)}
+        matched = {p for p in remaining if held[p][0] == tree.get(p)}
         if not matched:
             continue
         on_remote = branch_on_remote(where, commit)

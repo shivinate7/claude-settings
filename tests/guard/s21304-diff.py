@@ -513,6 +513,16 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+# The 201-path tree: its read costs what the incident tree's does, and a failed index read is not proved.
+for _label, _check in (
+    ("base copies: the pushed-copy read on a 201-path tree stays within its stated git starts and writes no file",
+     path_cap_read_cost_case),
+    ("base copies: a 201-path tree whose index read times out is not proved", path_cap_timeout_check),
+    ("base copies: a 201-path tree whose git cannot start is not proved", path_cap_no_git_check),
+    ("base copies: a 201-path tree whose command line is too long is not proved", path_cap_long_line_check),
+):
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    LOG_FAMILY[_label] = "branch-worktree"
 # The two MCP updates that mark nothing ready, read by _rpr_no_read (records-page-ready). They sit here because
 # LOG_CHECKS_EXTRA is defined here.
 for _label, _check in (
