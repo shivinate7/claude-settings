@@ -866,10 +866,12 @@ def run_step_uncached(name, step, install, detail, shell, env, cwd, ctx, log, su
     elif unstarted and only:
         state = "unknown"
         first = "tool missing (%s); %s" % ("; ".join(unstarted), first)
-    elif line is None:  # a verdict that died or went silent is a read that could not run, whatever its exit code (a signal kill too)
-        state = "unknown"
     else:
         state = "FAIL" if rc else "SKIP" if first.startswith("SKIP ") else "PASS"
+        if line is None:  # a verdict that died or went silent never reads PASS or a bare FAIL, whatever its exit code (a signal kill too)
+            # It keeps FAIL only for a failure signal this branch knows: a real error beside a tool that did not start, a
+            # failed install, a line before the suite that failed. Those take their note below. Any other dead read is unknown.
+            state = "FAIL" if rc and (unstarted or install or not preamble_ran) else "unknown"
         if install and state == "FAIL":  # the tree at fault, not the change: unknown, never FAIL
             state, first = "unknown", "install failed, so each lint step after it is unknown; " + first
         elif state == "FAIL" and not preamble_ran:  # the same rule for a line before the suite of a CI step: the tree at fault
