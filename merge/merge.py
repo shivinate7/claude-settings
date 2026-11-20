@@ -4450,12 +4450,12 @@ def pull_number_in_title(line):
 REVERT_WALK_MAX = 200  # commits revert_proven reads from the breaking merge up to the base's head; a longer walk is not proven
 
 def _shas(read):
-    """A git list read (rc, out) -> its 40-hex shas in order, or None when the read failed, any line is not a sha, or it holds more than REVERT_WALK_MAX."""
+    """A git list read (rc, out) -> its 40-hex shas in order, or None when it holds more than REVERT_WALK_MAX (a true no). Raises Stop when the read failed or any line is not a sha: revert_proven reads that as a proof it could not read."""
     c, out = read
     lines = out.split()
-    if c or len(lines) > REVERT_WALK_MAX or not all(re.fullmatch(r"[0-9a-f]{40}", x) for x in lines):
-        return None
-    return lines
+    if c or not all(re.fullmatch(r"[0-9a-f]{40}", x) for x in lines):
+        raise Stop("a list read of the revert's proof failed")
+    return None if len(lines) > REVERT_WALK_MAX else lines
 
 UNREAD = "unread"  # revert_proven(beside_ok=True) answer for a proof it could not read
 
@@ -4473,8 +4473,8 @@ def revert_proven(root, host, base, beside_ok=False):
     A first red names no breaking merge, so it never lifts. Any read that fails, or a walk past the cap, is not proven: unknown never reads clear.
     Skipped runs are no evidence here. Cost accepted by the owner: a revert that does not fix the failure reads clear until the next full run.
     `beside_ok` leaves out the first condition's cancelled run and re-run in flight: red_base asks it, to learn whether the revert would have lifted the red but for a run that reads unknown.
-    With `beside_ok`, a proof that could not be read (the pull request or tree read fails, or the revert's checks read unknown) returns UNREAD, which is truthy: red_beside then
-    reads the base unknown, as decision no-merge-onto-red-main R4 says a failed read is. Without it, such a read is just not proven."""
+    With `beside_ok`, a proof that could not be read (any git read of it fails, the pull request or tree read fails, or the revert's checks read unknown) returns UNREAD, which is truthy: red_beside then
+    reads the base unknown, as decision no-merge-onto-red-main R4 says a failed read is. Without it, such a read is just not proven. A walk past the cap and a merge-base that says not an ancestor (rc 1) are true noes, not failed reads."""
     facts = getattr(host, "base_facts", None)
     if not facts or len(facts["blamed"]) != 1 or facts["red"] != 1 or (facts["others"] and not beside_ok):
         return False
@@ -4482,11 +4482,20 @@ def revert_proven(root, host, base, beside_ok=False):
     sha = facts["blamed"][0]
     try:
         c, head = git(root, "rev-parse", f"origin/{base}")
-        if c or head != facts["head"] or git(root, "merge-base", "--is-ancestor", sha, head)[0]:
+        if c:
+            return unread
+        if head != facts["head"]:
+            return False
+        c, _ = git(root, "merge-base", "--is-ancestor", sha, head)
+        if c not in (0, 1):
+            return unread  # rc 1 is "not an ancestor", a true no; any other code is a read that failed
+        if c:
             return False
         c, out = git(root, "log", "-z", "--format=%H%n%B", f"-n{REVERT_WALK_MAX + 1}", f"{sha}..{head}")
         said = [e.strip("\n").partition("\n") for e in out.split("\0") if e.strip()]
-        if c or len(said) > REVERT_WALK_MAX or not all(re.fullmatch(r"[0-9a-f]{40}", x) for x, _, _ in said):
+        if c or not all(re.fullmatch(r"[0-9a-f]{40}", x) for x, _, _ in said):
+            return unread
+        if len(said) > REVERT_WALK_MAX:
             return False
 
         def reverting(s):  # the commits whose message says `This reverts commit <s>`; a longer hex (another sha that starts with s) is no match
@@ -4499,19 +4508,21 @@ def revert_proven(root, host, base, beside_ok=False):
         chain = _shas(git(root, "rev-list", "--first-parent", f"-n{REVERT_WALK_MAX + 1}", f"{sha}..{head}"))
         holds = _shas(git(root, "rev-list", "--ancestry-path", f"-n{REVERT_WALK_MAX + 1}", f"{revert}..{head}"))
         if chain is None or holds is None:
-            return False
+            return False  # a walk past the cap
         landed = next((x for x in reversed(chain) if x == revert or x in holds), None)  # chain is newest first
         if landed is None or reverting(revert) or reverting(landed):
             return False
         above = _shas(git(root, "rev-list", "--ancestry-path", f"-n{REVERT_WALK_MAX + 1}", f"{landed}..{head}"))
         if above is None:
-            return False
+            return False  # a walk past the cap
         below = ({sha} | {x for x, _, _ in said}) - set(above) - {landed}
         if not all(r in below for r in facts["red_heads"]):
             return False
         title = git(root, "log", "-1", "--format=%s", landed)
+        if title[0]:
+            return unread
         n = pull_number_in_title(title[1])
-        if title[0] or not n:
+        if not n:
             return False
         kept = {k: getattr(host, k) for k in ("base", "branch") if hasattr(host, k)}
         try:
