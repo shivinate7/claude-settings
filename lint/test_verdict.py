@@ -5,7 +5,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
-from proc_fixture import alive, kill_all, stop_group, wait_for, wait_gone  # noqa: E402  the one home of the signal-test helpers (testing/proc_fixture.py)
+from proc_fixture import alive, default_sigint, kill_all, stop_group, wait_for, wait_gone  # noqa: E402  the one home of the signal-test helpers (testing/proc_fixture.py)
 RUN_FOLDER = _test_temp.run_folder()  # its sweep is proved in test_find_copies.py
 V = os.environ.get("VERDICT_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "verdict")
 # The Windows launcher. It always runs its sibling bin/verdict, so VERDICT_UNDER_TEST does not reach it.
@@ -276,9 +276,8 @@ class T(unittest.TestCase):
     def test_sigint_to_verdict_ends_the_child_tree(self):
         """An INT to verdict alone ends its child and that child's child before verdict returns."""
         # A process that inherits SIG_IGN for INT never gets Python's KeyboardInterrupt, so verdict starts with the default action.
-        default_int = lambda: signal.signal(signal.SIGINT, signal.SIG_DFL)
         with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
-            proc, child, grand = self.start_child_tree(d, preexec=default_int)
+            proc, child, grand = self.start_child_tree(d, preexec=default_sigint())
             self.assertTrue(alive(child) and alive(grand), "scope: the child and its child must run before INT")
             proc.send_signal(signal.SIGINT)
             try:

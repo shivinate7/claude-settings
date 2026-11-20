@@ -52,6 +52,12 @@ def wait_for(path, cap, proc=None):
     return True
 
 
+def default_sigint():
+    """A preexec_fn that gives a child the default INT action. A child that inherits SIG_IGN never sees an INT, so a case that
+    sends one resets it first. The one home of that reset (lint/test_verdict.py and merge/test_launch.py)."""
+    return lambda: signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+
 def kill_all(pids):
     """SIGKILL each pid that is still set. A cleanup: a red run leaves no process behind."""
     for pid in pids:
