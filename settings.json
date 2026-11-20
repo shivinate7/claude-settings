@@ -11,6 +11,7 @@
   "permissions": {
     "allow": [
       "Bash(gh pr merge:*)",
+      "Bash(python3 merge/merge.py --lane-lint:*)",
       "mcp__Claude_Browser",
       "ArtifactData",
       "mcp__claude-artifacts__db_get",
