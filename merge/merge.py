@@ -264,7 +264,7 @@ A list read asks for each page by number (`Host.pages`), so no `gh` flag beyond 
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, ast, concurrent.futures, contextlib, datetime, fnmatch, functools, hashlib, importlib.util, io, json, math, os, pathlib, re, shlex, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, ast, concurrent.futures, contextlib, datetime, fnmatch, functools, hashlib, importlib.util, inspect, io, json, math, os, pathlib, re, shlex, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -3751,7 +3751,10 @@ def run_touched_tests(wt, base, head):
         skips.extend(f"skip {p}: the head changes it, but the merge with {base} no longer has it" for p in held.split("\0") if p)
     try:
         # a path the diff deleted or renamed away is not in the tree, so it is no test to run; the selector's own main() drops it the same way
-        tests = sorted(set().union(*(candidates(p, tracked) for p in diff.split("\0") if p and p in tracked)))
+        # The selector reads each test's imports to find the tests that import a changed module, so it reads them in the lint tree, not
+        # in this process's folder. A selector from before that read has no `root` and gets the old call.
+        where = {"root": wt} if "root" in inspect.signature(candidates).parameters else {}
+        tests = sorted(set().union(*(candidates(p, tracked, **where) for p in diff.split("\0") if p and p in tracked)))
     except Exception as e:  # the lane's selector code: a bug in it must not read as a pass or a traceback
         return 0, [], [], [f"the selector's candidates() raised {type(e).__name__}: {e}"]
     env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
