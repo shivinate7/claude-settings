@@ -22,6 +22,12 @@ lines and each step's log lines in workflow order, and treats an install step as
 LocalActionUnderLint: --lint runs a local uses: action only when the read of its action.yml before any step runs accepts it; FAIL beats unknown, and each refusal
 names its file, line or value and runs no step. A plain run never runs one.
 OwnLogPrune: ci-job removes its own ci-job-* logs over one day old when it starts, and keeps the rest.
+RerunCache: a rerun at the same key runs no passing step and prints PASS (cached); a failed, unknown, unrun, edited, renamed or
+  corrupt step runs again. The control case is a first run, which runs every step and prints no cached line. A changed ambient
+  variable, a changed tool file that ci-job runs, an edited action file a remote uses: step runs from the install or the pointer
+  checkout, a changed tree a step before it wrote into, an amend with the same tree, a moved base, and a saved pass seven days old
+  from its save (a hit does not refresh it) each miss too. The same commit in another worktree hits, a volatile variable does not
+  change the key, and past 300 saved passes the oldest are pruned.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -54,6 +60,8 @@ ENV = _test_git.apply(dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_
 ENV.pop("VERDICT_LOG", None)
 ENV.pop("CI_JOB_LINT_WORKERS", None)
 ENV.pop("CI_JOB_HEAD_SHA", None)  # the lane lint's pushed head: a case sets it, and the unset case needs it absent
+ENV.pop("CI_JOB_NO_CACHE", None)  # the rerun cache's knob: a case sets it, and the cache cases need it absent
+ENV["XDG_CACHE_HOME"] = os.path.join(RUN_FOLDER, "xdg-cache")  # the rerun cache's store: no case writes the real ~/.cache
 
 
 def workflow(*steps, job="lane", other=None):
@@ -1659,7 +1667,9 @@ class ParallelLint(Job):
     def test_an_invalid_worker_count_falls_back_to_the_default(self):
         for value in ("0", "abc"):
             self.fresh_run()
-            rc, lines, out = self.run_lint(*self.rendezvous_steps(["a", "b"]), workers=value, launch=cpus(4))
+            # Each pass reruns the same two steps, so the rerun cache would answer the second pass: the knob turns it off.
+            rc, lines, out = self.run_lint(*self.rendezvous_steps(["a", "b"]), workers=value, launch=cpus(4),
+                                           env={"CI_JOB_NO_CACHE": "1"})
             self.assertEqual(list(by_step(lines).items()), [("a", "PASS"), ("b", "PASS")],
                              "CI_JOB_LINT_WORKERS=%s did not fall back to the default worker count:\n%s" % (value, out))
             self.assertEqual(rc, 0, out)
@@ -1928,6 +1938,16 @@ NO_PIPX = {"PATH": os.pathsep.join(d for d in os.environ.get("PATH", "").split(o
 ZIZMOR = "Workflow supply-chain audit (zizmor)"
 
 
+def stub_pipx():
+    """(PATH with a stub pipx first, the stub's argv file). The stub writes its argv, one word a line, to that file. The one home of the stub."""
+    bin_dir = tempfile.mkdtemp(prefix="pipx_", dir=RUN_FOLDER)
+    argv_file = os.path.join(bin_dir, "argv.txt")
+    with open(os.path.join(bin_dir, "pipx"), "w", encoding="utf-8", newline="\n") as f:
+        f.write("#!/bin/sh\nprintf '%%s\\n' \"$@\" > '%s'\n" % argv_file)
+    os.chmod(os.path.join(bin_dir, "pipx"), 0o755)
+    return os.pathsep.join([bin_dir, os.environ.get("PATH", "")]), argv_file
+
+
 class LintTools(Job):
     """--lint runs checks' Code check action (code_check.py, one home) and the zizmor action (actions/zizmor/run.sh,
     one home of the pin). A planted bug fails them; a missing pipx makes them unknown; neither may vanish from the lint
@@ -1972,13 +1992,8 @@ class LintTools(Job):
     def run_with_stub_pipx(self, *steps):
         """Runs one job under --lint with a stub pipx first on PATH. The stub writes its argv, one word a line, to a file.
         Returns (rc, lines, out, argv): argv is None when pipx was never called."""
-        bin_dir = tempfile.mkdtemp(prefix="pipx_", dir=RUN_FOLDER)
-        argv_file = os.path.join(bin_dir, "argv.txt")
-        with open(os.path.join(bin_dir, "pipx"), "w", encoding="utf-8", newline="\n") as f:
-            f.write("#!/bin/sh\nprintf '%%s\\n' \"$@\" > '%s'\n" % argv_file)
-        os.chmod(os.path.join(bin_dir, "pipx"), 0o755)
-        env = {"PATH": os.pathsep.join([bin_dir, os.environ.get("PATH", "")])}
-        rc, lines, out = self.run_job(*steps, args=("--lint",), env=env)
+        path, argv_file = stub_pipx()
+        rc, lines, out = self.run_job(*steps, args=("--lint",), env={"PATH": path})
         argv = None
         if os.path.exists(argv_file):
             with open(argv_file, encoding="utf-8") as f:
@@ -2086,7 +2101,7 @@ def pipx_runs_pinned_ruff():
         pin = json.load(f)["tools"]["ruff"]
     try:
         return subprocess.run(["pipx", "run", "ruff==" + pin, "--version"], capture_output=True,
-                              timeout=60).returncode == 0
+                              timeout=60, env=ENV).returncode == 0  # ENV's cache folder: pipx caches under XDG_CACHE_HOME
     except (OSError, subprocess.TimeoutExpired):
         return False
 
@@ -2109,10 +2124,11 @@ class CodeCheckFromCopiedInstall(Job):
     # shell files, so code_check's run over the tree stays small.
     IN_REPO = ("bin/ci-job", "bin/verdict", "hooks/*.py", "lint/workflow_steps.py", "ruff.toml")
 
-    def install(self, claude_md_checkout):
+    def install(self, claude_md_checkout, folder=None):
         """A copied install: ci-job, verdict and ste-changed as plain files, hooks/ and lint/ beside them, and a global rules
-        file whose @-line names claude_md_checkout. Returns the copied ci-job and the config dir."""
-        cfg = os.path.join(self.root, "cfg")
+        file whose @-line names claude_md_checkout. It goes in folder (default: cfg under the repo).
+        Returns the copied ci-job and the config dir."""
+        cfg = folder or os.path.join(self.root, "cfg")
         os.makedirs(os.path.join(cfg, "bin"))
         for name in ("ci-job", "verdict", "ste-changed"):
             shutil.copy2(os.path.join(HERE, "..", "bin", name), os.path.join(cfg, "bin", name))  # copy2: ste-changed runs as a program
@@ -2996,6 +3012,441 @@ class OwnLogPrune(Job):
         self.assertTrue(os.path.exists(other), "a log whose name is not ci-job-* must stay")
         own = [n for n in self.ci_logs() if n not in (first[0], "ci-job-lane-kept.log")]
         self.assertEqual(len(own), 1, "the second run must leave its own log, got %r" % own)
+
+
+# A step of the rerun cases is a probe, lint/<script>.py. Each run appends the step name to runs.txt in PROBE_DIR, then exits
+# with the code the case wrote for that step (0 when none). The count is taken below the cache, so no run_step is replaced.
+# A probe whose PROBE_DIR holds <name>.write also writes that text to gen.txt in the tree it runs in (a writing step).
+PROBE_SOURCE = '''import os, sys
+folder = os.environ["PROBE_DIR"]
+with open(os.path.join(folder, "runs.txt"), "a", encoding="utf-8") as f:
+    f.write(sys.argv[1] + "\\n")
+write = os.path.join(folder, sys.argv[1] + ".write")
+if os.path.exists(write):
+    with open(write, encoding="utf-8") as src, open("gen.txt", "w", encoding="utf-8") as dst:
+        dst.write(src.read())
+code = os.path.join(folder, sys.argv[1] + ".exit")
+sys.exit(int(open(code, encoding="utf-8").read()) if os.path.exists(code) else 0)
+'''
+ZIZMOR_PROBE = 'echo zizmor >> "$PROBE_DIR/runs.txt"\n'  # stands in for actions/zizmor/run.sh: it records each run, and passes
+
+
+def rerun_step(name, script=None):
+    """A workflow step that runs its probe, lint/<script>.py (the name with dashes as underscores by default), as step `name`."""
+    return step(name, "python3 lint/%s.py %s" % (script or name.replace("-", "_"), name))
+
+
+def state_of(lines, name):
+    """The state a verdict line prints before the step's name, or None when no line names the step."""
+    for ln in lines:
+        head = ln.partition(": ")[0].split()
+        if head[-1:] == [name]:
+            return " ".join(head[:-1])
+    return None
+
+
+class RerunCache(unittest.TestCase):
+    """The rerun cache of the lane job. A step that passed is saved under its name, the files it reads and the tool version,
+    and a rerun at the same key runs no saved step and prints PASS (cached). A failed or unknown step is never saved. An edit to
+    a script, a rename, or a corrupt saved result misses. A changed ambient variable, a changed tool file ci-job runs, or a changed
+    tree that an earlier step wrote into also misses. A hit does not refresh a saved pass: it ages out seven days after its save.
+    The key holds the HEAD commit, so an amend with the same tree misses. It holds the base commit, so a moved base misses. It
+    does not hold the checkout's path, so the same commit in another worktree hits. A volatile variable never changes the key.
+    An action file that a remote uses: step runs from the install or the pointer checkout, so an edit to that file misses.
+    Past 300 saved passes, the oldest are pruned.
+    Each case runs bin/ci-job, or a copied install of it, in a fresh repo under RUN_FOLDER."""
+
+    install = CodeCheckFromCopiedInstall.install  # the copied install: this class calls it, it does not copy it
+    DAY = 86400  # seconds: the age cases set a saved pass's age in days
+
+    def fixture(self):
+        """A new throwaway repo of three committed probe steps, with its probe folder and home in one sandbox under RUN_FOLDER."""
+        self.sandbox = tempfile.mkdtemp(prefix="rerun_", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, self.sandbox, True)
+        self.root = os.path.join(self.sandbox, "repo")
+        self.probe = os.path.join(self.sandbox, "probe")
+        self.home = os.path.join(self.sandbox, "home")
+        self.tmp = os.path.join(self.sandbox, "tmp")
+        for folder in (os.path.join(self.root, "lint"), self.probe, self.home, self.tmp):
+            os.makedirs(folder)
+        self.workers = "1"
+        subprocess.run(["git", "init", "-q", "-b", "main", self.root], check=True, env=ENV)
+        for script in ("check_a", "check_b", "check_c"):
+            with open(os.path.join(self.root, "lint", script + ".py"), "w", encoding="utf-8", newline="\n") as f:
+                f.write(PROBE_SOURCE + "# fixture %s\n" % os.path.basename(self.sandbox))
+        self.commit("fixture")
+
+    def commit(self, message):
+        subprocess.run(["git", "add", "-A"], cwd=self.root, check=True, env=ENV)
+        subprocess.run(["git", "commit", "-q", "-m", message], cwd=self.root, check=True, env=ENV)
+
+    def amend(self, message):
+        """Replace the HEAD commit's message, with its tree unchanged."""
+        subprocess.run(["git", "commit", "--amend", "-q", "-m", message], cwd=self.root, check=True, env=ENV)
+
+    def rev(self, what, cwd=None):
+        return subprocess.run(["git", "rev-parse", what], cwd=cwd or self.root, check=True, capture_output=True,
+                              text=True, env=ENV).stdout.strip()
+
+    def plant_run_sh(self, folder):
+        """The probe run.sh of the zizmor action, at folder/actions/zizmor/run.sh. Returns its path."""
+        path = os.path.join(folder, "actions", "zizmor", "run.sh")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        write_lf(path, ZIZMOR_PROBE)
+        return path
+
+    def set_exit(self, name, code):
+        with open(os.path.join(self.probe, name + ".exit"), "w", encoding="utf-8") as f:
+            f.write(str(code))
+
+    def edit_script(self, script, commit=False):
+        """Append one line to a probe script, uncommitted, or committed too."""
+        with open(os.path.join(self.root, "lint", script + ".py"), "a", encoding="utf-8", newline="\n") as f:
+            f.write("# edit\n")
+        if commit:
+            self.commit("edit " + script)
+
+    def lane_run(self, *steps, ambient=None, script=CI_JOB, args=(), root=None):
+        """One lane run of `steps` with --lint. `ambient` is set in the caller's environment, which the steps inherit; `script` is
+        the ci-job to run; `args` are extra ci-job arguments (--base); `root` is the checkout to run in, the fixture's repo by default.
+        Returns the exit code, the verdict lines, the step names whose probe ran, and the output."""
+        wf = os.path.join(self.sandbox, "wf.yml")
+        with open(wf, "w", encoding="utf-8", newline="\n") as f:
+            f.write(workflow(*steps))
+        runs = os.path.join(self.probe, "runs.txt")
+        if os.path.exists(runs):
+            os.remove(runs)
+        env = {**ENV, "VERDICT_LOG": os.path.join(self.sandbox, "verdict.log"), "PROBE_DIR": self.probe,
+               "CI_JOB_LINT_WORKERS": self.workers, "HOME": self.home, "XDG_CACHE_HOME": os.path.join(self.home, "cache"),
+               "XDG_STATE_HOME": os.path.join(self.home, "state"), "TMPDIR": self.tmp, "TEMP": self.tmp, "TMP": self.tmp,
+               **(ambient or {})}
+        done = subprocess.run([sys.executable, script, "lane", "--lint", "--workflow", wf, *args], cwd=root or self.root,
+                              capture_output=True, text=True, env=env, timeout=120)
+        ran = []
+        if os.path.exists(runs):
+            with open(runs, encoding="utf-8") as f:
+                ran = f.read().split()
+        lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("log=")]
+        return done.returncode, lines, ran, done.stdout + done.stderr
+
+    def files(self):
+        """Every file under the repo, the home and the temp folder: where a build may keep a saved result."""
+        found = set()
+        for top in (self.root, self.home, self.tmp):
+            for dirpath, _, names in os.walk(top):
+                found.update(os.path.join(dirpath, name) for name in names)
+        return found
+
+    def test_a_first_run_runs_every_step_and_prints_no_cached_line(self):  # the premise of the rerun cases below: a first run runs and passes every step, with no (cached) line
+        self.fixture()
+        rc, lines, ran, out = self.lane_run(rerun_step("check-a"), rerun_step("check-b"))
+        self.assertEqual(sorted(ran), ["check-a", "check-b"], "the first run should run every step, got %r\n%s" % (ran, out))
+        self.assertEqual(rc, 0, out)
+        self.assertEqual([state_of(lines, n) for n in ("check-a", "check-b")], ["PASS", "PASS"], out)
+        self.assertFalse([ln for ln in lines if "(cached)" in ln], out)
+
+    def test_a_rerun_at_the_same_key_runs_no_passing_step_and_prints_cached_for_each(self):
+        for workers in ("1", "2"):
+            with self.subTest(workers=workers):
+                self.fixture()
+                self.workers = workers
+                steps = (rerun_step("check-a"), rerun_step("check-b"))
+                _, _, first, out = self.lane_run(*steps)
+                self.assertEqual(sorted(first), ["check-a", "check-b"], "the first run should run every step, got %r\n%s" % (first, out))
+                rc, lines, ran, out = self.lane_run(*steps)
+                self.assertEqual(ran, [], "the rerun ran %r again: each passed at the same key and nothing changed\n%s" % (ran, out))
+                for name in ("check-a", "check-b"):
+                    self.assertEqual(state_of(lines, name), "PASS (cached)", "%s did not print PASS (cached) on the rerun\n%s" % (name, out))
+                self.assertEqual(rc, 0, "a rerun where every step is cached must exit 0, not %d\n%s" % (rc, out))
+
+    def test_a_rerun_runs_only_the_failed_and_the_unrun_steps(self):
+        self.fixture()
+        self.set_exit("check-b", 1)
+        _, _, first, out = self.lane_run(rerun_step("check-a"), rerun_step("check-b"))
+        self.assertEqual(sorted(first), ["check-a", "check-b"], "the first run should run every step, got %r\n%s" % (first, out))
+        self.set_exit("check-b", 0)
+        rc, lines, ran, out = self.lane_run(rerun_step("check-a"), rerun_step("check-b"), rerun_step("check-c"))
+        self.assertEqual(ran, ["check-b", "check-c"],
+                         "the rerun should run only the failed check-b and the unrun check-c, got %r\n%s" % (ran, out))
+        self.assertEqual(state_of(lines, "check-a"), "PASS (cached)", out)
+        self.assertEqual(rc, 0, out)
+
+    def not_saved_until_a_pass(self, code, state):
+        """check-a exits `code` in the first run and passes after. The second run must run check-a again, since the first
+        run's result is not saved. check-b passes in every run, so the third run must run nothing: that proves the second
+        run's pass is saved."""
+        self.fixture()
+        self.set_exit("check-a", code)
+        steps = (rerun_step("check-a"), rerun_step("check-b"))
+        _, lines, _, out = self.lane_run(*steps)
+        self.assertEqual(state_of(lines, "check-a"), state, "scope: check-a should read %s in the first run\n%s" % (state, out))
+        self.set_exit("check-a", 0)
+        _, _, ran, out = self.lane_run(*steps)
+        self.assertIn("check-a", ran, "check-a did not run in the second run: its saved %s from the first run was reused\n%s" % (state, out))
+        self.assertNotIn("check-b", ran, "check-b ran again in the second run, though it passed at the same key\n%s" % out)
+        rc, lines, ran, out = self.lane_run(*steps)
+        self.assertEqual(ran, [], "the third run ran %r again: the pass the second run earned was not saved\n%s" % (ran, out))
+        self.assertEqual(state_of(lines, "check-a"), "PASS (cached)", out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_failed_step_is_never_saved(self):
+        self.not_saved_until_a_pass(1, "FAIL")
+
+    def test_an_unknown_step_is_never_saved(self):
+        self.not_saved_until_a_pass(127, "unknown")
+
+    def edit_misses(self, commit):
+        self.fixture()
+        steps = (rerun_step("check-a"), rerun_step("check-b"))
+        _, _, first, out = self.lane_run(*steps)
+        self.assertEqual(sorted(first), ["check-a", "check-b"], "the first run should run every step, got %r\n%s" % (first, out))
+        self.edit_script("check_a", commit=commit)
+        _, _, ran, out = self.lane_run(*steps)
+        self.assertIn("check-a", ran, "check-a did not run after its script changed, so its saved pass was reused\n%s" % out)
+        rc, lines, ran, out = self.lane_run(*steps)
+        self.assertEqual(ran, [], "the third run ran %r again with no change since the second, so the second run's pass was not saved\n%s" % (ran, out))
+        self.assertEqual(state_of(lines, "check-a"), "PASS (cached)", out)
+        self.assertEqual(rc, 0, out)
+
+    def test_an_uncommitted_edit_to_a_script_misses_its_saved_result(self):
+        self.edit_misses(commit=False)
+
+    def test_a_committed_edit_to_a_script_misses_its_saved_result(self):
+        self.edit_misses(commit=True)
+
+    def corrupt_saved_result(self, junk):
+        self.fixture()
+        steps = (rerun_step("check-a"),)
+        before = self.files()
+        _, _, first, out = self.lane_run(*steps)
+        self.assertEqual(first, ["check-a"], "the first run should run check-a, got %r\n%s" % (first, out))
+        self.assertTrue(self.files() - before, "the first run saved no file under the repo, the home or the temp folder, so there is no saved result to corrupt")
+        _, _, ran, out = self.lane_run(*steps)
+        self.assertEqual(ran, [], "the second run ran check-a again with nothing changed, so the saved result did not serve it\n%s" % out)
+        for path in self.files() - before:
+            with open(path, "wb") as f:
+                f.write(junk)
+        rc, lines, ran, out = self.lane_run(*steps)
+        self.assertEqual(ran, ["check-a"], "check-a was not run after its saved result was corrupted\n%s" % out)
+        self.assertEqual(state_of(lines, "check-a"), "PASS", out)
+        self.assertEqual(rc, 0, out)
+
+    def test_an_empty_saved_result_is_a_miss(self):
+        self.corrupt_saved_result(b"")
+
+    def test_a_garbled_saved_result_is_a_miss(self):
+        self.corrupt_saved_result(b"\xff\xfe not a saved result \x00")
+
+    def test_a_renamed_step_misses_and_the_other_steps_still_hit(self):
+        self.fixture()
+        _, _, first, out = self.lane_run(rerun_step("check-a"), rerun_step("check-b"))
+        self.assertEqual(sorted(first), ["check-a", "check-b"], "the first run should run every step, got %r\n%s" % (first, out))
+        _, _, ran, out = self.lane_run(rerun_step("check-z", script="check_a"), rerun_step("check-b"))
+        self.assertNotIn("check-b", ran, "check-b ran again though neither it nor its files changed\n%s" % out)
+        self.assertIn("check-z", ran, "check-z did not run: under its new name it has no saved result\n%s" % out)
+
+    def test_an_ambient_variable_the_step_did_not_set_misses_its_saved_pass(self):
+        self.fixture()
+        steps = (rerun_step("check-a"),)
+        _, _, first, out = self.lane_run(*steps, ambient={"FOO": "1"})
+        self.assertEqual(first, ["check-a"], "the first run should run check-a, got %r\n%s" % (first, out))
+        _, lines, ran, out = self.lane_run(*steps, ambient={"FOO": "1"})
+        self.assertEqual(ran, [], "scope: the rerun with FOO=1 again ran %r, so the saved pass was not reused\n%s" % (ran, out))
+        self.assertEqual(state_of(lines, "check-a"), "PASS (cached)", out)
+        _, _, ran, out = self.lane_run(*steps, ambient={"FOO": "0"})
+        self.assertIn("check-a", ran, "check-a was not run when the ambient FOO changed from 1 to 0: its saved pass keys on the "
+                      "step's own env, which does not hold FOO\n%s" % out)
+
+    def test_an_edit_to_a_tool_file_ci_job_runs_misses_its_saved_pass(self):
+        for rel in ("bin/verdict", "bin/ste-changed", "hooks/pin_note.py", "lint/workflow_steps.py"):
+            with self.subTest(file=rel):
+                self.fixture()
+                script, cfg = self.install(CHECKOUT, folder=os.path.join(self.sandbox, "tool"))
+                steps = (rerun_step("check-a"),)
+                _, _, first, out = self.lane_run(*steps, script=script)
+                self.assertEqual(first, ["check-a"], "the first run should run check-a, got %r\n%s" % (first, out))
+                _, lines, ran, out = self.lane_run(*steps, script=script)
+                self.assertEqual(ran, [], "scope: the rerun with no edit ran %r, so the saved pass was not reused\n%s" % (ran, out))
+                self.assertEqual(state_of(lines, "check-a"), "PASS (cached)", out)
+                with open(os.path.join(cfg, rel), "a", encoding="utf-8", newline="\n") as f:
+                    f.write("\n# edit\n")
+                _, _, ran, out = self.lane_run(*steps, script=script)
+                self.assertIn("check-a", ran, "check-a printed PASS (cached) after %s changed in the copy that runs it: the key holds "
+                              "ci-job's own bytes only\n%s" % (rel, out))
+
+    def test_a_step_after_a_writing_step_keys_on_the_tree_it_sees_not_the_run_start_tree(self):
+        self.fixture()
+        steps = (rerun_step("check-a"), rerun_step("check-b"))
+        gen = os.path.join(self.root, "gen.txt")
+        self.set_exit("check-a", 1)  # the writer fails, so it is never saved: it runs, and writes gen.txt, in every run
+        self.set_write("check-a", "good\n")
+        _, _, first, out = self.lane_run(*steps)
+        self.assertEqual(sorted(first), ["check-a", "check-b"], "the first run should run both steps, got %r\n%s" % (first, out))
+        self.assertTrue(os.path.exists(gen), "scope: the writing step wrote no gen.txt in the first run\n%s" % out)
+        os.remove(gen)  # the run-start tree now matches the first run's
+        _, lines, ran, out = self.lane_run(*steps)
+        self.assertEqual(ran, ["check-a"], "scope: the rerun with the same write ran %r, not only the failed writer\n%s" % (ran, out))
+        self.assertEqual(state_of(lines, "check-b"), "PASS (cached)", out)
+        os.remove(gen)
+        self.set_write("check-a", "bad\n")
+        _, _, ran, out = self.lane_run(*steps)
+        self.assertIn("check-b", ran, "check-b printed PASS (cached) after the writing step put 'bad' in the tree it reads: its key "
+                      "came from the tree before the writing step ran\n%s" % out)
+
+    def test_a_cached_hit_does_not_refresh_a_saved_pass_and_it_ages_out_seven_days_after_its_save(self):
+        self.fixture()
+        steps = (rerun_step("check-a"),)
+        before = self.files()
+        _, _, first, out = self.lane_run(*steps)
+        self.assertEqual(first, ["check-a"], "the first run should run check-a, got %r\n%s" % (first, out))
+        entry = self.saved_entry("check-a", before)
+        self.age(entry, -6 * self.DAY)  # the pass was saved six days ago
+        _, _, ran, out = self.lane_run(*steps)
+        self.assertEqual(ran, [], "scope: a pass six days old should still hit, but check-a ran %r\n%s" % (ran, out))
+        self.age(entry, -2 * self.DAY)  # saved eight days ago: the hit above must not have made it newer
+        _, _, ran, out = self.lane_run(*steps)
+        self.assertIn("check-a", ran, "check-a printed PASS (cached) from a pass saved eight days ago: a hit refreshed its age, "
+                      "or the age is not checked when the pass is loaded\n%s" % out)
+
+    def test_an_amend_that_drops_a_trailer_with_the_same_tree_misses_the_saved_passes(self):
+        self.fixture()
+        self.amend("fixture\n\nRed-run: none: fixture")
+        steps = (rerun_step("check-a"), rerun_step("check-b"))
+        _, _, first, out = self.lane_run(*steps)
+        self.assertEqual(sorted(first), ["check-a", "check-b"], "the first run should run both steps, got %r\n%s" % (first, out))
+        _, _, ran, out = self.lane_run(*steps)
+        self.assertEqual(ran, [], "scope: a rerun at the same commit ran %r again\n%s" % (ran, out))
+        head, tree = self.rev("HEAD"), self.rev("HEAD^{tree}")
+        self.amend("fixture")
+        self.assertNotEqual(self.rev("HEAD"), head, "scope: the amend left HEAD as it was")
+        self.assertEqual(self.rev("HEAD^{tree}"), tree, "scope: the amend changed the tree")
+        _, _, ran, out = self.lane_run(*steps)
+        self.assertEqual(sorted(ran), ["check-a", "check-b"],
+                         "after an amend that dropped the trailer, with the same tree, the saved passes were reused: the key holds no commit\n%s" % out)
+
+    def zizmor_edit_misses(self, script, run_sh, config):
+        """The remote zizmor step, run by `script`, whose run.sh is run_sh. The first run runs it, a rerun prints PASS (cached) and
+        runs nothing, and an edit to run.sh makes the next run run it again. `config` is the CLAUDE_CONFIG_DIR the copy reads its pointer from."""
+        ambient = {"CLAUDE_CONFIG_DIR": config, "PATH": stub_pipx()[0]}  # a stub pipx: the zizmor branch needs one on PATH, and run.sh is the probe
+        steps = (step("zizmor", uses="shivinate7/claude-settings/actions/zizmor@main"),)
+        _, _, first, out = self.lane_run(*steps, script=script, ambient=ambient)
+        self.assertEqual(first, ["zizmor"], "scope: the first run should run the zizmor step, got %r\n%s" % (first, out))
+        _, lines, ran, out = self.lane_run(*steps, script=script, ambient=ambient)
+        self.assertEqual(ran, [], "scope: the rerun with no edit ran %r, so its saved pass was not reused\n%s" % (ran, out))
+        self.assertEqual(state_of(lines, "zizmor"), "PASS (cached)", out)
+        with open(run_sh, "a", encoding="utf-8", newline="\n") as f:
+            f.write("# edit\n")
+        _, _, ran, out = self.lane_run(*steps, script=script, ambient=ambient)
+        self.assertEqual(ran, ["zizmor"], "the zizmor step printed PASS (cached) after its run.sh changed, under the install or pointer "
+                         "it runs from: the key holds bin/, hooks/ and lint/ only\n%s" % out)
+
+    def test_an_edit_to_the_zizmor_run_sh_in_the_install_misses_its_saved_pass(self):
+        self.fixture()
+        empty = os.path.join(self.sandbox, "no-pointer")
+        os.makedirs(empty)
+        cfg = os.path.join(self.sandbox, "tool")
+        script, _ = self.install(empty, folder=cfg)  # the copy's own actions/ holds run.sh; its pointer holds none
+        self.zizmor_edit_misses(script, self.plant_run_sh(cfg), cfg)
+
+    def test_an_edit_to_the_zizmor_run_sh_in_the_pointer_checkout_misses_its_saved_pass(self):
+        self.fixture()
+        pointer = os.path.join(self.sandbox, "pointer")
+        run_sh = self.plant_run_sh(pointer)
+        cfg = os.path.join(self.sandbox, "tool")
+        script, _ = self.install(pointer, folder=cfg)  # the copy has no actions/: run.sh comes from the pointer checkout
+        self.zizmor_edit_misses(script, run_sh, cfg)
+
+    def test_the_same_commit_in_a_worktree_at_another_path_hits_the_saved_passes(self):
+        self.fixture()
+        steps = (rerun_step("check-a"), rerun_step("check-b"))
+        _, _, first, out = self.lane_run(*steps)
+        self.assertEqual(sorted(first), ["check-a", "check-b"], "the first run should run both steps, got %r\n%s" % (first, out))
+        other = os.path.join(self.sandbox, "worktree-b")
+        subprocess.run(["git", "worktree", "add", "--detach", other, "HEAD"], cwd=self.root, check=True, env=ENV)
+        self.assertEqual(self.rev("HEAD", cwd=other), self.rev("HEAD"), "scope: the other worktree is not at the same commit")
+        _, _, ran, out = self.lane_run(*steps, root=other)
+        self.assertEqual(ran, [], "the same commit at another path ran %r again: the key holds the checkout's path\n%s" % (ran, out))
+
+    def test_a_volatile_variable_that_changes_between_runs_still_hits(self):
+        self.fixture()
+        steps = (rerun_step("check-a"),)
+        _, _, first, out = self.lane_run(*steps, ambient={"VERDICT_LOG": os.path.join(self.sandbox, "verdict-1.log")})
+        self.assertEqual(first, ["check-a"], "the first run should run check-a, got %r\n%s" % (first, out))
+        _, lines, ran, out = self.lane_run(*steps, ambient={"VERDICT_LOG": os.path.join(self.sandbox, "verdict-2.log"), "COLUMNS": "132"})
+        self.assertEqual(ran, [], "check-a ran again when only VERDICT_LOG and COLUMNS changed, both volatile: the key holds a "
+                         "variable that changes between runs\n%s" % out)
+        self.assertEqual(state_of(lines, "check-a"), "PASS (cached)", out)
+
+    def test_a_moved_base_misses_its_saved_passes(self):
+        self.fixture()
+        subprocess.run(["git", "branch", "side"], cwd=self.root, check=True, env=ENV)  # the base: a branch at the fixture commit
+        steps = (rerun_step("check-a"),)
+        base = ("--base", "side")
+        _, _, first, out = self.lane_run(*steps, args=base)
+        self.assertEqual(first, ["check-a"], "the first run should run check-a, got %r\n%s" % (first, out))
+        _, _, ran, out = self.lane_run(*steps, args=base)
+        self.assertEqual(ran, [], "scope: a rerun with the base unmoved ran %r\n%s" % (ran, out))
+        head, tree, side = self.rev("HEAD"), self.rev("HEAD^{tree}"), self.rev("side")
+        moved = subprocess.run(["git", "commit-tree", tree, "-p", side, "-m", "base moved"], cwd=self.root, check=True,
+                               capture_output=True, text=True, env=ENV).stdout.strip()
+        subprocess.run(["git", "update-ref", "refs/heads/side", moved], cwd=self.root, check=True, env=ENV)
+        self.assertEqual(self.rev("side"), moved, "scope: the base did not move")
+        self.assertEqual((self.rev("HEAD"), self.rev("HEAD^{tree}")), (head, tree), "scope: moving the base changed HEAD")
+        _, _, ran, out = self.lane_run(*steps, args=base)
+        self.assertEqual(ran, ["check-a"], "check-a printed PASS (cached) after its base moved to a new commit: the key holds no base commit\n%s" % out)
+
+    def test_past_three_hundred_saved_passes_the_oldest_are_pruned(self):
+        self.fixture()
+        cache = os.path.join(self.home, "cache", "claude-settings", "ci-job-pass")
+        os.makedirs(cache)
+        now = time.time()  # the planted ages are offsets from this, so no verdict reads the date
+        planted = {"%064x" % k for k in range(1, 306)}  # plant k is k minutes old: plant 1 is the newest
+        for k in range(1, 306):
+            self.plant_pass(cache, "%064x" % k, now - 60 * k)
+        old = "%064x" % 0xABCDEF
+        self.plant_pass(cache, old, now - 8 * self.DAY)
+        self.assertEqual(len(os.listdir(cache)), 306, "scope: the planted store holds 306 files")
+        _, _, ran, out = self.lane_run(rerun_step("check-a"))
+        self.assertEqual(ran, ["check-a"], "scope: check-a did not run, so no pass was saved\n%s" % out)
+        left = set(os.listdir(cache))
+        self.assertEqual(len(left - planted - {old}), 1, "scope: the save kept no new pass of its own")
+        self.assertEqual(len(left), 300, "a save past 300 saved passes left %d files, not 300" % len(left))
+        self.assertEqual(left & planted, {"%064x" % k for k in range(1, 300)},
+                         "the save did not keep the 299 newest planted passes and prune the oldest")
+        self.assertNotIn(old, left, "a pass 8 days old survived a save: the store does not age out past passes")
+
+    def plant_pass(self, folder, name, when):
+        """A saved pass planted under `name`, its mtime set to `when`: a file the store reads only by its age."""
+        path = os.path.join(folder, name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("{}")
+        os.utime(path, (when, when))
+
+    def set_write(self, name, text):
+        """Make the probe `name` write `text` to gen.txt in the tree it runs in, on every run."""
+        with open(os.path.join(self.probe, name + ".write"), "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def saved_entry(self, name, before):
+        """The one saved pass of step `name` that appeared since `before`. The store is under the home folder, where $XDG_CACHE_HOME points."""
+        found = []
+        for path in self.files() - before:
+            if not path.startswith(self.home + os.sep):
+                continue
+            try:
+                with open(path, encoding="utf-8") as f:
+                    saved = json.load(f)
+            except (OSError, ValueError):
+                continue
+            if isinstance(saved, dict) and saved.get("name") == name:
+                found.append(path)
+        self.assertEqual(len(found), 1, "scope: expected one saved pass for %s under the home folder, found %r" % (name, found))
+        return found[0]
+
+    def age(self, path, seconds):
+        """Move a file's mtime by `seconds` from its current mtime: a synthetic clock for a saved pass's age, with no sleep."""
+        when = os.path.getmtime(path) + seconds
+        os.utime(path, (when, when))
 
 
 if __name__ == "__main__":

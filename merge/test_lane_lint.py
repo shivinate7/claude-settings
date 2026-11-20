@@ -3775,6 +3775,12 @@ class StepVerdictRows(unittest.TestCase):
         self.assertEqual([(v, n) for v, n, _ in rows], [("pass", "STE lint"), ("unknown", "Windows split guard")],
                          "a declared step that ci-job never printed read as a pass on exit 0: %s" % rows)
 
+    def test_a_cached_pass_line_reads_pass(self):
+        line = "%-15s %s: %s" % ("PASS (cached)", "STE lint", "ok")  # ci-job's own line for a step its rerun cache answered
+        rows = merge.step_verdicts([line], ["STE lint"], "pass")
+        self.assertEqual([(v, n) for v, n, _ in rows], [("pass", "STE lint")],
+                         "a PASS (cached) line read as %s, not as pass: %s" % (rows[0][0], rows))
+
     def test_control_every_declared_step_with_a_pass_line_in_a_passing_run_reads_pass(self):  # the green control of F3 and F4
         rows = merge.step_verdicts(["PASS STE lint: ok", "PASS Cost line pins: ok"], ["STE lint", "Cost line pins"], "pass")
         self.assertEqual([(v, n) for v, n, _ in rows], [("pass", "STE lint"), ("pass", "Cost line pins")], "a passing run with a PASS line per step did not read pass: %s" % rows)
