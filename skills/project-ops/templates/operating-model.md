@@ -118,7 +118,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   each ruling to triage. A finding about another repo goes to that repo's triage. It builds what the owner asks of it and
   merges its own pull requests under the standing merge role. It decides nothing: an arbiter decides, and a consultant helps the owner decide. It ends when its plan lands. The name
   "advisor" is not used, since the built-in advisor (`advisorModel`) has it (decision `session-tiers`, Consultant).
-- **Batch runner's standing duty: a rolling combine train.** In a repo that still batches, the batch runner keeps it all the time (ruled, not in force or built; both routes stay, picked by speed per situation; the scope reading is the lane's, unchecked; a repo on per-lane merging, where each lane PR merges alone, does not)
+- **Batch runner's duty: a rolling combine train, by the situation.** In a repo that still batches, the batch runner combines when the situation calls for it (the owner's 10:23 CST Nov 20 ruling: the first ready item goes alone, and a backlog of 10 or more ready drafts combines in parallel pairs, 8>4>2>1). That ruling supersedes the earlier "all the time." Ruled, not in force or built; both routes stay, picked by speed per situation; the scope reading is the lane's, unchecked; a repo on per-lane merging, where a PR merges alone, does not
   (claude-settings decision `session-tiers`, the session roles decision, bullet "Rolling combine train": the levels L1 to L4, what is
   frozen, what keeps folding, what a fold owes, the pre-merge reads and the fold checks (both relayed, not checked), and the per-batch report numbers).
 
