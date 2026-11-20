@@ -230,7 +230,7 @@ def _only_blocks(tag, text):
     return re.fullmatch(r"\s*(?:%s\s*)+" % block, text, re.S) is not None
 
 
-def is_not_owner_words(prompt):
+def is_bash_input_echo(prompt):
     """True for a prompt that is only a bash-input echo. A paste-only prompt is owner input and is saved."""
     return _only_blocks("bash-input|bash-stdout|bash-stderr", prompt)
 
@@ -248,7 +248,7 @@ def capture(raw, stamp):
         MACHINE_TAGS = ()
     if MACHINE_TAGS and prompt.strip().startswith(MACHINE_TAGS):
         return  # a notice is not an owner message
-    if is_not_owner_words(prompt):
+    if is_bash_input_echo(prompt):
         return
     err = save_message(paths[0], stamp, prompt)
     if err is not None:
