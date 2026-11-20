@@ -210,9 +210,10 @@ class UnknownReads(DriftFixture):
         self.commit_step("c2", status="doing", order=2)
         self.no_trailer_on_main()
         self.publish(sessions=[], items=[], pulls=[self.open_pull(44, "lane/c2")], landed=[],
-                     read_at=test_build.iso_ago(120))
-        out = self.out_with_live(expect=(0,))
-        self.drift_row_unknown(out)
+                     read_at=self.STALE_READ)
+        _, out = self.clocked_build("--live", str(self.live), expect=(0, 1))  # 120 minutes old on the build's clock
+        self.assertEqual(self.code, 1, "c2 is doing and its live file is two hours old: exit 1, not 0")
+        self.drift_row_unknown(out)  # the drift row still reads unknown
 
     def test_main_branch_that_cannot_be_read_reads_the_row_unknown(self):
         self.commit_step("c2", status="done", order=2)
