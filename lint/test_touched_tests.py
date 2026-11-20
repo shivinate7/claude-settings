@@ -1155,6 +1155,64 @@ class Selector(unittest.TestCase):
         files, _ = self.listed(base, {module: "new\n"})
         self.assertEqual(files, sorted(importers), f"the listed tests are {files}, not the tests that import {module}")
 
+    def test_a_test_that_does_not_parse_is_listed_for_a_hook_change(self):
+        """unknown is not skip: a tracked test the selector cannot parse may import the hook, so it is listed."""
+        module, broken = "hooks/ci_wake.py", "hooks/test_broken_syntax.py"
+        text = "import ci_wake\n\n\ndef test_broken(:\n    assert ci_wake\n"
+        with self.assertRaises(SyntaxError):  # the fixture must not parse, or this case probes no unparsed test
+            compile(text, broken, "exec")
+        base = with_ci({module: "old\n", broken: text}, [broken])
+        files, stdout = self.listed(base, {module: "new\n"})
+        self.assertIn(f"touched {module}", stdout, f"the selector did not read the change to {module}, so this case probes nothing")
+        self.assertIn(broken, files, f"{broken} does not parse and is not listed for a change to {module}: an unread test is skipped")
+
+    def test_a_test_that_loads_the_module_by_a_path_literal_is_listed(self):
+        """spec_from_file_location names a hook by its file path, and the test loads that hook: it is listed."""
+        module, loader = "hooks/ci_wake.py", "lint/test_load_by_path.py"
+        text = ("import importlib.util\n\n"
+                'SPEC = importlib.util.spec_from_file_location("wake_loaded", "../hooks/ci_wake.py")\n\n\n'
+                "def test_loaded():\n    assert SPEC\n")
+        base = with_ci({module: "old\n", loader: text}, [loader])
+        files, stdout = self.listed(base, {module: "new\n"})
+        self.assertIn(f"touched {module}", stdout, f"the selector did not read the change to {module}, so this case probes nothing")
+        self.assertIn(loader, files, f"{loader} loads {module} by its file path and is not listed for a change to it")
+
+    def test_a_test_that_loads_the_module_through_a_joined_path_constant_is_listed(self):
+        """The spelling lint/test_now_central.py uses: a module constant joins the hook's path, and the loader passes it on."""
+        module, loader = "hooks/ci_wake.py", "lint/test_load_by_join.py"
+        text = ("import importlib.util\nimport os\n\n"
+                "ROOT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')\n"
+                'HOOK = os.path.join(ROOT_DIR, "hooks", "ci_wake.py")\n'
+                'SPEC = importlib.util.spec_from_file_location("wake_loaded", HOOK)\n\n\n'
+                "def test_loaded():\n    assert SPEC\n")
+        base = with_ci({module: "old\n", loader: text}, [loader])
+        files, stdout = self.listed(base, {module: "new\n"})
+        self.assertIn(f"touched {module}", stdout, f"the selector did not read the change to {module}, so this case probes nothing")
+        self.assertIn(loader, files, f"{loader} loads {module} through a joined path constant and is not listed for a change to it")
+
+    def test_a_test_that_imports_the_module_by_name_with_import_module_is_listed(self):
+        """importlib.import_module names the module as a string, and the test imports it: it is listed."""
+        module, importer = "hooks/ci_wake.py", "hooks/test_dynamic_wake.py"
+        text = ("import importlib\n\n\n"
+                "def test_dynamic():\n"
+                '    wake = importlib.import_module("ci_wake")\n'
+                "    assert wake\n")
+        base = with_ci({module: "old\n", importer: text}, [importer])
+        files, stdout = self.listed(base, {module: "new\n"})
+        self.assertIn(f"touched {module}", stdout, f"the selector did not read the change to {module}, so this case probes nothing")
+        self.assertIn(importer, files, f"{importer} imports {module} by name with import_module and is not listed for a change to it")
+
+    def test_a_hook_path_named_only_in_a_comment_or_a_docstring_is_not_listed(self):
+        """The control for the loader forms: the hook's path sits in a docstring and in a comment, and no test loads it."""
+        module, importer = "hooks/ci_wake.py", "lint/test_mentions_path.py"
+        text = ('"""Covers the wake in ../hooks/ci_wake.py. Nothing here loads that file."""\n'
+                "# the wake lives at ../hooks/ci_wake.py, see the docstring\n\n\n"
+                "def test_mentions():\n    assert True\n")
+        base = with_ci({module: "old\n", importer: text}, [importer])
+        files, stdout = self.listed(base, {module: "new\n"})
+        self.assertIn(f"touched {module}", stdout, f"the selector did not read the change to {module}, so this case probes nothing")
+        self.assertNotIn(importer, files, f"{importer} names {module} only in a docstring and a comment, and is listed")
+
 
 if __name__ == "__main__":
     unittest.main()
