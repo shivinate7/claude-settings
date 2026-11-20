@@ -320,6 +320,20 @@ class RepoHost(FakeHost):
     def refuse_pinned_mismatch(self):  # the real Host reads the pinned checks from GitHub; a fake has none
         return None
 
+class GitCommitsHost(FakeHost):
+    """A FakeHost that answers a commit read and a main-holds read from the checkout's git, as GitHub answers them once the commits are pushed.
+    clean_merges_after walks a merge's parents and asks whether main holds the second one, so the plain FakeHost (no parents, holds nothing)
+    cannot carry a record over a merge of main. Its own `cwd` is the checkout, where merge_state runs git, as Host.cwd is."""
+    def __init__(self, root, other):
+        super().__init__(root, other)
+        self.cwd = root
+
+    def commit_read(self, sha):  # -> (parents, tree), as Host.commit_read gives them
+        return sh(self.root, "git", "log", "-1", "--format=%P", sha).split(), sh(self.root, "git", "rev-parse", f"{sha}^{{tree}}")
+
+    def holds_head_gh(self, head, other):  # True when origin's branch `other` contains `head`: GitHub's compare reads ahead or identical
+        return subprocess.run(["git", "merge-base", "--is-ancestor", head, f"origin/{other}"], cwd=self.root, capture_output=True).returncode == 0
+
 def second_checkout(t):
     """Make a second checkout in folder t, the way copy_repos builds one: its own origin, a main whose stamp config names MAILAUDIT_CHECK, and
     a feat that holds main's tip and has one commit of its own, so its head differs from the first checkout's. -> (co, other)."""
@@ -16452,6 +16466,127 @@ class StandingMergeRole(CloudSession):
         self.own_pr([("CLAUDE.md", "modified", 1)])
         self.scripted_records(record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
         self.assert_standing_refused()
+
+    # ---- a clean merge of main over a passing record keeps the record (decision pr-review-record, "A clean merge of main keeps the record").
+    # The gate reads the record as merge --reviewed does, through live_review_state. A conflicted or an edited merge of main still refuses.
+    RECORD_REFUSAL = "has no passing review record"  # the end of the refusal standing_refusal gives a head with no passing record
+
+    def git_commit_reads(self):
+        """Serve this case's commit reads from the checkout's git. own_pr and scripted_records then set the pull request on that host."""
+        self.host = GitCommitsHost(self.co, self.other)
+
+    def record_head(self):
+        """The record's head: a rule-text commit on origin's feat. The passing record for it is served by the case."""
+        self.commit_files(["CLAUDE.md"])
+        return self.head()
+
+    def push_main(self, path, text):
+        """One commit on origin's main, pushed through origin, so the merge tool's base read sees it. -> its sha."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, path), text)
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", f"main: {path}")
+        sh(o, "git", "push", "-q", "origin", "main")
+        return sh(o, "git", "rev-parse", "HEAD")
+
+    def merge_main_into(self, record, main_sha, side, resolve=None, extra=None):
+        """A merge of `main_sha` into the record's head, made in the other clone and pushed to origin's side branch `side`, so this checkout
+        holds its commits. `resolve`: git's merge conflicts on CLAUDE.md, and the case resolves it to this text. `extra`: the merge commit also
+        adds this file, so its tree is no git clean merge. -> the merge's sha."""
+        o = self.other
+        sh(o, "git", "checkout", "-q", "-B", side, record)
+        merge_cmd = ["git", "merge", "-q", "--no-edit"] + (["--no-commit"] if extra else []) + [main_sha]
+        r = subprocess.run(merge_cmd, cwd=o, capture_output=True, text=True)
+        want = 1 if resolve is not None else 0  # only the conflicted merge is meant to conflict; every other merge must come out clean
+        assert r.returncode == want, f"the fixture's merge of main into {side} returned {r.returncode}, not {want}:\n{r.stdout}{r.stderr}"
+        if resolve is not None:
+            put(os.path.join(o, "CLAUDE.md"), resolve)
+        if extra:
+            put(os.path.join(o, extra), "extra\n")
+        sh(o, "git", "add", "-A")
+        if resolve is not None or extra:
+            sh(o, "git", "commit", "-q", "--no-edit")
+        sh(o, "git", "push", "-q", "origin", f"HEAD:refs/heads/{side}")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return sh(o, "git", "rev-parse", "HEAD")
+
+    def git_clean_tree(self, record, main_sha):
+        """-> the tree of git's clean merge of the record's head and main, or None when they conflict."""
+        r = subprocess.run(["git", "merge-tree", "--write-tree", record, main_sha], cwd=self.co, capture_output=True, text=True)
+        return r.stdout.split()[0] if r.returncode == 0 else None
+
+    def assert_clean_merge_of(self, record, main_sha, clean, body):
+        """P7, the scope before the gate reads it: `clean` is git's clean merge of the record's head and main, and the merge tool's own reader
+        (live_review_state, merge --reviewed) reads the record over it as passing. Both hold on the old code, so a red below comes from the gate alone."""
+        self.assertEqual(sh(self.co, "git", "log", "-1", "--format=%P", clean).split(), [record, main_sha],
+                         "the fixture's merge does not have the record's head and main as its parents")
+        self.assertEqual(self.git_clean_tree(record, main_sha), sh(self.co, "git", "rev-parse", f"{clean}^{{tree}}"),
+                         "the fixture's merge is not git's clean merge of the record's head and main")
+        self.assertTrue(merge.clean_merges_after(self.host, record, clean, "main"), "the merge tool's own walk does not reach the record through the clean merge")
+        self.assertEqual(merge.live_review_state(self.host, merge.parse_review(body), clean, "main")[0], "done",
+                         "the merge tool's own reader does not read the record over the clean merge of main as done")
+
+    def assert_gate_passes_clean_merge(self, clean):
+        """The red premise: standing_refusal, the gate, answers "" for the clean merge. On the old code it gives the record refusal."""
+        why = merge.standing_refusal(self.host, 7, self.host.pr(7), clean)
+        self.assertEqual(why, "", "the standing gate refuses a clean merge of main over a passing record, though the merge tool reads the record as done: " + why)
+
+    def test_a_clean_merge_of_main_over_a_passing_record_merges_under_standing(self):
+        self.git_commit_reads()
+        record = self.record_head()
+        early = self.push_main("docs/notes.md", "Notes.\n")
+        clean = self.merge_main_into(record, early, "fixture-clean")
+        body = record_text(head=record, rounds=REVIEW_PASS)
+        self.own_pr([("CLAUDE.md", "added", 1)])
+        self.scripted_records(body)
+        self.assert_clean_merge_of(record, early, clean, body)
+        sh(self.other, "git", "push", "-q", "origin", f"{clean}:refs/heads/feat")
+        self.assertEqual(self.head(), clean, "fixture: the clean merge is not the pull request's live head")
+        rc, out, err = self.standing_confirm()
+        self.assertNotIn(self.RECORD_REFUSAL, err, "the standing gate refused a clean merge of main over a passing record")
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+    def test_a_conflicted_merge_of_main_over_a_passing_record_is_refused_for_the_record_under_standing(self):
+        self.git_commit_reads()
+        record = self.record_head()
+        early = self.push_main("docs/notes.md", "Notes.\n")
+        clean = self.merge_main_into(record, early, "fixture-clean")
+        late = self.push_main("CLAUDE.md", "Main's rule text.\n")  # main moves on, and its CLAUDE.md conflicts with the record's
+        conflicted = self.merge_main_into(record, late, "fixture-conflicted", resolve="Resolved by hand.\n")
+        body = record_text(head=record, rounds=REVIEW_PASS)
+        self.own_pr([("CLAUDE.md", "added", 1)])
+        self.scripted_records(body)
+        self.assert_clean_merge_of(record, early, clean, body)
+        self.assert_gate_passes_clean_merge(clean)  # the red premise: the same record, over the clean merge
+        sh(self.other, "git", "push", "-q", "origin", f"{conflicted}:refs/heads/feat")
+        self.assertEqual(self.head(), conflicted, "fixture: the conflicted merge is not the pull request's live head")
+        rc, out, err = self.standing_confirm()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(self.RECORD_REFUSAL, err, "the conflicted merge of main was refused for another cause, not for its record")
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
+
+    def test_an_edited_clean_merge_of_main_over_a_passing_record_is_refused_for_the_record_under_standing(self):
+        self.git_commit_reads()
+        record = self.record_head()
+        early = self.push_main("docs/notes.md", "Notes.\n")
+        clean = self.merge_main_into(record, early, "fixture-clean")
+        edited = self.merge_main_into(record, early, "fixture-edited", extra="extra.txt")
+        body = record_text(head=record, rounds=REVIEW_PASS)
+        self.own_pr([("CLAUDE.md", "added", 1)])
+        self.scripted_records(body)
+        self.assert_clean_merge_of(record, early, clean, body)
+        self.assert_gate_passes_clean_merge(clean)  # the red premise: the same record, over the clean merge
+        self.assertNotEqual(sh(self.co, "git", "rev-parse", f"{edited}^{{tree}}"), self.git_clean_tree(record, early),
+                            "fixture: the edited merge has git's clean merge tree, so the case tests nothing")
+        self.own_pr([("CLAUDE.md", "added", 1), ("extra.txt", "added", 1)])  # the pull request now holds the edit too
+        sh(self.other, "git", "push", "-q", "origin", f"{edited}:refs/heads/feat")
+        self.assertEqual(self.head(), edited, "fixture: the edited merge is not the pull request's live head")
+        rc, out, err = self.standing_confirm()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(self.RECORD_REFUSAL, err, "the edited merge of main was refused for another cause, not for its record")
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
 
     # ---- no size bound: a pull request past docs needs a passing reviewer record; a docs-only one needs none.
     RULE_PATHS = ("CLAUDE.md", "agents/a.md", "agents/b.md", "skills/b/SKILL.md", "skills/c/SKILL.md")
