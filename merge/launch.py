@@ -27,7 +27,11 @@ def rmtree_retry(path):  # own copy: bin/merge is a standalone shim and can't im
 
 def run(tree, args):
     # nowindow: merge.py prints its report on the caller's terminal; the wrapper's no-window flag could hide that output
-    return subprocess.run([sys.executable, os.path.join(tree, "merge", "merge.py"), *args]).returncode
+    # Its own group and a forwarded TERM, HUP or INT: a signal to the launcher alone would leave merge.py running, holding the merge lock.
+    # INT is forwarded too because a child in its own session no longer gets the terminal's Ctrl-C.
+    proc = subprocess.Popen([sys.executable, os.path.join(tree, "merge", "merge.py"), *args], start_new_session=True)
+    with _nowindow.forward_signals(proc, ("SIGTERM", "SIGHUP", "SIGINT")):
+        return proc.wait()
 
 def warn(sha, behind, why):
     b = f"{behind} commit(s) behind origin/main as of the last fetch" if behind is not None else "distance behind origin/main unknown"
@@ -59,7 +63,8 @@ def main(co, args):
     tmp = os.path.realpath(tempfile.mkdtemp(prefix="merge-fresh-"))  # /var is a symlink on macOS
     wt = os.path.join(tmp, "tree")
     try:
-        c, o = git(co, "worktree", "add", "-q", "--detach", wt, want)
+        # Locked, with the launcher's pid, so merge.py's sweep (sweep_dead_trees) can remove the tree after a launcher that died
+        c, o = git(co, "worktree", "add", "-q", "--detach", "--lock", "--reason", f"merge tool, pid {os.getpid()}", wt, want)
         got = git(wt, "rev-parse", "HEAD")[1] if c == 0 else ""
         if got != want:
             warn(sha, behind, f"temporary worktree at origin/{ref} failed or did not match: " + (o or got))
@@ -77,6 +82,7 @@ def main(co, args):
         print(f"merge: running claude-settings {want[:12]} (origin/{ref})", file=sys.stderr)
         return run(wt, args)
     finally:
+        git(co, "worktree", "unlock", wt)
         git(co, "worktree", "remove", "--force", wt)
         rmtree_retry(tmp)  # belt-and-suspenders: Windows can leave read-only pack files behind git's own remove
         git(co, "worktree", "prune")  # drop the registration once the directory is actually gone

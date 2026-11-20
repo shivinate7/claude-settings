@@ -323,7 +323,7 @@ def pin_tree(sha):
             env=dict(os.environ, GIT_TERMINAL_PROMPT="0")).returncode != 0:  # a credential prompt must fail, not hang the run
         PIN_TREES[sha] = (None, "commit %s is not in %s and could not be fetched" % (sha[:7], src))
     else:
-        tree = tempfile.mkdtemp(prefix="ci-job-pin-%s-" % sha[:7])
+        tree = tempfile.mkdtemp(prefix="ci-job-pin-%d-%s-" % (os.getpid(), sha[:7]))  # the pid lets merge.py's sweep remove it after a run that died
         PIN_TREES[sha] = (tree, None)  # recorded first, so the run's end deletes it even if the archive fails
         try:
             with _nowindow.Popen(["git", "archive", "--format=tar", sha], cwd=src, stdout=subprocess.PIPE,
@@ -1062,7 +1062,7 @@ def main(argv):
     ctx = (top, base, values, pinned)
     workers = lint_workers() if lint and not dry else 1
     pool = concurrent.futures.ThreadPoolExecutor(workers) if workers > 1 else None  # one worker is the serial path
-    logdir = tempfile.mkdtemp(prefix="ci-job-lint-") if pool else None  # each parallel step's own log, until it is added to the run's
+    logdir = tempfile.mkdtemp(prefix="ci-job-lint-%d-" % os.getpid()) if pool else None  # each parallel step's own log, until it is added to the run's
     kept_logs = False
     futures, logs = {}, {}  # by step index: the queued run, and its log
     try:

@@ -18,10 +18,13 @@ when the caller redirects neither (subprocess fills all three standard handles o
 output lands under the flag is unmeasured. A site that must show a child's output on the caller's terminal
 carries a `# nowindow: <reason>` marker and calls `subprocess` itself.
 """
+import contextlib
 import os
+import signal
 import stat
 import subprocess
 import sys
+import threading
 
 CREATE_NO_WINDOW = 0x08000000  # subprocess has no such name on a non-Windows runner
 
@@ -67,3 +70,44 @@ def check_output(*args, **kwargs):
     if not had_stdin and kwargs.get("stdin") is subprocess.DEVNULL and "input" in kwargs and kwargs["input"] is None:
         del kwargs["input"]  # check_output turns input=None into "", which subprocess refuses beside _flags' stdin
     return subprocess.check_output(*args, **kwargs)
+
+
+def kill_group(proc, sig):
+    """Send `sig` to the process group of `proc`, which a caller started with start_new_session=True, so its children get it too.
+    Windows has no process groups: the signal goes to proc alone, as terminate (or kill for SIGKILL)."""
+    if not hasattr(os, "killpg"):
+        proc.kill() if sig == getattr(signal, "SIGKILL", None) else proc.terminate()
+        return
+    try:
+        os.killpg(proc.pid, sig)
+    except OSError:
+        pass
+
+
+@contextlib.contextmanager
+def forward_signals(proc, names=("SIGTERM", "SIGHUP"), grace=5):
+    """While the block runs, each signal in `names` that reaches this process goes to the process group of `proc`, which the caller
+    started with start_new_session=True. A caller killed alone would leave that group running. The block keeps waiting on `proc`, so its
+    own clean-up runs once the group ends; a group still alive `grace` seconds after the signal is killed. Handlers are restored on exit.
+    A non-main thread and Windows keep the default handling."""
+    nums = [getattr(signal, n) for n in names if hasattr(signal, n)]
+    timers = []
+    def forward(sig, frame):
+        if proc.returncode is not None:
+            return  # reaped: its pid may be reused
+        kill_group(proc, sig)
+        timer = threading.Timer(grace, kill_group, (proc, getattr(signal, "SIGKILL", signal.SIGTERM)))
+        timer.daemon = True
+        timer.start()
+        timers.append(timer)
+    try:
+        before = {n: signal.signal(n, forward) for n in nums} if hasattr(os, "killpg") else {}
+    except ValueError:
+        before = {}
+    try:
+        yield
+    finally:
+        for n, handler in before.items():
+            signal.signal(n, handler)
+        for timer in timers:
+            timer.cancel()

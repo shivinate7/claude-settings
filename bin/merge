@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Shim for the merge tool. Finds the claude-settings checkout and starts merge/launch.py there.
 # No merge logic lives here. README: "The `merge` command".
-import os, re, shutil, stat, subprocess, sys, tempfile
+import os, re, shutil, signal, stat, subprocess, sys, tempfile, threading
 OK = r"(https://github\.com/|git@github\.com:)shivinate7/claude-settings(\.git)?/?"
 def rmtree_retry(path):  # standalone shim: can't import merge/launch.py's copy of this
     def handler(func, p, exc):
@@ -35,7 +35,25 @@ d = find()
 try:
     if not origin(d): sys.exit(f"merge: {d} is not a checkout of shivinate7/claude-settings; stopped before any PR read")
     # nowindow: launch.py and merge.py print the merge report on the caller's terminal; the wrapper's no-window flag could hide that output
-    rc = subprocess.run([sys.executable, os.path.join(d, "merge", "launch.py"), d] + sys.argv[1:]).returncode
+    # Its own group and a forwarded TERM, HUP or INT: a signal to this shim alone would leave the launcher and merge.py running.
+    # INT is forwarded too because a child in its own session no longer gets the terminal's Ctrl-C.
+    # Own copy of hooks/_nowindow.py's forward_signals: this standalone shim imports no repo code.
+    proc = subprocess.Popen([sys.executable, os.path.join(d, "merge", "launch.py"), d] + sys.argv[1:], start_new_session=True)
+    timers = []
+    def kill_group(sig):
+        try: os.killpg(proc.pid, sig)
+        except OSError: return False
+        return True
+    def forward(sig, frame):
+        if proc.returncode is None and kill_group(sig):
+            t = threading.Timer(5, kill_group, (signal.SIGKILL,)); t.daemon = True; t.start(); timers.append(t)  # a group that ignores the signal is killed
+    before = {}
+    if hasattr(os, "killpg"):
+        for n in ("SIGTERM", "SIGHUP", "SIGINT"):
+            if hasattr(signal, n): before[getattr(signal, n)] = signal.signal(getattr(signal, n), forward)
+    rc = proc.wait()
+    for n, h in before.items(): signal.signal(n, h)
+    for t in timers: t.cancel()
 finally:
     for m in made: rmtree_retry(m)  # only a clone this shim made
 sys.exit(rc)

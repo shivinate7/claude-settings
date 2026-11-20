@@ -2967,15 +2967,34 @@ def open_worktree(root, info, base):
     return add_worktree(root, fetch_pr_head(root, info, base)["head"])
 
 MERGE_LOCK = re.compile(r"merge tool, pid (\d+)")
+# A run folder in the temp folder names its maker's pid: ci-job-lint-<pid>-, ci-job-pin-<pid>-<sha7>-, mutate_guard_<pid>-.
+# A folder from before the pid was added has no digits and a dash at that place, so it never matches.
+RUN_FOLDER = re.compile(r"(?:ci-job-lint-(\d+)-|ci-job-pin-(\d+)-[0-9a-f]{7}-|mutate_guard_(\d+)-)")
+
+
+def sweep_dead_folders(temp):
+    """Remove each ci-job-lint, ci-job-pin and mutate_guard folder directly in TEMP whose name carries a dead pid: a run that died left it.
+    A live pid and a name with no pid stay."""
+    try:
+        names = os.listdir(temp)
+    except OSError:
+        return
+    for name in names:
+        m = RUN_FOLDER.match(name)
+        path = os.path.join(temp, name)
+        if m and os.path.isdir(path) and not os.path.islink(path) and not pid_alive(int(next(g for g in m.groups() if g))):
+            shutil.rmtree(path, ignore_errors=True)
 
 
 def sweep_dead_trees(root):
     """Remove each locked worktree of ROOT in the temp folder whose lock reason is `merge tool, pid N` with N dead: a merge run that died left it.
-    The tree is this tool's own, so it is dropped with force, as drop_worktree does. A live pid, an unreadable pid and any other lock stay."""
+    The tree is this tool's own, so it is dropped with force, as drop_worktree does. A live pid, an unreadable pid and any other lock stay.
+    The trees are the merge-wt- ones this module makes and the merge-fresh- ones merge/launch.py makes. Run folders of dead runs go too (sweep_dead_folders)."""
+    temp = os.path.realpath(tempfile.gettempdir())
+    sweep_dead_folders(temp)
     c, out = git(root, "worktree", "list", "--porcelain")
     if c:
         return
-    temp = os.path.realpath(tempfile.gettempdir())
     path = None
     for line in out.splitlines():
         if line.startswith("worktree "):
@@ -2983,7 +3002,7 @@ def sweep_dead_trees(root):
         elif line.startswith("locked") and path:
             m = MERGE_LOCK.fullmatch(line[len("locked"):].strip())
             tmp = os.path.dirname(path)
-            if (m and os.path.basename(path) == "tree" and os.path.basename(tmp).startswith("merge-wt-")
+            if (m and os.path.basename(path) == "tree" and os.path.basename(tmp).startswith(("merge-wt-", "merge-fresh-"))
                     and os.path.dirname(tmp) == temp and not pid_alive(int(m.group(1)))):
                 drop_worktree(root, tmp, path)
 
