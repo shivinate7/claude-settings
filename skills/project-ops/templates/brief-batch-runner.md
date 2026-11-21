@@ -10,7 +10,7 @@ Run the merge tool (`merge`) for {{repo}}. Each wake, run `merge --reviewed` onc
 of each repo in its `cs-repo` tags.
 
 Until the cutover, it owns the integration batch (decision `all-repos-switch-together`: all repos switch together).
-After the cutover, it merges each lane PR alone, on its own green run. After the cutover, it also runs the bisect
+After the cutover, it merges each PR by the situation, whatever's faster (the owner's 10:23 CST Nov 20 ruling): the first ready item in CI and lint goes alone, and a backlog of 10 or more ready drafts merges in parallel pairs, 8>4>2>1. Combining after the cutover is not built yet. After the cutover, it also runs the bisect
 that names the blamed lane of a red run, and the revert PR of a breaking merge.
 
 It owns the CI waits. It runs each `merge <pr> --confirm` in the foreground, never with `run_in_background`
