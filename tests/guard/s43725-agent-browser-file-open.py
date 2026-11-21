@@ -5,8 +5,10 @@ FAMILY = "agent-browser-file-open"
 # desktop app's built-in browser is refused. The calls are mcp__Claude_Browser__navigate and mcp__Claude_Browser__preview_start,
 # which take the URL in `url`, and mcp__Claude_Browser__browser_batch, whose items named navigate or preview_start are judged by
 # their input `url`. The app shows an "Allow Claude to open" card for such a call. Bypass mode does not skip that card, and it has
-# no timeout. No one watches a subagent, so one such call stalled for 12 hours. Headless Chrome (Playwright) opens the same file
+# no timeout. No one watches an agent, so one such call stalled for 12 hours. Headless Chrome (Playwright) opens the same file
 # with no card, so the refusal names headless Chrome or a localhost URL as the remedy. The scheme is read case-insensitively.
+# The same three names under mcp__remote-devices__ (a cloud session linked to the computer) are refused the same way.
+# A batch item may name its tool by the bare name or by the full mcp__Claude_Browser__ name.
 # An owner override lifts the refusal.
 # The allows are as load-bearing as the refusals: a false alarm here stops an agent's check of a localhost page.
 BROWSER_NAVIGATE = "mcp__Claude_Browser__navigate"
@@ -69,3 +71,33 @@ browser_allow("an agent's browser_batch of https items only is allowed", BROWSER
     {"name": "navigate", "input": {"url": "https://example.org"}}]})
 browser_allow("an agent's browser_batch with no actions is allowed", BROWSER_BATCH, {"actions": []})
 browser_allow("an agent's preview_start with name and no url is allowed", BROWSER_PREVIEW, {"name": "web"})
+# Refused: the built-in browser's three names under mcp__remote-devices__, which a cloud session linked to the computer
+# calls. Each is judged as its built-in name is. Red on the current guard, which matches the built-in names only.
+REMOTE_NAVIGATE = "mcp__remote-devices__Claude_Browser__navigate"
+REMOTE_PREVIEW = "mcp__remote-devices__Claude_Browser__preview_start"
+REMOTE_BATCH = "mcp__remote-devices__Claude_Browser__browser_batch"
+browser_refuse("remote-devices navigate to a file: URL is refused", REMOTE_NAVIGATE, {"url": FILE_URL})
+browser_refuse("remote-devices preview_start of a file: URL is refused", REMOTE_PREVIEW, {"url": "file:///tmp/x.html"})
+browser_refuse("remote-devices browser_batch whose item navigates to a file: URL is refused", REMOTE_BATCH, {"actions": [
+    {"name": "navigate", "input": {"url": "file:///tmp/x.html"}}]})
+# Allowed: the same three names with no agent_id (the main session), and an agent's https pages. Green on the current guard.
+browser_allow("the remote-devices navigate to a file: URL with no agent_id is allowed", REMOTE_NAVIGATE,
+              {"url": FILE_URL}, agent_id=None)
+browser_allow("the remote-devices preview_start of a file: URL with no agent_id is allowed", REMOTE_PREVIEW,
+              {"url": "file:///tmp/x.html"}, agent_id=None)
+browser_allow("the remote-devices browser_batch of a file: navigate with no agent_id is allowed", REMOTE_BATCH, {"actions": [
+    {"name": "navigate", "input": {"url": "file:///tmp/x.html"}}]}, agent_id=None)
+browser_allow("an agent's remote-devices navigate to https://example.com is allowed", REMOTE_NAVIGATE,
+              {"url": "https://example.com"})
+browser_allow("an agent's remote-devices preview_start of https://example.com is allowed", REMOTE_PREVIEW,
+              {"url": "https://example.com"})
+browser_allow("an agent's remote-devices browser_batch of https items only is allowed", REMOTE_BATCH, {"actions": [
+    {"name": "navigate", "input": {"url": "https://example.com"}}]})
+# Refused: a batch item named by the full tool name, mcp__Claude_Browser__navigate, opens the file: URL too. Red on the
+# current guard, which reads only the bare item names navigate and preview_start.
+browser_refuse("browser_batch whose item is the full name mcp__Claude_Browser__navigate with a file: URL is refused",
+               BROWSER_BATCH, {"actions": [
+    {"name": "mcp__Claude_Browser__navigate", "input": {"url": "file:///tmp/x.html"}}]})
+# Refused: leading spaces before the scheme do not hide a file: URL. Green on the current guard, which strips them. This pins
+# that behaviour; it is no red case.
+browser_refuse("navigate to a file: URL with leading spaces is refused", BROWSER_NAVIGATE, {"url": "  file:///tmp/x.html"})
