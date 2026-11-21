@@ -19,4 +19,4 @@ Owner, 2026-11-21 13:58 CST, "ya approved": refuse the call, and point at the so
 - Cost: at most one guard run per `navigate`, `preview_start` or `browser_batch` call, from the six tool names added to the guard's PreToolUse matcher in `settings.json`, pinned by `lint/test_settings_matcher.py`.
 
 Kind: process
-Home: hooks/guard.py and settings.json
+Home: hooks/guard.py
