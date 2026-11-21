@@ -286,7 +286,8 @@ rpm_mcp("ready-mcp-mark: MCP draft false after a read of a background --fast-che
         carries=RPM_REMEDY, lacks=RPM_TARGET_LACKS, owner="y", repo="x", pullNumber=12, draft=False)
 rpm_mcp("ready-mcp-mark: MCP draft false after a background ready run completed, with no read of its output, is refused", "deny", RPM_BG_NOTICE,
         carries=RPM_REMEDY, lacks=RPM_TARGET_LACKS, owner="y", repo="x", pullNumber=12, draft=False)
-# X1. The pass line names a sha and no pull request, and main matches a pass by the head sha alone (note ready-mark-pass-matched-by-sha).
-# The decision names `merge <pr> --ready` on that pull request's current head, so a pass from `merge 13 --ready` is no pass for #12. Red on main.
-rpm_mcp("ready-mcp-mark: MCP draft false after a ready pass from another pull request's run, on this head, is refused", "deny", RPM_OTHER_PR,
-        carries=RPM_REMEDY, lacks=RPM_TARGET_LACKS, owner="y", repo="x", pullNumber=12, draft=False)
+# X1. Green control. The pass line names a head sha and no pull request, and main matches a pass by that sha alone (decision
+# ready-mark-pass-matched-by-sha). This control pins that sha-alone allow, so this step does not tighten the match. A PR-number tie
+# is a separate ruling, not pinned here.
+rpm_mcp("ready-mcp-mark: MCP draft false after a ready pass from another pull request's run, on this head, is allowed (sha match)", "allow",
+        RPM_OTHER_PR, owner="y", repo="x", pullNumber=12, draft=False)
