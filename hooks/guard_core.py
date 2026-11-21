@@ -1553,7 +1553,9 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     may not have run (after `||`, after an `&&` whose left side may fail, or inside a `then`, `else`, `elif` or
     `do` body, however many lines it spans, up to its `fi` or `done`), so the folder it returns is one of two
     the shell may be in. A `cd` in a pipe is not counted: it moves nothing."""
-    where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
+    where = shell_cwd if isinstance(shell_cwd, str) and shell_cwd and os.path.isabs(shell_cwd) else None
+    if not isinstance(made, (set, frozenset, list, tuple)):
+        made = frozenset()   # a string would make `in` a substring test and trust a folder that nothing made
     prev, stack = None, []
     known = {}         # the variables the shell holds: plain assignments that ran here (`_track_variables`)
     doubt = False      # the last cd may have failed in an `&&` chain: a segment after it may not run
@@ -1571,7 +1573,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         closes = sum(1 for _, char in marks if char == ")")
         end = ends[at] if at < len(ends) else ""
         if at == number:
-            if uncertain is not None:
+            if isinstance(uncertain, list):
                 uncertain.append(may_skip)
             return None if skipping or gone else where
         if not segment.strip():
