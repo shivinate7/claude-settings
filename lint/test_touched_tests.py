@@ -1461,6 +1461,26 @@ class PosixOnlyInHeavySuites(SelectorBase):
         src = HEAD + '@unittest.skipIf(sys.platform != "win32", "POSIX signals")\n' + CLASS + DEF + BODY
         self.fails_at(POSIX_PATH, src, CALL, "signal.SIGHUP")
 
+    # A skip decorator covers the body only. A class body and a def's default arguments run when the module loads, on Windows too.
+    def test_a_posix_name_in_a_class_body_attribute_under_a_skipif_class_fails(self):
+        src = HEAD + GUARD_NT + CLASS + "    SIGNALS = (signal.SIGHUP, signal.SIGQUIT)\n" + DEF + BODY
+        self.fails_at(POSIX_PATH, src, "SIGNALS = (signal.SIGHUP, signal.SIGQUIT)", "signal.SIGHUP", not_named=CALL)
+
+    def test_a_posix_name_in_a_method_default_under_a_skipif_class_fails(self):
+        src = HEAD + GUARD_NT + CLASS + "    def helper(self, sig=signal.SIGHUP):\n        return sig\n" + DEF + BODY
+        self.fails_at(POSIX_PATH, src, "def helper(self, sig=signal.SIGHUP):", "signal.SIGHUP", not_named=CALL)
+
+    def test_a_posix_name_in_a_default_of_a_skipif_module_def_fails(self):
+        src = HEAD + '@unittest.skipIf(os.name == "nt", "POSIX signals")\ndef stop_group(sig=signal.SIGHUP):\n    os.killpg(0, sig)\n'
+        self.fails_at(POSIX_PATH, src, "def stop_group(sig=signal.SIGHUP):", "signal.SIGHUP", not_named="os.killpg(0, sig)")
+
+    def test_a_class_body_attribute_under_an_os_name_if_passes(self):
+        src = HEAD + GUARD_NT + CLASS + '    if os.name != "nt":\n        SIGNALS = (signal.SIGHUP, signal.SIGQUIT)\n' + DEF + BODY
+        self.passes(POSIX_PATH, src)
+
+    def test_a_posix_call_in_a_function_body_under_a_skipif_def_passes(self):
+        self.passes(POSIX_PATH, HEAD + '@unittest.skipIf(os.name == "nt", "POSIX signals")\ndef stop_group():\n    os.killpg(0, signal.SIGTERM)\n')
+
     def test_an_if_os_name_nt_body_does_not_guard_the_call(self):
         src = HEAD + CLASS + DEF + '        if os.name == "nt":\n            ' + CALL + "\n"
         self.fails_at(POSIX_PATH, src, CALL, "signal.SIGHUP")
