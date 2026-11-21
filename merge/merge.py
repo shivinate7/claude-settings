@@ -4495,7 +4495,7 @@ def _shas(read):
     c, out = read
     lines = out.split()
     if c or not all(re.fullmatch(r"[0-9a-f]{40}", x) for x in lines):
-        raise Stop("a list read of the revert's proof failed")
+        raise Stop("a list read of the revert's proof failed, so the proof is unread (decision no-merge-onto-red-main)")
     return None if len(lines) > REVERT_WALK_MAX else lines
 
 UNREAD = "unread"  # revert_proven(beside_ok=True) answer for a proof it could not read
