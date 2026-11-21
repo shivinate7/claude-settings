@@ -1345,6 +1345,7 @@ REPLAY_MARKS = ("CHERRY_PICK_HEAD", "REVERT_HEAD", "SQUASH_MSG", "MERGE_MSG", "r
 
 CD_WORDS = ("cd", "chdir", "pushd", "set-location", "push-location")
 POP_WORDS = ("popd", "pop-location")
+BRANCH_KEYWORDS = ("then", "else", "elif", "do")   # a segment that opens a branch or loop body: it may not run
 CD_UNKNOWN = object()   # a move whose destination is not tracked (popd)
 
 
@@ -1420,8 +1421,11 @@ def _variable_text(known, text: str) -> str:
     one resolver, as assignments written ahead of the text; it is imported late (guard_frozen imports
     this file). A variable not in `known` stays as written."""
     from guard_frozen import _resolve_vars
+    if "$" not in text:
+        return text   # nothing to read: the resolver would hand the text back, after reading all of `known`
     mark = " ;\x00; "
-    given = "".join('%s="%s"%s' % (name, value, mark) for name, value in known.items())
+    # only the names the text holds can change it, so a long command of many assignments is not read in full each time
+    given = "".join('%s="%s"%s' % (name, value, mark) for name, value in known.items() if name in text)
     return _resolve_vars(given + text).split(mark)[-1]
 
 
@@ -1525,7 +1529,8 @@ def _read_cd_variable(known, segment: str, move: str, ran: bool) -> str:
     return read if isinstance(read, str) and read else move
 
 
-def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False, made=frozenset()):
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False, made=frozenset(),
+                       uncertain=None):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
@@ -1546,8 +1551,39 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     the next command runs. A brace group after the `||` is not read. Off by
     default, so a rule that fails closed on an untrusted `cd` keeps doing so.
     `made` holds normalized folders an earlier segment of the same call makes (a mkdir, a clone): a `cd`
-    into one is read as one that works, though the folder is missing at check time. Empty by default."""
-    where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
+    into one is read as one that works, though the folder is missing at check time. Empty by default.
+    `uncertain`, a list, gets one bool when the walk reaches `segments[number]`: True when a `cd` ahead of it
+    may not have run (after `||`, after an `&&` whose left side may fail, or inside a `then`, `else`, `elif` or
+    `do` body, however many lines it spans, up to its `fi` or `done`), so the folder it returns is one of two
+    the shell may be in. A `cd` in a pipe is not counted: it moves nothing."""
+    walk = _walk_dirs(segments[:number + 1], shell_cwd, ends, failed_cd_stays, made)
+    at = 0
+    while True:
+        try:
+            here, may_skip = next(walk)
+        except StopIteration as finished:
+            return finished.value   # `number` is past the last segment: where the shell ends
+        if at == number:
+            if isinstance(uncertain, list):
+                uncertain.append(may_skip)
+            return here
+        at += 1
+
+
+def dirs_before_segments(segments, shell_cwd: str, ends=(), failed_cd_stays=False, made=frozenset()):
+    """`[(folder, uncertain)]`, one pair per segment: what `dir_before_segment` gives each one, from ONE walk.
+    A caller that wants every segment's folder takes this, never `dir_before_segment` in a loop: that walk
+    restarts at the first segment on each call, so the work grows with the cube of a long command."""
+    walk = _walk_dirs(segments, shell_cwd, ends, failed_cd_stays, made)
+    return list(walk)
+
+
+def _walk_dirs(segments, shell_cwd, ends, failed_cd_stays, made):
+    """The one walk behind `dir_before_segment` and `dirs_before_segments`. Yields `(folder, may_skip)` as the walk
+    reaches each segment, before it reads that segment, and returns the folder the shell ends in."""
+    where = shell_cwd if isinstance(shell_cwd, str) and shell_cwd and os.path.isabs(shell_cwd) else None
+    if not isinstance(made, (set, frozenset, list, tuple)):
+        made = frozenset()   # a string would make `in` a substring test and trust a folder that nothing made
     prev, stack = None, []
     known = {}         # the variables the shell holds: plain assignments that ran here (`_track_variables`)
     doubt = False      # the last cd may have failed in an `&&` chain: a segment after it may not run
@@ -1555,17 +1591,26 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
     bail = False       # a failed cd ended in `||`: an `exit` next ends the shell
     gone = False       # the shell has ended: nothing after runs
+    may_skip = False   # a cd ahead of the target may not have run (`uncertain`)
     last_end = ""      # the operator that ended the last non-empty segment
-    for at, segment in enumerate(segments[:number + 1]):
+    compounds = []     # open if/for/while/until: True once its then, else, elif or do has begun its body
+    for at, segment in enumerate(segments):
         marks = [(index, char) for index, char, quote in walk_quotes(segment) if not quote and char in "()"]
         groups = _subshell_opens(segment, marks)
         stack.extend((where, prev, dict(known), index in groups) for index, char in marks if char == "(")
         closes = sum(1 for _, char in marks if char == ")")
         end = ends[at] if at < len(ends) else ""
-        if at == number:
-            return None if skipping or gone else where
+        yield (None if skipping or gone else where), may_skip
         if not segment.strip():
             continue   # an operator at end of line then the newline leaves an empty part: it changes nothing
+        tokens = segment_tokens(segment)
+        word = tokens[0] if tokens else None
+        if word in ("if", "for", "while", "until", "select"):
+            compounds.append(False)
+        elif word in BRANCH_KEYWORDS and compounds:
+            compounds[-1] = True   # a body opens, so a `cd` in it on a later line may not run
+        elif word in ("fi", "done") and compounds:
+            compounds.pop()
         if gone:
             continue
         if skipping:
@@ -1577,7 +1622,6 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                     where, prev, known = _close_paren(stack, known)
                     skipping = False
             continue
-        tokens = segment_tokens(segment)
         move = _segment_cd_move(tokens) if tokens else None
         before = last_end
         last_end = end
@@ -1592,6 +1636,8 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
         ran = not (doubt or piped or before == "||")   # this segment runs in the shell, as itself
         sure = ran and not (unsure and before == "&&")
+        if move is not None and tokens and (not sure or word in BRANCH_KEYWORDS or any(compounds)):
+            may_skip = True
         assigned = _track_variables(known, segment, tokens, sure)
         doubt = doubt and end == "&&"
         if tokens is None:

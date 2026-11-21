@@ -193,6 +193,14 @@ MUTATIONS = [
      '    if lines is None:\n        guard_core.record("Bash", "noted", "subject-unread", "git checkout " + name)\n',
      '    if lines is None:\n        pass\n', "guard",
      'a bare checkout of a dirty file whose status git cannot read is allowed and logged once as subject-unread'),
+    ("shared-tree: a segment is judged in its own cd folder",
+     '        elif here is not None:\n            root = here\n',
+     '        elif False:\n            root = here\n', "guard",
+     'per-file deny: cd shared, restore f.txt, then cd to a clean checkout'),
+    ("shared-tree: an uncertain segment drops the whole-command fallback",
+     '            if maybe and maybe[0]:\n                here = None\n',
+     '            if False:\n                here = None\n', "guard",
+     'per-file deny: one-line if false; then cd clean; fi, the restore runs in the shared tree, the call ends in it'),
 
     # ---- rule 1's three new git forms: branch delete, worktree remove, worktree prune. Each
     # mutation breaks one arm of the state read the plan named as the safety hole in this rule.
@@ -3793,6 +3801,17 @@ MUTATIONS = [
      '    return clause\n\n\ndef _claim_clause',
      '    return None\n\n\ndef _claim_clause',
      "guard", 'brief-claim: test-author brief where main refuses all three today'),
+    # The machine-load brake's Linux memory and lint-start reads (decision machine-load-brake). Each row kills on its own
+    # case: the Linux read on a 96% Agent start, and the lint start on the disk-full bin/ci-job --lint case, which needs no
+    # memory reading.
+    ('load-brake: the Linux branch of _read_memory returns None, so memory is unread on Linux',
+     '        return 100.0 * (total - available) / total',
+     '        return None',
+     "guard", 'linux, local, Agent run_in_background true, memory 96%: full, refused'),
+    ('load-brake: lint_start_hit_of returns the empty string, so a background lint start is never read',
+     'def lint_start_hit_of(tool: str, tool_input) -> str:',
+     'def lint_start_hit_of(tool: str, tool_input) -> str:\n    return ""',
+     "guard", 'bin/ci-job --lint, background, 3.1 GB free of 926 GB: full, refused'),
 ]
 
 

@@ -698,7 +698,7 @@ while True:
             path_is_inside, primary_checkout, record, refuse, resolve_command,
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
-            _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes, segment_with_vars as _segment_with_vars,
+            _git_subcommand_index, dir_before_segment, dirs_before_segments, shell_abs, walk_quotes, segment_with_vars as _segment_with_vars,
             _checkout_root_by_stat, layout_module as _layout_module,
             _REDIRECT_OPERATOR, ssh_remote_script, strip_redirections,
         )
@@ -766,7 +766,7 @@ while True:
             BACKGROUND_END_REASON, CHECK_TAIL_REASON, CHECK_TIMEOUT_TEMPLATE, FG_BACKGROUND_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
             NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, UV_VALUE_FLAGS, VERDICT_PIPE_REASON, WAITER_REASON,
             background_end_hit, background_work_running, check_tail_hit, check_timeout_hit, check_timeout_limit_text, fg_long_hit,
-            live_stream_hit, ln_descends_hit,
+            lint_start_hit, live_stream_hit, ln_descends_hit,
             loop_condition_polls_a_pattern, narrated_tail_hit, verdict_pipe_hit, waiter_verdict,
         )
         _loading = "guard_rm_var"
@@ -4999,8 +4999,14 @@ LOAD_FULL_CLOUD_REASON = ("the disk is full (%s). No new lane or agent starts un
                           + 'On Windows, double-quote the root: --root "D:/a/repo". ' + LOAD_CITE)
 
 
+LOAD_LINT_CITE = "(decision machine-load-brake, a full machine starts no lint)"
+LOAD_LINT_REASON = "the machine is full (%s). No lint starts until the load drops. Wait, then retry. " + LOAD_LINT_CITE
+LOAD_LINT_DISK_REASON = ("the disk is full (%s). No lint starts until space is freed. Free it with " + LOAD_SWEEP
+                         + " (preview first, then add --confirm), then retry. " + LOAD_LINT_CITE)
+
+
 def _read_memory():
-    """Percent of physical memory in use, from the OS's own counter, or None on another platform."""
+    """Percent of physical memory in use, from the OS's own counter (/proc/meminfo on Linux), or None on another platform."""
     import ctypes
     if sys.platform == "win32":
         from ctypes import wintypes
@@ -5017,6 +5023,19 @@ def _read_memory():
         if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
             return None
         return 100.0 * (status.ullTotalPhys - status.ullAvailPhys) / status.ullTotalPhys
+    if sys.platform.startswith("linux") or is_cloud():
+        # A cloud host is Linux (decision machine-load-brake), so a cloud start reads meminfo on any reported platform.
+        # MemAvailable is the kernel's own estimate of what a new process can use, caches included.
+        fields = {}
+        with open("/proc/meminfo", encoding="ascii", errors="replace") as handle:
+            for line in handle:
+                name, _, rest = line.partition(":")
+                if name in ("MemTotal", "MemAvailable"):
+                    fields[name] = int(rest.split()[0])
+        total, available = fields.get("MemTotal"), fields.get("MemAvailable")
+        if not total or available is None:
+            return None
+        return 100.0 * (total - available) / total
     if sys.platform == "darwin":
         # kern.memorystatus_level is the free share that `memory_pressure` prints.
         level, size = ctypes.c_int(0), ctypes.c_size_t(ctypes.sizeof(ctypes.c_int))
@@ -5060,10 +5079,41 @@ def _load_value(reading: dict, key: str):
     return None if isinstance(v, bool) or not isinstance(v, (int, float)) else float(v)
 
 
+def lint_start_hit_of(tool: str, tool_input) -> str:
+    """The matched text when this call starts a lint in the background (`merge --lane-lint`, `bin/ci-job --lint`), else "".
+    A lint start is judged on the machine's load like an Agent start. A call with run_in_background, a lint ended by `&`,
+    and a lint in `bash -c` or `( ... )` all count. A foreground lint with no `&` is no start.
+    Never raises: a call it cannot read is no lint start."""
+    if tool not in SHELL_TOOLS or not isinstance(tool_input, dict):
+        return ""
+    try:
+        return lint_start_hit(strip_heredoc_bodies(tool_input.get("command") or ""), bool(tool_input.get("run_in_background")))
+    except Exception:
+        return ""
+
+
+def lint_load_hit() -> tuple:
+    """(rule reason, matched) when the machine is full at a background lint start, else ("", ""). One read of the load.
+    Memory counts in a cloud session too: a lint is the heaviest call a session makes. A failed or unread
+    reading counts as normal."""
+    try:
+        full = load_full(read_load())
+    except Exception:
+        return "", ""
+    if not full:
+        return "", ""
+    text = ", ".join(full)
+    if any(t.startswith("disk") for t in full):
+        return LOAD_LINT_DISK_REASON % text, text
+    return LOAD_LINT_REASON % text, text
+
+
 def load_hit(tool: str, tool_input) -> tuple:
     """(rule reason, matched) when the machine's load refuses this start call, else ("", ""). The one
     read of the call: a failed read or an unread value counts as normal. A cloud session is braked at a full disk
     only: memory and busy never refuse its start."""
+    if lint_start_hit_of(tool, tool_input):
+        return lint_load_hit()
     if tool not in START_TOOLS:
         return "", ""
     cloud = is_cloud()
@@ -5082,9 +5132,16 @@ def load_hit(tool: str, tool_input) -> tuple:
     def disk_under(share, gb):
         return disk_text is not None and disk < min(disk_total * share / 100.0, gb)
 
-    full = load_full(reading, disk_only=cloud)
+    full = load_full(reading)
+    # The owed audit's own Audit: spawn is not refused at the Full memory point (decision machine-load-brake, Full): it is
+    # the one call that clears the audit. Only Full memory is lifted: a full disk still refuses it (the disk cleanup frees
+    # that first), and the busy test below still judges both readings, so a background spawn or a busy disk refuses as on
+    # main. AUDIT_SPAWN_PASSED is set only for that spawn, while the audit is owed.
+    if full and AUDIT_SPAWN_PASSED and not any(t.startswith("disk") for t in full):
+        full = []
     if full:
-        return (LOAD_FULL_CLOUD_REASON if cloud else LOAD_FULL_REASON) % ", ".join(full), ", ".join(full)
+        disk_tripped = any(t.startswith("disk") for t in full)
+        return (LOAD_FULL_CLOUD_REASON if cloud and disk_tripped else LOAD_FULL_REASON) % ", ".join(full), ", ".join(full)
     if cloud:
         return "", ""
     # An Agent or Task call that leaves run_in_background out or sets it false passes busy. Any other present value
@@ -5162,7 +5219,7 @@ def lane_session_hit(payload, tool: str) -> tuple:
 
 def load_full(reading, disk_only=False) -> list:
     """The readings over the full point, as text, or []. An unread or malformed reading counts as normal. `disk_only`
-    leaves memory out, as a cloud start does."""
+    leaves memory out."""
     if not isinstance(reading, dict):
         return []
     memory = _load_value(reading, "memory_pct")
@@ -5447,7 +5504,28 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # Not a recursive judge_shell: that clears PENDING_ASK and would lose a deny.
     texts = [stripped, *substitution_commands(raw, stripped)]
     whole_root = []   # command_root reads the whole command: once per command, never per segment
-    for segment in (part for text in texts for part in split_segments(text)):
+    judged = []       # (segment, folder the shell is in when it runs, or None) for every text
+    whole_reading = (GIT_WORK_TREE_RE.search(stripped) or "<<" in stripped
+                     or any(_segment_git_c_target(segment_tokens(part) or []) is not None
+                            for part in split_segments(stripped) if part.strip()))
+    for index, text in enumerate(texts):
+        text_ends = []
+        text_segments = split_segments(text, text_ends)
+        own_folders = index == 0 and not whole_reading
+        walked = dirs_before_segments(text_segments, cwd, text_ends) if own_folders else None   # one walk, never one per segment
+        for number, part in enumerate(text_segments):
+            # The command's own segments are read in the folder the shell holds when each runs, so a
+            # `cd` after a destructive segment moves nothing that ran before it. Four things keep
+            # the whole-command reading of `command_root`: a substitution (it runs where its own
+            # segment stands, which the whole-command root is kept for, as main reads it), a command
+            # with a `--work-tree`, `git -C` or `env -C` (`_run_dir` reads the first `-C` for every
+            # segment, as the owner ruled), a command with a heredoc (`dir_before_segment` reads a
+            # body line as a live segment), and a segment after a `cd` that may not have run.
+            here, maybe = (walked[number][0], [walked[number][1]]) if walked else (None, [])
+            if maybe and maybe[0]:
+                here = None
+            judged.append((part, here))
+    for segment, here in judged:
         if not segment.strip():
             continue
         words = segment_tokens(segment)
@@ -5455,6 +5533,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if own_c is not None:
             # a `--work-tree` beside the `-C` moves the files the call discards to that tree
             root = command_root(segment, cwd) if GIT_WORK_TREE_RE.search(segment) else _absolute(own_c, cwd)
+        elif here is not None:
+            root = here
         else:
             whole_root = whole_root or [command_root(stripped, cwd)]
             root = whole_root[0]
@@ -8036,9 +8116,9 @@ def judge(payload) -> None:
     # 9c. The machine-load brake: one read on a start call, and one on an agent's or a lane session's shell or file write.
     # It runs before the Opus refusal, because a lifted refusal exits refuse() at once and would skip this deny.
     load_reason, load_matched = load_hit(tool, tool_input)
-    if not load_reason:
+    if not load_reason and not lint_start_hit_of(tool, tool_input):   # a lint start was read once by load_hit
         load_reason, load_matched = running_agent_hit(payload, tool)
-    if not load_reason:
+    if not load_reason and not lint_start_hit_of(tool, tool_input):
         load_reason, load_matched = lane_session_hit(payload, tool)
     if load_reason:
         refuse(tool, "deny", "load-brake", load_reason, load_matched)

@@ -3008,16 +3008,32 @@ def folder_owner(path):
     return int(next(g for g in m.groups() if g)) if m else None
 
 
+PF_KTHREAD = 0x200000  # the kernel's flag word bit for a kernel thread (linux/sched.h)
+
+
+def kernel_thread(pid, proc="/proc"):
+    """True when PID is a Linux kernel thread (PF_KTHREAD in field 9 of PROC/<pid>/stat). False when the stat cannot be read, so a pid never
+    proven a kernel thread stays a possible holder; macOS and Windows have no PROC and read False. A kernel thread's cwd is unreadable to a
+    non-root user and it descends from kthreadd (pid 2), so unskipped it would tie to a folder named for pid 2 and cost one `ps` per climb step."""
+    try:
+        with open(os.path.join(proc, str(pid), "stat"), encoding="utf-8", errors="replace") as f:
+            text = f.read()
+        # comm (field 2) may hold spaces and parentheses: fields 3 onward start after the last ")". Flags is field 9, the seventh of those.
+        return bool(int(text.rsplit(")", 1)[1].split()[6]) & PF_KTHREAD)
+    except (OSError, ValueError, IndexError):
+        return False
+
+
 def held_by_live_process(path, owner=None):
     """True when a live process has its working folder, or an open file, in PATH or under it, or when that cannot be read (unknown keeps the folder).
     The working folder comes from the janitor's `sweep.processes_in`, the one reader of it. That reader skips open files, so on Linux each
     /proc/<pid>/fd link is read here too: a child that outlives a dead launcher can hold a file in the folder while its cwd is elsewhere.
-    A pid whose cwd or fd list cannot be read keeps the folder only when it is below OWNER (the pid the folder is named for; the owner's own cwd is no hold): the
-    other pids this user cannot read (pid 1, another user's) are no holder of this folder. OWNER defaults to the pid in the folder's name
+    A pid whose cwd or fd list cannot be read keeps the folder only when it is below OWNER (the pid the folder is named for; the owner's own cwd is no hold) and is no
+    kernel thread (kernel_thread): the other pids this user cannot read (pid 1, another user's) are no holder of this folder. OWNER defaults to the pid in the folder's name
     (folder_owner). A folder with no owner pid keeps for no unreadable pid."""
     owner = folder_owner(path) if owner is None else owner
-    if owner is not None and owner <= 2:
-        owner = None  # init (1) and Linux's kthreadd (2) are ancestors of every process or kernel thread, so neither ties any of them to this folder
+    if owner is not None and owner <= 1:
+        owner = None  # init is every process's ancestor, so it ties none of them to this folder
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "janitor"))
     try:
         import sweep  # janitor/sweep.py
@@ -3048,7 +3064,7 @@ def held_by_live_process(path, owner=None):
     if owner is None:
         return False
     try:
-        return any(pid != owner and _descends_from(sweep, pid, owner) is not False and pid_alive(pid) for pid in unreadable)  # a pid that ended since the read holds nothing
+        return any(pid != owner and not kernel_thread(pid) and _descends_from(sweep, pid, owner) is not False and pid_alive(pid) for pid in unreadable)  # a pid that ended since the read holds nothing
     except Exception:
         return True
 
@@ -3881,7 +3897,7 @@ def run_safe_sweep(root):
 
 def refuse_full_disk(root):
     """Refuse a lane lint when a drive it writes to is under the guard's full disk floor, min(5% of the drive, 5 GiB) (decision machine-load-brake): the
-    drive of the home folder (the guard's reader called bare, hooks/guard.py _read_disk, which reads home in a cloud session too; only a cloud start reads "/") or the drive of the temp folder, where add_worktree makes the lint tree.
+    drive of the home folder (the guard's reader called bare, hooks/guard.py _read_disk, which reads home in a cloud session too; only the guard's own cloud read, at an Agent or a lint start, reads "/") or the drive of the temp folder, where add_worktree makes the lint tree.
     A lint tree is a full checkout, and a full disk fails it half made. The floor is the guard's (load_full), fed the disk reading alone, so memory
     never refuses here. The floor holds in a cloud session too. A drive that cannot be read prints one line that says so; the other is still checked,
     and the lint goes ahead when none is full.
