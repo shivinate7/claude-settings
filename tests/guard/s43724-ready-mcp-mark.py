@@ -267,13 +267,14 @@ rpm_mcp("ready-mcp-mark: MCP draft false after a Record-claim stop with no ready
 rpm_mcp("ready-mcp-mark: MCP draft false after a Record-claim stop with no ready checks, naming an older head, is refused", "deny",
         RPM_CLAIM_STOP_OLD, fake=GHREADY_CLAIM, carries=RPM_REMEDY, lacks=RPM_TARGET_LACKS, owner="y", repo="x", pullNumber=12, draft=False)
 # B1. A background ready run's pass reaches the guard only through the session's own read of its output file, here a Read of the path
-# or a Bash cat of it. Each shows the pass for the run's head. Red on main: main reads a Bash result only when that call is itself a ready run.
+# or a Bash cat of it. Each shows the pass for the run's head. Each case pins that such a read counts. The guard counts a result only
+# when its call is a ready run or reads that run's output, so without the read the pass never reaches it.
 rpm_mcp("ready-mcp-mark: MCP draft false after a background ready pass read by Read is allowed", "allow", RPM_BG_READ,
         owner="y", repo="x", pullNumber=12, draft=False)
 rpm_mcp("ready-mcp-mark: MCP draft false after a background ready pass read by a Bash cat is allowed", "allow", RPM_BG_CAT,
         owner="y", repo="x", pullNumber=12, draft=False)
-# B2. Controls, green on main: each is refused now and must stay refused. Each pins one way a background run could pass for a
-# ready pass by mistake. The never-read case's output file holds the pass on disk, so a guard that opened the file would allow it.
+# B2. Controls: each case is refused, and must stay refused. Each pins one way a background run could pass for a ready pass by
+# mistake. The never-read case's output file holds the pass on disk, so a guard that opened the file would allow it.
 rpm_mcp("ready-mcp-mark: MCP draft false after a background ready pass read on an older head is refused", "deny", RPM_BG_OLD,
         carries=RPM_REMEDY, lacks=RPM_TARGET_LACKS, owner="y", repo="x", pullNumber=12, draft=False)
 rpm_mcp("ready-mcp-mark: MCP draft false after a background ready run whose output was never read is refused", "deny", RPM_BG_NEVER,
@@ -286,8 +287,8 @@ rpm_mcp("ready-mcp-mark: MCP draft false after a read of a background --fast-che
         carries=RPM_REMEDY, lacks=RPM_TARGET_LACKS, owner="y", repo="x", pullNumber=12, draft=False)
 rpm_mcp("ready-mcp-mark: MCP draft false after a background ready run completed, with no read of its output, is refused", "deny", RPM_BG_NOTICE,
         carries=RPM_REMEDY, lacks=RPM_TARGET_LACKS, owner="y", repo="x", pullNumber=12, draft=False)
-# X1. Green control. The pass line names a head sha and no pull request, and main matches a pass by that sha alone (decision
-# ready-mark-pass-matched-by-sha). This control pins that sha-alone allow, so this step does not tighten the match. A PR-number tie
-# is a separate ruling, not pinned here.
+# X1. Green control. The pass line names a head sha and no pull request, and main matches a pass by that sha alone (the note
+# ready-mark-pass-matched-by-sha records this match). This control pins that sha-alone allow, so this step does not tighten
+# the match. A PR-number tie is a separate ruling, not pinned here.
 rpm_mcp("ready-mcp-mark: MCP draft false after a ready pass from another pull request's run, on this head, is allowed (sha match)", "allow",
         RPM_OTHER_PR, owner="y", repo="x", pullNumber=12, draft=False)
