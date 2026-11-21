@@ -8,7 +8,8 @@
 # Reuse: duo reuses the first booted device whose name contains "iPhone Duo", pro the first booted iPhone whose name does
 # not. Reuse takes no lease and shuts nothing down. It never shuts down a simulator it did not boot.
 # Cross-role (ruling sims-load-brake-only): a Duo may boot beside the 18 Pro and the reverse. A booted phone of the other
-# kind is no reason to refuse. The cap below (CAP=2, guard SIM_BOOT_CAP=2) stays until the owner rules on it: an open question.
+# kind is no reason to refuse. The ruling also covers the 2-device cap below and rules it out; this lane keeps CAP=2 (guard
+# SIM_BOOT_CAP=2, test case 107) until a follow-up lane changes the guard (debt sim-boot-cap-outlives-ruling).
 # Before its own boot it counts every booted device, owner-booted too. At the cap it boots nothing, runs no tests,
 # names the booted devices and exits 1: the guard sees only the command word, not the boot inside this tool. A simctl
 # list that fails exits 1 with no boot.
