@@ -16,7 +16,7 @@ Owner, 2026-11-21 13:58 CST, "ya approved": refuse the call, and point at the so
 - The reason says a file opened in the built-in browser can stop on an app card nobody answers. It names headless Chrome (Playwright) or a localhost URL as the way.
 - The main session passes: a person sees its card. A localhost or https URL passes. An owner override lifts the rule.
 - Incident: 2026-11-21, a designer agent in the home repo opened its mockup by `file://` and waited 12 hours (01:13 to 13:13 CST).
-- Cost: one guard run per `navigate`, `preview_start` or `browser_batch` call, from the three tools added to the guard's PreToolUse matcher in `settings.json`.
+- Cost: at most one guard run per `navigate`, `preview_start` or `browser_batch` call, from the six tool names added to the guard's PreToolUse matcher in `settings.json`, pinned by `lint/test_settings_matcher.py`.
 
 Kind: process
 Home: hooks/guard.py and settings.json
