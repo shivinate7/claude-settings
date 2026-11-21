@@ -235,6 +235,27 @@ rc_allow("a commit -qam after sed -i on docs/x.md, a path that is no test, with 
 rc_allow("a commit -m after sed -i on hooks/test_x.py, with no -a and no add, and no Red-run line",
          SED_TEST + " && " + VCS + ' commit -m "add test"', RC_CLEAN)
 
+# 8. A step before the commit that only names a test path does not write it. A test run, a read or a delete leaves the
+# file as it was, so the commit adds no test line and needs no trailer. Each case has a green control: the same call
+# with `Red-run: none: x` in its -m. A refused control means another rule refuses the call, not this one.
+rc_allow("a test run of hooks/test_x.py, then git add of docs/x.md and a commit -m, with no Red-run line",
+         "bin/verdict python3 " + RR_TEST + " && " + VCS + " add docs/x.md && " + VCS + ' commit -m "fix"', RC_CLEAN)
+rc_allow("a test run of hooks/test_x.py, then git add of docs/x.md and a commit -m, with Red-run: none: x",
+         "bin/verdict python3 " + RR_TEST + " && " + VCS + " add docs/x.md && " + VCS + ' commit -m "fix" -m "%s"'
+         % RR_NONE_LINE, RC_CLEAN)
+rc_allow("a cat of hooks/test_x.py, then a commit -am, with no Red-run line",
+         "cat " + RR_TEST + " && " + VCS + ' commit -am "x"', RC_CLEAN)
+rc_allow("a cat of hooks/test_x.py, then a commit -am, with Red-run: none: x",
+         "cat " + RR_TEST + " && " + VCS + ' commit -am "x" -m "%s"' % RR_NONE_LINE, RC_CLEAN)
+rc_allow("a grep of hooks/test_x.py, then a commit -am, with no Red-run line",
+         "grep -n x " + RR_TEST + " && " + VCS + ' commit -am "x"', RC_CLEAN)
+rc_allow("a grep of hooks/test_x.py, then a commit -am, with Red-run: none: x",
+         "grep -n x " + RR_TEST + " && " + VCS + ' commit -am "x" -m "%s"' % RR_NONE_LINE, RC_CLEAN)
+rc_allow("an rm of hooks/test_x.py, then a commit -qam, with no Red-run line",
+         "rm " + RR_TEST + " && " + VCS + ' commit -qam "drop"', RC_CLEAN)
+rc_allow("an rm of hooks/test_x.py, then a commit -qam, with Red-run: none: x",
+         "rm " + RR_TEST + " && " + VCS + ' commit -qam "drop" -m "%s"' % RR_NONE_LINE, RC_CLEAN)
+
 
 RC_REMEDY_LABEL = ("red-run: a commit with no push after it and no Red-run line is refused, and the refusal names both "
                    "trailer forms, a re-run with the trailer in -m, and no --amend")
