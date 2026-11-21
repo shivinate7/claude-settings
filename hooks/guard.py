@@ -698,7 +698,7 @@ while True:
             path_is_inside, primary_checkout, record, refuse, resolve_command,
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
-            _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes, segment_with_vars as _segment_with_vars,
+            _git_subcommand_index, dir_before_segment, dirs_before_segments, shell_abs, walk_quotes, segment_with_vars as _segment_with_vars,
             _checkout_root_by_stat, layout_module as _layout_module,
             _REDIRECT_OPERATOR, ssh_remote_script, strip_redirections,
         )
@@ -5504,7 +5504,28 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # Not a recursive judge_shell: that clears PENDING_ASK and would lose a deny.
     texts = [stripped, *substitution_commands(raw, stripped)]
     whole_root = []   # command_root reads the whole command: once per command, never per segment
-    for segment in (part for text in texts for part in split_segments(text)):
+    judged = []       # (segment, folder the shell is in when it runs, or None) for every text
+    whole_reading = (GIT_WORK_TREE_RE.search(stripped) or "<<" in stripped
+                     or any(_segment_git_c_target(segment_tokens(part) or []) is not None
+                            for part in split_segments(stripped) if part.strip()))
+    for index, text in enumerate(texts):
+        text_ends = []
+        text_segments = split_segments(text, text_ends)
+        own_folders = index == 0 and not whole_reading
+        walked = dirs_before_segments(text_segments, cwd, text_ends) if own_folders else None   # one walk, never one per segment
+        for number, part in enumerate(text_segments):
+            # The command's own segments are read in the folder the shell holds when each runs, so a
+            # `cd` after a destructive segment moves nothing that ran before it. Four things keep
+            # the whole-command reading of `command_root`: a substitution (it runs where its own
+            # segment stands, which the whole-command root is kept for, as main reads it), a command
+            # with a `--work-tree`, `git -C` or `env -C` (`_run_dir` reads the first `-C` for every
+            # segment, as the owner ruled), a command with a heredoc (`dir_before_segment` reads a
+            # body line as a live segment), and a segment after a `cd` that may not have run.
+            here, maybe = (walked[number][0], [walked[number][1]]) if walked else (None, [])
+            if maybe and maybe[0]:
+                here = None
+            judged.append((part, here))
+    for segment, here in judged:
         if not segment.strip():
             continue
         words = segment_tokens(segment)
@@ -5512,6 +5533,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if own_c is not None:
             # a `--work-tree` beside the `-C` moves the files the call discards to that tree
             root = command_root(segment, cwd) if GIT_WORK_TREE_RE.search(segment) else _absolute(own_c, cwd)
+        elif here is not None:
+            root = here
         else:
             whole_root = whole_root or [command_root(stripped, cwd)]
             root = whole_root[0]
