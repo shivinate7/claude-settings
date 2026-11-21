@@ -113,7 +113,7 @@ No daemon and no timer.
 - A range that changes `hooks/route_rows.json` reads it at base and at head (read lint/stale_cites.py:1215-1216; read lint/stale_cites.py:1291-1293; not pinned: no test counts these reads). A sentence with a route cite reads the head blob once more (read lint/stale_cites.py:1268-1269; read lint/stale_cites.py:1441-1461) (unmeasured).
 - When a row id is removed, one `git ls-tree` runs and each tracked `.md` is read (read lint/stale_cites.py:1288-1312; read lint/stale_cites.py:1475-1479) (unmeasured).
 - STALE005's judge, `judge()`, is rule-based and starts no model (read lint/stale_cites.py:1256-1286).
-- The merge takes the changed names from a `--name-only` diff (`merge/merge.py` `confirm`). The merge judge runs its own `git diff -U0` (`merge/merge.py` `prose_judge_lines`) and up to 3 model starts per merge (`merge/merge.py` `PROSE_JUDGE_MAX_CALLS`). Its model starts are unmeasured.
+- The merge takes the changed names from a `--name-only` diff (merge/merge.py confirm). The merge judge runs its own `git diff -U0` (merge/merge.py prose_judge_lines) and up to 3 model starts per merge (merge/merge.py PROSE_JUDGE_MAX_CALLS). Its model starts are unmeasured.
 
 ## Owner-only
 
