@@ -115,6 +115,10 @@ def _lsp_once_check():
         return False, "with no override: got %s (%s), want a refusal under lane-effort-pin" % (got, reason[:90])
     note = ov_type(config, session, "override", 1)
     got, reason = call(2)
+    # The lift line comes first and the refusal after it, so stdout holds two JSON objects. A reader takes one object,
+    # so the refusal is not read: the defect is the two objects, not the lift.
+    if got == "unparsable" and ov_names_lift(reason.split("}}", 1)[0] + "}}", "lane-effort-pin"):
+        return False, "the lifted call printed the lift line, then a refusal: two JSON objects on stdout, and a reader takes one"
     if got != "deny":
         return False, "the one-act override let the whole call through: got %s (%s), want lane-title-slug refused" % (
             got, reason[:90])
@@ -122,6 +126,9 @@ def _lsp_once_check():
         return False, "after the lift, the refusal is not lane-title-slug's: %s" % reason[:90]
     if LSP_REMEDY["lane-effort-pin"] in reason:
         return False, "the lifted rule lane-effort-pin is still printed: %s" % reason[:90]
+    # The lift notice for the rule the override lifted rides in the later refusal's reason (guard_core refuse()).
+    if "(override lifted: lane-effort-pin)" not in reason:
+        return False, "the later refusal does not carry the lift notice for lane-effort-pin: %s" % reason[-90:]
     got, reason = call(3)
     if got != "deny" or not reason.startswith("lane-effort-pin: ") or (LSP_COUNT % 2) not in reason:
         return False, "the override is spent, want both refused again under lane-effort-pin with the count of 2: %s (%s)" % (

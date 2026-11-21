@@ -3015,8 +3015,8 @@ def held_by_live_process(path, owner=None):
     other pids this user cannot read (pid 1, another user's) are no holder of this folder. OWNER defaults to the pid in the folder's name
     (folder_owner). A folder with no owner pid keeps for no unreadable pid."""
     owner = folder_owner(path) if owner is None else owner
-    if owner is not None and owner <= 1:
-        owner = None  # init is every process's ancestor, so it ties none of them to this folder
+    if owner is not None and owner <= 2:
+        owner = None  # init (1) and Linux's kthreadd (2) are ancestors of every process or kernel thread, so neither ties any of them to this folder
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "janitor"))
     try:
         import sweep  # janitor/sweep.py
@@ -3880,7 +3880,7 @@ def run_safe_sweep(root):
 
 def refuse_full_disk(root):
     """Refuse a lane lint when a drive it writes to is under the guard's full disk floor, min(5% of the drive, 5 GiB) (decision machine-load-brake): the
-    drive of the home folder (the guard's reader called bare, hooks/guard.py _read_disk, which reads home in a cloud session too; only a cloud start reads "/") or the drive of the temp folder, where add_worktree makes the lint tree.
+    drive of the home folder (the guard's reader called bare, hooks/guard.py _read_disk, which reads home in a cloud session too; only the guard's own cloud read, at an Agent or a lint start, reads "/") or the drive of the temp folder, where add_worktree makes the lint tree.
     A lint tree is a full checkout, and a full disk fails it half made. The floor is the guard's (load_full), fed the disk reading alone, so memory
     never refuses here. The floor holds in a cloud session too. A drive that cannot be read prints one line that says so; the other is still checked,
     and the lint goes ahead when none is full.
@@ -4804,6 +4804,23 @@ def stale_page_remedy(n, claim=""):
 
 READY_CHECKS_CITE = "(decision lanes-run-no-full-ci-job, the ready checks: a draft goes ready only when the repo's merge.readyChecks pass)"
 
+# The stdout lines of the draft step that a ready run's reader (hooks/guard_merge.py ready_mark_hit) reads from a session transcript to learn which head the run stood
+# for. One home: the step says them from these templates and the guard builds its patterns from the same templates (ready_line_pattern).
+READY_PASS_FMT = "merge: the ready checks ({checks}) pass on {sha}."
+READY_NO_CHECKS_LINE = "merge: this repo declares no ready checks (merge.readyChecks), so the draft step runs none."
+READY_DRY_FMT = "merge: the dry merge of {head} into {base} is {dry}."  # a pass on {dry} stands for {head}: the dry merge has the head as its first parent
+READY_UNCHECKED_FMT = "merge: the draft step ran no checks on #{n} at {sha}. Nothing was pushed."  # a base other than the default with no ready checks: no worktree, so no other line names the head
+READY_RECORDS_CURRENT_FMT = "merge: the records page on {branch} at {sha} is current. Nothing was pushed."
+READY_RECORDS_PUSHED_FMT = "merge: the records page pushed to {branch} at {sha}."
+READY_MERGED_FMT = "merge: {base} is merged into {branch} at {sha}, here only. Nothing is pushed yet."
+READY_CLAIM_STOP_FMT = "{sha} on {branch} holds a Record-claim ({claim}), so the draft step adds no page commit on top of it."  # the head of a Record-claim stop; the stop prints it first, after "merge: "
+READY_LINE_FIELDS = {"sha": r"[0-9a-f]{7,40}", "head": r"[0-9a-f]{7,40}", "dry": r"[0-9a-f]{7,40}", "n": r"\d+", "checks": r"[^)\n]*", "base": r"\S+", "branch": r"\S+", "claim": r"[^)\n]*"}
+
+def ready_line_pattern(fmt):
+    """The compiled pattern of one READY_*_FMT template: each {name} field is a named group, the rest is literal."""
+    parts = re.split(r"\{(\w+)\}", fmt)
+    return re.compile("".join(re.escape(part) if i % 2 == 0 else f"(?P<{part}>{READY_LINE_FIELDS[part]})" for i, part in enumerate(parts)))
+
 READY_JOB_PREFIX = re.compile(r"^([a-z][a-z0-9_-]*):(.+)$")  # a `<job>:<step>` ready check; a step name that does not open this way is a step of job `checks`
 
 STEP_LINE = re.compile(r"^(PASS \(cached\)|PASS|FAIL|SKIP|skipped|unknown|not run)\s+(.*)$")  # PASS (cached): a pass that ci-job's rerun cache answered
@@ -4915,7 +4932,7 @@ def run_ready_checks(wt, n, base, checks, remedy="Fix it on the branch, push, an
         message = "\n".join([f"the pre-ready run of {short} against {base} {'FAILs' if failed else 'is unknown, not a pass'}: " + ", ".join(f"{v} {name}" for v, name, _ in bad) + ".",
                              f"#{n} stays a draft and nothing was pushed. {remedy} {READY_CHECKS_CITE}"])
         raise LintFail(message, [f"{v} {name}: {d}" for v, name, d in bad], []) if failed else Stop(message)
-    say(f"merge: the ready checks ({', '.join(checks)}) pass on {short}.")
+    say(READY_PASS_FMT.format(checks=", ".join(checks), sha=short))
 
 def open_named(host, info, n):
     """-> the pull requests that the body of `n` (`info`) names as replaced and that are open now (replaced_names, then one read of the open list).
@@ -5014,10 +5031,11 @@ def reopen_dropped(host, n, info):
     if done:
         say(f"merge: reopened {', '.join(f'#{m}' for m in done)}, dropped from the batch of #{n}. {REPLACED_CITE}")
 
-def open_merge_worktree(root, info, base, host=None, n=None):
+def open_merge_worktree(root, info, base, host=None, n=None, announce=False):
     """The dry merge: a detached, locked worktree on the merge of the PR's head with origin/<base>, built from merge_tree's written tree and one commit-tree
     (parents: the head, then the base tip), never a branch or a ref. -> (tmp, wt), the same pair as add_worktree; drop it with drop_worktree. When the head
-    already holds the base tip the merge is the head's own tree, and the worktree is at the head. A conflict raises Stop `fail merge with <base>` with the
+    already holds the base tip the merge is the head's own tree, and the worktree is at the head. `announce` (the draft step) says READY_DRY_FMT when it
+    makes a dry merge commit, so the guard maps a ready result on that commit to the head. A conflict raises Stop `fail merge with <base>` with the
     conflicted paths; a read that cannot run raises Stop `unknown merge with <base>`. Fetches as open_worktree does (fetch_pr_head); pushes nothing.
     Cost: two fetches, three git starts (merge-tree and its two rev-parse), one commit-tree, one worktree."""
     info = fetch_pr_head(root, info, base, host, n)
@@ -5032,6 +5050,8 @@ def open_merge_worktree(root, info, base, host=None, n=None):
     c, sha = git(root, "-c", "user.name=merge", "-c", "user.email=merge@localhost", "commit-tree", tree, "-p", head, "-p", tip, "-m", f"dry merge of {head[:9]} into {base}")
     if c:
         raise Stop(f"unknown merge with {base}: git commit-tree failed: {sha}. Run again. Nothing was pushed. {READY_CHECKS_CITE}")
+    if announce:
+        say(READY_DRY_FMT.format(head=head[:9], base=base, dry=sha[:9]))
     return add_worktree(root, sha)
 
 def fast_checks(root, cfg, n, host, info):
@@ -5083,12 +5103,14 @@ def draft_step(root, cfg, n, host, info, merge_main=False):
         raise Stop(f"the head of #{n} has a red check, so it stays a draft and nothing was pushed {GREEN_CITE}: {red}.")
     checks = cfg.get("merge", {}).get("readyChecks")
     if not checks:
-        say("merge: this repo declares no ready checks (merge.readyChecks), so the draft step runs none.")
+        say(READY_NO_CHECKS_LINE)
     default = base == cfg["defaultBranch"]
     if not default:
         say(f"merge: {base} is not the default branch ({cfg['defaultBranch']}). The records page is rebuilt only for it. Nothing was pushed.")
+        if not checks:
+            say(READY_UNCHECKED_FMT.format(n=n, sha=info["head"][:9]))
     if default or checks:  # one worktree, one open_worktree call, on either base
-        tmp, wt = open_worktree(root, info, base) if default else open_merge_worktree(root, info, base)  # another base: the ci-job steps read the merge, a head behind it included; the debt-close lint and the clash read info["head"]
+        tmp, wt = open_worktree(root, info, base) if default else open_merge_worktree(root, info, base, announce=True)  # another base: the ci-job steps read the merge, a head behind it included; the debt-close lint and the clash read info["head"]
         try:
             pre = (root, host, info)
             if not default:
@@ -5098,7 +5120,7 @@ def draft_step(root, cfg, n, host, info, merge_main=False):
                 if claim:
                     if checks:
                         run_ready_checks(wt, n, base, checks, pre=pre)  # before the remedy: it has the session mark ready by hand, past the checks
-                    raise Stop(f"{info['head'][:9]} on {info['branch']} holds a Record-claim ({claim}), so the draft step adds no page commit on top of it. "
+                    raise Stop(READY_CLAIM_STOP_FMT.format(sha=info["head"][:9], branch=info["branch"], claim=claim) + " "
                                f"Mark #{n} ready by hand ({READY_ROUTES}), then run --confirm again. Nothing was pushed. {RECORDS_CITE}")
                 stale, stands = holds_base(wt, f"origin/{base}", info["head"])
                 if stale:  # holds_base ends with the remedy
@@ -5108,7 +5130,7 @@ def draft_step(root, cfg, n, host, info, merge_main=False):
                     say(f"merge: {stands}. The green run stands.")
                     if merge_main:
                         merged = merge_base_in(wt, base, info["branch"])  # the clean merge holds_base read; the page and the checks below read its tree
-                        say(f"merge: {base} is merged into {info['branch']} at {merged[:9]}, here only. Nothing is pushed yet.")
+                        say(READY_MERGED_FMT.format(base=base, branch=info["branch"], sha=merged[:9]))
                 rebuilt = rebuild_records(wt)
                 sha = commit_claim(wt, None) if rebuilt else None
                 if checks:
@@ -5118,9 +5140,9 @@ def draft_step(root, cfg, n, host, info, merge_main=False):
                     if merged:
                         say(f"merge: the merge of {base} pushed to {info['branch']}.")
                     if rebuilt:
-                        say(f"merge: the records page pushed to {info['branch']} at {sha[:9]}.")
+                        say(READY_RECORDS_PUSHED_FMT.format(branch=info["branch"], sha=sha[:9]))
                 else:
-                    say(f"merge: the records page on {info['branch']} at {info['head'][:9]} is current. Nothing was pushed.")
+                    say(READY_RECORDS_CURRENT_FMT.format(branch=info["branch"], sha=info["head"][:9]))
         finally:
             drop_worktree(root, tmp, wt)
     close_replaced(host, n, info)  # after the checks and the push, so a red or refused step closes nothing; before the ready mark, which may stay unmarked
@@ -7899,6 +7921,8 @@ def main(argv, host=None, lock=None, hosts=None):
                     if not plain and review_state(last, last["head"])[0] != "done":  # after a FAIL Fix check line, or any record that is not done, no merge qualifies
                         parents = []
                     ok = plain or (len(parents) == 2 and h.holds_head_gh(parents[1], info["base"]))
+                    if not ok and len(parents) == 2:  # a lane's merge of another open pull request's current head: drafts count, an older head of that pull request does not. The tree rule below and the done gate above still apply
+                        ok = any(d["number"] != a.pr and d["head"]["sha"] == parents[1] for d in h.open_pulls())
                     if ok and plain and ancestor(h.cwd or ".", last["head"], a.head) is False:  # the verifier reads Head..head, so a head that git reads as not holding the Head is refused (real fix commits may lie between). Unknown keeps the rule that held before: a plain head takes the fix check
                         ok = False
                     if ok and not plain and parents[0] != a.fix_check[0]:  # the start may be the earlier reviewed Head with any commits after it (owner, page item 949 A): git's ancestry decides, and the fix diff reads every commit since that Head. When git cannot tell, the old walk over clean merges of main decides
@@ -7921,7 +7945,7 @@ def main(argv, host=None, lock=None, hosts=None):
                             print(f"merge: --fix-check: whether {a.head[:9]} is git's own merge of the base is unknown ({unread}), so the fix verifier is refused. Fetch both parents of that head into this checkout, then run again. " + REVIEW_CITE, file=sys.stderr)
                             return 2
                 if not ok:
-                    print("merge: --fix-check: the reviewed head must be the Head of an earlier review log on this pull request (the newest one, or an older one when the new record carries its rounds, no later log is unreadable, and no later Fix check from that head FAILed), and that log must have no Fix check line or a PASS one. After a PASS one, the head must descend from that Head (the fix verifier reviews every commit since it). A head that is a merge must also be a merge of the base, and the log must read done, with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
+                    print("merge: --fix-check: the reviewed head must be the Head of an earlier review log on this pull request (the newest one, or an older one when the new record carries its rounds, no later log is unreadable, and no later Fix check from that head FAILed), and that log must have no Fix check line or a PASS one. After a PASS one, the head must descend from that Head (the fix verifier reviews every commit since it). A head that is a merge must also be a merge of the base, or of the current head of another open pull request, and the log must read done, with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant, accepted=a.accepted).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)

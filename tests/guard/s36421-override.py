@@ -9,8 +9,11 @@ FAMILY = "override"
 # <config dir>/state/override/<session_id>.json, {"kind": "once" or "timed", "until": ISO-8601}.
 #
 # What an override does: it covers only the session that typed it. An agent's call spends only a timed
-# override. A valid override makes the guard print nothing, so the normal permission flow runs, and it logs
-# one line with decision `override` and the rule it lifted. What no override does: lift frozen-path,
+# override. A valid override lets the act through, so the normal permission flow runs. A lift prints one line on
+# stdout: a PreToolUse JSON object whose hookSpecificOutput.additionalContext names the lifted rule and says override,
+# with no permissionDecision, so the normal permission flow runs (decision `owner-override`, an owner override
+# lets a refused or asked act through). It also logs one line with decision
+# `override` and the rule it lifted. What no override does: lift frozen-path,
 # git-env-set, or a kill of pid 0, 1 or -1, or count an unreadable override file as an override.
 #
 # A one-act override is state that a call uses up, so each case is a story over several guard calls on
@@ -112,13 +115,23 @@ def ov_kill(config, session, seconds, agent_id=None):
     return ov_call("Bash", {"command": OV_KILL}, NOGIT, config, session, seconds, agent_id)
 
 
+# tests/lift_line.py is the one reader of the lift line. The guard and hook tests both import it, so they parse it one way.
+sys.path.insert(0, os.path.join(REPO, "tests"))
+import lift_line  # noqa: E402,F401  the one reader of the lift line
+ov_names_lift = lift_line.names_lift
+ov_lift_of = lift_line.lift_of
+
+
 def ov_want(got, reason, want, rule):
-    """'' when (got, reason) is the verdict wanted. An allow must print nothing. A refusal must name
-    its rule; a tuple of rules lists the ones that may name it. Else why not."""
+    """'' when (got, reason) is the verdict wanted. An allow prints nothing, or the one line a lifted act prints
+    (ov_names_lift). A refusal must name its rule; a tuple of rules lists the ones that may name it. Else why not.
+    decide() reads a line with no permissionDecision as "unparsable", so that verdict takes the same line."""
+    if want == "allow" and ov_lift_of(got, reason, rule):
+        return ""
     if got != want:
         return "got %s (%s), want %s" % (got, reason[:70], want)
-    if want == "allow" and reason:
-        return "the allow printed %r, want nothing" % reason[:70]
+    if want == "allow" and reason and not ov_names_lift(reason, rule):
+        return "the allow printed %r, want nothing or the one line that names %r" % (reason[:70], rule)
     names = (rule,) if isinstance(rule, str) else rule
     if want != "allow" and not any(name in reason for name in names):
         return "the refusal does not name rule %r: %s" % (rule, reason[:70])
@@ -962,16 +975,18 @@ def ov_parallel_check(workers=6, rounds=5):
 
         def worker(i):
             start.wait()
-            verdicts[i] = ov_kill(config, session, 60)[0]
+            verdicts[i] = ov_kill(config, session, 60)
         threads = [threading.Thread(target=worker, args=(i,)) for i in range(workers)]
         for thread in threads:
             thread.start()
         for thread in threads:
             thread.join()
-        if verdicts.count("allow") != 1 or verdicts.count("deny") != workers - 1:
-            return False, "round %d: %d calls raced for one override, verdicts %r, want one allow; %s" % (
-                n, workers, verdicts, note or "typed")
-    return True, "%d rounds of %d racing calls, one allow each" % (rounds, workers)
+        lifts = sum(ov_lift_of(got, reason, "machine-wide-kill") for got, reason in verdicts)
+        denies = sum(got == "deny" for got, _reason in verdicts)
+        if lifts != 1 or denies != workers - 1:
+            return False, "round %d: %d calls raced for one override, verdicts %r, want one lift and %d denies; %s" % (
+                n, workers, [got for got, _reason in verdicts], workers - 1, note or "typed")
+    return True, "%d rounds of %d racing calls, one lift each" % (rounds, workers)
 
 
 OV_TAKE_CHILD = (

@@ -1,0 +1,1 @@
+- ready-mark-hash-sel-untested: PR #3756, review finding F8 (the "#12" selector branch). hooks/guard_merge.py:2223 (ready_mark_hit) strips a leading "#" from the selector. No case in tests/guard/s43724-ready-mcp-mark.py passes a "#"-prefixed selector, so that branch has no test. Decision ready-mcp-mark-guard, the guard on ready marks made over MCP. Seen: 2026-11-21 x1
