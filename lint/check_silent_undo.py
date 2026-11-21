@@ -82,12 +82,8 @@ WORD = re.compile(r"[A-Za-z0-9]")
 
 
 class Unknown(Exception):
-    problems = ()  # findings the read made before it gave up; only check() sets them
+    problems = ()  # findings the read made before it gave up; no reader sets them now (the octopus read gave them up), and the merge refusal still reads them
     notes = ()
-
-
-class Octopus(Unknown):
-    """A merge with three or more parents, which lost_lines does not read. check() keeps going past it."""
 
 
 def git(cwd, *a, ok=(0,)):
@@ -433,7 +429,7 @@ class Blobs:
 
 
 def lost_lines(cwd, m, refs=()):
-    """[(path, parent, [line])] for merge commit m. With refs (upstream, then the default branch),
+    """[(path, parent, [line])] for merge commit m, of two or more parents. With refs (upstream, then the default branch),
     a lost line whose adding commit no ref holds is the branch's own work and is skipped. The
     test is per line, not per parent: a parent the branch built on an integration branch can still
     carry main's lines."""
@@ -441,18 +437,49 @@ def lost_lines(cwd, m, refs=()):
     parents = out.split()[1:]
     if len(parents) < 2:
         return []
-    if len(parents) > 2:
-        raise Octopus("%s has %d parents; only two-parent merges are read" % (m[:9], len(parents)))
-    rc, out = git(cwd, "merge-base", "--all", *parents, ok=(0, 1))
-    bases = out.split() if rc == 0 else []
+    # each parent is read against its merge bases with each other parent, as a two-parent merge reads it. An octopus read against the
+    # one base all parents share would flag a line another parent's merge removed, and miss a drop a pairwise read catches.
+    bases_of = {}
+    for i, p in enumerate(parents):
+        for q in parents[i + 1:]:
+            rc, out = git(cwd, "merge-base", "--all", p, q, ok=(0, 1))
+            bases_of[p, q] = bases_of[q, p] = out.split() if rc == 0 else []
     found = []
     blobs = Blobs(cwd)
     try:
         for p in parents:
-            found += lost_in_parent(cwd, m, p, bases, refs, blobs)
+            # a pair with no common base has nothing to read against; a parent with no such pair is never flagged
+            pairs = [(q, bases_of[p, q]) for q in parents if q != p and bases_of[p, q]]
+            if not pairs:
+                continue
+            # a line is lost when any pairwise reading finds it lost, unless another parent removed it from a base that held it.
+            # A base that held the line with a parent that still holds it excuses nothing, so that parent's own pair stays lost.
+            lost, own, names = {}, {}, {}
+            for q, bases in pairs:
+                for path, _, lines in lost_in_parent(cwd, m, p, bases, refs, blobs):
+                    lost.setdefault(path, []).extend(l for l in lines if l not in lost.get(path, ()))
+                    own.setdefault(q, {}).setdefault(path, set()).update(lines)
+            for path, lines in lost.items():
+                # a pair that read the line as lost found it absent from its base, so it excuses nothing
+                kept = [l for l in lines if not any(l not in own.get(q, {}).get(path, ()) and removed_by(cwd, blobs, names, p, q, bases, path, l)
+                                                    for q, bases in pairs)]
+                if kept:
+                    found.append((path, p, kept))
     finally:
         blobs.close()
     return found
+
+
+def removed_by(cwd, blobs, names, p, q, bases, path, line):
+    """True when parent q removed `line` of parent p's `path` from a base of the pair that held it: a base holds the line,
+    and q's file does not. Each side is read at the name git pairs with p's path, so a rename moves neither read."""
+    def text_at(rev):
+        if rev not in names:  # names: rev -> {p's path: its path in rev}, read once per rev
+            names[rev] = {old: new for old, (new, _, _) in renamed(cwd, p, rev, raw_files(cwd, p, rev)).items()}
+        return blobs.get(rev, names[rev].get(path, path))
+    if not any(line in counts(text_at(b)) for b in bases):
+        return False
+    return line not in counts(text_at(q))
 
 
 def unrestored(cwd, h, m, found, unspent):
@@ -816,8 +843,7 @@ def retire_excuses(cwd, upstream, head, pr_body, run_state, paths):
 
 
 def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=None, retire_head=None):
-    """(problem lines, ALLOWED notes); no problems is green. Raises Unknown; for a merge of three or more parents it raises
-    only after every other read, with the findings in .problems and .notes. Reads only the commits
+    """(problem lines, ALLOWED notes); no problems is green. Raises Unknown. Reads only the commits
     upstream gained after the branch was cut: from where the branch's own first-parent line left
     main, up, the fork commit included. The window starts at the fork point, never at a commit time (one-second resolution)."""
     if git(cwd, "rev-parse", "--is-shallow-repository")[1].strip() != "false":
@@ -829,12 +855,9 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     ok = allowed(cwd, "%s..%s" % (upstream, h), pr_body)
     refs = [upstream] + [r for r in ((default,) if default else ("origin/HEAD", "origin/main", "main")) if r != upstream and git(
         cwd, "rev-parse", "--verify", "-q", r + "^{commit}", ok=(0, 1))[0] == 0][:1]  # the default branch too
-    items, octopus, unspent = [], [], {}
+    items, unspent = [], {}
     for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
-        try:
-            items += [(x[0], fmt_lost(m, *x)) for x in unrestored(cwd, h, m, lost_lines(cwd, m, refs), unspent)]
-        except Octopus as e:  # the other reads still run: their findings must not hide behind this one
-            octopus.append(str(e))
+        items += [(x[0], fmt_lost(m, *x)) for x in unrestored(cwd, h, m, lost_lines(cwd, m, refs), unspent)]
     items += revived_notes(cwd, upstream, h)
     rc, out = git(cwd, "merge-tree", "--write-tree", upstream, h, ok=(0, 1))
     if rc == 0:
@@ -858,10 +881,6 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
         ok = dict(retire_excuses(cwd, upstream, retire_head or h, pr_body, run_state, open_paths), **ok)
     bad, notes = judge(items, ok)
     notes += misplaced(cwd, "%s..%s" % (upstream, h)) if bad else []
-    if octopus:
-        e = Octopus("; ".join(octopus))
-        e.problems, e.notes = bad, notes
-        raise e
     return bad, notes
 
 

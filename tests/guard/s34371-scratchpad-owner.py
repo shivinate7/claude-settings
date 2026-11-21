@@ -56,11 +56,23 @@ def spo_wrote(fx, name, agent, path, text, tool="Write", command=None):
     return []
 
 
+# The one reader of the lift line (tests/lift_line.py). A lifted refusal prints that line, and decide() reads it as "unparsable".
+sys.path.insert(0, os.path.join(REPO, "tests"))
+import lift_line  # noqa: E402,F401  the one reader of the lift line
+
+
 def spo_allowed(name, got, reason):
     """A call the rule passes: the decision is allow."""
     if got == "allow":
         return ""
     return "%s: want allow, got %s (%s)" % (name, got, reason[:100])
+
+
+def spo_lifted(name, got, reason):
+    """A call that the owner's override lifts: the guard prints the one lift line, and it names scratchpad-owner."""
+    if lift_line.lift_of(got, reason, SPO_RULE):
+        return ""
+    return "%s: want the override to lift %s, got %s (%s)" % (name, SPO_RULE, got, reason[:100])
 
 
 def spo_refused(name, got, reason, banned):
@@ -595,8 +607,9 @@ def spo_mv_approved_case():
     problems.append(spo_refused("mv approved, B's mv before the override", got, reason, banned))
     note = ov_type(config, fx["sid"], "override 15m", 30)
     got, reason = call(SPO_OTHER, "Bash", mv, 60)
-    problems.append(spo_allowed("mv approved, B's mv under the override", got, reason))
-    if got == "allow":
+    lifted = spo_lifted("mv approved, B's mv under the override", got, reason)
+    problems.append(lifted)
+    if not lifted:
         os.rename(probe, moved)   # the approved mv lands its file at the new name
     later = OV_TIMED_SECONDS + 120   # the override typed at 30 s has ended by now
     got, reason = call(SPO_WRITER, "Bash", {"command": "python3 %s" % moved}, later)
@@ -1000,8 +1013,9 @@ def spo_approved_case():
                                 (fx["scratch"], "probe2.py")))
     note = ov_type(config, fx["sid"], "override 15m", 30)
     got, reason = call("Write", overwrite, 60)
-    problems.append(spo_allowed("approved, B's overwrite under the override", got, reason))
-    if got == "allow":
+    lifted = spo_lifted("approved, B's overwrite under the override", got, reason)
+    problems.append(lifted)
+    if not lifted:
         write(probe, SPO_OVERWRITE_TEXT)   # the approved act lands its bytes, as the tool would
     later = OV_TIMED_SECONDS + 120   # the override typed at 30 s ends 15 min on
     got, reason = call("Bash", {"command": "python3 %s" % probe}, later)
@@ -1059,8 +1073,9 @@ def spo_lifted_removal_case(tag, name, command_of, land, passed):
                                 (fx["scratch"], "probe2.py")))
     note = ov_type(config, fx["sid"], "override 15m", 30)
     got, reason = call(SPO_OTHER, removal, 60)
-    problems.append(spo_allowed(name + ", B's removal under the override", got, reason))
-    if got == "allow":
+    lifted = spo_lifted(name + ", B's removal under the override", got, reason)
+    problems.append(lifted)
+    if not lifted:
         land(fx, probe)   # the approved removal lands, as the tool would
     write(probe, PY_TEXT)   # the file comes back outside the guard, as an editor's save would
     later = OV_TIMED_SECONDS + 120   # the override typed at 30 s has ended by then

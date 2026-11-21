@@ -27,7 +27,7 @@ The sweep deletes a local branch that holds no unique work. It also removes a sp
 - **Liveness.** A record in `~/.claude/sessions/*.json` counts as live only when the id is alive and the recorded start time still matches, so a recycled id cannot inherit a dead session's claim.
 - **Proof.** Each refusal gets a test arm that violates it, and the rebase ghost arm must go red against a keep rule that tests ancestry alone. Each new rule gets a row in `lint/rule_mechanisms.json`, or an argued `unmechanized` row.
 
-- **Other tiers have their own records.** The Windows temp folder (`windows-temp-sweep`). The agent-end reap, which stops processes and reaps build folders (`agent-end-reap-stops-what-a-finished-agent-left`, `build-dirs-reaped-at-agent-end`). The process tiers (`unattended-sweep-stops-proven-orphans`). Idle simulators (`sweep-shuts-down-idle-simulators`).
+- **Other tiers have their own records.** The Windows temp folder (`windows-temp-sweep`). The leftover temp folders of dead test runs (`leftover-temp-reap`). The agent-end reap, which stops processes and reaps build folders (`agent-end-reap-stops-what-a-finished-agent-left`, `build-dirs-reaped-at-agent-end`). The process tiers (`unattended-sweep-stops-proven-orphans`). Idle simulators (`sweep-shuts-down-idle-simulators`).
 
 Kind: process
 Home: janitor/sweep.py

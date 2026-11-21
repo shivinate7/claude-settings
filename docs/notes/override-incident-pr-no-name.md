@@ -1,0 +1,1 @@
+- override-incident-pr-no-name: PR #3755, review finding F9 (plain names for cited PRs). docs/decisions/owner-override.md:26 (the incident line) cites pull requests #3691 and #3749 with no plain name. Give each PR a plain name at its first mention. Decision owner-override, which sets what an owner override may lift. Seen: 2026-11-21 x1
