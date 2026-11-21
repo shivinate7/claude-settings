@@ -65,7 +65,13 @@
 # turn zizmor's offline audits online). Multi-line `run: |` steps run whole. Verdicts: PASS, SKIP (the step ran and skipped tests, exit 0), FAIL, unknown (tool missing, or an expression it
 # cannot read), not run locally (a `uses:` action), skipped (a pull-request step with no base). Under --lint, a step
 # it leaves out prints `not run`, which is no verdict.
-# A step's `if:` reads every needs.scope.outputs flag (== 'true' or != 'false') as true, except records_only_skip, which reads as off because a local run runs every step (!= 'true' reads true, == 'true' reads false); !cancelled(), always() and success() as true,
+# A step's `if:` reads a needs.scope.outputs flag (== 'true' or != 'false') as true, except under --lint with a base: there the repo's
+# .github/scripts/ci-scope.sh runs as CI's scope job runs it (EVENT=pull_request, BASE_SHA the base, PR_HEAD the head, no GREEN_HEAD), and
+# a step whose flag reads false prints skipped, as CI skips it. A script that is missing or fails, or a flag it omits, leaves the step to
+# run and prints one `UNKNOWN scope` line (no exit change). Cost: one bash process and one temp file per --lint run with a base, 60 s at most.
+# The one other exception is records_only_skip: it reads as off in every mode, because a local run runs every step (!= 'true' reads true,
+# == 'true' reads false), and the script's value for it is not read.
+# !cancelled(), always() and success() read as true,
 # and github.event_name == 'pull_request' as true only with a base. ${{ github.base_ref }} is --base without
 # its remote; ${{ github.event.pull_request.head.sha }} is CI_JOB_HEAD_SHA when it is set and not blank (the lane lint sets it to the
 # pushed head, since its HEAD is a merge commit), else HEAD; ${{ github.event.pull_request.base.sha }} is the commit of --base. No step's env gets
@@ -125,11 +131,12 @@
 # it misses 7 days after the save. Cost: per step that may be cached, one set of git processes (a temp index, add, write-tree, rev-parse); per run, one
 # read of those trees; per pass, one file of under 1 KB in $XDG_CACHE_HOME (else ~/.cache) /claude-settings/ci-job-pass. A save prunes files saved
 # over 7 days ago, and the store holds at most 300 files. No timer, no lasting process. CI_JOB_NO_CACHE=1 turns the cache off.
-import ast, concurrent.futures, hashlib, json, os, re, shutil, signal, subprocess, sys, tarfile, tempfile, threading, time
+import ast, concurrent.futures, hashlib, json, os, re, shutil, subprocess, sys, tempfile, threading, time
 BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+from tree_export import export_tree  # noqa: E402  the one home of the export of a commit's tree (hooks/tree_export.py)
 from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup (never the WSL launcher)
 from pin_note import ENV as PIN_NOTE_ENV, MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's names (hooks/pin_note.py)
 from action_pin import pin_regex  # noqa: E402  the one home of the sha pin's pattern (hooks/action_pin.py)
@@ -204,6 +211,59 @@ def unshallow(block, top, dry, tally):
               ((done.stderr.strip().splitlines() or ["no message"])[-1]))
 
 
+SCOPE_TERM = re.compile(r"needs\.scope\.outputs\.([\w-]+)\s*(==\s*'true'|!=\s*'false')")  # the two forms that read a flag as on; any other form stays unreadable
+SCOPE_SCRIPT = ".github/scripts/ci-scope.sh"  # the one home of the scope flags: CI's scope job runs it too
+SCOPE = {"flags": None, "why": None, "unknown": set()}  # flags: {name: "true"|"false"} from the script; None with a base: it did not run, why says so; unknown: the flags read as true
+
+
+def scope_term(m):
+    """T or F for one `needs.scope.outputs.X == 'true'` or `!= 'false'` term. Without flags, or for a flag the script did not give,
+    it reads T (the step runs); the second case is listed in SCOPE["unknown"], which main() reports as UNKNOWN scope."""
+    flags = SCOPE["flags"]
+    if flags is None:
+        if SCOPE["why"]:
+            SCOPE["unknown"].add(m.group(1))
+        return " T "
+    value = flags.get(m.group(1))
+    if value not in ("true", "false"):
+        SCOPE["unknown"].add(m.group(1))
+        return " T "
+    return " T " if value == "true" else " F "
+
+
+def scope_flags(top, base_sha, head_ref, head_sha):
+    """(flags, why): the name=value lines the repo's ci-scope.sh writes for this diff, run as CI's scope job runs it on a pull
+    request. (None, why) when the script is missing or fails: no flag is known, and each scope-gated step runs."""
+    script = os.path.join(top, *SCOPE_SCRIPT.split("/"))
+    if not os.path.isfile(script):
+        return None, "no %s" % SCOPE_SCRIPT
+    argv = shell_argv("bash")
+    if not argv:
+        return None, no_shell("bash")
+    if not base_sha:
+        return None, "the base does not resolve to a commit"
+    fd, out = tempfile.mkstemp(prefix="ci-job-scope-", suffix=".out")
+    os.close(fd)
+    env = {k: v for k, v in os.environ.items() if k not in ("EVENT", "BASE_SHA", "HEAD_REF", "GREEN_HEAD", "PR_HEAD", "GITHUB_OUTPUT")}
+    env.update(EVENT="pull_request", BASE_SHA=base_sha, HEAD_REF=head_ref, PR_HEAD=head_sha, GITHUB_OUTPUT=out)  # no GREEN_HEAD: unknown never skips
+    try:
+        done = _nowindow.run(argv + [slashed(script)], cwd=top, env=env, capture_output=True, text=True, encoding="utf-8",
+                             stdin=subprocess.DEVNULL, timeout=SELECTOR_LIMIT)
+        if done.returncode != 0:
+            return None, ((done.stderr + done.stdout).strip().splitlines() or ["exit %d with no message" % done.returncode])[-1]
+        with open(out, encoding="utf-8") as f:
+            return dict(ln.strip().split("=", 1) for ln in f if "=" in ln), None
+    except subprocess.TimeoutExpired:
+        return None, "the script ran past %d s and was stopped" % SELECTOR_LIMIT
+    except (OSError, ValueError) as e:
+        return None, str(e)
+    finally:
+        try:
+            os.remove(out)
+        except OSError:
+            pass
+
+
 def condition(text, pr):
     """True, False, or None when the expression holds a term this runner cannot read."""
     if not text:
@@ -212,7 +272,7 @@ def condition(text, pr):
     expr = m.group(1) if m else text.strip()
     expr = re.sub(r"needs\.scope\.outputs\.records_only_skip\s*!=\s*'true'", " T ", expr)  # a lane lint runs every step: the skip flag is off
     expr = re.sub(r"needs\.scope\.outputs\.records_only_skip\s*==\s*'true'", " F ", expr)
-    expr = re.sub(r"needs\.scope\.outputs\.[\w-]+\s*(?:==\s*'true'|!=\s*'false')", " T ", expr)  # a flag reads as true
+    expr = SCOPE_TERM.sub(scope_term, expr)
     expr = re.sub(r"github\.event_name\s*==\s*'pull_request'", " T " if pr else " F ", expr)
     expr = re.sub(r"github\.event_name\s*!=\s*'pull_request'", " F " if pr else " T ", expr)
     expr = re.sub(r"github\.event\.pull_request\.draft", " F ", expr)  # a lint run reads a ready pull request
@@ -327,16 +387,7 @@ def pin_tree(sha):
     else:
         tree = tempfile.mkdtemp(prefix="ci-job-pin-%d-%s-" % (os.getpid(), sha[:7]))  # the pid lets merge.py's sweep remove it after a run that died
         PIN_TREES[sha] = (tree, None)  # recorded first, so the run's end deletes it even if the archive fails
-        try:
-            with _nowindow.Popen(["git", "archive", "--format=tar", sha], cwd=src, stdout=subprocess.PIPE,
-                                 stderr=subprocess.DEVNULL) as proc, tarfile.open(fileobj=proc.stdout, mode="r|") as tar:
-                for member in tar:  # the stream is read once; a member is extracted as it passes
-                    if member.issym():
-                        continue  # the harness reads no symlink, and a host that refuses os.symlink would fail the whole export
-                    tar.extract(member, tree, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
-            error = None if proc.returncode == 0 else "git archive exited %d" % proc.returncode
-        except (OSError, tarfile.TarError) as exc:
-            error = "%s: %s" % (type(exc).__name__, exc)
+        error = export_tree(src, sha, tree)
         if error:
             PIN_TREES[sha] = (tree, "git archive of %s in %s failed (%s)" % (sha[:7], src, error))
     return PIN_TREES[sha]
@@ -442,6 +493,8 @@ def if_held(step, pr):
     if cond is None:
         return "unknown", "an if: this runner cannot read: %s" % step_key(step, "if")
     if not cond:
+        if pr and SCOPE["flags"] is not None and "needs.scope.outputs." in (step_key(step, "if") or ""):
+            return "skipped", "CI's scope job skips it for this diff (%s)" % SCOPE_SCRIPT
         return "skipped", "a pull-request step: pass --base to run it" if not pr else "a step that runs only off a pull request"
     return None
 
@@ -1040,6 +1093,10 @@ def main(argv):
         os.close(fd)
     tally = {"FAIL": 0, "unknown": int(no_base)}
     unshallow(block, top, dry, tally)
+    SCOPE.update(flags=None, why=None, unknown=set())
+    if lint and base:  # the flags CI's scope job gives this diff, so a step CI skips is skipped here
+        SCOPE["flags"], SCOPE["why"] = scope_flags(top, base_sha, git("rev-parse", "--abbrev-ref", "HEAD", cwd=top) or "",
+                                                   values["github.event.pull_request.head.sha"])
     kind = ["lint" if is_lint(st) else "install" if is_install(st) else "local" if LOCAL_ACTION.fullmatch(uses(st)) else ""
             for st in steps] if lint else [""] * len(steps)
     suites = [suite_paths(st) if lint and not k else [] for st, k in zip(steps, kind)]  # each step's suite lines
@@ -1074,6 +1131,9 @@ def main(argv):
     starts = [r or s is not None for r, (s, _) in zip(runs, ready)]
     ran, ran_lint, blocker = 0, 0, None  # blocker: the install step that did not finish
     ctx = (top, base, values, pinned)
+    if SCOPE["unknown"]:
+        gated = ", ".join(sorted(SCOPE["unknown"]))
+        print("UNKNOWN scope   %s: each step gated on %s runs" % (SCOPE["why"] or "%s did not give %s" % (SCOPE_SCRIPT, gated), gated))
     workers = lint_workers() if lint and not dry else 1
     pool = concurrent.futures.ThreadPoolExecutor(workers) if workers > 1 else None  # one worker is the serial path
     logdir = tempfile.mkdtemp(prefix="ci-job-lint-%d-" % os.getpid()) if pool else None  # each parallel step's own log, until it is added to the run's
@@ -1175,23 +1235,8 @@ def main(argv):
     return 1 if tally["FAIL"] else 2 if tally["unknown"] else 0
 
 
-def end_on_signals():
-    """TERM and HUP end the run through the `finally` below, the path INT takes as a KeyboardInterrupt, so the log folder, the pin trees and
-    the work folder go. A second signal while it cleans up is ignored. Where handlers cannot be set (another thread), nothing changes."""
-    def stop(sig, frame):
-        for n in nums:
-            signal.signal(n, signal.SIG_IGN)
-        raise SystemExit(128 + sig)
-    nums = [getattr(signal, n) for n in ("SIGTERM", "SIGHUP") if hasattr(signal, n)]  # Windows has no SIGHUP
-    try:
-        for n in nums:
-            signal.signal(n, stop)
-    except ValueError:
-        pass
-
-
 if __name__ == "__main__":
-    end_on_signals()
+    _nowindow.end_on_signals()  # TERM and HUP end the run through the `finally` below, so the log folder, the pin trees and the work folder go
     try:
         sys.exit(main(sys.argv[1:]))
     finally:

@@ -18,6 +18,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _test_temp  # noqa: E402
@@ -119,6 +120,23 @@ def aged_folder(root, name, hours):
     return path
 
 
+SYNTHETIC_NOW = 1800000000  # the sweep's clock in the hold case: a fixed epoch, so no case reads the real one
+
+
+def folder_aged_at(root, name, now, days):
+    path = os.path.join(root, name)
+    os.makedirs(path)
+    mtime = now - days * 24 * 60 * 60
+    os.utime(path, (mtime, mtime))
+    return path
+
+
+def end_holder(proc):
+    """Close the holder's stdin, so it reads EOF and exits, then reap it."""
+    proc.stdin.close()
+    proc.wait(timeout=60)
+
+
 class RunFolderSweepTest(unittest.TestCase):
     """The sweep of test-temp-standard: a run folder whose pid is dead goes after an hour, and a live run's folder stays."""
 
@@ -160,6 +178,44 @@ class RunFolderSweepTest(unittest.TestCase):
         _test_temp.run_folder(root)
         self.assertFalse(os.path.exists(control), "positive control: a dead-pid folder over an hour old must be swept in this run")
         self.assertTrue(os.path.isdir(live), "a run folder whose pid is alive must stay: a parallel run owns it")
+
+    # A folder that a live process holds stays, whatever its age. The holder's cwd is the folder: the shape of a red-run copy.
+    @unittest.skipUnless(sys.platform.startswith("linux"), "the hold read is /proc/<pid>/cwd; a Mac or Windows read is not designed yet")
+    def test_a_folder_a_live_process_holds_stays_whatever_its_age(self):
+        root = os.path.join(RUN_FOLDER, "sweep-held")
+        os.makedirs(root)
+        control = folder_aged_at(root, "%d-%s" % (os.getpid(), "c" * 32), SYNTHETIC_NOW, 2)
+        held = folder_aged_at(root, "%d-%s" % (os.getpid(), "d" * 32), SYNTHETIC_NOW, 2)
+        holder = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"], cwd=held, stdin=subprocess.PIPE)
+        self.addCleanup(end_holder, holder)
+        _test_temp.sweep(root, os.path.join(root, "own-run"), now=SYNTHETIC_NOW)
+        self.assertFalse(os.path.exists(control), "positive control: an unheld folder two days old must be swept")
+        self.assertTrue(os.path.isdir(held), "a run folder that a live process holds must stay, whatever its age")
+
+    # A holder whose cwd cannot be read: the sweep cannot tell which folder it runs in, so the folder stays. Root reads every cwd here,
+    # so the read is refused for the holder's pid alone. The unpatched read first shows that the holder does run in the folder.
+    @unittest.skipUnless(sys.platform.startswith("linux"), "the hold read is /proc/<pid>/cwd; a Mac or Windows read is not designed yet")
+    def test_a_folder_whose_holder_cwd_cannot_be_read_stays(self):
+        sys.path.insert(0, os.path.join(HERE, "..", "janitor"))
+        import sweep  # janitor/sweep.py, the one reader of a process's cwd; merge.py imports it under this name
+        root = os.path.join(RUN_FOLDER, "sweep-unreadable-holder")
+        os.makedirs(root)
+        held = folder_aged_at(root, "%d-%s" % (os.getpid(), "d" * 32), SYNTHETIC_NOW, 2)
+        holder = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"], cwd=held, stdin=subprocess.PIPE)
+        self.addCleanup(end_holder, holder)
+        self.assertEqual(os.path.realpath(sweep.process_cwd(holder.pid)), os.path.realpath(held),
+                         "control: the holder's cwd, read unpatched, is not the folder it was started in")
+        reads = []
+        real_process_cwd = sweep.process_cwd
+
+        def refuse_the_holder(pid):
+            reads.append(pid)
+            return None if pid == holder.pid else real_process_cwd(pid)
+
+        with mock.patch.object(sweep, "process_cwd", refuse_the_holder):
+            _test_temp.sweep(root, os.path.join(root, "own-run"), now=SYNTHETIC_NOW)
+        self.assertIn(holder.pid, reads, "scope: the sweep never read the holder's cwd, so the refusal was not reached")
+        self.assertTrue(os.path.isdir(held), "a run folder whose holder's cwd cannot be read must stay: the sweep reaped it")
 
 
 class FindCopiesTest(unittest.TestCase):

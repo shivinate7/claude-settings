@@ -2790,9 +2790,10 @@ class SessionStartStableFreshnessTests(GitFixtureMixin, SessionStartAgentWorktre
 
 class SessionStartRoleFileTests(SessionStartAgentWorktreeNoticeTests):
     """The launcher's role (bin/claude-role sets CS_SESSION_ROLE) is written at session start to
-    <CLAUDE_CONFIG_DIR>/state/session-roles/<session id>.json, and that file is removed when the variable is unset. The guard
-    and the merge read it for a local session (lane local-tier-file). A /clear gives a session a new id, so the entry that runs
-    the hook must fire on clear as well: the entry test is a scope check, then the subject."""
+    <CLAUDE_CONFIG_DIR>/state/session-roles/<session id>.json. A start with the variable unset removes that file, except a resume
+    or a compact start, which keeps it (owner pick 981 a, 19:16 CST Nov 18). The guard and the merge read it for a local session
+    (lane local-tier-file). A /clear gives a session a new id, so the entry that runs the hook must fire on clear as well: the
+    entry test is a scope check, then the subject."""
 
     def role_file(self, sid=SESSION):
         return os.path.join(self.config, "state", "session-roles", sid + ".json")
@@ -2811,6 +2812,40 @@ class SessionStartRoleFileTests(SessionStartAgentWorktreeNoticeTests):
         self.run_hook(role=None)
         self.assertFalse(os.path.exists(self.role_file()),
                          "session start with no CS_SESSION_ROLE left the own role file in place")
+
+    def assert_resume_or_compact_keeps_the_role_file(self, source):
+        self.put(self.role_file(), json.dumps({"session": SESSION, "role": "triage"}))
+        self.run_hook(source=source, role=None)
+        self.assertTrue(os.path.isfile(self.role_file()),
+                        "a %s start with no CS_SESSION_ROLE removed the own role file" % source)
+        with open(self.role_file(), encoding="utf-8") as handle:
+            data = json.load(handle)
+        self.assertEqual(data.get("role"), "triage",
+                         "a %s start with no CS_SESSION_ROLE changed the kept role file to role %r" % (source, data.get("role")))
+
+    def test_a_resume_start_with_no_role_variable_keeps_the_own_role_file(self):
+        self.assert_resume_or_compact_keeps_the_role_file("resume")
+
+    def test_a_compact_start_with_no_role_variable_keeps_the_own_role_file(self):
+        self.assert_resume_or_compact_keeps_the_role_file("compact")
+
+    def test_a_resume_start_with_the_launcher_role_refreshes_the_role_file(self):
+        # Control, green on the old code: with the variable set, every start rewrites the file from it. It pins the refresh half.
+        self.put(self.role_file(), json.dumps({"session": SESSION, "role": "coordinator"}))
+        self.run_hook(source="resume", role="triage")
+        with open(self.role_file(), encoding="utf-8") as handle:
+            data = json.load(handle)
+        self.assertEqual(data.get("role"), "triage",
+                         "a resume with CS_SESSION_ROLE=triage left role %r in the role file" % (data.get("role"),))
+
+    def test_a_fresh_start_with_no_role_variable_writes_no_role_file(self):
+        # Control, green on the old code. A startup or a clear gets a session id of its own, so with no role nothing is written.
+        for source in ("startup", "clear"):
+            with self.subTest(source=source):
+                self.run_hook(source=source, role=None)
+                folder = os.path.join(self.config, "state", "session-roles")
+                found = os.listdir(folder) if os.path.isdir(folder) else []
+                self.assertEqual(found, [], "a %s start with no CS_SESSION_ROLE wrote a role file: %r" % (source, found))
 
     def test_no_session_id_writes_no_role_file(self):
         # Control, green on the old code, which writes no role file at all. It pins that a file is never keyed on a missing id.

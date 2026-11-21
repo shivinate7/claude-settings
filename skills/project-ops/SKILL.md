@@ -17,14 +17,15 @@ Without a project, each session holds one or more roles, and the owner acts as t
   `templates/brief*.md`: `brief.md` for a lane, `brief-<role>.md` for each other role. Triage, the batch runner and the arbiter
   compact in routine use and are not replaced. The coordinator rotates a standing session only when it
   goes stale or breaks. The coordinator compacts in place and has no successor (owner, 2026-11-10 14:29 CST, G7, standing sessions compact).
+- **App sessions.** A desktop-app session can get its role from `CS_SESSION_ROLE` in the app's scoped environment. How that env is keyed (to a preset or a folder), whether the app re-applies it on resume, and whether `start_session` gets a file with it are unmeasured. Desktop sessions on 2026-11-15 19:31 CST and 2026-11-18 18:34 CST wrote a role file (decision `session-tiers`, Known limits of the local file). A terminal session gets its role from `bin/claude-role`, which starts only `coordinator`, `triage` or `batch-runner`. Any other name exits 2, and a lane is never started there (`bin/claude-role`, `hooks/session_role.py`).
 - **The roster.** One list of who holds each standing session now. `templates/roster.md`.
 - **Autopilot.** An act that needs the owner's answer gets a "Deferred" line and waits. All other
   work runs. `templates/operating-model.md`.
 - **Batching.** Until the cutover, rule `git-integration-branch-merge` (lanes join one integration branch) governs it.
-  After the cutover, each lane PR merges alone on its own green run (decision `all-repos-switch-together`).
+  After the cutover, a PR merges alone on its own green run, or joins a batch by the situation (decision `all-repos-switch-together`; decision `session-tiers`, the owner's 10:23 CST Nov 20 ruling).
   The model adds only a review record on each PR (`templates/operating-model.md`, record
   `pr-review-record`). Under a standing merge grant, the batch runner batches each PR whose review record
-  is done, as `merge --reviewed` finds it, and merges the integration PR on green (until the cutover; after it, each lane PR on green). The owner is not
+  is done, as `merge --reviewed` finds it, and merges the integration PR on green (until the cutover; after it, a PR merges on its own green run, alone or in a batch by the situation). The owner is not
   asked.
 - **The record branch.** An orphan branch, `roadmap` by default, that holds the roadmap data,
   briefs and role handoff notes. It is never merged into main. A fork names its own record branch,
@@ -93,7 +94,7 @@ Decision `shared-resource-owner` (a shared machine names one owning repo) govern
 
 ## Rules this skill does not restate
 
-- `git-integration-branch-merge`: how lanes join a batch and how a red batch drops a lane, until the cutover. After it, each lane PR merges alone, and a red main reverts the blamed lane (decision `no-merge-onto-red-main`).
+- `git-integration-branch-merge`: how lanes join a batch and how a red batch drops a lane, until the cutover. After it, a PR merges alone or joins a batch by the situation (decision `session-tiers`, the owner's 10:23 CST Nov 20 ruling), and a red main reverts the blamed lane (decision `no-merge-onto-red-main`).
 - `roles-review-cap-three`: review rounds.
 - `speak-cite-id-plus-gloss`: give every id a plain name.
 - `parallelism-no-mid-task-talk`: lanes do not talk mid-task.
