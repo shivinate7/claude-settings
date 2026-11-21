@@ -10,9 +10,9 @@ import re
 import shlex
 
 from guard_core import (
-    DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, _wrapper_flags, basename,
+    DURATION, PLAYWRIGHT_PS_SHELLS, PosixScript, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, _wrapper_flags, basename,
     bare_words, command_indexes, inline_script, inner_commands, is_powershell, resolve_command,
-    segment_tokens, split_segments,
+    segment_tokens, split_segments, walk_quotes,
 )
 from guard_env import _substitutions
 
@@ -139,13 +139,14 @@ def _whole_word(tokens, at: int) -> str:
     return word
 
 
-def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
+def _roster_word(tokens, index: int, interpreter_only: bool = False, launcher_script: bool = False) -> str:
     """The roster spelling the command at `index` runs (`merge`, `merge.cmd`, or a script run through
     a runner, `python merge.py`), else ''. The one reader of NARRATING_COMMANDS and
     NARRATING_SCRIPT_TAILS. A word carrying a script path counts, so `python3.11` and `uv run python`
     both match. `interpreter_only` keeps the word to an interpreter (SCRIPT_INTERPRETER) and the path
     to its script operand: the check rule needs it, so `grep -n x merge/merge.py` and
-    `python3 -m pytest -k merge/merge.py` are no run of the script."""
+    `python3 -m pytest -k merge/merge.py` are no run of the script. `launcher_script` also counts the launcher
+    run as a script (`python3 bin/merge`)."""
     word = basename(tokens[index])
     if word in NARRATING_COMMANDS:
         return word
@@ -153,7 +154,8 @@ def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
         script = _script_operand(tokens, index) if SCRIPT_INTERPRETER.match(word.removesuffix(".exe")) else ""
         if not script and word.endswith(".py"):
             script = tokens[index]  # `uv run merge/merge.py`: uv runs the script, so it is the command word
-        if script.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
+        if script.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS) or (
+                launcher_script and basename(script) in NARRATING_COMMANDS):
             return word + " " + basename(script)
         return ""
     for token in tokens[index:]:
@@ -239,16 +241,33 @@ def _skip_uv_run(tokens, index: int) -> int:
     return index
 
 
-def check_stage(segment: str, background: bool) -> str:
+def _skip_setsid(tokens, index: int) -> int:
+    """The index of the command `setsid [flags] cmd ...` starts, read through `resolve_command` again, else `index`.
+    `setsid` is no entry of COMMAND_WRAPPERS, for the same reason `uv` is none (`_skip_uv_run`). Its flags
+    (`-c`, `-f`, `-w`) take no value."""
+    while index < len(tokens) and basename(tokens[index]) == "setsid":
+        start = index + 1
+        while start < len(tokens) and tokens[start].startswith("-"):
+            start += 1
+        at = resolve_command(tokens[start:])
+        if at is None:
+            break
+        index = start + at
+    return index
+
+
+def check_stage(segment: str, background: bool, launcher_script: bool = False) -> str:
     """The command word when one segment runs a named check, else ''. `ci-job` counts
-    only in the background."""
+    only in the background. `launcher_script` also reads `python3 bin/merge` as a run of `merge`: only the lint-start
+    reader asks, so check-timeout and the tail rule keep their own reading of that spelling. It also reads through
+    `setsid`, which they do not."""
     tokens = segment_tokens(segment)
     if not tokens:
         return ""
     index = resolve_command(tokens)
     if index is None:
         return ""
-    index = _skip_uv_run(tokens, index)
+    index = _skip_uv_run(tokens, _skip_setsid(tokens, index) if launcher_script else index)
     if basename(tokens[index]) in CHECK_COMMANDS:
         return basename(tokens[index]) if background else ""
     if SCRIPT_INTERPRETER.match(basename(tokens[index]).removesuffix(".exe")) and _script_operand(
@@ -256,7 +275,117 @@ def check_stage(segment: str, background: bool) -> str:
         return CHECK_COMMANDS[0] if background else ""
     if "--confirm" in tokens or not any(flag in tokens for flag in CHECK_FLAGS):
         return ""
-    return _roster_word(tokens, index, interpreter_only=True)
+    return _roster_word(tokens, index, interpreter_only=True, launcher_script=launcher_script)
+
+
+LINT_NEST_DEPTH = 4   # `bash -c` or `( ... )` inside another is followed this far; a deeper lint is read as no start
+GROUP_MARK = "\x01"  # stands for one `( ... )` group in the text around it; the call's own text never holds it
+
+
+def _subshell_groups(text: str):
+    """(outer, inners): `text` with each top-level `( ... )` subshell group cut out and replaced by a word
+    `\x01N\x01`, and the N-th group's inner text. A `$(`, `<(` or `>(` is no group, and a paren in quotes, escaped
+    or in a comment is text, so the scan reads the call as walk_quotes does. A `(` never closed leaves the text as it is."""
+    outer, inners, stack = [], [], []
+    copied = start = skip = 0
+    for at, char, quote in walk_quotes(text):
+        if at < skip or quote:
+            continue
+        if char == "#" and (at == 0 or text[at - 1] in " \t\n;|&("):
+            end = text.find("\n", at)
+            skip = len(text) if end < 0 else end
+        elif char == "(":
+            kind = "other" if at and text[at - 1] in "$<>" else "group"
+            if not stack and kind == "group":
+                outer.append(text[copied:at])
+                start = at + 1
+            stack.append(kind)
+        elif char == ")" and stack:
+            if stack.pop() == "group" and not stack:
+                outer.append(" %s%d%s " % (GROUP_MARK, len(inners), GROUP_MARK))
+                inners.append(text[start:at])
+                copied = at + 1
+    if stack:   # an unclosed group: nothing was cut
+        return text, []
+    outer.append(text[copied:])
+    kind = type(text) if isinstance(text, (PosixScript, PowerShellScript)) else str
+    return kind("".join(outer)), [kind(inner) for inner in inners]
+
+
+def _background_split(segment: str):
+    """One segment cut at each unquoted `&` that sends the command before it to the background. A `&&`, `&>`, `>&`,
+    `<&`, a `|&` at the start of a segment and a quoted or escaped `&` cut nothing."""
+    parts, last = [], 0
+    for at, char, quote in walk_quotes(segment):
+        if char != "&" or quote or segment[at + 1:at + 2] in (">", "&") or segment[at - 1:at] in ("&", ">", "<"):
+            continue
+        if not segment[:at].strip():
+            continue
+        parts.append(segment[last:at])
+        last = at + 1
+    parts.append(segment[last:])
+    return parts
+
+
+def _lint_stage(part: str) -> str:
+    """The matched text when one command part names a lint start, `merge --lane-lint` or `ci-job --lint`, else ''."""
+    word = check_stage(part, True, launcher_script=True)
+    if not word:
+        return ""
+    flag = "--lint" if word in CHECK_COMMANDS else "--lane-lint"
+    return word + " " + flag if flag in (segment_tokens(part) or ()) else ""
+
+
+def _lint_start_in(text: str, background: bool, depth: int) -> str:
+    """The lint start in `text`, read list by list. A list is the commands joined by `&&`, `||` and `|`, and it ends at
+    `;`, a newline or a `&`. Only a list a `&` ends, or any list when the call itself runs in the background, starts a
+    background lint. A `( ... )` group and the script a `bash -c` or `sh -c` hands on are read the same way, in the
+    background state of the list that holds them."""
+    if depth > LINT_NEST_DEPTH:
+        return ""
+    powershell = is_powershell(text)   # `&` there is the call operator and `( )` an expression: no cut
+    outer, inners = (text, []) if powershell else _subshell_groups(text)
+    ends = []
+    pieces = []
+    for segment, end in zip(split_segments(outer, ends), ends):
+        parts = [segment] if powershell else _background_split(segment)
+        pieces += [(part, "&" if n < len(parts) - 1 else end) for n, part in enumerate(parts)]
+    group = []
+    for part, end in pieces:
+        group.append(part)
+        if end in ("&&", "||", "|"):
+            continue
+        listed_background = background or end == "&"
+        for member in group:
+            if listed_background:
+                hit = _lint_stage(member)
+                if hit:
+                    return hit
+            for number in (int(n) for n in _group_numbers(member)):
+                hit = _lint_start_in(inners[number], listed_background, depth + 1)
+                if hit:
+                    return hit
+            tokens = segment_tokens(member)
+            for script in inner_commands(tokens) if tokens else ():
+                hit = _lint_start_in(script, listed_background, depth + 1)
+                if hit:
+                    return hit
+        group = []
+    return ""
+
+
+def _group_numbers(member: str):
+    """The numbers of the group marks a part holds, in order."""
+    return [word[1:-1] for word in member.split() if len(word) > 2 and word[0] == word[-1] == GROUP_MARK
+            and word[1:-1].isdigit()]
+
+
+def lint_start_hit(stripped: str, background: bool = True) -> str:
+    """The matched text when a call starts a lint in the background: `merge --lane-lint` or `ci-job --lint`, in any
+    segment, else ''. A bare `ci-job` with no --lint is no lint start, and a foreground lint with no `&` is none.
+    `background` is true when the call runs in the background; a trailing `&`, a `( ... )` group or a `bash -c`
+    script is read for its own background state (`_lint_start_in`)."""
+    return _lint_start_in(stripped.replace(GROUP_MARK, " "), background, 0)
 
 
 def _pipeline_hit(stages, background: bool) -> str:
