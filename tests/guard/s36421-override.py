@@ -9,8 +9,10 @@ FAMILY = "override"
 # <config dir>/state/override/<session_id>.json, {"kind": "once" or "timed", "until": ISO-8601}.
 #
 # What an override does: it covers only the session that typed it. An agent's call spends only a timed
-# override. A valid override makes the guard print nothing, so the normal permission flow runs, and it logs
-# one line with decision `override` and the rule it lifted. What no override does: lift frozen-path,
+# override. A valid override lets the act through, so the normal permission flow runs. A lift prints one line on
+# stdout: a PreToolUse JSON object whose hookSpecificOutput.additionalContext names the lifted rule and says override,
+# with no permissionDecision (owner ruling, 22:17 CST Nov 20: option a). It also logs one line with decision
+# `override` and the rule it lifted. What no override does: lift frozen-path,
 # git-env-set, or a kill of pid 0, 1 or -1, or count an unreadable override file as an override.
 #
 # A one-act override is state that a call uses up, so each case is a story over several guard calls on
@@ -112,13 +114,42 @@ def ov_kill(config, session, seconds, agent_id=None):
     return ov_call("Bash", {"command": OV_KILL}, NOGIT, config, session, seconds, agent_id)
 
 
+def ov_context_block(text):
+    """The hookSpecificOutput of `text` when `text` is one PreToolUse JSON object with a string additionalContext and
+    no permissionDecision, else None. A lifted act prints this one line (owner ruling, 22:17 CST Nov 20)."""
+    try:
+        parsed = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    block = parsed.get("hookSpecificOutput") if isinstance(parsed, dict) else None
+    if not isinstance(block, dict) or block.get("hookEventName") != "PreToolUse":
+        return None
+    if "permissionDecision" in block or not isinstance(block.get("additionalContext"), str):
+        return None
+    return block
+
+
+def ov_names_lift(text, rule):
+    """True when `text` is the one line a lifted act prints, and its additionalContext names `rule` and says override.
+    `rule` is one rule name or a tuple of them."""
+    block = ov_context_block(text)
+    if block is None:
+        return False
+    context = block["additionalContext"]
+    names = (rule,) if isinstance(rule, str) else tuple(rule or ())
+    return "override" in context and any(name and name in context for name in names)
+
+
 def ov_want(got, reason, want, rule):
-    """'' when (got, reason) is the verdict wanted. An allow must print nothing. A refusal must name
-    its rule; a tuple of rules lists the ones that may name it. Else why not."""
+    """'' when (got, reason) is the verdict wanted. An allow prints nothing, or the one line a lifted act prints
+    (ov_names_lift). A refusal must name its rule; a tuple of rules lists the ones that may name it. Else why not.
+    decide() reads a line with no permissionDecision as "unparsable", so that verdict takes the same line."""
+    if want == "allow" and got == "unparsable" and ov_names_lift(reason, rule):
+        return ""
     if got != want:
         return "got %s (%s), want %s" % (got, reason[:70], want)
-    if want == "allow" and reason:
-        return "the allow printed %r, want nothing" % reason[:70]
+    if want == "allow" and reason and not ov_names_lift(reason, rule):
+        return "the allow printed %r, want nothing or the one line that names %r" % (reason[:70], rule)
     names = (rule,) if isinstance(rule, str) else rule
     if want != "allow" and not any(name in reason for name in names):
         return "the refusal does not name rule %r: %s" % (rule, reason[:70])
