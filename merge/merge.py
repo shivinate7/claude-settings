@@ -3015,8 +3015,8 @@ def held_by_live_process(path, owner=None):
     other pids this user cannot read (pid 1, another user's) are no holder of this folder. OWNER defaults to the pid in the folder's name
     (folder_owner). A folder with no owner pid keeps for no unreadable pid."""
     owner = folder_owner(path) if owner is None else owner
-    if owner is not None and owner <= 1:
-        owner = None  # init is every process's ancestor, so it ties none of them to this folder
+    if owner is not None and owner <= 2:
+        owner = None  # init (1) and Linux's kthreadd (2) are ancestors of every process or kernel thread, so neither ties any of them to this folder
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "janitor"))
     try:
         import sweep  # janitor/sweep.py
