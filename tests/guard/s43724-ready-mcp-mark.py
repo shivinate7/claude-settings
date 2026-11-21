@@ -1,4 +1,4 @@
-# section 43723
+# section 43724
 FAMILY = "ready-mcp-mark-guard"
 #
 # `ready-mcp-mark-guard`. A ready mark by the GitHub MCP update tool (draft false) is allowed only when the merge tool's
