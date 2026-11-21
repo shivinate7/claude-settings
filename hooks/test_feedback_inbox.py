@@ -2035,10 +2035,9 @@ def case_page_claude_artifacts_read_artifact_does_not_prove_the_filing():
 
 def case_export_scan_does_not_count_a_claude_artifacts_db_write_with_no_collection():
     """The export scan counts no claude-artifacts db_write that names no collection. The ArtifactData schema requires
-    `collection` for every action but batch, so the tool refuses such a write, and the fallback that counts an unnamed
-    batch must not take it. Two shapes are checked: a write with a doc_id and data, and a write whose writes name only
-    answers. The controls are a db_write naming items, which counts once, and an ArtifactData set with no collection,
-    which the export scan already leaves out."""
+    `collection` for every action but batch, so the tool refuses such a write. Two shapes are checked: a write with a
+    doc_id and data, and a write whose writes name only answers. The controls are a db_write naming items, which counts
+    once, and an ArtifactData set with no collection, which the export scan already leaves out."""
     data = {"n": 98}
     found = export_writes([used_rec(CLAUDE_ARTIFACTS + "db_write", tool_input(
         None, collection="items", doc_id="disk-cleanup", data=data))])
