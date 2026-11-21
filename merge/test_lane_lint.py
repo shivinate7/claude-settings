@@ -5104,10 +5104,10 @@ class LintCheckReviewed(tm.ReviewEnv):
     the pull request not done, and name `merge --lane-lint 7`. The lint comments come from the one comment list read the records use (decision
     pr-review-record, the cost)."""
 
-    def listing(self, comments, head=tm.REVIEW_HEAD):
-        """-> (rc, stdout and stderr, host) of `merge --reviewed` for pull request 7 at `head`: one done review record, then `comments`."""
+    def listing(self, comments, head=tm.REVIEW_HEAD, draft=False):
+        """-> (rc, stdout and stderr, host) of `merge --reviewed` for pull request 7 at `head`: one done review record, then `comments`. `draft` marks pull request 7 as a draft."""
         record = tm.review_comment(1, 7, tm.record_text(rounds=tm.REVIEW_PASS))
-        host = tm.PullsHost([tm.batch_pull(7, head)], {}, comments=[record, *comments])
+        host = tm.PullsHost([tm.batch_pull(7, head, draft=draft)], {}, comments=[record, *comments])
         rc, out, err = self.run_args("--reviewed", host=host)
         return rc, out + err, host
 
@@ -5115,8 +5115,12 @@ class LintCheckReviewed(tm.ReviewEnv):
         self.assertNotIn(" done: ", tm.list_line(self, out, 7), "#7 reads done with no lane-lint PASS at its live head:\n" + out)
         self.assertIn("merge --lane-lint 7", out, "#7 is not ready, and no line names `merge --lane-lint 7`:\n" + out)
 
+    def unreadable_lint(self):
+        """A lint comment at the live head with no Result line: its lint is unknown."""
+        return dict(lint_comment(2, tm.REVIEW_HEAD), body=f"{LANE_LINT_MARKER}\nPR: #7\nHead: {tm.REVIEW_HEAD}\n")
+
     def test_a_lint_result_with_no_readable_verdict_shows_lint_unknown_and_is_not_done(self):
-        unreadable = dict(lint_comment(2, tm.REVIEW_HEAD), body=f"{LANE_LINT_MARKER}\nPR: #7\nHead: {tm.REVIEW_HEAD}\n")  # no Result line
+        unreadable = self.unreadable_lint()
         rc, out, host = self.listing([unreadable])
         self.assertEqual(rc, 0, out)
         line = tm.list_line(self, out, 7)
@@ -5148,6 +5152,40 @@ class LintCheckReviewed(tm.ReviewEnv):
         rc, out, host = self.listing([lint_comment(2, tm.REVIEW_HEAD, by=NOT_OWNER)])
         self.assertEqual(rc, 0, out)
         self.assert_not_ready(out)
+
+    def test_a_reviewed_draft_with_no_lint_pass_reads_ready_with_merge_ready_as_its_next_act(self):
+        rc, out, host = self.listing([], draft=True)
+        self.assertEqual(rc, 0, out)
+        line = tm.list_line(self, out, 7)
+        self.assertRegex(line, rf"^#7 feat7 {tm.REVIEW_HEAD[:9]} ready: ", "a reviewed draft with no lint PASS does not read ready:\n" + out)
+        self.assertIn("next: merge --ready", line, "a reviewed draft with no lint PASS names no `merge --ready` as its next act:\n" + out)
+
+    def test_a_reviewed_draft_with_no_lint_pass_names_no_lane_lint_before_ready(self):
+        rc, out, host = self.listing([], draft=True)
+        self.assertEqual(rc, 0, out)
+        tm.list_line(self, out, 7)  # the #7 line must exist first: with no such line, the absence below passes
+        self.assertNotIn("merge --lane-lint 7", out, "a reviewed draft with no lint PASS is told to lint before it goes ready, though `merge --ready` reads no lint:\n" + out)
+
+    def test_a_reviewed_draft_with_a_lint_pass_reads_ready_with_merge_ready_as_its_next_act(self):
+        rc, out, host = self.listing([lint_comment(2, tm.REVIEW_HEAD)], draft=True)
+        self.assertEqual(rc, 0, out)
+        line = tm.list_line(self, out, 7)
+        self.assertRegex(line, rf"^#7 feat7 {tm.REVIEW_HEAD[:9]} ready: ", "a reviewed draft with a lint PASS at its head does not read ready:\n" + out)
+        self.assertIn("next: merge --ready", line, "a reviewed draft with a lint PASS at its head names no `merge --ready` as its next act:\n" + out)
+
+    def test_a_reviewed_draft_with_an_unreadable_lint_reads_ready_with_merge_ready_as_its_next_act(self):
+        rc, out, host = self.listing([self.unreadable_lint()], draft=True)
+        self.assertEqual(rc, 0, out)
+        line = tm.list_line(self, out, 7)
+        self.assertRegex(line, rf"^#7 feat7 {tm.REVIEW_HEAD[:9]} ready: ", "a reviewed draft with an unreadable lint does not read ready, though an unreadable lint is no finding:\n" + out)
+        self.assertIn("next: merge --ready", line, "a reviewed draft with an unreadable lint names no `merge --ready` as its next act:\n" + out)
+
+    def test_a_reviewed_draft_with_a_lint_fail_does_not_read_ready_and_names_no_merge_ready_as_its_next_act(self):
+        rc, out, host = self.listing([lint_comment(2, tm.REVIEW_HEAD, verdict="FAIL")], draft=True)
+        self.assertEqual(rc, 0, out)
+        line = tm.list_line(self, out, 7)
+        self.assertNotRegex(line, rf"^#7 feat7 {tm.REVIEW_HEAD[:9]} ready: ", "a reviewed draft with a lint FAIL reads ready, though a lint FAIL is a finding:\n" + out)
+        self.assertNotIn("next: merge --ready", line, "a reviewed draft with a lint FAIL names `merge --ready` as its next act, though a lint FAIL is a finding:\n" + out)
 
 
 class LintCheckJoin(tm.CloudSession):
