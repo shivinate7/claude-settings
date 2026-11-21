@@ -17,7 +17,7 @@ Incident: PR 3255 (04:25 CST) and PR 3472 (05:40 CST), 2026-11-15. Each was mark
 
 Open risk: `--ready`'s own mark is refused by GraphQL, so the session marks ready by MCP after the pass (decision `records-index-at-merge`, the ready route). That mark follows a pass on the same head, so the rule allows it. A session that ran `--ready` in another session, or before a compaction, meets the refusal and runs `--ready` again. Unmeasured: how often.
 
-Cost: only an update with draft false reads anything. One transcript read (the whole file, once), then one pull request read when a pass line is found. No process outlives the call and no file is written.
+Cost: only an update with draft false reads anything. It makes at most one transcript read (the whole file) and at most one pull request read, the second only when a stood sha is found. No process outlives the call and no file is written.
 
 Debt: `ready-checks-skipped-by-mcp` retires on a guard case that shows a ready mark outside the draft step is refused. Family `ready-mcp-mark-guard` in `hooks/test_guard.py` is that case.
 
