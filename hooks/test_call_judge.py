@@ -22,7 +22,8 @@ Interface the hook must match:
   claude-opus-5-5, no --effort, rule id `question-judge`. The prompts are the settings.json prompts,
   with the call's tool_input JSON where $ARGUMENTS stood.
 - A model answer {"ok": false, "reason": R} refuses through guard_core.refuse(): a PreToolUse deny
-  that holds R and the override line, and one guard.log deny line. An override lifts it: no output.
+  that holds R and the override line, and one guard.log deny line. An override lifts it: one stdout line
+  that names the lifted rule (tests/lift_line.py names_lift), and no deny.
 - Veto (an act no override lifts): an Explore spawn whose model field is neither sonnet nor opus.
   Every other refusal is liftable.
 - The Explore remedy: the spawn prompt's fix clause and the Agent fallback reason name the audit marker,
@@ -83,6 +84,8 @@ sys.path.insert(0, os.path.join(REPO, "lint"))
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
+sys.path.insert(0, os.path.join(REPO, "tests"))
+import lift_line  # noqa: E402  the one reader of the lift line (tests/lift_line.py)
 ROOT = _test_temp.run_folder()
 atexit.register(shutil.rmtree, ROOT, ignore_errors=True)
 STUB_DIR = os.path.join(ROOT, "stub")
@@ -551,7 +554,7 @@ def case_agent_override():
         r = run_hook(inp, answer=FLAG, pass_=pass_)
         if lifted:
             check("agent: %s lifts the refusal (no output, one override log line)" % label,
-                  r.code == 0 and r.out == "" and lifted_log(r, "spawn-judge"), detail(r))
+                  r.code == 0 and lift_line.names_lift(r.out.strip(), "spawn-judge") and lifted_log(r, "spawn-judge"), detail(r))
         else:
             d = r.deny() or {}
             check("agent: %s leaves the deny" % label,
@@ -575,7 +578,7 @@ def case_explore_row_is_vetoed():
                        ("a builder spawn with no model field", spawn_input("builder", model=None))):
         r = run_hook(inp, answer=FLAG, pass_=(SID_A, TIMED))
         check("explore: %s is not vetoed, a timed override lifts it" % label,
-              r.code == 0 and r.out == "" and lifted_log(r, "spawn-judge"), detail(r))
+              r.code == 0 and lift_line.names_lift(r.out.strip(), "spawn-judge") and lifted_log(r, "spawn-judge"), detail(r))
 
 
 def load_file_module(path, name):
@@ -656,7 +659,7 @@ def case_question():
         r = run_hook(inp, answer=FLAG, pass_=pass_)
         if lifted:
             check("question: %s lifts the refusal" % label,
-                  r.code == 0 and r.out == "" and lifted_log(r, "question-judge"), detail(r))
+                  r.code == 0 and lift_line.names_lift(r.out.strip(), "question-judge") and lifted_log(r, "question-judge"), detail(r))
         else:
             check("question: %s leaves the deny" % label,
                   r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
@@ -682,7 +685,7 @@ def case_question_departs():
           and r.reason().rstrip().endswith(override.offer("question-departs").strip()), r.reason()[-160:])
     r = run_hook(question_input(box=good_box(departs=None)), answer=ALLOW, pass_=(SID_A, TIMED))
     check("question departs: a timed override lifts the code refusal",
-          r.code == 0 and r.out == "" and lifted_log(r, "question-departs"), detail(r))
+          r.code == 0 and lift_line.names_lift(r.out.strip(), "question-departs") and lifted_log(r, "question-departs"), detail(r))
     r = run_hook(question_input(), answer=ALLOW)
     check("question departs: a box with the line reaches the model once and is not refused",
           r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, detail(r))
@@ -791,7 +794,7 @@ def case_page_override():
         r = run_hook(inp, answer=PAGE_FLAG, pass_=pass_)
         if lifted:
             check("page: %s lifts the refusal (no output, one override log line)" % label,
-                  r.code == 0 and r.out == "" and lifted_log(r, "question-judge"), detail(r))
+                  r.code == 0 and lift_line.names_lift(r.out.strip(), "question-judge") and lifted_log(r, "question-judge"), detail(r))
         else:
             check("page: %s leaves the deny" % label,
                   r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny"
@@ -833,7 +836,8 @@ def case_page_str_replace_judged():
           and flagged.reason().rstrip().endswith(override.offer("question-judge").strip()), flagged.reason()[-160:])
     r = run_hook(page_input("str_replace", None, field="context", old_str=PAGE_OLD, new_str=fragment),
                  answer=PAGE_FLAG, pass_=(SID_A, TIMED))
-    check("page str_replace: a timed override lifts the refusal", r.code == 0 and r.out == ""
+    check("page str_replace: a timed override lifts the refusal",
+          r.code == 0 and lift_line.names_lift(r.out.strip(), "question-judge")
           and lifted_log(r, "question-judge"), detail(r))
     ok = run_hook(page_input("str_replace", None, field="context", old_str=PAGE_OLD, new_str=fragment),
                   answer=ALLOW)
