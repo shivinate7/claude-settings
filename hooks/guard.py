@@ -5133,6 +5133,12 @@ def load_hit(tool: str, tool_input) -> tuple:
         return disk_text is not None and disk < min(disk_total * share / 100.0, gb)
 
     full = load_full(reading)
+    # The owed audit's own Audit: spawn is not refused at the Full memory point (decision machine-load-brake, Full): it is
+    # the one call that clears the audit. Only Full memory is lifted: a full disk still refuses it (the disk cleanup frees
+    # that first), and the busy test below still judges both readings, so a background spawn or a busy disk refuses as on
+    # main. AUDIT_SPAWN_PASSED is set only for that spawn, while the audit is owed.
+    if full and AUDIT_SPAWN_PASSED and not any(t.startswith("disk") for t in full):
+        full = []
     if full:
         disk_tripped = any(t.startswith("disk") for t in full)
         return (LOAD_FULL_CLOUD_REASON if cloud and disk_tripped else LOAD_FULL_REASON) % ", ".join(full), ", ".join(full)
@@ -8091,12 +8097,6 @@ def judge(payload) -> None:
         load_reason, load_matched = running_agent_hit(payload, tool)
     if not load_reason and not lint_start_hit_of(tool, tool_input):
         load_reason, load_matched = lane_session_hit(payload, tool)
-    # The owed audit's own Audit: spawn passes a full memory (decision machine-load-brake, Full): it is the one call that
-    # clears the audit, and a recovery control must not depend on the state it recovers. A full disk still refuses it,
-    # since the disk cleanup (audit_disk_cleanup_hit) frees that first. AUDIT_SPAWN_PASSED is set only while the audit
-    # is owed, so no other spawn is exempt.
-    if load_reason and AUDIT_SPAWN_PASSED and "disk" not in load_matched:
-        load_reason = ""
     if load_reason:
         refuse(tool, "deny", "load-brake", load_reason, load_matched)
 
