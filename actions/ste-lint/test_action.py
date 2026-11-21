@@ -1574,7 +1574,9 @@ def one_line_no_traceback(r):
 
 
 with scratch("sweep") as root:
-    own, old, new = (os.path.join(root, "%d-%s" % (n, uuid.uuid4().hex)) for n in (1, 2, 3))
+    reaped = subprocess.Popen([sys.executable, "-c", "pass"])  # its pid is dead once it has ended: the old folder is named for it
+    reaped.wait(timeout=60)
+    own, old, new = (os.path.join(root, "%d-%s" % (n, uuid.uuid4().hex)) for n in (1, reaped.pid, 3))
     for folder in (own, old, new):
         os.makedirs(folder)
     two_days_ago = time.time() - 2 * 24 * 60 * 60
