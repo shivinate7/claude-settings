@@ -262,6 +262,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        tool in shared_names.REMOTE_OUTWARD_TOOLS: starting, messaging, tagging or archiving sessions,
                        scheduled tasks, repos and computers. The session's own call, and the read tools, pass.
                        An override lifts it.
+  agent-browser-file-open
+                       deny. A call by an agent (the payload carries a non-empty agent_id) that opens a `file:` URL (the scheme
+                       read in any case) through mcp__Claude_Browser__navigate or mcp__Claude_Browser__preview_start (`url`), or
+                       through a mcp__Claude_Browser__browser_batch item named navigate or preview_start (its input `url`). The
+                       reason names headless Chrome or a localhost URL as the way. The main session, an empty agent_id and any
+                       other URL pass. An override lifts it.
   sendmessage-session-id
                        deny. A SendMessage whose `to` is a string starting `session_`: that is no agent name, and the
                        hand-off could go missing. A missing or non-string `to`, an agent name, @parent and the
@@ -6313,6 +6319,43 @@ def page_design_hit(writes, tool_input, cwd):
     return None
 
 
+# ------------------------------------------------------------------ an agent opens a file: URL in the built-in browser
+#
+# The desktop app asks the person before it opens a file in some folders, `.claude` among them, and its card has no
+# timeout. An agent's own worktree sits in such a folder and no one watches an agent, so the call can stall for hours.
+BROWSER_URL_TOOLS = ("mcp__Claude_Browser__navigate", "mcp__Claude_Browser__preview_start")
+BROWSER_BATCH_TOOL = "mcp__Claude_Browser__browser_batch"
+BROWSER_FILE_OPEN_REASON = (
+    "A file opened in the built-in browser can stop on an app card that nobody answers, and an agent has no one to "
+    "answer it. Open the file in headless Chrome (Playwright), or serve it on a localhost URL and open that. "
+    "(decision browser-prompts-are-the-apps)"
+)
+
+
+def _is_file_url(url) -> bool:
+    return isinstance(url, str) and url.lstrip().lower().startswith("file:")
+
+
+def browser_file_open_hit(tool: str, tool_input) -> str:
+    """Return the `file:` URL (cut for the log) that this browser call opens, else ''. A navigate or preview_start
+    names it in `url`; a browser_batch holds items named navigate or preview_start, each judged by its input `url`."""
+    if not isinstance(tool_input, dict):
+        return ""
+    if tool in BROWSER_URL_TOOLS:
+        url = tool_input.get("url")
+        return url[:120] if _is_file_url(url) else ""
+    if tool == BROWSER_BATCH_TOOL:
+        actions = tool_input.get("actions")
+        for item in actions if isinstance(actions, list) else []:
+            if not isinstance(item, dict) or item.get("name") not in ("navigate", "preview_start"):
+                continue
+            item_input = item.get("input")
+            url = item_input.get("url") if isinstance(item_input, dict) else None
+            if _is_file_url(url):
+                return url[:120]
+    return ""
+
+
 # ------------------------------------------------------------------ SendMessage to a cloud session
 #
 # SendMessage addresses an agent by name. A `session_...` id is no agent name, and auto mode refused such a call, so
@@ -8143,6 +8186,14 @@ def judge(payload) -> None:
     # agent's create_session is refused here. An override lifts it.
     if payload.get("agent_id") and tool in REMOTE_OUTWARD_TOOLS:
         refuse(tool, "deny", "agent-no-remote-tools", AGENT_NO_REMOTE_REASON, tool)
+
+    # 8c. agent-browser-file-open. An agent never opens a file: URL in the built-in browser: the app's card for it has no
+    # timeout and no one answers it. Keyed on a truthy agent_id, as 8b is. The main session passes: a person sees its card.
+    # An override lifts it.
+    if payload.get("agent_id"):
+        file_url = browser_file_open_hit(tool, tool_input)
+        if file_url:
+            refuse(tool, "deny", "agent-browser-file-open", BROWSER_FILE_OPEN_REASON, file_url)
 
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
     # model; the log holds what the call asked for. A lane start's floor is judged with the lane-start rules (8a).
