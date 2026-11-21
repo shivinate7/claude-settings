@@ -192,7 +192,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   self-role-claim      deny. A Bash or PowerShell call that sets CS_SESSION_ROLE or runs bin/claude-role,
                        also inside `bash -c`, `sh -c` or `eval`: a session does not claim a role. Also a call
                        that starts claude while the guard's own CS_SESSION_ROLE is non-empty, since the child
-                       inherits the role. Reads through Test-Path, Get-Item or Remove-Item on Env: pass;
+                       inherits the role, or that resumes (--resume, -r, -c, --continue) a session whose role
+                       file is valid, since a resume keeps that file. Reads through Test-Path, Get-Item or Remove-Item on Env: pass;
                        `$role = $env:CS_SESSION_ROLE`, `command -v claude-role` and a bare
                        `CS_SESSION_ROLE=x` are refused (debt self-role-claim-false-alarms). (self-role-claim)
   roadmap-one-writer   deny. A `git push`, also one inside `bash -c`, `sh -c` or `eval`, whose destination is
@@ -5633,7 +5634,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 2a1. A session that holds a role and starts claude: the child inherits the role (rule self-role-claim). It runs before the
     # detached-launch rule so `Start-Process claude` names its own reason. Cost: one environment read per call.
-    matched = self_role_child_hit(stripped)
+    matched = self_role_child_hit(stripped, cwd, transcript)
     if matched:
         refuse(tool, "deny", "self-role-claim", SELF_ROLE_CHILD_REASON, matched)
 

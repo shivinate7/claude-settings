@@ -20,7 +20,7 @@ session_id=$(printf '%s' "$input" | sed -n 's/.*"session_id"[[:space:]]*:[[:spac
 source=$(printf '%s' "$input" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
 
 # The launcher's role file (bin/claude-role sets CS_SESSION_ROLE): hooks/session_role.py records the role for this session id,
-# or removes the session's file when the variable is unset, so the guard and the merge tool can read a local session's tier
+# or removes the session's file when the variable is unset (a resume or compact start keeps it), so the guard and the merge tool can read a local session's tier
 # (decision session-tiers). Local sessions only; a cloud session reads its tags. Any failure is silent. Cost: one python
 # start and one small file write or delete per start, no process kept, no timer.
 if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
