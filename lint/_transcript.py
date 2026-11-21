@@ -12,8 +12,11 @@ import os
 import re
 
 SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
-ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData")
-WRITE_VERBS = ("set", "update", "batch")
+CLAUDE_ARTIFACTS_DB = "mcp__claude-artifacts__db_"  # the claude-artifacts page db tools; the verb is the tool name's tail, never an input action
+# The tool-name prefixes of the page db tools, for `name.startswith(ARTIFACT_DATA)`. read_artifact is no db tool, so it never matches.
+ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData", CLAUDE_ARTIFACTS_DB)
+WRITE_VERBS = ("set", "update", "batch", "str_replace")
+TOOL_WRITE_VERBS = ("write", "str_replace")  # the claude-artifacts tool-name verbs that write: db_write stands for set, update and batch
 
 
 def read_transcript(path):
@@ -321,8 +324,18 @@ def _in_items(d):
             or any(isinstance(d.get(k), str) and d[k].startswith("items/") for k in ("doc_id", "path")))
 
 
-def is_write(d):
-    """False for a dict whose action or op is a verb other than set, update, batch."""
+def tool_verb(name):
+    """The verb in a claude-artifacts db tool name (db_get gives get, db_write gives write), else None.
+    read_artifact and every other tool name give None."""
+    name = name if isinstance(name, str) else ""
+    return name[len(CLAUDE_ARTIFACTS_DB):] or None if name.startswith(CLAUDE_ARTIFACTS_DB) else None
+
+
+def is_write(d, verb=None):
+    """False for a dict whose action or op is a verb other than a WRITE_VERBS one. A tool-name `verb`
+    (see tool_verb) wins over the input's action: only a TOOL_WRITE_VERBS verb is a write, whatever the input says."""
+    if verb is not None:
+        return verb in TOOL_WRITE_VERBS
     verb = d.get("action", d.get("op"))
     return not isinstance(verb, str) or verb in WRITE_VERBS
 
@@ -333,9 +346,9 @@ def is_n(v, n):
         isinstance(v, str) and v.isdigit() and int(v) == int(n))
 
 
-def _has_n(node, n):
+def _has_n(node, n, verb=None):
     if isinstance(node, dict):
-        if not is_write(node):
+        if not is_write(node, verb):
             return False
         if is_n(node.get("n"), n):
             return True
@@ -343,20 +356,22 @@ def _has_n(node, n):
     return isinstance(node, list) and any(_has_n(c, n) for c in node)
 
 
-def writes_n(node, n):
-    """True when a write dict that names the items collection holds key n == n at any depth below it."""
+def writes_n(node, n, verb=None):
+    """True when a write dict that names the items collection holds key n == n at any depth below it.
+    A tool-name `verb` (see tool_verb) governs the top dict only; nested dicts read their own action."""
     if isinstance(node, dict):
-        if not is_write(node):
+        if not is_write(node, verb):
             return False
-        return (_in_items(node) and _has_n(node, n)) or any(writes_n(c, n) for c in node.values())
+        return (_in_items(node) and _has_n(node, n, verb)) or any(writes_n(c, n) for c in node.values())
     return isinstance(node, list) and any(writes_n(c, n) for c in node)
 
 
-def items_write(node):
-    """True when a set, update or batch call writes under the items collection at any depth: the page
-    writer's own write of an item. A get, a list or another collection is no write to items."""
+def items_write(node, verb=None):
+    """True when a write call writes under the items collection at any depth: the page writer's own write
+    of an item. A get, a list or another collection is no write to items. A tool-name `verb` (see
+    tool_verb) governs the top dict only, so a db_get with no action is no write."""
     if isinstance(node, dict):
-        if not is_write(node):
+        if not is_write(node, verb):
             return False
         return _in_items(node) or any(items_write(c) for c in node.values())
     return isinstance(node, list) and any(items_write(c) for c in node)
@@ -425,7 +440,7 @@ def _page_reads(records):
         for use in tool_uses(rec):
             inp = use.get("input")
             if (str(use.get("name", "")).startswith(ARTIFACT_DATA) and isinstance(inp, dict)
-                    and inp.get("action") == "get"
+                    and tool_verb(use.get("name")) is None and inp.get("action") == "get"
                     and (inp.get("path") == "meta/page"
                          or (inp.get("collection") == "meta" and inp.get("doc_id") == "page"))):
                 pending.add(use.get("id"))

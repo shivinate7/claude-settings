@@ -187,7 +187,8 @@ KINDS = ("ruling", "task", "question", "note", "standing", "page", "repo")
 JOT = re.compile(r"\[(%s)\]\s+->\s+\S" % "|".join(KINDS))
 PAGE_HOME = re.compile(r"page:(\d+)")
 SEND_TOOLS = _transcript.SEND_TOOLS  # the send predicates live in lint/_transcript.py, one home
-ARTIFACT_DATA = _transcript.ARTIFACT_DATA
+ARTIFACT_DATA = _transcript.ARTIFACT_DATA  # the one home of the page db tool names
+_tool_verb = _transcript.tool_verb
 _writes_n = _transcript.writes_n
 _is_n = _transcript.is_n
 REPO_HOME = re.compile(r"repo:([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)")
@@ -798,21 +799,33 @@ def norm(text):
 
 def _proves(use, n):
     """True when a tool_use sends page item n: a message naming n as a whole token, or an
-    ArtifactData write with key n == n under collection `items`."""
+    ArtifactData write with key n == n under collection `items`. The write names a page url: the
+    schema requires it, so a call without one is refused and sends nothing."""
     name, tool_input = use.get("name") or "", use.get("input")
     if not isinstance(tool_input, dict):
         return False
     if name in SEND_TOOLS:
         msg = tool_input.get("message")
         return isinstance(msg, str) and re.search(r"(?<![A-Za-z0-9-])%s(?![A-Za-z0-9-])" % n, msg) is not None
-    return name.startswith(ARTIFACT_DATA) and _writes_n(tool_input, n)
+    return (name.startswith(ARTIFACT_DATA) and isinstance(tool_input.get("url"), str) and _read_verb(use) is None
+            and _writes_n(tool_input, n, _tool_verb(name)))
+
+
+def _read_verb(use):
+    """The read verb (get, list or query) of an ArtifactData action or a claude-artifacts db_<verb> tool name, else None.
+    A claude-artifacts tool's name wins over its input's action."""
+    name, inp = use.get("name") or "", use.get("input")
+    verb = _tool_verb(name)
+    if verb is None:
+        verb = inp.get("action") if isinstance(inp, dict) else None
+    return verb if verb in READ_VERBS else None
 
 
 def _reads_items(use):
     """True for an ArtifactData get, list or query of collection `items` that names a page url and no out_dir.
     A read with out_dir returns file paths, not the documents, so its result cannot show item n."""
     name, inp = use.get("name") or "", use.get("input")
-    return (name.startswith(ARTIFACT_DATA) and isinstance(inp, dict) and inp.get("action") in READ_VERBS
+    return (name.startswith(ARTIFACT_DATA) and isinstance(inp, dict) and _read_verb(use) is not None
             and inp.get("collection") == "items" and isinstance(inp.get("url"), str) and not inp.get("out_dir"))
 
 
@@ -1389,16 +1402,32 @@ def _ts(rec):
     return _transcript.parse_utc_timestamp(rec.get("timestamp"))
 
 
-def _exported_write(inp, collections):
-    """True when an ArtifactData input writes (set, update, batch or delete) a collection the waiting copy
-    exports: named by `collection`, or by a `doc_id` or `path` of the form `<collection>/...`. A batch that
-    names none is counted, since its writes are not read. `delete` is counted here and in no shared list."""
-    verb = inp.get("action", inp.get("op"))
-    if isinstance(verb, str) and verb not in _transcript.WRITE_VERBS + ("delete",):
-        return False
-    named = [inp["collection"]] if isinstance(inp.get("collection"), str) else [
-        inp[k].partition("/")[0] for k in ("doc_id", "path") if isinstance(inp.get(k), str) and "/" in inp[k]]
-    return any(c in collections for c in named) or (not named and verb == "batch")
+def _named_collections(d):
+    """The collections a write dict names: its `collection`, else the `<collection>` head of a `doc_id` or `path`
+    of the form `<collection>/...`."""
+    if isinstance(d.get("collection"), str):
+        return [d["collection"]]
+    return [d[k].partition("/")[0] for k in ("doc_id", "path") if isinstance(d.get(k), str) and "/" in d[k]]
+
+
+def _exported_write(inp, collections, tool_verb=None):
+    """True when an ArtifactData input writes (set, update, batch, str_replace or delete) a collection the waiting
+    copy exports: named by `collection`, or by a `doc_id` or `path` of the form `<collection>/...`. A batch names
+    its collections in its `writes`, one per op. A write that names no collection is no write, since the schema
+    requires one outside a batch. `delete` is counted here and in no shared list.
+    A claude-artifacts `tool_verb` wins over the input's action: db_write, db_str_replace and db_delete count, db_get, db_list
+    and db_query do not."""
+    if tool_verb is not None:
+        if tool_verb not in _transcript.TOOL_WRITE_VERBS + ("delete",):
+            return False
+    else:
+        verb = inp.get("action", inp.get("op"))
+        if isinstance(verb, str) and verb not in _transcript.WRITE_VERBS + ("delete",):
+            return False
+    named = _named_collections(inp)
+    for op in inp["writes"] if isinstance(inp.get("writes"), list) else ():
+        named += _named_collections(op) if isinstance(op, dict) else []
+    return any(c in collections for c in named)
 
 
 def _scan_transcript(records, collections):
@@ -1415,7 +1444,7 @@ def _scan_transcript(records, collections):
             if not isinstance(inp, dict) or when is None:
                 continue
             if name.startswith(ARTIFACT_DATA):
-                if _exported_write(inp, collections) and isinstance(inp.get("url"), str):
+                if _read_verb(use) is None and _exported_write(inp, collections, _tool_verb(name)) and isinstance(inp.get("url"), str):
                     writes.append((when, use.get("id"), inp["url"]))
             elif name in SHELL_TOOLS and EXPORT_RUN.search(str(inp.get("command", ""))):
                 exports.append((when, use.get("id")))
