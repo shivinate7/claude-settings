@@ -2071,6 +2071,21 @@ def case_export_scan_counts_an_artifactdata_str_replace_of_items():
           len(found) == 1 and found[0][2] == PAGE_URL, found)
 
 
+def case_export_scan_counts_a_claude_artifacts_db_str_replace_of_items():
+    """The export scan counts a claude-artifacts db_str_replace of the items collection as one export write to the page,
+    as it counts an ArtifactData str_replace of the same input. The tool's name carries the verb, so the input has no
+    action key. The ArtifactData str_replace is the control, and it counts once on the old code too, so a failure on the
+    claude-artifacts write names that write alone."""
+    control = export_writes([used_rec("ArtifactData", tool_input(
+        "str_replace", collection="items", doc_id="disk-cleanup", field="html", old_str="Ruling", new_str="Answer"))])
+    check("export scan: control, an ArtifactData str_replace of items is one export write to the page",
+          len(control) == 1 and control[0][2] == PAGE_URL, control)
+    found = export_writes([used_rec(CLAUDE_ARTIFACTS + "db_str_replace", tool_input(
+        None, collection="items", doc_id="disk-cleanup", field="html", old_str="Ruling", new_str="Answer"))])
+    check("export scan: a claude-artifacts db_str_replace of items is one export write to the page",
+          len(found) == 1 and found[0][2] == PAGE_URL, found)
+
+
 def case_artifactdata_get_list_and_query_of_items_are_reads():
     """An ArtifactData get, list or query of the items collection is a read: the export scan counts no write, and the
     page send check takes no read for the send. This is a control. The old code already reads these verbs, so it passes
@@ -5256,6 +5271,7 @@ CASES = (
     case_page_claude_artifacts_read_artifact_does_not_prove_the_filing,
     case_export_scan_does_not_count_a_claude_artifacts_db_write_with_no_collection,
     case_export_scan_counts_an_artifactdata_str_replace_of_items,
+    case_export_scan_counts_a_claude_artifacts_db_str_replace_of_items,
     case_artifactdata_get_list_and_query_of_items_are_reads,
     case_page_write_without_a_url_is_no_send_proof,
     case_repo_send_naming_the_repo_passes,
