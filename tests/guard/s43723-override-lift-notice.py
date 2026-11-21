@@ -3,7 +3,7 @@ FAMILY = "override"
 #
 # When an owner override lifts a refusal, the guard prints one line on stdout: a PreToolUse JSON object whose
 # hookSpecificOutput.additionalContext names the lifted rule and says override, with no permissionDecision, so the
-# normal permission flow runs (owner ruling, 22:17 CST Nov 20: option a). Claude does not see stderr from a hook that
+# normal permission flow runs. Claude does not see stderr from a hook that
 # exits 0, and it does see additionalContext, so the line goes on stdout. ov_names_lift in section 36421 reads it.
 #
 # Cases 1 and 2 need that line, so they fail until the guard prints it. Case 3 needs no output at all. Case 4 is a

@@ -1,4 +1,4 @@
-"""The one reader of the stdout line that a lifted act prints (owner ruling, 22:17 CST Nov 20, option a).
+"""The one reader of the stdout line that a lifted act prints (decision `owner-override`, an owner override lets a refused or asked act through).
 
 A valid override that lifts a refusal prints one PreToolUse JSON object: hookSpecificOutput.additionalContext
 names the lifted rule and says override, and there is no permissionDecision, so the normal permission flow runs.

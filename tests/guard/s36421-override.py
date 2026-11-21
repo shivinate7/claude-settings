@@ -11,7 +11,8 @@ FAMILY = "override"
 # What an override does: it covers only the session that typed it. An agent's call spends only a timed
 # override. A valid override lets the act through, so the normal permission flow runs. A lift prints one line on
 # stdout: a PreToolUse JSON object whose hookSpecificOutput.additionalContext names the lifted rule and says override,
-# with no permissionDecision (owner ruling, 22:17 CST Nov 20: option a). It also logs one line with decision
+# with no permissionDecision, so the normal permission flow runs (decision `owner-override`, an owner override
+# lets a refused or asked act through). It also logs one line with decision
 # `override` and the rule it lifted. What no override does: lift frozen-path,
 # git-env-set, or a kill of pid 0, 1 or -1, or count an unreadable override file as an override.
 #
@@ -114,7 +115,7 @@ def ov_kill(config, session, seconds, agent_id=None):
     return ov_call("Bash", {"command": OV_KILL}, NOGIT, config, session, seconds, agent_id)
 
 
-# The one reader of the lift line (owner ruling, 22:17 CST Nov 20): tests/lift_line.py. The hook tests import it too.
+# tests/lift_line.py is the one reader of the lift line. The guard and hook tests both import it, so they parse it one way.
 sys.path.insert(0, os.path.join(REPO, "tests"))
 import lift_line  # noqa: E402,F401  the one reader of the lift line
 ov_names_lift = lift_line.names_lift
