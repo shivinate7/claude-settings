@@ -2142,6 +2142,81 @@ def lane_mcp_ready_hit(tool: str, tool_input, transcript: str) -> str:
     return "update_pull_request draft false from a lane" if _own_record_is_lane(transcript) else ""
 
 
+# ---- a ready mark by MCP with no ready pass on the head (rule ready-mcp-mark-guard, decision ready-mcp-mark-guard)
+# `merge <pr> --ready` writes no durable record of its pass. run_ready_checks prints one line, `merge: the ready checks (...) pass on <sha9>.`,
+# and that line reaches the guard only as the result of the Bash call in this session's transcript (read by lint/_transcript.py, the one home).
+# Cost: only an update with draft false reads anything: one transcript read, then one pull request read when a pass line is found.
+# A call with no transcript, or one that cannot be read, is allowed, as the other transcript rules allow it.
+READY_PASS_LINE = re.compile(r"merge: the ready checks \([^)\n]*\) pass on ([0-9a-f]{7,40})\.")
+READY_MARK_READ_TIMEOUT = 20
+READY_MARK_REASON = (
+    "Rule (Git, ready-mcp-mark-guard): no `merge %(n)s --ready` run in this session passed its ready checks on %(head)s. A ready mark made without that pass "
+    "skips the ready checks and the records step, so the confirm refuses it and costs a second CI run (PR 3255 and PR 3472, 2026-11-15). "
+    "Remedy: run `merge %(n)s --ready` in this session and let it pass, then mark #%(n)s ready after its draft run shows. "
+    "(decision ready-mcp-mark-guard, a ready mark needs a ready pass on the head)"
+)
+
+
+def _ready_pass_shas(transcript: str):
+    """The shas (7 to 40 hex chars) that a `--ready` Bash or PowerShell call of this transcript reported a ready pass on, or None when the
+    transcript cannot be read."""
+    from guard_core import lint_dir  # lazy: the one home of where lint/ is
+    lint = lint_dir()
+    if lint not in sys.path:
+        sys.path.insert(0, lint)
+    try:
+        import _transcript
+        records = _transcript.read_transcript(transcript)
+    except Exception:
+        return None
+    ready_calls = set()
+    shas = set()
+    for rec in records:
+        for use in _transcript.tool_uses(rec):
+            command = (use.get("input") or {}).get("command")
+            if use.get("name") in ("Bash", "PowerShell") and isinstance(command, str) and "--ready" in command and isinstance(use.get("id"), str):
+                ready_calls.add(use["id"])
+        for result in _transcript.tool_results(rec):
+            if result.get("tool_use_id") not in ready_calls:
+                continue
+            content = result.get("content")
+            text = content if isinstance(content, str) else " ".join(
+                b.get("text", "") for b in content or [] if isinstance(b, dict) and isinstance(b.get("text"), str))
+            shas.update(m.group(1) for m in READY_PASS_LINE.finditer(text))
+    return shas
+
+
+def ready_mark_hit(tool: str, tool_input, transcript: str, where: str):
+    """(reason, matched) when an MCP update with draft false marks a pull request ready and this session's transcript shows no `merge <pr> --ready`
+    pass on the head the pull request has now, else None. Judged only in a repo that uses the merge tool. A call that marks nothing ready, a missing or
+    unreadable transcript and an unreadable head pass (the records-page-ready rule reads the same head and refuses an unreadable one first)."""
+    if tool != READY_PAGE_MCP_TOOL or not isinstance(tool_input, dict) or tool_input.get("draft") is not False:
+        return None
+    if not isinstance(transcript, str) or not transcript or not where or not uses_merge_tool(where):
+        return None
+    shas = _ready_pass_shas(transcript)
+    if shas is None:
+        return None
+    for selector, repo in ready_page_calls(tool, tool_input, ""):
+        if not selector.isdigit():
+            continue
+        head = ""
+        if shas:  # no pass line at all refuses without a head read
+            module = merge_module()
+            if module is None:
+                continue
+            try:
+                with module.shared_deadline(READY_MARK_READ_TIMEOUT):
+                    head = module.Host(repo=repo or None, cwd=where).pr(int(selector))["head"]
+            except Exception:
+                continue
+            if any(head.startswith(sha) for sha in shas):
+                continue
+        named = "its current head " + head[:9] if head else "its current head"
+        return READY_MARK_REASON % {"n": selector, "head": named}, "ready mark with no ready pass #" + selector
+    return None
+
+
 # ---- the record branch's one writer: only the triage session pushes to it (rule roadmap-one-writer)
 RECORD_WRITER_TIER = "triage"
 DEFAULT_RECORD_BRANCH = "roadmap"
