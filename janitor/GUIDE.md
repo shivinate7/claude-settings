@@ -304,8 +304,9 @@ daily sweep stays clean too. The sweep above is the backstop, not the only clean
 | `ci-job-*.log` in the temp folder | `bin/ci-job` | start of a run with no `VERDICT_LOG` | over 1 day old |
 | `ci-job-lint-*` folder and `ci-job-pin-*` trees | `bin/ci-job` | exit | the run's own, always |
 | `merge-wt-*` tree of a finished run | `merge/merge.py` | exit | the run's own, always |
-| `merge-wt-*` tree of a dead run | `merge/merge.py` (`add_worktree`) | job start | lock reason `merge tool, pid N` with N dead |
-| test run folder `<pid>-<uuid>` | `lint/_test_temp.py` | job start (the next test run) | pid dead and over 1 hour old; pid alive and over 1 day old |
+| `merge-wt-*` and `merge-fresh-*` tree of a dead run | `merge/merge.py` (`add_worktree`) | job start | lock reason `merge tool, pid N` with N dead |
+| `ci-job-lint-<pid>-*`, `ci-job-pin-<pid>-*` and `mutate_guard_<pid>-*` folder of a dead run | `merge/merge.py` (`add_worktree`) | job start | the pid in the name is dead |
+| test run folder `<pid>-<uuid>` (a `bin/red-run` copy left by a run that died without its exit too) | `lint/_test_temp.py` | job start (the next test run) | pid dead and over 1 hour old; pid alive and over 1 day old |
 | session scratch `<temp>/claude/...` (Windows) and `<tmp>/claude-<uid>/...` (POSIX) | `janitor/temp_sweep.py`, through `janitor/sweep.py` | each sweep, on every OS | transcript idle over 24 hours, and no live session |
 
 ## How you opt out

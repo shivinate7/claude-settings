@@ -43,7 +43,7 @@ Drop a section that is empty.
 ## Proof of done
 
 - Each guard goes red once, on its own defect: break a generated block, a command, and a
-  path, one at a time, on a scratch copy, watch each guard fail, then restore it. Give the
+  path, one at a time, in a `bin/red-run` copy (`--replace`), watch each guard fail. Give the
   verdict of each in one line.
 - The README renders cleanly on GitHub. Check the headings, tables, and code blocks.
 - List every claim you deleted, every claim you replaced with a link, and every claim you

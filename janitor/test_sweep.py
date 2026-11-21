@@ -37,6 +37,7 @@ import threading
 import time
 import types
 import unittest
+import uuid
 from datetime import datetime, timezone
 from unittest import mock
 
@@ -1000,6 +1001,12 @@ class ScratchRootsTests(unittest.TestCase):
 # folder, process, or run log. `reached` is the positive control: the run got past the simulator
 # tier, so an empty recording means the step did not run, not that the run ended early.
 
+def leftover_temp_stubbed():
+    """The leftover temp-folder step reads the real temp root on every full run. A case that runs a
+    full sweep in this process stubs it, or the case reaches the machine's own temp folders."""
+    return mock.patch.object(sweep, "leftover_temp_pass", return_value=0)
+
+
 @contextlib.contextmanager
 def machine_tiers_stubbed(base):
     """Stubs the full-mode tiers that read the real machine, and points HOME and the run log into
@@ -1010,6 +1017,7 @@ def machine_tiers_stubbed(base):
         stack.enter_context(mock.patch.object(sweep, "find_dead_rooted", return_value=[]))
         stack.enter_context(mock.patch.object(sweep, "find_loose_processes", return_value=[]))
         stack.enter_context(mock.patch.object(sweep, "reap_listener"))
+        stack.enter_context(leftover_temp_stubbed())
         yield stack.enter_context(mock.patch.object(sweep, "sim_tier", return_value=[]))
 
 
@@ -1979,7 +1987,7 @@ class LooseProcessTests(unittest.TestCase):
         for key, fn in stubs.items():
             setattr(key[0], key[1], fn)
         try:
-            with contextlib.redirect_stdout(io.StringIO()):
+            with contextlib.redirect_stdout(io.StringIO()), leftover_temp_stubbed():
                 sweep.main(["--confirm", "--restore-log", os.path.join(self.home, "log"), repo])
         finally:
             for key, fn in real.items():
@@ -2093,7 +2101,9 @@ def sweep_over_fixture(fx, session_end, before=None):
             sweep, "sweep_repo", lambda root, *a, **k: fake_result(root)))
         stack.enter_context(mock.patch.object(sweep, "find_loose_processes", loose))
         stack.enter_context(mock.patch.object(sweep, "sim_tier", sim))
-        stack.enter_context(mock.patch.object(sweep, "temp_tier", temp))
+        stack.enter_context(mock.patch.object(sweep, "temp_pass", temp))
+        # The daily run also reads the real temp root, and this run passes --confirm: stub that step too.
+        stack.enter_context(leftover_temp_stubbed())
         stack.enter_context(mock.patch.object(sweep, "find_swept_listeners", lambda paths: []))
         stack.enter_context(mock.patch.object(sweep, "print_grace_period_report",
                                               lambda *a, **k: None))
@@ -2160,7 +2170,7 @@ class SessionEndScopeTests(unittest.TestCase):
         self.assertEqual(seen["pid_reads"], 1,
                          "the session-end run read the machine pid list %d times" % seen["pid_reads"])
 
-    def test_the_session_end_run_still_runs_the_simulator_and_temp_tiers(self):
+    def test_the_session_end_run_still_runs_the_simulator_and_temp_pass(self):
         seen = sweep_over_fixture(self.fx, session_end=True)
         self.assertEqual(seen["sim"], 1, "the session-end run did not run the simulator tier")
         self.assertEqual(seen["temp"], 1, "the session-end run did not run the temp-folder tier")
@@ -2736,6 +2746,144 @@ class SameRunBranchCutTests(unittest.TestCase):
             sweep.remove_worktree = real
         self.assertEqual(self._branch(result)["reason"], "checked-out")
         self.assertIn("lane-cut", sweep.list_local_branches(root))
+
+    # --- a session that starts in a tree after that tree's verdict was read -----------------
+    # The tree stage reads each session once, before the branch stage runs. A session can start
+    # in a tree after that read, so the branch stage must read every holder's session again. These
+    # cases stub each tree's verdict to "reap", as if the read came before the session started, and
+    # they run in preview, so nothing is removed. The branch stage is then the only read left.
+
+    def _session(self, wt, kind):
+        """A session record whose cwd is WT, and the liveness its kind must read. "live" names this
+        process, so it reads True. "unreadable" names this process with a start time far behind its
+        real one, which reads None (WorktreeDecisionTests proves that read). "dead" names a pid that
+        has ended, which reads False. CFG is shared by every case, so the record is removed at cleanup."""
+        sid = "held-%s-%s" % (kind, os.path.basename(wt))
+        if kind == "live":
+            write_session(sid, os.getpid(), this_process_start_ms(), wt)
+        elif kind == "unreadable":
+            write_session(sid, os.getpid(), this_process_start_ms() - 10_000_000, wt)
+        else:
+            write_session(sid, temp_dead_pid(), 0, wt)
+        record = os.path.join(CFG, "sessions", sid + ".json")
+        self.addCleanup(lambda: os.remove(record) if os.path.exists(record) else None)
+        return {"live": True, "unreadable": None, "dead": False}[kind]
+
+    def _held(self, name, kinds):
+        """One repository and one branch, lane-held, held by one linked tree per entry of KINDS. The
+        first tree is added with -b and the rest with --force, as in
+        test_a_second_kept_worktree_on_the_same_branch_keeps_it_held. Returns the root and a list of
+        (tree path, the liveness its session must read)."""
+        root = os.path.join(ROOT, "held-" + name)
+        make_repo(root, {"f.txt": "x\n"})
+        give_remote(root)
+        trees = []
+        for number, kind in enumerate(kinds):
+            wt = os.path.join(ROOT, "held-%s-wt%d" % (name, number))
+            if number == 0:
+                added = run_vcs(root, "worktree", "add", "-q", wt, "-b", "lane-held")
+            else:
+                added = run_vcs(root, "worktree", "add", "-q", "--force", wt, "lane-held")
+            require(added.returncode == 0, "adding %r failed: %s" % (wt, added.stderr.strip()))
+            trees.append((wt, self._session(wt, kind)))
+        return root, trees
+
+    def _assert_fixture_reads(self, trees):
+        """Scope first: each session reads what its kind says, through the one liveness read the sweep makes."""
+        live_read = sys.modules["git_reads"].worktree_live_session
+        for wt, expected in trees:
+            self.assertIs(live_read(wt), expected,
+                          "fixture session for %s does not read %r" % (os.path.basename(wt), expected))
+
+    def _sweep_stale_verdicts(self, root, confirm=False):
+        def stale_reap(where, entry, *args, **kwargs):
+            return {"path": entry["path"], "action": "reap", "reason": "stub: verdict read before the session started"}
+        with mock.patch.object(sweep, "decide_worktree", side_effect=stale_reap):
+            return sweep.sweep_repo(root, confirm, os.path.join(ROOT, "held.log"), attended=True)
+
+    def _assert_every_tree_row_reaps(self, result, trees):
+        """Scope before subject: each tree's row reads reap, so a keep can only come from the branch stage."""
+        for wt, _expected in trees:
+            target = os.path.normcase(os.path.realpath(wt))
+            rows = [w for w in result["worktrees"]
+                    if os.path.normcase(os.path.realpath(w["path"])) == target]
+            self.assertEqual(len(rows), 1, "no tree row for %s" % wt)
+            self.assertEqual(rows[0]["action"], "reap", "the stub did not take for %s" % wt)
+
+    def _held_branch_row(self, result):
+        rows = [b for b in result["branches"] if b["name"] == "lane-held"]
+        self.assertEqual(len(rows), 1, "the branch lane-held is not judged exactly once")
+        return rows[0]
+
+    def test_a_live_session_that_started_after_its_tree_verdict_keeps_the_branch_held(self):
+        root, trees = self._held("live", ["live"])
+        self._assert_fixture_reads(trees)
+        result = self._sweep_stale_verdicts(root)
+        self._assert_every_tree_row_reaps(result, trees)
+        self.assertEqual(self._held_branch_row(result)["action"], "keep",
+                         "the branch was released while a live session holds its tree")
+
+    def test_an_unknown_session_that_started_after_its_tree_verdict_keeps_the_branch_held(self):
+        root, trees = self._held("unknown", ["unreadable"])
+        self._assert_fixture_reads(trees)
+        result = self._sweep_stale_verdicts(root)
+        self._assert_every_tree_row_reaps(result, trees)
+        self.assertEqual(self._held_branch_row(result)["action"], "keep",
+                         "the branch was released while its tree's session reads unknown")
+
+    def test_one_live_tree_among_dead_ones_keeps_the_branch_held(self):
+        # The live tree is the SECOND holder. A check that reads only the first holder would release it.
+        root, trees = self._held("mixed", ["dead", "live"])
+        self._assert_fixture_reads(trees)
+        result = self._sweep_stale_verdicts(root)
+        self._assert_every_tree_row_reaps(result, trees)
+        self.assertEqual(self._held_branch_row(result)["action"], "keep",
+                         "the branch was released while one tree on it has a live session")
+
+    def test_control_a_branch_whose_every_tree_reads_dead_is_still_released(self):
+        # Green on the old code too. It proves the stubbed preview does reach the branch decision.
+        root, trees = self._held("alldead", ["dead", "dead"])
+        self._assert_fixture_reads(trees)
+        result = self._sweep_stale_verdicts(root)
+        self._assert_every_tree_row_reaps(result, trees)
+        self.assertEqual(self._held_branch_row(result)["action"], "reap",
+                         "a branch whose every session reads dead was held back: %s"
+                         % self._held_branch_row(result).get("reason"))
+
+    # --- confirm: the run removes the tree that holds the branch ---------------------------
+    # A confirm run releases a branch by removing its tree, so the tree's path is gone when the
+    # branch stage runs. The branch stage must still read a live holder's session before it cuts
+    # the branch, since the tree stage read that session only once, before the removal.
+
+    def _confirm_released(self, name, kind):
+        """Runs a confirm sweep whose one tree is stubbed to reap, and returns the branch row. The
+        tree is removed by the real remove_worktree, so the branch stage sees a released tree."""
+        root, trees = self._held(name, [kind])
+        self._assert_fixture_reads(trees)
+        result = self._sweep_stale_verdicts(root, confirm=True)
+        self._assert_every_tree_row_reaps(result, trees)
+        wt = trees[0][0]
+        target = os.path.normcase(os.path.realpath(wt))
+        row = [w for w in result["worktrees"]
+               if os.path.normcase(os.path.realpath(w["path"])) == target][0]
+        self.assertNotIn("error", row, "the tree was not removed: %s" % row.get("error"))
+        self.assertFalse(os.path.isdir(wt), "the run did not remove the tree, so it released nothing")
+        return root, self._held_branch_row(result)
+
+    def test_confirm_a_live_holder_in_a_released_tree_keeps_the_branch(self):
+        root, row = self._confirm_released("confirm-live", "live")
+        self.assertEqual(row["action"], "keep",
+                         "the branch was released after this run removed the tree its live session holds: %s"
+                         % row.get("reason"))
+        self.assertIn("lane-held", sweep.list_local_branches(root))
+
+    def test_control_confirm_a_released_tree_with_dead_holder_still_releases_the_branch(self):
+        # Green on the old code too. It proves a confirm run releases the branch of a removed tree
+        # whose session reads dead, so no fix passes by keeping every branch of a removed tree.
+        root, row = self._confirm_released("confirm-dead", "dead")
+        self.assertEqual(row["action"], "reap",
+                         "a branch whose removed tree reads dead was held back: %s" % row.get("reason"))
+        self.assertNotIn("lane-held", sweep.list_local_branches(root))
 
 
 class SingleTierModeTests(unittest.TestCase):
@@ -7252,7 +7400,9 @@ class BuildDirReapTests(unittest.TestCase):
         self.fill(os.path.dirname(free), (os.path.basename(free),))
         self.fill(os.path.dirname(live), (os.path.basename(live),))
         self.hold_cwd(live)
-        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg)
+        temp = os.path.join(self.root, "tmp")  # the child's temp root: a fixture, never the machine's
+        os.makedirs(temp, exist_ok=True)
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, TMPDIR=temp, TEMP=temp, TMP=temp)
         result = subprocess.run([sys.executable, JANITOR, primary, "--confirm"], capture_output=True,
                                 text=True, env=env, timeout=120)
         self.assertEqual(result.returncode, 0, "janitor exited %d: %s"
@@ -7472,7 +7622,7 @@ class StrictWorktreeTests(unittest.TestCase):
             return {"root": root, "refused": "opted-out", "branches": [], "worktrees": [],
                     "listeners": [], "pruned": None, "husks": []}
 
-        with mock.patch.object(sweep, "sweep_repo", spy), \
+        with mock.patch.object(sweep, "sweep_repo", spy), leftover_temp_stubbed(), \
                 contextlib.redirect_stdout(io.StringIO()):
             sweep.main(["--root", self.root, "--attended",
                         "--restore-log", os.path.join(ROOT, "unatt.log")])
@@ -7605,7 +7755,7 @@ def _machine_quiet():
     processes). A case here must never signal a process this suite did not start."""
     with mock.patch.object(sweep, "find_dead_rooted", return_value=[]), \
             mock.patch.object(sweep, "find_loose_processes", return_value=[]), \
-            contextlib.redirect_stdout(io.StringIO()):
+            leftover_temp_stubbed(), contextlib.redirect_stdout(io.StringIO()):
         yield
 
 
@@ -10401,6 +10551,369 @@ class OwnAgentLockTests(unittest.TestCase):
                 decision = sweep.decide_worktree(root, entry)
             self.assertTrue(read.called, "the ancestor read was never made")
             self.assertEqual(decision["action"], "keep", "reaped on an unreadable ancestor: %s" % decision["reason"])
+
+
+# ------------------------------------------------ leftover temp folders (janitor/sweep.py)
+#
+# A killed run leaks its folder in the temp folder. Two kinds leak: `mutate_guard_<pid>-<hex>` (the work
+# folder of hooks/mutate_guard.py) and `claude-settings-test-temp/<pid>-<hex>` (the run folder of
+# lint/_test_temp.py). The sweep reaps one only when its owner pid is dead and its mtime is over one hour
+# old. A live owner, or a folder under an hour old, is kept.
+#
+# The owner pid is read from the folder's name, as a run folder's always is. A `mutate_guard_` folder
+# names no owner today, so its name must carry the pid before the sweep can judge it.
+#
+# Each case runs the real sweep as a child process. The child's TMPDIR is a fixture folder inside the
+# case's run folder, so no case reaches the real temp folder. The child's clock starts at the fixture's
+# moment and runs on from there, so the age verdict never reads the real clock. Each keep case also carries
+# a dead, old folder of each kind, which the same run must reap. A keep then cannot pass over a sweep that
+# never ran.
+
+LEFTOVER_RUNNER = """\
+import errno
+import os
+import sys
+import time
+
+sys.path[:0] = [%(hooks)r, %(janitor)r]
+_real_time = time.time
+_offset = %(now)r - _real_time()
+time.time = lambda: _real_time() + _offset  # the child's clock starts at the fixture's moment
+import sweep  # noqa: E402
+
+# The machine's own reads are stubbed, as machine_tiers_stubbed stubs them in the suite's process. An
+# unstubbed --confirm would reap the real machine's dead-rooted servers.
+sweep.find_dead_rooted = lambda *a, **k: []
+sweep.find_loose_processes = lambda *a, **k: []
+sweep.reap_listener = lambda decision: None
+sweep.sim_tier = lambda *a, **k: []
+
+# Two seams, for what Linux cannot make real. A Windows junction is a link only sweep.is_link sees, so
+# the names in LINK_NAMES are read as links. A pid in EPERM_PIDS has an owner this user may not signal:
+# the owner read must keep its folder, not take the owner for dead.
+LINK_NAMES = %(link_names)r
+EPERM_PIDS = %(eperm_pids)r
+_real_is_link = sweep.is_link
+_real_kill = os.kill
+
+
+def _seam_is_link(path):
+    return os.path.basename(path) in LINK_NAMES or _real_is_link(path)
+
+
+def _seam_kill(pid, sig):
+    if pid in EPERM_PIDS:
+        raise PermissionError(errno.EPERM, "Operation not permitted")
+    return _real_kill(pid, sig)
+
+
+sweep.is_link = _seam_is_link
+os.kill = _seam_kill
+sys.exit(sweep.main(sys.argv[1:]))
+"""
+
+# A child that holds the file at argv[1] open and then waits. It prints `ready` once the file is open.
+HOLD_CHILD = """\
+import sys
+import time
+handle = open(sys.argv[1], "rb")  # held open for the whole run
+print("ready", flush=True)
+time.sleep(600)
+"""
+
+
+class LeftoverTempFolderTests(unittest.TestCase):
+    OLD_HOURS = 2  # over the one-hour limit, with a wide margin
+    YOUNG_HOURS = 0.25  # under the limit, with a wide margin
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, self.run, True)
+        self.base = os.path.join(self.run, "case")
+        self.temp = os.path.join(self.base, "tmp")  # the child's temp folder: a fixture, never /tmp
+        self.test_temp = os.path.join(self.temp, "claude-settings-test-temp")
+        self.repo = os.path.join(self.base, "repo")
+        self.now = time.time()
+        self.dead_pid = temp_dead_pid()
+        os.makedirs(self.test_temp)
+        make_repo(self.repo, {"README.md": "fixture\n"})
+
+    def live_pid(self, cwd=None, hold=None):
+        """A pid whose process this case starts and stops, so it stays alive for the whole run. CWD, when
+        given, is the child's working folder. HOLD, when given, is a file the child keeps open: this returns
+        only after the child reports it holds the file."""
+        if hold is None:
+            child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"], cwd=cwd)
+        else:
+            child = subprocess.Popen([sys.executable, "-c", HOLD_CHILD, hold], cwd=cwd,
+                                     stdout=subprocess.PIPE, text=True)
+        self.addCleanup(self.stop_child, child)
+        if hold is not None:
+            ready = child.stdout.readline()  # "" at end of file, when the child died before it opened HOLD
+            self.assertEqual(ready.strip(), "ready", "the child did not open %s\n  stdout: %r" % (hold, ready))
+        return child.pid
+
+    @staticmethod
+    def stop_child(child):
+        child.kill()
+        child.wait(timeout=30)
+        if child.stdout is not None:
+            child.stdout.close()
+
+    def leftover(self, folder, hours):
+        """A folder with one nested file, every mtime `hours` old. A killed run leaves this shape."""
+        write(os.path.join(folder, "work", "scratch.txt"), "left behind\n")
+        mtime = self.now - hours * 3600
+        for dirpath, dirnames, filenames in os.walk(folder):
+            for name in dirnames + filenames:
+                os.utime(os.path.join(dirpath, name), (mtime, mtime))
+            os.utime(dirpath, (mtime, mtime))
+        return folder
+
+    def mutate_guard_leftover(self, owner, hours):
+        return self.leftover(os.path.join(self.temp, "mutate_guard_%d-%s" % (owner, uuid.uuid4().hex[:8])), hours)
+
+    def run_folder_leftover(self, owner, hours):
+        return self.leftover(os.path.join(self.test_temp, "%d-%s" % (owner, uuid.uuid4().hex)), hours)
+
+    def child_env(self):
+        env = dict(os.environ)
+        env.update(TMPDIR=self.temp, TEMP=self.temp, TMP=self.temp, HOME=self.base, USERPROFILE=self.base,
+                   CLAUDE_CONFIG_DIR=os.path.join(self.base, "cfg"),
+                   JANITOR_RUN_LOG=os.path.join(self.base, "run.log"))
+        return env
+
+    def run_sweep(self, *flags, link_names=(), eperm_pids=()):
+        """The real sweep on the fixture repo, in a child process with the fixture temp folder. LINK_NAMES
+        and EPERM_PIDS are the two seams LEFTOVER_RUNNER installs for the link and owner-read keeps."""
+        runner = os.path.join(self.base, "runner.py")
+        write(runner, LEFTOVER_RUNNER % {"hooks": os.path.join(REPO_ROOT, "hooks"), "janitor": HERE,
+                                         "now": self.now, "link_names": sorted(link_names),
+                                         "eperm_pids": sorted(eperm_pids)})
+        proc = subprocess.run([sys.executable, runner, "--restore-log", os.path.join(self.base, "restore.log"),
+                               *flags, self.repo], cwd=self.base, env=self.child_env(),
+                              capture_output=True, text=True, timeout=120)
+        # Scope first: a run that crashed, or never reached its summary, says nothing about any folder.
+        self.assertNotIn("Traceback", proc.stderr, "the sweep run crashed\n%s" % self.report(proc))
+        self.assertIn("== summary ==", proc.stdout, "the sweep run never reached its summary\n%s" % self.report(proc))
+        return proc
+
+    @staticmethod
+    def report(proc):
+        return "  exit %s, stderr: %s" % (proc.returncode, proc.stderr.strip()[-400:])
+
+    def assertGone(self, folder, cause, proc):
+        self.assertFalse(os.path.exists(folder), "%s\n  still exists: %s\n%s" % (cause, folder, self.report(proc)))
+
+    def assertKept(self, folder, cause, proc):
+        self.assertTrue(os.path.isdir(folder), "%s\n  was removed: %s\n%s" % (cause, folder, self.report(proc)))
+
+    def test_preview_lists_a_dead_owner_mutate_guard_folder(self):
+        folder = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        proc = self.run_sweep()
+        self.assertIn(os.path.basename(folder), proc.stdout + proc.stderr,
+                      "the preview does not list the dead-owner mutate_guard folder %s\n%s"
+                      % (folder, self.report(proc)))
+        self.assertTrue(os.path.isdir(folder), "a preview without --confirm removed %s" % folder)
+
+    def test_preview_lists_a_dead_owner_run_folder(self):
+        folder = self.run_folder_leftover(self.dead_pid, self.OLD_HOURS)
+        proc = self.run_sweep()
+        self.assertIn(os.path.basename(folder), proc.stdout + proc.stderr,
+                      "the preview does not list the dead-owner run folder %s\n%s" % (folder, self.report(proc)))
+        self.assertTrue(os.path.isdir(folder), "a preview without --confirm removed %s" % folder)
+
+    def test_confirm_removes_a_dead_owner_mutate_guard_folder(self):
+        folder = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        proc = self.run_sweep("--confirm")
+        self.assertGone(folder, "--confirm did not remove the dead-owner mutate_guard folder", proc)
+
+    def test_confirm_removes_a_dead_owner_run_folder(self):
+        folder = self.run_folder_leftover(self.dead_pid, self.OLD_HOURS)
+        proc = self.run_sweep("--confirm")
+        self.assertGone(folder, "--confirm did not remove the dead-owner run folder", proc)
+
+    def test_confirm_keeps_a_live_owner_folder(self):
+        control = [self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS),
+                   self.run_folder_leftover(self.dead_pid, self.OLD_HOURS)]
+        live = self.live_pid()
+        kept = [self.mutate_guard_leftover(live, self.OLD_HOURS), self.run_folder_leftover(live, self.OLD_HOURS)]
+        proc = self.run_sweep("--confirm")
+        for folder in control:
+            self.assertGone(folder, "control: --confirm did not remove a dead-owner folder, so the live-owner "
+                                    "keeps below prove nothing", proc)
+        for folder in kept:
+            self.assertKept(folder, "--confirm removed a live-owner folder", proc)
+
+    def test_confirm_keeps_a_folder_under_an_hour_old(self):
+        control = [self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS),
+                   self.run_folder_leftover(self.dead_pid, self.OLD_HOURS)]
+        young = [self.mutate_guard_leftover(self.dead_pid, self.YOUNG_HOURS),
+                 self.run_folder_leftover(self.dead_pid, self.YOUNG_HOURS)]
+        proc = self.run_sweep("--confirm")
+        for folder in control:
+            self.assertGone(folder, "control: --confirm did not remove a dead-owner folder, so the under-an-hour "
+                                    "keeps below prove nothing", proc)
+        for folder in young:
+            self.assertKept(folder, "--confirm removed a folder under an hour old", proc)
+
+    def test_confirm_reaps_an_incident_sized_leak(self):
+        """Four leaked folders of each kind, all with dead owners: the size of the leak that filled the disk."""
+        folders = [self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS) for _ in range(4)]
+        folders += [self.run_folder_leftover(self.dead_pid, self.OLD_HOURS) for _ in range(4)]
+        proc = self.run_sweep("--confirm")
+        left = [os.path.basename(folder) for folder in folders if os.path.exists(folder)]
+        self.assertFalse(left, "--confirm left %d of %d dead-owner folders\n%s"
+                         % (len(left), len(folders), self.report(proc)))
+
+    def test_confirm_keeps_a_symlink_named_as_a_dead_owner_folder(self):
+        """A symlink is a link, never an owner's folder: the link stays, and so does what it points at."""
+        target = self.leftover(os.path.join(self.base, "outside", "work-dir"), self.OLD_HOURS)
+        link = os.path.join(self.temp, "mutate_guard_%d-%s" % (self.dead_pid, uuid.uuid4().hex[:8]))
+        reason = temp_make_link(link, target)
+        if reason:
+            self.skipTest(reason)
+        control = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        proc = self.run_sweep("--confirm")
+        self.assertGone(control, "control: --confirm did not remove a dead-owner folder, so the symlink keep "
+                                 "proves nothing", proc)
+        self.assertTrue(os.path.islink(link), "--confirm removed the symlink %s\n%s" % (link, self.report(proc)))
+        self.assertTrue(os.path.isfile(os.path.join(target, "work", "scratch.txt")),
+                        "--confirm removed the folder a symlink points at: %s\n%s" % (target, self.report(proc)))
+
+    def test_confirm_keeps_a_real_folder_the_link_check_flags(self):
+        """The link check flags a real folder, as it flags a Windows junction. Dropping that check reaps it."""
+        flagged = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        flagged_run = self.run_folder_leftover(self.dead_pid, self.OLD_HOURS)
+        control = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        proc = self.run_sweep("--confirm", link_names=[os.path.basename(flagged), os.path.basename(flagged_run)])
+        self.assertGone(control, "control: --confirm did not remove a dead-owner folder, so the link-flag keeps "
+                                 "prove nothing", proc)
+        self.assertKept(flagged, "--confirm removed a mutate_guard folder that the link check flags", proc)
+        self.assertKept(flagged_run, "--confirm removed a run folder that the link check flags", proc)
+
+    def test_confirm_keeps_a_dead_owner_folder_under_a_symlinked_run_folder_parent(self):
+        """The run-folder parent is a link to a folder outside the temp root. The sweep must not list through
+        the link, so the dead-owner folder inside the target stays. The control in the temp root is reaped, so
+        the keep is not a sweep that never ran."""
+        target = os.path.join(self.base, "outside")
+        held = self.leftover(os.path.join(target, "%d-%s" % (self.dead_pid, uuid.uuid4().hex)), self.OLD_HOURS)
+        os.rmdir(self.test_temp)  # setUp made it as an empty folder
+        reason = temp_make_link(self.test_temp, target)
+        if reason:
+            self.skipTest(reason)
+        self.assertTrue(os.path.islink(self.test_temp), "precondition: the run-folder parent is not a link, so the "
+                                                        "case proves nothing")
+        control = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        proc = self.run_sweep("--confirm")
+        self.assertGone(control, "control: --confirm did not remove a dead-owner folder, so the symlinked-parent "
+                                 "keep proves nothing", proc)
+        self.assertKept(held, "--confirm listed through a symlinked run-folder parent and removed a folder outside "
+                              "the temp root", proc)
+
+    def test_confirm_keeps_a_dead_owner_folder_a_live_process_holds_a_file_open_in(self):
+        """A live process with an open file inside a dead owner's folder keeps the folder, though its cwd is
+        outside it. The cwd read cannot see it, so only the open-file read can keep the folder."""
+        if sys.platform.startswith("win"):
+            self.skipTest("Windows reads no open files here: its holders read is cwd-only")
+        folder = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        held = os.path.join(folder, "work", "scratch.txt")
+        control = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        pid = self.live_pid(cwd=self.base, hold=held)
+        # Scope first: the holder's cwd is outside the folder, and the kernel lists the open file.
+        read = sweep.process_cwd(pid)
+        self.assertEqual(os.path.realpath(read or ""), os.path.realpath(self.base),
+                         "control: the holder's cwd reads as %r, not the case's base, so the keep below proves "
+                         "nothing" % (read,))
+        inside, _unreadable = sweep.processes_in(folder)
+        self.assertNotIn(pid, inside or [], "control: the holder's cwd reads inside the folder, so the keep below "
+                                            "proves nothing about its open file")
+        if os.path.isdir("/proc/%d/fd" % pid):  # Linux lists a process's open files here
+            links = [os.readlink(os.path.join("/proc/%d/fd" % pid, fd)) for fd in os.listdir("/proc/%d/fd" % pid)]
+            self.assertIn(os.path.realpath(held), [os.path.realpath(link) for link in links],
+                          "control: the holder does not list the file open, so the keep below proves nothing")
+        proc = self.run_sweep("--confirm")
+        self.assertGone(control, "control: --confirm did not remove a dead-owner folder, so the open-file keep "
+                                 "proves nothing", proc)
+        self.assertKept(folder, "--confirm removed a dead-owner folder a live process holds a file open in", proc)
+
+    def test_confirm_skips_a_plain_file_named_as_a_dead_owner_folder(self):
+        """A plain file named like a dead owner's folder is not a folder, so the sweep skips it and prints no
+        FAILED line for it. Without the folder check the sweep tries to remove the file, and that fails."""
+        name = "mutate_guard_%d-%s" % (self.dead_pid, uuid.uuid4().hex[:8])
+        plain = os.path.join(self.temp, name)
+        write(plain, "not a folder\n")
+        mtime = self.now - self.OLD_HOURS * 3600
+        os.utime(plain, (mtime, mtime))
+        control = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        proc = self.run_sweep("--confirm")
+        self.assertIn("== leftover temp folders ==", proc.stdout,
+                      "scope: the run never reached the leftover temp-folder step\n%s" % self.report(proc))
+        self.assertGone(control, "control: --confirm did not remove a dead-owner folder, so the plain-file skip "
+                                 "proves nothing", proc)
+        failed = [line for line in proc.stdout.splitlines() if "FAILED" in line and name in line]
+        self.assertFalse(failed, "--confirm tried to remove the plain file %s\n  %s\n%s"
+                         % (plain, "\n  ".join(failed), self.report(proc)))
+        self.assertTrue(os.path.isfile(plain), "--confirm removed the plain file %s\n%s" % (plain, self.report(proc)))
+
+    def test_confirm_keeps_a_pid_less_mutate_guard_name(self):
+        """The older name `mutate_guard_<rand>` carries no owner pid, so no owner can be proven dead."""
+        pidless = self.leftover(os.path.join(self.temp, "mutate_guard_%s" % uuid.uuid4().hex[:8]), self.OLD_HOURS)
+        control = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        proc = self.run_sweep("--confirm")
+        self.assertGone(control, "control: --confirm did not remove a dead-owner folder, so the pid-less keep "
+                                 "proves nothing", proc)
+        self.assertKept(pidless, "--confirm removed a pid-less mutate_guard folder", proc)
+
+    def test_confirm_keeps_a_mutate_guard_name_with_no_hyphen_after_its_digits(self):
+        """`mutate_guard_<dead pid>abc123` has no separator after the digits, so they are not a pid. A
+        pattern with an optional hyphen would read them as the dead owner's pid and reap the folder."""
+        hyphenless = self.leftover(os.path.join(self.temp, "mutate_guard_%dabc123" % self.dead_pid), self.OLD_HOURS)
+        control = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        proc = self.run_sweep("--confirm")
+        self.assertGone(control, "control: --confirm did not remove a dead-owner folder, so the hyphen-less keep "
+                                 "proves nothing", proc)
+        self.assertKept(hyphenless, "--confirm read the digits of a hyphen-less name as an owner pid", proc)
+
+    @unittest.skipIf(sys.platform.startswith("win"), "the owner read this case seams is os.kill; Windows reads "
+                                                     "a process table instead")
+    def test_confirm_keeps_a_folder_whose_owner_pid_cannot_be_read(self):
+        """An owner the OS refuses to signal may be alive, so its folder stays. The control's owner is a
+        different dead pid, so the control does not share the refusal."""
+        unreadable = temp_dead_pid()
+        folder = self.mutate_guard_leftover(unreadable, self.OLD_HOURS)
+        control = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        proc = self.run_sweep("--confirm", eperm_pids=[unreadable])
+        self.assertGone(control, "control: --confirm did not remove a dead-owner folder, so the unreadable-owner "
+                                 "keep proves nothing", proc)
+        self.assertKept(folder, "--confirm removed a folder whose owner pid it could not read", proc)
+
+    def test_confirm_keeps_a_dead_owner_folder_with_a_live_process_inside(self):
+        """A process running inside a dead owner's folder keeps the folder: removing it pulls the
+        directory out from under that process. The process's cwd sits one level down, so a check that
+        only compares the folder itself with the cwd misses it."""
+        if sys.platform.startswith("win"):
+            self.skipTest("the cwd read this case proves is POSIX-only here; Windows reads it as None")
+        folder = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        inner = os.path.join(folder, "work")
+        control = self.mutate_guard_leftover(self.dead_pid, self.OLD_HOURS)
+        pid = self.live_pid(cwd=inner)
+        read = sweep.process_cwd(pid)
+        self.assertEqual(os.path.realpath(read or ""), os.path.realpath(inner),
+                         "control: the live child's cwd reads as %r, not inside the folder, so the keep "
+                         "below proves nothing" % (read,))
+        proc = self.run_sweep("--confirm")
+        self.assertGone(control, "control: --confirm did not remove a dead-owner folder with no process in it",
+                        proc)
+        self.assertKept(folder, "--confirm removed a dead-owner folder while a live process ran inside it", proc)
+
+    def test_the_child_sweep_gets_the_fixture_temp_root(self):
+        """Green on purpose: the child's temp root is the fixture, so the cases above never reach /tmp."""
+        probe = subprocess.run([sys.executable, "-c", "import tempfile; print(tempfile.gettempdir())"],
+                               cwd=self.base, env=self.child_env(), capture_output=True, text=True, timeout=60)
+        self.assertEqual(os.path.realpath(probe.stdout.strip()), os.path.realpath(self.temp),
+                         "the child's temp root is %r, not the fixture %r\n  stderr: %s"
+                         % (probe.stdout.strip(), self.temp, probe.stderr.strip()[-400:]))
 
 
 if __name__ == "__main__":

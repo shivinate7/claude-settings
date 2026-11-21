@@ -19,7 +19,7 @@ Each exception has one status:
 - **CI wake.** One `hooks/ci_wake.py` watch per `gh pr ready` (decision `ci-wait-reads-run-status`, CI waits read the run status). Status: ruled. The watch lives up to its 3300 s budget.
 - **Daily job.** One scheduled sweep a day (decision `the-janitor-is-one-machine-wide-sweep`, the janitor). Status: ruled. Its saving is unmeasured, so the rule's timer condition is not shown.
 
-The load brake is not one of the three. Locally, an agent's own write may read the machine load once, inside the guard hook already running for it. So may the own write of a session with an own id, to brake a lane session (decision `machine-load-brake`). Status: unmeasured. No cost test is confirmed: the record names family `load-brake` in `hooks/test_guard.py` for its counts, and that family's pinning of the reads is not verified.
+The load brake is not one of the three. Locally, an agent's own write may read the machine load once, inside the guard hook already running for it. So may the own write of a session with an own id, to brake a lane session. On a cloud session, each Agent, Task or Workflow start reads the disk once and refuses when the disk is full (decision `machine-load-brake`, the machine-load brake). Status: unmeasured. No cost test is confirmed: the record names family `load-brake` in `hooks/test_guard.py` for its counts, and that family's pinning of the reads is not verified.
 
 The doorbell (`mail wait`) is a waiting process beside these three, not one of them. Its record is the doorbell section of decision `session-messages` (ruling 3.15, owner 2026-11-11 13:22 CST). That section names cost test `test_the_decision_states_the_measured_doorbell_cost` in `hooks/test_mail_wait.py`.
 

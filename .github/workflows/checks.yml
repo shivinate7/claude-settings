@@ -451,6 +451,9 @@ jobs:
       - name: Red-run trailer fixture suite
         run: python3 lint/test_check_red_run.py
 
+      - name: Red-run command fixture suite
+        run: python3 lint/test_red_run.py
+
       - name: Plan refuter fixture suite
         if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_check_plan_refuter.py
@@ -1351,6 +1354,10 @@ jobs:
           GUARD_CHROMIUM: "1"
           GUARD_SHARD: 2/2
         run: python3 hooks/test_guard.py
+
+      - name: Protected-path suite
+        if: ${{ needs.scope.outputs.checks_guard == 'true' || github.event_name != 'pull_request' }}
+        run: python3 hooks/test_guard_protected.py
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
