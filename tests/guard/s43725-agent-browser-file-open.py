@@ -16,7 +16,7 @@ BROWSER_PREVIEW = "mcp__Claude_Browser__preview_start"
 BROWSER_BATCH = "mcp__Claude_Browser__browser_batch"
 AGENT_BROWSER_RULE = "agent-browser-file-open"
 # The refusal's remedy. One of these fragments is enough: a tuple inside `carries` is any-of (see add in hooks/test_guard.py).
-REMEDY = (("headless Chrome", "Playwright", "localhost"),)
+ABFO_REMEDY = (("headless Chrome", "Playwright", "localhost"),)
 # The incident's shape, with a placeholder for the owner's home folder: a file: URL inside an agent's .claude worktree.
 FILE_URL = ("file:///Users/example/project/.claude/worktrees/agent-af44ec7ffb6db277d/docs/design/scene-state/"
             "scene-state-blind-1.html#c=house&s=sure")
@@ -34,7 +34,7 @@ def browser_payload(tool, tool_input, agent_id=AGENT_ID_VALUE):
 def browser_refuse(name, tool, tool_input):
     """A browser call by an agent that the guard refuses. The reason names its rule and the remedy."""
     add("agent-browser-file-open: " + name, "deny", rule=AGENT_BROWSER_RULE, tool=tool,
-        raw=browser_payload(tool, tool_input), carries=REMEDY)
+        raw=browser_payload(tool, tool_input), carries=ABFO_REMEDY)
 
 
 def browser_allow(name, tool, tool_input, agent_id=AGENT_ID_VALUE):
