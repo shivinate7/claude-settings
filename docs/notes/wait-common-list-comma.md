@@ -1,0 +1,1 @@
+- wait-common-list-comma: PR #3768 (adds wait_common.py to the guard-set lists). At PR #3768's head (branch fix-wait-common-guard-set, 2d9953ecde), the comments at install.sh (line 998), install.ps1 (line 306) and install.ps1 (line 768) read "route_rows.json precompact_handoff_prompt.md" with no comma between the two names. Add the comma after route_rows.json. Seen: 2026-11-21 x1
