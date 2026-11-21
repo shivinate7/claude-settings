@@ -5032,7 +5032,7 @@ def open_merge_worktree(root, info, base, host=None, n=None, announce=False):
     """The dry merge: a detached, locked worktree on the merge of the PR's head with origin/<base>, built from merge_tree's written tree and one commit-tree
     (parents: the head, then the base tip), never a branch or a ref. -> (tmp, wt), the same pair as add_worktree; drop it with drop_worktree. When the head
     already holds the base tip the merge is the head's own tree, and the worktree is at the head. `announce` (the draft step) says READY_DRY_FMT when it
-    makes a dry merge commit, so a ready pass on that commit reads as a pass on the head. A conflict raises Stop `fail merge with <base>` with the
+    makes a dry merge commit, so the guard maps a ready result on that commit to the head. A conflict raises Stop `fail merge with <base>` with the
     conflicted paths; a read that cannot run raises Stop `unknown merge with <base>`. Fetches as open_worktree does (fetch_pr_head); pushes nothing.
     Cost: two fetches, three git starts (merge-tree and its two rev-parse), one commit-tree, one worktree."""
     info = fetch_pr_head(root, info, base, host, n)

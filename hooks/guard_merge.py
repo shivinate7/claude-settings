@@ -2142,7 +2142,7 @@ def lane_mcp_ready_hit(tool: str, tool_input, transcript: str) -> str:
     return "update_pull_request draft false from a lane" if _own_record_is_lane(transcript) else ""
 
 
-# ---- a ready mark by MCP with no ready pass on the head (rule ready-mcp-mark-guard, decision ready-mcp-mark-guard)
+# ---- a ready mark by MCP with no ready run that stood for the head (rule ready-mcp-mark-guard, decision ready-mcp-mark-guard)
 # `merge <pr> --ready` and `merge <pr> --confirm` on a draft run the draft step, which writes no durable record of its pass. It prints lines (merge/merge.py READY_*_FMT),
 # and they reach the guard only as the result of the Bash call in this session's transcript (read by lint/_transcript.py, the one home).
 # The patterns are built from those templates (ready_line_pattern), never copied here. A run stands for a head when its pass line names it, when a dry-merge line maps the

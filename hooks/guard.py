@@ -8090,7 +8090,7 @@ def judge(payload) -> None:
         if matched:
             refuse(tool, "deny", "merge-role-proof", LANE_READY_REASON, matched)
         refuse_ready_page(tool, tool_input, "", cwd)
-        # A ready mark with no `merge <pr> --ready` pass on the head in this session's transcript (rule ready-mcp-mark-guard).
+        # A ready mark with no `merge <pr> --ready` run that stood for the head in this session's transcript (rule ready-mcp-mark-guard).
         unproved = ready_mark_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", cwd)
         if unproved:
             refuse(tool, "deny", "ready-mcp-mark-guard", unproved[0], unproved[1])
