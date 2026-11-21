@@ -170,7 +170,7 @@ def _build_readymark():
     _rpr_need(len({_rpm_bg_output(job) for job in outputs}) == len(outputs), "two background jobs share an output file")
     _rpr_need(os.path.isfile(_rpm_bg_output("bgnever")), "the never-read output file is missing, so that case would pin nothing")
     lines = {
-        RPM_NO_PASS: _rpm_ready_run("ready-none","merge: #12 stays a draft. Mark it ready after its draft run shows."),
+        RPM_NO_PASS: _rpm_ready_run("ready-none", "merge: #12 stays a draft. Mark it ready after its draft run shows."),
         RPM_OLD_PASS: _rpm_ready_run("ready-old", _rpm_pass(older), "merge: #12 stays a draft. Mark it ready after its draft run shows."),
         RPM_PASS: _rpm_ready_run("ready-now", _rpm_pass(current), "merge: #12 stays a draft. Mark it ready after its draft run shows."),
         RPM_CLAIM_PASS: _rpm_ready_run(
