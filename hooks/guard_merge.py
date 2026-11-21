@@ -540,7 +540,7 @@ def _commit_shape(args):
             all_flag = True
         elif arg in _COMMIT_VALUE_FLAGS:
             index += 1
-        elif arg.startswith("--"):
+        elif arg.startswith("--") or arg.startswith("<<"):   # a heredoc header (`-F - <<EOF`) is no pathspec
             continue
         elif arg.startswith("-") and len(arg) > 1:
             for at, letter in enumerate(arg[1:], 1):
@@ -753,7 +753,7 @@ def records_page_hit(stripped: str, cwd: str) -> str:
 # and the test lines it stages are read the way the marker read reads its tree (`_commit_test_adds`: one
 # `git diff --numstat`, and one `git ls-files --others` for each add that names paths). Only a commit with a
 # push after it costs that read. A message the guard cannot read (`-F`, `-C`, `-c`, an editor) makes the whole
-# push a no-hit, except an `-m "$(cat <<'EOF' ...)"` message, which is read from its heredoc body. A failed
+# push a no-hit, except an `-m "$(cat <<'EOF' ...)"` message and an `-F - <<'EOF'` message, which are read from their heredoc body. A failed
 # read, a copy of the hooks with no lint folder beside it, and a default base that cannot be read are no hit.
 CONFLICT_MARKERS_REASON = (
     "Rule (Git, conflict-markers; decision commit-refuses-conflict-markers): this commit would hold conflict markers in {file}. "
@@ -1182,10 +1182,13 @@ def _commit_test_adds(where, top, all_flag, specs, wholes, adds, is_test_rel):
 _MESSAGE_ELSEWHERE = {"--file", "--reuse-message", "--reedit-message", "--fixup", "--squash", "--template"}
 
 
-def _commit_paragraphs(args):
-    """The `-m` paragraphs of a `git commit` call, in order, or None when its message comes from a place the guard
-    cannot read: `-F`, `-C`, `-c`, `-t`, `--fixup`, `--squash`, or no `-m` at all with no `--amend` (an editor)."""
+def _commit_paragraphs(args, bodies=()):
+    """The message paragraphs of a `git commit` call, in order, or None when its message comes from a place the guard
+    cannot read: `-F` (a file, or `-` with no heredoc body), `-C`, `-c`, `-t`, `--fixup`, `--squash`, or no `-m` at all
+    with no `--amend` (an editor). `-F -` (also `--file=-`, `-F-`) with a heredoc on its own segment reads the
+    heredoc `bodies` as the message: the body is in the command, so no file or stdin read is needed."""
     paragraphs, elsewhere, index = [], False, 0
+    stdin_text = "\n\n".join(bodies)
     while index < len(args):
         arg = args[index]
         index += 1
@@ -1200,7 +1203,14 @@ def _commit_paragraphs(args):
                     paragraphs.append(args[index])
                     index += 1
                 continue
-            elsewhere = elsewhere or name in _MESSAGE_ELSEWHERE
+            if name == "--file":
+                source = value if equals else (args[index] if index < len(args) else "")
+                if source == "-" and stdin_text:
+                    paragraphs.append(stdin_text)
+                else:
+                    elsewhere = True
+            else:
+                elsewhere = elsewhere or name in _MESSAGE_ELSEWHERE
             if name in _COMMIT_VALUE_FLAGS and not equals:
                 index += 1
         elif arg.startswith("-") and len(arg) > 1:
@@ -1212,6 +1222,12 @@ def _commit_paragraphs(args):
                             paragraphs.append(rest)
                         elif index < len(args):
                             paragraphs.append(args[index])
+                    elif letter == "F":
+                        source = rest or (args[index] if index < len(args) else "")
+                        if source == "-" and stdin_text:
+                            paragraphs.append(stdin_text)
+                        else:
+                            elsewhere = True
                     else:
                         elsewhere = True
                     index += 0 if rest else 1
@@ -1225,8 +1241,9 @@ def _commit_message(args, bodies=()):
     """`(readable, message)` of a `git commit` call. A message the guard cannot read (`_commit_paragraphs` gives None)
     is `(False, None)`; an `--amend` with no `-m` keeps the commit's own message, `(True, None)`. `bodies` are the
     heredoc bodies of the commit's own segment: an `-m` that holds a `$(cat <<'EOF' ...)` takes its message from
-    them, so they join the paragraphs. The guard's strip leaves them out of the segment text."""
-    paragraphs = _commit_paragraphs(args)
+    them, so they join the paragraphs; an `-F -` takes them as its whole message. The guard's strip leaves them out of
+    the segment text."""
+    paragraphs = _commit_paragraphs(args, bodies)
     if paragraphs is None:
         return False, None
     if bodies and any("<<" in paragraph for paragraph in paragraphs):
@@ -1412,7 +1429,7 @@ def _made_folders(segments, number, cwd, ends):
     return frozenset(made)
 
 
-def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
+def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None, written_test=None):
     """Return `(kind, file)` for the first commit or push that would carry all three conflict markers
     in one file, else `('', '')`. The kind is `commit`, `push`, `chain` (a push after a commit the
     guard could not judge; the file is then `git push`), or `cd` (a git write, any verb in `GIT_WRITES`, after a `cd`
@@ -1490,13 +1507,21 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
         red_hit = None
         if not has_head:   # no HEAD: `git diff` would read an empty tree
             continue
+        # An earlier step of this call may edit a test file the commit then takes (`sed -i f && git commit -a`): the hook
+        # runs before the shell, so the tree it reads is still clean. `written_test` names the test paths those steps write.
+        earlier = " && ".join(prior for prior in segments[:number] if prior.strip()) if (
+            written_test and number and (all_flag or specs or wholes or adds)) else ""
+
+        def test_adds(where=where, top=top, all_flag=all_flag, specs=specs, wholes=wholes, adds=adds, earlier=earlier):
+            paths = _commit_test_adds(where, top, all_flag, specs, wholes, adds, is_test_rel)
+            return list(dict.fromkeys(paths + (written_test(earlier) if earlier else [])))
+
         if call[0] == "commit" and number < last_push and is_test_rel is not None and _red_run_present():
             bodies = own_heredoc_bodies(segment, raw, before) if raw and "<<" in segment else ()
-            _note_commit(virtual, call[1], _commit_test_adds(where, top, all_flag, specs, wholes, adds, is_test_rel), bodies)
+            _note_commit(virtual, call[1], test_adds(), bodies)
         elif call[0] == "commit" and is_test_rel is not None and _red_run_present():
             bodies = own_heredoc_bodies(segment, raw, before) if raw and "<<" in segment else ()
-            red_hit = _commit_red_run(call[1], bodies, _red_run_module(), top,
-                                      lambda: _commit_test_adds(where, top, all_flag, specs, wholes, adds, is_test_rel))
+            red_hit = _commit_red_run(call[1], bodies, _red_run_module(), top, test_adds)
         if specs:
             found = _marker_findings(where, top, ["HEAD", "--", *specs], None)
         else:
