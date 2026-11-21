@@ -2152,6 +2152,8 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
         if lifted:
             record(tool, lifted, rule, matched + " step " + step if step else matched)
             if lifted in override.LIFTS:
+                # An allow prints nothing on stdout, so the owner sees the lift on stderr, as hooks/answered_claims.py does.
+                print("override lifted: %s" % rule, file=sys.stderr)
                 if on_lift:
                     on_lift()
                 if continue_on_lift:
