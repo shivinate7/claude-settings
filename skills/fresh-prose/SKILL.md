@@ -54,8 +54,8 @@ STALE002 fires on a line that cites a Python file and a name the pull request re
 
 ## Proof
 
-Proof (`verification-trust-guard-after-red`): break the target on a scratch copy, watch the
-guard fail, restore the target. Give each guard's verdict in one line.
+Proof (`verification-trust-guard-after-red`): break the target in a `bin/red-run` copy of the commit (`--replace`), watch the
+guard fail. Give each guard's verdict in one line.
 
 ## README
 

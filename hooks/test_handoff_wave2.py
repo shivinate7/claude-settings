@@ -71,6 +71,7 @@ import ast
 import collections
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -946,12 +947,25 @@ UNREADABLE_SRC = "\n".join([
 # it refuses every Agent call, which stops these cases before the compaction-audit step they pin. The brake has its
 # own cases (tests/guard/s39497-load-brake.py), so the guard runs here with the drive read as roomy. The launcher runs
 # the guard as __main__ with its own folder first on sys.path, as `python guard.py` does.
+# With HOME_MARKER_ENV set, the launcher also sets the home's EXPLORE_AUDIT_MARKER (hooks/shared_names.py) to
+# that value before any module imports it, so the guard and reread_check read the same mocked marker.
+HOME_MARKER_ENV = "WAVE2_HOME_MARKER"   # the launcher below reads this name, spelled out
 ROOMY_DISK_SRC = "\n".join([
-    "import collections, os, runpy, shutil, sys",
+    "import collections, os, re, runpy, shutil, sys, types",
     "Usage = collections.namedtuple('Usage', 'total used free')",
     "shutil.disk_usage = lambda path: Usage(total=100 * 2**30, used=20 * 2**30, free=80 * 2**30)",
     "sys.argv = sys.argv[1:]",
     "sys.path[0] = os.path.dirname(os.path.abspath(sys.argv[0]))",
+    "marker = os.environ.get('WAVE2_HOME_MARKER')",
+    "if marker is not None:",
+    "    home = os.path.join(sys.path[0], 'shared_names.py')",
+    "    with open(home, encoding='utf-8') as f:",
+    "        text = f.read()",
+    "    text = re.sub(r'^EXPLORE_AUDIT_MARKER = .*$', 'EXPLORE_AUDIT_MARKER = ' + repr(marker), text, flags=re.M)",
+    "    mod = types.ModuleType('shared_names')",
+    "    mod.__file__ = home",
+    "    exec(compile(text, home, 'exec'), mod.__dict__)",
+    "    sys.modules['shared_names'] = mod",
     "runpy.run_path(sys.argv[0], run_name='__main__')",
     "",
 ])
@@ -1149,9 +1163,10 @@ def write_call(c):
     return {"file_path": os.path.join(c.proj, "notes.md"), "content": "x"}
 
 
-def guard_call(c, sid, tool, tool_input, agent_id=None):
+def guard_call(c, sid, tool, tool_input, agent_id=None, home=None):
     """One PreToolUse payload through hooks/guard.py, as Claude Code sends it: (decision, reason).
-    An empty stdout is an allow. `agent_id` is set on a call made from inside an agent."""
+    An empty stdout is an allow. `agent_id` is set on a call made from inside an agent. `home` is the
+    audit marker the home holds for this call (see ROOMY_DISK_SRC); None leaves the home as it is."""
     body = {"hook_event_name": "PreToolUse", "session_id": sid, "tool_name": tool,
             "tool_input": tool_input, "cwd": c.proj}
     if agent_id:
@@ -1160,6 +1175,8 @@ def guard_call(c, sid, tool, tool_input, agent_id=None):
     for name in ENV_DROP:
         env.pop(name, None)
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    if home is not None:
+        env[HOME_MARKER_ENV] = home
     proc = subprocess.run([sys.executable, "-c", ROOMY_DISK_SRC, GUARD], input=json.dumps(body),
                           capture_output=True, text=True, env=env, cwd=c.proj, timeout=120)
     out = (proc.stdout or "").strip()
@@ -1562,6 +1579,134 @@ def case_stale_sibling_without_audit_flag_path_exits_zero():
         c.cleanup()
 
 
+# --------------------------------------------------------------------------- part 4, the remedy texts
+# The compaction-audit refusal (hooks/guard.py COMPACTION_AUDIT_REASON) and reread_check's Stop remedy
+# (audit_reason) each name the audit marker in backticks after `first line is`. Both must name the home's
+# marker (hooks/shared_names.py), so an agent that follows either text is accepted by the guard. Under the
+# mocked home `Probe:` the refusal keeps the literal `Audit:`: that is the defect. `Audit:` is the unchanged
+# home, the green control of each case.
+
+PROBE = "Probe:"
+UNPATCHED = "Audit:"
+SPAWN_TAIL = " check the handoff against the repo."
+
+
+def home_line_why():
+    """'' when hooks/shared_names.py has one EXPLORE_AUDIT_MARKER line, the line the launcher rewrites."""
+    with open(os.path.join(HERE, "shared_names.py"), encoding="utf-8") as f:
+        lines = sum(1 for line in f if line.startswith("EXPLORE_AUDIT_MARKER = "))
+    return "" if lines == 1 else "shared_names.py has %d EXPLORE_AUDIT_MARKER lines, want 1" % lines
+
+
+def remedy_marker(text):
+    """The marker a remedy names: the backticked text after `first line is `. "" when it names none."""
+    found = re.search(r"first line is `([^`]*)`", text or "")
+    return found.group(1) if found else ""
+
+
+def stop_reason(c, sid, home):
+    """The reason of reread_check's Stop block under the home marker `home`, or "" when Stop does not block.
+    The flags are files in the config dir, so the module that set them does not matter here."""
+    body = {"session_id": sid, "hook_event_name": "Stop", "stop_hook_active": False, "cwd": c.proj}
+    env = c.env()
+    env[HOME_MARKER_ENV] = home
+    proc = subprocess.run([sys.executable, "-c", ROOMY_DISK_SRC, READ_CHECK, "--stop"],
+                          input=json.dumps(body), capture_output=True, text=True, env=env,
+                          cwd=c.proj, timeout=120)
+    obj = json_or_none(proc.stdout)
+    if proc.returncode == 0 and isinstance(obj, dict) and obj.get("decision") == "block":
+        return str(obj.get("reason", ""))
+    return ""
+
+
+def names_home_marker(home):
+    """The Stop remedy and the compaction-audit refusal each name the home's marker `home`. Scope first: the
+    refusal is compaction-audit's. Then the subject, the marker each remedy names. Under the mocked `Probe:`
+    home the refusal names `Audit:`: that step is the red."""
+    c = Case("names-home")
+    try:
+        if not step("the home holds one EXPLORE_AUDIT_MARKER line, so the mock reaches it", home_line_why()):
+            return
+        post, rd = compact(c, SID)
+        if not step("--post-compact and the Read exit 0", exit_why(post) or exit_why(rd)):
+            return
+        stop = remedy_marker(stop_reason(c, SID, home))
+        refusal = guard_call(c, SID, "Bash", BASH, home=home)
+        if not step("after the read, a Bash call is refused by compaction-audit", refused_by(refusal, AUDIT_RULE)):
+            return
+        step("reread_check's Stop remedy names the home marker `%s`" % home,
+             "" if stop == home else "the Stop remedy names `%s`" % (stop or "no marker"))
+        named = remedy_marker(refusal[1])
+        step("the compaction-audit refusal names the home marker `%s`" % home,
+             "" if named == home else "the refusal names `%s`" % (named or "no marker"))
+    finally:
+        c.cleanup()
+
+
+def spawn_from_remedy(home, source):
+    """A spawn whose brief opens with the marker one remedy names, and whose other fields are AUDIT_SPAWN's.
+    `source` is "stop" (reread_check's Stop remedy) or "refusal" (the compaction-audit refusal). The spawn
+    must pass the guard and clear the owed audit flag, as the remedy promises."""
+    c = Case("spawn-%s" % source)
+    try:
+        if not step("the home holds one EXPLORE_AUDIT_MARKER line, so the mock reaches it", home_line_why()):
+            return
+        post, rd = compact(c, SID)
+        if not step("--post-compact and the Read exit 0", exit_why(post) or exit_why(rd)):
+            return
+        if source == "stop":
+            text = stop_reason(c, SID, home)
+        else:
+            refusal = guard_call(c, SID, "Bash", BASH, home=home)
+            if not step("after the read, a Bash call is refused by compaction-audit",
+                        refused_by(refusal, AUDIT_RULE)):
+                return
+            text = refusal[1]
+        marker = remedy_marker(text)
+        if not step("the %s remedy names a marker" % source, "" if marker else "the remedy names no marker"):
+            return
+        got = guard_call(c, SID, "Agent", dict(AUDIT_SPAWN, prompt=marker + SPAWN_TAIL), home=home)
+        if not step("a spawn built word for word from the %s remedy is allowed" % source, allowed_why(got)):
+            return
+        step("that spawn clears the audit flag",
+             "" if not os.path.isfile(audit_flag(c, SID)) else "the audit flag is still set after the spawn")
+    finally:
+        c.cleanup()
+
+
+def case_remedies_name_probe_home():
+    """Red on the old code: with the home marker `Probe:`, the compaction-audit refusal still names `Audit:`
+    while the Stop remedy names `Probe:`."""
+    names_home_marker(PROBE)
+
+
+def case_remedies_name_unpatched_home():
+    """Green control: the unchanged home (`Audit:`) through the same launcher. Both remedies name it."""
+    names_home_marker(UNPATCHED)
+
+
+def case_stop_remedy_spawn_clears_probe_home():
+    """Green: a spawn built from reread_check's Stop remedy passes the guard under the `Probe:` home. This
+    shows the guard's audit_spawn reads the mocked marker, the scope for the refusal case below."""
+    spawn_from_remedy(PROBE, "stop")
+
+
+def case_refusal_remedy_spawn_clears_probe_home():
+    """Red on the old code: a spawn built from the compaction-audit refusal's remedy, under the `Probe:` home,
+    is refused by compaction-audit instead of passing the guard."""
+    spawn_from_remedy(PROBE, "refusal")
+
+
+def case_refusal_remedy_spawn_clears_unpatched_home():
+    """Green control: the same spawn, built from the refusal's remedy, under the unchanged `Audit:` home."""
+    spawn_from_remedy(UNPATCHED, "refusal")
+
+
+def case_stop_remedy_spawn_clears_unpatched_home():
+    """Green control: the same spawn, built from the Stop remedy, under the unchanged `Audit:` home."""
+    spawn_from_remedy(UNPATCHED, "stop")
+
+
 def main() -> int:
     print("Part 1: SessionEnd pointer, SessionStart reorient (hooks/precompact_handoff.py)")
     case_session_end_clear_writes_pointer()
@@ -1613,6 +1758,12 @@ def main() -> int:
     case_audit_marker_judged_like_the_home()
     case_reader_follows_the_home_constant()
     case_stale_sibling_without_audit_flag_path_exits_zero()
+    case_remedies_name_probe_home()
+    case_remedies_name_unpatched_home()
+    case_stop_remedy_spawn_clears_probe_home()
+    case_refusal_remedy_spawn_clears_probe_home()
+    case_refusal_remedy_spawn_clears_unpatched_home()
+    case_stop_remedy_spawn_clears_unpatched_home()
 
     if FAILED:
         print()
