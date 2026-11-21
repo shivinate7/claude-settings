@@ -285,13 +285,14 @@ add("merge-checks: the host auto-merge tool denies on a failed head", "deny", "m
 add("merge-checks: the host auto-merge tool allows a green head, as the merge tool does", "allow",
     silent=True, tool=AUTO_MERGE_TOOL, cwd=NOGIT, pullNumber=12, repo="x", owner="y",
     env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
-# The batch brake is removed: a merge is allowed while another ready pull request on the base has a required check pending,
-# by `gh pr merge` and by the host's merge tool. The merged pull request is 1, the other is 2 (its head is pr-two-head).
+# Another ready pull request on the base, with a required check pending, refuses a merge, by `gh pr merge` and by the
+# host's merge tool. The merged pull request is 1, the other is 2 (its head is pr-two-head).
 BATCH_ON = GHBATCH + os.pathsep + PY_PATH
-sh("merge-batch: gh pr merge is allowed while another ready pr has a required check pending",
-   "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=BATCH_ON, config=MERGECFG)
-add("merge-batch: the merge tool of the host is allowed while another ready pr has a required check pending", "allow",
-    tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=1, repo="x", owner="y",
+
+sh("merge-batch: gh pr merge is refused while another ready pr has a required check pending",
+   "gh pr merge 1 --squash", "deny", "merge-checks", carries="#2", cwd=NOGIT, env_path=BATCH_ON, config=MERGECFG)
+add("merge-batch: the merge tool of the host is refused while another ready pr has a required check pending", "deny", "merge-checks",
+    carries="#2", tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=1, repo="x", owner="y",
     env_path=BATCH_ON, config=MERGECFG)
 sh("merge-batch: gh pr merge is allowed when the other ready pr's required check has passed",
    "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHBATCHDONE + os.pathsep + PY_PATH)
@@ -302,28 +303,31 @@ add("merge-batch: the merge tool of the host is allowed when the other ready pr'
     env_path=GHBATCHDONE + os.pathsep + PY_PATH)
 sh("merge-batch: gh pr merge is allowed while another ready pr that holds this head has a required check pending",
    "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHBATCHCONTAIN + os.pathsep + PY_PATH)
-sh("merge-batch: gh pr merge is allowed while another ready pr that does not hold this head has a required check pending",
-   "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHBATCHDIVERGED + os.pathsep + PY_PATH)
-sh("merge-batch: gh pr merge is allowed while another ready pr holds this head but this head is behind main",
-   "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHBATCHBEHIND + os.pathsep + PY_PATH)
-# The batch brake is removed: no other ready pull request's checks, and no base protection read, refuse a merge.
-# A protection read that fails with a server error or on the network does not deny a merge whose head reads green.
-sh("merge-batch: with no branch protection a pending check on the other ready pr does not refuse gh pr merge",
-   "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHNOPROT + os.pathsep + PY_PATH)
+
+sh("merge-batch: gh pr merge is refused while another ready pr that does not hold this head has a required check pending",
+   "gh pr merge 1 --squash", "deny", "merge-checks", carries="#2", cwd=NOGIT, env_path=GHBATCHDIVERGED + os.pathsep + PY_PATH)
+sh("merge-batch: gh pr merge is refused while another ready pr holds this head but this head is behind main",
+   "gh pr merge 1 --squash", "deny", "merge-checks", carries="#2", cwd=NOGIT, env_path=GHBATCHBEHIND + os.pathsep + PY_PATH)
+# The guard's required names. A pinned merge.requiredChecks list is the list, with no protection read (STAMPREPO pins `checks`).
+# With no branch protection (a 404) every pending check on the other ready pull request counts. A protection read that fails any
+# other way is unknown, and a merge with an unknown read is denied.
+sh("merge-batch: with no branch protection a pending check on the other ready pr refuses gh pr merge",
+   "gh pr merge 1 --squash", "deny", "merge-checks", carries="#2", cwd=NOGIT, env_path=GHNOPROT + os.pathsep + PY_PATH)
 sh("merge-batch: with no branch protection a passed check on the other ready pr allows gh pr merge",
    "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHNOPROTDONE + os.pathsep + PY_PATH)
-sh("merge-checks: a protection read that fails with a server error still allows gh pr merge on a green head",
-   "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHPROT500 + os.pathsep + PY_PATH)
-sh("merge-checks: a protection read that fails on the network still allows gh pr merge on a green head",
-   "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHPROTNET + os.pathsep + PY_PATH)
-# A running or queued workflow on another ready pull request does not hold a merge: the batch brake that read it is removed.
-sh("merge-batch: gh pr merge is allowed while another ready pr's workflow runs, before its required check reports",
-   "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHRUNBLOCK + os.pathsep + PY_PATH)
-add("merge-batch: the merge tool of the host is allowed while another ready pr's workflow runs", "allow",
-    tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=1, repo="x", owner="y",
+
+sh("merge-batch: a protection read that fails with a server error is unknown, and denies gh pr merge",
+   "gh pr merge 1 --squash", "deny", "merge-checks", carries="unknown", cwd=NOGIT, env_path=GHPROT500 + os.pathsep + PY_PATH)
+sh("merge-batch: a protection read that fails on the network is unknown, and denies gh pr merge",
+   "gh pr merge 1 --squash", "deny", "merge-checks", carries="unknown", cwd=NOGIT, env_path=GHPROTNET + os.pathsep + PY_PATH)
+# A running workflow on another ready pull request holds the merge before its required check reports: scope runs first and checks needs it.
+sh("merge-batch: gh pr merge is refused while another ready pr's workflow runs, before its required check reports",
+   "gh pr merge 1 --squash", "deny", "merge-checks", carries=("#2", "ci-checks"), cwd=NOGIT, env_path=GHRUNBLOCK + os.pathsep + PY_PATH)
+add("merge-batch: the merge tool of the host is refused while another ready pr's workflow runs", "deny", "merge-checks",
+    carries=("#2", "ci-checks"), tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=1, repo="x", owner="y",
     env_path=GHRUNBLOCK + os.pathsep + PY_PATH)
-sh("merge-batch: gh pr merge is allowed while another ready pr's workflow is queued with no check rows",
-   "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHRUNNONE + os.pathsep + PY_PATH)
+sh("merge-batch: gh pr merge is refused while another ready pr's workflow is queued with no check rows",
+   "gh pr merge 1 --squash", "deny", "merge-checks", carries=("#2", "ci-checks"), cwd=NOGIT, env_path=GHRUNNONE + os.pathsep + PY_PATH)
 sh("merge-batch: gh pr merge is allowed when the other ready pr's workflow has finished",
    "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHRUNDONE + os.pathsep + PY_PATH)
 NEED_ON = GHNEED + os.pathsep + PY_PATH
@@ -1207,12 +1211,13 @@ LANE_TRANSCRIPT = role_path("lane")
 TRIAGE_TRANSCRIPT = role_path("triage")
 
 
-def record_refuse(name, command, transcript, cwd=PUSHFEAT, env=ROLE_ENV, carries=(), **kw):
-    """A git push the guard refuses under roadmap-one-writer. The reason names the rule, never the push.
-    `carries` is the caller's own fragments, added to RECORD_CARRIES, which every record refusal holds."""
+def record_refuse(name, command, transcript, cwd=PUSHFEAT, env=ROLE_ENV, rule=RECORD_RULE, carries=(), **kw):
+    """A git push the guard refuses under roadmap-one-writer, or under `rule` when another rule reads it
+    first. The reason names the rule, never the push. Only the record rule's reason carries its words.
+    `carries` is the caller's own fragments: on the record rule they are added to RECORD_CARRIES."""
     more = (carries,) if isinstance(carries, str) else tuple(carries)
-    sh("roadmap-one-writer: " + name, command, "deny", rule=RECORD_RULE,
-       carries=RECORD_CARRIES + more, lacks=RECORD_LACKS,
+    held = RECORD_CARRIES + more if rule == RECORD_RULE else more
+    sh("roadmap-one-writer: " + name, command, "deny", rule=rule, carries=held, lacks=RECORD_LACKS,
        transcript=transcript, env=env, cwd=cwd, **kw)
 
 
@@ -1287,7 +1292,12 @@ record_refuse("a lane's HEAD:roadmap push in a subshell after a cd, piped to tai
 record_refuse("a lane's push to roadmap in a subshell under bash -c after a cd is refused",
               'bash -c "(cd ' + slash(RECROADMAP) + " && " + VCS + ' push origin roadmap)"', LANE_TRANSCRIPT)
 record_refuse("a lane's push to roadmap with a trailing background & is refused",
-              VCS + " push origin roadmap&", LANE_TRANSCRIPT)
+              VCS + " push origin roadmap&", LANE_TRANSCRIPT, rule="detached-launch")
+# The pid is captured on the same line, so detached-launch lets this push through. roadmap-one-writer refuses it:
+# the glued & ends the word, so the push reads the record branch. The glued-& mutant in the mutation table names
+# this row by the words it starts with, so keep those words.
+record_refuse("a lane's push to roadmap with a trailing background & is refused, the pid captured by echo $!",
+              VCS + " push origin roadmap& echo $!", LANE_TRANSCRIPT)
 record_allow("a lane's push to lane/foo in a subshell after a cd into the roadmap checkout is allowed",
              "(cd " + slash(RECROADMAP) + " && " + VCS + " push origin lane/foo)", LANE_TRANSCRIPT)
 # Quoted, heredoc and comment text never hides a push, and a push after such text is still a push.
