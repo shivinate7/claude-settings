@@ -834,7 +834,7 @@ class SessionEndStopsOnlyServersInItsRepository(unittest.TestCase):
                                                   lambda paths: []))
             stack.enter_context(mock.patch.object(self.sweep, "sim_tier",
                                                   lambda confirm, record_path=None: []))
-            stack.enter_context(mock.patch.object(self.sweep, "temp_tier", lambda confirm: 0))
+            stack.enter_context(mock.patch.object(self.sweep, "temp_pass", lambda confirm: 0))
             stack.enter_context(mock.patch.object(self.sweep, "print_grace_period_report",
                                                   lambda *a, **k: None))
             self.hook.handle({"hook_event_name": "SessionEnd", "cwd": repo}, elapsed_seconds=0.0)
