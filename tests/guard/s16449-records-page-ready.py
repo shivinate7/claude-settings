@@ -22,7 +22,7 @@ RPR_CARRY = ("Return #12 to draft",)           # the stale remedy's first step (
 RPR_DEBT = "# Gap one\n\n- **What.** The check misses one case.\n- **Where.** x\n- **Decision.** none\n- **Retire.** y\n"
 RPR_STAMP = json.dumps({"defaultBranch": "main", "kinds": [],
                         "merge": {"method": "merge", "deadlineMinutes": 5, "afterMerge": [], "deleteBranch": True}})
-RPR_STAMP_READY = json.dumps({"defaultBranch": "main", "kinds": [],
+RPR_READY_CHECK = json.dumps({"defaultBranch": "main", "kinds": [],
                               "merge": {"method": "merge", "deadlineMinutes": 5, "afterMerge": [], "deleteBranch": True,
                                         "readyChecks": ["check invariants"]}})  # a repo that declares ready checks: merge.py prints their pass line
 GHREADY_STALE = os.path.join(RPR, "gh-stale")      # feat-stale, base main: a debt with no page
@@ -94,7 +94,7 @@ def _build_ready_page():
     commit("a record the generator refuses", {"debts/bad.md": "# Bad\n\n- **Where.** x\n"})
     branch("dev", "main")
     branch("feat-dev-behind", "dev")                      # cut before dev moves on, so its head lacks the dev tip
-    commit("a debt aimed at dev, cut before dev moved", {"debts/gap-one.md": RPR_DEBT, ".github/stamp.json": RPR_STAMP_READY})
+    commit("a debt aimed at dev, cut before dev moved", {"debts/gap-one.md": RPR_DEBT, ".github/stamp.json": RPR_READY_CHECK})  # glossary-ok: .github/stamp.json is the real config file name
     _rpr_git(RPR_SEED, "checkout", "-q", "dev")
     commit("dev moves on", {"dev.txt": "dev side\n"})
     branch("feat-dev", "dev")

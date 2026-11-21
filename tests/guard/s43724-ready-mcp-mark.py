@@ -5,7 +5,7 @@ FAMILY = "ready-mcp-mark-guard"
 # ready checks passed on the pull request's current head. `merge <pr> --ready` writes no durable record of that pass:
 # run_ready_checks (merge/merge.py) prints one stdout line, `merge: the ready checks (...) pass on <sha9>.`, and the line
 # reaches the guard only through the session transcript, as the result of the Bash call. So the rule reads the session's
-# own transcript for a `merge <pr> --ready` call whose result passes on the head the pull request now has.
+# own transcript for a `merge <pr> --ready` call whose result names a passing run for the head the pull request now has.
 #
 # THE FIXTURE. The records-page-ready fixture (section 16449). GHREADY_CURRENT is feat-current, whose records page is current,
 # so records-page-ready allows the mark on main. Each case below changes only its transcript (or the call's draft field),
@@ -141,7 +141,7 @@ def rpm_mcp(name, expected, transcript, fake=GHREADY_CURRENT, carries=(), lacks=
         cwd=cwd, env_path=_rpr_env(fake), config=MERGECFG, transcript=transcript, carries=carries, lacks=lacks, **tool_input)
 
 
-# Refused: a ready mark with no ready pass on the head, and a ready pass on an older head. The refusal names the ready run.
+# Refused: a ready mark with no ready pass in the transcript, and one whose only ready pass is on an older head. The refusal names the ready run.
 rpm_mcp("ready-mcp-mark: MCP draft false with no ready pass in the transcript is refused", "deny", RPM_NO_PASS,
         carries=RPM_REMEDY, lacks=RPM_TARGET_LACKS, owner="y", repo="x", pullNumber=12, draft=False)
 rpm_mcp("ready-mcp-mark: MCP draft false after a ready pass on an older head is refused", "deny", RPM_OLD_PASS,
