@@ -30,6 +30,10 @@ PROBE = "zz_guardset_probe.py"  # a flat module that no guard-set list names
 FIXTURE_DIRS = ("hooks", "lint", "testing", os.path.join(".github", "scripts"))
 FIXTURE_FILES = ("install.sh", "install.ps1", "landed-dirs.txt")
 TIMEOUT = 300  # hang guard: the guard-set cases run in about 5 s
+SUITE = os.path.join("hooks", "test_install_src.sh")
+HANG_SUITE = "#!/bin/sh\nexec sleep 60\n"  # runs 60 s, so a cap of 1 s always ends it first
+OK_THEN_EXIT_ONE = ("#!/bin/sh\necho 'ok   - guardset4: fake'\necho 'ok   - guardset7: fake'\n"
+                    "echo 'ok   - guardset8: fake'\nexit 1\n")
 NO_STEP = "job checks in .github/workflows/checks.yml has no step that runs `python3 %s`, so a short guard-set list passes lane lint"
 RUN = ""  # this run's folder, made in setUpModule
 
@@ -60,9 +64,10 @@ def run_command(command, cwd):
     return done.returncode, done.stdout + done.stderr
 
 
-def make_fixture(name, probe=False, drop_case=None):
+def make_fixture(name, probe=False, drop_case=None, suite=None, cap=None):
     """A git-initialised copy of the guard-set tree, built from disk. `probe` adds one flat module that a guard
-    file imports and no list names. `drop_case` takes one `run <case>` line out of the case list, so it never runs."""
+    file imports and no list names. `drop_case` takes one `run <case>` line out of the case list, so it never runs.
+    `suite` replaces the text of the suite file, and `cap` sets the check's TIMEOUT to that many seconds."""
     root = os.path.join(RUN, name)
     os.makedirs(root)
     for d in FIXTURE_DIRS:
@@ -78,7 +83,7 @@ def make_fixture(name, probe=False, drop_case=None):
         with open(os.path.join(root, "hooks", "guard.py"), "a", encoding="utf-8") as fh:
             fh.write("\nimport %s  # the guard-set probe\n" % PROBE[:-3])
     if drop_case:
-        path = os.path.join(root, "hooks", "test_install_src.sh")
+        path = os.path.join(root, SUITE)
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
         line = "\nrun %s\n" % drop_case
@@ -86,6 +91,17 @@ def make_fixture(name, probe=False, drop_case=None):
             raise AssertionError("the case list holds `run %s` %d times, want once" % (drop_case, text.count(line)))
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(text.replace(line, "\n"))
+    if suite is not None:
+        with open(os.path.join(root, SUITE), "w", encoding="utf-8") as fh:
+            fh.write(suite)
+    if cap is not None:
+        path = os.path.join(root, CHECK)
+        with open(path, encoding="utf-8") as fh:
+            text, n = re.subn(r"^TIMEOUT = \d+", "TIMEOUT = %d" % cap, fh.read(), flags=re.M)
+        if n != 1:
+            raise AssertionError("the check holds `TIMEOUT = <n>` %d times, want once" % n)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
     return root
 
 
@@ -142,6 +158,18 @@ class GuardSetCheck(Base):
         code, out = run_command(command, make_fixture("dropped", drop_case="guardset7"))
         self.assertEqual(code, 1, "the step exits %d when guardset7 never runs, want 1:\n%s" % (code, tail(out)))
         self.assertIn("guardset7", out, "the output does not name guardset7:\n%s" % tail(out))
+
+    def test_a_suite_past_its_cap_exits_one_and_says_it_did_not_finish(self):
+        _, command = self.locate()
+        code, out = run_command(command, make_fixture("hang", suite=HANG_SUITE, cap=1))
+        self.assertEqual(code, 1, "the step exits %d when the suite runs past its cap, want 1:\n%s" % (code, tail(out)))
+        self.assertIn("did not finish", out, "the output does not say the suite did not finish:\n%s" % tail(out))
+
+    def test_every_case_ok_then_suite_exit_non_zero_exits_one(self):
+        _, command = self.locate()
+        code, out = run_command(command, make_fixture("exit-after-ok", suite=OK_THEN_EXIT_ONE))
+        self.assertEqual(code, 1, "the step exits %d when each case prints ok and the suite exits 1, want 1:\n%s" % (code, tail(out)))
+        self.assertIn("exited 1", out, "the output does not say the suite exited 1:\n%s" % tail(out))
 
 
 class RunFolderSweep(unittest.TestCase):
