@@ -821,6 +821,52 @@ chained_ask("per-file ask: cd lane && restore f.txt && cd lane && the same resto
             "cd " + slash(GITWT) + " && " + VCS + " restore f.txt && cd " + slash(GITWT) + " && "
             + VCS + " restore f.txt && echo done", cwd=NOGIT)
 
+# EACH SEGMENT IS JUDGED IN THE FOLDER THE SHELL IS IN WHEN IT RUNS. A cd after a destructive segment
+# moves nothing that ran before it. So the restore below runs in the shared checkout and must deny,
+# even though the call ends in a clean checkout.
+sh("per-file deny: cd shared, restore f.txt, then cd to a clean checkout; the restore runs in the shared tree",
+   "cd " + slash(SUBJDIRTY) + " && " + VCS + " restore f.txt && cd " + slash(SUBJCLEAN),
+   "deny", "shared-tree", cwd=NOGIT)
+# The mirror: the restore runs in the clean checkout, and only the cd after it enters the shared one.
+# Nothing the restore touches is uncommitted, so the call must not refuse.
+sh("per-file allow: cd to a clean checkout, restore f.txt, then cd shared; the restore runs in the clean tree",
+   "cd " + slash(SUBJCLEAN) + " && " + VCS + " restore f.txt && cd " + slash(SUBJDIRTY),
+   "allow", cwd=NOGIT)
+
+# A CD THAT DOES NOT RUN MOVES NOTHING. The cd after `||` runs only when `true` fails, so the restore
+# runs where the shell already holds. From the dirty shared checkout the restore must deny, though the
+# call names a clean checkout in its cd. From the clean checkout it must not refuse, though the call
+# names the shared checkout in its cd.
+sh("per-file deny: true || cd clean, restore f.txt, then cd shared; the cd never runs, the restore runs in the shared tree",
+   "true || cd " + slash(SUBJCLEAN) + "; " + VCS + " restore f.txt; cd " + slash(SUBJDIRTY),
+   "deny", "shared-tree", cwd=SUBJDIRTY)
+sh("per-file allow: true || cd shared, restore f.txt, then cd clean; the cd never runs, the restore runs in the clean tree",
+   "true || cd " + slash(SUBJDIRTY) + "; " + VCS + " restore f.txt; cd " + slash(SUBJCLEAN),
+   "allow", cwd=SUBJCLEAN)
+
+# A BRANCH BODY THAT OPENS ON ITS OWN LINE MAY NOT RUN. `then` and `do` on a line of their own leave the
+# body's cd read as a plain cd that runs. `if false` never enters its then branch, and a `for` over an empty
+# list never enters its do body, so the cd in either one moves nothing and the restore runs where the shell
+# already was. Each call ends in a cd to the checkout the restore runs in, which is the folder the
+# whole-command reading names when the walk cannot tell.
+sh("per-file deny: multi-line if, the cd into the clean tree is in a then branch that never runs; the restore runs in the shared tree",
+   "if false\nthen\n cd " + slash(SUBJCLEAN) + "\nfi\n" + VCS + " restore f.txt\ncd " + slash(SUBJDIRTY),
+   "deny", "shared-tree", cwd=SUBJDIRTY)
+sh("per-file allow: multi-line if, the cd into the shared tree is in a then branch that never runs; the restore runs in the clean tree",
+   "if false\nthen\n cd " + slash(SUBJDIRTY) + "\nfi\n" + VCS + " restore f.txt\ncd " + slash(SUBJCLEAN),
+   "allow", cwd=SUBJCLEAN)
+sh("per-file deny: multi-line for, the cd into the clean tree is in a do body that runs zero times; the restore runs in the shared tree",
+   "for f in\ndo\n cd " + slash(SUBJCLEAN) + "\ndone\n" + VCS + " restore f.txt\ncd " + slash(SUBJDIRTY),
+   "deny", "shared-tree", cwd=SUBJDIRTY)
+sh("per-file allow: multi-line for, the cd into the shared tree is in a do body that runs zero times; the restore runs in the clean tree",
+   "for f in\ndo\n cd " + slash(SUBJDIRTY) + "\ndone\n" + VCS + " restore f.txt\ncd " + slash(SUBJCLEAN),
+   "allow", cwd=SUBJCLEAN)
+# CONTROL, ONE LINE. The `then` sits on the cd's own segment, so the walk already reads that cd as one that
+# may not run, and the whole-command reading settles the restore: the shared checkout the call ends in.
+sh("per-file deny: one-line if false; then cd clean; fi, the restore runs in the shared tree, the call ends in it",
+   "if false; then cd " + slash(SUBJCLEAN) + "; fi; " + VCS + " restore f.txt; cd " + slash(SUBJDIRTY),
+   "deny", "shared-tree", cwd=SUBJDIRTY)
+
 # HEREDOC BODY WITH A LONE QUOTE, THEN A CD. segment_roots (guard.py ~1228) loses sync when a heredoc
 # body holds a lone quote, and drops every later `cd`. The cwd is in no checkout, so the cd act does
 # not refuse the cd below; the shared-tree rule reads the folder it moves to, and the restore runs in

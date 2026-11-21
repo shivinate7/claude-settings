@@ -1,0 +1,1 @@
+- mutate-deps-folders-leak: The `mkdtemp(prefix="mutate_deps_")` calls at three sites in `hooks/mutate_guard.py` make folders with no pid, so the leftover step never matches them. A run that dies before its cleanup leaves its `mutate_deps_` folder behind. How often is unmeasured. Seen: 2026-11-18 x1

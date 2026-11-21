@@ -198,6 +198,14 @@ MUTATIONS = [
      '    if lines is None:\n        guard_core.record("Bash", "noted", "subject-unread", "git checkout " + name)\n',
      '    if lines is None:\n        pass\n', "guard",
      'a bare checkout of a dirty file whose status git cannot read is allowed and logged once as subject-unread'),
+    ("shared-tree: a segment is judged in its own cd folder",
+     '        elif here is not None:\n            root = here\n',
+     '        elif False:\n            root = here\n', "guard",
+     'per-file deny: cd shared, restore f.txt, then cd to a clean checkout'),
+    ("shared-tree: an uncertain segment drops the whole-command fallback",
+     '            if maybe and maybe[0]:\n                here = None\n',
+     '            if False:\n                here = None\n', "guard",
+     'per-file deny: one-line if false; then cd clean; fi, the restore runs in the shared tree, the call ends in it'),
 
     # ---- rule 1's three new git forms: branch delete, worktree remove, worktree prune. Each
     # mutation breaks one arm of the state read the plan named as the safety hole in this rule.

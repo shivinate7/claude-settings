@@ -266,7 +266,7 @@ def hu_override_check():
     if not ok:
         return False, why
     note = ov_type(config, HU_SID, "override")
-    ok, why = ov_story([("first call", call(60), "allow", None),
+    ok, why = ov_story([("first call, the lift of the refusal", call(60), "allow", HU_RULE),
                         ("second call, override spent", call(120), "deny", HU_RULE)], note)
     if not ok:
         return False, why

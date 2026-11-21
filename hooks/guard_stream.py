@@ -68,12 +68,20 @@ def live_stream_hit(segment: str) -> str:
                  if (h := live_stream_hit(part))), "")
 
 
+WAIT_UNTIL_AHEAD = 25   # a foreground wait-until that lasts this many seconds or more is refused
+
+# The wait-until remedy, said once for each reason that points at it. A foreground wait for a far time is refused,
+# so every reason that names the helper also names the background.
+WAIT_UNTIL_FAR_REFUSED = ("A foreground wait-until for a time %d seconds or more away is refused: "
+                          "run it with run_in_background." % WAIT_UNTIL_AHEAD)
+WAIT_UNTIL_REMEDY = "To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`. " + WAIT_UNTIL_FAR_REFUSED
+
 LIVE_STREAM_REASON = (
     "this command follows a stream and never ends on its own, so it outlives the turn "
     "and the agent that started it. "
     "Remedy: run the command in the foreground with a timeout, or in the background and "
     "wait for its completion notice. To wait on a pid, use `bin/wait-pid PID [--timeout SECS]`. "
-    "To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`."
+    + WAIT_UNTIL_REMEDY
 )
 
 
@@ -197,13 +205,14 @@ def _whole_word(tokens, at: int) -> str:
     return word
 
 
-def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
+def _roster_word(tokens, index: int, interpreter_only: bool = False, launcher_script: bool = False) -> str:
     """The roster spelling the command at `index` runs (`merge`, `merge.cmd`, or a script run through
     a runner, `python merge.py`), else ''. The one reader of NARRATING_COMMANDS and
     NARRATING_SCRIPT_TAILS. A word carrying a script path counts, so `python3.11` and `uv run python`
     both match. `interpreter_only` keeps the word to a command that runs a script (`_script_run`) and the
     path to that script: the check rule needs it, so `grep -n x merge/merge.py` and
-    `python3 -m pytest -k merge/merge.py` are no run of the script."""
+    `python3 -m pytest -k merge/merge.py` are no run of the script. `launcher_script` also counts the launcher
+    run as a script (`python3 bin/merge`)."""
     word = basename(tokens[index])
     if word in NARRATING_COMMANDS:
         return word
@@ -211,6 +220,8 @@ def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
         script = _script_run(tokens, index)
         if script.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
             return word if script == tokens[index] else word + " " + basename(script)
+        if launcher_script and basename(script) in NARRATING_COMMANDS:
+            return word + " " + basename(script)
         return ""
     for token in tokens[index:]:
         if token.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
@@ -309,16 +320,34 @@ def _merge_flag(tokens, flag: str) -> bool:
     return False
 
 
-def check_stage(segment: str, background: bool) -> str:
+def _skip_setsid(tokens, index: int) -> int:
+    """The index of the command `setsid [flags] cmd ...` starts, read through `resolve_command` again, else `index`.
+    `setsid` is no entry of COMMAND_WRAPPERS, for the same reason `uv` is none (`_skip_uv_run`). Its flags
+    (`-c`, `-f`, `-w`) take no value."""
+    while index < len(tokens) and basename(tokens[index]) == "setsid":
+        start = index + 1
+        while start < len(tokens) and tokens[start].startswith("-"):
+            start += 1
+        at = resolve_command(tokens[start:])
+        if at is None:
+            break
+        index = start + at
+    return index
+
+
+def check_stage(segment: str, background: bool, launcher_script: bool = False) -> str:
     """The command word when one segment runs a named check, else ''. `ci-job` counts
-    only in the background, which a trailing `&` makes it (the caller passes that in `background`)."""
+    only in the background, which a trailing `&` makes it (the caller passes that in `background`).
+    `launcher_script` also reads `python3 bin/merge` as a run of `merge`: only the lint-start
+    reader asks, so check-timeout and the tail rule keep their own reading of that spelling. It also reads through
+    `setsid`, which they do not."""
     tokens = segment_tokens(segment)
     if not tokens:
         return ""
     index = resolve_command(tokens)
     if index is None:
         return ""
-    index = _skip_uv_run(tokens, index)
+    index = _skip_uv_run(tokens, _skip_setsid(tokens, index) if launcher_script else index)
     if index >= len(tokens):   # a redirect-only segment (`> out.txt`) leaves no command word
         return ""
     if basename(tokens[index]) in CHECK_COMMANDS:
@@ -327,7 +356,7 @@ def check_stage(segment: str, background: bool) -> str:
         return CHECK_COMMANDS[0] if background else ""
     if "--confirm" in tokens or not any(_merge_flag(tokens, flag) for flag in CHECK_FLAGS):
         return ""
-    return _roster_word(tokens, index, interpreter_only=True)
+    return _roster_word(tokens, index, interpreter_only=True, launcher_script=launcher_script)
 
 
 LINT_SCRIPT = re.compile(r"(?:^|/)lint/[^/]+\.py$")
@@ -487,7 +516,7 @@ def _background_split(segment: str):
 
 def _lint_stage(part: str) -> str:
     """The matched text when one command part names a lint start, `merge --lane-lint` or `ci-job --lint`, else ''."""
-    word = check_stage(part, True)
+    word = check_stage(part, True, launcher_script=True)
     if not word:
         return ""
     flag = "--lint" if word in CHECK_COMMANDS else "--lane-lint"
@@ -939,12 +968,77 @@ def clock_loop(token_rows) -> bool:
     return words[heads[0] + 1:heads[0] + 2] == ["do"] and clock_test(token_rows[heads[0]])
 
 
+WAIT_UNTIL_REDIRECT_WORD = re.compile(r"(?:\d*|&)(?:>>?|<)")   # a redirect operator at the start of a word
+
+
+def wait_until_words(words):
+    """The words after `wait-until`, as the helper would receive them: an unquoted `$(...)` or backtick
+    substitution that the tokenizer split on its spaces is one word again, a redirect (`2>&1`, `> f`) is dropped,
+    a `)` that closes a grouping is cut off, and a `--timeout` whose value is not a literal is dropped, since the
+    helper never gets a number it could cap the wait with."""
+    merged, at = [], 0
+    while at < len(words):
+        word, at = words[at], at + 1
+        while at < len(words) and (word.startswith("$(") and word.count("(") > word.count(")")
+                                   or word.count("`") % 2):
+            word, at = word + " " + words[at], at + 1
+        merged.append(word)
+    kept, skip = [], False
+    for word in merged:
+        if skip:
+            skip = False
+        elif WAIT_UNTIL_REDIRECT_WORD.match(word) and not word.startswith("$"):
+            skip = bool(WAIT_UNTIL_REDIRECT_WORD.fullmatch(word))   # `>` or `2>` takes the next word as its file
+        else:
+            while word.endswith(")") and word.count(")") > word.count("("):
+                word = word[:-1]
+            if word:
+                kept.append(word)
+    args, at = [], 0
+    while at < len(kept):
+        value = kept[at + 1] if at + 1 < len(kept) else ""
+        if kept[at] == "--timeout" and ("$" in value or "`" in value):
+            at += 2
+        elif kept[at].startswith("--timeout=") and ("$" in kept[at] or "`" in kept[at]):
+            at += 1
+        else:
+            args.append(kept[at])
+            at += 1
+    return args
+
+
+def wait_until_far(tokens, index) -> bool:
+    """True when `wait-until TIME` at `tokens[index]` waits WAIT_UNTIL_AHEAD seconds or more: TIME is that far after the
+    hook clock (local_time.clock, which LOCAL_TIME_NOW replaces in tests) and no --timeout under that caps the wait.
+    The arguments are read by wait_common.split_args, the helper's own reader, so a flag value is never the time.
+    A TIME that is not a literal (`$(...)`, `$VAR`) cannot be read here, so it counts as far unless --timeout caps
+    it. A literal that cannot be read, or has no zone, is the helper's own error at once, so it is not a wait."""
+    import contextlib
+    import io
+    import local_time
+    from wait_common import parse_instant, split_args
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):   # split_args exits 2 with a message on a bad argument
+            time_arg, timeout = split_args("wait-until", "usage: wait-until TIME [--timeout SECS]",
+                                         wait_until_words(tokens[index + 1:]))
+    except SystemExit:
+        return False
+    if time_arg is None or 0 < timeout < WAIT_UNTIL_AHEAD:
+        return False
+    if "$" in time_arg or "`" in time_arg:
+        return True
+    when = parse_instant(time_arg)
+    if when is None:
+        return False
+    return (when - local_time.clock()).total_seconds() >= WAIT_UNTIL_AHEAD
+
+
 def waiter_verdict(segments, background: bool) -> str:
     """Return the matched text when a command waits by looping, else ''.
 
     Refused: a loop around a sleep, two or more sleeps, one sleep of SLEEP_LIMIT seconds or
     more, `timeout /t`, `gh run watch` (foreground or background), and a foreground
-    `gh pr checks --watch`. Allowed: one short sleep, `gh pr checks --watch` with
+    `gh pr checks --watch`, and a foreground `wait-until` for a time WAIT_UNTIL_AHEAD seconds or more away, or a time not a literal. Allowed: one short sleep, `gh pr checks --watch` with
     run_in_background, and, with run_in_background, one sleep of any length followed by a command
     and a `clock_loop`: a `+%s` read ordered against an epoch, or an ISO read ordered against an ISO time."""
     sleeps, loop, watcher, run_watch, followed = [], False, "", "", False
@@ -967,6 +1061,9 @@ def waiter_verdict(segments, background: bool) -> str:
                 sleeps.append((tokens[at], sleep_seconds(tokens, at)))
         if word in WAITER_COMMANDS:
             pass
+        elif word.lstrip("(") == "wait-until":
+            if not background and wait_until_far(tokens, index):
+                return tokens[index]
         elif word in ("gh", "gh.exe") and gh_watches(tokens[index + 1:]):
             found = "gh " + " ".join(tokens[index + 1:index + 3])
             watcher = watcher or found
@@ -995,7 +1092,8 @@ WAITER_REASON = (
     "notice. In the background, one pause of any length followed by a command is allowed, and so is a "
     "loop whose test orders the date output against a literal time of the same kind: date +%s against an "
     "epoch with -gt or -ge, or an ISO date-time read against an ISO time with \\>. "
-    "A single pause under 25 seconds is allowed in the foreground. Avoid gh pr checks --watch in the "
+    "A single pause under 25 seconds is allowed in the foreground, and so is wait-until for a time under 25 "
+    "seconds away. " + WAIT_UNTIL_FAR_REFUSED + " Avoid gh pr checks --watch in the "
     "foreground, which serves a cached status. For a server warm-up, use a "
     "readiness check such as `curl --retry 5 --retry-connrefused http://localhost:3000`."
 )
@@ -1421,7 +1519,7 @@ PATTERN_POLLER_REASON = (
     "every process whose command line names it, including this session's own wrapper for the "
     "same wait, so the condition can stay true long after the work is done. "
     "Remedy: wait on one pid with `bin/wait-pid PID [--timeout SECS]`, which also takes a job a stall "
-    "left behind. To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`. "
+    "left behind. " + WAIT_UNTIL_REMEDY + " "
     "To wait for CI, wait for the CI-wake notice that follows gh pr ready."
 )
 

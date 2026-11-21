@@ -1409,19 +1409,102 @@ for _label, _trigger, _rule in REMEDY_TRIGGERS:
     sh("wait-until: the remedy of %s names the helper by its bin path" % _label, _trigger, "deny", _rule,
        cwd=NOGIT, carries=("`bin/wait-until",))
 
-# The helper is never refused, in the foreground or under run_in_background. Nothing judges it yet, so these
-# pin that a waiter rule never refuses the one allowed form. A command after the helper is allowed too.
+# A foreground wait is refused when it lasts 25 s or more, as a pause of that length is: its time is 25 s or more
+# away, and no short --timeout caps it. The wait goes under run_in_background, and the reason names it. The clock is
+# LOCAL_TIME_NOW, the hook clock's one home (local_time.clock), so no verdict reads the real time. The 24, 25 and 26 s
+# times bracket the line. SLEEP_LIMIT (guard_stream.py) is 25, and its sleep check refuses a pause of 25 s or more.
+WAIT_UNTIL_NOW = "2026-11-19T12:00:00+00:00"  # the synthetic clock of the cases below
+WAIT_UNTIL_24S = "2026-11-19T12:00:24Z"  # 24 s after that clock: under 25 s away
+WAIT_UNTIL_25S = "2026-11-19T12:00:25Z"  # 25 s after it: at the line, so refused
+WAIT_UNTIL_26S = "2026-11-19T12:00:26Z"  # 26 s after it: more than 25 s away
+WAIT_UNTIL_FAR = "2026-11-19T13:00:00Z"  # an hour after it: far away
+
+# The helper is allowed in the foreground for a past time, a time under 25 s away, or a far time with --timeout 10
+# (see below). Under run_in_background it is allowed for any time. A command after the helper is allowed too.
+# Every case here pins the clock, so the past time is past on the pinned clock, whatever the real date.
 for _command in ("wait-until %s" % WAIT_UNTIL_TIME, "wait-until %s --timeout 500" % WAIT_UNTIL_TIME):
-    sh("wait-until: %s is allowed in the foreground" % _command, _command, "allow", cwd=NOGIT)
+    sh("wait-until: %s is allowed in the foreground" % _command, _command, "allow", cwd=NOGIT,
+       env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW})
     add("wait-until: %s is allowed under run_in_background" % _command, "allow", cwd=NOGIT,
-        command=_command, run_in_background=True)
+        env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW}, command=_command, run_in_background=True)
 add("wait-until: the helper, then one command, is allowed under run_in_background", "allow", cwd=NOGIT,
     command="wait-until %s; node tool.mjs" % WAIT_UNTIL_TIME, run_in_background=True)
 
-# THE REMEDY CHECK. Every command form that a waiter-family remedy names in backticks is allowed, in the
-# foreground and under run_in_background: the guard must not refuse the advice it gives. The remedies are read
-# from guard_stream, the one home of them. A form is tried with its optional `[...]` part and without it.
-WAIT_SAMPLES = {"PID": "12345", "SECS": "500", "TIME": WAIT_UNTIL_TIME, "T": WAIT_UNTIL_TIME}
+add("wait-until: a foreground wait for a time 26 s away is refused, and the reason names run_in_background",
+    "deny", "waiter", cwd=NOGIT, carries=("run_in_background",), env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW},
+    command="~/.claude/bin/wait-until %s" % WAIT_UNTIL_26S)
+add("wait-until: a background wait for a time 26 s away is allowed", "allow", cwd=NOGIT,
+    env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW}, command="~/.claude/bin/wait-until %s" % WAIT_UNTIL_26S,
+    run_in_background=True)
+for _bg in (False, True):
+    add("wait-until: a wait for a time 24 s away is allowed%s" % (" under run_in_background" if _bg else ""),
+        "allow", cwd=NOGIT, env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW},
+        command="~/.claude/bin/wait-until %s" % WAIT_UNTIL_24S, **({"run_in_background": True} if _bg else {}))
+
+# The line itself: a time 25 s away is a wait of 25 s, which the sleep check refuses too.
+add("wait-until: a foreground wait for a time 25 s away is refused, and the reason names run_in_background",
+    "deny", "waiter", cwd=NOGIT, carries=("run_in_background",), env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW},
+    command="wait-until %s" % WAIT_UNTIL_25S)
+add("wait-until: a background wait for a time 25 s away is allowed", "allow", cwd=NOGIT,
+    env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW}, command="wait-until %s" % WAIT_UNTIL_25S, run_in_background=True)
+
+# --timeout caps a wait. A far time under a long cap is refused, and the same time under a 10 s cap is allowed.
+# The far time with no cap stays refused, so the allow under the 10 s cap comes from the cap, not a missed branch.
+sh("wait-until: a foreground wait for a far time with no --timeout is refused, and the reason names run_in_background",
+   "wait-until %s" % WAIT_UNTIL_FAR, "deny", "waiter", cwd=NOGIT, carries=("run_in_background",),
+   env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW})
+sh("wait-until: a foreground wait for a far time with --timeout 500 is refused, and the reason names run_in_background",
+   "wait-until --timeout 500 %s" % WAIT_UNTIL_FAR, "deny", "waiter", cwd=NOGIT,
+   carries=("run_in_background",), env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW})
+add("wait-until: a background wait for a far time with --timeout 500 is allowed", "allow", cwd=NOGIT,
+    env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW}, command="wait-until --timeout 500 %s" % WAIT_UNTIL_FAR,
+    run_in_background=True)
+sh("wait-until: a foreground wait for a far time with --timeout 10 is allowed",
+   "wait-until %s --timeout 10" % WAIT_UNTIL_FAR, "allow", cwd=NOGIT, env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW})
+sh("wait-until: a foreground wait for a time 24 s away with --timeout 500 is allowed",
+   "wait-until --timeout 500 %s" % WAIT_UNTIL_24S, "allow", cwd=NOGIT, env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW})
+
+# A time that is not a literal (a command substitution or a variable) cannot be read here, so a foreground wait on
+# one is refused. Under run_in_background it is allowed. An echo that names such a wait is text, and is allowed.
+for _non_literal in ('"$(date -u +%Y-%m-%dT%H:%M:%SZ)"', '$(date -u +%Y-%m-%dT%H:%M:%SZ)', "$T"):
+    sh("wait-until: a foreground wait on the non-literal time %s is refused, and the reason names run_in_background"
+       % _non_literal, "wait-until %s" % _non_literal, "deny", "waiter", cwd=NOGIT,
+       carries=("run_in_background",), env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW})
+    add("wait-until: a wait on the non-literal time %s is allowed under run_in_background" % _non_literal,
+        "allow", cwd=NOGIT, env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW}, command="wait-until %s" % _non_literal,
+        run_in_background=True)
+sh("wait-until: an echo that names a wait on $T is text and is allowed", 'echo "wait-until $T"', "allow",
+   cwd=NOGIT, env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW})
+
+# A redirect, a grouping, or a --timeout that is not a number does not change the wait: the far time still
+# waits, and a --timeout that cannot be read caps nothing. Each refused form has a background control, which
+# is the same line allowed under run_in_background. The 10 s cap on a redirected line is the foreground control:
+# the cap allows the wait, whatever the redirect.
+WAIT_UNTIL_LINE_FORMS = (
+    "wait-until %s 2>&1",
+    "wait-until %s >/dev/null 2>&1",
+    "wait-until %s > f",
+    "wait-until %s --timeout 500 2>&1",
+    "wait-until %s --timeout $N",
+    "(wait-until %s)",
+)
+for _line_form in WAIT_UNTIL_LINE_FORMS:
+    _line_command = _line_form % WAIT_UNTIL_FAR
+    sh("wait-until: a foreground %s is refused, and the reason names run_in_background" % _line_command,
+       _line_command, "deny", "waiter", cwd=NOGIT, carries=("run_in_background",),
+       env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW})
+    add("wait-until: %s is allowed under run_in_background" % _line_command, "allow", cwd=NOGIT,
+        env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW}, command=_line_command, run_in_background=True)
+sh("wait-until: a foreground wait for a far time with --timeout 10 and a redirect is allowed",
+   "wait-until %s --timeout 10 2>&1" % WAIT_UNTIL_FAR, "allow", cwd=NOGIT,
+   env={"LOCAL_TIME_NOW": WAIT_UNTIL_NOW})
+
+# THE REMEDY CHECK. Every command form that a waiter-family remedy names in backticks is allowed under
+# run_in_background, and in the foreground too, unless the remedy names run_in_background. A foreground wait for a
+# far time is refused, so that remedy must say to run it in the background. The far sample is WAIT_UNTIL_FAR, under
+# the pinned clock, so a wait-until form reaches that refusal (the scope check). The remedies are read from
+# guard_stream, the one home of them. A form is tried with its optional `[...]` part and without it.
+WAIT_SAMPLES = {"PID": "12345", "SECS": "500", "TIME": WAIT_UNTIL_FAR, "T": WAIT_UNTIL_FAR}
 REMEDY_CONSTANTS = ("WAITER_REASON", "LIVE_STREAM_REASON", "PATTERN_POLLER_REASON")
 # A placeholder that is not an upper-case name: the check-timeout remedy names its run as `verdict <cmd>`.
 REMEDY_WORD_SAMPLES = {"<cmd>": CHECK_TIMEOUT_LINT}
@@ -1439,19 +1522,24 @@ def remedy_forms(reason):
     return list(dict.fromkeys(forms))
 
 
+def remedy_decision(form, background, limit=None):
+    """The guard's (decision, reason) for `form` under the pinned clock, in the background or the foreground."""
+    tool_input = {"command": form}
+    if background:
+        tool_input["run_in_background"] = True
+    if limit is not None:
+        tool_input["timeout"] = limit
+        tool_input["description"] = TAIL_BG_UNTIL
+    return decide({"raw": None, "tool": "Bash", "cwd": NOGIT, "session": None, "env_path": None,
+                   "tool_input": tool_input, "env": {"LOCAL_TIME_NOW": WAIT_UNTIL_NOW}})
+
+
 def remedy_refusal(form, limit=None):
     """'' when the guard allows `form`, else what it refused. The foreground and the background are both tried,
     unless a `limit` is given: the form is then judged under that time limit in the background only. A remedy that
     says to run a lane lint in the background is judged there, since a foreground call is refused at any limit."""
     for background in ((True,) if limit is not None else (False, True)):
-        tool_input = {"command": form}
-        if background:
-            tool_input["run_in_background"] = True
-        if limit is not None:
-            tool_input["timeout"] = limit
-            tool_input["description"] = TAIL_BG_UNTIL
-        got, reason = decide({"raw": None, "tool": "Bash", "cwd": NOGIT, "session": None,
-                              "env_path": None, "tool_input": tool_input})
+        got, reason = remedy_decision(form, background, limit)
         if got != "allow":
             return "%s%s is %s (%s)" % (form, " under run_in_background" if background else "", got, reason[:70])
     return ""
@@ -1459,15 +1547,18 @@ def remedy_refusal(form, limit=None):
 
 def remedy_check(constant, trigger=None, limit=None):
     """A log check: the remedy named by `constant` names at least one command form, every form is a placeholder
-    the check can fill, and the guard allows every form. `trigger` is (rule, tool_input) for a call that the rule
-    refuses: the guard must refuse it before the remedy is read, so a rule not yet built fails by its own cause.
-    `limit` judges every form under that time limit, in the background (see remedy_refusal)."""
+    the check can fill, and the guard allows every form. A form the foreground refuses passes only when the remedy
+    names run_in_background, since the background is the advice for a wait the foreground refuses. `trigger` is
+    (rule, tool_input) for a call that the rule refuses: the guard must refuse it before the remedy is read, so a rule
+    not yet built fails by its own cause. `limit` judges every form under that time limit, in the background (see
+    remedy_refusal) and skips the foreground rule."""
     def check():
         import guard_stream  # the one home of the remedies (hooks/guard_stream.py)
         if trigger is not None:
             rule, tool_input = trigger
             got, reason = decide({"raw": None, "tool": "Bash", "cwd": NOGIT, "session": None,
-                                  "env_path": None, "tool_input": dict(tool_input)})
+                                  "env_path": None, "tool_input": dict(tool_input),
+                                  "env": {"LOCAL_TIME_NOW": WAIT_UNTIL_NOW}})
             if got != "deny" or rule not in reason:
                 return False, ("the guard does not refuse %s under run_in_background with rule %s, so no %s is "
                                "printed to read" % (tool_input["command"], rule, constant))
@@ -1480,9 +1571,22 @@ def remedy_check(constant, trigger=None, limit=None):
         unfilled = [f for f in forms if "<" in f]
         if unfilled:
             return False, "%s names a placeholder the check cannot fill: %s" % (constant, unfilled[0])
-        refused = [m for m in (remedy_refusal(f, limit) for f in forms) if m]
-        if refused:
-            return False, "%s names a form the guard refuses: %s" % (constant, refused[0])
+        if limit is not None:
+            refused = [m for m in (remedy_refusal(f, limit) for f in forms) if m]
+            if refused:
+                return False, "%s names a form the guard refuses: %s" % (constant, refused[0])
+            return True, "%s names %d command forms, and the guard allows each" % (constant, len(forms))
+        # The scope comes first: a remedy that names wait-until must reach a foreground refusal under the far sample.
+        under = {f: (remedy_decision(f, False)[0], remedy_decision(f, True)[0]) for f in forms}
+        if "wait-until" in reason and not any("wait-until" in f and under[f][0] != "allow" for f in forms):
+            return False, "%s names wait-until, but the far sample never reached a foreground refusal" % constant
+        background = [f for f in forms if under[f][1] != "allow"]
+        if background:
+            return False, "%s names a form the guard refuses under run_in_background: %s" % (constant, background[0])
+        foreground = [f for f in forms if under[f][0] != "allow"]
+        if foreground and "run_in_background" not in reason:
+            return False, ("%s names the form %s, which is refused in the foreground, and the remedy names no "
+                           "run_in_background" % (constant, foreground[0]))
         return True, "%s names %d command forms, and the guard allows each" % (constant, len(forms))
     return check
 
