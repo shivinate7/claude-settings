@@ -30,6 +30,9 @@ RerunCache: a rerun at the same key runs no passing step and prints PASS (cached
   checkout, a changed tree a step before it wrote into, an amend with the same tree, a moved base, and a saved pass seven days old
   from its save (a hit does not refresh it) each miss too. The same commit in another worktree hits, a volatile variable does not
   change the key, and past 300 saved passes the oldest are pruned.
+ScopeLint: --lint with a base reads each needs.scope.outputs flag from the repo's .github/scripts/ci-scope.sh, the script CI's scope
+  job runs, on the diff to the base. A step gated on a false flag is skipped. A flag the script does not give, or a script that
+  fails, leaves its step to run, and the log says UNKNOWN scope.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -105,6 +108,9 @@ class Job(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.root, True)
         subprocess.run(["git", "init", "-q", "-b", "main", self.root], check=True, env=ENV)
         self.log = os.path.join(self.root, "verdict.log")
+
+    def git(self, *a):
+        subprocess.run(["git", "-C", self.root, *a], check=True, env=ENV, capture_output=True)
 
     def job_call(self, *steps, args=(), env=None, script=CI_JOB, launch=(), job="lane", other=None):
         """argv and env of one run of the job: its workflow is written into the throwaway repo. launch: python's own flags
@@ -529,9 +535,6 @@ class LintBase(Job):
     PR = "${{ github.event_name == 'pull_request' }}"
     NARRATION = step("Comment narration check", 'python3 lint/check_comment_narration.py --base "origin/$BASE_REF"',
                      **{"if": PR}, env={"BASE_REF": "${{ github.base_ref }}"})
-
-    def git(self, *a):
-        subprocess.run(["git", "-C", self.root, *a], check=True, env=ENV, capture_output=True)
 
     def lane_adds_narration(self, origin=True):
         for rel in ("lint/check_comment_narration.py", "lint/layout.py", "lint/layout.json", "lint/diff_moves.py",
@@ -3793,6 +3796,136 @@ class RerunCache(unittest.TestCase):
         """Move a file's mtime by `seconds` from its current mtime: a synthetic clock for a saved pass's age, with no sleep."""
         when = os.path.getmtime(path) + seconds
         os.utime(path, (when, when))
+
+
+class ScopeLint(Job):
+    """`--lint` with a base reads each `needs.scope.outputs` flag from .github/scripts/ci-scope.sh of the repo under test, the
+    script CI's scope job runs, on the diff from the base to HEAD. A step gated on a flag that reads false is skipped. A flag
+    the script does not give, or a script that fails, leaves its step to run, and the log says UNKNOWN scope."""
+
+    SCOPE = ".github/scripts/ci-scope.sh"
+    PROBE = "lint/check_scope_probe.py"
+    PROBE_SRC = "import sys\nopen('ran-%s.txt' % sys.argv[1], 'w').close()\n"  # a probe step leaves one marker: it ran
+    SCOPE_ENV = ("EVENT", "BASE_SHA", "HEAD_REF", "GREEN_HEAD", "PR_HEAD", "GITHUB_OUTPUT")  # the script's inputs and its output
+    EXPECT = {"true": "PASS", "false": "skipped"}  # a flag's value, and the verdict of a step gated on it
+    FAILS = "echo 'scope: the script broke' >&2\nexit 1\n"
+    OMITS_CODE = 'echo "guard=false" >> "$GITHUB_OUTPUT"\n'
+    STUB_CODE_FALSE = 'touch scope-stub-ran.txt\necho "code=false" >> "$GITHUB_OUTPUT"\n'
+
+    def job_call(self, *steps, **keys):
+        """The run's environment without the script's variables, so each case sets them through the run, not the caller."""
+        argv, env = super().job_call(*steps, **keys)
+        return argv, {k: v for k, v in env.items() if k not in self.SCOPE_ENV}
+
+    def real_script(self):
+        with open(os.path.join(HERE, "..", self.SCOPE), encoding="utf-8", newline="") as f:
+            return f.read()
+
+    def write(self, files):
+        for rel, text in files.items():
+            path = os.path.join(self.root, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(text)
+
+    def commit_base(self, script):
+        """main holds the probe, the two lists the script reads, and the scope script the repo holds (its text)."""
+        self.write({self.PROBE: self.PROBE_SRC, "landed-dirs.txt": "landed-probe-dir\n",
+                    ".github/guard-inputs.txt": "no-such-path/*\n", self.SCOPE: script})
+        self.git("add", "-A")
+        self.git("commit", "-qm", "base")
+
+    def lane(self, files, name="lane"):
+        """A branch off main whose one commit holds `files` (path -> text); no files makes an empty commit."""
+        self.git("checkout", "-q", "main")
+        self.git("checkout", "-qb", name)
+        self.write(files)
+        if files:
+            self.git("add", "--", *files)
+        self.git("commit", "-q", "--allow-empty", "-m", "lane")
+
+    def flags_of_script(self):
+        """The name=value lines the repo's scope script writes for the lane's diff against main, run as the pull-request
+        scope job runs it."""
+        out = os.path.join(self.root, "scope-output.txt")
+        if os.path.exists(out):
+            os.remove(out)
+        base = subprocess.run(["git", "-C", self.root, "rev-parse", "main"], check=True, capture_output=True,
+                              text=True, env=ENV).stdout.strip()
+        env = {k: v for k, v in ENV.items() if k not in self.SCOPE_ENV}
+        env.update(EVENT="pull_request", BASE_SHA=base, GITHUB_OUTPUT=out)
+        done = subprocess.run(["bash", self.SCOPE], cwd=self.root, env=env, capture_output=True, text=True, timeout=120)
+        self.assertEqual(done.returncode, 0, "scope: the script failed on the fixture\n" + done.stdout + done.stderr)
+        with open(out, encoding="utf-8") as f:
+            return dict(ln.strip().split("=", 1) for ln in f if "=" in ln)
+
+    def probe(self, flag):
+        """A lint step gated on one flag; its run leaves a marker."""
+        return step("flag %s" % flag, "python3 %s %s" % (self.PROBE, flag),
+                    **{"if": "${{ needs.scope.outputs.%s == 'true' }}" % flag})
+
+    def ran(self, flag):
+        return os.path.exists(os.path.join(self.root, "ran-%s.txt" % flag))
+
+    def lint(self, *steps):
+        return self.run_job(*steps, args=("--lint", "--base", "main"))
+
+    def test_a_docs_notes_change_skips_a_step_gated_on_code(self):
+        self.commit_base(self.real_script())
+        self.lane({"docs/notes/x.md": "a note\n"})
+        self.assertEqual(self.flags_of_script()["code"], "false", "scope: the script sets code true for a docs-only diff")
+        rc, lines, out = self.lint(self.probe("code"))
+        self.assertEqual(by_step(lines).get("flag code"), "skipped", out)
+        self.assertFalse(self.ran("code"), "scope: the step gated on code ran for a docs-only diff\n" + out)
+
+    def test_a_hooks_guard_change_runs_a_step_gated_on_code(self):  # the control: the script sets code true here
+        self.commit_base(self.real_script())
+        self.lane({"hooks/guard.py": "x = 1\n"})
+        self.assertEqual(self.flags_of_script()["code"], "true", "scope: the script sets code false for a hooks/guard.py change")
+        rc, lines, out = self.lint(self.probe("code"))
+        self.assertEqual(by_step(lines).get("flag code"), "PASS", out)
+        self.assertTrue(self.ran("code"), "scope: the step gated on code did not run for a hooks/guard.py change\n" + out)
+
+    def test_every_flag_checks_yml_reads_takes_the_value_the_script_gives(self):
+        """Each flag the workflow reads is computed, so no flag defaults to true. A docs-only diff and an empty one (the
+        script sets every flag on) are both checked: each probe step runs or skips as the script's value says."""
+        with open(CHECKS, encoding="utf-8") as f:
+            names = sorted(set(re.findall(r"needs\.scope\.outputs\.([\w-]+)", f.read())))
+        self.commit_base(self.real_script())
+        for label, files in (("docs-only", {"docs/notes/x.md": "a note\n"}), ("empty", {})):
+            self.lane(files, name="lane-" + label)
+            want = self.flags_of_script()
+            absent = [n for n in names if n not in want]
+            self.assertEqual(absent, [], "scope: the script gives no value for a flag checks.yml reads, %s diff" % label)
+            rc, lines, out = self.lint(*[self.probe(n) for n in names])
+            got = by_step(lines)
+            wrong = ["%s (script %s, ci-job %s)" % (n, want[n], got.get("flag " + n, "no line")) for n in names
+                     if got.get("flag " + n) != self.EXPECT.get(want[n])]
+            self.assertEqual(wrong, [], "scope: ci-job's steps differ from the script's flags, %s diff: %s\n%s"
+                             % (label, ", ".join(wrong), out))
+
+    def test_a_scope_script_that_fails_runs_the_step_and_logs_unknown_scope(self):
+        self.commit_base(self.FAILS)
+        self.lane({"docs/notes/x.md": "a note\n"})
+        rc, lines, out = self.lint(self.probe("code"))
+        self.assertTrue(self.ran("code"), "scope: a step gated on a flag the failed script did not give did not run\n" + out)
+        self.assertIn("UNKNOWN scope", out, "scope: the log does not say UNKNOWN scope when the script fails\n" + out)
+
+    def test_a_flag_the_script_omits_runs_its_step_and_logs_unknown_scope(self):
+        self.commit_base(self.OMITS_CODE)
+        self.lane({"docs/notes/x.md": "a note\n"})
+        rc, lines, out = self.lint(self.probe("code"))
+        self.assertTrue(self.ran("code"), "scope: a step gated on a flag the script omits did not run\n" + out)
+        self.assertIn("UNKNOWN scope", out, "scope: the log does not say UNKNOWN scope for a flag the script omits\n" + out)
+
+    def test_ci_job_takes_its_flags_from_the_scope_script_the_repo_holds(self):
+        # The stub says code false for a hooks/guard.py change, which the real script calls true, so only a run of the stub skips the step.
+        self.commit_base(self.STUB_CODE_FALSE)
+        self.lane({"hooks/guard.py": "x = 1\n"})
+        rc, lines, out = self.lint(self.probe("code"))
+        self.assertTrue(os.path.exists(os.path.join(self.root, "scope-stub-ran.txt")),
+                        "scope: ci-job did not run .github/scripts/ci-scope.sh of the repo under test\n" + out)
+        self.assertEqual(by_step(lines).get("flag code"), "skipped", out)
 
 
 if __name__ == "__main__":
