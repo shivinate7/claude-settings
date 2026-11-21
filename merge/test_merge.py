@@ -145,9 +145,12 @@ def complete_config(**fields):
     CONFIG itself leaves requiredChecks out, and the notice is printed above the stop line a case reads."""
     return json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=["checks"], **fields)))
 
+FAKE_REPO = "owner/repo"  # the repository a FakeHost pull request's head and base both live in, as the info dict names them (owner/name)
+
 class FakeHost:
     """The GitHub half, scripted. `other` is a second clone that plays a competing pusher and the merger."""
     built = True
+    head_repo = base_repo = FAKE_REPO  # the repositories pr() reports: a case sets head_repo to another for a fork
     own_number = 7  # the lane's own PR: pr() serves its head from the branch; the lane-lint cases name it 7
 
     def now(self):
@@ -194,12 +197,14 @@ class FakeHost:
                 raise merge.Stop(f"reading the pull request failed: HTTP 404: Not Found (#{n})")
             row = self.pulls[n]
             return {"head": row["head"]["sha"], "branch": row["head"]["ref"], "base": row["base"]["ref"], "state": row["state"].upper(),
-                    "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": bool(row["draft"]), "body": row["body"] or ""}
+                    "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": bool(row["draft"]), "body": row["body"] or "",
+                    "head_repo": self.head_repo, "base_repo": self.base_repo}
         head = merge.origin_head(self.root, self.branch)
         base = (self.base_seq.pop(0) if len(self.base_seq) > 1 else self.base_seq[0]) if self.base_seq else self.base
         return {"head": self.head_override or head, "branch": self.branch, "base": base, "state": self.pr_state,
                 "mergeable": self.mergeable, "merge_state": "CLEAN", "draft": self.draft, "body": self.body,
-                "changed_files": len(self.changed) if self.changed_files is None else self.changed_files}
+                "changed_files": len(self.changed) if self.changed_files is None else self.changed_files,
+                "head_repo": self.head_repo, "base_repo": self.base_repo}
 
     def open_pulls(self):
         """-> the open pull requests as `GET pulls` lists them: the own PR, then each scripted row that is open. Each call is one list read."""
@@ -265,7 +270,8 @@ class FakeHost:
     def pr_info(self, n):  # the same fields as pr(), read from the entry add_pr or create_pr made
         p = self.batch_pulls[n]
         return {"head": merge.origin_head(self.root, p["branch"]), "branch": p["branch"], "base": p["base"], "state": p["state"],
-                "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": p["draft"], "body": p["body"]}
+                "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": p["draft"], "body": p["body"],
+                "head_repo": self.head_repo, "base_repo": self.base_repo}
 
     def batch_pr(self, branch):  # the open pull request whose head is `branch`, as (n, info), or None
         self.batch_pr_calls.append(branch)

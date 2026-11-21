@@ -1980,7 +1980,7 @@ def repo_proof_hit(stripped: str, cwd: str, transcript: str, session_id: str = "
     """Return a short label when a cloud session's `merge --confirm` or `merge --ready` acts in a checkout whose repo no cs-repo tag of the own newest
     get_session record names, else ''. Fails closed inside the clause, like role_proof_hit: an unparseable command, an unreadable
     checkout, no record and a set_session_tags after the record are each a refusal, because the guard-wide crash path fails open.
-    --lane-lint merges nothing and is not judged. Cost: none for a call that is no merge confirm;
+    --lane-lint merges no pull request and is not judged. Cost: none for a call that is no merge confirm;
     else one parse, one read of the origin and one transcript read.
 
     A local session is judged on `--confirm` only, by its OWN record (session_role.local_judgement, rules a, b, c): an own file must name

@@ -169,15 +169,19 @@
                           process kept, file or timer.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"] [--with PR,PR,...] [--touched-tests]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
-                          --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
+                          --base origin/<base>` in a temporary detached worktree. A PR gives its head and base; a
                           commit or ref is linted against --base (default main). A PR on a base other than main also FAILs when its head lacks that base's head (never lifted). A FAIL step refuses. An unknown refuses unless
                           --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. A lint that ran no lint
-                          CI step is an unknown. The `PASS:` line names the CI steps skipped, as a count and names. Takes no lock, merges
-                          and pushes nothing, except that a PASS on a PR number posts one comment on it, as the account that runs it
+                          CI step is an unknown. The `PASS:` line names the CI steps skipped, as a count and names. Takes no lock and merges
+                          no pull request. A PASS on a PR number posts one comment on it, as the account that runs it
                           (the join and --reviewed count only an owner's); any session may run it, cloud included. Cost per call: one
                           ci-job run (about 550 s, measured once on one PR head), one worktree, and on a PASS one comment post.
                           Every head, a ref or commit too, is first merged into origin/<base> with `git merge-tree --write-tree`. A conflict FAILs,
-                          naming the base (never lifted).
+                          naming the base (never lifted), and nothing is resolved or pushed. A PR on main (not an integration PR, not a Record-claim head)
+                          whose head lacks main's tip is linted as the merge commit of the head and the tip. After a full PASS (the lint, the mutation test
+                          and the touched tests) that merge commit is pushed to the PR's branch with a plain push, and the PASS line and the comment name
+                          it, so the PASS head is the merged head. A refused push stops with no comment. A FAIL, an unknown, a lifted unknown and a batch
+                          runner's pre-join call push nothing. Cost of the push: one `git push` per call, only when the head is behind main.
                           A PR number is also checked against each other open PR of its lane (a draft counts; a PR whose body holds a
                           session URL the linted PR's body holds). Order: the stack stop, the base check, the cross-measure, then the ci-job
                           run. An unknown in the first three stops before the ci-job run, and --lint-unknown-ok never lifts it. A FAIL in the base
@@ -1419,7 +1423,7 @@ class Host:
         return self.info(json.loads(out))
 
     def pr(self, n):
-        """-> {head, branch, base, state, mergeable, merge_state, draft, body, created, changed_files}"""
+        """-> {head, branch, base, state, mergeable, merge_state, draft, body, created, changed_files, head_repo, base_repo}"""
         info = self.read_pr(n)
         self.base = info["base"]  # the PR's own base drives required_names
         self.branch = info["branch"]
@@ -1433,7 +1437,8 @@ class Host:
                 "mergeable": cls.MERGEABLE[d.get("mergeable")], "merge_state": (d.get("mergeable_state") or "unknown").upper(),
                 "draft": bool(d.get("draft")), "body": d.get("body") or "", "created": d.get("created_at"),
                 "merge_commit": d.get("merge_commit_sha"),  # set on an open pull request too: it names the merge only when the state reads MERGED
-                "changed_files": d.get("changed_files")}  # only --review-record reads the count; pr_files stops on a missing one
+                "changed_files": d.get("changed_files"),  # only --review-record reads the count; pr_files stops on a missing one
+                "head_repo": ((d["head"].get("repo") or {}).get("full_name")), "base_repo": ((d["base"].get("repo") or {}).get("full_name"))}  # owner/name; None when the repo is gone (a deleted fork)
 
     def open_prs(self):
         """-> [(number, pr() fields)] of every open pull request, all pages. A failed read is a Stop, never an empty list."""
@@ -2516,10 +2521,10 @@ def holds_base(wt, base_ref, sha, raise_unread=False):
         raise Unread(text)
     return text, None
 
-def push_branch(wt, branch, lease=None, cite=""):
-    """A plain push. Never force: a moved branch refuses it, and nothing reaches origin.
+def push_branch(wt, branch, lease=None, cite="", source="HEAD"):
+    """A plain push of `source` (HEAD by default; lane_lint passes its merge commit, which `wt` holds as an object). Never force: a moved branch refuses it, and nothing reaches origin.
     `lease`, a sha, makes it a force-with-lease push that lands only while origin still holds that sha: a batch rebuild is the one caller. `cite` ends the stop's text: that caller passes its own."""
-    c, out = git(wt, "push", "-q", *([f"--force-with-lease=refs/heads/{branch}:{lease}"] if lease else []), "origin", f"HEAD:refs/heads/{branch}")
+    c, out = git(wt, "push", "-q", *([f"--force-with-lease=refs/heads/{branch}:{lease}"] if lease else []), "origin", f"{source}:refs/heads/{branch}")
     if c:
         raise Stop(f"the push of {branch} was refused. Nothing is on origin from this run. Run again.{' ' + cite if cite else ''}\n{out}")
 
@@ -3536,9 +3541,9 @@ def tool_key():
     digest.update(b"env\0" + tool_env().encode())
     return digest.hexdigest()
 
-def saved_pass_path(root, head, merged, base, job, pr_body, tool):
-    """The file that holds the saved PASS of `job` at (head, merged tree, base name, base tip, pr_body, the tool's bytes), or None when the clone's git dir
-    cannot be read. `merged` is [the merged tree, the base tip] (merge_reason's list). The key is the head sha, the merged tree, the base name, the base tip
+def saved_pass_path(root, head, merged, base, job, pr_body, tool, read):
+    """The file that holds the saved PASS of `job` at (head, merged tree, base name, base tip, pr_body, the tool's bytes, read), or None when the clone's git dir
+    cannot be read. `merged` is [the merged tree, the base tip] (merge_reason's list). `read` is the commit ci-job reads as CI_JOB_HEAD_SHA: the pushed merge M when the run may push, else the head. A PASS of a run that read the head never serves a run that reads M, so a push is never of a merge that ci-job did not read. The key is the head sha, `read`, the merged tree, the base name, the base tip
     the lint merged, the job name, a hash of the PR body that ci-job reads as PR_BODY (None, a ref or commit with no body, is told from an empty body) and
     `tool`, the tool_key the caller took once before the job (so a tool-tree edit during the run never saves under the new key), so a new head, base, body or an edit to a file the lint reads names another file. The base name is in the key since ci-job runs against
     origin/<base>; the tip, since a tip that moves with no change to the merged tree is a new base. The folder sits under the clone's git dir, which outlives a lint tree and holds no state of a lane's work."""
@@ -3550,18 +3555,18 @@ def saved_pass_path(root, head, merged, base, job, pr_body, tool):
     if tool is None:
         return None
     body = "none" if pr_body is None else "body:" + hashlib.sha256(pr_body.encode()).hexdigest()
-    key = hashlib.sha256("\0".join([head, merged[0], merged[1], base, job, body, tool]).encode()).hexdigest()
+    key = hashlib.sha256("\0".join([head, read, merged[0], merged[1], base, job, body, tool]).encode()).hexdigest()
     return os.path.join(gitdir, SAVED_PASS_FOLDER, key + ".json")
 
-def saved_pass_read(root, head, merged, base, job, pr_body, tool):
+def saved_pass_read(root, head, merged, base, job, pr_body, tool, read):
     """-> {"skipped": [...], "notes": [...]} of the saved PASS at this key, or None: no file, or one that is empty, unreadable or not a PASS record (a miss)."""
     try:
-        path = saved_pass_path(root, head, merged, base, job, pr_body, tool)
+        path = saved_pass_path(root, head, merged, base, job, pr_body, tool, read)
         if path is None:
             return None
         with open(path, "rb") as f:
             data = json.loads(f.read(SAVED_PASS_MAX_BYTES + 1).decode("utf-8"))
-        key = {"head": head, "tree": merged[0], "tip": merged[1], "base": base, "job": job}
+        key = {"head": head, "read": read, "tree": merged[0], "tip": merged[1], "base": base, "job": job}
         if (not isinstance(data, dict) or data.get("verdict") != "pass" or any(data.get(k) != v for k, v in key.items())
                 or not all(isinstance(data.get(k), list) and all(isinstance(x, str) for x in data[k]) for k in ("skipped", "notes"))):
             return None
@@ -3596,17 +3601,17 @@ def saved_pass_prune(folder, keep_path):
         except OSError:
             pass
 
-def saved_pass_write(root, head, merged, base, job, skipped, notes, pr_body, tool):
+def saved_pass_write(root, head, merged, base, job, skipped, notes, pr_body, tool, read):
     """Save the PASS of `job` after a run that passed, and only then: a fail, a timeout, an unknown and a run with no verdict never reach this call.
     The file is written whole and moved into place, so a reader never sees half of it, and its .part file is removed on any exit, a SIGTERM's SystemExit
     included. A record over SAVED_PASS_MAX_BYTES, or any write error, saves nothing: the next lint runs the job, which costs time and never a wrong pass.
     A save then prunes the folder (saved_pass_prune)."""
     part = None
     try:
-        path = saved_pass_path(root, head, merged, base, job, pr_body, tool)
+        path = saved_pass_path(root, head, merged, base, job, pr_body, tool, read)
         if path is None:
             return
-        body = json.dumps({"verdict": "pass", "head": head, "tree": merged[0], "tip": merged[1], "base": base, "job": job,
+        body = json.dumps({"verdict": "pass", "head": head, "read": read, "tree": merged[0], "tip": merged[1], "base": base, "job": job,
                            "skipped": list(skipped), "notes": list(notes)}).encode("utf-8")
         if len(body) >= SAVED_PASS_MAX_BYTES:
             return
@@ -3866,6 +3871,12 @@ def refuse_incomplete_tree(wt, head, base, tree=None):
         raise UnknownStop("\n".join([f"the lint of {head[:9]} against {base} is unknown, not a pass: the lint worktree lacks {', '.join(missing)}, so no step ran.",
                                      "Run again. If it keeps happening, the lint worktree made for this head is incomplete. --lint-unknown-ok does not lift this. " + LANE_LINT_REMEDY]))
 
+def mergeable_into_branch(info):
+    """True when lane_lint may push a merge commit to the pull request's branch: the pull request is open and its head lives in its base's repository. A fork's
+    branch is not ours to push to. A repository that GitHub no longer names (None) and an info with no repository field are never assumed to be ours."""
+    head_repo = info.get("head_repo")
+    return info["state"] == "OPEN" and head_repo is not None and head_repo == info.get("base_repo")
+
 def landed_sweep():
     """The landed sweep, `<config dir>/janitor/sweep.py`, read at call time. merge runs from a temp tree launch.py deletes at the end, so a path from this file's own __file__ is gone by the time the owner reads it."""
     from shared_names import config_dir  # hooks/shared_names.py, the one home of the config dir, on sys.path from the top of this file
@@ -3939,19 +3950,23 @@ def refuse_full_disk(root):
 
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_tests=False, mutate_run=True, pre_join=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
-    in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
+    in a temporary detached worktree, removed on every exit. Takes no lock. Pushes nothing, except the one merge commit below. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR, and a stacked PR (base other than main) whose head lacks its base's head stops first.
     Then every head, a ref or commit too, is merged into origin/<base> with merge_reason: a conflict is a FAIL that names the base, and an unknown is a Stop.
     Once those pass, the merged tree is made a commit (`git commit-tree`, first parent the base tip, second the head) and the lint worktree checks it out, so every step
     and the touched tests read the files of the merge, not the head's older copy, and a diff of the base against HEAD or the work tree shows only the lane's own changes.
-    The first parent is the base tip that merge_reason merged, never a later read of origin/<base>. ci-job gets the head as CI_JOB_HEAD_SHA, so its
-    `github.event.pull_request.head.sha` is the pushed head, not the merge commit. A commit-tree or checkout that fails is an UnknownStop, which no flag lifts.
+    The first parent is the base tip that merge_reason merged, never a later read of origin/<base>. A commit-tree or checkout that fails is an UnknownStop, which no flag lifts.
+    A pull request on the default branch that is open, has its head in its base's repository (mergeable_into_branch), is not an integration PR, is not a `pre_join` call, whose head the caller's checkout holds (an ancestor of its HEAD) and holds no Record-claim, and lacks that base tip is linted as M instead:
+    the merge commit of the head (first parent) and the tip (second), made with base_merge_message and the tree merge_reason read. The lint commit's second parent is then M,
+    and ci-job gets M as CI_JOB_HEAD_SHA, so its `github.event.pull_request.head.sha` is M. For any other target the second parent is the head, and CI_JOB_HEAD_SHA is the head.
+    M is pushed only after the lint, the mutation test and the touched tests all pass (a plain push of M to the pull request's branch, never forced). A refused push (the branch moved) is a Stop
+    that posts nothing. A FAIL, an unknown (lifted or not) and a conflict push nothing; a conflict is never resolved here. The PASS line and the comment name M, the head that passed.
     Then cross_measure checks a PR's head against the lane's other open PRs and `with_prs`: an unknown there is a Stop too.
     A FAIL above (the base conflict, a clash that counts) or an unknown stops before the ci-job run, as one refusal that lists every FAIL block; the ci-job never runs beside it.
     Any other target is a commit or ref. ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     A FAIL above, and exit 1 of ci-job (a FAIL), refuse always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
     A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names.
-    A PASS on a pull request number posts the lane-lint comment (lint_body) naming the head it read, which `--reviewed` and the join require; a failed post
+    A PASS on a pull request number posts the lane-lint comment (lint_body) naming the head it read (M when M was pushed), which `--reviewed` and the join require; a failed post
     prints a reason line and still exits 0. A FAIL, an unknown and a ref or commit target post nothing.
     A lane of the repo that carries the tool (a base that holds bin/ci-job and merge/merge.py) that changes bin/ci-job, or a file it imports directly
     (ci_job_import_paths), also runs the head's own bin/ci-job after the tool's copy passes, and passes only when both pass. The head copy's saved PASS
@@ -3965,7 +3980,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     A hand-in of a pull request that is not an integration PR is refused while its body names an open replaced pull request (open_named); no override lifts it.
     On a batch integration PR, a PASS (after its lint comment) reopens each closed lane the block has dropped when the tool closed it, and posts a pointer after the reopen (reopen_dropped);
     the PASS closes no lane and posts no pointer on one, because the merge of the integration PR closes each open lane its freeze block names, as replaced, after posting a pointer comment on it (close_members_after_merge).
-    A job that passes is saved (saved_pass_write) under the clone's git dir, keyed by the head sha, the merged tree, the base name and tip, the job name, a hash of the PR body and a hash of the tool's folders, the files LINT_FILES names outside them, and the env they read (tool_files, tool_env), taken once before the job. A rerun at
+    A job that passes is saved (saved_pass_write) under the clone's git dir, keyed by the head sha, the commit ci-job reads (the pushed merge when the run may push), the merged tree, the base name and tip, the job name, a hash of the PR body and a hash of the tool's folders, the files LINT_FILES names outside them, and the env they read (tool_files, tool_env), taken once before the job. A rerun at
     the same key skips the job and prints "PASS (cached)"; it still posts the lane-lint comment. A fail, a timeout, an unknown and a lifted unknown are never saved,
     and a corrupt, empty or unreadable file is a miss. The mutation test run (mutate_run_check) does not go through this path and is not saved.
     Before any tree is made, refuse_full_disk refuses a drive under the guard's full disk floor, in a cloud session and a local one."""
@@ -3986,7 +4001,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     else:
         head, base = lane_head_and_base(root, target, base)
         tmp, wt = add_worktree(root, head)
-    touched = None
+    touched, pushed_merge = None, None
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
         pin_notes, fails, reports, stop = [], [], [], ""
         refuse_incomplete_tree(wt, head, base)
@@ -4022,10 +4037,43 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
                 say(f"merge: draft run of {head[:9]} is {draft}, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *draft_lines)
         if fails or stop:  # as on main, a counted FAIL or an unknown ends the run before the ci-job
             raise Stop("\n".join([*([f"the lint of {head[:9]} against {base} FAILs:", *fails] if fails else []), stop if stop else LANE_LINT_REMEDY]))
-        # The lint tree is a merge commit of the base (first parent) and the head, so every file is the merged copy and HEAD is clean: a step that diffs the
-        # base against HEAD or the work tree reads only the lane's own changes, and the history steps see the lane's commits under one merge commit.
+        # A pull request on the default branch whose head lacks the tip the merge read: M, the merge commit of the head and that tip, is what the lint reads and a
+        # pass pushes (never read again from origin/<base>). Any other target lints a merge commit of the tip and the head that is never pushed.
+        # The caller owns the branch only when its checkout holds the pushed head, so a wrong PR number pushes nothing. An unreadable ancestry (None) is no push, as is a Record-claim head:
+        # a merge commit on top would hide the claim from own_claim. main_in_skip names the first gate that kept the push back, for the PASS line.
+        main_in_skip = ""
+        lacks_tip = target.isdigit() and ancestor(wt, merged[1], head) is False
+        if lacks_tip:
+            if not mergeable_into_branch(info):
+                main_in_skip = "closed or fork PR"
+            elif is_integration_pr(info):
+                main_in_skip = "integration PR"
+            elif pre_join:
+                main_in_skip = "batch runner pre-join"
+            elif head_claim(wt, head):
+                main_in_skip = "Record-claim head"
+            else:
+                held = ancestor(root, head, "HEAD")
+                if held is not True:
+                    main_in_skip = "checkout does not hold the head" if held is False else "checkout ancestry cannot be read"
+                else:
+                    try:  # a failed read keeps the push back; it never aborts a lint that passed
+                        default = default_branch(root)
+                    except Stop:
+                        default = None
+                    if default is None:
+                        main_in_skip = "default branch cannot be read"
+                    elif base != default:
+                        main_in_skip = "base is not the default branch"
+        if lacks_tip and not main_in_skip:
+            c, made = git(wt, *identity(wt), "commit-tree", merged[0], "-p", head, "-p", merged[1], "-m", base_merge_message(base, info["branch"]))
+            if c:
+                raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the merge of the head with {base} could not be made: {made} {LANE_LINT_CITE}")
+            pushed_merge = made.strip()
+        # The lint tree is a merge commit of the base (first parent) and the head (second; M when pushed), so every file is the merged copy and HEAD is clean: a step
+        # that diffs the base against HEAD or the work tree reads only the lane's own changes, and the history steps see the lane's commits under one merge commit.
         c, made = sh(["git", "-C", wt, "-c", "user.name=merge-lane-lint", "-c", "user.email=merge-lane-lint@invalid", "commit-tree", merged[0],
-                      "-p", merged[1], "-p", head, "-m", f"lane-lint merge of {head[:9]} into {base}"])
+                      "-p", merged[1], "-p", pushed_merge or head, "-m", f"lane-lint merge of {head[:9]} into {base}"])
         merge_commit = made.strip()
         c2, out = (c, made) if c else git(wt, "checkout", "-q", "--detach", merge_commit)
         if c2:
@@ -4033,16 +4081,17 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         refuse_incomplete_tree(wt, head, base, merge_commit)
         body_for_job = (info.get("body") or "") if target.isdigit() else None  # a ref or commit has no PR body
         tool = tool_key()  # taken once, before the job: the read and the write use this key, so a tool-tree edit during the run saves under no new key
-        saved = saved_pass_read(root, head, merged, base, LINT_JOB, body_for_job, tool)
+        read_sha = pushed_merge or head  # the commit ci-job reads below: a saved PASS of another commit is no proof of it
+        saved = saved_pass_read(root, head, merged, base, LINT_JOB, body_for_job, tool, read_sha)
         if saved is not None:
             state, lines, log, liftable = "pass", saved["skipped"], [], False
             pin_notes.extend(saved["notes"])
             say(f"PASS (cached): ci-job {LINT_JOB} passed at head {head[:9]} on base {merged[1][:9]} with this merge tool; the job is not run again.")
         else:
-            state, lines, log, liftable = ci_job_run(wt, LINT_JOB, "--lint", "--base", f"origin/{base}", notes=pin_notes, head_sha=head,
+            state, lines, log, liftable = ci_job_run(wt, LINT_JOB, "--lint", "--base", f"origin/{base}", notes=pin_notes, head_sha=read_sha,
                                                      pr_body=body_for_job)
             if state == "pass":
-                saved_pass_write(root, head, merged, base, LINT_JOB, lines, pin_notes, body_for_job, tool)
+                saved_pass_write(root, head, merged, base, LINT_JOB, lines, pin_notes, body_for_job, tool, read_sha)
         if state == "pass" and lane_changes_the_tool(root, base, head):  # the lane's own bin/ci-job lints it too; the lint passes only when both copies pass
             head_copy = os.path.join(wt, *CI_JOB_REL.split("/"))
             if not os.path.isfile(head_copy):
@@ -4051,7 +4100,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
                 say(f"merge: the lane {'renames' if moved else 'deletes'} {CI_JOB_REL}, so it has no copy of its own to run: only the tool's copy linted {head[:9]}.")
             else:
                 head_notes = []
-                saved = saved_pass_read(root, head, merged, base, HEAD_COPY_JOB, body_for_job, tool)
+                saved = saved_pass_read(root, head, merged, base, HEAD_COPY_JOB, body_for_job, tool, head)
                 if saved is not None:
                     h_state, h_lines, h_log, h_liftable = "pass", saved["skipped"], [], False
                     head_notes.extend(saved["notes"])
@@ -4060,7 +4109,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
                     h_state, h_lines, h_log, h_liftable = ci_job_run(wt, LINT_JOB, "--lint", "--base", f"origin/{base}", notes=head_notes, head_sha=head,
                                                                       pr_body=body_for_job, script=head_copy)
                     if h_state == "pass":
-                        saved_pass_write(root, head, merged, base, HEAD_COPY_JOB, h_lines, head_notes, body_for_job, tool)
+                        saved_pass_write(root, head, merged, base, HEAD_COPY_JOB, h_lines, head_notes, body_for_job, tool, head)
                 if h_state == "pass":
                     lines = lines + [l for l in h_lines if l not in lines]
                     pin_notes.extend(n for n in head_notes if n not in pin_notes)
@@ -4100,17 +4149,22 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             raise Liftable("\n".join([f"the touched tests of {short} against {base} are unknown, not a pass:", *unknowns,
                                       'Run it where the test can finish, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
     if state == "pass":
+        if pushed_merge:  # last, after every check above passed: a refusal (the branch moved) posts nothing and prints no PASS
+            push_branch(root, info["branch"], source=pushed_merge, cite=LANE_LINT_CITE)
+            short = pushed_merge[:9]
         named = f" ({len(lines)} CI step{'s' if len(lines) != 1 else ''} skipped: {', '.join(lines)})" if lines else ""
         counts = f"; touched tests: {touched[0]} run, {len(touched[1])} skipped" if touched is not None else ""
-        tail = "The batch runner may take this head, or join it to a batch." if target.isdigit() else "No comment is posted for a ref or commit, so this does not satisfy the join."
+        counts += f"; main-in not pushed ({main_in_skip}): the head lacks {base}'s tip" if main_in_skip else ""
+        tail = (f"The merge of {base} into the lane was pushed to {info['branch']}. " if pushed_merge else "") + "The batch runner may take this head, or join it to a batch." if target.isdigit() else "No comment is posted for a ref or commit, so this does not satisfy the join."
         say(f"PASS: lint of {short} against {base} passes{named}{counts}{'; ' + mutate if mutate else ''}. {tail}", *pin_notes, *report_lines)
         if target.isdigit():  # a ref or commit has no pull request to carry the comment
             n = int(target)
+            named_head = pushed_merge or head
             try:
-                host.post_comment(n, lint_body(n, head))
+                host.post_comment(n, lint_body(n, named_head))
             except Stop as e:  # the lint stands; only the proof on the PR is missing, so say how to get it
                 say(f"merge: the lane-lint comment was not posted on #{n}: {' '.join(str(e).split())} The join and `merge --reviewed` read no PASS for {short} until it is. "
-                    f"Run `merge --lane-lint {n}` again, or post this comment on #{n} as the repo's owner:", *lint_body(n, head).splitlines())
+                    f"Run `merge --lane-lint {n}` again, or post this comment on #{n} as the repo's owner:", *lint_body(n, named_head).splitlines())
             if is_integration_pr(info):  # after the proof, so a refused reopen still leaves the PASS on the pull request. The lanes close after the PR merges (close_members_after_merge), never here
                 reopen_dropped(host, n, info)
         return 0
@@ -5092,10 +5146,14 @@ def fast_checks(root, cfg, n, host, info):
         drop_worktree(root, tmp, wt)
     return 0
 
+def base_merge_message(base, branch):
+    """The message of a merge of origin/<base> into a lane branch: merge_base_in's merge and lane_lint's pushed merge commit share it."""
+    return f"Merge origin/{base} into {branch}"
+
 def merge_base_in(wt, base, branch):
     """Merge origin/<base> into the head checked out in `wt`: a merge commit, parents the head then the tip, no fast-forward. -> its sha.
     Local only: nothing is pushed. The caller has read the merge as clean (holds_base), so a merge that fails here is a Stop, and the tree is left as it was."""
-    c, out = git(wt, *identity(wt), "merge", "--no-ff", "-q", "-m", f"Merge origin/{base} into {branch}", f"origin/{base}")
+    c, out = git(wt, *identity(wt), "merge", "--no-ff", "-q", "-m", base_merge_message(base, branch), f"origin/{base}")
     if c:
         _, aborted = git(wt, "merge", "--abort")
         raise Stop(f"the merge of origin/{base} into {branch} failed, so nothing was pushed {BASE_CITE}: {' '.join(out.split())[:200]}"
@@ -7634,7 +7692,7 @@ def build_parser():
     p.add_argument("-C", "--repo-dir", default=None, metavar="PATH", help="act in the checkout at PATH, not the one the process stands in; the last value wins")
     p.add_argument("--confirm", action="store_true")
     p.add_argument("--express", action="store_true", help="with --confirm: merge a prose-only PR whose body names a ruling in origin/roadmap's store; any other PR refuses")
-    p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing")
+    p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges no pull request; a PR on main behind main's tip is linted merged, and a full pass pushes that merge commit to its branch")
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
     p.add_argument("--with", dest="with_prs", default=None, metavar="PR,PR,...", help="with --lane-lint on a PR number: also check the head against each named open PR (a comma list), even one of another session")
@@ -7833,7 +7891,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 raise Stop("not in a git checkout " + LANE_LINT_CITE)
             with release_on_signals():  # a signal ends the run through lane_lint's `finally`, which removes the worktree
                 with_prs = parse_with(a.with_prs, int(a.pr)) if a.with_prs is not None else ()  # a bad list stops before any read
-                return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok, with_prs, a.touched_tests, pre_join=read_merge_role() == "batch-runner")  # before the role check and any lock: it merges and pushes nothing
+                return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok, with_prs, a.touched_tests, pre_join=read_merge_role() == "batch-runner")  # before the role check and any lock: it merges no pull request, and pushes only the merge commit of a lane behind main after a full pass
         if a.release_check:
             try:
                 c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=a.repo_dir)  # -C names the checkout; None is the process directory's
