@@ -1235,6 +1235,29 @@ lb_add("foreground, merge --lane-lint 9 &, full disk: the brake's own call refus
 lb_add("foreground, merge --lane-lint 9 &, memory 96%: the brake's own call refuses, names the memory, the reader runs once",
        lb_hit_check("load_hit", "Bash", lb_reading(memory_pct=96.0), {"command": "merge --lane-lint 9 &"},
                     deny=LB_MEM96, reads=1))
+# A LINT START BEHIND A LAUNCHER. `python3 bin/merge --lane-lint N & echo $!` and `setsid bin/ci-job --lint & echo $!` run a
+# lint in the background as `bin/ci-job --lint & echo $!` does, so a full machine refuses each one, with one read. A
+# foreground call with no `&` starts no lint, so it reads nothing. The launcher is what each case varies.
+# `python3` reaches no other refusal, so its cases judge the whole guard. `setsid` is refused by detached-launch on its
+# own, so its cases judge the brake's own call (load_hit), as the `merge --lane-lint 9 &` cases above do.
+LB_PY_MERGE_BG = {"command": "python3 bin/merge --lane-lint 12 & echo $!", "timeout": 7200000}   # above the lint bound
+LB_SETSID_CI_BG = {"command": "setsid bin/ci-job --lint & echo $!"}
+lb_add("python3 bin/merge --lane-lint 12 & echo $!, full disk: refused, names the disk, the sweep and the override line",
+       lb_decision_check("Bash", LB_DISK_FULL, "deny", LB_LINT_FULL_NAMES, tool_input=LB_PY_MERGE_BG))
+lb_add("linux, local, python3 bin/merge --lane-lint 12 & echo $!, memory 96%: full, refused, names the memory and the override line",
+       lb_decision_check("Bash", None, "deny", LB_MEM_LINUX_NAMES, tool_input=LB_PY_MERGE_BG,
+                         fake=lb_fake("linux", memory=96.0)))
+lb_add("setsid bin/ci-job --lint & echo $!, full disk: the brake's own call refuses, names the disk and the sweep, the reader runs once",
+       lb_hit_check("load_hit", "Bash", LB_DISK_FULL, LB_SETSID_CI_BG, deny=(lb_gb(3.1, 926), LB_SWEEP), reads=1))
+lb_add("setsid bin/ci-job --lint & echo $!, memory 96%: the brake's own call refuses, names the memory, the reader runs once",
+       lb_hit_check("load_hit", "Bash", lb_reading(memory_pct=96.0), LB_SETSID_CI_BG, deny=LB_MEM96, reads=1))
+# Green controls: python3 on a normal machine is allowed. reads=None, since a lint start may read once.
+lb_add("linux, local, python3 bin/merge --lane-lint 12 & echo $!, memory 50%: allowed (control)",
+       lb_decision_check("Bash", None, "allow", tool_input=LB_PY_MERGE_BG, fake=lb_fake("linux", memory=50.0),
+                         reads=None))
+lb_add("setsid bin/ci-job --lint, foreground with no &, full disk: the brake's own call returns the empty pair, the reader does not run",
+       lb_hit_check("load_hit", "Bash", LB_DISK_FULL, {"command": "setsid bin/ci-job --lint"}, reads=0))
+
 # Cloud: a start call reads the disk and memory once, and its pair is empty only at a disk that is not full and memory
 # not over 95%. A running agent's call reads nothing.
 lb_add("CLAUDE_CODE_REMOTE=true, Agent run_in_background true, memory 97.2%: load_hit refuses, names the memory, "

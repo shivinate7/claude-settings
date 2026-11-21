@@ -139,13 +139,68 @@ def cd_setup(name, reading, want):
     return folder, cfg, flag, ""
 
 
-def cd_bash(folder, cfg, reading, command, tag):
-    """One Bash call under `reading`. -> (decision, reason, side, why)."""
-    run, side, why = cd_run(folder, cfg, {"mode": "main", "reading": reading}, "Bash", {"command": command}, tag)
+def cd_call(folder, cfg, reading, tool, tool_input, tag, remote=False):
+    """One call of any tool through the copy's whole guard under `reading`, as the main session. -> (decision, reason,
+    side, why). The one home of a guarded call in this section: cd_bash is the Bash form of it."""
+    run, side, why = cd_run(folder, cfg, {"mode": "main", "reading": reading}, tool, tool_input, tag, remote)
     if why:
         return None, "", side, why
     decision, reason = _decision(run)
     return decision, reason, side, ""
+
+
+def cd_bash(folder, cfg, reading, command, tag):
+    """One Bash call under `reading`. -> (decision, reason, side, why)."""
+    return cd_call(folder, cfg, reading, "Bash", {"command": command}, tag)
+
+
+# THE AUDIT SPAWN AT A FULL MEMORY. A pending audit must be able to clear when memory is over 95%: its spawn is the one
+# call that clears it, and a recovery control must not depend on the state it recovers (verification-recovery-independent-of-state).
+# The spawn is judged by the whole guard, so these cases hold wherever the exemption is placed.
+def cd_spawn_allowed_check(name, reading, label):
+    """The Audit: spawn while the audit is owed, as the whole guard judges it under `reading`: allowed."""
+    folder, cfg, _flag, why = cd_owed(name)
+    if why:
+        return False, why
+    decision, reason, _side, why = cd_call(folder, cfg, reading, "Agent", CA_AUDIT, name)
+    if why:
+        return False, why
+    problem = ov_want(decision, reason, "allow", "compaction-audit")
+    if problem:
+        return False, "the Audit: spawn was not allowed while the audit is owed, %s: %s" % (label, problem)
+    return True, "the Audit: spawn is allowed while the audit is owed, %s" % label
+
+
+def cd_spawn_clears_check(name, reading, label):
+    """The Audit: spawn under `reading` clears the audit flag, so the audit is no longer owed."""
+    folder, cfg, flag, why = cd_owed(name)
+    if why:
+        return False, why
+    decision, reason, _side, why = cd_call(folder, cfg, reading, "Agent", CA_AUDIT, name)
+    if why:
+        return False, why
+    if os.path.isfile(flag):
+        return False, "the audit flag is still set after the Audit: spawn, %s (decision %s: %s)" % (
+            label, decision, reason[:70])
+    return True, "the Audit: spawn clears the audit flag, %s" % label
+
+
+def cd_spawn_then_bash_check(name, reading, label):
+    """After the Audit: spawn passes under `reading`, an ordinary Bash call is allowed: the owed audit no longer holds
+    the session, so the call that frees memory can run."""
+    folder, cfg, _flag, why = cd_owed(name)
+    if why:
+        return False, why
+    _decision1, _reason1, _side1, why = cd_call(folder, cfg, reading, "Agent", CA_AUDIT, name)
+    if why:
+        return False, why
+    decision, reason, _side2, why = cd_bash(folder, cfg, reading, CD_ORDINARY, name + "-after")
+    if why:
+        return False, why
+    problem = ov_want(decision, reason, "allow", "compaction-audit")
+    if problem:
+        return False, "after the Audit: spawn, an ordinary Bash call was not allowed, %s: %s" % (label, problem)
+    return True, "after the Audit: spawn, an ordinary Bash call is allowed, %s" % label
 
 
 def cd_allowed_check(name, reading, command, tag):
@@ -314,6 +369,14 @@ CD_CHECKS = (
                               cd_sweep_root(CD_WIN_DQ_BS) + ";rm -rf /tmp/claude-disk-cleanup/run-2", "wdqsemi")),
     ("compaction-audit: the cloud disk-full refusal shows the sweep with a double-quoted --root, so a Windows shell keeps its backslashes",
      cd_remedy_check),
+    ("compaction-audit: an owed audit at memory over 95% and a fine disk lets the Audit: spawn through",
+     lambda: cd_spawn_allowed_check("spawn-mem-allowed", CD_MEMORY_FULL, "at memory 96% and a fine disk")),
+    ("compaction-audit: an Audit: spawn that passes at memory over 95% clears the audit flag",
+     lambda: cd_spawn_clears_check("spawn-mem-clears", CD_MEMORY_FULL, "at memory 96% and a fine disk")),
+    ("compaction-audit: after an Audit: spawn that passes at memory over 95%, an ordinary Bash call is allowed",
+     lambda: cd_spawn_then_bash_check("spawn-mem-bash", CD_MEMORY_FULL, "at memory 96% and a fine disk")),
+    ("compaction-audit: control, an owed audit at memory 40% lets the Audit: spawn through and clears the flag",
+     lambda: cd_spawn_clears_check("spawn-fine", CD_FINE, "at memory 40% and a fine disk")),
 )
 FIXTURELESS_CHECKS.update(check for _label, check in CD_CHECKS)   # each builds its own folders, no lazy fixture
 LOG_CHECKS = LOG_CHECKS + CD_CHECKS
