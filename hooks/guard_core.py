@@ -2134,7 +2134,7 @@ def _vetoed() -> bool:
 def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None, on_lift=None,
            continue_on_lift: bool = False):
     """Print a deny or an ask and exit, unless an owner override lifts it (decision
-    owner-override). A lifted act prints nothing, so the normal permission flow runs. The
+    owner-override). A lifted act prints one context line and no decision, so the normal permission flow runs. The
     veto runs before the override is taken, so a call that also holds a never-lifted act spends no override.
     spawn_role is set only on the Opus spawn refusal, the one refusal an Opus override may lift.
     on_lift, when set, runs once when an override lifts the act, so a rule may keep state only for an act that lands.
@@ -2152,8 +2152,11 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
         if lifted:
             record(tool, lifted, rule, matched + " step " + step if step else matched)
             if lifted in override.LIFTS:
-                # An allow prints nothing on stdout, so the owner sees the lift on stderr, as hooks/answered_claims.py does.
-                print("override lifted: %s" % rule, file=sys.stderr)
+                # Claude never sees the stderr of a hook that exits 0, so the lift goes on stdout as one context line with
+                # no permissionDecision. Compact separators keep the line under the 120 characters a verdict reader keeps.
+                print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                                         "additionalContext": "override lifted: %s" % rule}},
+                                 separators=(",", ":")))
                 if on_lift:
                     on_lift()
                 if continue_on_lift:
