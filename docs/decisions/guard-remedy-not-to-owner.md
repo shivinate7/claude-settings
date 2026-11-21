@@ -197,6 +197,13 @@ Text: `PLAIN_CONTRADICTION_REASON`. Rule `output-bring-decisions-as-question` (a
 - "Contradiction: resolved", "Contradiction: settled", "Contradiction: none" and "No contradiction:" claim no open choice, so they pass. "Contradiction: none of" is still a claim.
 - Add the question to Input Needed, with options and a recommendation, or drop the Contradiction line from Deviations.
 
+### Page-path guard (any reply)
+
+Text: `HASSIO_REASON`. Home Assistant app pages are `/<app slug>` now, so a `/hassio/...` page path opens nothing the owner reaches.
+
+- The reply names `/hassio/...`, bare or inside a URL, like `/hassio/ingress/core_configurator` or `/hassio/addon/core_configurator`. Name the page as `/<app slug>` instead.
+- `/api/hassio/...` is the supervisor API and passes. Paths in code spans, fences and question lines are not checked.
+
 ## Shared tails
 
 - Every refusal, except a notes fix (R14; not built; step `notes-fix-no-owner-line`), opens with the owner line from `owner_line()`, which cites this record, and ends with ` (rule reports-order-of-labels)`, then, from a reply guard, the correction line below. That rule says the report's four labels go in order: Done, Deviations, Input Needed, Next. On the rewrite after a refusal, a triage hold gets the tail too.
