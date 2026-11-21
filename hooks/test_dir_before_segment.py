@@ -244,6 +244,44 @@ case("R=<A>; R=<B> cd \"$R\": the cd target is the old value A, never B",
      'R=%s; R=%s cd "$R" && git status' % (TARGET, OTHER), "git status", (TARGET, None))
 
 
+# --- A cd that may not run makes the segment after it uncertain: the `uncertain` flag, which judge_shell reads
+# to fall back to the whole-command folder. The walk sets the flag in two places: an `&&` whose left side may
+# fail, and a branch keyword (then, else, do, elif) that opens the cd's own segment. Each arm has a row. The
+# control rows read the same cd after `;` or with no left side, which always runs, so the flag stays False.
+def expect_uncertain(label, command, scope, want, cwd=SHELL):
+    """The `uncertain` flag dir_before_segment gives the segment that holds SCOPE, which must be the one segment
+    that holds it. `want` is True when a cd ahead of that segment may not have run. The folder is not read here."""
+    ends = []
+    segments = guard_core.split_segments(command, ends)
+    named = [number for number, segment in enumerate(segments) if scope in segment]
+    check(label + " (scope)", len(named) == 1, "%d segments hold %r in %r" % (len(named), scope, command))
+    if len(named) != 1:
+        return
+    flag = []
+    guard_core.dir_before_segment(segments, named[0], cwd, ends, uncertain=flag)
+    check(label, flag == [want], "flag %r, want %r" % (flag, [want]))
+
+
+def uncertain_case(label, command, scope, want, cwd=SHELL):
+    CASES.append((label, lambda: expect_uncertain(label, command, scope, want, cwd)))
+
+
+uncertain_case("&& arm: true && cd <A>, then git status: the cd after && may not run, so the flag is True",
+               'true && cd %s; git status; cd %s' % (TARGET, OTHER), "git status", True)
+uncertain_case("&& arm control: cd <A> && git status: the first cd has no left side that may fail, so the flag is False",
+               'cd %s && git status' % TARGET, "git status", False)
+uncertain_case("then arm: if true; then cd <A>; fi, then git status: the then body may not run, so the flag is True",
+               'if true; then cd %s; fi; git status' % TARGET, "git status", True)
+uncertain_case("else arm: if false; then :; else cd <A>; fi, then git status: the else body may not run, so the flag is True",
+               'if false; then :; else cd %s; fi; git status' % TARGET, "git status", True)
+uncertain_case("do arm: for f in a; do cd <A>; done, then git status: the do body may not run, so the flag is True",
+               'for f in a; do cd %s; done; git status' % TARGET, "git status", True)
+uncertain_case("elif arm: if false; then :; elif cd <A>; then :; fi, then git status: the elif test may not run, so the flag is True",
+               'if false; then :; elif cd %s; then :; fi; git status' % TARGET, "git status", True)
+uncertain_case("branch control: true; cd <A>; git status: a cd after ; runs, so the flag is False",
+               'true; cd %s; git status' % TARGET, "git status", False)
+
+
 @contextlib.contextmanager
 def pinned_home(home):
     """HOME and USERPROFILE point at `home` inside the block, and both are put back after it."""
