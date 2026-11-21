@@ -8091,6 +8091,12 @@ def judge(payload) -> None:
         load_reason, load_matched = running_agent_hit(payload, tool)
     if not load_reason and not lint_start_hit_of(tool, tool_input):
         load_reason, load_matched = lane_session_hit(payload, tool)
+    # The owed audit's own Audit: spawn passes a full memory (decision machine-load-brake, Full): it is the one call that
+    # clears the audit, and a recovery control must not depend on the state it recovers. A full disk still refuses it,
+    # since the disk cleanup (audit_disk_cleanup_hit) frees that first. AUDIT_SPAWN_PASSED is set only while the audit
+    # is owed, so no other spawn is exempt.
+    if load_reason and AUDIT_SPAWN_PASSED and "disk" not in load_matched:
+        load_reason = ""
     if load_reason:
         refuse(tool, "deny", "load-brake", load_reason, load_matched)
 
