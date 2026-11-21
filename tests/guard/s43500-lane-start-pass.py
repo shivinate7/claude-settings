@@ -115,6 +115,10 @@ def _lsp_once_check():
         return False, "with no override: got %s (%s), want a refusal under lane-effort-pin" % (got, reason[:90])
     note = ov_type(config, session, "override", 1)
     got, reason = call(2)
+    # The lift line comes first and the refusal after it, so stdout holds two JSON objects. A reader takes one object,
+    # so the refusal is not read: the defect is the two objects, not the lift.
+    if got == "unparsable" and ov_names_lift(reason.split("}}", 1)[0] + "}}", "lane-effort-pin"):
+        return False, "the lifted call printed the lift line, then a refusal: two JSON objects on stdout, and a reader takes one"
     if got != "deny":
         return False, "the one-act override let the whole call through: got %s (%s), want lane-title-slug refused" % (
             got, reason[:90])

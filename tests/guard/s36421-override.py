@@ -140,11 +140,17 @@ def ov_names_lift(text, rule):
     return "override" in context and any(name and name in context for name in names)
 
 
+def ov_lift_of(got, reason, rule):
+    """True when a verdict is a lift of `rule`: decide() reads the one context line as "unparsable", and only that line
+    that names `rule` counts. Every check that counts lifts reads them through here, so there is one reader."""
+    return got == "unparsable" and ov_names_lift(reason, rule)
+
+
 def ov_want(got, reason, want, rule):
     """'' when (got, reason) is the verdict wanted. An allow prints nothing, or the one line a lifted act prints
     (ov_names_lift). A refusal must name its rule; a tuple of rules lists the ones that may name it. Else why not.
     decide() reads a line with no permissionDecision as "unparsable", so that verdict takes the same line."""
-    if want == "allow" and got == "unparsable" and ov_names_lift(reason, rule):
+    if want == "allow" and ov_lift_of(got, reason, rule):
         return ""
     if got != want:
         return "got %s (%s), want %s" % (got, reason[:70], want)
@@ -993,16 +999,18 @@ def ov_parallel_check(workers=6, rounds=5):
 
         def worker(i):
             start.wait()
-            verdicts[i] = ov_kill(config, session, 60)[0]
+            verdicts[i] = ov_kill(config, session, 60)
         threads = [threading.Thread(target=worker, args=(i,)) for i in range(workers)]
         for thread in threads:
             thread.start()
         for thread in threads:
             thread.join()
-        if verdicts.count("allow") != 1 or verdicts.count("deny") != workers - 1:
-            return False, "round %d: %d calls raced for one override, verdicts %r, want one allow; %s" % (
-                n, workers, verdicts, note or "typed")
-    return True, "%d rounds of %d racing calls, one allow each" % (rounds, workers)
+        lifts = sum(ov_lift_of(got, reason, "machine-wide-kill") for got, reason in verdicts)
+        denies = sum(got == "deny" for got, _reason in verdicts)
+        if lifts != 1 or denies != workers - 1:
+            return False, "round %d: %d calls raced for one override, verdicts %r, want one lift and %d denies; %s" % (
+                n, workers, [got for got, _reason in verdicts], workers - 1, note or "typed")
+    return True, "%d rounds of %d racing calls, one lift each" % (rounds, workers)
 
 
 OV_TAKE_CHILD = (
