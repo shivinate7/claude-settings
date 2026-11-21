@@ -57,7 +57,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `git-cite-by-id` | Ids, not paths. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-record-own-file-per-kind` | Give each record its own file, one folder per kind. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-one-record-per-question` | One record per question. | [`CLAUDE.md`](../CLAUDE.md) |
-| `git-integration-branch-merge` | Each lane PR merges alone through the merge tool, on its own green run and the review its risk needs. | [`CLAUDE.md`](../CLAUDE.md) |
+| `git-integration-branch-merge` | A PR merges alone; it may combine several reviewed lanes. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-screens-verdict` | If the repo has screens, check each screen at every size and theme it ships in. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-browser-login-only-needed` | Prefer a headless or isolated browser over my own, and use my login only when needed. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-announce-own-screen` | Before a window or a screen capture lands on my screen, say so in one line. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -549,6 +549,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `stamp-shallow-depth-two` | `stamp.mjs --check` off the default branch needs `fetch-depth: 0`. | [`docs/debts/stamp-shallow-depth-two.md`](../docs/debts/stamp-shallow-depth-two.md) |
 | `stamp-shell-write-counts-read` | `_shell_reads` is a deny list of write forms, so an unlisted write counts as a read when its text holds a premise's Source token. | [`docs/debts/stamp-shell-write-counts-read.md`](../docs/debts/stamp-shell-write-counts-read.md) |
 | `stamp-shell-write-not-judged` | The stamp rule judges only Write, Edit and MultiEdit to a session handoff, the same scope as `handoff-sections` (item 14). | [`docs/debts/stamp-shell-write-not-judged.md`](../docs/debts/stamp-shell-write-not-judged.md) |
+| `start-audit-opus-grant-untested` | The start audit's Opus lane check reads two grants: the Opus override file and a live timed override. | [`docs/debts/start-audit-opus-grant-untested.md`](../docs/debts/start-audit-opus-grant-untested.md) |
 | `start-fetch-leaves-refs-stale` | The session start fetches only origin's main and its HEAD target, so refs such as `origin/roadmap` age until a session runs `git fetch origin <branch>`. | [`docs/debts/start-fetch-leaves-refs-stale.md`](../docs/debts/start-fetch-leaves-refs-stale.md) |
 | `start-session-checks-after` | Handoff-unread no longer refuses a `start_session` call. | [`docs/debts/start-session-checks-after.md`](../docs/debts/start-session-checks-after.md) |
 | `start-session-load-unbraked` | Status: open. | [`docs/debts/start-session-load-unbraked.md`](../docs/debts/start-session-load-unbraked.md) |
@@ -559,6 +560,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `two-agent-merge-silent-undo` | A builder cannot edit tests and a test-author cannot edit product code. | [`docs/debts/two-agent-merge-silent-undo.md`](../docs/debts/two-agent-merge-silent-undo.md) |
 | `two-worktrees-unexpanded-target` | A `cd` or `git -C` target the guard cannot expand, such as `"$(git rev-parse --show-toplevel)"`, `$REPO` or `"$(pwd)"`, names a folder that does not exist. | [`docs/debts/two-worktrees-unexpanded-target.md`](../docs/debts/two-worktrees-unexpanded-target.md) |
 | `unlock-delete-no-check` | After retry-net-method-safe, a 5xx on the lock-release DELETE stops the unlock with a network stop, and the lock stays until it expires. | [`docs/debts/unlock-delete-no-check.md`](../docs/debts/unlock-delete-no-check.md) |
+| `unstarted-bullets-share-a-file` | The Unstarted shared-file check joins every bullet under one bare `Unstarted:` line into one item. | [`docs/debts/unstarted-bullets-share-a-file.md`](../docs/debts/unstarted-bullets-share-a-file.md) |
 | `unstarted-guard-held` | No check refuses a coordinator report whose `Unstarted:` line omits a step that is ready and not started (rule `reports-name-unstarted-items`). | [`docs/debts/unstarted-guard-held.md`](../docs/debts/unstarted-guard-held.md) |
 | `upgrade-strips-name-port` | The version 1 to 2 upgrade removes `:N` after a name whose extension is in `codeExtensions`. | [`docs/debts/upgrade-strips-name-port.md`](../docs/debts/upgrade-strips-name-port.md) |
 | `verdict-line-only-counts` | `parse_review` in `merge/merge.py` ends a review record at its first `---` line and reads nothing below it. | [`docs/debts/verdict-line-only-counts.md`](../docs/debts/verdict-line-only-counts.md) |

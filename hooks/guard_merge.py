@@ -1755,8 +1755,9 @@ def _claims_a_role(tokens) -> bool:
     return False
 
 
-def _self_role_hit(text: str, depth: int, judge=None) -> bool:
-    """True when `judge` (default `_claims_a_role`) is true of any command the text runs, reading the same places each time."""
+def _self_role_hit(text: str, depth: int, judge=None, unreadable: bool = True) -> bool:
+    """True when `judge` (default `_claims_a_role`) is true of any command the text runs, reading the same places each time.
+    `unreadable` is the answer for a segment that cannot be tokenized (a quote left open): True refuses it, as a claim must."""
     judge = judge or _claims_a_role
     from guard_env import substitution_commands   # imported late: a family reads only the families before it
     stripped = strip_heredoc_bodies(text)
@@ -1768,11 +1769,13 @@ def _self_role_hit(text: str, depth: int, judge=None) -> bool:
                 continue
             tokens = segment_tokens(segment)
             if tokens is None:
-                return True   # a quote left open: the segment names what the judge looks for and cannot be read, so it is refused
+                if unreadable:
+                    return True   # a quote left open: the segment names what the judge looks for and cannot be read, so it is refused
+                continue
             if judge(tokens):
                 return True
             for script in inner_commands(tokens):
-                if depth >= MERGE_NEST_DEPTH or _self_role_hit(script, depth + 1, judge):
+                if _self_role_hit(script, depth + 1, judge, unreadable) if depth < MERGE_NEST_DEPTH else unreadable:
                     return True
     return False
 
@@ -1793,7 +1796,8 @@ def self_role_hit(stripped: str) -> str:
 
 # ---- self-role-claim, child start: a session that holds a role does not start claude (decision session-tiers)
 SELF_ROLE_CHILD_REASON = (
-    "self-role-claim: this session holds a role, and a claude it starts inherits that role, so the child would gain a merge or a "
+    "self-role-claim: a claude this call starts would hold a role. Either this session holds one and the child inherits it, or the call "
+    "resumes (--resume, -r, -c) a session whose role file exists, and a resume keeps that file. The child would gain a merge or a "
     "roadmap push that a cloud child does not have. Do the work in this session, or ask the owner to start the session he wants "
     "from his own terminal. "
     "(decision session-tiers, a session with a role does not start a child session)"  # glossary-ok: session-tiers is the decision's file name
@@ -1824,17 +1828,76 @@ def _starts_claude(tokens) -> bool:
     return False
 
 
-def self_role_child_hit(stripped: str) -> str:
-    """Return a short label when the guard's own environment holds a non-empty CS_SESSION_ROLE and a Bash or PowerShell call starts claude, else ''.
-    The child inherits the variable and its SessionStart hook would write its own role file, so it would gain a role no cloud child has. Fails
-    closed inside the clause: a call that names claude and cannot be read is refused, because the guard-wide crash path fails open.
-    Cost: one environment read per call, and a parse only when the variable is set and the call names claude."""
-    if not os.environ.get(SELF_ROLE_VARIABLE) or "claude" not in stripped.lower():
+def _resume_target(tokens):
+    """None when no claude start in one tokenized command resumes a session. Else the value the resume names, as written ('' for `-c`, `--continue`
+    and a `--resume` or `-r` with no value). Reads the same command words as _starts_claude; a `Start-Process` argument string is split into words."""
+    for at in command_indexes(tokens):
+        if tokens[at] in ("&", "."):
+            at += 1
+            if at >= len(tokens):
+                continue
+        word = _program_word(tokens[at])
+        rest = tokens[at + 1:]
+        if word in ("start-process", "saps", "start") and any(_program_word(t) == "claude" for t in rest):
+            rest = [w for t in rest for w in t.split()]
+        elif word != "claude":
+            continue
+        for place, arg in enumerate(rest):
+            if arg in ("-c", "--continue"):
+                return ""
+            if arg in ("--resume", "-r"):
+                value = rest[place + 1] if place + 1 < len(rest) else ""
+                return "" if value.startswith("-") else value
+            if arg.startswith("--resume="):
+                return arg[len("--resume="):]
+    return None
+
+
+def _resume_names_role(target: str, cwd: str, transcript: str) -> bool:
+    """True when a resume that names `target` would bring back a session whose role file is valid. A session id of the id shape with its own role
+    file counts. An id-shaped value with no role file is a known non-role session only when `<value>.jsonl` sits in this project's folder; any other
+    such value (a title like `batch-runner` fits the id shape) is judged as a value that names no id. A value that names no id (`-c`, a bare
+    `--resume`, a title) can reach any role session whose transcript sits in the project's folder (the folder of the own transcript, else the one
+    the cwd names under the config dir); with no such folder to read, any valid role file counts, except for an id-shaped value, taken as a session id."""
+    import re
+    import session_role
+    id_shaped = bool(target) and session_role.valid_id(target)
+    if id_shaped and session_role.own_record(target) is not None:
+        return True
+    records = session_role.all_records()
+    if not records:
+        return False
+    folder = os.path.dirname(transcript) if transcript else ""
+    if not folder and cwd:
+        folder = os.path.join(session_role.roles_dir().parent.parent, "projects", re.sub(r"[^A-Za-z0-9]", "-", cwd))
+    if not folder or not os.path.isdir(folder):
+        return not id_shaped   # no folder to read: an id-shaped value is taken as a session id, as before; any other value counts any role file
+    if id_shaped and os.path.exists(os.path.join(folder, target + ".jsonl")):
+        return False
+    return any(os.path.exists(os.path.join(folder, record["session"] + ".jsonl")) for record in records)
+
+
+def self_role_child_hit(stripped: str, cwd: str = "", transcript: str = "") -> str:
+    """Return a short label when a Bash or PowerShell call starts claude and the child would hold a role, else ''. Two ways. (1) The guard's own
+    environment holds a non-empty CS_SESSION_ROLE: the child inherits it and its SessionStart hook would write its own role file. (2) The call
+    resumes (`--resume <id>`, `-r`, `-c`, `--continue`) a session whose role file is valid: the start keeps that file (session_role.write), so a
+    role-less session would take the role over. Way (1) fails closed inside the clause: a call that names claude and cannot be read is refused,
+    because the guard-wide crash path fails open. Way (2) lets an unreadable call pass, since it needs a role file to exist and a real resume.
+    Cost: one environment read per call; a parse only when the call names claude; one folder listing of the role files for a resume."""
+    if "claude" not in stripped.lower():
         return ""
+    if os.environ.get(SELF_ROLE_VARIABLE):
+        try:
+            return "a role session starts claude" if _self_role_hit(stripped, 0, _starts_claude) else ""
+        except Exception:
+            return "a role session starts claude"
+    def resumes_a_role(tokens) -> bool:
+        target = _resume_target(tokens)
+        return target is not None and _resume_names_role(target, cwd, transcript)
     try:
-        return "a role session starts claude" if _self_role_hit(stripped, 0, _starts_claude) else ""
+        return "a resume names a session that holds a role" if _self_role_hit(stripped, 0, resumes_a_role, unreadable=False) else ""
     except Exception:
-        return "a role session starts claude"
+        return ""
 
 
 # ---- merge --confirm: the checkout it acts in must be a repo the own record names (rule merge-confirm-repo)
