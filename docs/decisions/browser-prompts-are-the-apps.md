@@ -12,7 +12,7 @@ Owner, 2026-10-11: claude-settings cannot disable the built-in browser pane's ap
 
 Owner, 2026-11-21 13:58 CST, "ya approved": refuse the call, and point at the solution, headless Chrome.
 
-- Rule `agent-browser-file-open` in `hooks/guard.py` refuses a call by an agent (a non-empty `agent_id`) that opens a `file:` URL. The scheme is read in any case. The calls are `mcp__Claude_Browser__navigate` and `mcp__Claude_Browser__preview_start` (`url`), and each `navigate` or `preview_start` item of `mcp__Claude_Browser__browser_batch` (its input `url`).
+- Rule `agent-browser-file-open` in `hooks/guard.py` refuses a call by an agent (a non-empty `agent_id`) that opens a `file:` URL. The scheme is read in any case. The calls are `mcp__Claude_Browser__navigate` and `mcp__Claude_Browser__preview_start` (`url`), and each `navigate` or `preview_start` item of `mcp__Claude_Browser__browser_batch` (its input `url`). The cloud-linked names (`mcp__remote-devices__Claude_Browser__*`) are covered too, and a batch item may carry the full tool name.
 - The reason says a file opened in the built-in browser can stop on an app card nobody answers. It names headless Chrome (Playwright) or a localhost URL as the way.
 - The main session passes: a person sees its card. A localhost or https URL passes. An owner override lifts the rule.
 - Incident: 2026-11-21, a designer agent in the home repo opened its mockup by `file://` and waited 12 hours (01:13 to 13:13 CST).

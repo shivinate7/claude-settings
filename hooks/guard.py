@@ -264,8 +264,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        An override lifts it.
   agent-browser-file-open
                        deny. A call by an agent (the payload carries a non-empty agent_id) that opens a `file:` URL (the scheme
-                       read in any case) through mcp__Claude_Browser__navigate or mcp__Claude_Browser__preview_start (`url`), or
-                       through a mcp__Claude_Browser__browser_batch item named navigate or preview_start (its input `url`). The
+                       read in any case) through navigate or preview_start (`url`), or through a browser_batch item named navigate or
+                       preview_start, short or full (its input `url`), under the prefix mcp__Claude_Browser__ or
+                       mcp__remote-devices__Claude_Browser__ (shared by BROWSER_TOOL_PREFIXES). The
                        reason names headless Chrome or a localhost URL as the way. The main session, an empty agent_id and any
                        other URL pass. An override lifts it.
   sendmessage-session-id
@@ -6323,8 +6324,14 @@ def page_design_hit(writes, tool_input, cwd):
 #
 # The desktop app asks the person before it opens a file in some folders, `.claude` among them, and its card has no
 # timeout. An agent's own worktree sits in such a folder and no one watches an agent, so the call can stall for hours.
-BROWSER_URL_TOOLS = ("mcp__Claude_Browser__navigate", "mcp__Claude_Browser__preview_start")
-BROWSER_BATCH_TOOL = "mcp__Claude_Browser__browser_batch"
+# One home for the names: the built-in browser's prefix and the cloud-linked one, times the short tool names. A
+# browser_batch item may carry the short name or the full one.
+BROWSER_TOOL_PREFIXES = ("mcp__Claude_Browser__", "mcp__remote-devices__Claude_Browser__")
+BROWSER_URL_SHORT_NAMES = ("navigate", "preview_start")
+BROWSER_BATCH_SHORT_NAME = "browser_batch"
+BROWSER_URL_TOOLS = tuple(p + n for p in BROWSER_TOOL_PREFIXES for n in BROWSER_URL_SHORT_NAMES)
+BROWSER_BATCH_TOOLS = tuple(p + BROWSER_BATCH_SHORT_NAME for p in BROWSER_TOOL_PREFIXES)
+BROWSER_BATCH_ITEM_NAMES = BROWSER_URL_SHORT_NAMES + BROWSER_URL_TOOLS
 BROWSER_FILE_OPEN_REASON = (
     "A file opened in the built-in browser can stop on an app card that nobody answers, and an agent has no one to "
     "answer it. Open the file in headless Chrome (Playwright), or serve it on a localhost URL and open that. "
@@ -6344,10 +6351,10 @@ def browser_file_open_hit(tool: str, tool_input) -> str:
     if tool in BROWSER_URL_TOOLS:
         url = tool_input.get("url")
         return url[:120] if _is_file_url(url) else ""
-    if tool == BROWSER_BATCH_TOOL:
+    if tool in BROWSER_BATCH_TOOLS:
         actions = tool_input.get("actions")
         for item in actions if isinstance(actions, list) else []:
-            if not isinstance(item, dict) or item.get("name") not in ("navigate", "preview_start"):
+            if not isinstance(item, dict) or item.get("name") not in BROWSER_BATCH_ITEM_NAMES:
                 continue
             item_input = item.get("input")
             url = item_input.get("url") if isinstance(item_input, dict) else None
