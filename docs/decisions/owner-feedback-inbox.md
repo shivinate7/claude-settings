@@ -27,6 +27,10 @@ Triage's outbox is a separate store: `roadmap/outbox/` on the record branch (ski
   one key `<url>|<doc_id>|<at>` per saved note, and a repeat read saves nothing. Cost: one process
   start per `ArtifactData` call (unmeasured). Files are written only when a read of `answers` returns a new note:
   the inbox and the key file. A failed save tells the session to jot the note by hand.
+  A prompt that is only a bash-input echo (`<bash-input>`, `<bash-stdout>` and `<bash-stderr>` records,
+  the trace a `!` command leaves) is not saved: it holds no word of the owner's own (owner, pick 983 a,
+  saved 19:16 CST Nov 18). The pick covers bash-input turns only. A paste-only prompt is saved. A tag
+  quoted in owner words, or owner words beside a record, keep the whole prompt.
 - **Notices.** A message that starts with a tag in `shared_names.MACHINE_TAGS` is agent or system
   text. It is never captured, and it does not count toward a burst. Hand-backs and the
   `<cross-session-message` frame are skipped. That skip is a bandaid (owner ruling 2026-11-01

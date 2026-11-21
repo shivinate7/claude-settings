@@ -23,6 +23,7 @@ RC_MERGE = os.path.join(RCROOT, "rc-merge")        # a merge of main in progress
 RC_REVERT = os.path.join(RCROOT, "rc-revert")      # a revert of a test deletion in progress: hooks/test_x.py staged
 RC_NOHEAD = os.path.join(RCROOT, "rc-nohead")      # a repo with no commit: hooks/test_x.py staged
 RC_LIMIT = os.path.join(RCROOT, "rc-limit")        # hooks/test_x.py staged, msg.txt beside it
+RC_CLEAN = os.path.join(RCROOT, "rc-clean")        # hooks/test_x.py and docs/x.md tracked, unchanged: a shell edit is the only change
 
 
 def _rc_stage(where, files):
@@ -33,9 +34,17 @@ def _rc_stage(where, files):
 
 
 def _rc_scope(where, rels, status):
-    """Stop the suite unless each of `rels` shows `status` in `git status --porcelain` of `where`. Scope comes before
-    the subject: a fixture that lost its change would pass its cases for the wrong reason."""
+    """Stop the suite unless each of `rels` shows `status` in `git status --porcelain` of `where`. A status of
+    "clean" wants each of `rels` tracked and absent from the status. Scope comes before the subject: a fixture that
+    lost its change would pass its cases for the wrong reason."""
     lines = run_vcs(where, "status", "--porcelain", "--untracked-files=all").stdout.splitlines()
+    if status == "clean":
+        tracked = run_vcs(where, "ls-files").stdout.splitlines()
+        for rel in rels:
+            if rel not in tracked or any(line[3:] == rel for line in lines):
+                sys.exit("fixture setup failed in the red-run commit fixtures: %r is not tracked and clean in %r: %r"
+                         % (rel, where, lines))
+        return
     for rel in rels:
         if not any(line[:2] == status and line[3:] == rel for line in lines):
             sys.exit("fixture setup failed in the red-run commit fixtures: %r has no %r status in %r: %r"
@@ -95,9 +104,12 @@ def _build_red_run_commit():
     write(os.path.join(RC_LIMIT, "msg.txt"), "add test\n")
     _rc_scope(RC_LIMIT, [RR_TEST], "A ")
 
+    _cmk_pushed(RC_CLEAN, {RR_TEST: RR_TEST_TEXT, "docs/x.md": "# X\n"})
+    _rc_scope(RC_CLEAN, [RR_TEST, "docs/x.md"], "clean")
+
 
 lazy_fixture([RC_UNSTAGED, RC_TRACKED, RC_SIX, RC_DOCS, RC_DELETE, RC_AMEND, RC_EMPTY, RC_MERGE, RC_REVERT,
-              RC_NOHEAD, RC_LIMIT], _build_red_run_commit)
+              RC_NOHEAD, RC_LIMIT, RC_CLEAN], _build_red_run_commit)
 
 
 def rc_refuse(name, command, cwd):
@@ -166,6 +178,83 @@ for limit_form in ("-F msg.txt", "-t msg.txt", "-C HEAD", "-c HEAD", "--fixup=HE
              VCS + " commit " + limit_form, RC_LIMIT)
 rc_allow("known-limit: a plain commit with no -m opens an editor, whose message the guard cannot read",
          VCS + " commit", RC_LIMIT)
+
+# 7. A message from `-F -` (also `-F-` and `--file=-`) is read from the heredoc on the commit's own segment, as a
+# `-m "$(cat <<'EOF' ...)"` message already is. The body is read as text: its lone quote and its `#` line do not stop
+# the read. Each refused form has a green control with `Red-run: none: x` in the same body.
+SED_TEST = "sed -i '1s/a/b/' " + RR_TEST
+ECHO_TEST = "echo x >> " + RR_TEST
+
+
+def _rc_file_commit(flag, body, push=False):
+    """A `git commit <flag> <<'EOF'` call with `body` as its message, and `git push` after it on the first line when
+    `push` is set. The body ends in a plain `EOF` line, not the `)"` that closes a `$(cat ...)`."""
+    tail = " && " + VCS + " push" if push else ""
+    return VCS + " commit %s <<'EOF'%s\n%s\nEOF\n" % (flag, tail, body)
+
+
+RC_F_NONE = RR_SUBJECT + "\n\n" + RR_NONE_LINE
+RC_QUOTE_BODY = "add hooks/test_x.py: don't drop it\n# a note"
+rc_refuse("a commit -F - <<EOF that adds hooks/test_x.py, with no Red-run line in its body",
+          _rc_file_commit("-F -", RR_SUBJECT), RR_HEREDOC)
+rc_refuse("a commit -F- <<EOF that adds hooks/test_x.py, with no Red-run line in its body",
+          _rc_file_commit("-F-", RR_SUBJECT), RR_HEREDOC)
+rc_refuse("a commit --file=- <<EOF that adds hooks/test_x.py, with no Red-run line in its body",
+          _rc_file_commit("--file=-", RR_SUBJECT), RR_HEREDOC)
+rc_refuse("a commit -F - <<EOF with a lone quote and a # line in its body, and no Red-run line",
+          _rc_file_commit("-F -", RC_QUOTE_BODY), RR_HEREDOC)
+rr_refuse("a commit -F - <<EOF && git push, with no Red-run line in its body",
+          _rc_file_commit("-F -", RR_SUBJECT, push=True), RR_HEREDOC)
+rc_refuse("a commit -qam after sed -i on hooks/test_x.py, with no Red-run line",
+          SED_TEST + " && " + VCS + ' commit -qam "add test"', RC_CLEAN)
+rc_refuse("a commit -am after echo x >> hooks/test_x.py, with no Red-run line",
+          ECHO_TEST + " && " + VCS + ' commit -am "add test"', RC_CLEAN)
+rc_refuse("a commit -m after sed -i on hooks/test_x.py and git add of it, with no Red-run line",
+          SED_TEST + " && " + VCS + " add " + RR_TEST + " && " + VCS + ' commit -m "add test"', RC_CLEAN)
+
+rc_allow("a commit -F - <<EOF with Red-run: none: x in its body", _rc_file_commit("-F -", RC_F_NONE), RR_HEREDOC)
+rc_allow("a commit -F- <<EOF with Red-run: none: x in its body", _rc_file_commit("-F-", RC_F_NONE), RR_HEREDOC)
+rc_allow("a commit --file=- <<EOF with Red-run: none: x in its body",
+         _rc_file_commit("--file=-", RC_F_NONE), RR_HEREDOC)
+rc_allow("a commit -F - <<EOF with a lone quote and a # line, and Red-run: none: x in its body",
+         _rc_file_commit("-F -", RC_QUOTE_BODY + "\n\n" + RR_NONE_LINE), RR_HEREDOC)
+rr_allow("a commit -F - <<EOF && git push, with Red-run: none: x in its body",
+         _rc_file_commit("-F -", RC_F_NONE, push=True), RR_HEREDOC)
+rc_allow("a commit -qam after sed -i on hooks/test_x.py, with Red-run: none: x",
+         SED_TEST + " && " + VCS + ' commit -qam "add test" -m "%s"' % RR_NONE_LINE, RC_CLEAN)
+rc_allow("a commit -am after echo x >> hooks/test_x.py, with Red-run: none: x",
+         ECHO_TEST + " && " + VCS + ' commit -am "add test" -m "%s"' % RR_NONE_LINE, RC_CLEAN)
+rc_allow("a commit -m after sed -i on hooks/test_x.py and git add of it, with Red-run: none: x",
+         SED_TEST + " && " + VCS + " add " + RR_TEST + " && " + VCS + ' commit -m "add test" -m "%s"' % RR_NONE_LINE,
+         RC_CLEAN)
+
+# The green controls that the rule must not reach: a shell edit to a path that is no test, and a shell edit to a
+# test that the commit does not take (no -a, no add in the call).
+rc_allow("a commit -qam after sed -i on docs/x.md, a path that is no test, with no Red-run line",
+         "sed -i '1s/a/b/' docs/x.md && " + VCS + ' commit -qam "docs"', RC_CLEAN)
+rc_allow("a commit -m after sed -i on hooks/test_x.py, with no -a and no add, and no Red-run line",
+         SED_TEST + " && " + VCS + ' commit -m "add test"', RC_CLEAN)
+
+# 8. A step before the commit that only names a test path does not write it. A test run, a read or a delete leaves the
+# file as it was, so the commit adds no test line and needs no trailer. Each case has a green control: the same call
+# with `Red-run: none: x` in its -m. A refused control means another rule refuses the call, not this one.
+rc_allow("a test run of hooks/test_x.py, then git add of docs/x.md and a commit -m, with no Red-run line",
+         "bin/verdict python3 " + RR_TEST + " && " + VCS + " add docs/x.md && " + VCS + ' commit -m "fix"', RC_CLEAN)
+rc_allow("a test run of hooks/test_x.py, then git add of docs/x.md and a commit -m, with Red-run: none: x",
+         "bin/verdict python3 " + RR_TEST + " && " + VCS + " add docs/x.md && " + VCS + ' commit -m "fix" -m "%s"'
+         % RR_NONE_LINE, RC_CLEAN)
+rc_allow("a cat of hooks/test_x.py, then a commit -am, with no Red-run line",
+         "cat " + RR_TEST + " && " + VCS + ' commit -am "x"', RC_CLEAN)
+rc_allow("a cat of hooks/test_x.py, then a commit -am, with Red-run: none: x",
+         "cat " + RR_TEST + " && " + VCS + ' commit -am "x" -m "%s"' % RR_NONE_LINE, RC_CLEAN)
+rc_allow("a grep of hooks/test_x.py, then a commit -am, with no Red-run line",
+         "grep -n x " + RR_TEST + " && " + VCS + ' commit -am "x"', RC_CLEAN)
+rc_allow("a grep of hooks/test_x.py, then a commit -am, with Red-run: none: x",
+         "grep -n x " + RR_TEST + " && " + VCS + ' commit -am "x" -m "%s"' % RR_NONE_LINE, RC_CLEAN)
+rc_allow("an rm of hooks/test_x.py, then a commit -qam, with no Red-run line",
+         "rm " + RR_TEST + " && " + VCS + ' commit -qam "drop"', RC_CLEAN)
+rc_allow("an rm of hooks/test_x.py, then a commit -qam, with Red-run: none: x",
+         "rm " + RR_TEST + " && " + VCS + ' commit -qam "drop" -m "%s"' % RR_NONE_LINE, RC_CLEAN)
 
 
 RC_REMEDY_LABEL = ("red-run: a commit with no push after it and no Red-run line is refused, and the refusal names both "

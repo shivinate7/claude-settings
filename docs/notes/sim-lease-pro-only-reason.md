@@ -1,1 +1,0 @@
-- sim-lease-pro-only-reason: Retrospective 21:38 CST Nov 12, Degen ledger D22, no-owner-call half: sim-lease-tool.md:7 gives no reason for the Pro-only rule; state it. The other half (allow a Duo beside the Pro) departs from the owner ruling of 2026-11-02 13:51 CST and is an owner call.

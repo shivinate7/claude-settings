@@ -56,11 +56,11 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    session then moves the pin in a lane of its own. No bot and no schedule moves it. That tool reads
    only the `ste-lint` and `zizmor` pins. Other claude-settings pins can drift unseen.
    Other pins keep full-SHA pinning. Which bot, if any, bumps them is set per repo.
-8. **Batch lanes.** Degen and home switch to the per-lane flow on stable now (ruling `own-degen-home-switch-now`, degen and home switch now). Every other child repo waits for the drain, and the batch rules below stay live there until the cutover (decision `all-repos-switch-together`).
+8. **Batch lanes.** Degen and home switch to the per-lane flow on stable now (ruling `own-degen-home-switch-now`, degen and home switch now). Every repo except degen and home waits for the drain, and the batch rules below stay live there until the cutover (decision `all-repos-switch-together`).
 
-   Per-lane flow (in use in degen and home; target, not live elsewhere): each lane PR merges alone through the merge tool, on its own green run and the review its risk needs (rule `git-integration-branch-merge`). Each lane PR goes ready once, after its last review, and merges on whichever proof of its head arrives first: a green `all-jobs-passed` rollup or a local lane-lint PASS (decision `draft-until-reviewed`, owner ruling 2026-11-20 13:06 CST). After a merge, main's run skips when a passing PR run proved the tree (rule `roles-each-layer-proves-once`). A breaking merge is one after which main's newest finished run is red. Its revert PR is an ordinary lane PR, merged with `--base-red-ok` (decision `no-merge-onto-red-main`). After a red main, merges resume when the revert merges with its tree proven, with the revert's own run still going (owner ruling `own-823-b-revert-merge-lifts-red`, 2026-11-14 15:04 CST, which made pick 745 b live). While main is red, a lane that touches none of the blamed paths may merge (owner pick 746 b; target, not live: the blame step is not built).
+   Per-lane flow (in use in degen and home; target, not live elsewhere): each PR merges alone through the merge tool, on its own green run and the review its risk needs, or joins a batch by the situation (rule `git-integration-branch-merge`; decision `session-tiers`, the owner's 10:23 CST Nov 20 ruling). Joining a batch after the cutover is not built yet (step `combine-tournament`), so until it is built a PR merges alone. Each lane PR goes ready once, after its last review, and merges on whichever proof of its head arrives first: a green `all-jobs-passed` rollup or a local lane-lint PASS (decision `draft-until-reviewed`, owner ruling 2026-11-20 13:06 CST). After a merge, main's run skips when a passing PR run proved the tree (rule `roles-each-layer-proves-once`). A breaking merge is one after which main's newest finished run is red. Its revert PR is an ordinary lane PR, merged with `--base-red-ok` (decision `no-merge-onto-red-main`). After a red main, merges resume when the revert merges with its tree proven, with the revert's own run still going (owner ruling `own-823-b-revert-merge-lifts-red`, 2026-11-14 15:04 CST, which made pick 745 b live). While main is red, a lane that touches none of the blamed paths may merge (owner pick 746 b; target, not live: the blame step is not built).
 
-   Until the cutover, every repo except degen and home batches lanes into one integration branch and one integration PR. A batch runs one
+   Until the cutover, every repo except degen and home combines lanes into one integration branch and one integration PR when the situation calls for it (decision `session-tiers`, the owner's 10:23 CST Nov 20 ruling). A batch runs one
    CI run (rule `git-integration-branch-merge`, one CI run per batch). Only the integration PR goes
    ready. Each lane PR stays a draft until the integration PR merges. A lane runs
    `~/.claude/bin/merge --lane-lint <pr>` before it hands off, and the batch runner runs it again on
@@ -84,13 +84,12 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    the running batch may merge (decision `no-merge-during-batch-ci`, the contains rule). A drop
    changes the running batch's head, so the brake refuses that merge until the next batch is built
    on the new head.
-   Each lane merges alone: `merge <pr> --confirm` takes one PR, with no batch to build, freeze, blame or stack.
+   A PR that merges alone uses `merge <pr> --confirm`, which takes one PR, with no batch to build, freeze, blame or stack.
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
    Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run, and
-   the new run is the re-run. A lone lane is its own integration PR. When
-   the integration PR that replaces a lane PR opens, the lane PR closes as replaced, and its branch stays. The merge tool closes it, at
-   `--ready` and at the integration PR's hand-in, from a `Replaces #N` or `Carries #N` line in the
-   body or the batch-freeze member list. The tool reopens each lane it closed that is marked Dropped
+   the new run is the re-run. A lone lane is its own integration PR. When the pull request that replaces a lane PR opens, the lane PR closes as replaced, and its branch stays, unless it is a batch member.
+   At `--ready`, a `Replaces #N` or `Carries #N` line closes the pull request it names, when this pull request is not an integration PR.
+   A batch member closes only after its integration PR merges, with a pointer comment. Not built yet: the tool still closes members at `--ready` and at the hand-in. The tool reopens each lane it closed that is marked Dropped
    at the next lint pass.
    When the integration run is red, read the failing job. Find the lane whose files it touches.
    Search one lane merge commit at a time: for each lane merge commit `M` on the integration branch,
