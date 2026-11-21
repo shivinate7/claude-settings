@@ -5,7 +5,7 @@
 # section 13410: a `claude` call that resumes a named session, or continues the newest one, is denied when the session it
 # targets holds a role file. A value that names no session, a title or a bare `-c`, is judged by the role transcripts in the
 # own folder. A title of the id shape (SESSION_ID_RE, 8 to 200 characters) must not pass as an id with no file: the title cases
-# are RED on 00d17ab34b, which reads such a title as an id, finds no file of that name, and allows.
+# are there to catch a guard that reads such a title as an id, finds no file of that name, and allows.
 # The controls are green on the old code too: a resume of a session with no kept file, a resume of a named session that holds
 # none, a title or `-c` in a folder with no role transcript, text that names the command.
 _RS_PREV_FAMILY = FAMILY
@@ -48,15 +48,15 @@ for _cmd, _transcript in RS_FORMS:
             "deny", rule="self-role-claim", tool="Bash", command=_cmd, cwd=PUSHSSH, session=LT_OTHER, config=_config,
             transcript=_transcript, env=RS_NOENV)
 
-# RED on 00d17ab34b. Cause: a title of the id shape is read as a session id, its file is missing, and the guard allows, so the
-# folder scan never runs. No role file has the title's name, and the own folder holds a role transcript, so each must be denied.
+# A title of the id shape must not be read as a session id. That read finds no file, so the guard allows and the folder
+# scan never runs. No role file has the title's name, and the own folder holds a role transcript, so each must be denied.
 for _title in RS_TITLES:
     for _config, _role in RS_CONFIGS:
         add("local-role: a role-less session that runs `claude %s` is denied when the own folder holds a %s role transcript" % (_title, _role),
             "deny", rule="self-role-claim", tool="Bash", command="claude " + _title, cwd=PUSHSSH, session=LT_OTHER, config=_config,
             transcript=RS_OWN, env=RS_NOENV)
 
-# RED on 00d17ab34b. The same title through the two other shapes the guard reads: a nested `bash -c`, and PowerShell's Start-Process.
+# The same title through the two other shapes the guard reads: a nested `bash -c`, and PowerShell's Start-Process. Each must deny it, for the reason above.
 add("local-role: a role-less session that runs `bash -c 'claude --resume roadmap-triage'` is denied when the own folder holds a triage role transcript",
     "deny", rule="self-role-claim", tool="Bash", command="bash -c 'claude --resume roadmap-triage'", cwd=PUSHSSH, session=LT_OTHER,
     config=LT_TRIAGE, transcript=RS_OWN, env=RS_NOENV)
