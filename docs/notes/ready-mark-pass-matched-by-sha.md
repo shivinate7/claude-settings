@@ -1,0 +1,1 @@
+- ready-mark-pass-matched-by-sha: PR #3756, review finding F6 (pass matched by sha). hooks/guard_merge.py:2233 (ready_mark_hit) matches a stood pass by head sha, not by PR number. A pass stood for one PR therefore clears any PR whose head starts with that sha. Decision ready-mcp-mark-guard, the guard on ready marks made over MCP. Seen: 2026-11-21 x1

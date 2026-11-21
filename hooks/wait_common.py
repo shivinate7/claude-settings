@@ -10,6 +10,7 @@ import os
 import re
 import sys
 import time
+from datetime import datetime
 
 # Seconds a helper waits when it gets no --timeout; 0 means no cap. wait-pid caps at 540, under Bash's 600 s,
 # because the pid it waits on may never end. wait-until has no cap: its target time ends the wait.
@@ -24,6 +25,16 @@ def die(prog, message):
     """Print `prog: message` to stderr and exit 2."""
     print("%s: %s" % (prog, message), file=sys.stderr)
     sys.exit(2)
+
+
+def parse_instant(text):
+    """An ISO-8601 instant that carries a zone (`Z` or an offset) as an aware datetime, else None. The one
+    reader of a wait time: bin/wait-until waits on it and the guard's stream family judges how far away it is."""
+    try:
+        when = datetime.fromisoformat(text[:-1] + "+00:00" if text[-1:] in ("Z", "z") else text)
+    except (ValueError, OverflowError, OSError):
+        return None
+    return when if when.utcoffset() is not None else None
 
 
 def number(prog, usage, text, name):

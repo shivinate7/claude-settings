@@ -2131,10 +2131,18 @@ def _vetoed() -> bool:
         return True  # a veto that cannot be read is a veto: the refusal stands
 
 
+_lifted_rules: list = []  # the rules an override lifted in this call, in order
+
+
+def lift_notice() -> str:
+    """The one notice for the rules an override lifted in this call."""
+    return "override lifted: " + ", ".join(_lifted_rules)
+
+
 def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None, on_lift=None,
            continue_on_lift: bool = False):
     """Print a deny or an ask and exit, unless an owner override lifts it (decision
-    owner-override). A lifted act prints nothing, so the normal permission flow runs. The
+    owner-override). A lifted act prints one context line and no decision, so the normal permission flow runs. The
     veto runs before the override is taken, so a call that also holds a never-lifted act spends no override.
     spawn_role is set only on the Opus spawn refusal, the one refusal an Opus override may lift.
     on_lift, when set, runs once when an override lifts the act, so a rule may keep state only for an act that lands.
@@ -2152,12 +2160,20 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
         if lifted:
             record(tool, lifted, rule, matched + " step " + step if step else matched)
             if lifted in override.LIFTS:
+                _lifted_rules.append(rule)
                 if on_lift:
                     on_lift()
                 if continue_on_lift:
-                    return True
+                    return True  # a later refusal of this call carries the notice, so stdout holds one object
+                # Claude never sees the stderr of a hook that exits 0, so the lift goes on stdout as one context line with
+                # no permissionDecision. Compact separators keep it short; it grows by one rule name for each rule lifted in the call.
+                print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                                         "additionalContext": lift_notice()}},
+                                 separators=(",", ":")))
                 sys.exit(0)
     record(tool, decision, rule, matched)
+    if _lifted_rules:  # an earlier rule of this call was lifted: say so inside the refusal, never as a second object
+        reason = reason.rstrip() + " (" + lift_notice() + ")"
     try:  # the line the owner types to lift this refusal, or the words that none does; last in the reason
         import override
         line = override.NO_OVERRIDE if vetoed else override.offer(rule, spawn_role, _override_who[1])

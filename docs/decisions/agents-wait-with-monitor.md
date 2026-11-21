@@ -10,8 +10,9 @@ Owner, 2026-10-11 and 2026-10-12: the `Monitor` tool, Claude Code's own wait-onc
 - `gh pr checks --watch` in the foreground;
 - `gh run watch` in the foreground or the background (`ci-wait-reads-run-status`, CI waits read the run status);
 - `timeout /t`, which the ruling did not name.
+- a foreground `wait-until` for a time `WAIT_UNTIL_AHEAD` seconds or more away, or for a time that is not a literal (`$VAR`, `$(...)`). A `--timeout` that caps the wait below `WAIT_UNTIL_AHEAD` seconds lifts it. Run it with `run_in_background`.
 
-It allows one `sleep` or `Start-Sleep` under 25 s anywhere in a command, and a background `gh pr checks --watch`. A word inside a quoted string or a heredoc body is not a call. The remedy names the CI-wake notice that follows `gh pr ready`, or Monitor.
+It allows one `sleep` or `Start-Sleep` under 25 s anywhere in a command, and a background `gh pr checks --watch`. A word inside a quoted string or a heredoc body is not a call. The remedy names the CI-wake notice that follows `gh pr ready`, Monitor, or `run_in_background`.
 
 Why: the guard once refused Monitor and all short pauses, so an agent that followed the Bash tool's text lost a turn. Almost none of the refusals were real loops. That count is unmeasured: it has no source or re-run command.
 Whether Monitor still errors is unmeasured too (notes entry `waiter-monitor-failures-unmeasured`).

@@ -4141,7 +4141,7 @@ def ref(name):
     except OSError:
         pass
     return ""
-def feat_head(): return ref("refs/heads/feat")
+def feat_head(): return ref("refs/heads/" + S.get("head_ref", "feat"))  # the pull request's head branch: feat, or the case's head_ref (a batch integration PR's batch-x, whose claim commit moves it)
 RUN_FIELDS = ("databaseId", "name", "workflowName", "workflowDatabaseId", "status", "conclusion", "headSha", "headBranch", "event", "url")
 def next_runs():
     """The next answer to a workflow-run read: runs_seq, one entry a read, the last one again. An entry is (name, status, conclusion[, databaseId[, workflowDatabaseId]]).
@@ -4271,6 +4271,8 @@ try:
 
     elif method == "GET" and m_pr:
         n = int(m_pr.group(1))
+        if n != num and refused(S.get("pr_read_fail"), n):  # a case's failed read of another pull request: a member read after the merge
+            raise Refused(refused(S["pr_read_fail"], n))
         if n in numbered and n != num:
             r, ex = numbered[n], named_pr(n)
             finish(one(pull(n, r[1], r[0], r[2], state=ex["state"], merged=ex["merged"], body=ex["body"]), jq), 0, include)
@@ -7320,7 +7322,9 @@ class CloseReplaced(Env):
     repo, and not as `see #N` or `related #N`. A number list counts only when the line or sentence ends right after it, so `Replaces #1 in the docs`
     names nothing. Each case reads the fake gh's calls: at most one read of each named pull request, one
     `PATCH pulls/<N> state=closed` and one pointer comment for each open one, and no call at all to a pull request the body does not close.
-    The close does not wait on the ready mark: the real Host's ready returns False, and the step still closes. Not a GhHalf subclass: the GhHalf tests must not run twice."""
+    The close does not wait on the ready mark: the real Host's ready returns False, and the step still closes. A batch integration PR closes none
+    of its members at --ready; a landed `--confirm` of it closes each open member, with a `Merged in #N as <sha>` pointer (owner goal, 10:47 CST
+    Nov 20: members close only after it merges). Not a GhHalf subclass: the GhHalf tests must not run twice."""
     set, calls, gh_host, go, gh_state = GhHalf.set, GhHalf.calls, GhHalf.gh_host, GhHalf.go, GhHalf.gh_state
 
     def setUp(self):
@@ -7358,6 +7362,127 @@ class CloseReplaced(Env):
         """Nothing read, closed or commented on pull request n: the body does not name it as replaced."""
         self.assertEqual(self.lines_naming(n), [], f"#{n} was read or changed, though the body does not name it as replaced:\n{out}")
         self.assertEqual(self.posts_on(n), [], f"#{n} got a comment, though the body does not name it as replaced:\n{out}")
+
+    def confirm_integration(self, numbers, dropped=(), merged=(), closed=(), **state):
+        """`merge 7 --confirm` on batch integration PR #7 (head `batch-x`), whose freeze block names `numbers` (`dropped` marked). Each member is
+        open, except those in `merged`: GitHub marks them MERGED, so they are listed and read closed and merged. Those in `closed` are closed by
+        hand, not merged. `state` sets more fields of the fake gh (checks_seq, merge_fail, post_fail, close_fail, pr_read_fail).
+        -> (rc, stdout and stderr together)."""
+        self.push_branch(merge.integration_branch("x"))
+        extra = {str(n): {"state": "closed", "merged": True} for n in merged}
+        extra.update({str(n): {"state": "closed", "merged": False} for n in closed})
+        self.set(pr_number=7, body="\n".join(merge.freeze_lines("x", {n: f"{n:040x}" for n in numbers}, dropped=dropped)),
+                 head_ref=merge.integration_branch("x"), open_prs=[[f"named-{n}", f"{n:040x}", "main", n] for n in numbers], pr_extra=extra, **state)
+        self.host.branch = merge.integration_branch("x")  # the claim hook (claim_push_fires_on_claim) reads the branch a claim lands on, so the second step runs
+        return self.go()
+
+    def assert_not_closed(self, n, out):
+        """Pull request n got no close and no comment: nothing in this step closes it, and nothing points to it."""
+        self.assertNotIn(f"PATCH pulls/{n} state=closed", self.calls().splitlines(), f"#{n} was closed by this step, though it is not closed by it:\n{out}")
+        self.assertEqual(self.posts_on(n), [], f"#{n} got a comment from this step, though it gets none:\n{out}")
+
+    def assert_merged_pointer(self, n, by, oid, out):
+        """Pull request n got one comment that says `Merged in #by as <sha>`, and the sha is the merge commit `oid` (a prefix of 7 or more digits names it too)."""
+        posted = self.posts_on(n)
+        self.assertEqual(len(posted), 1, f"#{n} got {len(posted)} comments, want one that says #{by} merged as its commit:\n{out}")
+        m = re.search(rf"Merged in #{by} as ([0-9a-f]{{7,40}})\b", posted[0])
+        self.assertIsNotNone(m, f"the comment on #{n} does not say `Merged in #{by} as <sha>`:\n{posted[0]}")
+        self.assertTrue(oid.startswith(m.group(1)), f"the comment on #{n} names {m.group(1)}, and the merge commit is {oid}:\n{posted[0]}")
+
+    def test_a_landed_confirm_closes_each_open_member_with_a_merged_pointer(self):  # owner goal, 10:47 CST Nov 20: members close only after it merges
+        members = list(range(3301, 3311))  # ten open members: the backlog size that combines
+        rc, out = self.confirm_integration(members)
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls(), "precondition: the integration PR did not merge, so no member can close after it:\n" + out)
+        oid = self.gh_state("oid")
+        for n in members:
+            with self.subTest(n=n):
+                self.assertIn(f"PATCH pulls/{n} state=closed", self.calls().splitlines(), f"#{n} stayed open after #7 merged:\n{out}")
+                self.assert_merged_pointer(n, 7, oid, out)
+
+    def test_a_landed_confirm_leaves_a_dropped_member_open(self):  # owner goal, 10:47 CST Nov 20; the dropped lane is the control
+        rc, out = self.confirm_integration([3301, 3302], dropped=[3302])
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls(), "precondition: the integration PR did not merge, so no member can close after it:\n" + out)
+        self.assert_merged_pointer(3301, 7, self.gh_state("oid"), out)
+        self.assert_not_closed(3302, out)
+
+    def test_a_member_github_marks_merged_gets_only_the_pointer_and_no_close(self):  # C5: the close is skipped for a MERGED member
+        rc, out = self.confirm_integration([3301, 3302], merged=[3302])
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls(), "precondition: the integration PR did not merge, so no member can close after it:\n" + out)
+        oid = self.gh_state("oid")
+        self.assert_merged_pointer(3302, 7, oid, out)
+        self.assertNotIn("PATCH pulls/3302 state=closed", self.calls().splitlines(), f"#3302 was closed, though GitHub already marks it merged:\n{out}")
+        self.assertIn("PATCH pulls/3301 state=closed", self.calls().splitlines(), f"the open member #3301 stayed open after #7 merged:\n{out}")
+        self.assert_merged_pointer(3301, 7, oid, out)
+
+    def test_a_refused_confirm_closes_no_member(self):  # owner goal, 10:47 CST Nov 20; green on the old code, a guard for the close after a landed merge
+        rc, out = self.confirm_integration([3301, 3302], merge_fail=NOT_MERGEABLE)
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls(), "precondition: the merge call was never sent, so the refusal is not the one under test:\n" + out)
+        self.assertIn("not mergeable", out, "precondition: the confirm did not stop at GitHub's refusal of the merge:\n" + out)
+        for n in (3301, 3302):
+            with self.subTest(n=n):
+                self.assert_not_closed(n, out)
+
+    def test_a_red_confirm_closes_no_member(self):  # owner goal, 10:47 CST Nov 20; green on the old code, a guard for the close after a landed merge
+        rc, out = self.confirm_integration([3301, 3302], checks_seq=[[("checks", "fail", "https://x/y")]])
+        self.assertNotEqual(rc, 0, out)
+        self.assertNotIn(MERGE_CALL, self.calls(), f"precondition: the merge was sent though a required check is red, so the red is not the one under test:\n{out}")
+        self.assertIn("checks: fail", out, f"precondition: the confirm did not stop at the red check:\n{out}")
+        for n in (3301, 3302):
+            with self.subTest(n=n):
+                self.assert_not_closed(n, out)
+
+    def test_a_rerun_after_a_lost_merge_reply_closes_each_open_member(self):  # the lost reply stops the first run before any member; the rerun reads the merged PR and closes them
+        members = list(range(3301, 3311))  # ten open members: the backlog size that combines
+        rc, out = self.confirm_integration(members, merge_replies=[[NET_TLS, True], [NET_TLS, False]], state_read_fail=NOT_FOUND)  # the merge lands, its reply is lost, and the state read after it fails
+        self.assertEqual(self.calls().count(MERGE_CALL), 1, f"precondition: the merge call was not sent once, so the lost reply is not the one under test:\n{out}")
+        self.assertNotIn("reverted on", out, f"precondition: the first run reverted the merge, so the rerun is not the one under test:\n{out}")
+        oid = self.gh_state("oid")
+        self.assertTrue(oid, f"precondition: the merge did not land on the base, so there is no merge commit for the rerun to name:\n{out}")
+        self.set(state_read_fail=None)  # the rerun's read of pull request 7 answers: merged at the merge commit
+        _, rerun_out = self.go()
+        self.assertEqual(self.calls().count(MERGE_CALL), 1, f"the rerun sent a second merge call for a pull request that is merged:\n{rerun_out}")
+        for n in members:
+            with self.subTest(n=n):
+                self.assertIn(f"PATCH pulls/{n} state=closed", self.calls().splitlines(), f"#{n} stayed open after #7 merged, and the rerun did not close it:\n{rerun_out}")
+                self.assert_merged_pointer(n, 7, oid, rerun_out)
+
+    def assert_refused_after_the_landed_merge(self, knob, text):
+        """Integration PR #7 with two open members, and GitHub refuses (`text`, through `knob`) the post-merge pointer or close of member 3301. The merge
+        lands before that refusal: the run exits non-zero, names the landed merge and the member, and reverts nothing."""
+        rc, out = self.confirm_integration([3301, 3302], **{knob: {"3301": text}})
+        self.assertEqual(self.calls().count(MERGE_CALL), 1, f"precondition: the merge call was not sent once, so the refusal after it is not the one under test:\n{out}")
+        self.assertNotIn("reverted on", out, f"the merge landed, and a refusal after it reverted it:\n{out}")
+        self.assertNotEqual(rc, 0, f"a refused post-merge call on #3301 exited 0:\n{out}")
+        self.assertRegex(out, r"the merge of #7 landed, and a lane it carries was not closed: .*#3301",
+                         f"the output does not name the landed merge and the member #3301 that was refused:\n{out}")
+
+    def test_a_refused_comment_after_the_landed_merge_exits_nonzero_and_keeps_the_merge(self):  # F3: the post-merge refusal is reported, and never undoes the merge
+        self.assert_refused_after_the_landed_merge("post_fail", rest_err(403, "Resource not accessible by integration"))
+
+    def test_a_refused_close_after_the_landed_merge_exits_nonzero_and_keeps_the_merge(self):  # F3: the post-merge refusal is reported, and never undoes the merge
+        self.assert_refused_after_the_landed_merge("close_fail", rest_err(422, "Unprocessable Entity"))
+
+    def test_a_member_unreadable_after_the_merge_gets_an_unknown_line_and_no_pointer(self):  # F4: the unknown member is named, and the open sibling still closes
+        rc, out = self.confirm_integration([3301, 3302], closed=[3302], pr_read_fail={"3302": NOT_FOUND})
+        self.assertEqual(self.calls().count(MERGE_CALL), 1, f"precondition: the merge call was not sent once:\n{out}")
+        self.assertIn("PATCH pulls/3301 state=closed", self.calls().splitlines(), f"control: the open member #3301 stayed open after #7 merged, so the loop did not go on:\n{out}")
+        self.assert_merged_pointer(3301, 7, self.gh_state("oid"), out)
+        self.assertIn("#3302 UNKNOWN", out, f"the closed and unreadable member #3302 has no UNKNOWN line:\n{out}")
+        self.assertEqual(rc, 0, f"an unreadable member exited the landed merge non-zero:\n{out}")
+        self.assert_not_closed(3302, out)
+
+    def test_a_member_closed_by_hand_gets_no_pointer_and_no_close(self):  # F4: a member closed by hand is skipped without a line
+        rc, out = self.confirm_integration([3301, 3302], closed=[3302])
+        self.assertEqual(self.calls().count(MERGE_CALL), 1, f"precondition: the merge call was not sent once:\n{out}")
+        self.assertIn("PATCH pulls/3301 state=closed", self.calls().splitlines(), f"control: the open member #3301 stayed open after #7 merged:\n{out}")
+        self.assert_merged_pointer(3301, 7, self.gh_state("oid"), out)
+        self.assertEqual(rc, 0, f"a member closed by hand exited the landed merge non-zero:\n{out}")
+        self.assert_not_closed(3302, out)
+        self.assertNotIn("#3302 UNKNOWN", out, f"a member closed by hand got an UNKNOWN line, though it is closed and merged nowhere:\n{out}")
 
     def test_a_replaces_line_closes_the_named_open_pull_request_at_ready(self):
         rc, out = self.ready(3210, "Replaces #1636", named=[(1636, "open")])
@@ -7471,15 +7596,15 @@ class CloseReplaced(Env):
         self.assertEqual(rc, 0, out)
         self.assert_untouched(1636, out)
 
-    def test_an_integration_pr_at_ready_closes_its_open_lanes_and_not_a_dropped_one(self):  # control: green on the old code
+    def test_an_integration_pr_at_ready_closes_none_of_its_open_lanes(self):  # owner goal, 10:47 CST Nov 20: members close only after it merges
         lanes = {3301: "a" * 40, 3302: "b" * 40, 3303: "c" * 40}
         self.push_branch(merge.integration_branch("x"))
         body = "\n".join(merge.freeze_lines("x", lanes, dropped=[3303]))
         rc, out = self.ready(7, body, named=[(3301, "open"), (3302, "open"), (3303, "open")], head_ref=merge.integration_branch("x"))
         self.assertEqual(rc, 0, out)
-        for n in (3301, 3302):
-            self.assert_closed_with_pointer(n, 7, out)
-        self.assert_untouched(3303, out)
+        for n in (3301, 3302, 3303):
+            with self.subTest(n=n):
+                self.assert_not_closed(n, out)
 
     def test_a_name_with_words_after_its_number_closes_nothing(self):  # step 4: a number list counts only at the end of its line or sentence
         rc, out = self.ready(3210, "Replaces #1636 in the docs", named=[(1636, "open")])
@@ -7520,7 +7645,7 @@ class CloseReplaced(Env):
         self.push_branch(merge.integration_branch("x"))
         body = "\n".join(["Carries #3302", *merge.freeze_lines("x", lanes, dropped=[3302])])
         rc, out = self.ready(7, body, named=[(3301, "open"), (3302, "open")], head_ref=merge.integration_branch("x"))
-        self.assert_closed_with_pointer(3301, 7, out)  # control: the kept lane still closes
+        self.assert_not_closed(3301, out)  # owner goal, 10:47 CST Nov 20: the kept lane closes after the integration PR merges, not at --ready
         self.assert_untouched(3302, out)
         self.assertEqual(rc, 0, out)
 
@@ -19792,7 +19917,8 @@ class ReviewRoundOneCompletes(ReviewEnv):
 class ReviewFixAfterMainMerge(ReviewEnv):
     """A fix check after a merge of main (decision pr-review-record). The newest earlier record holds a fix check, so the rule of ReviewFixBase
     refuses every fix check from its head. A lane that merges main into the fixed head has a new head: a merge commit whose second parent is on main,
-    and whose first parent is the fixed head or a commit after it, as git's ancestry reads it. A merge with a commit off main is refused. A plain
+    and whose first parent is the fixed head or a commit after it, as git's ancestry reads it. A merge with a commit off main is refused, unless
+    that commit is the head of another open pull request: a lane merged into this branch (the lane cases at the end of this class). A plain
     commit on the head is accepted after a PASS fix check. The newest record's fix check must have passed: a fix check after a FAIL one
     is refused, whatever the merge. The parents come from the commit read and the on-main test from the compare read, both scripted by PullsHost."""
 
@@ -19942,6 +20068,130 @@ class ReviewFixAfterMainMerge(ReviewEnv):
         body = posted_body(self, out)
         self.assertEqual(parse_text(self, body)["head"], m3, "the printed record names the wrong head")
         self.assertEqual(parse_text(self, body)["fix"], (fx.fixed, *REVIEW_FIX_PASS[1:]), "the printed record lacks the fix check from the reviewed head")
+
+    def lane_commits(self, fx):
+        """Add a lane branch and two merges of it into the fixed head to fx, shaped as a lane's merge into this branch is. `lane` adds a.txt and
+        b.txt off seed, so git's merge with fixed conflicts on a.txt alone and merges b.txt cleanly. `lane_merge` resolves a.txt by hand and edits
+        nothing else. `lane_edited` adds x.txt, which git's merge does not hold. The lane is pushed as feat8, as a pull request head is in origin.
+        -> fx, with lane, lane_merge and lane_edited added, and their parents and trees read from git."""
+        lane = self.git_commit(fx.seed, {"a.txt": "lane\n", "b.txt": "lane-b\n"})
+        sh(self.co, "git", "push", "-q", "origin", f"{lane}:refs/heads/feat8")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        lane_merge = self.git_commit(fx.fixed, {"a.txt": "resolved\n", "b.txt": "lane-b\n"}, lane)
+        lane_edited = self.git_commit(fx.fixed, {"a.txt": "resolved\n", "b.txt": "lane-b\n", "x.txt": "x\n"}, lane)
+        self.facts(fx, [lane, lane_merge, lane_edited])
+        fx.lane, fx.lane_merge, fx.lane_edited = lane, lane_merge, lane_edited
+        return fx
+
+    def lane_host(self, fx, live, lane_pr=True, verdict="PASS", pr8_head=None, pulls_error=None):
+        """The pull request at `live`, with the newest record (head fx.fixed, fix from fx.pre) and the commits, trees and compares of fx. With
+        `lane_pr`, another open pull request, 8, has fx.lane as its head, or `pr8_head` when given, as a lane's draft pull request does (decision
+        draft-until-reviewed). `pulls_error` fails the open pull request list read."""
+        pulls = [batch_pull(7, live)]
+        if lane_pr:
+            pulls.append(batch_pull(8, pr8_head or fx.lane, draft=True, head_ref="feat8"))
+        return PullsHost(pulls, {}, comments=[self.newest_record(verdict, head=fx.fixed, pre=fx.pre)], commits=fx.parents, trees=fx.trees,
+                         compares=fx.on_main, pulls_error=pulls_error)
+
+    def test_i_a_fix_verifier_after_a_conflicted_merge_of_an_open_pr_head_is_accepted_and_reads_done(self):
+        # A lane's conflicting merge of another open pull request's head into this branch. The second parent is not on main, so the base check
+        # alone refuses it. The conflict is resolved by hand at a.txt, as a conflicting merge of main is, so the tree rule passes it.
+        fx = self.lane_commits(self.real_commits())
+        self.assertEqual(merge.conflicting_files(self.co, fx.fixed, fx.lane), ("conflict", ["a.txt"]), "fixture: fixed and the lane do not conflict on a.txt alone")
+        self.assertEqual(fx.parents[fx.lane_merge], [fx.fixed, fx.lane], "fixture: the lane merge is not a merge of the fixed head and the lane")
+        self.assertFalse(self.is_ancestor(fx.lane, "origin/main"), "fixture: the lane is on origin's main, so the base check accepts the case")
+        host = self.lane_host(fx, fx.lane_merge)
+        self.assertIn(fx.lane, [d["head"]["sha"] for d in host.pulls if d["number"] == 8], "fixture: pull request 8 does not have the lane as its head")
+        rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=fx.lane_merge)
+        self.assertEqual(rc, 0, "a fix verifier after a conflicted merge of an open pull request's head was refused:\n" + out + err)
+        body = posted_body(self, out)
+        self.assertEqual(parse_text(self, body)["head"], fx.lane_merge, "the printed record names the wrong head")
+        self.assertEqual(parse_text(self, body)["fix"], (fx.fixed, *REVIEW_FIX_PASS[1:]), "the printed record lacks the fix check")
+        self.assertEqual(record_state(self, body, head=fx.lane_merge), "done", "the record printed after the lane merge's fix check does not read done")
+
+    def test_j_a_fix_verifier_on_a_lane_merge_with_an_edit_outside_its_conflict_is_refused(self):
+        # The lane merge of case i, with x.txt added, which git's merge does not hold. Pull request 8 is open in both cases, so only the tree rule
+        # can refuse this one, as it refuses a conflicting merge of main with an extra edit.
+        fx = self.lane_commits(self.real_commits())
+        r = subprocess.run(["git", "merge-tree", "--write-tree", fx.fixed, fx.lane], cwd=self.co, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, "fixture: fixed and the lane do not conflict in git:\n" + r.stdout + r.stderr)
+        self.assertEqual(fx.parents[fx.lane_edited], [fx.fixed, fx.lane], "fixture: the edited lane merge is not a merge of the fixed head and the lane")
+        edits = sh(self.co, "git", "diff-tree", "-r", "--name-only", r.stdout.split()[0], fx.trees[fx.lane_edited]).split()
+        self.assertEqual(sorted(edits), ["a.txt", "x.txt"], "fixture: the edited lane merge does not add one file outside git's conflict")
+        host = self.lane_host(fx, fx.lane_edited)
+        rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=fx.lane_edited)
+        self.assertIn(("pulls", {"state": "open"}), host.list_calls, "the open pull request list was not read, so the refusal may be the base check's")
+        self.assertEqual(rc, 2, "a fix verifier on a lane merge with an edit outside its conflict was accepted:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_k_a_fix_verifier_after_a_conflicted_merge_of_a_commit_no_open_pr_heads_is_refused(self):
+        # Control: the lane merge of case i, with no pull request at the lane's head. The only difference from case i is the open list, so the
+        # refusal is the one the base check made before the change.
+        fx = self.lane_commits(self.real_commits())
+        host = self.lane_host(fx, fx.lane_merge, lane_pr=False)
+        self.assertNotIn(fx.lane, [d["head"]["sha"] for d in host.pulls], "fixture: the lane is an open pull request's head, so the case tests nothing")
+        self.assertFalse(self.is_ancestor(fx.lane, "origin/main"), "fixture: the lane is on origin's main, so the base check accepts the case")
+        rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=fx.lane_merge)
+        self.assertEqual(rc, 2, "a fix verifier after a conflicted merge of a commit that no open pull request heads was accepted:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_l_a_fix_verifier_after_a_lane_merge_is_refused_when_the_newest_fix_verifier_failed(self):
+        # The lane merge of case i after a newest record whose fix verifier FAILed. The open record refuses the fix verifier before the merge's
+        # parents are read, so an open pull request at the lane's head does not admit it.
+        fx = self.lane_commits(self.real_commits())
+        host = self.lane_host(fx, fx.lane_merge, verdict="FAIL")
+        self.assertIn(fx.lane, [d["head"]["sha"] for d in host.pulls if d["number"] == 8], "fixture: pull request 8 does not have the lane as its head")
+        self.assertEqual(record_state(self, host.comments[0]["body"], head=fx.fixed), "open", "fixture: the newest record with a FAIL fix verifier does not read open")
+        rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=fx.lane_merge)
+        self.assertEqual(rc, 2, "a fix verifier after a lane merge was accepted though the newest record's fix verifier is FAIL:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_m_a_fix_verifier_after_a_lane_merge_with_this_prs_own_number_at_the_second_parent_is_refused(self):
+        # The lane merge of case i, and the open list also holds this pull request, number 7, at the lane, which is the second parent. The head read
+        # names the merge, so only the own-number clause tells this row from another pull request's head. GitHub gives one row to a number, so the
+        # two reads must disagree for this state to come up. The base check refuses the merge too, so the open list read is asserted first.
+        fx = self.lane_commits(self.real_commits())
+        host = self.lane_host(fx, fx.lane_merge, lane_pr=False)
+        host.pulls.append(batch_pull(7, fx.lane))
+        self.assertEqual(fx.parents[fx.lane_merge], [fx.fixed, fx.lane], "fixture: the lane merge is not a merge of the fixed head and the lane")
+        self.assertEqual([d["head"]["sha"] for d in host.pulls if d["number"] == 7], [fx.lane_merge, fx.lane],
+                         "fixture: the open list does not hold pull request 7 at the merge and at its second parent")
+        rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=fx.lane_merge)
+        self.assertIn(("pulls", {"state": "open"}), host.list_calls, "the open pull request list was not read, so the refusal may be the base check's")
+        self.assertEqual(rc, 2, "a fix verifier whose second parent is this pull request's own head was accepted:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_n_a_fix_verifier_after_a_lane_merge_is_refused_when_the_lane_is_an_older_head_of_an_open_pull_request(self):
+        # The lane merge of case i, where pull request 8 has moved on: its current head is lane_edited, and the lane is its older head. Drafts count,
+        # an older head does not (owner, q3-a). The base check refuses the lane too, so the open list read is asserted first.
+        fx = self.lane_commits(self.real_commits())
+        host = self.lane_host(fx, fx.lane_merge, pr8_head=fx.lane_edited)
+        self.assertEqual(fx.parents[fx.lane_merge], [fx.fixed, fx.lane], "fixture: the lane merge is not a merge of the fixed head and the lane")
+        self.assertEqual([d["head"]["sha"] for d in host.pulls if d["number"] == 8], [fx.lane_edited],
+                         "fixture: pull request 8 is not open at lane_edited, so the lane is not an older head of it")
+        self.assertFalse(self.is_ancestor(fx.lane, "origin/main"), "fixture: the lane is on origin's main, so the base check accepts the case")
+        rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=fx.lane_merge)
+        self.assertIn(("pulls", {"state": "open"}), host.list_calls, "the open pull request list was not read, so the refusal may be the base check's")
+        self.assertEqual(rc, 2, "a fix verifier after a lane merge of an older head of an open pull request was accepted:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_o_a_fix_verifier_after_a_lane_merge_is_refused_when_the_open_pull_list_cannot_be_read(self):
+        # The lane merge of case i, where the open pull request list fails. The fix check cannot tell whether the second parent is another open pull
+        # request's head, so it refuses, and the failed read is what it names. A refusal by the base check would print no such text.
+        fx = self.lane_commits(self.real_commits())
+        host = self.lane_host(fx, fx.lane_merge, pulls_error="gh: the open pull requests could not be read (test)")
+        self.assertEqual(fx.parents[fx.lane_merge], [fx.fixed, fx.lane], "fixture: the lane merge is not a merge of the fixed head and the lane")
+        rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=fx.lane_merge)
+        self.assertIn(("pulls", {"state": "open"}), host.list_calls, "the open pull request list was not read for the lane merge")
+        self.assertEqual(rc, 1, "a fix verifier after a lane merge whose open pull request list cannot be read was not refused as a failed read:\n" + out + err)
+        self.assertIn("the open pull requests could not be read", err, "the refusal does not name the failed open pull request read:\n" + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
+        self.assertNotIn("Traceback", err)
 
 class ReviewCleanMainMerge(ReviewEnv):
     """A record stays done when the pull request head is one or more clean merges of main after the record's head (decision pr-review-record).
@@ -26117,6 +26367,69 @@ class DraftReady(CloudSession):
         self.assertIn("is not the default branch", text)
         self.assertEqual(self.head("lane-101"), old, "a draft on another base was pushed to:\n" + text)
         self.assertEqual(self.lane_pushes(), [])
+
+    def other_base_lane(self, checks):
+        """Lane 101 cut before main moves, and a release branch at main's new tip, which the lane lacks: the lane's draft names release.
+        checks: main declares the ready check first, so release carries it too. -> the lane's head."""
+        if checks:
+            self.ready_checks_on_main()
+        old = self.lane(101)
+        self.main_moves()
+        sh(self.other, "git", "push", "-q", "origin", "main:refs/heads/release")
+        self.host.batch_pulls[101].update(base="release", draft=True)
+        return old
+
+    # The four pins below pin lines the built draft step prints: they are green on the built code, by design (the coordinator's
+    # ruling for this lane), so no red run is claimed for them.
+    def test_a_draft_on_another_base_names_its_dry_merge_and_passes_on_that_sha(self):
+        old = self.other_base_lane(checks=True)
+        with self.ready_check_answers("pass") as ran:
+            rc, text = self.ready_run()
+        self.assertTrue(ran, "setup: no ready check ran, though merge.readyChecks names one:\n" + text)
+        dry = re.search(r"^merge: the dry merge of ([0-9a-f]{9}) into release is ([0-9a-f]{9})\.$", text, re.M)
+        self.assertIsNotNone(dry, "the draft on release printed no dry-merge line:\n" + text)
+        self.assertEqual(dry.group(1), old[:9], "the dry-merge line names a head other than the lane's:\n" + text)
+        self.assertEqual(rc, 0, text)
+        passed = "merge: the ready checks (check invariants) pass on %s." % dry.group(2)
+        self.assertIsNotNone(re.search("^" + re.escape(passed) + "$", text, re.M),
+                             "the pass line is not the old words over the dry merge's sha:\n" + text)
+        self.assertLess(dry.start(), text.index(passed), "the pass line came before the dry-merge line:\n" + text)
+        parent = sh(self.co, "git", "rev-parse", dry.group(2) + "^1").strip()
+        self.assertTrue(parent.startswith(old[:9]), "the dry merge's first parent is not the lane's head:\n" + text)
+        self.assertEqual(self.lane_pushes(), [], "a draft on another base pushed to the lane:\n" + text)
+
+    def test_fast_checks_on_another_base_passes_on_its_dry_sha_and_prints_no_dry_merge_line(self):  # control: the dry line is draft_step's alone
+        self.other_base_lane(checks=True)
+        with self.ready_check_answers("pass") as ran:
+            rc, out, err = self.run_args("101", "--fast-checks")
+        text = out + err
+        self.assertTrue(ran, "setup: no ready check ran, though merge.readyChecks names one:\n" + text)
+        self.assertEqual(rc, 0, text)
+        self.assertNotIn("the dry merge of", text, "--fast-checks printed the dry-merge line, which only the draft step prints:\n" + text)
+        self.assertRegex(text, r"(?m)^merge: the ready checks \(check invariants\) pass on [0-9a-f]{9}\.$", "--fast-checks printed no pass line:\n" + text)
+        self.assertEqual(self.lane_pushes(), [], "--fast-checks pushed to the lane:\n" + text)
+
+    def test_a_draft_on_another_base_with_no_ready_checks_names_its_head_on_the_unchecked_line(self):
+        old = self.other_base_lane(checks=False)
+        rc, text = self.ready_run()
+        self.assertEqual(rc, 0, text)
+        self.assertIn("merge: the draft step ran no checks on #101 at %s. Nothing was pushed." % old[:9], text.splitlines(),
+                      "no unchecked line names the lane's head:\n" + text)
+        self.assertIn("merge: this repo declares no ready checks (merge.readyChecks), so the draft step runs none.", text.splitlines())
+        self.assertNotIn("the dry merge of", text, "a base with no ready checks made a dry merge, so it would have a worktree:\n" + text)
+        self.assertEqual(self.lane_pushes(), [], "a draft on another base pushed to the lane:\n" + text)
+
+    def test_a_draft_on_main_passes_in_the_same_words_as_before(self):
+        self.ready_checks_on_main()
+        old = self.lane(101)
+        self.host.batch_pulls[101]["draft"] = True
+        with self.ready_check_answers("pass") as ran:
+            rc, text = self.ready_run()
+        self.assertTrue(ran, "setup: no ready check ran, though merge.readyChecks names one:\n" + text)
+        self.assertEqual(rc, 0, text)
+        self.assertIn("merge: the ready checks (check invariants) pass on %s." % old[:9], text.splitlines(),
+                      "the pass line changed its words or its sha:\n" + text)
+        self.assertNotIn("the dry merge of", text, "a draft on main made a dry merge:\n" + text)
 
     def test_a_draft_whose_head_holds_a_record_claim_is_stopped_and_pushes_nothing(self):  # control: green on the old code
         old = self.lane(101, claim=True)
