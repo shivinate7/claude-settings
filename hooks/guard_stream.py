@@ -251,14 +251,15 @@ def _skip_setsid(tokens, index: int) -> int:
 def check_stage(segment: str, background: bool, launcher_script: bool = False) -> str:
     """The command word when one segment runs a named check, else ''. `ci-job` counts
     only in the background. `launcher_script` also reads `python3 bin/merge` as a run of `merge`: only the lint-start
-    reader asks, so check-timeout and the tail rule keep their own reading of that spelling."""
+    reader asks, so check-timeout and the tail rule keep their own reading of that spelling. It also reads through
+    `setsid`, which they do not."""
     tokens = segment_tokens(segment)
     if not tokens:
         return ""
     index = resolve_command(tokens)
     if index is None:
         return ""
-    index = _skip_uv_run(tokens, _skip_setsid(tokens, index))
+    index = _skip_uv_run(tokens, _skip_setsid(tokens, index) if launcher_script else index)
     if basename(tokens[index]) in CHECK_COMMANDS:
         return basename(tokens[index]) if background else ""
     if SCRIPT_INTERPRETER.match(basename(tokens[index]).removesuffix(".exe")) and _script_operand(
