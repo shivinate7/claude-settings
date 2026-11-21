@@ -73,6 +73,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import test_call_judge as tcj  # noqa: E402  the call_judge harness; its ROOT is this run's folder
+sys.path.insert(0, os.path.join(REPO, "tests"))
+import lift_line  # noqa: E402  the one reader of the lift line (tests/lift_line.py)
 
 RUN_FOLDER = tcj.ROOT
 os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(RUN_FOLDER, "config")
@@ -1880,7 +1882,8 @@ def case_call_judge():
           r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny" and r.calls == [], tcj.detail(r))
     r = tcj.run_hook(tcj.question_input(box=bad), answer=tcj.ALLOW, pass_=(tcj.SID_A, tcj.TIMED))
     check("call_judge: a timed override lifts the code refusal",
-          r.code == 0 and r.out == "" and tcj.lifted_log(r, FORM_RULE), tcj.detail(r))
+          r.code == 0 and lift_line.names_lift(r.out.strip(), FORM_RULE) and tcj.lifted_log(r, FORM_RULE),
+          tcj.detail(r))
     options = tcj.good_options()
     options[0] = {"label": "Allow the second form (Recommended)",
                   "description": "Gain: it lands today. Lose: two forms stay. " + WIDE + "."}

@@ -9,6 +9,8 @@ A capability has one home. Read this page before you build a helper, and extend 
 - reading a JSON value by a dotted path, with a fan-out over a list — `lint/rule_audit.py:_walk`
 - listing the copies of claude-settings skills in a child repo — `lint/find_copies.py:find_skill_copies`
 - loading the typescript package for the map skill — `skills/plain-english-map/scripts/lib/lazy-typescript.mjs:load`
+- running a test command in a copy of an old commit, for a red run or a mutant, removed when the run ends — `bin/red-run`
+- exporting a commit's tree into a folder — `hooks/tree_export.py:export_tree`
 - reading source text with comments and strings blanked — `skills/plain-english-map/scripts/lib/source-text.mjs:blankCommentsAndStrings`
 
 ## Code files

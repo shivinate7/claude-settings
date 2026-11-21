@@ -1,0 +1,1 @@
+- pick-guard-inactive-writer: The pick guard (the Stop hook, decision `guard-remedy-not-to-owner`, owner route) tells a session to send each owner question to the page writer. That session is inactive, so every send fails and the guard fires on every report. The decision's fallback also sends to that writer. It has no step for an inactive writer. Seen: 2026-11-21 x1

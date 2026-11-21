@@ -1,0 +1,1 @@
+- leftover-lsof-path-untested: On macOS, `_open_file_holders` in `janitor/sweep.py` passes the temp path to `lsof +D` as given, unresolved. No test covers that call. Whether lsof then misses a holder is unmeasured. Seen: 2026-11-18 x1

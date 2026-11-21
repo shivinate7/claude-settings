@@ -1,0 +1,1 @@
+- sweep-cli-tests-flake: `test_cli_refuses_to_discover_when_roots_is_malformed_and_no_root_given` and `test_cli_uses_the_explicit_roots_list_when_no_root_or_discover_given` in `janitor/test_sweep.py` flake. Each runs `sweep.py` as a subprocess under a 20 s timeout. The cause is unmeasured. Seen: 2026-11-18 x1

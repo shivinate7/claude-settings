@@ -7,8 +7,9 @@
 # It keeps no UDID: `sim-lease take --device <role> --udid` grants one (SLOT_UDID in bin/sim-lease is the one home).
 # Reuse: duo reuses the first booted device whose name contains "iPhone Duo", pro the first booted iPhone whose name does
 # not. Reuse takes no lease and shuts nothing down. It never shuts down a simulator it did not boot.
-# Cross-role (13:51 CST: never a Duo and the 18 Pro booted together): a duo run with only a non-Duo iPhone booted, or a pro
-# run with only a Duo booted, boots nothing, runs nothing, names the booted device on stderr and exits 1.
+# Cross-role (ruling sims-load-brake-only): a Duo may boot beside the 18 Pro and the reverse. A booted phone of the other
+# kind is no reason to refuse. The ruling also covers the 2-device cap below and rules it out; this lane keeps CAP=2 (guard
+# SIM_BOOT_CAP=2, test case 107) until a follow-up lane changes the guard (debt sim-boot-cap-outlives-ruling).
 # Before its own boot it counts every booted device, owner-booted too. At the cap it boots nothing, runs no tests,
 # names the booted devices and exits 1: the guard sees only the command word, not the boot inside this tool. A simctl
 # list that fails exits 1 with no boot.
@@ -25,7 +26,7 @@
 # or not macOS) boots and runs nothing, prints one stderr line saying no lease, and exits 1. The lease is given back
 # after the shutdown and before the lock is freed, on every exit, INT and TERM too. The take runs in the background and
 # this tool waits on it, so INT and TERM act at once. After the grant it reads the booted list again, under the lock, and
-# reruns the reuse, cross-role and cap checks before the boot: a simulator a dead holder left booted is reused (the lease
+# reruns the reuse and cap checks before the boot: a simulator a dead holder left booted is reused (the lease
 # goes back) or refused. A boot that fails shuts nothing down; a TERM during the boot still records, then shuts it down.
 # On its own boot it deletes the PosterBoard store (`data/Library/Application Support/PRBPosterExtensionDataStore`) of the
 # leased device, which this run has not booted, before the boot (ruling 10 of decision sim-test-is-the-one-boot-path). The
@@ -211,21 +212,17 @@ list_reports() {
 acquire_lock
 
 # scan: read the booted devices under the lock. Sets udid to the booted device of this role (reuse), else empty. Exits 1,
-# booting nothing, when the list cannot be read, when only the other phone kind is booted, or at the cap with no reuse.
+# booting nothing, when the list cannot be read or at the cap with no reuse.
 udid_of() { sed -n 's/^.* (\([0-9A-F-]\{36\}\))$/\1/p'; }
 scan() {
-  local listing duo_line pro_line mine other count
+  local listing duo_line pro_line mine count
   listing=$(xcrun simctl list devices booted) || { echo "sim-test: simctl list failed; booted nothing, ran nothing." >&2; exit 1; }
   booted=$(printf '%s\n' "$listing" | sed -n 's/^ *\(.*\) (\([0-9A-F-]\{36\}\)) (Booted).*/\1 (\2)/p')
   duo_line=$(printf '%s\n' "$booted" | grep 'iPhone Duo' | head -1)
   pro_line=$(printf '%s\n' "$booted" | grep iPhone | grep -v Duo | head -1)
-  if [ "$role" = duo ]; then mine=$duo_line other=$pro_line; else mine=$pro_line other=$duo_line; fi
+  if [ "$role" = duo ]; then mine=$duo_line; else mine=$pro_line; fi
   udid=$(printf '%s\n' "$mine" | udid_of)
   [ -n "$udid" ] && return 0
-  if [ -n "$other" ]; then
-    echo "sim-test: $other is booted, and a $role run needs the other phone kind: one phone kind at a time (owner ruling 2026-11-02 13:51 CST). Booted nothing, ran nothing; use --device for that kind, or ask the owner to stop it." >&2
-    exit 1
-  fi
   count=$(printf '%s\n' "$booted" | grep -c .)
   if [ "$count" -ge "$CAP" ]; then
     echo "sim-test: $count simulators are already booted, the cap is $CAP:" >&2
@@ -250,7 +247,7 @@ if [ -z "$udid" ]; then
     echo "sim-test: no lease was taken (CI, or not macOS), so no simulator is booted. Booted nothing, ran nothing." >&2
     exit 1
   fi
-  # The wait may have been long: a holder that died can have left its simulator booted. Judge the reuse, cross-role and
+  # The wait may have been long: a holder that died can have left its simulator booted. Judge the reuse and
   # cap checks again under the lock before the boot. A device that is now reusable is used, and the lease goes back.
   scan
   if [ -n "$udid" ]; then

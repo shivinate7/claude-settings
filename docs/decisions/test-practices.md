@@ -10,13 +10,13 @@ P1. Assert the outcome the person meets, not a proxy (a log string, source text,
 - degen 50149a79 — a source-text check passed while the simulator showed the cap never acted; the check was dropped.
 Applies to: every test.
 
-P2. Prove red first on a named old commit, with a green control beside it.
+P2. Prove red first on a named old commit, with a green control beside it. The run goes through `bin/red-run`.
 - q_max dc079516b — a layout test red on the old commit, green on the fix commit.
 - Counter: mailaudit 8452a12 and 8e94d76 — green suites while real defects shipped; one was found in live use because no test reached the state.
 - Counter: claude-settings d8c5ac166 — a check waited for a string the install never prints, so it could never go red.
 Applies to: every test that adds or changes a case.
 
-P3. A red counts only when an assert fails for the named cause; a crash, import error, timeout or "not built yet" is not a red. For a new feature, a crash on a missing name is not a red. After the build, the test-author makes a mutant of the built code on a scratch copy outside every repository, never on a repo file. It makes the copy without `.git`, such as with `git archive`, never a plain `cp -r`, and with no `.git` above it. It records the named case going red, reverts the mutant, and sends the result back to the orchestrator in its report.
+P3. A red counts only when an assert fails for the named cause; a crash, import error, timeout or "not built yet" is not a red. For a new feature, a crash on a missing name is not a red. After the build, the test-author makes a mutant of the built code with `bin/red-run`. The copy holds no `.git`, sits outside every repository, and is removed when the run ends; no repo file changes. It records the named case going red and sends the result back to the orchestrator in its report.
 - claude-settings decision mutation-report-scores-suites — "A crash is not a kill."
 - mailaudit decision testing-mutant-dies-check-cause — a mutant "kill" came from an unrelated guard.
 - claude-settings 06fe84c0b — the recorded red run was 14 AttributeErrors on missing symbols: it shows the test runs, not that it tells good code from bad.
@@ -60,7 +60,7 @@ P9. Delete or loosen a test only with proof that coverage holds: one mutant per 
 - Counter: joyous 29eb4e0 then da58dcf — an agent dropped a working test to fit a test count in its brief.
 Applies to: every change that removes or loosens a test case.
 
-P10. A reviewer reads the recorded red run. If it is missing or in doubt, the reviewer makes a mutant on a scratch copy outside every repository and watches the named case go red (`roles-each-layer-proves-once`). It makes the copy without `.git`, such as with `git archive`, never a plain `cp -r`, and with no `.git` above it.
+P10. A reviewer reads the recorded red run. If it is missing or in doubt, the reviewer makes a mutant with `bin/red-run` and watches the named case go red (`roles-each-layer-proves-once`). The copy holds no `.git` and sits outside every repository.
 - q_max ac3397064 — a mutant stayed green because an earlier error response answered first.
 - q_max decision D-804 — most round-2 mutants stayed green on the round-1 test file.
 - claude-settings decision mutation-report-scores-suites — hand-written mutants that each name their case: 367 of 367 killed; sampled ast rates are upper bounds, not gold.

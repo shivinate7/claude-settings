@@ -15,7 +15,16 @@ Stdout also names every touched path and what became of it, so the run log shows
 
 A touched path selects:
   a test file (patterns TEST_PATTERNS)                                       -> itself
-  dir/x.py                                                                   -> dir/test_x.py
+  dir/x.py                                                                   -> dir/test_x.py, and every tracked test_*.py (any
+                                                                               folder) that imports the module x, by `import x` or
+                                                                               `from x import ...`, even inside a function, or by a
+                                                                               loader call that hooks/mutate_guard.py
+                                                                               `_load_profile` reads (import_module, a loader path
+                                                                               that ends in x.py as a string, a constant, a join, an
+                                                                               `or` or if-else default). The
+                                                                               imports are read with `ast`, so a name in a comment
+                                                                               or a string selects nothing. A test it cannot read
+                                                                               or parse is selected: unknown is not skip.
   dir/x.sh                                                                   -> dir/test_x.sh, dir/x.test.sh
   dir/x.ps1                                                                  -> dir/x.test.ps1, dir/x-*.test.ps1
   any non-.md, non-test path under mods/<mod>/                               -> every *.test.mjs, *.test.js and check.mjs under
@@ -26,6 +35,8 @@ A touched path selects:
   any non-.md, non-test path under a folder named tests                      -> every test under that folder
 Each selected test then lands in one of these places, each printed with its reason, none dropped silently:
   HEAVY           the batch shards it in its own jobs; running it per lane push is a cost blow-up
+                  A touched HEAVY .py suite is read with `ast` first, and the job exits 1 when it uses a POSIX_ONLY name outside a guard
+                  that excludes Windows, on a line the change adds (see posix_offences). No lane run reaches a HEAVY suite on Windows, so this is its only read.
   NEEDS_SETUP     needs a browser or a tool this workflow does not install, or runs on one OS only
   per OS          listed for an OS when a job of checks.yml at HEAD runs on that OS and names it (see os_runs);
                   skipped on each other OS, and on both with "no CI job runs it" when no Windows or macOS job names it
@@ -36,7 +47,9 @@ an interpreter (`FOO=x node t`, `cd a && node t`) or after a chain (`&&`, `;`, `
 The exit names the line. A trailing backslash joins a line to the next. A step with `shell: powershell` or `pwsh` is read
 with each backslash as a slash, and a trailing backtick joins its line to the next.
 """
+import ast
 import fnmatch
+import importlib.util
 import json
 import os
 import re
@@ -73,6 +86,12 @@ HEAVY = {
     "merge/test_merge.py": "heavy: runs in the batch's shard jobs (MERGE_SHARD)",
     "janitor/test_sweep.py": "heavy: runs in the batch's checks-windows-sweep job",
     "hooks/test_install_src.sh": "heavy: runs in the batch's shell-macos job under its own step cap",
+}
+
+# The POSIX-only names a HEAVY suite may use only inside a guard that excludes Windows (module -> attribute names).
+POSIX_ONLY = {
+    "os": ("killpg", "getpgid", "setsid"),
+    "signal": ("SIGHUP", "SIGKILL", "SIGQUIT", "SIGUSR1", "SIGUSR2"),
 }
 
 # Suites that need a browser or a tool this workflow does not install (glob -> reason).
@@ -145,8 +164,305 @@ def reason(path, table):
     return None
 
 
-def candidates(path, tracked):
-    """The test files `path` selects, from the tracked paths at HEAD."""
+def _dotted(node):
+    """The dotted name an Attribute or Name chain spells ("os.name"), or None."""
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    return ".".join([node.id, *reversed(parts)])
+
+
+def _constants(node):
+    """The values of a constant, or of a tuple, list or set of constants. None when any element is not a constant."""
+    items = node.elts if isinstance(node, (ast.Tuple, ast.List, ast.Set)) else [node]
+    if all(isinstance(i, ast.Constant) for i in items):
+        return [i.value for i in items]
+    return None
+
+
+def on_windows(test, env=None):
+    """What the condition `test` evaluates to on Windows (os.name "nt", sys.platform "win32"): True, False, or None when it is
+    not a plain os.name or sys.platform test. Three-valued, so `and`, `or` and `not` carry the unknown through. An `if` body
+    runs only when its condition is true, so the body is safe on Windows when this is False, and the else arm when it is
+    True. skipIf skips when true, so it excuses a suite when this is True; skipUnless, when False. Evaluating on Windows,
+    never matching a spelling, is what makes the direction count: skipIf(os.name == "posix") is False here.
+    `env` is {name: expression} for the flags in scope (scope_env): a name in it is read as its expression."""
+    env = env or {}
+    if isinstance(test, ast.Name):
+        if test.id not in env:
+            return None
+        return on_windows(env[test.id], {k: v for k, v in env.items() if k != test.id})
+    if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+        inner = on_windows(test.operand, env)
+        return None if inner is None else not inner
+    if isinstance(test, ast.BoolOp):
+        seen = [on_windows(v, env) for v in test.values]
+        decisive = isinstance(test.op, ast.Or)
+        if decisive in seen:
+            return decisive
+        return None if None in seen else not decisive
+    if isinstance(test, ast.Compare) and len(test.ops) == 1 and len(test.comparators) == 1:
+        windows = {"os.name": "nt", "sys.platform": "win32"}.get(_dotted(test.left))
+        values = _constants(test.comparators[0])
+        if windows is None or values is None:
+            return None
+        if isinstance(test.ops[0], (ast.Eq, ast.In)):
+            return windows in values
+        if isinstance(test.ops[0], (ast.NotEq, ast.NotIn)):
+            return windows not in values
+        return None
+    if (isinstance(test, ast.Call) and isinstance(test.func, ast.Attribute) and test.func.attr == "startswith"
+            and _dotted(test.func.value) == "sys.platform" and len(test.args) == 1 and not test.keywords):
+        prefixes = _constants(test.args[0])
+        if prefixes is None or not all(isinstance(p, str) for p in prefixes):
+            return None
+        return any("win32".startswith(p) for p in prefixes)
+    return None
+
+
+def skip_decorator_excuses(decorator, env=None):
+    """True when `decorator` is unittest's skipIf or skipUnless with a condition that skips the test on Windows."""
+    if not isinstance(decorator, ast.Call) or not decorator.args:
+        return False
+    name = (_dotted(decorator.func) or "").rsplit(".", 1)[-1]
+    if name not in ("skipIf", "skipUnless"):
+        return False
+    return on_windows(decorator.args[0], env) is (name == "skipIf")
+
+
+def scope_env(outer, body, params=(), poisoned=frozenset()):
+    """The flags in scope inside a module or def body: `outer`, less each name this scope binds, plus each name this scope
+    binds once, by a plain `name = <expression>` (or an annotated one), as {name: expression}. A name bound twice, by a loop,
+    an import, a def or a global in any def (`poisoned`) is no flag. Bodies of nested defs, classes and lambdas are their own
+    scopes. on_windows() reads a flag's expression, so only an os.name or sys.platform test gives a value."""
+    counts, bound = {}, {}
+
+    def bind(name, n=1):
+        counts[name] = counts.get(name, 0) + n
+
+    def visit(node):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                bind(child.name)
+                continue
+            if isinstance(child, ast.Lambda):
+                continue
+            if isinstance(child, ast.Name) and isinstance(child.ctx, (ast.Store, ast.Del)):
+                bind(child.id)
+            elif isinstance(child, (ast.Import, ast.ImportFrom)):
+                for alias in child.names:
+                    bind((alias.asname or alias.name).split(".")[0])
+            elif isinstance(child, (ast.Global, ast.Nonlocal)):
+                for name in child.names:
+                    bind(name, 2)
+            elif isinstance(child, ast.Assign) and len(child.targets) == 1 and isinstance(child.targets[0], ast.Name):
+                bound[child.targets[0].id] = child.value
+            elif isinstance(child, ast.AnnAssign) and child.value is not None and isinstance(child.target, ast.Name):
+                bound[child.target.id] = child.value
+            visit(child)
+
+    for stmt in body:
+        visit(ast.Module(body=[stmt], type_ignores=[]))
+    for name in params:
+        bind(name, 2)
+    env = {k: v for k, v in outer.items() if k not in counts}
+    env.update({k: v for k, v in bound.items() if counts.get(k) == 1 and k not in poisoned})
+    return env
+
+
+def exits(stmts):
+    """True when the statement list `stmts` always ends the enclosing function, module, test or loop pass on reaching it: a
+    return, raise, continue or break, a call to skipTest (any receiver), sys.exit, exit or quit, or an `if` whose two arms both exit."""
+    for stmt in stmts:
+        if isinstance(stmt, (ast.Return, ast.Raise, ast.Continue, ast.Break)):
+            return True
+        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+            func = stmt.value.func
+            if (isinstance(func, ast.Attribute) and func.attr == "skipTest") or _dotted(func) in ("sys.exit", "exit", "quit"):
+                return True
+        if isinstance(stmt, ast.If) and exits(stmt.body) and exits(stmt.orelse):
+            return True
+    return False
+
+
+def posix_offences(path, source, added=None):
+    """One `path:line: message` string for each POSIX_ONLY name that `source` uses outside a guard that excludes Windows, and
+    one for a source that cannot be parsed (unknown is red, not skip). A guard is a def or class under skipIf or skipUnless
+    that skips Windows, an `if` body whose condition is false on Windows, or the else arm of an `if` whose condition is true
+    on Windows, or each statement after an `if` whose Windows arm always exits (see exits). A skip decorator covers the function bodies
+    under it, not a class body or a def's default arguments, which run at import. Any other guard covers everything nested in it. A name bound once to an os.name or sys.platform test is read as that test (scope_env). The source is read with `ast`, so a name in a comment or a string
+    counts for nothing. A name is `os.killpg`, `from os import killpg` (the import line is the offence: on Windows the import
+    itself raises) or `s.SIGHUP` under `import signal as s`. With `added` (a set of line numbers), only a name on such a line
+    counts: a call already on the base is an existing offence, and this change does not own it."""
+    try:
+        tree = ast.parse(source, filename=path)
+    except (SyntaxError, ValueError, RecursionError) as e:
+        return [f"{path}:{getattr(e, 'lineno', None) or 1}: cannot parse this heavy suite, so its POSIX-only calls are unread ({e})"]
+    found = []
+    modules = {m: m for m in POSIX_ONLY}
+    poisoned = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update({a.asname: a.name for a in node.names if a.asname and a.name in POSIX_ONLY})
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            poisoned.update(node.names)
+
+    def hit(line, name):
+        if added is None or line in added:
+            found.append(f"{path}:{line}: {name} is POSIX-only and has no guard that excludes Windows (skipIf on os.name == 'nt', "
+                         "skipUnless on os.name != 'nt', an if on os.name or sys.platform, or an earlier `if` on Windows that "
+                         "returns, raises, continues, calls skipTest or sys.exit)")
+
+    def block(stmts, guarded, env, skipped=False):
+        """Walk a statement list in order. An `if` whose Windows arm always exits guards each statement after it in this list."""
+        for stmt in stmts:
+            walk(stmt, guarded, env, skipped)
+            if not guarded and isinstance(stmt, ast.If):
+                verdict = on_windows(stmt.test, env)
+                arm = stmt.body if verdict is True else stmt.orelse if verdict is False else None
+                guarded = bool(arm) and exits(arm)
+
+    def walk(node, guarded, env, skipped=False):
+        """`skipped` is a skip decorator on an enclosing class or def. It guards only a function body, which runs with the test:
+        a class body and a def's default arguments run when the module loads, on Windows too."""
+        is_def = isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        if is_def or isinstance(node, ast.ClassDef):
+            skipped = skipped or any(skip_decorator_excuses(d, env) for d in node.decorator_list)
+            if isinstance(node, ast.ClassDef):
+                # A class body binds names that its methods do not read, so keep only the flags it leaves alone.
+                inner = scope_env(env, node.body, poisoned=poisoned)
+                env = {k: v for k, v in env.items() if inner.get(k) is v}
+            else:
+                args = node.args
+                names = [a.arg for a in args.posonlyargs + args.args + args.kwonlyargs] + [a.arg for a in (args.vararg, args.kwarg) if a]
+                env = scope_env(env, node.body, names, poisoned)
+        if isinstance(node, ast.If):
+            verdict = on_windows(node.test, env)
+            walk(node.test, guarded, env, skipped)
+            block(node.body, guarded or verdict is False, env, skipped)
+            block(node.orelse, guarded or verdict is True, env, skipped)
+            return
+        if not guarded and isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            module = modules.get(node.value.id)
+            if module and node.attr in POSIX_ONLY[module]:
+                hit(node.lineno, f"{module}.{node.attr}")
+        if not guarded and isinstance(node, ast.ImportFrom) and node.level == 0:
+            for alias in node.names:
+                if alias.name in POSIX_ONLY.get(node.module, ()):
+                    hit(node.lineno, f"{node.module}.{alias.name}")
+        for field, value in ast.iter_fields(node):
+            covered = guarded or (is_def and field == "body" and skipped)
+            if isinstance(value, list) and value and all(isinstance(v, ast.stmt) for v in value):
+                block(value, covered, env, skipped)
+            elif isinstance(value, list):
+                for child in value:
+                    if isinstance(child, ast.AST):
+                        walk(child, covered, env, skipped)
+            elif isinstance(value, ast.AST):
+                walk(value, covered, env, skipped)
+
+    try:
+        block(tree.body, False, scope_env({}, tree.body, poisoned=poisoned))
+    except RecursionError as e:
+        return [f"{path}:1: cannot read this heavy suite, so its POSIX-only calls are unread ({e})"]
+    return found
+
+
+def added_lines(base, path):
+    """The set of line numbers the change from `base` to HEAD adds or rewrites in `path`, from the zero-context diff hunks."""
+    added = set()
+    for start, count in re.findall(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", git("diff", "-U0", "--no-renames", f"{base}...HEAD", "--", path),
+                                   re.MULTILINE):
+        added.update(range(int(start), int(start) + (1 if count == "" else int(count))))
+    return added
+
+
+def heavy_offences(test, base):
+    """posix_offences() of the touched HEAVY .py suite `test`, read from the checkout, for the lines the change from `base` adds.
+    An unreadable file is an offence."""
+    try:
+        with open(test, "rb") as f:
+            return posix_offences(test, f.read(), added_lines(base, test))
+    except OSError as e:
+        return [f"{test}:1: cannot read this heavy suite, so its POSIX-only calls are unread ({e})"]
+
+
+# {(root, test): (stat key, module names)}, kept while the file's size and mtime hold. A run asks about each tracked test once per
+# touched .py path, and this parses it once.
+_IMPORTS = {}
+
+# The scanner for "which module does this test load by a loader call" has one home, hooks/mutate_guard.py (`_load_profile`: import_module,
+# __import__, spec_from_file_location, SourceFileLoader, run_path, constants, joins, `or` and if-else defaults, parameters). It is
+# stdlib-only, so this script loads it by path from the checkout it sits in.
+_HOME = None
+
+
+def load_profile(source):
+    """`_load_profile` of hooks/mutate_guard.py for `source`: (import stems, loader basenames, read basenames)."""
+    global _HOME
+    if _HOME is None:
+        hooks = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "hooks")
+        sys.path.insert(0, hooks)
+        spec = importlib.util.spec_from_file_location("mutate_guard_home", os.path.join(hooks, "mutate_guard.py"))
+        _HOME = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_HOME)
+    return _HOME._load_profile(source)
+
+
+def loaded_modules(source):
+    """The module names the test text `source` loads by a loader call or an import by name: a loader path that ends in x.py names x."""
+    stems, loads, _reads = load_profile(source)
+    return set(stems) | {base[:-3] for base in loads if base.endswith(".py")}
+
+
+def imported_modules(test, root):
+    """The top-level module names the Python test `test` imports, or None when it cannot be read or parsed. `import a.b` names a,
+    `from a import b` names a, and `from . import a` names a. A loader call names its module too: `import_module("a.b")` names a,
+    and `spec_from_file_location(name, path)` names the stem of a .py path. The parser sees every import in the file, a lazy one
+    inside a function included, and no name in a comment or a string."""
+    full = os.path.join(root, *test.split("/"))
+    try:
+        info = os.stat(full)
+        key = (info.st_size, info.st_mtime_ns)
+        cached = _IMPORTS.get((root, test))
+        if cached and cached[0] == key:
+            return cached[1]
+        with open(full, "rb") as f:
+            raw = f.read()
+        tree = ast.parse(raw, filename=test)
+    except (OSError, SyntaxError, ValueError):
+        return None
+    names = loaded_modules(raw.decode("utf-8", errors="replace"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(alias.name.partition(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                names.add(node.module.partition(".")[0])
+            elif node.level:
+                names.update(alias.name.partition(".")[0] for alias in node.names)
+    _IMPORTS[(root, test)] = (key, frozenset(names))
+    return _IMPORTS[(root, test)][1]
+
+
+def importers(module, tracked, root):
+    """The tracked Python tests, in any folder, that import the module named `module`. A test whose imports cannot be read is
+    listed: a test the selector cannot read must not read as a test that does not import it."""
+    found = set()
+    for t in tracked:
+        if t.endswith(".py") and is_test(t):
+            names = imported_modules(t, root)
+            if names is None or module in names:
+                found.add(t)
+    return found
+
+
+def candidates(path, tracked, root="."):
+    """The test files `path` selects, from the tracked paths at HEAD. `root` is the checkout the tracked paths sit in: the selector
+    reads each test's imports there, not in the current folder."""
     # A file that a HEAVY glob names is selected even when its name is no test name (a section file), so the log skips it with its reason.
     if is_test(path) or reason(path, HEAVY):
         return {path}
@@ -156,6 +472,7 @@ def candidates(path, tracked):
     stem, dot, ext = name.rpartition(".")
     if dot and ext == "py":
         found.add(f"{prefix}test_{stem}.py")
+        found |= importers(stem, tracked, root)
     elif dot and ext == "sh":
         found.add(f"{prefix}test_{stem}.sh")
         found.add(f"{prefix}{stem}.test.sh")
@@ -433,8 +750,11 @@ def main():
     lists = {word: [] for word in texts}
     cmds = {word: {} for word in texts}
     labels = {"windows": "Windows", "macos": "macOS"}
+    offences = []
     for test in sorted(selected):
         why = reason(test, HEAVY) or reason(test, NEEDS_SETUP)
+        if reason(test, HEAVY) and test.endswith(".py") and test in touched:
+            offences += heavy_offences(test, base)
         if why:
             print(f"skip {test}: {why}")
             continue
@@ -458,6 +778,10 @@ def main():
                 print(f"skip {test} on {word}: {CI_PATH} runs it on no {labels[word]} job")
         if listed:
             print(f"run {test} on {' and '.join(listed)}")
+    if offences:
+        for line in offences:
+            print(f"touched-tests: {line}", file=sys.stderr)
+        sys.exit(1)
     write_outputs(lists["windows"], lists["macos"], cmds)
 
 

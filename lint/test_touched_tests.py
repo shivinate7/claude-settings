@@ -115,7 +115,9 @@ def with_ci(base, paths=None):
     return with_checks(base, ci_for(paths) if paths is not None else FIXTURE_CI)
 
 
-class Selector(unittest.TestCase):
+class SelectorBase(unittest.TestCase):
+    """The fixture and the output readers that every selector case class shares. It holds no case."""
+
     @classmethod
     def setUpClass(cls):
         cls.run_dir = _test_temp.run_folder()
@@ -183,12 +185,16 @@ class Selector(unittest.TestCase):
         self.assertEqual(outputs["any"], "true" if files else "false", f"any disagrees with files: {outputs}")
         return sorted(files), r.stdout
 
-    def constant(self, name):
-        """The list the selector holds as its constant `name`. The script is loaded for it, never copied here."""
+    def selector_module(self):
+        """The selector loaded as a module, for its constants and its candidates(). The script is loaded, never copied here."""
         spec = importlib.util.spec_from_file_location("touched_tests", SCRIPT)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        value = getattr(module, name, None)
+        return module
+
+    def constant(self, name):
+        """The list the selector holds as its constant `name`. The script is loaded for it, never copied here."""
+        value = getattr(self.selector_module(), name, None)
         self.assertIsNotNone(value, f"the selector has no {name} constant")
         return list(value)
 
@@ -263,6 +269,10 @@ class Selector(unittest.TestCase):
         self.assertEqual(r.returncode, 1, f"the selector exited {r.returncode}, not 1, on a checks.yml it cannot read:\n{r.stderr}")
         self.assertEqual(outputs, {}, f"the selector wrote output on its exit 1: {outputs}")
         return r.stderr
+
+
+class Selector(SelectorBase):
+    """The selector's cases over the scratch repos that fixture() builds."""
 
     def test_control_the_fixture_diff_names_the_changed_path(self):
         """Green control: with no selector, the fixture's own diff still holds the path it changed, so each red case
@@ -1065,6 +1075,525 @@ class Selector(unittest.TestCase):
         self.assertEqual(macos, [a], "files_macos does not list the duo-fold test the shell-macos job runs")
         self.assertEqual(self.commands_of(outputs, "commands_macos"), {a: "bash"},
                          "commands_macos does not read the shell-macos job's /bin/bash line as bash")
+
+    # A test that imports a changed hook module is selected with it. A test is named by its module (test_<module>.py), so a
+    # change to ci_wake.py alone misses a test that imports ci_wake, such as hooks/test_stall_watch_stop.py. The import
+    # below is the form that file uses: beside the module, with a comment after it.
+    IMPORT_CI_WAKE = "import ci_wake  # noqa: E402  the one home of the no-workflows read, beside this file\n"
+
+    def test_a_change_to_a_hook_module_lists_the_test_that_imports_it(self):
+        own, importer, module = "hooks/test_ci_wake.py", "hooks/test_stall_watch_stop.py", "hooks/ci_wake.py"
+        base = with_ci({module: "old\n", own: "old\n", importer: self.IMPORT_CI_WAKE + "\n\ndef test_stop():\n    assert True\n"},
+                       [own, importer])
+        files, _ = self.listed(base, {module: "new\n"})
+        self.assertIn(own, files, f"{own} is not listed for a change to {module}, so this case probes nothing")
+        self.assertIn(importer, files, f"{importer} imports {module} and is not listed")
+        windows, _, _ = self.per_os(base, {module: "new\n"})
+        self.assertIn(importer, windows, f"{importer} imports {module} and is not in files_windows, so the Windows leg skips it")
+
+    def test_a_test_that_names_the_module_in_a_from_import_is_listed(self):
+        module, importer = "hooks/ci_wake.py", "hooks/test_wake_gh.py"
+        base = with_ci({module: "old\n", importer: "from ci_wake import gh\n\n\ndef test_gh():\n    assert gh\n"}, [importer])
+        files, _ = self.listed(base, {module: "new\n"})
+        self.assertIn(importer, files, f"{importer} does `from ci_wake import gh` and is not listed for a change to {module}")
+
+    def test_a_test_outside_hooks_that_imports_the_module_inside_a_function_is_listed(self):
+        """An indented import counts. lint/test_hook_platform_exit.py imports ci_wake inside its test functions."""
+        module, importer = "hooks/ci_wake.py", "lint/test_wake_lazy.py"
+        base = with_ci({module: "old\n", importer: "def test_lazy():\n    import ci_wake\n    assert ci_wake\n"}, [importer])
+        files, _ = self.listed(base, {module: "new\n"})
+        self.assertIn(importer, files, f"{importer} imports {module} inside a function and is not listed")
+
+    def test_an_import_after_a_lone_quote_and_a_quoted_hash_is_listed(self):
+        """A lone quote in a comment, a `#` inside a string and a triple quote inside a string open nothing that hides the
+        import after them."""
+        module, importer = "hooks/ci_wake.py", "hooks/test_quotes.py"
+        text = ("# don't stop at this quote\n"
+                'MARK = "# not a comment"\n'
+                "TRIPLE = '\"\"\"'\n"
+                "import ci_wake\n\n\ndef test_quotes():\n    assert ci_wake\n")
+        base = with_ci({module: "old\n", importer: text}, [importer])
+        files, _ = self.listed(base, {module: "new\n"})
+        self.assertIn(importer, files, f"{importer} imports {module} after a lone quote and a quoted hash, and is not listed")
+
+    def test_an_import_named_only_in_a_comment_or_a_string_is_not_listed(self):
+        """The control for the scanner: the module name appears in a docstring, a comment and a string, and no import."""
+        module, importer = "hooks/ci_wake.py", "hooks/test_mentions.py"
+        text = ('"""Covers ci_wake.\n\nimport ci_wake  is text here, not an import.\n"""\n'
+                "# import ci_wake\n"
+                'NOTE = """\nfrom ci_wake import gh\n"""\n\n\ndef test_mentions():\n    assert True\n')
+        base = with_ci({module: "old\n", importer: text}, [importer])
+        files, _ = self.listed(base, {module: "new\n"})
+        self.assertNotIn(importer, files, f"{importer} names {module} only in a comment or a string, and is listed")
+
+    def test_a_module_whose_name_starts_with_the_changed_name_is_not_an_importer(self):
+        """The control for the name match: ci_wake_extra and ci_wake_v2 are other modules."""
+        module, importer = "hooks/ci_wake.py", "hooks/test_wake_extra.py"
+        text = "import ci_wake_extra\nfrom ci_wake_v2 import gh\n\n\ndef test_extra():\n    assert True\n"
+        base = with_ci({module: "old\n", importer: text}, [importer])
+        files, _ = self.listed(base, {module: "new\n"})
+        self.assertNotIn(importer, files, f"{importer} imports other modules, not {module}, and is listed")
+
+    def test_a_product_module_that_imports_the_changed_module_is_not_listed(self):
+        """The control for the test-only list: hooks/guard_user.py imports ci_wake in a function, and it is no test."""
+        module, product = "hooks/ci_wake.py", "hooks/guard_user.py"
+        base = with_ci({module: "old\n", product: "def check():\n    import ci_wake\n    return ci_wake\n"})
+        files, _ = self.listed(base, {module: "new\n"})
+        self.assertNotIn(product, files, f"{product} imports {module} and is listed, though it is no test")
+        self.assertEqual(files, [], f"a change to {module} with no importing test listed {files}")
+
+    def test_a_hook_module_no_test_imports_lists_no_extra_test(self):
+        """The control for a test beside lonely.py that imports another module: hooks/test_other.py is that test."""
+        module, other = "hooks/lonely.py", "hooks/test_other.py"
+        helper_test = "import helper\n\n\ndef test_other():\n    assert helper\n"
+        base = with_ci({module: "old\n", other: helper_test, "hooks/helper.py": "old\n"}, [other])
+        files, _ = self.listed(base, {module: "new\n"})
+        self.assertEqual(files, [], f"a change to {module}, which no test imports, listed {files}")
+
+    def test_every_test_that_imports_a_changed_hook_module_is_listed_and_no_other(self):
+        """The full state: three importers in two folders, one of them a from-import, and a bystander test with no import."""
+        module = "hooks/ci_wake.py"
+        importers = ["hooks/test_stall_watch_stop.py", "hooks/test_wake_gh.py", "lint/test_wake_lazy.py"]
+        bystander = "hooks/test_bystander.py"
+        base = with_ci({
+            module: "old\n",
+            importers[0]: self.IMPORT_CI_WAKE + "\n\ndef test_stop():\n    assert True\n",
+            importers[1]: "from ci_wake import gh\n\n\ndef test_gh():\n    assert gh\n",
+            importers[2]: "def test_lazy():\n    import ci_wake\n    assert ci_wake\n",
+            bystander: "def test_bystander():\n    assert True\n",
+        }, importers + [bystander])
+        files, _ = self.listed(base, {module: "new\n"})
+        self.assertEqual(files, sorted(importers), f"the listed tests are {files}, not the tests that import {module}")
+
+    def test_a_test_that_does_not_parse_is_listed_for_a_hook_change(self):
+        """unknown is not skip: a tracked test the selector cannot parse may import the hook, so it is listed."""
+        module, broken = "hooks/ci_wake.py", "hooks/test_broken_syntax.py"
+        text = "import ci_wake\n\n\ndef test_broken(:\n    assert ci_wake\n"
+        with self.assertRaises(SyntaxError):  # the fixture must not parse, or this case probes no unparsed test
+            compile(text, broken, "exec")
+        base = with_ci({module: "old\n", broken: text}, [broken])
+        files, stdout = self.listed(base, {module: "new\n"})
+        self.assertIn(f"touched {module}", stdout, f"the selector did not read the change to {module}, so this case probes nothing")
+        self.assertIn(broken, files, f"{broken} does not parse and is not listed for a change to {module}: an unread test is skipped")
+
+    def test_a_test_that_loads_the_module_by_a_path_literal_is_listed(self):
+        """spec_from_file_location names a hook by its file path, and the test loads that hook: it is listed."""
+        module, loader = "hooks/ci_wake.py", "lint/test_load_by_path.py"
+        text = ("import importlib.util\n\n"
+                'SPEC = importlib.util.spec_from_file_location("wake_loaded", "../hooks/ci_wake.py")\n\n\n'
+                "def test_loaded():\n    assert SPEC\n")
+        base = with_ci({module: "old\n", loader: text}, [loader])
+        files, stdout = self.listed(base, {module: "new\n"})
+        self.assertIn(f"touched {module}", stdout, f"the selector did not read the change to {module}, so this case probes nothing")
+        self.assertIn(loader, files, f"{loader} loads {module} by its file path and is not listed for a change to it")
+
+    def test_a_test_that_loads_the_module_through_a_joined_path_constant_is_listed(self):
+        """The spelling lint/test_now_central.py uses: a module constant joins the hook's path, and the loader passes it on."""
+        module, loader = "hooks/ci_wake.py", "lint/test_load_by_join.py"
+        text = ("import importlib.util\nimport os\n\n"
+                "ROOT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')\n"
+                'HOOK = os.path.join(ROOT_DIR, "hooks", "ci_wake.py")\n'
+                'SPEC = importlib.util.spec_from_file_location("wake_loaded", HOOK)\n\n\n'
+                "def test_loaded():\n    assert SPEC\n")
+        base = with_ci({module: "old\n", loader: text}, [loader])
+        files, stdout = self.listed(base, {module: "new\n"})
+        self.assertIn(f"touched {module}", stdout, f"the selector did not read the change to {module}, so this case probes nothing")
+        self.assertIn(loader, files, f"{loader} loads {module} through a joined path constant and is not listed for a change to it")
+
+    def test_a_test_that_imports_the_module_by_name_with_import_module_is_listed(self):
+        """importlib.import_module names the module as a string, and the test imports it: it is listed."""
+        module, importer = "hooks/ci_wake.py", "hooks/test_dynamic_wake.py"
+        text = ("import importlib\n\n\n"
+                "def test_dynamic():\n"
+                '    wake = importlib.import_module("ci_wake")\n'
+                "    assert wake\n")
+        base = with_ci({module: "old\n", importer: text}, [importer])
+        files, stdout = self.listed(base, {module: "new\n"})
+        self.assertIn(f"touched {module}", stdout, f"the selector did not read the change to {module}, so this case probes nothing")
+        self.assertIn(importer, files, f"{importer} imports {module} by name with import_module and is not listed for a change to it")
+
+    def test_a_hook_path_named_only_in_a_comment_or_a_docstring_is_not_listed(self):
+        """The control for the loader forms: the hook's path sits in a docstring and in a comment, and no test loads it."""
+        module, importer = "hooks/ci_wake.py", "lint/test_mentions_path.py"
+        text = ('"""Covers the wake in ../hooks/ci_wake.py. Nothing here loads that file."""\n'
+                "# the wake lives at ../hooks/ci_wake.py, see the docstring\n\n\n"
+                "def test_mentions():\n    assert True\n")
+        base = with_ci({module: "old\n", importer: text}, [importer])
+        files, stdout = self.listed(base, {module: "new\n"})
+        self.assertIn(f"touched {module}", stdout, f"the selector did not read the change to {module}, so this case probes nothing")
+        self.assertNotIn(importer, files, f"{importer} names {module} only in a docstring and a comment, and is listed")
+
+    # A test names the hook it loads by file path, through a loader call. Each case below is one loader form: an `or`
+    # default and an if-else default for a module constant (the selector reads a constant only when it is a string or a
+    # join), a path passed by keyword, a `/` join, and `__import__` by name. The control names another module through an `or`.
+    def test_a_test_that_loads_the_module_through_an_or_default_is_listed(self):
+        """A module constant that is `X or os.path.join(HERE, "y.py")`, passed to the loader."""
+        module, importer = "hooks/ci_wake.py", "hooks/test_wake_or.py"
+        text = ("import importlib.util\nimport os\n\n"
+                'HERE = os.path.dirname(os.path.abspath(__file__))\n'
+                'MODULE = os.environ.get("CI_WAKE_MODULE") or os.path.join(HERE, "ci_wake.py")\n'
+                'SPEC = importlib.util.spec_from_file_location("wake_or", MODULE)\n\n\n'
+                "def test_or_default():\n    assert SPEC\n")
+        base = with_ci({module: "old\n", importer: text}, [importer])
+        files, stdout = self.listed(base, {module: "new\n"})
+        self.assertIn(f"touched {module}", stdout, f"the selector did not read the change to {module}, so this case probes nothing")
+        self.assertIn(importer, files, f"{importer} loads {module} through an `or` default and is not listed for a change to it")
+
+    def test_a_test_that_loads_the_module_through_an_if_else_is_listed(self):
+        """The if-else form of the same loader line: the path sits in the else arm, the default."""
+        module, importer = "hooks/ci_wake.py", "hooks/test_wake_ifelse.py"
+        text = ("import importlib.util\nimport os\n\n"
+                'HERE = os.path.dirname(os.path.abspath(__file__))\n'
+                'MODULE = (os.environ["CI_WAKE_MODULE"] if "CI_WAKE_MODULE" in os.environ\n'
+                '          else os.path.join(HERE, "ci_wake.py"))\n'
+                'SPEC = importlib.util.spec_from_file_location("wake_ifelse", MODULE)\n\n\n'
+                "def test_if_else():\n    assert SPEC\n")
+        base = with_ci({module: "old\n", importer: text}, [importer])
+        files, stdout = self.listed(base, {module: "new\n"})
+        self.assertIn(f"touched {module}", stdout, f"the selector did not read the change to {module}, so this case probes nothing")
+        self.assertIn(importer, files, f"{importer} loads {module} through an if-else default and is not listed for a change to it")
+
+    def test_an_or_default_that_names_another_module_is_not_listed(self):
+        """The control for the `or` form: its constant loads hooks/other.py, which is no changed module, so the test is not listed."""
+        module, importer, other = "hooks/ci_wake.py", "hooks/test_wake_other_or.py", "hooks/other.py"
+        text = ("import importlib.util\nimport os\n\n"
+                'HERE = os.path.dirname(os.path.abspath(__file__))\n'
+                'MODULE = os.environ.get("OTHER_MODULE") or os.path.join(HERE, "other.py")\n'
+                'SPEC = importlib.util.spec_from_file_location("other_or", MODULE)\n\n\n'
+                "def test_other_or():\n    assert SPEC\n")
+        base = with_ci({module: "old\n", other: "old\n", importer: text}, [importer])
+        files, stdout = self.listed(base, {module: "new\n"})
+        self.assertIn(f"touched {module}", stdout, f"the selector did not read the change to {module}, so this case probes nothing")
+        self.assertNotIn(importer, files, f"{importer} loads {other}, not {module}, through an `or` default, and is listed")
+
+    def test_a_test_that_passes_the_path_to_the_loader_by_keyword_is_listed(self):
+        """spec_from_file_location takes the path as `location=`, and the selector reads that keyword."""
+        module, importer = "hooks/ci_wake.py", "lint/test_wake_keyword.py"
+        text = ("import importlib.util\n\n"
+                'SPEC = importlib.util.spec_from_file_location("wake_kw", location="../hooks/ci_wake.py")\n\n\n'
+                "def test_keyword():\n    assert SPEC\n")
+        base = with_ci({module: "old\n", importer: text}, [importer])
+        files, stdout = self.listed(base, {module: "new\n"})
+        self.assertIn(f"touched {module}", stdout, f"the selector did not read the change to {module}, so this case probes nothing")
+        self.assertIn(importer, files, f"{importer} passes {module} to the loader by keyword and is not listed for a change to it")
+
+    def test_a_test_that_joins_the_path_with_a_slash_is_listed(self):
+        """`Path(HERE) / "ci_wake.py"` ends in the hook's file name, and the selector reads a `/` join."""
+        module, importer = "hooks/ci_wake.py", "hooks/test_wake_slash.py"
+        text = ("import importlib.util\nimport os\nfrom pathlib import Path\n\n"
+                'HERE = os.path.dirname(os.path.abspath(__file__))\n'
+                'SPEC = importlib.util.spec_from_file_location("wake_slash", Path(HERE) / "ci_wake.py")\n\n\n'
+                "def test_slash():\n    assert SPEC\n")
+        base = with_ci({module: "old\n", importer: text}, [importer])
+        files, stdout = self.listed(base, {module: "new\n"})
+        self.assertIn(f"touched {module}", stdout, f"the selector did not read the change to {module}, so this case probes nothing")
+        self.assertIn(importer, files, f"{importer} loads {module} through a `/` join and is not listed for a change to it")
+
+    def test_a_test_that_imports_the_module_with_dunder_import_is_listed(self):
+        """`__import__("ci_wake")` imports the module by name, as import_module does."""
+        module, importer = "hooks/ci_wake.py", "hooks/test_wake_dunder.py"
+        text = 'def test_dunder():\n    wake = __import__("ci_wake")\n    assert wake\n'
+        base = with_ci({module: "old\n", importer: text}, [importer])
+        files, stdout = self.listed(base, {module: "new\n"})
+        self.assertIn(f"touched {module}", stdout, f"the selector did not read the change to {module}, so this case probes nothing")
+        self.assertIn(importer, files, f"{importer} imports {module} with __import__ and is not listed for a change to it")
+
+    def test_the_real_stall_watch_test_is_a_candidate_of_its_module(self):
+        """The real tree: hooks/test_stall_watch_stop.py loads hooks/stall_watch.py through an `or` default, so a change to
+        stall_watch.py selects it. Read through the selector's candidates(), over the repo's tracked files."""
+        repo = os.path.abspath(os.path.join(HERE, ".."))
+        module, importer = "hooks/stall_watch.py", "hooks/test_stall_watch_stop.py"
+        for rel in (module, importer):
+            self.assertTrue(os.path.isfile(os.path.join(repo, *rel.split("/"))), f"the real tree has no {rel}, so this case probes nothing")
+        listing = subprocess.run(["git", "ls-files"], cwd=repo, capture_output=True, text=True)
+        self.assertEqual(listing.returncode, 0, f"git ls-files failed in the real tree: {listing.stderr}")
+        found = self.selector_module().candidates(module, set(listing.stdout.splitlines()), repo)
+        self.assertIn(importer, found, f"candidates({module!r}) does not include {importer}, which loads it through an `or` default")
+
+
+# Heavy suites: the touched job fails a heavy Python suite that calls a POSIX-only API outside a guard. A heavy suite is
+# skipped on a lane push, so a POSIX-only call in it reaches Windows CI unseen. The fixture templates are copied
+# from archive/posix-tests-skip-windows lint/test_check_posix_tests.py. That archive's repo-wide lint is dropped: the
+# step lives in the selector, which reads the file it already selects.
+POSIX_PATH = "merge/test_merge.py"  # HEAVY, and the suite the incident hit
+HEAD = "import os\nimport signal\nimport sys\nimport unittest\n\n\n"
+CLASS = "class WorkFolderOnSignal(unittest.TestCase):\n"
+DEF = "    def test_sighup_removes_the_work_folder(self):\n"
+CALL = "self.assert_signal_removes_work_folder(signal.SIGHUP)"
+BODY = "        " + CALL + "\n"  # a call in a method body
+GUARD_NT = '@unittest.skipIf(os.name == "nt", "POSIX signals")\n'
+
+
+def named_line(path, line):
+    """A pattern that matches `path` followed by `line` in one message, as `path:line` or `path line N`, and not a longer number."""
+    return re.compile(rf"{re.escape(path)}\D{{0,12}}{line}(?!\d)")
+
+
+def line_of(src, needle):
+    """The 1-based line of the one line of `src` that holds `needle`. Two such lines are a fixture bug."""
+    hits = [n for n, text in enumerate(src.split("\n"), 1) if needle in text]
+    if len(hits) != 1:
+        raise AssertionError(f"fixture bug: {needle!r} is on {len(hits)} lines")
+    return hits[0]
+
+
+class PosixOnlyInHeavySuites(SelectorBase):
+    """The touched job fails a heavy suite that calls a POSIX-only API outside a guard that reads os.name or sys.platform.
+    A red case expects exit 1, no output, and stderr that names the file, the call's line and the name. A green control
+    expects exit 0 and the suite's HEAVY skip, so the suite reached the scan and passed it. Only a call the change adds
+    fails the job: a call already on the base is an existing offence, and it passes the job (the diff-only rule)."""
+
+    def fails_at(self, path, src, needle, name, not_named=None, base=None):
+        """Scope first: `path` is HEAVY. Then the touched job exits 1 and writes no output, and stderr names `path` at the line of
+        `needle` and names `name`. With `not_named`, stderr does not name the line of that other needle. `base` is the file
+        before the change (a comment when None), so a case can put a call on the base."""
+        self.assertTrue(covers(self.constant("HEAVY"), path), f"the selector's HEAVY constant does not name {path}, so this case probes nothing")
+        repo, sha, out = self.fixture({path: "# base\n" if base is None else base}, {path: src})
+        r, outputs = self.select(repo, sha, out)
+        self.assertEqual(r.returncode, 1, f"the touched job exited {r.returncode}, not 1, on {name} with no guard in {path}:\n{r.stdout}{r.stderr}")
+        self.assertEqual(outputs, {}, f"the touched job wrote output on its exit 1: {outputs}")
+        line = line_of(src, needle)
+        self.assertRegex(r.stderr, named_line(path, line), f"stderr does not name {path} line {line}: {r.stderr!r}")
+        self.assertIn(name, r.stderr, f"stderr does not name {name}: {r.stderr!r}")
+        if not_named:
+            other = line_of(src, not_named)
+            self.assertNotRegex(r.stderr, named_line(path, other), f"stderr names line {other}, which is not an offence: {r.stderr!r}")
+
+    def passes(self, path, src, base=None):
+        """Scope first: the touched suite is read and reaches its HEAVY skip. Then the touched job exits 0. `base` as in fails_at."""
+        repo, sha, out = self.fixture({path: "# base\n" if base is None else base}, {path: src})
+        r, outputs = self.select(repo, sha, out)
+        self.assertIn(f"touched {path}", r.stdout, f"the selector did not read the touched suite {path}, so this case probes nothing")
+        self.assertTrue(skipped_on(r.stdout, path, HEAVY_KEY), f"{path} did not reach its HEAVY skip, so this case probes nothing")
+        self.assertEqual(r.returncode, 0, f"the touched job exited {r.returncode}, not 0, on {path}, which holds no unguarded POSIX-only call the change adds:\n{r.stdout}{r.stderr}")
+
+    def test_an_unguarded_sighup_in_a_touched_heavy_suite_fails_the_job(self):
+        self.fails_at(POSIX_PATH, HEAD + CLASS + DEF + BODY, CALL, "signal.SIGHUP")
+
+    def test_each_other_posix_only_name_unguarded_fails_the_job(self):
+        calls = (("os.killpg", "os.killpg(0, signal.SIGTERM)"), ("os.getpgid", "os.getpgid(0)"),
+                 ("os.setsid", "os.setsid()"), ("signal.SIGKILL", "os.kill(0, signal.SIGKILL)"),
+                 ("signal.SIGQUIT", "os.kill(0, signal.SIGQUIT)"), ("signal.SIGUSR1", "os.kill(0, signal.SIGUSR1)"),
+                 ("signal.SIGUSR2", "os.kill(0, signal.SIGUSR2)"))
+        for name, call in calls:
+            with self.subTest(name=name):
+                self.fails_at(POSIX_PATH, HEAD + CLASS + DEF + "        " + call + "\n", call, name)
+
+    def test_a_skipif_that_reads_no_os_name_does_not_excuse_the_call(self):
+        src = HEAD + '@unittest.skipIf(os.environ.get("CI"), "a skip")\n' + CLASS + DEF + BODY
+        self.fails_at(POSIX_PATH, src, CALL, "signal.SIGHUP")
+
+    def test_an_if_that_reads_no_os_name_does_not_excuse_the_call(self):
+        src = HEAD + CLASS + DEF + '        if os.environ.get("CI"):\n            ' + CALL + "\n"
+        self.fails_at(POSIX_PATH, src, CALL, "signal.SIGHUP")
+
+    def test_a_guard_on_one_class_does_not_cover_a_call_in_another_class(self):
+        src = (HEAD + GUARD_NT + CLASS + DEF + BODY
+               + "\n\nclass Unguarded(unittest.TestCase):\n"
+               + "    def test_quit(self):\n"
+               + "        self.assert_signal_removes_work_folder(signal.SIGQUIT)\n")
+        self.fails_at(POSIX_PATH, src, "signal.SIGQUIT)", "signal.SIGQUIT", not_named=CALL)
+
+    def test_a_call_after_an_os_name_if_block_fails(self):
+        src = HEAD + CLASS + DEF + '        if os.name != "nt":\n            pass\n' + BODY
+        self.fails_at(POSIX_PATH, src, CALL, "signal.SIGHUP")
+
+    def test_a_call_after_a_multi_line_string_fails_on_its_own_line(self):
+        src = (HEAD + CLASS + DEF + '        text = """\nos.killpg(os.getpgid(0), signal.SIGTERM)\nsignal.SIGHUP\n"""\n'
+               + '        self.assertIn("killpg", text)\n' + BODY)
+        self.fails_at(POSIX_PATH, src, CALL, "signal.SIGHUP", not_named="os.killpg(os.getpgid(0)")
+
+    def test_a_lone_quote_in_text_does_not_hide_the_call(self):
+        src = HEAD + CLASS + DEF + '        """Don\'t run this on Windows."""\n' + "        # it's the POSIX stop path\n" + BODY
+        self.fails_at(POSIX_PATH, src, CALL, "signal.SIGHUP")
+
+    def test_an_unguarded_call_at_the_end_of_a_full_size_suite_fails(self):
+        filler = "".join(f"VALUE_{n} = {n}\n" for n in range(27000))  # merge/test_merge.py is 27806 lines
+        self.fails_at(POSIX_PATH, HEAD + filler + CLASS + DEF + BODY, CALL, "signal.SIGHUP")
+
+    def test_a_skipif_os_name_nt_class_passes(self):
+        self.passes(POSIX_PATH, HEAD + GUARD_NT + CLASS + DEF + BODY)
+
+    def test_a_skipunless_sys_platform_def_passes(self):
+        src = HEAD + CLASS + '    @unittest.skipUnless(sys.platform != "win32", "POSIX signals")\n' + DEF + BODY
+        self.passes(POSIX_PATH, src)
+
+    def test_an_if_os_name_not_nt_block_passes(self):
+        self.passes(POSIX_PATH, HEAD + CLASS + DEF + '        if os.name != "nt":\n            ' + CALL + "\n")
+
+    def test_an_if_sys_platform_block_passes(self):
+        self.passes(POSIX_PATH, HEAD + CLASS + DEF + '        if sys.platform != "win32":\n            ' + CALL + "\n")
+
+    def test_a_call_only_in_a_string_or_comment_passes(self):
+        src = (HEAD + CLASS + "    def test_names(self):\n"
+               + '        note = "os.killpg(os.getpgid(0), signal.SIGTERM)"  # signal.SIGHUP is text here\n'
+               + '        self.assertIn("killpg", note)\n')
+        self.passes(POSIX_PATH, src)
+
+    def test_a_call_in_a_multi_line_string_passes(self):
+        src = (HEAD + CLASS + "    def test_doc(self):\n"
+               + '        text = """\nos.killpg(os.getpgid(0), signal.SIGTERM)\nsignal.SIGHUP\n"""\n'
+               + '        self.assertIn("killpg", text)\n')
+        self.passes(POSIX_PATH, src)
+
+    def test_a_touched_non_heavy_suite_is_not_scanned_by_this_step(self):
+        path = "lint/test_posix_light.py"  # not HEAVY: this step reads the heavy suites only
+        self.assertFalse(covers(self.constant("HEAVY"), path), f"{path} is HEAVY, so this case probes nothing")
+        repo, sha, out = self.fixture(with_ci({path: "# base\n"}, [path]), {path: HEAD + CLASS + DEF + BODY})
+        r, outputs = self.select(repo, sha, out)
+        self.assertIn(f"touched {path}", r.stdout, f"the selector did not read the touched suite {path}, so this case probes nothing")
+        windows, _ = self.os_lists(outputs)
+        self.assertIn(path, windows, f"{path} is not in files_windows, so the Windows job would not run it")
+        self.assertEqual(r.returncode, 0, f"the touched job exited {r.returncode} on a non-heavy suite with an unguarded call:\n{r.stdout}{r.stderr}")
+
+    def test_an_empty_heavy_suite_passes(self):
+        self.passes(POSIX_PATH, "")
+
+    def test_a_skipif_os_name_posix_class_does_not_excuse_the_call(self):
+        src = HEAD + '@unittest.skipIf(os.name == "posix", "POSIX signals")\n' + CLASS + DEF + BODY
+        self.fails_at(POSIX_PATH, src, CALL, "signal.SIGHUP")
+
+    def test_a_skipunless_os_name_nt_class_does_not_excuse_the_call(self):
+        src = HEAD + '@unittest.skipUnless(os.name == "nt", "POSIX signals")\n' + CLASS + DEF + BODY
+        self.fails_at(POSIX_PATH, src, CALL, "signal.SIGHUP")
+
+    def test_a_skipif_sys_platform_not_win32_class_does_not_excuse_the_call(self):
+        src = HEAD + '@unittest.skipIf(sys.platform != "win32", "POSIX signals")\n' + CLASS + DEF + BODY
+        self.fails_at(POSIX_PATH, src, CALL, "signal.SIGHUP")
+
+    # A skip decorator covers the body only. A class body and a def's default arguments run when the module loads, on Windows too.
+    def test_a_posix_name_in_a_class_body_attribute_under_a_skipif_class_fails(self):
+        src = HEAD + GUARD_NT + CLASS + "    SIGNALS = (signal.SIGHUP, signal.SIGQUIT)\n" + DEF + BODY
+        self.fails_at(POSIX_PATH, src, "SIGNALS = (signal.SIGHUP, signal.SIGQUIT)", "signal.SIGHUP", not_named=CALL)
+
+    def test_a_posix_name_in_a_method_default_under_a_skipif_class_fails(self):
+        src = HEAD + GUARD_NT + CLASS + "    def helper(self, sig=signal.SIGHUP):\n        return sig\n" + DEF + BODY
+        self.fails_at(POSIX_PATH, src, "def helper(self, sig=signal.SIGHUP):", "signal.SIGHUP", not_named=CALL)
+
+    def test_a_posix_name_in_a_default_of_a_skipif_module_def_fails(self):
+        src = HEAD + '@unittest.skipIf(os.name == "nt", "POSIX signals")\ndef stop_group(sig=signal.SIGHUP):\n    os.killpg(0, sig)\n'
+        self.fails_at(POSIX_PATH, src, "def stop_group(sig=signal.SIGHUP):", "signal.SIGHUP", not_named="os.killpg(0, sig)")
+
+    def test_a_class_body_attribute_under_an_os_name_if_passes(self):
+        src = HEAD + GUARD_NT + CLASS + '    if os.name != "nt":\n        SIGNALS = (signal.SIGHUP, signal.SIGQUIT)\n' + DEF + BODY
+        self.passes(POSIX_PATH, src)
+
+    def test_a_posix_call_in_a_function_body_under_a_skipif_def_passes(self):
+        self.passes(POSIX_PATH, HEAD + '@unittest.skipIf(os.name == "nt", "POSIX signals")\ndef stop_group():\n    os.killpg(0, signal.SIGTERM)\n')
+
+    def test_an_if_os_name_nt_body_does_not_guard_the_call(self):
+        src = HEAD + CLASS + DEF + '        if os.name == "nt":\n            ' + CALL + "\n"
+        self.fails_at(POSIX_PATH, src, CALL, "signal.SIGHUP")
+
+    def test_the_else_arm_of_an_if_os_name_posix_does_not_guard_the_call(self):
+        src = HEAD + CLASS + DEF + '        if os.name == "posix":\n            pass\n        else:\n            ' + CALL + "\n"
+        self.fails_at(POSIX_PATH, src, CALL, "signal.SIGHUP")
+
+    def test_the_body_of_an_if_os_name_posix_guards_the_call(self):
+        self.passes(POSIX_PATH, HEAD + CLASS + DEF + '        if os.name == "posix":\n            ' + CALL + "\n")
+
+    def test_an_existing_unguarded_sighup_on_the_base_does_not_fail_an_unrelated_change(self):
+        base = HEAD + CLASS + DEF + BODY
+        src = HEAD + "UNRELATED = 1\n\n\n" + CLASS + DEF + BODY  # the added lines shift the call's line number
+        self.passes(POSIX_PATH, src, base=base)
+
+    def test_a_new_unguarded_sighup_fails_when_the_base_already_had_one(self):
+        base = HEAD + CLASS + DEF + BODY
+        src = base + "\n    def test_sighup_again(self):\n        os.kill(0, signal.SIGHUP)\n"
+        self.fails_at(POSIX_PATH, src, "os.kill(0, signal.SIGHUP)", "signal.SIGHUP", base=base)
+
+    def test_a_new_sighup_in_a_skipif_nt_class_passes_when_the_base_had_one(self):
+        base = HEAD + GUARD_NT + CLASS + DEF + BODY
+        src = base + "\n    def test_sighup_again(self):\n        os.kill(0, signal.SIGHUP)\n"
+        self.passes(POSIX_PATH, src, base=base)
+
+    def test_a_from_signal_import_of_sighup_used_unguarded_fails_on_the_import(self):
+        # On Windows the import itself raises ImportError when the suite loads, so the import line is the one pinned.
+        src = "import os\nimport unittest\nfrom signal import SIGHUP\n\n\n" + CLASS + DEF + "        self.assert_signal_removes_work_folder(SIGHUP)\n"
+        self.fails_at(POSIX_PATH, src, "from signal import SIGHUP", "SIGHUP")
+
+    def test_a_skiptest_on_nt_before_the_call_passes(self):
+        src = (HEAD + CLASS + "    def test_stop_group(self):\n"
+               + '        if os.name == "nt":\n            self.skipTest("posix only")\n'
+               + "        os.killpg(0, signal.SIGTERM)\n")
+        self.passes(POSIX_PATH, src)
+
+    def test_a_skiptest_on_posix_before_the_call_fails(self):
+        src = (HEAD + CLASS + "    def test_stop_group(self):\n"
+               + '        if os.name == "posix":\n            self.skipTest("nt only")\n'
+               + "        os.killpg(0, signal.SIGTERM)\n")
+        self.fails_at(POSIX_PATH, src, "os.killpg(0, signal.SIGTERM)", "os.killpg")
+
+    def test_an_early_return_on_nt_before_the_call_in_a_function_passes(self):
+        src = HEAD + "def stop_group():\n" + '    if os.name == "nt":\n        return\n' + "    os.killpg(0, signal.SIGTERM)\n"
+        self.passes(POSIX_PATH, src)
+
+    def test_an_early_return_on_posix_before_the_call_in_a_function_fails(self):
+        src = HEAD + "def stop_group():\n" + '    if os.name == "posix":\n        return\n' + "    os.killpg(0, signal.SIGTERM)\n"
+        self.fails_at(POSIX_PATH, src, "os.killpg(0, signal.SIGTERM)", "os.killpg")
+
+    def test_a_flag_from_os_name_not_nt_tested_in_the_same_function_passes(self):
+        src = (HEAD + CLASS + "    def test_stop_group(self):\n" + '        posix = os.name != "nt"\n'
+               + "        if posix:\n            os.killpg(0, signal.SIGTERM)\n")
+        self.passes(POSIX_PATH, src)
+
+    def test_a_flag_from_os_name_eq_nt_tested_in_the_same_function_fails(self):
+        src = (HEAD + CLASS + "    def test_stop_group(self):\n" + '        posix = os.name == "nt"\n'
+               + "        if posix:\n            os.killpg(0, signal.SIGTERM)\n")
+        self.fails_at(POSIX_PATH, src, "os.killpg(0, signal.SIGTERM)", "os.killpg")
+
+    def test_a_module_flag_from_os_name_not_nt_tested_in_a_method_passes(self):
+        src = (HEAD + 'posix = os.name != "nt"\n\n\n' + CLASS + "    def test_stop_group(self):\n"
+               + "        if posix:\n            os.killpg(0, signal.SIGTERM)\n")
+        self.passes(POSIX_PATH, src)
+
+    def test_a_module_raise_on_nt_before_a_module_level_call_passes(self):
+        src = HEAD + 'if os.name == "nt":\n    raise unittest.SkipTest("posix only")\n\n\n' + "GROUP = os.getpgid(0)\n"
+        self.passes(POSIX_PATH, src)
+
+    def test_a_module_raise_on_posix_before_a_module_level_call_fails(self):
+        src = HEAD + 'if os.name == "posix":\n    raise unittest.SkipTest("nt only")\n\n\n' + "GROUP = os.getpgid(0)\n"
+        self.fails_at(POSIX_PATH, src, "GROUP = os.getpgid(0)", "os.getpgid")
+
+    def test_a_module_raise_on_nt_before_a_class_level_call_passes(self):
+        src = (HEAD + 'if os.name == "nt":\n    raise unittest.SkipTest("posix only")\n\n\n'
+               + "class WorkGroup(unittest.TestCase):\n    GROUP = os.getpgid(0)\n")
+        self.passes(POSIX_PATH, src)
+
+    def test_a_not_os_name_eq_nt_guard_passes(self):
+        src = (HEAD + CLASS + "    def test_stop_group(self):\n" + '        if not os.name == "nt":\n'
+               + "            os.killpg(0, signal.SIGTERM)\n")
+        self.passes(POSIX_PATH, src)
+
+    def test_an_and_of_os_name_and_sys_platform_guard_passes(self):
+        src = (HEAD + CLASS + "    def test_stop_group(self):\n" + '        if os.name != "nt" and sys.platform != "win32":\n'
+               + "            os.killpg(0, signal.SIGTERM)\n")
+        self.passes(POSIX_PATH, src)
+
+    def test_a_sys_platform_startswith_guard_passes(self):
+        src = (HEAD + CLASS + "    def test_stop_group(self):\n" + '        if sys.platform.startswith("linux"):\n'
+               + "            os.killpg(0, signal.SIGTERM)\n")
+        self.passes(POSIX_PATH, src)
+
+    def test_an_elif_os_name_guard_passes(self):
+        src = (HEAD + CLASS + "    def test_stop_group(self):\n" + '        if os.name == "nt":\n            pass\n'
+               + '        elif os.name != "nt":\n            os.killpg(0, signal.SIGTERM)\n')
+        self.passes(POSIX_PATH, src)
+
+    def test_the_else_arm_of_an_os_name_eq_nt_guard_passes(self):
+        src = (HEAD + CLASS + "    def test_stop_group(self):\n" + '        if os.name == "nt":\n            pass\n'
+               + "        else:\n            os.killpg(0, signal.SIGTERM)\n")
+        self.passes(POSIX_PATH, src)
+
+    def test_a_hash_in_a_string_before_a_guarded_call_passes(self):
+        src = (HEAD + CLASS + "    def test_stop_group(self):\n" + '        note = "# runs on POSIX only"\n'
+               + '        if os.name != "nt":\n            os.killpg(0, signal.SIGTERM)\n')
+        self.passes(POSIX_PATH, src)
+
+    def test_a_hash_in_a_string_before_an_unguarded_call_fails(self):
+        src = (HEAD + CLASS + "    def test_stop_group(self):\n" + '        note = "# runs on POSIX only"\n'
+               + "        os.killpg(0, signal.SIGTERM)\n")
+        self.fails_at(POSIX_PATH, src, "os.killpg(0, signal.SIGTERM)", "os.killpg")
 
 
 if __name__ == "__main__":

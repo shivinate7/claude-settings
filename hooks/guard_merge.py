@@ -540,7 +540,7 @@ def _commit_shape(args):
             all_flag = True
         elif arg in _COMMIT_VALUE_FLAGS:
             index += 1
-        elif arg.startswith("--"):
+        elif arg.startswith("--") or arg.startswith("<<"):   # a heredoc header (`-F - <<EOF`) is no pathspec
             continue
         elif arg.startswith("-") and len(arg) > 1:
             for at, letter in enumerate(arg[1:], 1):
@@ -753,7 +753,7 @@ def records_page_hit(stripped: str, cwd: str) -> str:
 # and the test lines it stages are read the way the marker read reads its tree (`_commit_test_adds`: one
 # `git diff --numstat`, and one `git ls-files --others` for each add that names paths). Only a commit with a
 # push after it costs that read. A message the guard cannot read (`-F`, `-C`, `-c`, an editor) makes the whole
-# push a no-hit, except an `-m "$(cat <<'EOF' ...)"` message, which is read from its heredoc body. A failed
+# push a no-hit, except an `-m "$(cat <<'EOF' ...)"` message and an `-F - <<'EOF'` message, which are read from their heredoc body. A failed
 # read, a copy of the hooks with no lint folder beside it, and a default base that cannot be read are no hit.
 CONFLICT_MARKERS_REASON = (
     "Rule (Git, conflict-markers; decision commit-refuses-conflict-markers): this commit would hold conflict markers in {file}. "
@@ -1182,10 +1182,13 @@ def _commit_test_adds(where, top, all_flag, specs, wholes, adds, is_test_rel):
 _MESSAGE_ELSEWHERE = {"--file", "--reuse-message", "--reedit-message", "--fixup", "--squash", "--template"}
 
 
-def _commit_paragraphs(args):
-    """The `-m` paragraphs of a `git commit` call, in order, or None when its message comes from a place the guard
-    cannot read: `-F`, `-C`, `-c`, `-t`, `--fixup`, `--squash`, or no `-m` at all with no `--amend` (an editor)."""
+def _commit_paragraphs(args, bodies=()):
+    """The message paragraphs of a `git commit` call, in order, or None when its message comes from a place the guard
+    cannot read: `-F` (a file, or `-` with no heredoc body), `-C`, `-c`, `-t`, `--fixup`, `--squash`, or no `-m` at all
+    with no `--amend` (an editor). `-F -` (also `--file=-`, `-F-`) with a heredoc on its own segment reads the
+    heredoc `bodies` as the message: the body is in the command, so no file or stdin read is needed."""
     paragraphs, elsewhere, index = [], False, 0
+    stdin_text = "\n\n".join(bodies)
     while index < len(args):
         arg = args[index]
         index += 1
@@ -1200,7 +1203,14 @@ def _commit_paragraphs(args):
                     paragraphs.append(args[index])
                     index += 1
                 continue
-            elsewhere = elsewhere or name in _MESSAGE_ELSEWHERE
+            if name == "--file":
+                source = value if equals else (args[index] if index < len(args) else "")
+                if source == "-" and stdin_text:
+                    paragraphs.append(stdin_text)
+                else:
+                    elsewhere = True
+            else:
+                elsewhere = elsewhere or name in _MESSAGE_ELSEWHERE
             if name in _COMMIT_VALUE_FLAGS and not equals:
                 index += 1
         elif arg.startswith("-") and len(arg) > 1:
@@ -1212,6 +1222,12 @@ def _commit_paragraphs(args):
                             paragraphs.append(rest)
                         elif index < len(args):
                             paragraphs.append(args[index])
+                    elif letter == "F":
+                        source = rest or (args[index] if index < len(args) else "")
+                        if source == "-" and stdin_text:
+                            paragraphs.append(stdin_text)
+                        else:
+                            elsewhere = True
                     else:
                         elsewhere = True
                     index += 0 if rest else 1
@@ -1225,8 +1241,9 @@ def _commit_message(args, bodies=()):
     """`(readable, message)` of a `git commit` call. A message the guard cannot read (`_commit_paragraphs` gives None)
     is `(False, None)`; an `--amend` with no `-m` keeps the commit's own message, `(True, None)`. `bodies` are the
     heredoc bodies of the commit's own segment: an `-m` that holds a `$(cat <<'EOF' ...)` takes its message from
-    them, so they join the paragraphs. The guard's strip leaves them out of the segment text."""
-    paragraphs = _commit_paragraphs(args)
+    them, so they join the paragraphs; an `-F -` takes them as its whole message. The guard's strip leaves them out of
+    the segment text."""
+    paragraphs = _commit_paragraphs(args, bodies)
     if paragraphs is None:
         return False, None
     if bodies and any("<<" in paragraph for paragraph in paragraphs):
@@ -1412,7 +1429,7 @@ def _made_folders(segments, number, cwd, ends):
     return frozenset(made)
 
 
-def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
+def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None, written_test=None):
     """Return `(kind, file)` for the first commit or push that would carry all three conflict markers
     in one file, else `('', '')`. The kind is `commit`, `push`, `chain` (a push after a commit the
     guard could not judge; the file is then `git push`), or `cd` (a git write, any verb in `GIT_WRITES`, after a `cd`
@@ -1490,13 +1507,21 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
         red_hit = None
         if not has_head:   # no HEAD: `git diff` would read an empty tree
             continue
+        # An earlier step of this call may edit a test file the commit then takes (`sed -i f && git commit -a`): the hook
+        # runs before the shell, so the tree it reads is still clean. `written_test` names the test paths those steps write.
+        earlier = " && ".join(prior for prior in segments[:number] if prior.strip()) if (
+            written_test and number and (all_flag or specs or wholes or adds)) else ""
+
+        def test_adds(where=where, top=top, all_flag=all_flag, specs=specs, wholes=wholes, adds=adds, earlier=earlier):
+            paths = _commit_test_adds(where, top, all_flag, specs, wholes, adds, is_test_rel)
+            return list(dict.fromkeys(paths + (written_test(earlier) if earlier else [])))
+
         if call[0] == "commit" and number < last_push and is_test_rel is not None and _red_run_present():
             bodies = own_heredoc_bodies(segment, raw, before) if raw and "<<" in segment else ()
-            _note_commit(virtual, call[1], _commit_test_adds(where, top, all_flag, specs, wholes, adds, is_test_rel), bodies)
+            _note_commit(virtual, call[1], test_adds(), bodies)
         elif call[0] == "commit" and is_test_rel is not None and _red_run_present():
             bodies = own_heredoc_bodies(segment, raw, before) if raw and "<<" in segment else ()
-            red_hit = _commit_red_run(call[1], bodies, _red_run_module(), top,
-                                      lambda: _commit_test_adds(where, top, all_flag, specs, wholes, adds, is_test_rel))
+            red_hit = _commit_red_run(call[1], bodies, _red_run_module(), top, test_adds)
         if specs:
             found = _marker_findings(where, top, ["HEAD", "--", *specs], None)
         else:
@@ -1730,8 +1755,9 @@ def _claims_a_role(tokens) -> bool:
     return False
 
 
-def _self_role_hit(text: str, depth: int, judge=None) -> bool:
-    """True when `judge` (default `_claims_a_role`) is true of any command the text runs, reading the same places each time."""
+def _self_role_hit(text: str, depth: int, judge=None, unreadable: bool = True) -> bool:
+    """True when `judge` (default `_claims_a_role`) is true of any command the text runs, reading the same places each time.
+    `unreadable` is the answer for a segment that cannot be tokenized (a quote left open): True refuses it, as a claim must."""
     judge = judge or _claims_a_role
     from guard_env import substitution_commands   # imported late: a family reads only the families before it
     stripped = strip_heredoc_bodies(text)
@@ -1743,11 +1769,13 @@ def _self_role_hit(text: str, depth: int, judge=None) -> bool:
                 continue
             tokens = segment_tokens(segment)
             if tokens is None:
-                return True   # a quote left open: the segment names what the judge looks for and cannot be read, so it is refused
+                if unreadable:
+                    return True   # a quote left open: the segment names what the judge looks for and cannot be read, so it is refused
+                continue
             if judge(tokens):
                 return True
             for script in inner_commands(tokens):
-                if depth >= MERGE_NEST_DEPTH or _self_role_hit(script, depth + 1, judge):
+                if _self_role_hit(script, depth + 1, judge, unreadable) if depth < MERGE_NEST_DEPTH else unreadable:
                     return True
     return False
 
@@ -1768,7 +1796,8 @@ def self_role_hit(stripped: str) -> str:
 
 # ---- self-role-claim, child start: a session that holds a role does not start claude (decision session-tiers)
 SELF_ROLE_CHILD_REASON = (
-    "self-role-claim: this session holds a role, and a claude it starts inherits that role, so the child would gain a merge or a "
+    "self-role-claim: a claude this call starts would hold a role. Either this session holds one and the child inherits it, or the call "
+    "resumes (--resume, -r, -c) a session whose role file exists, and a resume keeps that file. The child would gain a merge or a "
     "roadmap push that a cloud child does not have. Do the work in this session, or ask the owner to start the session he wants "
     "from his own terminal. "
     "(decision session-tiers, a session with a role does not start a child session)"  # glossary-ok: session-tiers is the decision's file name
@@ -1799,17 +1828,76 @@ def _starts_claude(tokens) -> bool:
     return False
 
 
-def self_role_child_hit(stripped: str) -> str:
-    """Return a short label when the guard's own environment holds a non-empty CS_SESSION_ROLE and a Bash or PowerShell call starts claude, else ''.
-    The child inherits the variable and its SessionStart hook would write its own role file, so it would gain a role no cloud child has. Fails
-    closed inside the clause: a call that names claude and cannot be read is refused, because the guard-wide crash path fails open.
-    Cost: one environment read per call, and a parse only when the variable is set and the call names claude."""
-    if not os.environ.get(SELF_ROLE_VARIABLE) or "claude" not in stripped.lower():
+def _resume_target(tokens):
+    """None when no claude start in one tokenized command resumes a session. Else the value the resume names, as written ('' for `-c`, `--continue`
+    and a `--resume` or `-r` with no value). Reads the same command words as _starts_claude; a `Start-Process` argument string is split into words."""
+    for at in command_indexes(tokens):
+        if tokens[at] in ("&", "."):
+            at += 1
+            if at >= len(tokens):
+                continue
+        word = _program_word(tokens[at])
+        rest = tokens[at + 1:]
+        if word in ("start-process", "saps", "start") and any(_program_word(t) == "claude" for t in rest):
+            rest = [w for t in rest for w in t.split()]
+        elif word != "claude":
+            continue
+        for place, arg in enumerate(rest):
+            if arg in ("-c", "--continue"):
+                return ""
+            if arg in ("--resume", "-r"):
+                value = rest[place + 1] if place + 1 < len(rest) else ""
+                return "" if value.startswith("-") else value
+            if arg.startswith("--resume="):
+                return arg[len("--resume="):]
+    return None
+
+
+def _resume_names_role(target: str, cwd: str, transcript: str) -> bool:
+    """True when a resume that names `target` would bring back a session whose role file is valid. A session id of the id shape with its own role
+    file counts. An id-shaped value with no role file is a known non-role session only when `<value>.jsonl` sits in this project's folder; any other
+    such value (a title like `batch-runner` fits the id shape) is judged as a value that names no id. A value that names no id (`-c`, a bare
+    `--resume`, a title) can reach any role session whose transcript sits in the project's folder (the folder of the own transcript, else the one
+    the cwd names under the config dir); with no such folder to read, any valid role file counts, except for an id-shaped value, taken as a session id."""
+    import re
+    import session_role
+    id_shaped = bool(target) and session_role.valid_id(target)
+    if id_shaped and session_role.own_record(target) is not None:
+        return True
+    records = session_role.all_records()
+    if not records:
+        return False
+    folder = os.path.dirname(transcript) if transcript else ""
+    if not folder and cwd:
+        folder = os.path.join(session_role.roles_dir().parent.parent, "projects", re.sub(r"[^A-Za-z0-9]", "-", cwd))
+    if not folder or not os.path.isdir(folder):
+        return not id_shaped   # no folder to read: an id-shaped value is taken as a session id, as before; any other value counts any role file
+    if id_shaped and os.path.exists(os.path.join(folder, target + ".jsonl")):
+        return False
+    return any(os.path.exists(os.path.join(folder, record["session"] + ".jsonl")) for record in records)
+
+
+def self_role_child_hit(stripped: str, cwd: str = "", transcript: str = "") -> str:
+    """Return a short label when a Bash or PowerShell call starts claude and the child would hold a role, else ''. Two ways. (1) The guard's own
+    environment holds a non-empty CS_SESSION_ROLE: the child inherits it and its SessionStart hook would write its own role file. (2) The call
+    resumes (`--resume <id>`, `-r`, `-c`, `--continue`) a session whose role file is valid: the start keeps that file (session_role.write), so a
+    role-less session would take the role over. Way (1) fails closed inside the clause: a call that names claude and cannot be read is refused,
+    because the guard-wide crash path fails open. Way (2) lets an unreadable call pass, since it needs a role file to exist and a real resume.
+    Cost: one environment read per call; a parse only when the call names claude; one folder listing of the role files for a resume."""
+    if "claude" not in stripped.lower():
         return ""
+    if os.environ.get(SELF_ROLE_VARIABLE):
+        try:
+            return "a role session starts claude" if _self_role_hit(stripped, 0, _starts_claude) else ""
+        except Exception:
+            return "a role session starts claude"
+    def resumes_a_role(tokens) -> bool:
+        target = _resume_target(tokens)
+        return target is not None and _resume_names_role(target, cwd, transcript)
     try:
-        return "a role session starts claude" if _self_role_hit(stripped, 0, _starts_claude) else ""
+        return "a resume names a session that holds a role" if _self_role_hit(stripped, 0, resumes_a_role, unreadable=False) else ""
     except Exception:
-        return "a role session starts claude"
+        return ""
 
 
 # ---- merge --confirm: the checkout it acts in must be a repo the own record names (rule merge-confirm-repo)
@@ -2054,14 +2142,110 @@ def lane_mcp_ready_hit(tool: str, tool_input, transcript: str) -> str:
     return "update_pull_request draft false from a lane" if _own_record_is_lane(transcript) else ""
 
 
+# ---- a ready mark by MCP with no ready run that stood for the head (rule ready-mcp-mark-guard, decision ready-mcp-mark-guard)
+# `merge <pr> --ready` and `merge <pr> --confirm` on a draft run the draft step, which writes no durable record of its pass. It prints lines (merge/merge.py READY_*_FMT),
+# and they reach the guard only as the result of the Bash call in this session's transcript (read by lint/_transcript.py, the one home).
+# The patterns are built from those templates (ready_line_pattern), never copied here. A run stands for a head when its pass line names it, when a dry-merge line maps the
+# pass's sha to it, or, in a repo with no ready checks, when a line of the step names it. `--fast-checks` prints the pass line but builds no records page: it stands for nothing.
+# Cost: only an update with draft false reads anything: one transcript read, then one pull request read when a stood head is found.
+# A call with no transcript, or one that cannot be read, is allowed, as the other transcript rules allow it.
+READY_MARK_READ_TIMEOUT = 20
+READY_RUN_FLAGS = ("--ready", "--confirm")
+READY_MARK_REASON = (
+    "Rule (Git, ready-mcp-mark-guard): no `merge %(n)s --ready` run in this session passed its ready checks on %(head)s. A ready mark made without that pass "
+    "skips the ready checks and the records step, so the confirm refuses it and costs a second CI run (PR 3255 and PR 3472, 2026-11-15). "
+    "Remedy: run `merge %(n)s --ready` in this session and let it pass, then retry this call once its draft run shows. "
+    "(decision ready-mcp-mark-guard, a ready mark needs a ready pass on the head)"
+)
+
+
+def _ready_stood_shas(text: str, merge) -> set:
+    """The shas (7 to 40 hex chars) that the ready run whose result is `text` stands for: its pass shas, the head a dry-merge line maps a pass sha to, and,
+    when the run declared no ready checks, the head each sha-bearing line of the draft step names. `merge` is the merge tool module, the home of the line templates."""
+    pattern = merge.ready_line_pattern
+    shas = {m.group("sha") for m in pattern(merge.READY_PASS_FMT).finditer(text)}
+    for m in pattern(merge.READY_DRY_FMT).finditer(text):
+        if any(sha.startswith(m.group("dry")) or m.group("dry").startswith(sha) for sha in shas):
+            shas.add(m.group("head"))
+    if merge.READY_NO_CHECKS_LINE in text:
+        for fmt in (merge.READY_UNCHECKED_FMT, merge.READY_RECORDS_CURRENT_FMT, merge.READY_RECORDS_PUSHED_FMT, merge.READY_MERGED_FMT,
+                    merge.READY_CLAIM_STOP_FMT):
+            shas.update(m.group("sha") for m in pattern(fmt).finditer(text))
+    return shas
+
+
+def _ready_pass_shas(transcript: str, merge):
+    """The shas that a `--ready` or `--confirm` Bash or PowerShell call of this transcript stood for (_ready_stood_shas), or None when the
+    transcript cannot be read."""
+    from guard_core import lint_dir  # lazy: the one home of where lint/ is
+    lint = lint_dir()
+    if lint not in sys.path:
+        sys.path.insert(0, lint)
+    try:
+        import _transcript
+        records = _transcript.read_transcript(transcript)
+    except Exception:
+        return None
+    ready_calls = set()
+    shas = set()
+    for rec in records:
+        for use in _transcript.tool_uses(rec):
+            command = (use.get("input") or {}).get("command")
+            if (use.get("name") in ("Bash", "PowerShell") and isinstance(command, str) and isinstance(use.get("id"), str)
+                    and any(flag in command for flag in READY_RUN_FLAGS)):
+                ready_calls.add(use["id"])
+        for result in _transcript.tool_results(rec):
+            if result.get("tool_use_id") not in ready_calls:
+                continue
+            content = result.get("content")
+            text = content if isinstance(content, str) else " ".join(
+                b.get("text", "") for b in content or [] if isinstance(b, dict) and isinstance(b.get("text"), str))
+            shas |= _ready_stood_shas(text, merge)
+    return shas
+
+
+def ready_mark_hit(tool: str, tool_input, transcript: str, where: str):
+    """(reason, matched) when an MCP update with draft false marks a pull request ready and this session's transcript shows no `merge <pr> --ready` or
+    `--confirm` run that stood for the head the pull request has now, else None. Judged only in a repo that uses the merge tool. A call that marks nothing ready,
+    a missing or unreadable transcript, an unloadable merge tool and an unreadable head pass (the records-page-ready rule reads the same head and refuses
+    an unreadable one first). A selector may carry a leading `#`, as ready_page_read reads it."""
+    if tool != READY_PAGE_MCP_TOOL or not isinstance(tool_input, dict) or tool_input.get("draft") is not False:
+        return None
+    if not isinstance(transcript, str) or not transcript or not where or not uses_merge_tool(where):
+        return None
+    module = merge_module()
+    if module is None:
+        return None
+    shas = _ready_pass_shas(transcript, module)
+    if shas is None:
+        return None
+    for selector, repo in ready_page_calls(tool, tool_input, ""):
+        selector = selector[1:] if selector[:1] == "#" and selector[1:].isdigit() else selector
+        if not selector.isdigit():
+            continue
+        head = ""
+        if shas:  # no stood sha at all refuses without a head read
+            try:
+                with module.shared_deadline(READY_MARK_READ_TIMEOUT):
+                    head = module.Host(repo=repo or None, cwd=where).pr(int(selector))["head"]
+            except Exception:
+                continue
+            if any(head.startswith(sha) for sha in shas):
+                continue
+        named = "its current head " + head[:9] if head else "its current head"
+        return READY_MARK_REASON % {"n": selector, "head": named}, "ready mark with no ready pass #" + selector
+    return None
+
+
 # ---- the record branch's one writer: only the triage session pushes to it (rule roadmap-one-writer)
 RECORD_WRITER_TIER = "triage"
 DEFAULT_RECORD_BRANCH = "roadmap"
+RECORD_DECISION_CITE = "(decision session-tiers, the triage session is the only writer of the record branch)"  # glossary-ok: session-tiers is the decision's file name
 RECORD_CITE = (
     "own turn, then retry. Before this session asks the owner to push a commit, run `git fetch origin <record "
     "branch>`, then `git merge-base --is-ancestor <commit> origin/<record branch>`: exit 0 means the commit is "
     "already there, so ask the owner only when it is not. "
-    "(decision session-tiers, the triage session is the only writer of the record branch)"  # glossary-ok: session-tiers is the decision's file name
+    + RECORD_DECISION_CITE
 )
 RECORD_REASON = (
     "roadmap-one-writer: the repo's record branch has one writer, the triage session, and this session's own "
@@ -2074,6 +2258,32 @@ RECORD_REASON = (
     "commit exists. If this session is triage: run get_session (no argument) alone in its "
     + RECORD_CITE
 )
+
+# A push whose folder still holds a variable or a substitution after the command's own assignments are read: the
+# folder is the shell's to know, so the push's repo and record branch are unknown. A cloud triage proof reads the
+# transcript, never the folder, so it still lets the push through.
+RECORD_FOLDER_MATCH = "git push to the record branch through an unreadable folder: "
+RECORD_FOLDER_REASON = (
+    "roadmap-one-writer: this push to the record branch runs in a folder this guard cannot read, because it holds "
+    "{names} that the command does not assign. The push's repo and record branch are unknown, so a local "
+    "role file cannot be matched to its repo. Write the folder as a literal path, or assign the variable earlier in the same command "
+    "(`W=<folder>; git -C \"$W\" push ...`), then retry. "
+    + RECORD_DECISION_CITE
+)
+UNREAD_FOLDER = re.compile(r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|\$\(|`")
+
+
+def _unread_folder_names(where: str) -> str:
+    """The variables and substitutions still in the folder WHERE, comma-joined, else ''."""
+    names = dict.fromkeys(UNREAD_FOLDER.findall(where or ""))
+    return ", ".join("a command substitution" if name in ("$(", "`") else name for name in names)
+
+
+def record_reason(matched: str) -> str:
+    """The refusal text for a record_writer_hit result, with its names filled in."""
+    if matched.startswith(RECORD_FOLDER_MATCH):
+        return RECORD_FOLDER_REASON.format(names=matched[len(RECORD_FOLDER_MATCH):])
+    return RECORD_REASON
 
 
 def _own_proved_tags(transcript: str):
@@ -2232,8 +2442,10 @@ def _lane_handoff_holds(args, where: str, overrides, root: str, destination, tag
 
 
 def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb, session_id: str = "") -> str:
-    """Return the matched push when a segment pushes to the checkout's record branch, or to the default
+    """Return the reason text when a segment pushes to the checkout's record branch, or to the default
     name `roadmap`, and the own record proves neither the triage role nor a lane's own handoff push, else ''.
+    The text is "git push to the record branch", or `RECORD_FOLDER_MATCH` plus the unread variable names when
+    the push goes to `roadmap` from a folder the command names with a variable or substitution it does not assign.
     `record_branch_of(root)` reads the checkout's branch (lint/layout.py); a read error means the default.
     `read_verb(subcommand, args)` is guard.py's own test for a dry run, which moves nothing. The proof is
     read only after a push reaches the branch. `session_id` is the hook payload's id, which a local session's
@@ -2254,6 +2466,9 @@ def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of
                 continue
             if _own_role_proved(transcript, RECORD_WRITER_TIER, session_id, root):  # glossary-ok: RECORD_WRITER_TIER is the existing name
                 continue
+            unread = _unread_folder_names(where)
+            if unread and DEFAULT_RECORD_BRANCH in destinations:
+                return RECORD_FOLDER_MATCH + unread
             tags = _own_proved_tags(transcript)
             if (tags is not None and LANE_TAG in tags and len(destinations) == 1 and root
                     and _lane_handoff_holds(args, where, overrides, root, destinations[0], tags)):
@@ -3162,7 +3377,7 @@ def _minutes_ahead(then, now) -> int:
     return int((then.replace(second=0, microsecond=0) - now.replace(second=0, microsecond=0)).total_seconds() // 60)
 
 
-def stamp_hit(tool: str, tool_input):
+def header_time_hit(tool: str, tool_input):
     """Return (matched, reason) when this send_message opens with a header stamp that is wrong for the clock, else
     None. Only the first non-blank line is read, and only its header stamp. Wrong means one of three things. The
     zone name is not the clock's own (local_time's DST rule names the current zone), whatever the minutes. A dated
@@ -3334,7 +3549,7 @@ def written_time_hit(tool: str, tool_input, cwd: str = ""):
     roadmap/data/steps/<name>.json file: `updatedAt` in a Write, and each instant in an Edit's or MultiEdit's new
     text. In a shell command: the last literal `updatedAt` key with a single- or double-quoted value. Only a value
     with an offset is read. Cost: one clock read, and only when a judged value is present; one local file read,
-    only for an items write that carries `file_path` and no inline data; no transcript or process. Fails open, like stamp_hit."""
+    only for an items write that carries `file_path` and no inline data; no transcript or process. Fails open, like header_time_hit."""
     if not isinstance(tool_input, dict):
         return None
     judged = []
