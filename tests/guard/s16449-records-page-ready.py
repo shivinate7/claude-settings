@@ -22,6 +22,9 @@ RPR_CARRY = ("Return #12 to draft",)           # the stale remedy's first step (
 RPR_DEBT = "# Gap one\n\n- **What.** The check misses one case.\n- **Where.** x\n- **Decision.** none\n- **Retire.** y\n"
 RPR_STAMP = json.dumps({"defaultBranch": "main", "kinds": [],
                         "merge": {"method": "merge", "deadlineMinutes": 5, "afterMerge": [], "deleteBranch": True}})
+RPR_READY_CHECK = json.dumps({"defaultBranch": "main", "kinds": [],
+                              "merge": {"method": "merge", "deadlineMinutes": 5, "afterMerge": [], "deleteBranch": True,
+                                        "readyChecks": ["check invariants"]}})  # a repo that declares ready checks: merge.py prints their pass line
 GHREADY_STALE = os.path.join(RPR, "gh-stale")      # feat-stale, base main: a debt with no page
 GHREADY_NAMED = os.path.join(RPR, "gh-named")      # the same, and every call must name repos/y/x
 GHREADY_CURRENT = os.path.join(RPR, "gh-current")  # feat-current: a debt and the page the generator writes
@@ -37,6 +40,8 @@ RPR_SHALLOW = os.path.join(RPR, "shallow")         # a shallow clone of origin: 
 RPR_SHALLOW_WT = os.path.join(RPR, "shallow-wt")   # a worktree of that clone at feat-behind, for the scope read in the fixture
 GHREADY_SHALLOW = os.path.join(RPR, "gh-shallow")  # feat-behind in RPR_SHALLOW: the ancestry is unknown, so the ready mark is refused
 GHREADY_SHALLOW_NAMED = os.path.join(RPR, "gh-shallow-named")  # the same, and every call must name repos/y/x
+RPR_DEV_BEHIND_CLONE = os.path.join(RPR, "clone-dev-behind")  # a clone checked out at feat-dev-behind: its stamp declares ready checks
+GHREADY_DEV_BEHIND = os.path.join(RPR, "gh-dev-behind")       # feat-dev-behind, base dev: a head that lacks the dev tip
 RPR_UNKNOWN_LACKS = ("--confirm", "merge <pr>", "merge 12")  # the unknown reason names no merge command: it says to retry, or to draft first
 
 
@@ -88,15 +93,20 @@ def _build_ready_page():
     branch("feat-bad", "main")
     commit("a record the generator refuses", {"debts/bad.md": "# Bad\n\n- **Where.** x\n"})
     branch("dev", "main")
+    branch("feat-dev-behind", "dev")                      # cut before dev moves on, so its head lacks the dev tip
+    commit("a debt aimed at dev, cut before dev moved", {"debts/gap-one.md": RPR_DEBT, ".github/stamp.json": RPR_READY_CHECK})  # glossary-ok: .github/stamp.json is the real config file name
+    _rpr_git(RPR_SEED, "checkout", "-q", "dev")
     commit("dev moves on", {"dev.txt": "dev side\n"})
     branch("feat-dev", "dev")
     commit("a debt aimed at dev", {"debts/gap-one.md": RPR_DEBT})
     _rpr_git(RPR_SEED, "push", "-q", "origin", "main", "dev", "feat-behind", "feat-stale", "feat-current",
-             "feat-claim", "feat-empty", "feat-bad", "feat-dev")
+             "feat-claim", "feat-empty", "feat-bad", "feat-dev", "feat-dev-behind")
 
     # Scope before subject: each head is the state its case names.
     _rpr_need(run_vcs(RPR_SEED, "merge-base", "--is-ancestor", "main", "feat-behind").returncode == 1,
               "feat-behind holds the base tip, so it has no lack to skip for")
+    _rpr_need(run_vcs(RPR_SEED, "merge-base", "--is-ancestor", "dev", "feat-dev-behind").returncode == 1,
+              "feat-dev-behind holds the dev tip, so it has no lack to skip for")
     _rpr_need("gap-one" in _rpr_git(RPR_SEED, "show", "feat-current:docs/records.md"), "feat-current carries no page")
     _rpr_need(_rpr_git(RPR_SEED, "ls-tree", "--name-only", "feat-stale", "--", "docs/records.md") == "", "feat-stale carries a page")
     _rpr_need("**What.**" not in _rpr_git(RPR_SEED, "show", "feat-bad:debts/bad.md"), "feat-bad holds a What line")
@@ -104,6 +114,8 @@ def _build_ready_page():
     _rpr_git(RPR, "clone", "-q", RPR_ORIGIN, RPR_REPO)
     _rpr_git(RPR, "clone", "-q", RPR_ORIGIN, RPR_NOSEL)
     _rpr_git(RPR_NOSEL, "checkout", "-q", "feat-stale")
+    _rpr_git(RPR, "clone", "-q", RPR_ORIGIN, RPR_DEV_BEHIND_CLONE)
+    _rpr_git(RPR_DEV_BEHIND_CLONE, "checkout", "-q", "feat-dev-behind")
     make_repo(RPR_PLAIN, {"README.md": "plain\n", "debts/gap-one.md": RPR_DEBT})
 
     def head(name):
@@ -118,6 +130,7 @@ def _build_ready_page():
     make_fake_gh(GHREADY_CLAIM, "main", head_sha=head("feat-claim"), head_ref="feat-claim", draft=True)
     make_fake_gh(GHREADY_BEHIND, "main", head_sha=head("feat-behind"), head_ref="feat-behind", draft=True)
     make_fake_gh(GHREADY_DEV, "dev", head_sha=head("feat-dev"), head_ref="feat-dev", draft=True)
+    make_fake_gh(GHREADY_DEV_BEHIND, "dev", head_sha=head("feat-dev-behind"), head_ref="feat-dev-behind", draft=True)
     make_fake_gh(GHREADY_EMPTY, "main", head_sha=head("feat-empty"), head_ref="feat-empty", draft=True)
     make_fake_gh(GHREADY_BAD, "main", head_sha=head("feat-bad"), head_ref="feat-bad", draft=True)
 

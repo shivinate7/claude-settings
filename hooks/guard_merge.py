@@ -2142,6 +2142,101 @@ def lane_mcp_ready_hit(tool: str, tool_input, transcript: str) -> str:
     return "update_pull_request draft false from a lane" if _own_record_is_lane(transcript) else ""
 
 
+# ---- a ready mark by MCP with no ready run that stood for the head (rule ready-mcp-mark-guard, decision ready-mcp-mark-guard)
+# `merge <pr> --ready` and `merge <pr> --confirm` on a draft run the draft step, which writes no durable record of its pass. It prints lines (merge/merge.py READY_*_FMT),
+# and they reach the guard only as the result of the Bash call in this session's transcript (read by lint/_transcript.py, the one home).
+# The patterns are built from those templates (ready_line_pattern), never copied here. A run stands for a head when its pass line names it, when a dry-merge line maps the
+# pass's sha to it, or, in a repo with no ready checks, when a line of the step names it. `--fast-checks` prints the pass line but builds no records page: it stands for nothing.
+# Cost: only an update with draft false reads anything: one transcript read, then one pull request read when a stood head is found.
+# A call with no transcript, or one that cannot be read, is allowed, as the other transcript rules allow it.
+READY_MARK_READ_TIMEOUT = 20
+READY_RUN_FLAGS = ("--ready", "--confirm")
+READY_MARK_REASON = (
+    "Rule (Git, ready-mcp-mark-guard): no `merge %(n)s --ready` run in this session passed its ready checks on %(head)s. A ready mark made without that pass "
+    "skips the ready checks and the records step, so the confirm refuses it and costs a second CI run (PR 3255 and PR 3472, 2026-11-15). "
+    "Remedy: run `merge %(n)s --ready` in this session and let it pass, then retry this call once its draft run shows. "
+    "(decision ready-mcp-mark-guard, a ready mark needs a ready pass on the head)"
+)
+
+
+def _ready_stood_shas(text: str, merge) -> set:
+    """The shas (7 to 40 hex chars) that the ready run whose result is `text` stands for: its pass shas, the head a dry-merge line maps a pass sha to, and,
+    when the run declared no ready checks, the head each sha-bearing line of the draft step names. `merge` is the merge tool module, the home of the line templates."""
+    pattern = merge.ready_line_pattern
+    shas = {m.group("sha") for m in pattern(merge.READY_PASS_FMT).finditer(text)}
+    for m in pattern(merge.READY_DRY_FMT).finditer(text):
+        if any(sha.startswith(m.group("dry")) or m.group("dry").startswith(sha) for sha in shas):
+            shas.add(m.group("head"))
+    if merge.READY_NO_CHECKS_LINE in text:
+        for fmt in (merge.READY_UNCHECKED_FMT, merge.READY_RECORDS_CURRENT_FMT, merge.READY_RECORDS_PUSHED_FMT, merge.READY_MERGED_FMT,
+                    merge.READY_CLAIM_STOP_FMT):
+            shas.update(m.group("sha") for m in pattern(fmt).finditer(text))
+    return shas
+
+
+def _ready_pass_shas(transcript: str, merge):
+    """The shas that a `--ready` or `--confirm` Bash or PowerShell call of this transcript stood for (_ready_stood_shas), or None when the
+    transcript cannot be read."""
+    from guard_core import lint_dir  # lazy: the one home of where lint/ is
+    lint = lint_dir()
+    if lint not in sys.path:
+        sys.path.insert(0, lint)
+    try:
+        import _transcript
+        records = _transcript.read_transcript(transcript)
+    except Exception:
+        return None
+    ready_calls = set()
+    shas = set()
+    for rec in records:
+        for use in _transcript.tool_uses(rec):
+            command = (use.get("input") or {}).get("command")
+            if (use.get("name") in ("Bash", "PowerShell") and isinstance(command, str) and isinstance(use.get("id"), str)
+                    and any(flag in command for flag in READY_RUN_FLAGS)):
+                ready_calls.add(use["id"])
+        for result in _transcript.tool_results(rec):
+            if result.get("tool_use_id") not in ready_calls:
+                continue
+            content = result.get("content")
+            text = content if isinstance(content, str) else " ".join(
+                b.get("text", "") for b in content or [] if isinstance(b, dict) and isinstance(b.get("text"), str))
+            shas |= _ready_stood_shas(text, merge)
+    return shas
+
+
+def ready_mark_hit(tool: str, tool_input, transcript: str, where: str):
+    """(reason, matched) when an MCP update with draft false marks a pull request ready and this session's transcript shows no `merge <pr> --ready` or
+    `--confirm` run that stood for the head the pull request has now, else None. Judged only in a repo that uses the merge tool. A call that marks nothing ready,
+    a missing or unreadable transcript, an unloadable merge tool and an unreadable head pass (the records-page-ready rule reads the same head and refuses
+    an unreadable one first). A selector may carry a leading `#`, as ready_page_read reads it."""
+    if tool != READY_PAGE_MCP_TOOL or not isinstance(tool_input, dict) or tool_input.get("draft") is not False:
+        return None
+    if not isinstance(transcript, str) or not transcript or not where or not uses_merge_tool(where):
+        return None
+    module = merge_module()
+    if module is None:
+        return None
+    shas = _ready_pass_shas(transcript, module)
+    if shas is None:
+        return None
+    for selector, repo in ready_page_calls(tool, tool_input, ""):
+        selector = selector[1:] if selector[:1] == "#" and selector[1:].isdigit() else selector
+        if not selector.isdigit():
+            continue
+        head = ""
+        if shas:  # no stood sha at all refuses without a head read
+            try:
+                with module.shared_deadline(READY_MARK_READ_TIMEOUT):
+                    head = module.Host(repo=repo or None, cwd=where).pr(int(selector))["head"]
+            except Exception:
+                continue
+            if any(head.startswith(sha) for sha in shas):
+                continue
+        named = "its current head " + head[:9] if head else "its current head"
+        return READY_MARK_REASON % {"n": selector, "head": named}, "ready mark with no ready pass #" + selector
+    return None
+
+
 # ---- the record branch's one writer: only the triage session pushes to it (rule roadmap-one-writer)
 RECORD_WRITER_TIER = "triage"
 DEFAULT_RECORD_BRANCH = "roadmap"
