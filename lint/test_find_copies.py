@@ -279,6 +279,28 @@ class RunFolderSweepTest(unittest.TestCase):
                          "a pid whose stat cannot be read is never proven a kernel thread")
 
 
+    # The owner rule rules out only pid 1, which is every process's ancestor. A folder named for pid 2 keeps its unreadable descendants,
+    # so a live child whose parent reads as 2 holds it. The child is this run's; the parent read is the one the case fakes.
+    @unittest.skipUnless(sys.platform.startswith("linux"), "the hold read is /proc/<pid>/stat and fd; a Mac or Windows read is not designed yet")
+    def test_a_folder_named_for_pid_2_is_held_by_its_unreadable_child(self):
+        tool = merge_tool()
+        sweep = janitor_sweep()
+        folder = os.path.join(RUN_FOLDER, "owner-two", "2-" + "b" * 32)
+        os.makedirs(folder)
+        child = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"], stdin=subprocess.PIPE)
+        self.addCleanup(end_holder, child)
+        real_parent_pid = sweep._parent_pid
+
+        def parent_of(pid):
+            return 2 if pid == child.pid else real_parent_pid(pid)
+
+        with mock.patch.object(sweep, "processes_in", return_value=([], [child.pid])):
+            with mock.patch.object(sweep, "_parent_pid", side_effect=parent_of):
+                with mock.patch.object(tool, "kernel_thread", return_value=False, create=True):
+                    held = tool.held_by_live_process(folder)
+        self.assertTrue(held, "a folder named for pid 2 is held by its unreadable child: the owner rule must rule out only pid 1")
+
+
 class FindCopiesTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
