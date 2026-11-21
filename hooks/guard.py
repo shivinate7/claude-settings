@@ -2599,16 +2599,22 @@ def shell_written_test_rels(text: str, cwd: str) -> list:
     one shell-write reader (`_shell_write_hit`) and `is_test_rel`. The red-run commit read asks it for the steps that
     run before a commit in the same call, whose edits the hook cannot yet see in the tree."""
     found = []
+    last = []
 
-    def test_path(path, where):
+    def test_path(path, where, verb=""):
+        if verb in ("rm", "unlink", "rmdir", "shred", "trash"):
+            return False   # a delete adds no test line (decision red-run-trailer-on-test-commits)
         rel = repo_rel(path, where)
-        if rel is not None and is_test_rel(rel):
-            found.append(rel)
+        if rel is not None and is_test_rel(rel) and rel not in found:
+            last[:] = [rel]
             return True
         return False
 
-    _shell_write_hit(text, cwd, test_path, follow_cd=True)
-    return list(dict.fromkeys(found))
+    # The reader returns its first write hit, and the predicate only names a candidate: a path a command reads or
+    # runs (`cat`, `grep`, `python3 hooks/test_x.py`) is judged by it and is no hit. Each pass skips the paths found.
+    while _shell_write_hit(text, cwd, test_path, follow_cd=True, predicate_command=True):
+        found.append(last[0])
+    return found
 
 
 def builder_shell_test_hit(raw: str, stripped: str, cwd: str, tool) -> str:
