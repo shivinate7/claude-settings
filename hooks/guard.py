@@ -272,6 +272,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        command without --undo) while its head's records page is stale, or when that read cannot run, in
                        a repo that uses the merge tool. A base that is not the default branch, a head holding a
                        Record-claim, a head behind the base, and a current page pass. (records-index-at-merge)
+  ready-mcp-mark-guard deny. Marking a pull request ready by MCP update_pull_request with draft false when this
+                       session's transcript shows no `merge <pr> --ready` run that passed its ready checks on the
+                       pull request's current head, in a repo that uses the merge tool. A draft true or body-only
+                       update, a missing transcript and a pass on the current head pass. (ready-mcp-mark-guard)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        A merge's own page at MERGE_HEAD passes: MERGE_HEAD is on the base's first-parent
                        line, or the lane is stacked on a base that main has not merged.
@@ -732,7 +736,7 @@ while True:
             records_page_hit, repo_proof_hit, role_proof_hit, lane_ready_hit, lane_mcp_ready_hit, self_role_child_hit, self_role_hit,
             DEFAULT_RECORD_BRANCH, record_reason, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, PRIOR_WORK_REASON, prior_work_lane_hit, prior_work_named, header_time_hit, step_dup_hit, step_pr_hit, target_roster_hit, trust_card_hit, written_time_hit,
             BRIEF_ID_REASON, BRIEF_TOPIC_REASON, STEP_DUP_REASON,
-            undrafted_pr_create, uses_merge_tool, ready_page_hit,
+            undrafted_pr_create, uses_merge_tool, ready_page_hit, ready_mark_hit,
         )
         _loading = "guard_review_log"
         from guard_review_log import review_log_hit
@@ -8109,6 +8113,10 @@ def judge(payload) -> None:
         if matched:
             refuse(tool, "deny", "merge-role-proof", LANE_READY_REASON, matched)
         refuse_ready_page(tool, tool_input, "", cwd)
+        # A ready mark with no `merge <pr> --ready` run that stood for the head in this session's transcript (rule ready-mcp-mark-guard).
+        unproved = ready_mark_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", cwd)
+        if unproved:
+            refuse(tool, "deny", "ready-mcp-mark-guard", unproved[0], unproved[1])
 
     # The MCP create tool carries its own `draft` field.
     if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:

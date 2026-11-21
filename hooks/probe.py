@@ -148,11 +148,14 @@ def read_payload(args):
 
 
 def verdict_line(guard_stdout):
-    """`allow` for no output, else `<decision> <reason>` from the guard's permissionDecision."""
+    """`allow` for no output, `allow <note>` for a lift line, else `<decision> <reason>`. A lift line holds
+    an additionalContext and no permissionDecision (guard_core refuse()): the act is not refused."""
     if not guard_stdout.strip():
         return "allow"
     try:
         out = json.loads(guard_stdout)["hookSpecificOutput"]
+        if "permissionDecision" not in out and isinstance(out["additionalContext"], str):
+            return " ".join(("allow %s" % out["additionalContext"]).split())
         decision, reason = out["permissionDecision"], out["permissionDecisionReason"]
     except (ValueError, KeyError, TypeError):
         raise BadInput("the guard printed output this probe does not read: %r" % guard_stdout[:200])
