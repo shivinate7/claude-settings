@@ -3896,7 +3896,7 @@ def run_safe_sweep(root):
 
 def refuse_full_disk(root):
     """Refuse a lane lint when a drive it writes to is under the guard's full disk floor, min(5% of the drive, 5 GiB) (decision machine-load-brake): the
-    drive of the home folder (the guard's reader called bare, hooks/guard.py _read_disk, which reads home in a cloud session too; only a cloud start reads "/") or the drive of the temp folder, where add_worktree makes the lint tree.
+    drive of the home folder (the guard's reader called bare, hooks/guard.py _read_disk, which reads home in a cloud session too; only the guard's own cloud read, at an Agent or a lint start, reads "/") or the drive of the temp folder, where add_worktree makes the lint tree.
     A lint tree is a full checkout, and a full disk fails it half made. The floor is the guard's (load_full), fed the disk reading alone, so memory
     never refuses here. The floor holds in a cloud session too. A drive that cannot be read prints one line that says so; the other is still checked,
     and the lint goes ahead when none is full.
