@@ -300,7 +300,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        commit in the same call before the push counts, read from its `-m` text (an `--amend`
                        with none keeps the commit's own); a message the guard cannot read, a failed read and a
                        default base it cannot read are no hit. A lone `git commit` (no push after it in the
-                       call) that stages added lines on a test path is judged too, by its own `-m` text; a
+                       call) that stages added lines on a test path is judged too, by its own `-m` text (or the heredoc body of `-F -`), and a test path written by an earlier step of the call counts when the commit takes the working tree; a
                        merge or other replay in progress is no hit. The refusal for a flagged tip names only
                        commit and push; for a flagged commit below the tip (under a merge at the tip too) it
                        names commit, rebase and push; for a branch rewritten since its push it names no
@@ -2592,6 +2592,23 @@ def builder_test_path(path: str, cwd: str) -> bool:
             and repo_rel(path, where, outside=False) is None):
         return False
     return is_builder_test_rel(rel)
+
+
+def shell_written_test_rels(text: str, cwd: str) -> list:
+    """The repository-relative test paths the shell command `text` writes (a redirect, `tee`, `sed -i`, `cp`), by the
+    one shell-write reader (`_shell_write_hit`) and `is_test_rel`. The red-run commit read asks it for the steps that
+    run before a commit in the same call, whose edits the hook cannot yet see in the tree."""
+    found = []
+
+    def test_path(path, where):
+        rel = repo_rel(path, where)
+        if rel is not None and is_test_rel(rel):
+            found.append(rel)
+            return True
+        return False
+
+    _shell_write_hit(text, cwd, test_path, follow_cd=True)
+    return list(dict.fromkeys(found))
 
 
 def builder_shell_test_hit(raw: str, stripped: str, cwd: str, tool) -> str:
@@ -5834,7 +5851,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # `-m` text; so is a lone commit with no push after it, which adds one `git diff --numstat` only when its
     # message holds no trailer. A git write after a cd into a missing folder adds one `git rev-parse` of the
     # folder the shell stays in; the scan for folders the call makes is parsing only. guard_merge states the cost.
-    kind, matched = conflict_markers_hit(stripped, cwd, is_test_rel, raw)
+    kind, matched = conflict_markers_hit(stripped, cwd, is_test_rel, raw, lambda text: shell_written_test_rels(text, cwd))
     if kind in ("red-run", "red-run-commit"):
         red_reason, red_shown = red_run_reason(matched, kind == "red-run-commit")
         refuse(tool, "deny", "red-run", red_reason, red_shown)

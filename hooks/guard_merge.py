@@ -1429,7 +1429,7 @@ def _made_folders(segments, number, cwd, ends):
     return frozenset(made)
 
 
-def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
+def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None, written_test=None):
     """Return `(kind, file)` for the first commit or push that would carry all three conflict markers
     in one file, else `('', '')`. The kind is `commit`, `push`, `chain` (a push after a commit the
     guard could not judge; the file is then `git push`), or `cd` (a git write, any verb in `GIT_WRITES`, after a `cd`
@@ -1507,13 +1507,21 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
         red_hit = None
         if not has_head:   # no HEAD: `git diff` would read an empty tree
             continue
+        # An earlier step of this call may edit a test file the commit then takes (`sed -i f && git commit -a`): the hook
+        # runs before the shell, so the tree it reads is still clean. `written_test` names the test paths those steps write.
+        earlier = " && ".join(prior for prior in segments[:number] if prior.strip()) if (
+            written_test and number and (all_flag or specs or wholes or adds)) else ""
+
+        def test_adds(where=where, top=top, all_flag=all_flag, specs=specs, wholes=wholes, adds=adds, earlier=earlier):
+            paths = _commit_test_adds(where, top, all_flag, specs, wholes, adds, is_test_rel)
+            return list(dict.fromkeys(paths + (written_test(earlier) if earlier else [])))
+
         if call[0] == "commit" and number < last_push and is_test_rel is not None and _red_run_present():
             bodies = own_heredoc_bodies(segment, raw, before) if raw and "<<" in segment else ()
-            _note_commit(virtual, call[1], _commit_test_adds(where, top, all_flag, specs, wholes, adds, is_test_rel), bodies)
+            _note_commit(virtual, call[1], test_adds(), bodies)
         elif call[0] == "commit" and is_test_rel is not None and _red_run_present():
             bodies = own_heredoc_bodies(segment, raw, before) if raw and "<<" in segment else ()
-            red_hit = _commit_red_run(call[1], bodies, _red_run_module(), top,
-                                      lambda: _commit_test_adds(where, top, all_flag, specs, wholes, adds, is_test_rel))
+            red_hit = _commit_red_run(call[1], bodies, _red_run_module(), top, test_adds)
         if specs:
             found = _marker_findings(where, top, ["HEAD", "--", *specs], None)
         else:
