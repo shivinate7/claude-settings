@@ -29,6 +29,10 @@ RPM_DRY_OLD = os.path.join(RPM, "dry-merge-pass-older-head.jsonl")        # the 
 RPM_NOT_DEFAULT = "merge: dev is not the default branch (main). The records page is rebuilt only for it. Nothing was pushed."
 RPM_NO_CHECKS = "merge: this repo declares no ready checks (merge.readyChecks), so the draft step runs none."
 RPM_DRAFT_LINE = "merge: #12 stays a draft. Mark it ready after its draft run shows."
+RPM_UNCHECKED_PASS = os.path.join(RPM, "unchecked-current-head.jsonl")  # a ready run on a base other than the default, no ready checks: its unchecked line names feat-dev-behind
+RPM_UNCHECKED_OLD = os.path.join(RPM, "unchecked-older-head.jsonl")     # the same run, its unchecked line naming feat-dev-behind^
+RPM_CLAIM_STOP = os.path.join(RPM, "claim-stop-current-head.jsonl")     # a ready run that stops on a Record-claim head, no ready checks: the stop names feat-claim
+RPM_CLAIM_STOP_OLD = os.path.join(RPM, "claim-stop-older-head.jsonl")   # the same stop, naming feat-claim^
 
 
 def _rpm_pass(sha):
@@ -57,6 +61,17 @@ def _rpm_dry_line(head, dry):
     return "merge: the dry merge of %s into dev is %s." % (head[:9], dry[:9])
 
 
+def _rpm_unchecked_line(head):
+    """The line the draft step prints on a base other than the default, with no ready checks: the one line that names its head (merge/merge.py)."""
+    return "merge: the draft step ran no checks on #12 at %s. Nothing was pushed." % head[:9]
+
+
+def _rpm_claim_stop(sha):
+    """The stop a head that holds a Record-claim prints on a ready run (merge/merge.py, draft_step), as the Bash result carries it."""
+    return ("merge: %s on feat-claim holds a Record-claim (D-002), so the draft step adds no page commit on top of it. "
+            "Mark #12 ready by hand, then run --confirm again. Nothing was pushed." % sha[:9])
+
+
 def _build_readymark():
     materialize(RPR)  # the records-page fixture: its heads and fake gh answers are the ones these transcripts name
     os.makedirs(RPM, exist_ok=True)
@@ -83,6 +98,9 @@ def _build_readymark():
     dry_tree = _rpr_git(RPR_DEV_BEHIND_CLONE, "merge-tree", "--write-tree", dev_behind, dev_tip)
     dry = _rpr_git(RPR_DEV_BEHIND_CLONE, "commit-tree", dry_tree, "-p", dev_behind, "-p", dev_tip,
                    "-m", "dry merge of %s into dev" % dev_behind[:9])
+    claim_older = _rpr_git(RPR_SEED, "rev-parse", "--verify", "feat-claim^")
+    _rpr_need(run_vcs(RPR_SEED, "merge-base", "--is-ancestor", claim_older, claim).returncode == 0,
+              "feat-claim^ is not an ancestor of feat-claim, so it is no older head of it")
     _rpr_need(_rpr_git(RPR_DEV_BEHIND_CLONE, "rev-parse", dry + "^1") == dev_behind
               and _rpr_git(RPR_DEV_BEHIND_CLONE, "rev-parse", dry + "^2") == dev_tip,
               "the dry merge does not hold the head as its first parent and the dev tip as its second")
@@ -101,6 +119,10 @@ def _build_readymark():
         RPM_NOCHECKS_OLD: _rpm_ready_run("nochecks-old", RPM_NO_CHECKS, _rpm_records_current(older), RPM_DRAFT_LINE),
         RPM_DRY_PASS: _rpm_ready_run("dry-now", RPM_NOT_DEFAULT, _rpm_dry_line(dev_behind, dry), _rpm_pass(dry), RPM_DRAFT_LINE),
         RPM_DRY_OLD: _rpm_ready_run("dry-old", RPM_NOT_DEFAULT, _rpm_dry_line(dev_behind_older, dry), _rpm_pass(dry), RPM_DRAFT_LINE),
+        RPM_UNCHECKED_PASS: _rpm_ready_run("unchecked-now", RPM_NO_CHECKS, RPM_NOT_DEFAULT, _rpm_unchecked_line(dev_behind), RPM_DRAFT_LINE),
+        RPM_UNCHECKED_OLD: _rpm_ready_run("unchecked-old", RPM_NO_CHECKS, RPM_NOT_DEFAULT, _rpm_unchecked_line(dev_behind_older), RPM_DRAFT_LINE),
+        RPM_CLAIM_STOP: _rpm_ready_run("claim-stop-now", RPM_NO_CHECKS, _rpm_claim_stop(claim)),
+        RPM_CLAIM_STOP_OLD: _rpm_ready_run("claim-stop-old", RPM_NO_CHECKS, _rpm_claim_stop(claim_older)),
     }
     for path, rows in lines.items():
         with open(path, "w", encoding="utf-8") as handle:
@@ -108,7 +130,8 @@ def _build_readymark():
 
 
 lazy_fixture([RPM_NO_PASS, RPM_OLD_PASS, RPM_PASS, RPM_CLAIM_PASS, RPM_CONFIRM_PASS, RPM_CONFIRM_OLD, RPM_FAST_PASS,
-              RPM_NOCHECKS_PASS, RPM_NOCHECKS_OLD, RPM_DRY_PASS, RPM_DRY_OLD], _build_readymark)
+              RPM_NOCHECKS_PASS, RPM_NOCHECKS_OLD, RPM_DRY_PASS, RPM_DRY_OLD,
+              RPM_UNCHECKED_PASS, RPM_UNCHECKED_OLD, RPM_CLAIM_STOP, RPM_CLAIM_STOP_OLD], _build_readymark)
 
 
 def rpm_mcp(name, expected, transcript, fake=GHREADY_CURRENT, carries=(), lacks=(), cwd=RPR_REPO, **tool_input):
@@ -154,3 +177,15 @@ rpm_mcp("ready-mcp-mark: MCP draft false after a dry-merge pass for this head is
 rpm_mcp("ready-mcp-mark: MCP draft false after a dry-merge pass for an older head is refused", "deny", RPM_DRY_OLD,
         fake=GHREADY_DEV_BEHIND, cwd=RPR_DEV_BEHIND_CLONE, carries=RPM_REMEDY, lacks=RPM_TARGET_LACKS,
         owner="y", repo="x", pullNumber=12, draft=False)
+# I1. A ready run on a base that is not the default, in a repo with no ready checks, has no worktree, so the unchecked line is the
+# only line that names its head. The run stands for the head that line names. Green on the built guard: it pins that line.
+rpm_mcp("ready-mcp-mark: MCP draft false after an unchecked ready run on a base that is not the default is allowed", "allow",
+        RPM_UNCHECKED_PASS, fake=GHREADY_DEV_BEHIND, owner="y", repo="x", pullNumber=12, draft=False)
+rpm_mcp("ready-mcp-mark: MCP draft false after an unchecked ready run on an older head is refused", "deny", RPM_UNCHECKED_OLD,
+        fake=GHREADY_DEV_BEHIND, carries=RPM_REMEDY, lacks=RPM_TARGET_LACKS, owner="y", repo="x", pullNumber=12, draft=False)
+# I3. A ready run that stops on a Record-claim head, in a repo with no ready checks, names that head in its stop line. The stop's remedy
+# marks the head ready by hand, so the mark after it stands for that head. Red on the built guard: it reads no line of the stop.
+rpm_mcp("ready-mcp-mark: MCP draft false after a Record-claim stop with no ready checks, on the claim head, is allowed", "allow",
+        RPM_CLAIM_STOP, fake=GHREADY_CLAIM, owner="y", repo="x", pullNumber=12, draft=False)
+rpm_mcp("ready-mcp-mark: MCP draft false after a Record-claim stop with no ready checks, naming an older head, is refused", "deny",
+        RPM_CLAIM_STOP_OLD, fake=GHREADY_CLAIM, carries=RPM_REMEDY, lacks=RPM_TARGET_LACKS, owner="y", repo="x", pullNumber=12, draft=False)

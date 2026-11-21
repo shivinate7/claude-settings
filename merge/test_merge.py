@@ -26118,6 +26118,69 @@ class DraftReady(CloudSession):
         self.assertEqual(self.head("lane-101"), old, "a draft on another base was pushed to:\n" + text)
         self.assertEqual(self.lane_pushes(), [])
 
+    def other_base_lane(self, checks):
+        """Lane 101 cut before main moves, and a release branch at main's new tip, which the lane lacks: the lane's draft names release.
+        checks: main declares the ready check first, so release carries it too. -> the lane's head."""
+        if checks:
+            self.ready_checks_on_main()
+        old = self.lane(101)
+        self.main_moves()
+        sh(self.other, "git", "push", "-q", "origin", "main:refs/heads/release")
+        self.host.batch_pulls[101].update(base="release", draft=True)
+        return old
+
+    # The four pins below pin lines the built draft step prints: they are green on the built code, by design (the coordinator's
+    # ruling for this lane), so no red run is claimed for them.
+    def test_a_draft_on_another_base_names_its_dry_merge_and_passes_on_that_sha(self):
+        old = self.other_base_lane(checks=True)
+        with self.ready_check_answers("pass") as ran:
+            rc, text = self.ready_run()
+        self.assertTrue(ran, "setup: no ready check ran, though merge.readyChecks names one:\n" + text)
+        dry = re.search(r"^merge: the dry merge of ([0-9a-f]{9}) into release is ([0-9a-f]{9})\.$", text, re.M)
+        self.assertIsNotNone(dry, "the draft on release printed no dry-merge line:\n" + text)
+        self.assertEqual(dry.group(1), old[:9], "the dry-merge line names a head other than the lane's:\n" + text)
+        self.assertEqual(rc, 0, text)
+        passed = "merge: the ready checks (check invariants) pass on %s." % dry.group(2)
+        self.assertIsNotNone(re.search("^" + re.escape(passed) + "$", text, re.M),
+                             "the pass line is not the old words over the dry merge's sha:\n" + text)
+        self.assertLess(dry.start(), text.index(passed), "the pass line came before the dry-merge line:\n" + text)
+        parent = sh(self.co, "git", "rev-parse", dry.group(2) + "^1").strip()
+        self.assertTrue(parent.startswith(old[:9]), "the dry merge's first parent is not the lane's head:\n" + text)
+        self.assertEqual(self.lane_pushes(), [], "a draft on another base pushed to the lane:\n" + text)
+
+    def test_fast_checks_on_another_base_passes_on_its_dry_sha_and_prints_no_dry_merge_line(self):  # control: the dry line is draft_step's alone
+        self.other_base_lane(checks=True)
+        with self.ready_check_answers("pass") as ran:
+            rc, out, err = self.run_args("101", "--fast-checks")
+        text = out + err
+        self.assertTrue(ran, "setup: no ready check ran, though merge.readyChecks names one:\n" + text)
+        self.assertEqual(rc, 0, text)
+        self.assertNotIn("the dry merge of", text, "--fast-checks printed the dry-merge line, which only the draft step prints:\n" + text)
+        self.assertRegex(text, r"(?m)^merge: the ready checks \(check invariants\) pass on [0-9a-f]{9}\.$", "--fast-checks printed no pass line:\n" + text)
+        self.assertEqual(self.lane_pushes(), [], "--fast-checks pushed to the lane:\n" + text)
+
+    def test_a_draft_on_another_base_with_no_ready_checks_names_its_head_on_the_unchecked_line(self):
+        old = self.other_base_lane(checks=False)
+        rc, text = self.ready_run()
+        self.assertEqual(rc, 0, text)
+        self.assertIn("merge: the draft step ran no checks on #101 at %s. Nothing was pushed." % old[:9], text.splitlines(),
+                      "no unchecked line names the lane's head:\n" + text)
+        self.assertIn("merge: this repo declares no ready checks (merge.readyChecks), so the draft step runs none.", text.splitlines())
+        self.assertNotIn("the dry merge of", text, "a base with no ready checks made a dry merge, so it would have a worktree:\n" + text)
+        self.assertEqual(self.lane_pushes(), [], "a draft on another base pushed to the lane:\n" + text)
+
+    def test_a_draft_on_main_passes_in_the_same_words_as_before(self):
+        self.ready_checks_on_main()
+        old = self.lane(101)
+        self.host.batch_pulls[101]["draft"] = True
+        with self.ready_check_answers("pass") as ran:
+            rc, text = self.ready_run()
+        self.assertTrue(ran, "setup: no ready check ran, though merge.readyChecks names one:\n" + text)
+        self.assertEqual(rc, 0, text)
+        self.assertIn("merge: the ready checks (check invariants) pass on %s." % old[:9], text.splitlines(),
+                      "the pass line changed its words or its sha:\n" + text)
+        self.assertNotIn("the dry merge of", text, "a draft on main made a dry merge:\n" + text)
+
     def test_a_draft_whose_head_holds_a_record_claim_is_stopped_and_pushes_nothing(self):  # control: green on the old code
         old = self.lane(101, claim=True)
         self.main_moves()  # the lane lacks main's tip, and its merge with the tip is clean: only the claim stops the run
