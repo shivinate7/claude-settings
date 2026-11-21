@@ -4,7 +4,8 @@ name: lane-touched-tests
 # fails on Windows or macOS alone first shows in the batch. This workflow runs only the test files a draft touches,
 # on Windows (item 400 a, owner, 2026-11-08 06:08 CST; macOS went off, owner, 2026-11-16 01:33 CST). Every job skips on a ready PR. It is not in checks.yml,
 # not in all-jobs-passed and not a required check. The selector is .github/scripts/touched-tests.py: it names each
-# touched test it does not run, and exits non-zero on a diff it cannot read.
+# touched test it does not run, and exits non-zero on a diff it cannot read, and on an unguarded POSIX-only call that a touched
+# heavy suite adds.
 on:
   pull_request:
     types: [opened, synchronize, reopened, converted_to_draft]
