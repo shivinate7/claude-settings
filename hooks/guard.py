@@ -1354,9 +1354,11 @@ HANDOFF_UNREAD_REASON = (
     "Remedy: Read %s now. The Read clears this check. Then repeat the call."
 )
 
+from shared_names import EXPLORE_AUDIT_MARKER as _AUDIT_MARKER  # noqa: E402  the one home of the marker the remedy names; reread_check.audit_reason reads it too
+
 COMPACTION_AUDIT_REASON = (
     "Rule (compaction audit): context was compacted and the handoff audit is still owed. "
-    "Remedy: spawn one Explore agent on Sonnet whose brief's first line is `Audit:`, as step 3 of the "
+    "Remedy: spawn one Explore agent on Sonnet whose brief's first line is `" + _AUDIT_MARKER.replace("%", "%%") + "`, as step 3 of the "
     "handoff prompt says. It reads the transcript from the last compaction marker and compares it "
     "with %s. That spawn clears this check. Then repeat the call. "
     "(decision precompact-handoff, item 16)"
