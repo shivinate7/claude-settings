@@ -16,6 +16,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+import types
 import unittest
 from unittest import mock
 
@@ -175,6 +177,29 @@ class PruneStale(SessionRoleCase):
         self.assertTrue(session_role.write(SID, "", "triage"))
         self.assertEqual(self.present(), sorted(["session-role-fresh.json", SID + ".json"]),
                          "a write did not prune the stale file, or removed a fresh one or its own")
+
+
+class KeptRoleFileSurvivesAResume(SessionRoleCase):
+    """write() keeps the own file on a resume start with no role: session_role.py touches it with os.utime before the prune. The prune
+    removes a file whose mtime is older than STALE_SECONDS, so an own file eight days old survives only because the touch moved its mtime.
+    A sibling of that age is pruned on the same start, which shows the prune ran."""
+
+    def test_an_own_file_eight_days_old_survives_a_resume_start_and_a_sibling_of_that_age_does_not(self):
+        now = int(time.time())  # read once; the prune's clock is stubbed to it, so the verdict runs on `now`
+        old = now - 8 * 86400
+        own = os.path.join(self.folder(), SID + ".json")
+        sibling = os.path.join(self.folder(), OTHER + ".json")
+        self.put_role(SID + ".json", SID, "triage")
+        self.put_role(OTHER + ".json", OTHER, "triage")
+        for path in (own, sibling):
+            os.utime(path, (old, old))
+        self.assertGreater(now - old, session_role.STALE_SECONDS, "scope: the fixture is not older than the prune limit")
+        with mock.patch.object(session_role, "time", types.SimpleNamespace(time=lambda: now)):
+            self.assertTrue(session_role.write(SID, "", "", "resume"), "a resume start with no role reported failure")
+        self.assertFalse(os.path.exists(sibling), "a resume start kept an eight-day-old sibling: the prune did not run on this start")
+        self.assertTrue(os.path.isfile(own), "a resume start with no role removed its own eight-day-old role file")
+        with open(own, encoding="utf-8") as handle:
+            self.assertEqual(json.load(handle).get("role"), "triage", "a resume start changed the kept role file")
 
 
 class WriteRefusals(SessionRoleCase):

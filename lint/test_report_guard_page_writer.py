@@ -68,6 +68,11 @@ class PageWriterTests(trg.SameTurnWriter, unittest.TestCase):
         """An ArtifactData set to the items collection of the page at `url`: the write a question makes on the page."""
         return self.call("ArtifactData", {"action": "set", "collection": "items", "url": url, "doc_id": "q1", "data": {}})
 
+    def claude_artifacts_items(self, name, url):
+        """A claude-artifacts db call on the items collection of the page at `url`. Its input's action says update, so
+        only the tool name's verb tells a read from a write."""
+        return self.call(name, {"action": "update", "collection": "items", "url": url, "doc_id": "q1", "data": {}})
+
     def question_refusal(self, root, acts):
         """The refusal question_problem gives a pick asked after `acts` in the same turn, judged from `root`."""
         records = [trg.human("decide"), *acts, trg.assistant_text(self.reply(self.PICK))]
@@ -130,6 +135,18 @@ class PageWriterTests(trg.SameTurnWriter, unittest.TestCase):
         acts = [*trs.own_record(trs.TRIAGE_ID, ["cs-build:lane"], parent=PARENT_ID), *self.items_write(page)]
         refusal = self.question_refusal(root, acts)
         self.assertNotEqual(refusal, "", "a plain lane's items write passed the pick check")
+
+    def test_rw_red_claude_artifacts_db_get_is_no_items_write(self):
+        # Catches: the tool name's verb dropped at items_write, so a claude-artifacts db_get whose input says update
+        # counts as the page writer's write of an item. The control is the same input under db_write, which must pass
+        # first: it shows the call reaches the items check at all.
+        root, _writer = self.repo_and_writer()
+        page = layout.waiting_page(root)
+        self.assertTrue(str(page).startswith("https://"), "scope: this repo's extras file names no waiting page url: %r" % page)
+        control = self.question_refusal(root, self.claude_artifacts_items("mcp__claude-artifacts__db_write", page))
+        self.assertEqual(control, "", "scope: a claude-artifacts db_write of items was refused, so the read case proves nothing: %s" % control)
+        refusal = self.question_refusal(root, self.claude_artifacts_items("mcp__claude-artifacts__db_get", page))
+        self.assertNotEqual(refusal, "", "a claude-artifacts db_get of items counted as the page writer's items write")
 
 
 if __name__ == "__main__":

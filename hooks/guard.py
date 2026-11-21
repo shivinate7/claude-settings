@@ -192,7 +192,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   self-role-claim      deny. A Bash or PowerShell call that sets CS_SESSION_ROLE or runs bin/claude-role,
                        also inside `bash -c`, `sh -c` or `eval`: a session does not claim a role. Also a call
                        that starts claude while the guard's own CS_SESSION_ROLE is non-empty, since the child
-                       inherits the role. Reads through Test-Path, Get-Item or Remove-Item on Env: pass;
+                       inherits the role, or that resumes (--resume, -r, -c, --continue) a session whose role
+                       file is valid, since a resume keeps that file. Reads through Test-Path, Get-Item or Remove-Item on Env: pass;
                        `$role = $env:CS_SESSION_ROLE`, `command -v claude-role` and a bare
                        `CS_SESSION_ROLE=x` are refused (debt self-role-claim-false-alarms). (self-role-claim)
   roadmap-one-writer   deny. A `git push`, also one inside `bash -c`, `sh -c` or `eval`, whose destination is
@@ -300,7 +301,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        commit in the same call before the push counts, read from its `-m` text (an `--amend`
                        with none keeps the commit's own); a message the guard cannot read, a failed read and a
                        default base it cannot read are no hit. A lone `git commit` (no push after it in the
-                       call) that stages added lines on a test path is judged too, by its own `-m` text; a
+                       call) that stages added lines on a test path is judged too, by its own `-m` text (or the heredoc body of `-F -`), and a test path written by an earlier step of the call counts when the commit takes the working tree; a
                        merge or other replay in progress is no hit. The refusal for a flagged tip names only
                        commit and push; for a flagged commit below the tip (under a merge at the tip too) it
                        names commit, rebase and push; for a branch rewritten since its push it names no
@@ -1354,9 +1355,11 @@ HANDOFF_UNREAD_REASON = (
     "Remedy: Read %s now. The Read clears this check. Then repeat the call."
 )
 
+from shared_names import EXPLORE_AUDIT_MARKER as _AUDIT_MARKER  # noqa: E402  the one home of the marker the remedy names; reread_check.audit_reason reads it too
+
 COMPACTION_AUDIT_REASON = (
     "Rule (compaction audit): context was compacted and the handoff audit is still owed. "
-    "Remedy: spawn one Explore agent on Sonnet whose brief's first line is `Audit:`, as step 3 of the "
+    "Remedy: spawn one Explore agent on Sonnet whose brief's first line is `" + _AUDIT_MARKER.replace("%", "%%") + "`, as step 3 of the "
     "handoff prompt says. It reads the transcript from the last compaction marker and compares it "
     "with %s. That spawn clears this check. Then repeat the call. "
     "(decision precompact-handoff, item 16)"
@@ -2590,6 +2593,29 @@ def builder_test_path(path: str, cwd: str) -> bool:
             and repo_rel(path, where, outside=False) is None):
         return False
     return is_builder_test_rel(rel)
+
+
+def shell_written_test_rels(text: str, cwd: str) -> list:
+    """The repository-relative test paths the shell command `text` writes (a redirect, `tee`, `sed -i`, `cp`), by the
+    one shell-write reader (`_shell_write_hit`) and `is_test_rel`. The red-run commit read asks it for the steps that
+    run before a commit in the same call, whose edits the hook cannot yet see in the tree."""
+    found = []
+    last = []
+
+    def test_path(path, where, verb=""):
+        if verb in ("rm", "unlink", "rmdir", "shred", "trash"):
+            return False   # a delete adds no test line (decision red-run-trailer-on-test-commits)
+        rel = repo_rel(path, where)
+        if rel is not None and is_test_rel(rel) and rel not in found:
+            last[:] = [rel]
+            return True
+        return False
+
+    # The reader returns its first write hit, and the predicate only names a candidate: a path a command reads or
+    # runs (`cat`, `grep`, `python3 hooks/test_x.py`) is judged by it and is no hit. Each pass skips the paths found.
+    while _shell_write_hit(text, cwd, test_path, follow_cd=True, predicate_command=True):
+        found.append(last[0])
+    return found
 
 
 def builder_shell_test_hit(raw: str, stripped: str, cwd: str, tool) -> str:
@@ -5631,7 +5657,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 2a1. A session that holds a role and starts claude: the child inherits the role (rule self-role-claim). It runs before the
     # detached-launch rule so `Start-Process claude` names its own reason. Cost: one environment read per call.
-    matched = self_role_child_hit(stripped)
+    matched = self_role_child_hit(stripped, cwd, transcript)
     if matched:
         refuse(tool, "deny", "self-role-claim", SELF_ROLE_CHILD_REASON, matched)
 
@@ -5855,7 +5881,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # `-m` text; so is a lone commit with no push after it, which adds one `git diff --numstat` only when its
     # message holds no trailer. A git write after a cd into a missing folder adds one `git rev-parse` of the
     # folder the shell stays in; the scan for folders the call makes is parsing only. guard_merge states the cost.
-    kind, matched = conflict_markers_hit(stripped, cwd, is_test_rel, raw)
+    kind, matched = conflict_markers_hit(stripped, cwd, is_test_rel, raw, lambda text: shell_written_test_rels(text, cwd))
     if kind in ("red-run", "red-run-commit"):
         red_reason, red_shown = red_run_reason(matched, kind == "red-run-commit")
         refuse(tool, "deny", "red-run", red_reason, red_shown)

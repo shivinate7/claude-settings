@@ -63,6 +63,7 @@ import signal
 import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -2086,7 +2087,7 @@ def _on_windows():
     return sys.platform.startswith("win")
 
 
-def temp_tier(confirm):
+def temp_pass(confirm):
     """The session temp-folder step: removes the temp folder of a session idle over 24 hours (preview
     without CONFIRM), under the Windows temp root and the POSIX `claude-<uid>` root. Every OS. It
     stops at the sweep deadline. Returns the number of failures: folders it could not remove or
@@ -2097,6 +2098,140 @@ def temp_tier(confirm):
     print("== session temp folders ==")
     temp_sweep.past_deadline = _past_deadline
     return temp_sweep.run(confirm)
+
+
+# A killed test or mutation run leaks its folder in the temp folder. Two kinds leak, and each name
+# carries its owner's pid: `mutate_guard_<pid>-<rand>` (the work folder of hooks/mutate_guard.py) and
+# `claude-settings-test-temp/<pid>-<32 hex>` (the run folder of lint/_test_temp.py). The hyphen after
+# the pid keeps the older pid-less `mutate_guard_<rand>` names from matching: those stay kept.
+LEFTOVER_TEMP_MIN_AGE = 60 * 60  # a folder this young may belong to a run still starting or ending
+LEFTOVER_TEMP_PATTERNS = (
+    (None, re.compile(r"mutate_guard_([0-9]+)-[0-9a-z_]+")),
+    ("claude-settings-test-temp", re.compile(r"([0-9]+)-[0-9a-f]{32}")),
+)
+
+
+def _owner_dead(pid: int) -> bool:
+    """True only when PID is proven gone. Any read that cannot tell means alive: a folder with an
+    unproven owner stays, and so does one whose pid a live process has since reused."""
+    if pid <= 0:  # os.kill(0, 0) signals a whole process group, never one process
+        return False
+    if sys.platform.startswith("win"):
+        return _process_running_windows(pid) is False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except Exception:
+        return False
+    return False
+
+
+def _open_file_holders(path: str):
+    """Pids with an open file at or under PATH, or `None` when that cannot be read. Linux reads each
+    `/proc/<pid>/fd`; macOS asks `lsof +D`. Windows has no read here, so its holders are cwd-only."""
+    if sys.platform.startswith("win"):
+        return []
+    if sys.platform.startswith("linux"):
+        pids = list_all_pids()
+        if pids is None:
+            return None
+        holders = []
+        for pid in pids:
+            fd_dir = "/proc/%d/fd" % pid
+            try:
+                links = [os.readlink(os.path.join(fd_dir, fd)) for fd in os.listdir(fd_dir)]
+            except OSError:
+                continue  # the process ended, or is not ours to read: out of scope, as in `processes_in`
+            if any(_cwd_under_checkout(link, path) for link in links if link.startswith(os.sep)):
+                holders.append(pid)
+        return holders
+    try:
+        answer = _nowindow.run(["lsof", "-Fp", "+D", path], capture_output=True, text=True, timeout=60)
+    except Exception:
+        return None
+    if answer.returncode not in (0, 1):
+        return None
+    return [int(line[1:]) for line in answer.stdout.splitlines() if line[1:].isdigit() and line[0] == "p"]
+
+
+def _live_process_inside(path: str):
+    """A reason string when a live process has its cwd or an open file inside PATH, or when that
+    cannot be read; `None` when none does. Removing a folder under a running process breaks it, so
+    a read that fails keeps the folder."""
+    inside, _unreadable = processes_in(path)
+    if inside is None:
+        return "the process list could not be read"
+    holders = _open_file_holders(path)
+    if holders is None:
+        return "the open files could not be read"
+    pids = sorted(set(inside) | set(holders))
+    if pids:
+        return "process %d is running inside it" % pids[0]
+    return None
+
+
+def find_leftover_temp(temp_root: str, now: float):
+    """One decision per folder that names an owner pid: reap when the owner is dead, the folder is
+    over LEFTOVER_TEMP_MIN_AGE old and no live process runs inside it, else keep. A link, a file and
+    any other name are never listed."""
+    decisions = []
+    for sub, pattern in LEFTOVER_TEMP_PATTERNS:
+        parent = temp_root if sub is None else os.path.join(temp_root, sub)
+        if sub is not None and is_link(parent):  # listdir would follow it out of the temp root
+            continue
+        try:
+            names = sorted(os.listdir(parent))
+        except OSError:
+            continue
+        for name in names:
+            found = pattern.fullmatch(name)
+            path = os.path.join(parent, name)
+            if not found or is_link(path):
+                continue
+            try:
+                info = os.lstat(path)
+            except OSError:
+                continue
+            if not stat.S_ISDIR(info.st_mode):
+                continue
+            age = now - info.st_mtime
+            pid = int(found.group(1))
+            if age <= LEFTOVER_TEMP_MIN_AGE:
+                action, reason = "keep", "under an hour old"
+            elif not _owner_dead(pid):
+                action, reason = "keep", "owner pid %d is alive" % pid
+            else:
+                busy = _live_process_inside(path)
+                if busy:
+                    action, reason = "keep", busy
+                else:
+                    action, reason = "reap", "owner pid %d is dead, idle %d min" % (pid, age // 60)
+            decisions.append({"path": path, "action": action, "reason": reason})
+    return decisions
+
+
+def leftover_temp_pass(confirm: bool):
+    """The leftover temp-folder step: removes each dead-owner folder over an hour old (preview
+    without CONFIRM). Returns the number of folders it could not remove."""
+    print("")
+    print("== leftover temp folders ==")
+    failures = 0
+    for decision in find_leftover_temp(tempfile.gettempdir(), time.time()):
+        if decision["action"] != "reap":
+            continue
+        if not confirm:
+            print("  WOULD reap %s (%s)" % (decision["path"], decision["reason"]))
+        elif _past_deadline():
+            print("  keep       %s (not reaped: deadline)" % decision["path"])
+        else:
+            try:
+                shutil.rmtree(decision["path"])
+                print("  REAPED     %s (%s)" % (decision["path"], decision["reason"]))
+            except OSError as err:
+                failures += 1
+                print("  FAILED     %s (%s)" % (decision["path"], err))
+    return failures
 
 
 # A Claude Code Bash call starts every command as `zsh -c 'source ~/.claude/shell-snapshots/...
@@ -3635,9 +3770,12 @@ def _sweep_roots(args, roots, restore_log_path, mode):
         print_grace_period_report(reaped)
     if not _past_deadline():
         print_sim_report(sim_tier(args.confirm), args.confirm)
+    failed = 0
+    if not session_end and not _past_deadline():  # machine-wide: the scheduled job and a person's run
+        failed += leftover_temp_pass(args.confirm)
     if not _past_deadline():
-        return 1 if temp_tier(args.confirm) else 0
-    return 0
+        failed += temp_pass(args.confirm)
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
