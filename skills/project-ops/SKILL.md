@@ -22,10 +22,10 @@ Without a project, each session holds one or more roles, and the owner acts as t
 - **Autopilot.** An act that needs the owner's answer gets a "Deferred" line and waits. All other
   work runs. `templates/operating-model.md`.
 - **Batching.** Until the cutover, rule `git-integration-branch-merge` (lanes join one integration branch) governs it.
-  After the cutover, each lane PR merges alone on its own green run (decision `all-repos-switch-together`).
+  After the cutover, a PR merges alone on its own green run, or joins a batch by the situation (decision `all-repos-switch-together`; decision `session-tiers`, the owner's 10:23 CST Nov 20 ruling).
   The model adds only a review record on each PR (`templates/operating-model.md`, record
   `pr-review-record`). Under a standing merge grant, the batch runner batches each PR whose review record
-  is done, as `merge --reviewed` finds it, and merges the integration PR on green (until the cutover; after it, each lane PR on green). The owner is not
+  is done, as `merge --reviewed` finds it, and merges the integration PR on green (until the cutover; after it, a PR merges on its own green run, alone or in a batch by the situation). The owner is not
   asked.
 - **The record branch.** An orphan branch, `roadmap` by default, that holds the roadmap data,
   briefs and role handoff notes. It is never merged into main. A fork names its own record branch,
@@ -94,7 +94,7 @@ Decision `shared-resource-owner` (a shared machine names one owning repo) govern
 
 ## Rules this skill does not restate
 
-- `git-integration-branch-merge`: how lanes join a batch and how a red batch drops a lane, until the cutover. After it, each lane PR merges alone, and a red main reverts the blamed lane (decision `no-merge-onto-red-main`).
+- `git-integration-branch-merge`: how lanes join a batch and how a red batch drops a lane, until the cutover. After it, a PR merges alone or joins a batch by the situation (decision `session-tiers`, the owner's 10:23 CST Nov 20 ruling), and a red main reverts the blamed lane (decision `no-merge-onto-red-main`).
 - `roles-review-cap-three`: review rounds.
 - `speak-cite-id-plus-gloss`: give every id a plain name.
 - `parallelism-no-mid-task-talk`: lanes do not talk mid-task.
