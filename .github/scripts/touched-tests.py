@@ -292,8 +292,8 @@ def posix_offences(path, source, added=None):
     """One `path:line: message` string for each POSIX_ONLY name that `source` uses outside a guard that excludes Windows, and
     one for a source that cannot be parsed (unknown is red, not skip). A guard is a def or class under skipIf or skipUnless
     that skips Windows, an `if` body whose condition is false on Windows, or the else arm of an `if` whose condition is true
-    on Windows, or each statement after an `if` whose Windows arm always exits (see exits). A guard covers everything nested in
-    it. A name bound once to an os.name or sys.platform test is read as that test (scope_env). The source is read with `ast`, so a name in a comment or a string
+    on Windows, or each statement after an `if` whose Windows arm always exits (see exits). A skip decorator covers the function bodies
+    under it, not a class body or a def's default arguments, which run at import. Any other guard covers everything nested in it. A name bound once to an os.name or sys.platform test is read as that test (scope_env). The source is read with `ast`, so a name in a comment or a string
     counts for nothing. A name is `os.killpg`, `from os import killpg` (the import line is the offence: on Windows the import
     itself raises) or `s.SIGHUP` under `import signal as s`. With `added` (a set of line numbers), only a name on such a line
     counts: a call already on the base is an existing offence, and this change does not own it."""
@@ -316,18 +316,21 @@ def posix_offences(path, source, added=None):
                          "skipUnless on os.name != 'nt', an if on os.name or sys.platform, or an earlier `if` on Windows that "
                          "returns, raises, continues, calls skipTest or sys.exit)")
 
-    def block(stmts, guarded, env):
+    def block(stmts, guarded, env, skipped=False):
         """Walk a statement list in order. An `if` whose Windows arm always exits guards each statement after it in this list."""
         for stmt in stmts:
-            walk(stmt, guarded, env)
+            walk(stmt, guarded, env, skipped)
             if not guarded and isinstance(stmt, ast.If):
                 verdict = on_windows(stmt.test, env)
                 arm = stmt.body if verdict is True else stmt.orelse if verdict is False else None
                 guarded = bool(arm) and exits(arm)
 
-    def walk(node, guarded, env):
-        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-            guarded = guarded or any(skip_decorator_excuses(d, env) for d in node.decorator_list)
+    def walk(node, guarded, env, skipped=False):
+        """`skipped` is a skip decorator on an enclosing class or def. It guards only a function body, which runs with the test:
+        a class body and a def's default arguments run when the module loads, on Windows too."""
+        is_def = isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        if is_def or isinstance(node, ast.ClassDef):
+            skipped = skipped or any(skip_decorator_excuses(d, env) for d in node.decorator_list)
             if isinstance(node, ast.ClassDef):
                 # A class body binds names that its methods do not read, so keep only the flags it leaves alone.
                 inner = scope_env(env, node.body, poisoned=poisoned)
@@ -338,9 +341,9 @@ def posix_offences(path, source, added=None):
                 env = scope_env(env, node.body, names, poisoned)
         if isinstance(node, ast.If):
             verdict = on_windows(node.test, env)
-            walk(node.test, guarded, env)
-            block(node.body, guarded or verdict is False, env)
-            block(node.orelse, guarded or verdict is True, env)
+            walk(node.test, guarded, env, skipped)
+            block(node.body, guarded or verdict is False, env, skipped)
+            block(node.orelse, guarded or verdict is True, env, skipped)
             return
         if not guarded and isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
             module = modules.get(node.value.id)
@@ -351,14 +354,15 @@ def posix_offences(path, source, added=None):
                 if alias.name in POSIX_ONLY.get(node.module, ()):
                     hit(node.lineno, f"{node.module}.{alias.name}")
         for field, value in ast.iter_fields(node):
+            covered = guarded or (is_def and field == "body" and skipped)
             if isinstance(value, list) and value and all(isinstance(v, ast.stmt) for v in value):
-                block(value, guarded, env)
+                block(value, covered, env, skipped)
             elif isinstance(value, list):
                 for child in value:
                     if isinstance(child, ast.AST):
-                        walk(child, guarded, env)
+                        walk(child, covered, env, skipped)
             elif isinstance(value, ast.AST):
-                walk(value, guarded, env)
+                walk(value, covered, env, skipped)
 
     try:
         block(tree.body, False, scope_env({}, tree.body, poisoned=poisoned))
