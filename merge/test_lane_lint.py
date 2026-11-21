@@ -2904,7 +2904,9 @@ FLOOR_SUITE = "lint/test_check_python_floor.py"  # the fixture suite that failed
 WORKFLOW_PATH = ".github/workflows/checks.yml"  # the file the lint reads its steps from: the other file a lint tree lacked in the incident
 LINT_TREE_FILE_TEXT = "# a file the head's tree holds and the lint tree is made without\n"  # the body of a file the LintTreeFileMain cases push; the lint never reads it
 SELECTOR = os.path.join(REPO, ".github", "scripts", "touched-tests.py")  # read at test time: its tables give the skip reasons, and the lint tree loads it
-LOAD_4 = "def load():\n    return 4\n"  # main's lint/load.py
+# The selector execs hooks/mutate_guard.py for its loader scanner, and that file imports these at top level (testing/ by its ../testing path).
+SELECTOR_HOME = ("hooks/mutate_guard.py", "hooks/mutate_shared.py", "hooks/_nowindow.py", "testing/tracked_tree.py")
+LOAD_4 ="def load():\n    return 4\n"  # main's lint/load.py
 LOAD_8 = "def load():\n    return 8\n"  # lane-b's change to it
 BUDGET = "from load import load\nassert load() + 3 <= 10, 'the budget is over: load() + 3 > 10'\n"  # lane-a's test: holds on LOAD_4, fails on LOAD_8
 
@@ -2967,10 +2969,15 @@ class TouchedTests(LaneFixture):
         self.pwsh_log = os.path.join(self.t, "pwsh-calls.log")  # the stub pwsh of pwsh_stub_on_path writes its argv here
         with open(SELECTOR, encoding="utf-8") as f:
             selector = f.read()
+        home = {}  # the lint tree holds the selector's home files, as a real checkout does
+        for path in SELECTOR_HOME:
+            with open(os.path.join(REPO, *path.split("/")), encoding="utf-8") as f:
+                home[path] = f.read()
         self.push_commit("main", {
             ".github/scripts/touched-tests.py": selector,
             "lint/load.py": LOAD_4,
             "lint/test_stale.py": logged_test(self.touched_log, "lint/test_stale.py", "raise AssertionError('the stale test ran')\n"),
+            **home,
         })
 
     def push_commit(self, branch, files):
