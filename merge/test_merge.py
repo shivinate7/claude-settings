@@ -20494,9 +20494,10 @@ class LintCleanMainMergeCarry(ReviewEnv, RecordsEnv):
         fx = self.real_commits()
         self.base_without_kinds(fx)
         self.generated_page_carries(fx)
-        page_and_notes = self.claim_over(fx.fixed, {merge.RECORDS_PAGE: "records page, rebuilt\n", "notes.txt": "notes\n"}, message=merge.PAGE_SUBJECT)
+        page_and_notes = self.tool_page(fx.fixed, changes={"notes.txt": "notes\n"})
         self.facts(fx, [page_and_notes])
-        self.assertFalse(self.carry(fx, page_and_notes), "a records-page subject on a commit that also touches notes.txt carried the PASS on a base with no record kinds")
+        self.assert_page_scope(page_and_notes, fx.fixed, files=[merge.RECORDS_PAGE, "notes.txt"])
+        self.assertFalse(self.carry(fx, page_and_notes), "a generated records page that also touches notes.txt carried the PASS on a base with no record kinds")
         hand = self.tool_page(fx.fixed, hand="hand line\n")
         self.facts(fx, [hand])
         self.assert_page_scope(hand, fx.fixed)
@@ -20509,6 +20510,11 @@ class LintCleanMainMergeCarry(ReviewEnv, RecordsEnv):
         page = self.tool_page(fx.fixed)
         self.facts(fx, [page])
         self.assert_page_scope(page, fx.fixed)
+        live = self.reviewed_host(fx, page, comments=[lint_of(7, page)])
+        try:
+            merge.lint_check(live, 7, live.pr(7), self.co, merge.DEFAULT_CONFIG)  # control: a lint PASS on the live head needs no carry
+        except merge.Stop as e:
+            self.fail("control: the join refused a records page whose own lane lint PASS is on it: " + str(e))
         host = self.reviewed_host(fx, page, comments=[lint_of(7, fx.fixed)])
         branch = host.pr(7)["branch"]
         sh(self.co, "git", "push", "-q", "-f", "origin", f"{page}:refs/heads/{branch}")
@@ -23058,6 +23064,8 @@ class ClaimOnlyReviewed(ReviewEnv, RecordsEnv):
         page = self.tool_page(fx.fixed)
         self.facts(fx, [page])
         self.assert_page_scope(page, fx.fixed)
+        self.reviewed_line(self.claim_host(fx, page, record_head=page, lint_head=page), page, "done",
+                           "control: a records-page head with its own lane lint PASS does not read done")
         self.reviewed_line(self.claim_host(fx, page, record_head=page, lint_head=fx.fixed), page, "done",
                            "a lint PASS on the reviewed head does not carry to a records-page head when the base has no record kinds")
 
