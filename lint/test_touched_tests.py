@@ -1312,7 +1312,7 @@ class Selector(SelectorBase):
 
 
 # Heavy suites: the touched job fails a heavy Python suite that calls a POSIX-only API outside a guard. A heavy suite is
-# skipped on a lane push, so no lane run reaches it on Windows (the incident of PR #3729). The fixture templates are copied
+# skipped on a lane push, so a POSIX-only call in it reaches Windows CI unseen. The fixture templates are copied
 # from archive/posix-tests-skip-windows lint/test_check_posix_tests.py. That archive's repo-wide lint is dropped: the
 # step lives in the selector, which reads the file it already selects.
 POSIX_PATH = "merge/test_merge.py"  # HEAVY, and the suite the incident hit
