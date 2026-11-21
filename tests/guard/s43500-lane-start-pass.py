@@ -126,6 +126,9 @@ def _lsp_once_check():
         return False, "after the lift, the refusal is not lane-title-slug's: %s" % reason[:90]
     if LSP_REMEDY["lane-effort-pin"] in reason:
         return False, "the lifted rule lane-effort-pin is still printed: %s" % reason[:90]
+    # The lift notice for the rule the override lifted rides in the later refusal's reason (guard_core refuse()).
+    if "(override lifted: lane-effort-pin)" not in reason:
+        return False, "the later refusal does not carry the lift notice for lane-effort-pin: %s" % reason[-90:]
     got, reason = call(3)
     if got != "deny" or not reason.startswith("lane-effort-pin: ") or (LSP_COUNT % 2) not in reason:
         return False, "the override is spent, want both refused again under lane-effort-pin with the count of 2: %s (%s)" % (

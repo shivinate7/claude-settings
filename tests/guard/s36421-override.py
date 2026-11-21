@@ -114,36 +114,11 @@ def ov_kill(config, session, seconds, agent_id=None):
     return ov_call("Bash", {"command": OV_KILL}, NOGIT, config, session, seconds, agent_id)
 
 
-def ov_context_block(text):
-    """The hookSpecificOutput of `text` when `text` is one PreToolUse JSON object with a string additionalContext and
-    no permissionDecision, else None. A lifted act prints this one line (owner ruling, 22:17 CST Nov 20)."""
-    try:
-        parsed = json.loads(text)
-    except (TypeError, ValueError):
-        return None
-    block = parsed.get("hookSpecificOutput") if isinstance(parsed, dict) else None
-    if not isinstance(block, dict) or block.get("hookEventName") != "PreToolUse":
-        return None
-    if "permissionDecision" in block or not isinstance(block.get("additionalContext"), str):
-        return None
-    return block
-
-
-def ov_names_lift(text, rule):
-    """True when `text` is the one line a lifted act prints, and its additionalContext names `rule` and says override.
-    `rule` is one rule name or a tuple of them."""
-    block = ov_context_block(text)
-    if block is None:
-        return False
-    context = block["additionalContext"]
-    names = (rule,) if isinstance(rule, str) else tuple(rule or ())
-    return "override" in context and any(name and name in context for name in names)
-
-
-def ov_lift_of(got, reason, rule):
-    """True when a verdict is a lift of `rule`: decide() reads the one context line as "unparsable", and only that line
-    that names `rule` counts. Every check that counts lifts reads them through here, so there is one reader."""
-    return got == "unparsable" and ov_names_lift(reason, rule)
+# The one reader of the lift line (owner ruling, 22:17 CST Nov 20): tests/lift_line.py. The hook tests import it too.
+sys.path.insert(0, os.path.join(REPO, "tests"))
+import lift_line  # noqa: E402,F401  the one reader of the lift line
+ov_names_lift = lift_line.names_lift
+ov_lift_of = lift_line.lift_of
 
 
 def ov_want(got, reason, want, rule):
