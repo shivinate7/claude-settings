@@ -945,7 +945,7 @@ lb_add("echo hi # bin/ci-job --lint, background, full disk: allowed, and the rea
 # nothing."). A foreground lint at a full disk is allowed, and the reader does not run. A `>&` or `&&` cuts no
 # background list. `echo hi & ...` is refused by detached-launch, not by the brake, so its case pins only that the
 # brake does not refuse it. A foreground `merge --lane-lint` with a time limit is refused by check-timeout at any limit.
-# With no limit it is allowed (ruling own-896-897-glued-amp-b, 2026-11-16 13:30 CST).
+# With no limit it is allowed (ruling own-896-897-glued-amp-b).
 lb_add("foreground, bin/ci-job --lint, full disk: allowed, and the reader does not run",
        lb_full_scope(LB_DISK_FULL, lb_decision_check("Bash", LB_DISK_FULL, "allow",
                                                      tool_input={"command": "bin/ci-job --lint"}, reads=0)))
