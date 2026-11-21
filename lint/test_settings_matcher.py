@@ -316,11 +316,15 @@ class Matcher(unittest.TestCase):
 
     def test_guard_matcher_covers_agent_browser_tools(self):
         # Rule agent-browser-file-open refuses an agent's file: URL through the desktop app's browser, so a guard matcher
-        # must see each of the three calls that open a URL.
+        # must see each of the three calls that open a URL, under the built-in name and under the cloud session's
+        # mcp__remote-devices__ name.
         matchers = guard_matchers()
         self.assertTrue(matchers)
         for tool in ("mcp__Claude_Browser__navigate", "mcp__Claude_Browser__preview_start",
-                     "mcp__Claude_Browser__browser_batch"):
+                     "mcp__Claude_Browser__browser_batch",
+                     "mcp__remote-devices__Claude_Browser__navigate",
+                     "mcp__remote-devices__Claude_Browser__preview_start",
+                     "mcp__remote-devices__Claude_Browser__browser_batch"):
             with self.subTest(tool=tool):
                 self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
                                 "no guard matcher covers %s: %r" % (tool, matchers))
