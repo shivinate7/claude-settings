@@ -1,0 +1,1 @@
+- pr3691-transcript-meta-skip: on the PR 3691 head, lint/_transcript.py:442 skips a claude-artifacts db_get of meta/page. Found in PR 3691 review, which routes it to a note and does not block; not on main. Seen: 2026-11-20 x1

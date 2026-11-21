@@ -1,0 +1,1 @@
+- reread-marker-unreadable-stop: if hooks/reread_check.py cannot read shared_names, audit_spawn (line 115) returns False. The audit flag then never clears, and the Stop block (lines 168-169) keeps firing. Found in PR 3748 review. Decision: precompact-handoff. Seen: 2026-11-20 x1

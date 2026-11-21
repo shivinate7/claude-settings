@@ -1,0 +1,1 @@
+- pr3686-hardcoded-25-seconds: on the PR 3686 head, bin/wait-until line 715 hard-codes "25 seconds". Found in PR 3686 review; not on main. Seen: 2026-11-20 x1

@@ -1,0 +1,1 @@
+- pr3746-same-head-carried-merges: the PR 3746 Lane Own Merge entry names a PASS of "that same head", but the merge tool also accepts a PASS carried over clean merges of main. Found in PR 3746 review; not on main. Seen: 2026-11-20 x1

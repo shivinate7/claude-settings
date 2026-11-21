@@ -1,0 +1,1 @@
+- ios-template-ui-test-no-fold: skills/ios-apps/templates/Makefile.tmpl lines 30-31 run sim-test in ui-test with no fold step. No template calls bin/duo-fold. Found in review of PR 3682. Decision: duo-fold-tool. Seen: 2026-11-20 x1

@@ -1,0 +1,1 @@
+- pr3747-cost-one-child-process: on the PR 3747 head, the Cost line says one child process, but there are three. Found in PR 3747 review; not on main. Seen: 2026-11-20 x1

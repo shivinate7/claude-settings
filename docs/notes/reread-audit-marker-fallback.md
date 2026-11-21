@@ -1,0 +1,1 @@
+- reread-audit-marker-fallback: hooks/reread_check.py:133 falls back to a literal `Audit:` when the shared marker is unset. The prompt at hooks/precompact_handoff_prompt.md:30 and hooks/test_precompact_handoff.py:2326 pin that literal. Found in PR 3748 review. Decision: precompact-handoff. Seen: 2026-11-20 x1

@@ -1,0 +1,1 @@
+- pr3746-auto-mode-lint-pass-form: docs/decisions/auto-mode-owner-acts.md does not list the lane-lint PASS form that PR 3746 adds to the Lane Own Merge entry. Found in PR 3746 review, which says another record-writer is adding it. Seen: 2026-11-20 x1

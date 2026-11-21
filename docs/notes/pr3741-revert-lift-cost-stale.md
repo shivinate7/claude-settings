@@ -1,0 +1,1 @@
+- pr3741-revert-lift-cost-stale: on the PR 3741 head, the "Cost of the revert lift" text in no-merge-onto-red-main is stale. Found in PR 3741 review; the text is not on main. Decision: no-merge-onto-red-main. Seen: 2026-11-20 x1

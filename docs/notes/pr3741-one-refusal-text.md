@@ -1,0 +1,1 @@
+- pr3741-one-refusal-text: on the PR 3741 head, one refusal text covers a proof that could not be read. A 404 on the PR read, or an unfetched PR head, refuses as unknown under "a merged revert lifts", which is wrong there. Found in PR 3741 review; not on main. Seen: 2026-11-20 x1

@@ -1,0 +1,1 @@
+- pr3686-chained-timeout-passes: on the PR 3686 head, chained `--timeout` waits pass the far-time refusal of wait-until. Found in PR 3686 review; not on main. Seen: 2026-11-20 x1
