@@ -22,8 +22,8 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from test_windows_split import CHECKS, MACOS_JOBS, all_jobs, eval_with, yaml_scalar  # noqa: E402  the one home of the checks.yml path
-from all_jobs_passed_rules import (ALL_JOBS_PASSED_USES, all_problems, child_problems, ci_done_problems, needs_of,  # noqa: E402  the one home of the rules
+from test_windows_split import CHECKS, MACOS_JOBS, RECORDS_ONLY_CONDITION, WRONG_DELTA_FORMS, all_jobs, eval_with, yaml_scalar  # noqa: E402  the one home of the checks.yml path
+from all_jobs_passed_rules import (ALL_JOBS_PASSED_USES, DELTA_CLAUSES, all_problems, child_problems, ci_done_problems, needs_of,  # noqa: E402  the one home of the rules
                                    needs_problems, off_problems, scope_if_problems, scope_skips_problems, shape_problems, split_jobs, step_with,
                                    steps_problems, steps_part)
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the job parser
@@ -31,6 +31,7 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lin
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  test-temp-standard: teardown removes the run folder (testing/tracked_tree.py)
 from test_ci_scope import run as scope_run  # noqa: E402  the scope script's one harness (lint/test_ci_scope.py)
+import test_ci_scope  # noqa: E402  its RUN_DIR is set in setUpModule below
 
 PIN = "08c6903cd8c0fde910a37f88322edcfb5dd907a8"
 # A minimal checks.yml that passes. Its comment openers sit inside quotes and in a block body, a lone quote sits in
@@ -202,7 +203,7 @@ def planned_nightly_skip(text):
 
 # checks-hooks' header and its job-level if in checks.yml. A case swaps that if line for its own, so the subject is the job's one if.
 HOOKS_HEAD = "  checks-hooks:\n\n    runs-on: ubuntu-latest\n    needs: scope\n"
-HOOKS_IF = "    if: ${{ needs.scope.outputs.records_only_skip != 'true' }}\n"
+HOOKS_IF = "    if: ${{ " + " || ".join((RECORDS_ONLY_CONDITION, *DELTA_CLAUSES["checks-hooks"])) + " }}\n"
 
 
 class PushOffRollup(unittest.TestCase):
@@ -211,14 +212,29 @@ class PushOffRollup(unittest.TestCase):
     its skip is never read there. The rule (off_problems) refused every job-level if on a needed job, which the push guard is not.
     Synthetic files: one Windows job, needed by all-jobs-passed, with the if under test."""
 
-    def rollup_text(self, job_if):
-        lines = ["jobs:", "  checks-windows:", "    runs-on: windows-latest", "    needs: scope"]
+    def rollup_text(self, job_if, name="checks-windows"):
+        lines = ["jobs:", f"  {name}:", "    runs-on: windows-latest", "    needs: scope"]
         if job_if is not None:
             lines.append(f"    if: {job_if}")
         lines += ["    steps:", "      - run: echo ok", "  all-jobs-passed:", "    runs-on: ubuntu-latest",
                   "    if: ${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}",
-                  "    needs:", "      - checks-windows", "    steps:", "      - run: echo ok"]
+                  "    needs:", f"      - {name}", "    steps:", "      - run: echo ok"]
         return "\n".join(lines) + "\n"
+
+    def test_each_named_delta_form_passes_the_rollup_rules(self):
+        # Scope first: the named forms exist. Named failure: a lint job's named delta form is refused, so all-jobs-passed reads its skip as red.
+        self.assertTrue(DELTA_CLAUSES, "no named delta forms: this case would prove nothing")
+        for name, clauses in DELTA_CLAUSES.items():
+            with self.subTest(job=name):
+                form = " || ".join((RECORDS_ONLY_CONDITION, *clauses))
+                self.assertEqual(off_problems(self.rollup_text("${{ " + form + " }}", name)), [], f"{name}'s named delta form is refused")
+
+    def test_each_wrong_delta_form_is_refused_by_the_rollup_rules(self):
+        # Control, green on the old rules too: a form the job does not name is refused. A rule that accepts it fails here.
+        for name, expr in WRONG_DELTA_FORMS:
+            with self.subTest(job=name, if_=expr):
+                self.assertTrue(off_problems(self.rollup_text("${{ " + expr + " }}", name)),
+                                f"{name} takes {expr!r}, a form it does not name, and the rollup rules pass it")
 
     def test_a_needed_job_whose_job_level_if_is_the_push_guard_passes_the_rollup_rules(self):
         # Named failure on the old rules: the push guard is a job-level if on a needed job, so the rule refuses it.
@@ -277,7 +293,9 @@ class MacOnceByBatchRollup(unittest.TestCase):
         # Control: a job-level if that reads a scope flag is refused on a needed job that is no macOS job.
         self.assertEqual(self.text.count(HOOKS_HEAD + HOOKS_IF), 1, "checks-hooks' header changed: this case must follow it")
         text = self.text.replace(HOOKS_HEAD + HOOKS_IF, HOOKS_HEAD + "    if: ${{ needs.scope.outputs.checks_macos == 'true' }}\n", 1)
-        self.assertTrue(off_problems(text) or needs_problems(text), "a flag-reading job-level if on an unnamed job passes the rollup rules")
+        # Relative to the real file's own problems: a truthy whole-file result would pass for the wrong cause while the file has any.
+        clean = all_problems(self.text)
+        self.assertTrue([p for p in all_problems(text) if p not in clean], "a flag-reading job-level if on an unnamed job passes the rollup rules")
 
 
 # The macOS jobs run on a schedule and a dispatch only (owner, 01:33 CST Nov 16): no job-level if lets a pull_request start one,
@@ -467,6 +485,9 @@ RUN_FOLDER = None  # set by setUpModule, so a `--workflow` run makes no folder o
 def setUpModule():
     global RUN_FOLDER
     RUN_FOLDER = _test_temp.run_folder()
+    # scope_run makes its scratch repos under test_ci_scope's run folder. That module's teardown removes the folder when it ran
+    # first in this process, so this module points scope_run at its own folder, which tearDownModule below removes.
+    test_ci_scope.RUN_DIR = RUN_FOLDER
 
 
 def tearDownModule():

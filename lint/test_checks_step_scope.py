@@ -2,11 +2,12 @@
 
 ci-scope.sh sets `code` false for a change that touches only .md files. A step that reads no .md file takes the scope condition
 `needs.scope.outputs.code == 'true' || github.event_name != 'pull_request'`, so a docs-only pull request skips it. A
-step that reads a .md file stays unscoped. The step lists are the audit of main's checks.yml when this was written, by step name.
+step that reads a .md file stays unscoped, but may take the records-only clause on top (ruling own-830-c).
+The step lists are the audit of main's checks.yml when this was written, by step name.
 
 Pinned here:
   1. each NO-MD and NAMES-ONLY step carries the scope condition, exactly.
-  2. each MUST-STAY-UNSCOPED step has no scope output in its `if:`, and each PR-only step keeps its own `if:`.
+  2. each MUST-STAY-UNSCOPED step has no scope output in its `if:` but the records-only clause, and each PR-only step keeps its own `if:`.
   3. each MAIN_STEPS name is a step of the checks job (no rename or drop), and a step outside MAIN_STEPS reads no scope output.
   4. a docs-only pull request leaves `code` false, skips each scoped step, and leaves STE lint running.
      The fail-safe flags are not repeated: lint/test_ci_scope.py pins them in Scope.test_push_schedule_and_dispatch_run_everything_even_for_docs,
@@ -14,7 +15,8 @@ Pinned here:
   5. the entry file of each scoped step names no tracked .md file, unless ALLOWED lists that name with a reason.
   6. no file a scoped step reaches within TRANSITIVE_DEPTH hops reads test_guard.py or a tracked .md file
      (TRANSITIVE_MD_READERS), unless TRANSITIVE_ALLOWED lists that name for the file with a reason.
-  7. each doc step (DOC_STEPS) carries the scope condition of its doc groups, one constant per group set, and the .md names
+  7. each doc step (DOC_STEPS) carries the scope condition of its doc groups, with or without the records-only clause on top,
+     one constant per group set, and the .md names
      its entry names are under a doc flag its `if:` reads (ALLOWED names aside).
   8. a docs-only change runs exactly the doc steps that list its group, or `any`, with no other step's change.
 
@@ -40,12 +42,33 @@ sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import workflow_steps as ws  # noqa: E402  the one home of the step parser
 from test_ci_scope import DOC_CASES, DOC_FLAGS, doc_groups, run as scope_run  # noqa: E402  ci-scope.sh run in a temp repo, and the doc groups
+import test_ci_scope  # noqa: E402  its RUN_DIR is set in setUpModule below
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  test-temp-standard: teardown removes the run folder (testing/tracked_tree.py)
+from all_jobs_passed_rules import drop_condition, eval_if, unwrap  # noqa: E402  the one home of the `if:` readers and the records-only clause
 from test_windows_split import (  # noqa: E402  the one home of the `if:` evaluator, the scope conditions and the doc condition builder
     NO_MD_SCOPE_CONDITION, SCOPE_DOC_AGENTS, SCOPE_DOC_ANY, SCOPE_DOC_DECISIONS, SCOPE_DOC_DECISIONS_MAP_OTHER, SCOPE_DOC_DECISIONS_OTHER,
     SCOPE_DOC_DECISIONS_RULES, SCOPE_DOC_DECISIONS_RULES_OTHER, SCOPE_DOC_RULES, SCOPE_DOC_SKILLS, SCOPE_DOC_SKILLS_AGENTS,
-    SCOPE_DOC_SKILLS_DECISIONS, SCOPE_DOC_SKILLS_OTHER, doc_scope_condition, drop_condition, eval_if, run_lines, unwrap, LINUX_SUITES)
+    SCOPE_DOC_SKILLS_DECISIONS, SCOPE_DOC_SKILLS_OTHER, doc_scope_condition, run_lines, LINUX_SUITES)
 
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
+RUN_FOLDER = None  # set by setUpModule
+
+
+def setUpModule():
+    global RUN_FOLDER
+    RUN_FOLDER = _test_temp.run_folder()
+    # scope_run makes its scratch repos under test_ci_scope's run folder. That module's teardown removes the folder when it ran
+    # first in this process, so this module points scope_run at its own folder, which tearDownModule below removes.
+    test_ci_scope.RUN_DIR = RUN_FOLDER
+
+
+def tearDownModule():
+    if RUN_FOLDER and os.path.isdir(RUN_FOLDER):
+        tracked_tree.rm_tree(RUN_FOLDER)
+
+
 WORKFLOW = ".github/workflows/checks.yml"
 JOB = "checks"
 SPLIT_JOBS = ("checks", "checks-hooks", "checks-rest")  # the old checks job split into these three; the rest of CHECKS_SUITE_JOBS were never part of it
@@ -141,6 +164,7 @@ NAMES_ONLY = [
 ]
 
 # The audit's MUST-STAY-UNSCOPED steps: each reads a .md file at run time, or is not audited yet (fail safe), so each stays unscoped.
+# Each may take the records-only clause alone (ruling own-830-c).
 # The doc steps are not listed here: DOC_STEPS below gives each one the scope condition of the doc groups it reads.
 MUST_STAY_UNSCOPED = [
     'Skill model rows check',
@@ -158,7 +182,8 @@ MUST_STAY_UNSCOPED = [
     'Checks step scope suite',  # names tracked .md files as data; a docs-only rename would turn main red if it carried the scope condition
     'Scratchpad owner fixture suite',  # runs test_guard.py, whose section files read skills/impeccable/SKILL.md
     'Guard wrappers fixture suite',  # runs test_guard.py through drive_test_guard
-    'Skill model rows fixture suite',  # its checks job step has no `if:` (test_check_skill_model_rows.py pins it)
+    'Guard cases from base fixture suite',  # runs test_guard.py's listing, whose section files read skills/impeccable/SKILL.md
+    'Skill model rows fixture suite',  # its `if:` is the records-only clause alone (test_check_skill_model_rows.py pins it)
     'Project-ops roles check',  # reads the session-tiers record and the project-ops templates at run time (audit hook, run-time open)
     'Project-ops roles fixture suite',  # its real-repo case reads the same record and templates at run time
     'Reply judge fixture suite',  # reads CLAUDE.md at run time (hooks/test_reply_judge.py), so a CLAUDE.md-only pull request must run it
@@ -299,6 +324,7 @@ PR_ONLY = [
     'Ruling kind check',
     'Silent undo check',
     'Comment narration check',
+    'Guard cases from base check',
 ]
 
 # The checks job's step names. An unnamed step is its `uses:` reference.
@@ -376,6 +402,8 @@ MAIN_STEPS = [
     'Stale prose check fixture suite',
     'Ruled store fixture suite',
     'Route judge measure fixture suite',
+    'Guard cases from base fixture suite',
+    'Guard cases from base check',
     'Guard log report fixture suite',
     'Verdict runner fixture suite',
     'Wait-pid helper fixture suite',
@@ -783,22 +811,24 @@ class ChecksStepBase(unittest.TestCase):
 class ScopeConditionOnNoMdSteps(ChecksStepBase):
     def test_each_no_md_and_names_only_step_carries_the_scope_condition(self):
         steps = self.steps()
-        checks = {identity(st) for st in ws.step_blocks(ws.job_block(read_repo(WORKFLOW), JOB))}
         for name in NO_MD + NAMES_ONLY:
             with self.subTest(step=name):
                 got = if_of(self.named(steps, name))
-                # Outside the checks job, the records-only condition may follow the scope condition: `${{ (SCOPE) && RECORDS_ONLY_CONDITION }}`.
-                conditioned_ok = name not in checks and drop_condition(unwrap(got)) == NO_MD_SCOPE_CONDITION
-                self.assertTrue(got == SCOPE_CONDITION or conditioned_ok, "step %r: if is %r, want the scope condition" % (name, got))
+                # The records-only clause may follow the scope condition, `${{ (SCOPE) && RECORDS_ONLY_CONDITION }}`, and no other clause may.
+                # A step that drops its scope condition reads None or the clause alone, so it fails here.
+                self.assertEqual(drop_condition(unwrap(got)), NO_MD_SCOPE_CONDITION, "step %r: if is %r, want the scope condition" % (name, got))
 
 
 class UnscopedAndPrOnlySteps(ChecksStepBase):
     def test_each_must_stay_unscoped_step_reads_no_scope_output(self):
+        # The records-only clause is allowed on these steps (ruling own-830-c),
+        # so it is taken off first. Its form (it gates the whole if) is pinned by test_windows_split's condition_problems.
         steps = self.steps()
         for name in MUST_STAY_UNSCOPED:
             with self.subTest(step=name):
-                expr = if_of(self.named(steps, name)) or ""
-                self.assertNotIn("needs.scope.outputs", expr, "step %r reads a scope output in its if: %r" % (name, expr))
+                got = if_of(self.named(steps, name))
+                expr = drop_condition(unwrap(got)) or ""
+                self.assertNotIn("needs.scope.outputs", expr, "step %r reads a scope output in its if: %r" % (name, got))
 
     def test_each_pr_only_step_keeps_its_pull_request_if(self):
         steps = self.steps()
@@ -822,8 +852,8 @@ class StepNames(ChecksStepBase):
             if name in MAIN_STEPS:
                 continue
             with self.subTest(step=name):
-                expr = if_of(st) or ""
-                self.assertNotIn("needs.scope.outputs", expr, "unlisted step %r reads a scope output: %r" % (name, expr))
+                expr = drop_condition(unwrap(if_of(st))) or ""  # the records-only clause alone is no scope output; `(X) && RECORDS` still reads X
+                self.assertNotIn("needs.scope.outputs", expr, "unlisted step %r reads a scope output: %r" % (name, if_of(st)))
 
     def test_each_hard_coded_list_names_a_main_step(self):
         for name in NO_MD + NAMES_ONLY + MUST_STAY_UNSCOPED + PR_ONLY + list(DOC_STEPS):
@@ -1041,13 +1071,16 @@ class WholeTreeReadersOnAModsChange(ChecksStepBase):
 
 
 class DocStepScopeConditions(ChecksStepBase):
-    # A records-only push still runs each doc step, since each reads a .md file (decision records-index-at-merge).
+    # A doc step may skip on a records-only push (ruling own-830-c), so the
+    # records-only clause may sit on top of its scope. The scope itself must still be there, so a step that drops it stays red.
     def test_each_doc_step_carries_the_scope_condition_of_its_groups(self):
         steps = self.steps()
         for name, groups in DOC_STEPS.items():
             with self.subTest(step=name):
                 got = if_of(self.named(steps, name))
-                self.assertEqual(got, expected_if(groups), "step %r: if is %r, want the scope condition of %s alone" % (name, got, groups))
+                scope = drop_condition(unwrap(got))
+                self.assertEqual(scope, SCOPE_OF[frozenset(groups)],
+                                 "step %r: if is %r, want the scope condition of %s, with or without the records-only clause" % (name, got, groups))
 
     def test_each_doc_step_group_set_has_one_constant_built_from_its_groups(self):
         for groups in sorted({tuple(g) for g in DOC_STEPS.values()}):

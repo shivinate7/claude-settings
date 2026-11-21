@@ -108,11 +108,11 @@ def lane_reads(jobs=None):
 
 
 def caller_jobs():
-    """Every job of the calling workflow, and which of them are macOS jobs, read by the pinned copy's own reader (lint/test_windows_split.py)."""
+    """Every job of the calling workflow, and which of them are macOS jobs, read by the pinned copy's own reader (lint/all_jobs_passed_rules.py)."""
     sys.path.insert(0, os.path.join(pin, "lint"))
-    import test_windows_split
+    import all_jobs_passed_rules
     with open(os.path.join(caller, ".github", "workflows", "checks.yml"), encoding="utf-8") as handle:
-        return sorted(test_windows_split.all_jobs(handle.read())), set(test_windows_split.MACOS_JOBS)
+        return sorted(all_jobs_passed_rules.all_jobs(handle.read())), set(all_jobs_passed_rules.MACOS_JOBS)
 
 
 def skipped_runs(jobs, skipped):

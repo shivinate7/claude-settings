@@ -32,7 +32,7 @@ second full run of the jobs. CI scope turns off the job and suite flags for that
 (owner, 2026-11-14 15:02 CST, ruling own-830-c, the records-only CI skip; `.github/scripts/ci-scope.sh`,
 `green-head.sh`). Owner item 857 b (waiting-page save, 2026-11-15 19:48 CST, "Overrule: the ruling reopens")
 holds ruling own-830-c again in full: a records-only change skips every suite job and the `checks` lint job,
-and the all-jobs-passed rollup passes. The `scope`, `nightly-skip` and `push-skip` jobs still run to decide it.
+and the all-jobs-passed rollup passes. The `scope`, `nightly-skip` and `push-skip` jobs still run to decide it. The owner confirmed on 2026-11-18 18:54 CST (relayed, "yes they can") that a suite step which reads a .md file may skip on such a push, when the prior head's run was fully green.
 The job and suite flags cover the macOS, Windows, pointer, guard, shoot, mutation and sweep work. CI scope also turns
 off the mutation report. The merge
 tool heals a ready PR's stale page itself under merge.requiredChecks "none" (page item 926 a, 14:32 CST, 2026-11-16;

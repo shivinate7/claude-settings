@@ -60,6 +60,7 @@ split you propose. Never review your own work. The orchestrator sends a reviewer
 Prove your change once: show the test-author's new cases green on your code. Run only the
 suites your change touches. Never run the full suites locally. When your lane changes a file a
 mutation test targets, run that mutation test once through `verdict` before pushing.
+A fix loop reruns only the suites the fix changed, then runs each touched suite once in full on the final head.
 Run PowerShell with the PowerShell tool, never powershell.exe from Bash (agent-powershell-tool).
 When worktree isolation refuses a command as too complex, split it into plain, separate commands. A step that still needs a script file is a need to report.
 

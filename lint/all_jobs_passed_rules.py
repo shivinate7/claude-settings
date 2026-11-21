@@ -17,9 +17,198 @@ import sys
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
-from test_windows_split import (ALL_JOBS_PASSED_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_OFF_JOBS, PUSH_SKIP_JOB, RECORDS_ONLY_CONDITION, all_jobs, draft_guard_only, drop_condition, eval_if,  # noqa: E402,F401  the one home of the scope condition and scalar parsers
-                                job_if_without_records, push_guard_only, push_off_only, shard_base, shard_push_off, unwrap, yaml_scalar)  # NIGHTLY_SKIP_JOB and PUSH_SKIP_JOB are read from here by actions/push-skip/push-skip.py
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
+
+# The scope condition and the job and `if:` readers below are the ones the lint suites read (lint/test_windows_split.py and others). This
+# module imports no test file: the shared action runs it from its own checkout, and the lint suites import it. NIGHTLY_SKIP_JOB and
+# PUSH_SKIP_JOB are read from here by actions/push-skip/push-skip.py.
+MACOS_JOBS = ("shell-macos", "checks-macos", "checks-macos-b")
+WINDOWS_PUSH_OFF_JOBS = ("pointer-windows", "checks-windows", "checks-windows-guard", "checks-windows-guard-2", "checks-windows-guard-3",
+                         "checks-windows-merge", "checks-windows-merge-2", "checks-windows-merge-3", "checks-windows-merge-4",
+                         "checks-windows-merge-5", "checks-windows-sweep", "checks-windows-rest", "checks-windows-rest-2")
+MUTATE_PUSH_OFF_JOBS = ("checks-mutate-guard", "checks-mutate-guard-b", "checks-mutate-guard-c", "mutation-report")
+PUSH_OFF_JOBS = MACOS_JOBS + WINDOWS_PUSH_OFF_JOBS + MUTATE_PUSH_OFF_JOBS
+NIGHTLY_SKIP_JOB = "nightly-skip"
+PUSH_SKIP_JOB = "push-skip"
+SKIP_VALUES = ("", "true", "false")
+SHARD_VAR = {"checks-windows-guard": "GUARD_SHARD", "checks-windows-merge": "MERGE_SHARD"}
+ALL_JOBS_PASSED_JOB = "all-jobs-passed"
+RECORDS_ONLY_CONDITION = "needs.scope.outputs.records_only_skip != 'true'"
+# The delta skips (ci-scope.sh's skip_comment_delta and skip_record_delta) start a lint job after a records-only skip. Such a job's
+# job-level if is the records-only condition, then the clauses named here, in this order. A clause only runs its job more, so the job
+# still skips on the records-only skip alone. Any other clause, or another order, fails the job-level rules.
+COMMENT_DELTA_CLAUSE = "needs.scope.outputs.skip_comment_delta == 'true'"
+RECORD_DELTA_CLAUSE = "needs.scope.outputs.skip_record_delta == 'true'"
+DELTA_CLAUSES = {"checks": (COMMENT_DELTA_CLAUSE, RECORD_DELTA_CLAUSE), "checks-hooks": (RECORD_DELTA_CLAUSE,),
+                 "checks-rest": (RECORD_DELTA_CLAUSE,)}
+
+
+def all_jobs(text):
+    """{job: {"os", "if": job-level if or None, "needs": raw needs text or None, "steps": [{key: value}]}}.
+
+    Step keys sit at 8 spaces, or inline after `- ` at 6. Block scalars (`run: |`) read as "|".
+    """
+    jobs, job, in_jobs = {}, None, False
+    for line in text.splitlines():
+        if re.match(r"^jobs:\s*$", line):
+            in_jobs = True
+        elif in_jobs and (m := re.match(r"^  ([\w-]+):\s*$", line)):
+            job = jobs[m.group(1)] = {"os": None, "if": None, "needs": None, "steps": []}
+        elif not job:
+            continue
+        elif m := re.match(r"^    (runs-on|if|needs):\s*(\S.*?)\s*$", line):
+            job[{"runs-on": "os", "if": "if", "needs": "needs"}[m.group(1)]] = m.group(2)
+        elif m := re.match(r"^      - (\w+):\s*(.*?)\s*$", line):
+            job["steps"].append({m.group(1): m.group(2)})
+        elif (m := re.match(r"^        (\w+):\s*(.*?)\s*$", line)) and job["steps"]:
+            job["steps"][-1][m.group(1)] = m.group(2)
+        elif (m := re.match(r"^          (\w+):\s*(.*?)\s*$", line)) and job["steps"]:  # an `env:` block key
+            if not isinstance(job["steps"][-1].get("env"), dict):
+                job["steps"][-1]["env"] = {}
+            job["steps"][-1]["env"][m.group(1)] = m.group(2)
+    # The red-job wake step (a `job:` input) ends every job and is no suite step (decision ci-wait-reads-run-status).
+    for job in jobs.values():
+        job["steps"] = [st for st in job["steps"]
+                        if not ("actions/ci-done-comment" in st.get("uses", "") and "job" in (st.get("env") or {}))]
+    return jobs
+
+
+def shard_base(name):
+    """The base job a shard job belongs to (`checks-windows-guard-2` -> `checks-windows-guard`), or None."""
+    m = re.fullmatch(r"(.+)-([2-9]|[1-9][0-9]+)", name)
+    return m.group(1) if m and m.group(1) in SHARD_VAR else None
+
+
+def eval_if(expr, event, flag_value, draft=False, nightly_skip="", push_skip=""):
+    """Evaluate an `if:` (a job's, a step's or a scope condition) for an event with every scope output set to flag_value and
+    github.event.pull_request.draft set to draft. Reads only !cancelled(), success(), always(), &&, ||, !, parentheses,
+    == and != on github.event_name, github.event.pull_request.draft, needs.scope.outputs.*, and the skip output of the two
+    skip jobs (nightly_skip and push_skip: the value given, '' when unset, as GitHub reads an output no step set)."""
+    e = expr.strip()
+    if e.startswith("${{") and e.endswith("}}"):
+        e = e[3:-2]
+    e = e.replace("github.event.pull_request.draft", repr(draft))
+    e = e.replace("!cancelled()", "True").replace("success()", "True").replace("always()", "True")
+    e = e.replace("&&", " and ").replace("||", " or ")
+    e = e.replace("github.event_name", repr(event))
+    e = re.sub(r"needs\.scope\.outputs\.\w+", repr(flag_value), e)
+    # Only the two skip jobs' skip outputs are read. Any other job's output stays unread, so the reader raises on it, as before.
+    e = re.sub(rf"needs\.{re.escape(NIGHTLY_SKIP_JOB)}\.outputs\.skip\b", repr(nightly_skip), e)
+    e = re.sub(rf"needs\.{re.escape(PUSH_SKIP_JOB)}\.outputs\.skip\b", repr(push_skip), e)
+    e = re.sub(r"!(?!=)", " not ", e)
+    return bool(eval(e, {"__builtins__": {}}))
+
+
+def yaml_scalar(raw):
+    """A YAML value without its trailing comment or outer quotes. `#` starts a comment only after a space and outside
+    quotes, so `'a # b'` and `${{ x == '#' }}` keep their `#`, and a lone quote in plain text (`Don't`) is text."""
+    s = (raw or "").strip()
+    if s[:1] in ("'", '"'):
+        end = s.find(s[0], 1)
+        return s[1:end] if end != -1 else s
+    m = re.search(r"(?:^|\s)#", s)
+    return (s[:m.start()] if m else s).rstrip()
+
+
+def unwrap(raw):
+    """A value's expression with `${{ }}` removed, or None when the value is absent."""
+    if raw is None:
+        return None
+    s = yaml_scalar(raw)
+    return s[3:-2].strip() if s.startswith("${{") and s.endswith("}}") else s
+
+
+def drop_condition(expr):
+    """An `if:` expression without the records-only condition: `(E) && RECORDS_ONLY_CONDITION` gives E, and `success() && RECORDS_ONLY_CONDITION` gives None, the
+    no-if: default. Any other expression, or None, comes back as it is."""
+    if expr == f"success() && {RECORDS_ONLY_CONDITION}":
+        return None
+    m = re.fullmatch(rf"\((.+)\) && {re.escape(RECORDS_ONLY_CONDITION)}", expr or "")
+    return m.group(1) if m else expr
+
+
+def job_if_without_records(raw):
+    """A job-level `if:` (raw, with its `${{ }}`) with the records-only condition taken off, unwrapped. The condition alone gives None,
+    the job has no if. `(E) && RECORDS_ONLY_CONDITION` gives E, which a shard reads as its draft guard. Any other if comes back as it
+    is, so a wider one still fails the job-level rules. runs_with_condition pins the skip's value instead of taking it off."""
+    e = unwrap(raw)
+    if e == RECORDS_ONLY_CONDITION:
+        return None
+    return drop_condition(e)
+
+
+def delta_clauses_off(name, raw):
+    """`raw` (with its `${{ }}`) with job `name`'s delta clauses taken off, when it is exactly RECORDS_ONLY_CONDITION followed by
+    DELTA_CLAUSES[name], in that order: the records-only condition alone is what the job reads. Any other if, and a job with no
+    delta clauses, comes back as it is."""
+    clauses = DELTA_CLAUSES.get(name)
+    if clauses and unwrap(raw) == " || ".join((RECORDS_ONLY_CONDITION, *clauses)):
+        return RECORDS_ONLY_CONDITION
+    return raw
+
+
+def draft_guard_only(expr):
+    """True when a job-level `if:` holds only the draft guard (ci-hygiene steps 11 and 19): it skips a draft PR, runs on a
+    ready PR and on push, and reads no scope flag, so its answer does not change with the flags. Any other expression is False.
+    It also reads no other job's output: the answer must match for every skip value (SKIP_VALUES)."""
+    e = unwrap(expr)
+    if not e:
+        return False
+    try:
+        return all(eval_if(e, event, flag, draft=draft, nightly_skip=nightly_skip) == want for nightly_skip in SKIP_VALUES for event, flag, draft, want in (
+            ("pull_request", "false", True, False),
+            ("pull_request", "false", False, True),
+            ("pull_request", "true", False, True),
+            ("push", "false", False, True),
+            ("push", "true", False, True)))
+    except Exception:
+        return False
+
+
+def push_guard_only(expr):
+    """True when a job-level `if:` is the push guard and nothing else: true on a pull_request (draft or not), a schedule and a
+    workflow_dispatch, false on a push. It reads no scope flag, so its answer holds for every flag value, and it reads no other
+    job's output: the answer must match for every skip value (SKIP_VALUES)."""
+    e = unwrap(expr)
+    if not e:
+        return False
+    try:
+        return all(eval_if(e, event, flag, draft=draft, nightly_skip=nightly_skip) == want for nightly_skip in SKIP_VALUES for event, flag, draft, want in (
+            ("pull_request", "false", True, True), ("pull_request", "true", False, True),
+            ("schedule", "false", False, True), ("workflow_dispatch", "false", False, True),
+            ("push", "false", False, False), ("push", "true", False, False)))
+    except Exception:
+        return False
+
+
+def push_off_only(expr):
+    """True when a job-level `if:` is the push guard and nothing else: false on a push with any flag and any draft state, true on a
+    schedule, a dispatch and a pull_request that is not a draft. A draft pull_request may read either way (a shard keeps the draft
+    guard, see shard_push_off). It reads no scope flag and no other job's output, so its answer holds for every flag and skip value."""
+    e = unwrap(expr)
+    if not e:
+        return False
+    try:
+        return all(eval_if(e, event, flag, draft=draft, nightly_skip=skip) == want
+                   for skip in SKIP_VALUES for flag in ("true", "false")
+                   for event, draft, want in (("push", False, False), ("push", True, False), ("schedule", False, True),
+                                              ("workflow_dispatch", False, True), ("pull_request", False, True)))
+    except Exception:
+        return False
+
+
+def shard_push_off(expr):
+    """True when a shard's job-level `if:` is the push guard with the shard draft guard (SHARD_JOB_IF): false on a push, false on a
+    draft pull_request, true on a ready pull_request, a schedule and a dispatch. No scope flag is read."""
+    e = unwrap(expr)
+    if not e:
+        return False
+    try:
+        return all(eval_if(e, event, "true", draft=draft) == want
+                   for event, draft, want in (("push", False, False), ("pull_request", True, False), ("pull_request", False, True),
+                                              ("schedule", False, True), ("workflow_dispatch", False, True)))
+    except Exception:
+        return False
 
 ALL_JOBS_PASSED_USES = "$/actions/all-jobs-passed"
 ALL_JOBS_PASSED_IF = "${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}"
@@ -167,10 +356,11 @@ def steps_problems(text):
     return problems
 
 
-def records_only_if(expr):
-    """True when a job-level if is the records-only skip alone. check.sh passes the job's skip on a run whose scope job says
-    records_only_skip true, and reads any wider condition as a skip it cannot tell from a failure."""
-    return unwrap(expr) == RECORDS_ONLY_CONDITION
+def records_only_if(expr, name):
+    """True when a job-level if is the records-only skip alone, or that skip followed by job `name`'s delta clauses (delta_clauses_off).
+    check.sh passes the job's skip on a run whose scope job says records_only_skip true, and reads any wider condition as a skip it
+    cannot tell from a failure."""
+    return unwrap(delta_clauses_off(name, expr)) == RECORDS_ONLY_CONDITION
 
 
 def shard_records_only_if(expr):
@@ -195,12 +385,12 @@ def off_problems(text):
         if shard_base(name):
             # R62: a Windows full shard runs on a ready pull request, so it is needed. Its job-level if is the draft guard only.
             rest = job_if_without_records(jobs[name]["if"])
-            if not draft_guard_only(jobs[name]["if"] or "") and not shard_push_off(rest or "") and not shard_records_only_if(jobs[name]["if"]) and not records_only_if(jobs[name]["if"]):
+            if not draft_guard_only(jobs[name]["if"] or "") and not shard_push_off(rest or "") and not shard_records_only_if(jobs[name]["if"]) and not records_only_if(jobs[name]["if"], name):
                 problems.append(f"shard {name} is in all-jobs-passed's needs but its job-level if is not the draft guard: "
                                 f"{jobs[name]['if']}")
         elif name in PUSH_OFF_JOBS and jobs[name]["if"] is not None and push_off_only(job_if_without_records(jobs[name]["if"])):
             continue  # a listed job (R61 push-off list) with the push guard alone, or with the records-only skip joined: a pull_request runs it, so the rollup needs it and never reads a skip
-        elif name != "scope" and jobs[name]["if"] is not None and not records_only_if(jobs[name]["if"]):
+        elif name != "scope" and jobs[name]["if"] is not None and not records_only_if(jobs[name]["if"], name):
             problems.append(f"{name} is needed and keeps a job-level if: all-jobs-passed reads its skip as red, "
                             "so its scope condition belongs in its steps")
     return problems
