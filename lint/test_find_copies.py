@@ -155,6 +155,11 @@ def janitor_sweep():
     return sweep
 
 
+def fake_proc_stat(proc, pid, comm, flags, tpgid=0):
+    """A fake /proc with one stat line for PID: its comm in parentheses, as the kernel writes it, the tpgid word as field 8 and the flags word as field 9."""
+    write(proc, "%d/stat" % pid, "%d (%s) S 2 0 0 0 %d %d 0 0 0 0 0 0 0 20 0 1 0 1 0 0 0\n" % (pid, comm, tpgid, flags))
+
+
 class RunFolderSweepTest(unittest.TestCase):
     """The sweep of test-temp-standard: a run folder whose pid is dead goes after an hour, and a live run's folder stays."""
 
@@ -252,6 +257,26 @@ class RunFolderSweepTest(unittest.TestCase):
                 kernel = tool.held_by_live_process(folder)
         self.assertTrue(control, "positive control: an unreadable child of this run that is not a kernel thread must hold the folder")
         self.assertFalse(kernel, "a kernel thread holds no folder: the hold check kept a folder for an unreadable kernel thread")
+
+    # kernel_thread reads field 9 after the last ")" of the stat, because the comm between the parentheses may hold both.
+    def test_a_kernel_thread_with_parentheses_in_its_comm_reads_true(self):
+        proc = os.path.join(RUN_FOLDER, "proc-kthread")
+        fake_proc_stat(proc, 4242, "kworker/0:1 (x) y", 0x200000)
+        self.assertTrue(merge_tool().kernel_thread(4242, proc=proc),
+                        "a stat whose flags carry PF_KTHREAD reads as a kernel thread, whatever its comm holds")
+
+    def test_a_comm_with_parentheses_and_no_kernel_flag_reads_false(self):
+        proc = os.path.join(RUN_FOLDER, "proc-plain")
+        # The kernel bit sits in field 8, where a parser that splits at the first ")" reads field 9. The flags word is 0.
+        fake_proc_stat(proc, 4243, "a b) c", 0, tpgid=0x200000)
+        self.assertFalse(merge_tool().kernel_thread(4243, proc=proc),
+                         "a stat whose flags lack PF_KTHREAD reads as no kernel thread, whatever its comm holds")
+
+    def test_a_missing_stat_reads_false(self):
+        proc = os.path.join(RUN_FOLDER, "proc-missing")
+        os.makedirs(proc)
+        self.assertFalse(merge_tool().kernel_thread(4244, proc=proc),
+                         "a pid whose stat cannot be read is never proven a kernel thread")
 
 
 class FindCopiesTest(unittest.TestCase):
