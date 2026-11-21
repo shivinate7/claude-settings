@@ -16,6 +16,7 @@ CLAUDE_ARTIFACTS_DB = "mcp__claude-artifacts__db_"  # the claude-artifacts page 
 # The tool-name prefixes of the page db tools, for `name.startswith(ARTIFACT_DATA)`. read_artifact is no db tool, so it never matches.
 ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData", CLAUDE_ARTIFACTS_DB)
 WRITE_VERBS = ("set", "update", "batch", "str_replace")
+TOOL_WRITE_VERBS = ("write", "str_replace")  # the claude-artifacts tool-name verbs that write: db_write stands for set, update and batch
 
 
 def read_transcript(path):
@@ -332,9 +333,9 @@ def tool_verb(name):
 
 def is_write(d, verb=None):
     """False for a dict whose action or op is a verb other than a WRITE_VERBS one. A tool-name `verb`
-    (see tool_verb) wins over the input's action: only db_write is a write, whatever the input says."""
+    (see tool_verb) wins over the input's action: only a TOOL_WRITE_VERBS verb is a write, whatever the input says."""
     if verb is not None:
-        return verb == "write"
+        return verb in TOOL_WRITE_VERBS
     verb = d.get("action", d.get("op"))
     return not isinstance(verb, str) or verb in WRITE_VERBS
 
