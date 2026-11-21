@@ -55,6 +55,8 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the
 ROOT = _test_temp.run_folder()  # every temp file of this run, fixture repos included, lives under it
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
+sys.path.insert(0, os.path.join(HERE, "..", "tests"))
+import lift_line  # noqa: E402  the one reader of the lift line (tests/lift_line.py)
 atexit.register(shutil.rmtree, ROOT, ignore_errors=True)  # a pass, a failed case or a crash leaves no folder
 STUB_DIR = os.path.join(ROOT, "stub")
 FAILED = []
@@ -635,8 +637,9 @@ def case_override_lifts_a_deny():
     ):
         r = run_hook(inp, override=override, **kwargs)
         if lifted:
-            check("%s: lifted, no output, one override log line" % label,
-                  r.code == 0 and r.out == "" and r.log.count("\toverride\tparallelism-no-mid-task-talk\t") == 1
+            check("%s: lifted, one stdout line that names the rule, one override log line" % label,
+                  r.code == 0 and lift_line.names_lift(r.out.strip(), "parallelism-no-mid-task-talk")
+                  and r.log.count("\toverride\tparallelism-no-mid-task-talk\t") == 1
                   and "\tdeny\t" not in r.log, detail(r) + " log=%r" % r.log)
         else:
             d = r.deny()
@@ -899,7 +902,8 @@ def case_origin_only_store_is_read():
 
 def case_override_lifts_a_past_ruling_refusal():
     r = past_run(settled_text(SETTLING[0][1], "`decision %s`" % SLUG), "full", override=(SID_A, TIMED))
-    check("past-ruling override: the send lands (exit 0, no output)", r.code == 0 and r.out == "", detail(r))
+    check("past-ruling override: the send lands (exit 0, one stdout line that names past-ruling)",
+          r.code == 0 and lift_line.names_lift(r.out.strip(), "past-ruling"), detail(r))
     check("past-ruling override: one override line for past-ruling, no deny line",
           r.log.count("\toverride\tpast-ruling\t") == 1 and "\tdeny\tpast-ruling\t" not in r.log,
           detail(r) + " log=%r" % r.log)
