@@ -2168,7 +2168,8 @@ def _ready_stood_shas(text: str, merge) -> set:
         if any(sha.startswith(m.group("dry")) or m.group("dry").startswith(sha) for sha in shas):
             shas.add(m.group("head"))
     if merge.READY_NO_CHECKS_LINE in text:
-        for fmt in (merge.READY_UNCHECKED_FMT, merge.READY_RECORDS_CURRENT_FMT, merge.READY_RECORDS_PUSHED_FMT, merge.READY_MERGED_FMT):
+        for fmt in (merge.READY_UNCHECKED_FMT, merge.READY_RECORDS_CURRENT_FMT, merge.READY_RECORDS_PUSHED_FMT, merge.READY_MERGED_FMT,
+                    merge.READY_CLAIM_STOP_FMT):
             shas.update(m.group("sha") for m in pattern(fmt).finditer(text))
     return shas
 

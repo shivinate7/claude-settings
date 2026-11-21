@@ -4809,7 +4809,8 @@ READY_UNCHECKED_FMT = "merge: the draft step ran no checks on #{n} at {sha}. Not
 READY_RECORDS_CURRENT_FMT = "merge: the records page on {branch} at {sha} is current. Nothing was pushed."
 READY_RECORDS_PUSHED_FMT = "merge: the records page pushed to {branch} at {sha}."
 READY_MERGED_FMT = "merge: {base} is merged into {branch} at {sha}, here only. Nothing is pushed yet."
-READY_LINE_FIELDS = {"sha": r"[0-9a-f]{7,40}", "head": r"[0-9a-f]{7,40}", "dry": r"[0-9a-f]{7,40}", "n": r"\d+", "checks": r"[^)\n]*", "base": r"\S+", "branch": r"\S+"}
+READY_CLAIM_STOP_FMT = "{sha} on {branch} holds a Record-claim ({claim}), so the draft step adds no page commit on top of it."  # the head of a Record-claim stop; the stop prints it first, after "merge: "
+READY_LINE_FIELDS = {"sha": r"[0-9a-f]{7,40}", "head": r"[0-9a-f]{7,40}", "dry": r"[0-9a-f]{7,40}", "n": r"\d+", "checks": r"[^)\n]*", "base": r"\S+", "branch": r"\S+", "claim": r"[^)\n]*"}
 
 def ready_line_pattern(fmt):
     """The compiled pattern of one READY_*_FMT template: each {name} field is a named group, the rest is literal."""
@@ -5071,7 +5072,7 @@ def draft_step(root, cfg, n, host, info, merge_main=False):
                 if claim:
                     if checks:
                         run_ready_checks(wt, n, base, checks, pre=pre)  # before the remedy: it has the session mark ready by hand, past the checks
-                    raise Stop(f"{info['head'][:9]} on {info['branch']} holds a Record-claim ({claim}), so the draft step adds no page commit on top of it. "
+                    raise Stop(READY_CLAIM_STOP_FMT.format(sha=info["head"][:9], branch=info["branch"], claim=claim) + " "
                                f"Mark #{n} ready by hand ({READY_ROUTES}), then run --confirm again. Nothing was pushed. {RECORDS_CITE}")
                 stale, stands = holds_base(wt, f"origin/{base}", info["head"])
                 if stale:  # holds_base ends with the remedy
