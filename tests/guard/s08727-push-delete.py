@@ -178,6 +178,11 @@ sh("push: lease with git -C naming a feature checkout allows from the main check
 sh("push: a git -C on another call is not the push's directory",
    VCS + " -C " + slash(PUSHMAIN) + " status && " + VCS + " push " + LE.strip(), "allow",
    cwd=PUSHFEAT)
+# A quoted -C folder with a space holds one word. The guard must read that whole word, or the `push` after it is
+# taken as the folder and its force push is never seen. The folder is no checkout, so the force push asks.
+sh("push: a force push through a -C folder with a space asks, not read as blank text",
+   VCS + ' -C "' + slash(os.path.join(ROOT, "no such dir")) + '" push -f origin HEAD:main', "ask", "force-push",
+   cwd=NOGIT)
 sh("push: lease after cd into the default branch's checkout asks, the leading cd is no second command",
    "cd " + slash(PUSHMAIN) + " && " + VCS + " push " + LE.strip(), "ask", "force-push",
    cwd=PUSHFEAT, lacks=(CHAIN_ASK,))

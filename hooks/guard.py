@@ -195,7 +195,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   self-role-claim      deny. A Bash or PowerShell call that sets CS_SESSION_ROLE or runs bin/claude-role,
                        also inside `bash -c`, `sh -c` or `eval`: a session does not claim a role. Also a call
                        that starts claude while the guard's own CS_SESSION_ROLE is non-empty, since the child
-                       inherits the role. Reads through Test-Path, Get-Item or Remove-Item on Env: pass;
+                       inherits the role, or that resumes (--resume, -r, -c, --continue) a session whose role
+                       file is valid, since a resume keeps that file. Reads through Test-Path, Get-Item or Remove-Item on Env: pass;
                        `$role = $env:CS_SESSION_ROLE`, `command -v claude-role` and a bare
                        `CS_SESSION_ROLE=x` are refused (debt self-role-claim-false-alarms). (self-role-claim)
   roadmap-one-writer   deny. A `git push`, also one inside `bash -c`, `sh -c` or `eval`, whose destination is
@@ -303,7 +304,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        commit in the same call before the push counts, read from its `-m` text (an `--amend`
                        with none keeps the commit's own); a message the guard cannot read, a failed read and a
                        default base it cannot read are no hit. A lone `git commit` (no push after it in the
-                       call) that stages added lines on a test path is judged too, by its own `-m` text; a
+                       call) that stages added lines on a test path is judged too, by its own `-m` text (or the heredoc body of `-F -`), and a test path written by an earlier step of the call counts when the commit takes the working tree; a
                        merge or other replay in progress is no hit. The refusal for a flagged tip names only
                        commit and push; for a flagged commit below the tip (under a merge at the tip too) it
                        names commit, rebase and push; for a branch rewritten since its push it names no
@@ -710,7 +711,7 @@ while True:
             path_is_inside, primary_checkout, record, refuse, resolve_command,
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
-            _git_subcommand_index, amp_pieces, dir_before_segment, shell_abs, walk_quotes,
+            _git_subcommand_index, amp_pieces, dir_before_segment, shell_abs, walk_quotes, segment_with_vars as _segment_with_vars,
             _checkout_root_by_stat, layout_module as _layout_module,
             _REDIRECT_OPERATOR, ssh_remote_script, strip_redirections,
         )
@@ -746,7 +747,7 @@ while True:
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, OCTOPUS_PUSH_STALE, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, LANE_READY_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit, lane_ready_hit, lane_mcp_ready_hit, self_role_child_hit, self_role_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, PRIOR_WORK_REASON, prior_work_lane_hit, prior_work_named, stamp_hit, step_dup_hit, step_pr_hit, target_roster_hit, trust_card_hit, written_time_hit,
+            DEFAULT_RECORD_BRANCH, record_reason, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, PRIOR_WORK_REASON, prior_work_lane_hit, prior_work_named, header_time_hit, step_dup_hit, step_pr_hit, target_roster_hit, trust_card_hit, written_time_hit,
             BRIEF_ID_REASON, BRIEF_TOPIC_REASON, STEP_DUP_REASON,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
@@ -1188,15 +1189,6 @@ def worktree_add_target(args):
     return words[0] if words else None
 
 
-def _segment_with_vars(segments, number: int) -> str:
-    """`segments[number]` with each variable read as the value an earlier segment of the same
-    command assigned (`_resolve_vars`, the one home). Unassigned variables stay as written."""
-    if "$" not in segments[number]:
-        return segments[number]
-    mark = " ;\x00; "
-    return _resolve_vars(mark.join(segments[:number + 1])).split(mark)[-1]
-
-
 def hand_made_worktree_hit(segments, number: int, cwd: str, ends=(), payload=None) -> str:
     """The new-tree path when `segments[number]` is a real worktree add whose tree lands
     outside `<primary>/.claude/worktrees/`, else "". The primary is the one of the repo the call
@@ -1210,7 +1202,7 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=(), payload=Non
     cwd) allow."""
     if "worktree" not in segments[number]:
         return ""   # early exit: resolving variables re-reads every earlier segment, so it runs only for a segment that holds the word `worktree`
-    read = _segment_with_vars(segments, number)
+    read = _segment_with_vars(segments, number, ends)
     tokens = segment_tokens(read)
     index = resolve_command(tokens) if tokens else None
     if index is None or basename(tokens[index]) not in ("git", "git.exe"):
@@ -1383,9 +1375,11 @@ HANDOFF_UNREAD_REASON = (
     "Remedy: Read %s now. The Read clears this check. Then repeat the call."
 )
 
+from shared_names import EXPLORE_AUDIT_MARKER as _AUDIT_MARKER  # noqa: E402  the one home of the marker the remedy names; reread_check.audit_reason reads it too
+
 COMPACTION_AUDIT_REASON = (
     "Rule (compaction audit): context was compacted and the handoff audit is still owed. "
-    "Remedy: spawn one Explore agent on Sonnet whose brief's first line is `Audit:`, as step 3 of the "
+    "Remedy: spawn one Explore agent on Sonnet whose brief's first line is `" + _AUDIT_MARKER.replace("%", "%%") + "`, as step 3 of the "
     "handoff prompt says. It reads the transcript from the last compaction marker and compares it "
     "with %s. That spawn clears this check. Then repeat the call. "
     "(decision precompact-handoff, item 16)"
@@ -2619,6 +2613,29 @@ def builder_test_path(path: str, cwd: str) -> bool:
             and repo_rel(path, where, outside=False) is None):
         return False
     return is_builder_test_rel(rel)
+
+
+def shell_written_test_rels(text: str, cwd: str) -> list:
+    """The repository-relative test paths the shell command `text` writes (a redirect, `tee`, `sed -i`, `cp`), by the
+    one shell-write reader (`_shell_write_hit`) and `is_test_rel`. The red-run commit read asks it for the steps that
+    run before a commit in the same call, whose edits the hook cannot yet see in the tree."""
+    found = []
+    last = []
+
+    def test_path(path, where, verb=""):
+        if verb in ("rm", "unlink", "rmdir", "shred", "trash"):
+            return False   # a delete adds no test line (decision red-run-trailer-on-test-commits)
+        rel = repo_rel(path, where)
+        if rel is not None and is_test_rel(rel) and rel not in found:
+            last[:] = [rel]
+            return True
+        return False
+
+    # The reader returns its first write hit, and the predicate only names a candidate: a path a command reads or
+    # runs (`cat`, `grep`, `python3 hooks/test_x.py`) is judged by it and is no hit. Each pass skips the paths found.
+    while _shell_write_hit(text, cwd, test_path, follow_cd=True, predicate_command=True):
+        found.append(last[0])
+    return found
 
 
 def builder_shell_test_hit(raw: str, stripped: str, cwd: str, tool) -> str:
@@ -5009,7 +5026,8 @@ LOAD_BUSY_NO_FOREGROUND = "A Workflow has no foreground form. "
 LOAD_FULL_REASON = "the machine is full (%s). No new lane or agent starts until the load drops. Wait, then retry. " + LOAD_CITE
 LOAD_SWEEP = "python3 ~/.claude/janitor/sweep.py --root <repo> --attended --fast"
 LOAD_FULL_CLOUD_REASON = ("the disk is full (%s). No new lane or agent starts until space is freed. Free it with "
-                          + LOAD_SWEEP + " (preview first, then add --confirm), then retry. " + LOAD_CITE)
+                          + LOAD_SWEEP + " (preview first, then add --confirm), then retry. "
+                          + 'On Windows, double-quote the root: --root "D:/a/repo". ' + LOAD_CITE)
 
 
 LOAD_LINT_CITE = "(decision machine-load-brake, a full machine starts no lint)"
@@ -5247,6 +5265,10 @@ AUDIT_CLEANUP_SHELL_BAD = re.compile(r"[;&|<>`$()\n\r\\*?\[\]{}~]")
 AUDIT_CLEANUP_SWEEP_FLAGS = tuple(LOAD_SWEEP.split("<repo>", 1)[1].split())
 AUDIT_CLEANUP_SWEEP_CONFIRM = "--confirm"
 AUDIT_CLEANUP_TMP = "/tmp/"
+# On Windows the sweep's --root is a drive path. Bash strips an unquoted backslash (D:\a\repo arrives as D:arepo), so that
+# form cannot work and stays refused. Two forms arrive whole: a double-quoted drive path (it keeps its backslashes) and a
+# forward-slash drive path, quoted or not. Each is judged on its own charset, then stands in as a POSIX root below.
+AUDIT_CLEANUP_WIN_ROOT = re.compile(r'(?<=\s--root )(?:"[A-Za-z]:[\\/][\w.\-\\/]*"|[A-Za-z]:/[\w.\-/]*)(?=\s|$)')
 
 
 def audit_cleanup_form(tool: str, tool_input) -> bool:
@@ -5256,6 +5278,8 @@ def audit_cleanup_form(tool: str, tool_input) -> bool:
     if tool != "Bash" or not isinstance(command, str):
         return False
     sweep_script = LOAD_SWEEP.split()[1]
+    if sweep_script in command:
+        command = AUDIT_CLEANUP_WIN_ROOT.sub("/root", command, count=1)
     # The sweep's own script path, with its ~ left for the shell to expand, is the one place a ~ may sit.
     if AUDIT_CLEANUP_SHELL_BAD.search(command.replace(sweep_script, "", 1)):
         return False
@@ -5696,7 +5720,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 2a1. A session that holds a role and starts claude: the child inherits the role (rule self-role-claim). It runs before the
     # detached-launch rule so `Start-Process claude` names its own reason. Cost: one environment read per call.
-    matched = self_role_child_hit(stripped)
+    matched = self_role_child_hit(stripped, cwd, transcript)
     if matched:
         refuse(tool, "deny", "self-role-claim", SELF_ROLE_CHILD_REASON, matched)
 
@@ -5898,7 +5922,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # every pushed commit's paths (and one `git symbolic-ref` when no cs-step tag names the slug); a triage push, any other session's push and a push to another branch read no diff.
     matched = record_writer_hit(stripped, cwd, transcript, record_branch_of, read_verb, session_id)
     if matched:
-        refuse(tool, "deny", "roadmap-one-writer", RECORD_REASON, matched)
+        refuse(tool, "deny", "roadmap-one-writer", record_reason(matched), matched)
 
     # 6b. A pull request opened without --draft.
     for text, _in_message in _substitutions(stripped)[0]:
@@ -5921,7 +5945,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # `-m` text; so is a lone commit with no push after it, which adds one `git diff --numstat` only when its
     # message holds no trailer. A git write after a cd into a missing folder adds one `git rev-parse` of the
     # folder the shell stays in; the scan for folders the call makes is parsing only. guard_merge states the cost.
-    kind, matched = conflict_markers_hit(stripped, cwd, is_test_rel, raw)
+    kind, matched = conflict_markers_hit(stripped, cwd, is_test_rel, raw, lambda text: shell_written_test_rels(text, cwd))
     if kind in ("red-run", "red-run-commit"):
         red_reason, red_shown = red_run_reason(matched, kind == "red-run-commit")
         refuse(tool, "deny", "red-run", red_reason, red_shown)
@@ -8186,7 +8210,7 @@ def judge(payload) -> None:
             refuse(tool, "deny", "sendmessage-session-id", SENDMESSAGE_REASON, target[:120])
 
     # A send_message whose header stamp is off the clock (rule message-time-matches-clock).
-    stamped = stamp_hit(tool, tool_input)
+    stamped = header_time_hit(tool, tool_input)
     if stamped:
         refuse(tool, "deny", "message-time-matches-clock", stamped[1], stamped[0])
 

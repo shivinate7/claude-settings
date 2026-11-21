@@ -4,7 +4,7 @@
 
 Four idle limits. 30 min: agent-end reap. 1 h: unattended `--confirm`, a merged tree. 4 h: session-end agent rule. 24 h: unattended `--confirm`, a pushed tree that is not merged. Pushed is enough (HEAD need not be merged) for the agent-end reap and the `agent-*` rule only. A dirty tree is never reaped.
 
-Five routes remove a worktree. One is the unattended `--confirm` run. One is a test-author's `git worktree remove` of its own red-run checkout, once that checkout is clean and detached at a pushed commit; the guard refuses the remove of a dirty one. Two remove a tree under `.claude/worktrees/agent-*` without both of its conditions: the agent-end reap and the session-end sweep's agent rule. No route runs a remover a repo supplies (decisions `the-janitor-is-one-machine-wide-sweep` and `uniform-over-variants`, owner 2026-10-27 12:51 CDT). The merge tool also removes the worktree that holds the branch it merged (owner, 2026-10-25, step c44). It calls the sweep's `--fast` judgment with `--attended` for that one tree, so there is no idle wait. The tree goes when it is clean and its HEAD is in the merged head. No lock, session or process may hold it, and it may not be the caller's cwd. A failed read keeps the tree, except one process whose cwd cannot be read: it is out of scope, not inside.
+Four routes remove a worktree. One is the unattended `--confirm` run. Two remove a tree under `.claude/worktrees/agent-*` without both of its conditions: the agent-end reap and the session-end sweep's agent rule. No route runs a remover a repo supplies (decisions `the-janitor-is-one-machine-wide-sweep` and `uniform-over-variants`, owner 2026-10-27 12:51 CDT). The merge tool also removes the worktree that holds the branch it merged (owner, 2026-10-25, step c44). It calls the sweep's `--fast` judgment with `--attended` for that one tree, so there is no idle wait. The tree goes when it is clean and its HEAD is in the merged head. No lock, session or process may hold it, and it may not be the caller's cwd. A failed read keeps the tree, except one process whose cwd cannot be read: it is out of scope, not inside.
 
 ### Idle limits, side by side
 
@@ -92,7 +92,7 @@ The live lock reads `claude agent agent-<id> (pid N start S)`, where S is clock 
 
 Code: `janitor/agent_end_reap.py` (`stopped_agents`, `agent_finished`, `stop_and_settle`), `janitor/sweep.py` (`decide_worktree` and its parameter `finished_host_lock`, `decide_agent_end_worktree`, `host_child_stops`, `agent_mark`).
 
-Session start warns when more than 50 agent worktrees exist. An agent leaves its worktree clean, and a later agent end removes it once its commits are pushed. The builder agent definition says so. The test-author commits and pushes to the branch its brief names, and cleans and removes its red-run checkout itself.
+Session start warns when more than 50 agent worktrees exist. An agent leaves its worktree clean, and a later agent end removes it once its commits are pushed. The builder agent definition says so. The test-author commits and pushes to the branch its brief names.
 
 ### Session-end sweep, agent rule
 
@@ -104,7 +104,7 @@ Owner ruling, 2026-10-14: the session-end sweep (`sweep.py --confirm`, no `--att
 
 A read that fails or cannot tell keeps the tree. The report line names its path and the reason `unreadable-subject`. The sweep runs no script the repo supplies, whatever its `package.json` defines.
 
-Reason: a lane pushes `HEAD:<lane>` from a local branch of another name, so a branch-upstream read called many trees never pushed. The test-author makes its red-run checkout under `<repo>/.claude/worktrees/` and names it `agent-<something>`, so this rule covers it. A checkout with another name under that folder is not covered.
+Reason: a lane pushes `HEAD:<lane>` from a local branch of another name, so a branch-upstream read called many trees never pushed. An agent's tree under `<repo>/.claude/worktrees/` is named `agent-<something>`, so this rule covers it. A checkout with another name under that folder is not covered.
 
 Kind: process
 Home: janitor/sweep.py
