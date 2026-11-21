@@ -2166,7 +2166,7 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
                 if continue_on_lift:
                     return True  # a later refusal of this call carries the notice, so stdout holds one object
                 # Claude never sees the stderr of a hook that exits 0, so the lift goes on stdout as one context line with
-                # no permissionDecision. Compact separators keep the line under the 120 characters a verdict reader keeps.
+                # no permissionDecision. Compact separators keep it short; it grows by one rule name for each rule lifted in the call.
                 print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                                          "additionalContext": lift_notice()}},
                                  separators=(",", ":")))
