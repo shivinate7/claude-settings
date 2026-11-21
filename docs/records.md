@@ -48,7 +48,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `git-main-only-by-pr` | Move main only by pull request, merged only when I name the act, or under a repo grant. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-never-merge-failing-ci` | Never merge a PR whose own run is red. | [`CLAUDE.md`](../CLAUDE.md) |
 | `gh-write-cloud` | In a cloud session, a `gh` pr, issue or `gh api` write is refused: write through the GitHub MCP tools or the merge tool. | [`CLAUDE.md`](../CLAUDE.md) |
-| `git-red-main-reverts` | A PR may merge onto a red main (owner ruling Q5 v, chat, 10:42 CST Nov 20, 2026). | [`CLAUDE.md`](../CLAUDE.md) |
+| `git-red-main-reverts` | A PR may merge onto a red main (ruling Q5 v, 10:42 CST Nov 20, 2026; decision `no-merge-onto-red-main`). | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-ci-wait-checks-in` | A session that waits on CI sets a one-time check-in when it starts to wait, and again after each red job, each wider apart, never past 55 minutes. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-ci-done-comment-wakes` | A run with a red job posts a PR comment for each red job as it fails, and one at the run end for any job not yet announced. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-never-discard-output` | Keep git write output. | [`CLAUDE.md`](../CLAUDE.md) |
