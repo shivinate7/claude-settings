@@ -35,6 +35,17 @@ def oj_ctx(goal=OJ_GOAL, problem=OJ_STAKE, based=(OJ_BASED,), tail=OJ_CTX, depar
 OJ_GOOD = oj_ctx()
 
 
+
+def pr2015_oj_item(**over):
+    """Item 34's shape: a decision about which CI job runs a check, with options, a pick and a why, and no form lines.
+    It carries n, so the n rule (item_n_hit) passes it and question-form is the rule that judges it."""
+    item = {"id": OJ_DOC, "n": 928, "kind": "decision", "status": "open", "title": "Which CI job runs the stamp check?",
+            "context": OJ_CTX, "options": OJ_OPTIONS, "pick": "a",
+            "why": "The lint job already holds the other format checks."}
+    item.update(over)
+    return {k: v for k, v in item.items() if v is not None}
+
+
 def oj_item(**over):
     """Item 34's shape: a decision about which CI job runs a check, with options, a pick and a why, and no form lines."""
     item = {"id": OJ_DOC, "n": 928, "kind": "decision", "status": "open", "title": "Which CI job runs the stamp check?",
@@ -70,6 +81,7 @@ def oj_batch(name, expected, writes, **extra):
 
 oj("item 34's shape (a CI job choice with options, a pick, a why and no form lines) is denied", "deny",
    oj_item())
+
 oj("the refusal names the three lines and the five stakes", "deny", oj_item(),
    carries=("Goal", "Problem", "Based on", *OJ_KINDS))
 # Wrong-field class: the words are there, the lines are not.
@@ -117,6 +129,8 @@ oj("an option with an empty lose is denied", "deny",
    oj_item(context=OJ_GOOD, options=[OJ_OPTIONS[0], dict(OJ_OPTIONS[1], lose="")]))
 oj("a decision with no context is denied", "deny", oj_item(context=None))
 oj("an item with no kind is judged as a decision and denied", "deny", oj_item(kind=None))
+
+oj("stands false with no form lines is denied", "deny", pr2015_oj_item(stands=False))
 oj("port false with no form lines is denied", "deny", oj_item(port=False))
 
 # False-alarm class: a stake of any kind, a premise of any kind, in any case, at a line start, is the form.
@@ -142,6 +156,10 @@ oj("form lines with more lines after them are allowed", "allow",
    oj_item(context=oj_ctx(tail=OJ_CTX + "\nThe test job runs longer.")))
 oj("a decision with the form is allowed", "allow", oj_item(context=OJ_GOOD))
 
+
+# Stood-pick class: the session's own pick stands, so the stake needs no kind.
+oj("a stood pick with a stake is allowed", "allow", pr2015_oj_item(stands=True, context=OJ_GOOD))
+
 oj("a port with a Departs from line and the form is allowed", "allow",
    oj_item(port=True, context=oj_ctx(tail=OJ_CTX + "\n" + PQ_DEPARTS)))
 oj("a task with a Why yours line and no form lines is not judged", "allow",
@@ -157,6 +175,7 @@ oj("an update that carries kind decision and context with no form lines is denie
    {"kind": "decision", "context": OJ_CTX}, action="update")
 oj("an update that carries kind decision and a context with the form is allowed", "allow",
    {"kind": "decision", "context": OJ_GOOD}, action="update")
+
 oj("an update that carries kind decision and a bare Problem line with no stake is denied", "deny",
    {"kind": "decision", "context": oj_ctx(problem="Problem: which job runs the check")},
    action="update", rule=OJ_PROBLEM_RULES)
@@ -216,6 +235,7 @@ oj_batch("with a str_replace that drops the Problem line is denied", "deny",
            "old_str": OJ_GOOD, "new_str": oj_ctx(problem=None)}])
 oj_batch("of decisions that each carry the form is allowed", "allow",
          [oj_write(oj_item(context=OJ_GOOD)), oj_write(oj_item(id="second", context=OJ_GOOD))])
+
 oj_batch("with a closed decision and no form lines is allowed", "allow",
          [oj_write(oj_item(status="closed", context=OJ_ANSWERED))])
 oj_batch("with a closed decision, then an open one with no form lines, is denied", "deny",
@@ -225,6 +245,11 @@ oj_batch("with a closed decision, then an open one with no form lines, is denied
 os.makedirs(os.path.join(ROOT, "oj"), exist_ok=True)
 OJ_FILE_BAD = os.path.join(ROOT, "oj", "bad.json")
 OJ_FILE_GOOD = os.path.join(ROOT, "oj", "good.json")
+
+with open(OJ_FILE_BAD, "w", encoding="utf-8") as _f:
+    json.dump(pr2015_oj_item(), _f)
+with open(OJ_FILE_GOOD, "w", encoding="utf-8") as _f:
+    json.dump(pr2015_oj_item(context=OJ_GOOD), _f)
 with open(OJ_FILE_BAD, "w", encoding="utf-8") as _f:
     json.dump(with_shown(oj_item()), _f)
 with open(OJ_FILE_GOOD, "w", encoding="utf-8") as _f:
