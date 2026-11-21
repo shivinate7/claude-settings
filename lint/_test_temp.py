@@ -2,8 +2,9 @@
 
 One temp root for this repo, one run folder per test run named `<pid>-<UUID>`, and a sweep of
 sibling run folders: one whose pid is dead goes after an hour, and one whose pid is alive goes
-after a day. hooks/test_guard.py keeps the same root and name, so each sweep also cleans the
-other's crashed runs.
+after a day. A folder that a live process holds stays, whatever its age: bin/red-run's copy is a
+run folder, and its test command runs inside it. hooks/test_guard.py keeps the same root and name,
+so each sweep also cleans the other's crashed runs.
 """
 import os
 import re
@@ -11,6 +12,7 @@ import shutil
 import tempfile
 import time
 import uuid
+import importlib.util
 
 TEMP_ROOT = os.path.join(tempfile.gettempdir(), "claude-settings-test-temp")
 RUN_FOLDER_RE = re.compile(r"[0-9]+-[0-9a-f]{32}")
@@ -39,8 +41,32 @@ def pid_alive(pid):
     return True
 
 
+MERGE_TOOL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "merge", "merge.py")
+_MERGE = []  # [the merge tool's module, or None when it did not load]: loaded once, at the first folder the sweep would remove
+
+
+def held(path):
+    """True when a live process holds `path` (merge.py held_by_live_process, the one reader of that hold), and when that cannot be read:
+    the merge tool did not load, or the read raised. Unknown keeps the folder: the safe side, since a removed copy kills a running red-run."""
+    if not _MERGE:
+        try:
+            spec = importlib.util.spec_from_file_location("merge_tool", MERGE_TOOL)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            _MERGE.append(module)
+        except (Exception, SystemExit):  # a tool that exits at import is unloadable too
+            _MERGE.append(None)
+    if _MERGE[0] is None:
+        return True
+    try:
+        return bool(_MERGE[0].held_by_live_process(path))
+    except Exception:
+        return True
+
+
 def sweep(temp_root, own, now=None):
-    """Remove each sibling run folder under `temp_root` whose mtime is over an hour old and whose pid is dead, or over a day old. `own` stays."""
+    """Remove each sibling run folder under `temp_root` whose mtime is over an hour old and whose pid is dead, or over a day old, unless a live
+    process holds it (`held`). `own` stays."""
     now = time.time() if now is None else now
     try:
         names = os.listdir(temp_root)
@@ -54,7 +80,7 @@ def sweep(temp_root, own, now=None):
             age = now - os.path.getmtime(path)
         except OSError:
             continue
-        if age > MAX_AGE or (age > DEAD_MAX_AGE and not pid_alive(int(name.split("-", 1)[0]))):
+        if (age > MAX_AGE or (age > DEAD_MAX_AGE and not pid_alive(int(name.split("-", 1)[0])))) and not held(path):
             shutil.rmtree(path, ignore_errors=True)
 
 

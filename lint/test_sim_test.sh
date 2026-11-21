@@ -10,8 +10,8 @@
 #    exit 2, no lock, no boot.
 #  - A booted Duo (its name contains "iPhone Duo") is reused by UDID: no boot, no shutdown, no lease. With two, the first
 #    is used. An iPad is not an iPhone. pro reuses the first booted iPhone whose name does not contain "Duo".
-#  - Cross-role: a duo run with a non-Duo iPhone booted, or a pro run with a Duo booted, boots nothing, runs nothing,
-#    prints one stderr line naming the booted device, and exits 1. It shuts down no device it did not boot.
+#  - Beside a booted phone: a duo run with the 18 Pro booted, or a pro run with a Duo booted, is allowed (record
+#    sims-load-brake-only). It boots its own device, runs, and shuts down only that device.
 #  - None booted, its own boot: the lease (bin/sim-lease, beside the script) grants the UDID for the role, duo slot 1 or
 #    2 or the pro UDID. The tool boots that UDID, tests, and shuts that same UDID down. The UDIDs are read from SLOT_UDID
 #    in bin/sim-lease, the one home of the device IDs.
@@ -37,8 +37,8 @@
 #  - A SpringBoard crash loop (3 new SpringBoard-*.ips reports during the run that name this run's UDID, or no device
 #    folder) stops xcodebuild and exits non-zero. The stop line says "shut down" if it booted the simulator, else "left".
 #  - A `simctl list` that fails (non-zero): exit 1, no boot, no xcodebuild. The booted list is never read as empty.
-#  - A duo run that queued behind a pro holder re-reads the booted list after its grant: an 18 Pro booted by then is
-#    refused (exit 1, no boot), as the one-phone-kind rule says.
+#  - A duo run that queued behind the load re-reads the booted list after its grant: an 18 Pro booted by then is not a
+#    refusal, and the duo boots its own Duo beside it.
 #  - `--hold --for S -- CMD` with CMD still running at S: exit 124, then cleanup. A crash loop stops a hold, with or
 #    without CMD.
 #  - TERM to the tool during the lease wait: it ends at once, not after the wait, with no boot, its queue place and the
@@ -284,6 +284,8 @@ ARGS=(-scheme X)
 run() { start_tool "$@"; finish_tool; }
 steps() { grep -E '^(simctl (boot|shutdown) |xcodebuild)' "$calls" | awk '{print ($1=="xcodebuild") ? "run" : $2}' | tr '\n' ' '; }
 has_call() { grep -Fxq "$1" "$calls"; }
+# no_call_names TEXT: no logged simctl or xcodebuild call holds TEXT, as a UDID or a name does.
+no_call_names() { ! grep -Fq -- "$1" "$calls"; }
 rc_is() { [[ $rc -eq $1 ]]; }
 steps_are() { [[ "$(steps)" == "$1" ]]; }
 # dest_is UDID: a logged xcodebuild call names this destination. Its other arguments are not checked.
@@ -830,21 +832,23 @@ need "the Duo is reused: the role is not read after -scheme" dest_is "$DUO1"
 need "--device and its value reach xcodebuild unchanged" has_call "xcodebuild test -scheme X --device pro -only-testing:AppUITests/Login -collect-test-diagnostics never -destination platform=iOS Simulator,id=$DUO1"
 end_case "58 control: a flag after the first xcodebuild argument is xcodebuild's own"
 
-fresh; booted "iPhone 18 Pro" $PRO; run
-need "exit 1" rc_is 1
-need "boots nothing" no_boot
-need "runs nothing" no_xcodebuild
-need "shuts down nothing" no_shutdown
-need "stderr names the booted 18 Pro" grep -Fq "iPhone 18 Pro" "$work/run.err"
-end_case "59 duo run with an 18 Pro booted: refused, boots and runs nothing, exit 1"
+fresh; booted "iPhone 18 Pro" $PRO
+need "fixture: the 18 Pro is booted" grep -Fq "iPhone 18 Pro" "$booted_file"
+run
+need "exit code" rc_is 0
+need "steps are boot run shutdown of the Duo" steps_are "boot run shutdown "
+need "destination is the Duo's UDID" dest_is "$DUO1"
+need "the 18 Pro gets no call" no_call_names "$PRO"
+end_case "59 duo run with an 18 Pro booted: allowed, boots its Duo, runs, shuts that Duo down, and the 18 Pro gets no call"
 
-fresh; booted "iPhone Duo" $DUO1; ARGS=(--device pro -scheme X); run; ARGS=(-scheme X)
-need "exit 1" rc_is 1
-need "boots nothing" no_boot
-need "runs nothing" no_xcodebuild
-need "shuts down nothing" no_shutdown
-need "stderr names the booted Duo" grep -Fq "iPhone Duo" "$work/run.err"
-end_case "60 pro run with a Duo booted: refused, boots and runs nothing, exit 1"
+fresh; booted "iPhone Duo" $DUO1
+need "fixture: the Duo is booted" grep -Fq "iPhone Duo" "$booted_file"
+ARGS=(--device pro -scheme X); run; ARGS=(-scheme X)
+need "exit code" rc_is 0
+need "steps are boot run shutdown of the 18 Pro" steps_are "boot run shutdown "
+need "destination is the pro UDID" dest_is "$PRO"
+need "the Duo gets no call" no_call_names "$DUO1"
+end_case "60 pro run with a Duo booted: allowed, boots the 18 Pro, runs, shuts it down, and the Duo gets no call"
 
 # Control: the pro role reuses the booted 18 Pro, as it did before the role flag existed.
 fresh; booted "iPhone 18 Pro" $PRO; ARGS=(--device pro -scheme X); run; ARGS=(-scheme X)
@@ -921,45 +925,41 @@ tool_ended() { local st; st=$(ps -o stat= -p "$tool_pid" 2>/dev/null); [[ -z $st
 # holds neither a lease nor a place.
 lease_freed_after_reap() { env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME="$work/home" "$sim_lease" status > /dev/null 2>&1; lease_released; }
 
-# pro_dies_during_duo_wait BOOTED: a pro holder takes the pro lease, a duo run queues behind it, and the holder dies. With
-# BOOTED yes the 18 Pro is still booted when the holder dies, as a pro run that never shut it down leaves it. With BOOTED
-# duo, a Duo of slot 2 is booted during the wait, so the queued run reuses that Duo after its grant. A second argument
-# store, with duo, also gives that Duo a store folder before the holder dies.
-pro_dies_during_duo_wait() {
-  fresh
-  sleep 600 > /dev/null 2>&1 &
-  local holder=$!
-  need "the pro holder is granted the pro lease" test "$(env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME="$work/home" \
-    "$sim_lease" take --device pro --pid "$holder" --wait 1 2>/dev/null)" = pro
+# queued_duo_wait BOOTED [store]: a duo run queues behind the 5-minute load of 100, the limit a grant has now (record
+# sims-load-brake-only). While it waits, BOOTED is booted: yes the 18 Pro, duo a Duo of
+# slot 2 (with its store folder when the second argument is store), no nothing. Then the load falls, and the granted run
+# re-reads the booted list.
+queued_duo_wait() {
+  fresh; set_load "{ 0.50 100.00 0.50 }"
   ARGS=(-scheme X); start_tool SIM_LEASE_WAIT=60
-  need "the duo run is queued behind the pro lease" poll_for 20 in_lease_file
+  need "the duo run is queued behind the load" poll_for 20 in_lease_file
   if [[ $1 = yes ]]; then
     booted "iPhone 18 Pro" $PRO
-    need "the 18 Pro is booted when the holder dies" grep -Fq "iPhone 18 Pro" "$booted_file"
+    need "the 18 Pro is booted during the wait" grep -Fq "iPhone 18 Pro" "$booted_file"
   elif [[ $1 = duo ]]; then
     booted "iPhone Duo" $DUO2
     if [[ ${2:-} = store ]]; then
       mkstore "$DUO2"
-      need "fixture: the Duo's store is there before the holder dies" store_kept "$DUO2"
+      need "fixture: the Duo's store is there before the grant" store_kept "$DUO2"
     fi
   fi
-  kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
+  set_load "{ 0.50 0.50 0.50 }"
   finish_tool
   ARGS=(-scheme X)
 }
-pro_dies_during_duo_wait yes
-need "exit 1" rc_is 1
-need "boots nothing" no_boot
-need "runs nothing" no_xcodebuild
-need "stderr names the booted 18 Pro" grep -Fq "iPhone 18 Pro" "$work/run.err"
+queued_duo_wait yes
+need "exit code" rc_is 0
+need "steps are boot run shutdown of the Duo" steps_are "boot run shutdown "
+need "destination is the Duo's UDID" dest_is "$DUO1"
+need "the 18 Pro gets no call" no_call_names "$PRO"
 need "lease given back" lease_released
-end_case "69 a pro holder dies with the 18 Pro still booted, during a queued duo run's wait: refused, no boot, exit 1"
+end_case "69 a duo run queued behind the load, with the 18 Pro booted during its wait: granted, boots its Duo beside the 18 Pro, lease given back"
 
-pro_dies_during_duo_wait no
+queued_duo_wait no
 need "exit code" rc_is 0
 need "steps are boot run shutdown" steps_are "boot run shutdown "
 need "destination is the Duo's UDID" dest_is "$DUO1"
-end_case "70 control: a pro holder dies with nothing booted, and the queued duo run boots its Duo"
+end_case "70 control: nothing booted during a queued duo run's wait, and the granted run boots its Duo"
 
 fresh; run STUB_LIST_RC=1
 need "exit 1" rc_is 1
@@ -1032,15 +1032,15 @@ need "shutdown of the Duo it booted, after the boot" has_call "simctl shutdown $
 need "the Duo's boot is recorded" record_names "$DUO1"
 end_case "77 TERM to the tool during a slow simctl boot: the Duo still comes up, and is shut down and recorded"
 
-# Case 78: a Duo booted during the wait, then the pro holder dies: the queued duo run reuses that Duo after its grant, and
-# gives the lease back before xcodebuild.
-pro_dies_during_duo_wait duo
+# Case 78: a Duo booted during a load-queued wait: the granted duo run reuses that Duo, and gives the lease back before
+# xcodebuild.
+queued_duo_wait duo
 need "exit code" rc_is 0
 need "steps are run only" steps_are "run "
 need "destination is the booted Duo" dest_is "$DUO2"
 need "lease not held during xcodebuild" lease_not_held_at_xc
 need "no shutdown" no_shutdown
-end_case "78 a Duo booted during the wait, then the pro holder dies: the queued run reuses it, and the lease goes back before xcodebuild"
+end_case "78 a Duo booted during a load-queued wait: the granted run reuses it, and the lease goes back before xcodebuild"
 
 # Case 79: a failed own boot shuts nothing down. The boot fails, so the tool clears its boot mark before it exits, and its
 # cleanup has no simulator of its own to shut down.
@@ -1088,7 +1088,6 @@ spawn_window() {
 }
 # spawns_after_record: spawn_record has one line per spawn, and each says the boot record was on disk at that call.
 spawns_after_record() { [[ -s $work/spawn_record ]] && ! grep -Fxq none "$work/spawn_record"; }
-no_call_names() { ! grep -Fq -- "$1" "$calls"; }
 not_in_list() { ! grep -Fq -- "$1" "$(noise_list)" 2>/dev/null; }
 not_spelled() { ! grep -Fq -- "$1" "$script"; }
 # list_is_exact: the label lines of the list file are the 17 labels, and the rest of it is comments and blank lines.
@@ -1135,9 +1134,6 @@ end_case "83 control: the reuse path makes no disable call"
 fresh; booted "Apple Watch Ultra 3" $THIRD; booted "iPad Pro 13-inch" $OTHER; run
 need "cap: exit 1, no boot, no xcodebuild" refused_clean
 need "cap: no disable call" no_spawn
-fresh; booted "iPhone 18 Pro" $PRO; run
-need "cross-role: exit 1, no boot, no xcodebuild" refused_clean
-need "cross-role: no disable call" no_spawn
 fresh; run STUB_LIST_RC=1
 need "list failure: exit 1, no boot, no xcodebuild" refused_clean
 need "list failure: no disable call" no_spawn
@@ -1147,7 +1143,7 @@ need "no-op lease: no disable call" no_spawn
 fresh; run STUB_BOOT_RC=1
 need "failed boot: exit non-zero, boot tried, no xcodebuild" failed_boot_clean
 need "failed boot: no disable call" no_spawn
-end_case "84 control: the cap, cross-role, list failure, no-op lease and a failed boot make no disable call"
+end_case "84 control: the cap, list failure, no-op lease and a failed boot make no disable call"
 
 fresh; run STUB_SPAWN_RC=1 STUB_RC=65
 need "scope: 17 spawns ran, each refused" test "$(spawn_count)" -eq 17
@@ -1371,13 +1367,11 @@ end_case "98 reuse path: a booted Duo keeps its store: no boot, no delete"
 # Case 99: refusal paths. Each refusal is its own run with its own fixture; the Duo's store is kept in each.
 fresh; booted "Apple Watch Ultra 3" $THIRD; booted "iPad Pro 13-inch" $OTHER; mkstore "$DUO1"
 refusal_keeps_store cap
-fresh; booted "iPhone 18 Pro" $PRO; mkstore "$DUO1"
-refusal_keeps_store cross-role
 fresh; mkstore "$DUO1"
 refusal_keeps_store "simctl list failure" STUB_LIST_RC=1
 fresh; mkstore "$DUO1"
 refusal_keeps_store "no-op lease" CI=true
-end_case "99 refusal paths (cap, cross-role, simctl list failure, no-op lease): the Duo's store is kept"
+end_case "99 refusal paths (cap, simctl list failure, no-op lease): the Duo's store is kept"
 
 # Case 100: store absent. The boot proceeds, and nothing is printed to stderr.
 fresh
@@ -1424,15 +1418,37 @@ need "the default-root store was still there when simctl boot ran" store_at_boot
 need "exit code" rc_is 0
 end_case "104 no SIM_TEST_DEVICES_DIR: the store under the default root goes too"
 
-# Case 105: the re-scan under the lock finds a Duo that a dead holder left booted. The run reuses it: no boot, the store
-# stays, and the lease goes back before xcodebuild.
-pro_dies_during_duo_wait duo store
+# Case 105: the granted run's re-scan finds a Duo booted during the wait. The run reuses it: no boot, the store stays, and
+# the lease goes back before xcodebuild.
+queued_duo_wait duo store
 need "destination is the booted Duo" dest_is "$DUO2"
 need "the Duo's store is kept" store_kept "$DUO2"
 need "exit code" rc_is 0
 need "steps are run only" steps_are "run "
 need "lease not held during xcodebuild" lease_not_held_at_xc
 end_case "105 re-scan after the lease reuses a booted Duo: no boot, its store is kept, the lease goes back"
+
+# Case 106: a duo run beside a booted 18 Pro is allowed (ruling sims-load-brake-only). Its own boot runs in full: the store
+# goes before the boot, the noise labels are disabled on the Duo, and the 18 Pro gets no call.
+fresh; booted "iPhone 18 Pro" $PRO; mkstore "$DUO1"
+need "fixture: the 18 Pro is booted" grep -Fq "iPhone 18 Pro" "$booted_file"
+need "fixture: the Duo's store is there before the run" store_there "$DUO1"
+run
+need "exit code" rc_is 0
+need "the Duo was booted" has_call "simctl boot $DUO1"
+need "the store was gone at the Duo's boot" store_at_boot_is "$DUO1" absent
+need "the noise labels are disabled on the Duo" test "$(spawn_count)" -eq 17
+need "the 18 Pro gets no call" no_call_names "$PRO"
+end_case "106 a duo run beside a booted 18 Pro is allowed: the Duo's own boot runs in full, and the 18 Pro gets no call"
+
+# Case 107: the cap still stops a third device. A duo run beside a booted 18 Pro and an iPad has two other devices booted
+# and no Duo to reuse: it boots nothing, runs nothing, and names the cap.
+fresh; booted "iPhone 18 Pro" $PRO; booted "iPad Pro 13-inch" $OTHER
+need "fixture: the 18 Pro and the iPad are booted" grep -Fq "iPhone 18 Pro" "$booted_file"
+run
+need "cap: exit 1, no boot, no xcodebuild" refused_clean
+need "cap: the stderr names the cap" grep -Fq "already booted" "$work/run.err"
+end_case "107 a duo run beside a booted 18 Pro and an iPad: refused at the cap, boots and runs nothing, exit 1"
 
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
