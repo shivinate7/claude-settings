@@ -117,6 +117,21 @@ def kill_tree(proc, sig, known=()):
     return pids
 
 
+def end_on_signals():
+    """TERM and HUP end the run as SystemExit, the path INT takes as a KeyboardInterrupt, so the caller's `finally` runs and its folders go.
+    A second signal while it cleans up is ignored. Where handlers cannot be set (another thread), nothing changes."""
+    def stop(sig, frame):
+        for n in nums:
+            signal.signal(n, signal.SIG_IGN)
+        raise SystemExit(128 + sig)
+    nums = [getattr(signal, n) for n in ("SIGTERM", "SIGHUP") if hasattr(signal, n)]  # Windows has no SIGHUP
+    try:
+        for n in nums:
+            signal.signal(n, stop)
+    except ValueError:
+        pass
+
+
 @contextlib.contextmanager
 def forward_signals(proc, names=("SIGTERM", "SIGHUP"), grace=5):
     """While the block runs, each signal in `names` that reaches this process goes to `proc` and the processes below it (kill_tree).
