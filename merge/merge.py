@@ -3017,7 +3017,7 @@ def kernel_thread(pid, proc="/proc"):
     try:
         with open(os.path.join(proc, str(pid), "stat"), encoding="utf-8", errors="replace") as f:
             text = f.read()
-        # comm (field 2) may hold spaces and parentheses: fields 3 on start after the last ")". Flags is field 9, the seventh of those.
+        # comm (field 2) may hold spaces and parentheses: fields 3 onward start after the last ")". Flags is field 9, the seventh of those.
         return bool(int(text.rsplit(")", 1)[1].split()[6]) & PF_KTHREAD)
     except (OSError, ValueError, IndexError):
         return False
