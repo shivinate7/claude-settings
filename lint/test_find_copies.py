@@ -137,6 +137,24 @@ def end_holder(proc):
     proc.wait(timeout=60)
 
 
+MERGE_TOOL = os.path.join(HERE, "..", "merge", "merge.py")
+
+
+def merge_tool():
+    """The merge tool loaded as its own module, the way lint/_test_temp.py loads it, so a case patches the copy its hold check calls."""
+    spec = importlib.util.spec_from_file_location("merge_tool_under_test", MERGE_TOOL)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def janitor_sweep():
+    """janitor/sweep.py, the module the merge tool's hold check reads a folder's processes through."""
+    sys.path.insert(0, os.path.join(HERE, "..", "janitor"))
+    import sweep  # janitor/sweep.py, the one reader of a process's cwd; merge.py imports it under this name
+    return sweep
+
+
 class RunFolderSweepTest(unittest.TestCase):
     """The sweep of test-temp-standard: a run folder whose pid is dead goes after an hour, and a live run's folder stays."""
 
@@ -196,8 +214,7 @@ class RunFolderSweepTest(unittest.TestCase):
     # so the read is refused for the holder's pid alone. The unpatched read first shows that the holder does run in the folder.
     @unittest.skipUnless(sys.platform.startswith("linux"), "the hold read is /proc/<pid>/cwd; a Mac or Windows read is not designed yet")
     def test_a_folder_whose_holder_cwd_cannot_be_read_stays(self):
-        sys.path.insert(0, os.path.join(HERE, "..", "janitor"))
-        import sweep  # janitor/sweep.py, the one reader of a process's cwd; merge.py imports it under this name
+        sweep = janitor_sweep()
         root = os.path.join(RUN_FOLDER, "sweep-unreadable-holder")
         os.makedirs(root)
         held = folder_aged_at(root, "%d-%s" % (os.getpid(), "d" * 32), SYNTHETIC_NOW, 2)
@@ -216,6 +233,25 @@ class RunFolderSweepTest(unittest.TestCase):
             _test_temp.sweep(root, os.path.join(root, "own-run"), now=SYNTHETIC_NOW)
         self.assertIn(holder.pid, reads, "scope: the sweep never read the holder's cwd, so the refusal was not reached")
         self.assertTrue(os.path.isdir(held), "a run folder whose holder's cwd cannot be read must stay: the sweep reaped it")
+
+    # An unreadable pid below the folder's owner holds the folder, unless it is a kernel thread: a kernel thread's cwd is unreadable to a
+    # user, and it descends from pid 2, so it must not tie to a folder named for this run. The child is this run's, so only the kernel
+    # flag differs between the control and the case. The hold check is called on the merge tool's own module, whose kernel_thread is patched.
+    @unittest.skipUnless(sys.platform.startswith("linux"), "the hold read is /proc/<pid>/stat and fd; a Mac or Windows read is not designed yet")
+    def test_a_kernel_thread_holds_no_folder(self):
+        tool = merge_tool()
+        sweep = janitor_sweep()
+        folder = os.path.join(RUN_FOLDER, "kthread-hold", "%d-%s" % (os.getpid(), "e" * 32))
+        os.makedirs(folder)
+        child = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"], stdin=subprocess.PIPE)
+        self.addCleanup(end_holder, child)
+        with mock.patch.object(sweep, "processes_in", return_value=([], [child.pid])):
+            with mock.patch.object(tool, "kernel_thread", return_value=False, create=True):
+                control = tool.held_by_live_process(folder)
+            with mock.patch.object(tool, "kernel_thread", return_value=True, create=True):
+                kernel = tool.held_by_live_process(folder)
+        self.assertTrue(control, "positive control: an unreadable child of this run that is not a kernel thread must hold the folder")
+        self.assertFalse(kernel, "a kernel thread holds no folder: the hold check kept a folder for an unreadable kernel thread")
 
 
 class FindCopiesTest(unittest.TestCase):
