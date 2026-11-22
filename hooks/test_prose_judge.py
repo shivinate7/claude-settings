@@ -59,6 +59,8 @@ sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import _test_ruling_kind_fixture as fx  # noqa: E402  the fixture record text (lint/_test_ruling_kind_fixture.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
+sys.path.insert(0, os.path.join(REPO_ROOT, "tests"))
+import lift_line  # noqa: E402  the one reader of the lift line (tests/lift_line.py)
 
 try:
     import prose_judge as pj
@@ -424,8 +426,9 @@ def case_f_an_override_lifts_the_refusal():
         ):
             code, out, log, err = ov_run(tool_payload, override)
             if lifted:
-                check("%s, %s: lifted, no output, one override log line" % (name, label),
-                      code == 0 and out == "" and log.count("\toverride\tprose-judge\t") == 1
+                check("%s, %s: lifted, one stdout line that names prose-judge, one override log line" % (name, label),
+                      code == 0 and lift_line.names_lift(out.strip(), "prose-judge")
+                      and log.count("\toverride\tprose-judge\t") == 1
                       and "\tdeny\t" not in log, (code, out[:120], log, err[-120:]))
             else:
                 hso = (json_or_none(out) or {}).get("hookSpecificOutput") or {}

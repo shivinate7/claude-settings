@@ -5,6 +5,7 @@ Other files reach these names through `guard`.
 """
 import contextlib
 import fnmatch
+import importlib
 import io
 import json
 import os
@@ -36,8 +37,9 @@ from guard_push_delete import (
 # quoted message and a heredoc body name an act and perform none.
 #
 # 1. merge-checks: a merge made outside the merge tool is
-#    refused while the head has a check or a workflow run pending or red, or when that read could not run. Another ready PR's CI never
-#    holds a merge (per-lane merge). The merge tool (merge/merge.py) runs its own `gh pr merge` as a subprocess, so no hook
+#    refused while the head has a check or a workflow run pending or red, or when that read could not run, or while another ready PR on the
+#    base has CI running and its head does not hold this one (`Host.batch_running`).
+#    The merge tool (merge/merge.py) runs its own `gh pr merge` as a subprocess, so no hook
 #    sees it; it has already read the head green. The read below is the tool's own `Host.head_read`, one home.
 # 2. cite-by-id (CLAUDE.md `git-cite-by-id`): a commit message or PR body that cites a record by
 #    its path is refused. The id is the record's file name without folder or `.md`, the slug
@@ -211,12 +213,19 @@ def merge_check(selector, repo: str, where: str):
     where = os.path.normpath(where) if where else ""   # a `cd` target may carry either separator
     host = module.Host(required=pinned_required(where) or "protection", repo=repo or None, cwd=where or None)
     # No ignore list: this head counts every check, so an ignored red check on it still refuses.
+    # The other ready pull requests on the base may not have CI running (decision no-merge-during-batch-ci), but an ignored check or run never counts.
+    try:
+        host.batch_brake = ignored_checks(module, where)
+    except module.Stop as e:
+        return "unknown", str(e)
     return host.head_read(selector, nothing_is_green=not has_workflows(where))
 
 
 MERGE_CHECK_REASON = (
     "Rule (Git): this head is not settled: %s. A merge waits for every check and workflow run on "
     "the head, required or not, and a read that could not run counts as not settled. "
+    "It also waits while another ready pull request on the base has CI running, unless that head holds this one "
+    "(decision no-merge-during-batch-ci). "
     "Remedy: run the merge tool, `merge <pr> --confirm`, which waits on the required checks, then "
     "merges the head it waited on."
 )
@@ -267,6 +276,16 @@ def pinned_required(where: str):
         if isinstance(names, list) and names and all(isinstance(k, str) and k for k in names):
             return names
     return None
+
+
+def ignored_checks(module, where: str):
+    """The repo's `merge.ignoreChecks` as {name: reason}: the checks and runs another ready pull request may have
+    running without holding a merge. {} with no such list. A bad entry raises the merge tool's Stop."""
+    for config in _merge_configs(where) if where else ():
+        merge = config["merge"]
+        if isinstance(merge, dict) and "ignoreChecks" in merge:
+            return module.ignore_checks(config)
+    return {}
 
 
 BARE_MERGE_REASON = (
@@ -1980,7 +1999,7 @@ def repo_proof_hit(stripped: str, cwd: str, transcript: str, session_id: str = "
     """Return a short label when a cloud session's `merge --confirm` or `merge --ready` acts in a checkout whose repo no cs-repo tag of the own newest
     get_session record names, else ''. Fails closed inside the clause, like role_proof_hit: an unparseable command, an unreadable
     checkout, no record and a set_session_tags after the record are each a refusal, because the guard-wide crash path fails open.
-    --lane-lint merges nothing and is not judged. Cost: none for a call that is no merge confirm;
+    --lane-lint merges no pull request and is not judged. Cost: none for a call that is no merge confirm;
     else one parse, one read of the origin and one transcript read.
 
     A local session is judged on `--confirm` only, by its OWN record (session_role.local_judgement, rules a, b, c): an own file must name
@@ -2140,6 +2159,117 @@ def lane_mcp_ready_hit(tool: str, tool_input, transcript: str) -> str:
     if tool != READY_PAGE_MCP_TOOL or not is_cloud() or not isinstance(tool_input, dict) or tool_input.get("draft") is not False:
         return ""
     return "update_pull_request draft false from a lane" if _own_record_is_lane(transcript) else ""
+
+
+# ---- a ready mark by MCP with no ready run that stood for the head (rule ready-mcp-mark-guard, decision ready-mcp-mark-guard)
+# `merge <pr> --ready` and `merge <pr> --confirm` on a draft run the draft step, which writes no durable record of its pass. It prints lines (merge/merge.py READY_*_FMT),
+# and they reach the guard only as the result of the Bash call in this session's transcript (read by lint/_transcript.py, the one home).
+# The patterns are built from those templates (ready_line_pattern), never copied here. A run stands for a head when its pass line names it, when a dry-merge line maps the
+# pass's sha to it, or, in a repo with no ready checks, when a line of the step names it. `--fast-checks` prints the pass line but builds no records page: it stands for nothing.
+# Cost: only an update with draft false reads anything: one transcript read, then one pull request read when a stood head is found.
+# A call with no transcript, or one that cannot be read, is allowed, as the other transcript rules allow it.
+READY_MARK_READ_TIMEOUT = 20
+READY_RUN_FLAGS = ("--ready", "--confirm")
+READY_MARK_REASON = (
+    "Rule (Git, ready-mcp-mark-guard): no `merge %(n)s --ready` run in this session passed its ready checks on %(head)s. A ready mark made without that pass "
+    "skips the ready checks and the records step, so the confirm refuses it and costs a second CI run (PR 3255 and PR 3472, 2026-11-15). "
+    "Remedy: run `merge %(n)s --ready` in this session and let it pass, then retry this call once its draft run shows. "
+    "(decision ready-mcp-mark-guard, a ready mark needs a ready pass on the head)"
+)
+
+
+def _ready_stood_shas(text: str, merge) -> set:
+    """The shas (7 to 40 hex chars) that the ready run whose result is `text` stands for: its pass shas, the head a dry-merge line maps a pass sha to, and,
+    when the run declared no ready checks, the head each sha-bearing line of the draft step names. `merge` is the merge tool module, the home of the line templates."""
+    pattern = merge.ready_line_pattern
+    shas = {m.group("sha") for m in pattern(merge.READY_PASS_FMT).finditer(text)}
+    for m in pattern(merge.READY_DRY_FMT).finditer(text):
+        if any(sha.startswith(m.group("dry")) or m.group("dry").startswith(sha) for sha in shas):
+            shas.add(m.group("head"))
+    if merge.READY_NO_CHECKS_LINE in text:
+        for fmt in (merge.READY_UNCHECKED_FMT, merge.READY_RECORDS_CURRENT_FMT, merge.READY_RECORDS_PUSHED_FMT, merge.READY_MERGED_FMT,
+                    merge.READY_CLAIM_STOP_FMT):
+            shas.update(m.group("sha") for m in pattern(fmt).finditer(text))
+    return shas
+
+
+def _ready_pass_shas(transcript: str, merge):
+    """The shas that a `--ready` or `--confirm` Bash or PowerShell call of this transcript stood for (_ready_stood_shas), or None when the
+    transcript cannot be read. A run in the background stands for its shas once the transcript reads its output: a Read of the output file, or a
+    Bash or PowerShell command that names it, whose result holds the run's lines. The output path is the one the run's start result names
+    (stall_watch RESULT_PATH, the one home of that format), so a pass in any other file counts for nothing. The guard never opens the file."""
+    from guard_core import lint_dir  # lazy: the one home of where lint/ is
+    lint = lint_dir()
+    if lint not in sys.path:
+        sys.path.insert(0, lint)
+    try:
+        import _transcript
+        records = _transcript.read_transcript(transcript)
+        result_path = importlib.import_module("stall_watch").RESULT_PATH
+    except Exception:
+        return None
+    ready_calls = set()
+    read_calls = set()
+    outputs = set()  # output files of the background ready runs seen so far
+    shas = set()
+    for rec in records:
+        for use in _transcript.tool_uses(rec):
+            tool_input = use.get("input") or {}
+            command = tool_input.get("command")
+            if not isinstance(use.get("id"), str):
+                continue
+            shell = use.get("name") in ("Bash", "PowerShell") and isinstance(command, str)
+            if shell and any(flag in command for flag in READY_RUN_FLAGS):
+                ready_calls.add(use["id"])
+            elif use.get("name") == "Read" and tool_input.get("file_path") in outputs:
+                read_calls.add(use["id"])
+            elif shell and any(path in command for path in outputs):
+                read_calls.add(use["id"])
+        for result in _transcript.tool_results(rec):
+            content = result.get("content")
+            text = content if isinstance(content, str) else " ".join(
+                b.get("text", "") for b in content or [] if isinstance(b, dict) and isinstance(b.get("text"), str))
+            if result.get("tool_use_id") in read_calls:
+                shas |= _ready_stood_shas(text, merge)
+            elif result.get("tool_use_id") in ready_calls:
+                shas |= _ready_stood_shas(text, merge)
+                started = result_path.search(text)
+                if started:
+                    outputs.add(started.group(1))
+    return shas
+
+
+def ready_mark_hit(tool: str, tool_input, transcript: str, where: str):
+    """(reason, matched) when an MCP update with draft false marks a pull request ready and this session's transcript shows no `merge <pr> --ready` or
+    `--confirm` run that stood for the head the pull request has now, else None. Judged only in a repo that uses the merge tool. A call that marks nothing ready,
+    a missing or unreadable transcript, an unloadable merge tool and an unreadable head pass (the records-page-ready rule reads the same head and refuses
+    an unreadable one first). A selector may carry a leading `#`, as ready_page_read reads it."""
+    if tool != READY_PAGE_MCP_TOOL or not isinstance(tool_input, dict) or tool_input.get("draft") is not False:
+        return None
+    if not isinstance(transcript, str) or not transcript or not where or not uses_merge_tool(where):
+        return None
+    module = merge_module()
+    if module is None:
+        return None
+    shas = _ready_pass_shas(transcript, module)
+    if shas is None:
+        return None
+    for selector, repo in ready_page_calls(tool, tool_input, ""):
+        selector = selector[1:] if selector[:1] == "#" and selector[1:].isdigit() else selector
+        if not selector.isdigit():
+            continue
+        head = ""
+        if shas:  # no stood sha at all refuses without a head read
+            try:
+                with module.shared_deadline(READY_MARK_READ_TIMEOUT):
+                    head = module.Host(repo=repo or None, cwd=where).pr(int(selector))["head"]
+            except Exception:
+                continue
+            if any(head.startswith(sha) for sha in shas):
+                continue
+        named = "its current head " + head[:9] if head else "its current head"
+        return READY_MARK_REASON % {"n": selector, "head": named}, "ready mark with no ready pass #" + selector
+    return None
 
 
 # ---- the record branch's one writer: only the triage session pushes to it (rule roadmap-one-writer)

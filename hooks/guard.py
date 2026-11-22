@@ -30,7 +30,7 @@ Every tool the guard judges, first of the refusals (`judge`, after the Read and 
 set_override_veto and session_home_keep):
   handoff-unread       deny. After compaction, a call from the main session while its handoff is
                        unread. The reason names the handoff and says to Read it. A payload with
-                       `agent_id` passes. An override lifts it. A failed import allows.
+                       `agent_id` passes. An override lifts it. A failed import of reread_check, or of its sibling precompact_handoff, refuses as guard-crash at load.
                        (precompact-handoff, item 9)
   compaction-audit     deny. After compaction, once the handoff is read, a call from the main session
                        until it spawns one agent (Agent or Task) whose brief's first non-blank line
@@ -113,9 +113,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   verdict-pipe         deny. A `verdict` stage piped into another command: the exit is the last
                        stage's, and a filter can cut verdict's FAIL line.
   background-end       deny. A background command with no end note. (background-needs-end-note)
-  check-tail           deny. A named check piped into tail or head. (background-check-through-verdict)
-  check-timeout        deny. A `merge --lane-lint` run in the foreground, or in the background under a
-                       time limit below its bound. (background-check-through-verdict)
+  check-tail           deny. A named check piped into any filter after the run, or a lint piped into
+                       any later command with a commit or push later in the call.
+                       (background-check-through-verdict)
+  check-timeout        deny. A `merge --lane-lint` run in the foreground with a time limit set, or in the
+                       background under a time limit below its bound. A run with no limit passes.
+                       (background-check-through-verdict)
   fg-bash-while-bg     deny. A foreground call that can run long (a test, lint, merge, build or install, or a time
                        limit over 60000 ms), while this session has a background command or agent running, read from
                        the transcript. A call from an agent, a missing transcript and a failed read allow.
@@ -272,6 +275,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        command without --undo) while its head's records page is stale, or when that read cannot run, in
                        a repo that uses the merge tool. A base that is not the default branch, a head holding a
                        Record-claim, a head behind the base, and a current page pass. (records-index-at-merge)
+  ready-mcp-mark-guard deny. Marking a pull request ready by MCP update_pull_request with draft false when this
+                       session's transcript shows no `merge <pr> --ready` run that passed its ready checks on the
+                       pull request's current head, in a repo that uses the merge tool. A draft true or body-only
+                       update, a missing transcript and a pass on the current head pass. (ready-mcp-mark-guard)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        A merge's own page at MERGE_HEAD passes: MERGE_HEAD is on the base's first-parent
                        line, or the lane is stacked on a base that main has not merged.
@@ -375,7 +382,7 @@ Other tools, in `judge` order:
                        `.git`, a target outside the clone, reads and non-writing shell pass. A git
                        `clean` counts only with a force flag. An
                        override lifts it. It adds no git spawn beyond what the call already spends.
-  scratchpad-owner     deny. A call with a valid `agent_id` that runs a file in this session's scratchpad, or
+  scratchpad-owner     ask (deny for an `rm` or `mv` of a folder holding such a file). A call with a valid `agent_id` that runs a file in this session's scratchpad, or
                        writes over one, that another agent wrote. Each such write records its agent in a
                        sidecar `<scratchpad>/.writers/<hash>`. A run is an interpreter or the path as the
                        command word; a write is a Write-family target or a shell write target. A first
@@ -676,6 +683,20 @@ def _install_ids_differ():
     return len(ids) > 1
 
 
+def _print_crash_refuse():
+    """Print the guard-crash refusal, the one text of it. It reads nothing from a guard module, so the load
+    failure below, which cannot trust one, prints it too."""
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse", "permissionDecision": "deny",
+        "permissionDecisionReason": (
+            "guard-crash: the guard is missing a part and cannot judge this call, so it refuses "
+            "every call, Bash and PowerShell too. Remedy: in your own terminal, not a Claude "
+            "session, run install.sh from the claude-settings checkout (Windows: install.ps1), "
+            "then retry. No override lifts this refusal, because the failed guard cannot check "
+            "the acts that no override lifts. "
+            "(decision guard-hooks-fail-closed, a guard with a missing part refuses the call)")}}))
+
+
 _load_deadline = time.monotonic() + _LOAD_WAIT_SECONDS
 _loading = "guard_core"   # the module being loaded, for the fallback line below
 while True:
@@ -694,7 +715,7 @@ while True:
             path_is_inside, primary_checkout, record, refuse, resolve_command,
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
-            _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes, segment_with_vars as _segment_with_vars,
+            _git_subcommand_index, amp_pieces, dir_before_segment, dirs_before_segments, shell_abs, walk_quotes, segment_with_vars as _segment_with_vars,
             _checkout_root_by_stat, layout_module as _layout_module,
             _REDIRECT_OPERATOR, ssh_remote_script, strip_redirections,
         )
@@ -732,7 +753,7 @@ while True:
             records_page_hit, repo_proof_hit, role_proof_hit, lane_ready_hit, lane_mcp_ready_hit, self_role_child_hit, self_role_hit,
             DEFAULT_RECORD_BRANCH, record_reason, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, PRIOR_WORK_REASON, prior_work_lane_hit, prior_work_named, header_time_hit, step_dup_hit, step_pr_hit, target_roster_hit, trust_card_hit, written_time_hit,
             BRIEF_ID_REASON, BRIEF_TOPIC_REASON, STEP_DUP_REASON,
-            undrafted_pr_create, uses_merge_tool, ready_page_hit,
+            undrafted_pr_create, uses_merge_tool, ready_page_hit, ready_mark_hit,
         )
         _loading = "guard_review_log"
         from guard_review_log import review_log_hit
@@ -762,7 +783,7 @@ while True:
             BACKGROUND_END_REASON, CHECK_TAIL_REASON, CHECK_TIMEOUT_TEMPLATE, FG_BACKGROUND_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
             NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, UV_VALUE_FLAGS, VERDICT_PIPE_REASON, WAITER_REASON,
             background_end_hit, background_work_running, check_tail_hit, check_timeout_hit, check_timeout_limit_text, fg_long_hit,
-            live_stream_hit, ln_descends_hit,
+            lint_start_hit, live_stream_hit, ln_descends_hit,
             loop_condition_polls_a_pattern, narrated_tail_hit, verdict_pipe_hit, waiter_verdict,
         )
         _loading = "guard_rm_var"
@@ -775,6 +796,17 @@ while True:
         )
         _loading = "guard_wsl"
         from guard_wsl import WSL_REASON, wsl_hit
+        # Flat modules the guard reads on every call. A failed import takes this same wait-then-refuse
+        # path (decision install-hooks-whole), never a fallback that judges with the read missing.
+        # guard_kill imports proc_env above, so its failure surfaces under guard_kill's name.
+        _loading = "reread_check"
+        import reread_check
+        # reread_check never raises on its sibling, so the guard reads the gap: ph is None when the sibling is
+        # missing, will not import, or lacks a name in PH_NAMES. A reread_check with no unread_handoff is as bad.
+        if reread_check.ph is None:
+            raise ImportError("reread_check could not use precompact_handoff")
+        if not callable(getattr(reread_check, "unread_handoff", None)):
+            raise ImportError("reread_check has no unread_handoff")
 
         _loading = "install-id"
         if _install_ids_differ():
@@ -783,7 +815,7 @@ while True:
     except Exception as exc:
         if time.monotonic() < _load_deadline:
             time.sleep(_LOAD_STEP_SECONDS)
-            for _name in ("git_reads", "guard_core") + _FAMILY_MODULES:
+            for _name in ("git_reads", "guard_core", "reread_check", "precompact_handoff", "proc_env") + _FAMILY_MODULES:
                 sys.modules.pop(_name, None)
             importlib.invalidate_caches()
             _loading = "guard_core"
@@ -816,15 +848,7 @@ while True:
         except Exception:
             stopping = False
         if not stopping:
-            print(json.dumps({"hookSpecificOutput": {
-                "hookEventName": "PreToolUse", "permissionDecision": "deny",
-                "permissionDecisionReason": (
-                    "guard-crash: the guard is missing a part and cannot judge this call, so it refuses "
-                    "every call, Bash and PowerShell too. Remedy: in your own terminal, not a Claude "
-                    "session, run install.sh from the claude-settings checkout (Windows: install.ps1), "
-                    "then retry. No override lifts this refusal, because the failed guard cannot check "
-                    "the acts that no override lifts. "
-                    "(decision guard-hooks-fail-closed, a guard with a missing part refuses the call)")}}))
+            _print_crash_refuse()
         sys.exit(0)
 
 
@@ -4504,6 +4528,21 @@ ROLE_NO_MODEL_REASON = (
 )
 
 
+def _question_form_module():
+    """hooks/question_form.py, told this file's folder, so a stamped copy in guard.d/<id>/ finds the install's
+    lint/ and skills/. The one home of the import. A copy whose question_form will not import, or lacks
+    use_hooks_home, refuses the call as guard-crash (decision install-hooks-whole): the SystemExit passes the
+    `except Exception` of each page check, so none of them allows on it."""
+    try:
+        import question_form
+        question_form.use_hooks_home(_HERE)
+    except Exception as exc:
+        record("", "deny", "guard-crash", cap_safe("question_form: " + type(exc).__name__ + ": " + str(exc), 200))
+        _print_crash_refuse()
+        sys.exit(0)
+    return question_form
+
+
 def record_branch_of(root):
     """The record branch of the checkout at `root`: lint/layout.py record_branch, else "roadmap" when the
     layout cannot be read."""
@@ -4973,7 +5012,7 @@ def role_model_one(tool_input):
 # and the field is not offered, so busy does not slow an Agent call there.) Full (memory over 95%, disk free
 # under the smaller of 5% of the disk and 5 GB) refuses every start call. A reading that cannot be read counts as normal. Only an
 # agent's shell or file write also reads load (RUNNING_AGENT_TOOLS, below). A cloud session (CLAUDE_CODE_REMOTE
-# "true") brakes a start call at a full disk only, read once from "/", and skips every other reading and every
+# "true") brakes a start call at a full disk (read once from "/") or at memory over 95%, and skips busy and every
 # running-agent call (decision machine-load-brake, "Cloud sessions").
 # SESSION_TOOL stays in the list, but no PreToolUse hook sees a start_session call (see SESSION_TOOL), so the brake does not
 # read the load for it. The audit after the call does not read load either.
@@ -4995,8 +5034,14 @@ LOAD_FULL_CLOUD_REASON = ("the disk is full (%s). No new lane or agent starts un
                           + 'On Windows, double-quote the root: --root "D:/a/repo". ' + LOAD_CITE)
 
 
+LOAD_LINT_CITE = "(decision machine-load-brake, a full machine starts no lint)"
+LOAD_LINT_REASON = "the machine is full (%s). No lint starts until the load drops. Wait, then retry. " + LOAD_LINT_CITE
+LOAD_LINT_DISK_REASON = ("the disk is full (%s). No lint starts until space is freed. Free it with " + LOAD_SWEEP
+                         + " (preview first, then add --confirm), then retry. " + LOAD_LINT_CITE)
+
+
 def _read_memory():
-    """Percent of physical memory in use, from the OS's own counter, or None on another platform."""
+    """Percent of physical memory in use, from the OS's own counter (/proc/meminfo on Linux), or None on another platform."""
     import ctypes
     if sys.platform == "win32":
         from ctypes import wintypes
@@ -5013,6 +5058,19 @@ def _read_memory():
         if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
             return None
         return 100.0 * (status.ullTotalPhys - status.ullAvailPhys) / status.ullTotalPhys
+    if sys.platform.startswith("linux") or is_cloud():
+        # A cloud host is Linux (decision machine-load-brake), so a cloud start reads meminfo on any reported platform.
+        # MemAvailable is the kernel's own estimate of what a new process can use, caches included.
+        fields = {}
+        with open("/proc/meminfo", encoding="ascii", errors="replace") as handle:
+            for line in handle:
+                name, _, rest = line.partition(":")
+                if name in ("MemTotal", "MemAvailable"):
+                    fields[name] = int(rest.split()[0])
+        total, available = fields.get("MemTotal"), fields.get("MemAvailable")
+        if not total or available is None:
+            return None
+        return 100.0 * (total - available) / total
     if sys.platform == "darwin":
         # kern.memorystatus_level is the free share that `memory_pressure` prints.
         level, size = ctypes.c_int(0), ctypes.c_size_t(ctypes.sizeof(ctypes.c_int))
@@ -5056,10 +5114,41 @@ def _load_value(reading: dict, key: str):
     return None if isinstance(v, bool) or not isinstance(v, (int, float)) else float(v)
 
 
+def lint_start_hit_of(tool: str, tool_input) -> str:
+    """The matched text when this call starts a lint in the background (`merge --lane-lint`, `bin/ci-job --lint`), else "".
+    A lint start is judged on the machine's load like an Agent start. A call with run_in_background, a lint ended by `&`,
+    and a lint in `bash -c` or `( ... )` all count. A foreground lint with no `&` is no start.
+    Never raises: a call it cannot read is no lint start."""
+    if tool not in SHELL_TOOLS or not isinstance(tool_input, dict):
+        return ""
+    try:
+        return lint_start_hit(strip_heredoc_bodies(tool_input.get("command") or ""), bool(tool_input.get("run_in_background")))
+    except Exception:
+        return ""
+
+
+def lint_load_hit() -> tuple:
+    """(rule reason, matched) when the machine is full at a background lint start, else ("", ""). One read of the load.
+    Memory counts in a cloud session too: a lint is the heaviest call a session makes. A failed or unread
+    reading counts as normal."""
+    try:
+        full = load_full(read_load())
+    except Exception:
+        return "", ""
+    if not full:
+        return "", ""
+    text = ", ".join(full)
+    if any(t.startswith("disk") for t in full):
+        return LOAD_LINT_DISK_REASON % text, text
+    return LOAD_LINT_REASON % text, text
+
+
 def load_hit(tool: str, tool_input) -> tuple:
     """(rule reason, matched) when the machine's load refuses this start call, else ("", ""). The one
     read of the call: a failed read or an unread value counts as normal. A cloud session is braked at a full disk
-    only: memory and busy never refuse its start."""
+    or at memory over 95%: busy never refuses its start."""
+    if lint_start_hit_of(tool, tool_input):
+        return lint_load_hit()
     if tool not in START_TOOLS:
         return "", ""
     cloud = is_cloud()
@@ -5078,9 +5167,16 @@ def load_hit(tool: str, tool_input) -> tuple:
     def disk_under(share, gb):
         return disk_text is not None and disk < min(disk_total * share / 100.0, gb)
 
-    full = load_full(reading, disk_only=cloud)
+    full = load_full(reading)
+    # The owed audit's own Audit: spawn is not refused at the Full memory point (decision machine-load-brake, Full): it is
+    # the one call that clears the audit. Only Full memory is lifted: a full disk still refuses it (the disk cleanup frees
+    # that first), and the busy test below still judges both readings, so a background spawn or a busy disk refuses as on
+    # main. AUDIT_SPAWN_PASSED is set only for that spawn, while the audit is owed.
+    if full and AUDIT_SPAWN_PASSED and not any(t.startswith("disk") for t in full):
+        full = []
     if full:
-        return (LOAD_FULL_CLOUD_REASON if cloud else LOAD_FULL_REASON) % ", ".join(full), ", ".join(full)
+        disk_tripped = any(t.startswith("disk") for t in full)
+        return (LOAD_FULL_CLOUD_REASON if cloud and disk_tripped else LOAD_FULL_REASON) % ", ".join(full), ", ".join(full)
     if cloud:
         return "", ""
     # An Agent or Task call that leaves run_in_background out or sets it false passes busy. Any other present value
@@ -5158,7 +5254,7 @@ def lane_session_hit(payload, tool: str) -> tuple:
 
 def load_full(reading, disk_only=False) -> list:
     """The readings over the full point, as text, or []. An unread or malformed reading counts as normal. `disk_only`
-    leaves memory out, as a cloud start does."""
+    leaves memory out."""
     if not isinstance(reading, dict):
         return []
     memory = _load_value(reading, "memory_pct")
@@ -5443,7 +5539,28 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # Not a recursive judge_shell: that clears PENDING_ASK and would lose a deny.
     texts = [stripped, *substitution_commands(raw, stripped)]
     whole_root = []   # command_root reads the whole command: once per command, never per segment
-    for segment in (part for text in texts for part in split_segments(text)):
+    judged = []       # (segment, folder the shell is in when it runs, or None) for every text
+    whole_reading = (GIT_WORK_TREE_RE.search(stripped) or "<<" in stripped
+                     or any(_segment_git_c_target(segment_tokens(part) or []) is not None
+                            for part in split_segments(stripped) if part.strip()))
+    for index, text in enumerate(texts):
+        text_ends = []
+        text_segments = split_segments(text, text_ends)
+        own_folders = index == 0 and not whole_reading
+        walked = dirs_before_segments(text_segments, cwd, text_ends) if own_folders else None   # one walk, never one per segment
+        for number, part in enumerate(text_segments):
+            # The command's own segments are read in the folder the shell holds when each runs, so a
+            # `cd` after a destructive segment moves nothing that ran before it. Four things keep
+            # the whole-command reading of `command_root`: a substitution (it runs where its own
+            # segment stands, which the whole-command root is kept for, as main reads it), a command
+            # with a `--work-tree`, `git -C` or `env -C` (`_run_dir` reads the first `-C` for every
+            # segment, as the owner ruled), a command with a heredoc (`dir_before_segment` reads a
+            # body line as a live segment), and a segment after a `cd` that may not have run.
+            here, maybe = (walked[number][0], [walked[number][1]]) if walked else (None, [])
+            if maybe and maybe[0]:
+                here = None
+            judged.append((part, here))
+    for segment, here in judged:
         if not segment.strip():
             continue
         words = segment_tokens(segment)
@@ -5451,6 +5568,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if own_c is not None:
             # a `--work-tree` beside the `-C` moves the files the call discards to that tree
             root = command_root(segment, cwd) if GIT_WORK_TREE_RE.search(segment) else _absolute(own_c, cwd)
+        elif here is not None:
+            root = here
         else:
             whole_root = whole_root or [command_root(stripped, cwd)]
             root = whole_root[0]
@@ -5671,7 +5790,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = verdict_pipe_hit(stripped)
     if matched:
         refuse(tool, "deny", "verdict-pipe", VERDICT_PIPE_REASON, matched)
-    matched = check_tail_hit(stripped, background)
+    matched = check_tail_hit(stripped, background, cwd)
     if matched:
         refuse(tool, "deny", "check-tail", CHECK_TAIL_REASON, matched)
     # The long foreground call is read first, so a foreground lane lint under background work gets this refusal and
@@ -5723,7 +5842,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 4. A wide delete refuses, and a force push asks.
     # Split before backslashes turn to slashes, so `it\'s` opens no quote that hides a delete.
-    delete_texts = [[delete_text(segment) for segment in split_segments(text)] for text in texts]
+    delete_texts = [[delete_text(piece) for segment in split_segments(text)
+                     for piece, _ in amp_pieces(segment)] for text in texts]
     for delete_segments in delete_texts:
         for number in range(len(delete_segments)):
             matched, reason = parent_delete_hit(delete_segments, number, cwd)
@@ -5943,7 +6063,7 @@ from shared_names import COMMENTS_TOOL, DATA_TOOL  # noqa: E402  the one home of
 def data_tool_judge(tool_input, cwd="", session_id=None):
     """((rule, matched), writes): data_tool_hit's verdict and the item writes it judged, for the rule that
     reads the writes again (page-item-design)."""
-    import question_form
+    question_form = _question_form_module()
     return question_form.page_item_hit(tool_input, cwd, session_id)
 
 
@@ -6031,7 +6151,7 @@ def page_stale_hit(tool_input, cwd):
     try:
         import contextlib
         import io
-        import question_form
+        question_form = _question_form_module()
         root = question_form.waiting_page_root(tool_input, cwd)
         if not root:
             return None
@@ -6116,7 +6236,7 @@ MOCKUP_HOME_FIX = " (decision mockup-home, a mockup kept off the repo is gone wi
 def mockup_home_hit(writes, tool_input, cwd):
     """(reason, matched) for the first `designs` entry of `writes` with no `file` or a refused one, else None.
     Fails open on any unread state."""
-    import question_form
+    question_form = _question_form_module()
     try:
         root = question_form.waiting_page_root(tool_input, cwd)
         found = question_form.design_file_problems(writes, root) if root else []
@@ -6135,7 +6255,7 @@ def page_design_hit(writes, tool_input, cwd):
     carries both `options` and `designs`: the checker needs the other half, which the write does not hold, so a
     partial update is allowed with one noted line. The pictured items of one call share one deadline. Fails open
     on any unread state."""
-    import question_form
+    question_form = _question_form_module()
     pictured = []
     for op, doc_id, data in question_form.design_writes(writes):
         if op == "update" and not (data.get("options") and data.get("designs")):
@@ -7110,7 +7230,7 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # Rule scratchpad-owner (decision scratchpad-owner). Every agent of a session shares the session's
 # scratchpad, so one agent can run a script another agent left there. A call from an agent that writes a
 # file in the scratchpad records the agent as its writer (`scratchpad_record_writer`); a shell call from an
-# agent that runs a scratchpad file another agent recorded is refused, and so is a write over such a file. A call
+# agent that runs a scratchpad file another agent recorded asks, and so does a write over such a file; a folder removal is refused. A call
 # with no `agent_id`, a file with no record, an agent's own file and a read pass. The text gate (`SCRATCHPAD_WORD`) keeps a call that names no scratchpad from
 # touching the disk: a path that reaches the scratchpad by a symlink is the ceiling, and passes.
 SCRATCHPAD_WORD = "scratchpad"
@@ -7292,15 +7412,18 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
     taken, reason = "", SCRATCHPAD_OVERWRITE_REASON
     for full in files:
         writer = scratchpad_writer_of(full, session)
-        if writer and writer != agent and not taken:
-            taken = "agent %s writes over a scratchpad file agent %s wrote: %s" % (agent, writer, full)
-        elif full in removed and not taken:
+        if writer and writer != agent:
+            if not taken:
+                taken = "agent %s writes over a scratchpad file agent %s wrote: %s" % (agent, writer, full)
+        elif full in removed:
             # An `rm` or `mv` that names a folder, the scratchpad itself or a glob removes each file under it, and
-            # only a file has a record: read the files (`scratchpad_folder_writer`).
+            # only a file has a record: read the files (`scratchpad_folder_writer`). A folder is a deny and a file
+            # an ask, so the folder wins whatever its place in the call: a file listed first must not hide it.
             held = scratchpad_folder_writer(full, session, agent)
             if held:
                 taken = "agent %s removes a scratchpad folder holding a file agent %s wrote: %s" % (agent, held[1], held[0])
                 reason = SCRATCHPAD_FOLDER_REASON
+                break
 
     def record_writers():
         for full in files:
@@ -7309,8 +7432,26 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
 
     if taken:
         # A refused write lands nothing, so the record stays with the first writer; an override that lifts it moves it.
-        refuse(tool, "deny", "scratchpad-owner", reason, taken, on_lift=record_writers)
+        refuse(tool, "deny" if reason is SCRATCHPAD_FOLDER_REASON else "ask", "scratchpad-owner", reason, taken,
+               on_lift=record_writers)
     record_writers()
+
+
+def scratchpad_folder_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
+    """Rule scratchpad-owner, the folder form: the log detail when an agent's call removes or moves a folder, the
+    scratchpad itself or a glob that holds a file another agent wrote, else ''. A removed file that is itself
+    another agent's is an overwrite ask (`scratchpad_owner_write`), not a folder, so it is skipped here. The shell
+    path reads this before the run ask: a folder removal is a deny, and the run ask must not hide it."""
+    agent, session, files, removed, _moved = scratchpad_writes(payload, tool, tool_input, cwd)
+    if not agent:
+        return ""
+    for full in files:
+        writer = scratchpad_writer_of(full, session)
+        if full in removed and not (writer and writer != agent):
+            held = scratchpad_folder_writer(full, session, agent)
+            if held:
+                return "agent %s removes a scratchpad folder holding a file agent %s wrote: %s" % (agent, held[1], held[0])
+    return ""
 
 
 def scratchpad_command_words(tokens):
@@ -7898,12 +8039,8 @@ def judge(payload) -> None:
     guard_core.set_override_veto(lambda: never_lifted(payload, tool, tool_input, cwd))
     session_home_keep(payload, tool, cwd)  # rule session-home's record, kept before any refusal can end the call
     # 0, handoff-unread. After compaction, no call the guard judges runs from the main session until it reads its handoff.
-    # Not in never_lifted: the owner may mean the call. A failed import allows.
-    try:
-        from reread_check import unread_handoff
-    except Exception:
-        unread_handoff = None
-    unread = unread_handoff(payload) if unread_handoff else ""
+    # Not in never_lifted: the owner may mean the call. A failed import of reread_check refuses as guard-crash at load.
+    unread = reread_check.unread_handoff(payload)
     if unread:
         refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % unread, unread)
     # 0, compaction-audit. Once the handoff is read, no call runs from the main session until it sends the audit
@@ -8032,9 +8169,9 @@ def judge(payload) -> None:
     # 9c. The machine-load brake: one read on a start call, and one on an agent's or a lane session's shell or file write.
     # It runs before the Opus refusal, because a lifted refusal exits refuse() at once and would skip this deny.
     load_reason, load_matched = load_hit(tool, tool_input)
-    if not load_reason:
+    if not load_reason and not lint_start_hit_of(tool, tool_input):   # a lint start was read once by load_hit
         load_reason, load_matched = running_agent_hit(payload, tool)
-    if not load_reason:
+    if not load_reason and not lint_start_hit_of(tool, tool_input):
         load_reason, load_matched = lane_session_hit(payload, tool)
     if load_reason:
         refuse(tool, "deny", "load-brake", load_reason, load_matched)
@@ -8086,6 +8223,10 @@ def judge(payload) -> None:
         if matched:
             refuse(tool, "deny", "merge-role-proof", LANE_READY_REASON, matched)
         refuse_ready_page(tool, tool_input, "", cwd)
+        # A ready mark with no `merge <pr> --ready` run that stood for the head in this session's transcript (rule ready-mcp-mark-guard).
+        unproved = ready_mark_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", cwd)
+        if unproved:
+            refuse(tool, "deny", "ready-mcp-mark-guard", unproved[0], unproved[1])
 
     # The MCP create tool carries its own `draft` field.
     if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:
@@ -8140,7 +8281,7 @@ def judge(payload) -> None:
         if not rule and item_writes:
             rule, matched = data_tool_label_hit(item_writes, payload.get("transcript_path"), cwd)
         if rule:
-            import question_form
+            question_form = _question_form_module()
         # One literal refuse() per rule: lint/rule_audit.py reads only string-literal rule ids.
         if rule == "port-question":
             refuse(tool, "deny", "port-question", question_form.PAGE_REASONS["port-question"], matched)
@@ -8225,10 +8366,14 @@ def judge(payload) -> None:
                     remedies.setdefault(n[0], remedy)
             if names:
                 sim_boot_refusal(tool, names, remedies)
-            # After the denies above: the shell call runs another agent's scratchpad script.
+            # After the denies above: the shell call runs another agent's scratchpad script. A folder removal in the
+            # same call is still a deny, so it is judged before the run ask.
             owned = scratchpad_owner_hit(payload, tool, tool_input, cwd)
             if owned:
-                refuse(tool, "deny", "scratchpad-owner", SCRATCHPAD_OWNER_REASON, owned)
+                folder = scratchpad_folder_hit(payload, tool, tool_input, cwd)
+                if folder:
+                    refuse(tool, "deny", "scratchpad-owner", SCRATCHPAD_FOLDER_REASON, folder)
+                refuse(tool, "ask", "scratchpad-owner", SCRATCHPAD_OWNER_REASON, owned)
             scratchpad_owner_write(payload, tool, tool_input, cwd)   # the call passed: refuse an overwrite, else record the writer
         return
     if tool == SIM_MCP:

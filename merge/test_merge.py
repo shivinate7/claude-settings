@@ -19,6 +19,7 @@ sys.path.append(os.path.join(HERE, "..", "janitor"))  # noqa: E402  janitor/swee
 import sweep  # noqa: E402
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import decision_watch  # noqa: E402  the one model caller (hooks/decision_watch.py); merge.py puts hooks on sys.path
+import merge_options  # noqa: E402  the one home of the long option names the guard reads (hooks/merge_options.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
@@ -145,9 +146,12 @@ def complete_config(**fields):
     CONFIG itself leaves requiredChecks out, and the notice is printed above the stop line a case reads."""
     return json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=["checks"], **fields)))
 
+FAKE_REPO = "owner/repo"  # the repository a FakeHost pull request's head and base both live in, as the info dict names them (owner/name)
+
 class FakeHost:
     """The GitHub half, scripted. `other` is a second clone that plays a competing pusher and the merger."""
     built = True
+    head_repo = base_repo = FAKE_REPO  # the repositories pr() reports: a case sets head_repo to another for a fork
     own_number = 7  # the lane's own PR: pr() serves its head from the branch; the lane-lint cases name it 7
 
     def now(self):
@@ -194,12 +198,14 @@ class FakeHost:
                 raise merge.Stop(f"reading the pull request failed: HTTP 404: Not Found (#{n})")
             row = self.pulls[n]
             return {"head": row["head"]["sha"], "branch": row["head"]["ref"], "base": row["base"]["ref"], "state": row["state"].upper(),
-                    "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": bool(row["draft"]), "body": row["body"] or ""}
+                    "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": bool(row["draft"]), "body": row["body"] or "",
+                    "head_repo": self.head_repo, "base_repo": self.base_repo}
         head = merge.origin_head(self.root, self.branch)
         base = (self.base_seq.pop(0) if len(self.base_seq) > 1 else self.base_seq[0]) if self.base_seq else self.base
         return {"head": self.head_override or head, "branch": self.branch, "base": base, "state": self.pr_state,
                 "mergeable": self.mergeable, "merge_state": "CLEAN", "draft": self.draft, "body": self.body,
-                "changed_files": len(self.changed) if self.changed_files is None else self.changed_files}
+                "changed_files": len(self.changed) if self.changed_files is None else self.changed_files,
+                "head_repo": self.head_repo, "base_repo": self.base_repo}
 
     def open_pulls(self):
         """-> the open pull requests as `GET pulls` lists them: the own PR, then each scripted row that is open. Each call is one list read."""
@@ -265,7 +271,8 @@ class FakeHost:
     def pr_info(self, n):  # the same fields as pr(), read from the entry add_pr or create_pr made
         p = self.batch_pulls[n]
         return {"head": merge.origin_head(self.root, p["branch"]), "branch": p["branch"], "base": p["base"], "state": p["state"],
-                "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": p["draft"], "body": p["body"]}
+                "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": p["draft"], "body": p["body"],
+                "head_repo": self.head_repo, "base_repo": self.base_repo}
 
     def batch_pr(self, branch):  # the open pull request whose head is `branch`, as (n, info), or None
         self.batch_pr_calls.append(branch)
@@ -11766,6 +11773,14 @@ class MergeImport(unittest.TestCase):
         r = subprocess.run([sys.executable, tool, "7", "--confirm"], cwd=root, capture_output=True, text=True)
         self.assert_one_clear_line(r, "NameError")
 
+class ParserOptions(unittest.TestCase):
+    """The parser's long options and MERGE_OPTIONS, which the guard reads to name a prefix, are one list. Adding an option to
+    one and not the other fails here."""
+    def test_the_parser_long_options_are_the_merge_options(self):
+        parser = merge.build_parser()
+        long_options = {s for action in parser._actions for s in action.option_strings if s.startswith("--")}
+        self.assertEqual(long_options, set(merge_options.MERGE_OPTIONS))
+
 class RecordsPageHome(unittest.TestCase):
     """The records page path has one home, lint/hook_catalog.py. merge.py imports it and holds no copy."""
     def test_merge_holds_no_copy_of_the_records_page_path(self):
@@ -19011,6 +19026,12 @@ class ReviewEnv(Env):
         sh(self.co, "git", "push", "-q", "-f", "origin", f"{sha}:refs/heads/main")
         sh(self.co, "git", "fetch", "-q", "origin")
 
+    def base_without_kinds(self, fx):
+        """Move origin's main to a commit on main3 whose stamp config has no record kinds, so the base claims nothing (claim_only). -> its sha."""
+        no_kinds = self.git_commit(fx.main3, {".github/stamp.json": json.dumps(dict(CONFIG, kinds=[]))})
+        self.base_tip(no_kinds)
+        return no_kinds
+
     def claim_over(self, parent, changes, message="Claim record numbers\n\nRecord-claim: D-002", more_parents=()):
         """-> the sha of a commit over `parent`: its tree is the one git_commit builds for `changes`, and its message is a claim commit's (a Record-claim
         trailer, which claim_only reads) unless `message` names another. `more_parents` follow `parent`. The tree is git_commit's, so the fixture
@@ -19917,7 +19938,8 @@ class ReviewRoundOneCompletes(ReviewEnv):
 class ReviewFixAfterMainMerge(ReviewEnv):
     """A fix check after a merge of main (decision pr-review-record). The newest earlier record holds a fix check, so the rule of ReviewFixBase
     refuses every fix check from its head. A lane that merges main into the fixed head has a new head: a merge commit whose second parent is on main,
-    and whose first parent is the fixed head or a commit after it, as git's ancestry reads it. A merge with a commit off main is refused. A plain
+    and whose first parent is the fixed head or a commit after it, as git's ancestry reads it. A merge with a commit off main is refused, unless
+    that commit is the head of another open pull request: a lane merged into this branch (the lane cases at the end of this class). A plain
     commit on the head is accepted after a PASS fix check. The newest record's fix check must have passed: a fix check after a FAIL one
     is refused, whatever the merge. The parents come from the commit read and the on-main test from the compare read, both scripted by PullsHost."""
 
@@ -20067,6 +20089,130 @@ class ReviewFixAfterMainMerge(ReviewEnv):
         body = posted_body(self, out)
         self.assertEqual(parse_text(self, body)["head"], m3, "the printed record names the wrong head")
         self.assertEqual(parse_text(self, body)["fix"], (fx.fixed, *REVIEW_FIX_PASS[1:]), "the printed record lacks the fix check from the reviewed head")
+
+    def lane_commits(self, fx):
+        """Add a lane branch and two merges of it into the fixed head to fx, shaped as a lane's merge into this branch is. `lane` adds a.txt and
+        b.txt off seed, so git's merge with fixed conflicts on a.txt alone and merges b.txt cleanly. `lane_merge` resolves a.txt by hand and edits
+        nothing else. `lane_edited` adds x.txt, which git's merge does not hold. The lane is pushed as feat8, as a pull request head is in origin.
+        -> fx, with lane, lane_merge and lane_edited added, and their parents and trees read from git."""
+        lane = self.git_commit(fx.seed, {"a.txt": "lane\n", "b.txt": "lane-b\n"})
+        sh(self.co, "git", "push", "-q", "origin", f"{lane}:refs/heads/feat8")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        lane_merge = self.git_commit(fx.fixed, {"a.txt": "resolved\n", "b.txt": "lane-b\n"}, lane)
+        lane_edited = self.git_commit(fx.fixed, {"a.txt": "resolved\n", "b.txt": "lane-b\n", "x.txt": "x\n"}, lane)
+        self.facts(fx, [lane, lane_merge, lane_edited])
+        fx.lane, fx.lane_merge, fx.lane_edited = lane, lane_merge, lane_edited
+        return fx
+
+    def lane_host(self, fx, live, lane_pr=True, verdict="PASS", pr8_head=None, pulls_error=None):
+        """The pull request at `live`, with the newest record (head fx.fixed, fix from fx.pre) and the commits, trees and compares of fx. With
+        `lane_pr`, another open pull request, 8, has fx.lane as its head, or `pr8_head` when given, as a lane's draft pull request does (decision
+        draft-until-reviewed). `pulls_error` fails the open pull request list read."""
+        pulls = [batch_pull(7, live)]
+        if lane_pr:
+            pulls.append(batch_pull(8, pr8_head or fx.lane, draft=True, head_ref="feat8"))
+        return PullsHost(pulls, {}, comments=[self.newest_record(verdict, head=fx.fixed, pre=fx.pre)], commits=fx.parents, trees=fx.trees,
+                         compares=fx.on_main, pulls_error=pulls_error)
+
+    def test_i_a_fix_verifier_after_a_conflicted_merge_of_an_open_pr_head_is_accepted_and_reads_done(self):
+        # A lane's conflicting merge of another open pull request's head into this branch. The second parent is not on main, so the base check
+        # alone refuses it. The conflict is resolved by hand at a.txt, as a conflicting merge of main is, so the tree rule passes it.
+        fx = self.lane_commits(self.real_commits())
+        self.assertEqual(merge.conflicting_files(self.co, fx.fixed, fx.lane), ("conflict", ["a.txt"]), "fixture: fixed and the lane do not conflict on a.txt alone")
+        self.assertEqual(fx.parents[fx.lane_merge], [fx.fixed, fx.lane], "fixture: the lane merge is not a merge of the fixed head and the lane")
+        self.assertFalse(self.is_ancestor(fx.lane, "origin/main"), "fixture: the lane is on origin's main, so the base check accepts the case")
+        host = self.lane_host(fx, fx.lane_merge)
+        self.assertIn(fx.lane, [d["head"]["sha"] for d in host.pulls if d["number"] == 8], "fixture: pull request 8 does not have the lane as its head")
+        rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=fx.lane_merge)
+        self.assertEqual(rc, 0, "a fix verifier after a conflicted merge of an open pull request's head was refused:\n" + out + err)
+        body = posted_body(self, out)
+        self.assertEqual(parse_text(self, body)["head"], fx.lane_merge, "the printed record names the wrong head")
+        self.assertEqual(parse_text(self, body)["fix"], (fx.fixed, *REVIEW_FIX_PASS[1:]), "the printed record lacks the fix check")
+        self.assertEqual(record_state(self, body, head=fx.lane_merge), "done", "the record printed after the lane merge's fix check does not read done")
+
+    def test_j_a_fix_verifier_on_a_lane_merge_with_an_edit_outside_its_conflict_is_refused(self):
+        # The lane merge of case i, with x.txt added, which git's merge does not hold. Pull request 8 is open in both cases, so only the tree rule
+        # can refuse this one, as it refuses a conflicting merge of main with an extra edit.
+        fx = self.lane_commits(self.real_commits())
+        r = subprocess.run(["git", "merge-tree", "--write-tree", fx.fixed, fx.lane], cwd=self.co, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, "fixture: fixed and the lane do not conflict in git:\n" + r.stdout + r.stderr)
+        self.assertEqual(fx.parents[fx.lane_edited], [fx.fixed, fx.lane], "fixture: the edited lane merge is not a merge of the fixed head and the lane")
+        edits = sh(self.co, "git", "diff-tree", "-r", "--name-only", r.stdout.split()[0], fx.trees[fx.lane_edited]).split()
+        self.assertEqual(sorted(edits), ["a.txt", "x.txt"], "fixture: the edited lane merge does not add one file outside git's conflict")
+        host = self.lane_host(fx, fx.lane_edited)
+        rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=fx.lane_edited)
+        self.assertIn(("pulls", {"state": "open"}), host.list_calls, "the open pull request list was not read, so the refusal may be the base check's")
+        self.assertEqual(rc, 2, "a fix verifier on a lane merge with an edit outside its conflict was accepted:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_k_a_fix_verifier_after_a_conflicted_merge_of_a_commit_no_open_pr_heads_is_refused(self):
+        # Control: the lane merge of case i, with no pull request at the lane's head. The only difference from case i is the open list, so the
+        # refusal is the one the base check made before the change.
+        fx = self.lane_commits(self.real_commits())
+        host = self.lane_host(fx, fx.lane_merge, lane_pr=False)
+        self.assertNotIn(fx.lane, [d["head"]["sha"] for d in host.pulls], "fixture: the lane is an open pull request's head, so the case tests nothing")
+        self.assertFalse(self.is_ancestor(fx.lane, "origin/main"), "fixture: the lane is on origin's main, so the base check accepts the case")
+        rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=fx.lane_merge)
+        self.assertEqual(rc, 2, "a fix verifier after a conflicted merge of a commit that no open pull request heads was accepted:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_l_a_fix_verifier_after_a_lane_merge_is_refused_when_the_newest_fix_verifier_failed(self):
+        # The lane merge of case i after a newest record whose fix verifier FAILed. The open record refuses the fix verifier before the merge's
+        # parents are read, so an open pull request at the lane's head does not admit it.
+        fx = self.lane_commits(self.real_commits())
+        host = self.lane_host(fx, fx.lane_merge, verdict="FAIL")
+        self.assertIn(fx.lane, [d["head"]["sha"] for d in host.pulls if d["number"] == 8], "fixture: pull request 8 does not have the lane as its head")
+        self.assertEqual(record_state(self, host.comments[0]["body"], head=fx.fixed), "open", "fixture: the newest record with a FAIL fix verifier does not read open")
+        rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=fx.lane_merge)
+        self.assertEqual(rc, 2, "a fix verifier after a lane merge was accepted though the newest record's fix verifier is FAIL:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_m_a_fix_verifier_after_a_lane_merge_with_this_prs_own_number_at_the_second_parent_is_refused(self):
+        # The lane merge of case i, and the open list also holds this pull request, number 7, at the lane, which is the second parent. The head read
+        # names the merge, so only the own-number clause tells this row from another pull request's head. GitHub gives one row to a number, so the
+        # two reads must disagree for this state to come up. The base check refuses the merge too, so the open list read is asserted first.
+        fx = self.lane_commits(self.real_commits())
+        host = self.lane_host(fx, fx.lane_merge, lane_pr=False)
+        host.pulls.append(batch_pull(7, fx.lane))
+        self.assertEqual(fx.parents[fx.lane_merge], [fx.fixed, fx.lane], "fixture: the lane merge is not a merge of the fixed head and the lane")
+        self.assertEqual([d["head"]["sha"] for d in host.pulls if d["number"] == 7], [fx.lane_merge, fx.lane],
+                         "fixture: the open list does not hold pull request 7 at the merge and at its second parent")
+        rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=fx.lane_merge)
+        self.assertIn(("pulls", {"state": "open"}), host.list_calls, "the open pull request list was not read, so the refusal may be the base check's")
+        self.assertEqual(rc, 2, "a fix verifier whose second parent is this pull request's own head was accepted:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_n_a_fix_verifier_after_a_lane_merge_is_refused_when_the_lane_is_an_older_head_of_an_open_pull_request(self):
+        # The lane merge of case i, where pull request 8 has moved on: its current head is lane_edited, and the lane is its older head. Drafts count,
+        # an older head does not (owner, q3-a). The base check refuses the lane too, so the open list read is asserted first.
+        fx = self.lane_commits(self.real_commits())
+        host = self.lane_host(fx, fx.lane_merge, pr8_head=fx.lane_edited)
+        self.assertEqual(fx.parents[fx.lane_merge], [fx.fixed, fx.lane], "fixture: the lane merge is not a merge of the fixed head and the lane")
+        self.assertEqual([d["head"]["sha"] for d in host.pulls if d["number"] == 8], [fx.lane_edited],
+                         "fixture: pull request 8 is not open at lane_edited, so the lane is not an older head of it")
+        self.assertFalse(self.is_ancestor(fx.lane, "origin/main"), "fixture: the lane is on origin's main, so the base check accepts the case")
+        rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=fx.lane_merge)
+        self.assertIn(("pulls", {"state": "open"}), host.list_calls, "the open pull request list was not read, so the refusal may be the base check's")
+        self.assertEqual(rc, 2, "a fix verifier after a lane merge of an older head of an open pull request was accepted:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_o_a_fix_verifier_after_a_lane_merge_is_refused_when_the_open_pull_list_cannot_be_read(self):
+        # The lane merge of case i, where the open pull request list fails. The fix check cannot tell whether the second parent is another open pull
+        # request's head, so it refuses, and the failed read is what it names. A refusal by the base check would print no such text.
+        fx = self.lane_commits(self.real_commits())
+        host = self.lane_host(fx, fx.lane_merge, pulls_error="gh: the open pull requests could not be read (test)")
+        self.assertEqual(fx.parents[fx.lane_merge], [fx.fixed, fx.lane], "fixture: the lane merge is not a merge of the fixed head and the lane")
+        rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=fx.lane_merge)
+        self.assertIn(("pulls", {"state": "open"}), host.list_calls, "the open pull request list was not read for the lane merge")
+        self.assertEqual(rc, 1, "a fix verifier after a lane merge whose open pull request list cannot be read was not refused as a failed read:\n" + out + err)
+        self.assertIn("the open pull requests could not be read", err, "the refusal does not name the failed open pull request read:\n" + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
+        self.assertNotIn("Traceback", err)
 
 class ReviewCleanMainMerge(ReviewEnv):
     """A record stays done when the pull request head is one or more clean merges of main after the record's head (decision pr-review-record).
@@ -20292,8 +20438,7 @@ class LintCleanMainMergeCarry(ReviewEnv, RecordsEnv):
 
     def test_k_a_clean_merge_carries_when_the_base_has_no_record_kinds(self):
         fx = self.real_commits()
-        no_kinds = self.git_commit(fx.main3, {".github/stamp.json": json.dumps(dict(CONFIG, kinds=[]))})
-        self.base_tip(no_kinds)
+        self.base_without_kinds(fx)
         claim = self.claim_over(fx.fixed, {"docs/decisions/second.md": record("D-002", "second")})
         self.facts(fx, [claim])
         self.assertFalse(self.carry(fx, claim), "fixture: a claim carries under a base with no record kinds, so the case below proves nothing about the stamp config")
@@ -20342,6 +20487,57 @@ class LintCleanMainMergeCarry(ReviewEnv, RecordsEnv):
         clone = self.main_only_clone()
         self.assertFalse(self.has_commit(clone, fork), "fixture: the main-only clone holds the unpushed commit, so git can read the merge")
         self.assertFalse(self.carry(fx, live, root=clone), "a merge whose merge state is unknown carried the PASS: an unknown read is no carry")
+
+    def generated_page_carries(self, fx):
+        """-> the generator's records page committed straight on the linted head, after its scope checks, and asserts that it carries the PASS. On a
+        base with no record kinds the old code refuses every claim, so this carry is the one red assert the no-kinds cases below share."""
+        page = self.tool_page(fx.fixed)
+        self.facts(fx, [page])
+        self.assert_page_scope(page, fx.fixed)
+        self.assertTrue(self.carry(fx, page), "a generator-proved records page directly over the linted head did not carry the PASS on a base with no record kinds")
+        return page
+
+    def test_r_a_generated_page_on_the_linted_head_carries_when_the_base_has_no_record_kinds(self):
+        fx = self.real_commits()
+        self.base_without_kinds(fx)
+        claim = self.claim_over(fx.fixed, {"docs/decisions/second.md": record("D-002", "second")})
+        self.facts(fx, [claim])
+        self.assertFalse(self.carry(fx, claim), "control: a claim commit over the linted head carried the PASS on a base with no record kinds")
+        self.generated_page_carries(fx)
+
+    def test_s_a_page_subject_commit_with_another_file_and_a_hand_edited_page_are_not_carried_when_the_base_has_no_record_kinds(self):
+        fx = self.real_commits()
+        self.base_without_kinds(fx)
+        self.generated_page_carries(fx)
+        page_and_notes = self.tool_page(fx.fixed, changes={"notes.txt": "notes\n"})
+        self.facts(fx, [page_and_notes])
+        self.assert_page_scope(page_and_notes, fx.fixed, files=[merge.RECORDS_PAGE, "notes.txt"])
+        self.assertFalse(self.carry(fx, page_and_notes), "a generated records page that also touches notes.txt carried the PASS on a base with no record kinds")
+        hand = self.tool_page(fx.fixed, hand="hand line\n")
+        self.facts(fx, [hand])
+        self.assert_page_scope(hand, fx.fixed)
+        self.assertIn("hand line", sh(self.co, "git", "show", f"{hand}:{merge.RECORDS_PAGE}"), "fixture: the page commit does not hold the hand edit")
+        self.assertFalse(self.carry(fx, hand), "a hand-edited records page carried the PASS on a base with no record kinds")
+
+    def test_t_the_join_accepts_a_generated_page_over_a_lint_pass_when_the_base_has_no_record_kinds(self):
+        fx = self.real_commits()
+        self.base_without_kinds(fx)
+        page = self.tool_page(fx.fixed)
+        self.facts(fx, [page])
+        self.assert_page_scope(page, fx.fixed)
+        live = self.reviewed_host(fx, page, comments=[lint_of(7, page)])
+        try:
+            merge.lint_check(live, 7, live.pr(7), self.co, merge.DEFAULT_CONFIG)  # control: a lint PASS on the live head needs no carry
+        except merge.Stop as e:
+            self.fail("control: the join refused a records page whose own lane lint PASS is on it: " + str(e))
+        host = self.reviewed_host(fx, page, comments=[lint_of(7, fx.fixed)])
+        branch = host.pr(7)["branch"]
+        sh(self.co, "git", "push", "-q", "-f", "origin", f"{page}:refs/heads/{branch}")
+        self.assertEqual(sh(self.co, "git", "ls-remote", "origin", f"refs/heads/{branch}").split()[0], page, "fixture: origin's pull request branch is not the records page")
+        try:
+            merge.lint_check(host, 7, host.pr(7), self.co, merge.DEFAULT_CONFIG)
+        except merge.Stop as e:
+            self.fail("the join refused a generated records page over the lint PASS of the reviewed head, on a base with no record kinds: " + str(e))
 
 
 class ReviewUnknownReads(ReviewEnv):
@@ -21520,7 +21716,7 @@ class ReviewedList(ReviewEnv):
     def test_a_draft_is_listed_with_no_ci_read(self):
         host, rc, out, err = self.listing([batch_pull(9, REVIEW_HEAD, draft=True)], [review_comment(1, 9, record_text(n=9, rounds=REVIEW_PASS)), lint_of(9, REVIEW_HEAD)])
         self.assertEqual(rc, 0, out + err)
-        self.assertRegex(list_line(self, out, 9), rf"^#9 feat9 {REVIEW_HEAD[:9]} done: .*; CI draft, no run$")
+        self.assertRegex(list_line(self, out, 9), rf"^#9 feat9 {REVIEW_HEAD[:9]} ready: .*; next: merge --ready.*; CI draft, no run$")
         self.assertEqual([rel for rel, _ in host.list_calls if rel.startswith("commits/")], [], "a draft's head was read")
 
     def test_a_ready_pr_gets_its_live_ci_state(self):
@@ -22874,6 +23070,20 @@ class ClaimOnlyReviewed(ReviewEnv, RecordsEnv):
         self.facts(fx, [page])
         self.assert_page_scope(page, fx.fixed)
         self.assert_page_not_carried(fx, page, "a hand-written records page reached through the claims route")
+
+    def test_v_a_lint_pass_on_the_reviewed_head_carries_to_a_records_page_head_when_the_base_has_no_record_kinds(self):
+        # Catches: claim_only refusing a generator-proved records page on a base with no stamp kinds, so the lint PASS on the reviewed head reads as no lint.
+        fx = self.real_commits()
+        self.base_without_kinds(fx)
+        self.use_fake_records()
+        page = self.tool_page(fx.fixed)
+        self.facts(fx, [page])
+        self.assert_page_scope(page, fx.fixed)
+        self.reviewed_line(self.claim_host(fx, page, record_head=page, lint_head=page), page, "done",
+                           "control: a records-page head with its own lane lint PASS does not read done")
+        self.reviewed_line(self.claim_host(fx, page, record_head=page, lint_head=fx.fixed), page, "done",
+                           "a lint PASS on the reviewed head does not carry to a records-page head when the base has no record kinds")
+
 
 class PageOnlyRecordCarry(ReviewEnv, RecordsEnv):
     """A records-page commit the merge tool wrote carries a review record the way a claim commit does. The tool's page commit has one parent, the
@@ -26242,6 +26452,69 @@ class DraftReady(CloudSession):
         self.assertIn("is not the default branch", text)
         self.assertEqual(self.head("lane-101"), old, "a draft on another base was pushed to:\n" + text)
         self.assertEqual(self.lane_pushes(), [])
+
+    def other_base_lane(self, checks):
+        """Lane 101 cut before main moves, and a release branch at main's new tip, which the lane lacks: the lane's draft names release.
+        checks: main declares the ready check first, so release carries it too. -> the lane's head."""
+        if checks:
+            self.ready_checks_on_main()
+        old = self.lane(101)
+        self.main_moves()
+        sh(self.other, "git", "push", "-q", "origin", "main:refs/heads/release")
+        self.host.batch_pulls[101].update(base="release", draft=True)
+        return old
+
+    # The four pins below pin lines the built draft step prints: they are green on the built code, by design (the coordinator's
+    # ruling for this lane), so no red run is claimed for them.
+    def test_a_draft_on_another_base_names_its_dry_merge_and_passes_on_that_sha(self):
+        old = self.other_base_lane(checks=True)
+        with self.ready_check_answers("pass") as ran:
+            rc, text = self.ready_run()
+        self.assertTrue(ran, "setup: no ready check ran, though merge.readyChecks names one:\n" + text)
+        dry = re.search(r"^merge: the dry merge of ([0-9a-f]{9}) into release is ([0-9a-f]{9})\.$", text, re.M)
+        self.assertIsNotNone(dry, "the draft on release printed no dry-merge line:\n" + text)
+        self.assertEqual(dry.group(1), old[:9], "the dry-merge line names a head other than the lane's:\n" + text)
+        self.assertEqual(rc, 0, text)
+        passed = "merge: the ready checks (check invariants) pass on %s." % dry.group(2)
+        self.assertIsNotNone(re.search("^" + re.escape(passed) + "$", text, re.M),
+                             "the pass line is not the old words over the dry merge's sha:\n" + text)
+        self.assertLess(dry.start(), text.index(passed), "the pass line came before the dry-merge line:\n" + text)
+        parent = sh(self.co, "git", "rev-parse", dry.group(2) + "^1").strip()
+        self.assertTrue(parent.startswith(old[:9]), "the dry merge's first parent is not the lane's head:\n" + text)
+        self.assertEqual(self.lane_pushes(), [], "a draft on another base pushed to the lane:\n" + text)
+
+    def test_fast_checks_on_another_base_passes_on_its_dry_sha_and_prints_no_dry_merge_line(self):  # control: the dry line is draft_step's alone
+        self.other_base_lane(checks=True)
+        with self.ready_check_answers("pass") as ran:
+            rc, out, err = self.run_args("101", "--fast-checks")
+        text = out + err
+        self.assertTrue(ran, "setup: no ready check ran, though merge.readyChecks names one:\n" + text)
+        self.assertEqual(rc, 0, text)
+        self.assertNotIn("the dry merge of", text, "--fast-checks printed the dry-merge line, which only the draft step prints:\n" + text)
+        self.assertRegex(text, r"(?m)^merge: the ready checks \(check invariants\) pass on [0-9a-f]{9}\.$", "--fast-checks printed no pass line:\n" + text)
+        self.assertEqual(self.lane_pushes(), [], "--fast-checks pushed to the lane:\n" + text)
+
+    def test_a_draft_on_another_base_with_no_ready_checks_names_its_head_on_the_unchecked_line(self):
+        old = self.other_base_lane(checks=False)
+        rc, text = self.ready_run()
+        self.assertEqual(rc, 0, text)
+        self.assertIn("merge: the draft step ran no checks on #101 at %s. Nothing was pushed." % old[:9], text.splitlines(),
+                      "no unchecked line names the lane's head:\n" + text)
+        self.assertIn("merge: this repo declares no ready checks (merge.readyChecks), so the draft step runs none.", text.splitlines())
+        self.assertNotIn("the dry merge of", text, "a base with no ready checks made a dry merge, so it would have a worktree:\n" + text)
+        self.assertEqual(self.lane_pushes(), [], "a draft on another base pushed to the lane:\n" + text)
+
+    def test_a_draft_on_main_passes_in_the_same_words_as_before(self):
+        self.ready_checks_on_main()
+        old = self.lane(101)
+        self.host.batch_pulls[101]["draft"] = True
+        with self.ready_check_answers("pass") as ran:
+            rc, text = self.ready_run()
+        self.assertTrue(ran, "setup: no ready check ran, though merge.readyChecks names one:\n" + text)
+        self.assertEqual(rc, 0, text)
+        self.assertIn("merge: the ready checks (check invariants) pass on %s." % old[:9], text.splitlines(),
+                      "the pass line changed its words or its sha:\n" + text)
+        self.assertNotIn("the dry merge of", text, "a draft on main made a dry merge:\n" + text)
 
     def test_a_draft_whose_head_holds_a_record_claim_is_stopped_and_pushes_nothing(self):  # control: green on the old code
         old = self.lane(101, claim=True)

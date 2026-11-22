@@ -104,10 +104,10 @@ def cd_run(folder, cfg, spec, tool, tool_input, tag, remote=False):
     return run, side, ""
 
 
-def cd_brake(folder, cfg, reading, remote=False):
+def cd_brake(folder, cfg, reading, remote=False, tool_input=CA_AUDIT):
     """What the load brake says of the audit spawn under `reading`: (reason, matched). The probe's hit mode judges the
     call and runs nothing, so no audit flag moves. -> (pair, why)."""
-    run, side, why = cd_run(folder, cfg, {"mode": "hit", "reading": reading}, "Agent", CA_AUDIT, "brake", remote)
+    run, side, why = cd_run(folder, cfg, {"mode": "hit", "reading": reading}, "Agent", tool_input, "brake", remote)
     if why:
         return None, why
     hit = side.get("hit")
@@ -116,14 +116,14 @@ def cd_brake(folder, cfg, reading, remote=False):
     return hit, ""
 
 
-def cd_setup(name, reading, want):
-    """The owed state, and a check that `reading` is the one the case names. The brake's verdict on the audit spawn
-    under it must be `want`: "disk" (refused for disk), "memory" (refused for memory) or "pass" (let through).
-    -> (folder, cfg, flag, why)."""
+def cd_setup(name, reading, want, tool_input=CA_AUDIT):
+    """The owed state, and a check that `reading` is the one the case names. The brake's verdict on the spawn
+    `tool_input` under it must be `want`: "disk" (refused for disk), "memory" (refused for memory), "both" (refused
+    for memory and for disk) or "pass" (let through). -> (folder, cfg, flag, why)."""
     folder, cfg, flag, why = cd_owed(name)
     if why:
         return None, None, None, why
-    hit, why = cd_brake(folder, cfg, reading)
+    hit, why = cd_brake(folder, cfg, reading, tool_input=tool_input)
     if why:
         return None, None, None, "setup: " + why
     reason, matched = hit
@@ -131,6 +131,8 @@ def cd_setup(name, reading, want):
         ok = not reason
     elif want == "disk":
         ok = bool(reason) and "disk" in matched and "memory" not in matched
+    elif want == "both":
+        ok = bool(reason) and "disk" in matched and "memory" in matched
     else:
         ok = bool(reason) and "memory" in matched and "disk" not in matched
     if not ok:
@@ -139,13 +141,93 @@ def cd_setup(name, reading, want):
     return folder, cfg, flag, ""
 
 
-def cd_bash(folder, cfg, reading, command, tag):
-    """One Bash call under `reading`. -> (decision, reason, side, why)."""
-    run, side, why = cd_run(folder, cfg, {"mode": "main", "reading": reading}, "Bash", {"command": command}, tag)
+def cd_call(folder, cfg, reading, tool, tool_input, tag, remote=False):
+    """One call of any tool through the copy's whole guard under `reading`, as the main session. -> (decision, reason,
+    side, why). The one home of a guarded call in this section: cd_bash is the Bash form of it."""
+    run, side, why = cd_run(folder, cfg, {"mode": "main", "reading": reading}, tool, tool_input, tag, remote)
     if why:
         return None, "", side, why
     decision, reason = _decision(run)
     return decision, reason, side, ""
+
+
+def cd_bash(folder, cfg, reading, command, tag):
+    """One Bash call under `reading`. -> (decision, reason, side, why)."""
+    return cd_call(folder, cfg, reading, "Bash", {"command": command}, tag)
+
+
+# THE AUDIT SPAWN AT A FULL MEMORY. A pending audit must be able to clear when memory is over 95%: its spawn is the one
+# call that clears it, and a recovery control must not depend on the state it recovers (verification-recovery-independent-of-state).
+# The spawn is judged by the whole guard, so these cases hold wherever the exemption is placed.
+def cd_spawn_allowed_check(name, reading, label):
+    """The Audit: spawn while the audit is owed, as the whole guard judges it under `reading`: allowed."""
+    folder, cfg, _flag, why = cd_owed(name)
+    if why:
+        return False, why
+    decision, reason, _side, why = cd_call(folder, cfg, reading, "Agent", CA_AUDIT, name)
+    if why:
+        return False, why
+    problem = ov_want(decision, reason, "allow", "compaction-audit")
+    if problem:
+        return False, "the Audit: spawn was not allowed while the audit is owed, %s: %s" % (label, problem)
+    return True, "the Audit: spawn is allowed while the audit is owed, %s" % label
+
+
+def cd_spawn_clears_check(name, reading, label):
+    """The Audit: spawn under `reading` clears the audit flag, so the audit is no longer owed."""
+    folder, cfg, flag, why = cd_owed(name)
+    if why:
+        return False, why
+    decision, reason, _side, why = cd_call(folder, cfg, reading, "Agent", CA_AUDIT, name)
+    if why:
+        return False, why
+    if os.path.isfile(flag):
+        return False, "the audit flag is still set after the Audit: spawn, %s (decision %s: %s)" % (
+            label, decision, reason[:70])
+    return True, "the Audit: spawn clears the audit flag, %s" % label
+
+
+def cd_spawn_then_bash_check(name, reading, label):
+    """After the Audit: spawn passes under `reading`, an ordinary Bash call is allowed: the owed audit no longer holds
+    the session, so the call that frees memory can run."""
+    folder, cfg, _flag, why = cd_owed(name)
+    if why:
+        return False, why
+    _decision1, _reason1, _side1, why = cd_call(folder, cfg, reading, "Agent", CA_AUDIT, name)
+    if why:
+        return False, why
+    decision, reason, _side2, why = cd_bash(folder, cfg, reading, CD_ORDINARY, name + "-after")
+    if why:
+        return False, why
+    problem = ov_want(decision, reason, "allow", "compaction-audit")
+    if problem:
+        return False, "after the Audit: spawn, an ordinary Bash call was not allowed, %s: %s" % (label, problem)
+    return True, "after the Audit: spawn, an ordinary Bash call is allowed, %s" % label
+
+
+# THE AUDIT SPAWN AT A FULL DISK AND AT A BUSY MEMORY (decision machine-load-brake). The owed audit's own Audit: spawn is
+# refused at a full disk: the cleanup frees the disk first, and the spawn is not the cleanup. A busy memory refusal of a
+# background spawn stands: the memory exemption is for Full memory only.
+CA_AUDIT_BG = dict(CA_AUDIT, run_in_background=True)
+CD_BOTH = {"memory_pct": 96.0, "disk_free_gb": 3.0, "disk_total_gb": 926.0}
+CD_BUSY_MEMORY = {"memory_pct": 90.0, "disk_free_gb": 500.0, "disk_total_gb": 926.0}
+
+
+def cd_spawn_refused_check(name, reading, want, tool_input, label):
+    """The owed audit's Audit: spawn under `reading` is refused by load-brake, and the refusal leaves the audit owed.
+    `want` is the brake's verdict the case holds (see cd_setup)."""
+    folder, cfg, flag, why = cd_setup(name, reading, want, tool_input)
+    if why:
+        return False, why
+    decision, reason, _side, why = cd_call(folder, cfg, reading, "Agent", tool_input, name)
+    if why:
+        return False, why
+    problem = ov_want(decision, reason, "deny", "load-brake")
+    if problem:
+        return False, "the Audit: spawn was not refused by load-brake, %s: %s" % (label, problem)
+    if not os.path.isfile(flag):
+        return False, "the refused Audit: spawn cleared the audit flag, %s" % label
+    return True, "the Audit: spawn is refused by load-brake and the audit stays owed, %s" % label
 
 
 def cd_allowed_check(name, reading, command, tag):
@@ -314,6 +396,21 @@ CD_CHECKS = (
                               cd_sweep_root(CD_WIN_DQ_BS) + ";rm -rf /tmp/claude-disk-cleanup/run-2", "wdqsemi")),
     ("compaction-audit: the cloud disk-full refusal shows the sweep with a double-quoted --root, so a Windows shell keeps its backslashes",
      cd_remedy_check),
+    ("compaction-audit: an owed audit at memory over 95% and a fine disk lets the Audit: spawn through",
+     lambda: cd_spawn_allowed_check("spawn-mem-allowed", CD_MEMORY_FULL, "at memory 96% and a fine disk")),
+    ("compaction-audit: an Audit: spawn that passes at memory over 95% clears the audit flag",
+     lambda: cd_spawn_clears_check("spawn-mem-clears", CD_MEMORY_FULL, "at memory 96% and a fine disk")),
+    ("compaction-audit: after an Audit: spawn that passes at memory over 95%, an ordinary Bash call is allowed",
+     lambda: cd_spawn_then_bash_check("spawn-mem-bash", CD_MEMORY_FULL, "at memory 96% and a fine disk")),
+    ("compaction-audit: control, an owed audit at memory 40% lets the Audit: spawn through and clears the flag",
+     lambda: cd_spawn_clears_check("spawn-fine", CD_FINE, "at memory 40% and a fine disk")),
+    ("compaction-audit: an owed Audit: spawn at a full disk is refused by load-brake, and the audit stays owed",
+     lambda: cd_spawn_refused_check("spawn-disk", CD_FULL, "disk", CA_AUDIT, "at memory 40% and a full disk")),
+    ("compaction-audit: an owed Audit: spawn at a full memory and a full disk is refused by load-brake, and the audit stays owed",
+     lambda: cd_spawn_refused_check("spawn-both", CD_BOTH, "both", CA_AUDIT, "at memory 96% and a full disk")),
+    ("compaction-audit: an owed Audit: spawn at a busy memory with run_in_background true is refused by load-brake, as on main",
+     lambda: cd_spawn_refused_check("spawn-busy-bg", CD_BUSY_MEMORY, "memory", CA_AUDIT_BG,
+                                    "at memory 90% busy, run_in_background true")),
 )
 FIXTURELESS_CHECKS.update(check for _label, check in CD_CHECKS)   # each builds its own folders, no lazy fixture
 LOG_CHECKS = LOG_CHECKS + CD_CHECKS

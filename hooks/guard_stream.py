@@ -10,11 +10,12 @@ import re
 import shlex
 
 from guard_core import (
-    DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, _wrapper_flags, basename,
-    bare_words, command_indexes, inline_script, inner_commands, is_powershell, resolve_command,
-    segment_tokens, split_segments,
+    DURATION, PLAYWRIGHT_PS_SHELLS, PosixScript, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords,
+    _wrapper_flags, backgrounding_amp, basename, bare_words, command_indexes, inline_script, inner_commands,
+    is_powershell, resolve_command, git_calls, segment_dirs, segment_tokens, split_segments, walk_quotes,
 )
 from guard_env import _substitutions
+from merge_options import MERGE_OPTIONS
 
 
 # ------------------------------------------------------------------ a stream that never ends
@@ -67,12 +68,20 @@ def live_stream_hit(segment: str) -> str:
                  if (h := live_stream_hit(part))), "")
 
 
+WAIT_UNTIL_AHEAD = 25   # a foreground wait-until that lasts this many seconds or more is refused
+
+# The wait-until remedy, said once for each reason that points at it. A foreground wait for a far time is refused,
+# so every reason that names the helper also names the background.
+WAIT_UNTIL_FAR_REFUSED = ("A foreground wait-until for a time %d seconds or more away is refused: "
+                          "run it with run_in_background." % WAIT_UNTIL_AHEAD)
+WAIT_UNTIL_REMEDY = "To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`. " + WAIT_UNTIL_FAR_REFUSED
+
 LIVE_STREAM_REASON = (
     "this command follows a stream and never ends on its own, so it outlives the turn "
     "and the agent that started it. "
     "Remedy: run the command in the foreground with a timeout, or in the background and "
     "wait for its completion notice. To wait on a pid, use `bin/wait-pid PID [--timeout SECS]`. "
-    "To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`."
+    + WAIT_UNTIL_REMEDY
 )
 
 
@@ -80,12 +89,19 @@ LIVE_STREAM_REASON = (
 # a claim commit's checks and prints a line a minute. A pipe block-buffers that heartbeat and the
 # filter keeps one end of it, so a working wait reads as a hang. The roster is NAMED, one entry per
 # incident, because "does this command narrate for minutes" cannot be resolved from the system, and
-# refusing every `| tail` is the cry-wolf guard (docs/decisions/guard-that-cries-wolf-is-spent.md). `tee`
-# keeps every byte, so it is not refused. Only `--confirm` reaches the wait: a bare `merge <pr>` is a
-# preview that returns in seconds, so piping it is allowed.
+# refusing every `| tail` is the cry-wolf guard (docs/decisions/guard-that-cries-wolf-is-spent.md). A `tee`
+# with nothing after it keeps every byte and is not refused; a `tee` followed by `tail` or `head` is
+# refused, since the filter still cuts what the agent reads. Only `--confirm` reaches the wait: a bare
+# `merge <pr>` is a preview that returns in seconds, so piping it is allowed.
 NARRATING_COMMANDS = ("merge", "merge.cmd")
 NARRATING_SCRIPT_TAILS = ("merge/merge.py", "merge/launch.py")
 TRUNCATING_FILTERS = ("tail", "head")
+# The lone writer stage the check rule lets through: `tee`, `tee.exe`, `Tee-Object` and `Out-File`. No filter
+# cuts what it keeps. `tee` and `Tee-Object -FilePath` print the whole stream and write it to a file the agent
+# reads back. `Tee-Object -Variable` writes no file but prints the stream in full. `Out-File` prints nothing, so
+# its file is the only copy of the stream, as with `> file`.
+# Compared on the word `basename` gives, with `.exe` stripped as in `_roster_word`.
+FILE_WRITER_STAGES = ("tee", "tee-object", "out-file")
 SCRIPT_INTERPRETER = re.compile(r"(?:python[\d.]*w?|py)$")
 
 
@@ -102,18 +118,76 @@ def narrating_stage(segment: str) -> str:
 
 # The interpreter flags that take the next word as their value, so `python -W ignore run.py` skips `ignore`.
 INTERPRETER_VALUE_FLAGS = ("-W", "-X")
+# A redirect word the shell strips before the interpreter runs: `2>&1`, `2>/dev/null`, `>file`, `>>file`,
+# `<file`, `&>file`. Group 1 is what follows the operator, empty for a bare `>` or `2>`, whose target is
+# the next word.
+REDIRECT_WORD = re.compile(r"^(?:\d*|&)(?:>>|<<<|<<|>&|<&|>|<|&>)(.*)$")
+
+
+def _redirect_width(tokens, at: int) -> int:
+    """How many words the redirect at `at` takes (1 for `2>&1`, 2 for a bare `>` and its target), 0 when
+    the word at `at` is no redirect."""
+    redirect = REDIRECT_WORD.match(tokens[at])
+    if not redirect:
+        return 0
+    return 1 if redirect.group(1) else 2
+
+
+def _skip_redirects(tokens, at: int) -> int:
+    """The index of the first word from `at` on that is no redirect word. A redirect before the command
+    (`2>/dev/null python3 lint/x.py`) is stripped by the shell, so the command is the word after it."""
+    while at < len(tokens) and (width := _redirect_width(tokens, at)):
+        at += width
+    return at
+
+
+def _flag_module(tokens, at: int):
+    """What the interpreter flag at `at` (`-m`, `-Im`, `-Wignore`, `-uc`) does with the rest of the word.
+    Returns (module, next_at): module is the `-m` operand, `""` for `-c` (code, no script), None for a
+    flag that names neither. A value flag (-W, -X) takes the rest of its word, else the next word."""
+    flag = tokens[at]
+    if flag.startswith("--"):
+        return None, at + 1
+    for pos, char in enumerate(flag[1:], 1):
+        rest = flag[pos + 1:]
+        if char == "c":
+            return "", at + 1
+        if char == "m":
+            if rest:
+                return rest, at + 1
+            return (tokens[at + 1] if at + 1 < len(tokens) else ""), at + 2
+        if "-" + char in INTERPRETER_VALUE_FLAGS:
+            return None, at + (1 if rest else 2)
+    return None, at + 1
 
 
 def _script_operand(tokens, index: int) -> str:
-    """The script an interpreter at `index` runs: its first word that is no flag. '' for `-m <module>`
-    and `-c <code>`, which run no script, so what follows them is an argument of theirs."""
+    """The script an interpreter at `index` runs: its first word that is no flag and no redirect. A
+    `-m <module>` runs the module's file, so `-m lint.ste_lint` reads as `lint/ste_lint.py` and the
+    roster and lint tails judge it as they judge the path. '' for `-c <code>`, which runs no script."""
     at = index + 1
-    while at < len(tokens) and tokens[at].startswith("-"):
-        flag = tokens[at]
-        if flag in ("-m", "-c"):
-            return ""
-        at += 2 if flag in INTERPRETER_VALUE_FLAGS else 1
-    return _whole_word(tokens, at) if at < len(tokens) else ""
+    while at < len(tokens):
+        width = _redirect_width(tokens, at)
+        if width:
+            at += width
+        elif tokens[at].startswith("-"):
+            module, at = _flag_module(tokens, at)
+            if module is not None:
+                return module.replace(".", "/") + ".py" if module else ""
+        else:
+            return _whole_word(tokens, at)
+    return ""
+
+
+def _script_run(tokens, index: int) -> str:
+    """The script the command at `index` runs, else ''. An interpreter runs its script operand
+    (`_script_operand`). A `.py` command word is the script itself, which is how `uv run lint/x.py` runs
+    it. The one reader of both spellings, for `_roster_word`, `check_stage` and `lint_stage`."""
+    word = basename(tokens[index])
+    script = _script_operand(tokens, index) if SCRIPT_INTERPRETER.match(word.removesuffix(".exe")) else ""
+    if not script and word.endswith(".py"):
+        script = tokens[index]
+    return script
 
 
 def _whole_word(tokens, at: int) -> str:
@@ -131,21 +205,22 @@ def _whole_word(tokens, at: int) -> str:
     return word
 
 
-def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
+def _roster_word(tokens, index: int, interpreter_only: bool = False, launcher_script: bool = False) -> str:
     """The roster spelling the command at `index` runs (`merge`, `merge.cmd`, or a script run through
     a runner, `python merge.py`), else ''. The one reader of NARRATING_COMMANDS and
     NARRATING_SCRIPT_TAILS. A word carrying a script path counts, so `python3.11` and `uv run python`
-    both match. `interpreter_only` keeps the word to an interpreter (SCRIPT_INTERPRETER) and the path
-    to its script operand: the check rule needs it, so `grep -n x merge/merge.py` and
-    `python3 -m pytest -k merge/merge.py` are no run of the script."""
+    both match. `interpreter_only` keeps the word to a command that runs a script (`_script_run`) and the
+    path to that script: the check rule needs it, so `grep -n x merge/merge.py` and
+    `python3 -m pytest -k merge/merge.py` are no run of the script. `launcher_script` also counts the launcher
+    run as a script (`python3 bin/merge`)."""
     word = basename(tokens[index])
     if word in NARRATING_COMMANDS:
         return word
     if interpreter_only:
-        script = _script_operand(tokens, index) if SCRIPT_INTERPRETER.match(word.removesuffix(".exe")) else ""
-        if not script and word.endswith(".py"):
-            script = tokens[index]  # `uv run merge/merge.py`: uv runs the script, so it is the command word
+        script = _script_run(tokens, index)
         if script.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
+            return word if script == tokens[index] else word + " " + basename(script)
+        if launcher_script and basename(script) in NARRATING_COMMANDS:
             return word + " " + basename(script)
         return ""
     for token in tokens[index:]:
@@ -155,21 +230,14 @@ def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
 
 
 def narrated_tail_hit(stripped: str) -> str:
-    """Return the matched text when a narrating stage is piped straight into `tail`/`head`."""
-    ends = []
-    segments = split_segments(stripped, ends)
-    for index in range(len(segments) - 1):
-        if ends[index] != "|":
-            continue
-        stage = narrating_stage(segments[index])
-        if not stage:
-            continue
-        tokens = segment_tokens(segments[index + 1])
-        if not tokens:
-            continue
-        at = resolve_command(tokens)
-        if at is not None and basename(tokens[at]) in TRUNCATING_FILTERS:
-            return stage + " | " + basename(tokens[at])
+    """Return the matched text when a narrating stage reaches `tail`/`head`, directly or through a
+    `tee` or other filters. Same pipeline walk as `check_tail_hit`, one stage reader apart."""
+    flags = []
+    pipelines = _pipelines(stripped, flags)
+    for stages, list_amp in zip(pipelines, flags):
+        hit = _pipeline_hit(stages, False, lambda segment, _background: narrating_stage(segment), list_amp=list_amp)
+        if hit:
+            return hit
     return ""
 
 
@@ -177,21 +245,22 @@ NARRATED_TAIL_REASON = (
     "this command waits for minutes and prints a line as it goes, and a pipe into a filter "
     "that keeps one end of the stream hides that line until the end, so a working wait looks "
     "like a hang. "
-    "Remedy: run the command with nothing after it and read its output as it arrives, or "
-    "redirect to a file you read back afterwards, or use tee to keep a full copy."
+    "Remedy: run the command through `verdict <cmd>`, or with nothing after it, or through a "
+    "`tee` with nothing after it, and read its output as it arrives, or redirect to a file you "
+    "read back afterwards."
 )
 
 
-# A CHECK piped into `tail` or `head` (decision background-check-through-verdict). A filter that keeps
-# one end holds every byte until the command exits, then prints a few lines, so the one useful line, the
-# verdict, can be cut off or never read. `verdict <cmd>` keeps the whole log and prints the verdict
-# itself. Only named checks count, one entry per incident, because refusing every `| tail` is the
+# A CHECK piped into any filter but a lone `tee`, `tee.exe`, `Tee-Object` or `Out-File` (decision
+# background-check-through-verdict). A filter
+# after the run can cut or hide the verdict line, the one useful line, so it can be lost or never read. `verdict <cmd>` keeps the whole log and prints the
+# verdict itself. Only named checks count, one entry per incident, because refusing every `| tail` is the
 # cry-wolf guard (docs/decisions/guard-that-cries-wolf-is-spent.md). The merge tool's verdict calls
 # (`--lane-lint`, `--review-record`, `--release-check`) are refused in the foreground too. They count as `merge`,
 # `merge.cmd`, or `merge/merge.py` or `merge/launch.py` run by `python`, a `python3.N`, `pythonw` or
 # `py`, behind a wrapper or `uv run`. A call through `verdict` is verdict-pipe's, never read here.
 # `merge --confirm` is narrated_tail_hit's, so it is left out here and never refused twice.
-# `ci-job` is refused in the background only.
+# `ci-job` is refused in the background only, and a trailing `&` is the background.
 CHECK_COMMANDS = ("ci-job", "ci-job.cmd")
 CHECK_FLAGS = ("--lane-lint", "--review-record", "--release-check")
 CHECK_SCRIPT_TAIL = "bin/ci-job"
@@ -215,6 +284,7 @@ def _skip_uv_run(tokens, index: int) -> int:
     """The index of the command `uv [flags] run [flags] ...` starts, read through `resolve_command`
     again, else `index`. `uv` is no entry of COMMAND_WRAPPERS: adding it would move every rule that
     reads the command word, and only the check rule needs it."""
+    index = _skip_redirects(tokens, index)
     while index < len(tokens) and basename(tokens[index]) == "uv":
         run = index + 1
         while run < len(tokens) and tokens[run].startswith("-"):
@@ -227,36 +297,298 @@ def _skip_uv_run(tokens, index: int) -> int:
         at = resolve_command(tokens[start:])
         if at is None:
             break
+        index = _skip_redirects(tokens, start + at)
+    return index
+
+
+def _merge_flag(tokens, flag: str) -> bool:
+    """True when a token is the merge tool's option `flag`, or a prefix that names it alone. The merge parser sets
+    allow_abbrev off, so a prefix runs no check (`--lane` is an error, not `--lane-lint`). The guard still reads a
+    unique prefix as the flag: a tail after it is refused, which costs nothing, because the command fails anyway.
+    A prefix that matches two or more options is no flag (`--l`). The option names are MERGE_OPTIONS, the list
+    the merge parser is checked against. `--name=value` is split at the first `=`, so `--lane=7` reads as `--lane 7`.
+    `check_timeout_hit` takes the exact token only."""
+    for token in tokens:
+        if token.startswith("--"):
+            token = token.split("=", 1)[0]
+        if len(token) > 2 and token.startswith("--") and token not in MERGE_OPTIONS:
+            named = [name for name in MERGE_OPTIONS if name.startswith(token)]
+            if named == [flag]:
+                return True
+        elif token == flag:
+            return True
+    return False
+
+
+def _skip_setsid(tokens, index: int) -> int:
+    """The index of the command `setsid [flags] cmd ...` starts, read through `resolve_command` again, else `index`.
+    `setsid` is no entry of COMMAND_WRAPPERS, for the same reason `uv` is none (`_skip_uv_run`). Its flags
+    (`-c`, `-f`, `-w`) take no value."""
+    while index < len(tokens) and basename(tokens[index]) == "setsid":
+        start = index + 1
+        while start < len(tokens) and tokens[start].startswith("-"):
+            start += 1
+        at = resolve_command(tokens[start:])
+        if at is None:
+            break
         index = start + at
     return index
 
 
-def check_stage(segment: str, background: bool) -> str:
+def check_stage(segment: str, background: bool, launcher_script: bool = False) -> str:
     """The command word when one segment runs a named check, else ''. `ci-job` counts
-    only in the background."""
+    only in the background, which a trailing `&` makes it (the caller passes that in `background`).
+    `launcher_script` also reads `python3 bin/merge` as a run of `merge`: only the lint-start
+    reader asks, so check-timeout and the tail rule keep their own reading of that spelling. It also reads through
+    `setsid`, which they do not."""
     tokens = segment_tokens(segment)
     if not tokens:
         return ""
     index = resolve_command(tokens)
     if index is None:
         return ""
-    index = _skip_uv_run(tokens, index)
+    index = _skip_uv_run(tokens, _skip_setsid(tokens, index) if launcher_script else index)
+    if index >= len(tokens):   # a redirect-only segment (`> out.txt`) leaves no command word
+        return ""
     if basename(tokens[index]) in CHECK_COMMANDS:
         return basename(tokens[index]) if background else ""
-    if SCRIPT_INTERPRETER.match(basename(tokens[index]).removesuffix(".exe")) and _script_operand(
-            tokens, index).replace("\\", "/").endswith(CHECK_SCRIPT_TAIL):
+    if _script_run(tokens, index).replace("\\", "/").endswith(CHECK_SCRIPT_TAIL):
         return CHECK_COMMANDS[0] if background else ""
-    if "--confirm" in tokens or not any(flag in tokens for flag in CHECK_FLAGS):
+    if "--confirm" in tokens or not any(_merge_flag(tokens, flag) for flag in CHECK_FLAGS):
         return ""
-    return _roster_word(tokens, index, interpreter_only=True)
+    return _roster_word(tokens, index, interpreter_only=True, launcher_script=launcher_script)
 
 
-def _pipeline_hit(stages, background: bool) -> str:
-    """The matched text when a named check in one pipeline's stages reaches `tail`/`head`. A `tee`
-    between them does not end the reach, since the filter after it still cuts what the agent reads. A
-    `tee` with no `tail` or `head` after it is not a hit."""
+LINT_SCRIPT = re.compile(r"(?:^|/)lint/[^/]+\.py$")
+
+
+CD_COMMANDS = ("cd", "pushd", "chdir", "set-location", "sl")
+
+
+def _enters_lint_dir(segment: str, in_lint: bool) -> bool:
+    """Whether the working directory is `lint/` after `segment`, given `in_lint` before it. A `cd` to a
+    path that ends in `lint` enters it; a `cd` anywhere else leaves it; any other segment keeps it."""
+    tokens = segment_tokens(segment)
+    index = resolve_command(tokens) if tokens else None
+    if index is None or basename(tokens[index]).lower() not in CD_COMMANDS:
+        return in_lint
+    targets = [word for word in tokens[index + 1:] if not word.startswith("-")]
+    path = targets[0].replace("\\", "/").rstrip("/") if targets else ""
+    return basename(path) == "lint"
+
+
+LINT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "lint")
+
+
+def _is_lint_file(name: str, folder=None) -> bool:
+    """Whether `name` is a file in the lint folder the call has entered. `folder` is that folder, read
+    from the call's own cwd and its `cd`. A copy install has no lint/ beside its guard, and another repo
+    has its own lint scripts. So the guard's own folder is wrong for both. LINT_DIR, the lint/ of the
+    checkout this guard runs from, is read only when `folder` is None: the cwd is unknown, or a `cd`
+    went to a folder that does not exist. No list of lint scripts exists (LINT_SCRIPT is a path
+    pattern), so the folder is the one home. Under `cd lint`, a bare name that is no file there
+    (`-m pytest` reads as `pytest.py`) runs no lint script."""
+    return os.path.isfile(os.path.join(folder or LINT_DIR, name))
+
+
+def lint_stage(segment: str, background: bool, in_lint: bool = False, folder=None) -> str:
+    """`lint` when one segment runs a script under `lint/`, through an interpreter, as `-m lint.<name>`,
+    or as the `.py` command word (`uv run lint/x.py`), else ''. With `in_lint` (an earlier `cd lint` in
+    the same command), a script named by its basename is under `lint/` too (`./ste_lint.py`) when it is
+    a file in `folder`, the folder the segment runs in (see _is_lint_file). The `background` argument
+    keeps the signature of check_stage, the other stage reader."""
+    tokens = segment_tokens(segment)
+    index = resolve_command(tokens) if tokens else None
+    if index is None:
+        return ""
+    index = _skip_uv_run(tokens, index)
+    if index >= len(tokens):   # a redirect-only segment (`> out.txt`) leaves no command word
+        return ""
+    script = _script_run(tokens, index).replace("\\", "/").lstrip("(")   # `(./x.py` opens a subshell
+    if in_lint and script and "/" not in script.removeprefix("./") and _is_lint_file(
+            script.removeprefix("./"), folder):
+        script = "lint/" + script.removeprefix("./")
+    if LINT_SCRIPT.search(script):
+        return "lint"
+    return ""
+
+
+SUBSTITUTION_SLOT = re.compile(r"(?<![\w.-])x(?![\w.-])|`x`")
+
+
+def _flat(pipelines):
+    """The segments of `pipelines` in order, and the `ends` that segment_dirs reads. Only a pipe
+    end matters to it here (a pipe part's `cd` moves nothing), so each pipeline ends in `;`."""
+    segments, ends = [], []
+    for stages in pipelines:
+        for place, segment in enumerate(stages):
+            segments.append(segment)
+            ends.append("|" if place < len(stages) - 1 else ";")
+    return segments, ends
+
+
+def _inherited_in_lint(pipelines, cwd: str = ""):
+    """Whether a command substitution inside the outer text `pipelines` runs with `lint/` as its working
+    directory, and the folder it runs in (None when unknown). `_substitutions` leaves each substitution's
+    place in the outer text as `x`, so a segment holding that slot, reached after a `cd lint`, hands
+    `lint/` to every substitution. Which slot a text fills is not tracked, so one slot after `cd lint`
+    counts for all (the reading that refuses more)."""
+    segments, ends = _flat(pipelines)
+    in_lint = False
+    for segment, folder in zip(segments, segment_dirs(segments, cwd, ends)):
+        if in_lint and SUBSTITUTION_SLOT.search(segment):
+            return True, folder
+        in_lint = _enters_lint_dir(segment, in_lint)
+    return False, None
+
+
+def _ends_in_ampersand(stages, first: int) -> bool:
+    """Whether the pipeline is backgrounded by a `&` in the stage at `first` or a later one, spaced
+    or glued to the last word (`backgrounding_amp`, the one reader detached-launch shares)."""
+    for segment in stages[first:]:
+        tokens = segment_tokens(segment)
+        if tokens and backgrounding_amp(segment, tokens):
+            return True
+    return False
+
+
+def _list_ends_in_ampersand(segments, ends, after: int) -> bool:
+    """Whether the `&&` or `||` list that a pipeline closes, which goes on from segment `after`, is
+    ended by a job `&`: `ci-job x | tail && echo done & echo $!` backgrounds the whole list. The
+    list runs on through `|`, `&&` and `||` and stops at `;` or a newline, or at the first `&`."""
+    for segment, end in zip(segments[after:], ends[after:]):
+        tokens = segment_tokens(segment)
+        if tokens and backgrounding_amp(segment, tokens):
+            return True
+        if end not in ("|", "&&", "||"):
+            return False
+    return False
+
+
+LINT_NEST_DEPTH = 4   # `bash -c` or `( ... )` inside another is followed this far; a deeper lint is read as no start
+GROUP_MARK = "\x01"  # stands for one `( ... )` group in the text around it; the call's own text never holds it
+
+
+def _subshell_groups(text: str):
+    """(outer, inners): `text` with each top-level `( ... )` subshell group cut out and replaced by a word
+    `\x01N\x01`, and the N-th group's inner text. A `$(`, `<(` or `>(` is no group, and a paren in quotes, escaped
+    or in a comment is text, so the scan reads the call as walk_quotes does. A `(` never closed leaves the text as it is."""
+    outer, inners, stack = [], [], []
+    copied = start = skip = 0
+    for at, char, quote in walk_quotes(text):
+        if at < skip or quote:
+            continue
+        if char == "#" and (at == 0 or text[at - 1] in " \t\n;|&("):
+            end = text.find("\n", at)
+            skip = len(text) if end < 0 else end
+        elif char == "(":
+            kind = "other" if at and text[at - 1] in "$<>" else "group"
+            if not stack and kind == "group":
+                outer.append(text[copied:at])
+                start = at + 1
+            stack.append(kind)
+        elif char == ")" and stack:
+            if stack.pop() == "group" and not stack:
+                outer.append(" %s%d%s " % (GROUP_MARK, len(inners), GROUP_MARK))
+                inners.append(text[start:at])
+                copied = at + 1
+    if stack:   # an unclosed group: nothing was cut
+        return text, []
+    outer.append(text[copied:])
+    kind = type(text) if isinstance(text, (PosixScript, PowerShellScript)) else str
+    return kind("".join(outer)), [kind(inner) for inner in inners]
+
+
+def _background_split(segment: str):
+    """One segment cut at each unquoted `&` that sends the command before it to the background. A `&&`, `&>`, `>&`,
+    `<&`, a `|&` at the start of a segment and a quoted or escaped `&` cut nothing."""
+    parts, last = [], 0
+    for at, char, quote in walk_quotes(segment):
+        if char != "&" or quote or segment[at + 1:at + 2] in (">", "&") or segment[at - 1:at] in ("&", ">", "<"):
+            continue
+        if not segment[:at].strip():
+            continue
+        parts.append(segment[last:at])
+        last = at + 1
+    parts.append(segment[last:])
+    return parts
+
+
+def _lint_stage(part: str) -> str:
+    """The matched text when one command part names a lint start, `merge --lane-lint` or `ci-job --lint`, else ''."""
+    word = check_stage(part, True, launcher_script=True)
+    if not word:
+        return ""
+    flag = "--lint" if word in CHECK_COMMANDS else "--lane-lint"
+    return word + " " + flag if flag in (segment_tokens(part) or ()) else ""
+
+
+def _lint_start_in(text: str, background: bool, depth: int) -> str:
+    """The lint start in `text`, read list by list. A list is the commands joined by `&&`, `||` and `|`, and it ends at
+    `;`, a newline or a `&`. Only a list a `&` ends, or any list when the call itself runs in the background, starts a
+    background lint. A `( ... )` group and the script a `bash -c` or `sh -c` hands on are read the same way, in the
+    background state of the list that holds them."""
+    if depth > LINT_NEST_DEPTH:
+        return ""
+    powershell = is_powershell(text)   # `&` there is the call operator and `( )` an expression: no cut
+    outer, inners = (text, []) if powershell else _subshell_groups(text)
+    ends = []
+    pieces = []
+    for segment, end in zip(split_segments(outer, ends), ends):
+        parts = [segment] if powershell else _background_split(segment)
+        pieces += [(part, "&" if n < len(parts) - 1 else end) for n, part in enumerate(parts)]
+    group = []
+    for part, end in pieces:
+        group.append(part)
+        if end in ("&&", "||", "|"):
+            continue
+        listed_background = background or end == "&"
+        for member in group:
+            if listed_background:
+                hit = _lint_stage(member)
+                if hit:
+                    return hit
+            for number in (int(n) for n in _group_numbers(member)):
+                hit = _lint_start_in(inners[number], listed_background, depth + 1)
+                if hit:
+                    return hit
+            tokens = segment_tokens(member)
+            for script in inner_commands(tokens) if tokens else ():
+                hit = _lint_start_in(script, listed_background, depth + 1)
+                if hit:
+                    return hit
+        group = []
+    return ""
+
+
+def _group_numbers(member: str):
+    """The numbers of the group marks a part holds, in order."""
+    return [word[1:-1] for word in member.split() if len(word) > 2 and word[0] == word[-1] == GROUP_MARK
+            and word[1:-1].isdigit()]
+
+
+def lint_start_hit(stripped: str, background: bool = True) -> str:
+    """The matched text when a call starts a lint in the background: `merge --lane-lint` or `ci-job --lint`, in any
+    segment, else ''. A bare `ci-job` with no --lint is no lint start, and a foreground lint with no `&` is none.
+    `background` is true when the call runs in the background; a trailing `&`, a `( ... )` group or a `bash -c`
+    script is read for its own background state (`_lint_start_in`)."""
+    return _lint_start_in(stripped.replace(GROUP_MARK, " "), background, 0)
+
+
+def _pipeline_hit(stages, background: bool, stage_of=check_stage, any_filter: bool = False,
+                  any_later: bool = False, list_amp: bool = False) -> str:
+    """The matched text when a stage that `stage_of(segment, backgrounded)` names, in one pipeline's
+    stages, reaches `tail`/`head`. A `tee` between them does not end the reach, since the filter after it
+    still cuts what the agent reads. A `tee` with no `tail` or `head` after it is not a hit. The one walk
+    for the narrated rule and the check rule. `backgrounded` is the call's `background`, or a lone `&` word
+    in this stage or a later one, or a job `&` that ends the `&&` or `||` list this pipeline closes
+    (`list_amp`). `any_filter` (the check rule, decision `background-check-through-verdict`)
+    widens the reach to every later stage but a file writer (`tee`, `tee.exe`, `Tee-Object`, `Out-File`),
+    since `sed -n`, `grep -m1` and `awk` cut what the agent reads as `tail` does. With `any_later`, any
+    later command counts: a pipeline's exit is its last stage's, so `grep`, `tee` and `wc` mask the
+    exit of the stage before them as `tail` does (the lint-then-commit gate reads the exit, not the cut)."""
     for first, segment in enumerate(stages):
-        stage = check_stage(segment, background)
+        stage = stage_of(segment, background or list_amp or _ends_in_ampersand(stages, first))
         if not stage:
             continue
         for later in stages[first + 1:]:
@@ -264,31 +596,90 @@ def _pipeline_hit(stages, background: bool) -> str:
             at = resolve_command(tokens) if tokens else None
             if at is None:
                 continue
+            at = _skip_redirects(tokens, at)
+            if at >= len(tokens):
+                continue
             word = basename(tokens[at])
-            if word in TRUNCATING_FILTERS:
+            if any_later or ((word.removesuffix(".exe") not in FILE_WRITER_STAGES) if any_filter
+                             else (word in TRUNCATING_FILTERS)):
                 return stage + " | " + word
     return ""
 
 
-def check_tail_hit(stripped: str, background: bool) -> str:
-    """The matched text when a call pipes a named check into `tail`/`head`, directly or through other
-    filters. A pipeline ends at any separator other than `|`."""
+def _commits_or_pushes(segment: str) -> bool:
+    """True when one segment runs a commit or a push, read by the one reader of git calls."""
+    return any(verb in ("commit", "push") for verb, _args in git_calls(segment))
+
+
+def _pipelines(text: str, list_amps=None):
+    """One command text as its pipelines, each a list of stage segments. A pipeline ends at any
+    separator other than `|`. With `list_amps` (a list), it gets one flag per pipeline: whether the `&&`
+    or `||` list that pipeline closes is ended by a job `&` (`_list_ends_in_ampersand`)."""
     ends = []
-    segments = split_segments(stripped, ends)
+    segments = split_segments(text, ends)
+    pipelines = []
     stages = []
-    for segment, end in zip(segments, ends):
+    for number, (segment, end) in enumerate(zip(segments, ends)):
         stages.append(segment)
         if end != "|":
-            hit = _pipeline_hit(stages, background)
+            pipelines.append(stages)
+            if list_amps is not None:
+                list_amps.append(end in ("&&", "||") and _list_ends_in_ampersand(segments, ends, number + 1))
+            stages = []
+    pipelines.append(stages)
+    if list_amps is not None:
+        list_amps.append(False)
+    return pipelines
+
+
+def check_tail_hit(stripped: str, background: bool, cwd: str = "") -> str:
+    """The matched text when a call pipes a named check into any filter but a lone `tee`, `tee.exe`,
+    `Tee-Object` or `Out-File`, directly or through other filters. Each command substitution is its own
+    text, read through the one reader in guard_env as `verdict_pipe_hit` reads it, so a pipe inside `$(...)` counts. A lint script piped into any later
+    command counts only when a later segment of the call runs a commit or a push: the pipeline's exit is
+    the last stage's, so a red lint hides, and the commit or push runs on it (incident, lane
+    windows-tests-for-touched-files). Order across texts is not tracked: a lint inside a substitution
+    counts when any other text of the call runs a commit or a push, and so does an outer lint when a
+    substitution after it runs one (`lint | tail -2 && out=$(git commit ...)`). Under `cd lint`, a bare
+    script name is looked up in the folder its pipeline runs in. That folder is read from `cwd`, the
+    call's own, and each `cd` before it. A pipe part's `cd` moves nothing, so all stages of a pipeline
+    share the folder of its first stage. With no cwd, the guard's own lint/ is read (see _is_lint_file)."""
+    texts, too_deep = _substitutions(stripped, powershell=is_powershell(stripped))
+    if too_deep:   # the env layer refuses a nest this deep; read the command as it stands
+        texts = [(stripped, False)]
+    amps = [[] for _ in texts]
+    texts = [_pipelines(text, flags) for (text, _in_message), flags in zip(texts, amps)]
+    for pipelines, flags in zip(texts, amps):
+        for stages, list_amp in zip(pipelines, flags):
+            hit = _pipeline_hit(stages, background, any_filter=True, list_amp=list_amp)
             if hit:
                 return hit
-            stages = []
-    return _pipeline_hit(stages, background)
+    inherited, slot_folder = _inherited_in_lint(texts[-1], cwd) if len(texts) > 1 else (False, None)
+    for number, pipelines in enumerate(texts):
+        inner = number < len(texts) - 1
+        in_lint = inherited and inner
+        segments, ends = _flat(pipelines)
+        folders = list(segment_dirs(segments, slot_folder if inner else cwd, ends))
+        first = 0
+        for at, stages in enumerate(pipelines):
+            folder = folders[first] if stages else None
+            first += len(stages)
+            hit = _pipeline_hit(stages, background,
+                                lambda segment, bg: lint_stage(segment, bg, in_lint, folder), any_later=True)
+            for segment in stages:
+                in_lint = _enters_lint_dir(segment, in_lint)
+            if not hit:
+                continue
+            others = texts[:number] + texts[number + 1:]
+            after = list(pipelines[at + 1:]) + [stages for text in others for stages in text]
+            if any(_commits_or_pushes(segment) for later in after for segment in later):
+                return hit + " then a commit or push"
+    return ""
 
 
 CHECK_TAIL_REASON = (
-    "this check's output goes into a filter that keeps one end, so the filter holds everything "
-    "until the check exits and the verdict can be lost "
+    "this check's output goes into a filter after the run, and the filter can cut or hide the "
+    "verdict line "
     "(decision background-check-through-verdict). "
     "Remedy: run the check through verdict, as `verdict <cmd>` with nothing after it. It keeps the "
     "full log and prints the verdict itself. "
@@ -301,9 +692,8 @@ CHECK_TAIL_REASON = (
 # A BACKGROUND LANE LINT'S TIME LIMIT (rule check-timeout). `merge --lane-lint` waits for its pushed head. Then it
 # runs one ci-job under the merge tool's lint bound. A call whose `timeout` is shorter ends before the verdict.
 # The bound is read from the merge tool, never copied. The tool caps a foreground limit below the bound,
-# so a foreground lane lint is refused at any limit. A call with no `timeout` gets the tool's default,
-# which is under the bound too. An unloadable merge tool gives an unknown bound: nothing is refused.
-BACKGROUND_DEFAULT_TIMEOUT_MS = 1800000
+# so a foreground lane lint that sets a limit is refused at any limit. A call that sets no `timeout` is not
+# judged: no limit means no bound to compare. An unloadable merge tool gives an unknown bound: nothing is refused.
 
 
 def check_timeout_bound_ms():
@@ -320,8 +710,8 @@ def check_timeout_bound_ms():
 
 def check_timeout_hit(stripped: str, background: bool, timeout_ms=None) -> str:
     """The matched text when a call runs `merge --lane-lint` with too little time, else ''.
-    The foreground has too little at any limit. The background has too little under the bound.
-    `timeout_ms` is the `timeout` of the call. None means the default."""
+    A call that sets no limit is not judged. A foreground call that sets one has too little at any limit.
+    A background call has too little under the bound. `timeout_ms` is the `timeout` of the call, None when unset."""
     hit = ""
     for segment in split_segments(stripped):
         word = check_stage(segment, False)  # False: ci-job is no lane lint
@@ -329,15 +719,13 @@ def check_timeout_hit(stripped: str, background: bool, timeout_ms=None) -> str:
         if word and tokens and "--lane-lint" in tokens:
             hit = word + " --lane-lint"
             break
-    if not hit:
+    if not hit or isinstance(timeout_ms, bool) or not isinstance(timeout_ms, (int, float)):
         return ""
     bound = check_timeout_bound_ms()
     if bound is None:
         return ""
     if not background:
         return hit
-    if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, (int, float)):
-        timeout_ms = BACKGROUND_DEFAULT_TIMEOUT_MS
     return hit if timeout_ms < bound else ""
 
 
@@ -580,12 +968,77 @@ def clock_loop(token_rows) -> bool:
     return words[heads[0] + 1:heads[0] + 2] == ["do"] and clock_test(token_rows[heads[0]])
 
 
+WAIT_UNTIL_REDIRECT_WORD = re.compile(r"(?:\d*|&)(?:>>?|<)")   # a redirect operator at the start of a word
+
+
+def wait_until_words(words):
+    """The words after `wait-until`, as the helper would receive them: an unquoted `$(...)` or backtick
+    substitution that the tokenizer split on its spaces is one word again, a redirect (`2>&1`, `> f`) is dropped,
+    a `)` that closes a grouping is cut off, and a `--timeout` whose value is not a literal is dropped, since the
+    helper never gets a number it could cap the wait with."""
+    merged, at = [], 0
+    while at < len(words):
+        word, at = words[at], at + 1
+        while at < len(words) and (word.startswith("$(") and word.count("(") > word.count(")")
+                                   or word.count("`") % 2):
+            word, at = word + " " + words[at], at + 1
+        merged.append(word)
+    kept, skip = [], False
+    for word in merged:
+        if skip:
+            skip = False
+        elif WAIT_UNTIL_REDIRECT_WORD.match(word) and not word.startswith("$"):
+            skip = bool(WAIT_UNTIL_REDIRECT_WORD.fullmatch(word))   # `>` or `2>` takes the next word as its file
+        else:
+            while word.endswith(")") and word.count(")") > word.count("("):
+                word = word[:-1]
+            if word:
+                kept.append(word)
+    args, at = [], 0
+    while at < len(kept):
+        value = kept[at + 1] if at + 1 < len(kept) else ""
+        if kept[at] == "--timeout" and ("$" in value or "`" in value):
+            at += 2
+        elif kept[at].startswith("--timeout=") and ("$" in kept[at] or "`" in kept[at]):
+            at += 1
+        else:
+            args.append(kept[at])
+            at += 1
+    return args
+
+
+def wait_until_far(tokens, index) -> bool:
+    """True when `wait-until TIME` at `tokens[index]` waits WAIT_UNTIL_AHEAD seconds or more: TIME is that far after the
+    hook clock (local_time.clock, which LOCAL_TIME_NOW replaces in tests) and no --timeout under that caps the wait.
+    The arguments are read by wait_common.split_args, the helper's own reader, so a flag value is never the time.
+    A TIME that is not a literal (`$(...)`, `$VAR`) cannot be read here, so it counts as far unless --timeout caps
+    it. A literal that cannot be read, or has no zone, is the helper's own error at once, so it is not a wait."""
+    import contextlib
+    import io
+    import local_time
+    from wait_common import parse_instant, split_args
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):   # split_args exits 2 with a message on a bad argument
+            time_arg, timeout = split_args("wait-until", "usage: wait-until TIME [--timeout SECS]",
+                                         wait_until_words(tokens[index + 1:]))
+    except SystemExit:
+        return False
+    if time_arg is None or 0 < timeout < WAIT_UNTIL_AHEAD:
+        return False
+    if "$" in time_arg or "`" in time_arg:
+        return True
+    when = parse_instant(time_arg)
+    if when is None:
+        return False
+    return (when - local_time.clock()).total_seconds() >= WAIT_UNTIL_AHEAD
+
+
 def waiter_verdict(segments, background: bool) -> str:
     """Return the matched text when a command waits by looping, else ''.
 
     Refused: a loop around a sleep, two or more sleeps, one sleep of SLEEP_LIMIT seconds or
     more, `timeout /t`, `gh run watch` (foreground or background), and a foreground
-    `gh pr checks --watch`. Allowed: one short sleep, `gh pr checks --watch` with
+    `gh pr checks --watch`, and a foreground `wait-until` for a time WAIT_UNTIL_AHEAD seconds or more away, or a time not a literal. Allowed: one short sleep, `gh pr checks --watch` with
     run_in_background, and, with run_in_background, one sleep of any length followed by a command
     and a `clock_loop`: a `+%s` read ordered against an epoch, or an ISO read ordered against an ISO time."""
     sleeps, loop, watcher, run_watch, followed = [], False, "", "", False
@@ -608,6 +1061,9 @@ def waiter_verdict(segments, background: bool) -> str:
                 sleeps.append((tokens[at], sleep_seconds(tokens, at)))
         if word in WAITER_COMMANDS:
             pass
+        elif word.lstrip("(") == "wait-until":
+            if not background and wait_until_far(tokens, index):
+                return tokens[index]
         elif word in ("gh", "gh.exe") and gh_watches(tokens[index + 1:]):
             found = "gh " + " ".join(tokens[index + 1:index + 3])
             watcher = watcher or found
@@ -636,7 +1092,8 @@ WAITER_REASON = (
     "notice. In the background, one pause of any length followed by a command is allowed, and so is a "
     "loop whose test orders the date output against a literal time of the same kind: date +%s against an "
     "epoch with -gt or -ge, or an ISO date-time read against an ISO time with \\>. "
-    "A single pause under 25 seconds is allowed in the foreground. Avoid gh pr checks --watch in the "
+    "A single pause under 25 seconds is allowed in the foreground, and so is wait-until for a time under 25 "
+    "seconds away. " + WAIT_UNTIL_FAR_REFUSED + " Avoid gh pr checks --watch in the "
     "foreground, which serves a cached status. For a server warm-up, use a "
     "readiness check such as `curl --retry 5 --retry-connrefused http://localhost:3000`."
 )
@@ -993,6 +1450,8 @@ def _fg_tokens_hit(tokens, depth: int) -> str:
     tokens = _fg_clean(tokens)
     for start in command_indexes(tokens):
         at = _fg_skip_ionice(tokens, _skip_uv_run(tokens, start))
+        if at >= len(tokens):   # a redirect-only segment (`> out.txt`) leaves no command word, like check_stage reads it
+            continue
         hit = _fg_word_hit(tokens, at)
         if hit:
             return hit
@@ -1060,7 +1519,7 @@ PATTERN_POLLER_REASON = (
     "every process whose command line names it, including this session's own wrapper for the "
     "same wait, so the condition can stay true long after the work is done. "
     "Remedy: wait on one pid with `bin/wait-pid PID [--timeout SECS]`, which also takes a job a stall "
-    "left behind. To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`. "
+    "left behind. " + WAIT_UNTIL_REMEDY + " "
     "To wait for CI, wait for the CI-wake notice that follows gh pr ready."
 )
 

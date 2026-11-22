@@ -1,0 +1,1 @@
+- variable-text-cost-unpinned: no test pins `_variable_text`'s cost bound in hooks/guard_core.py (the filter that hands only names present in the text, plus IFS, to the resolver; 4000 assignments went 121 s to 3 s); the Windows rm-var rows are the only cost check and measure a different command shape; found by a fix verifier on 2026-11-18 Seen: 2026-11-18 x1

@@ -79,6 +79,10 @@ no third-person owner after it, and the writer's own act on an object that names
 refusal per turn lists the lines and joins any other reason. A rewrite after a missing-report refusal is checked too. Risk
 kind and incident: decision answered-needs-source. Cost: regex over the reply, no file, no process.
 
+The page-path check: on any turn, landed or not, it refuses a reply that names an old Home Assistant page path, `/hassio/...`,
+bare or inside a URL. App pages are `/<app slug>` now. `/api/hassio/...` is the supervisor API and passes. Fences, question
+lines and inline code spans are skipped, as in the answered check. Cost: regex over the reply, no file, no process.
+
 After a compaction, each report also holds a `Recovered:` line and a `Handoff gave:` line (each
 may say `none`) in the report blockquote, until one lands (`compaction-carry`, decision
 precompact-handoff, item 'Recovered line after compaction'). A label counts only where it starts an item: at line start (after
@@ -186,7 +190,7 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
-    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender, tool_verb,
+    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, inactive_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender, tool_verb,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 import _clause  # noqa: E402
@@ -971,6 +975,27 @@ def answered_problem(text):
     return ANSWERED_REASON + "".join("\n- " + b for b in bad) if bad else ""
 
 
+# An old Home Assistant page path in a reply. App pages are /<app slug> now, so a /hassio/... page path opens
+# nothing the owner reaches. /api/hassio/... is the supervisor API and passes: a bare path must start at /hassio/
+# (no word, dot, slash or dash before it), and in a URL /hassio/ must follow the host directly. Lines are read as
+# the answered check reads them: outside fences, no question lines, inline code spans removed (a quoted log line is no claim).
+HASSIO_PATH_RE = re.compile(
+    r"(?:(?<![\w./~-])|\bhttps?://[^/\s`]+)(/hassio/[\w-][^\s`'\")\]>]*)", re.I)
+HASSIO_CHECK = "Page-path guard"
+HASSIO_REASON = owner_line(
+    HASSIO_CHECK,
+    "%r is an old Home Assistant page path; app pages are now /<app slug>, and /api/hassio/... is the supervisor API")
+
+
+def hassio_path_problem(text):
+    """The refusal for a reply that names an old Home Assistant page path, else ''. One refusal names the first path."""
+    for body in _prose_lines(text):
+        found = HASSIO_PATH_RE.search(CODE_SPAN.sub(" ", body))
+        if found:
+            return HASSIO_REASON % found.group(1).rstrip(".,;:!")
+    return ""
+
+
 # reports-done-names-models: a Done item that agents built or reviewed names each one's role
 # and model, as "(builder sonnet, reviewer sonnet)". Only these roles build or review; an Explore
 # search or a Plan spawn needs no name. A Workflow agent() is unseen: its model can sit in a variable.
@@ -1521,8 +1546,9 @@ def question_problem(records, turn, text, hook):
     ack of a send this turn made to the writer or the parent starts no turn.
     Owner-facing: a send to the page writer, or an items write to this repo's page. The writer is the newest
     meta/page read's; with no such read at all, the layout's `page-writer` (its ack starts no turn either).
-    The key's writer counts only for a send whose own result shows delivery (`delivered_tool_use_ids`); a send
-    with no result, a failed result or a non-delivered one does not. A transcript writer counts on the send alone.
+    The key's writer counts only for a send whose own result shows delivery (`delivered_tool_use_ids`) or a
+    failure of `session_inactive` (`inactive_tool_use_ids`: the writer is gone, the attempt meets the duty); a
+    send with no result, any other failed result or a non-delivered one does not. A transcript writer counts on the send alone.
     A read whose result names no writer keeps the refusal's old text. The question box counts
     only in a repo with no waiting page. A send to @parent reaches no one there.
     Lane: a send to the parent or the page writer; a send to @parent counts only in a lane. A session whose own
@@ -1560,7 +1586,9 @@ def question_problem(records, turn, text, hook):
             acks[writer] = {writer}
             uses, sends = _turn_acts(records, turn, acks)
             # Only the cloud body {"status":"delivered"} counts; the local SendMessage success shape is not measured.
-            delivered = delivered_tool_use_ids(records)
+            # A send that failed with session_inactive also meets the duty: no live writer exists to take it, and
+            # the report names the failed send. Any other failure, and no send at all, still refuse.
+            delivered = delivered_tool_use_ids(records) | inactive_tool_use_ids(records)
             if any(writer in t and u.get("id") in delivered for u, t in zip(uses, sends)):
                 return "", ""
     page = layout.waiting_page(root) if root else "unknown"
@@ -3214,6 +3242,9 @@ def rewrite_problems(hook):
         answered = answered_problem(text)
         if answered:
             reasons.append(answered)
+        hassio = hassio_path_problem(text)
+        if hassio:
+            reasons.append(hassio)
         recovered = recovered_problem(records, text) if report_shape_ok(text) else ""
         if recovered:
             reasons.append(recovered)
@@ -3646,6 +3677,10 @@ def main():
         relay = relay_reasons(after, text, hook.get("cwd"))
         try:
             relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
+        except Exception:
+            pass
+        try:
+            relay.append(hassio_path_problem(text))
         except Exception:
             pass
     cannot = ""

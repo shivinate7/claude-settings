@@ -845,6 +845,7 @@ sh("push: stray branch, a bare push under push.default current asks",
 sh("push: stray branch, the ask names the explicit form HEAD:<branch>", VCS + " push origin HEAD", "ask",
    PUSH_STRAY_RULE, cwd=PUSHSTRAY, carries=("HEAD:<branch>",), lacks=("HEAD:mylocal", "HEAD:lane/x"))
 
+
 # DENY, rule push-agent-branch. A non-forced push whose destination is an agent-worktree name is refused, with or
 # without -u. push-stray-branch stays silent on a branch with no upstream, so this rule carries that case. The
 # names are agent-<hex>, claude/agent-<hex> and worktree-agent-<hex>, with 8 or more hex characters after the
@@ -1076,10 +1077,12 @@ sh("main, git -C into a repo with no remote is silent, from a repo with a networ
 # HEAD on PUSHLOCALSTRAY (its branch tracks origin/other) is stray, and the agent name on PUSHLOCAL is refused.
 push_case("local origin, main then HEAD on a branch tracking another name asks stray", "origin main HEAD", "ask",
           cwd=PUSHLOCALSTRAY, rule=PUSH_STRAY_RULE)
+
 agent_refused("push: local origin, main then the agent name asks the agent rule",
               VCS + " push origin main claude/agent-deadbeef01", cwd=PUSHLOCAL)
 push_case("local origin, HEAD on a branch tracking another name asks stray (control)", "origin HEAD", "ask",
           cwd=PUSHLOCALSTRAY, rule=PUSH_STRAY_RULE)
+
 agent_refused("push: local origin, the agent name alone asks the agent rule (control)",
               VCS + " push origin claude/agent-deadbeef01", cwd=PUSHLOCAL)
 # On a network origin, a main refspec before an agent name is refused by the agent rule, not asked as push-main.
@@ -1134,6 +1137,7 @@ push_case("main tracking origin/main, network origin, HEAD asks push-main", "ori
           rule=PUSH_MAIN_RULE)
 push_case("main tracking origin/main, local origin, --all is silent", "origin --all", "allow", cwd=PUSHLOCALMAIN,
           silent=True)
+
 all_allowed("main tracking origin/main, network origin, --all is silent, local main equal", "origin --all",
             cwd=PUSHMAINUP)
 
@@ -1698,10 +1702,12 @@ for _name, _command in (
 RM_PARENT_HINT = {"Bash": "rm -rf build", "PowerShell": "Remove-Item -Recurse build"}
 
 
-def rm_parent(name, command, expected="deny", **kw):
-    """One case of the block: a deny names destructive-delete, an allow names nothing."""
-    sh("rm-parent: " + name.replace("\n", " ; "), command, expected,
-       "destructive-delete" if expected == "deny" else None, cwd=NOGIT, **kw)
+def rm_parent(name, command, expected="deny", rule=None, **kw):
+    """One case of the block: a deny names destructive-delete unless `rule` names the rule that reads it
+    first, and an allow names nothing."""
+    if rule is None:
+        rule = "destructive-delete" if expected == "deny" else None
+    sh("rm-parent: " + name.replace("\n", " ; "), command, expected, rule, cwd=NOGIT, **kw)
 
 
 # The flag spellings, on `.` and `..`: one cluster, split flags, a capital R, a verbose letter, the
@@ -1931,10 +1937,23 @@ for _command in (VCS + " rm -r --cached .", VCS + " rm -r .", VCS + " rm -r --ca
     rm_parent("allows " + _command, _command, "allow")
 rm_parent("a real rm -rf . after a git command", VCS + " status && rm -rf .")
 
-# KNOWN OPEN. A shell operator glued to the target (`..&`, `..>x`, `.>/dev/null`) leaves the target
-# unread by both the token read and the raw read. These cases record today's verdict and are not a
-# ruling that it is right: when a fix makes one deny, re-point it here.
-for _command in ("rm -rf ..&", "rm -rf ..>x", "rm -rf .>/dev/null"):
+# A `&` glued to the target backgrounds the delete as a spaced one does, so detached-launch refuses `rm -rf ..&`
+# before any delete rule reads it. destructive-delete still reads no target glued to a shell operator, so this row
+# shows only the detached-launch refusal.
+rm_parent("rm -rf ..& is refused by detached-launch", "rm -rf ..&", rule="detached-launch")
+# With a pid captured on the same line, detached-launch does not refuse the job (bare_background_hit returns on
+# `$!`), as it does not refuse the spaced `rm -rf .. & echo $!`. That spaced form is refused by destructive-delete,
+# so this glued form is too. destructive-delete reads no target glued to a shell operator (above), so this row
+# is red on the code before this change, and a fix to the job reader alone leaves it red.
+rm_parent("rm -rf ..& echo $!, a glued & with the pid captured, is refused by destructive-delete",
+          "rm -rf ..& echo $!", rule="destructive-delete")
+# `&>` redirects both streams, so `..` is the target and the delete is refused by destructive-delete. Only
+# the `>` after the `&` is read, so no job is formed. `rm -rf ..>x` stays a known open case below.
+rm_parent("rm -rf ..&>/dev/null, a glued &> redirect, is refused by destructive-delete", "rm -rf ..&>/dev/null")
+# KNOWN OPEN. A shell operator glued to the target (`..>x`, `.>/dev/null`) leaves the target unread by
+# both the token read and the raw read. These cases record today's verdict and are not a ruling that
+# it is right: when a fix makes one deny, re-point it here.
+for _command in ("rm -rf ..>x", "rm -rf .>/dev/null"):
     rm_parent("known open: " + _command, _command, "allow")
 
 

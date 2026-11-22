@@ -770,5 +770,32 @@ def ask_verdict_is_printed_as_asked():
     return expect(out == "ask stub-ask: a stub asks\n", "printed %r, want the guard's ask line" % out[:80])
 
 
+# A lifted refusal: the guard prints additionalContext and no permissionDecision (guard_core lift_notice).
+LIFT_STUB = (
+    "import json, sys\n"
+    "json.load(sys.stdin)\n"
+    "out = {'hookEventName': 'PreToolUse', 'additionalContext': 'override lifted: spawn-judge'}\n"
+    "print(json.dumps({'hookSpecificOutput': out}))\n"
+)
+
+
+@case
+def lift_only_verdict_is_allow_with_its_note():
+    """Probe: a guard's lift line (additionalContext, no permissionDecision) prints as `allow` with its note."""
+    folder = os.path.realpath(new_dir())
+    hooks = install_layout(folder)
+    probe_copy = os.path.join(hooks, "probe.py")
+    write(os.path.join(hooks, "guard.py"), LIFT_STUB.encode("utf-8"))
+    rc, out, err = probe(["--tool", "Bash", "--command", HARMLESS, "--cwd", folder], script=probe_copy)
+    if INTERPRETER_MISSING in err:
+        return ["stderr is the interpreter's missing-file error, so the helper did not run"]
+    # scope() is not used: its VERDICT pattern has no `allow <note>` form, and it must stay strict for the others.
+    if rc != 0:
+        return expect(False, "probe exited %d on a lift-only line, want the verdict `allow <note>`: %s"
+                      % (rc, err.strip()[-160:]))
+    return expect(out == "allow override lifted: spawn-judge\n",
+                  "printed %r, want the lift line read as allow with its note" % out[:120])
+
+
 if __name__ == "__main__":
     sys.exit(run_cases(CASES))

@@ -21,6 +21,10 @@ Owner, 2026-10-26 (step c41, answer a): build an Opus-only override word. It lif
 
 Owner, 2026-10-19 00:07 CDT, process-only: after round 3, a test-only re-point of mutation anchors lands with CI's mutation run as its proof, with no 4th review.
 
+Owner, 2026-11-20 22:17 CST, chat, "A is good", answering option a: "add the additionalContext line and amend line 34. Gain: Claude sees each lifted refusal and can stop a bad act." The sentence on a valid override is that line. A lift now prints one context line, so Claude sees it.
+
+Incident, 2026-11-20 14:55 CST: `override 4h` lifted `red-run-commit` silently. That rule refuses a commit that adds test lines with no valid Red-run trailer (decision `red-run-trailer-on-test-commits`, a commit that adds test lines carries the red run of those lines). Two commits with no Red-run trailer went in, in pull requests #3691 and #3749. The lift printed nothing, so Claude could not see it.
+
 Orchestrator's call, not an owner grant:
 
 - An override covers only the session where the owner typed it.
@@ -31,7 +35,7 @@ Orchestrator's call, not an owner grant:
 - An override file that is missing, unreadable or corrupt is no override.
 - `override` also lifts the Opus spawn refusal of `agent-model-cap`, and a refusal of a spawn above its role's row (`agent-role-model`; owner, 2026-11-01 17:25 CST, item 127, pick a, same for Sonnet and Opus). It never lifts that rule's settings-write ask, nor the no-model refusal of `agent-role-model`.
 - The override check sits at the top of `refuse()` in `hooks/guard_core.py`, the one place that prints a deny or an ask.
-- A valid override writes one guard log line, `override <rule>`, and prints nothing, so the normal permission flow runs.
+- A valid override writes one guard log line, `override <rule>`. On a lift it also prints one stdout line: a PreToolUse `hookSpecificOutput` whose `additionalContext` is `override lifted: <rules>`, with no `permissionDecision`, so the normal permission flow still runs. It is stdout, not stderr, because Claude never sees stderr from a hook that exits 0. When a later rule of the same hook run refuses the call, the refusal reason carries `(override lifted: <rules>)` before the override offer line, and no second object prints.
 
 ## The plain override ask
 

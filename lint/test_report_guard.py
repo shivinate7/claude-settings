@@ -33,6 +33,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, HOOKS)  # guard_core, loaded by path below, imports its sibling modules
 import ste_lint  # noqa: E402
 import report_guard as RG  # noqa: E402  session_wording, the one detector for an order to the session (lint/report_guard.py)
+import _transcript as TR  # noqa: E402  the transcript reads; the unit cases below call inactive_tool_use_ids (lint/_transcript.py)
 import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (one home)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
@@ -2756,6 +2757,8 @@ class SameTurnWriter:
 
     DELIVERED = '{"status":"delivered"}'  # a cloud send_message result whose send reached its session
     NOT_DELIVERED = '{"status":"queued"}'  # a result that reads as not delivered
+    # A cloud send result that failed because the target session is gone. The guard reads the code session_inactive.
+    INACTIVE = "Cannot send events to inactive session %s (session_inactive)"
 
     def call(self, name, input_, result=None, side=False, is_error=False, tool_use_result=None):
         """The records one tool call leaves: the call, and its result when one is given. is_error sets the
@@ -3279,6 +3282,81 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                 out = self.stop([human("decide"), *reads, *send, assistant_text(self.reply(self.PICK))], repo=keyed)
                 self.assertIsNone(out, "a failed send on the transcript path was refused; that path keeps main's verdict")
 
+    # A send that failed as session_inactive: the writer's session is gone, so the attempt meets the duty.
+
+    def test_qm_layout_writer_green_failed_send_as_session_inactive_passes(self):
+        # Catches: a send to the layout key's writer that failed as session_inactive refused, as if no send reached it.
+        # Both the session_id and the to field count.
+        bare = self.make_repo("bare_key")
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        for label, send in (("session_id", self.send(session_id=self.WRITER, result=self.INACTIVE % self.WRITER, is_error=True)),
+                            ("to", self.send(to=self.WRITER, result=self.INACTIVE % self.WRITER, is_error=True))):
+            with self.subTest(field=label):
+                records = [human("decide"), *send, assistant_text(self.reply(self.PICK))]
+                self.assert_blocked(self.stop(records, repo=bare), "Pick guard", "the page writer is not known to this session")
+                self.assertIsNone(self.stop(records, repo=keyed),
+                                  "a failed send to the layout key's writer that reads session_inactive was refused")
+
+    def test_qm_layout_writer_red_failed_session_inactive_send_to_another_id_blocks(self):
+        # Catches: a session_inactive failure to a session that is not the layout key's writer passing as the writer's send.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        other = "session_other9"
+        for label, send in (("session_id", self.send(session_id=other, result=self.INACTIVE % other, is_error=True)),
+                            ("to", self.send(to=other, result=self.INACTIVE % other, is_error=True))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                self.assert_blocked(out, "Pick guard", "the page writer is session " + self.WRITER)
+
+    def test_qm_layout_writer_red_failed_send_with_other_error_text_blocks(self):
+        # Catches: a failed send to the layout key's writer counted as delivered for any error text. The near miss
+        # names an inactive session but lacks the session_inactive code, so only the exact code counts.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        texts = ("Rate limit exceeded", "Session not found", "Cannot send events to inactive session " + self.WRITER)
+        for text in texts:
+            for label, send in (("session_id", self.send(session_id=self.WRITER, result=text, is_error=True)),
+                                ("to", self.send(to=self.WRITER, result=text, is_error=True))):
+                with self.subTest(text=text, field=label):
+                    out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                    self.assert_blocked(out, "Pick guard", "the page writer is session " + self.WRITER)
+
+    def test_qm_layout_writer_red_session_inactive_text_without_a_failure_flag_blocks(self):
+        # Catches: the session_inactive text read alone as a failure, with no is_error and no success false on the record.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        for label, send in (("session_id", self.send(session_id=self.WRITER, result=self.INACTIVE % self.WRITER)),
+                            ("to", self.send(to=self.WRITER, result=self.INACTIVE % self.WRITER))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                self.assert_blocked(out, "Pick guard", "the page writer is session " + self.WRITER)
+
+    def test_qm_layout_writer_green_local_send_failure_as_session_inactive_passes(self):
+        # Catches: a local SendMessage failure (success false on its record, no is_error) that reads session_inactive
+        # refused, when it reaches the same duty as a failed cloud send.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        failed = {"success": False, "message": "fixture: the send did not reach its session"}
+        for label, send in (("session_id", self.send(session_id=self.WRITER, result=self.INACTIVE % self.WRITER,
+                                                     tool_use_result=failed)),
+                            ("to", self.send(to=self.WRITER, result=self.INACTIVE % self.WRITER, tool_use_result=failed))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                self.assertIsNone(out, "a local send that failed as session_inactive was refused")
+
+    def test_qm_layout_writer_red_no_send_or_an_earlier_inactive_failure_blocks(self):
+        # Catches: no send this turn, or a session_inactive failure from an earlier turn, passing for this turn's question.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        failed = self.send(session_id=self.WRITER, result=self.INACTIVE % self.WRITER, is_error=True)
+        earlier = (("no send", []),
+                   ("failed send in an earlier turn", [human("first"), *failed, assistant_text("Sent earlier.")]))
+        for label, before in earlier:
+            with self.subTest(case=label):
+                out = self.stop([*before, human("decide"), assistant_text(self.reply(self.PICK))], repo=keyed)
+                self.assert_blocked(out, "Pick guard", "the page writer is session " + self.WRITER)
+
     FRESH_QUESTION_CODE = (
         "import json, sys; sys.path.insert(0, %r); import report_guard; data = json.load(sys.stdin); "
         "print(json.dumps(list(report_guard.question_problem(data['records'], data['records'], data['text'], "
@@ -3416,6 +3494,36 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         out = self.stop([*self.lane_record(), peer_msg("pick?"), assistant_text(self.reply(self.PICK))],
                         env_id=self.LANE_ENV, stop_active=True)
         self.assertIsNone(out)
+
+
+class InactiveToolUseIdsTests(SameTurnWriter, unittest.TestCase):
+    """The unit read of which sends failed as session_inactive (lint/_transcript.py inactive_tool_use_ids). Each case
+    builds records with the send helper and reads the set. No guard runs."""
+
+    def send_id(self, records):
+        return records[0]["message"]["content"][0]["id"]
+
+    def test_failed_send_as_session_inactive_is_in_the_set_for_either_failure_shape(self):
+        # Catches: a session_inactive send left out when its failure is an is_error flag or a local success false.
+        for label, flag in (("is_error", {"is_error": True}), ("success false", {"tool_use_result": {"success": False}})):
+            with self.subTest(failure=label):
+                records = self.send(to=self.WRITER, result=self.INACTIVE % self.WRITER, **flag)
+                self.assertEqual(TR.inactive_tool_use_ids(records), {self.send_id(records)},
+                                 "a failed send that reads session_inactive is not in the set")
+
+    def test_session_inactive_text_without_a_failure_flag_is_not_in_the_set(self):
+        # Catches: the session_inactive text read as a failure when the record carries no failure flag.
+        records = self.send(to=self.WRITER, result=self.INACTIVE % self.WRITER)
+        self.assertEqual(TR.inactive_tool_use_ids(records), set(), "a send with no failure flag is in the set")
+
+    def test_other_failure_text_is_not_in_the_set(self):
+        # Catches: any failed send counted as session_inactive, whatever its text.
+        records = self.send(to=self.WRITER, result="Rate limit exceeded", is_error=True)
+        self.assertEqual(TR.inactive_tool_use_ids(records), set(), "a failure with other text is in the set")
+
+    def test_no_records_give_an_empty_set(self):
+        # Catches: a read of an empty transcript that fails, or names a send that never happened.
+        self.assertEqual(TR.inactive_tool_use_ids([]), set(), "an empty transcript gave a non-empty set")
 
 
 class ConfigReportTests(unittest.TestCase):
@@ -6503,6 +6611,87 @@ class CostTests(unittest.TestCase):
     def test_replies_with_no_question_since_the_owner_message_start_nothing(self):
         run = self.stop(self.ci, DONE_ONLY, [[{"ok": True}, None]], earlier=[DONE_ONLY])
         self.assertEqual((run["models"], run["children"], run["files"]), ([], [], []))
+
+
+class HassioPagePathTests(unittest.TestCase):
+    """An old Home Assistant app page path in a reply, in report_guard.py's Stop hook, on any turn.
+
+    Home Assistant app pages are now /<slug>. So /hassio/ingress/<slug> and /hassio/addon/<slug> open a
+    page the owner no longer reaches by that path. /api/hassio/... is the supervisor API and passes. A path
+    inside an inline code span is a quotation, not a claim: the answered check reads code spans as non-claims
+    (AnsweredNeedsSourceTests), so a quoted log line passes.
+    """
+
+    def hook(self, reply):
+        records = [human("point me at the add-on page"), assistant_text(reply)]
+        path = write_transcript(records, tempfile.mkdtemp(dir=RUN_FOLDER))
+        return {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
+
+    def verdict(self, reply):
+        run = run_guard(REPORT_GUARD, self.hook(reply))
+        self.assertEqual(run.returncode, 0, run.stderr)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def assert_flagged(self, reply, needle):
+        out = self.verdict(reply) or {}
+        self.assertEqual(out.get("decision"), "block",
+                         "a reply that names an old HA page path is not flagged: %r" % reply)
+        self.assertIn(needle, out.get("reason", ""),
+                      "the flag does not name the old HA page path: %r" % reply)
+
+    def assert_not_flagged(self, reply):
+        out = self.verdict(reply) or {}
+        self.assertNotIn("decision", out,
+                         "a false flag for %r: %s" % (reply, out.get("reason")))
+
+    def test_control_the_harness_blocks_a_known_reply_on_this_shape(self):
+        # Control, green on the old code: an existing check blocks a plain turn, so a pass below is a
+        # read of the new check and not a silent harness.
+        out = self.verdict("The owner answered it.") or {}
+        self.assertEqual(out.get("decision"), "block", "the plain-turn harness did not block a known reply")
+
+    def test_an_old_ingress_page_path_is_flagged(self):
+        replies = [
+            "Open the add-on at /hassio/ingress/core_configurator to check the config.",
+            "/hassio/ingress/core_configurator opens the add-on page.",
+            "The add-on page (/hassio/ingress/core_configurator) still loads.",
+        ]
+        for reply in replies:
+            with self.subTest(reply=reply):
+                self.assert_flagged(reply, "/hassio/ingress/")
+
+    def test_an_old_addon_page_path_is_flagged(self):
+        replies = [
+            "Use /hassio/addon/core_configurator/info for the add-on page.",
+            "The add-on page is at /hassio/addon/core_configurator.",
+        ]
+        for reply in replies:
+            with self.subTest(reply=reply):
+                self.assert_flagged(reply, "/hassio/addon/")
+
+    def test_an_old_page_path_in_a_full_url_is_flagged(self):
+        # A full URL puts a word character before /hassio/, so only the URL alternative in HASSIO_PATH_RE flags it.
+        replies = [
+            "Open http://homeassistant.local:8123/hassio/addon/x to check the add-on.",
+            "The add-on page is at http://homeassistant.local:8123/hassio/addon/x.",
+        ]
+        for reply in replies:
+            with self.subTest(reply=reply):
+                self.assert_flagged(reply, "/hassio/addon/x")
+
+    def test_the_supervisor_api_path_is_not_flagged(self):
+        # Green on the old code. The lookbehind must read the path start as /hassio/, not any /hassio/ in it.
+        replies = [
+            "The supervisor call is /api/hassio/info.",
+            "The ingress API is /api/hassio/ingress/core_configurator.",
+        ]
+        for reply in replies:
+            with self.subTest(reply=reply):
+                self.assert_not_flagged(reply)
+
+    def test_an_old_path_quoted_in_a_code_span_is_not_flagged(self):
+        # Green on the old code. Code spans are non-claims, so a quoted log line that holds the old path passes.
+        self.assert_not_flagged("The log holds `GET /hassio/ingress/core_configurator 200` from the old page.")
 
 
 if __name__ == "__main__":

@@ -677,6 +677,13 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 lint/check_unknown_reads_contract.py
 
+      - name: Guard-set list fixture suite
+        run: python3 lint/test_check_guardset_lists.py
+
+      - name: Guard-set lists (guardset4, guardset7, guardset8)
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 lint/check_guardset_lists.py
+
       - name: Landed-directory manifest agreement
         if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/check_landed_dirs.py

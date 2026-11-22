@@ -1,0 +1,1 @@
+- leftover-regex-not-tied: `LEFTOVER_TEMP_PATTERNS` in `janitor/sweep.py` copies the folder name that `hooks/mutate_guard.py` makes with `mkdtemp(prefix="mutate_guard_%d-")`. No test ties the two, so a rename on one side goes unseen. Seen: 2026-11-18 x1
