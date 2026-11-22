@@ -2134,20 +2134,26 @@ class MutateLoadCap(unittest.TestCase):
         with open(os.path.join(self.wt, ".github", "workflows", "checks.yml"), "w", encoding="utf-8") as f:
             f.write(sharded_workflow(self.jobs))
 
-    def run_check(self, load, timeout_first=False):
-        """mutate_run_check on the sharded workflow at `load` per CPU (None: no reading). Each merge.sh call prints a clean report, and the first
-        raises TimeoutExpired when `timeout_first` says so. -> (failures, the timeout of each merge.sh call, the printed text)."""
+    def run_check(self, load, timeout_first=False, walls=None, partial=b""):
+        """mutate_run_check on the sharded workflow. `load` is one reading (None: no reading), or a list that the reader gives in turn; self.reader
+        is that mock, so a case counts its calls. `walls` gives the seconds each merge.sh call takes, shard by shard (none when omitted). The first
+        call raises TimeoutExpired, with `partial` as its stdout, when `timeout_first` says so. -> (failures, the timeout of each merge.sh call,
+        the printed text)."""
         timeouts, clock = [], WallClock()
+        walls = walls or [0] * len(SHARD_JOBS)
 
         def sh_stub(args, *rest, **kwargs):
+            n = len(timeouts)
             timeouts.append(kwargs.get("timeout"))
-            if timeout_first and len(timeouts) == 1:
-                raise subprocess.TimeoutExpired(args, kwargs.get("timeout"))
+            if timeout_first and n == 0:
+                raise subprocess.TimeoutExpired(args, kwargs.get("timeout"), output=partial)
+            clock.advance(walls[n])  # the run took this long: mutate_run_check reads its wall time from the clock
             return 0, mutate_report(694, 694, 0, 0)
 
+        self.reader = unittest.mock.Mock(side_effect=load) if isinstance(load, list) else unittest.mock.Mock(return_value=load)
         printed = io.StringIO()
         with unittest.mock.patch.object(merge, "sh", sh_stub), \
-                unittest.mock.patch.object(merge, "mutate_load_per_cpu", return_value=load, create=True), \
+                unittest.mock.patch.object(merge, "mutate_load_per_cpu", self.reader, create=True), \
                 unittest.mock.patch("time.monotonic", clock.now), contextlib.redirect_stdout(printed):
             _, failures = merge.mutate_run_check(self.wt)
         return failures, timeouts, printed.getvalue()
@@ -2186,6 +2192,62 @@ class MutateLoadCap(unittest.TestCase):
         self.assertEqual(len(stops), 1, "no failure says the cut-off shard stopped at its cap under load 6.0 per CPU: %s" % failures)
         self.assertIn("%d-minute cap of job %s" % (cap, job), stops[0], "the stop does not name its job's cap in minutes: " + stops[0])
         self.assertNotIn("survived", " | ".join(failures), "a cut-off shard is reported as a survived mutant: " + " | ".join(failures))
+
+    def test_shard_run_past_its_cap_within_the_load_stretch_passes(self):
+        """Why: a shard run between its own cap and the stretched cap is within the stretch the load allows, so it passes."""
+        cap_s = [job_cap(self.jobs[job], job) * 60 for job in SHARD_JOBS]
+        failures, _, _ = self.run_check(2.5, walls=[s + 1 for s in cap_s])
+        self.assertEqual(failures, [], "a shard run one second past its own cap was refused under load 2.5 per CPU, inside the stretch: %s" % failures)
+        failures, _, _ = self.run_check(2.5, walls=[s * 2.5 for s in cap_s])
+        self.assertEqual(failures, [], "a shard run at its stretched cap was refused under load 2.5 per CPU: %s" % failures)
+
+    def test_shard_run_just_past_the_load_stretch_fails_as_a_stop(self):
+        cap_s = [job_cap(self.jobs[job], job) * 60 for job in SHARD_JOBS]
+        failures, _, _ = self.run_check(2.5, walls=[cap_s[0] * 2.5 + 1, 0, 0])
+        self.assertEqual(len(failures), 1, "a shard run one second past its stretched cap did not fail the lint once: %s" % failures)
+        self.assertIn("stopped at cap under load 2.5 per CPU", failures[0], "a run past its stretched cap is not named as a stop under load: " + failures[0])
+
+    def test_load_is_read_once_and_every_shard_keeps_its_own_cap_at_load_0_4(self):
+        """Why: the reader gives 6.0 at its second and third reads. A read per shard would stretch the last two shards, so the one read at the
+        start must set every shard's cap."""
+        _, timeouts, _ = self.run_check([0.4, 6.0, 6.0])
+        self.assertEqual(self.reader.call_count, 1, "the load was read %d times in one run, want once, before the first shard" % self.reader.call_count)
+        want = [job_cap(self.jobs[job], job) * 60 for job in SHARD_JOBS]
+        self.assertEqual(timeouts, want, "a shard's cap follows a later read of the load, not the one read at the start: got %s, want %s" % (timeouts, want))
+
+    def test_load_per_cpu_is_the_5_minute_average_over_the_cpu_count(self):
+        with unittest.mock.patch.object(os, "getloadavg", return_value=(1, 8, 15)), unittest.mock.patch.object(os, "cpu_count", return_value=4):
+            self.assertEqual(merge.mutate_load_per_cpu(), 2.0, "the load per CPU is not the 5-minute average over the CPU count")
+
+    def test_load_per_cpu_is_none_when_the_load_average_cannot_be_read(self):
+        for error in (OSError("no load average"), AttributeError("no getloadavg")):  # AttributeError: a platform with no load average to read
+            with self.subTest(error=type(error).__name__), unittest.mock.patch.object(os, "getloadavg", side_effect=error):
+                self.assertIsNone(merge.mutate_load_per_cpu(), "the reader gave a load when the load average raised %s" % type(error).__name__)
+
+    def test_stop_at_factor_1_names_neither_the_load_nor_the_stretch(self):
+        failures, _, _ = self.run_check(1.0, timeout_first=True)
+        stops = [f for f in failures if "stopped at" in f]
+        self.assertEqual(len(stops), 1, "no failure says the cut-off shard stopped at its cap: %s" % failures)
+        self.assertNotIn("load", stops[0], "a stop at factor 1 names a load: " + stops[0])
+        self.assertNotIn("stretched", stops[0], "a stop at factor 1 names a stretch: " + stops[0])
+
+    def test_stop_above_factor_1_names_the_load_and_the_stretch(self):
+        failures, _, _ = self.run_check(6.0, timeout_first=True)
+        stops = [f for f in failures if "stopped at cap under load 6.0 per CPU" in f]
+        self.assertEqual(len(stops), 1, "no failure says the cut-off shard stopped at its cap under load 6.0 per CPU: %s" % failures)
+        self.assertIn("stretched x4.0", stops[0], "the stop above factor 1 does not name the stretch: " + stops[0])
+
+    def test_shard_start_line_names_no_load_at_factor_1(self):
+        _, _, printed = self.run_check(0.5)
+        self.assertNotIn("load", printed, "a shard start line at factor 1 names a load that did not stretch its cap: " + printed)
+
+    def test_cut_off_shard_that_printed_a_survivor_is_no_survived_failure(self):
+        """Why: a shard cut off at its cap judged no mutant survived, so a survivor line it printed before the cut-off is no survived verdict."""
+        survivor = b"SURVIVED    hooks/guard.py: flipped the guard\n"  # mutate_shared's per-mutant line
+        failures, _, _ = self.run_check(6.0, timeout_first=True, partial=survivor)
+        stops = [f for f in failures if "stopped at cap under load 6.0 per CPU" in f]
+        self.assertEqual(len(stops), 1, "a cut-off shard that printed a survivor gave no stop line: %s" % failures)
+        self.assertNotRegex(" | ".join(failures), r"\d+ mutants? survived", "a cut-off shard that printed a survivor is reported as survived mutants: %s" % failures)
 
 
 class CrossMeasure(LaneFixture):
