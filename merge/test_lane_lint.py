@@ -37,6 +37,8 @@ first run scope_and_save, whose rerun must run no job. Saved results are pruned:
 by a crash or a kill is gone after the next save.
 Cost per case: at most four stub starts; a tool-copy case copies the repo's tree once, and a family case once per file (unmeasured); the prune cases
 make TOOL_KEYS lints (unmeasured).
+LaneLintLoadCeiling (class LaneLintLoadCeiling) covers the load gate that runs before the lint: 4 per CPU refuses, 3.9 per CPU starts, and an unknown
+CPU count prints one line and goes ahead. setUpModule pins the load to an idle reading for every case here, and RUNNER_SCRIPT pins it in each child run.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import ast, atexit, contextlib, importlib.util, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, threading, time, types, unittest, unittest.mock, uuid
@@ -66,6 +68,11 @@ atexit.register(shutil.rmtree, RUN_FOLDER, True)
 
 def setUpModule():
     tm.install_model_guard()  # the test base of test_merge: a join here runs the prose judge, and no case starts `claude -p`
+    # The lint's load gate reads the host's 5-minute load. Every case in this module runs merge in this process (some outside LaneFixture),
+    # so a loaded runner would refuse them. The load cases patch their own reading, and that patch wins until it ends.
+    load_patch = unittest.mock.patch.object(os, "getloadavg", return_value=(0.0, 0.0, 0.0), create=True)  # create: no getloadavg on Windows
+    load_patch.start()
+    unittest.addModuleCleanup(load_patch.stop)
 
 PASSING = [("PASS", "record slugs"), ("PASS", "ste lint")]
 FAILING = [("PASS", "record slugs"), ("FAIL", "comment narration")]
@@ -118,8 +125,9 @@ sys.exit(RC)
 '''
 
 # merge.py fixes CI_JOB at import, so a subprocess run names the stub here, before main runs. Same argv and exit code as merge.py's __main__.
-RUNNER_SCRIPT = '''import sys
+RUNNER_SCRIPT = '''import os, sys
 sys.path.insert(0, __HERE__)
+os.getloadavg = lambda: (0.0, 0.0, 0.0)  # a child process has its own load reading: the parent's pin does not reach it
 import merge
 merge.CI_JOB = __STUB__
 sys.exit(merge.main(sys.argv[1:]))
@@ -605,6 +613,18 @@ class LaneFixture(CiJobStub, tm.CloudSession):
                 self.fail("the mode does not exist: " + last)
             self.fail("argparse refused the command line: " + last)
         return rc, out, err
+
+    @contextlib.contextmanager
+    def worktree_adds(self):
+        """Record each `git worktree add` that merge runs inside the block. -> the list, filled with each call's argv after `git`."""
+        adds = []
+        real = merge.git  # Env.setUp's wrapper: the spy chains on it
+        def git(cwd, *a, **k):
+            if a[:2] == ("worktree", "add"):
+                adds.append(a)
+            return real(cwd, *a, **k)
+        with unittest.mock.patch.object(merge, "git", git):
+            yield adds
 
     def assert_lint_merge(self, lint_head, head, base, repo=None):
         """The lint's HEAD is the merge commit of origin/<base> (first parent) and the head (second parent): the lint reads the merged files,
@@ -6821,18 +6841,6 @@ class LaneLintDiskFloor(LaneFixture):
         with patch:
             yield
 
-    @contextlib.contextmanager
-    def worktree_adds(self):
-        """Record each `git worktree add` that merge runs inside the block. -> the list, filled with each call's argv after `git`."""
-        adds = []
-        real = merge.git  # Env.setUp's wrapper: the spy chains on it
-        def git(cwd, *a, **k):
-            if a[:2] == ("worktree", "add"):
-                adds.append(a)
-            return real(cwd, *a, **k)
-        with unittest.mock.patch.object(merge, "git", git):
-            yield adds
-
     def refusal_run(self, cloud, free_gib, total_gib=DISK_GIB):
         """`merge 7 --lane-lint` with `free_gib` free on a `total_gib` drive, the lint stubbed to PASS. -> (rc, output, worktree adds)."""
         self.assertLess(free_gib, full_floor_gib(total_gib), "the case reads %s GiB, not under the full floor; it proves nothing" % free_gib)
@@ -7199,6 +7207,72 @@ class LaneLintDiskFloor(LaneFixture):
             self.assertTrue(self.under(module.__file__, tree), "merge.py did not load from the temp tree: %s" % module.__file__)
             text = self.refusal_from(module)
         self.assert_names_landed_sweep(text, landed, tree)
+
+
+# The load gate reads the 5-minute load over the CPU count. The cases name the ruling's ceiling, 4 per CPU (decision draft-until-reviewed), as
+# literals, so they check the number the owner set and not merge.py's constant. The CPU count is patched, so no reading depends on the host.
+LOAD_CPUS = 2  # on 2 CPUs, a load of 8.0 reads 4.0 per CPU and a load of 7.8 reads 3.9
+LOAD_AT_CEILING = 8.0
+LOAD_UNDER_CEILING = 7.8
+
+
+class LaneLintLoadCeiling(LaneFixture):
+    """`merge --lane-lint` on a machine whose 5-minute load is at or above 4 per CPU: refused before any worktree is made, in a cloud session and a
+    local one, and the refusal names the reading and the decision (decision draft-until-reviewed). Under 4 per CPU the lint starts. An unknown CPU
+    count goes ahead with one line that says so. Cost per case: one lint, one stub start; the load and the CPU count are patched, so no real reading
+    is taken (unmeasured)."""
+
+    @contextlib.contextmanager
+    def load_reading(self, five_minute, cpus):
+        """Patch the 5-minute load to `five_minute` and the CPU count to `cpus` (None: unknown) for the block."""
+        with unittest.mock.patch.object(os, "getloadavg", return_value=(0.0, five_minute, 0.0)), \
+                unittest.mock.patch.object(os, "cpu_count", return_value=cpus):
+            yield
+
+    def lint_at_load(self, cloud, five_minute, cpus):
+        """`merge 7 --lane-lint` at the reading, the lint stubbed to PASS (use_ci_job first). -> (rc, output, worktree adds)."""
+        if os.path.exists(self.log):
+            os.remove(self.log)  # lint_calls reads the whole log, so an earlier lint in the same case must not count here
+        self.forget_saved_passes()  # a saved PASS of this head skips the job, and these cases count the job's runs
+        with self.load_reading(five_minute, cpus), self.worktree_adds() as adds:
+            rc, text = self.run_lane("--lane-lint", "7", cloud=cloud)
+        return rc, text, adds
+
+    def test_a_load_of_3_9_per_cpu_starts_the_lint(self):  # the control: a lint at this load starts on the old code too
+        self.use_ci_job(PASSING, 0)
+        for cloud in (True, False):
+            with self.subTest(cloud=cloud):
+                rc, text, _ = self.lint_at_load(cloud, LOAD_UNDER_CEILING, LOAD_CPUS)
+                self.assertEqual(rc, 0, "a lint at 3.9 per CPU was refused: " + text)
+                self.assertEqual(len(self.lint_calls()), 1, "a lint at 3.9 per CPU did not run its job once: " + text)
+                self.assertNotIn("per CPU", text, "a lint at 3.9 per CPU names the load gate, though it starts: " + text)
+
+    def test_a_load_of_4_per_cpu_refuses_the_lint_before_any_tree(self):
+        self.use_ci_job(PASSING, 0)
+        for cloud in (True, False):
+            with self.subTest(cloud=cloud):
+                rc, text, adds = self.lint_at_load(cloud, LOAD_AT_CEILING, LOAD_CPUS)
+                self.assertEqual(rc, 1, "a lint at 4 per CPU went ahead: " + text)
+                self.assertEqual(self.lint_calls(), [], "the refused lint ran its job anyway: " + text)
+                self.assertEqual(adds, [], "the refused lint made a worktree before it refused: %r" % (adds,))
+
+    def test_the_load_refusal_names_the_load_the_reading_and_the_decision(self):
+        self.use_ci_job(PASSING, 0)
+        rc, text, _ = self.lint_at_load(True, LOAD_AT_CEILING, LOAD_CPUS)
+        self.assertEqual(rc, 1, "a lint at 4 per CPU went ahead, so there is no refusal to read: " + text)
+        self.assertRegex(text, r"5-minute load", "the refusal does not name the 5-minute load: " + text)  # scope before the reading
+        self.assertRegex(text, r"reads 4\.0 per CPU", "the refusal does not name the reading of 4.0 per CPU: " + text)
+        self.assertIn("decision draft-until-reviewed", text, "the refusal does not name the decision: " + text)
+
+    def test_an_unknown_cpu_count_prints_one_line_and_the_lint_goes_ahead(self):
+        # A load of 40.0 refuses on any CPU count up to 10, so the lint starts only because the count is unknown.
+        self.use_ci_job(PASSING, 0)
+        rc, text, _ = self.lint_at_load(True, 40.0, None)
+        self.assertEqual(rc, 0, "a lint with an unknown CPU count was refused: " + text)
+        self.assertEqual(len(self.lint_calls()), 1, "a lint with an unknown CPU count did not run its job once: " + text)
+        lines = [line for line in text.splitlines() if "CPU count" in line]
+        self.assertEqual(len(lines), 1, "an unknown CPU count printed %d lines that name it, want one: %s" % (len(lines), text))
+        self.assertIn("unknown", lines[0], "the one line does not say the reading is unknown: " + lines[0])
 
 
 VERDICT_DIR_ENV = "MUTATE_VERDICT_DIR"  # the one name of the folder a mutate shard saves its verdicts in (hooks/test_mutate_shared.py ResumeTests names it too)
