@@ -532,6 +532,11 @@ class LaneFixture(CiJobStub, tm.CloudSession):
         disk_patch = unittest.mock.patch.object(shutil, "disk_usage", return_value=roomy)
         disk_patch.start()
         self.addCleanup(disk_patch.stop)
+        # The host's load would stretch each shard's cap (merge.mutate_run_check), so the cap-edge cases here read a load of 0. create=True: a
+        # tree without the load reader still runs these cases, which must not stop at a missing name.
+        load_patch = unittest.mock.patch.object(merge, "mutate_load_per_cpu", return_value=0.0, create=True)
+        load_patch.start()
+        self.addCleanup(load_patch.stop)
 
     def record_sweep(self, root, confirm, restore_log_path, mode="full", attended=False, own_lock_rule=True):
         """The stand-in for janitor/sweep.py's sweep_repo: it records the call with where stdout stands, and reaps nothing. -> sweep_repo's result shape.
@@ -2114,6 +2119,135 @@ def lane_lint_usage():
         return None
     end = next((i for i in range(starts[0] + 1, len(lines)) if lines[i].startswith("  merge ")), len(lines))
     return "\n".join(lines[starts[0]:end])
+
+
+class MutateLoadCap(unittest.TestCase):
+    """The shard caps that merge.mutate_run_check stretches by the 5-minute load per CPU, read at each shard's start.
+    Why: the caps come from the real sharded checks.yml (shard_jobs), so a cap edit moves these cases with it. merge.sh is stubbed, so no
+    mutation run starts, and the clock is synthetic, so no verdict reads the host's time."""
+
+    def setUp(self):
+        self.wt = tempfile.mkdtemp(prefix="mutate-load-", dir=RUN_FOLDER)  # this run's folder: its teardown removes the tree
+        self.addCleanup(shutil.rmtree, self.wt, True)
+        os.makedirs(os.path.join(self.wt, ".github", "workflows"))
+        self.jobs = shard_jobs()
+        with open(os.path.join(self.wt, ".github", "workflows", "checks.yml"), "w", encoding="utf-8") as f:
+            f.write(sharded_workflow(self.jobs))
+
+    def run_check(self, load, timeout_first=False, walls=None, partial=b""):
+        """mutate_run_check on the sharded workflow. `load` is one reading (None: no reading), or a list that the reader gives in turn; self.reader
+        is that mock, so a case counts its calls. `walls` gives the seconds each merge.sh call takes, shard by shard (none when omitted). The first
+        call raises TimeoutExpired, with `partial` as its stdout, when `timeout_first` says so. -> (failures, the timeout of each merge.sh call,
+        the printed text)."""
+        timeouts, clock = [], WallClock()
+        walls = walls or [0] * len(SHARD_JOBS)
+
+        def sh_stub(args, *rest, **kwargs):
+            n = len(timeouts)
+            timeouts.append(kwargs.get("timeout"))
+            if timeout_first and n == 0:
+                raise subprocess.TimeoutExpired(args, kwargs.get("timeout"), output=partial)
+            clock.advance(walls[n])  # the run took this long: mutate_run_check reads its wall time from the clock
+            return 0, mutate_report(694, 694, 0, 0)
+
+        self.reader = unittest.mock.Mock(side_effect=load) if isinstance(load, list) else unittest.mock.Mock(return_value=load)
+        printed = io.StringIO()
+        with unittest.mock.patch.object(merge, "sh", sh_stub), \
+                unittest.mock.patch.object(merge, "mutate_load_per_cpu", self.reader, create=True), \
+                unittest.mock.patch("time.monotonic", clock.now), contextlib.redirect_stdout(printed):
+            _, failures = merge.mutate_run_check(self.wt)
+        return failures, timeouts, printed.getvalue()
+
+    def assert_caps_at(self, load, factor):
+        """Each shard run starts under its job's cap in seconds, stretched by `factor`."""
+        _, timeouts, _ = self.run_check(load)
+        want = [job_cap(self.jobs[job], job) * 60 * factor for job in SHARD_JOBS]
+        self.assertEqual(timeouts, want, "at load %s per CPU the shard runs are not under caps x%s: got timeouts %s, want %s" % (load, factor, timeouts, want))
+
+    def test_shard_caps_are_kept_at_half_a_run_per_cpu(self):
+        self.assert_caps_at(0.5, 1.0)
+
+    def test_shard_caps_are_kept_at_one_run_per_cpu(self):
+        self.assert_caps_at(1.0, 1.0)
+
+    def test_shard_caps_are_stretched_by_the_load_at_2_5_per_cpu(self):
+        self.assert_caps_at(2.5, 2.5)
+
+    def test_shard_caps_stop_stretching_at_four_times_under_load_6_per_cpu(self):
+        self.assert_caps_at(6.0, 4.0)
+
+    def test_shard_caps_are_kept_when_the_load_cannot_be_read(self):
+        self.assert_caps_at(None, 1.0)
+
+    def test_shard_start_line_names_the_load_and_the_stretch(self):
+        _, _, printed = self.run_check(2.5)
+        self.assertEqual(printed.count("load 2.5 per CPU, cap x2.5"), len(SHARD_JOBS),
+                         "the start line of each shard does not name the load and the stretch: " + printed)
+
+    def test_shard_cut_off_at_its_cap_under_load_fails_as_a_stop_not_a_mutant_verdict(self):
+        failures, _, _ = self.run_check(6.0, timeout_first=True)
+        job = SHARD_JOBS[0]
+        cap = job_cap(self.jobs[job], job)
+        stops = [f for f in failures if "stopped at cap under load 6.0 per CPU" in f]
+        self.assertEqual(len(stops), 1, "no failure says the cut-off shard stopped at its cap under load 6.0 per CPU: %s" % failures)
+        self.assertIn("%d-minute cap of job %s" % (cap, job), stops[0], "the stop does not name its job's cap in minutes: " + stops[0])
+        self.assertNotIn("survived", " | ".join(failures), "a cut-off shard is reported as a survived mutant: " + " | ".join(failures))
+
+    def test_shard_run_past_its_cap_within_the_load_stretch_passes(self):
+        """Why: a shard run between its own cap and the stretched cap is within the stretch the load allows, so it passes."""
+        cap_s = [job_cap(self.jobs[job], job) * 60 for job in SHARD_JOBS]
+        failures, _, _ = self.run_check(2.5, walls=[s + 1 for s in cap_s])
+        self.assertEqual(failures, [], "a shard run one second past its own cap was refused under load 2.5 per CPU, inside the stretch: %s" % failures)
+        failures, _, _ = self.run_check(2.5, walls=[s * 2.5 for s in cap_s])
+        self.assertEqual(failures, [], "a shard run at its stretched cap was refused under load 2.5 per CPU: %s" % failures)
+
+    def test_shard_run_just_past_the_load_stretch_fails_as_a_stop(self):
+        cap_s = [job_cap(self.jobs[job], job) * 60 for job in SHARD_JOBS]
+        failures, _, _ = self.run_check(2.5, walls=[cap_s[0] * 2.5 + 1, 0, 0])
+        self.assertEqual(len(failures), 1, "a shard run one second past its stretched cap did not fail the lint once: %s" % failures)
+        self.assertIn("stopped at cap under load 2.5 per CPU", failures[0], "a run past its stretched cap is not named as a stop under load: " + failures[0])
+
+    def test_load_is_read_once_and_every_shard_keeps_its_own_cap_at_load_0_4(self):
+        """Why: the reader gives 6.0 at its second and third reads. A read per shard would stretch the last two shards, so the one read at the
+        start must set every shard's cap."""
+        _, timeouts, _ = self.run_check([0.4, 6.0, 6.0])
+        self.assertEqual(self.reader.call_count, 1, "the load was read %d times in one run, want once, before the first shard" % self.reader.call_count)
+        want = [job_cap(self.jobs[job], job) * 60 for job in SHARD_JOBS]
+        self.assertEqual(timeouts, want, "a shard's cap follows a later read of the load, not the one read at the start: got %s, want %s" % (timeouts, want))
+
+    def test_load_per_cpu_is_the_5_minute_average_over_the_cpu_count(self):
+        with unittest.mock.patch.object(os, "getloadavg", return_value=(1, 8, 15)), unittest.mock.patch.object(os, "cpu_count", return_value=4):
+            self.assertEqual(merge.mutate_load_per_cpu(), 2.0, "the load per CPU is not the 5-minute average over the CPU count")
+
+    def test_load_per_cpu_is_none_when_the_load_average_cannot_be_read(self):
+        for error in (OSError("no load average"), AttributeError("no getloadavg")):  # AttributeError: a platform with no load average to read
+            with self.subTest(error=type(error).__name__), unittest.mock.patch.object(os, "getloadavg", side_effect=error):
+                self.assertIsNone(merge.mutate_load_per_cpu(), "the reader gave a load when the load average raised %s" % type(error).__name__)
+
+    def test_stop_at_factor_1_names_neither_the_load_nor_the_stretch(self):
+        failures, _, _ = self.run_check(1.0, timeout_first=True)
+        stops = [f for f in failures if "stopped at" in f]
+        self.assertEqual(len(stops), 1, "no failure says the cut-off shard stopped at its cap: %s" % failures)
+        self.assertNotIn("load", stops[0], "a stop at factor 1 names a load: " + stops[0])
+        self.assertNotIn("stretched", stops[0], "a stop at factor 1 names a stretch: " + stops[0])
+
+    def test_stop_above_factor_1_names_the_load_and_the_stretch(self):
+        failures, _, _ = self.run_check(6.0, timeout_first=True)
+        stops = [f for f in failures if "stopped at cap under load 6.0 per CPU" in f]
+        self.assertEqual(len(stops), 1, "no failure says the cut-off shard stopped at its cap under load 6.0 per CPU: %s" % failures)
+        self.assertIn("stretched x4.0", stops[0], "the stop above factor 1 does not name the stretch: " + stops[0])
+
+    def test_shard_start_line_names_no_load_at_factor_1(self):
+        _, _, printed = self.run_check(0.5)
+        self.assertNotIn("load", printed, "a shard start line at factor 1 names a load that did not stretch its cap: " + printed)
+
+    def test_cut_off_shard_that_printed_a_survivor_is_no_survived_failure(self):
+        """Why: a shard cut off at its cap judged no mutant survived, so a survivor line it printed before the cut-off is no survived verdict."""
+        survivor = b"SURVIVED    hooks/guard.py: flipped the guard\n"  # mutate_shared's per-mutant line
+        failures, _, _ = self.run_check(6.0, timeout_first=True, partial=survivor)
+        stops = [f for f in failures if "stopped at cap under load 6.0 per CPU" in f]
+        self.assertEqual(len(stops), 1, "a cut-off shard that printed a survivor gave no stop line: %s" % failures)
+        self.assertNotRegex(" | ".join(failures), r"\d+ mutants? survived", "a cut-off shard that printed a survivor is reported as survived mutants: %s" % failures)
 
 
 class CrossMeasure(LaneFixture):
@@ -7972,6 +8106,182 @@ class CiJobHeadCopy(LaneFixture):
         self.assertEqual(rc, 0, text)
         self.assertRegex(text, "renam", "the lint does not say the lane renamed bin/ci-job: " + text)
         self.assertNotRegex(text, "deletes bin/ci-job", "the lint says the lane deletes bin/ci-job, though the lane renamed it: " + text)
+
+
+class ReviewedRead:
+    """A stand-in for merge.reviewed_read. `batch` are the pull requests whose record passes (act `batch`), `others` are (number, act) pairs, and
+    every number is an open pull request on main. `fail` makes the read raise. `calls` counts the reads, so a case proves whether a list was read."""
+
+    def __init__(self, batch=(), others=(), fail=None, stacked=()):
+        self.rows = sorted([(n, "batch") for n in batch] + list(others))
+        self.fail = fail
+        self.stacked = set(stacked)  # the numbers whose base is another branch, not main
+        self.calls = 0
+
+    def __call__(self, h, cfgrel=None, facts=None, ledger=None):
+        self.calls += 1
+        if self.fail is not None:
+            raise self.fail
+        ledger.extend({"number": n, "act": act, "owner": "batch runner", "ageHours": 1.0, "red": False} for n, act in self.rows)
+        pulls = [{"number": n, "base": {"ref": "pr-%d" % n if n in self.stacked else "main"}, "head": {"sha": "%040d" % n}} for n, _ in self.rows]
+        return [], pulls, {}
+
+
+def hint_lines(text):
+    """The hint's lines: each starts `merge: another lane lint`, the one line a lint prints when another lint of its clone holds a tree."""
+    return [line for line in text.splitlines() if line.startswith("merge: another lane lint")]
+
+
+class CombineHint(LaneFixture):
+    """The hint `merge --lane-lint` prints when another lane lint of its clone is running or queued (merge.combine_hint). It is one line, printed before
+    the lint, that names the ready PRs and the command that builds a train from them, or says to merge alone under the backlog. The lock is real git:
+    a lane lint's tree is locked `merge tool, pid N, lane lint`, and the pid is a live child or a reaped one. merge.reviewed_read is a stand-in,
+    so each case sets the rows and counts the reads."""
+
+    def setUp(self):
+        super().setUp()
+        self.use_ci_job(PASSING, 0)
+        temp = unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER)  # other_lane_lint_pids reads only the trees in the temp folder
+        temp.start()
+        self.addCleanup(temp.stop)
+
+    def live_pid(self):
+        """The pid of a child process that is still running: another lane lint's pid. The child is killed at the end of the case."""
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
+        self.addCleanup(child.wait)
+        self.addCleanup(child.kill)
+        return child.pid
+
+    def lock_lint_tree(self, pid):
+        """A lane lint's tree as add_lane_lint_worktree leaves it: a merge-wt- folder in the temp folder, with a worktree of the lane checkout
+        locked `merge tool, pid N, lane lint`. -> (folder, worktree)."""
+        tmp = os.path.realpath(tempfile.mkdtemp(prefix="merge-wt-"))
+        wt = os.path.join(tmp, "tree")
+        tm.sh(self.co, "git", "worktree", "add", "-q", "--detach", "--lock", "--reason", "merge tool, pid %d, lane lint" % pid, wt, self.head("feat"))
+        self.addCleanup(merge.drop_worktree, self.co, tmp, wt)
+        self.assertIn("merge tool, pid %d, lane lint" % pid, tm.sh(self.co, "git", "worktree", "list", "--porcelain"),
+                      "scope: the lane lint's lock reason is not on the tree before the case runs")
+        return tmp, wt
+
+    def hint_run(self, reads, *argv, cloud=False):
+        """-> (rc, stdout and stderr) of merge in the lane checkout, with merge.reviewed_read standing as `reads`."""
+        with unittest.mock.patch.object(merge, "reviewed_read", reads):
+            rc, out, err = self.lane_streams(*argv, cloud=cloud)
+        return rc, out + err
+
+    def test_a_live_lane_lint_lock_prints_the_combine_line_before_the_lint(self):
+        self.lock_lint_tree(self.live_pid())
+        reads = ReviewedRead(batch=range(101, 112))
+        rc, text = self.hint_run(reads, "--lane-lint", "7")
+        self.assertEqual(rc, 0, text)
+        self.assertTrue(pass_lines(text), "the lint printed no PASS line: " + text)
+        hint = hint_lines(text)
+        self.assertEqual(len(hint), 1, "another lane lint holds a tree, and no one line says so: " + text)
+        self.assertLess(text.index(hint[0]), text.index(pass_lines(text)[0]), "the hint comes after the lint's verdict, not before it: " + text)
+        self.assertEqual(reads.calls, 1, "the ready PRs were read %d times, want once" % reads.calls)
+
+    def test_no_lane_lint_lock_prints_no_combine_line_and_reads_no_list(self):  # the control of the live case: the same rows, no other lint
+        reads = ReviewedRead(batch=range(101, 112))
+        rc, text = self.hint_run(reads, "--lane-lint", "7")
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(hint_lines(text), [], "no other lint holds a tree, and a hint was printed: " + text)
+        self.assertEqual(reads.calls, 0, "no other lint holds a tree, and the ready PRs were read %d times" % reads.calls)
+
+    def test_a_lane_lint_lock_whose_pid_is_dead_prints_no_combine_line(self):
+        self.lock_lint_tree(tm.reaped_child_pid())
+        reads = ReviewedRead(batch=range(101, 112))
+        rc, text = self.hint_run(reads, "--lane-lint", "7")
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(hint_lines(text), [], "a lock whose pid is dead was taken for a live lint: " + text)
+        self.assertEqual(reads.calls, 0, "a lock whose pid is dead led to a read of the ready PRs")
+
+    def test_eleven_batch_rows_name_the_command_and_the_ready_prs_but_not_the_front_pr(self):
+        self.lock_lint_tree(self.live_pid())
+        rc, text = self.hint_run(ReviewedRead(batch=range(101, 112)), "--lane-lint", "7")
+        hint = hint_lines(text)
+        self.assertEqual(len(hint), 1, "no one hint line: " + text)
+        line = hint[0]
+        self.assertNotIn("#101", line, "the front PR, which merges alone, is named as ready: " + line)
+        for n in range(102, 112):
+            self.assertIn("#%d" % n, line, "ready PR #%d is not named: %s" % (n, line))
+        self.assertRegex(line, r"combine_train\.py --root \S+ --build --name <name>$", "the line gives no command that builds the train: " + line)
+
+    def test_a_batch_row_on_a_stacked_base_is_not_listed_as_ready(self):
+        self.lock_lint_tree(self.live_pid())
+        rc, text = self.hint_run(ReviewedRead(batch=range(101, 113), stacked=(105,)), "--lane-lint", "7")  # 101 is the front; 105 sits on a stacked base
+        hint = hint_lines(text)
+        self.assertEqual(len(hint), 1, "no one hint line: " + text)
+        line = hint[0]
+        self.assertNotIn("#105", line, "a batch row on a stacked base is listed as ready: " + line)
+        self.assertNotIn("#101", line, "the front PR is listed as ready: " + line)
+        self.assertIn("Combine the 10 ready PRs", line, "the count is not the ten ready PRs on main behind the front: " + line)
+        for n in (102, 103, 104, 106, 107, 108, 109, 110, 111, 112):
+            self.assertIn("#%d" % n, line, "ready PR #%d on main is not named: %s" % (n, line))
+
+    def test_a_live_lock_with_no_ready_pr_says_none_and_merge_alone(self):  # the empty state: no `batch` row at all
+        self.lock_lint_tree(self.live_pid())
+        rc, text = self.hint_run(ReviewedRead(), "--lane-lint", "7")
+        hint = hint_lines(text)
+        self.assertEqual(len(hint), 1, "no one hint line: " + text)
+        self.assertIn("none", hint[0], "the empty list is not named as none: " + hint[0])
+        self.assertIn("merge alone", hint[0], "an empty backlog is not said to merge alone: " + hint[0])
+        self.assertNotIn("--build", hint[0], "a command that builds a train is printed for an empty backlog: " + hint[0])
+
+    def test_ten_batch_rows_leave_nine_ready_prs_and_say_merge_alone(self):
+        self.lock_lint_tree(self.live_pid())
+        rc, text = self.hint_run(ReviewedRead(batch=range(101, 111)), "--lane-lint", "7")
+        hint = hint_lines(text)
+        self.assertEqual(len(hint), 1, "no one hint line: " + text)
+        line = hint[0]
+        self.assertIn("merge alone", line, "nine ready PRs under the backlog of ten are not said to merge alone: " + line)
+        self.assertNotIn("--build", line, "a command that builds a train is printed under the backlog: " + line)
+        self.assertNotIn("#101", line, "the front PR, which merges alone, is named as ready: " + line)
+        for n in range(102, 111):
+            self.assertIn("#%d" % n, line, "ready PR #%d is not named: %s" % (n, line))
+
+    def test_a_failed_read_says_unknown_and_the_lint_goes_on(self):
+        self.lock_lint_tree(self.live_pid())
+        rc, text = self.hint_run(ReviewedRead(fail=RuntimeError("the pull request list could not be read")), "--lane-lint", "7")
+        hint = hint_lines(text)
+        self.assertEqual(len(hint), 1, "no one hint line: " + text)
+        self.assertIn("unknown", hint[0], "a read that failed is not reported as unknown: " + hint[0])
+        self.assertEqual(rc, 0, "the lint did not exit as it does with no other lint: " + text)
+        self.assertTrue(pass_lines(text), "the lint printed no PASS line: " + text)
+        self.assertEqual(len(self.lint_calls()), 1, "the lint ran %d times, want once" % len(self.lint_calls()))
+
+    def test_the_batch_runners_pre_join_call_prints_no_combine_line(self):
+        self.lock_lint_tree(self.live_pid())
+        rc, text = self.hint_run(ReviewedRead(batch=range(101, 112)), "--lane-lint", "7")  # the control: a lane's own call prints the hint
+        self.assertEqual(len(hint_lines(text)), 1, "control: no hint for a lane's own call, so the pre-join case proves nothing: " + text)
+        self.put_role("batch-runner")
+        reads = ReviewedRead(batch=range(101, 112))
+        rc, text = self.hint_run(reads, "--lane-lint", "7", cloud=True)
+        self.assertEqual(rc, 0, text)
+        self.assertTrue(pass_lines(text), "the pre-join call printed no PASS line, so it did not reach the lint: " + text)
+        self.assertEqual(hint_lines(text), [], "the batch runner's pre-join call printed a combine hint: " + text)
+        self.assertEqual(reads.calls, 0, "the batch runner's pre-join call read the ready PRs %d times" % reads.calls)
+
+    def test_the_sweep_removes_a_dead_lane_lint_tree_and_keeps_a_live_one(self):
+        dead_tmp, dead_wt = self.lock_lint_tree(tm.reaped_child_pid())
+        live_tmp, live_wt = self.lock_lint_tree(self.live_pid())
+        self.assertTrue(tm.tree_listed(self.co, dead_wt), "scope: the dead lane lint tree is not registered before the sweep")
+        merge.sweep_dead_trees(self.co)
+        self.assertFalse(os.path.exists(dead_tmp), "a lane lint tree whose pid is dead stays after the sweep")
+        self.assertFalse(tm.tree_listed(self.co, dead_wt), "the dead lane lint tree stays registered after the sweep")
+        self.assertTrue(os.path.isdir(live_tmp), "a lane lint tree whose pid is alive was removed")
+        self.assertTrue(tm.tree_listed(self.co, live_wt), "the live lane lint tree lost its registration")
+
+
+class MergeLockReasons(unittest.TestCase):
+    """merge.MERGE_LOCK reads the lock reason of a merge tree: `merge tool, pid N`, and `merge tool, pid N, lane lint` for a lane lint's tree."""
+
+    def test_the_lock_reads_the_plain_reason_and_the_lane_lint_reason(self):
+        plain = merge.MERGE_LOCK.fullmatch("merge tool, pid 4242")
+        self.assertIsNotNone(plain, "the plain merge lock reason no longer reads as a merge lock")
+        self.assertEqual(plain.group(1), "4242")
+        lane = merge.MERGE_LOCK.fullmatch("merge tool, pid 4242, lane lint")
+        self.assertIsNotNone(lane, "the lane lint lock reason does not read as a merge lock, so its pid is never checked")
+        self.assertEqual(lane.group(1), "4242")
 
 
 if __name__ == "__main__":

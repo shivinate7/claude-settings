@@ -27,9 +27,11 @@ def read(section_dir):
 
 def faults(sections):
     """[(name, message)] for each file of `sections` (from read) that has no header, whose name number is not its
-    header number, or that shares its header number with another file."""
+    header number, or that shares its header number with another file. A shared number's message names every file that
+    holds it and the next free number, one above the highest header in `sections`, so the second branch renumbers."""
     bad = []
     numbers = [n for _, n, _ in sections if n is not None]
+    next_free = max(numbers) + 1 if numbers else 1
     for name, n, _ in sections:
         if n is None:
             bad.append((name, "has no `# section <n>` first line"))
@@ -38,5 +40,7 @@ def faults(sections):
         if m and int(m.group(1)) != n:
             bad.append((name, "name number %d disagrees with its header, section %d" % (int(m.group(1)), n)))
         if numbers.count(n) > 1:
-            bad.append((name, "section number %d is on %d section files" % (n, numbers.count(n))))
+            holders = ", ".join(other for other, m, _ in sections if m == n)
+            bad.append((name, "section number %d is on %d section files (%s); the next free number is %d"
+                        % (n, numbers.count(n), holders, next_free)))
     return bad

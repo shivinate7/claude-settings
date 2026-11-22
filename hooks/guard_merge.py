@@ -2272,6 +2272,38 @@ def ready_mark_hit(tool: str, tool_input, transcript: str, where: str):
     return None
 
 
+# ---- a pull request opened by MCP with no closing link of this session (rule pr-create-session-link, decision pr-create-session-link)
+# The merge tool refuses `--confirm` for a body with no link to the merging session (merge/merge.py own_session_link, the one reader of the link). The agent that opens the
+# pull request is the one that can add it, so the refusal comes at creation. Only the MCP create tool is judged: in a cloud session, the only place the session id is
+# known, a `gh pr create` is already refused (rule gh-write-cloud). Cost: one env read, and the merge tool load only in a cloud session.
+# A local session (no session id), a repo with no merge tool and an unloadable merge tool pass.
+CREATE_PR_MCP_TOOL = "mcp__github__create_pull_request"
+PR_SESSION_LINK_FMT = "Session: https://claude.ai/code/%s"
+PR_SESSION_LINK_REASON = (
+    "Rule (Git, pr-create-session-link): this pull request's body has no link to this session. The merge tool reads that link to know who may merge, "
+    "and it refuses the merge without it. Remedy: add this line to the body, on its own line, then retry: `%(line)s`. "
+    "(decision pr-create-session-link, a pull request body carries its session's link)"
+)
+
+
+def create_pr_link_hit(tool: str, tool_input, where: str):
+    """(reason, matched) when an MCP create call's body lacks this session's closing link, else None. The link is judged by the merge tool's own_session_link,
+    and the line to add is built from the session id that override.remote_session_id reads, so neither reader is copied here."""
+    if tool != CREATE_PR_MCP_TOOL or not isinstance(tool_input, dict):
+        return None
+    from override import remote_session_id
+    own = remote_session_id()
+    if not own or not where or not uses_merge_tool(where):
+        return None
+    module = merge_module()
+    if module is None:
+        return None
+    body = tool_input.get("body")
+    if module.own_session_link(body if isinstance(body, str) else ""):
+        return None
+    return PR_SESSION_LINK_REASON % {"line": PR_SESSION_LINK_FMT % own}, "create_pull_request body without session link"
+
+
 # ---- the record branch's one writer: only the triage session pushes to it (rule roadmap-one-writer)
 RECORD_WRITER_TIER = "triage"
 DEFAULT_RECORD_BRANCH = "roadmap"

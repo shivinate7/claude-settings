@@ -2,7 +2,7 @@
 
 ## The ruling
 
-A lint that cannot read its input prints UNKNOWN. Locally it exits 0. When env `CI` is set it exits non-zero, because the CI exit code is the verdict (`verification-report-unknown-reads`, report a read that could not run as unknown). Only `lint/check_record_slugs.py` and `lint/check_silent_undo.py` have this shape. `ci-scope.sh` fails safe by running the harness. The other lints exit 1 on a failed read.
+A lint that cannot read its input prints UNKNOWN. Locally it exits 0. When env `CI` is set it exits non-zero, because the CI exit code is the verdict (`verification-report-unknown-reads`, report a read that could not run as unknown). A workflow step may set `CI` on its own `env:` to carry that rule into a run that has no `CI`, such as the merge tool's ready run (step `Record slug length`). Only `lint/check_record_slugs.py` and `lint/check_silent_undo.py` have this shape. `ci-scope.sh` fails safe by running the harness. The other lints exit 1 on a failed read.
 
 Why: a green exit on an unread input hides a defect.
 

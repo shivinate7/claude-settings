@@ -485,13 +485,26 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/check_hook_dup_names.py
 
+      # CI is set on the step so the merge tool's ready run, which has no CI variable, reads an unreadable git as red (decision ci-unknown-is-red).
       - name: Record slug length
         if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
+        env:
+          CI: "true"
         run: python3 lint/check_record_slugs.py
 
       - name: Cost line pins
         if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/check_cost_pins.py
+
+      # A static read of the mutant table: each anchor of hooks/mutate_guard.py sits once where its entry says. It reads every anchor in one
+      # pass, in about a second, and names each bad one. The mutation run's own pre-check covers ambiguity only for guard and audit targets.
+      - name: Mutant anchor census
+        if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
+        run: python3 lint/check_mutant_anchors.py
+
+      - name: Mutant anchor census fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
+        run: python3 lint/test_check_mutant_anchors.py
 
       # Pull requests only: the range is base..HEAD, and a push has no base. The checkout is full-depth (fetch-depth 0).
       # Each of the four pull-request lint steps (this one, Plan refuter line, Ruling kind check, Comment narration check) also needs its
@@ -631,6 +644,9 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: python3 lint/check_comment_narration.py --base "origin/$BASE_REF"
+
+      - name: Cheap-lints fixture suite
+        run: python3 lint/test_cheap_lints.py
 
       - name: Unknown-read contract fixture suite
         if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
