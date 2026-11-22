@@ -57,6 +57,8 @@ transcript and prints one JSON line `{"decision": "block", "reason": "..."}`, or
   update_pull_request with draft false. Draft true or absent starts none. Quoted text, heredoc bodies and
   `#` comments are no call. Global flags before `pr` (`gh -R <repo> pr ready <N>`) do not hide the call, and the
   PR is read as a merge's is: `-R <repo> <N>`, or the number in a pull URL. A `$VAR` PR word is no number.
+  A ready call whose tool_result is an error (a PreToolUse guard refused it) opens no wait, and restores the wait
+  it replaced.
 - A later user or queued message with a green or cancelled CI verdict line closes the wait. A red verdict
   keeps it open and voids the check-ins before it. A `CI unknown` line (still running included) closes nothing.
 - A merge closes the wait only when it names the waited PR: `gh pr merge <N>` or `gh pr close <N>` in Bash or
@@ -3202,6 +3204,50 @@ def CI101_a_none_line_closes_the_wait():
     _, out, _, _ = stop_in_process(transcript([prompt("merge when green"), ready(command=command),
                                                prompt("CI unknown on %s: no run yet" % CI_SHA)]))
     return problems + ["control: " + p for p in block_problems(out)]
+
+
+# The first sentence of a real ready-mark refusal, from a session transcript, with the PR number filled in.
+REFUSED_READY_TEXT = ("PreToolUse:mcp__github__update_pull_request hook error: ready-mcp-mark-guard: Rule (Git, "
+                      "ready-mcp-mark-guard): no `merge %s --ready` run in this session passed its ready checks.")
+
+
+def ready_mark(number, refused):
+    """A GitHub MCP ready call on number (draft false), with its result. A refusal is the result a PreToolUse
+    guard leaves: is_error true, the text as a string, and a toolUseResult that starts with Error:."""
+    call_rec = mcp_pr(MCP_READY, number, draft=False)
+    call_id = call_rec["message"]["content"][0]["id"]
+    if not refused:
+        return [call_rec, tool_result(call_id, "Pull request %s marked ready" % number)]
+    text = REFUSED_READY_TEXT % number
+    return [call_rec, tool_result(call_id, text, is_error=True, tool_use_result="Error: " + text)]
+
+
+@case
+def CI102_refused_ready_mark_asks_nothing():
+    """CI102. a ready mark that a PreToolUse guard refused marks nothing, so the Stop asks nothing. Control: the
+    same mark with an error-free result blocks and names the PR"""
+    return silent_with_control(ready_mark(CI_PR, refused=True), ready_mark(CI_PR, refused=False))
+
+
+@case
+def CI103_successful_ready_mark_still_asks():
+    """CI103. a ready mark whose result is error-free opens the wait, so the Stop blocks and names the PR"""
+    return expect_block(ready_mark(CI_PR, refused=False))
+
+
+@case
+def CI104_refused_then_retried_and_passed_asks():
+    """CI104. a refused ready mark, then the same mark retried and passed: the passed call opens the wait, so the
+    Stop blocks and names the PR"""
+    return expect_block(ready_mark(CI_PR, refused=True) + ready_mark(CI_PR, refused=False))
+
+
+@case
+def CI105_refused_mark_for_a_second_pr_leaves_the_first_wait():
+    """CI105. a good ready mark for one PR, then a refused one for another: the wait stays on the first PR, so the
+    Stop blocks and names that PR only"""
+    items = ready_mark(CI_PR, refused=False) + ready_mark(CI_OTHER_PR, refused=True)
+    return expect_block(items, pr=CI_PR, not_named=[CI_OTHER_PR])
 
 
 def paused_job(job_id, command):
