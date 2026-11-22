@@ -205,7 +205,7 @@
                           A head whose diff against the base touches hooks/mutate_*.py or hooks/mutate_*.mjs also runs, after a passing lint, the command of each of the head's mutation test shard jobs (CI step "Guard mutation test, shard i/M") in that same worktree.
                           The run happens at the hand-off lint; the batch runner's pre-join lint skips it when a hand-off PASS names the live head.
                           It FAILs on any survivor, on any wrong-cause or unknown mutant (as CI does), on a run past a shard job's
-                          timeout-minutes, on a command that cannot start, on a report it cannot read at any exit, and on a tally at a
+                          timeout-minutes (stretched by the 5-minute load per CPU, up to four times; a cut-off run reads "stopped at cap under load X"), on a command that cannot start, on a report it cannot read at any exit, and on a tally at a
                           nonzero exit (a table is judged by its counts, not its exit code). It prints its wall time and killed,
                           survived and unknown counts, on the PASS line or in the FAIL text. Extra cost, only then: up to three shard runs
                           one after another (decision lanes-run-no-full-ci-job holds the measured cost); on any other head, one `git diff --name-only`. A pre-join lint that skips
@@ -3690,6 +3690,21 @@ def mutate_report_counts(out):
         return int(line.group(1)), by_label.get("survived", 0), by_label.get("unknown", 0), unread, True, by_label.get("wrong cause", 0)
     return (0, 0, 0, unread, False, 0) if unread else None
 
+MUTATE_LOAD_MAX_FACTOR = 4.0  # most a shard's cap grows under load: a stuck run still ends in bounded time (unmeasured; a first value)
+
+def mutate_load_per_cpu():
+    """The 5-minute load average per CPU, or None where it cannot be read (Windows has no load average). The brake's readings
+    (hooks/guard.py read_load) hold memory and disk only, and the brake never reads the load average; the cap stretch here is no brake, it
+    refuses nothing. A shard's cap is a wall-clock time measured on an idle machine, so a loaded one needs the load average to size it."""
+    try:
+        return os.getloadavg()[1] / (os.cpu_count() or 1)
+    except (AttributeError, OSError):
+        return None
+
+def mutate_cap_factor(load):
+    """How many times a shard's cap stretches under `load` per CPU: 1 at or below one run per CPU, then the load itself, to MUTATE_LOAD_MAX_FACTOR."""
+    return 1.0 if load is None else min(MUTATE_LOAD_MAX_FACTOR, max(1.0, load))
+
 MUTATE_VERDICT_DIR_ENV = "MUTATE_VERDICT_DIR"  # the env name hooks/mutate_shared.py reads for the folder a leg saves its judged mutants in
 
 def mutate_verdict_dir():
@@ -3759,7 +3774,11 @@ def mutate_run_check(wt):
         start = time.monotonic()
         start_error = ""
         tag = f"mutation test shard {label}"
-        progress(f"{tag}: start, job {job}, cap {cap} min")
+        load = mutate_load_per_cpu()  # read at each shard's start, so a later shard sees the load that is on the machine then
+        factor = mutate_cap_factor(load)
+        seconds = cap * 60 * factor
+        load_text = "" if load is None else f", load {load:.1f} per CPU, cap x{factor:.1f}"
+        progress(f"{tag}: start, job {job}, cap {cap} min{load_text}")
         stop, interval = threading.Event(), MUTATE_HEARTBEAT_SECONDS
         def heartbeat():  # the runner's stdout is captured, so these lines are the only sign a long shard is alive; no mutant id, as none is read here
             while not stop.wait(interval):
@@ -3767,7 +3786,7 @@ def mutate_run_check(wt):
         beat = threading.Thread(target=heartbeat, name="mutate-heartbeat", daemon=True)
         try:
             beat.start()
-            c, out = sh(shlex.split(body), cwd=wt, env=env, timeout=cap * 60, live_stderr=True)
+            c, out = sh(shlex.split(body), cwd=wt, env=env, timeout=seconds, live_stderr=True)
         except subprocess.TimeoutExpired as e:  # the stdout read before the timeout is bytes on POSIX even under text=True, and None when nothing was read
             partial = e.stdout if e.stdout is not None else e.output
             c, out = None, (partial.decode("utf-8", errors="replace") if isinstance(partial, bytes) else partial or "").strip()
@@ -3780,13 +3799,16 @@ def mutate_run_check(wt):
         if start_error:
             progress(f"{tag}: did not start")
             return "mutation test run did not start", [f"the mutation test command could not start ({start_error}), so no mutation test run was made"]
-        wall = round(time.monotonic() - start) if c is not None else cap * 60
+        wall = round(time.monotonic() - start) if c is not None else round(seconds)
         counts = mutate_report_counts(out)
         killed, survived, unknown, unread, tally, wrong = counts or (0, 0, 0, 0, False, 0)
         progress(f"{tag}: end, {wall} s, killed {killed}, survived {survived}, unknown {unknown}")
         failures = []
-        if c is None or wall > cap * 60:
-            failures.append(f"the mutation test run took {wall} s, past the {cap}-minute cap of job {job}")
+        if c is None or wall > seconds:
+            # A shard stopped at its cap judged no mutant survived: it proves nothing either way. It still fails the lint, but as a stop under load, never as a failed mutant.
+            under = f" under load {load:.1f} per CPU" if load is not None else ""
+            failures.append(f"the mutation test run stopped at cap{under}: it took {wall} s, past the {cap}-minute cap of job {job}, stretched x{factor:.1f} for the load. "
+                            "The stop is no mutant verdict: the run was cut off, so rerun it when the load drops")
         if counts is None:
             tail = out.splitlines()[-TOUCHED_TAIL_LINES:]  # the cause is the last stdout lines (mutate_guard prints `ERROR ...`); the whole stdout would bury it
             failures.append("\n".join([f"the mutation test run exited {'at its timeout' if c is None else c} and printed no report that can be read"
