@@ -3228,14 +3228,26 @@ def _is_label(arg) -> bool:
     return False
 
 
-def _case_key(node, renames=None) -> str:
+def _case_key(node, renames=None, exact=False) -> str:
     """The key of a case across a rename of its description or its function and a flip of its expected verdict:
     the statement with its function name and docstring dropped, the description of a call (its first argument,
     when it reads as a sentence) blanked, each verdict word masked, and a verdict keyword dropped. `renames` maps the old name of a function
-    to its new name (`_def_renames`), applied to each name the statement reads."""
+    to its new name (`_def_renames`), applied to each name the statement reads. With `exact`, nothing is masked
+    or blanked: only the function name, the docstring and the renamed names differ from the plain dump."""
     import ast
     import copy
     tree = copy.deepcopy(node)
+    if exact:
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Name):
+                n.id = (renames or {}).get(n.id, n.id)
+            elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                if not isinstance(n, ast.ClassDef):
+                    n.name = ""
+                if n.body and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant) \
+                        and isinstance(n.body[0].value.value, str):
+                    n.body = n.body[1:]
+        return ast.dump(tree)
     for n in ast.walk(tree):
         if isinstance(n, ast.Constant) and isinstance(n.value, str):
             n.value = _VERDICT_WORDS.sub("V", n.value)
@@ -3268,11 +3280,15 @@ def _module_defs(part):
             if len(k) == 3 and k[0] == "" and k[1] in ("FunctionDef", "AsyncFunctionDef")}
 
 
-def _def_renames(part, result):
+def _def_renames(part, result, base=None):
     """The functions of `part` that `result` holds under another name: `{old name: new name}`. A function the
     result lacks by name is paired with a function that only the result has, when their case keys are equal. A
-    function that calls a renamed function pairs once that one has: the pairing runs until nothing new pairs."""
+    function that calls a renamed function pairs once that one has: the pairing runs until nothing new pairs.
+    A function the parent edited (its statement differs from `base`'s, or the base lacks it) pairs only on its
+    exact text, with no verdict masked: a rename carries the base's statement, never a parent's edit, so main's
+    unflipped copy of a function the lane flipped is no pair."""
     mine, theirs = _module_defs(part), _module_defs(result)
+    origin = _module_defs(base) if base is not None else {}
     open_mine = [name for name in mine if name not in theirs]
     free = [name for name in theirs if name not in mine]
     renames, changed = {}, True
@@ -3281,9 +3297,10 @@ def _def_renames(part, result):
         for name in open_mine:
             if name in renames:
                 continue
-            key = _case_key(mine[name], renames)
+            exact = name not in origin or _case_key(origin[name], exact=True) != _case_key(mine[name], exact=True)
+            key = _case_key(mine[name], renames, exact)
             for fresh in free:
-                if _case_key(theirs[fresh]) == key:
+                if _case_key(theirs[fresh], exact=exact) == key:
                     renames[name] = fresh
                     free.remove(fresh)
                     changed = True
@@ -3447,11 +3464,20 @@ def merge_test_issue(result, first, second, elsewhere, base=None):
     for part in parents:
         gone = {key for key, count in _key_counts(part).items() if have.get(key, 0) < count}
         if gone:
-            held, kept = _stable_counts(part, _def_renames(part, result)), _stable_counts(result)
+            import collections
+            renames = _def_renames(part, result, base)
+            held, kept = _stable_counts(part, renames), _stable_counts(result)
             # Only the base's own statement is carried over by a rename: a statement the parent added or edited,
-            # that the result lacks, is a dropped edit.
+            # that the result lacks, is a dropped edit. A parent's edit of a base statement is held only by a result
+            # statement of the same exact text (its verdict words unmasked), so main's unflipped copy of a case
+            # helper the lane flipped does not hold the flip.
+            versions = _key_versions(part)
+            edited = {key for key in gone if key in base_keys and versions[key] != _key_versions(base).get(key)}
+            exact = collections.Counter(_case_key(n, renames, True) for key, n in part["key_nodes"] if key in edited)
+            there = collections.Counter(_case_key(n, None, True) for _, n in result["key_nodes"])
             if any(key not in base_keys for key in gone) \
-                    or any(kept[0][case] < held[0][case] for key, case in held[2] if key in gone):
+                    or any(kept[0][case] < held[0][case] for key, case in held[2] if key in gone and key not in edited) \
+                    or any(there[case] < count for case, count in exact.items()):
                 issues.add("lost")
     kept = {d for p in parents for d, _ in p["others"]}
     if base is not None:
@@ -3473,7 +3499,7 @@ def merge_test_issue(result, first, second, elsewhere, base=None):
         # A call the base holds is carried over by a rename; a call a parent added or edited is not.
         base_calls = {d for d, _ in base["calls"]} if base is not None else set()
         kept = _stable_counts(result)[1]
-        held = [_stable_counts(p, _def_renames(p, result))[1] for p in parents]
+        held = [_stable_counts(p, _def_renames(p, result, base))[1] for p in parents]
         if any(d not in base_calls for d in gone) \
                 or any(kept[case] < max(h[case] for h in held) for h in held for case in h):
             issues.add("lost")
