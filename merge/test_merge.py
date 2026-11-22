@@ -683,6 +683,15 @@ class Env(unittest.TestCase):
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "rival"); sh(o, "git", "push", "-q", "origin", "feat")
         return sh(o, "git", "rev-parse", "HEAD")
 
+    def same_tree_push(self, message="same tree"):
+        """One commit on origin's feat from the second clone, with no change: its tree is the branch head's. `message` names it, so a trailer-only
+        commit is one call with a trailer. -> its sha."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "commit", "-q", "--allow-empty", "-m", message); sh(o, "git", "push", "-q", "origin", "feat")
+        return sh(o, "git", "rev-parse", "HEAD")
+
     def main_moves(self, files=None, start="origin/main"):
         """A person pushes a commit to main from the second clone. Default: a path no batch touches (elsewhere.txt); `files` ({path: text}) names others.
         `start` is the commit the new one sits on: a lane's head makes main's tip a descendant of that head."""
@@ -951,7 +960,8 @@ def without_usage(text):
 class ConfirmHead(Env):
     """`merge <pr> --confirm --head <sha>`: a relayed yes binds to the pull request's head at relay time (decision auto-mode-owner-acts,
     section Relayed Merge Yes). The head the relay named must be the live head. A moved head is refused before anything is claimed,
-    locked or merged. Without --head, confirm is as Flow tests it."""
+    locked or merged. A commit whose tree equals its parent's keeps the relayed head (owner, 13:33 CST Nov 22, through the coordinator). Without
+    --head, confirm is as Flow tests it."""
 
     def test_the_live_head_the_relay_named_merges(self):
         rc, out, err = self.run_args("7", "--confirm", "--head", self.head())
@@ -1124,6 +1134,36 @@ class ConfirmHead(Env):
         self.assertIn("moved", out + err, "the rerun was not refused as a moved head")
         self.assertFalse(getattr(self.host, "merged", False), out + err)
         self.assertEqual(self.claims(), 0, "a claim reached main")
+
+    def test_a_same_tree_commit_on_the_relayed_head_keeps_the_relayed_head(self):
+        relayed = self.head()
+        live = self.same_tree_push()  # one commit on the relayed head, with no change
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "log", "-1", "--format=%P", live), relayed, "fixture: the live head is not a commit on the relayed head")
+        self.assertEqual(sh(self.co, "git", "rev-parse", f"{live}^{{tree}}"), sh(self.co, "git", "rev-parse", f"{relayed}^{{tree}}"),
+                         "fixture: the live head's tree is not the relayed head's, so the case tests nothing")
+        self.assertTrue(merge.relayed_head_holds(self.co, "feat", relayed, live),
+                        "a relayed yes did not hold for a live head that sits on the relayed head with only a commit whose tree equals its parent's")
+
+    def test_a_trailer_only_commit_on_the_relayed_head_keeps_the_relayed_head(self):
+        relayed = self.head()
+        live = self.same_tree_push("Verified: none: a message-only change")  # a trailer and no change
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "log", "-1", "--format=%P", live), relayed, "fixture: the live head is not a commit on the relayed head")
+        self.assertEqual(sh(self.co, "git", "rev-parse", f"{live}^{{tree}}"), sh(self.co, "git", "rev-parse", f"{relayed}^{{tree}}"),
+                         "fixture: the live head's tree is not the relayed head's, so the case tests nothing")
+        self.assertTrue(merge.relayed_head_holds(self.co, "feat", relayed, live),
+                        "a relayed yes did not hold for a live head that sits on the relayed head with only a trailer-only commit, whose tree equals its parent's")
+
+    def test_a_commit_that_changes_the_tree_does_not_keep_the_relayed_head(self):
+        relayed = self.head()
+        live = self.competitor_push()  # one commit on the relayed head that changes the tree
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "log", "-1", "--format=%P", live), relayed, "fixture: the live head is not a commit on the relayed head")
+        self.assertNotEqual(sh(self.co, "git", "rev-parse", f"{live}^{{tree}}"), sh(self.co, "git", "rev-parse", f"{relayed}^{{tree}}"),
+                            "fixture: the live head's tree is the relayed head's, so the case tests nothing")
+        self.assertFalse(merge.relayed_head_holds(self.co, "feat", relayed, live),
+                         "a relayed yes held for a live head whose commit changes the tree: only an equal tree keeps the relayed head")
 
     def test_a_head_that_is_not_40_hex_is_refused_as_bad_input(self):
         out, err = self.assert_usage_error("7", "--confirm", "--head", self.head()[:7])
@@ -19041,6 +19081,14 @@ class ReviewEnv(Env):
         parents = [arg for p in (parent, *more_parents) for arg in ("-p", p)]
         return git_in("git", "commit-tree", tree, *parents, "-m", message)
 
+    def same_tree_chain(self, parent, n):
+        """-> the shas of n commits over `parent`, oldest first. Each adds no change, so each tree is its parent's, and each parent is the one before it."""
+        shas, tip = [], parent
+        for _ in range(n):
+            tip = self.git_commit(tip, {})
+            shas.append(tip)
+        return shas
+
     def is_ancestor(self, a, b):
         """True when commit `a` is an ancestor of `b` in the checkout."""
         return subprocess.run(["git", "merge-base", "--is-ancestor", a, b], cwd=self.co, capture_output=True).returncode == 0
@@ -19051,7 +19099,8 @@ class ReviewEnv(Env):
         `seed` that is not on main. Each merge has `fixed` first, except where its name says otherwise: `clean` and `clean2` are git's clean merges
         of main and main2, `edited` is the clean merge plus one file, `conflicted` is a conflict with main3 resolved by hand, `stacked` merges
         `feat`, and `octopus` has three parents. `plain` is a commit on `fixed`, `clean_plain` a commit on `clean`, and `after_plain` a clean merge
-        of main on `plain`. `empty` and `clean_empty` add a commit with no change on `fixed` and on `clean`. -> the shas by name, with `parents` and
+        of main on `plain`. `empty` and `clean_empty` add a commit with no change on `fixed` and on `clean`. `trailer` adds one on `fixed` whose message
+        is a Verified trailer and nothing else. -> the shas by name, with `parents` and
         `trees` for each (git's own answers), `on_main`, the compare answers on main, and `on_stack`, the compare answers of `feat` (the second parent
         of `stacked`) on feat-base, which holds `feat`, and on main, which does not."""
         sh(self.co, "git", "fetch", "-q", "origin")
@@ -19073,9 +19122,10 @@ class ReviewEnv(Env):
         octopus = self.git_commit(fixed, {"b.txt": "b\n"}, main, seed)
         empty = self.git_commit(fixed, {})
         clean_empty = self.git_commit(clean, {})
+        trailer = self.git_commit(fixed, {}, message="Verified: none: a message-only change")
         names = dict(seed=seed, pre=pre, fixed=fixed, main=main, main2=main2, main3=main3, feat=feat, plain=plain, clean=clean, clean2=clean2,
                      clean_plain=clean_plain, after_plain=after_plain, edited=edited, conflicted=conflicted, stacked=stacked, octopus=octopus,
-                     empty=empty, clean_empty=clean_empty)
+                     empty=empty, clean_empty=clean_empty, trailer=trailer)
         pushes = [f"{sha}:refs/heads/fixture-{name}" for name, sha in names.items()]
         sh(self.co, "git", "push", "-q", "origin", *pushes, f"{main3}:refs/heads/main", f"{feat}:refs/heads/feat-base")
         sh(self.co, "git", "fetch", "-q", "origin")
@@ -20539,7 +20589,8 @@ class ReviewCleanMainMerge(ReviewEnv):
 class LintCleanMainMergeCarry(ReviewEnv, RecordsEnv):
     """A lane-lint PASS carries across a clean merge of main. The merge tool proves the merge: two
     parents, the second on the base's main, git's own merge tree of its parents, and nothing else changed since the PASS. The lint carries across clean
-    merges of main only: a claim or records-page commit after a clean merge is not carried here. The old direct form, a claim or page straight on the
+    merges of main, and across a commit whose tree equals its parent's (owner, 13:33 CST Nov 22, through the coordinator). A claim or records-page
+    commit after a clean merge is not carried here. The old direct form, a claim or page straight on the
     PASS, stays. Any other form is not carried, and a read that fails is not carried, never passed. The carry does not depend on the stamp config. Cases call lint_carried with its
     current signature, through the scripted host of --reviewed (reviewed_host); lint_check and --reviewed each get one case."""
 
@@ -20594,6 +20645,24 @@ class LintCleanMainMergeCarry(ReviewEnv, RecordsEnv):
         self.assertEqual(fx.parents[fx.clean_plain], [fx.clean], "fixture: the plain commit's parent is not the clean merge")
         self.assertFalse(self.carry(fx, fx.clean_plain), "a plain one-parent commit after a clean merge of main carried the PASS")
         self.assertFalse(self.carry(fx, fx.clean, passed=[]), "a clean merge of main with no PASS to carry reads as carried")
+
+    def test_r_a_lint_pass_carries_across_a_commit_whose_tree_equals_its_parents(self):
+        fx = self.real_commits()
+        self.assertEqual(fx.parents[fx.empty], [fx.fixed], "fixture: the empty commit's parent is not the reviewed head")
+        self.assertEqual(fx.trees[fx.empty], fx.trees[fx.fixed], "fixture: the empty commit's tree is not the reviewed head's, so the case tests nothing")
+        self.assertTrue(self.carry(fx, fx.empty), "a lane-lint PASS on the reviewed head does not carry across an empty commit, whose tree equals its parent's")
+
+    def test_r_a_lint_pass_carries_across_a_trailer_only_commit(self):
+        fx = self.real_commits()
+        self.assertEqual(fx.parents[fx.trailer], [fx.fixed], "fixture: the trailer commit's parent is not the reviewed head")
+        self.assertEqual(fx.trees[fx.trailer], fx.trees[fx.fixed], "fixture: the trailer commit's tree is not the reviewed head's, so the case tests nothing")
+        self.assertTrue(self.carry(fx, fx.trailer), "a lane-lint PASS on the reviewed head does not carry across a trailer-only commit, whose tree equals its parent's")
+
+    def test_r_a_lint_pass_is_not_carried_across_a_commit_that_changes_the_tree(self):
+        fx = self.real_commits()
+        self.assertEqual(fx.parents[fx.plain], [fx.fixed], "fixture: the plain commit's parent is not the reviewed head")
+        self.assertNotEqual(fx.trees[fx.plain], fx.trees[fx.fixed], "fixture: the plain commit's tree is the reviewed head's, so the case tests nothing")
+        self.assertFalse(self.carry(fx, fx.plain), "a lane-lint PASS carried across a commit that changes the tree: only an equal tree carries it across one commit")
 
     def test_d_a_merge_with_a_hand_edit_is_not_carried(self):
         fx = self.real_commits()
@@ -20810,8 +20879,22 @@ class ReviewUnknownReads(ReviewEnv):
 
 
 class ReviewCleanMainWalk(ReviewEnv):
-    """The walk over clean merges of main reads at most REVIEW_MERGE_WALK merge commits (50). A record reads done for a head 50 merges on, and
-    stale for one 51 on, and the walk costs one commit read and one compare for each merge commit (decision pr-review-record)."""
+    """The walk over clean merges of main, and over commits whose tree equals their parent's, reads at most REVIEW_MERGE_WALK commits (50). A record
+    reads done for a head 50 commits on, and stale for one 51 on, and the walk costs one commit read and one compare for each merge commit (decision
+    pr-review-record). The same-tree commits count against the same cap."""
+
+    def test_fifty_one_commits_whose_trees_equal_their_parents_read_stale(self):
+        # A control that holds on the old code too, where the first commit stops the walk. The fix must keep the cap for these commits, so a walk
+        # that stopped counting them would read done past it.
+        cap = merge.REVIEW_MERGE_WALK
+        fx = self.real_commits()
+        chain = self.same_tree_chain(fx.fixed, cap + 1)
+        self.facts(fx, chain)
+        self.assertEqual(fx.parents[chain[-1]], [chain[-2]], "fixture: the top of the chain is not on the one below it")
+        self.assertEqual({fx.trees[c] for c in chain}, {fx.trees[fx.fixed]}, "fixture: a commit of the chain changes the tree, so the case tests nothing")
+        out = self.reviewed_line(self.reviewed_host(fx, chain[-1]), chain[-1], "stale",
+                                 "%d commits whose trees equal their parents must read stale, past the walk's cap" % (cap + 1))
+        self.assertNotIn("unknown", list_line(self, out, 7), "the stale line says unknown: the walk stopped on a read, not on the cap")
 
     def test_fifty_clean_merges_read_done_and_fifty_one_read_stale(self):
         cap = merge.REVIEW_MERGE_WALK
@@ -20838,25 +20921,47 @@ class ReviewCleanMainWalk(ReviewEnv):
 
 
 class ReviewEmptyCommits(ReviewEnv):
-    """An empty commit makes the record stale, after the reviewed head or after a clean merge of main. Only clean merges of main keep a record:
-    owner, Nov 10 14:07 CST ("a review log survives a clean main merge"), and waiting-page item 514, option b, Nov 11 14:38 CST, which drops the
-    reading that an empty commit keeps it too."""
+    """A commit whose tree equals its parent's keeps the review record, on the reviewed head or after a clean merge of main: an empty commit, and a
+    commit that adds only a message trailer. A commit that changes the tree makes the record stale. Owner, item 514 b, 13:26 CST Nov 22, "yes" to
+    "a commit whose tree equals its parent's keeps its review record"."""
 
-    def test_an_empty_commit_on_the_reviewed_head_reads_stale(self):
+    def test_an_empty_commit_on_the_reviewed_head_reads_done(self):
         fx = self.real_commits()
+        self.assertEqual(fx.parents[fx.empty], [fx.fixed], "fixture: the empty commit's parent is not the reviewed head")
+        self.assertEqual(fx.trees[fx.empty], fx.trees[fx.fixed], "fixture: the empty commit's tree is not the reviewed head's, so the case tests nothing")
         self.reviewed_line(self.reviewed_host(fx, fx.fixed), fx.fixed, "done",
                            "control: the record does not read done at its own head, so the case below tests nothing")
-        out = self.reviewed_line(self.reviewed_host(fx, fx.empty), fx.empty, "stale",
-                                 "an empty commit on the reviewed head must read stale: only clean merges of main keep a record")
-        self.assertNotIn("unknown", list_line(self, out, 7), "the stale line says unknown: a failed read stands in for the empty commit's rule")
+        out = self.reviewed_line(self.reviewed_host(fx, fx.empty), fx.empty, "done",
+                                 "an empty commit on the reviewed head must read done: its tree equals its parent's, so the record is kept")
+        self.assertNotIn("unknown", list_line(self, out, 7), "the done line says unknown: a failed read stands in for the empty commit's rule")
 
-    def test_an_empty_commit_after_a_clean_merge_of_main_reads_stale(self):
+    def test_an_empty_commit_after_a_clean_merge_of_main_reads_done(self):
         fx = self.real_commits()
+        self.assertEqual(fx.parents[fx.clean_empty], [fx.clean], "fixture: the empty commit's parent is not the clean merge")
+        self.assertEqual(fx.trees[fx.clean_empty], fx.trees[fx.clean], "fixture: the empty commit's tree is not the clean merge's, so the case tests nothing")
         self.reviewed_line(self.reviewed_host(fx, fx.clean), fx.clean, "done",
                            "control: a clean merge of main after the reviewed head must read done, before the case below is read")
-        out = self.reviewed_line(self.reviewed_host(fx, fx.clean_empty), fx.clean_empty, "stale",
-                                 "an empty commit after a clean merge of main must read stale: only clean merges of main keep a record")
-        self.assertNotIn("unknown", list_line(self, out, 7), "the stale line says unknown: a failed read stands in for the empty commit's rule")
+        out = self.reviewed_line(self.reviewed_host(fx, fx.clean_empty), fx.clean_empty, "done",
+                                 "an empty commit after a clean merge of main must read done: its tree equals its parent's, so the record is kept")
+        self.assertNotIn("unknown", list_line(self, out, 7), "the done line says unknown: a failed read stands in for the empty commit's rule")
+
+    def test_a_trailer_only_commit_on_the_reviewed_head_reads_done(self):
+        fx = self.real_commits()
+        self.assertEqual(fx.parents[fx.trailer], [fx.fixed], "fixture: the trailer commit's parent is not the reviewed head")
+        self.assertEqual(fx.trees[fx.trailer], fx.trees[fx.fixed], "fixture: the trailer commit's tree is not the reviewed head's, so the case tests nothing")
+        self.assertRegex(sh(self.co, "git", "log", "-1", "--format=%B", fx.trailer), r"(?m)^Verified: ", "fixture: the trailer commit has no Verified trailer")
+        out = self.reviewed_line(self.reviewed_host(fx, fx.trailer), fx.trailer, "done",
+                                 "a trailer-only commit on the reviewed head must read done: its tree equals its parent's, so the record is kept")
+        self.assertNotIn("unknown", list_line(self, out, 7), "the done line says unknown: a failed read stands in for the trailer commit's rule")
+
+    def test_a_commit_that_changes_the_tree_reads_stale_beside_them(self):
+        fx = self.real_commits()
+        self.assertNotEqual(fx.trees[fx.plain], fx.trees[fx.fixed], "fixture: the plain commit's tree is the reviewed head's, so the case tests nothing")
+        self.reviewed_line(self.reviewed_host(fx, fx.fixed), fx.fixed, "done",
+                           "control: the record does not read done at its own head, so the case below tests nothing")
+        out = self.reviewed_line(self.reviewed_host(fx, fx.plain), fx.plain, "stale",
+                                 "a commit that changes the tree must read stale: only a tree equal to its parent's keeps the record")
+        self.assertNotIn("unknown", list_line(self, out, 7), "the stale line says unknown: a failed read stands in for the changed-tree rule")
 
 
 class ReviewFixAfterPriorRecord(ReviewEnv):
