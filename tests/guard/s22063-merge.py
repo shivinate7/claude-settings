@@ -26,6 +26,10 @@ def gh_root_repo_spaced_check():
     return gh_root_flag_verb_check("gh --repo o/r pr create --fill", ["pr", "create"])
 
 
+
+FIXTURELESS_CHECKS.update((gh_root_dash_r_check, gh_root_repo_equals_check, gh_root_repo_spaced_check))
+
+
 # The same flag after the group word (`gh pr -R o/r merge`): gh reads it there too. Each form has a check. A repo
 # value that reads as a verb is the value, never the verb.
 def gh_group_dash_r_check():

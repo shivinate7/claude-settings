@@ -90,6 +90,45 @@ def fg_agent(call_id, agent_id):
             fg_result(call_id, "Async agent launched successfully.\nagentId: %s" % agent_id, tur)]
 
 
+def fg_launched(*job_ids):
+    """Background commands this session launched, one call each, in the order given."""
+    records = []
+    for job_id in job_ids:
+        call_id = "call-" + job_id
+        records += [fg_bash(call_id, "sleep 600", background=True), fg_launch(call_id, job_id)]
+    return records
+
+
+def fg_queue(content):
+    """A queued notice as the transcript holds it: a queue-operation enqueue record whose content is the text."""
+    return {"type": "queue-operation", "operation": "enqueue", "timestamp": FG_LATER,
+            "sessionId": "fg-bash-while-bg", "content": content}
+
+
+def fg_restart_queue(job_ids, status="stopped"):
+    """The restart notice that a container restart leaves, as a queue-operation record. It has no task-id tag: its
+    summary names each task as '(task <id>)'."""
+    named = ", ".join('"sleep 600" (task %s)' % job_id for job_id in job_ids)
+    return fg_queue("<task-notification>\n<status>%s</status>\n<summary>The container running this session was "
+                    "restarted before background work reported back: %s. That work is lost; no result or further "
+                    "notification will arrive for it.</summary>\n</task-notification>" % (status, named))
+
+
+def fg_restart_reminder(job_ids):
+    """The same restart text, as a user system-reminder record."""
+    named = ", ".join('"sleep 600" (task %s)' % job_id for job_id in job_ids)
+    return {"type": "user", "timestamp": FG_LATER, "message": {"role": "user", "content": (
+        "<system-reminder>\nThe following background tasks were running and are now stopped: %s.\n</system-reminder>"
+        % named)}}
+
+
+def fg_task_queue(job_id, status):
+    """A completion notice with a task id, recorded only as a queue-operation enqueue record."""
+    return fg_queue("<task-notification>\n<task-id>%s</task-id>\n<tool-use-id>toolu_%s</tool-use-id>\n"
+                    "<output-file>%s</output-file>\n<status>%s</status>\n"
+                    "<summary>fg-bash-while-bg test</summary>\n</task-notification>" % (job_id, job_id, FG_OUT, status))
+
+
 # One transcript per state of this session's work. Each is a fixture, built once when a case names its path.
 FG_LINES = {
     "idle": fg_plain("idle1", "ls -la"),
@@ -101,6 +140,17 @@ FG_LINES = {
                   + fg_stop("stop2", "stopjob1"),
     "agent-running": fg_agent("agent1", "agentrun1"),
     "agent-done": fg_agent("agent2", "agentdone1") + [fg_notice("agentdone1", "completed")],
+    # Restart and queued notices. Each restart names three tasks, the one under test in the middle or the last, so a
+    # fix that reads only the first name would fail.
+    "restart-queue": fg_launched("bgrsta", "bgrst1", "bgrstc") + [fg_restart_queue(["bgrsta", "bgrst1", "bgrstc"])],
+    "restart-reminder": fg_launched("bgrma", "bgrmb", "bgrmc") + [fg_restart_reminder(["bgrma", "bgrmb", "bgrmc"])],
+    "restart-agent": fg_launched("bgrsa1") + fg_agent("agent-rst", "agentrst1")
+                     + [fg_restart_queue(["bgrsa1", "agentrst1"])],
+    "restart-other": fg_launched("bgrot1") + [fg_restart_queue(["bgrot10", "bgrot2"])],
+    "reminder-other": fg_launched("bgrmo1") + [fg_restart_reminder(["bgrmo10"])],
+    "queue-done": fg_launched("bgqd1") + [fg_task_queue("bgqd1", "completed")],
+    "queue-running": fg_launched("bgqr1") + [fg_task_queue("bgqr1", "running")],
+    "restart-running": fg_launched("bgrr1") + [fg_restart_queue(["bgrr1"], status="running")],
 }
 
 
@@ -205,6 +255,26 @@ fg_allow("fg-bash-while-bg: npm test is allowed once TaskStop has stopped its ba
          "npm test", fg_path("bg-stopped"))
 fg_allow("fg-bash-while-bg: npm test is allowed once its background agent has its completion notice",
          "npm test", fg_path("agent-done"))
+
+# RESTART AND QUEUED NOTICES. A restart notice names each task the restart stopped, as '(task <id>)'. Such a task gets no
+# result and no notice, so it is not running. A notice recorded as a queue-operation holds a completion too. A notice that
+# names another id, or whose status is not terminal, closes nothing.
+fg_allow("fg-bash-while-bg: npm test is allowed once a restart notice in queue-operation form has stopped each of its three background commands",
+         "npm test", fg_path("restart-queue"))
+fg_allow("fg-bash-while-bg: npm test is allowed once a restart notice in user reminder form has stopped each of its three background commands",
+         "npm test", fg_path("restart-reminder"))
+fg_allow("fg-bash-while-bg: npm test is allowed once a restart notice has stopped a background command and a background agent",
+         "npm test", fg_path("restart-agent"))
+fg_allow("fg-bash-while-bg: npm test is allowed once a completed notice recorded as a queue-operation has finished its background command",
+         "npm test", fg_path("queue-done"))
+fg_refuse("fg-bash-while-bg: a foreground npm test is refused while a restart notice names only a longer id that begins with its background command's id",
+          "npm test", fg_path("restart-other"))
+fg_refuse("fg-bash-while-bg: a foreground npm test is refused while a reminder names only a longer id that begins with its background command's id",
+          "npm test", fg_path("reminder-other"))
+fg_refuse("fg-bash-while-bg: a foreground npm test is refused while a running notice recorded as a queue-operation names its background command",
+          "npm test", fg_path("queue-running"))
+fg_refuse("fg-bash-while-bg: a foreground npm test is refused while a restart-shaped notice with running status names its background command",
+          "npm test", fg_path("restart-running"))
 fg_allow("fg-bash-while-bg: a foreground ls with a 120000 ms limit is allowed with no background work",
          "ls -la", fg_path("idle"), timeout=120000)
 
@@ -309,6 +379,25 @@ FG_SCOPE = (
      ("<task-notification>",)),
     ("agent-done", "a background agent with a completion notice", ('"agentId": "agentdone1"',
                                                                    "<status>completed</status>"), ()),
+    ("restart-queue","three background commands stopped by a restart notice in queue-operation form",
+     ('"backgroundTaskId": "bgrsta"', '"backgroundTaskId": "bgrst1"', '"backgroundTaskId": "bgrstc"',
+      '"type": "queue-operation"', "<status>stopped</status>", "(task bgrst1)"), ("<task-id>",)),
+    ("restart-reminder", "three background commands stopped by a restart notice in user reminder form",
+     ('"backgroundTaskId": "bgrmb"', "The following background tasks were running and are now stopped",
+      "(task bgrmb)"), ("<task-id>", "queue-operation")),
+    ("restart-agent", "a background command and a background agent, both named by a restart notice",
+     ('"backgroundTaskId": "bgrsa1"', '"agentId": "agentrst1"', "(task agentrst1)"), ("<task-id>",)),
+    ("restart-other", "a background command, and a restart notice that names a longer id beginning with its id",
+     ('"backgroundTaskId": "bgrot1"', "(task bgrot10)"), ("(task bgrot1)", "<task-id>")),
+    ("reminder-other", "a background command, and a reminder that names a longer id beginning with its id",
+     ('"backgroundTaskId": "bgrmo1"', "(task bgrmo10)"), ("(task bgrmo1)", "<task-id>")),
+    ("queue-done", "a background command with a completed notice recorded as a queue-operation",
+     ('"backgroundTaskId": "bgqd1"', "<task-id>bgqd1</task-id>", "<status>completed</status>",
+      '"type": "queue-operation"'), ()),
+    ("queue-running", "a background command with a running notice recorded as a queue-operation",
+     ('"backgroundTaskId": "bgqr1"', "<task-id>bgqr1</task-id>", "<status>running</status>"), ()),
+    ("restart-running", "a background command with a restart-shaped notice whose status is not terminal",
+     ('"backgroundTaskId": "bgrr1"', "(task bgrr1)", "<status>running</status>"), ("<task-id>",)),
 )
 
 
