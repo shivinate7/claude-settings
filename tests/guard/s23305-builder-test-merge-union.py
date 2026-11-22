@@ -161,8 +161,8 @@ _mt_refuse("builder-refuse: control, a merge that drops main's one-sided edit of
 # text and adds a case. A result that takes the first parent's text holds every case, so it is allowed, though the other
 # parent's old text is no longer in it. The rows are plain calls: the files are parsed, never run.
 # The controls stay refused as lost: a deleted call, call and function, row or twin row, a rename that comes with a
-# deletion, and a function whose flip the result keeps while it drops the other parent's edit. The result holds fewer of
-# that case than a parent does.
+# deletion, and a function that both parents changed where the result drops either parent's edit. The result holds
+# fewer of that case than a parent does, or drops a parent's edit.
 # The edit and the lane's new row are adjacent, so the merge conflicts at the end of the file. The full-size case edits a
 # row in the middle (a clean merge) and conflicts on the rows both sides append at the end.
 MR_TOP = MT_BASE + "\n"
@@ -234,19 +234,26 @@ _mt_allow("builder-refuse: a merge of a hundred rows that takes main's renamed a
           "new rows, is allowed", MR_FULL)
 
 # Both parents change one function: the lane only flips a verdict in it, main edits what it checks. Both change one line,
-# so the merge conflicts on the function. The flip is no edit to keep.
+# so the merge conflicts on the function. The result keeps main's edit, so it drops the lane's flip. Decision
+# `merge-union-reads-lost`, line 17: "Still refused as `lost`: a result that drops any entry of either parent."
 MR_FUNC = ('def _gate_rows():\n    rows = []\n    rows.append(("push to main", "deny"))\n'
            '    rows.append(("push to a branch", "allow"))\n    return rows\n')
 MR_FUNC_FLIP = MR_FUNC.replace('"push to main", "deny"', '"push to main", "ask"')
 MR_FUNC_EDIT = MR_FUNC.replace('"push to main", "deny"', '"push --force to main", "deny"')
-MR_FUNC_KEPT = _mr_case("mr-both-changed-keeps-edit", MR_TOP + MR_FUNC, MR_TOP + MR_FUNC_FLIP, MR_TOP + MR_FUNC_EDIT,
-                        MR_TOP + MR_FUNC_EDIT)
-_mt_allow("builder-refuse: a merge of a function that the lane only flipped and main edited, which keeps main's edit, "
-          "is allowed", MR_FUNC_KEPT)
+MR_FUNC_FLIP_DROPPED = _mr_case("mr-both-changed-drops-flip", MR_TOP + MR_FUNC, MR_TOP + MR_FUNC_FLIP,
+                                MR_TOP + MR_FUNC_EDIT, MR_TOP + MR_FUNC_EDIT)
+_mt_refuse("builder-refuse: a merge of a function that the lane only flipped and main edited, which keeps main's edit "
+           "and drops the flip, is refused as lost", MR_FUNC_FLIP_DROPPED, "lost", (MT_CARRY["lost"],))
 MR_FUNC_DROPPED = _mr_case("mr-both-changed-drops-edit", MR_TOP + MR_FUNC, MR_TOP + MR_FUNC_FLIP, MR_TOP + MR_FUNC_EDIT,
                            MR_TOP + MR_FUNC_FLIP)
 _mt_refuse("builder-refuse: control, a merge of a function that the lane only flipped and main edited, which keeps the "
            "flip and drops main's edit, is refused as lost", MR_FUNC_DROPPED, "lost", (MT_CARRY["lost"],))
+# Green control: main did not edit the function, and the result keeps the lane's flip. Both sides append a row at the
+# end, so the merge conflicts there, and the function merges clean.
+MR_FUNC_FLIP_KEPT = _mr_case("mr-lane-only-flip-kept", MR_TOP + MR_FUNC, MR_TOP + MR_FUNC_FLIP + MR_LANE_ROW,
+                             MR_TOP + MR_FUNC + MR_MAIN_ROW, MR_TOP + MR_FUNC_FLIP + MR_LANE_ROW + MR_MAIN_ROW)
+_mt_allow("builder-refuse: control, a merge of a function that the lane only flipped and main did not edit, which keeps "
+          "the flip, is allowed", MR_FUNC_FLIP_KEPT)
 
 
 # ---- CONTROLS: a deleted case stays lost, since the result holds fewer of its case than a parent ----
