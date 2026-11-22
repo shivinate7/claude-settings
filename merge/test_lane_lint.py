@@ -37,6 +37,10 @@ first run scope_and_save, whose rerun must run no job. Saved results are pruned:
 by a crash or a kill is gone after the next save.
 Cost per case: at most four stub starts; a tool-copy case copies the repo's tree once, and a family case once per file (unmeasured); the prune cases
 make TOOL_KEYS lints (unmeasured).
+LaneLintResumeLine (class LaneLintResumeLine) holds the first stdout line a lint prints. It names `merge --lane-lint <target>` and says the lint restarts,
+so a session that reads a stop at the background cap as a failure learns the same command restarts it. Its cases check that line for a PR number, a
+branch and a commit, its place before a FAIL or an unknown refusal, and the verdict words it leaves out. The rerun case sits in LintResumesPassedJobs,
+and the disk floor's control in LaneLintDiskFloor. Cost per case: one lane lint, one stub ci-job start (unmeasured).
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import ast, atexit, contextlib, importlib.util, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, threading, time, types, unittest, unittest.mock, uuid
@@ -7200,6 +7204,11 @@ class LaneLintDiskFloor(LaneFixture):
             text = self.refusal_from(module)
         self.assert_names_landed_sweep(text, landed, tree)
 
+    def test_the_disk_floor_refuses_before_the_resume_line_prints(self):  # the control: the floor refuses first, so no resume line prints
+        rc, text, adds = self.refusal_run(cloud=False, free_gib=REFUSE_GIB)
+        self.assert_refused_before_any_tree(rc, text, adds, REFUSE_GIB)
+        self.assertEqual(resume_lines(text, "7"), [], "the resume line printed before the disk floor refused: " + text)
+
 
 VERDICT_DIR_ENV = "MUTATE_VERDICT_DIR"  # the one name of the folder a mutate shard saves its verdicts in (hooks/test_mutate_shared.py ResumeTests names it too)
 
@@ -7819,6 +7828,13 @@ class LintResumesPassedJobs(LaneFixture):
         self.assertEqual(self.ran(), ran + 1, "scope: the next save did not run its job: " + out)
         self.assertFalse(os.path.exists(stale), "the next save left the .part file of a killed run: " + stale)
 
+    def test_a_rerun_on_the_same_head_prints_the_resume_line_before_the_cached_pass(self):
+        head, saved, rc2, out2 = self.scope_and_save()
+        self.assertEqual(rc2, 0, out2)
+        self.assertTrue(self.cached(out2), "the rerun printed no PASS (cached) line: " + out2)
+        first = out2.splitlines()[0]
+        self.assertTrue(is_resume_line(first, "7"), "the rerun's first line is not the resume line for `merge --lane-lint 7`: %r\n%s" % (first, out2))
+
 
 class CiJobHeadCopy(LaneFixture):
     """The lane lint runs the head's own bin/ci-job as well, when the lane changes the tool. The base is the lane-merge repo: origin/main holds bin/ci-job
@@ -7972,6 +7988,90 @@ class CiJobHeadCopy(LaneFixture):
         self.assertEqual(rc, 0, text)
         self.assertRegex(text, "renam", "the lint does not say the lane renamed bin/ci-job: " + text)
         self.assertNotRegex(text, "deletes bin/ci-job", "the lint says the lane deletes bin/ci-job, though the lane renamed it: " + text)
+
+
+RESUME_WORD = "restart"  # the one word that marks the resume line: a lane lint prints no other line that says it restarts
+
+
+def is_resume_line(line, target):
+    """True when `line` is the resume line of a lint of `target`: it names `merge --lane-lint <target>` and says the lint restarts."""
+    return "merge --lane-lint %s" % target in line and RESUME_WORD in line
+
+
+def resume_lines(text, target):
+    """The lines of `text` that are the resume line of a lint of `target`."""
+    return [line for line in text.splitlines() if is_resume_line(line, target)]
+
+
+class LaneLintResumeLine(LaneFixture):
+    """The first stdout line of `merge --lane-lint`. A lint the harness stops at its background cap shows the session only a stopped task, so the
+    line says the same command restarts it, and that a job which passed on this head is kept. The line names the target as the caller gave it.
+    It holds no verdict word: the suite's readers take a `PASS:` prefix as a pass, and a session reads `FAIL` or `run again` as a refusal.
+    Cost per case: one lane lint and one stub ci-job start (unmeasured)."""
+
+    def assert_first_stdout_line_is_resume(self, out, target):
+        """Why: the line comes first on stdout, before any verdict or refusal the lint prints after it."""
+        lines = out.splitlines()
+        self.assertTrue(lines, "the lint printed no stdout line: " + out)
+        self.assertTrue(is_resume_line(lines[0], target),
+                        "the first stdout line is not the resume line for `merge --lane-lint %s`: %r\n%s" % (target, lines[0], out))
+
+    def assert_resume_holds_no_verdict(self, text, target):
+        """Why: exactly one line, since the lint prints it once per call and the first-line cases read it; and no verdict word on that line.
+        `text` is the call's stdout and stderr together, so a second copy on either stream counts."""
+        found = resume_lines(text, target)
+        self.assertEqual(len(found), 1, "want one resume line for `merge --lane-lint %s`, got %d: %s" % (target, len(found), text))
+        line = found[0]
+        self.assertNotIn("PASS:", line, "the resume line carries a PASS verdict word: " + line)
+        self.assertNotIn("FAIL", line, "the resume line carries a FAIL verdict word: " + line)
+        self.assertNotIn("run again", line.lower(), "the resume line says `run again`, which a session reads as a refusal: " + line)
+
+    def test_a_pr_number_lint_prints_the_resume_line_first_and_names_the_pr(self):
+        self.use_ci_job(PASSING, 0)
+        rc, out, err = self.lane_streams("--lane-lint", "7")
+        self.assertEqual(rc, 0, out + err)
+        self.assert_first_stdout_line_is_resume(out, "7")
+
+    def test_a_branch_target_prints_the_resume_line_naming_that_branch(self):
+        self.use_ci_job(PASSING, 0)
+        rc, out, err = self.lane_streams("--lane-lint", "feat")
+        self.assertEqual(rc, 0, out + err)
+        self.assert_first_stdout_line_is_resume(out, "feat")
+
+    def test_a_commit_target_prints_the_resume_line_naming_that_commit(self):
+        self.use_ci_job(PASSING, 0)
+        sha = self.head("feat")
+        rc, out, err = self.lane_streams("--lane-lint", sha)
+        self.assertEqual(rc, 0, out + err)
+        self.assert_first_stdout_line_is_resume(out, sha)
+
+    def test_the_resume_line_prints_before_a_fail_refusal(self):
+        self.use_ci_job(FAILING, 1)
+        rc, out, err = self.lane_streams("--lane-lint", "7")
+        self.assertEqual(rc, 1, out + err)
+        self.assertTrue(any("comment narration" in line and "FAIL" in line for line in (out + err).splitlines()),
+                        "the FAIL refusal is missing, so the order cannot be read: " + out + err)
+        self.assert_first_stdout_line_is_resume(out, "7")
+
+    def test_the_resume_line_prints_before_an_unknown_refusal(self):
+        self.use_ci_job(UNKNOWN, 2)
+        rc, out, err = self.lane_streams("--lane-lint", "7")
+        self.assertEqual(rc, 1, out + err)
+        self.assertTrue(any("shellcheck" in line and "unknown" in line.lower() for line in (out + err).splitlines()),
+                        "the unknown refusal is missing, so the order cannot be read: " + out + err)
+        self.assert_first_stdout_line_is_resume(out, "7")
+
+    def test_the_resume_line_holds_no_verdict_word_on_a_passing_lint(self):
+        self.use_ci_job(PASSING, 0)
+        rc, out, err = self.lane_streams("--lane-lint", "7")
+        self.assertEqual(rc, 0, out + err)
+        self.assert_resume_holds_no_verdict(out + err, "7")
+
+    def test_the_resume_line_holds_no_verdict_word_on_a_failing_lint(self):
+        self.use_ci_job(FAILING, 1)
+        rc, out, err = self.lane_streams("--lane-lint", "7")
+        self.assertEqual(rc, 1, out + err)
+        self.assert_resume_holds_no_verdict(out + err, "7")
 
 
 if __name__ == "__main__":
