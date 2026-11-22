@@ -1148,5 +1148,16 @@ class BuildExitCodes(unittest.TestCase):
         self.assertFalse(branch_exists(root, merge.integration_branch(BUILD_NAME)), "a failed fetch of main still built an integration branch")
 
 
+class HintBacklogIsTheToolsThreshold(unittest.TestCase):
+    """The lane lint's hint names merge.COMBINE_BACKLOG as the number of ready PRs that builds a train. It must equal BUILD_THRESHOLD, or the hint
+    promises a train the tool refuses to build, or the reverse. merge.py keeps its own copy, since it never imports the tool (Controls above)."""
+
+    def test_the_hint_backlog_equals_the_tools_build_threshold(self):
+        import combine_train  # the tool; imported in the case, so a missing tool fails this case alone
+        backlog = getattr(merge, "COMBINE_BACKLOG", None)
+        self.assertIsNotNone(backlog, "merge.py names no COMBINE_BACKLOG, so the lane lint's hint has no backlog to match the tool's threshold")
+        self.assertEqual(backlog, combine_train.BUILD_THRESHOLD, "merge.COMBINE_BACKLOG and combine_train.BUILD_THRESHOLD differ")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
