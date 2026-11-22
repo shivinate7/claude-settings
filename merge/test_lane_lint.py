@@ -7974,5 +7974,168 @@ class CiJobHeadCopy(LaneFixture):
         self.assertNotRegex(text, "deletes bin/ci-job", "the lint says the lane deletes bin/ci-job, though the lane renamed it: " + text)
 
 
+class ReviewedRead:
+    """A stand-in for merge.reviewed_read. `batch` are the pull requests whose record passes (act `batch`), `others` are (number, act) pairs, and
+    every number is an open pull request on main. `fail` makes the read raise. `calls` counts the reads, so a case proves whether a list was read."""
+
+    def __init__(self, batch=(), others=(), fail=None):
+        self.rows = sorted([(n, "batch") for n in batch] + list(others))
+        self.fail = fail
+        self.calls = 0
+
+    def __call__(self, h, cfgrel=None, facts=None, ledger=None):
+        self.calls += 1
+        if self.fail is not None:
+            raise self.fail
+        ledger.extend({"number": n, "act": act, "owner": "batch runner", "ageHours": 1.0, "red": False} for n, act in self.rows)
+        pulls = [{"number": n, "base": {"ref": "main"}, "head": {"sha": "%040d" % n}} for n, _ in self.rows]
+        return [], pulls, {}
+
+
+def hint_lines(text):
+    """The hint's lines: each starts `merge: another lane lint`, the one line a lint prints when another lint of its clone holds a tree."""
+    return [line for line in text.splitlines() if line.startswith("merge: another lane lint")]
+
+
+class CombineHint(LaneFixture):
+    """The hint `merge --lane-lint` prints when another lane lint of its clone is running or queued (merge.combine_hint). It is one line, printed before
+    the lint, that names the ready PRs and the command that builds a train from them, or says to merge alone under the backlog. The lock is real git:
+    a lane lint's tree is locked `merge tool, pid N, lane lint`, and the pid is a live child or a reaped one. merge.reviewed_read is a stand-in,
+    so each case sets the rows and counts the reads."""
+
+    def setUp(self):
+        super().setUp()
+        self.use_ci_job(PASSING, 0)
+        temp = unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER)  # other_lane_lint_pids reads only the trees in the temp folder
+        temp.start()
+        self.addCleanup(temp.stop)
+
+    def live_pid(self):
+        """The pid of a child process that is still running: another lane lint's pid. The child is killed at the end of the case."""
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
+        self.addCleanup(child.wait)
+        self.addCleanup(child.kill)
+        return child.pid
+
+    def lock_lint_tree(self, pid):
+        """A lane lint's tree as add_lane_lint_worktree leaves it: a merge-wt- folder in the temp folder, with a worktree of the lane checkout
+        locked `merge tool, pid N, lane lint`. -> (folder, worktree)."""
+        tmp = os.path.realpath(tempfile.mkdtemp(prefix="merge-wt-"))
+        wt = os.path.join(tmp, "tree")
+        tm.sh(self.co, "git", "worktree", "add", "-q", "--detach", "--lock", "--reason", "merge tool, pid %d, lane lint" % pid, wt, self.head("feat"))
+        self.addCleanup(merge.drop_worktree, self.co, tmp, wt)
+        self.assertIn("merge tool, pid %d, lane lint" % pid, tm.sh(self.co, "git", "worktree", "list", "--porcelain"),
+                      "scope: the lane lint's lock reason is not on the tree before the case runs")
+        return tmp, wt
+
+    def hint_run(self, reads, *argv, cloud=False):
+        """-> (rc, stdout and stderr) of merge in the lane checkout, with merge.reviewed_read standing as `reads`."""
+        with unittest.mock.patch.object(merge, "reviewed_read", reads):
+            rc, out, err = self.lane_streams(*argv, cloud=cloud)
+        return rc, out + err
+
+    def test_a_live_lane_lint_lock_prints_the_combine_line_before_the_lint(self):
+        self.lock_lint_tree(self.live_pid())
+        reads = ReviewedRead(batch=range(101, 112))
+        rc, text = self.hint_run(reads, "--lane-lint", "7")
+        self.assertEqual(rc, 0, text)
+        self.assertTrue(pass_lines(text), "the lint printed no PASS line: " + text)
+        hint = hint_lines(text)
+        self.assertEqual(len(hint), 1, "another lane lint holds a tree, and no one line says so: " + text)
+        self.assertLess(text.index(hint[0]), text.index(pass_lines(text)[0]), "the hint comes after the lint's verdict, not before it: " + text)
+        self.assertEqual(reads.calls, 1, "the ready PRs were read %d times, want once" % reads.calls)
+
+    def test_no_lane_lint_lock_prints_no_combine_line_and_reads_no_list(self):  # the control of the live case: the same rows, no other lint
+        reads = ReviewedRead(batch=range(101, 112))
+        rc, text = self.hint_run(reads, "--lane-lint", "7")
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(hint_lines(text), [], "no other lint holds a tree, and a hint was printed: " + text)
+        self.assertEqual(reads.calls, 0, "no other lint holds a tree, and the ready PRs were read %d times" % reads.calls)
+
+    def test_a_lane_lint_lock_whose_pid_is_dead_prints_no_combine_line(self):
+        self.lock_lint_tree(tm.reaped_child_pid())
+        reads = ReviewedRead(batch=range(101, 112))
+        rc, text = self.hint_run(reads, "--lane-lint", "7")
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(hint_lines(text), [], "a lock whose pid is dead was taken for a live lint: " + text)
+        self.assertEqual(reads.calls, 0, "a lock whose pid is dead led to a read of the ready PRs")
+
+    def test_eleven_batch_rows_name_the_command_and_the_ready_prs_but_not_the_front_pr(self):
+        self.lock_lint_tree(self.live_pid())
+        rc, text = self.hint_run(ReviewedRead(batch=range(101, 112)), "--lane-lint", "7")
+        hint = hint_lines(text)
+        self.assertEqual(len(hint), 1, "no one hint line: " + text)
+        line = hint[0]
+        self.assertNotIn("#101", line, "the front PR, which merges alone, is named as ready: " + line)
+        for n in range(102, 112):
+            self.assertIn("#%d" % n, line, "ready PR #%d is not named: %s" % (n, line))
+        self.assertRegex(line, r"combine_train\.py --root \S+ --build --name <name>$", "the line gives no command that builds the train: " + line)
+
+    def test_a_live_lock_with_no_ready_pr_says_none_and_merge_alone(self):  # the empty state: no `batch` row at all
+        self.lock_lint_tree(self.live_pid())
+        rc, text = self.hint_run(ReviewedRead(), "--lane-lint", "7")
+        hint = hint_lines(text)
+        self.assertEqual(len(hint), 1, "no one hint line: " + text)
+        self.assertIn("none", hint[0], "the empty list is not named as none: " + hint[0])
+        self.assertIn("merge alone", hint[0], "an empty backlog is not said to merge alone: " + hint[0])
+        self.assertNotIn("--build", hint[0], "a command that builds a train is printed for an empty backlog: " + hint[0])
+
+    def test_ten_batch_rows_leave_nine_ready_prs_and_say_merge_alone(self):
+        self.lock_lint_tree(self.live_pid())
+        rc, text = self.hint_run(ReviewedRead(batch=range(101, 111)), "--lane-lint", "7")
+        hint = hint_lines(text)
+        self.assertEqual(len(hint), 1, "no one hint line: " + text)
+        line = hint[0]
+        self.assertIn("merge alone", line, "nine ready PRs under the backlog of ten are not said to merge alone: " + line)
+        self.assertNotIn("--build", line, "a command that builds a train is printed under the backlog: " + line)
+        self.assertNotIn("#101", line, "the front PR, which merges alone, is named as ready: " + line)
+        for n in range(102, 111):
+            self.assertIn("#%d" % n, line, "ready PR #%d is not named: %s" % (n, line))
+
+    def test_a_failed_read_says_unknown_and_the_lint_goes_on(self):
+        self.lock_lint_tree(self.live_pid())
+        rc, text = self.hint_run(ReviewedRead(fail=RuntimeError("the pull request list could not be read")), "--lane-lint", "7")
+        hint = hint_lines(text)
+        self.assertEqual(len(hint), 1, "no one hint line: " + text)
+        self.assertIn("unknown", hint[0], "a read that failed is not reported as unknown: " + hint[0])
+        self.assertEqual(rc, 0, "the lint did not exit as it does with no other lint: " + text)
+        self.assertTrue(pass_lines(text), "the lint printed no PASS line: " + text)
+        self.assertEqual(len(self.lint_calls()), 1, "the lint ran %d times, want once" % len(self.lint_calls()))
+
+    def test_the_batch_runners_pre_join_call_prints_no_combine_line(self):
+        self.lock_lint_tree(self.live_pid())
+        rc, text = self.hint_run(ReviewedRead(batch=range(101, 112)), "--lane-lint", "7")  # the control: a lane's own call prints the hint
+        self.assertEqual(len(hint_lines(text)), 1, "control: no hint for a lane's own call, so the pre-join case proves nothing: " + text)
+        self.put_role("batch-runner")
+        reads = ReviewedRead(batch=range(101, 112))
+        rc, text = self.hint_run(reads, "--lane-lint", "7", cloud=True)
+        self.assertEqual(rc, 0, text)
+        self.assertTrue(pass_lines(text), "the pre-join call printed no PASS line, so it did not reach the lint: " + text)
+        self.assertEqual(hint_lines(text), [], "the batch runner's pre-join call printed a combine hint: " + text)
+        self.assertEqual(reads.calls, 0, "the batch runner's pre-join call read the ready PRs %d times" % reads.calls)
+
+    def test_the_sweep_removes_a_dead_lane_lint_tree_and_keeps_a_live_one(self):
+        dead_tmp, dead_wt = self.lock_lint_tree(tm.reaped_child_pid())
+        live_tmp, live_wt = self.lock_lint_tree(self.live_pid())
+        self.assertTrue(tm.tree_listed(self.co, dead_wt), "scope: the dead lane lint tree is not registered before the sweep")
+        merge.sweep_dead_trees(self.co)
+        self.assertFalse(os.path.exists(dead_tmp), "a lane lint tree whose pid is dead stays after the sweep")
+        self.assertFalse(tm.tree_listed(self.co, dead_wt), "the dead lane lint tree stays registered after the sweep")
+        self.assertTrue(os.path.isdir(live_tmp), "a lane lint tree whose pid is alive was removed")
+        self.assertTrue(tm.tree_listed(self.co, live_wt), "the live lane lint tree lost its registration")
+
+
+class MergeLockReasons(unittest.TestCase):
+    """merge.MERGE_LOCK reads the lock reason of a merge tree: `merge tool, pid N`, and `merge tool, pid N, lane lint` for a lane lint's tree."""
+
+    def test_the_lock_reads_the_plain_reason_and_the_lane_lint_reason(self):
+        plain = merge.MERGE_LOCK.fullmatch("merge tool, pid 4242")
+        self.assertIsNotNone(plain, "the plain merge lock reason no longer reads as a merge lock")
+        self.assertEqual(plain.group(1), "4242")
+        lane = merge.MERGE_LOCK.fullmatch("merge tool, pid 4242, lane lint")
+        self.assertIsNotNone(lane, "the lane lint lock reason does not read as a merge lock, so its pid is never checked")
+        self.assertEqual(lane.group(1), "4242")
+
+
 if __name__ == "__main__":
     unittest.main()
