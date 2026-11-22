@@ -272,10 +272,10 @@ MR_ROW_A = 'sh("a push to main is checked by the gate", PUSH_MAIN, "deny")\n'
 MR_ROW_B = 'sh("a push to a branch is checked by the gate", PUSH_BRANCH, "allow")\n'
 _mr_deleted("row", "a merge that deletes one of two rows", MR_ROW_A + MR_ROW_B, MR_ROW_B)
 # Twins: two rows with one command and one description, whose verdicts differ. Each holds the other's case key.
-MR_TWIN_DENY = 'sh("a push to main is checked by the gate", PUSH_MAIN, "deny")\n'
+MR_TWIN_REFUSE = 'sh("a push to main is checked by the gate", PUSH_MAIN, "deny")\n'
 MR_TWIN_ASK = 'sh("a push to main is checked by the gate", PUSH_MAIN, "ask")\n'
 _mr_deleted("twin-row", "a merge that deletes one of two twin rows that differ only in verdict",
-            MR_TWIN_DENY + MR_TWIN_ASK, MR_TWIN_DENY)
+            MR_TWIN_REFUSE + MR_TWIN_ASK, MR_TWIN_REFUSE)
 
 # A rename that main made is honoured, and another row is deleted in the same result.
 MR_RENAME_OLD = 'sh("a push to a branch is checked by the gate", PUSH_BRANCH, "allow")\n'
