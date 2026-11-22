@@ -243,6 +243,8 @@
                           ready) and nothing more. A PR that is ready already is left as it is. It
                           merges no pull request, takes no lock and needs no merge role. A red head or a head that conflicts with the base is not marked ready.
                           The step also closes each open PR the body names as replaced, after the checks and the push and before the ready mark.
+                          A cloud session that records the standing role gets one warning line first when the body lacks its own `Session: https://claude.ai/code/<id>` link
+                          (session_link_note, the read --confirm refuses on); the ready mark goes ahead.
                           A repo with merge.readyChecks gets the pre-ready run: the checks, the debt-close lint and the open-PR clash (the head against every
                           other open PR on its base), each one line `pass NAME`, `fail NAME: why` or `unknown NAME: why`, before any push. A PR on a base
                           other than the default branch gets its ci-job steps run on the merge of its head with that base.
@@ -7511,6 +7513,16 @@ def own_session_link(body):
     own = remote_session_id()
     return bool(own) and own in re.findall(r"https://claude\.ai/code/(session_[A-Za-z0-9_-]+)", body or "", re.ASCII)
 
+def session_link_note(info):
+    """The one line `--ready` prints when a standing session's own link is missing from the pull request body, or None. It reads what --confirm reads (own_session_link),
+    for the same session (a cloud one that records the standing role), so the gap shows at the ready pass and not at the last step. A warning, not a refusal: --confirm
+    refuses, and a body edit after the ready mark still mends it. A session with no id has no line to name, so it gets no note."""
+    from override import remote_session_id
+    own = remote_session_id()
+    if not own or own_session_link(info.get("body")):
+        return None
+    return f"merge: this pull request's body lacks this session's link, so --confirm will refuse it. Add the line: Session: https://claude.ai/code/{own}"
+
 def standing_refusal(h, n, info, head, main=None, claims=None):
     """-> why a standing session may not merge pull request `n`, or "" when it may (ruling own-tiny-fixes-b). It must be the session's own,
     and the head's own checks must be green. A pull request past docs, code and guard paths included, needs one passing reviewer record, of any model, on the relayed head `head`,
@@ -8109,6 +8121,10 @@ def main(argv, host=None, lock=None, hosts=None):
         if a.fast_checks:  # before any lock: it reads a dry merge and writes nothing
             return fast_checks(root, cfg, a.pr, h, info)
         if a.ready:  # before any lock: a lane marks its own draft ready once, and a ready pull request is left as it is
+            if os.environ.get("CLAUDE_CODE_REMOTE") == "true" and read_merge_role() == STANDING_ROLE:  # the session --confirm reads the link for (standing_refusal)
+                note = session_link_note(info)
+                if note:
+                    say(note)
             if not info["draft"]:
                 say(f"merge: #{a.pr} is ready already. Nothing was changed.")
                 return 0
