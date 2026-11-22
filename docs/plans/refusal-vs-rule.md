@@ -30,7 +30,7 @@ merge while another ready PR ran CI, stricter than the batch-CI rule that was th
 - **uncited:** no rule or decision holds the refusal. Most are fail-closed stops on a failed read.
 - **unverified:** no rule sentence could be quoted.
 
-130 rows: exact 80, looser 9, stricter 9 (one reads `stricter (wording)`), uncited 31, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
+130 rows: exact 81, looser 9, stricter 8, uncited 31, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
 exact has a gap.
 
 
@@ -151,7 +151,7 @@ Notes: owner-judge also fires on prose "Problem statement:" (wrong id only). gh-
 | `merge:required-none-named` | no-merge-during-batch-ci | "The tool refuses a base with no protection and no pinned list." | exact | exact | no protection (776) or an empty list (782) | - |
 | `merge:ignore-clash` | git-never-merge-failing-ci | "Never merge failing CI." | exact | exact | merge.ignoreChecks names a required check (780) | - |
 | `merge:pinned-mismatch` | main-branch-protection (nearest) | "so the merge tool reads the name from the protection." | uncited | exact | a pinned check list differs from a non-empty protection list (800) | rule rewrite: add "the pin equals the protection" to main-branch-protection |
-| `merge:base-red-or-unknown` | no-merge-onto-red-main | "Unknown refuses, as the silent-undo check does." | exact | exact | the newest base run is red, or cancelled with no red job (947-980) | - |
+| `merge:base-red-or-unknown` | no-merge-onto-red-main | "Unknown refuses, as the silent-undo check does." | exact | exact | the base reads UNKNOWN, or a red sits beside a cancelled or running run that a revert would lift (4584); a known red does not refuse (ruling Q5 v) | - |
 | `merge:head-read-verdict` | git-never-merge-failing-ci | "Never merge failing CI." | exact | exact | red, pending, no check yet, or unknown is not green (1025-1057) | - |
 | `merge:ready-never-sent` | records-index-at-merge | "so the batch runner marks the PR ready" | exact | exact | the tool never marks a PR ready (1073) | - |
 | `merge:blocked-or-behind` | none | - | uncited | exact | a PR GitHub reads BLOCKED (for example, by a missing review) or BEHIND gets no merge call (1085) | rule rewrite: add to standing-merge-grant that a BLOCKED PR never merges |
@@ -185,9 +185,9 @@ Notes: the merge lock has no decision record: 5 lock rows uncited. BEHIND needs 
 | `merge:ignore-entry-invalid` | none | - | uncited | exact | an ignoreChecks entry with no reason (2083) | - |
 | `merge:pr-closed-or-conflicting` | none | - | uncited | exact | the PR is closed or conflicting (2051, 2053) | - |
 | `merge:worktree-open-failed` | none | - | uncited | exact | origin's head differs from the one gh named, or the tree cannot be added (2060-2069) | - |
-| `merge:red-base` | no-merge-onto-red-main | "the merge tool refuses `merge <pr> --confirm` while the base branch's latest completed run has a red job." | exact | exact | a red or unread main run (2105); --base-red-ok lifts it | - |
+| `merge:red-base` | no-merge-onto-red-main | "The merge refuses while main reads UNKNOWN." | exact | exact | the base reads UNKNOWN, or a red sits beside a cancelled or running run that a revert would lift (4584); `--base-red-ok` lifts that read, never a known red | - |
 | `merge:preview-base-stale` | merge-needs-current-base | "The preview prints a `base:` line that says whether the head ... is BEHIND." | exact | exact | a BEHIND head gets "--confirm refuses it" (2129, 2132) | - |
-| `merge:preview-base-run` | no-merge-onto-red-main | "The preview prints the same verdict on its `<base> run:` line." | stricter (wording) | exact | a red main says "--confirm refuses it", though --base-red-ok lifts it (2156) | tool fix: add "unless --base-red-ok" to the line |
+| `merge:preview-base-run` | no-merge-onto-red-main | "The preview prints the verdict on its `<base> run:` line, with the detail and `red_line`." | exact | exact | an UNKNOWN base says "--confirm refuses it unless --base-red-ok"; a red base with no run beside it says "--confirm merges onto the red main" (4713-4714) | - |
 | `merge:draft-holds-claim` | records-index-at-merge | "refuses ... a head that carries a claim" | exact | exact | a draft head with a claim line (2177) | - |
 | `merge:draft-base-stale` | records-index-at-merge | "refuses a head that does not hold the base tip" | exact | exact | a BEHIND or unknown draft head (2182) | - |
 | `merge:base-changed-under-lock` | none | - | uncited | exact | the PR is retargeted during the lock wait (2217) | - |
@@ -221,7 +221,7 @@ Notes: every Stop ends "No override lifts this refusal" (2488), false for red-ba
 Each stricter or looser row becomes one step. Triage owns the steps. This record changes no guard.
 
 - **Stricter, tool fix:** `pointer-head`, `command-in-item`, `gh-login-switch`, `machine-wide-kill`, `detached-launch`,
-  `impeccable-review-only`, `builder-test-edit`, `merge:preview-base-run`, the "no override" text.
+  `impeccable-review-only`, `builder-test-edit`, the "no override" text.
 - **Looser, tool fix:** `shared-tree`, `destructive-delete` (`$(pwd)`, heredoc forms), `session-home`,
   `agent-model-floor`, `port-question`, `question-form`, `page-stale`.
 - **Fit the tool to the rule** (process-only, coordinator 2026-11-01 21:14 CST). The rule stays,
