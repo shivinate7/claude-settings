@@ -1234,6 +1234,118 @@ def owner_waits_gap(payload):
         return ""
 
 
+# --- Goal order reminder (step goal-order-not-wait) ---------------------------------------
+# At a Stop with no running background command or agent, a line names the earliest PR the handoff's
+# `## Goal` cites that is still open and has no lint running. Reminder only: it never blocks and
+# never raises, and a read that cannot run says nothing. The PR state is one REST read through
+# ci_wake.gh_json (5 s bound), cached in the nudge state file for GOAL_PR_TTL seconds; a closed or
+# merged PR is final and stays cached. A running lint is a `--lane-lint <N>` process in the local
+# process table (one `ps`), so a lint in another machine's session is not seen.
+GOAL_HEADING = "Goal"
+GOAL_PR_TTL = 300  # seconds an OPEN or UNKNOWN read is reused
+GOAL_PR_MAX = 10  # most cited PRs read in one Stop
+GOAL_READ_TIMEOUT = 5  # seconds for one gh read
+_GOAL_CITE = re.compile(r"(?<![\w&#])#(\d{1,6})\b")
+_LINT_TARGET = re.compile(r"--lane-lint(?:=|\s+)#?(\d+)\b")
+
+
+def goal_cites(text):
+    """The PR numbers the handoff's `## Goal` section cites as `#NNN`, in order, each once. [] for no
+    Goal section or no cite. Fenced code is not read."""
+    head = section_heading(GOAL_HEADING).search(text)
+    if not head:
+        return []
+    seen, fence = [], None
+    for line in text[head.end():].splitlines():
+        found = _FENCE.match(line)
+        if found:
+            fence = None if fence == found.group(1)[0] else (fence or found.group(1)[0])
+            continue
+        if fence is None and _ANY_HEAD.match(line):
+            break
+        if fence is None:
+            for num in _GOAL_CITE.findall(line):
+                if int(num) not in seen:
+                    seen.append(int(num))
+    return seen
+
+
+def _goal_pr_state(number, cwd, cache, now):
+    """OPEN, CLOSED, MERGED or None (unknown) for PR `number`, read from `cache` (the nudge state's
+    "goal_prs") or by one bounded REST read. Sets the cache entry. A failed read is cached as UNKNOWN
+    for the TTL, so a dead network costs one bounded read per TTL."""
+    entry = cache.get(str(number))
+    if isinstance(entry, dict):
+        state, at = entry.get("state"), entry.get("at")
+        if state in ("CLOSED", "MERGED"):
+            return state
+        if state in ("OPEN", "UNKNOWN") and isinstance(at, (int, float)) and 0 <= now - at < GOAL_PR_TTL:
+            return None if state == "UNKNOWN" else state
+    import ci_wake  # the one home of the PR read
+    try:
+        pr = ci_wake.pr_fields(ci_wake.gh_json(["api", "repos/{owner}/{repo}/pulls/%d" % number], cwd,
+                                               gone="http 404", timeout=GOAL_READ_TIMEOUT))
+        state = pr["state"]
+    except Exception:
+        state = "UNKNOWN"
+    cache[str(number)] = {"state": state, "at": now}
+    return None if state == "UNKNOWN" else state
+
+
+def _lint_targets():
+    """The PR numbers a `--lane-lint <N>` process on this machine names. One `ps`; raises when ps cannot run."""
+    import subprocess
+    out = subprocess.run(["ps", "-axo", "args="], stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                         timeout=GOAL_READ_TIMEOUT)
+    if out.returncode != 0:
+        raise OSError("ps failed")
+    return {int(n) for line in out.stdout.splitlines() for n in _LINT_TARGET.findall(line)}
+
+
+def goal_order_line(payload, state, now=None):
+    """One reminder line naming the earliest open goal PR with no lint running, or "". "" for an agent's
+    call, no handoff, no cite, a live background command or agent, and any read that fails. Sets
+    state["goal_prs"], the cache."""
+    try:
+        if payload.get("agent_id"):
+            return ""
+        session_id = payload.get("session_id", "")
+        path = handoff_path(session_id)
+        transcript = payload.get("transcript_path")
+        if not session_id or not os.path.isfile(path) or not isinstance(transcript, str) \
+                or not os.path.isfile(transcript):
+            return ""
+        with open(path, "r", encoding="utf-8") as f:
+            cites = goal_cites(f.read())[:GOAL_PR_MAX]
+        if not cites:
+            return ""
+        import guard_stream  # the one home of "a background command or agent still runs"
+        if guard_stream.background_work_running(transcript):
+            return ""
+        now = time.time() if now is None else now
+        cache = state.get("goal_prs")
+        if not isinstance(cache, dict):
+            cache = {}
+        state["goal_prs"] = cache
+        linting = None
+        for number in cites:
+            found = _goal_pr_state(number, payload.get("cwd"), cache, now)
+            if found is None:
+                return ""  # an unread PR could be the earliest: say nothing
+            if found != "OPEN":
+                continue
+            if linting is None:
+                linting = _lint_targets()
+            if number in linting:
+                continue
+            return ("Goal order: #%d is the earliest goal PR still open, and no lint is running on it. Lint it or "
+                    "merge it before a later goal item (step goal-order-not-wait)." % number)
+        return ""
+    except Exception as e:
+        sys.stderr.write("precompact_handoff: goal order error: %s\n" % e)
+        return ""
+
+
 def run_nudge(payload):
     try:
         record_dir(payload.get("session_id", ""), payload.get("cwd"))
@@ -1254,8 +1366,9 @@ def run_nudge(payload):
     before = dict(state)
     facts, missing = None, []
     reason = ""
+    goal_line = goal_order_line(payload, state)
     try:
-        facts = _checkpoint_facts(payload, state)
+        facts =_checkpoint_facts(payload, state)
     except Exception as e:
         sys.stderr.write("precompact_handoff: nudge error: %s\n" % e)
     if not facts:  # a checkpoint block already says to rewrite the handoff; the sections wait for the next Stop
@@ -1285,8 +1398,13 @@ def run_nudge(payload):
         sys.stderr.write("precompact_handoff: nudge error: %s\n" % e)
         reason = ""
     reasons = [r for r in (reason, owner_waits_gap(payload)) if r]
+    out = {}
     if reasons:
-        print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (decision precompact-handoff)"}))
+        out = {"decision": "block", "reason": " ".join(reasons) + " (decision precompact-handoff)"}
+    if goal_line:
+        out["systemMessage"] = goal_line
+    if out:
+        print(json.dumps(out))
     return 0
 
 
