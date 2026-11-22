@@ -41,7 +41,7 @@ output style load in each session on each repo.
   parent whose tree equals its parent's (an empty commit, or one that adds only a message trailer). The same-tree
   form is owner item 514 b, the same-tree ruling: "yes", 13:26 CST Nov 22, widened at 13:33 CST to the lane-lint
   PASS and a relayed yes. Where `merge.requiredChecks` is "none" and the base is the default branch, a clean merge
-  of main that the records-page heal pushes also counts. The relayed head (`--head`) must be an ancestor of the live
+  of main also counts: two parents, the second on main, and a tree that is git's own clean merge of the two. The relayed head (`--head`) must be an ancestor of the live
   head. A live head that does not contain it refuses, even with a claim or same-tree commit on top. It does not
   check `--head` against the relay.
   `relayed_head_holds` in `merge/merge.py` reads no review record.
