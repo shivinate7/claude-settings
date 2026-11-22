@@ -4004,7 +4004,7 @@ def refuse_loaded_machine():
     per_cpu = five_minute / cpus
     if per_cpu >= LANE_LINT_MAX_LOAD_PER_CPU:
         raise Stop(f"the 5-minute load reads {per_cpu:.1f} per CPU ({five_minute:.2f} over {cpus} CPUs), at or above the {LANE_LINT_MAX_LOAD_PER_CPU:g} limit. "
-                   f"No lane lint starts now; CI proves the head instead. {LANE_LINT_LOAD_CITE}")
+                   f"No lane lint starts now. Wait for the load to fall, or let CI prove the head where the repo runs one. {LANE_LINT_LOAD_CITE}")
 
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_tests=False, mutate_run=True, pre_join=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
@@ -4148,6 +4148,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             pin_notes.extend(saved["notes"])
             say(f"PASS (cached): ci-job {LINT_JOB} passed at head {head[:9]} on base {merged[1][:9]} with this merge tool; the job is not run again.")
         else:
+            refuse_loaded_machine()  # read again at the job's start: the tree, the merge and the clash reads above took time, and the entry read may be old
             state, lines, log, liftable = ci_job_run(wt, LINT_JOB, "--lint", "--base", f"origin/{base}", notes=pin_notes, head_sha=read_sha,
                                                      pr_body=body_for_job)
             if state == "pass":
@@ -4166,6 +4167,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
                     head_notes.extend(saved["notes"])
                     say(f"PASS (cached): the head's own {CI_JOB_REL} passed at head {head[:9]} on base {merged[1][:9]} with this merge tool; it is not run again.")
                 else:
+                    refuse_loaded_machine()  # the head copy is a second lint start
                     h_state, h_lines, h_log, h_liftable = ci_job_run(wt, LINT_JOB, "--lint", "--base", f"origin/{base}", notes=head_notes, head_sha=head,
                                                                       pr_body=body_for_job, script=head_copy)
                     if h_state == "pass":
@@ -5027,7 +5029,7 @@ def pre_ready_rows(wt, n, base, checks, pre):
     for job, group in ready_job_groups(checks).items():
         raw = []
         args = [job, "--pinned", *[a for _, bare in group for a in ("--step", bare)], "--base", f"origin/{base}"]
-        state, job_lines, job_log, _ = ci_job_run(wt, *args, raw=raw)
+        state, job_lines, job_log, _ = ci_job_run(wt, *args, raw=raw)  # no load gate: a ready check (STE lint and the like) runs seconds, and is not the lane lint
         states.append(state)
         lines += job_lines
         log += job_log
