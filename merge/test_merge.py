@@ -6329,13 +6329,14 @@ class NoneRequiredChecks(ScopedRepo, Env):
         self.assertEqual(rc, 0, out)
         self.assertIn(MERGE_CALL, self.calls())
 
-    def test_a_red_main_run_still_refuses_the_merge_under_a_listed_check(self):  # control: green on the old code
+    def test_a_red_main_run_does_not_refuse_the_merge_under_a_listed_check(self):
+        """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): a PR may merge onto a red main. It was a refusal under a listed check."""
         push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})
         self.set(base_runs=[main_run(901, "failure")], base_jobs={"901": [main_job("scope", "success"), main_job("checks", "failure", 20)]})
         rc, out = self.go(required=["checks"])
-        self.assertEqual(rc, 1, out)
-        self.assertIn("latest completed run is red", out)
-        self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertEqual(rc, 0, out)
+        self.assertIn("main is RED", out)
+        self.assertIn(MERGE_CALL, self.calls())
 
     def run_main_with_gh_host(self, *args, required="protection"):
         """merge.main with no host argument, so main reads the required checks from the config of the base, as in production. The gh host of
@@ -28054,6 +28055,18 @@ class StaleMergeTrees(unittest.TestCase):
         patch = unittest.mock.patch.object(tempfile, "tempdir", self.tmpdir)
         patch.start()
         self.addCleanup(patch.stop)
+        # The hold check reads processes through sweep.processes_in. An empty reader keeps a live pid on the runner from deciding
+        # a dead tree's verdict. A case that needs a live child found by its working folder calls read_real_processes.
+        self.real_processes_in = sweep.processes_in
+        processes = unittest.mock.patch.object(sweep, "processes_in", return_value=([], []))
+        self.fake_processes_in = processes.start()
+        self.addCleanup(processes.stop)
+
+    def read_real_processes(self):
+        """Put the real process reader back for this case."""
+        restore = unittest.mock.patch.object(sweep, "processes_in", self.real_processes_in)
+        restore.start()
+        self.addCleanup(restore.stop)
 
     def make_tree(self, name, reason, root=None, prefix="merge-wt-"):
         """A <prefix><name> folder with a locked worktree in it, as the merge tool makes one (prefix merge-wt- or merge-fresh-),
@@ -28089,6 +28102,8 @@ class StaleMergeTrees(unittest.TestCase):
         tmp, wt = merge.add_worktree(self.repo, self.head)
         self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
 
+        self.assertTrue(self.fake_processes_in.called,
+                        "scope: the hold check must read processes through the fake, or the fake decides nothing")
         self.assertFalse(os.path.exists(stale_tmp),
                          "a merge-wt tree whose merge pid %d is dead must be removed when add_worktree starts" % dead)
         self.assertNotIn(os.path.realpath(stale_wt), self.locked_trees(),
@@ -28199,6 +28214,7 @@ class StaleMergeTrees(unittest.TestCase):
         dead = reaped_child_pid()
         control_tmp, _ = self.make_tree("gone", "merge tool, pid %d" % dead, prefix="merge-fresh-")
         held_tmp, held_wt = self.make_tree("held", "merge tool, pid %d" % dead, prefix="merge-fresh-")
+        self.read_real_processes()  # the live child is found by its working folder, which only the real reader reads
         holder = self.start_holder(held_wt)
         self.assertTrue(self.holds_inside(holder, held_tmp), "scope: the live child must have its working folder in the tree before add_worktree runs")
 
@@ -28232,6 +28248,7 @@ class StaleMergeTrees(unittest.TestCase):
         it. A dead folder with no process in it, in the same sweep, goes."""
         dead = reaped_child_pid()
         held, holders, control = {}, {}, {}
+        self.read_real_processes()  # each live child is found by its working folder, which only the real reader reads
         for kind, pattern in self.PLAIN_KINDS.items():
             control[kind] = self.make_folder(pattern % dead)
             held[kind] = self.make_folder((pattern % dead).replace("run", "held"))
