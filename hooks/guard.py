@@ -3209,8 +3209,9 @@ def test_file_parts(text: str):
 
 # The verdict words a case asserts. A case key masks them, so a flip of the expected verdict (refused to asked)
 # keeps the key.
+# An underscore or a digit joins a word: `PUSH_ALLOWED` and `PUSH_DENIED` are two names, not one masked name.
 _VERDICT_WORDS = re.compile(
-    r"(?<![A-Za-z])(?:allow(?:s|ed)?|ask(?:s|ed)?|den(?:y|ies|ied)|refus(?:e|es|ed)|lift(?:s|ed)?)(?![A-Za-z])",
+    r"(?<![A-Za-z0-9_])(?:allow(?:s|ed)?|ask(?:s|ed)?|den(?:y|ies|ied)|refus(?:e|es|ed)|lift(?:s|ed)?)(?![A-Za-z0-9_])",
     re.IGNORECASE)
 
 
@@ -3397,16 +3398,27 @@ def _union_keys(parts):
             and _is_union(held[0], first[key][0], second[key][0], (base.get(key) or [None])[0])}
 
 
-def _edit_dropped(first, second, base, result, union=()) -> bool:
+def _edit_dropped(first, second, base, result, union=(), stable=None) -> bool:
     """True when a key both parents hold at different versions loses a parent's edit. Each argument maps a key to
     its version. Both parents changed it from the base: the result keeps one version at most. One changed it: the
     result must keep that version, since the base version drops that parent's edit. A key in `union` is one the
-    result built from both parents' entries (`_union_keys`): it drops no edit."""
+    result built from both parents' entries (`_union_keys`): it drops no edit. `stable` is the same four maps read
+    as case keys: a key whose parents differ only in a description, a name or a verdict is held, when the result
+    keeps one parent's edited version (not the base's)."""
     for key in set(first) & set(second) - set(union):
         mine, theirs, origin = first[key], second[key], base.get(key)
         if mine != theirs and (origin not in (mine, theirs) or result.get(key) == origin):
+            if stable is not None and result.get(key) in (mine, theirs) and result.get(key) != origin \
+                    and not _edit_dropped_key(key, *stable):
+                continue
             return True
     return False
+
+
+def _edit_dropped_key(key, first, second, base, result) -> bool:
+    """`_edit_dropped` for one key."""
+    mine, theirs, origin = first.get(key), second.get(key), base.get(key)
+    return mine != theirs and (origin not in (mine, theirs) or result.get(key) == origin)
 
 
 def merge_test_issue(result, first, second, elsewhere, base=None):
@@ -3441,21 +3453,25 @@ def merge_test_issue(result, first, second, elsewhere, base=None):
         # header): a result that keeps the other parent's version drops the edit, though every key survives.
         read = (first, second, base, result)
         unions = _union_keys(read)
-        # An edit that only renames a case or flips its verdict is no edit to keep: the exact reading flags a key
-        # both parents changed, and the case-key reading must flag it too.
-        if (_edit_dropped(*({key: dump for key, (dump, _) in p["cases"].items()} for p in read))
-                and _edit_dropped(*({key: _case_key(node) for key, (_, node) in p["cases"].items()} for p in read))
-        ) or (_edit_dropped(*(_key_versions(p) for p in read), union=unions)
-              and _edit_dropped(*(_stable_versions(p, _def_renames(p, result)) for p in read), union=unions)):
+        # An edit that only renames a case or flips its verdict is held when the result keeps a parent's edited
+        # version; a result that drops the edit, or keeps the base's version, is lost, as the exact reading says.
+        if _edit_dropped(*({key: dump for key, (dump, _) in p["cases"].items()} for p in read),
+                         stable=tuple({key: _case_key(node) for key, (_, node) in p["cases"].items()} for p in read)
+                         ) or _edit_dropped(*(_key_versions(p) for p in read), union=unions,
+                                            stable=tuple(_stable_versions(p, _def_renames(p, result)) for p in read)):
             issues.add("lost")
     # A statement a parent holds (not an import, not a comment) that the result no longer holds, unless the result
     # holds as many statements with its case key: a case that a rename or a flipped verdict carried over.
     have = _key_counts(result)
+    base_keys = _key_counts(base) if base is not None else {}
     for part in parents:
         gone = {key for key, count in _key_counts(part).items() if have.get(key, 0) < count}
         if gone:
             held, kept = _stable_counts(part, _def_renames(part, result)), _stable_counts(result)
-            if any(kept[0][case] < held[0][case] for key, case in held[2] if key in gone):
+            # Only the base's own statement is carried over by a rename: a statement the parent added or edited,
+            # that the result lacks, is a dropped edit.
+            if any(key not in base_keys for key in gone) \
+                    or any(kept[0][case] < held[0][case] for key, case in held[2] if key in gone):
                 issues.add("lost")
     kept = {d for p in parents for d, _ in p["others"]}
     if base is not None:
@@ -3474,9 +3490,12 @@ def merge_test_issue(result, first, second, elsewhere, base=None):
     if gone:
         # Held by key, not by text: a call whose description, function name or expected verdict changed still
         # holds its case. A case is lost only when the result holds fewer calls of its key than a parent.
+        # A call the base holds is carried over by a rename; a call a parent added or edited is not.
+        base_calls = {d for d, _ in base["calls"]} if base is not None else set()
         kept = _stable_counts(result)[1]
         held = [_stable_counts(p, _def_renames(p, result))[1] for p in parents]
-        if any(kept[case] < max(h[case] for h in held) for h in held for case in h):
+        if any(d not in base_calls for d in gone) \
+                or any(kept[case] < max(h[case] for h in held) for h in held for case in h):
             issues.add("lost")
     return next((name for name in MERGE_TEST_ORDER if name in issues), "")
 
