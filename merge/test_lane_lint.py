@@ -2934,6 +2934,24 @@ class CrossMeasure(LaneFixture):
         self.assertEqual(self.clash(head, sib), "conflict", "precondition: the lane head and PR %d do not clash, so the case probes nothing" % n)
         return head, sib
 
+    def batch_pair(self, draft=False):
+        """This head (PR 7) and PR 8, the batch integration PR of INTEGRATION_NAME on its integration branch, both change shared-a.txt. draft
+        parks PR 8. Each merges clean with main and the two conflict, so the clash counts. -> (head, PR 8's head)."""
+        head = self.own_writes({"shared-a.txt": "lane 7\n"})
+        batch_branch = merge.integration_branch(INTEGRATION_NAME)
+        batch = self.pr_writes(8, {"shared-a.txt": "integration 8\n"}, self.integration_body(), branch=batch_branch, draft=draft)
+        self.assertIs(self.host.pulls[8]["draft"], draft, "precondition: PR 8's draft field is not %r, so the case probes the other batch kind" % draft)
+        block = merge.parse_freeze(self.host.pulls[8]["body"])
+        self.assertIsNotNone(block, "precondition: PR 8's body holds no freeze block, so it is a lane PR and the case probes no batch")
+        self.assertEqual(block["name"], INTEGRATION_NAME, "precondition: PR 8's freeze block names another batch")
+        self.assertEqual(self.host.pulls[8]["head"]["ref"], batch_branch, "precondition: PR 8 is not on its batch's integration branch, so it is a lane PR")
+        self.assertIsNone(merge.parse_freeze(self.host.body), "precondition: the linted PR 7 holds a freeze block, so it is itself a batch PR")
+        self.assertTrue(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is not in this lane, so the case probes nothing")
+        self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the lane head does not merge clean with main")
+        self.assertEqual(self.clash(batch, "origin/main"), "clean", "precondition: the batch head does not merge clean with main, so the clash is not counted")
+        self.assertEqual(self.clash(head, batch), "conflict", "precondition: the lane head and the batch head do not clash, so the case probes nothing")
+        return head, batch
+
     def report_after_pass(self, text):
         """-> the lines after the PASS line: the report of the clashes the lint does not count."""
         lines = text.splitlines()
@@ -3040,18 +3058,7 @@ class CrossMeasure(LaneFixture):
         self.assertEqual(lints, 1, "the ci-job lint did not run once on the passing integration PR: " + text)
 
     def test_clash_order_an_open_batch_integration_pr_above_this_lane_goes_first_and_fails_it(self):  # the green control: the same pair with a lane PR #8 passes (the_lower_pr_passes_...)
-        head = self.own_writes({"shared-a.txt": "lane 7\n"})
-        batch_branch = merge.integration_branch(INTEGRATION_NAME)
-        batch = self.pr_writes(8, {"shared-a.txt": "integration 8\n"}, self.integration_body(), branch=batch_branch)
-        block = merge.parse_freeze(self.host.pulls[8]["body"])
-        self.assertIsNotNone(block, "precondition: PR 8's body holds no freeze block, so it is a lane PR and the case probes no batch")
-        self.assertEqual(block["name"], INTEGRATION_NAME, "precondition: PR 8's freeze block names another batch")
-        self.assertEqual(self.host.pulls[8]["head"]["ref"], batch_branch, "precondition: PR 8 is not on its batch's integration branch, so it is a lane PR")
-        self.assertIsNone(merge.parse_freeze(self.host.body), "precondition: the linted PR 7 holds a freeze block, so it is itself a batch PR")
-        self.assertTrue(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is not in this lane, so the case probes nothing")
-        self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the lane head does not merge clean with main")
-        self.assertEqual(self.clash(batch, "origin/main"), "clean", "precondition: the batch head does not merge clean with main, so the clash is not counted")
-        self.assertEqual(self.clash(head, batch), "conflict", "precondition: the lane head and the batch head do not clash, so the case probes nothing")
+        head, _ = self.batch_pair()
         self.use_ci_job(PASSING, 0)
         rc, text, lints, _, _ = self.measured("--lane-lint", "7")
         self.assertEqual(rc, 1, "PR 7, numbered below the open batch integration PR #8, did not wait for it: " + text)
@@ -3062,19 +3069,7 @@ class CrossMeasure(LaneFixture):
         self.assertEqual(lints, 0, "the ci-job lint ran beside a counted clash with a batch integration PR: " + text)
 
     def test_clash_order_a_draft_batch_integration_pr_above_this_lane_is_a_report_line_and_no_fail(self):  # the draft case of the batch case above: the same pair, parked as a draft
-        head = self.own_writes({"shared-a.txt": "lane 7\n"})
-        batch_branch = merge.integration_branch(INTEGRATION_NAME)
-        batch = self.pr_writes(8, {"shared-a.txt": "integration 8\n"}, self.integration_body(), branch=batch_branch, draft=True)
-        self.assertIs(self.host.pulls[8]["draft"], True, "precondition: PR 8 is not a draft, so the case probes no draft batch")
-        block = merge.parse_freeze(self.host.pulls[8]["body"])
-        self.assertIsNotNone(block, "precondition: PR 8's body holds no freeze block, so it is a lane PR and the case probes no batch")
-        self.assertEqual(block["name"], INTEGRATION_NAME, "precondition: PR 8's freeze block names another batch")
-        self.assertEqual(self.host.pulls[8]["head"]["ref"], batch_branch, "precondition: PR 8 is not on its batch's integration branch, so it is a lane PR")
-        self.assertIsNone(merge.parse_freeze(self.host.body), "precondition: the linted PR 7 holds a freeze block, so it is itself a batch PR")
-        self.assertTrue(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is not in this lane, so the case probes nothing")
-        self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the lane head does not merge clean with main")
-        self.assertEqual(self.clash(batch, "origin/main"), "clean", "precondition: the draft batch head does not merge clean with main, so the clash is not counted")
-        self.assertEqual(self.clash(head, batch), "conflict", "precondition: the lane head and the draft batch head do not clash, so the case probes nothing")
+        head, _ = self.batch_pair(draft=True)
         self.use_ci_job(PASSING, 0)
         rc, text, lints, _, _ = self.measured("--lane-lint", "7")
         self.assertEqual(rc, 0, "a draft batch integration PR #8 above this lane refused the lane, so the draft went first as a batch: " + text)
