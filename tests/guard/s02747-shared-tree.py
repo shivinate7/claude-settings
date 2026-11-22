@@ -942,6 +942,7 @@ for _cd in ("sl", "chdir", "Push-Location"):
     sh("per-file ask: PowerShell %s into the shared checkout, then restore f.txt, from a worktree, denies by other-checkout"
        % _cd, _cd + " " + slash(GITMAIN) + "; " + VCS + " restore f.txt",
        "deny", "other-checkout", tool="PowerShell", cwd=GITWT)
+
 # 5. env's own chdir flags. The guard reads env -C and env --chdir as the run folder, the folder git
 # then runs in, so other-checkout denies each one as it denies a git -C into the shared checkout.
 sh("per-file ask: env -C into the shared checkout, then restore f.txt, from a worktree, denies by other-checkout",
@@ -969,9 +970,16 @@ chained_ask("per-file deny: env -C into a clean checkout, then a bare restore of
             "env -C " + slash(SUBJCLEAN) + " " + VCS + " status && " + VCS + " restore .", cwd=GITWT)
 
 # LATE PROBES (named "late probe", so MUTATE_ONLY="late probe" runs this block alone). Each runs a
-# per-file restore in the shared checkout from the lane. env -vC is read as env -C, so other-checkout
-# denies it. The --ch= abbreviation is not read as --chdir, so it still asks. The control stays allowed.
+# per-file restore in the shared checkout from the lane. Only the --ch= abbreviation asks, because it is not
+# read as --chdir. env -vC is read as env -C, so other-checkout denies it; its row below is a deny, not an ask.
+# The control stays allowed.
 _SH = slash(GITMAIN)
+
+for _label, _cmd in (
+    ("env --ch= abbreviation", "env --ch=" + _SH + " " + VCS + " restore f.txt"),
+):
+    sh("per-file ask: late probe, %s names the shared checkout, from a worktree" % _label, _cmd,
+       "ask", "shared-tree", cwd=GITWT)
 sh("per-file ask: late probe, env -vC names the shared checkout, from a worktree, denies by other-checkout",
    "env -vC " + _SH + " " + VCS + " restore f.txt", "deny", "other-checkout", cwd=GITWT)
 sh("per-file ask: late probe, env --ch= abbreviation names the shared checkout, from a worktree",

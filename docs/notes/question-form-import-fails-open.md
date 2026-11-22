@@ -1,0 +1,1 @@
+- question-form-import-fails-open: an import defect in hooks/question_form.py turns off the six page rules (guard-crash) and the whole chat judge. A defect in hooks/precompact_handoff.py refuses every call at load instead (decision install-hooks-whole). Decision: question-form. Seen: 2026-11-17 x1

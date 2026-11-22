@@ -393,8 +393,9 @@ def register_simulator_boot_cases():
        "xcodebuild -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' -only-testing:AppTests test",
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
 
-    # The remedy names sim-test with the xcodebuild arguments only. The shell's redirects and a background `&`
-    # are not arguments of xcodebuild, so the remedy holds none of them, whether spaced or glued to a quote.
+    # The remedy names sim-test with the xcodebuild arguments only. The shell's redirects are not arguments of
+    # xcodebuild, so the remedy holds none of them. A background `&` is refused by detached-launch before this
+    # rule reads the command, so no row here reaches the remedy with a `&`.
     sh("route: a test of a shut-down simulator with 2>&1 names sim-test -scheme App, with no redirect word",
        "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' 2>&1",
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
@@ -403,10 +404,9 @@ def register_simulator_boot_cases():
        "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' > out.log",
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
        carries="Run `sim-test -scheme App", lacks=(">",))
-    sh("route: a test of a shut-down simulator, the quote glued to a trailing &, names sim-test -scheme App",
+    sh("route: a test of a shut-down simulator, the quote glued to a trailing &, is refused by detached-launch first",
        'xcodebuild test -scheme App -destination "platform=iOS Simulator,id=' + SIM_UC + '"&',
-       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
-       carries="Run `sim-test -scheme App", lacks=("&",))
+       "deny", rule="detached-launch", env_path=one_path, config=one_cfg)
     sh("route: a test of a shut-down simulator, the quote glued to a redirect, names sim-test -scheme App",
        'xcodebuild test -scheme App -destination "platform=iOS Simulator,id=' + SIM_UC + '">/dev/null',
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,

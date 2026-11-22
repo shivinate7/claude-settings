@@ -23,6 +23,14 @@ def up_item(**over):
     return with_stake({k: v for k, v in item.items() if v is not None})
 
 
+
+def pr2015_up(name, expected, item, action="set", **extra):
+    kw = dict(action=action, collection="items", doc_id="banchi-titles", data=item)
+    kw.update(extra)
+    add("uniform pick: " + name, expected, "uniform-pick" if expected == "deny" else None,
+        tool="ArtifactData", cwd=PQ_REPO, **{"url": PQ_URL, **kw})
+
+
 def up(name, expected, item, action="set", **extra):
     kw = dict(action=action, collection="items", doc_id="banchi-titles", data=with_shown(item))
     kw.update(extra)
@@ -36,6 +44,8 @@ up("a widening option offered and not picked is allowed", "allow", up_item(pick=
 up("an item with no pick is allowed", "allow", up_item(pick=None, recommended="b"))
 up("widens false is not a widening option", "allow",
    up_item(options=[dict(UP_WIDE, widens=False), UP_MATCH]))
+
+pr2015_up("a stood pick of a widening option is denied", "deny", up_item(stands=True))
 up("an update that carries options and a widening pick is denied", "deny",
    {"options": [UP_WIDE, UP_MATCH], "pick": "a"}, action="update")
 up("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
@@ -71,6 +81,11 @@ up("a ranked item whose list pick holds the widening option is denied", "deny",
    up_item(ranked=True, options=UP_THREE, pick=["b", "a"]))
 up("a ranked item whose list pick holds only non-widening keys is allowed", "allow",
    up_item(ranked=True, options=UP_THREE, pick=["c", "b"]))
+
+pr2015_up("a stood multi pick that holds the widening option is denied", "deny",
+   up_item(multi=True, options=UP_THREE, pick=["a", "c"], stands=True))
+pr2015_up("a stood multi pick of non-widening keys is allowed", "allow",
+   up_item(multi=True, options=UP_THREE, pick=["b", "c"], stands=True))
 up("an update that carries options and a widening list pick is denied", "deny",
    {"multi": True, "options": UP_THREE, "pick": ["b", "a"]}, action="update")
 up("an update that carries options and a non-widening list pick is allowed", "allow",
