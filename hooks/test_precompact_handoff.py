@@ -3072,6 +3072,696 @@ def case_owner_waits_prose_line_names_no_act():
         c.cleanup()
 
 
+# --------------------------------------------------------------------------- goal order
+# Decision precompact-handoff, item 18. At a Stop the handoff's `## Goal` cites `#NNN` PRs in order. The
+# hook prints one `systemMessage` line naming the first cited PR that is open and has no `--lane-lint <N>`
+# process on this machine. It says nothing while a background command or agent runs, for an agent's own
+# call, and for any read that fails. An OPEN or UNKNOWN read is reused for 300 s, a MERGED or CLOSED one
+# for good. Each case runs the real hook as a subprocess, with a `gh` and a `ps` on PATH that answer from
+# one fixture file and log each call, with time.time() fixed by GOAL_TEST_NOW, and with ci_wake.gh logging the
+# timeout each read is given (GOAL_TEST_GH_LOG), so no case reads the real clock and none sleeps. The cases need a POSIX `ps`, so they do not run on Windows.
+GOAL_NOW = 1800000000.0
+GOAL_TTL = 300  # the TTL the decision names, not read from the code under test
+GOAL_BOUND = 5.0  # the seconds the decision bounds each gh read at
+GOAL_FOREVER = 10 * 365 * 24 * 3600  # an age no TTL reaches
+GOAL_DEFAULT = "Merge in order: #101, then #102, then #103 (owner, 2026-11-22).\n"
+GOAL_OPEN = {101: "open", 102: "open", 103: "open"}
+GOAL_LINT_101 = "python3 /home/u/.claude/bin/merge --lane-lint 101"
+GOAL_BUDGET = 10.0  # the seconds the decision gives every read of one Stop together
+# The head branch and sha each of the three default PRs has, with no two sharing a ref or a 7-digit sha prefix.
+GOAL_HEADS = {101: ("lane-101", "a1b2c3d" + "0" * 33), 102: ("lane-102", "b2c3d4e" + "0" * 33),
+              103: ("lane-103", "c3d4e5f" + "0" * 33)}
+# The hook runs under this wrapper, which fixes time.time() and gives time.monotonic() a synthetic clock: it
+# starts at 0 and moves only when a read costs time. A gh read costs fixture["read_costs"][i] seconds (the last
+# cost repeats) and the `ps` fixture["ps_cost"]. A read longer than the timeout it was given ends at the timeout
+# and fails as a timeout does. When the clock reaches fixture["kill_at"], the hook is dead, as the harness kills a
+# Stop hook at its timeout: no output, exit 137. Each read logs its kind, its start and its timeout; the first
+# read also logs the nudge state file as it stood then (GOAL_TEST_STATE).
+CLOCK_WRAPPER = "\n".join([
+    "import json, os, runpy, subprocess, sys, threading, time",
+    "NOW = float(os.environ['GOAL_TEST_NOW'])",
+    "time.time = lambda: NOW",
+    "sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[1])))",
+    "import ci_wake",
+    "with open(os.environ['GOAL_FIXTURE'], encoding='utf-8') as f:",
+    "    fx = json.load(f)",
+    "clock = [0.0]",
+    "time.monotonic = lambda: clock[0]",
+    "log = os.environ['GOAL_TEST_GH_LOG']",
+    "seen = {'gh': 0, 'first': False}",
+    "def note(line):",
+    "    with open(log, 'a', encoding='utf-8') as f:",
+    "        f.write(line + '\\n')",
+    "def begin(kind, timeout):",
+    "    if not seen['first']:",
+    "        seen['first'] = True",
+    "        try:",
+    "            with open(os.environ['GOAL_TEST_STATE'], encoding='utf-8') as f:",
+    "                note('state ' + f.read().replace('\\n', ' '))",
+    "        except OSError:",
+    "            note('state -')",
+    "    note('%s %r %r' % (kind, clock[0], timeout))",
+    "def end(cost, timeout):",
+    "    clock[0] += min(cost, timeout)",
+    "    if clock[0] >= fx['kill_at']:",
+    "        os._exit(137)",
+    "    return cost > timeout",
+    "real_gh = ci_wake.gh",
+    "def gh(args, cwd, timeout=ci_wake.READ_TIMEOUT):",
+    "    begin('gh', timeout)",
+    "    out = real_gh(args, cwd, timeout)",
+    "    costs = fx.get('read_costs') or [0]",
+    "    cost = costs[min(seen['gh'], len(costs) - 1)]",
+    "    seen['gh'] += 1",
+    "    if end(cost, timeout):",
+    "        raise ci_wake.Unknown('gh %s timed out' % ' '.join(args[:2]))",
+    "    return out",
+    "ci_wake.gh = gh",
+    "real_run = subprocess.run",
+    "def run(cmd, *a, **kw):",
+    "    if not (isinstance(cmd, list) and cmd[:2] == ['ps', '-axo']):",
+    "        return real_run(cmd, *a, **kw)",
+    "    begin('ps', kw['timeout'])",
+    "    out = real_run(cmd, *a, **kw)",
+    "    if end(fx.get('ps_cost', 0), kw['timeout']):",
+    "        raise subprocess.TimeoutExpired(cmd, kw['timeout'])",
+    "    return out",
+    "subprocess.run = run",
+    "sys.argv = sys.argv[1:]",
+    "runpy.run_path(sys.argv[0], run_name='__main__')",
+]) + "\n"
+# One body, two launchers (`gh` and `ps`). It reads the fixture named by GOAL_FIXTURE, logs the call, and answers:
+# `ps` prints fixture["ps"] (exit 1 for ps_fail); `gh api .../pulls/N` prints a REST pull for fixture["prs"][N]
+# (open, closed, merged) with the head fixture["heads"][N] = [ref, sha], and exits 1 for "fail" or a number the
+# fixture does not hold. For "gone" it answers as gh does for a number no pull request has: HTTP 404.
+GOAL_SHIM = "\n".join([
+    "import json, os, sys",
+    "fx = json.load(open(os.environ['GOAL_FIXTURE'], encoding='utf-8'))",
+    "tool = os.path.basename(sys.argv[0])",
+    "with open(fx['log'], 'a', encoding='utf-8') as f:",
+    "    f.write(tool + ' ' + ' '.join(sys.argv[1:]) + '\\n')",
+    "if tool == 'ps':",
+    "    if fx.get('ps_fail'):",
+    "        sys.exit(1)",
+    "    print('\\n'.join(fx.get('ps', [])))",
+    "    sys.exit(0)",
+    "number = sys.argv[-1].rsplit('/', 1)[-1]",
+    "state = fx['prs'].get(number)",
+    "if state in (None, 'fail'):",
+    "    sys.stderr.write('gh: HTTP 500\\n')",
+    "    sys.exit(1)",
+    "if state == 'gone':",
+    "    print('{\"message\": \"Not Found\"}')",
+    "    sys.stderr.write('gh: Not Found (HTTP 404)\\n')",
+    "    sys.exit(1)",
+    "ref, sha = fx.get('heads', {}).get(number, ['lane', 'a' * 40])",
+    "json.dump({'number': int(number), 'state': 'open' if state == 'open' else 'closed', 'merged': state == 'merged',",
+    "           'draft': False, 'head': {'ref': ref, 'sha': sha},",
+    "           'html_url': 'https://github.com/o/r/pull/' + number}, sys.stdout)",
+]) + "\n"
+
+
+def goal_handoff(goal, omit=()):
+    """handoff_text with this body under `## Goal`."""
+    return handoff_text(omit=omit).replace(SECTION_BODIES["Goal"], goal.rstrip("\n") + "\n", 1)
+
+
+def goal_case(name):
+    """A Case whose PATH holds a `gh` and a `ps` that read one fixture and log each call."""
+    c = Case(name)
+    c.fixture = os.path.join(c.root, "goal_fixture.json")
+    c.calls = os.path.join(c.root, "goal_calls.log")
+    c.timeouts = os.path.join(c.root, "goal_timeouts.log")
+    c.extra_env["GOAL_FIXTURE"] = c.fixture
+    for tool in ("gh", "ps"):
+        put_shim(os.path.join(c.bin, tool), "#!%s\n%s" % (sys.executable, GOAL_SHIM))
+    return c
+
+
+def goal_calls(c, tool=None, needle=""):
+    """How many logged calls there are: of this tool (gh, ps) when named, and holding this text."""
+    if not os.path.isfile(c.calls):
+        return 0
+    with open(c.calls, "r", encoding="utf-8") as f:
+        return sum(1 for ln in f if (tool is None or ln.startswith(tool + " ")) and needle in ln)
+
+
+def nudge_hook_timeout():
+    """The seconds settings.json gives the Stop hook that runs `--nudge`: the harness kills the hook after them.
+    None when settings.json holds no such hook or it has no timeout."""
+    with open(os.path.join(REPO_ROOT, "settings.json"), "r", encoding="utf-8") as f:
+        stop = json.load(f).get("hooks", {}).get("Stop", [])
+    found = [h.get("timeout") for g in stop for h in g.get("hooks", [])
+             if "precompact_handoff.py" in h.get("command", "") and "--nudge" in h.get("command", "")]
+    return found[0] if found else None
+
+
+def goal_stop(c, prs, ps=(), handoff=goal_handoff(GOAL_DEFAULT), lines=None, extra=None, now=GOAL_NOW,
+              ps_fail=False, active=False, lose_transcript=False, read_costs=(), ps_cost=0, size=None):
+    """One Stop at the fixed time `now`. prs: {number: open | closed | merged | gone | fail}. handoff: the text
+    (or bytes) to write, or None for no handoff file. lines: transcript lines after the first-turn entry. size:
+    the context size the transcript's last entry holds, for a Stop that checkpoints (no lines then). read_costs
+    and ps_cost: the synthetic seconds each gh read and the ps take (CLOCK_WRAPPER). The hook dies once the
+    synthetic clock reaches the Stop hook's timeout."""
+    put(c.fixture, json.dumps({"log": c.calls, "prs": {str(k): v for k, v in prs.items()}, "ps": list(ps),
+                               "ps_fail": ps_fail, "read_costs": list(read_costs), "ps_cost": ps_cost,
+                               "kill_at": nudge_hook_timeout() or 10 ** 9,
+                               "heads": {str(k): list(v) for k, v in GOAL_HEADS.items()}}))
+    if isinstance(handoff, bytes):
+        put_bytes(c.handoff_path(), handoff)
+    elif handoff is not None:
+        put(c.handoff_path(), handoff)
+
+    def via(args, payload):
+        if lose_transcript:
+            os.remove(payload["transcript_path"])
+        env = c.env()
+        env["GOAL_TEST_NOW"] = repr(float(now))
+        env["GOAL_TEST_GH_LOG"] = c.timeouts
+        env["GOAL_TEST_STATE"] = c.nudge_path()
+        return subprocess.run([sys.executable, "-c", CLOCK_WRAPPER, MODULE] + list(args),
+                              input=json.dumps(payload), capture_output=True, text=True, env=env, cwd=c.repo)
+
+    if lines is None and size is None:
+        lines = []
+    return nudge(c, size or 0, active=active, lines=lines, extra=dict({"cwd": c.repo}, **(extra or {})), via=via)
+
+
+def goal_message(proc):
+    """The systemMessage a Stop run printed, or None."""
+    try:
+        obj = json.loads(proc.stdout or "")
+    except ValueError:
+        return None
+    msg = obj.get("systemMessage") if isinstance(obj, dict) else None
+    return msg if isinstance(msg, str) else None
+
+
+def goal_named(proc):
+    """The PR numbers the reminder line names, in order; None when the run printed no reminder."""
+    msg = goal_message(proc)
+    return None if msg is None else [int(n) for n in re.findall(r"#(\d+)", msg)]
+
+
+def goal_spans(c):
+    """Each read the Stop started, in order, as (kind, start, timeout): kind gh or ps, start the synthetic clock
+    when it began, timeout the seconds it was given."""
+    if not os.path.isfile(c.timeouts):
+        return []
+    with open(c.timeouts, "r", encoding="utf-8") as f:
+        rows = [ln.split() for ln in f if ln.split()[:1] in (["gh"], ["ps"])]
+    return [(kind, float(start), float(timeout)) for kind, start, timeout in rows]
+
+
+def goal_timeouts(c):
+    """The timeouts the Stop's gh reads were given, in order."""
+    return [timeout for kind, _start, timeout in goal_spans(c) if kind == "gh"]
+
+
+def goal_state_at_first_read(c):
+    """The nudge state file as the Stop's first read found it, as a dict; None when the file was not there yet
+    (or the Stop made no read)."""
+    if not os.path.isfile(c.timeouts):
+        return None
+    with open(c.timeouts, "r", encoding="utf-8") as f:
+        for ln in f:
+            if ln.startswith("state "):
+                try:
+                    return json.loads(ln[len("state "):])
+                except ValueError:
+                    return None
+    return None
+
+
+def goal_seed(c, entries):
+    """Write the nudge state a earlier Stop would have left: {number: (state, age in seconds at GOAL_NOW)}."""
+    put(c.nudge_path(), json.dumps({"goal_prs": {str(n): {"state": s, "at": GOAL_NOW - age}
+                                                 for n, (s, age) in entries.items()}}))
+
+
+def goal_job_lines(closed=False):
+    """The transcript lines of one background shell job that still runs; with `closed`, its terminal notice
+    too. hooks/test_stall_watch_stop.py builds them: it is the one home of the record shapes scan_jobs reads."""
+    # Importing it only defines helpers (its cases run from its own main), but it makes its scratch folder at import.
+    # It gets this run's folder, so the run keeps one (test-temp-standard).
+    own_run_folder = _test_temp.run_folder
+    _test_temp.run_folder = lambda *a, **kw: RUN_FOLDER
+    try:
+        import test_stall_watch_stop as sw
+    finally:
+        _test_temp.run_folder = own_run_folder
+    records = sw.flagged("bgjob1") + ([sw.notice("bgjob1")] if closed else [])
+    return [json.dumps(r) for r in records]
+
+
+def goal_silent(label, proc):
+    """No reminder line, exit 0, and no traceback: a read that cannot run says nothing and never raises."""
+    msg = goal_message(proc)
+    check("goal order %s: prints no reminder line" % label, msg is None, "message: %r" % msg)
+    check("goal order %s: exits 0 and raises nothing" % label,
+          proc.returncode == 0 and "Traceback" not in proc.stderr,
+          "rc=%r stderr=%r" % (proc.returncode, proc.stderr[-300:]))
+
+
+def goal_scope():
+    """The scope, asserted before each subject: with this fixture and no lint, the Stop names #101. A subject
+    that reads silent after this is silent for its own reason."""
+    c = goal_case("goal_scope")
+    try:
+        proc = goal_stop(c, GOAL_OPEN)
+        check("goal order scope: three open goal PRs and no lint: the Stop names the earliest, #101",
+              goal_named(proc) == [101], "named: %r, stdout: %r, stderr: %r"
+              % (goal_named(proc), proc.stdout[:200], proc.stderr[-200:]))
+    finally:
+        c.cleanup()
+
+
+def case_goal_order_names_the_earliest_open_pr():
+    goal_scope()
+    rows = (
+        ("the first cite is open", GOAL_DEFAULT, GOAL_OPEN, [101]),
+        ("a merged first cite is passed over", GOAL_DEFAULT, {101: "merged", 102: "open", 103: "open"}, [102]),
+        ("a closed first cite is passed over", GOAL_DEFAULT, {101: "closed", 102: "open", 103: "open"}, [102]),
+        ("the order is the Goal's order, not the number's", "Merge #102 first, then #101.\n", GOAL_OPEN, [102]),
+        ("a cite that comes twice counts once", "#102 now, #101 later, #102 again.\n", GOAL_OPEN, [102]),
+        ("every cited PR is merged", GOAL_DEFAULT, {101: "merged", 102: "merged", 103: "merged"}, None),
+        ("a first cite no PR has (a 404, such as an issue) is passed over", GOAL_DEFAULT,
+         {101: "gone", 102: "open", 103: "open"}, [102]),
+        ("every cite is a 404", GOAL_DEFAULT, {101: "gone", 102: "gone", 103: "gone"}, None),
+        ("a 404 passes, but a failed read after it still stops the walk", GOAL_DEFAULT,
+         {101: "gone", 102: "fail", 103: "open"}, None),
+    )
+    for label, goal, prs, want in rows:
+        c = goal_case("goal_names")
+        try:
+            proc = goal_stop(c, prs, handoff=goal_handoff(goal), ps=["/usr/bin/vim notes.md", "gh pr view 101"])
+            got = goal_named(proc)
+            check("goal order names (%s): the line names %r" % (label, want), got == want,
+                  "named: %r, stdout: %r" % (got, proc.stdout[:200]))
+            msg = goal_message(proc)
+            check("goal order names (%s): one line, exit 0" % label,
+                  proc.returncode == 0 and (msg is None or "\n" not in msg.strip()),
+                  "rc=%r message: %r" % (proc.returncode, msg))
+            if want is None:
+                check("goal order names (%s): no open PR, so no ps start" % label,
+                      goal_calls(c, "ps") == 0, "ps calls: %d" % goal_calls(c, "ps"))
+        finally:
+            c.cleanup()
+    unread = (
+        ("a cite in another section is no Goal cite",
+         handoff_text().replace(SECTION_BODIES["Next steps"], "Merge #101 first.\n")),
+        ("a cite inside a fenced block is not read",
+         goal_handoff("Plan:\n```\n#101\n```\nNothing else.\n")),
+        ("a Goal with no cite", goal_handoff("Ship the check, with no PR yet.\n")),
+        ("no Goal section", handoff_text(omit=("Goal",)).replace(SECTION_BODIES["Next steps"], "Merge #101.\n")),
+    )
+    for label, text in unread:
+        c = goal_case("goal_unread")
+        try:
+            goal_silent("names (%s)" % label, goal_stop(c, GOAL_OPEN, handoff=text))
+        finally:
+            c.cleanup()
+
+
+def case_goal_order_skips_a_pr_with_a_lint_running():
+    goal_scope()
+    rows = (
+        ("a lint on #101", [GOAL_LINT_101], [102]),
+        ("a lint wrapped in verdict, with more flags", ["verdict merge --lane-lint 101 --touched-tests"], [102]),
+        ("lints on #101 and #102", [GOAL_LINT_101, "merge --lane-lint 102"], [103]),
+        ("lints on all three", [GOAL_LINT_101, "merge --lane-lint 102", "merge --lane-lint 103"], None),
+        ("a lint on a later PR only", ["merge --lane-lint 102"], [101]),
+        ("a lint on #1010, which only starts with 101", ["merge --lane-lint 1010"], [101]),
+        ("a lint on #10, which 101 only ends with", ["merge --lane-lint 10"], [101]),
+        ("a process that holds the number but no lint flag", ["gh pr view 101", "vim lane-lint 101"], [101]),
+        ("a lint by the head branch of #101", ["merge --lane-lint lane-101"], [102]),
+        ("a lint by origin/ and the head branch of #101", ["merge --lane-lint origin/lane-101"], [102]),
+        ("a lint by a 7-digit prefix of the head sha of #101", ["merge --lane-lint " + GOAL_HEADS[101][1][:7]], [102]),
+        ("a lint by the whole head sha of #101", ["merge --lane-lint " + GOAL_HEADS[101][1]], [102]),
+        ("a lint by the head branch of #102 only", ["merge --lane-lint lane-102"], [101]),
+        ("a lint by a 7-digit prefix of the head sha of #102 only", ["merge --lane-lint " + GOAL_HEADS[102][1][:7]],
+         [101]),
+        ("a lint by a 6-digit prefix of the head sha of #101, too short to name it",
+         ["merge --lane-lint " + GOAL_HEADS[101][1][:6]], [101]),
+        ("a lint by a branch no cited PR has", ["merge --lane-lint lane-999"], [101]),
+    )
+    for label, ps, want in rows:
+        c = goal_case("goal_lint")
+        try:
+            proc = goal_stop(c, GOAL_OPEN, ps=ps)
+            got = goal_named(proc)
+            check("goal order lint (%s): the line names %r" % (label, want), got == want,
+                  "named: %r, stdout: %r" % (got, proc.stdout[:200]))
+            check("goal order lint (%s): one ps start for the whole Stop" % label, goal_calls(c, "ps") == 1,
+                  "ps calls: %d" % goal_calls(c, "ps"))
+        finally:
+            c.cleanup()
+
+
+def case_goal_order_bounds_each_gh_read():
+    goal_scope()
+    c = goal_case("goal_bound")
+    try:
+        proc = goal_stop(c, {101: "merged", 102: "merged", 103: "open"})
+        got = goal_timeouts(c)
+        check("goal order bound: three gh reads, each given the decision's 5 s timeout",
+              goal_named(proc) == [103] and got == [GOAL_BOUND] * 3, "named: %r, timeouts: %r" % (goal_named(proc), got))
+    finally:
+        c.cleanup()
+
+
+def case_goal_order_is_silent_while_work_runs():
+    goal_scope()
+    rows = (
+        ("a background job still runs", dict(lines=goal_job_lines())),
+        ("the payload is an agent's (agent_id)", dict(extra={"agent_id": "a1b2c3"})),
+        ("the Stop is a stop_hook_active re-run", dict(active=True)),
+    )
+    for label, kw in rows:
+        c = goal_case("goal_busy")
+        try:
+            goal_silent(label, goal_stop(c, GOAL_OPEN, **kw))
+            check("goal order (%s): makes no gh read and starts no ps" % label,
+                  goal_calls(c) == 0, "calls: %d" % goal_calls(c))
+        finally:
+            c.cleanup()
+    c = goal_case("goal_busy_done")
+    try:
+        proc = goal_stop(c, GOAL_OPEN, lines=goal_job_lines(closed=True))
+        check("goal order (the same job, closed by its terminal notice): the line names #101 again",
+              goal_named(proc) == [101], "named: %r, stdout: %r" % (goal_named(proc), proc.stdout[:200]))
+    finally:
+        c.cleanup()
+
+
+def case_goal_order_is_silent_when_a_read_fails():
+    goal_scope()
+    rows = (
+        ("no handoff file", dict(handoff=None)),
+        ("an unreadable transcript", dict(lose_transcript=True)),
+        ("a handoff that is not UTF-8", dict(handoff=b"## Goal\n\xff\xfe #101 not UTF-8\n")),
+        ("the PR read fails", dict(prs={101: "fail", 102: "open", 103: "open"})),
+        ("the earliest PR read fails and a later one is open: the later one is not named",
+         dict(prs={101: "fail", 102: "open"})),
+        ("ps cannot run", dict(ps_fail=True)),
+    )
+    for label, kw in rows:
+        c = goal_case("goal_fail")
+        try:
+            args = dict(prs=GOAL_OPEN)
+            args.update(kw)
+            goal_silent(label, goal_stop(c, args.pop("prs"), **args))
+        finally:
+            c.cleanup()
+
+
+def case_goal_order_caches_each_read():
+    goal_scope()
+    merged_101 = {101: "merged", 102: "open", 103: "open"}
+    c = goal_case("goal_hit")
+    try:
+        first = goal_stop(c, GOAL_OPEN)
+        reads = goal_calls(c, "gh")
+        check("goal order cache (fresh hit): the first Stop names #101 after one gh read",
+              goal_named(first) == [101] and reads == 1, "named: %r, gh reads: %d" % (goal_named(first), reads))
+        second = goal_stop(c, merged_101, now=GOAL_NOW + 10)  # only the cache can still say #101 is open
+        check("goal order cache (fresh hit): a Stop 10 s later answers from the cache and makes no gh read",
+              goal_named(second) == [101] and goal_calls(c, "gh") == reads,
+              "named: %r, gh reads: %d" % (goal_named(second), goal_calls(c, "gh")))
+    finally:
+        c.cleanup()
+    for age, label, want_named, want_reads in (
+            (GOAL_TTL - 1, "an OPEN read 299 s old is fresh", [101], 0),
+            (GOAL_TTL, "an OPEN read 300 s old is stale", [102], 2)):
+        c = goal_case("goal_ttl")
+        try:
+            goal_seed(c, {101: ("OPEN", age)})
+            proc = goal_stop(c, merged_101)
+            check("goal order cache (TTL): %s: the line names %r" % (label, want_named),
+                  goal_named(proc) == want_named, "named: %r, stdout: %r" % (goal_named(proc), proc.stdout[:200]))
+            check("goal order cache (TTL): %s: %d gh read(s)" % (label, want_reads),
+                  goal_calls(c, "gh") == want_reads, "gh reads: %d" % goal_calls(c, "gh"))
+        finally:
+            c.cleanup()
+    for kept in ("MERGED", "CLOSED"):
+        c = goal_case("goal_kept")
+        try:
+            goal_seed(c, {101: (kept, GOAL_FOREVER)})
+            proc = goal_stop(c, GOAL_OPEN)  # the fixture says #101 is open: a kept read must not be re-read
+            check("goal order cache (%s kept): a %s read from years ago is never read again, so #102 is named"
+                  % (kept, kept), goal_named(proc) == [102] and goal_calls(c, "gh", "pulls/101") == 0,
+                  "named: %r, reads of #101: %d" % (goal_named(proc), goal_calls(c, "gh", "pulls/101")))
+        finally:
+            c.cleanup()
+    c = goal_case("goal_unknown")
+    try:
+        first = goal_stop(c, {101: "fail"})
+        second = goal_stop(c, GOAL_OPEN, now=GOAL_NOW + 10)  # the network is back, but the failed read is kept
+        check("goal order cache (failed read): a failed read says nothing, and the next Stop within the TTL "
+              "makes no new read", goal_named(first) is None and goal_named(second) is None
+              and goal_calls(c, "gh") == 1,
+              "named: %r, %r, gh reads: %d" % (goal_named(first), goal_named(second), goal_calls(c, "gh")))
+        third = goal_stop(c, GOAL_OPEN, now=GOAL_NOW + GOAL_TTL)
+        check("goal order cache (failed read): after the TTL it reads again and names #101",
+              goal_named(third) == [101] and goal_calls(c, "gh") == 2,
+              "named: %r, gh reads: %d" % (goal_named(third), goal_calls(c, "gh")))
+    finally:
+        c.cleanup()
+
+
+def case_goal_order_keeps_a_refreshed_read():
+    """A read made while the nudge state already holds a cache must reach the state file, or the next Stop
+    reads it again, and the TTL saves nothing."""
+    goal_scope()
+    merged_101 = {101: "merged", 102: "open", 103: "open"}
+    c = goal_case("goal_refresh")
+    try:
+        goal_stop(c, GOAL_OPEN)
+        goal_stop(c, GOAL_OPEN, now=GOAL_NOW + GOAL_TTL + 1)  # the OPEN read is stale: one new read
+        reads = goal_calls(c, "gh")
+        proc = goal_stop(c, merged_101, now=GOAL_NOW + GOAL_TTL + 2)  # fresh against the new read
+        check("goal order cache (refresh): the stale read, read again, is kept: the next Stop makes no gh read",
+              goal_named(proc) == [101] and goal_calls(c, "gh") == reads,
+              "named: %r, gh reads: %d, before: %d" % (goal_named(proc), goal_calls(c, "gh"), reads))
+    finally:
+        c.cleanup()
+    c = goal_case("goal_newcite")
+    try:
+        both = goal_handoff("Merge #101, then #102.\n")
+        goal_stop(c, {101: "merged", 102: "open"}, handoff=goal_handoff("Merge #101.\n"))
+        goal_stop(c, {101: "merged", 102: "open"}, handoff=both, now=GOAL_NOW + 1)  # #102 is new to the cache
+        reads = goal_calls(c, "gh")
+        proc = goal_stop(c, {101: "merged", 102: "merged"}, handoff=both, now=GOAL_NOW + 2)
+        check("goal order cache (new cite): a PR read for the first time beside a stored cache is kept too",
+              goal_named(proc) == [102] and goal_calls(c, "gh") == reads,
+              "named: %r, gh reads: %d, before: %d" % (goal_named(proc), goal_calls(c, "gh"), reads))
+    finally:
+        c.cleanup()
+
+
+def case_goal_order_reads_at_most_ten_prs():
+    goal_scope()
+    cites = list(range(201, 213))  # twelve cites: a full-size Goal
+    prs = {n: "merged" for n in cites}
+    prs[212] = "open"
+    c = goal_case("goal_cap")
+    try:
+        proc = goal_stop(c, prs, handoff=goal_handoff("Merge " + ", ".join("#%d" % n for n in cites) + ".\n"))
+        check("goal order cap: twelve cites make ten gh reads, and no more", goal_calls(c, "gh") == 10,
+              "gh reads: %d" % goal_calls(c, "gh"))
+        check("goal order cap: each of the ten reads has the 5 s timeout", goal_timeouts(c) == [GOAL_BOUND] * 10,
+              "timeouts: %r" % goal_timeouts(c))
+        goal_silent("cap (the first ten are merged)", proc)
+        check("goal order cap: no open PR is found, so no ps start", goal_calls(c, "ps") == 0,
+              "ps calls: %d" % goal_calls(c, "ps"))
+    finally:
+        c.cleanup()
+
+
+def case_goal_order_rides_a_block_and_never_blocks_alone():
+    goal_scope()
+    c = goal_case("goal_alone")
+    try:
+        proc = goal_stop(c, GOAL_OPEN)
+        obj = json.loads(proc.stdout or "{}")
+        check("goal order alone: the reminder is no block and sets no exit code",
+              proc.returncode == 0 and "decision" not in obj and goal_named(proc) == [101],
+              "rc=%r stdout: %r" % (proc.returncode, proc.stdout[:200]))
+    finally:
+        c.cleanup()
+    c = goal_case("goal_block")
+    try:
+        install_prompt(c, prompt_source())
+        proc = goal_stop(c, GOAL_OPEN, handoff=goal_handoff(GOAL_DEFAULT, omit=("Next steps",)))
+        check("goal order beside a block (control): the handoff with no Next steps blocks",
+              block_reason(proc) is not None, "stdout: %r" % proc.stdout[:200])
+        check("goal order beside a block: the same JSON object carries the line, and the exit code stays 0",
+              goal_named(proc) == [101] and proc.returncode == 0,
+              "named: %r, rc=%r, stdout: %r" % (goal_named(proc), proc.returncode, proc.stdout[:200]))
+    finally:
+        c.cleanup()
+
+
+def case_goal_order_caches_a_cite_no_pr_has():
+    goal_scope()
+    handoff = goal_handoff("Merge #101, then #102.\n")
+    c = goal_case("goal_notpr")
+    try:
+        first = goal_stop(c, {101: "gone", 102: "open"}, handoff=handoff)
+        check("goal order cache (404): #101 is no PR, so it is passed over: the line names #102 after two gh reads",
+              goal_named(first) == [102] and goal_calls(c, "gh") == 2,
+              "named: %r, gh reads: %d" % (goal_named(first), goal_calls(c, "gh")))
+        # The fixture now calls #101 open: only the cache can still say it is no PR.
+        second = goal_stop(c, {101: "open", 102: "open"}, handoff=handoff, now=GOAL_NOW + 10)
+        check("goal order cache (404 kept): a Stop 10 s later makes no new read of #101 and still names #102",
+              goal_named(second) == [102] and goal_calls(c, "gh", "pulls/101") == 1,
+              "named: %r, reads of #101: %d" % (goal_named(second), goal_calls(c, "gh", "pulls/101")))
+        third = goal_stop(c, {101: "open", 102: "open"}, handoff=handoff, now=GOAL_NOW + GOAL_TTL)
+        check("goal order cache (404 expires): at the TTL #101 is read again, and now it is named",
+              goal_named(third) == [101] and goal_calls(c, "gh", "pulls/101") == 2,
+              "named: %r, reads of #101: %d" % (goal_named(third), goal_calls(c, "gh", "pulls/101")))
+    finally:
+        c.cleanup()
+
+
+def goal_budget_check(label, c):
+    """No read of the Stop began with more time than the shared budget had left."""
+    spans = goal_spans(c)
+    over = [s for s in spans if s[1] + s[2] > GOAL_BUDGET]
+    check("goal order budget (%s): no read is given more time than the %d s budget has left" % (label, GOAL_BUDGET),
+          not over, "reads that could end past the budget (kind, start, timeout): %r of %r" % (over, spans))
+
+
+def case_goal_order_shares_one_budget():
+    goal_scope()
+    cites = list(range(301, 307))
+    goal = "Merge " + ", ".join("#%d" % n for n in cites) + ".\n"
+    prs = {n: "merged" for n in cites[:-1]}
+    prs[cites[-1]] = "open"
+    c = goal_case("goal_budget_fast")
+    try:
+        proc = goal_stop(c, prs, handoff=goal_handoff(goal))
+        check("goal order budget (control): five merged cites and #306 open, each read instant: the line names #306 "
+              "after six reads", goal_named(proc) == [306] and len(goal_timeouts(c)) == 6,
+              "named: %r, gh timeouts: %r" % (goal_named(proc), goal_timeouts(c)))
+    finally:
+        c.cleanup()
+    c = goal_case("goal_budget_spent")
+    try:
+        proc = goal_stop(c, prs, handoff=goal_handoff(goal), read_costs=[2.5])  # four reads use the 10 s
+        goal_budget_check("six cites at 2.5 s a read", c)
+        goal_silent("budget (the four reads that fit spend all 10 s, and #306 is open behind them)", proc)
+    finally:
+        c.cleanup()
+    full = list(range(321, 331))  # ten cites: the cap
+    c = goal_case("goal_budget_full")
+    try:
+        proc = goal_stop(c, {n: "merged" for n in full}, read_costs=[1.0],
+                         handoff=goal_handoff("Merge " + ", ".join("#%d" % n for n in full) + ".\n"))
+        goal_budget_check("ten cites at 1 s a read", c)
+        check("goal order budget (ten cites at 1 s a read): the budget just fits them, so all ten are read",
+              len(goal_timeouts(c)) == 10, "gh timeouts: %r" % goal_timeouts(c))
+        goal_silent("budget (every one of ten cites is merged)", proc)
+    finally:
+        c.cleanup()
+
+
+def case_goal_order_budget_covers_the_ps():
+    goal_scope()
+    handoff = goal_handoff("Merge #311, then #312.\n")
+    prs = {311: "merged", 312: "open"}
+    for label, costs, want, ps_starts in (
+            ("instant reads (control)", [0], [312], 1),
+            ("two 4 s reads leave the ps 2 s", [4, 4], [312], 1),
+            ("two 5 s reads leave the ps nothing", [5, 5], None, 0)):
+        c = goal_case("goal_budget_ps")
+        try:
+            proc = goal_stop(c, prs, handoff=handoff, read_costs=costs)
+            goal_budget_check(label, c)
+            check("goal order budget (%s): the line names %r" % (label, want), goal_named(proc) == want,
+                  "named: %r, stdout: %r" % (goal_named(proc), proc.stdout[:200]))
+            check("goal order budget (%s): the ps starts %d time(s)" % (label, ps_starts),
+                  goal_calls(c, "ps") == ps_starts, "ps calls: %d" % goal_calls(c, "ps"))
+        finally:
+            c.cleanup()
+
+
+def case_goal_order_slow_reads_never_cost_a_block():
+    goal_scope()
+    hook = nudge_hook_timeout()
+    cost = 4.0  # each read; ten of them outlast the hook, but the budget stops the walk after three
+    ok = isinstance(hook, (int, float)) and hook > GOAL_BUDGET and 10 * cost > hook
+    check("goal order blocks (scope): settings.json gives the nudge Stop hook a timeout that ten 4 s reads outlast "
+          "and the 10 s budget does not", ok, "timeout: %r" % (hook,))
+    if not ok:
+        return
+    cites = list(range(401, 413))  # twelve cites, all merged: the walk reads on until something stops it
+    handoff = goal_handoff("Merge " + ", ".join("#%d" % n for n in cites) + ".\n")
+    prs = {n: "merged" for n in cites}
+    rows = (
+        ("the checkpoint block", lambda c: dict(size=210000), "Rewrite your handoff at"),
+        ("the owner-wait block", lambda c: dict(lines=coord_refusal(c, PUSH_PLAIN)), "Bash `%s`" % PUSH_PLAIN),
+    )
+    for label, kw, text in rows:
+        c = goal_case("goal_block_fast")
+        try:
+            reason = stop_reason(goal_stop(c, prs, handoff=handoff, **kw(c)))
+            check("goal order blocks (%s, control): with instant reads the Stop blocks and names it" % label,
+                  reason is not None and text in reason, "reason: %r" % (reason,))
+        finally:
+            c.cleanup()
+        c = goal_case("goal_block_slow")
+        try:
+            proc = goal_stop(c, prs, handoff=handoff, read_costs=[cost], **kw(c))
+            reason = stop_reason(proc)
+            check("goal order blocks (%s): with 4 s reads the reminder's budget runs out, and the Stop still "
+                  "blocks and names it" % label, reason is not None and text in reason and proc.returncode == 0,
+                  "rc=%r, reason: %r, stderr: %r" % (proc.returncode, reason, proc.stderr[-200:]))
+            check("goal order blocks (%s): the spent budget leaves the reminder line out" % label,
+                  goal_message(proc) is None, "message: %r" % (goal_message(proc),))
+            if label == "the checkpoint block":
+                check("goal order blocks (%s): the checkpoint is recorded, so the next Stop does not repeat it" % label,
+                      stored_bucket(c) == 0, "stored bucket: %r" % (stored_bucket(c),))
+        finally:
+            c.cleanup()
+
+
+def case_goal_order_writes_state_before_its_reads():
+    goal_scope()
+    c = goal_case("goal_state_first")
+    try:
+        proc = goal_stop(c, GOAL_OPEN, size=210000)
+        reason = stop_reason(proc)
+        check("goal order state (control): a Stop at 210k blocks for a checkpoint and the reminder still names #101",
+              reason is not None and "Rewrite your handoff at" in reason and goal_named(proc) == [101],
+              "reason: %r, named: %r" % (reason, goal_named(proc)))
+        seen = goal_state_at_first_read(c)
+        check("goal order state: the checkpoint is in the nudge state file before the reminder makes its first read",
+              isinstance(seen, dict) and seen.get("bucket") == 0, "state file at the first read: %r" % (seen,))
+    finally:
+        c.cleanup()
+
+
+def run_goal_order_cases():
+    if os.name == "nt":
+        print("SKIP: goal order cases need a POSIX ps")
+        return
+    case_goal_order_names_the_earliest_open_pr()
+    case_goal_order_skips_a_pr_with_a_lint_running()
+    case_goal_order_bounds_each_gh_read()
+    case_goal_order_is_silent_while_work_runs()
+    case_goal_order_is_silent_when_a_read_fails()
+    case_goal_order_caches_each_read()
+    case_goal_order_keeps_a_refreshed_read()
+    case_goal_order_reads_at_most_ten_prs()
+    case_goal_order_rides_a_block_and_never_blocks_alone()
+    case_goal_order_caches_a_cite_no_pr_has()
+    case_goal_order_shares_one_budget()
+    case_goal_order_budget_covers_the_ps()
+    case_goal_order_slow_reads_never_cost_a_block()
+    case_goal_order_writes_state_before_its_reads()
+
+
 def main() -> int:
     case_prompt_names_audit_agent()
     case_precompact_writes_digest_and_state()
@@ -3165,6 +3855,7 @@ def main() -> int:
     case_owner_waits_substring_act_blocks()
     case_owner_waits_alone_on_line_names_act()
     case_owner_waits_prose_line_names_no_act()
+    run_goal_order_cases()
 
     if FAILED:
         print()

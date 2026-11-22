@@ -389,6 +389,10 @@ MACOS_REACH = {
     ("hooks/guard_kill.py", "session_root_pid"): lambda family, session: family == "kill",
     # Reached by the descendants check in section 21305: kill_tree walks a kill's tree through this reader.
     ("hooks/_nowindow.py", "descendants"): lambda family, session: family == "kill",
+    # No guard case reaches this arm. The Stop hook's goal-order line calls it (run_nudge), and
+    # hooks/test_precompact_handoff.py proves that line. The row names the handoff family, the nearest
+    # reach in the same module, so the arm check passes.
+    ("hooks/precompact_handoff.py", "_lint_targets"): lambda family, session: family == "handoff-sections",
 }
 
 

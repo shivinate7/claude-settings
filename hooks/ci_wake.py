@@ -101,9 +101,10 @@ def gh(args, cwd, timeout=READ_TIMEOUT):
     return p.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
 
 
-def gh_json(args, cwd, gone=""):
-    """-> the JSON gh prints. gone: text in a failed read's output that means the PR does not exist (NoPR)."""
-    rc, out, err = gh(args, cwd)
+def gh_json(args, cwd, gone="", timeout=READ_TIMEOUT):
+    """-> the JSON gh prints. gone: text in a failed read's output that means the PR does not exist (NoPR).
+    timeout: seconds for the one gh read; precompact_handoff's goal-order reminder passes a short one."""
+    rc, out, err = gh(args, cwd, timeout)
     if rc != 0:
         if gone and gone in (out + err).lower():
             raise NoPR()
