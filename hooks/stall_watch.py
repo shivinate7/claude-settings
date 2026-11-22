@@ -96,7 +96,7 @@ Stop: stall_watch.py --stop
   running agent, one tail read per quiet agent. Any error, or stop_hook_active true, prints nothing and exits 0. No posix check.
   CI-wait check: the same Stop run reads the transcript once more, one record at a time. The newest
   ready call (`gh pr ready <N>` in Bash or PowerShell, outside quotes, heredoc bodies and `#` comments, not
-  --undo; or MCP update_pull_request with draft false) opens a wait. An --undo, or draft true, closes the wait on its PR. A `gh` global flag before `pr`
+  --undo; or MCP update_pull_request with draft false) opens a wait. An --undo, or draft true, closes the wait on its PR. A ready call whose tool_result has is_error true (a PreToolUse refusal) opens no wait. A `gh` global flag before `pr`
   (`gh -R o/r pr ready 5`) is skipped. A later user or queued message with a
   `CI green|cancelled|none on <sha>` line closes it (ci_wake writes `CI none` for a repo with no active workflow,
   so the Stop starts no gh process); a `CI unknown` line leaves it open. A merge or close that
@@ -1032,10 +1032,10 @@ def gh_pr_call(words):
 
 
 def ci_events(rec):
-    """The CI-wait events one transcript record holds, in order: ('ready', pr), ('checkin', call id),
+    """The CI-wait events one transcript record holds, in order: ('ready', pr, call id), ('checkin', call id),
     ('failed', call id), ('merge', pr), ('mergeany',), ('verdict', word). A user or queued message holds a
     verdict line; only an assistant call holds the rest. A tool result is no message, so a verdict it prints
-    is not one, but its error flag voids the check-in it answers. ('merge', pr) is a merge or close that names
+    is not one, but its error flag voids the check-in it answers, and the ready call it answers. ('merge', pr) is a merge or close that names
     pr (pr_ref); ('mergeany',) is a gh pr merge or close that names no PR at all, only flags, which aims at
     the current branch's PR."""
     kind = rec.get("type")
@@ -1065,14 +1065,14 @@ def ci_events(rec):
             if inp.get("pullNumber"):
                 events.append(("merge", str(inp["pullNumber"])))
         elif tool == "update_pull_request" and inp.get("draft") is False:
-            events.append(("ready", str(inp.get("pullNumber") or "")))
+            events.append(("ready", str(inp.get("pullNumber") or ""), b.get("id")))
         elif tool == "update_pull_request" and inp.get("draft") is True:
             events.append(("undo", str(inp.get("pullNumber") or "")))
         elif isinstance(inp.get("command"), str) and name in ("Bash", "PowerShell"):
             for words in shell_calls(inp["command"]):
                 gh = gh_pr_call(words)
                 if gh and gh[0] == "ready":
-                    events.append(("undo" if "--undo" in gh[1] else "ready", pr_ref(gh[1])))
+                    events.append(("undo", pr_ref(gh[1])) if "--undo" in gh[1] else ("ready", pr_ref(gh[1]), b.get("id")))
                 elif gh:
                     # --auto only queues the merge and --disable-auto drops it: neither has merged anything
                     if not {"--auto", "--disable-auto"} & set(gh[1]):
@@ -1093,8 +1093,10 @@ def open_ci_wait(transcript):
     a $var) when it names any PR or none. An undo (gh pr ready --undo, or MCP draft true) closes the wait on
     its PR the same way. A
     red verdict keeps it open and voids the check-ins before it. A check-in after the anchor
-    covers it, unless its result was an error. One streamed read, records in file order."""
+    covers it, unless its result was an error. A ready call whose result was an error (a guard refused it)
+    opens no wait and restores the wait before it. One streamed read, records in file order."""
     wait = None  # [pr, ids of the check-ins since the anchor]
+    ready_id, before = None, None  # the newest ready call, and the wait it replaced
     with open(transcript, "rb") as f:
         for line in f:
             if not any(k in line for k in CI_KEYS):
@@ -1105,7 +1107,10 @@ def open_ci_wait(transcript):
                 continue
             for ev in events:
                 if ev[0] == "ready":
+                    ready_id, before = ev[2], wait and [wait[0], set(wait[1])]
                     wait = [ev[1], set()]
+                elif ev[0] == "failed" and ev[1] is not None and ev[1] == ready_id:
+                    wait, ready_id = before, None  # a refused or failed ready call marked nothing
                 elif wait is None:
                     continue
                 elif ev[0] == "checkin":
