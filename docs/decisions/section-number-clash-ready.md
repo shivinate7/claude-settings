@@ -21,5 +21,5 @@ Cost: the ready run and the lane lint run the whole step, not the section read a
 
 Reader: the draft step's `fail Record slug length` line, and the CI step of the same name.
 
-Kind: build
+Kind: process
 Home: lint/_guard_sections.py
