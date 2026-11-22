@@ -676,6 +676,78 @@ class HeadShaCarrier(Job):
         self.assertEqual(seen, "<unset>", "a step saw CI_JOB_HEAD_SHA in its env: " + out)
 
 
+class WorkspaceExpression(Job):
+    """ci-job reads ${{ github.workspace }} as the git top level it stands in, in a step's env: value and in the zizmor
+    action's with: paths, both through expand(). Every other expression stays unknown, a run: body's included, and so does
+    ${{ github.sha }}. ci-job relays no step output, so each step writes the value it sees to seen.txt. The zizmor action
+    runs the tree's own actions/zizmor/run.sh, so a stub run.sh there writes ZIZMOR_PATHS as the action received it."""
+
+    SEEN_ENV = "printf '%s' \"$NODE_PATH\" > seen.txt"
+    RUN_SH = "printf '%s' \"$ZIZMOR_PATHS\" > seen.txt\n"
+
+    def top(self):
+        return subprocess.run(["git", "-C", self.root, "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+                              check=True, env=ENV).stdout.strip()
+
+    def seen_path(self):
+        return os.path.join(self.root, "seen.txt")
+
+    def zizmor_paths(self, paths):
+        """seen_after's (verdicts, seen, output) for a --lint run of the zizmor action whose with: paths is `paths`: seen is
+        the ZIZMOR_PATHS the stub run.sh got."""
+        write_lf(os.path.join(self.root, "actions", "zizmor", "run.sh"), self.RUN_SH)
+        action = step(ZIZMOR, uses="$/actions/zizmor", **{"with": {"paths": paths}})
+        path, _ = stub_pipx()  # the zizmor branch reads a missing pipx as unknown, so the stub keeps the paths the only reason in play
+        return self.seen_after(action, args=("--lint",), env={"PATH": path})
+
+    def test_an_env_value_holding_the_workspace_reads_as_the_top_level(self):
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN_ENV, env={"NODE_PATH": "${{ github.workspace }}/x"}))
+        self.assertEqual(verdicts, ["PASS"], "an env value holding github.workspace did not run its step: " + out)
+        self.assertEqual(seen, self.top() + "/x", "an env value holding github.workspace did not read as the top level: " + out)
+
+    def test_the_workspace_is_the_top_level_when_the_job_runs_from_a_subfolder(self):
+        sub = os.path.join(self.root, "sub")
+        os.makedirs(sub)
+        out_file = self.seen_path()  # absolute, since the step's own working folder is not what this case reads
+        argv, env = self.job_call(step("seen", "printf '%s' \"$NODE_PATH\" > \"$OUT_FILE\"",
+                                       env={"NODE_PATH": "${{ github.workspace }}/x", "OUT_FILE": out_file}))
+        done = subprocess.run(argv, cwd=sub, capture_output=True, text=True, env=env, timeout=120)
+        out = done.stdout + done.stderr
+        self.assertTrue(os.path.exists(out_file), "an env value holding github.workspace did not run its step from a subfolder: " + out)
+        with open(out_file, encoding="utf-8") as f:
+            self.assertEqual(f.read(), self.top() + "/x", "github.workspace read as the working folder, not the top level: " + out)
+
+    def test_a_literal_env_value_reaches_the_step_as_written(self):  # the control: the step and its seen.txt carry a value
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN_ENV, env={"NODE_PATH": "/literal/x"}))
+        self.assertEqual((verdicts, seen), (["PASS"], "/literal/x"), out)
+
+    def test_a_with_paths_value_holding_the_workspace_resolves(self):
+        verdicts, seen, out = self.zizmor_paths("${{ github.workspace }}/.github/")
+        self.assertEqual(verdicts, ["PASS"], "a with: paths value holding github.workspace did not run the action: " + out)
+        self.assertEqual(seen, self.top() + "/.github/", "a with: paths value holding github.workspace did not read as the top level: " + out)
+
+    def test_a_literal_with_paths_value_reaches_the_action_as_written(self):  # the control: the stub run.sh runs and sees the paths
+        verdicts, seen, out = self.zizmor_paths(".github/ actions/")
+        self.assertEqual((verdicts, seen), (["PASS"], ".github/ actions/"), out)
+
+    def test_the_workspace_inside_a_run_body_stays_unknown(self):
+        rc, lines, out = self.run_job(step("body", "printf '%s' \"${{ github.workspace }}\" > seen.txt"))
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), "a run: body holding github.workspace did not read unknown: " + out)
+        self.assertIn("run: holds an expression", lines[0], out)
+        self.assertFalse(os.path.exists(self.seen_path()), "a run: body holding github.workspace ran: " + out)
+
+    def test_github_sha_in_an_env_value_stays_unknown(self):
+        rc, lines, out = self.run_job(step("sha", "printf '%s' \"$SHA\" > seen.txt", env={"SHA": "${{ github.sha }}"}))
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), "an env value holding github.sha did not read unknown: " + out)
+        self.assertIn("env SHA needs an expression", lines[0], out)
+        self.assertFalse(os.path.exists(self.seen_path()), "an env value holding github.sha ran its step: " + out)
+
+    def test_github_sha_in_a_with_paths_value_stays_unknown(self):
+        verdicts, seen, out = self.zizmor_paths("${{ github.sha }}/.github/")
+        self.assertEqual(verdicts, ["unknown"], "a with: paths value holding github.sha did not read unknown: " + out)
+        self.assertFalse(os.path.exists(self.seen_path()), "a with: paths value holding github.sha ran the action: " + out)
+
+
 def mapped(parent, body):
     """One `      - ` step whose `parent:` block (`with` or `env`) holds `body`, raw, as YAML writes it."""
     return "      - name: s\n        %s:\n%s\n" % (parent, body)
