@@ -38,6 +38,12 @@ dl_deny("merge --lane-lint 7 & wait, a job a later wait joins", "merge --lane-li
 # not the lint the shell backgrounds, so the lint's end still reaches no one.
 dl_deny("merge --lane-lint 7 & echo $! with run_in_background", "merge --lane-lint 7 & echo $!",
         run_in_background=True)
+# --- A shell runs the lint too. `bash` and `sh` run `bin/ci-job` or `bin/merge` as python does, so the shell's script
+# is the lint start. The incident's shape is a bash-run lint ended by `&` (decision detached-launch-refused).
+dl_deny("bash bin/ci-job checks --lint & echo $!, a kept pid behind bash", "bash bin/ci-job checks --lint & echo $!")
+dl_deny("sh bin/ci-job checks --lint & echo $!, a kept pid behind sh", "sh bin/ci-job checks --lint & echo $!")
+dl_deny("bash ./bin/ci-job --lint & echo $!, a ./ path behind bash", "bash ./bin/ci-job --lint & echo $!")
+dl_deny("bash bin/merge --lane-lint 7 &, a bash-run merge lint that a & ends", "bash bin/merge --lane-lint 7 &")
 
 # --- The scanner reads the call as the shell does. A comment opener or a lone quote inside a string hides no lint that
 # follows it, and a lint named inside a string or a comment starts nothing (see the allowed cases below).
@@ -55,6 +61,11 @@ dl_allow("bin/ci-job checks --lint with run_in_background and no &", "bin/ci-job
          run_in_background=True)
 dl_allow("nohup merge --lane-lint 7 with no &", "nohup merge --lane-lint 7")
 dl_allow("setsid -w merge --lane-lint 7, which waits for its child", "setsid -w merge --lane-lint 7")
+# The same bash and sh lints in the foreground, with no `&`: the shell waits for its lint, so no lint is detached.
+dl_allow("bash bin/ci-job checks --lint in the foreground", "bash bin/ci-job checks --lint")
+dl_allow("sh bin/ci-job checks --lint in the foreground", "sh bin/ci-job checks --lint")
+dl_allow("bash ./bin/ci-job --lint in the foreground", "bash ./bin/ci-job --lint")
+dl_allow("bash bin/merge --lane-lint 7 in the foreground", "bash bin/merge --lane-lint 7")
 dl_allow("an echo that quotes merge --lane-lint 7 &", "echo 'merge --lane-lint 7 &'")
 dl_allow("a heredoc body that holds merge --lane-lint 7 &", "cat <<'EOF'\nmerge --lane-lint 7 &\nEOF")
 dl_allow("a comment line that holds merge --lane-lint 7 &", "# merge --lane-lint 7 &")
