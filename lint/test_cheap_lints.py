@@ -7,6 +7,8 @@ bin/cheap-lints runs the repo's merge.readyChecks (.github/stamp.json) through m
 - A failing check exits 1 and prints `fail NAME`. Every check passing exits 0 and prints the summary line.
 - No line of the run matches merge.READY_PASS_FMT. The merge guard reads that line as a ready run.
 - A `<job>:<step>` entry runs under its own job. A bare entry is a step of job `checks`.
+- A read that cannot run exits 2 with an `unknown cheap-lints:` line and no traceback: a bad call, a copy with no
+  hooks/ beside it, and a run with no claude-settings checkout to find.
 
 Each case builds a fixture repo in its own folder of the run folder. The repo has a two-job workflow of one-line
 Python steps and a stamp.json that names the case's checks. No case reads the real checks.yml.
@@ -69,7 +71,8 @@ def git_env(case):
     The temp files, the ci-job log and the step cache stay in the case folder."""
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(("GITHUB_", "CI_JOB_")) and k not in ("PR_BODY", "VERDICT_LOG")}
-    env.update(TMPDIR=case, XDG_CACHE_HOME=case, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull)
+    env.update(TMPDIR=case, XDG_CACHE_HOME=case, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull,
+               CLAUDE_CONFIG_DIR=os.path.join(case, "config"))  # an empty config dir: no global rules file points at a checkout
     return _test_git.apply(env)
 
 
@@ -86,13 +89,33 @@ def make_fixture(case, text):
     return repo
 
 
-def run_cheap(text):
-    """Run bin/cheap-lints in a fresh fixture repo whose stamp.json is `text`. -> (exit code, output lines, stderr merged in)."""
-    case = tempfile.mkdtemp(prefix="cheap_", dir=RUN_FOLDER)
+def new_case():
+    """A case folder in the run folder. Every file a case writes lives under it."""
+    return tempfile.mkdtemp(prefix="cheap_", dir=RUN_FOLDER)
+
+
+def run_in(case, text, script, args=()):
+    """Run `script` with `args` in a fixture repo under `case` whose stamp.json is `text`. -> (exit code, output lines, stderr merged in)."""
     repo = make_fixture(case, text)
-    done = subprocess.run([sys.executable, CHEAP], cwd=repo, env=git_env(case), stdout=subprocess.PIPE,
+    done = subprocess.run([sys.executable, script, *args], cwd=repo, env=git_env(case), stdout=subprocess.PIPE,
                           stderr=subprocess.STDOUT, text=True, encoding="utf-8", timeout=120)
     return done.returncode, done.stdout.splitlines()
+
+
+def run_cheap(text, args=()):
+    """Run this checkout's bin/cheap-lints in a fresh fixture repo whose stamp.json is `text`."""
+    return run_in(new_case(), text, CHEAP, args)
+
+
+def copy_cheap(case, hooks):
+    """Copy bin/cheap-lints to <case>/copy/bin. With `hooks`, <case>/copy/hooks links to this checkout's hooks/, the one
+    folder the copy reads beside itself. Without it, the copy has no hooks/ at all. -> the copy's path."""
+    bin_dir = os.path.join(case, "copy", "bin")
+    os.makedirs(bin_dir)
+    shutil.copy(CHEAP, os.path.join(bin_dir, "cheap-lints"))
+    if hooks:
+        os.symlink(os.path.join(ROOT, "hooks"), os.path.join(case, "copy", "hooks"), target_is_directory=True)
+    return os.path.join(bin_dir, "cheap-lints")
 
 
 class CheapLints(unittest.TestCase):
@@ -140,6 +163,31 @@ class CheapLints(unittest.TestCase):
         rc, lines = run_cheap(config_text(["Other pass"]))
         self.assertEqual(rc, 2, "exit %d for a bare entry that only job other holds, want 2: job checks has no such step" % rc)
         self.assertIn(("unknown", "Other pass"), verdicts(lines), "no `unknown Other pass` line: %r" % lines)
+
+    def test_extra_argument_exits_two_with_an_unknown_line(self):
+        rc, lines = run_cheap(config_text(["Pass one"]), args=["main", "extra"])
+        self.assertEqual(rc, 2, "exit %d for `main extra`, want 2: a bad call is unknown, never 1" % rc)
+        self.assertTrue(any(line.startswith("unknown ") for line in lines), "no `unknown` line for `main extra`: %r" % lines)
+
+    def test_copy_without_hooks_exits_two_with_an_unknown_line_and_no_traceback(self):
+        case = new_case()
+        script = copy_cheap(case, hooks=False)
+        self.assertFalse(os.path.isdir(os.path.join(case, "copy", "hooks")), "premise: the copy has a hooks/ beside it")
+        rc, lines = run_in(case, config_text(["Pass one"]), script)
+        self.assertEqual(rc, 2, "exit %d for a copy with no hooks/, want 2: the copy cannot run, which is unknown" % rc)
+        self.assertTrue(any(line.startswith("unknown cheap-lints:") for line in lines), "no `unknown cheap-lints:` line: %r" % lines)
+        self.assertFalse(any("Traceback" in line for line in lines), "a copy with no hooks/ prints a traceback: %r" % lines)
+
+    def test_no_claude_settings_checkout_exits_two_with_an_unknown_line_and_no_traceback(self):
+        case = new_case()
+        script = copy_cheap(case, hooks=True)
+        self.assertFalse(os.path.isdir(os.path.join(case, "copy", "merge")), "premise: the copy has a merge/ beside it")
+        self.assertFalse(os.path.isfile(os.path.join(case, "config", "CLAUDE.md")), "premise: the config dir points at a checkout")
+        rc, lines = run_in(case, config_text(["Pass one"]), script)
+        self.assertEqual(rc, 2, "exit %d with no claude-settings checkout found, want 2: nothing can run, which is unknown" % rc)
+        self.assertTrue(any(line.startswith("unknown cheap-lints: no claude-settings checkout found") for line in lines),
+                        "no `unknown cheap-lints: no claude-settings checkout found` line: %r" % lines)
+        self.assertFalse(any("Traceback" in line for line in lines), "a run with no checkout prints a traceback: %r" % lines)
 
 
 def tearDownModule():
