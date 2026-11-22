@@ -5,6 +5,7 @@ Other files reach these names through `guard`.
 """
 import contextlib
 import fnmatch
+import importlib
 import io
 import json
 import os
@@ -2194,7 +2195,9 @@ def _ready_stood_shas(text: str, merge) -> set:
 
 def _ready_pass_shas(transcript: str, merge):
     """The shas that a `--ready` or `--confirm` Bash or PowerShell call of this transcript stood for (_ready_stood_shas), or None when the
-    transcript cannot be read."""
+    transcript cannot be read. A run in the background stands for its shas once the transcript reads its output: a Read of the output file, or a
+    Bash or PowerShell command that names it, whose result holds the run's lines. The output path is the one the run's start result names
+    (stall_watch RESULT_PATH, the one home of that format), so a pass in any other file counts for nothing. The guard never opens the file."""
     from guard_core import lint_dir  # lazy: the one home of where lint/ is
     lint = lint_dir()
     if lint not in sys.path:
@@ -2202,23 +2205,37 @@ def _ready_pass_shas(transcript: str, merge):
     try:
         import _transcript
         records = _transcript.read_transcript(transcript)
+        result_path = importlib.import_module("stall_watch").RESULT_PATH
     except Exception:
         return None
     ready_calls = set()
+    read_calls = set()
+    outputs = set()  # output files of the background ready runs seen so far
     shas = set()
     for rec in records:
         for use in _transcript.tool_uses(rec):
-            command = (use.get("input") or {}).get("command")
-            if (use.get("name") in ("Bash", "PowerShell") and isinstance(command, str) and isinstance(use.get("id"), str)
-                    and any(flag in command for flag in READY_RUN_FLAGS)):
-                ready_calls.add(use["id"])
-        for result in _transcript.tool_results(rec):
-            if result.get("tool_use_id") not in ready_calls:
+            tool_input = use.get("input") or {}
+            command = tool_input.get("command")
+            if not isinstance(use.get("id"), str):
                 continue
+            shell = use.get("name") in ("Bash", "PowerShell") and isinstance(command, str)
+            if shell and any(flag in command for flag in READY_RUN_FLAGS):
+                ready_calls.add(use["id"])
+            elif use.get("name") == "Read" and tool_input.get("file_path") in outputs:
+                read_calls.add(use["id"])
+            elif shell and any(path in command for path in outputs):
+                read_calls.add(use["id"])
+        for result in _transcript.tool_results(rec):
             content = result.get("content")
             text = content if isinstance(content, str) else " ".join(
                 b.get("text", "") for b in content or [] if isinstance(b, dict) and isinstance(b.get("text"), str))
-            shas |= _ready_stood_shas(text, merge)
+            if result.get("tool_use_id") in read_calls:
+                shas |= _ready_stood_shas(text, merge)
+            elif result.get("tool_use_id") in ready_calls:
+                shas |= _ready_stood_shas(text, merge)
+                started = result_path.search(text)
+                if started:
+                    outputs.add(started.group(1))
     return shas
 
 
