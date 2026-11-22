@@ -24966,6 +24966,11 @@ def install_model_guard():
 
 def setUpModule():
     install_model_guard()
+    # The lane lint's load gate reads the host's 5-minute load, and the lane-lint cases of this module run merge in this process. A loaded runner
+    # would refuse them. A case that reads a load patches its own, and that patch wins until it ends.
+    load_patch = unittest.mock.patch.object(os, "getloadavg", return_value=(0.0, 0.0, 0.0), create=True)  # create: no getloadavg on Windows
+    load_patch.start()
+    unittest.addModuleCleanup(load_patch.stop)
 
 
 class ProseJudge(Env):
