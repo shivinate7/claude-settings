@@ -128,6 +128,23 @@ MT4_TABLE_DROP = _mt_case("mt4-table-edit-dropped", [(TEST_A, MT4_GROWN + MT4_TA
 _mt_refuse("builder-refuse: a merge that drops one parent's edit to a module-level table, keeping the other "
            "parent's whole file, is refused as lost", MT4_TABLE_DROP, "lost", (MT_CARRY["lost"],))
 
+# A row of the table that one parent edits in place, and the other parent adds a case right after the table. The result
+# keeps the base row and the other parent's whole file, so the row edit is dropped.
+MT4_HEAD_ROW_EDITED = MT4_HEAD.replace("[1, 2]", "[1, 5]")
+MT4_ROW_DROP = _mt_case("mt4-table-row-edit-dropped", [(TEST_A, MT4_HEAD_ROW_EDITED + MT4_TAIL)],
+                        [(TEST_A, MT4_HEAD + MT4_TABLE_CASE + MT4_TAIL)], [TEST_A],
+                        resolve=[(TEST_A, MT4_HEAD + MT4_TABLE_CASE + MT4_TAIL)], stage=True,
+                        files={**BASE_FILES, TEST_A: MT4_HEAD + MT4_TAIL})
+_mt_refuse("builder-refuse: a merge that drops one parent's edit to a row of a module-level table, keeping the other "
+           "parent's whole file, is refused as lost", MT4_ROW_DROP, "lost", (MT_CARRY["lost"],))
+# Control: the result keeps the edited row and the other parent's case, so nothing is dropped and the merge is allowed.
+MT4_ROW_KEPT = _mt_case("mt4-table-row-edit-kept", [(TEST_A, MT4_HEAD_ROW_EDITED + MT4_TAIL)],
+                        [(TEST_A, MT4_HEAD + MT4_TABLE_CASE + MT4_TAIL)], [TEST_A],
+                        resolve=[(TEST_A, MT4_HEAD_ROW_EDITED + MT4_TABLE_CASE + MT4_TAIL)], stage=True,
+                        files={**BASE_FILES, TEST_A: MT4_HEAD + MT4_TAIL})
+_mt_allow("builder-refuse: control, a merge that keeps the edited row of a module-level table and the other parent's case, "
+          "is allowed", MT4_ROW_KEPT)
+
 # Empty state: the base holds no test case, only the table, and each side changes it one way.
 MT4_TABLE_EMPTY = _mt_case("mt4-table-edit-dropped-empty", [(TEST_A, MT4_GROWN)],
                            [(TEST_A, MT4_HEAD + MT4_TABLE_CASE)], [TEST_A],

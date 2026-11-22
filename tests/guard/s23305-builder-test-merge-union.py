@@ -286,4 +286,56 @@ MR_RENAME_LOST = _mr_case("mr-rename-kept-row-deleted", MR_TOP + MR_ROW_A + MR_R
 _mt_refuse("builder-refuse: control, a merge that takes main's renamed row and deletes another row is refused as lost",
            MR_RENAME_LOST, "lost", (MT_CARRY["lost"],))
 
+
+# ---- A parent's rename, flip or identifier change that the result drops (decision merge-union-reads-lost, line 17) ----
+# A function that main renames while the lane flips a verdict in it. Both change adjacent lines, so the merge conflicts.
+# The result takes main's rename and drops the flip. The rename pairs the two functions by case key, and that key masks
+# the verdict, so the reader takes the flip for kept.
+MR_F4_BASE = 'def _rows():\n    return [("push to main", "deny")]\n'
+MR_F4_FLIP = 'def _rows():\n    return [("push to main", "ask")]\n'
+MR_F4_RENAMED = 'def _gate_rows():\n    return [("push to main", "deny")]\n'
+_mt_refuse("builder-refuse: a merge of a function that the lane flipped and main renamed, which takes main's rename and "
+           "drops the flip, is refused as lost",
+           _mr_case("mr-rename-hides-flip", MR_TOP + MR_F4_BASE, MR_TOP + MR_F4_FLIP, MR_TOP + MR_F4_RENAMED,
+                    MR_TOP + MR_F4_RENAMED), "lost", (MT_CARRY["lost"],))
+# Control: main renames the function and the lane only adds a row, so the rename alone is held and is allowed.
+_mt_allow("builder-refuse: control, a merge that takes main's renamed function, with both sides' new rows, is allowed",
+          _mr_case("mr-rename-only-kept", MR_TOP + MR_F4_BASE, MR_TOP + MR_F4_BASE + MR_LANE_ROW,
+                   MR_TOP + MR_F4_RENAMED + MR_MAIN_ROW, MR_TOP + MR_F4_RENAMED + MR_LANE_ROW + MR_MAIN_ROW))
+
+# A row's description that the lane renames, and the result keeps the base description. A case key blanks a call's
+# description, so only the call's own text shows the drop.
+MR_DESC_NEW = 'sh("a push to a branch is inspected by the gate", PUSH_BRANCH, "allow")\n'
+_mt_refuse("builder-refuse: a merge that keeps a row's base description and drops the lane's rename of it is refused as "
+           "lost", _mr_case("mr-desc-rename-dropped", MR_TOP + MR_ROW_B, MR_TOP + MR_DESC_NEW,
+                            MR_TOP + MR_ROW_B + MR_MAIN_ROW, MR_TOP + MR_ROW_B + MR_MAIN_ROW), "lost", (MT_CARRY["lost"],))
+_mt_allow("builder-refuse: control, a merge that keeps the lane's renamed description of a row, with main's new row, is "
+          "allowed", _mr_case("mr-desc-rename-kept", MR_TOP + MR_ROW_B, MR_TOP + MR_DESC_NEW,
+                              MR_TOP + MR_ROW_B + MR_MAIN_ROW, MR_TOP + MR_DESC_NEW + MR_MAIN_ROW))
+
+# The lane swaps a row's identifier and verdict to PUSH_DENIED, and main keeps the PUSH_ALLOWED row. The result takes the
+# swap and drops main's row, so it is lost. The case key tells the two names apart only while the underscore joins a
+# word to its verdict (`_VERDICT_WORDS`).
+MR_SWAP_OLD = 'sh("a push to a branch is checked by the gate", PUSH_ALLOWED, "allow")\n'
+MR_SWAP_NEW = 'sh("a push to a branch is checked by the gate", PUSH_DENIED, "deny")\n'
+_mt_refuse("builder-refuse: a merge that takes the lane's PUSH_DENIED swap and drops main's PUSH_ALLOWED row is refused "
+           "as lost", _mr_case("mr-identifier-swap-dropped", MR_TOP + MR_SWAP_OLD, MR_TOP + MR_SWAP_NEW,
+                               MR_TOP + MR_SWAP_OLD + MR_MAIN_ROW, MR_TOP + MR_SWAP_NEW + MR_MAIN_ROW),
+           "lost", (MT_CARRY["lost"],))
+# Control: the result keeps the swap and main's row, so nothing is dropped and the merge is allowed.
+_mt_allow("builder-refuse: control, a merge that keeps the lane's PUSH_DENIED swap and main's PUSH_ALLOWED row, is allowed",
+          _mr_case("mr-identifier-swap-both-kept", MR_TOP + MR_SWAP_OLD, MR_TOP + MR_SWAP_NEW,
+                   MR_TOP + MR_SWAP_OLD + MR_MAIN_ROW, MR_TOP + MR_SWAP_NEW + MR_SWAP_OLD + MR_MAIN_ROW))
+
+# The lane renames a function that main keeps under its base name, and the result keeps the base name. The renamed
+# function is a statement the lane added, and the result lacks it, so the drop reads lost.
+_mt_refuse("builder-refuse: a merge that keeps a function's base name and drops the lane's rename of it is refused as "
+           "lost", _mr_case("mr-def-rename-dropped", MR_TOP + MR_F4_BASE, MR_TOP + MR_F4_RENAMED + MR_LANE_ROW,
+                            MR_TOP + MR_F4_BASE + MR_MAIN_ROW, MR_TOP + MR_F4_BASE + MR_LANE_ROW + MR_MAIN_ROW),
+           "lost", (MT_CARRY["lost"],))
+# Control: the result keeps the lane's renamed function.
+_mt_allow("builder-refuse: control, a merge that keeps the lane's renamed function, with both sides' new rows, is allowed",
+          _mr_case("mr-def-rename-kept", MR_TOP + MR_F4_BASE, MR_TOP + MR_F4_RENAMED + MR_LANE_ROW,
+                   MR_TOP + MR_F4_BASE + MR_MAIN_ROW, MR_TOP + MR_F4_RENAMED + MR_LANE_ROW + MR_MAIN_ROW))
+
 FAMILY = _MU5_PRIOR_FAMILY
