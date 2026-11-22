@@ -1310,10 +1310,14 @@ def _lint_targets(deadline=None):
     """What each `--lane-lint <target>` process on this machine names: a set of PR numbers (a target of 1 to
     6 digits) and a set of other targets (a ref or a sha). One `ps`; raises when ps cannot run or no time is left."""
     import subprocess
+    try:
+        import _nowindow  # the one home of a no-window child start
+    except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
+        _nowindow = subprocess
     timeout = GOAL_READ_TIMEOUT if deadline is None else _goal_left(deadline)
     if timeout <= 0:
         raise OSError("no time left for ps")
-    out = subprocess.run(["ps", "-axo", "args="], stdin=subprocess.DEVNULL, capture_output=True, text=True,
+    out = _nowindow.run(["ps", "-axo", "args="], stdin=subprocess.DEVNULL, capture_output=True, text=True,
                          timeout=timeout)
     if out.returncode != 0:
         raise OSError("ps failed")
