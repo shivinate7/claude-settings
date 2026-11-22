@@ -73,7 +73,7 @@
 # and github.event_name == 'pull_request' as true only with a base. ${{ github.base_ref }} is --base without
 # its remote; ${{ github.event.pull_request.head.sha }} is CI_JOB_HEAD_SHA when it is set and not blank (the lane lint sets it to the
 # pushed head, since its HEAD is a merge commit), else HEAD; ${{ github.event.pull_request.base.sha }} is the commit of --base. No step's env gets
-# CI_JOB_HEAD_SHA. Any other expression makes the step unknown.
+# CI_JOB_HEAD_SHA. ${{ github.workspace }} is the git top level this run stands in. Any other expression makes the step unknown.
 # Each step's env sets GITHUB_BASE_REF to that value (the step's own env: wins), as GitHub does on a pull-request run; with no --base it is unset, as off one.
 # A tool is missing when a line's command is not on PATH, or the step exits 127.
 # --step NAME (repeatable) runs only the steps with those names, of any kind, each as a plain run (never with --lint, which
@@ -1081,6 +1081,7 @@ def main(argv):
     values = {"base": base or "", "github.base_ref": base.split("/", 1)[1] if base and "/" in base else (base or ""),
               "github.event.pull_request.head.sha": os.environ.get(HEAD_SHA_ENV, "").strip() or git("rev-parse", "HEAD", cwd=top) or "",
               **({"github.event.pull_request.base.sha": base_sha} if base_sha else {}),  # a base that does not resolve leaves the expression unread
+              "github.workspace": top,  # the lint's checkout root, as GITHUB_WORKSPACE is on the runner; env: and with: paths read it through expand()
               "github.token": ""}  # no runner token here (RUNNER_UNSET): a step that maps it into GH_TOKEN reads gh's own login
     log = os.environ.get("VERDICT_LOG")
     if not log and not dry:
