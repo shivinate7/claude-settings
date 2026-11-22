@@ -215,13 +215,13 @@ def unshallow(block, top, dry, tally):
               ((done.stderr.strip().splitlines() or ["no message"])[-1]))
 
 
-SCOPE_TERM = re.compile(r"needs\.scope\.outputs\.([\w-]+)\s*(==\s*'true'|!=\s*'false')")  # the two forms that read a flag as on; any other form stays unreadable
+SCOPE_TERM = re.compile(r"needs\.scope\.outputs\.([\w-]+)\s*(==\s*'true'|!=\s*'false'|!=\s*'true')")  # the three forms CI writes to read a flag; any other form stays unreadable
 SCOPE_SCRIPT = ".github/scripts/ci-scope.sh"  # the one home of the scope flags: CI's scope job runs it too
 SCOPE = {"flags": None, "why": None, "unknown": set()}  # flags: {name: "true"|"false"} from the script; None with a base: it did not run, why says so; unknown: the flags read as true
 
 
 def scope_term(m):
-    """T or F for one `needs.scope.outputs.X == 'true'` or `!= 'false'` term. Without flags, or for a flag the script did not give,
+    """T or F for one `needs.scope.outputs.X == 'true'`, `!= 'true'` or `!= 'false'` term. Without flags, or for a flag the script did not give,
     it reads T (the step runs); the second case is listed in SCOPE["unknown"], which main() reports as UNKNOWN scope."""
     flags = SCOPE["flags"]
     if flags is None:
@@ -232,7 +232,8 @@ def scope_term(m):
     if value not in ("true", "false"):
         SCOPE["unknown"].add(m.group(1))
         return " T "
-    return " T " if value == "true" else " F "
+    on = value == "true"  # `== 'true'` and `!= 'false'` hold when the flag is on; `!= 'true'` holds when it is off
+    return " T " if on == (m.group(2).startswith("==") or m.group(2).endswith("'false'")) else " F "
 
 
 def scope_flags(top, base_sha, head_ref, head_sha):
