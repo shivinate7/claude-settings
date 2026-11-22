@@ -2044,6 +2044,40 @@ def case_read_pr_maps_rest_fields():
           got["state"] == "OPEN" and got["isDraft"] is False and got["headRefOid"] == SHA, repr(got))
 
 
+def case_gh_json_passes_its_timeout_to_gh():
+    """gh_json hands its one gh read the timeout it is given, and gh's own default (READ_TIMEOUT) when it is given
+    none, so a caller with a short bound (the goal-order reminder in precompact_handoff.py) is not held for 60 s.
+    The errors it raises do not change with a timeout. In process, on a fake gh that keeps gh's own default."""
+    mod = load_module()
+    seen = []
+    reply = [0, json.dumps({"ok": True}), ""]
+
+    def fake_gh(args, cwd, timeout=mod.READ_TIMEOUT):
+        seen.append(timeout)
+        return tuple(reply)
+
+    def call(*extra, **kw):
+        del seen[:]
+        try:
+            with mock.patch.object(mod, "gh", fake_gh):
+                return mod.gh_json(["api", "repos/o/r/pulls/7"], None, *extra, **kw), None
+        except Exception as e:
+            return None, e
+
+    got, err = call()
+    check("gh_json with no timeout reads with READ_TIMEOUT, as before",
+          got == {"ok": True} and seen == [mod.READ_TIMEOUT], "got=%r seen=%r err=%r" % (got, seen, err))
+    got, err = call(timeout=5)
+    check("gh_json(timeout=5) reads with a 5 s timeout",
+          got == {"ok": True} and seen == [5], "got=%r seen=%r err=%r" % (got, seen, err))
+    reply[:] = [1, "", "gh: Not Found (HTTP 404)"]
+    got, err = call(gone="http 404", timeout=5)
+    check("gh_json(timeout=5): a 404 read still raises NoPR", isinstance(err, mod.NoPR), "err=%r" % (err,))
+    got, err = call(timeout=5)
+    check("gh_json(timeout=5): a failed read with no `gone` text still raises Unknown",
+          isinstance(err, mod.Unknown), "err=%r" % (err,))
+
+
 MCP_READY = "mcp__github__update_pull_request"   # the cloud's ready route: draft false marks a PR ready
 
 
@@ -2507,6 +2541,7 @@ def main():
     case_draft_and_missing_pr_start_no_watch_by_rest()
     case_empty_selector_without_a_branch_is_unknown()
     case_read_pr_maps_rest_fields()
+    case_gh_json_passes_its_timeout_to_gh()
     case_hash_number_selector_reads_the_number_route()
     case_api_reads_are_gets_unless_the_case_opts_in()
     if not cost_probe.run_class(CostTests):
