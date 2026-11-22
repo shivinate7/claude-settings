@@ -3207,12 +3207,104 @@ def test_file_parts(text: str):
     return {"cases": cases, "others": others, "keys": keys, "calls": calls, "key_nodes": key_nodes}
 
 
-def _case_shape(node) -> str:
+# The verdict words a case asserts. A case key masks them, so a flip of the expected verdict (refused to asked)
+# keeps the key.
+_VERDICT_WORDS = re.compile(
+    r"(?<![A-Za-z])(?:allow(?:s|ed)?|ask(?:s|ed)?|den(?:y|ies|ied)|refus(?:e|es|ed)|lift(?:s|ed)?)(?![A-Za-z])",
+    re.IGNORECASE)
+
+
+def _is_label(arg) -> bool:
+    """True when `arg` reads as a case's description: a string of three words or more, plain, `%`-formatted or
+    an f-string."""
+    import ast
+    left = arg.left if isinstance(arg, ast.BinOp) and isinstance(arg.op, ast.Mod) else arg
+    if isinstance(left, ast.Constant) and isinstance(left.value, str):
+        return left.value.count(" ") >= 2
+    if isinstance(left, ast.JoinedStr):
+        return "".join(v.value for v in left.values
+                       if isinstance(v, ast.Constant) and isinstance(v.value, str)).count(" ") >= 2
+    return False
+
+
+def _case_key(node, renames=None) -> str:
+    """The key of a case across a rename of its description or its function and a flip of its expected verdict:
+    the statement with its function name and docstring dropped, the description of a call (its first argument,
+    when it reads as a sentence) blanked, each verdict word masked, and a verdict keyword dropped. `renames` maps the old name of a function
+    to its new name (`_def_renames`), applied to each name the statement reads."""
     import ast
     import copy
-    bare = copy.copy(node)
-    bare.name = ""
-    return ast.dump(bare)
+    tree = copy.deepcopy(node)
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Constant) and isinstance(n.value, str):
+            n.value = _VERDICT_WORDS.sub("V", n.value)
+        elif isinstance(n, ast.Name):
+            n.id = _VERDICT_WORDS.sub("V", (renames or {}).get(n.id, n.id))
+        elif isinstance(n, ast.Attribute):
+            n.attr = _VERDICT_WORDS.sub("V", n.attr)
+        elif isinstance(n, ast.keyword) and n.arg:
+            n.arg = _VERDICT_WORDS.sub("V", n.arg)
+        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if not isinstance(n, ast.ClassDef):
+                n.name = ""
+            if n.body and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant) \
+                    and isinstance(n.body[0].value.value, str):
+                n.body = n.body[1:]
+        elif isinstance(n, ast.Call):
+            if n.args and _is_label(n.args[0]):
+                n.args[0] = ast.Constant(value="<label>")
+            # A verdict given by keyword (`want="ask"`) is the verdict itself: with the word masked, the keyword
+            # that a flip adds or drops (the default verdict is no keyword) is no difference.
+            n.keywords = [k for k in n.keywords if not (
+                isinstance(k.value, ast.Constant) and isinstance(k.value.value, str)
+                and _VERDICT_WORDS.fullmatch(k.value.value))]
+    return ast.dump(tree)
+
+
+def _module_defs(part):
+    """The module-level functions of `part` (from `test_file_parts`), by name."""
+    return {k[2]: n for k, n in part["key_nodes"]
+            if len(k) == 3 and k[0] == "" and k[1] in ("FunctionDef", "AsyncFunctionDef")}
+
+
+def _def_renames(part, result):
+    """The functions of `part` that `result` holds under another name: `{old name: new name}`. A function the
+    result lacks by name is paired with a function that only the result has, when their case keys are equal. A
+    function that calls a renamed function pairs once that one has: the pairing runs until nothing new pairs."""
+    mine, theirs = _module_defs(part), _module_defs(result)
+    open_mine = [name for name in mine if name not in theirs]
+    free = [name for name in theirs if name not in mine]
+    renames, changed = {}, True
+    while changed:
+        changed = False
+        for name in open_mine:
+            if name in renames:
+                continue
+            key = _case_key(mine[name], renames)
+            for fresh in free:
+                if _case_key(theirs[fresh]) == key:
+                    renames[name] = fresh
+                    free.remove(fresh)
+                    changed = True
+                    break
+    return renames
+
+
+def _stable_counts(part, renames=None):
+    """`(statements, calls, listed)` for `part`: how many module statements and how many module-level calls hold
+    each case key, and the `[(statement key, case key)]` of its statements."""
+    import collections
+    listed = [(k, _case_key(n, renames)) for k, n in part["key_nodes"]]
+    calls = collections.Counter(_case_key(n, renames) for _, n in part["calls"])
+    return collections.Counter(c for _, c in listed), calls, listed
+
+
+def _stable_versions(part, renames):
+    """`_key_versions` with each statement read as its case key (`_case_key`)."""
+    versions = {}
+    for key, node in part["key_nodes"]:
+        versions[key] = versions.get(key, ()) + (_case_key(node, renames),)
+    return versions
 
 
 def _key_versions(parts):
@@ -3327,15 +3419,15 @@ def merge_test_issue(result, first, second, elsewhere, base=None):
     fresh = {k: v for k, v in result["cases"].items() if k not in parent_keys}
     fresh_shapes = {}
     for key, (_, node) in fresh.items():
-        fresh_shapes.setdefault(_case_shape(node), key)
+        fresh_shapes.setdefault(_case_key(node), key)
     renamed = set()
     for key in parent_keys - set(result["cases"]):
         node = (first["cases"].get(key) or second["cases"][key])[1]
         if elsewhere(key):
             issues.add("moved")
-        elif _case_shape(node) in fresh_shapes:
+        elif _case_key(node) in fresh_shapes:
             issues.add("renamed")
-            renamed.add(fresh_shapes[_case_shape(node)])
+            renamed.add(fresh_shapes[_case_key(node)])
         else:
             issues.add("lost")
     if set(fresh) - renamed:
@@ -3349,14 +3441,21 @@ def merge_test_issue(result, first, second, elsewhere, base=None):
         # header): a result that keeps the other parent's version drops the edit, though every key survives.
         read = (first, second, base, result)
         unions = _union_keys(read)
-        if _edit_dropped(*({key: dump for key, (dump, _) in p["cases"].items()} for p in read)) or _edit_dropped(
-                *(_key_versions(p) for p in read), union=unions):
+        # An edit that only renames a case or flips its verdict is no edit to keep: the exact reading flags a key
+        # both parents changed, and the case-key reading must flag it too.
+        if (_edit_dropped(*({key: dump for key, (dump, _) in p["cases"].items()} for p in read))
+                and _edit_dropped(*({key: _case_key(node) for key, (_, node) in p["cases"].items()} for p in read))
+        ) or (_edit_dropped(*(_key_versions(p) for p in read), union=unions)
+              and _edit_dropped(*(_stable_versions(p, _def_renames(p, result)) for p in read), union=unions)):
             issues.add("lost")
-    # A statement a parent holds (not an import, not a comment) that the result no longer holds.
+    # A statement a parent holds (not an import, not a comment) that the result no longer holds, unless the result
+    # holds as many statements with its case key: a case that a rename or a flipped verdict carried over.
     have = _key_counts(result)
     for part in parents:
-        for key, count in _key_counts(part).items():
-            if have.get(key, 0) < count:
+        gone = {key for key, count in _key_counts(part).items() if have.get(key, 0) < count}
+        if gone:
+            held, kept = _stable_counts(part, _def_renames(part, result)), _stable_counts(result)
+            if any(kept[0][case] < held[0][case] for key, case in held[2] if key in gone):
                 issues.add("lost")
     kept = {d for p in parents for d, _ in p["others"]}
     if base is not None:
@@ -3369,9 +3468,15 @@ def merge_test_issue(result, first, second, elsewhere, base=None):
     for dump, node in result["calls"]:
         if dump not in held_calls:
             issues.add("skip" if _skip_marks(node) else "new")
-    for dump in held_calls:
-        needed = max(sum(1 for d, _ in p["calls"] if d == dump) for p in parents)
-        if sum(1 for d, _ in result["calls"] if d == dump) < needed:
+    gone = [dump for dump in held_calls
+            if sum(1 for d, _ in result["calls"] if d == dump)
+            < max(sum(1 for d, _ in p["calls"] if d == dump) for p in parents)]
+    if gone:
+        # Held by key, not by text: a call whose description, function name or expected verdict changed still
+        # holds its case. A case is lost only when the result holds fewer calls of its key than a parent.
+        kept = _stable_counts(result)[1]
+        held = [_stable_counts(p, _def_renames(p, result))[1] for p in parents]
+        if any(kept[case] < max(h[case] for h in held) for h in held for case in h):
             issues.add("lost")
     return next((name for name in MERGE_TEST_ORDER if name in issues), "")
 
