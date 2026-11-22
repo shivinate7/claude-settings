@@ -176,6 +176,10 @@
                           no pull request. A PASS on a PR number posts one comment on it, as the account that runs it
                           (the join and --reviewed count only an owner's); any session may run it, cloud included. Cost per call: one
                           ci-job run (about 550 s, measured once on one PR head), one worktree, and on a PASS one comment post.
+                          When another lane lint of this clone is running or queued (a live pid in a locked merge-wt- tree marked `lane lint`), it first prints one line:
+                          the ready PRs with passing records (the `batch` rows of --reviewed on main, the front PR left out) and the command `combine_train.py --build`
+                          that builds a train from them (10 or more; fewer merge alone). A failed read prints that it is unknown; the lint goes on. A batch runner's
+                          pre-join call prints none. Cost: one `git worktree list`, and only when another lint is seen, one `merge --reviewed` read.
                           Every head, a ref or commit too, is first merged into origin/<base> with `git merge-tree --write-tree`. A conflict FAILs,
                           naming the base (never lifted), and nothing is resolved or pushed. A PR on main (not an integration PR, not a Record-claim head)
                           whose head lacks main's tip is linted as the merge commit of the head and the tip. After a full PASS (the lint, the mutation test
@@ -3019,7 +3023,8 @@ def open_worktree(root, info, base):
     """Fetch, check that the head is the one gh named, and make a detached worktree there."""
     return add_worktree(root, fetch_pr_head(root, info, base)["head"])
 
-MERGE_LOCK = re.compile(r"merge tool, pid (\d+)")
+LANE_LINT_LOCK_MARK = ", lane lint"  # the lock reason of a lane lint's tree: `merge tool, pid N, lane lint`; other_lane_lint_pids reads it
+MERGE_LOCK = re.compile(r"merge tool, pid (\d+)(?:" + re.escape(LANE_LINT_LOCK_MARK) + ")?")
 # A run folder in the temp folder names its maker's pid: ci-job-lint-<pid>-, ci-job-pin-<pid>-<sha7>-, mutate_guard_<pid>-.
 # A folder from before the pid was added has no digits and a dash at that place, so it never matches.
 RUN_FOLDER = re.compile(r"(?:ci-job-lint-(\d+)-|ci-job-pin-(\d+)-[0-9a-f]{7}-|mutate_guard_(\d+)-)")
@@ -3155,6 +3160,66 @@ def add_worktree(root, head):
         shutil.rmtree(tmp, ignore_errors=True)
         raise Stop("cannot make the worktree: " + out)
     return tmp, wt
+
+def add_lane_lint_worktree(root, head):
+    """add_worktree, then the lock reason gains LANE_LINT_LOCK_MARK so another lane lint can see this one. The relabel is best effort: a failed one leaves the
+    tree locked as before and this lint unseen, which only costs the other lint its hint."""
+    tmp, wt = add_worktree(root, head)
+    reason = f"merge tool, pid {os.getpid()}{LANE_LINT_LOCK_MARK}"
+    if not git(root, "worktree", "unlock", wt)[0] and git(root, "worktree", "lock", "--reason", reason, wt)[0]:
+        git(root, "worktree", "lock", "--reason", f"merge tool, pid {os.getpid()}", wt)  # never leave the tree unlocked for the janitor
+    return tmp, wt
+
+
+def other_lane_lint_pids(root):
+    """-> the pids, other than this run's, of live lane lints that hold a locked merge-wt- tree of this clone: a lint that is running, or queued behind the machine's load
+    after it made its tree. Reads one `git worktree list`; a lint in another clone, container or cloud session is not seen. A read that fails sees none."""
+    temp = os.path.realpath(tempfile.gettempdir())
+    c, out = git(root, "worktree", "list", "--porcelain")
+    if c:
+        return []
+    pids, path = [], None
+    for line in out.splitlines():
+        if line.startswith("worktree "):
+            path = os.path.realpath(line[len("worktree "):])
+        elif line.startswith("locked") and path:
+            m = MERGE_LOCK.fullmatch(line[len("locked"):].strip())
+            tmp = os.path.dirname(path)
+            if (m and line.rstrip().endswith(LANE_LINT_LOCK_MARK) and os.path.basename(path) == "tree" and os.path.basename(tmp).startswith("merge-wt-")
+                    and os.path.dirname(tmp) == temp and int(m.group(1)) != os.getpid() and pid_alive(int(m.group(1)))):
+                pids.append(int(m.group(1)))
+    return pids
+
+
+COMBINE_BACKLOG = 10  # equal to combine_train.BUILD_THRESHOLD: merge.py never imports the tool (its control test), so the number is kept in both
+
+
+def combine_hint(root, host):
+    """Print one line when another lane lint is running or queued: the ready PRs whose records pass, and the command that builds a train from them, so a lane
+    does not wait on a queue the batch could skip (decision session-tiers, merge alone or combine). The set is the one `combine_train.py --build` takes
+    (batch_rows there): rows whose act is `batch` on a main base, the lowest-numbered one (the front PR, which merges alone) left out. Never stops a lint: a read that fails prints one line saying so."""
+    pids = other_lane_lint_pids(root)
+    if not pids:
+        return
+    who = f"another lane lint is running or queued (pid {', '.join(map(str, sorted(pids)))})"
+    try:
+        rows = []
+        _lines, pulls, _totals = reviewed_read(host, None, ledger=rows)
+        stacked = {d["number"] for d in pulls if d["base"]["ref"] != "main"}
+        ready = sorted(r["number"] for r in rows if r["act"] == "batch" and r["number"] not in stacked)[1:]
+    except Exception as e:  # a hint is never a verdict: an unreadable list is reported as unknown
+        say(f"merge: {who}; the ready PRs could not be read ({type(e).__name__}), so no combine hint. Run `merge --reviewed`.")
+        return
+    names = ", ".join(f"#{n}" for n in ready) or "none"
+    tool = os.path.join(os.path.dirname(os.path.abspath(__file__)), "combine_train.py")
+    if not os.path.isfile(tool):
+        say(f"merge: {who}. Ready PRs with passing records: {names}. This checkout has no combine command.")
+    elif len(ready) < COMBINE_BACKLOG:
+        say(f"merge: {who}. Ready PRs with passing records: {names}, under the backlog of {COMBINE_BACKLOG}, so they merge alone and no train is built.")
+    else:
+        say(f"merge: {who}. Combine the {len(ready)} ready PRs with passing records ({names}) instead of linting one by one: "
+            f"python3 {tool} --root {root} --build --name <name>")
+
 
 def drop_worktree(root, tmp, wt):
     git(root, "worktree", "unlock", wt)
@@ -4022,8 +4087,10 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     and a corrupt, empty or unreadable file is a miss. The mutation test run (mutate_run_check) does not go through this path and is not saved.
     Before any tree is made, refuse_full_disk refuses a drive under the guard's full disk floor, in a cloud session and a local one."""
     refuse_full_disk(root)
+    host = host or Host(cwd=root)
+    if not pre_join:  # the batch runner's parallel pre-join lints are queued by design; a hint on each would cost one PR-list read apiece
+        combine_hint(root, host)
     if target.isdigit():
-        host = host or Host(cwd=root)
         n = int(target)
         info = host.pr(n)
         base = info["base"]
@@ -4034,10 +4101,10 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             if still_open:
                 raise Stop(f"the body of #{n} names {', '.join(f'#{m}' for m in still_open)} as replaced, and it is open. "
                            f"Close it as replaced by #{n} (a pointer comment; its branch stays), then run `merge --lane-lint {n}` again. {REPLACED_CITE}")
-        tmp, wt = add_worktree(root, head)
+        tmp, wt = add_lane_lint_worktree(root, head)
     else:
         head, base = lane_head_and_base(root, target, base)
-        tmp, wt = add_worktree(root, head)
+        tmp, wt = add_lane_lint_worktree(root, head)
     touched, pushed_merge = None, None
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
         pin_notes, fails, reports, stop = [], [], [], ""
