@@ -13,7 +13,7 @@ State: target, not live, for every other child repo. Degen and home switch to pe
 - The merge tool is one shared script that every repo runs (`merge/merge.py`). A cutover in one repo gives that tool two rule sets. The exception accepts that for degen and home.
 - Decision `uniform-over-variants` forbids one rule set per repo. Q1 a applies it to the cutover. The exception above is the one departure.
 - Child repos read the stable branch (decision `stable-branch`) and fall back as decision `stable-fallback-warn` says. Both land before the cutover.
-- Until the cutover, every repo except degen and home keeps its batch path, and a red main keeps the brake of decision `no-merge-onto-red-main`.
+- Until the cutover, every repo except degen and home keeps its batch path, and a red main follows decision `no-merge-onto-red-main` (a PR may merge onto a red main; UNKNOWN still refuses).
 
 Why: act 4 changes the shared merge tool. Child repos would lose batching and get no stable branch or revert route if the cutover came first in one repo. Refuter, 2026-11-11 22:58 CST, gap 3.
 
