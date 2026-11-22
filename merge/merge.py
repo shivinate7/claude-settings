@@ -3208,7 +3208,7 @@ def combine_hint(root, host):
         stacked = {d["number"] for d in pulls if d["base"]["ref"] != "main"}
         ready = sorted(r["number"] for r in rows if r["act"] == "batch" and r["number"] not in stacked)[1:]
     except Exception as e:  # a hint is never a verdict: an unreadable list is reported as unknown
-        say(f"merge: {who}; the ready PRs could not be read ({type(e).__name__}), so no combine hint. Run `merge --reviewed`.")
+        say(f"merge: {who}. The ready PRs with passing records are unknown: the read failed ({type(e).__name__}), so no combine hint. Run `merge --reviewed`.")
         return
     names = ", ".join(f"#{n}" for n in ready) or "none"
     tool = os.path.join(os.path.dirname(os.path.abspath(__file__)), "combine_train.py")
