@@ -14,9 +14,13 @@ StepSelect: --step runs only the named steps; a name no step has is one unknown 
 SuiteSteps: --lint runs a CI step that runs a hooks/merge/lint suite only when the selector picks it for the diff; a selector
   that cannot run exits 2.
   SuiteSteps also covers a multi-line step with a preamble line, a suite with an argument, a suite that reaches a changed
-  module through an import, a selector that hangs, a picked suite whose step is in another job, and a guard preamble
+  module through an import, a selector that hangs, a guard preamble
   (`[ -d node_modules/x ] || npm ci`, or an if block) before a picked suite. It also covers a preamble line that ends in
   `&&`, `||` or `|`, which the marker must not join, and a failed preamble that does not block a lint step after it.
+  The sibling pass: a suite the diff picks that only another job of the workflow holds runs through that job's own step, and
+  a FAIL there exits 1. A job on a windows or macos runner prints one `not run` line that names the runner, and runs nothing.
+  A suite two jobs hold runs once. A step of that job with an `if:` or `env:` the runner cannot read reads unknown, exit 2.
+  --plan prints `would run` for that job's picked suite steps and runs none. Each case counts the suite's runs in a file.
 Lint mode: a --lint run that picks no lint step is unknown, exit 2; a lint step that a pull-request run would run reads
 unknown when it is skipped; a lint step that runs only off a pull request reads skipped, and the run still exits 0.
 ParallelLint: --lint runs its lint steps at once (CI_JOB_LINT_WORKERS, else the cpu count up to 4), keeps the printed
@@ -71,12 +75,13 @@ ENV.pop("CI_JOB_NO_CACHE", None)  # the rerun cache's knob: a case sets it, and 
 ENV["XDG_CACHE_HOME"] = os.path.join(RUN_FOLDER, "xdg-cache")  # the rerun cache's store: no case writes the real ~/.cache
 
 
-def workflow(*steps, job="lane", other=None):
+def workflow(*steps, job="lane", other=None, other_runner="ubuntu-latest", extra=()):
     """The workflow of one run: `job` runs `steps`, and a second job named `other` runs the `other` steps (by default one
-    step that exits 1)."""
+    step that exits 1) on `other_runner`. extra: more jobs after `other`, each (name, runner, steps)."""
     other_steps = "".join(other) if other is not None else "      - run: exit 1\n"
     return ("name: t\non: push\njobs:\n  %s:\n    runs-on: ubuntu-latest\n    steps:\n" % job) + "".join(steps) + \
-        "\n  other:\n    runs-on: ubuntu-latest\n    steps:\n" + other_steps
+        "\n  other:\n    runs-on: %s\n    steps:\n" % other_runner + other_steps + \
+        "".join("\n  %s:\n    runs-on: %s\n    steps:\n" % (name, runner) + "".join(more) for name, runner, more in extra)
 
 
 def step(name, run=None, **keys):
@@ -112,19 +117,23 @@ class Job(unittest.TestCase):
     def git(self, *a):
         subprocess.run(["git", "-C", self.root, *a], check=True, env=ENV, capture_output=True)
 
-    def job_call(self, *steps, args=(), env=None, script=CI_JOB, launch=(), job="lane", other=None):
+    def job_call(self, *steps, args=(), env=None, script=CI_JOB, launch=(), job="lane", other=None, other_runner="ubuntu-latest",
+                 extra=()):
         """argv and env of one run of the job: its workflow is written into the throwaway repo. launch: python's own flags
         before the script, such as `-c` with a launcher's code. job: the job the steps belong to; other: the steps of a second
-        job named `other` (by default one step that exits 1)."""
+        job named `other` (by default one step that exits 1), which runs on other_runner; extra: more jobs, each (name, runner,
+        steps)."""
         path = os.path.join(self.root, "wf.yml")
         with open(path, "w", encoding="utf-8", newline="\n") as f:
-            f.write(workflow(*steps, job=job, other=other))
+            f.write(workflow(*steps, job=job, other=other, other_runner=other_runner, extra=extra))
         env = {**ENV, "VERDICT_LOG": self.log, **{k: v for k, v in os.environ.items() if k == "VERDICT_HEARTBEAT"},
                **(env or {})}
         return [sys.executable, *launch, script, job, "--workflow", path, *args], env
 
-    def run_job(self, *steps, args=(), env=None, script=CI_JOB, launch=(), job="lane", other=None, stdin=None):
-        argv, env = self.job_call(*steps, args=args, env=env, script=script, launch=launch, job=job, other=other)
+    def run_job(self, *steps, args=(), env=None, script=CI_JOB, launch=(), job="lane", other=None, other_runner="ubuntu-latest",
+                extra=(), stdin=None):
+        argv, env = self.job_call(*steps, args=args, env=env, script=script, launch=launch, job=job, other=other,
+                                  other_runner=other_runner, extra=extra)
         done = subprocess.run(argv, cwd=self.root, capture_output=True, text=True, env=env, timeout=120, stdin=stdin)
         lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("log=")]
         return done.returncode, lines, done.stdout + done.stderr
@@ -1498,18 +1507,117 @@ class SuiteSteps(Job):
         self.assertEqual((proc.returncode, by_step(lines)), (2, {"Wiring suite": "unknown"}),
                          "a selector that hangs must read as unknown on the CI step, and the job must exit 2\n" + out + err)
 
-    def test_a_picked_suite_whose_step_is_only_in_another_job_is_one_not_run_line_that_names_it(self):
-        self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",))},
+    @staticmethod
+    def counted(text):
+        """A suite's text that first appends one line to suite-runs.txt in the repo root, where CI's step runs it: the file
+        counts how many times the suite ran, whichever job ran it."""
+        return "with open('suite-runs.txt', 'a', encoding='utf-8') as f:\n    f.write('ran\\n')\n" + text
+
+    def suite_runs(self):
+        """How many times a counted suite ran in this repo."""
+        try:
+            with open(os.path.join(self.root, "suite-runs.txt"), encoding="utf-8") as f:
+                return len(f.read().split())
+        except OSError:
+            return 0
+
+    def sibling_repo(self, code=0):
+        """The repo of the sibling-pass cases: the diff holds only hooks/bridge.py, which the counted suite hooks/test_wiring.py
+        opens, so the selector picks that suite and LINT_STEP runs and passes. The suite exits `code`."""
+        self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": self.counted(suite_text(("bridge.py",), code=code))},
                        {"hooks/bridge.py": "V = 2\n"}, lint=True)
         self.assertEqual(self.diff(), ["hooks/bridge.py"], "the scope: the diff holds only the file the suite opens")
-        rc, lines, out = self.run_job(step("Docs", "echo docs"), self.LINT_STEP, job="checks", other=[self.WIRING],
-                                      args=self.LINT)
-        named = [ln for ln in lines if "Wiring suite" in ln or "hooks/test_wiring.py" in ln]
-        self.assertEqual(len(named), 1,
-                         "--lint must print one line for a picked suite whose step is only in job other, never silence\n" + out)
-        self.assertTrue(NOT_RUN.match(named[0]), "that line must start with `not run`\n" + out)
-        self.assertRegex(named[0], r"\bother\b", "that line must name job other\n" + out)
-        self.assertEqual(rc, 0, "a not-run line never moves the exit code\n" + out)
+
+    DOCS = step("Docs", "echo docs")  # a step of the linted job that is neither lint nor suite
+    UNREADABLE = (("an if:", {"if": "${{ github.ref == 'refs/heads/main' }}"}),  # the runner cannot read either key
+                  ("an env:", {"env": {"TOKEN": "${{ secrets.TOKEN }}"}}))
+
+    def test_a_picked_suite_held_only_by_another_ubuntu_job_runs_that_jobs_step_and_passes(self):
+        # the control is test_the_same_suite_in_the_job_that_runs_is_run_and_passes: the same suite in the linted job
+        self.sibling_repo()
+        rc, lines, out = self.run_job(self.DOCS, self.LINT_STEP, job="checks", args=self.LINT,
+                                      other=[step("Other tool", "touch other-step-ran.txt"),
+                                             step("Other lint", "python3 lint/check_clean.py"), self.WIRING])
+        self.assertEqual(by_step(lines).get("Wiring suite"), "PASS",
+                         "--lint ran no picked suite whose CI step is in another ubuntu job of the workflow\n" + out)
+        self.assertEqual((rc, self.suite_runs()), (0, 1), "the suite must run once, and the job exit 0\n" + out)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "other-step-ran.txt")),
+                         "the sibling pass ran a step of job other that holds no picked suite\n" + out)
+        self.assertNotIn("Other lint", out, "the sibling pass ran or printed a lint step of job other, which is CI's, not the lane lint's\n" + out)
+
+    def test_a_picked_suite_that_fails_in_another_ubuntu_job_reads_fail_and_the_job_exits_one(self):
+        # the control is test_a_picked_suite_that_fails_reads_fail_and_the_job_exits_one: the same suite in the linted job
+        self.sibling_repo(code=1)
+        rc, lines, out = self.run_job(self.DOCS, self.LINT_STEP, job="checks", other=[self.WIRING], args=self.LINT)
+        self.assertEqual(by_step(lines).get("Wiring suite"), "FAIL",
+                         "--lint did not read a picked suite that exits 1 in another ubuntu job as FAIL\n" + out)
+        self.assertEqual(rc, 1, "a FAIL in a sibling pass must reach the exit code, though the linted job's own steps pass\n" + out)
+
+    def test_a_picked_suite_held_only_by_a_windows_or_macos_job_is_one_not_run_line_that_names_the_job_and_its_runner(self):
+        self.sibling_repo()
+        for runner in ("windows-latest", "macos-14"):
+            with self.subTest(runner=runner):
+                rc, lines, out = self.run_job(self.DOCS, self.LINT_STEP, job="checks", other=[self.WIRING], other_runner=runner,
+                                              args=self.LINT)
+                named = [ln for ln in lines if "Wiring suite" in ln or "hooks/test_wiring.py" in ln]
+                self.assertEqual(len(named), 1,
+                                 "--lint must print one line for a picked suite whose step is only in job other, never silence\n" + out)
+                self.assertTrue(NOT_RUN.match(named[0]), "that line must start with `not run`\n" + out)
+                self.assertRegex(named[0], r"\bother\b", "that line must name job other\n" + out)
+                self.assertIn(runner, named[0], "that line must name the runner the job runs on\n" + out)
+                self.assertEqual((rc, self.suite_runs()), (0, 0),
+                                 "a not-run line never moves the exit code, and the suite runs nowhere\n" + out)
+
+    def test_a_suite_held_by_the_linted_job_and_another_job_runs_once(self):  # the control for the case below: green before the sibling pass too
+        self.sibling_repo()
+        rc, lines, out = self.run_job(self.WIRING, self.LINT_STEP, job="checks", other=[self.WIRING], args=self.LINT)
+        self.assertEqual((rc, self.suite_runs()), (0, 1), "a suite held by the linted job and by job other must run once\n" + out)
+
+    def test_a_suite_held_by_two_other_jobs_runs_once(self):
+        self.sibling_repo()
+        rc, lines, out = self.run_job(self.DOCS, self.LINT_STEP, job="checks", other=[self.WIRING], args=self.LINT,
+                                      extra=[("third", "ubuntu-latest", [self.WIRING])])
+        self.assertEqual(self.suite_runs(), 1, "a picked suite that two other jobs hold must run once, in the first of them\n" + out)
+        self.assertEqual(rc, 0, out)
+        later = [ln for ln in lines if NOT_RUN.match(ln) and "job third" in ln]
+        self.assertEqual(len(later), 1, "the second job must print one not-run line that names it, for the suite that already ran\n" + out)
+
+    def test_a_sibling_jobs_picked_suite_step_with_an_if_or_env_the_runner_cannot_read_is_unknown(self):
+        # the control is test_the_same_unreadable_key_on_a_picked_suite_step_of_the_linted_job_reads_unknown
+        self.sibling_repo()
+        for what, keys in self.UNREADABLE:
+            with self.subTest(what):
+                unreadable = step("Wiring suite", "python3 hooks/test_wiring.py", **keys)
+                rc, lines, out = self.run_job(self.DOCS, self.LINT_STEP, job="checks", other=[unreadable], args=self.LINT)
+                self.assertEqual(by_step(lines).get("Wiring suite"), "unknown",
+                                 "--lint did not read a sibling job's picked suite step with %s it cannot read as unknown\n" % what + out)
+                self.assertEqual((rc, self.suite_runs()), (2, 0),
+                                 "an unknown in a sibling pass must exit 2, and the step must not run\n" + out)
+
+    def test_the_same_unreadable_key_on_a_picked_suite_step_of_the_linted_job_reads_unknown(self):  # the control for the case above
+        self.sibling_repo()
+        for what, keys in self.UNREADABLE:
+            with self.subTest(what):
+                unreadable = step("Wiring suite", "python3 hooks/test_wiring.py", **keys)
+                rc, lines, out = self.run_job(unreadable, self.LINT_STEP, job="checks", other=[self.DOCS], args=self.LINT)
+                self.assertEqual((rc, by_step(lines).get("Wiring suite"), self.suite_runs()), (2, "unknown", 0),
+                                 "a picked suite step with %s the runner cannot read must read unknown and not run\n" % what + out)
+
+    def test_a_plan_prints_would_run_for_the_picked_suite_steps_of_another_ubuntu_job_and_runs_none(self):
+        # the control is the case below: the same suite in the linted job
+        self.sibling_repo()
+        rc, lines, out = self.run_job(self.DOCS, self.LINT_STEP, job="checks", args=(*self.LINT, "--plan"),
+                                      other=[step("Other tool", "touch other-step-ran.txt"), self.WIRING])
+        self.assertEqual(by_step(lines).get("Wiring suite"), "would run",
+                         "--plan must print `would run` for the picked suite step of another ubuntu job\n" + out)
+        self.assertNotIn("Other tool", out, "--plan must print no line for a step of job other that holds no picked suite\n" + out)
+        self.assertEqual((rc, self.suite_runs(), os.path.exists(os.path.join(self.root, "other-step-ran.txt"))), (0, 0, False),
+                         "a plan must exit 0 and run no step of any job\n" + out)
+
+    def test_a_plan_prints_would_run_for_the_picked_suite_step_of_the_linted_job(self):  # the control for the case above
+        self.sibling_repo()
+        rc, lines, out = self.run_job(self.WIRING, self.LINT_STEP, job="checks", other=[self.DOCS], args=(*self.LINT, "--plan"))
+        self.assertEqual((rc, by_step(lines).get("Wiring suite"), self.suite_runs()), (0, "would run", 0), out)
 
     def test_the_same_suite_in_the_job_that_runs_is_run_and_passes(self):  # the control for the case above
         self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",))},
