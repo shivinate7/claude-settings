@@ -4659,10 +4659,10 @@ guardset1() {
 }
 
 guardset3() {
-  name="guardset3: the guard set holds question_form.py and precompact_handoff.py, the modules guard.py imports for the question form, each equal to the flat copy"
+  name="guardset3: the guard set holds question_form.py, precompact_handoff.py, proc_env.py and reread_check.py, each equal to the flat copy"
   guardset_install guardset3
   missing=""
-  for m in question_form.py precompact_handoff.py; do
+  for m in question_form.py precompact_handoff.py proc_env.py reread_check.py; do
     if [ ! -f "$cfg/hooks/guard.d/$set_id/$m" ]; then
       missing="$missing $m (not in the set)"
     elif ! cmp -s "$cfg/hooks/guard.d/$set_id/$m" "$cfg/hooks/$m"; then
@@ -4678,31 +4678,213 @@ guardset3() {
   rm -rf "$h"
 }
 
-# guardset4: the guard set's lists. guard_merge.py imports own_session.py at load, so each list that copies
-# the guard set must name it. A list without it ships a guard that cannot import.
+# guardset4: the guard set's lists. A flat module that a guard file imports must be in each list that
+# copies the guard set, or the shipped guard cannot import. guard_merge.py imports own_session.py at load,
+# guard_stream.py imports merge_options.py. The modules come from the imports of guard.py and of each
+# guard_*.py outside a try block, at module level or in a def body (a def body runs on each call), read
+# with the Python parser, so a new import needs no edit here. The try-block imports are guardset5's.
 # The check reads the list line only (the loop or the case line), never the comments above it.
-listed_in() {  # $1 file, $2 sed address of the one list line, $3 label
+guard_set_modules() {  # $1 "try" prints each flat module a guard file imports in a try block; "closure" prints each flat module the guard reaches through any import, at any depth, transitively; else outside one. One per line
+  python3 -I - "$REPO_ROOT" "${1:-outside}" <<'PY'
+import ast, glob, os, sys
+hooks = os.path.join(sys.argv[1], "hooks")
+mode = sys.argv[2]
+if mode not in ("outside", "try", "closure", "lintclosure"):
+    sys.exit("guard_set_modules: mode %r, want outside, try, closure or lintclosure" % mode)
+flat = set(os.listdir(hooks))
+found = set()
+if mode in ("closure", "lintclosure"):
+    # A flat module that a reached module imports lazily, in a def body, an except or an else, loads from the
+    # set's folder too, so it is walked as well. Only a flat hooks module counts: a lint/ module is no set member.
+    # lintclosure also walks each lint/ module a reached module imports, so a flat module that lint/ imports is
+    # reached too. closure leaves lint/ unwalked, as guardset7 reads it.
+    lint_dir = os.path.join(sys.argv[1], "lint")
+    lint = set(os.listdir(lint_dir)) if mode == "lintclosure" else set()
+    todo = [("hooks", "guard.py")] + [("hooks", f) for f in sorted(flat) if f.startswith("guard_") and f.endswith(".py")]
+    seen = set()
+    while todo:
+        where, name = todo.pop()
+        if (where, name) in seen:
+            continue
+        seen.add((where, name))
+        with open(os.path.join(hooks if where == "hooks" else lint_dir, name), encoding="utf-8") as fh:
+            tree = ast.parse(fh.read(), name)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                dotted = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                dotted = [node.module]
+            else:
+                continue
+            for item in dotted:
+                mod = item.split(".")[0] + ".py"
+                if mod in flat:
+                    todo.append(("hooks", mod))
+                    if mod != "guard.py" and not mod.startswith("guard_"):
+                        found.add(mod)
+                elif mod in lint:
+                    todo.append(("lint", mod))
+    print("\n".join(sorted(found)))
+    sys.exit(0)
+def visit(stmts, out):
+    for node in stmts:
+        if isinstance(node, ast.Try):
+            continue
+        if isinstance(node, ast.Import):
+            out.extend(a.name for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            out.append(node.module)
+        for field in ("body", "orelse", "finalbody"):
+            sub = getattr(node, field, None)
+            if isinstance(sub, list):
+                visit(sub, out)
+for path in glob.glob(os.path.join(hooks, "guard_*.py")) + [os.path.join(hooks, "guard.py")]:
+    with open(path, encoding="utf-8") as fh:
+        tree = ast.parse(fh.read(), path)
+    names = []
+    if mode == "try":
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Try):
+                for stmt in node.body:
+                    for sub in ast.walk(stmt):
+                        if isinstance(sub, ast.Import):
+                            names.extend(a.name for a in sub.names)
+                        elif isinstance(sub, ast.ImportFrom) and sub.level == 0 and sub.module:
+                            names.append(sub.module)
+    else:
+        visit(tree.body, names)
+    for name in names:
+        mod = name.split(".")[0] + ".py"
+        if mod in flat and mod != "guard.py" and not mod.startswith("guard_"):
+            found.add(mod)
+print("\n".join(sorted(found)))
+PY
+}
+
+# A name counts only as a whole name. Splitting the line at each character a file name cannot hold
+# leaves the names as tokens, so shared_names.py does not list names.py.
+line_has_name() {  # $1 a line, $2 a file name: true when the name is a whole token of the line
+  printf '%s\n' "$1" | tr -c '[:alnum:]_.-' '\n' | grep -Fx -- "$2" >/dev/null
+}
+
+listed_in() {  # $1 file, $2 sed address of the one list line, $3 label, $4 module
   lines=$(sed -n "$2" "$1")
-  if [ "$(printf '%s\n' "$lines" | grep -c .)" -ne 1 ]; then miss="$miss $3 (not one list line);"; return; fi
-  case "$lines" in
-    *own_session.py*) ;;
-    *) miss="$miss $3;" ;;
-  esac
+  if [ "$(printf '%s\n' "$lines" | grep -c .)" -ne 1 ]; then bad "$name" "$4: $3 is not one list line"; nmiss=$((nmiss + 1)); return; fi
+  if ! line_has_name "$lines" "$4"; then
+    bad "$name" "$4 is not in $3"; nmiss=$((nmiss + 1))
+  fi
+}
+
+guard_set_lists_hold() {  # $1 the check's name, $2... the modules: each is in the four guard-set lists
+  name=$1; shift
+  nmiss=0
+  for m in "$@"; do
+    listed_in "$REPO_ROOT/install.sh" '/^  for gf in .*question_form\.py/p' "install.sh copy loop" "$m"
+    listed_in "$REPO_ROOT/install.ps1" '/^  for gf in .*question_form\.py/p' "install.ps1 copy loop" "$m"
+    listed_in "$REPO_ROOT/install.ps1" '/^    foreach (\$shared in /p' "install.ps1 set loop" "$m"
+    # The guard-set case line is the one that sets `code guard sweep`; the shoot list also names question_form.py.
+    listed_in "$REPO_ROOT/.github/scripts/ci-scope.sh" '/hooks\/question_form\.py|.*code guard sweep /p' "ci-scope.sh case" "$m"
+  done
+  if [ "$nmiss" -eq 0 ]; then ok "$name"; fi
 }
 
 guardset4() {
-  name="guardset4: own_session.py is in each guard-set list: install.sh, the install.ps1 copy and set loops, and ci-scope.sh"
-  miss=""
-  listed_in "$REPO_ROOT/install.sh" '/^  for gf in .*question_form\.py/p' "install.sh copy loop"
-  listed_in "$REPO_ROOT/install.ps1" '/^  for gf in .*question_form\.py/p' "install.ps1 copy loop"
-  listed_in "$REPO_ROOT/install.ps1" '/^    foreach (\$shared in /p' "install.ps1 set loop"
-  # The guard-set case line is the one that sets `code guard sweep`; the shoot list also names question_form.py.
-  listed_in "$REPO_ROOT/.github/scripts/ci-scope.sh" '/hooks\/question_form\.py|.*code guard sweep /p' "ci-scope.sh case"
-  if [ -n "$miss" ]; then
-    bad "$name" "own_session.py is not in:$miss"
+  name="guardset4: each module a guard file imports at load is in each guard-set list: install.sh, the install.ps1 copy and set loops, and ci-scope.sh"
+  mods=$(guard_set_modules); mrc=$?
+  if [ "$mrc" -ne 0 ] || [ -z "$mods" ]; then
+    bad "$name" "the guard files' load-time imports read to no module list (exit $mrc)"
+    return
+  fi
+  guard_set_lists_hold "$name" $mods
+}
+
+# guardset5: a flat module a guard file imports inside a try block is in each guard-set list too. The try
+# falls back when its import fails, and no guard-crash follows, so a module the set leaves out fails open,
+# silently (decision install-hooks-whole: the guard set lands whole). The modules come from the try bodies of
+# guard.py and of each guard_*.py, read with the Python parser, so a new try import needs no edit here.
+guardset5() {
+  name="guardset5: each module a guard file imports in a try block is in each guard-set list: install.sh, the install.ps1 copy and set loops, and ci-scope.sh"
+  mods=$(guard_set_modules try); mrc=$?
+  if [ "$mrc" -ne 0 ] || [ -z "$mods" ]; then
+    bad "$name" "the guard files' try-block imports read to no module list (exit $mrc)"
+    return
+  fi
+  guard_set_lists_hold "$name" $mods
+}
+
+# guardset6: listed_in counts a name only as a whole name. names.py is a substring of the listed shared_names.py,
+# so it is missing from each guard-set list. A substring match would find it in each list that carries
+# shared_names.py. shared_names.py, listed in each, is the control.
+guardset6() {
+  name="guardset6: listed_in counts a name only as a whole name: names.py, inside the listed shared_names.py, is missing from each guard-set list"
+  probe=$(guard_set_lists_hold "guardset6 probe" names.py)
+  ctl=$(guard_set_lists_hold "guardset6 control" shared_names.py)
+  if [ "$(printf '%s\n' "$probe" | grep -c ' names.py is not in ')" -ne 4 ]; then
+    bad "$name" "names.py matched inside shared_names.py in a list: $(printf '%s' "$probe" | tr '\n' ' ')"
+  elif [ "$ctl" != "ok   - guardset6 control" ]; then
+    bad "$name" "shared_names.py is not found in each guard-set list: $(printf '%s' "$ctl" | tr '\n' ' ')"
   else
     ok "$name"
   fi
+}
+
+# guardset7: the closure. guardset4 and guardset5 read the guard files' own imports, so a module that a listed
+# module imports (override.py loads local_time.py in its override lift, precompact_handoff.py loads feedback_guard.py
+# in its inbox note) is walked by neither. The walk runs from the guard files through every reached flat module,
+# at any depth, so a lazy import needs no edit here. A module outside the set loads from the flat copy, which
+# install.sh replaces file by file, so one guard run can judge with a mix of old and new modules.
+guardset7() {
+  name="guardset7: each flat module the guard reaches through its imports, transitively and at any depth, is in each guard-set list: install.sh, the install.ps1 copy and set loops, and ci-scope.sh"
+  mods=$(guard_set_modules closure); mrc=$?
+  if [ "$mrc" -ne 0 ] || [ -z "$mods" ]; then
+    bad "$name" "the guard's import closure reads to no module list (exit $mrc)"
+    return
+  fi
+  guard_set_lists_hold "$name" $mods
+}
+
+# guardset8: the closure through lint/. guardset7 stops at lint/, so a flat module that a lint/ module imports is
+# in no list. lint/report_guard.py imports route_match and reply_judge inside functions, and question_form reaches
+# report_guard lazily (question_form._option_keys), so the guard's static graph reaches both. The walk here follows
+# lint/ modules too, and each module it reaches must be in each guard-set list.
+guardset8() {
+  name="guardset8: each flat module that a lint/ module the guard's static graph reaches imports is in each guard-set list: install.sh, the install.ps1 copy and set loops, and ci-scope.sh"
+  mods=$(guard_set_modules lintclosure); mrc=$?
+  if [ "$mrc" -ne 0 ] || [ -z "$mods" ]; then
+    bad "$name" "the guard's import closure through lint/ reads to no module list (exit $mrc)"
+    return
+  fi
+  guard_set_lists_hold "$name" $mods
+}
+
+# guardset9: a guard-set module that reads a file beside itself needs that file in the set too. guard.py puts
+# guard.d/<id>/ first on sys.path, so the module loads the set's copy, and the file beside it is the set's copy.
+# A file no list copies is missing there, so the module's read fails (ruling own-896-897-glued-amp-b, the CI-wait
+# cap). The pairs are hand-kept: a new sidecar read needs its pair here. A read through `..` is not beside the
+# module and is not listed. A pair counts only when its module is in the install.sh copy loop, so a module the
+# set does not ship is not asked of.
+GUARDSET_SIDECARS="ci_wait_cap.py:ci_wait_cap.json route_match.py:route_rows.json precompact_handoff.py:precompact_handoff_prompt.md"
+
+in_copy_loop() {  # $1 a file name: true when the install.sh copy loop names it
+  line_has_name "$(sed -n '/^  for gf in .*question_form\.py/p' "$REPO_ROOT/install.sh")" "$1"
+}
+
+guardset9() {
+  name="guardset9: each guard-set module that reads a file beside itself has that file in each guard-set list: install.sh, the install.ps1 copy and set loops, and ci-scope.sh"
+  sidecars=""; bad_scope=""
+  for pair in $GUARDSET_SIDECARS; do
+    sc_mod=${pair%%:*}; sc_file=${pair#*:}
+    in_copy_loop "$sc_mod" || continue
+    if [ ! -f "$REPO_ROOT/hooks/$sc_file" ] || ! grep -Fq -- "$sc_file" "$REPO_ROOT/hooks/$sc_mod"; then
+      bad_scope="$bad_scope $sc_mod does not read $sc_file beside itself, or the file is missing;"
+    fi
+    sidecars="$sidecars $sc_file"
+  done
+  if [ -n "$bad_scope" ]; then
+    bad "$name" "$bad_scope"
+    return
+  fi
+  guard_set_lists_hold "$name" $sidecars
 }
 
 guardset2() {
@@ -6826,6 +7008,80 @@ SH
   ok "$name"
 }
 
+# ---- routecopy: a guard.d/<id>/ copy of route_match finds the install's route rows ----
+# The probe loads route_match from the copy's folder and reads the rows, with only a temp HOME in its
+# environment. The copy is judged on what read_rows() returns, so the fixture install's rows are the
+# expected answer, whatever the install lands beside the copy.
+ROUTE_PROBE="$work/route-rows-probe.py"
+ROUTE_PROBE_ROW="routecopy-probe-row"
+
+# routecopy_install CASE: a fixture install of this repo's hooks, run as install.sh --cloud into a temp config
+# dir. Its route_rows.json holds one probe row. Sets rc_h (temp HOME), rc_cfg (config dir) and rc_set (the
+# guard.d folder the install stamps). Returns 1, after a bad line, when the install does not land.
+routecopy_install() {
+  rc_h=$(new_home); rc_cfg="$rc_h/.claude-cfg"; rc_co="$work/$1-checkout"
+  mkdir -p "$rc_co/hooks"
+  cp "$INSTALL_SH" "$rc_co/install.sh"
+  cp "$REPO_ROOT/landed-dirs.txt" "$rc_co/landed-dirs.txt"
+  printf '# %s fixture CLAUDE.md\n' "$1" > "$rc_co/CLAUDE.md"
+  printf '{}\n' > "$rc_co/settings.json"
+  copy_folder hooks "$rc_co/hooks" || { bad "$1" "could not copy the hooks folder into the fixture"; return 1; }
+  printf '{"rows": [{"id": "%s", "act": "probe", "route": "probe", "surface": "local", "outcome": "works", "measured": "fixture", "cc_version": "fixture", "evidence": "fixture", "by": "test", "pattern": "^probe$"}]}\n' "$ROUTE_PROBE_ROW" > "$rc_co/hooks/route_rows.json"
+  cat > "$ROUTE_PROBE" <<'PY'
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import route_match
+rows = route_match.read_rows()
+print("module " + route_match.__file__)
+print("rows " + ("none" if rows is None else json.dumps(sorted(str(row.get("id")) for row in rows))))
+PY
+  rc_out=$( cd "$rc_co" && env -i PATH="$PATH" HOME="$rc_h" CLAUDE_CONFIG_DIR="$rc_cfg" CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" bash ./install.sh --cloud 2>&1 ); rc_rc=$?
+  if [ "$rc_rc" -ne 0 ]; then bad "$1" "install.sh --cloud exited $rc_rc: $(printf '%s' "$rc_out" | tail -n 3)"; return 1; fi
+  if ! grep -q "$ROUTE_PROBE_ROW" "$rc_cfg/hooks/route_rows.json" 2>/dev/null; then
+    bad "$1" "the install did not land hooks/route_rows.json with the probe row"; return 1
+  fi
+  rc_id=$(sed -n 's/^INSTALL_ID = "\([^"]*\)".*/\1/p' "$rc_cfg/hooks/guard.py" 2>/dev/null | head -n1)
+  rc_set="$rc_cfg/hooks/guard.d/$rc_id"
+  if [ -z "$rc_id" ] || [ ! -f "$rc_set/route_match.py" ]; then
+    bad "$1" "the install landed no route_match.py in guard.d/<id>/ (id=$rc_id)"; return 1
+  fi
+  return 0
+}
+
+# routecopy_verdict CASE OUTPUT: the probe's output, read in scope order. Scope first: route_match must load
+# from the copy's folder. Then the subject: read_rows() must hold the probe row.
+routecopy_verdict() {
+  rc_mod=$(printf '%s\n' "$2" | sed -n 's/^module //p' | head -n1)
+  rc_rows=$(printf '%s\n' "$2" | sed -n 's/^rows //p' | head -n1)
+  case $rc_mod in
+    "$rc_set/route_match.py") ;;
+    *) bad "$1" "route_match did not load from guard.d/<id>/: $(printf '%s' "$2" | tail -n 1)"; return ;;
+  esac
+  case $rc_rows in
+    none) bad "$1" "route_match, loaded from guard.d/<id>/, reads no route rows: read_rows() returns None" ;;
+    *"\"$ROUTE_PROBE_ROW\""*) ok "$1" ;;
+    *) bad "$1" "route_match, loaded from guard.d/<id>/, reads route rows that are not the install's: $rc_rows" ;;
+  esac
+}
+
+routecopy1() {
+  name="routecopy1: a guard.d/<id>/ copy of route_match finds the install's route rows"
+  routecopy_install routecopy1 || return
+  got=$(env -i PATH="$PATH" HOME="$rc_h" python3 -I -B "$ROUTE_PROBE" "$rc_set" 2>&1)
+  routecopy_verdict "$name" "$got"
+  rm -rf "$rc_h"
+}
+
+# The control: the same probe, with the seam that names the install's rows. It is green on the code as it is,
+# so a red row comes from the lookup and not from the probe or the rows file.
+routecopy1c() {
+  name="routecopy1c (control): with GUARD_ROUTE_ROWS naming the install's rows, the guard.d/<id>/ copy reads them"
+  routecopy_install routecopy1c || return
+  got=$(env -i PATH="$PATH" HOME="$rc_h" GUARD_ROUTE_ROWS="$rc_cfg/hooks/route_rows.json" python3 -I -B "$ROUTE_PROBE" "$rc_set" 2>&1)
+  routecopy_verdict "$name" "$got"
+  rm -rf "$rc_h"
+}
+
 # The runner's own HOME is a default home too, so a case that runs git without its own HOME (the
 # session_start.sh cases) gets the same redirect as every other case.
 default_home "$work/runner-home"; HOME="$work/runner-home"; export HOME
@@ -6971,6 +7227,11 @@ run guardset1
 run guardset2
 run guardset3
 run guardset4
+run guardset5
+run guardset6
+run guardset7
+run guardset8
+run guardset9
 run win_sh1
 run win_sh2
 run win_sh3
@@ -7039,6 +7300,8 @@ run mergepin5
 run cloud_stale1
 run cloud_stale2
 run cloud_stale3
+run routecopy1
+run routecopy1c
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
