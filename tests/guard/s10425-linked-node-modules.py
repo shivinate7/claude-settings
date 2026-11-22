@@ -42,6 +42,21 @@ def _make_dir_link(target, link):
         sys.exit("fixture setup failed: %r is not a link to %r" % (link, target))
 
 
+
+def pr2015__build_linked_nm():
+    """The four working folders of this section, and the shim folder. One folder is a link to the target,
+    one holds a real folder."""
+    for folder in (NMTARGET, NMLINKED, NMREAL, NMABSENT):
+        write(os.path.join(folder, "package.json"), NM_PKG)
+    write(os.path.join(NMTARGET, "pkg.js"), "module.exports = {};\n")
+    _make_dir_link(NMTARGET, os.path.join(NMLINKED, "node_modules"))
+    write(os.path.join(NMREAL, "node_modules", "pkg.js"), "module.exports = {};\n")
+    write(os.path.join(NMSHIM, "sitecustomize.py"), NM_SHIM_SOURCE)
+
+
+lazy_fixture([NMTARGET, NMLINKED, NMREAL, NMABSENT, NMSHIM], pr2015__build_linked_nm)
+
+
 def _build_linked_nm():
     """The five working folders of this section, and the shim folder. NMLINKED and NMTILDE hold a link to
     the target, NMREAL holds a real folder, NMABSENT holds none."""

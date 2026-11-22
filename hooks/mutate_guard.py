@@ -111,6 +111,11 @@ TARGETS = {
 # label's prose is a statement about which rule breaks, and the required name is the proof that some
 # case actually reads that break, not a different one nearby.
 MUTATIONS = [
+    # THE COPY'S INSTALL FOLDER. guard.py tells question_form its own folder, so a stamped copy in guard.d/<id>/ finds
+    # the install's lint/ and skills/. Without that, the copy reads no layout and allows a waiting-page write it refuses.
+    ("question-form: the copy is not told its install folder, so its waiting-page checks read no lint/",
+     '    question_form.use_hooks_home(_HERE)',
+     '    pass', "guard", "port question: a copy install with lint/ beside it denies a batch with today's item"),
     # THE TWO ROOTS. `--work-tree` names whose FILES a call discards, and `--git-dir` names whose
     # HEAD it moves. Each mutant makes one of them unread, or makes one root answer the other's
     # question.
@@ -193,6 +198,14 @@ MUTATIONS = [
      '    if lines is None:\n        guard_core.record("Bash", "noted", "subject-unread", "git checkout " + name)\n',
      '    if lines is None:\n        pass\n', "guard",
      'a bare checkout of a dirty file whose status git cannot read is allowed and logged once as subject-unread'),
+    ("shared-tree: a segment is judged in its own cd folder",
+     '        elif here is not None:\n            root = here\n',
+     '        elif False:\n            root = here\n', "guard",
+     'per-file deny: cd shared, restore f.txt, then cd to a clean checkout'),
+    ("shared-tree: an uncertain segment drops the whole-command fallback",
+     '            if maybe and maybe[0]:\n                here = None\n',
+     '            if False:\n                here = None\n', "guard",
+     'per-file deny: one-line if false; then cd clean; fi, the restore runs in the shared tree, the call ends in it'),
 
     # ---- rule 1's three new git forms: branch delete, worktree remove, worktree prune. Each
     # mutation breaks one arm of the state read the plan named as the safety hole in this rule.
@@ -768,7 +781,7 @@ MUTATIONS = [
     ("detached-launch: a subshell background job no longer denies",
      '    if last == ")":\n        return tokens[-2] == "&"\n'
      '    return last.endswith(")") and last[:-1].endswith("&")',
-     '    return False', "guard", "detached: the incident's exact command orphans to pid 1"),
+     '    return False', "guard", "detached: a subshell background job is refused though echo $! follows it"),
     ("detached-launch: setsid no longer denies as a bare wrapper",
      '    if basename(word) != "setsid":\n        return ""',
      '    return ""', "guard", "detached: setsid with no -w starts its own session"),
@@ -781,8 +794,10 @@ MUTATIONS = [
      '        if False:\n            return "& disown"', "guard",
      "detached: disown right after a job whose pid is captured"),
     ("detached-launch: a bare trailing background job no longer denies",
-     '            if tokens[i] == "&":\n                return tokens[i - 1] + " &"',
-     '            if False:\n                return tokens[i - 1] + " &"', "guard",
+     '        matched = backgrounding_amp(segment, tokens, _skip_assignments_and_keywords(tokens))\n'
+     '        if matched:\n            return matched',
+     '        matched = backgrounding_amp(segment, tokens, _skip_assignments_and_keywords(tokens))\n'
+     '        if False:\n            return matched', "guard",
      "detached: a bare trailing background job with no pid captured, "
      "MEASURED zero harmless matches in 16571 local Bash commands"),
     ("detached-launch: a background job before another line no longer denies (last segment only)",
@@ -2014,13 +2029,14 @@ MUTATIONS = [
      '    record_writers()\n',
      '    pass\n',
      "guard", "scratchpad-owner: 3 agent B runs agent A's script through bash"),
+    # The two anchors below span the `if not taken:` that guard.py nests under the writer test.
     ("scratchpad-owner: a write over another agent's file is never refused",
-     '        if writer and writer != agent and not taken:',
-     '        if False and writer != agent and not taken:',
+     '        if writer and writer != agent:\n            if not taken:',
+     '        if False and writer != agent:\n            if not taken:',
      "guard", "scratchpad-owner: overwrite 1 agent B's Write over agent A's file"),
     ("scratchpad-owner: an agent's rewrite of its own file is refused too",
-     '        if writer and writer != agent and not taken:',
-     '        if writer and not taken:',
+     '        if writer and writer != agent:\n            if not taken:',
+     '        if writer:\n            if not taken:',
      "guard", "scratchpad-owner: overwrite 4 agent A rewrites its own file"),
     ("scratchpad-owner: a shell write target is not listed as a write",
      '                if full and SCRATCHPAD_WORD in full and full not in files and under_session_scratchpad(full, session):',
@@ -2051,8 +2067,8 @@ MUTATIONS = [
      '            if True:\n                scratchpad_record_writer(full, session, after[full])',
      "guard", "scratchpad-owner: approved 2 agent B's rm the owner approves keeps the record with agent A"),
     ("scratchpad-owner: an overwrite the owner lifts leaves the old record",
-     ', on_lift=record_writers)',
-     ')',
+     'taken,\n               on_lift=record_writers)',
+     'taken)',
      "guard", "scratchpad-owner: approved 1 agent B's overwrite the owner approves moves the record"),
     # Rule scratchpad-owner: the run forms a first-command reader does not read, and the copy and move destinations.
     # Each entry names the case that goes red when its mechanism is removed.
@@ -2157,9 +2173,14 @@ MUTATIONS = [
     # Rule scratchpad-owner, the folder check (`scratchpad_owner_write` and `scratchpad_folder_writer`). Each row names
     # the case that goes red when its mechanism is removed.
     ("scratchpad-owner: a folder rm or mv is never read for the files under it",
-     "elif full in removed and not taken:",
-     "elif False:",
+     "        elif full in removed:\n",
+     "        elif False:\n",
      "guard", "folder rm 1,"),
+    # A folder removal is read even when a file ask is taken first.
+    ("scratchpad-owner: a folder removal is skipped once a file ask is taken",
+     "        elif full in removed:\n",
+     "        elif full in removed and not taken:\n",
+     "guard", "file and folder 1,"),
     ("scratchpad-owner: a folder rm does not read the files of a nested folder",
      "tops.extend(entry.path for entry in entries)",
      "pass",
@@ -2609,6 +2630,151 @@ MUTATIONS = [
      'NARRATING_SCRIPT_TAILS = ("merge/merge.py", "merge/launch.py")',
      'NARRATING_SCRIPT_TAILS = ("nothing/at-all",)',
      "guard", 'narrate: the launcher script run through python'),
+    # The check rule (check-tail) reads any filter after a lane-lint or review-record run, through the
+    # one pipeline walk the narrated rule uses.
+    ('check-tail: the reach is tail and head only, as the narrated rule has it',
+     '(word.removesuffix(".exe") not in FILE_WRITER_STAGES) if any_filter',
+     '(word.removesuffix(".exe") not in FILE_WRITER_STAGES) if False',
+     "guard", 'merge --lane-lint through sed -n, with no tail or head'),
+    ('check-tail: a lone tee is read as a filter',
+     '(word.removesuffix(".exe") not in FILE_WRITER_STAGES) if any_filter',
+     '(word.removesuffix(".exe") not in ("tee-object", "out-file")) if any_filter',
+     "guard", 'merge --lane-lint through tee with nothing after it, backgrounded'),
+    ('check-tail: Out-File is no file writer, so a lone one is read as a filter',
+     'FILE_WRITER_STAGES = ("tee", "tee-object", "out-file")',
+     'FILE_WRITER_STAGES = ("tee", "tee-object")',
+     "guard", 'merge --lane-lint through Out-File with nothing after it'),
+    ('check-tail: Tee-Object is no file writer, so a lone one is read as a filter',
+     'FILE_WRITER_STAGES = ("tee", "tee-object", "out-file")',
+     'FILE_WRITER_STAGES = ("tee", "out-file")',
+     "guard", 'merge --lane-lint through Tee-Object with nothing after it'),
+    ('check-tail: the .exe strip is dropped, so a lone tee.exe is read as a filter',
+     '(word.removesuffix(".exe") not in FILE_WRITER_STAGES) if any_filter',
+     '(word not in FILE_WRITER_STAGES) if any_filter',
+     "guard", 'merge --lane-lint through tee.exe with nothing after it'),
+    ('check-tail: a separator no longer ends the pipeline',
+     '        if end != "|":\n            pipelines.append(stages)',
+     '        if False:\n            pipelines.append(stages)',
+     "guard", 'a semicolon ends the pipeline, so a tail after it reads no live stream'),
+    ('check-tail: a pipeline closed by a separator is never read',
+     '    for pipelines, flags in zip(texts, amps):\n        for stages, list_amp in zip(pipelines, flags):\n            hit = _pipeline_hit(stages, background, any_filter=True, list_amp=list_amp)',
+     '    for pipelines, flags in zip(texts, amps):\n        for stages, list_amp in zip(pipelines[-1:], flags[-1:]):\n            hit = _pipeline_hit(stages, background, any_filter=True, list_amp=list_amp)',
+     "guard", 'merge --lane-lint piped to tail, then a background &, is refused'),
+    ('check-tail: a check hit is never returned, so a piped check is never refused',
+     'hit = _pipeline_hit(stages, background, any_filter=True, list_amp=list_amp)\n            if hit:\n                return hit',
+     'hit = _pipeline_hit(stages, background, any_filter=True, list_amp=list_amp)\n            if False:\n                return hit',
+     "guard", 'merge --lane-lint piped to tail, then a background &, is refused'),
+    ('check-tail: a && list is never ended by a job, so its trailing & reads as no job',
+     '    for segment, end in zip(segments[after:], ends[after:]):',
+     '    for segment, end in ():',
+     "guard", 'ci-job checks | tail -3 && echo done & echo $!, a spaced & backgrounds the && list, is refused'),
+    ('check-tail: ci-job is refused in the foreground too',
+     '        return basename(tokens[index]) if background else ""',
+     '        return basename(tokens[index])',
+     "guard", 'ci-job piped to tail in the foreground is allowed'),
+    ('check-tail: a trailing & no longer makes a ci-job a backgrounded run',
+     '    for segment in stages[first:]:\n        tokens = segment_tokens(segment)\n        if tokens and backgrounding_amp(segment, tokens):',
+     '    for segment in stages[first:]:\n        tokens = segment_tokens(segment)\n        if False:',
+     "guard", 'ci-job checks --lint piped to grep, then a trailing background &'),
+    ('background-amp: a & glued to the last word is no background job, for check-tail and detached-launch',
+     '        if kind == "redirect":\n            continue\n        words = segment_tokens(',
+     '        if kind != "spaced":\n            continue\n        words = segment_tokens(',
+     "guard", 'ci-job checks piped to tail -3&, the & glued to the word'),
+    ('check-tail: a merge script run by its own path is no check',
+     '    if not script and word.endswith(".py"):\n        script = tokens[index]',
+     '    if not script and word.endswith(".py"):\n        script = ""',
+     "guard", './merge/merge.py --lane-lint piped to tail'),
+    ('check-tail: any command word runs the roster script, not only an interpreter',
+     '    return _roster_word(tokens, index, interpreter_only=True, launcher_script=launcher_script)',
+     '    return _roster_word(tokens, index, launcher_script=launcher_script)',
+     "guard", 'grep naming the script, piped to tail, backgrounded, is allowed'),
+    ('check-tail: a roster command with no lane-lint or review-record flag is a check',
+     '    if "--confirm" in tokens or not any(_merge_flag(tokens, flag) for flag in CHECK_FLAGS):',
+     '    if "--confirm" in tokens:',
+     "guard", 'narrate: a merge preview is not a wait'),
+
+    # check-tail: a lint piped to tail or head before a commit or a push, and the script operand reader.
+    ('check-tail lint: a uv run lint is not read through uv',
+     '    index = _skip_uv_run(tokens, index)\n    if index >= len(tokens):   # a redirect-only segment (`> out.txt`) leaves no command word\n'
+     '        return ""\n    script = _script_run(tokens, index)',
+     '    if index >= len(tokens):   # a redirect-only segment (`> out.txt`) leaves no command word\n'
+     '        return ""\n    script = _script_run(tokens, index)',
+     "guard", 'check-tail: uv run lint script piped to tail, then ; git commit, is refused'),
+    ('check-tail lint: a .py command word is no script',
+     '    if not script and word.endswith(".py"):\n        script = tokens[index]\n    return script',
+     '    return script',
+     "guard", 'check-tail: uv run lint script piped to tail, then ; git commit, is refused'),
+    ('check-tail lint: a redirect word is read as the script operand',
+     '    redirect = REDIRECT_WORD.match(tokens[at])\n    if not redirect:',
+     '    redirect = None\n    if not redirect:',
+     "guard", 'check-tail: python3 -u with a 2>&1 redirect before the script, piped to tail, is refused'),
+    ('check-tail lint: the lint pass reads the check roster, not lint scripts',
+     '            hit = _pipeline_hit(stages, background,\n'
+     '                                lambda segment, bg: lint_stage(segment, bg, in_lint, folder), any_later=True)\n',
+     '            hit = _pipeline_hit(stages, background, stage_of=check_stage, any_filter=False, any_later=False)\n',
+     "guard", 'check-tail: lint piped to tail, then && git commit is refused'),
+    ('check-tail lint: a lint piped to tail is refused with no commit or push after it',
+     '            if any(_commits_or_pushes(segment) for later in after for segment in later):',
+     '            if True:',
+     "guard", 'check-tail: lint piped to tail with no commit after is allowed'),
+    ('check-tail lint: a commit is no follow-up',
+     '    return any(verb in ("commit", "push") for verb, _args in git_calls(segment))',
+     '    return any(verb in ("push",) for verb, _args in git_calls(segment))',
+     "guard", 'check-tail: uv run lint script piped to tail, then ; git commit, is refused'),
+    ('check-tail lint: a push is no follow-up',
+     '    return any(verb in ("commit", "push") for verb, _args in git_calls(segment))',
+     '    return any(verb in ("commit",) for verb, _args in git_calls(segment))',
+     "guard", 'check-tail: python3.11 lint script piped to tail, then && git push, is refused'),
+    # The lint stage reads a lint/ folder script only, so a .py script elsewhere is no lint and is allowed.
+    ('check-tail lint: the lint stage reads any .py script, not only one under lint/',
+     r'LINT_SCRIPT = re.compile(r"(?:^|/)lint/[^/]+\.py$")',
+     r'LINT_SCRIPT = re.compile(r"(?:^|/)[^/]+\.py$")',
+     "guard", 'a .py script outside lint/ piped to tail'),
+    # A redirect target written apart from its word is skipped with it. Dropping that skip reads the target as the script.
+    ('check-tail lint: a separate redirect target is read as the script operand',
+     '    return 1 if redirect.group(1) else 2',
+     '    return 1',
+     "guard", 'lint behind a separate 2> /dev/null redirect'),
+    ('check-tail lint: a commit before the lint counts as a follow-up',
+     'after = list(pipelines[at + 1:])',
+     'after = list(pipelines)',
+     "guard", 'a commit before a lint piped to tail is allowed'),
+    # The lint-then-commit gate reads the exit, so any later stage masks it, a redirect word before the
+    # command and a substitution in the script path still count, and a `$(...)` is read as its own text.
+    ('check-tail lint: only tail and head mask the lint exit',
+     'if any_later or ((word.removesuffix(".exe") not in FILE_WRITER_STAGES) if any_filter',
+     'if ((word.removesuffix(".exe") not in FILE_WRITER_STAGES) if any_filter',
+     "guard", 'check-tail: lint piped to grep, then && git commit, is refused'),
+    ('check-tail lint: a redirect word before the command is the command',
+     '    index = _skip_redirects(tokens, index)\n    while index < len(tokens) and basename(tokens[index]) == "uv":',
+     '    while index < len(tokens) and basename(tokens[index]) == "uv":',
+     "guard", 'a 2>/dev/null redirect before the lint script, piped to tail'),
+    ('check-tail lint: a redirect word after uv run is the command',
+     '        index = _skip_redirects(tokens, start + at)\n',
+     '        index = start + at\n',
+     "guard", 'a 2>/dev/null redirect after uv run'),
+    # A redirect word between a pipe and its filter is skipped before the filter word is read.
+    ('check-tail: a redirect word between a pipe and its filter is skipped',
+     '            at = _skip_redirects(tokens, at)\n',
+     '',
+     "guard", 'check-tail: merge --lane-lint piped to a redirect word, then tee, backgrounded, is allowed'),
+    ('check-tail: a substitution is not read as its own text',
+     '    texts = [_pipelines(text, flags) for (text, _in_message), flags in zip(texts, amps)]\n',
+     '    texts = [_pipelines(stripped, flags) for (text, _in_message), flags in zip(texts[:1], amps)]\n',
+     "guard", 'a lint piped to tail inside $(...)'),
+    ('check-tail lint: a commit beside a lint in a substitution is no follow-up',
+     '            after = list(pipelines[at + 1:]) + [stages for text in others for stages in text]\n',
+     '            after = list(pipelines[at + 1:])\n',
+     "guard", 'a lint piped to tail inside $(...)'),
+    # A lint script is looked up in the folder the call runs in: a copy install's lint/ and another repo's lint/.
+    ("check-tail lint: a lint file is read from the guard's own lint/, not the call's folder",
+     '    return os.path.isfile(os.path.join(folder or LINT_DIR, name))',
+     '    return os.path.isfile(os.path.join(LINT_DIR, name))',
+     "guard", "check-tail: a copy install, cd lint, then ./ste_lint.py piped to tail, then && commit, is refused"),
+    ('check-tail lint: a commit word anywhere in a segment counts as a commit',
+     '    return any(verb in ("commit", "push") for verb, _args in git_calls(segment))',
+     '    return "commit" in segment or any(verb in ("commit", "push") for verb, _args in git_calls(segment))',
+     "guard", 'lint piped to tail, then ; echo commit'),
     ('ln-over-directory: never refuse',
      '        refuse(tool, "deny", "ln-over-directory", LN_DESCENDS_REASON, matched)',
      '        pass',
@@ -2937,8 +3103,8 @@ MUTATIONS = [
      "guard", 'override: a refusal an override lifts ends with the main override line'),
     ("override line: the missing-module deny stops saying that no override lifts it",
      '"then retry. No override lifts this refusal, because the failed guard cannot check "\n'
-     '                    "the acts that no override lifts. "\n'
-     '                    "(decision guard-hooks-fail-closed, a guard with a missing part refuses the call)")}}))',
+     '            "the acts that no override lifts. "\n'
+     '            "(decision guard-hooks-fail-closed, a guard with a missing part refuses the call)")}}))',
      '"then retry.")}}))',
      "guard", 'override: a missing-module deny says that no override lifts it'),
     ("override line: the Opus spawn ask no longer names the Opus word",
@@ -3356,10 +3522,21 @@ MUTATIONS = [
      '        refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % unread, unread)',
      '        pass',
      "guard", "handoff-unread: after compaction, Bash is refused while the handoff is unread"),
-    ("handoff-unread: a failed import of reread_check no longer fails open",
-     '    except Exception:\n        unread_handoff = None\n',
-     '    except Exception:\n        raise\n',
-     "guard", "handoff-unread: a guard copy without reread_check.py fails open"),
+    ("handoff-unread: a failed import of reread_check fails open again",
+     '        _loading = "reread_check"\n        import reread_check\n',
+     '        _loading = "reread_check"\n        try:\n            import reread_check\n'
+     '        except ImportError:\n'
+     '            reread_check = type("R", (), {"ph": 1, "unread_handoff": staticmethod(lambda payload: "")})\n',
+     "guard", "a guard copy without reread_check.py refuses as guard-crash"),
+    ("handoff-unread: a reread_check without its precompact_handoff sibling is let load again",
+     '        if reread_check.ph is None:',
+     '        if False:',
+     "guard", "a guard copy without precompact_handoff.py refuses as guard-crash"),
+    ("install-hooks-whole: a failed import of proc_env falls back to a foreign-pid read again",
+     'from proc_env import holds_session_tag  # the one home of the exec-environment read (hooks/proc_env.py)\n',
+     'try:\n    from proc_env import holds_session_tag\nexcept ImportError:\n'
+     '    def holds_session_tag(pid, session_id):\n        return False\n',
+     "guard", "a copy missing proc_env (guard_kill's session-tag read) refuses a Bash call as guard-crash"),
     ("handoff-unread: an agent's call is judged like the main session's",
      '        if ph is None or not isinstance(payload, dict) or payload.get("agent_id"):\n'
      '            return ""\n'
@@ -3420,6 +3597,10 @@ MUTATIONS = [
      '        return handoff if os.path.isfile(handoff) else ""',
      '        return handoff',
      "guard", "handoff-unread: a call is allowed when the flag is set and the handoff is missing"),
+    ("handoff-unread: the guard-crash refusal drops its install.sh fix",
+     'session, run install.sh from the claude-settings checkout (Windows: install.ps1), ',
+     'session, ',
+     "guard", "handoff-unread: install-hooks-whole: a missing reread_check's refusal names install.sh as the fix"),
     ("mockup-home: the refuse arm is dropped, so a design whose file sits under the machine home is allowed",
      "            if unhomed:",
      "            if False:",
@@ -4825,6 +5006,7 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
         os.makedirs(os.path.join(tree, "hooks"), exist_ok=True)
         os.makedirs(os.path.join(tree, "lint"), exist_ok=True)
         shutil.copy(os.path.join(HERE, "..", "lint", "_transcript.py"), os.path.join(tree, "lint"))
+        # guard_tree also copies shared_names.py, which ruling_home.py imports beside itself.
         mutate_shared.guard_tree(os.path.join(tree, "hooks"))
         copy_path = os.path.join(tree, "hooks", os.path.basename(TARGETS[target][0]))
     if target == "override":
@@ -5035,6 +5217,15 @@ def main() -> int:
                 return 1
             seen_paths[candidate.lower()] = (control_index, label)
 
+    # MUTATE_ONLY=<label> runs that one mutation. It filters after the anchor loop above, which checks every entry.
+    chosen = MUTATIONS
+    only = os.environ.get("MUTATE_ONLY")
+    if only:
+        chosen = [entry for entry in MUTATIONS if mutation_parts(entry)[0] == only]
+        if not chosen:
+            print("ERROR no mutation named: %s" % only)
+            return 1
+
     # The pid in the name lets merge.py's sweep remove this folder after a run that died before its cleanup.
     # The signal handlers go on before the folder is made, so a TERM, HUP or INT ends the run through the `finally` below.
     with stop_on_signals():
@@ -5059,8 +5250,8 @@ def main() -> int:
             lay_out_guard_reads(work)  # the override copies' ../merge, ../actions and ../bin
 
             return mutate_shared.run_mutants(
-                MUTATIONS, lambda entry: run_mutant(sources, work, entry),
-                controls=run_controls(sources, work, MUTATIONS), control_of=lambda entry: mutation_parts(entry)[3],
+                chosen, lambda entry: run_mutant(sources, work, entry),
+                controls=run_controls(sources, work, chosen), control_of=lambda entry: mutation_parts(entry)[3],
                 verdict_key=verdict_digest(sources))
         finally:
             shutil.rmtree(work, ignore_errors=True)

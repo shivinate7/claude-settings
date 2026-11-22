@@ -454,7 +454,7 @@ def _powershell_values(segment: str) -> str:
 
 
 ANSI_C_SIMPLE = {"a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "n": "\n", "r": "\r",
-                 "t": "\t", "v": "\v", "\\": "\\", "'": "'", '"': '"', "?": "?"}
+                "t": "\t", "v": "\v", "\\": "\\", "'": "'", '"': '"', "?": "?"}
 ANSI_C_ESCAPE = re.compile(r"\\(?:([0-7]{1,3})|x([0-9a-fA-F]{1,2})|u([0-9a-fA-F]{1,4})|U([0-9a-fA-F]{1,8})"
                            r"|c(.)|(.))", re.DOTALL)
 
@@ -500,6 +500,121 @@ def decode_ansi_c(text: str) -> str:
                 continue
         quote, index = after, index + width
     return "".join(out) + text[last:] if out else text
+
+
+def _bash_arithmetic_spans(segment: str, steps):
+    """The (start, end) index spans of each bash `$(( ))`, `(( ))` and `${ }` in `segment` that
+    closes in it. `steps` is `list(walk_quotes(segment))`; a quoted bracket counts for nothing. A
+    `((` whose first `)` is single is two subshells (`((cmd)&)`), so it makes no span. An opener with
+    no closer makes no span, as in the quote walk: the rest stays visible."""
+    free = [index for index, _, quote in steps if not quote]
+    spans, at = [], 0
+    while at < len(free):
+        index = free[at]
+        head = segment[index:index + 3]
+        paren = head == "$((" or (head[:2] == "((" and (index == 0 or segment[index - 1] in " \t\r\n;|&!"))
+        brace = head[:2] == "${"
+        skip = 3 if head == "$((" else 2
+        if not (paren or brace) or free[at:at + skip] != list(range(index, index + skip)):
+            at += 1
+            continue
+        depth, end = (2 if paren else 1), None
+        for spot in range(at + skip, len(free)):
+            char = segment[free[spot]]
+            if char == ("(" if paren else "{"):
+                depth += 1
+            elif char == (")" if paren else "}"):
+                if paren and depth == 2:
+                    if segment[free[spot] + 1:free[spot] + 2] == ")" and spot + 1 < len(free) \
+                            and free[spot + 1] == free[spot] + 1:
+                        end = spot + 1
+                    break
+                depth -= 1
+                if not depth:
+                    end = spot
+                    break
+        if end is None:
+            at += 1
+            continue
+        spans.append((index, free[end]))
+        at = end + 1
+    return spans
+
+
+def _amp_cuts(segment: str):
+    """Each unquoted `&` of `segment` that ends a job or redirects, as (index, kind), read with
+    `walk_quotes`, so a quoted `&`, an escaped `\\&` and a `&` inside a multi-line quote are none.
+    `kind` is "glued" (`tail -3&`: the `&` ends the word before it), "redirect" (a glued `&>`, which
+    redirects both streams and ends no job), or "spaced" (`&` after white space, or at the start).
+    These are no cut:
+    - a `&` of `&&`, `|&`, `>&` or `<&`;
+    - a `&` that comes first after `(` or `{` (white space may come between). PowerShell's call
+      operator sits there (`(& $tool x)`, `{&$tool $_}`), and in bash a job cannot;
+    - in PowerShell, a `&` before a character other than white space, since `&$cmd` and `&"x"` are
+      its call operator;
+    - in bash, a `&` inside `$(( ))`, `(( ))` or `${ }`, where it is bitwise and or a character."""
+    cuts = []
+    if "&" not in segment:
+        return cuts
+    powershell = is_powershell(segment)
+    steps = list(walk_quotes(segment))
+    spans = [] if powershell else _bash_arithmetic_spans(segment, steps)
+    opener = ""   # the last step before this one that is not white space (an escaped `\(` is `\`)
+    for index, char, quote in steps:
+        last, opener = opener, (opener if char in " \t\r\n" else char)
+        if char != "&" or quote:
+            continue
+        before, after = (segment[index - 1] if index else " "), segment[index + 1:index + 2]
+        if after == "&" or before in ">&<|":
+            continue
+        if last in ("(", "{") or any(start < index < end for start, end in spans):
+            continue
+        ends_word = after in ("", " ", "\t", "\r", "\n")
+        if before in " \t\r\n":
+            if after != ">" and not (powershell and not ends_word):
+                cuts.append((index, "spaced"))
+        elif after == ">":
+            cuts.append((index, "redirect"))
+        elif ends_word or not powershell:
+            cuts.append((index, "glued"))
+    return cuts
+
+
+def amp_pieces(segment: str):
+    """`segment` cut at each unquoted `&` glued to the word before it, as [(text, cut)]: `text` has
+    no `&` of its own cut off, and `cut` says a job-ending `&` followed it (`tail -3& echo $!` is
+    `tail -3` cut, then ` echo $!`). The reader of a glued `&` for the delete reader
+    (`backgrounding_amp` reads the spaced ones too). A glued `&>` cuts as well, with `cut` False: it
+    ends no job, and the word before it is the command's last, so `rm -rf ..&>f` deletes `..`.
+    `_amp_cuts` says what is no cut. A spaced `&` cuts nothing here."""
+    pieces, last = [], 0
+    for index, kind in _amp_cuts(segment):
+        if kind != "spaced":
+            pieces.append((segment[last:index], kind == "glued"))
+            last = index + 1
+    pieces.append((segment[last:], False))
+    return [(type(segment)(text), cut) for text, cut in pieces if text.strip() or not cut]
+
+
+def backgrounding_amp(segment: str, tokens, start: int = 0) -> str:
+    """The text a backgrounding `&` ends in one segment, else ''. The one home of "this command
+    runs as a background job", read by the check-tail rule and the detached-launch rule. A `&` is a
+    job when it ends a piece that holds a word after a command word (the one at `start` in the
+    first piece, any word in a later one), spaced or glued (`_amp_cuts`). The pieces come from the
+    raw text, never from `tokens`: they keep no quote marks, so a quoted `&` and a bare one are the
+    same token. `tokens` is `segment_tokens(segment)`; None means the segment cannot be read, which
+    is no job. A `&` at the head of a segment (`|&`, a PowerShell `& $cmd`) ends an empty piece."""
+    if not tokens:
+        return ""
+    last, floor = 0, start
+    for index, kind in _amp_cuts(segment):
+        if kind == "redirect":
+            continue
+        words = segment_tokens(type(segment)(segment[last:index]))
+        if words and (kind == "glued" or len(words) > floor):
+            return words[-1] + ("&" if kind == "glued" else " &")
+        last, floor = index + 1, 0
+    return ""
 
 
 def segment_tokens(segment: str):
@@ -1345,6 +1460,7 @@ REPLAY_MARKS = ("CHERRY_PICK_HEAD", "REVERT_HEAD", "SQUASH_MSG", "MERGE_MSG", "r
 
 CD_WORDS = ("cd", "chdir", "pushd", "set-location", "push-location")
 POP_WORDS = ("popd", "pop-location")
+BRANCH_KEYWORDS = ("then", "else", "elif", "do")   # a segment that opens a branch or loop body: it may not run
 CD_UNKNOWN = object()   # a move whose destination is not tracked (popd)
 
 
@@ -1415,13 +1531,24 @@ _VARIABLE_SAFE_WORDS = frozenset(CD_WORDS + POP_WORDS + (
 _VARIABLE_SET_IN_ARGS = re.compile(r"\$\(\(|\$\{[^}]*=")   # `$((R=1))` and `${R:=x}` set R from an argument
 
 
+_IDENTIFIER = re.compile(r"[A-Za-z_]\w*")
+
+
 def _variable_text(known, text: str) -> str:
     """`text` with each `$VAR` read as the value in `known`. The values go through `_resolve_vars`, the
     one resolver, as assignments written ahead of the text; it is imported late (guard_frozen imports
-    this file). A variable not in `known` stays as written."""
+    this file). A variable not in `known` stays as written.
+    Only the variables whose name occurs in `text` go through the resolver, with `IFS`, which it reads
+    without a use. Each known value is already plain text, so the others cannot change the answer, and
+    handing it all of `known` per call made a long run of assignments cost the square of its length."""
     from guard_frozen import _resolve_vars
+    if "$" not in text:
+        return text   # nothing to read: the resolver would hand the text back, after reading all of `known`
     mark = " ;\x00; "
-    given = "".join('%s="%s"%s' % (name, value, mark) for name, value in known.items())
+    # only the names the text holds can change it, so a long command of many assignments is not read in full each time
+    used = set(_IDENTIFIER.findall(text))
+    used.add("IFS")
+    given = "".join('%s="%s"%s' % (name, value, mark) for name, value in known.items() if name in used)
     return _resolve_vars(given + text).split(mark)[-1]
 
 
@@ -1525,7 +1652,8 @@ def _read_cd_variable(known, segment: str, move: str, ran: bool) -> str:
     return read if isinstance(read, str) and read else move
 
 
-def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False, made=frozenset()):
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False, made=frozenset(),
+                       uncertain=None):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
@@ -1546,8 +1674,54 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     the next command runs. A brace group after the `||` is not read. Off by
     default, so a rule that fails closed on an untrusted `cd` keeps doing so.
     `made` holds normalized folders an earlier segment of the same call makes (a mkdir, a clone): a `cd`
-    into one is read as one that works, though the folder is missing at check time. Empty by default."""
-    where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
+    into one is read as one that works, though the folder is missing at check time. Empty by default.
+    `uncertain`, a list, gets one bool when the walk reaches `segments[number]`: True when a `cd` ahead of it
+    may not have run (after `||`, after an `&&` whose left side may fail, or inside a `then`, `else`, `elif` or
+    `do` body, however many lines it spans, up to its `fi` or `done`), so the folder it returns is one of two
+    the shell may be in. A `cd` in a pipe is not counted: it moves nothing."""
+    walk = _walk_dirs(segments[:number + 1], shell_cwd, ends, failed_cd_stays, made)
+    at = 0
+    while True:
+        try:
+            here, may_skip = next(walk)
+        except StopIteration as finished:
+            return finished.value   # `number` is past the last segment: where the shell ends
+        if at == number:
+            if isinstance(uncertain, list):
+                uncertain.append(may_skip)
+            return here
+        at += 1
+
+
+def segment_dirs(segments, shell_cwd: str, ends=(), failed_cd_stays=False, made=frozenset()):
+    """dir_before_segment for every segment in one walk: yields each segment's folder in order, then
+    the folder after the last one. A caller that needs the folder of many segments reads them here,
+    since one dir_before_segment call per segment walks the command once per segment. `ends`,
+    `failed_cd_stays` and `made` read as in dir_before_segment."""
+    walk = _walk_dirs(segments, shell_cwd, ends, failed_cd_stays, made)
+    while True:
+        try:
+            here, _ = next(walk)
+        except StopIteration as finished:
+            yield finished.value
+            return
+        yield here
+
+
+def dirs_before_segments(segments, shell_cwd: str, ends=(), failed_cd_stays=False, made=frozenset()):
+    """`[(folder, uncertain)]`, one pair per segment: what `dir_before_segment` gives each one, from ONE walk.
+    A caller that wants every segment's folder takes this, never `dir_before_segment` in a loop: that walk
+    restarts at the first segment on each call, so the work grows with the cube of a long command."""
+    walk = _walk_dirs(segments, shell_cwd, ends, failed_cd_stays, made)
+    return list(walk)
+
+
+def _walk_dirs(segments, shell_cwd, ends, failed_cd_stays, made):
+    """The one walk behind `dir_before_segment` and `dirs_before_segments`. Yields `(folder, may_skip)` as the walk
+    reaches each segment, before it reads that segment, and returns the folder the shell ends in."""
+    where = shell_cwd if isinstance(shell_cwd, str) and shell_cwd and os.path.isabs(shell_cwd) else None
+    if not isinstance(made, (set, frozenset, list, tuple)):
+        made = frozenset()   # a string would make `in` a substring test and trust a folder that nothing made
     prev, stack = None, []
     known = {}         # the variables the shell holds: plain assignments that ran here (`_track_variables`)
     doubt = False      # the last cd may have failed in an `&&` chain: a segment after it may not run
@@ -1555,17 +1729,26 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
     bail = False       # a failed cd ended in `||`: an `exit` next ends the shell
     gone = False       # the shell has ended: nothing after runs
+    may_skip = False   # a cd ahead of the target may not have run (`uncertain`)
     last_end = ""      # the operator that ended the last non-empty segment
-    for at, segment in enumerate(segments[:number + 1]):
+    compounds = []     # open if/for/while/until: True once its then, else, elif or do has begun its body
+    for at, segment in enumerate(segments):
         marks = [(index, char) for index, char, quote in walk_quotes(segment) if not quote and char in "()"]
         groups = _subshell_opens(segment, marks)
         stack.extend((where, prev, dict(known), index in groups) for index, char in marks if char == "(")
         closes = sum(1 for _, char in marks if char == ")")
         end = ends[at] if at < len(ends) else ""
-        if at == number:
-            return None if skipping or gone else where
+        yield (None if skipping or gone else where), may_skip
         if not segment.strip():
             continue   # an operator at end of line then the newline leaves an empty part: it changes nothing
+        tokens = segment_tokens(segment)
+        word = tokens[0] if tokens else None
+        if word in ("if", "for", "while", "until", "select"):
+            compounds.append(False)
+        elif word in BRANCH_KEYWORDS and compounds:
+            compounds[-1] = True   # a body opens, so a `cd` in it on a later line may not run
+        elif word in ("fi", "done") and compounds:
+            compounds.pop()
         if gone:
             continue
         if skipping:
@@ -1577,7 +1760,6 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                     where, prev, known = _close_paren(stack, known)
                     skipping = False
             continue
-        tokens = segment_tokens(segment)
         move = _segment_cd_move(tokens) if tokens else None
         before = last_end
         last_end = end
@@ -1592,6 +1774,8 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
         ran = not (doubt or piped or before == "||")   # this segment runs in the shell, as itself
         sure = ran and not (unsure and before == "&&")
+        if move is not None and tokens and (not sure or word in BRANCH_KEYWORDS or any(compounds)):
+            may_skip = True
         assigned = _track_variables(known, segment, tokens, sure)
         doubt = doubt and end == "&&"
         if tokens is None:

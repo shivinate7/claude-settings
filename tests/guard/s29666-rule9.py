@@ -54,6 +54,10 @@ def _build_lane_origins():
 
 
 lazy_fixture(list(LANE_ORIGINS), _build_lane_origins)
+add("lane-effort-pin: lane tag with the effort command padded by space and a newline is denied",
+    "deny", "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="  /effort medium\n")
+add("lane-effort-pin: lane tag with the effort command and a trailing newline is denied", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium\n")
 add("lane-effort-pin: lane tag with a grant line first and effort medium is allowed", "allow",
     tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     model="sonnet", source_url=LANE_SOURCE_URL)
@@ -277,4 +281,4 @@ add("lane-repo-tag: a denied lane names the expected repo tag in its reason", "d
 # -C or --repo-dir (either spelling, glued or not, anywhere in the command, the last one wins), else the `cd X &&` directory, else the
 # working directory. The guard reads that checkout's repo and allows the merge only when a tag of the own newest get_session record
 # names the same cs-repo repo. A flag value that cannot be read, and a record that cannot be read, are denied. Outside the cloud, and
-# --lane-lint (which merges nothing), are not judged.
+# --lane-lint (which merges no pull request), are not judged.

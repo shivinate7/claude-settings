@@ -138,6 +138,44 @@ sh("narrate: tail of a file, no pipe", "tail -n 5 notes.txt", "allow", cwd=NOGIT
 sh("narrate: merge --confirm named in a quoted argument runs nothing",
    "echo 'merge 12 --confirm' | tail -1", "allow", cwd=NOGIT)
 
+
+# --- a tee between the wait and tail or head (extends the live-stream rule)
+#
+# tee keeps every byte in its file, but a tail or head after it still cuts what the agent reads, so the
+# heartbeat is hidden as before. narrated_tail_hit walks past the tee, as the check rule does. A tee
+# with nothing after it is the tee-only row above, and stays allowed.
+sh("narrate: a tee, then tail, after merge --confirm is refused",
+   "merge --confirm | tee x | tail -3", "deny", "live-stream", cwd=NOGIT)
+sh("narrate: a tee, then head, after merge --confirm is refused",
+   "merge 12 --confirm 2>&1 | tee -a log | head -5", "deny", "live-stream", cwd=NOGIT)
+sh("narrate: a tee, then grep, then tail, after merge --confirm is refused",
+   "merge 12 --confirm 2>&1 | tee run.out | grep FAIL | tail -3", "deny", "live-stream", cwd=NOGIT)
+sh("narrate: merge --confirm through tee with nothing after it is allowed",
+   "merge --confirm | tee x", "allow", cwd=NOGIT)
+# The scanner reads the pipeline's text, so a lone apostrophe, a comment or a quote near the tee must not
+# change which stages it reads (building-scanner-respects-strings).
+sh("narrate: scanner: a lone apostrophe ahead of a tee, then tail, is refused",
+   "echo don't; merge 12 --confirm 2>&1 | tee x | tail -3", "deny", "live-stream", cwd=NOGIT)
+sh("narrate: scanner: a tail after # is a comment, so the tee is the last stage and is allowed",
+   "merge 12 --confirm 2>&1 | tee x # | tail -3", "allow", cwd=NOGIT)
+sh("narrate: scanner: a pipe and a # inside the tee's quoted file name is no follow",
+   "merge 12 --confirm 2>&1 | tee 'a # | tail -3'", "allow", cwd=NOGIT)
+sh("narrate: scanner: a tee and tail pipe quoted as text is no follow",
+   'echo "merge 12 --confirm | tee x | tail -3"', "allow", cwd=NOGIT)
+
+# --- a filter between the wait and tail or head (extends the live-stream rule)
+#
+# A filter such as grep or sed cuts the heartbeat as a tee does, so a tail or head after it is refused too.
+# A filter with nothing after it, and a preview with no --confirm, stay allowed.
+sh("narrate: a grep, then tail, after merge --confirm is refused",
+   "merge --confirm | grep FAIL | tail -3", "deny", "live-stream", cwd=NOGIT)
+sh("narrate: a sed, then head, after merge --confirm is refused",
+   "merge 12 --confirm 2>&1 | sed -n 1,99p | head -5", "deny", "live-stream", cwd=NOGIT)
+sh("narrate: merge --confirm through grep with no tail or head is allowed",
+   "merge --confirm | grep FAIL", "allow", cwd=NOGIT)
+sh("narrate: a grep, then tail, on a merge preview without --confirm is allowed",
+   "merge 12 | grep x | tail -3", "allow", cwd=NOGIT)
+
 # --- a pipe out of a verdict stage (extends the live-stream rule)
 #
 # verdict prints its FAIL line first, and a pipe cuts it off. A pipeline's exit is its last stage's,
@@ -297,6 +335,22 @@ add("check-tail: merge --lane-lint through tee and tail, backgrounded, is refuse
 add("check-tail: ci-job checks --lint through tee and head, backgrounded, is refused", "deny",
     "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tee lint.log | head -20")
+
+add("check-tail: ci-job checks --lint piped to grep, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/ci-job checks --lint | grep FAIL")
+
+# A lone tee.exe, Tee-Object or Out-File with nothing after it is allowed too: each writes the output
+# to a file the agent reads back, so no filter cuts it.
+add("check-tail: merge --lane-lint through tee.exe with nothing after it, backgrounded, is allowed",
+    "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 7 | tee.exe lint.log")
+add("check-tail: merge --lane-lint through Tee-Object with nothing after it, backgrounded, is allowed",
+    "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 7 | Tee-Object -FilePath lint.log")
+add("check-tail: merge --lane-lint through Out-File with nothing after it, backgrounded, is allowed",
+    "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 7 | Out-File lint.log")
 add("check-tail: merge --lane-lint through tee with nothing after it, backgrounded, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, timeout=CHECK_TIMEOUT_MS, description=TAIL_BG_UNTIL,
     command="merge --lane-lint 7 2>&1 | tee lint.log")
@@ -365,9 +419,97 @@ sh("check-tail: uv run --no-group dev then merge --lane-lint piped to tail in th
    "uv run --no-group dev merge --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
 sh("check-tail: a uv global flag before run, then merge --lane-lint piped to tail is refused",
    "uv --quiet run merge --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
+
+sh("check-tail: merge --lane-lint piped to tail, then && push, is refused",
+   "~/.claude/bin/merge --lane-lint 7 2>&1 | tail -3 && git push", "deny", "check-tail",
+   cwd=NOGIT)
+# A lint piped to tail or head reports the filter's exit, not the lint's, so a commit or push after it
+# runs on a red lint. The pipe is refused when a git commit or git push follows it in the same call.
+sh("check-tail: lint piped to tail, then ; git add and && git commit is refused",
+   "python3 lint/ste_lint.py docs/x.md 2>&1 | tail -2; git add docs/x.md && git commit -m m",
+   "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: lint piped to tail, then && git commit is refused",
+   "python3 lint/ste_lint.py docs/x.md | tail -2 && git commit -m m", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: set -e, then lint piped to head, then ; git push is refused",
+   "set -e; python3 lint/rule_audit.py 2>&1 | head -3; git push origin HEAD:b", "deny", "check-tail",
+   cwd=NOGIT)
+# Controls: a lint piped onward with nothing after it, a verdict call with no pipe, and a lint with no pipe.
+sh("check-tail: lint piped to tail with no commit after is allowed",
+   "python3 lint/ste_lint.py docs/x.md | tail -2", "allow", cwd=NOGIT)
+sh("check-tail: verdict on a lint, then ; git commit, is allowed",
+   "verdict python3 lint/ste_lint.py docs/x.md; git commit -m m", "allow", cwd=NOGIT)
+sh("check-tail: lint then && git commit, with no pipe, is allowed",
+   "python3 lint/ste_lint.py docs/x.md && git commit -m m", "allow", cwd=NOGIT)
+# A lint piped to tail is refused before a commit or push, also through uv run and a versioned python. An
+# echo after the pipe names neither a commit nor a push, so that call is allowed.
+sh("check-tail: uv run lint script piped to tail, then ; git commit, is refused",
+   "uv run lint/ste_lint.py docs/x.md | tail -2; git commit -m m", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: python3.11 lint script piped to tail, then && git push, is refused",
+   "python3.11 lint/ste_lint.py docs/x.md 2>&1 | tail -2 && git push origin HEAD:b", "deny",
+   "check-tail", cwd=NOGIT)
+# A pipeline's exit is its last stage's, so a lint piped into any later stage masks its exit before a commit,
+# not only into tail or head. tee keeps every byte and still returns its own exit. A redirect word, a
+# substitution in the script path, or a pipe inside `$(...)` hides the lint from the check the same way.
+sh("check-tail: lint piped to grep, then && git commit, is refused",
+   "python3 lint/ste_lint.py docs/x.md | grep -v OK && git commit -m m", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: lint piped to tee, then && git commit, is refused",
+   "python3 lint/ste_lint.py docs/x.md | tee out.txt && git commit -m m", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: lint piped to wc, then && git commit, is refused",
+   "python3 lint/ste_lint.py docs/x.md | wc -l && git commit -m m", "deny", "check-tail", cwd=NOGIT)
+# Control: a lint piped to a filter with no commit after it is allowed, so the refusal stays on the commit.
+sh("check-tail: lint piped to grep with no commit after is allowed",
+   "python3 lint/ste_lint.py docs/x.md | grep -v OK", "allow", cwd=NOGIT)
+sh("check-tail: a 2>/dev/null redirect before the lint script, piped to tail, then && commit, is refused",
+   "2>/dev/null python3 lint/ste_lint.py docs/x.md | tail -2 && git commit -m m", "deny", "check-tail",
+   cwd=NOGIT)
+sh("check-tail: a 2>/dev/null redirect after uv run, piped to tail, then && commit, is refused",
+   "uv run 2>/dev/null lint/x.py | tail -2 && git commit -m m", "deny", "check-tail", cwd=NOGIT)
+# A substitution in the script path splits into several words, so the lint script is not the first word.
+sh("check-tail: a substitution in the lint script path, piped to tail, then && commit, is refused",
+   "$(echo a b)/lint/ste_lint.py docs/x.md | tail -2 && git commit -m m", "deny", "check-tail", cwd=NOGIT)
+# A pipe inside `$(...)`: the inner pipeline's exit is tail's, and echo discards the substitution's exit.
+sh("check-tail: a pipe inside $(...) in the lint script path, piped to tail, then && commit, is refused",
+   "python3 $(pwd | head -1)/lint/ste_lint.py docs/x.md | tail -2 && git commit -m m", "deny", "check-tail",
+   cwd=NOGIT)
+sh("check-tail: a lint piped to tail inside $(...), then && git commit, is refused",
+   "echo $(python3 lint/ste_lint.py x | tail -1) && git commit -m m", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: lint piped to tail, then ; echo done, is allowed",
+   "python3 lint/ste_lint.py docs/x.md | tail -2; echo done", "allow", cwd=NOGIT)
+# Pins: a script outside lint/ is no lint stage, so a commit after its pipe is not refused. A commit before
+# a lint stage is not after it, and `echo commit` names no commit. Current behaviour, no new claim.
+sh("check-tail: a .py script outside lint/ piped to tail, then && git commit, is allowed",
+   "python3 scripts/ste_check.py docs/x.md | tail -2 && git commit -m m", "allow", cwd=NOGIT)
+sh("check-tail: a commit before a lint piped to tail is allowed",
+   "git commit -m m && python3 lint/ste_lint.py docs/x.md | tail -2", "allow", cwd=NOGIT)
+sh("check-tail: lint piped to tail, then ; echo commit, is allowed",
+   "python3 lint/ste_lint.py docs/x.md | tail -2; echo commit", "allow", cwd=NOGIT)
 sh("check-tail: uv run --with-editable then python runs the script piped to tail is refused",
    "uv run --with-editable . python merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail",
    cwd=NOGIT)
+
+# Forms the roster does not yet read: a `uv run` that runs a script by its path, a script run by its
+# path, and an argparse prefix of --lane-lint or --review-record. argparse takes a prefix that matches
+# one option alone, so `merge --lane 7` runs --lane-lint. It refuses an ambiguous prefix and runs no
+# check, so `merge --l 7` (--lane-lint, --lint-unknown-ok, --live) is allowed.
+sh("check-tail: uv run runs the merge script piped to tail in the foreground is refused",
+   "uv run merge/merge.py --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: a merge script run by its path piped to tail in the foreground is refused",
+   "./merge/merge.py --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --lane, a prefix of --lane-lint, piped to tail in the foreground is refused",
+   "merge --lane 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --lane-l, a prefix of --lane-lint, piped to tail in the foreground is refused",
+   "merge --lane-l 7 2>&1 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --review-r, a prefix of --review-record, piped to head is refused",
+   "merge --review-r 12 --head 0123456789abcdef0123456789abcdef01234567 | head -5", "deny",
+   "check-tail", cwd=NOGIT)
+sh("check-tail: merge --l, an ambiguous prefix that argparse refuses, piped to tail is allowed",
+   "merge --l 7 | tail -3", "allow", cwd=NOGIT)
+# argparse splits `--name=value` at the `=` before it matches a name, so the = form names the same option
+# as the bare form: `merge --lane=7` runs --lane-lint, and `merge --lane-lint=7` runs it by its exact name.
+sh("check-tail: merge --lane=7, a prefix of --lane-lint in the = form, piped to tail, then && commit, is refused",
+   "merge --lane=7 | tail -3 && git commit -m x", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --lane-lint=7, the exact option in the = form, piped to tail, then && commit, is refused",
+   "merge --lane-lint=7 | tail -3 && git commit -m x", "deny", "check-tail", cwd=NOGIT)
 # `uv run` runs a script operand with no interpreter word, so the script is the command word. The check
 # reads only an interpreter's operand, so these uv spellings must still be refused.
 sh("check-tail: uv run merge/merge.py --lane-lint piped to tail in the foreground is refused",
@@ -402,6 +544,59 @@ sh("check-tail: a $(pwd) script path with no space piped to tail in the foregrou
 # Control: an unquoted substitution that names another script is not the merge script, so it is allowed.
 sh("check-tail: an unquoted $(git rev-parse) path to another script naming --lane-lint is allowed",
    "python3 $(git rev-parse --show-toplevel)/lint/other.py --lane-lint | tail -3", "allow", cwd=NOGIT)
+
+# A redirect word between the interpreter and the script is read as the script operand, which hides the
+# merge script from the check. Each spelling below names the merge script, so each must still be refused.
+sh("check-tail: python3 -u with a 2>&1 redirect before the script, piped to tail, is refused",
+   "python3 -u 2>&1 merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: a 2>/dev/null redirect before the script, piped to head, is refused",
+   "python3 2>/dev/null merge/merge.py --review-record 7 | head -5", "deny", "check-tail", cwd=NOGIT)
+# Pins: a redirect word and its target written apart (`2> /dev/null`) are two words, and the target is
+# skipped with it, so the lint script after them is still the operand. Current behaviour, no new claim.
+sh("check-tail: lint behind a separate 2> /dev/null redirect, piped to tail, then && commit, is refused",
+   "python3 2> /dev/null lint/ste_lint.py docs/x.md | tail -2 && git commit -m m", "deny", "check-tail",
+   cwd=NOGIT)
+# Pins: a nested substitution and a one-token backtick name the merge script, so each is refused too.
+sh("check-tail: a nested $(dirname $(git rev-parse)) script path piped to tail is refused",
+   "python3 $(dirname $(git rev-parse --show-toplevel))/x/merge/merge.py --lane-lint 7 | tail -3",
+   "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: a one-token backtick script path piped to tail is refused",
+   "python3 `pwd`/merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+
+# --- a redirect-only segment, a redirect before the filter, and a commit inside a substitution (rule check-tail)
+#
+# `> out.txt` and `2>&1` are a redirect with no command after it. check_tail_hit once read past the end of
+# such a segment: the guard logged a crash and allowed the call, so every later rule was skipped, the
+# lint-then-commit gate included. Each allow below must print nothing. A crash also allows, so the log check
+# registered after LOG_CHECKS_EXTRA reads each command's guard.log for a guard-crash line.
+TAIL_REDIRECT_ONLY = (
+    ("a redirect alone", "> out.txt"),
+    ("a redirect after &&", "echo hi && > out.txt"),
+    ("a redirect append after ;", "true; >> log.txt"),
+    ("a 2>&1 alone", "2>&1"),
+    ("a redirect before uv run's command", "uv run >out"),
+    ("a redirect after a pipe", "cat f | > out.txt"),
+)
+for _name, _command in TAIL_REDIRECT_ONLY:
+    sh("check-tail: " + _name + " is no command, and is allowed", _command, "allow", cwd=NOGIT)
+TAIL_REDIRECT_THEN_COMMIT = ("a redirect segment, then a lint piped to tail and && a commit",
+                             "> x; python3 lint/ste_lint.py d.md | tail -2 && " + VCS + " commit -m m")
+sh("check-tail: " + TAIL_REDIRECT_THEN_COMMIT[0] + ", is refused", TAIL_REDIRECT_THEN_COMMIT[1],
+   "deny", "check-tail", cwd=NOGIT)
+# A redirect word between a pipe and its filter is skipped, so `| 2>/dev/null tail` still reads as tail.
+sh("check-tail: merge --lane-lint piped to a redirect word, then tail, is refused",
+   "merge --lane-lint 7 | 2>/dev/null tail -3", "deny", "check-tail", cwd=NOGIT)
+# The same skip reads the file writer past a redirect word. tee keeps every byte, so the call is allowed.
+# Without the skip, the redirect word is read as the filter, and the call is refused.
+add("check-tail: merge --lane-lint piped to a redirect word, then tee, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, timeout=CHECK_TIMEOUT_MS, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 7 | 2>/dev/null tee lint.log")
+# A commit or a push inside `$(...)` is a follow-up of a lint piped to tail before it, as a commit outside is.
+sh("check-tail: a lint piped to tail, then && out=$(commit) in a substitution, is refused",
+   "python3 lint/ste_lint.py d.md | tail -2 && out=$(" + VCS + " commit -m m 2>&1)", "deny", "check-tail",
+   cwd=NOGIT)
+sh("check-tail: a lint piped to tail, then ; echo $(push) in a substitution, is refused",
+   "python3 lint/ste_lint.py d.md | tail -2; echo $(" + VCS + " push)", "deny", "check-tail", cwd=NOGIT)
 
 # A pipe out of verdict is refused whatever wraps the call (uv run, env VAR=x) and whatever follows
 # the pipeline (;, &&, ||), since the pipe hides verdict's exit. A verdict call with no pipe is allowed.
@@ -471,6 +666,291 @@ sh("check-tail: ci-job checks --lint piped to tail in the foreground is allowed"
    "~/.claude/bin/ci-job checks --lint 2>&1 | tail -20", "allow", cwd=NOGIT)
 sh("verdict-pipe: a verdict call piped to tail in the foreground is refused",
    "verdict merge --lane-lint 1476 | tail -3", "deny", "verdict-pipe", cwd=NOGIT)
+
+sh("check-tail: a verdict call with no pipe in the foreground is allowed",
+   "verdict merge --lane-lint 1476", "allow", cwd=NOGIT)
+
+# A filter of any kind between a lane-lint or review-record run and the pipeline's end is refused, not
+# only tail and head. A separator ends the pipeline, so a tail after `;` reads no check.
+sh("check-tail: merge --lane-lint through sed -n, with no tail or head, is refused",
+   "merge --lane-lint 7 | sed -n 1,5p", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --lane-lint through grep -m1, with no tail or head, is refused",
+   "merge --lane-lint 7 | grep -m1 FAIL", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --review-record through awk, with no tail or head, is refused",
+   "merge --review-record 7 | awk 'END{print}'", "deny", "check-tail", cwd=NOGIT)
+# A writer spelling (tee.exe, Tee-Object, Out-File) is no filter, but a filter after it still reaches the check.
+sh("check-tail: merge --lane-lint through tee.exe, then tail, is refused",
+   "merge --lane-lint 7 | tee.exe x | tail", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --lane-lint through Tee-Object, then Select-Object -Last 3, is refused",
+   "merge --lane-lint 7 | Tee-Object x | Select-Object -Last 3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --lane-lint through Out-File, then tail, is refused",
+   "merge --lane-lint 7 | Out-File x | tail", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --lane-lint with no pipe is allowed",
+   "merge --lane-lint 7", "allow", cwd=NOGIT)
+sh("check-tail: merge --lane-lint with output to a file is allowed",
+   "merge --lane-lint 7 > lint.log", "allow", cwd=NOGIT)
+sh("check-tail: a verdict call of merge --lane-lint with no pipe is allowed",
+   "verdict merge --lane-lint 7", "allow", cwd=NOGIT)
+sh("check-tail: grep of the saved lint log with no check in the pipe is allowed",
+   "grep -m1 FAIL lint.log", "allow", cwd=NOGIT)
+sh("check-tail: lane-lint to a file, then a semicolon and grep | tail of the log, is allowed",
+   "merge --lane-lint 7 > log; grep FAIL log | tail", "allow", cwd=NOGIT)
+sh("check-tail: lane-lint into tee only, then a semicolon and grep | tail of the log, is allowed",
+   "merge --lane-lint 7 | tee log; grep FAIL log | tail -3", "allow", cwd=NOGIT)
+sh("narrate: a semicolon ends the pipeline, so a tail after it reads no live stream and is allowed",
+   "merge --confirm 7 | tee x; tail -3 x", "allow", cwd=NOGIT)
+sh("check-tail: merge --lane-lint piped to tail, then a background &, is refused",
+   "merge --lane-lint 7 | tail & echo $!", "deny", "check-tail", cwd=NOGIT)
+
+# A trailing `&` backgrounds a named check as run_in_background does, so a ci-job with one is refused.
+# The until note keeps background-end out of these cases, as it does for the backgrounded rows above.
+add("check-tail: ci-job checks --lint piped to grep, then a trailing background &, is refused", "deny",
+    "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/ci-job checks --lint | grep FAIL & echo $!")
+add("check-tail: ci-job checks --lint piped to tail, then a trailing background &, is refused; detached-launch refuses it first", "deny",
+    "detached-launch", cwd=NOGIT, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/ci-job checks --lint | tail -3 &")
+sh("check-tail: ci-job checks --lint piped to tail in the foreground, with no &, is allowed",
+   "~/.claude/bin/ci-job checks --lint | tail -3", "allow", cwd=NOGIT)
+# `|&` pipes both streams. Its `&` is part of the pipe, not a background `&`, so these are allowed.
+sh("check-tail: ci-job checks --lint |& tail -3 in the foreground, the & of |& is a pipe, is allowed",
+   "~/.claude/bin/ci-job checks --lint |& tail -3", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks --lint 2>&1 |& cat in the foreground, the & of |& is a pipe, is allowed",
+   "~/.claude/bin/ci-job checks --lint 2>&1 |& cat", "allow", cwd=NOGIT)
+
+# A `&` glued to the last word backgrounds the pipeline as a spaced one does: `tail -3&` is `tail -3 &`.
+# detached-launch reads that job through `backgrounding_amp` and refuses it first, since no pid is
+# captured, so these name detached-launch. The two quoted cases keep a `#` or an apostrophe inside
+# quotes from ending the text the `&` follows.
+add("check-tail: ci-job checks piped to tail -3&, the & glued to the word, is refused; "
+    "detached-launch refuses it first", "deny",
+    "detached-launch", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | tail -3&")
+add("check-tail: ci-job checks|tail&, with no space around the pipe or the &, is refused; "
+    "detached-launch refuses it first", "deny",
+    "detached-launch", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks|tail&")
+add("check-tail: a glued & after a quoted #, piped to grep, is refused; "
+    "detached-launch refuses it first", "deny",
+    "detached-launch", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | grep '#x'&")
+add("check-tail: a glued & after a quoted lone apostrophe, piped to grep, is refused; "
+    "detached-launch refuses it first", "deny",
+    "detached-launch", cwd=NOGIT, description=TAIL_BG_UNTIL, command='ci-job checks | grep "don\'t"&')
+# The pid is captured on the next line, so detached-launch does not refuse it. check-tail reads the `&` at
+# the line's end as a background job and refuses the pipeline.
+add("check-tail: ci-job checks piped to tail -3&, a newline, then echo $! capturing the pid, is refused", "deny",
+    "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | tail -3&\necho $!")
+# A `&` glued to a word mid-line ends that word's job, and the next command runs on the same line. The reader
+# takes only the last token, so these were missed. `tail -3& echo $!` captures a pid on its line, so
+# detached-launch does not refuse it (bare_background_hit returns on `$!`), and check-tail refuses it, as it
+# refuses the spaced `tail -3 & echo $!`. `tail&echo done` captures no pid, so detached-launch refuses it, as
+# it refuses the spaced `tail & echo done`.
+sh("check-tail: ci-job checks | tail -3& echo $!, a glued & mid-line with the pid captured, is refused",
+   "ci-job checks | tail -3& echo $!", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: ci-job checks|tail&echo done, a glued & mid-line with no pid, is refused; "
+   "detached-launch refuses it first", "ci-job checks|tail&echo done", "deny", "detached-launch", cwd=NOGIT)
+# Controls for that reading, each held in the foreground and each allowed on the code before this change. A `&` that is no job
+# is a `&&`, a quoted `&`, a redirect's `&`, or the `&` of `|&`. None of these may turn into a background job.
+sh("check-tail: a&&b, an && glued to both words, is allowed", "a&&b", "allow", cwd=NOGIT)
+sh("check-tail: x |& tail, the & of |& is a pipe, is allowed", "x |& tail", "allow", cwd=NOGIT)
+sh("check-tail: echo 'a& b', a & inside quotes, is allowed", "echo 'a& b'", "allow", cwd=NOGIT)
+sh("check-tail: cmd 2>&1 | tail, the & of a redirect is no job, is allowed", "cmd 2>&1 | tail", "allow",
+   cwd=NOGIT)
+sh("check-tail: cmd >&2; echo x, the & of a redirect is no job, is allowed", "cmd >&2; echo x", "allow",
+   cwd=NOGIT)
+# The quote and comment cases for the mid-line reading (building-scanner-respects-strings): a `#` or a lone
+# apostrophe inside quotes starts no comment and ends no quote, so the `&` after it is a job. A `&` after a
+# comment's `#`, or inside a multi-line quote, is no job. Each deny names the rule its spaced form is refused by.
+sh("check-tail: ci-job checks | grep '#x'& echo $!, a glued & after a quoted #, with the pid captured, is refused",
+   "ci-job checks | grep '#x'& echo $!", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: ci-job checks | grep \"don't\"&echo done, a glued & after a quoted lone apostrophe, is refused; "
+   "detached-launch refuses it first", 'ci-job checks | grep "don\'t"&echo done', "deny", "detached-launch",
+   cwd=NOGIT)
+sh("check-tail: ci-job checks | tail -3 # a& b, a glued & after a comment's #, is allowed",
+   "ci-job checks | tail -3 # a& b", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks | grep \"x& y\" over a newline \"z\", a glued & inside a multi-line quote, is allowed",
+   'ci-job checks | grep "x& y\nz"', "allow", cwd=NOGIT)
+
+# A `&` glued to a word that starts no job. PowerShell's call operator takes an `&` before a command
+# (`& $tool x`, `&$tool $_`). In Bash, a `&` inside `$(( ))` or `(( ))` is bitwise and, and a `&` in a
+# `${s//&/and}` pattern is a character. detached-launch reads each glued `&` as a backgrounded job and refuses
+# it, so each of these is allowed. The deny controls after them keep the three real background jobs refused.
+sh("detached-launch: (& $tool x).Count, a call operator in a grouped expression, is allowed",
+   "(& $tool x).Count", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached-launch: $a = @(& $tool x), a call operator inside @(), is allowed",
+   "$a = @(& $tool x)", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached-launch: 1..3 | ForEach-Object {&$tool $_}, a glued call operator in a scriptblock, is allowed",
+   "1..3 | ForEach-Object {&$tool $_}", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached-launch: $r = (& ci-job checks), a call operator on a roster command, is allowed",
+   "$r = (& ci-job checks)", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached-launch: $x = (& git rev-parse HEAD), a call operator on git, is allowed",
+   "$x = (& git rev-parse HEAD)", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached-launch: echo $((5&3)), a bitwise & in arithmetic expansion, is allowed",
+   "echo $((5&3))", "allow", cwd=NOGIT)
+sh("detached-launch: if (( n&1 )); then echo odd; fi, a bitwise & in an arithmetic test, is allowed",
+   "if (( n&1 )); then echo odd; fi", "allow", cwd=NOGIT)
+sh("detached-launch: echo ${s//&/and}, a & in a parameter pattern, is allowed",
+   "echo ${s//&/and}", "allow", cwd=NOGIT)
+sh("detached-launch: ci-job x | tail -3&, the & glued to the word, is refused",
+   "ci-job x | tail -3&", "deny", "detached-launch", cwd=NOGIT)
+sh("detached-launch: (ci-job x | tail)&, a subshell backgrounded by a glued &, is refused",
+   "(ci-job x | tail)&", "deny", "detached-launch", cwd=NOGIT)
+sh("detached-launch: cmd 2>&1&, a redirect's & then a glued background &, is refused",
+   "cmd 2>&1&", "deny", "detached-launch", cwd=NOGIT)
+# An unquoted URL with `&` in it reads as a glued `&`: bash backgrounds `curl x?a=1` and runs `b=2`. The
+# refusal is the cost of reading that `&` as a job; how often it refuses a URL the user meant is unmeasured.
+# The quoted URLs keep their `&` in quotes, so they are allowed.
+sh("detached-launch: curl x?a=1&b=2, an unquoted URL with a glued &, is refused",
+   "curl x?a=1&b=2", "deny", "detached-launch", cwd=NOGIT)
+sh("detached-launch: curl -o out.json x?a=1&b=2, an unquoted URL after a flag, is refused",
+   "curl -o out.json x?a=1&b=2", "deny", "detached-launch", cwd=NOGIT)
+sh("detached-launch: curl \"x?a=1&b=2\", a double-quoted URL, is allowed",
+   'curl "x?a=1&b=2"', "allow", cwd=NOGIT)
+sh("detached-launch: curl 'x?a=1&b=2', a single-quoted URL, is allowed",
+   "curl 'x?a=1&b=2'", "allow", cwd=NOGIT)
+
+# A quoted lone `&` ends no job (decision detached-launch-refused), so each of these is allowed. The quotes keep
+# the `&` from reading as a spaced background `&`, and a `&` that is a word of a grep or a cut is no job.
+sh("check-tail: grep '&' file, a quoted lone &, is allowed", "grep '&' file", "allow", cwd=NOGIT)
+sh("check-tail: cut -d '&' -f1 q | head -3, a quoted lone &, is allowed", "cut -d '&' -f1 q | head -3", "allow",
+   cwd=NOGIT)
+sh("check-tail: ci-job checks | grep -c '&', a quoted lone &, is allowed", "ci-job checks | grep -c '&'", "allow",
+   cwd=NOGIT)
+sh("check-tail: grep \"&\" file | tail -3, a double-quoted lone &, is allowed", 'grep "&" file | tail -3', "allow",
+   cwd=NOGIT)
+# A `&` after an `&&` list backgrounds the whole list, so the ci-job pipeline before the `&&` runs as a job and
+# its cut verdict is lost. check-tail refuses each; the pid capture on the line keeps detached-launch out.
+add("check-tail: ci-job checks | tail -3 && echo done & echo $!, a spaced & backgrounds the && list, is refused",
+    "deny", "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | tail -3 && echo done & echo $!")
+add("check-tail: ci-job checks | tail -3 && echo done& echo $!, a glued & backgrounds the && list, is refused",
+    "deny", "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | tail -3 && echo done& echo $!")
+
+# Controls, each held in the foreground and each allowed. A reading that takes any `&` in a word for a
+# background job would refuse every one: the `&` of `|&` (also glued to the next word), `&&`, a quoted
+# `&`, a `>&` or `2>&` redirect, a `&` after a comment's `#`, and a `&` at a line's end in a multi-line quote.
+sh("check-tail: ci-job checks |& tail -3 in the foreground, the & of |& is a pipe, is allowed",
+   "ci-job checks |& tail -3", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks|&tail -3 in the foreground, the & of |& glued to the next word, is allowed",
+   "ci-job checks|&tail -3", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks && tail x in the foreground is allowed",
+   "ci-job checks && tail x", "allow", cwd=NOGIT)
+sh("check-tail: echo a&&b is allowed", "echo a&&b", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks piped to grep, a & inside quotes, is allowed",
+   "ci-job checks | grep 'a&'", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks piped to tail -3 >&2 in the foreground is allowed",
+   "ci-job checks | tail -3 >&2", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks piped to tail -3 2>&1 in the foreground is allowed",
+   "ci-job checks | tail -3 2>&1", "allow", cwd=NOGIT)
+sh("check-tail: a & after a comment's # is no job, piped to tail, is allowed",
+   "ci-job checks | tail -3 # bg&", "allow", cwd=NOGIT)
+sh("check-tail: a & at a line's end inside a multi-line quote is no job, is allowed",
+   'ci-job checks | grep "first line&\nsecond line"', "allow", cwd=NOGIT)
+
+# A merge script run by its path, with no interpreter word, is the same verdict call as
+# `python merge/merge.py`, so check-tail refuses it too.
+sh("check-tail: ./merge/merge.py --lane-lint piped to tail is refused",
+   "./merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge/merge.py --review-record piped to grep is refused",
+   "merge/merge.py --review-record 7 | grep Head", "deny", "check-tail", cwd=NOGIT)
+
+# A lint form run through `cd`, `python3 -m`, `-Im`, `-W ignore -m` or the merge module is still a lint run,
+# so a pipe to tail before a commit must be refused. Without that refusal the commit's lint gate is hidden.
+sh("check-tail: cd lint, then a bare lint script, piped to tail, then && commit, is refused",
+   "cd lint && ./ste_lint.py x.md | tail -3 && git commit -m x", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: python3 -m lint.ste_lint piped to tail, then && commit, is refused",
+   "python3 -m lint.ste_lint x.md | tail -3 && git commit -m x", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: python3 -Im lint.ste_lint piped to tail, then && commit, is refused",
+   "python3 -Im lint.ste_lint x.md | tail -3 && git commit -m x", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: python3 -W ignore -m lint.ste_lint piped to tail, then && commit, is refused",
+   "python3 -W ignore -m lint.ste_lint x.md | tail -3 && git commit -m x", "deny", "check-tail",
+   cwd=NOGIT)
+sh("check-tail: python3 -m merge.merge --lane-lint piped to tail, then && commit, is refused",
+   "python3 -m merge.merge --lane-lint 7 | tail -3 && git commit -m x", "deny", "check-tail",
+   cwd=NOGIT)
+# A test runner piped to tail before a commit is not a lint run, so each control is allowed.
+sh("check-tail: python3 -m pytest piped to tail, then && commit, is allowed",
+   "python3 -m pytest | tail -3 && git commit -m x", "allow", cwd=NOGIT)
+sh("check-tail: uv run pytest.py piped to tail, then && commit, is allowed",
+   "uv run pytest.py | tail -3 && git commit -m x", "allow", cwd=NOGIT)
+sh("check-tail: python3 -Im pytest piped to tail, then && commit, is allowed",
+   "python3 -Im pytest | tail -3 && git commit -m x", "allow", cwd=NOGIT)
+# Under `cd lint`, `-m pytest` and `-m unittest` name no script under lint/, so each is allowed.
+# A lint script run in a substitution, in a subshell, or by a path inside a subshell is still a lint run.
+sh("check-tail: cd lint, then python3 -m pytest piped to tail, then && commit, is allowed",
+   "cd lint && python3 -m pytest | tail -3 && git commit -m x", "allow", cwd=NOGIT)
+sh("check-tail: cd lint, then python3 -m unittest piped to tail, then && commit, is allowed",
+   "cd lint && python3 -m unittest test_x | tail -3 && git commit -m x", "allow", cwd=NOGIT)
+sh("check-tail: cd lint, then a lint script in a substitution piped to tail, then && commit, is refused",
+   "cd lint && out=$(./ste_lint.py x.md | tail -3) && git commit -m x", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: cd lint, then a lint script in a subshell piped to tail, then && commit, is refused",
+   "cd lint && (./ste_lint.py x.md | tail -3) && git commit -m x", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: a lint script path in a subshell piped to tail, then && commit, is refused",
+   "(python3 lint/ste_lint.py x.md | tail -3) && git commit -m x", "deny", "check-tail", cwd=NOGIT)
+# A comment opener in quotes, a lone apostrophe and a multi-line quote do not hide a lint pipe before a commit.
+sh("check-tail: a quoted # does not hide a lint pipe before a commit, is refused",
+   'echo "# ok"; python3 lint/ste_lint.py docs/x.md | tail -3 && git commit -m x', "deny", "check-tail",
+   cwd=NOGIT)
+sh("check-tail: a lone apostrophe in quotes does not hide a lint pipe before a commit, is refused",
+   "echo \"don't\"; python3 lint/ste_lint.py docs/x.md | tail -3 && git commit -m x", "deny",
+   "check-tail", cwd=NOGIT)
+sh("check-tail: a lint pipe after a multi-line quote, then && commit, is refused",
+   'echo "one\ntwo"\npython3 lint/ste_lint.py docs/x.md | tail -3 && git commit -m x', "deny",
+   "check-tail", cwd=NOGIT)
+
+# A `cd lint` lint run is judged against the lint/ folder of the checkout the call runs in, not against the
+# folder the guard was installed from. A copy install keeps its guard set under hooks/guard.d/<id>/, with no
+# lint/ beside it, so its lint folder reads nothing, and a lint script run from another repo is not seen.
+STREAM_COPY_ID = "20261108120000424"  # the id a copy install stamps: its time and its process id
+STREAM_COPY = os.path.join(ROOT, "streamcopy")  # hooks/guard.py beside hooks/guard.d/<id>/, as install.sh lays a copy
+STREAM_COPY_GUARD = os.path.join(STREAM_COPY, "hooks", "guard.py")
+STE_CHECKOUT = os.path.join(ROOT, "stecheckout")  # a checkout whose lint/ holds ste_lint.py
+OWN_REPO = os.path.join(ROOT, "ownrepo")  # another repo: its own lint/own_check.py, and no lint/pytest.py
+
+
+def guard_d_copy_build(folder, name, with_lint=False):
+    """A copy install, laid out as install.sh's land_guard_set lays it: every module under
+    hooks/guard.d/<id>/, guard.py and guard_*.py stamped with <id>, and the stamped guard.py beside that
+    folder, in hooks/. The stamped modules come from _reload_copy, the one home of a stamped set. With
+    with_lint, the install's lint/ and skills/waiting-page/page.html sit beside hooks/, as install.sh lands
+    them; without it, no lint/ is beside the copy at all."""
+    source, _good = _reload_copy(name, STREAM_COPY_ID)
+    hooks = os.path.join(folder, "hooks")
+    shutil.rmtree(folder, ignore_errors=True)
+    set_dir = os.path.join(hooks, "guard.d", STREAM_COPY_ID)
+    os.makedirs(set_dir)
+    for entry in os.listdir(source):
+        shutil.copy(os.path.join(source, entry), set_dir)
+    shutil.copy(os.path.join(source, "guard.py"), hooks)
+    if with_lint:
+        shutil.copytree(os.path.join(REPO, "lint"), os.path.join(folder, "lint"),
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        page_dir = os.path.join(folder, "skills", "waiting-page")
+        os.makedirs(page_dir)
+        shutil.copy(os.path.join(REPO, "skills", "waiting-page", "page.html"), page_dir)
+
+
+def stream_copy_build():
+    """The copy install of the stream family: no lint/ beside it (see guard_d_copy_build)."""
+    guard_d_copy_build(STREAM_COPY, "streamcopy")
+
+
+def lint_checkouts_build():
+    write(os.path.join(STE_CHECKOUT, "lint", "ste_lint.py"), "# lint\n")
+    write(os.path.join(OWN_REPO, "lint", "own_check.py"), "# lint\n")
+
+
+lazy_fixture([STREAM_COPY], stream_copy_build)
+lazy_fixture([STE_CHECKOUT, OWN_REPO], lint_checkouts_build)
+add("check-tail: a copy install, cd lint, then ./ste_lint.py piped to tail, then && commit, is refused",
+    "deny", "check-tail", cwd=STE_CHECKOUT, guard=STREAM_COPY_GUARD,
+    command="cd lint && ./ste_lint.py x.md | tail -3 && git commit -m x")
+# The control: the same copy refuses a lint path, which reads as lint/ whatever folder the guard holds.
+add("check-tail: a copy install, a lint path piped to tail, then && commit, is refused (control)",
+    "deny", "check-tail", cwd=STE_CHECKOUT, guard=STREAM_COPY_GUARD,
+    command="python3 lint/ste_lint.py x.md | tail -3 && git commit -m x")
+add("check-tail: another repo, cd lint, then ./own_check.py piped to tail, then && commit, is refused",
+    "deny", "check-tail", cwd=OWN_REPO, command="cd lint && ./own_check.py x | tail -3 && git commit -m x")
+# The control: another repo's `-m pytest` names no script in its lint/, so it is allowed.
+add("check-tail: another repo, cd lint, then python3 -m pytest piped to tail, then && commit, is allowed",
+    "allow", cwd=OWN_REPO, command="cd lint && python3 -m pytest | tail -3 && git commit -m x")
 add("check-tail: a verdict call with no pipe, backgrounded with the limit, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, timeout=CHECK_TIMEOUT_MS, description=TAIL_BG_UNTIL,
     command="verdict merge --lane-lint 1476")

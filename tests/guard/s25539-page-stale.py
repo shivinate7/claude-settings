@@ -205,6 +205,23 @@ wp_publish("a behind file uploaded as an asset is allowed", "allow", WP_BEHIND, 
 wp_publish("a file that cannot be read fails open", "allow", os.path.join(WP_DIR, "missing.html"))
 wp_publish("a behind page is allowed when main cannot be read", "allow", WP_BEHIND, guard=WP_GUARD_NOMAIN)
 
+# The same checkout, with question_form.py that will not import: the page check must refuse as guard-crash, not
+# allow (decision install-hooks-whole). The control above, with the intact copy, refuses the behind page.
+WP_BROKEN = os.path.join(ROOT, "wp-broken")
+
+
+def build_wp_broken():
+    materialize(WP_GUARD)
+    shutil.rmtree(WP_BROKEN, ignore_errors=True)
+    shutil.copytree(WP_CHECK, WP_BROKEN, symlinks=True)
+    write(os.path.join(WP_BROKEN, "hooks", "question_form.py"), BROKEN_MODULE)
+
+
+lazy_fixture([WP_BROKEN], build_wp_broken)
+add("page-stale: a behind page is refused as guard-crash when question_form.py will not import", "deny", None,
+    carries=("guard-crash",), tool="Artifact", cwd=PQ_REPO, guard=os.path.join(WP_BROKEN, "hooks", "guard.py"),
+    file_path=WP_BEHIND, url=PQ_URL)
+
 
 def wp_publish_run(file_path, cwd=WP_CHECK, url=PQ_URL):
     """One Artifact publish of `file_path` to `url`, judged by the copy of the guard in the controlled checkout.
