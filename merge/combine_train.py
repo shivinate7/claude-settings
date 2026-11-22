@@ -61,7 +61,7 @@ BASE = "origin/main"
 STATES = ("in-ci", "next-in-line", "queued")
 FROZEN = ("in-ci", "next-in-line")
 NO_HOME = "unknown (fast-checks-before-ready not landed)"
-BUILD_THRESHOLD = 10  # ready queued members that make a backlog worth one integration PR (ruling 10:23 CST Nov 20); fewer merge alone
+BUILD_THRESHOLD = merge.BUILD_THRESHOLD  # ready queued members that make a backlog worth one integration PR; its one home is merge.py
 BATCH_NAME = re.compile(r"[a-z0-9-]{1,32}")  # the batch name merge.parse_freeze reads
 HEADER = ("combine-train: dry run, no push, no gh pr ready or merge. Readings used: (a) in-ci and next-in-line batches are frozen and the queued "
           "batches behind them fold into one; (b) a clashing member leaves by name; (c) dry rounds ignore a move of main; "
@@ -466,8 +466,7 @@ def batch_rows(root):
     except Exception as e:  # merge.py's own stops (Stop, NetStop) are not in the tool's allowed merge.py names; any failed read is unknown, never a build
         raise ReadError(f"merge.reviewed_read could not be read ({type(e).__name__}: {' '.join(str(e).split())[:200]}); give --queue FILE")
     heads = {d["number"]: d["head"]["sha"] for d in pulls}
-    stacked = {d["number"] for d in pulls if d["base"]["ref"] != "main"}  # a `batch` row on a stacked base would carry its base branch into main; a row with no pull stays, so `gone` still names it
-    ready = sorted(r["number"] for r in rows if r["act"] == "batch" and r["number"] not in stacked)
+    ready = merge.ready_batch_numbers(rows, pulls)  # a row with no pull stays, so `gone` still names it
     gone = [n for n in ready if n not in heads]
     if gone:
         raise ReadError(f"merge.reviewed_read gave no head for {tag(gone)}")
