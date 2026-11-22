@@ -3985,6 +3985,12 @@ def refuse_full_disk(root):
                    f"`python3 {shlex.quote(landed_sweep())} --root {shlex.quote(str(root))} --confirm` "
                    "(decision machine-load-brake, the lane lint refuses at the full disk floor in a cloud session too).")
 
+def lane_lint_resume_line(target):
+    """The one line `merge --lane-lint` prints first. The harness stops a background command at its cap and the session sees only a stopped task, so the line says that is no
+    failure: the same command restarts the lint, and a job that passed on the same key is skipped (saved_pass_read) instead of run again. The key holds the base tip, and a save prunes the clone to SAVED_PASS_KEEP results, so the line names both limits. The mutation test run is not saved."""
+    return (f"merge: if this lint is stopped at its background cap before it ends, that is no verdict: restart it with `merge --lane-lint {target}` and the same flags. "
+            f"A job that passed on this head is kept and skipped while the base tip is unchanged and fewer than {SAVED_PASS_KEEP} other jobs have saved a pass in this clone since.")
+
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_tests=False, mutate_run=True, pre_join=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree, removed on every exit. Takes no lock. Pushes nothing, except the one merge commit below. -> 0 on a pass, else raises Stop.
@@ -4022,6 +4028,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     and a corrupt, empty or unreadable file is a miss. The mutation test run (mutate_run_check) does not go through this path and is not saved.
     Before any tree is made, refuse_full_disk refuses a drive under the guard's full disk floor, in a cloud session and a local one."""
     refuse_full_disk(root)
+    say(lane_lint_resume_line(target))
     if target.isdigit():
         host = host or Host(cwd=root)
         n = int(target)
