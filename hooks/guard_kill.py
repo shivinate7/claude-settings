@@ -8,21 +8,19 @@ import os
 import re
 import subprocess
 try:
-    import _nowindow  # the one home of a no-window child start; a flat hooks/ file, not a guard-set member
-except ImportError:  # install-hooks-whole: the guard set lands whole, the helper beside it a moment later; the guard still judges
+    import _nowindow  # the one home of a no-window child start; a flat hooks/ file, also a guard-set member (the install lists name it)
+except ImportError:  # install-hooks-whole: the install lists land the helper with the guard; a failed landing or an older install can lack it, and the guard still judges
     _nowindow = subprocess
 import sys
-try:
-    from proc_env import holds_session_tag  # the one home of the exec-environment read (hooks/proc_env.py)
-except ImportError:  # same fallback as _nowindow above: no read, so a PPID-1 pid stays foreign
-    def holds_session_tag(pid, session_id):
-        return False
+# Not in a try: a failed import fails guard.py's load, which waits and refuses as guard-crash (decision
+# install-hooks-whole). A guard that judged a kill with the read missing would call every PPID-1 pid foreign.
+from proc_env import holds_session_tag  # the one home of the exec-environment read (hooks/proc_env.py)
 
 from guard_core import (
     QUOTE_MARKS,
     ASSIGNMENT, CMD_EXE_NAMES, ENV_PATTERN_COMMANDS, PLAYWRIGHT_PS_SHELLS,
     POWERSHELL_CALL, PowerShellScript, SILENT_WRITE_REDIRECT, _pwsh_script, _skip_assignments_and_keywords,
-    _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, inline_script,
+    _split_heredocs, _strip_heredoc_bodies_unconditionally, backgrounding_amp, basename, inline_script,
     resolve_command, segment_tokens, split_segments,
 )
 from guard_env import substitution_commands
@@ -600,10 +598,9 @@ def bare_background_hit(cmd: str) -> str:
         tokens = segment_tokens(segment) if segment.strip() else None
         if not tokens:
             continue
-        start = _skip_assignments_and_keywords(tokens)
-        for i in range(start + 1, len(tokens)):
-            if tokens[i] == "&":
-                return tokens[i - 1] + " &"
+        matched = backgrounding_amp(segment, tokens, _skip_assignments_and_keywords(tokens))
+        if matched:
+            return matched
     return ""
 
 
