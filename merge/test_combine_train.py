@@ -58,7 +58,7 @@ import merge  # noqa: E402  merge.CI_JOB is the one home of a ci-job run; these 
 TOOL = os.path.join(HERE, "combine_train.py")
 MERGE_PY = os.path.join(HERE, "merge.py")
 READY = ["STE lint", "split guard", "cost pins", "scaffold", "debt retire", "open-PR clash"]
-GIT_WRAPPERS = {"merge_tree", "conflicting_files", "ci_job_run", "ready_job_groups", "integration_branch", "freeze_lines", "reviewed_read", "Host"}  # the merge.py names the tool may reach; ready_job_groups splits the ready checks by job, no run; integration_branch and freeze_lines are the one home of the integration branch name and the freeze body (coordinator pick, rule building-one-home-per-capability); reviewed_read (merge.py:6230) is the queue's reader, and Host is the host it reads through, as the --reviewed path builds it (merge.py:7746)
+GIT_WRAPPERS = {"merge_tree", "conflicting_files", "ci_job_run", "ready_job_groups", "integration_branch", "freeze_lines", "reviewed_read", "Host", "BUILD_THRESHOLD", "ready_batch_numbers"}  # the merge.py names the tool may reach; ready_job_groups splits the ready checks by job, no run; integration_branch and freeze_lines are the one home of the integration branch name and the freeze body (coordinator pick, rule building-one-home-per-capability); reviewed_read (merge.py:6230) is the queue's reader, and Host is the host it reads through, as the --reviewed path builds it (merge.py:7746); BUILD_THRESHOLD and ready_batch_numbers are the one home of the threshold and of the ready filter, which the hint reads too
 NO_HOME = "unknown (fast-checks-before-ready not landed)"
 SIX = ["members in", "members left out", "clash rate", "dry-round minutes", "lint minutes", "CI minutes"]
 PASS_WORD = re.compile(r"(?<!not a )(?<!not )(?<!no )\b(?:pass(?:es|ed)?|ok)\b", re.I)  # a claim of pass ("pass", "passed", "ok"), not "not a pass" or "not ok"
@@ -1148,15 +1148,21 @@ class BuildExitCodes(unittest.TestCase):
         self.assertFalse(branch_exists(root, merge.integration_branch(BUILD_NAME)), "a failed fetch of main still built an integration branch")
 
 
-class HintBacklogIsTheToolsThreshold(unittest.TestCase):
-    """The lane lint's hint names merge.COMBINE_BACKLOG as the number of ready PRs that builds a train. It must equal BUILD_THRESHOLD, or the hint
-    promises a train the tool refuses to build, or the reverse. merge.py keeps its own copy, since it never imports the tool (Controls above)."""
+class BuildThresholdHasOneHome(unittest.TestCase):
+    """merge.BUILD_THRESHOLD is the one home of the ready count that builds a train. The tool takes its threshold from it, and does not keep a
+    number of its own, so the lane lint's hint and the tool cannot disagree about when a train is built."""
 
-    def test_the_hint_backlog_equals_the_tools_build_threshold(self):
+    def test_the_tool_takes_its_build_threshold_from_merge(self):
         import combine_train  # the tool; imported in the case, so a missing tool fails this case alone
-        backlog = getattr(merge, "COMBINE_BACKLOG", None)
-        self.assertIsNotNone(backlog, "merge.py names no COMBINE_BACKLOG, so the lane lint's hint has no backlog to match the tool's threshold")
-        self.assertEqual(backlog, combine_train.BUILD_THRESHOLD, "merge.COMBINE_BACKLOG and combine_train.BUILD_THRESHOLD differ")
+        with open(TOOL, encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        assigned = [node.value for node in tree.body if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "BUILD_THRESHOLD" for t in node.targets)]
+        self.assertEqual(len(assigned), 1, "combine_train.py assigns BUILD_THRESHOLD %d times, want once" % len(assigned))
+        value = assigned[0]
+        self.assertTrue(isinstance(value, ast.Attribute) and value.attr == "BUILD_THRESHOLD" and isinstance(value.value, ast.Name) and value.value.id == "merge",
+                        "combine_train.py sets BUILD_THRESHOLD to something other than merge.BUILD_THRESHOLD, so the threshold has a second home")
+        self.assertIsNotNone(getattr(merge, "BUILD_THRESHOLD", None), "merge.py names no BUILD_THRESHOLD, so the tool has no home for its threshold")
+        self.assertEqual(combine_train.BUILD_THRESHOLD, merge.BUILD_THRESHOLD, "combine_train.BUILD_THRESHOLD is not merge.BUILD_THRESHOLD")
 
 
 if __name__ == "__main__":
