@@ -5446,11 +5446,13 @@ def relayed_head_holds(root, branch, relayed, live, base=None, heals=None):
     (same_tree_as_parent; owner item 514 b, widened 13:33 CST Nov 22), or, where `heals()` is true, a clean merge of `base`
     (base_merge_commit): the commits a requiredChecks "none" heal pushes (heals_stale_page). Under any other setting a merge of the base moves the head. The walk follows
     first parents, so the base's own commits behind a merge are not read. The branch is fetched for the commits; the base only when a merge commit is met.
-    A fetch or a log that fails, or a live head the fetch did not read, counts as a head that moved: the yes needs no more than a refusal."""
+    The relayed head must be an ancestor of the live head (`ancestor`) before any route above is read. A fetch, an ancestry read or a log that fails, or a live head the fetch did not read, counts as a head that moved: the yes needs no more than a refusal."""
     if live == relayed:
         return True
     c, out = git(root, "fetch", "-q", "origin", f"refs/heads/{branch}")
     if c or git(root, "rev-parse", "FETCH_HEAD")[1].strip() != live:
+        return False
+    if ancestor(root, relayed, live) is not True:  # the walk below lists only what the live head has above `relayed`: a head that is not on it (it moved back, or sideways) would pass on its own empty or claim commits. False and an unread (None) both count as moved
         return False
     base_read = []  # the one fetch of the base, made when a commit needs it
 
@@ -6177,8 +6179,8 @@ def edits_outside_conflict(root, parents, tree):
 def clean_merges_after(h, head, live, base=None, claims=None, root=None, merges_only=False):
     """True when every commit after `head`, up to the live head `live`, is a clean merge of main or a commit whose tree equals its parent's (one parent, the same tree id:
     an empty commit, or one that adds only a message trailer; owner item 514 b, 13:26 CST Nov 22, widened at 13:33 CST to the lane-lint carry). The walk reads only parents and trees,
-    never a message, so a trailer on such a commit (Record-claim, Verified, Red-run) is still read by its own reader over the branch's commits (head_claim, claim_under_head, the
-    git log of relayed_head_holds, lint/check_red_run.py), and the walk carries no trailer's meaning. A one-parent commit whose tree differs from its parent's is not carried by this
+    never a message, so a trailer on such a commit (Record-claim, Verified, Red-run) is still read by its own reader over the branch's commits (claim_under_head, the
+    git log of relayed_head_holds, lint/check_red_run.py; head_claim reads the trailer of the one commit it is given, HEAD by default, so it sees no commit below the head), and the walk carries no trailer's meaning. A one-parent commit whose tree differs from its parent's is not carried by this
     route. A clean merge of main has two
     parents, a second parent main holds (Host.holds_head_gh, main being `base`, else the host's base), and git's clean merge of its parents as its tree
     (merge_state). `claims`, the stamp config path: a one-parent claim commit also counts (claim_only, read in the host's checkout). A one-parent records-page
@@ -6209,7 +6211,7 @@ def clean_merges_after(h, head, live, base=None, claims=None, root=None, merges_
         if len(parents) == 1:  # a commit whose tree equals its parent's changes nothing, so a record or a lint PASS on the parent holds for it: empty, or a message-only trailer (owner item 514 b, 13:26 CST Nov 22, widened 13:33 CST)
             parent_tree = commit(parents[0])[1]
             if not tree or not parent_tree:
-                raise Stop(f"the commit read of {(parents[0] if parent_tree else sha)[:9]} names no tree {READ_CITE}")
+                raise Stop(f"the commit read of {(sha if not tree else parents[0])[:9]} names no tree {READ_CITE}")
             if tree == parent_tree:
                 sha = parents[0]
                 continue
