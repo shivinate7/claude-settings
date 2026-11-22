@@ -1,0 +1,1 @@
+- sweep-reaps-with-own-pid-alive: janitor/sweep.py reaps mutate_guard and test-temp folders with its own pid_alive and never reaches merge's held_by_live_process, so the Windows holder-check gap in the merge tool does not cover these folders (review F3 on PR 3777, pre-existing).
