@@ -485,8 +485,11 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/check_hook_dup_names.py
 
+      # CI is set on the step so the merge tool's ready run, which has no CI variable, reads an unreadable git as red (decision ci-unknown-is-red).
       - name: Record slug length
         if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
+        env:
+          CI: "true"
         run: python3 lint/check_record_slugs.py
 
       - name: Cost line pins
