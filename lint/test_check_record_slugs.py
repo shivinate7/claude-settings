@@ -8,16 +8,19 @@ decisions/ and debts/ from the diff, or the files it is given.
 
 A section file under tests/guard/ has a `# section <n>` header on its first line. Its name is `s<n>-<slug>.py`,
 and a name that does not read so is refused. Its number must be its name's number, and no other section file may
-hold it. The tree is read, not only the diff, and file arguments do not skip that read.
+hold it. The tree is read, not only the diff, and file arguments do not skip that read. A clash's fault names each
+file on the number and the next free number, and the ready run (merge.readyChecks) reads the step that finds it.
 
 Each case builds a temp tree: a copy of the module, and the records it checks. It runs the real
 script from that tree. The diff cases also make a temp git repo and set refs/remotes/origin/main,
 the base the script diffs against. RECORD_SLUGS_UNDER_TEST overrides the module path.
 """
+import ast
 import contextlib
 import datetime
 import importlib.util
 import io
+import json
 import os
 import re
 import shutil
@@ -31,12 +34,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
-MODULE = os.environ.get("RECORD_SLUGS_UNDER_TEST") or os.path.join(HERE, "check_record_slugs.py")
+import _guard_sections  # noqa: E402  the one home of the section header read and the faults (lint/_guard_sections.py)
+MODULE =os.environ.get("RECORD_SLUGS_UNDER_TEST") or os.path.join(HERE, "check_record_slugs.py")
 RUNNER = os.path.join(HERE, "..", "hooks", "test_guard.py")  # its SECTION_DIR names the section folder the check reads
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
+STAMP = os.path.join(HERE, "..", ".github", "stamp.json")  # merge.readyChecks lists the steps the ready run reads
 
-OK = "a" * 32 + ".md"  # a slug of 32 characters passes
+OK ="a" * 32 + ".md"  # a slug of 32 characters passes
 LONG = "a" * 33 + ".md"  # a slug of 33 characters fails
 VERY_LONG = "a" * 44 + ".md"  # a slug of 44 characters fails, for the ./ path case
 DOCS = "docs/decisions"  # a folder the default run does not read
@@ -1282,6 +1287,110 @@ class RecordSlugsTests(unittest.TestCase):
         rc, out = self.lint()
         self.assertEqual(rc, 1, "a section name the check cannot read must be refused, not passed:\n" + out)
         self.assertEqual(flagged(out), [SECTIONS + "/S43501-x.py"], out)
+
+
+READY_STEP = "Record slug length"  # the step that reads the section folder; also its name in .github/workflows/checks.yml
+# The text hooks/test_guard.py looks for when a duplicate number stops its run: `section number <n> is on <k> section files`.
+RUNNER_CLASH = re.compile(r"section number (\d+) is on (\d+) section files")
+
+
+def runner_clash_texts():
+    """Each string of hooks/test_guard.py that is the whole of RUNNER_CLASH, read by ast: the runner holds the one copy."""
+    with open(RUNNER, encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+    return [n.value for n in ast.walk(tree)
+            if isinstance(n, ast.Constant) and isinstance(n.value, str) and RUNNER_CLASH.fullmatch(n.value)]
+
+
+class SectionClashTests(unittest.TestCase):
+    """Two guard test section files on one number: the fault names each file on it and the next free number, one above
+    the highest header, so the branch that lands second renumbers without reading the other (decision
+    section-number-clash-ready). No case needs git: each writes real section files in a run folder and reads them as
+    the check and the runner do, so a run on an old tree reaches an assert."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp(prefix="sec_", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
+
+    def faults(self, numbers_by_name):
+        """The faults of a folder that holds one section file per (name, header number) pair."""
+        for name, n in numbers_by_name.items():
+            with open(os.path.join(self.folder, name), "w", encoding="utf-8", newline="\n") as f:
+                f.write(section_text(n))
+        return _guard_sections.faults(_guard_sections.read(self.folder))
+
+    def assert_names_files_and_next_free(self, bad, holders, next_free):
+        """Scope first: the faults are on `holders` and no other file. Then each message names every holder and `next_free`."""
+        self.assertEqual(sorted(os.path.basename(path) for path, _ in bad), sorted(holders),
+                         "scope: the faults are not on the clashing files alone")
+        for path, message in bad:
+            for holder in holders:
+                self.assertIn(holder, message, "the fault on %s does not name %s, a file on the same number" % (path, holder))
+            self.assertIn(str(next_free), message, "the fault on %s does not name the next free number, %d" % (path, next_free))
+
+    def test_two_files_on_one_number_name_both_files_and_the_next_free_number(self):
+        # The clash is on 43700 and the highest header is 43725: the next free number is 43726, not 43701.
+        bad = self.faults({"s43700-a.py": 43700, "s43700-b.py": 43700, "s43725-c.py": 43725})
+        self.assert_names_files_and_next_free(bad, ["s43700-a.py", "s43700-b.py"], 43726)
+
+    def test_three_files_on_one_number_name_all_three(self):
+        bad = self.faults({"s43700-a.py": 43700, "s43700-b.py": 43700, "s43700-c.py": 43700, "s43725-d.py": 43725})
+        self.assert_names_files_and_next_free(bad, ["s43700-a.py", "s43700-b.py", "s43700-c.py"], 43726)
+
+    def test_a_full_size_folder_flags_only_the_clashing_pair(self):
+        files = {"s%d-x.py" % n: n for n in range(43000, 43200)}  # 200 files on 200 numbers
+        files["s43100-dup.py"] = 43100
+        bad = self.faults(files)
+        self.assert_names_files_and_next_free(bad, ["s43100-dup.py", "s43100-x.py"], 43200)
+
+    def test_distinct_numbers_give_no_fault(self):
+        # The green control beside the reds: each name agrees with its header and no number repeats.
+        self.assertEqual(self.faults({"s43700-a.py": 43700, "s43701-b.py": 43701, "s43725-c.py": 43725}), [])
+
+    def test_an_empty_folder_gives_no_fault(self):
+        self.assertEqual(_guard_sections.faults(_guard_sections.read(self.folder)), [])
+
+    def test_the_message_keeps_the_text_the_runner_looks_for(self):
+        # hooks/test_guard.py reads the stop of a duplicate number by this text, so the new tail must follow it.
+        texts = runner_clash_texts()
+        self.assertEqual(len(texts), 1, "scope: hooks/test_guard.py holds %d texts of the form %r, not one"
+                         % (len(texts), RUNNER_CLASH.pattern))
+        number, count = (int(g) for g in RUNNER_CLASH.fullmatch(texts[0]).groups())
+        bad = self.faults({"s%05d-%d.py" % (number, i): number for i in range(count)})
+        self.assertEqual(len(bad), count, "scope: %d files on section %d did not fault once each" % (count, number))
+        for name, message in bad:
+            self.assertIn(texts[0], message, "the fault on %s no longer holds %r, the text hooks/test_guard.py reads"
+                          % (name, texts[0]))
+
+    def test_the_check_names_the_clashing_files_and_the_next_free_number(self):
+        # The check's own read of a root: its paths, with the same message. The runner file is the minimal one
+        # rule_audit.section_dir reads, so the root needs no git.
+        root = tempfile.mkdtemp(prefix="sec_root_", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        os.makedirs(os.path.join(root, "hooks"))
+        with open(os.path.join(root, "hooks", "test_guard.py"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("import os\nHERE = os.path.dirname(os.path.abspath(__file__))\n"
+                    'SECTION_DIR = os.path.join(HERE, "..", "tests", "guard")\n')
+        os.makedirs(os.path.join(root, *SECTIONS.split("/")))
+        for name, n in (("s43700-a.py", 43700), ("s43700-b.py", 43700), ("s43725-c.py", 43725)):
+            with open(os.path.join(root, *SECTIONS.split("/"), name), "w", encoding="utf-8", newline="\n") as f:
+                f.write(section_text(n))
+        spec = importlib.util.spec_from_file_location("check_record_slugs_sections", MODULE)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        bad = module.section_faults(root)
+        self.assertEqual(sorted(path for path, _ in bad), [SECTIONS + "/s43700-a.py", SECTIONS + "/s43700-b.py"],
+                         "scope: the check names paths of the clashing files below the root, and no other")
+        self.assert_names_files_and_next_free(bad, ["s43700-a.py", "s43700-b.py"], 43726)
+
+    def test_the_ready_run_reads_the_record_slug_step(self):
+        # A draft marked ready on a tree older than main meets a clash only when the ready run reads this step.
+        with open(STAMP, encoding="utf-8") as f:
+            config = json.load(f)
+        checks = config.get("merge", {}).get("readyChecks")
+        self.assertIsInstance(checks, list, "scope: .github/stamp.json declares no merge.readyChecks list")
+        self.assertIn(READY_STEP, checks, "merge.readyChecks does not list %r, so the ready run never reads a section clash"
+                      % READY_STEP)
 
 
 class ImportTests(unittest.TestCase):
