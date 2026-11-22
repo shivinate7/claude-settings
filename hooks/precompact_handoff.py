@@ -90,6 +90,7 @@ item 12.
 Never exits 2 and never refuses compaction: every failure is caught, logged to stderr,
 and the hook still exits 0 (case_precompact_error_is_ok_false).
 """
+import copy
 import datetime
 import json
 import math
@@ -1241,7 +1242,6 @@ def owner_waits_gap(payload):
 # ci_wake.gh_json (5 s bound), cached in the nudge state file for GOAL_PR_TTL seconds; a closed or
 # merged PR is final and stays cached. A running lint is a `--lane-lint <N>` process in the local
 # process table (one `ps`), so a lint in another machine's session is not seen.
-GOAL_HEADING = "Goal"
 GOAL_PR_TTL = 300  # seconds an OPEN or UNKNOWN read is reused
 GOAL_PR_MAX = 10  # most cited PRs read in one Stop
 GOAL_READ_TIMEOUT = 5  # seconds for one gh read
@@ -1250,9 +1250,10 @@ _LINT_TARGET = re.compile(r"--lane-lint(?:=|\s+)#?(\d+)\b")
 
 
 def goal_cites(text):
-    """The PR numbers the handoff's `## Goal` section cites as `#NNN`, in order, each once. [] for no
-    Goal section or no cite. Fenced code is not read."""
-    head = section_heading(GOAL_HEADING).search(text)
+    """The PR numbers the handoff's first required section cites as `#NNN`, in order, each once. [] for no
+    such section, no cite, or a prompt that names no sections. Fenced code is not read."""
+    names = required_sections()  # the marker's first name is the order-setting section; no code copies it
+    head = section_heading(re.escape(names[0])).search(text) if names else None
     if not head:
         return []
     seen, fence = [], None
@@ -1303,7 +1304,7 @@ def _lint_targets():
 
 
 def goal_order_line(payload, state, now=None):
-    """One reminder line naming the earliest open goal PR with no lint running, or "". "" for an agent's
+    """One reminder line naming the earliest open cited PR with no lint running, or "". "" for an agent's
     call, no handoff, no cite, a live background command or agent, and any read that fails. Sets
     state["goal_prs"], the cache."""
     try:
@@ -1338,11 +1339,11 @@ def goal_order_line(payload, state, now=None):
                 linting = _lint_targets()
             if number in linting:
                 continue
-            return ("Goal order: #%d is the earliest goal PR still open, and no lint is running on it. Lint it or "
-                    "merge it before a later goal item (step goal-order-not-wait)." % number)
+            return ("Order check: #%d is the earliest cited PR still open, and no lint is running on it. Lint it or "
+                    "merge it before a later item." % number)
         return ""
     except Exception as e:
-        sys.stderr.write("precompact_handoff: goal order error: %s\n" % e)
+        sys.stderr.write("precompact_handoff: order check error: %s\n" % e)
         return ""
 
 
@@ -1363,7 +1364,7 @@ def run_nudge(payload):
             state = loaded
     except Exception:
         pass
-    before = dict(state)
+    before = copy.deepcopy(state)  # goal_order_line sets nested cache entries in place
     facts, missing = None, []
     reason = ""
     goal_line = goal_order_line(payload, state)
