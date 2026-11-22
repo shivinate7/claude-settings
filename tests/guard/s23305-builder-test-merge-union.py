@@ -155,4 +155,128 @@ MU5_ONE_MAIN_DROPPED = _mt_case("mt5-one-side-main-dropped", [(TEST_A, MT_BASE +
 _mt_refuse("builder-refuse: control, a merge that drops main's one-sided edit of a case tuple is refused as lost",
            MU5_ONE_MAIN_DROPPED, "lost", (MT_CARRY["lost"],))
 
+
+# ---- A case that a parent renamed or whose verdict a parent flipped is held, not lost (decision merge-union-reads-lost) ----
+# One parent renames a case's description or its function, or flips its expected verdict. The other parent keeps the old
+# text and adds a case. A result that takes the first parent's text holds every case, so it is allowed, though the other
+# parent's old text is no longer in it. The rows are plain calls: the files are parsed, never run.
+# The controls stay refused as lost: a deleted call, call and function, row or twin row, a rename that comes with a
+# deletion, and a function whose flip the result keeps while it drops the other parent's edit. The result holds fewer of
+# that case than a parent does.
+# The edit and the lane's new row are adjacent, so the merge conflicts at the end of the file. The full-size case edits a
+# row in the middle (a clean merge) and conflicts on the rows both sides append at the end.
+MR_TOP = MT_BASE + "\n"
+MR_LANE_ROW = 'sh("a lane commit to its own branch passes", COMMIT_OWN, "allow")\n'
+MR_MAIN_ROW = 'sh("a main commit to its own branch passes", COMMIT_MAIN, "allow")\n'
+
+
+def _mr_case(name, base, lane, main, result):
+    """A conflicted merge of the test file: its text at the merge base, in each parent, and as the builder left it."""
+    return _mt_case(name, [(TEST_A, lane)], [(TEST_A, main)], [TEST_A], resolve=[(TEST_A, result)], stage=True,
+                    files={**BASE_FILES, TEST_A: base})
+
+
+def _mr_allowed(slug, name, old, new):
+    """The `old` statement sits in the base and the lane, `new` in main; the lane adds a row. The result takes `new`."""
+    _mt_allow("builder-refuse: " + name, _mr_case("mr-" + slug, MR_TOP + old, MR_TOP + old + MR_LANE_ROW, MR_TOP + new,
+                                                   MR_TOP + new + MR_LANE_ROW))
+
+
+# Incident shape: main renamed a row's description and flipped its verdict.
+_MR_OLD = 'sh("a lane\'s push # to main is refused by the gate", PUSH_MAIN, "deny")\n'
+_MR_NEW = 'sh("a lane\'s push # to main asks the owner first", PUSH_MAIN, "ask")\n'
+_mr_allowed("description-and-verdict", "a merge that takes main's renamed description and flipped verdict, with the "
+            "lane's new row, is allowed", _MR_OLD, _MR_NEW)
+
+# A function and the call that registers it are renamed together. The function name holds no verdict word.
+_MR_OLD = ('def _gate_push_plain():\n    return PUSH_MAIN\n\n\n'
+           'add_case("a plain push to main is refused by the gate", _gate_push_plain)\n')
+_MR_NEW = ('def _gate_push_ordinary():\n    return PUSH_MAIN\n\n\n'
+           'add_case("a plain push to main is blocked by the gate", _gate_push_ordinary)\n')
+_mr_allowed("function-and-call", "a merge that takes main's renamed case function and its renamed registering call is "
+            "allowed", _MR_OLD, _MR_NEW)
+
+# An sh or add row whose expected verdict flipped from deny to ask, and nothing else.
+_MR_OLD = 'add("a stop with a conflict marker is refused by the gate", "deny", rule=BDIFF, event="SubagentStop")\n'
+_MR_NEW = 'add("a stop with a conflict marker is refused by the gate", "ask", rule=BDIFF, event="SubagentStop")\n'
+_mr_allowed("add-row-flip", "a merge that takes main's add row, flipped from deny to ask, with the lane's new row, is "
+            "allowed", _MR_OLD, _MR_NEW)
+_MR_OLD = 'sh("a force push to main is refused by the gate", FORCE_MAIN, "deny")\n'
+_MR_NEW = 'sh("a force push to main is refused by the gate", FORCE_MAIN, "ask")\n'
+_mr_allowed("sh-row-flip", "a merge that takes main's sh row, flipped from deny to ask, with the lane's new row, is "
+            "allowed", _MR_OLD, _MR_NEW)
+
+# A verdict keyword that the flip adds: the default verdict has none.
+_MR_OLD = 'row("a plain commit passes the gate here", COMMIT_OWN)\n'
+_MR_NEW = 'row("a plain commit passes the gate here", COMMIT_OWN, want="ask")\n'
+_mr_allowed("want-keyword", "a merge that takes main's row with an added want=\"ask\" keyword, with the lane's new row, "
+            "is allowed", _MR_OLD, _MR_NEW)
+
+# Full-size state: a hundred rows, as in the incident (103 cases). Main renames and flips row 50 and adds a row, the lane
+# adds a row, and the result holds every row.
+MR_FULL_N, MR_FULL_AT = 100, 50
+
+
+def _mr_rows(renamed=None):
+    rows = []
+    for n in range(MR_FULL_N):
+        if n == renamed:
+            rows.append('sh("row number %03d asks the owner first", CMD_%03d, "ask")\n' % (n, n))
+        else:
+            rows.append('sh("row number %03d is refused by the gate", CMD_%03d, "deny")\n' % (n, n))
+    return "".join(rows)
+
+
+MR_FULL = _mr_case("mr-full-size-rename", MR_TOP + _mr_rows(), MR_TOP + _mr_rows() + MR_LANE_ROW,
+                   MR_TOP + _mr_rows(MR_FULL_AT) + MR_MAIN_ROW,
+                   MR_TOP + _mr_rows(MR_FULL_AT) + MR_LANE_ROW + MR_MAIN_ROW)
+_mt_allow("builder-refuse: a merge of a hundred rows that takes main's renamed and flipped row 50, and keeps both sides' "
+          "new rows, is allowed", MR_FULL)
+
+# Both parents change one function: the lane only flips a verdict in it, main edits what it checks. Both change one line,
+# so the merge conflicts on the function. The flip is no edit to keep.
+MR_FUNC = ('def _gate_rows():\n    rows = []\n    rows.append(("push to main", "deny"))\n'
+           '    rows.append(("push to a branch", "allow"))\n    return rows\n')
+MR_FUNC_FLIP = MR_FUNC.replace('"push to main", "deny"', '"push to main", "ask"')
+MR_FUNC_EDIT = MR_FUNC.replace('"push to main", "deny"', '"push --force to main", "deny"')
+MR_FUNC_KEPT = _mr_case("mr-both-changed-keeps-edit", MR_TOP + MR_FUNC, MR_TOP + MR_FUNC_FLIP, MR_TOP + MR_FUNC_EDIT,
+                        MR_TOP + MR_FUNC_EDIT)
+_mt_allow("builder-refuse: a merge of a function that the lane only flipped and main edited, which keeps main's edit, "
+          "is allowed", MR_FUNC_KEPT)
+MR_FUNC_DROPPED = _mr_case("mr-both-changed-drops-edit", MR_TOP + MR_FUNC, MR_TOP + MR_FUNC_FLIP, MR_TOP + MR_FUNC_EDIT,
+                           MR_TOP + MR_FUNC_FLIP)
+_mt_refuse("builder-refuse: control, a merge of a function that the lane only flipped and main edited, which keeps the "
+           "flip and drops main's edit, is refused as lost", MR_FUNC_DROPPED, "lost", (MT_CARRY["lost"],))
+
+
+# ---- CONTROLS: a deleted case stays lost, since the result holds fewer of its case than a parent ----
+# Each side adds a row at the end, and the builder leaves out part of the base.
+def _mr_deleted(slug, name, base, kept):
+    _mt_refuse("builder-refuse: control, " + name + " is refused as lost", _mr_case(
+        "mr-" + slug, MR_TOP + base, MR_TOP + base + MR_LANE_ROW, MR_TOP + base + MR_MAIN_ROW,
+        MR_TOP + kept + MR_LANE_ROW + MR_MAIN_ROW), "lost", (MT_CARRY["lost"],))
+
+
+MR_DEF = "def _gate_push_plain():\n    return PUSH_MAIN\n\n\n"
+MR_CALL = 'add_case("a plain push to main is refused by the gate", _gate_push_plain)\n'
+_mr_deleted("call-only", "a merge that deletes a registering call and keeps its function", MR_DEF + MR_CALL, MR_DEF)
+_mr_deleted("call-and-def", "a merge that deletes a registering call and its function", MR_DEF + MR_CALL, "")
+MR_ROW_A = 'sh("a push to main is checked by the gate", PUSH_MAIN, "deny")\n'
+MR_ROW_B = 'sh("a push to a branch is checked by the gate", PUSH_BRANCH, "allow")\n'
+_mr_deleted("row", "a merge that deletes one of two rows", MR_ROW_A + MR_ROW_B, MR_ROW_B)
+# Twins: two rows with one command and one description, whose verdicts differ. Each holds the other's case key.
+MR_TWIN_DENY = 'sh("a push to main is checked by the gate", PUSH_MAIN, "deny")\n'
+MR_TWIN_ASK = 'sh("a push to main is checked by the gate", PUSH_MAIN, "ask")\n'
+_mr_deleted("twin-row", "a merge that deletes one of two twin rows that differ only in verdict",
+            MR_TWIN_DENY + MR_TWIN_ASK, MR_TWIN_DENY)
+
+# A rename that main made is honoured, and another row is deleted in the same result.
+MR_RENAME_OLD = 'sh("a push to a branch is checked by the gate", PUSH_BRANCH, "allow")\n'
+MR_RENAME_NEW = 'sh("a push to a branch passes the gate here", PUSH_BRANCH, "ask")\n'
+MR_RENAME_LOST = _mr_case("mr-rename-kept-row-deleted", MR_TOP + MR_ROW_A + MR_RENAME_OLD,
+                          MR_TOP + MR_ROW_A + MR_RENAME_OLD + MR_LANE_ROW, MR_TOP + MR_ROW_A + MR_RENAME_NEW,
+                          MR_TOP + MR_RENAME_NEW + MR_LANE_ROW)
+_mt_refuse("builder-refuse: control, a merge that takes main's renamed row and deletes another row is refused as lost",
+           MR_RENAME_LOST, "lost", (MT_CARRY["lost"],))
+
 FAMILY = _MU5_PRIOR_FAMILY
