@@ -2239,36 +2239,47 @@ def _ready_pass_shas(transcript: str, merge):
     return shas
 
 
-def ready_mark_hit(tool: str, tool_input, transcript: str, where: str):
-    """(reason, matched) when an MCP update with draft false marks a pull request ready and this session's transcript shows no `merge <pr> --ready` or
-    `--confirm` run that stood for the head the pull request has now, else None. Judged only in a repo that uses the merge tool. A call that marks nothing ready,
-    a missing or unreadable transcript, an unloadable merge tool and an unreadable head pass (the records-page-ready rule reads the same head and refuses
-    an unreadable one first). A selector may carry a leading `#`, as ready_page_read reads it."""
-    if tool != READY_PAGE_MCP_TOOL or not isinstance(tool_input, dict) or tool_input.get("draft") is not False:
+def ready_mark_hit(tool: str, tool_input, transcript: str, where: str, command: str = ""):
+    """(reason, matched) when a ready mark, by MCP update with draft false or by the shell `gh pr ready` (ready_page_calls, the one parser of both),
+    marks a pull request ready and this session's transcript shows no `merge <pr> --ready` or `--confirm` run that stood for the head the pull request
+    has now, else None. Judged only in a repo that uses the merge tool. A call that marks nothing ready, a missing or unreadable transcript, an unloadable
+    merge tool and an unreadable head pass (the records-page-ready rule reads the same head and refuses an unreadable one first). An MCP selector may carry a
+    leading `#`, as ready_page_read reads it; a shell selector may also be a branch, a URL or empty, which `Host.pr_number` resolves."""
+    mcp = tool == READY_PAGE_MCP_TOOL
+    if mcp and (not isinstance(tool_input, dict) or tool_input.get("draft") is not False):
+        return None
+    if not mcp and (not isinstance(command, str) or "ready" not in command.lower()):
         return None
     if not isinstance(transcript, str) or not transcript or not where or not uses_merge_tool(where):
         return None
     module = merge_module()
     if module is None:
         return None
+    calls = ready_page_calls(tool, tool_input if isinstance(tool_input, dict) else {}, command)
+    if not calls:
+        return None
     shas = _ready_pass_shas(transcript, module)
     if shas is None:
         return None
-    for selector, repo in ready_page_calls(tool, tool_input, ""):
+    for selector, repo in calls:
         selector = selector[1:] if selector[:1] == "#" and selector[1:].isdigit() else selector
-        if not selector.isdigit():
+        if mcp and not selector.isdigit():
             continue
+        number = selector if selector.isdigit() else "<pr>"
         head = ""
         if shas:  # no stood sha at all refuses without a head read
             try:
                 with module.shared_deadline(READY_MARK_READ_TIMEOUT):
-                    head = module.Host(repo=repo or None, cwd=where).pr(int(selector))["head"]
+                    host = module.Host(repo=repo or None, cwd=where)
+                    resolved = host.pr_number(selector)
+                    number = str(resolved)
+                    head = host.pr(int(resolved))["head"]
             except Exception:
                 continue
             if any(head.startswith(sha) for sha in shas):
                 continue
         named = "its current head " + head[:9] if head else "its current head"
-        return READY_MARK_REASON % {"n": selector, "head": named}, "ready mark with no ready pass #" + selector
+        return READY_MARK_REASON % {"n": number, "head": named}, "ready mark with no ready pass #" + number
     return None
 
 
