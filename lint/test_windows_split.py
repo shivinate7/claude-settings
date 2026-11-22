@@ -39,6 +39,11 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+from all_jobs_passed_rules import (ALL_JOBS_PASSED_JOB, COMMENT_DELTA_CLAUSE, DELTA_CLAUSES, MACOS_JOBS,  # noqa: E402,F401  the one home of the rules
+                                   MUTATE_PUSH_OFF_JOBS, NIGHTLY_SKIP_JOB, PUSH_OFF_JOBS, PUSH_SKIP_JOB, RECORD_DELTA_CLAUSE,
+                                   RECORDS_ONLY_CONDITION, SHARD_VAR, SKIP_VALUES, WINDOWS_PUSH_OFF_JOBS, all_jobs, delta_clauses_off,
+                                   draft_guard_only, drop_condition, eval_if, job_if_without_records, push_guard_only, push_off_only,
+                                   shard_base, shard_push_off, unwrap, yaml_scalar)
 from workflow_steps import CHECKS_SUITE_JOBS, gating_text, job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
 CHECKS = os.environ.get("CHECKS_YML") or os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
 MIN_JOBS = 3
@@ -261,24 +266,15 @@ MAC_PICK = "needs.scope.outputs.mac_runner"
 MAC_PICK_RUNS_ON = (f"${{{{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) "
                     f"&& fromJSON('[\"macos-latest\"]') || fromJSON({MAC_PICK}) }}}}")
 # R61 part 1: a push starts no macOS runner. Each job named here keeps `github.event_name != 'push'` as its job-level if.
-MACOS_JOBS = ("shell-macos", "checks-macos", "checks-macos-b")
 # The one R61 list of jobs a push starts no runner for (owner page item 880, 11:53 CST Nov 15): the macOS jobs, every Windows job and
 # every mutation job. The daily scheduled run runs them. Each job keeps `github.event_name != 'push'` as its job-level if; a shard also
 # keeps the draft guard (SHARD_JOB_IF). Linux fast jobs are every other ubuntu job (the default reading of item 880).
-WINDOWS_PUSH_OFF_JOBS = ("pointer-windows", "checks-windows", "checks-windows-guard", "checks-windows-guard-2", "checks-windows-guard-3",
-                         "checks-windows-merge", "checks-windows-merge-2", "checks-windows-merge-3", "checks-windows-merge-4",
-                         "checks-windows-merge-5", "checks-windows-sweep", "checks-windows-rest", "checks-windows-rest-2")
-MUTATE_PUSH_OFF_JOBS = ("checks-mutate-guard", "checks-mutate-guard-b", "checks-mutate-guard-c", "mutation-report")
-PUSH_OFF_JOBS = MACOS_JOBS + WINDOWS_PUSH_OFF_JOBS + MUTATE_PUSH_OFF_JOBS
 # The shards whose job-level if keeps the draft guard with the push guard (SHARD_JOB_IF). rest-2 has the push guard alone, no draft guard.
 PUSH_OFF_SHARDS = ("checks-windows-guard-2", "checks-windows-guard-3", "checks-windows-merge-2", "checks-windows-merge-3",
                    "checks-windows-merge-4", "checks-windows-merge-5")
 # R61 part 3: the 03:17 nightly's skip job, and the one scope output it reads (the skip job's output).
-NIGHTLY_SKIP_JOB = "nightly-skip"
-PUSH_SKIP_JOB = "push-skip"
 SCOPE_NEEDS = {NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB}  # scope's if reads each skip job's skip output, so it needs both
 # The values the skip job's output can hold: unset (''), skip (`true`) or run (`false`). A guard predicate must give one answer for all.
-SKIP_VALUES = ("", "true", "false")
 MAC_OWN = "(needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()"
 MAC_CODE = f"{MAC_OWN} && needs.scope.outputs.code == 'true'"
 MAC_SWEEP = "!cancelled() && needs.scope.outputs.sweep == 'true'"  # the mutation step carries only its sweep flag (R62)
@@ -331,36 +327,6 @@ MACOS_SUITES = {
 }
 
 
-def all_jobs(text):
-    """{job: {"os", "if": job-level if or None, "needs": raw needs text or None, "steps": [{key: value}]}}.
-
-    Step keys sit at 8 spaces, or inline after `- ` at 6. Block scalars (`run: |`) read as "|".
-    """
-    jobs, job, in_jobs = {}, None, False
-    for line in text.splitlines():
-        if re.match(r"^jobs:\s*$", line):
-            in_jobs = True
-        elif in_jobs and (m := re.match(r"^  ([\w-]+):\s*$", line)):
-            job = jobs[m.group(1)] = {"os": None, "if": None, "needs": None, "steps": []}
-        elif not job:
-            continue
-        elif m := re.match(r"^    (runs-on|if|needs):\s*(\S.*?)\s*$", line):
-            job[{"runs-on": "os", "if": "if", "needs": "needs"}[m.group(1)]] = m.group(2)
-        elif m := re.match(r"^      - (\w+):\s*(.*?)\s*$", line):
-            job["steps"].append({m.group(1): m.group(2)})
-        elif (m := re.match(r"^        (\w+):\s*(.*?)\s*$", line)) and job["steps"]:
-            job["steps"][-1][m.group(1)] = m.group(2)
-        elif (m := re.match(r"^          (\w+):\s*(.*?)\s*$", line)) and job["steps"]:  # an `env:` block key
-            if not isinstance(job["steps"][-1].get("env"), dict):
-                job["steps"][-1]["env"] = {}
-            job["steps"][-1]["env"][m.group(1)] = m.group(2)
-    # The red-job wake step (a `job:` input) ends every job and is no suite step (decision ci-wait-reads-run-status).
-    for job in jobs.values():
-        job["steps"] = [st for st in job["steps"]
-                        if not ("actions/ci-done-comment" in st.get("uses", "") and "job" in (st.get("env") or {}))]
-    return jobs
-
-
 def windows_jobs(text):
     return {n: j for n, j in all_jobs(text).items() if j["os"] == "windows-latest"}
 
@@ -376,15 +342,8 @@ GUARD_JOB = "checks-windows-guard"
 # once. A shard job past the first runs on a ready pull_request and never on a draft. Its if is the draft guard, with the
 # records-only condition after it (`(draft guard) && RECORDS_ONLY_CONDITION`), and its steps carry the base job's scope
 # condition, so a run with no flag for the base job runs no shard.
-SHARD_VAR = {"checks-windows-guard": "GUARD_SHARD", "checks-windows-merge": "MERGE_SHARD"}
 SHARD_CMD = {"checks-windows-guard": "python hooks/test_guard.py", "checks-windows-merge": "python merge/test_merge.py"}
 SHARD_JOB_IF = "${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}"
-
-
-def shard_base(name):
-    """The base job a shard job belongs to (`checks-windows-guard-2` -> `checks-windows-guard`), or None."""
-    m = re.fullmatch(r"(.+)-([2-9]|[1-9][0-9]+)", name)
-    return m.group(1) if m and m.group(1) in SHARD_VAR else None
 
 
 # The guard mutation test moves off `checks` (Linux) to its own Linux job (cut F).
@@ -409,8 +368,6 @@ FLAG_OF.update({name: "guard" for name in MUTATE_JOBS})
 # The lint jobs run on every PR with no scope condition: the Linux jobs, read from their one home CHECKS_SUITE_JOBS.
 LINT_JOBS = CHECKS_SUITE_JOBS
 # all-jobs-passed is the one required check. Its needs are checked in lint/test_all_jobs_passed.py.
-ALL_JOBS_PASSED_JOB = "all-jobs-passed"
-
 
 def key(st):
     """A step's run command; a test_merge or test_guard step with its slice env reads as its SLICE."""
@@ -484,74 +441,34 @@ FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "check
          "code", "guard", "sweep", "shoot"]
 
 
-def eval_if(expr, event, flag_value, draft=False, nightly_skip="", push_skip=""):
-    """Evaluate an `if:` (a job's, a step's or a scope condition) for an event with every scope output set to flag_value and
-    github.event.pull_request.draft set to draft. Reads only !cancelled(), success(), always(), &&, ||, !, parentheses,
-    == and != on github.event_name, github.event.pull_request.draft, needs.scope.outputs.*, and the skip output of the two
-    skip jobs (nightly_skip and push_skip: the value given, '' when unset, as GitHub reads an output no step set)."""
-    e = expr.strip()
-    if e.startswith("${{") and e.endswith("}}"):
-        e = e[3:-2]
-    e = e.replace("github.event.pull_request.draft", repr(draft))
-    e = e.replace("!cancelled()", "True").replace("success()", "True").replace("always()", "True")
-    e = e.replace("&&", " and ").replace("||", " or ")
-    e = e.replace("github.event_name", repr(event))
-    e = re.sub(r"needs\.scope\.outputs\.\w+", repr(flag_value), e)
-    # Only the two skip jobs' skip outputs are read. Any other job's output stays unread, so the reader raises on it, as before.
-    e = re.sub(rf"needs\.{re.escape(NIGHTLY_SKIP_JOB)}\.outputs\.skip\b", repr(nightly_skip), e)
-    e = re.sub(rf"needs\.{re.escape(PUSH_SKIP_JOB)}\.outputs\.skip\b", repr(push_skip), e)
-    e = re.sub(r"!(?!=)", " not ", e)
-    return bool(eval(e, {"__builtins__": {}}))
-
-
-def yaml_scalar(raw):
-    """A YAML value without its trailing comment or outer quotes. `#` starts a comment only after a space and outside
-    quotes, so `'a # b'` and `${{ x == '#' }}` keep their `#`, and a lone quote in plain text (`Don't`) is text."""
-    s = (raw or "").strip()
-    if s[:1] in ("'", '"'):
-        end = s.find(s[0], 1)
-        return s[1:end] if end != -1 else s
-    m = re.search(r"(?:^|\s)#", s)
-    return (s[:m.start()] if m else s).rstrip()
-
-
-def unwrap(raw):
-    """A value's expression with `${{ }}` removed, or None when the value is absent."""
-    if raw is None:
-        return None
-    s = yaml_scalar(raw)
-    return s[3:-2].strip() if s.startswith("${{") and s.endswith("}}") else s
-
-
 # The records-only skip (ci-scope.sh's records_only_skip output, read as needs.scope.outputs.records_only_skip) turns off some
 # run steps. A step that takes the condition ends in it: `(E) && RECORDS_ONLY_CONDITION`, or `success() && RECORDS_ONLY_CONDITION` when it has no if:. Which steps take it:
 #   CONDITIONED_JOBS: every run step. A static trace found the Windows guard suite reads no records page.
-#   SPLIT_CONDITIONED_JOBS: only the run steps named by scope_named_steps(), each with the scope condition as its if:. Its doc steps take none.
-#   UNCONDITIONED_JOBS: no run step.
-RECORDS_ONLY_CONDITION = "needs.scope.outputs.records_only_skip != 'true'"
+#   SPLIT_CONDITIONED_JOBS: only the run steps named by scope_named_steps(), each with the scope condition as its if:.
+#   UNCONDITIONED_JOBS: no run step has to take it. Any step that reads a .md file may take it on top of its own scope, since
+#     ruling own-830-c lets it skip on a records-only push.
 CONDITIONED_JOBS = ("checks-windows-guard", "checks-windows-guard-2", "checks-windows-guard-3", "checks-windows-merge",
               "checks-windows-merge-2", "checks-windows-merge-3", "checks-windows-merge-4", "checks-windows-merge-5",
               "checks-windows-rest", "checks-windows-rest-2")
 SPLIT_CONDITIONED_JOBS = ("checks-hooks", "checks-rest")
 UNCONDITIONED_JOBS = ("checks",)
 SPEC_JOBS = CONDITIONED_JOBS + SPLIT_CONDITIONED_JOBS + UNCONDITIONED_JOBS
+# Each (job, if expression) is a form the job must not take. The rules of both test files read this list, so one rule cannot accept
+# a form the other refuses.
+UNNAMED_CLAUSE = "needs.scope.outputs.checks_macos == 'true'"
+WRONG_DELTA_FORMS = (("checks-hooks", f"{RECORDS_ONLY_CONDITION} || {COMMENT_DELTA_CLAUSE}"),
+                     ("checks", f"{RECORDS_ONLY_CONDITION} || {RECORD_DELTA_CLAUSE} || {COMMENT_DELTA_CLAUSE}"),
+                     ("checks", f"{RECORDS_ONLY_CONDITION} || {COMMENT_DELTA_CLAUSE}"),
+                     ("checks", f"{RECORDS_ONLY_CONDITION} || {COMMENT_DELTA_CLAUSE} || {RECORD_DELTA_CLAUSE} || {UNNAMED_CLAUSE}"),
+                     ("checks-rest", f"{RECORDS_ONLY_CONDITION} || {COMMENT_DELTA_CLAUSE} || {RECORD_DELTA_CLAUSE}"))
 
 
 def scope_named_steps():
     """The step names that take the condition in SPLIT_CONDITIONED_JOBS: NO_MD and NAMES_ONLY of lint/test_checks_step_scope.py, the
     one home of those lists. Imported here, not at the top, because that module imports this one. A doc step is not named:
-    a records-only push still runs the steps that read a .md file (decision records-index-at-merge)."""
+    it takes its own scope condition, and may take the records-only clause on top (ruling own-830-c, see SPLIT_CONDITIONED_JOBS)."""
     from test_checks_step_scope import NAMES_ONLY, NO_MD
     return set(NO_MD) | set(NAMES_ONLY)
-
-
-def drop_condition(expr):
-    """An `if:` expression without the records-only condition: `(E) && RECORDS_ONLY_CONDITION` gives E, and `success() && RECORDS_ONLY_CONDITION` gives None, the
-    no-if: default. Any other expression, or None, comes back as it is."""
-    if expr == f"success() && {RECORDS_ONLY_CONDITION}":
-        return None
-    m = re.fullmatch(rf"\((.+)\) && {re.escape(RECORDS_ONLY_CONDITION)}", expr or "")
-    return m.group(1) if m else expr
 
 
 def step_if(st):
@@ -560,32 +477,36 @@ def step_if(st):
     return drop_condition(unwrap(st.get("if")))
 
 
-def job_if_without_records(raw):
-    """A job-level `if:` (raw, with its `${{ }}`) with the records-only condition taken off, unwrapped. The condition alone gives None,
-    the job has no if. `(E) && RECORDS_ONLY_CONDITION` gives E, which a shard reads as its draft guard. Any other if comes back as it
-    is, so a wider one still fails the job-level rules. runs_with_condition pins the skip's value instead of taking it off."""
-    e = unwrap(raw)
-    if e == RECORDS_ONLY_CONDITION:
-        return None
-    return drop_condition(e)
+def records_clause_form(raw):
+    """True when `raw` is `success() && RECORDS_ONLY_CONDITION`, or `(X) && RECORDS_ONLY_CONDITION` with the clause after X's own
+    parenthesis. So the clause gates the whole if: `(A) || (B) && RECORDS_ONLY_CONDITION` is not this form."""
+    if raw == f"success() && {RECORDS_ONLY_CONDITION}":
+        return True
+    x = paren_prefix(raw)
+    return x is not None and raw == f"({x}) && {RECORDS_ONLY_CONDITION}"
 
 
 def condition_problem(name, st):
     """None when run step `st` of job `name` ends in the condition, `(E) && RECORDS_ONLY_CONDITION` or `success() && RECORDS_ONLY_CONDITION`; else the problem, named."""
     raw = unwrap(st.get("if"))
-    if raw == f"success() && {RECORDS_ONLY_CONDITION}" or re.fullmatch(rf"\(.+\) && {re.escape(RECORDS_ONLY_CONDITION)}", raw or ""):
+    if records_clause_form(raw):
         return None
     return f"{name} / {st.get('name') or st.get('run')}: the if: is not `(E) && {RECORDS_ONLY_CONDITION}` (or `success() && {RECORDS_ONLY_CONDITION}` with no if:): {raw!r}"
 
 
 def condition_spec_problem(name, st):
     """None when run step `st` of job `name` has the condition the spec gives it, else the problem, named. A step the spec does not
-    condition has no condition. A step it conditions has condition_problem's form."""
+    condition may carry the records-only clause in condition_problem's form, and no other condition. That covers a step that reads a
+    .md file, since ruling own-830-c lets it skip on a records-only push.
+    A step it conditions has condition_problem's form, and never `success() && RECORDS_ONLY_CONDITION` alone, which drops its scope."""
     label = st.get("name") or st.get("run")
+    raw = unwrap(st.get("if"))
     if name in UNCONDITIONED_JOBS or (name in SPLIT_CONDITIONED_JOBS and label not in scope_named_steps()):
         if RECORDS_ONLY_CONDITION in (st.get("if") or ""):
-            return f"{name} / {label}: the if: carries the records-only condition, which the spec does not give this step: {unwrap(st.get('if'))!r}"
+            return condition_problem(name, st)
         return None
+    if raw == f"success() && {RECORDS_ONLY_CONDITION}":
+        return f"{name} / {label}: the if: is the records-only condition alone, so the scope condition is dropped: {raw!r}"
     return condition_problem(name, st)
 
 
@@ -701,24 +622,6 @@ def scope_condition_step_problems(name, job, scope_condition):
             for st in job["steps"] if scope_condition_rest(step_if(st), scope_condition) is None]
 
 
-def draft_guard_only(expr):
-    """True when a job-level `if:` holds only the draft guard (ci-hygiene steps 11 and 19): it skips a draft PR, runs on a
-    ready PR and on push, and reads no scope flag, so its answer does not change with the flags. Any other expression is False.
-    It also reads no other job's output: the answer must match for every skip value (SKIP_VALUES)."""
-    e = unwrap(expr)
-    if not e:
-        return False
-    try:
-        return all(eval_if(e, event, flag, draft=draft, nightly_skip=nightly_skip) == want for nightly_skip in SKIP_VALUES for event, flag, draft, want in (
-            ("pull_request", "false", True, False),
-            ("pull_request", "false", False, True),
-            ("pull_request", "true", False, True),
-            ("push", "false", False, True),
-            ("push", "true", False, True)))
-    except Exception:
-        return False
-
-
 # R62: the full Windows suite runs on a ready pull_request whatever the flags say. Its steps carry the draft guard, bare (checkout and
 # setup) or as `(draft guard) && E`. A suite step's E reads code at most, the push condition, and never the job's own flag.
 DRAFT_GUARD = "github.event_name != 'pull_request' || !github.event.pull_request.draft"
@@ -787,6 +690,7 @@ def job_check_problems(name, job, flag=None):
     (LINT_JOBS) have no scope condition. A lint or scoped job's job-level if, if any, is the draft guard (draft_guard_only).
     The records-only condition may stand alone as a job-level if, or follow a shard's draft guard as `(draft guard) && RECORDS`;
     job_if_without_records takes it off before these rules read the rest. A shard's if with it bare, or unparenthesised, fails.
+    A lint job's named delta clauses (DELTA_CLAUSES) are taken off first, by delta_clauses_off; any other clause fails.
     A scoped job's scope condition G is the one its steps carry (read_scope_condition), every step carries G
     (scope_condition_step_problems), and G keeps the scope condition rules (scope_condition_property_problems). `flag` names
     the scope output for a job whose flag is not its own name (FLAG_OF)."""
@@ -794,7 +698,7 @@ def job_check_problems(name, job, flag=None):
     if not re.fullmatch(r"\[?\s*scope\s*\]?", job["needs"] or ""):
         problems.append(f"{name}: needs is {job['needs']}, want scope")
     expr = job["if"]
-    rest = job_if_without_records(expr)
+    rest = job_if_without_records(delta_clauses_off(name, expr))
     if shard_base(name):
         return problems + ([] if rest == unwrap(SHARD_JOB_IF) or (name in PUSH_OFF_JOBS and push_off_job_if(name, rest)) else [f"{name}: shard job if is {expr}, want {SHARD_JOB_IF}"])
     if name in LINT_JOBS:  # they run on every PR: no scope condition, and a job-level if only when it is the draft guard
@@ -1243,6 +1147,17 @@ class WindowsSplit(unittest.TestCase):
         for label, text in bad.items():
             with self.subTest(defect=label):
                 self.assertTrue(waiting_page_problems(text), label)
+
+    def test_a_lint_job_takes_only_its_named_delta_clauses(self):
+        # Scope first: each named form passes on the real file, so a refusal below is the clause and not a broken helper.
+        # Named failure: a delta clause the job does not name, or the named ones in another order, passes the job-level rules.
+        jobs = all_jobs(self.text)
+        for name in DELTA_CLAUSES:
+            self.assertEqual(job_check_problems(name, jobs[name]), [], f"{name}'s named delta form is refused")
+        for name, expr in WRONG_DELTA_FORMS:
+            with self.subTest(job=name, if_=expr):
+                job = {**jobs[name], "if": "${{ " + expr + " }}"}
+                self.assertTrue(job_check_problems(name, job), f"{name} takes {expr!r}, a form it does not name, and passes")
 
     def test_scope_job_checks_every_other_job(self):
         self.assertEqual(scope_problems(self.text), [])
@@ -1841,22 +1756,6 @@ NIGHTLY_TRUTH = (("push", False, "", True), ("pull_request", False, "", True), (
                  ("schedule", False, "true", False))
 
 
-def push_guard_only(expr):
-    """True when a job-level `if:` is the push guard and nothing else: true on a pull_request (draft or not), a schedule and a
-    workflow_dispatch, false on a push. It reads no scope flag, so its answer holds for every flag value, and it reads no other
-    job's output: the answer must match for every skip value (SKIP_VALUES)."""
-    e = unwrap(expr)
-    if not e:
-        return False
-    try:
-        return all(eval_if(e, event, flag, draft=draft, nightly_skip=nightly_skip) == want for nightly_skip in SKIP_VALUES for event, flag, draft, want in (
-            ("pull_request", "false", True, True), ("pull_request", "true", False, True),
-            ("schedule", "false", False, True), ("workflow_dispatch", "false", False, True),
-            ("push", "false", False, False), ("push", "true", False, False)))
-    except Exception:
-        return False
-
-
 def schedule_only(expr):
     """True when a job-level `if:` runs on a schedule and nowhere else: false on a push, a pull_request and a workflow_dispatch.
     Like push_guard_only, its answer must match for every skip value."""
@@ -1866,36 +1765,6 @@ def schedule_only(expr):
     try:
         return all(eval_if(e, event, "false", nightly_skip=nightly_skip) == want for nightly_skip in SKIP_VALUES for event, want in (
             ("schedule", True), ("pull_request", False), ("push", False), ("workflow_dispatch", False)))
-    except Exception:
-        return False
-
-
-def push_off_only(expr):
-    """True when a job-level `if:` is the push guard and nothing else: false on a push with any flag and any draft state, true on a
-    schedule, a dispatch and a pull_request that is not a draft. A draft pull_request may read either way (a shard keeps the draft
-    guard, see shard_push_off). It reads no scope flag and no other job's output, so its answer holds for every flag and skip value."""
-    e = unwrap(expr)
-    if not e:
-        return False
-    try:
-        return all(eval_if(e, event, flag, draft=draft, nightly_skip=skip) == want
-                   for skip in SKIP_VALUES for flag in ("true", "false")
-                   for event, draft, want in (("push", False, False), ("push", True, False), ("schedule", False, True),
-                                              ("workflow_dispatch", False, True), ("pull_request", False, True)))
-    except Exception:
-        return False
-
-
-def shard_push_off(expr):
-    """True when a shard's job-level `if:` is the push guard with the shard draft guard (SHARD_JOB_IF): false on a push, false on a
-    draft pull_request, true on a ready pull_request, a schedule and a dispatch. No scope flag is read."""
-    e = unwrap(expr)
-    if not e:
-        return False
-    try:
-        return all(eval_if(e, event, "true", draft=draft) == want
-                   for event, draft, want in (("push", False, False), ("pull_request", True, False), ("pull_request", False, True),
-                                              ("schedule", False, True), ("workflow_dispatch", False, True)))
     except Exception:
         return False
 

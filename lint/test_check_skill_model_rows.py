@@ -43,7 +43,7 @@ CHECK_STEP = "Skill model rows check"
 FIXTURE_STEP = "Skill model rows fixture suite"
 
 sys.path.insert(0, HERE)
-from test_windows_split import all_jobs  # noqa: E402  one home for the checks.yml step parser
+from all_jobs_passed_rules import RECORDS_ONLY_CONDITION, all_jobs, unwrap  # noqa: E402  one home for the checks.yml step parser and the records-only clause
 from check_skill_model_rows import skill_names  # noqa: E402
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
@@ -452,7 +452,9 @@ class CiWiring(unittest.TestCase):
     def test_checks_job_runs_the_fixture_suite(self):
         step = self.step(FIXTURE_STEP)
         self.assertEqual(step.get("run"), "python3 lint/test_check_skill_model_rows.py")
-        self.assertNotIn("if", step, "an if: condition lets a skipped suite read as passing")
+        # No if:, or the records-only clause alone (ruling own-830-c).
+        self.assertIn(unwrap(step.get("if")), (None, f"success() && {RECORDS_ONLY_CONDITION}"),
+                      "an if: other than the records-only clause lets a skipped suite read as passing: %r" % step.get("if"))
 
 
 if __name__ == "__main__":

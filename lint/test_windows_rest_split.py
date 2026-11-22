@@ -13,8 +13,8 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from test_windows_split import (CHECKS, RECORDS_ONLY_CONDITION, CONDITIONED_JOBS, SPLIT_CONDITIONED_JOBS, UNCONDITIONED_JOBS, all_jobs, eval_if,  # noqa: E402  the one home of the checks.yml reader
-                                condition_problem, job_if_without_records, scope_named_steps)
+from test_windows_split import (CHECKS, CONDITIONED_JOBS, SPLIT_CONDITIONED_JOBS, UNCONDITIONED_JOBS, all_jobs, eval_if,  # noqa: E402  the one home of the checks.yml reader
+                                condition_problem, condition_spec_problem, job_if_without_records, scope_named_steps)
 from all_jobs_passed_rules import needs_of  # noqa: E402  the one home of the needs reader
 from workflow_steps import job_block  # noqa: E402  the one home of the job parser
 
@@ -86,7 +86,8 @@ class WindowsRestSplit(unittest.TestCase):
 
 class RecordsOnlySkipCondition(unittest.TestCase):
     """The records-only skip's condition, read off checks.yml. The scope job declares the output. Each run step the spec conditions ends in
-    the condition, is off when the condition is shut, and runs as today when it is open. A run step the spec does not condition carries no condition."""
+    the condition, is off when the condition is shut, and runs as today when it is open. A run step the spec does not condition carries no
+    condition, or the records-only clause alone, on its own scope (ruling own-830-c)."""
 
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
@@ -133,11 +134,13 @@ class RecordsOnlySkipCondition(unittest.TestCase):
                 self.assertIsNone(problem, problem)
 
     def test_each_unconditioned_run_step_carries_no_condition(self):
+        # A step the spec does not condition may take the records-only clause (ruling own-830-c). The name keeps its old wording;
+        # condition_spec_problem holds the rule.
         for name, st in self.unconditioned_steps():
             label = st.get("name") or st["run"]
             with self.subTest(job=name, step=label):
-                self.assertNotIn(RECORDS_ONLY_CONDITION, st.get("if") or "",
-                                 f"{name} / {label} carries the records-only condition, which the spec does not give this step")
+                problem = condition_spec_problem(name, st)
+                self.assertIsNone(problem, problem)
 
     def test_the_condition_turns_each_conditioned_run_step_off_on_every_event(self):
         for name, st in self.conditioned_steps():

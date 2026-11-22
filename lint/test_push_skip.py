@@ -43,8 +43,9 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
-from test_windows_split import ALL_JOBS_PASSED_JOB, CHECKS, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB, all_jobs, eval_if  # noqa: E402  the one home of the checks.yml reader
-from all_jobs_passed_rules import FAN_IN, needs_of, split_jobs  # noqa: E402  the one home of the needs reader
+from test_windows_split import CHECKS  # noqa: E402  the one home of the checks.yml path
+from all_jobs_passed_rules import (ALL_JOBS_PASSED_JOB, FAN_IN, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB, all_jobs,  # noqa: E402  the one home of the checks.yml reader and the needs reader
+                                   eval_if, needs_of, split_jobs)
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the job parser
 import test_all_jobs_passed as all_jobs_home  # noqa: E402  the one home of the child workflow fixtures (CHILD_GOOD)
 
