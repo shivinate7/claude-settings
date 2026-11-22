@@ -794,6 +794,8 @@ TASK_ID = re.compile(r"<task-id>(.*?)</task-id>", re.S)
 TASK_STATUS = re.compile(r"<status>(.*?)</status>", re.S)
 RESULT_PATH = re.compile(r"Output is being written to: (.*?\.output)", re.S)
 STOPPED = re.compile(r"\s*Successfully stopped task: (\S+)")
+RESTART_TASK = re.compile(r"\(task (\w+)\)")  # how a restart notice names each task it stopped
+RESTART_REMINDER = "are now stopped"  # the text before the list of tasks a container restart stopped
 TERMINAL = ("completed", "failed", "killed", "stopped")
 
 
@@ -838,7 +840,7 @@ def scan_jobs(transcript):
     prev_stop, blocked = None, False
     with open(transcript, "rb") as f:
         for line in f:
-            if not any(k in line for k in (b"backgroundTaskId", b"TaskStop", b"Successfully stopped", b"until:", b"tool_use", b"stop_hook_summary", b"async_launched") + NOTICE_KEY):
+            if not any(k in line for k in (b"backgroundTaskId", b"TaskStop", b"Successfully stopped", b"until:", b"tool_use", b"stop_hook_summary", b"async_launched", RESTART_REMINDER.encode()) + NOTICE_KEY):
                 continue
             try:
                 rec = json.loads(line)
@@ -849,6 +851,11 @@ def scan_jobs(transcript):
                         if not blocked:  # the run after a blocked Stop had stop_hook_active: it listed nothing
                             prev_stop = when
                         blocked = bool(rec.get("hookErrors")) or rec.get("preventedContinuation") is True
+                    continue
+                if kind == "queue-operation":  # a queued notice that the transcript holds only as an enqueue record
+                    queued = rec.get("content")
+                    if rec.get("operation") == "enqueue" and isinstance(queued, str):
+                        done.update(closed_by_notice(queued))
                     continue
                 if kind == "attachment":  # a completion notice that arrives as a queued command
                     att = rec.get("attachment")
@@ -903,14 +910,23 @@ def scan_jobs(transcript):
 
 
 def closed_by_notice(text):
-    """The ids of the <task-notification> blocks in text with a terminal status."""
+    """The ids that text closes. A <task-notification> block with a terminal status closes its <task-id>.
+    A terminal block with no <task-id> is a restart notice: it closes each '(task <id>)' it names. A
+    reminder that says the background tasks 'are now stopped' closes each '(task <id>)' after that text.
+    A non-terminal status closes nothing. Each test is a substring check before any regex, because the
+    scan runs on every tool call."""
     ids = []
+    if RESTART_REMINDER in text:
+        ids += RESTART_TASK.findall(text[text.index(RESTART_REMINDER):])
     if not TASK_NOTIFICATION_TAG:
         return ids
     for note in text.split(TASK_NOTIFICATION_TAG)[1:]:
         tid, st = TASK_ID.search(note), TASK_STATUS.search(note)
-        if tid and st and st.group(1).strip().lower() in TERMINAL:
-            ids.append(tid.group(1).strip())
+        if st and st.group(1).strip().lower() in TERMINAL:
+            if tid:
+                ids.append(tid.group(1).strip())
+            else:
+                ids += RESTART_TASK.findall(note)
     return ids
 
 
