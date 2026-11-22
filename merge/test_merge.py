@@ -21654,7 +21654,7 @@ class ReviewedList(ReviewEnv):
     def test_a_draft_is_listed_with_no_ci_read(self):
         host, rc, out, err = self.listing([batch_pull(9, REVIEW_HEAD, draft=True)], [review_comment(1, 9, record_text(n=9, rounds=REVIEW_PASS)), lint_of(9, REVIEW_HEAD)])
         self.assertEqual(rc, 0, out + err)
-        self.assertRegex(list_line(self, out, 9), rf"^#9 feat9 {REVIEW_HEAD[:9]} done: .*; CI draft, no run$")
+        self.assertRegex(list_line(self, out, 9), rf"^#9 feat9 {REVIEW_HEAD[:9]} ready: .*; next: merge --ready.*; CI draft, no run$")
         self.assertEqual([rel for rel, _ in host.list_calls if rel.startswith("commits/")], [], "a draft's head was read")
 
     def test_a_ready_pr_gets_its_live_ci_state(self):
