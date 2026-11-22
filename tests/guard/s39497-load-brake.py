@@ -1251,9 +1251,17 @@ lb_add("setsid bin/ci-job --lint & echo $!, full disk: the brake's own call refu
        lb_hit_check("load_hit", "Bash", LB_DISK_FULL, LB_SETSID_CI_BG, deny=(lb_gb(3.1, 926), LB_SWEEP), reads=1))
 lb_add("setsid bin/ci-job --lint & echo $!, memory 96%: the brake's own call refuses, names the memory, the reader runs once",
        lb_hit_check("load_hit", "Bash", lb_reading(memory_pct=96.0), LB_SETSID_CI_BG, deny=LB_MEM96, reads=1))
-# Green controls: python3 on a normal machine is allowed. reads=None, since a lint start may read once.
-lb_add("linux, local, python3 bin/merge --lane-lint 12 & echo $!, memory 50%: allowed (control)",
-       lb_decision_check("Bash", None, "allow", tool_input=LB_PY_MERGE_BG, fake=lb_fake("linux", memory=50.0),
+# Green controls: python3 on a normal machine is allowed. reads=None, since a lint start may read once. The control is
+# not the `& echo $!` shape above: rule detached-launch refuses a lane lint that a `&` ends, kept pid or not (decision
+# detached-launch-refused), so that shape is no longer an allowed call. The lint in the foreground is allowed, and so is
+# the lint with run_in_background and no `&`, the one shape that the brake reads and the harness tracks.
+LB_PY_MERGE_FG = {"command": "python3 bin/merge --lane-lint 12"}
+LB_PY_MERGE_TRACKED = {"command": "python3 bin/merge --lane-lint 12", "run_in_background": True}
+lb_add("linux, local, python3 bin/merge --lane-lint 12, foreground, memory 50%: allowed (control)",
+       lb_decision_check("Bash", None, "allow", tool_input=LB_PY_MERGE_FG, fake=lb_fake("linux", memory=50.0),
+                         reads=None))
+lb_add("linux, local, python3 bin/merge --lane-lint 12, background, memory 50%: allowed (control)",
+       lb_decision_check("Bash", None, "allow", tool_input=LB_PY_MERGE_TRACKED, fake=lb_fake("linux", memory=50.0),
                          reads=None))
 lb_add("setsid bin/ci-job --lint, foreground with no &, full disk: the brake's own call returns the empty pair, the reader does not run",
        lb_hit_check("load_hit", "Bash", LB_DISK_FULL, {"command": "setsid bin/ci-job --lint"}, reads=0))
