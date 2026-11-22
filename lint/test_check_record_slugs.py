@@ -40,7 +40,7 @@ MODULE =os.environ.get("RECORD_SLUGS_UNDER_TEST") or os.path.join(HERE, "check_r
 RUNNER = os.path.join(HERE, "..", "hooks", "test_guard.py")  # its SECTION_DIR names the section folder the check reads
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
-STAMP = os.path.join(HERE, "..", ".github", "stamp.json")  # merge.readyChecks lists the steps the ready run reads
+MERGE_CONFIG = os.path.join(HERE, "..", ".github", "stamp.json")  # merge.readyChecks lists the steps the ready run reads
 WORKFLOW = os.path.join(HERE, "..", ".github", "workflows", "checks.yml")  # holds the ready run's step
 
 OK ="a" * 32 + ".md"  # a slug of 32 characters passes
@@ -1388,7 +1388,7 @@ class SectionClashTests(unittest.TestCase):
 
     def test_the_ready_run_reads_the_record_slug_step(self):
         # A draft marked ready on a tree older than main meets a clash only when the ready run reads this step.
-        with open(STAMP, encoding="utf-8") as f:
+        with open(MERGE_CONFIG, encoding="utf-8") as f:
             config = json.load(f)
         checks = config.get("merge", {}).get("readyChecks")
         self.assertIsInstance(checks, list, "scope: .github/stamp.json declares no merge.readyChecks list")
