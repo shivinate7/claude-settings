@@ -783,6 +783,7 @@ while True:
             BACKGROUND_END_REASON, CHECK_TAIL_REASON, CHECK_TIMEOUT_TEMPLATE, FG_BACKGROUND_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
             NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, UV_VALUE_FLAGS, VERDICT_PIPE_REASON, WAITER_REASON,
             background_end_hit, background_work_running, check_tail_hit, check_timeout_hit, check_timeout_limit_text, fg_long_hit,
+            DETACHED_LINT_REASON, detached_lint_hit,
             lint_start_hit, live_stream_hit, ln_descends_hit,
             loop_condition_polls_a_pattern, narrated_tail_hit, verdict_pipe_hit, waiter_verdict,
         )
@@ -5761,7 +5762,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # after a background job, or a bare trailing background job with no pid captured anywhere
     # in the command. Same decision as rule 2, deny, for the same reason: no pid survives to
     # stop it later.
+    # A lane lint detached from the harness has its own remedy (run_in_background), and a kept pid does not lift it.
+    # A lint piped into a filter keeps check-tail's refusal, which names the cut verdict.
     matched = detached_launch_hit(stripped)
+    lint_matched = detached_lint_hit(stripped, matched)
+    if lint_matched and not check_tail_hit(stripped, background, cwd):
+        refuse(tool, "deny", "detached-launch", DETACHED_LINT_REASON, lint_matched)
     if matched:
         refuse(tool, "deny", "detached-launch", DETACHED_LAUNCH_REASON, matched)
 

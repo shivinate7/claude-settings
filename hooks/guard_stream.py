@@ -575,6 +575,34 @@ def lint_start_hit(stripped: str, background: bool = True) -> str:
     return _lint_start_in(stripped.replace(GROUP_MARK, " "), background, 0)
 
 
+DETACHED_LINT_REASON = (
+    "this starts a lane lint (`merge --lane-lint` or `bin/ci-job --lint`) detached from the harness, so no task tracks it "
+    "and a FAIL sits unseen until someone looks. A kept pid (`& echo $!`) does not fix that: the harness still never "
+    "sees the run end. "
+    "Remedy: start the lint with this tool's run_in_background, so the harness tracks it and wakes the session when it ends. "
+    "Do not end it with `&`, or wrap it in `nohup`, `setsid` or `disown`. "
+    "(decision detached-launch-refused, a detached process is refused so a pid can always be named)"
+)
+
+
+def detached_lint_hit(stripped: str, detached: str = "") -> str:
+    """The matched text when a call runs a lane lint detached from the harness, else ''. Extends the `detached-launch`
+    rule: that rule lets `cmd & echo $!` pass, since a kept pid can be stopped, but a lint's end must reach the session,
+    and a pid does not carry it. Two reads. A lint list that a `&` ends counts, `$!` or not, also when the call itself
+    runs in the background (`lint_start_hit` with background False, so a `( ... )` group or a `bash -c` script is read
+    too). A lint anywhere in a call that `detached` (the `detached_launch_hit` match for that call) names as detached
+    counts too, which gives `setsid merge --lane-lint 7` and `nohup ... &` this reason. A lint run in the foreground, or
+    behind `nohup` or `setsid -w` with no `&`, is no hit. `stripped` is the call with heredoc bodies cut."""
+    hit = lint_start_hit(stripped, False)
+    if hit:
+        return hit + " &"
+    if detached:
+        hit = lint_start_hit(stripped, True)
+        if hit:
+            return hit + " ... " + detached
+    return ""
+
+
 def _pipeline_hit(stages, background: bool, stage_of=check_stage, any_filter: bool = False,
                   any_later: bool = False, list_amp: bool = False) -> str:
     """The matched text when a stage that `stage_of(segment, backgrounded)` names, in one pipeline's

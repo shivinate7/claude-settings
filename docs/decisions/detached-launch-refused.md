@@ -19,5 +19,14 @@ in a bare trailing `&`. Measured again (2026-09-26): over 13312 distinct command
 reading every segment refused 6 that the last-segment read allowed. All 6 held an `&` inside a
 python heredoc body. So the guard drops every heredoc body before it reads.
 
+## A lane lint starts as a tracked task
+
+- The mistake: starting a lane lint (`merge --lane-lint`, `bin/ci-job --lint`) detached from the harness. The shapes are a list ended by `&` (with or without `$!`), `nohup ... &`, `setsid` and `disown`. A kept pid passes the rule above, but it does not carry the lint's end to the session.
+- The harm: the harness tracks no task, so a FAIL wakes no one. Incident, Nov 20: the lane lint for PR 3723 started as `bash ... &` inside a foreground call. Its FAIL sat unseen for 52 minutes.
+- The rule: the `detached-launch` rule refuses these calls with its own remedy, which says to start the lint with the tool's `run_in_background`. It is the same rule id, so the owner's typed override lifts it as it lifts the rule above. The reader is `detached_lint_hit` in `hooks/guard_stream.py`. It walks the call with `lint_start_hit` (the load brake's reader of a lint start), which reads each list and each `( ... )` group or `bash -c` script as the shell tokenizer cuts them. A name inside a comment, a quoted string or a heredoc body is no command, so it counts for nothing. The refusal text is `DETACHED_LINT_REASON`.
+- Passes: the lint in the foreground, the lint with `run_in_background` and no `&`, `nohup` with no `&`, and `setsid -w`. The rule also refuses a lint that a `&` ends and a later `wait` joins, because the harness tracks neither the job nor its end. The wrong-refusal rate is unmeasured.
+- Cost: it reads the call text again, inside the guard process that already runs for each Bash call. It starts no process and writes no file apart from the refusal log line. No test pins this read yet, so a test-author pins it.
+- Reader: the session that started the lint reads the refusal and starts the lint again with `run_in_background`.
+
 Kind: process
 Home: hooks/guard.py
