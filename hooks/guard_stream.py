@@ -102,7 +102,7 @@ TRUNCATING_FILTERS = ("tail", "head")
 # its file is the only copy of the stream, as with `> file`.
 # Compared on the word `basename` gives, with `.exe` stripped as in `_roster_word`.
 FILE_WRITER_STAGES = ("tee", "tee-object", "out-file")
-# A python or a POSIX shell: each runs its first non-flag operand as a script (`bash bin/ci-job --lint`).
+# A python or a POSIX shell: `_script_operand` reads the script it runs, as the first word that is no flag and no redirect, or the `-m` module; `-c` code names none (`bash bin/ci-job --lint`).
 SCRIPT_INTERPRETER = re.compile(r"(?:python[\d.]*w?|py|bash|sh|zsh|dash)$")
 
 
