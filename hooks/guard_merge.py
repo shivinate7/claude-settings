@@ -36,8 +36,9 @@ from guard_push_delete import (
 # quoted message and a heredoc body name an act and perform none.
 #
 # 1. merge-checks: a merge made outside the merge tool is
-#    refused while the head has a check or a workflow run pending or red, or when that read could not run. Another ready PR's CI never
-#    holds a merge (per-lane merge). The merge tool (merge/merge.py) runs its own `gh pr merge` as a subprocess, so no hook
+#    refused while the head has a check or a workflow run pending or red, or when that read could not run, or while another ready PR on the
+#    base has CI running and its head does not hold this one (`Host.batch_running`).
+#    The merge tool (merge/merge.py) runs its own `gh pr merge` as a subprocess, so no hook
 #    sees it; it has already read the head green. The read below is the tool's own `Host.head_read`, one home.
 # 2. cite-by-id (CLAUDE.md `git-cite-by-id`): a commit message or PR body that cites a record by
 #    its path is refused. The id is the record's file name without folder or `.md`, the slug
@@ -211,12 +212,19 @@ def merge_check(selector, repo: str, where: str):
     where = os.path.normpath(where) if where else ""   # a `cd` target may carry either separator
     host = module.Host(required=pinned_required(where) or "protection", repo=repo or None, cwd=where or None)
     # No ignore list: this head counts every check, so an ignored red check on it still refuses.
+    # The other ready pull requests on the base may not have CI running (decision no-merge-during-batch-ci), but an ignored check or run never counts.
+    try:
+        host.batch_brake = ignored_checks(module, where)
+    except module.Stop as e:
+        return "unknown", str(e)
     return host.head_read(selector, nothing_is_green=not has_workflows(where))
 
 
 MERGE_CHECK_REASON = (
     "Rule (Git): this head is not settled: %s. A merge waits for every check and workflow run on "
     "the head, required or not, and a read that could not run counts as not settled. "
+    "It also waits while another ready pull request on the base has CI running, unless that head holds this one "
+    "(decision no-merge-during-batch-ci). "
     "Remedy: run the merge tool, `merge <pr> --confirm`, which waits on the required checks, then "
     "merges the head it waited on."
 )
@@ -267,6 +275,16 @@ def pinned_required(where: str):
         if isinstance(names, list) and names and all(isinstance(k, str) and k for k in names):
             return names
     return None
+
+
+def ignored_checks(module, where: str):
+    """The repo's `merge.ignoreChecks` as {name: reason}: the checks and runs another ready pull request may have
+    running without holding a merge. {} with no such list. A bad entry raises the merge tool's Stop."""
+    for config in _merge_configs(where) if where else ():
+        merge = config["merge"]
+        if isinstance(merge, dict) and "ignoreChecks" in merge:
+            return module.ignore_checks(config)
+    return {}
 
 
 BARE_MERGE_REASON = (

@@ -56,6 +56,23 @@ from html.parser import HTMLParser
 HERE = os.path.dirname(os.path.realpath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+# The install's hooks/ folder. lint/ and skills/ sit beside it (decision install-hooks-whole). A stamped copy of
+# this file sits in hooks/guard.d/<id>/, where HERE misses both, so guard.py passes its own folder in through
+# use_hooks_home. install_path is the one home of the lookup.
+HOOKS_HOME = HERE
+
+
+def use_hooks_home(home):
+    """Set the install's hooks/ folder, from which install_path finds lint/ and skills/."""
+    global HOOKS_HOME
+    HOOKS_HOME = home
+
+
+def install_path(*parts):
+    """A path under the install root, the folder that holds hooks/, lint/ and skills/."""
+    return os.path.join(HOOKS_HOME, "..", *parts)
+
+
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 from own_session import _CREATED_ID as SESSION_ID  # noqa: E402  the one home of the session id shape
 from shared_names import GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN  # noqa: E402  the one home of the gh logins
@@ -1219,7 +1236,7 @@ def _git_root_of(cwd):
 
 def _layout():
     """lint/layout.py, the one home of the layout and the mockup home."""
-    lint = os.path.join(HERE, "..", "lint")
+    lint = install_path("lint")
     if lint not in sys.path:
         sys.path.append(lint)
     import layout
@@ -1796,7 +1813,16 @@ def rework_off_page_hit(data) -> str:
 # item names only top-level fields that the page's own block lists, <script type="application/json"
 # id="itemFields">. That block is the one list: this code reads it and holds no copy.
 ITEM_FIELDS_SEAM = "GUARD_ITEM_FIELDS_PAGE"
-ITEM_FIELDS_PAGE = os.path.join(HERE, "..", "skills", "waiting-page", "page.html")
+ITEM_FIELDS_PAGE_PARTS = ("skills", "waiting-page", "page.html")
+
+
+def __getattr__(name):
+    """ITEM_FIELDS_PAGE, the page's path, derived from the parts on each read: use_hooks_home moves the install
+    root after import, so a path computed once would go stale. The parts are the one copy of the list."""
+    if name == "ITEM_FIELDS_PAGE":
+        return install_path(*ITEM_FIELDS_PAGE_PARTS)
+    raise AttributeError("module " + repr(__name__) + " has no attribute " + repr(name))
+
 ITEM_FIELD_REASON = ("The waiting page draws only the top-level item fields that its itemFields block "
                      "lists (skills/waiting-page/page.html). Draw the field on the page and add it to "
                      "that block, or leave it out of the write. An update may remove a stored field "
@@ -1848,7 +1874,7 @@ def item_field_hit(op, entry, data) -> str:
     """The matched text when this write of a waiting item names a top-level field outside the page's
     itemFields block. An update may remove a field with {"__delete__": true}. A str_replace names its
     field in `field`. A page with no readable block, or an empty one, reads as unknown, and the write passes."""
-    fields = _item_fields(os.environ.get(ITEM_FIELDS_SEAM) or ITEM_FIELDS_PAGE)
+    fields = _item_fields(os.environ.get(ITEM_FIELDS_SEAM) or install_path(*ITEM_FIELDS_PAGE_PARTS))
     if op == "str_replace":
         field = entry.get("field")
         top = field.split(".", 1)[0] if isinstance(field, str) else ""
@@ -2490,7 +2516,7 @@ def _option_keys(reply) -> list:
     """(key, question line, option text) for each option line of the reply's Input Needed item. The question line
     is the last non-option line with a `?` before the option, else the item's first line. The option text is the
     line after its key. Both are lowercased with spaces folded."""
-    lint = os.path.join(HERE, "..", "lint")
+    lint = install_path("lint")
     if lint not in sys.path:
         sys.path.append(lint)
     from report_guard import input_needed_section  # the one reader of the Input Needed item
