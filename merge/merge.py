@@ -3988,10 +3988,11 @@ def refuse_full_disk(root):
                    f"`python3 {shlex.quote(landed_sweep())} --root {shlex.quote(str(root))} --confirm` "
                    "(decision machine-load-brake, the lane lint refuses at the full disk floor in a cloud session too).")
 
-def refuse_loaded_machine():
+def refuse_loaded_machine(said=None):
     """Refuse a lane lint while the 5-minute load average per CPU is at LANE_LINT_MAX_LOAD_PER_CPU or more: on a loaded machine the lint runs past CI,
     which then proves the head sooner (decision draft-until-reviewed). The guard's load brake reads memory and disk, never the load average, so its readers do not fit here.
     A load or a CPU count that cannot be read (no os.getloadavg on this platform, a CPU count of None) prints one line that says so, and the lint goes ahead.
+    `said` is a list one lint passes to every call: the unknown line prints on the first call only, then the list holds a mark.
     Cost: one os.getloadavg call and one os.cpu_count call, no process and no file."""
     try:
         five_minute = os.getloadavg()[1]
@@ -3999,7 +4000,10 @@ def refuse_loaded_machine():
     except (AttributeError, OSError):
         five_minute = cpus = None
     if five_minute is None or not cpus:
-        print("merge: the 5-minute load or the CPU count read as unknown, so the lane lint goes ahead", file=sys.stderr)
+        if said is None or not said:
+            print("merge: the 5-minute load or the CPU count read as unknown, so the lane lint goes ahead", file=sys.stderr)
+        if said is not None:
+            said.append(True)
         return
     per_cpu = five_minute / cpus
     if per_cpu >= LANE_LINT_MAX_LOAD_PER_CPU:
@@ -4043,7 +4047,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     and a corrupt, empty or unreadable file is a miss. The mutation test run (mutate_run_check) does not go through this path and is not saved.
     Before any tree is made, refuse_loaded_machine refuses a 5-minute load of LANE_LINT_MAX_LOAD_PER_CPU per CPU or more, then refuse_full_disk refuses a drive
     under the guard's full disk floor, in a cloud session and a local one."""
-    refuse_loaded_machine()
+    load_said = []
+    refuse_loaded_machine(load_said)
     refuse_full_disk(root)
     if target.isdigit():
         host = host or Host(cwd=root)
@@ -4148,7 +4153,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             pin_notes.extend(saved["notes"])
             say(f"PASS (cached): ci-job {LINT_JOB} passed at head {head[:9]} on base {merged[1][:9]} with this merge tool; the job is not run again.")
         else:
-            refuse_loaded_machine()  # read again at the job's start: the tree, the merge and the clash reads above took time, and the entry read may be old
+            refuse_loaded_machine(load_said)  # read again at the job's start: the tree, the merge and the clash reads above took time, and the entry read may be old
             state, lines, log, liftable = ci_job_run(wt, LINT_JOB, "--lint", "--base", f"origin/{base}", notes=pin_notes, head_sha=read_sha,
                                                      pr_body=body_for_job)
             if state == "pass":
@@ -4167,7 +4172,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
                     head_notes.extend(saved["notes"])
                     say(f"PASS (cached): the head's own {CI_JOB_REL} passed at head {head[:9]} on base {merged[1][:9]} with this merge tool; it is not run again.")
                 else:
-                    refuse_loaded_machine()  # the head copy is a second lint start
+                    refuse_loaded_machine(load_said)  # the head copy is a second lint start
                     h_state, h_lines, h_log, h_liftable = ci_job_run(wt, LINT_JOB, "--lint", "--base", f"origin/{base}", notes=head_notes, head_sha=head,
                                                                       pr_body=body_for_job, script=head_copy)
                     if h_state == "pass":
