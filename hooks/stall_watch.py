@@ -96,7 +96,7 @@ Stop: stall_watch.py --stop
   running agent, one tail read per quiet agent. Any error, or stop_hook_active true, prints nothing and exits 0. No posix check.
   CI-wait check: the same Stop run reads the transcript once more, one record at a time. The newest
   ready call (`gh pr ready <N>` in Bash or PowerShell, outside quotes, heredoc bodies and `#` comments, not
-  --undo; or MCP update_pull_request with draft false) opens a wait. An --undo, or draft true, closes the wait on its PR. A `gh` global flag before `pr`
+  --undo; or MCP update_pull_request with draft false) opens a wait. An --undo, or draft true, closes the wait on its PR. A ready call whose tool_result is a PreToolUse hook refusal (an error that starts `PreToolUse:<tool> hook error`) opens no wait; a ready call that ran and then exited non-zero still does. A `gh` global flag before `pr`
   (`gh -R o/r pr ready 5`) is skipped. A later user or queued message with a
   `CI green|cancelled|none on <sha>` line closes it (ci_wake writes `CI none` for a repo with no active workflow,
   so the Stop starts no gh process); a `CI unknown` line leaves it open. A merge or close that
@@ -1031,11 +1031,26 @@ def gh_pr_call(words):
     return None
 
 
+# A PreToolUse hook refusal reaches the transcript as an error result whose text starts with this
+# (measured on this machine's transcripts: Bash, Agent, Monitor, Write, Edit and MCP tools alike).
+# A command that ran and exited non-zero starts with "Exit code N" instead.
+HOOK_REFUSAL = re.compile(r"\s*PreToolUse:\S+ hook error")
+
+
+def refused_result(block):
+    """True when a tool_result block is a PreToolUse hook refusal: the call never ran."""
+    content = block.get("content")
+    if isinstance(content, list):
+        content = "\n".join(c.get("text", "") for c in content if isinstance(c, dict) and isinstance(c.get("text"), str))
+    return isinstance(content, str) and HOOK_REFUSAL.match(content) is not None
+
+
 def ci_events(rec):
-    """The CI-wait events one transcript record holds, in order: ('ready', pr), ('checkin', call id),
-    ('failed', call id), ('merge', pr), ('mergeany',), ('verdict', word). A user or queued message holds a
+    """The CI-wait events one transcript record holds, in order: ('ready', pr, call id), ('checkin', call id),
+    ('failed', call id, refused), ('merge', pr), ('mergeany',), ('verdict', word). A user or queued message holds a
     verdict line; only an assistant call holds the rest. A tool result is no message, so a verdict it prints
-    is not one, but its error flag voids the check-in it answers. ('merge', pr) is a merge or close that names
+    is not one, but its error flag voids the check-in it answers. refused is true when the error text is a
+    PreToolUse hook refusal (HOOK_REFUSAL): the call never ran. ('merge', pr) is a merge or close that names
     pr (pr_ref); ('mergeany',) is a gh pr merge or close that names no PR at all, only flags, which aims at
     the current branch's PR."""
     kind = rec.get("type")
@@ -1045,7 +1060,7 @@ def ci_events(rec):
         return [("verdict", m.group(1)) for m in CI_VERDICT.finditer(text)] if isinstance(text, str) else []
     content = rec["message"]["content"]
     if kind == "user":
-        failed = [("failed", b.get("tool_use_id")) for b in (content if isinstance(content, list) else ())
+        failed = [("failed", b.get("tool_use_id"), refused_result(b)) for b in (content if isinstance(content, list) else ())
                   if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error") is True]
         if failed or "toolUseResult" in rec:
             return failed
@@ -1065,14 +1080,14 @@ def ci_events(rec):
             if inp.get("pullNumber"):
                 events.append(("merge", str(inp["pullNumber"])))
         elif tool == "update_pull_request" and inp.get("draft") is False:
-            events.append(("ready", str(inp.get("pullNumber") or "")))
+            events.append(("ready", str(inp.get("pullNumber") or ""), b.get("id")))
         elif tool == "update_pull_request" and inp.get("draft") is True:
             events.append(("undo", str(inp.get("pullNumber") or "")))
         elif isinstance(inp.get("command"), str) and name in ("Bash", "PowerShell"):
             for words in shell_calls(inp["command"]):
                 gh = gh_pr_call(words)
                 if gh and gh[0] == "ready":
-                    events.append(("undo" if "--undo" in gh[1] else "ready", pr_ref(gh[1])))
+                    events.append(("undo", pr_ref(gh[1])) if "--undo" in gh[1] else ("ready", pr_ref(gh[1]), b.get("id")))
                 elif gh:
                     # --auto only queues the merge and --disable-auto drops it: neither has merged anything
                     if not {"--auto", "--disable-auto"} & set(gh[1]):
@@ -1093,8 +1108,10 @@ def open_ci_wait(transcript):
     a $var) when it names any PR or none. An undo (gh pr ready --undo, or MCP draft true) closes the wait on
     its PR the same way. A
     red verdict keeps it open and voids the check-ins before it. A check-in after the anchor
-    covers it, unless its result was an error. One streamed read, records in file order."""
+    covers it, unless its result was an error. A ready call that a PreToolUse hook refused
+    never marked anything: it opens no wait and leaves the wait it found. One streamed read, records in file order."""
     wait = None  # [pr, ids of the check-ins since the anchor]
+    marks = []  # [call id, the wait before that ready call] for each ready call not yet answered
     with open(transcript, "rb") as f:
         for line in f:
             if not any(k in line for k in CI_KEYS):
@@ -1105,8 +1122,21 @@ def open_ci_wait(transcript):
                 continue
             for ev in events:
                 if ev[0] == "ready":
+                    marks.append([ev[2], wait and [wait[0], set(wait[1])]])
                     wait = [ev[1], set()]
-                elif wait is None:
+                    continue
+                if ev[0] == "failed" and ev[2]:
+                    ids = [m[0] for m in marks]
+                    if ev[1] is not None and ev[1] in ids:  # a refused ready call marked nothing
+                        i = ids.index(ev[1])
+                        if i == len(marks) - 1:
+                            wait = marks[i][1]  # its mark is the newest: the wait it found comes back
+                        else:
+                            marks[i + 1][1] = marks[i][1]  # a later ready call now found what this one found
+                        del marks[i]
+                if ev[0] in ("merge", "mergeany", "undo", "verdict"):
+                    marks = []  # the wait changed for another reason; a late refusal restores nothing
+                if wait is None:
                     continue
                 elif ev[0] == "checkin":
                     wait[1].add(ev[1])
