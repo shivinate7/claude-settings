@@ -532,6 +532,11 @@ class LaneFixture(CiJobStub, tm.CloudSession):
         disk_patch = unittest.mock.patch.object(shutil, "disk_usage", return_value=roomy)
         disk_patch.start()
         self.addCleanup(disk_patch.stop)
+        # The host's load would stretch each shard's cap (merge.mutate_run_check), so the cap-edge cases here read a load of 0. create=True: a
+        # tree without the load reader still runs these cases, which must not stop at a missing name.
+        load_patch = unittest.mock.patch.object(merge, "mutate_load_per_cpu", return_value=0.0, create=True)
+        load_patch.start()
+        self.addCleanup(load_patch.stop)
 
     def record_sweep(self, root, confirm, restore_log_path, mode="full", attended=False, own_lock_rule=True):
         """The stand-in for janitor/sweep.py's sweep_repo: it records the call with where stdout stands, and reaps nothing. -> sweep_repo's result shape.
@@ -2114,6 +2119,73 @@ def lane_lint_usage():
         return None
     end = next((i for i in range(starts[0] + 1, len(lines)) if lines[i].startswith("  merge ")), len(lines))
     return "\n".join(lines[starts[0]:end])
+
+
+class MutateLoadCap(unittest.TestCase):
+    """The shard caps that merge.mutate_run_check stretches by the 5-minute load per CPU, read at each shard's start.
+    Why: the caps come from the real sharded checks.yml (shard_jobs), so a cap edit moves these cases with it. merge.sh is stubbed, so no
+    mutation run starts, and the clock is synthetic, so no verdict reads the host's time."""
+
+    def setUp(self):
+        self.wt = tempfile.mkdtemp(prefix="mutate-load-", dir=RUN_FOLDER)  # this run's folder: its teardown removes the tree
+        self.addCleanup(shutil.rmtree, self.wt, True)
+        os.makedirs(os.path.join(self.wt, ".github", "workflows"))
+        self.jobs = shard_jobs()
+        with open(os.path.join(self.wt, ".github", "workflows", "checks.yml"), "w", encoding="utf-8") as f:
+            f.write(sharded_workflow(self.jobs))
+
+    def run_check(self, load, timeout_first=False):
+        """mutate_run_check on the sharded workflow at `load` per CPU (None: no reading). Each merge.sh call prints a clean report, and the first
+        raises TimeoutExpired when `timeout_first` says so. -> (failures, the timeout of each merge.sh call, the printed text)."""
+        timeouts, clock = [], WallClock()
+
+        def sh_stub(args, *rest, **kwargs):
+            timeouts.append(kwargs.get("timeout"))
+            if timeout_first and len(timeouts) == 1:
+                raise subprocess.TimeoutExpired(args, kwargs.get("timeout"))
+            return 0, mutate_report(694, 694, 0, 0)
+
+        printed = io.StringIO()
+        with unittest.mock.patch.object(merge, "sh", sh_stub), \
+                unittest.mock.patch.object(merge, "mutate_load_per_cpu", return_value=load, create=True), \
+                unittest.mock.patch("time.monotonic", clock.now), contextlib.redirect_stdout(printed):
+            _, failures = merge.mutate_run_check(self.wt)
+        return failures, timeouts, printed.getvalue()
+
+    def assert_caps_at(self, load, factor):
+        """Each shard run starts under its job's cap in seconds, stretched by `factor`."""
+        _, timeouts, _ = self.run_check(load)
+        want = [job_cap(self.jobs[job], job) * 60 * factor for job in SHARD_JOBS]
+        self.assertEqual(timeouts, want, "at load %s per CPU the shard runs are not under caps x%s: got timeouts %s, want %s" % (load, factor, timeouts, want))
+
+    def test_shard_caps_are_kept_at_half_a_run_per_cpu(self):
+        self.assert_caps_at(0.5, 1.0)
+
+    def test_shard_caps_are_kept_at_one_run_per_cpu(self):
+        self.assert_caps_at(1.0, 1.0)
+
+    def test_shard_caps_are_stretched_by_the_load_at_2_5_per_cpu(self):
+        self.assert_caps_at(2.5, 2.5)
+
+    def test_shard_caps_stop_stretching_at_four_times_under_load_6_per_cpu(self):
+        self.assert_caps_at(6.0, 4.0)
+
+    def test_shard_caps_are_kept_when_the_load_cannot_be_read(self):
+        self.assert_caps_at(None, 1.0)
+
+    def test_shard_start_line_names_the_load_and_the_stretch(self):
+        _, _, printed = self.run_check(2.5)
+        self.assertEqual(printed.count("load 2.5 per CPU, cap x2.5"), len(SHARD_JOBS),
+                         "the start line of each shard does not name the load and the stretch: " + printed)
+
+    def test_shard_cut_off_at_its_cap_under_load_fails_as_a_stop_not_a_mutant_verdict(self):
+        failures, _, _ = self.run_check(6.0, timeout_first=True)
+        job = SHARD_JOBS[0]
+        cap = job_cap(self.jobs[job], job)
+        stops = [f for f in failures if "stopped at cap under load 6.0 per CPU" in f]
+        self.assertEqual(len(stops), 1, "no failure says the cut-off shard stopped at its cap under load 6.0 per CPU: %s" % failures)
+        self.assertIn("%d-minute cap of job %s" % (cap, job), stops[0], "the stop does not name its job's cap in minutes: " + stops[0])
+        self.assertNotIn("survived", " | ".join(failures), "a cut-off shard is reported as a survived mutant: " + " | ".join(failures))
 
 
 class CrossMeasure(LaneFixture):
