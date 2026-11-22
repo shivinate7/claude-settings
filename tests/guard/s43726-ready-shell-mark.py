@@ -1,4 +1,4 @@
-# section 43725
+# section 43726
 FAMILY = "ready-mcp-mark-guard"
 #
 # `ready-mcp-mark-guard`, the shell form. The rule that section 43724 pins for the MCP update tool also reads the shell
