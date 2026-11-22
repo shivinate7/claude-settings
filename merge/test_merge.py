@@ -6329,13 +6329,14 @@ class NoneRequiredChecks(ScopedRepo, Env):
         self.assertEqual(rc, 0, out)
         self.assertIn(MERGE_CALL, self.calls())
 
-    def test_a_red_main_run_still_refuses_the_merge_under_a_listed_check(self):  # control: green on the old code
+    def test_a_red_main_run_does_not_refuse_the_merge_under_a_listed_check(self):
+        """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): a PR may merge onto a red main. It was a refusal under a listed check."""
         push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})
         self.set(base_runs=[main_run(901, "failure")], base_jobs={"901": [main_job("scope", "success"), main_job("checks", "failure", 20)]})
         rc, out = self.go(required=["checks"])
-        self.assertEqual(rc, 1, out)
-        self.assertIn("latest completed run is red", out)
-        self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertEqual(rc, 0, out)
+        self.assertIn("main is RED", out)
+        self.assertIn(MERGE_CALL, self.calls())
 
     def run_main_with_gh_host(self, *args, required="protection"):
         """merge.main with no host argument, so main reads the required checks from the config of the base, as in production. The gh host of
