@@ -483,6 +483,7 @@ jobs:
         run: python3 lint/test_check_red_run.py
 
       - name: Red-run command fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_red_run.py
 
       - name: Plan refuter fixture suite
@@ -678,6 +679,7 @@ jobs:
         run: python3 lint/check_unknown_reads_contract.py
 
       - name: Guard-set list fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_guardset_lists.py
 
       - name: Guard-set lists (guardset4, guardset7, guardset8)
