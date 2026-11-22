@@ -3300,14 +3300,6 @@ def _stable_counts(part, renames=None):
     return collections.Counter(c for _, c in listed), calls, listed
 
 
-def _stable_versions(part, renames):
-    """`_key_versions` with each statement read as its case key (`_case_key`)."""
-    versions = {}
-    for key, node in part["key_nodes"]:
-        versions[key] = versions.get(key, ()) + (_case_key(node, renames),)
-    return versions
-
-
 def _key_versions(parts):
     """Each statement key of `parts` with the dumps it holds, in file order, so a key held twice (an assign and
     an augmented assign of one name) compares as one version."""
@@ -3398,27 +3390,17 @@ def _union_keys(parts):
             and _is_union(held[0], first[key][0], second[key][0], (base.get(key) or [None])[0])}
 
 
-def _edit_dropped(first, second, base, result, union=(), stable=None) -> bool:
+def _edit_dropped(first, second, base, result, union=()) -> bool:
     """True when a key both parents hold at different versions loses a parent's edit. Each argument maps a key to
-    its version. Both parents changed it from the base: the result keeps one version at most. One changed it: the
-    result must keep that version, since the base version drops that parent's edit. A key in `union` is one the
-    result built from both parents' entries (`_union_keys`): it drops no edit. `stable` is the same four maps read
-    as case keys: a key whose parents differ only in a description, a name or a verdict is held, when the result
-    keeps one parent's edited version (not the base's)."""
+    its version. Both parents changed it from the base: the result keeps one version at most, so one parent's edit
+    is dropped, even when the edits only rename a case or flip its verdict. One changed it: the result must keep
+    that version, since the base version drops that parent's edit. A key in `union` is one the result built from
+    both parents' entries (`_union_keys`): it drops no edit."""
     for key in set(first) & set(second) - set(union):
         mine, theirs, origin = first[key], second[key], base.get(key)
         if mine != theirs and (origin not in (mine, theirs) or result.get(key) == origin):
-            if stable is not None and result.get(key) in (mine, theirs) and result.get(key) != origin \
-                    and not _edit_dropped_key(key, *stable):
-                continue
             return True
     return False
-
-
-def _edit_dropped_key(key, first, second, base, result) -> bool:
-    """`_edit_dropped` for one key."""
-    mine, theirs, origin = first.get(key), second.get(key), base.get(key)
-    return mine != theirs and (origin not in (mine, theirs) or result.get(key) == origin)
 
 
 def merge_test_issue(result, first, second, elsewhere, base=None):
@@ -3453,12 +3435,10 @@ def merge_test_issue(result, first, second, elsewhere, base=None):
         # header): a result that keeps the other parent's version drops the edit, though every key survives.
         read = (first, second, base, result)
         unions = _union_keys(read)
-        # An edit that only renames a case or flips its verdict is held when the result keeps a parent's edited
-        # version; a result that drops the edit, or keeps the base's version, is lost, as the exact reading says.
-        if _edit_dropped(*({key: dump for key, (dump, _) in p["cases"].items()} for p in read),
-                         stable=tuple({key: _case_key(node) for key, (_, node) in p["cases"].items()} for p in read)
-                         ) or _edit_dropped(*(_key_versions(p) for p in read), union=unions,
-                                            stable=tuple(_stable_versions(p, _def_renames(p, result)) for p in read)):
+        # A parent's rename or flip is an edit too: a result that drops it is lost. A parent that only renamed or
+        # flipped a case that the other parent left as the base had it is kept by the exact reading.
+        if _edit_dropped(*({key: dump for key, (dump, _) in p["cases"].items()} for p in read)) \
+                or _edit_dropped(*(_key_versions(p) for p in read), union=unions):
             issues.add("lost")
     # A statement a parent holds (not an import, not a comment) that the result no longer holds, unless the result
     # holds as many statements with its case key: a case that a rename or a flipped verdict carried over.
