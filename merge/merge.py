@@ -3316,7 +3316,7 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
     -> (fails, reports, stop). fails: one text block for the clashes that count. reports: one line per clash that does not count. stop: "" or the text
     of an unknown (a read git cannot answer, a head origin does not hold); the caller raises it, with the fails above it, never as a pass.
     A clash counts only when both heads merge clean with the base: otherwise it comes through the base, and its line names the head that conflicts with it.
-    A counted clash is ordered by PR number: the lower number goes first and passes the pair (a report line), the higher FAILs and names the PRs that go first. The check stays on the higher PR.
+    A counted clash is ordered by PR number: the lower number goes first and passes the pair (a report line), the higher FAILs and names the PRs that go first. The check stays on the higher PR. A draft never goes first: a clash with a lower-numbered draft is a report line.
     `integration` is true for a batch integration PR (is_integration_pr): a clash that would count is a report line instead, for the lane rebases after the merge.
     A PR that --with names and that is not open is a Stop here: never a pass. --lint-unknown-ok lifts none of it. A PR posted under another
     session id is found only through --with.
@@ -3408,6 +3408,8 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
             reports.append(f"{named}. Not counted: this PR is a batch integration PR, so #{m} rebases after the merge.")
         elif n < m:  # the pair is ordered by number: the lower goes first and passes the pair, the higher still fails it
             reports.append(f"{named}. Not counted: this PR goes first (#{n} is lower than #{m}), so #{m} waits for it.")
+        elif rows[m].get("draft") is True:  # a parked draft never goes first: it must not hold a ready PR back (scope "ready" reports a draft before this point)
+            reports.append(f"{named}. Not counted: #{m} is a draft, so it does not go first.")
         else:
             conflicts.append(named)
             goes_first.append(m)
