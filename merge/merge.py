@@ -3024,6 +3024,7 @@ def open_worktree(root, info, base):
     return add_worktree(root, fetch_pr_head(root, info, base)["head"])
 
 LANE_LINT_LOCK_MARK = ", lane lint"  # the lock reason of a lane lint's tree: `merge tool, pid N, lane lint`; other_lane_lint_pids reads it
+# A lock reason is `merge tool, pid N`, or `merge tool, pid N, lane lint` for a lane lint's tree.
 MERGE_LOCK = re.compile(r"merge tool, pid (\d+)(?:" + re.escape(LANE_LINT_LOCK_MARK) + ")?")
 # A run folder in the temp folder names its maker's pid: ci-job-lint-<pid>-, ci-job-pin-<pid>-<sha7>-, mutate_guard_<pid>-.
 # A folder from before the pid was added has no digits and a dash at that place, so it never matches.
@@ -3162,12 +3163,19 @@ def add_worktree(root, head):
     return tmp, wt
 
 def add_lane_lint_worktree(root, head):
-    """add_worktree, then the lock reason gains LANE_LINT_LOCK_MARK so another lane lint can see this one. The relabel is best effort: a failed one leaves the
-    tree locked as before and this lint unseen, which only costs the other lint its hint."""
+    """add_worktree, then the lock reason gains LANE_LINT_LOCK_MARK so another lane lint can see this one. git has no relabel of a lock, and a
+    `worktree unlock` then `lock` leaves the tree open to the janitor between them, so the reason file of the tree is replaced in one rename: the tree stays locked throughout.
+    A failed relabel leaves the first reason, and this lint unseen, which only costs the other lint its hint. Tests patch add_worktree(root, head), so the reason is no argument of it."""
     tmp, wt = add_worktree(root, head)
-    reason = f"merge tool, pid {os.getpid()}{LANE_LINT_LOCK_MARK}"
-    if not git(root, "worktree", "unlock", wt)[0] and git(root, "worktree", "lock", "--reason", reason, wt)[0]:
-        git(root, "worktree", "lock", "--reason", f"merge tool, pid {os.getpid()}", wt)  # never leave the tree unlocked for the janitor
+    c, gitdir = git(wt, "rev-parse", "--absolute-git-dir")
+    if not c:
+        try:
+            lock = os.path.join(gitdir, "locked")
+            with open(lock + ".new", "w", encoding="utf-8") as f:
+                f.write(f"merge tool, pid {os.getpid()}{LANE_LINT_LOCK_MARK}")
+            os.replace(lock + ".new", lock)
+        except OSError:
+            pass
     return tmp, wt
 
 
@@ -3191,7 +3199,16 @@ def other_lane_lint_pids(root):
     return pids
 
 
-COMBINE_BACKLOG = 10  # equal to combine_train.BUILD_THRESHOLD: merge.py never imports the tool (its control test), so the number is kept in both
+BUILD_THRESHOLD = 10  # ready queued members that make a backlog worth one integration PR (ruling 10:23 CST Nov 20); fewer merge alone. combine_train.py reads it from here
+
+
+def ready_batch_numbers(rows, pulls):
+    """-> the numbers, in order, of the ready rows `combine_train.py --build` takes with no queue file: act `batch` on a pull whose base ref is main (a `batch` row on a stacked base would
+    carry its base branch into main; a row with no pull stays). The lowest number is the front PR, which merges alone: the caller drops it. The one home: combine_hint and combine_train.batch_rows read it."""
+    stacked = {d["number"] for d in pulls if d["base"]["ref"] != "main"}
+    return sorted(r["number"] for r in rows if r["act"] == "batch" and r["number"] not in stacked)
+
+
 
 
 def combine_hint(root, host):
@@ -3205,8 +3222,7 @@ def combine_hint(root, host):
     try:
         rows = []
         _lines, pulls, _totals = reviewed_read(host, None, ledger=rows)
-        stacked = {d["number"] for d in pulls if d["base"]["ref"] != "main"}
-        ready = sorted(r["number"] for r in rows if r["act"] == "batch" and r["number"] not in stacked)[1:]
+        ready = ready_batch_numbers(rows, pulls)[1:]
     except Exception as e:  # a hint is never a verdict: an unreadable list is reported as unknown
         say(f"merge: {who}. The ready PRs with passing records are unknown: the read failed ({type(e).__name__}), so no combine hint. Run `merge --reviewed`.")
         return
@@ -3214,8 +3230,8 @@ def combine_hint(root, host):
     tool = os.path.join(os.path.dirname(os.path.abspath(__file__)), "combine_train.py")
     if not os.path.isfile(tool):
         say(f"merge: {who}. Ready PRs with passing records: {names}. This checkout has no combine command.")
-    elif len(ready) < COMBINE_BACKLOG:
-        say(f"merge: {who}. Ready PRs with passing records: {names}, under the backlog of {COMBINE_BACKLOG}, so they merge alone and no train is built.")
+    elif len(ready) < BUILD_THRESHOLD:
+        say(f"merge: {who}. Ready PRs with passing records: {names}, under the backlog of {BUILD_THRESHOLD}, so they merge alone and no train is built.")
     else:
         say(f"merge: {who}. Combine the {len(ready)} ready PRs with passing records ({names}) instead of linting one by one: "
             f"python3 {tool} --root {root} --build --name <name>")
