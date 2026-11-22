@@ -301,6 +301,69 @@ class RunFolderSweepTest(unittest.TestCase):
         self.assertTrue(held, "a folder named for pid 2 is held by its unreadable child: the owner rule must rule out only pid 1")
 
 
+# The climb cases' pids. Each is fake: the parent reader and the liveness read are faked, so no real process decides a verdict.
+CLIMB_OWNER, CLIMB_HOLDER, CLIMB_LIVE_PARENT, CLIMB_ENDED = 7000000, 7000001, 7000002, 7000003
+
+
+class DescendsFromTest(unittest.TestCase):
+    """The climb that ties an unreadable pid to its folder's owner. An ended ancestor cuts the climb and holds nothing. A live pid whose
+    parent cannot be read stays unknown, and the hold check keeps the folder for it."""
+
+    def fake_climb(self, alive):
+        """The merge tool and the sweep, with the parent reader and the liveness read faked. `parents` maps a pid to its parent. A pid it
+        does not name has no readable parent. Only the pids in `alive` are live. Each parent read lands in self.asked."""
+        tool, sweep, parents = merge_tool(), janitor_sweep(), {}
+        self.asked = []
+
+        def parent_of(pid):
+            self.asked.append(pid)
+            return parents.get(pid)
+
+        for target, name, fake in (
+            (sweep, "_parent_pid", parent_of),
+            (tool, "pid_alive", lambda pid: pid in alive),
+        ):
+            patcher = mock.patch.object(target, name, side_effect=fake)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        return tool, sweep, parents
+
+    def test_an_ended_ancestor_ends_the_climb_as_not_descending(self):
+        tool, sweep, parents = self.fake_climb(alive={CLIMB_HOLDER})
+        parents[CLIMB_HOLDER] = CLIMB_OWNER
+        self.assertIs(tool._descends_from(sweep, CLIMB_HOLDER, CLIMB_OWNER), True,
+                      "positive control: a live holder whose parent is the owner descends from the owner")
+        parents[CLIMB_HOLDER] = CLIMB_ENDED  # the ancestor is dead, and its own parent cannot be read
+        descends = tool._descends_from(sweep, CLIMB_HOLDER, CLIMB_OWNER)
+        self.assertIn(CLIMB_ENDED, self.asked, "scope: the climb never reached the ended ancestor, so the case proves nothing")
+        self.assertIs(descends, False, "an ended ancestor whose parent cannot be read ends the climb as False: it holds nothing")
+
+    def test_a_live_pid_under_an_unreadable_parent_reads_unknown(self):
+        tool, sweep, parents = self.fake_climb(alive={CLIMB_HOLDER, CLIMB_LIVE_PARENT})
+        parents[CLIMB_HOLDER] = CLIMB_OWNER
+        self.assertIs(tool._descends_from(sweep, CLIMB_HOLDER, CLIMB_OWNER), True,
+                      "positive control: a live holder whose parent is the owner descends from the owner")
+        parents[CLIMB_HOLDER] = CLIMB_LIVE_PARENT  # a live parent whose own parent cannot be read: the owner may sit above it
+        descends = tool._descends_from(sweep, CLIMB_HOLDER, CLIMB_OWNER)
+        self.assertIn(CLIMB_LIVE_PARENT, self.asked, "scope: the climb never reached the live parent, so the case proves nothing")
+        self.assertIsNone(descends, "a live pid under an unreadable parent reads None (unknown): the hold check must keep its folder")
+
+    def test_a_holder_under_an_ended_ancestor_does_not_hold_its_folder(self):
+        tool, sweep, parents = self.fake_climb(alive={CLIMB_HOLDER})
+        owner = os.getpid()  # the folder is named for this run, so its owner is this process
+        folder = os.path.join(RUN_FOLDER, "ended-ancestor", "%d-%s" % (owner, "f" * 32))
+        parents[CLIMB_HOLDER] = owner
+        with mock.patch.object(sweep, "processes_in", return_value=([], [CLIMB_HOLDER])), \
+                mock.patch.object(tool, "kernel_thread", return_value=False):
+            control = tool.held_by_live_process(folder)
+            parents[CLIMB_HOLDER] = CLIMB_ENDED  # the holder's ancestor has ended, and its own parent cannot be read
+            parents[CLIMB_ENDED] = None
+            held = tool.held_by_live_process(folder)
+        self.assertTrue(control, "positive control: a live holder whose parent is the folder's owner holds the folder")
+        self.assertIn(CLIMB_ENDED, self.asked, "scope: the climb never reached the ended ancestor, so the case proves nothing")
+        self.assertFalse(held, "a holder whose climb ends at an ended ancestor holds no folder: the hold check kept it")
+
+
 class FindCopiesTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
