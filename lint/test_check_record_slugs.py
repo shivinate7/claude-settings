@@ -35,11 +35,13 @@ sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 import _guard_sections  # noqa: E402  the one home of the section header read and the faults (lint/_guard_sections.py)
+import workflow_steps as ws  # noqa: E402  the one home of the step parser (lint/workflow_steps.py)
 MODULE =os.environ.get("RECORD_SLUGS_UNDER_TEST") or os.path.join(HERE, "check_record_slugs.py")
 RUNNER = os.path.join(HERE, "..", "hooks", "test_guard.py")  # its SECTION_DIR names the section folder the check reads
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 STAMP = os.path.join(HERE, "..", ".github", "stamp.json")  # merge.readyChecks lists the steps the ready run reads
+WORKFLOW = os.path.join(HERE, "..", ".github", "workflows", "checks.yml")  # holds the ready run's step
 
 OK ="a" * 32 + ".md"  # a slug of 32 characters passes
 LONG = "a" * 33 + ".md"  # a slug of 33 characters fails
@@ -1306,7 +1308,8 @@ class SectionClashTests(unittest.TestCase):
     """Two guard test section files on one number: the fault names each file on it and the next free number, one above
     the highest header, so the branch that lands second renumbers without reading the other (decision
     section-number-clash-ready). No case needs git: each writes real section files in a run folder and reads them as
-    the check and the runner do, so a run on an old tree reaches an assert."""
+    the check and the runner do, so a run on an old tree reaches an assert. The same class pins the ready run's CI: the
+    step sets it, and with it set an unreadable git exits red (decision ci-unknown-is-red)."""
 
     def setUp(self):
         self.folder = tempfile.mkdtemp(prefix="sec_", dir=RUN_FOLDER)
@@ -1391,6 +1394,53 @@ class SectionClashTests(unittest.TestCase):
         self.assertIsInstance(checks, list, "scope: .github/stamp.json declares no merge.readyChecks list")
         self.assertIn(READY_STEP, checks, "merge.readyChecks does not list %r, so the ready run never reads a section clash"
                       % READY_STEP)
+
+    def ready_step_env(self):
+        """The `env:` of the one step of checks.yml named READY_STEP, as {name: raw value}. Scope first: the step is
+        found once, so a missing or doubled step is its own failure and never reads as an empty env."""
+        with open(WORKFLOW, encoding="utf-8") as f:
+            steps = [st for st in ws.step_blocks(f.read()) if ws.step_key(st, "name") == READY_STEP]
+        self.assertEqual(len(steps), 1, "scope: checks.yml holds %d steps named %r, not one" % (len(steps), READY_STEP))
+        return ws.step_env(steps[0])
+
+    def test_the_record_slug_step_sets_ci_to_a_true_value(self):
+        # The merge tool's ready run has no CI variable, so the step sets it: an unreadable git is red there too
+        # (decision ci-unknown-is-red). A step with no CI reads that git as green and passes the ready run.
+        env = self.ready_step_env()
+        self.assertIn("CI", env, "the %r step sets no CI in its env, so the ready run reads an unreadable git as green"
+                      % READY_STEP)
+        self.assertEqual(env["CI"].strip("\"'").lower(), "true",
+                         "the %r step sets CI to %r, not a true value" % (READY_STEP, env["CI"]))
+
+    def unreadable_git_exit(self, ci):
+        """The exit code and output of the check's main() when the diff read raises Unknown, with env CI set to `ci`, or
+        unset when `ci` is None. The sections read is stubbed empty, so only the Unknown branch decides the exit."""
+        spec = importlib.util.spec_from_file_location("check_record_slugs_unknown", MODULE)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        out = io.StringIO()
+        with mock.patch.dict(os.environ), \
+                mock.patch.object(module, "section_faults", return_value=[]), \
+                mock.patch.object(module, "changes", side_effect=module.Unknown("git diff failed: unreadable")), \
+                contextlib.redirect_stdout(out):
+            os.environ.pop("CI", None)
+            if ci is not None:
+                os.environ["CI"] = ci
+            rc = module.main([])
+        return rc, out.getvalue()
+
+    def test_an_unreadable_git_with_no_ci_prints_unknown_and_exits_green(self):
+        # The green control beside the red below, and the local case ci-unknown-is-red keeps: CI is the only difference.
+        rc, out = self.unreadable_git_exit(None)
+        self.assertIn("check_record_slugs: UNKNOWN", out, "scope: the Unknown branch did not run:\n" + out)
+        self.assertNotIn("FAIL", out, "scope: a verdict other than Unknown printed:\n" + out)
+        self.assertEqual(rc, 0, "with no CI an unreadable git must stay green locally:\n" + out)
+
+    def test_an_unreadable_git_with_ci_set_prints_unknown_and_exits_red(self):
+        rc, out = self.unreadable_git_exit("true")
+        self.assertIn("check_record_slugs: UNKNOWN", out, "scope: the Unknown branch did not run:\n" + out)
+        self.assertNotIn("FAIL", out, "scope: a verdict other than Unknown printed, so the exit is not from CI:\n" + out)
+        self.assertEqual(rc, 1, "with CI set an unreadable git is UNKNOWN, and UNKNOWN is red, not a pass:\n" + out)
 
 
 class ImportTests(unittest.TestCase):
