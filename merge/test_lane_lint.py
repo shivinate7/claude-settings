@@ -2194,9 +2194,9 @@ class CrossMeasure(LaneFixture):
         """The lane's head gains a commit with `files`. -> its sha."""
         return self.commit_on("feat", files, "origin/feat")
 
-    def listing(self, n, head, body, state="open", draft=False):
-        """PR n on `head` with `body`, as the fake host's open-PR list and its PR read carry it. -> the head."""
-        self.host.pulls[n] = tm.REST.list_item(n, head, branch_of(n), "main", body=body, draft=draft, state=state)
+    def listing(self, n, head, body, state="open", draft=False, branch=None):
+        """PR n on `head` with `body`, as the fake host's open-PR list and its PR read carry it. `branch` names its head branch: branch_of(n) when None. -> the head."""
+        self.host.pulls[n] = tm.REST.list_item(n, head, branch or branch_of(n), "main", body=body, draft=draft, state=state)
         return head
 
     def list_pr(self, n, head, body, state="open", draft=False):
@@ -2204,10 +2204,11 @@ class CrossMeasure(LaneFixture):
         tm.sh(self.other, "git", "push", "-q", "origin", "%s:refs/heads/%s" % (head, branch_of(n)))
         return self.listing(n, head, body, state=state, draft=draft)
 
-    def pr_writes(self, n, files, body, start="origin/main", state="open", draft=False):
-        """PR n: a commit with `files`, cut from `start`, listed as PR n. -> its head sha."""
-        head = self.commit_on(branch_of(n), files, start)
-        return self.listing(n, head, body, state=state, draft=draft)
+    def pr_writes(self, n, files, body, start="origin/main", state="open", draft=False, branch=None):
+        """PR n: a commit with `files`, cut from `start`, listed as PR n. `branch` names its head branch: branch_of(n) when None. -> its head sha."""
+        name = branch or branch_of(n)
+        head = self.commit_on(name, files, start)
+        return self.listing(n, head, body, state=state, draft=draft, branch=name)
 
     def measured(self, *argv):
         """Run merge in the lane checkout, cloud off, with the counters reset. -> (rc, text, lint runs, PR-list reads, merge-tree calls).
@@ -2971,7 +2972,7 @@ class CrossMeasure(LaneFixture):
         rc, text, _, _, _ = self.measured("--lane-lint", "7")
         self.assertEqual(rc, 1, "PR 7 did not wait for the two lower PRs that clash with it: " + text)
         self.assertIn("#4, #5 go first", text, "the refusal does not say PRs #4 and #5 go first: " + text)
-        self.assertIn("Merge after #4, #5 lands", text, "the refusal does not say to merge after PRs #4 and #5 land: " + text)
+        self.assertIn("Merge after #4, #5 land:", text, "the refusal does not say to merge after PRs #4 and #5 land, in the plural: " + text)
         self.assertNotRegex(text, r"#\d+ goes first", "the refusal says a singular `goes first` for two PRs: " + text)
 
     def test_clash_order_a_higher_pr_beside_a_lower_one_is_not_named_as_going_first(self):
@@ -3037,6 +3038,28 @@ class CrossMeasure(LaneFixture):
         self.assertRegex(report, r"(?i)rebase[^\n]*after[^\n]*merge", "the report line for PR #5 does not say the lanes rebase after the merge: " + text)
         self.assertNotRegex(report, r"(?i)goes first", "the report line for the integration PR orders the pair: " + text)
         self.assertEqual(lints, 1, "the ci-job lint did not run once on the passing integration PR: " + text)
+
+    def test_clash_order_an_open_batch_integration_pr_above_this_lane_goes_first_and_fails_it(self):  # the green control: the same pair with a lane PR #8 passes (the_lower_pr_passes_...)
+        head = self.own_writes({"shared-a.txt": "lane 7\n"})
+        batch_branch = merge.integration_branch(INTEGRATION_NAME)
+        batch = self.pr_writes(8, {"shared-a.txt": "integration 8\n"}, self.integration_body(), branch=batch_branch)
+        block = merge.parse_freeze(self.host.pulls[8]["body"])
+        self.assertIsNotNone(block, "precondition: PR 8's body holds no freeze block, so it is a lane PR and the case probes no batch")
+        self.assertEqual(block["name"], INTEGRATION_NAME, "precondition: PR 8's freeze block names another batch")
+        self.assertEqual(self.host.pulls[8]["head"]["ref"], batch_branch, "precondition: PR 8 is not on its batch's integration branch, so it is a lane PR")
+        self.assertIsNone(merge.parse_freeze(self.host.body), "precondition: the linted PR 7 holds a freeze block, so it is itself a batch PR")
+        self.assertTrue(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is not in this lane, so the case probes nothing")
+        self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the lane head does not merge clean with main")
+        self.assertEqual(self.clash(batch, "origin/main"), "clean", "precondition: the batch head does not merge clean with main, so the clash is not counted")
+        self.assertEqual(self.clash(head, batch), "conflict", "precondition: the lane head and the batch head do not clash, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "PR 7, numbered below the open batch integration PR #8, did not wait for it: " + text)
+        self.assertIn("#8: shared-a.txt", text, "the refusal has no conflict line for the batch PR #8 and its file: " + text)
+        self.assertIn("#8 goes first", text, "the refusal does not say the batch PR #8 goes first: " + text)
+        self.assertIn("Merge after #8 lands:", text, "the refusal does not say, in the singular, to merge after the batch PR #8 lands: " + text)
+        self.assertEqual(pass_lines(text), [], "a lane that waits for a batch integration PR printed a PASS line: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran beside a counted clash with a batch integration PR: " + text)
 
     def test_clash_order_a_lower_stack_pair_is_skipped_and_gets_no_line(self):  # the control: a stack pair is never read, so the order never reaches it
         before = self.head("feat")
