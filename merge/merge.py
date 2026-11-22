@@ -3770,14 +3770,16 @@ def mutate_run_check(wt):
         except (OSError, ValueError):
             pass
 
+    # One read, before any shard starts: a later shard would read a load that holds the earlier shard's own workers (one per CPU), and so stretch a cap for load that is the lint's own.
+    load = mutate_load_per_cpu()
+    factor = mutate_cap_factor(load)
+
     def run_one(job, body, cap, env, label):
         start = time.monotonic()
         start_error = ""
         tag = f"mutation test shard {label}"
-        load = mutate_load_per_cpu()  # read at each shard's start, so a later shard sees the load that is on the machine then
-        factor = mutate_cap_factor(load)
         seconds = cap * 60 * factor
-        load_text = "" if load is None else f", load {load:.1f} per CPU, cap x{factor:.1f}"
+        load_text = f", load {load:.1f} per CPU, cap x{factor:.1f}" if factor > 1 else ""
         progress(f"{tag}: start, job {job}, cap {cap} min{load_text}")
         stop, interval = threading.Event(), MUTATE_HEARTBEAT_SECONDS
         def heartbeat():  # the runner's stdout is captured, so these lines are the only sign a long shard is alive; no mutant id, as none is read here
@@ -3805,10 +3807,12 @@ def mutate_run_check(wt):
         progress(f"{tag}: end, {wall} s, killed {killed}, survived {survived}, unknown {unknown}")
         failures = []
         if c is None or wall > seconds:
-            # A shard stopped at its cap judged no mutant survived: it proves nothing either way. It still fails the lint, but as a stop under load, never as a failed mutant.
-            under = f" under load {load:.1f} per CPU" if load is not None else ""
-            failures.append(f"the mutation test run stopped at cap{under}: it took {wall} s, past the {cap}-minute cap of job {job}, stretched x{factor:.1f} for the load. "
-                            "The stop is no mutant verdict: the run was cut off, so rerun it when the load drops")
+            # A shard stopped at its cap judged no mutant survived: it proves nothing either way. It still fails the lint, but as a stop, never as a failed mutant.
+            if factor > 1:
+                failures.append(f"the mutation test run stopped at cap under load {load:.1f} per CPU: it took {wall} s, past the {cap}-minute cap of job {job}, stretched x{factor:.1f} for the load. "
+                                "The stop is no mutant verdict: the run was cut off, so rerun it when the load drops")
+            else:
+                failures.append(f"the mutation test run stopped at its cap: it took {wall} s, past the {cap}-minute cap of job {job}. The stop is no mutant verdict: the run was cut off")
         if counts is None:
             tail = out.splitlines()[-TOUCHED_TAIL_LINES:]  # the cause is the last stdout lines (mutate_guard prints `ERROR ...`); the whole stdout would bury it
             failures.append("\n".join([f"the mutation test run exited {'at its timeout' if c is None else c} and printed no report that can be read"
