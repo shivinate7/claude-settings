@@ -57,8 +57,8 @@ transcript and prints one JSON line `{"decision": "block", "reason": "..."}`, or
   update_pull_request with draft false. Draft true or absent starts none. Quoted text, heredoc bodies and
   `#` comments are no call. Global flags before `pr` (`gh -R <repo> pr ready <N>`) do not hide the call, and the
   PR is read as a merge's is: `-R <repo> <N>`, or the number in a pull URL. A `$VAR` PR word is no number.
-  A ready call whose tool_result is an error (a PreToolUse guard refused it) opens no wait, and restores the wait
-  it replaced.
+  A ready call whose tool_result is a PreToolUse hook refusal opens no wait, and restores the wait it replaced.
+  A ready call that ran and then failed (`gh pr ready 5 && false`) still opens one.
 - A later user or queued message with a green or cancelled CI verdict line closes the wait. A red verdict
   keeps it open and voids the check-ins before it. A `CI unknown` line (still running included) closes nothing.
 - A merge closes the wait only when it names the waited PR: `gh pr merge <N>` or `gh pr close <N>` in Bash or
@@ -1813,6 +1813,7 @@ def A10_full_size_each_quiet_agent_is_listed_once():
 
 CI_PR = "4217"  # no sha, path or fixture id holds this number as a whole token, so \b4217\b names the PR alone
 CI_OTHER_PR = "1111"
+CI_EARLIER_PR = "3086"  # a third PR: the one a wait was on before two refused ready calls
 CI_SHA = "9f8e7d6"
 CI_OWNER, CI_REPO = "example-org", "example-repo"
 MCP_READY = "mcp__github__update_pull_request"
@@ -3211,15 +3212,27 @@ REFUSED_READY_TEXT = ("PreToolUse:mcp__github__update_pull_request hook error: r
                       "ready-mcp-mark-guard): no `merge %s --ready` run in this session passed its ready checks.")
 
 
-def ready_mark(number, refused):
-    """A GitHub MCP ready call on number (draft false), with its result. A refusal is the result a PreToolUse
-    guard leaves: is_error true, the text as a string, and a toolUseResult that starts with Error:."""
-    call_rec = mcp_pr(MCP_READY, number, draft=False)
+def ready_answer(call_rec, number, refused):
+    """The result of a ready call on number. A refusal is the result a PreToolUse guard leaves: is_error true,
+    the text as a string, and a toolUseResult that starts with Error:."""
     call_id = call_rec["message"]["content"][0]["id"]
     if not refused:
-        return [call_rec, tool_result(call_id, "Pull request %s marked ready" % number)]
+        return tool_result(call_id, "Pull request %s marked ready" % number)
     text = REFUSED_READY_TEXT % number
-    return [call_rec, tool_result(call_id, text, is_error=True, tool_use_result="Error: " + text)]
+    return tool_result(call_id, text, is_error=True, tool_use_result="Error: " + text)
+
+
+def ready_mark(number, refused):
+    """A GitHub MCP ready call on number (draft false), with its result (see ready_answer)."""
+    call_rec = mcp_pr(MCP_READY, number, draft=False)
+    return [call_rec, ready_answer(call_rec, number, refused)]
+
+
+def ready_marks_together(*marks):
+    """The ready calls of one message, each a (number, refused) pair: every call comes first, then every result in
+    the same order, as parallel calls land in a transcript."""
+    calls = [mcp_pr(MCP_READY, number, draft=False) for number, _ in marks]
+    return calls + [ready_answer(c, number, refused) for c, (number, refused) in zip(calls, marks)]
 
 
 @case
@@ -3248,6 +3261,58 @@ def CI105_refused_mark_for_a_second_pr_leaves_the_first_wait():
     Stop blocks and names that PR only"""
     items = ready_mark(CI_PR, refused=False) + ready_mark(CI_OTHER_PR, refused=True)
     return expect_block(items, pr=CI_PR, not_named=[CI_OTHER_PR])
+
+
+def failed_ready(command, text):
+    """A Bash ready call of command, and an error result whose text is text, as a failed Bash call leaves it: is_error
+    true, and a toolUseResult that starts with Error:."""
+    call_rec = ready(command=command)
+    call_id = call_rec["message"]["content"][0]["id"]
+    return [call_rec, tool_result(call_id, text, is_error=True, tool_use_result="Error: " + text)]
+
+
+@case
+def CI106_ready_call_that_ran_and_failed_still_asks():
+    """CI106. `gh pr ready N && false` ran, so the mark landed and its result is an error that starts `Exit code 1`,
+    no hook refusal: the Stop blocks and names the PR. Control: the same call with a PreToolUse:Bash hook refusal
+    for its result marks nothing, so the Stop asks nothing"""
+    command = "gh pr ready %s && false" % CI_PR
+    ran = failed_ready(command, "Exit code 1")
+    refused = failed_ready(command, "PreToolUse:Bash hook error: ready-mark-guard: no `merge %s --ready` run "
+                                    "passed." % CI_PR)
+    return expect_block(ran) + ["control: " + p for p in expect_silent(refused)]
+
+
+@case
+def CI107_two_refused_ready_calls_in_one_message_ask_nothing():
+    """CI107. two ready calls in one message, both refused by a PreToolUse hook: neither marked anything, so the
+    Stop asks nothing. Control: the same two calls with the second passing block and name that PR"""
+    return silent_with_control(ready_marks_together((CI_PR, True), (CI_OTHER_PR, True)),
+                               ready_marks_together((CI_PR, True), (CI_OTHER_PR, False)), pr=CI_OTHER_PR)
+
+
+@case
+def CI108_first_of_two_ready_calls_refused_leaves_the_second():
+    """CI108. two ready calls in one message, the first refused and the second passing: the wait is on the second PR
+    alone, so the Stop blocks and names it only"""
+    return expect_block(ready_marks_together((CI_PR, True), (CI_OTHER_PR, False)),
+                        pr=CI_OTHER_PR, not_named=[CI_PR])
+
+
+@case
+def CI109_second_of_two_ready_calls_refused_leaves_the_first():
+    """CI109. two ready calls in one message, the first passing and the second refused: the wait is on the first PR
+    alone, so the Stop blocks and names it only"""
+    return expect_block(ready_marks_together((CI_PR, False), (CI_OTHER_PR, True)),
+                        pr=CI_PR, not_named=[CI_OTHER_PR])
+
+
+@case
+def CI110_two_refused_ready_calls_in_one_message_restore_the_earlier_wait():
+    """CI110. a ready call for an earlier PR passed, then two ready calls in one message were both refused: the
+    wait is back on the earlier PR, so the Stop blocks and names it only"""
+    items = ready_mark(CI_EARLIER_PR, refused=False) + ready_marks_together((CI_PR, True), (CI_OTHER_PR, True))
+    return expect_block(items, pr=CI_EARLIER_PR, not_named=[CI_PR, CI_OTHER_PR])
 
 
 def paused_job(job_id, command):
