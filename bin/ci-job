@@ -12,10 +12,15 @@
 # shell never reaches the suite, makes the CI step unknown: ci-job echoes a marker right before a top-level first suite
 # line (preamble_marked; not under pwsh) and reads a failure with no marker in the log as the preamble's. A selector that
 # cannot run, or runs past its 60 s limit (SELECTOR_LIMIT), is unknown on each such CI step, exit 2. With no base or no
-# pick, the CI step is `not run`. The job scope is the linted job only: the suites picked for the CI steps of another job
-# print one `not run` line per job, naming the job and those suites, and run nowhere here. Cost: one selector process per
+# pick, the CI step is `not run`. A suite the diff picks for another job of the workflow runs too, by a second pass over that
+# job (a sibling pass, in the order the workflow lists the jobs): only the steps of that job with a picked suite run, each as
+# CI runs it, and the job's other steps run nowhere here. A job on a runner that is not ubuntu-* prints one `not run` line naming
+# the job, its picked suites and its runner. A suite already run in an earlier pass prints one `not run` line and runs once. The
+# list of jobs and their suites is the workflow's own, read from the same file as the linted job. A step of a sibling job whose
+# `if:` or `env:` this runner cannot read prints unknown, as any step's does. Cost: one selector process per
 # lane lint (one git diff, one git ls-files, one parse of each tracked test_*.py and of each module they reach, once for
-# the whole diff), plus one process per picked CI step. A mutation script (a name with "mutate")
+# the whole diff; each sibling pass reads that pick, not a new selector), plus one process per picked CI step in any ubuntu job, and one
+# read of the scope script, one unshallow check and one log file per sibling job that runs. A mutation script (a name with "mutate")
 # and every other command (bash, unpinned pipx, other uses:) is left out with one `not run` line naming the step and why, except a `uses:` of
 # this repo's own action (`$/actions/<name>`, `./actions/<name>`), which runs only when the read of its action.yml below accepts it, else prints one unknown line. After the
 # last step, one line counts the steps run out of the job's total (--plan: "would run"). Neither it nor a `not run`
@@ -141,6 +146,7 @@ from action_pin import pin_regex  # noqa: E402  the one home of the sha pin's pa
 from workflow_steps import job_block, job_workflow, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
 
 SELECTOR_LIMIT = 60  # seconds the --lint-suites selector may run (about 10 s on this repo's 123 suites) before it reads unknown
+SELECTED = {}  # (top, base) -> (picked suites, why not): the one selector run of this process; the sibling passes read it
 PREAMBLE_MARK = "ci-job-preamble-done"
 PREAMBLE_DONE = "echo; echo " + PREAMBLE_MARK  # the line preamble_marked adds right before a CI step's first suite line; the bare echo ends a preamble line that has no newline, so the mark lands at line start
 SUITE_LINE = re.compile(r"python3 ((?:hooks|merge)/test_[\w.-]+\.py)(?: [^|&;`<>]*)?")  # a CI step's suite line, arguments allowed
@@ -1009,7 +1015,10 @@ def prune_own_logs(folder, now=None):
         pass
 
 
-def main(argv):
+def main(argv, sibling=False, ran_suites=None):
+    """sibling: this run is the second pass over another job of the workflow that holds a picked suite (see the tail of this function); it runs
+    that job's picked suite steps only, and takes no sibling of its own. ran_suites: the suite paths already run in this process, so a suite two jobs hold runs once."""
+    ran_suites = set() if ran_suites is None else ran_suites
     args = list(argv)
     opts = {"--workflow": None, "--base": None}
     for key in opts:
@@ -1095,15 +1104,19 @@ def main(argv):
                                                    values["github.event.pull_request.head.sha"])
     kind = ["lint" if is_lint(st) else "install" if is_install(st) else "local" if LOCAL_ACTION.fullmatch(uses(st)) else ""
             for st in steps] if lint else [""] * len(steps)
+    if sibling:  # only the picked suite steps of this job: its own lint steps are CI's, not part of the lane lint
+        kind = ["" if k in ("lint", "local") else k for k in kind]
     suites = [suite_paths(st) if lint and not k else [] for st, k in zip(steps, kind)]  # each step's suite lines
     elsewhere = {}  # each other job: the suites of its CI steps, which this run does not run
-    if lint and base:
+    if lint and base and not sibling:
         for other in re.findall(r"^  ([\w-]+):\s*$", text.split("\njobs:", 1)[-1], re.M):
             found = {path for st in step_blocks(job_block(text, other)) for path in suite_paths(st)} if other != job else set()
             if found:
                 elsewhere[other] = found
     picked, why = None, "no base to read a diff"
-    if base and (any(suites) or elsewhere):  # one selector process for the CI steps with a suite in every job
+    if base and (top, base) in SELECTED:  # a sibling pass reads the pick the first pass made
+        picked, why = SELECTED[(top, base)]
+    elif base and (any(suites) or elsewhere):  # one selector process for the CI steps with a suite in every job
         why = "the selector did not run"
         try:
             done = _nowindow.run([sys.executable, os.path.join(os.path.dirname(BIN), "hooks", "mutate_guard.py"),
@@ -1117,6 +1130,7 @@ def main(argv):
             why = "the selector ran past %d s and was stopped" % SELECTOR_LIMIT
         except OSError as e:
             why = str(e)
+        SELECTED[(top, base)] = (picked, why)
     for i, found in enumerate(suites):  # a step with a picked suite runs as a lint step does
         if picked is not None and picked.intersection(found):
             kind[i] = "suite"
@@ -1159,6 +1173,8 @@ def main(argv):
                 if state in ("FAIL", "unknown"):
                     tally[state] += 1
                 continue
+            if sibling and not kind[n - 1]:
+                continue
             if lint and not kind[n - 1]:
                 print("%-15s %s: --lint runs only lint and install steps; %s" % (
                     "not run", name, "this is an action (uses: %s)" % uses(step) if uses(step) else
@@ -1186,6 +1202,8 @@ def main(argv):
                 continue
             ran += 1
             ran_lint += kind[n - 1] in ("lint", "suite")  # a picked suite step that ran is a lint run too
+            if kind[n - 1] == "suite" and picked is not None:
+                ran_suites.update(picked.intersection(suites[n - 1]))
             if dry:
                 print("%-15s %s" % ("would run", name))
                 continue
@@ -1216,19 +1234,31 @@ def main(argv):
             if not kept_logs:  # a log that did not reach the run's log stays in the folder for the reader
                 shutil.rmtree(os.path.abspath(logdir), ignore_errors=True)
     if lint and not ran_lint and not tally["FAIL"] and not tally["unknown"]:  # a pass that ran no lint CI step proved nothing; any other line already gives the exit
-        tally["unknown"] += 1
+        tally["unknown"] += not sibling  # a sibling job whose picked suite step CI's own if: skips proved nothing, and read nothing
         print("%-15s no lint CI step %s: %d of the job's %d steps are lint CI steps, and each one is skipped, not run, or unknown" % (
             "unknown", "would run" if dry else "ran", sum(k == "lint" for k in kind), len(steps)))
+    code = 1 if tally["FAIL"] else 2 if tally["unknown"] else 0
     if lint:
-        for other, found in elsewhere.items():  # one line per job: picked, but each CI step belongs to a job this run is not
-            if picked is not None and picked.intersection(found):
-                print("%-15s job %s: picked %s; job %s runs them, not %s" % ("not run", other, ", ".join(sorted(picked & found)), other, job))
         if picked is None and elsewhere and not any(suites):
             print("%-15s suites of other jobs: --lint could not select them: %s" % ("not run", why))
         print("summary: %s %d of %d steps" % ("would run" if dry else "ran", ran, len(steps)))
+        for other, found in elsewhere.items():  # the second pass: each other job that holds a picked suite, run as CI's own list of jobs names it
+            hit = picked.intersection(found) if picked is not None else set()
+            if not hit:
+                continue
+            runner = re.search(r"^    runs-on:\s*(\S+)", job_block(text, other) or "", re.M)
+            runner = runner.group(1).strip("'\"") if runner else "?"
+            if not runner.startswith("ubuntu"):
+                print("%-15s job %s: picked %s; it runs on %s, which this Linux lint does not run" % ("not run", other, ", ".join(sorted(hit)), runner))
+            elif hit <= ran_suites:
+                print("%-15s job %s: picked %s; each already ran above" % ("not run", other, ", ".join(sorted(hit))))
+            else:
+                print("job %s: picked %s; running its picked suite steps" % (other, ", ".join(sorted(hit))))
+                sub = main([other, "--lint", "--base", base, "--workflow", workflow] + (["--plan"] if dry else []), True, ran_suites)
+                code = 1 if 1 in (code, sub) else 2 if 2 in (code, sub) else 0
     if not dry:
         print("log=%s" % log)
-    return 1 if tally["FAIL"] else 2 if tally["unknown"] else 0
+    return code
 
 
 if __name__ == "__main__":
