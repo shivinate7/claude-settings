@@ -279,6 +279,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        shell `gh pr ready` without --undo, when this session's transcript shows no `merge <pr> --ready` run that passed its ready checks on the
                        pull request's current head, in a repo that uses the merge tool. A draft true or body-only
                        update, a missing transcript and a pass on the current head pass. (ready-mcp-mark-guard)
+  pr-create-session-link
+                       deny. A pull request opened by the MCP create tool whose body has no `Session: https://claude.ai/code/<id>`
+                       line for this cloud session, in a repo that uses the merge tool. The reason gives the line to add. A body with
+                       the link, a local session (no session id), another tool and a repo with no merge tool pass.
+                       An override lifts it. (pr-create-session-link)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        A merge's own page at MERGE_HEAD passes: MERGE_HEAD is on the base's first-parent
                        line, or the lane is stacked on a base that main has not merged.
@@ -753,7 +758,7 @@ while True:
             records_page_hit, repo_proof_hit, role_proof_hit, lane_ready_hit, lane_mcp_ready_hit, self_role_child_hit, self_role_hit,
             DEFAULT_RECORD_BRANCH, record_reason, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, PRIOR_WORK_REASON, prior_work_lane_hit, prior_work_named, header_time_hit, step_dup_hit, step_pr_hit, target_roster_hit, trust_card_hit, written_time_hit,
             BRIEF_ID_REASON, BRIEF_TOPIC_REASON, STEP_DUP_REASON,
-            undrafted_pr_create, uses_merge_tool, ready_page_hit, ready_mark_hit,
+            undrafted_pr_create, uses_merge_tool, ready_page_hit, ready_mark_hit, create_pr_link_hit,
         )
         _loading = "guard_review_log"
         from guard_review_log import review_log_hit
@@ -8237,6 +8242,11 @@ def judge(payload) -> None:
     # The MCP create tool carries its own `draft` field.
     if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:
         refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "create_pull_request without draft")
+
+    # The MCP create tool's body carries this session's link, which the merge tool reads at the confirm (rule pr-create-session-link).
+    unlinked = create_pr_link_hit(tool, tool_input, cwd)
+    if unlinked:
+        refuse(tool, "deny", "pr-create-session-link", unlinked[0], unlinked[1])
 
     # A review log comment the merge tool cannot read, or one that names a sha the checkout does not hold (rules
     # review-log-form and review-log-sha). One literal refuse() per rule: lint/rule_audit.py reads only string-literal rule ids.
