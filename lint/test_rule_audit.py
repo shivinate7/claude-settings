@@ -820,7 +820,6 @@ REFUSAL_UNCITED_EXEMPT = {
     "live-stream": "refusal-matches-rule",
     "ln-over-directory": "refusal-uncited-rewrites",
     "machine-wide-kill": "refusal-matches-rule",
-    "merge-checks": "refusal-matches-rule",
     "other-checkout": "refusal-matches-rule",
     "playwright-browsers-path": "refusal-matches-rule",
     "playwright-install": "refusal-matches-rule",

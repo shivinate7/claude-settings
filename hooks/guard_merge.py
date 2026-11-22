@@ -5,6 +5,7 @@ Other files reach these names through `guard`.
 """
 import contextlib
 import fnmatch
+import importlib
 import io
 import json
 import os
@@ -36,8 +37,9 @@ from guard_push_delete import (
 # quoted message and a heredoc body name an act and perform none.
 #
 # 1. merge-checks: a merge made outside the merge tool is
-#    refused while the head has a check or a workflow run pending or red, or when that read could not run. Another ready PR's CI never
-#    holds a merge (per-lane merge). The merge tool (merge/merge.py) runs its own `gh pr merge` as a subprocess, so no hook
+#    refused while the head has a check or a workflow run pending or red, or when that read could not run, or while another ready PR on the
+#    base has CI running and its head does not hold this one (`Host.batch_running`).
+#    The merge tool (merge/merge.py) runs its own `gh pr merge` as a subprocess, so no hook
 #    sees it; it has already read the head green. The read below is the tool's own `Host.head_read`, one home.
 # 2. cite-by-id (CLAUDE.md `git-cite-by-id`): a commit message or PR body that cites a record by
 #    its path is refused. The id is the record's file name without folder or `.md`, the slug
@@ -211,12 +213,19 @@ def merge_check(selector, repo: str, where: str):
     where = os.path.normpath(where) if where else ""   # a `cd` target may carry either separator
     host = module.Host(required=pinned_required(where) or "protection", repo=repo or None, cwd=where or None)
     # No ignore list: this head counts every check, so an ignored red check on it still refuses.
+    # The other ready pull requests on the base may not have CI running (decision no-merge-during-batch-ci), but an ignored check or run never counts.
+    try:
+        host.batch_brake = ignored_checks(module, where)
+    except module.Stop as e:
+        return "unknown", str(e)
     return host.head_read(selector, nothing_is_green=not has_workflows(where))
 
 
 MERGE_CHECK_REASON = (
     "Rule (Git): this head is not settled: %s. A merge waits for every check and workflow run on "
     "the head, required or not, and a read that could not run counts as not settled. "
+    "It also waits while another ready pull request on the base has CI running, unless that head holds this one "
+    "(decision no-merge-during-batch-ci). "
     "Remedy: run the merge tool, `merge <pr> --confirm`, which waits on the required checks, then "
     "merges the head it waited on."
 )
@@ -267,6 +276,16 @@ def pinned_required(where: str):
         if isinstance(names, list) and names and all(isinstance(k, str) and k for k in names):
             return names
     return None
+
+
+def ignored_checks(module, where: str):
+    """The repo's `merge.ignoreChecks` as {name: reason}: the checks and runs another ready pull request may have
+    running without holding a merge. {} with no such list. A bad entry raises the merge tool's Stop."""
+    for config in _merge_configs(where) if where else ():
+        merge = config["merge"]
+        if isinstance(merge, dict) and "ignoreChecks" in merge:
+            return module.ignore_checks(config)
+    return {}
 
 
 BARE_MERGE_REASON = (
@@ -1980,7 +1999,7 @@ def repo_proof_hit(stripped: str, cwd: str, transcript: str, session_id: str = "
     """Return a short label when a cloud session's `merge --confirm` or `merge --ready` acts in a checkout whose repo no cs-repo tag of the own newest
     get_session record names, else ''. Fails closed inside the clause, like role_proof_hit: an unparseable command, an unreadable
     checkout, no record and a set_session_tags after the record are each a refusal, because the guard-wide crash path fails open.
-    --lane-lint merges nothing and is not judged. Cost: none for a call that is no merge confirm;
+    --lane-lint merges no pull request and is not judged. Cost: none for a call that is no merge confirm;
     else one parse, one read of the origin and one transcript read.
 
     A local session is judged on `--confirm` only, by its OWN record (session_role.local_judgement, rules a, b, c): an own file must name
@@ -2176,7 +2195,9 @@ def _ready_stood_shas(text: str, merge) -> set:
 
 def _ready_pass_shas(transcript: str, merge):
     """The shas that a `--ready` or `--confirm` Bash or PowerShell call of this transcript stood for (_ready_stood_shas), or None when the
-    transcript cannot be read."""
+    transcript cannot be read. A run in the background stands for its shas once the transcript reads its output: a Read of the output file, or a
+    Bash or PowerShell command that names it, whose result holds the run's lines. The output path is the one the run's start result names
+    (stall_watch RESULT_PATH, the one home of that format), so a pass in any other file counts for nothing. The guard never opens the file."""
     from guard_core import lint_dir  # lazy: the one home of where lint/ is
     lint = lint_dir()
     if lint not in sys.path:
@@ -2184,23 +2205,37 @@ def _ready_pass_shas(transcript: str, merge):
     try:
         import _transcript
         records = _transcript.read_transcript(transcript)
+        result_path = importlib.import_module("stall_watch").RESULT_PATH
     except Exception:
         return None
     ready_calls = set()
+    read_calls = set()
+    outputs = set()  # output files of the background ready runs seen so far
     shas = set()
     for rec in records:
         for use in _transcript.tool_uses(rec):
-            command = (use.get("input") or {}).get("command")
-            if (use.get("name") in ("Bash", "PowerShell") and isinstance(command, str) and isinstance(use.get("id"), str)
-                    and any(flag in command for flag in READY_RUN_FLAGS)):
-                ready_calls.add(use["id"])
-        for result in _transcript.tool_results(rec):
-            if result.get("tool_use_id") not in ready_calls:
+            tool_input = use.get("input") or {}
+            command = tool_input.get("command")
+            if not isinstance(use.get("id"), str):
                 continue
+            shell = use.get("name") in ("Bash", "PowerShell") and isinstance(command, str)
+            if shell and any(flag in command for flag in READY_RUN_FLAGS):
+                ready_calls.add(use["id"])
+            elif use.get("name") == "Read" and tool_input.get("file_path") in outputs:
+                read_calls.add(use["id"])
+            elif shell and any(path in command for path in outputs):
+                read_calls.add(use["id"])
+        for result in _transcript.tool_results(rec):
             content = result.get("content")
             text = content if isinstance(content, str) else " ".join(
                 b.get("text", "") for b in content or [] if isinstance(b, dict) and isinstance(b.get("text"), str))
-            shas |= _ready_stood_shas(text, merge)
+            if result.get("tool_use_id") in read_calls:
+                shas |= _ready_stood_shas(text, merge)
+            elif result.get("tool_use_id") in ready_calls:
+                shas |= _ready_stood_shas(text, merge)
+                started = result_path.search(text)
+                if started:
+                    outputs.add(started.group(1))
     return shas
 
 

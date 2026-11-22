@@ -19,6 +19,7 @@ sys.path.append(os.path.join(HERE, "..", "janitor"))  # noqa: E402  janitor/swee
 import sweep  # noqa: E402
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import decision_watch  # noqa: E402  the one model caller (hooks/decision_watch.py); merge.py puts hooks on sys.path
+import merge_options  # noqa: E402  the one home of the long option names the guard reads (hooks/merge_options.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
@@ -145,9 +146,12 @@ def complete_config(**fields):
     CONFIG itself leaves requiredChecks out, and the notice is printed above the stop line a case reads."""
     return json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=["checks"], **fields)))
 
+FAKE_REPO = "owner/repo"  # the repository a FakeHost pull request's head and base both live in, as the info dict names them (owner/name)
+
 class FakeHost:
     """The GitHub half, scripted. `other` is a second clone that plays a competing pusher and the merger."""
     built = True
+    head_repo = base_repo = FAKE_REPO  # the repositories pr() reports: a case sets head_repo to another for a fork
     own_number = 7  # the lane's own PR: pr() serves its head from the branch; the lane-lint cases name it 7
 
     def now(self):
@@ -194,12 +198,14 @@ class FakeHost:
                 raise merge.Stop(f"reading the pull request failed: HTTP 404: Not Found (#{n})")
             row = self.pulls[n]
             return {"head": row["head"]["sha"], "branch": row["head"]["ref"], "base": row["base"]["ref"], "state": row["state"].upper(),
-                    "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": bool(row["draft"]), "body": row["body"] or ""}
+                    "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": bool(row["draft"]), "body": row["body"] or "",
+                    "head_repo": self.head_repo, "base_repo": self.base_repo}
         head = merge.origin_head(self.root, self.branch)
         base = (self.base_seq.pop(0) if len(self.base_seq) > 1 else self.base_seq[0]) if self.base_seq else self.base
         return {"head": self.head_override or head, "branch": self.branch, "base": base, "state": self.pr_state,
                 "mergeable": self.mergeable, "merge_state": "CLEAN", "draft": self.draft, "body": self.body,
-                "changed_files": len(self.changed) if self.changed_files is None else self.changed_files}
+                "changed_files": len(self.changed) if self.changed_files is None else self.changed_files,
+                "head_repo": self.head_repo, "base_repo": self.base_repo}
 
     def open_pulls(self):
         """-> the open pull requests as `GET pulls` lists them: the own PR, then each scripted row that is open. Each call is one list read."""
@@ -265,7 +271,8 @@ class FakeHost:
     def pr_info(self, n):  # the same fields as pr(), read from the entry add_pr or create_pr made
         p = self.batch_pulls[n]
         return {"head": merge.origin_head(self.root, p["branch"]), "branch": p["branch"], "base": p["base"], "state": p["state"],
-                "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": p["draft"], "body": p["body"]}
+                "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": p["draft"], "body": p["body"],
+                "head_repo": self.head_repo, "base_repo": self.base_repo}
 
     def batch_pr(self, branch):  # the open pull request whose head is `branch`, as (n, info), or None
         self.batch_pr_calls.append(branch)
@@ -11771,6 +11778,14 @@ class MergeImport(unittest.TestCase):
         r = subprocess.run([sys.executable, tool, "7", "--confirm"], cwd=root, capture_output=True, text=True)
         self.assert_one_clear_line(r, "NameError")
 
+class ParserOptions(unittest.TestCase):
+    """The parser's long options and MERGE_OPTIONS, which the guard reads to name a prefix, are one list. Adding an option to
+    one and not the other fails here."""
+    def test_the_parser_long_options_are_the_merge_options(self):
+        parser = merge.build_parser()
+        long_options = {s for action in parser._actions for s in action.option_strings if s.startswith("--")}
+        self.assertEqual(long_options, set(merge_options.MERGE_OPTIONS))
+
 class RecordsPageHome(unittest.TestCase):
     """The records page path has one home, lint/hook_catalog.py. merge.py imports it and holds no copy."""
     def test_merge_holds_no_copy_of_the_records_page_path(self):
@@ -19229,6 +19244,12 @@ class ReviewEnv(Env):
         sh(self.co, "git", "push", "-q", "-f", "origin", f"{sha}:refs/heads/main")
         sh(self.co, "git", "fetch", "-q", "origin")
 
+    def base_without_kinds(self, fx):
+        """Move origin's main to a commit on main3 whose stamp config has no record kinds, so the base claims nothing (claim_only). -> its sha."""
+        no_kinds = self.git_commit(fx.main3, {".github/stamp.json": json.dumps(dict(CONFIG, kinds=[]))})
+        self.base_tip(no_kinds)
+        return no_kinds
+
     def claim_over(self, parent, changes, message="Claim record numbers\n\nRecord-claim: D-002", more_parents=()):
         """-> the sha of a commit over `parent`: its tree is the one git_commit builds for `changes`, and its message is a claim commit's (a Record-claim
         trailer, which claim_only reads) unless `message` names another. `more_parents` follow `parent`. The tree is git_commit's, so the fixture
@@ -20635,8 +20656,7 @@ class LintCleanMainMergeCarry(ReviewEnv, RecordsEnv):
 
     def test_k_a_clean_merge_carries_when_the_base_has_no_record_kinds(self):
         fx = self.real_commits()
-        no_kinds = self.git_commit(fx.main3, {".github/stamp.json": json.dumps(dict(CONFIG, kinds=[]))})
-        self.base_tip(no_kinds)
+        self.base_without_kinds(fx)
         claim = self.claim_over(fx.fixed, {"docs/decisions/second.md": record("D-002", "second")})
         self.facts(fx, [claim])
         self.assertFalse(self.carry(fx, claim), "fixture: a claim carries under a base with no record kinds, so the case below proves nothing about the stamp config")
@@ -20685,6 +20705,57 @@ class LintCleanMainMergeCarry(ReviewEnv, RecordsEnv):
         clone = self.main_only_clone()
         self.assertFalse(self.has_commit(clone, fork), "fixture: the main-only clone holds the unpushed commit, so git can read the merge")
         self.assertFalse(self.carry(fx, live, root=clone), "a merge whose merge state is unknown carried the PASS: an unknown read is no carry")
+
+    def generated_page_carries(self, fx):
+        """-> the generator's records page committed straight on the linted head, after its scope checks, and asserts that it carries the PASS. On a
+        base with no record kinds the old code refuses every claim, so this carry is the one red assert the no-kinds cases below share."""
+        page = self.tool_page(fx.fixed)
+        self.facts(fx, [page])
+        self.assert_page_scope(page, fx.fixed)
+        self.assertTrue(self.carry(fx, page), "a generator-proved records page directly over the linted head did not carry the PASS on a base with no record kinds")
+        return page
+
+    def test_r_a_generated_page_on_the_linted_head_carries_when_the_base_has_no_record_kinds(self):
+        fx = self.real_commits()
+        self.base_without_kinds(fx)
+        claim = self.claim_over(fx.fixed, {"docs/decisions/second.md": record("D-002", "second")})
+        self.facts(fx, [claim])
+        self.assertFalse(self.carry(fx, claim), "control: a claim commit over the linted head carried the PASS on a base with no record kinds")
+        self.generated_page_carries(fx)
+
+    def test_s_a_page_subject_commit_with_another_file_and_a_hand_edited_page_are_not_carried_when_the_base_has_no_record_kinds(self):
+        fx = self.real_commits()
+        self.base_without_kinds(fx)
+        self.generated_page_carries(fx)
+        page_and_notes = self.tool_page(fx.fixed, changes={"notes.txt": "notes\n"})
+        self.facts(fx, [page_and_notes])
+        self.assert_page_scope(page_and_notes, fx.fixed, files=[merge.RECORDS_PAGE, "notes.txt"])
+        self.assertFalse(self.carry(fx, page_and_notes), "a generated records page that also touches notes.txt carried the PASS on a base with no record kinds")
+        hand = self.tool_page(fx.fixed, hand="hand line\n")
+        self.facts(fx, [hand])
+        self.assert_page_scope(hand, fx.fixed)
+        self.assertIn("hand line", sh(self.co, "git", "show", f"{hand}:{merge.RECORDS_PAGE}"), "fixture: the page commit does not hold the hand edit")
+        self.assertFalse(self.carry(fx, hand), "a hand-edited records page carried the PASS on a base with no record kinds")
+
+    def test_t_the_join_accepts_a_generated_page_over_a_lint_pass_when_the_base_has_no_record_kinds(self):
+        fx = self.real_commits()
+        self.base_without_kinds(fx)
+        page = self.tool_page(fx.fixed)
+        self.facts(fx, [page])
+        self.assert_page_scope(page, fx.fixed)
+        live = self.reviewed_host(fx, page, comments=[lint_of(7, page)])
+        try:
+            merge.lint_check(live, 7, live.pr(7), self.co, merge.DEFAULT_CONFIG)  # control: a lint PASS on the live head needs no carry
+        except merge.Stop as e:
+            self.fail("control: the join refused a records page whose own lane lint PASS is on it: " + str(e))
+        host = self.reviewed_host(fx, page, comments=[lint_of(7, fx.fixed)])
+        branch = host.pr(7)["branch"]
+        sh(self.co, "git", "push", "-q", "-f", "origin", f"{page}:refs/heads/{branch}")
+        self.assertEqual(sh(self.co, "git", "ls-remote", "origin", f"refs/heads/{branch}").split()[0], page, "fixture: origin's pull request branch is not the records page")
+        try:
+            merge.lint_check(host, 7, host.pr(7), self.co, merge.DEFAULT_CONFIG)
+        except merge.Stop as e:
+            self.fail("the join refused a generated records page over the lint PASS of the reviewed head, on a base with no record kinds: " + str(e))
 
 
 class ReviewUnknownReads(ReviewEnv):
@@ -23217,6 +23288,20 @@ class ClaimOnlyReviewed(ReviewEnv, RecordsEnv):
         self.facts(fx, [page])
         self.assert_page_scope(page, fx.fixed)
         self.assert_page_not_carried(fx, page, "a hand-written records page reached through the claims route")
+
+    def test_v_a_lint_pass_on_the_reviewed_head_carries_to_a_records_page_head_when_the_base_has_no_record_kinds(self):
+        # Catches: claim_only refusing a generator-proved records page on a base with no stamp kinds, so the lint PASS on the reviewed head reads as no lint.
+        fx = self.real_commits()
+        self.base_without_kinds(fx)
+        self.use_fake_records()
+        page = self.tool_page(fx.fixed)
+        self.facts(fx, [page])
+        self.assert_page_scope(page, fx.fixed)
+        self.reviewed_line(self.claim_host(fx, page, record_head=page, lint_head=page), page, "done",
+                           "control: a records-page head with its own lane lint PASS does not read done")
+        self.reviewed_line(self.claim_host(fx, page, record_head=page, lint_head=fx.fixed), page, "done",
+                           "a lint PASS on the reviewed head does not carry to a records-page head when the base has no record kinds")
+
 
 class PageOnlyRecordCarry(ReviewEnv, RecordsEnv):
     """A records-page commit the merge tool wrote carries a review record the way a claim commit does. The tool's page commit has one parent, the

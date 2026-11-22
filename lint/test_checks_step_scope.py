@@ -456,6 +456,7 @@ MAIN_STEPS = [
     'Comment narration check',
     'Unknown-read contract fixture suite',
     'Unknown-read contract (guard + session_start)',
+    'Guard-set lists (guardset4, guardset7, guardset8)',
     'Landed-directory manifest agreement',
     'Agent and skill model floor',
     'Agent and skill model floor fixture suite',

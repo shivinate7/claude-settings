@@ -78,6 +78,7 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
 - One "Merge Tool Read Checks:" entry names each limit the read-only flags keep: `--reviewed`,
   `--review-record` and `--lane-lint` (read from merge/merge.py's argparse), "takes no lock", the PASS and
   ref-or-commit comment rules, and both tool names. Its Never covers names each act in READ_CHECKS_REFUSED.
+  Its Covers text names the push target and its form, read from READ_CHECKS_PUSH.
   No word in READ_CHECKS_DROPPED appears outside that sentence. Outside it, the entry also names `--lane-lint`
   run in the background through `verdict`, read from READ_CHECKS_BACKGROUND.
 AUTO_MODE_SETTINGS names another settings file to read (default: this repo's settings.json), so the
@@ -242,7 +243,15 @@ READ_CHECKS_LIMITS = (("takes no lock", r"\btakes no lock\b"),
                       ("a ref or commit posts nothing", r"(?i)\bref or commit\b[^.]*\bposts nothing\b"))
 READ_CHECKS_REFUSED_FLAGS = ("--confirm", "--base-red-ok", "--undo-check-unknown-ok")
 READ_CHECKS_REFUSED = tuple((flag, "`%s`" % flag) for flag in READ_CHECKS_REFUSED_FLAGS) + (
-    ("gh pr merge", r"`gh pr merge`"), ("any other flag that lifts a check", "any other flag that lifts a check"))
+    ("gh pr merge", r"`gh pr merge`"), ("any other flag that lifts a check", "any other flag that lifts a check"),
+    ("a rebase", r"\ba rebase\b"), ("a force push", r"\ba force push\b"),
+    ("a push to any branch but that pull request's own head branch",
+     r"a push to any branch but that pull request's own head branch"),
+    ("a conflict resolution", r"\ba conflict resolution\b"))
+# The Covers text names the push the lint makes: its target, its form, and that a conflicting merge pushes nothing.
+READ_CHECKS_PUSH = (("the push target, that pull request's own head branch", r"pushes it to that pull request's own head branch"),
+                    ("a plain push", r"\bwith a plain push\b"),
+                    ("a conflicting merge pushes nothing", r"\bA merge that conflicts pushes nothing and resolves nothing\."))
 # The sentence outside the Never covers clause that lets a lane run `--lane-lint` in the background: the word, and the
 # verdict wrapper in its short form and its full-path form (decision auto-mode-owner-acts).
 READ_CHECKS_BACKGROUND = (("background", r"(?i)\bbackground\b"),
@@ -1015,6 +1024,12 @@ class MergeToolReadChecksIsAllowed(unittest.TestCase):
         for name, pattern in READ_CHECKS_REFUSED:
             with self.subTest(act=name):
                 self.assertRegex(clause, pattern, "Never covers does not name %r" % name)
+
+    def test_names_the_push_target_and_its_form(self):
+        covers = entry_part(self, MERGE_TOOL_READ)
+        for name, pattern in READ_CHECKS_PUSH:
+            with self.subTest(push=name):
+                self.assertRegex(covers, pattern, "Covers text does not say %r" % name)
 
     def test_names_the_background_verdict_lane_lint_call(self):
         entry = allow_entry(MERGE_TOOL_READ)

@@ -1,0 +1,1 @@
+- ready-mark-test-cites-note: PR #3765 (the ready-mark guard change), decision ready-mcp-mark-guard (the guard on ready marks made over MCP). The green-control comment in tests/guard/s43724-ready-mcp-mark.py cites decision `ready-mark-pass-matched-by-sha`. That record is a note, docs/notes/ready-mark-pass-matched-by-sha.md, not a decision. Cite it as a note. Seen: 2026-11-21 x1
