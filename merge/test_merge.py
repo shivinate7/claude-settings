@@ -683,13 +683,14 @@ class Env(unittest.TestCase):
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "rival"); sh(o, "git", "push", "-q", "origin", "feat")
         return sh(o, "git", "rev-parse", "HEAD")
 
-    def same_tree_push(self, message="same tree"):
-        """One commit on origin's feat from the second clone, with no change: its tree is the branch head's. `message` names it, so a trailer-only
-        commit is one call with a trailer. -> its sha."""
+    def same_tree_push(self, message="same tree", on="origin/feat", force=False):
+        """One commit on `on` (origin's feat by default) from the second clone, with no change: its tree is that commit's tree. `message` names it, so a
+        trailer-only commit is one call with a trailer. `force` moves origin's feat onto it even when that moves the branch back. -> its sha."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
-        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
-        sh(o, "git", "commit", "-q", "--allow-empty", "-m", message); sh(o, "git", "push", "-q", "origin", "feat")
+        sh(o, "git", "checkout", "-q", "-B", "feat", on)
+        sh(o, "git", "commit", "-q", "--allow-empty", "-m", message)
+        sh(o, "git", "push", "-q", *(["--force"] if force else []), "origin", "feat")
         return sh(o, "git", "rev-parse", "HEAD")
 
     def main_moves(self, files=None, start="origin/main"):
@@ -1164,6 +1165,35 @@ class ConfirmHead(Env):
                             "fixture: the live head's tree is the relayed head's, so the case tests nothing")
         self.assertFalse(merge.relayed_head_holds(self.co, "feat", relayed, live),
                          "a relayed yes held for a live head whose commit changes the tree: only an equal tree keeps the relayed head")
+
+    def assert_live_is_empty_on_the_parent(self, relayed, parent, live):
+        """Fixture for a live head that moved back: one commit on `parent`, the relayed head's parent, with the parent's tree. The relayed head is not its
+        ancestor, and it changes a file, so the case has a change the live head lacks."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "log", "-1", "--format=%P", live), parent, "fixture: the live head is not a commit on the parent of the relayed head")
+        self.assertIs(merge.ancestor(self.co, relayed, live), False, "fixture: the relayed head is an ancestor of the live head, so the live head did not move back")
+        self.assertEqual(sh(self.co, "git", "rev-parse", f"{live}^{{tree}}"), sh(self.co, "git", "rev-parse", f"{parent}^{{tree}}"),
+                         "fixture: the live head's tree is not its parent's, so the case tests nothing")
+        self.assertNotEqual(sh(self.co, "git", "rev-parse", f"{relayed}^{{tree}}"), sh(self.co, "git", "rev-parse", f"{parent}^{{tree}}"),
+                            "fixture: the relayed head changes no file, so the case tests nothing")
+
+    def test_a_trailer_free_empty_commit_on_the_parent_of_the_relayed_head_does_not_keep_it(self):
+        relayed = self.head()  # the pending record commit: its tree adds docs/decisions/second.md
+        parent = self.rev(f"{relayed}^")
+        live = self.same_tree_push("an empty commit with no trailer", on=parent, force=True)  # origin's feat moves back to the parent, then one empty commit
+        self.assert_live_is_empty_on_the_parent(relayed, parent, live)
+        self.assertFalse(merge.relayed_head_holds(self.co, "feat", relayed, live),
+                         "a relayed yes held for a live head behind the relayed head: an empty commit on its parent is not the file the yes named")
+
+    def test_a_record_claim_on_the_parent_of_the_relayed_head_does_not_keep_it(self):
+        """A known gap that predates the same-tree route: the Record-claim route keeps any commit that carries the trailer, and reads no ancestry.
+        This case is red on the same cause as the trailer-free one."""
+        relayed = self.head()
+        parent = self.rev(f"{relayed}^")
+        live = self.same_tree_push("Claim record numbers\n\nRecord-claim: D-002", on=parent, force=True)
+        self.assert_live_is_empty_on_the_parent(relayed, parent, live)
+        self.assertFalse(merge.relayed_head_holds(self.co, "feat", relayed, live),
+                         "a relayed yes held for a live head behind the relayed head: a Record-claim on its parent is not the file the yes named")
 
     def test_a_head_that_is_not_40_hex_is_refused_as_bad_input(self):
         out, err = self.assert_usage_error("7", "--confirm", "--head", self.head()[:7])
