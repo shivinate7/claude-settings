@@ -1251,6 +1251,15 @@ lb_add("setsid bin/ci-job --lint & echo $!, full disk: the brake's own call refu
        lb_hit_check("load_hit", "Bash", LB_DISK_FULL, LB_SETSID_CI_BG, deny=(lb_gb(3.1, 926), LB_SWEEP), reads=1))
 lb_add("setsid bin/ci-job --lint & echo $!, memory 96%: the brake's own call refuses, names the memory, the reader runs once",
        lb_hit_check("load_hit", "Bash", lb_reading(memory_pct=96.0), LB_SETSID_CI_BG, deny=LB_MEM96, reads=1))
+# A SHELL-RUN LINT START. `bash bin/ci-job --lint & echo $!` runs the lint in the background as `setsid` does, so the
+# brake's own call refuses it at 96% memory with one read. The control is the same shell in the foreground: no `&`, no
+# background lint, so the brake's reader does not run.
+LB_BASH_CI_BG = {"command": "bash bin/ci-job --lint & echo $!"}
+LB_BASH_CI_FG = {"command": "bash bin/ci-job --lint"}
+lb_add("bash bin/ci-job --lint & echo $!, memory 96%: the brake's own call refuses, names the memory, the reader runs once",
+       lb_hit_check("load_hit", "Bash", lb_reading(memory_pct=96.0), LB_BASH_CI_BG, deny=LB_MEM96, reads=1))
+lb_add("bash bin/ci-job --lint, foreground with no &, full disk: the brake's own call returns the empty pair, the reader does not run",
+       lb_hit_check("load_hit", "Bash", LB_DISK_FULL, LB_BASH_CI_FG, reads=0))
 # Green controls: python3 on a normal machine is allowed. reads=None, since a lint start may read once. The control is
 # not the `& echo $!` shape above: rule detached-launch refuses a lane lint that a `&` ends, kept pid or not (decision
 # detached-launch-refused), so that shape is no longer an allowed call. The lint in the foreground is allowed, and so is
