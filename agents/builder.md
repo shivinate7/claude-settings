@@ -63,6 +63,8 @@ mutation test targets, run that mutation test once through `verdict` before push
 Run PowerShell with the PowerShell tool, never powershell.exe from Bash (agent-powershell-tool).
 When worktree isolation refuses a command as too complex, split it into plain, separate commands. A step that still needs a script file is a need to report.
 
+After your last commit and before you report, run `~/.claude/bin/cheap-lints main` in your worktree. It runs the repo's ready checks (`merge.readyChecks`: STE lint, comment narration, record slugs, glossary and others) in seconds. Fix each `fail` and commit again. Report an `unknown` as unknown. It is no hand-off proof: `merge --lane-lint` stays that.
+
 When your commit is in, report at once. Never wait on a CI run, a pull request check, or
 another agent. The orchestrator reads the run. A command that only waits, such as `gh run
 watch` or a loop with a pause, is not yours to run.
