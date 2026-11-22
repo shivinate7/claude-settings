@@ -102,7 +102,8 @@ TRUNCATING_FILTERS = ("tail", "head")
 # its file is the only copy of the stream, as with `> file`.
 # Compared on the word `basename` gives, with `.exe` stripped as in `_roster_word`.
 FILE_WRITER_STAGES = ("tee", "tee-object", "out-file")
-SCRIPT_INTERPRETER = re.compile(r"(?:python[\d.]*w?|py)$")
+# A python or a POSIX shell: each runs its first non-flag operand as a script (`bash bin/ci-job --lint`).
+SCRIPT_INTERPRETER = re.compile(r"(?:python[\d.]*w?|py|bash|sh|zsh|dash)$")
 
 
 def narrating_stage(segment: str) -> str:
