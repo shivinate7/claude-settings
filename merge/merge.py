@@ -2310,13 +2310,14 @@ def claim_only(root, cfgrel, base, linted, live):
     review when the page goes stale, so it moves the head by nothing a record or a lint read. That holds only for a page the generator wrote, so a
     page-only commit counts when page_is_generated proves it, and is False when the page differs (a hand edit is a change a review must see, never a
     carry). A generator that cannot run raises Stop (unknown), never True: the callers keep it at stale or unknown, never done. Any other commit is
-    False. Any other read that fails is False. Commits come from the clone, so the caller fetches the branch first.
+    False, and so is every claim when the base holds no stamp kinds. Any other read that fails is False. Commits come from the clone, so the caller fetches the branch first.
     Cost: per page-only commit one temporary worktree, one `git show` and one generator run (page_is_generated; measured median 0.56 s, n=5, on a real tool page commit)."""
     try:
         _, kinds = base_stamp(root, cfgrel, f"origin/{base}")
     except Stop:
         return False
-    if not kinds or git(root, "merge-base", "--is-ancestor", linted, live)[0]:
+    kinds = kinds or []  # a base with no stamp kinds claims nothing, but its page commits still carry: a repo that stamps no record gets the same page commit
+    if git(root, "merge-base", "--is-ancestor", linted, live)[0]:
         return False
     c, rows = git(root, "rev-list", "--parents", f"{linted}..{live}")
     if c or not rows.strip():
@@ -2332,7 +2333,7 @@ def claim_only(root, cfgrel, base, linted, live):
                 continue
             return False  # a page commit is never a claim either: it has no Record-claim trailer to read
         c, files = git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", sha)
-        if len(parents) != 1 or c or not head_claim(root, sha) or not all(is_record(f) for f in files.splitlines()):
+        if not kinds or len(parents) != 1 or c or not head_claim(root, sha) or not all(is_record(f) for f in files.splitlines()):  # no kinds: no claim to carry, a page commit only
             return False
     return True
 
