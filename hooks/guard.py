@@ -5012,7 +5012,7 @@ def role_model_one(tool_input):
 # and the field is not offered, so busy does not slow an Agent call there.) Full (memory over 95%, disk free
 # under the smaller of 5% of the disk and 5 GB) refuses every start call. A reading that cannot be read counts as normal. Only an
 # agent's shell or file write also reads load (RUNNING_AGENT_TOOLS, below). A cloud session (CLAUDE_CODE_REMOTE
-# "true") brakes a start call at a full disk only, read once from "/", and skips every other reading and every
+# "true") brakes a start call at a full disk (read once from "/") or at memory over 95%, and skips busy and every
 # running-agent call (decision machine-load-brake, "Cloud sessions").
 # SESSION_TOOL stays in the list, but no PreToolUse hook sees a start_session call (see SESSION_TOOL), so the brake does not
 # read the load for it. The audit after the call does not read load either.
@@ -5146,7 +5146,7 @@ def lint_load_hit() -> tuple:
 def load_hit(tool: str, tool_input) -> tuple:
     """(rule reason, matched) when the machine's load refuses this start call, else ("", ""). The one
     read of the call: a failed read or an unread value counts as normal. A cloud session is braked at a full disk
-    only: memory and busy never refuse its start."""
+    or at memory over 95%: busy never refuses its start."""
     if lint_start_hit_of(tool, tool_input):
         return lint_load_hit()
     if tool not in START_TOOLS:

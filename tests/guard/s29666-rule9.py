@@ -281,4 +281,4 @@ add("lane-repo-tag: a denied lane names the expected repo tag in its reason", "d
 # -C or --repo-dir (either spelling, glued or not, anywhere in the command, the last one wins), else the `cd X &&` directory, else the
 # working directory. The guard reads that checkout's repo and allows the merge only when a tag of the own newest get_session record
 # names the same cs-repo repo. A flag value that cannot be read, and a record that cannot be read, are denied. Outside the cloud, and
-# --lane-lint (which merges nothing), are not judged.
+# --lane-lint (which merges no pull request), are not judged.
