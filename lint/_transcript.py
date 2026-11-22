@@ -414,6 +414,22 @@ def delivered_tool_use_ids(records):
     return delivered
 
 
+def inactive_tool_use_ids(records):
+    """The tool_use ids of sends that failed because the target session is inactive: a failed result (by
+    `failed_tool_use_ids`) whose text holds the cloud error code `session_inactive` (measured: "Cannot send
+    events to inactive session ... (session_inactive)"). Any other failure is not read here."""
+    failed = failed_tool_use_ids(records)
+    inactive = set()
+    for r in records:
+        if r.get("type") != "user":
+            continue
+        for b in tool_results(r):
+            use_id = b.get("tool_use_id")
+            if use_id in failed and "session_inactive" in result_text(b):
+                inactive.add(use_id)
+    return inactive
+
+
 def _finds_writer(node):
     if isinstance(node, dict):
         if isinstance(node.get("writer"), str) and node["writer"]:

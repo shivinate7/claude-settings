@@ -190,7 +190,7 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
-    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender, tool_verb,
+    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, inactive_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender, tool_verb,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 import _clause  # noqa: E402
@@ -1546,8 +1546,9 @@ def question_problem(records, turn, text, hook):
     ack of a send this turn made to the writer or the parent starts no turn.
     Owner-facing: a send to the page writer, or an items write to this repo's page. The writer is the newest
     meta/page read's; with no such read at all, the layout's `page-writer` (its ack starts no turn either).
-    The key's writer counts only for a send whose own result shows delivery (`delivered_tool_use_ids`); a send
-    with no result, a failed result or a non-delivered one does not. A transcript writer counts on the send alone.
+    The key's writer counts only for a send whose own result shows delivery (`delivered_tool_use_ids`) or a
+    failure of `session_inactive` (`inactive_tool_use_ids`: the writer is gone, the attempt meets the duty); a
+    send with no result, any other failed result or a non-delivered one does not. A transcript writer counts on the send alone.
     A read whose result names no writer keeps the refusal's old text. The question box counts
     only in a repo with no waiting page. A send to @parent reaches no one there.
     Lane: a send to the parent or the page writer; a send to @parent counts only in a lane. A session whose own
@@ -1585,7 +1586,9 @@ def question_problem(records, turn, text, hook):
             acks[writer] = {writer}
             uses, sends = _turn_acts(records, turn, acks)
             # Only the cloud body {"status":"delivered"} counts; the local SendMessage success shape is not measured.
-            delivered = delivered_tool_use_ids(records)
+            # A send that failed with session_inactive also meets the duty: no live writer exists to take it, and
+            # the report names the failed send. Any other failure, and no send at all, still refuse.
+            delivered = delivered_tool_use_ids(records) | inactive_tool_use_ids(records)
             if any(writer in t and u.get("id") in delivered for u, t in zip(uses, sends)):
                 return "", ""
     page = layout.waiting_page(root) if root else "unknown"
