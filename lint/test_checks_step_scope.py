@@ -132,6 +132,8 @@ NO_MD = [
     'Unknown-read contract fixture suite',
     'Python 3.9 floor check',
     'Playwright setup action suite',
+    'Mutant anchor census',
+    'Mutant anchor census fixture suite',
 ]
 
 # The audit's NAMES-ONLY steps: each names a file, or copies only hooks/ and lint/ files, which already set `code`.
@@ -417,6 +419,8 @@ MAIN_STEPS = [
     'Hook dup-name check',
     'Record slug length',
     'Cost line pins',
+    'Mutant anchor census',
+    'Mutant anchor census fixture suite',
     'Red-run trailer',
     'Plan refuter line',
     'Map check',

@@ -493,6 +493,16 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/check_cost_pins.py
 
+      # A static read of the mutant table: each anchor of hooks/mutate_guard.py sits once where its entry says. It reads every anchor in one
+      # pass, in about a second, and names each bad one. The mutation run's own pre-check covers ambiguity only for guard and audit targets.
+      - name: Mutant anchor census
+        if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
+        run: python3 lint/check_mutant_anchors.py
+
+      - name: Mutant anchor census fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
+        run: python3 lint/test_check_mutant_anchors.py
+
       # Pull requests only: the range is base..HEAD, and a push has no base. The checkout is full-depth (fetch-depth 0).
       # Each of the four pull-request lint steps (this one, Plan refuter line, Ruling kind check, Comment narration check) also needs its
       # scope flag (.github/scripts/ci-scope.sh), so it runs only when a file it reads changed. Red-run trailer reads every non-.md
