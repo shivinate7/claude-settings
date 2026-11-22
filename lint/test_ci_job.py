@@ -381,14 +381,14 @@ class Unknowns(Job):
         self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
 
 
-def checks_hooks_gate():
+def checks_hooks_condition():
     """The `if:` of the first checks-hooks step that joins a scope flag and the event with `||`, read from checks.yml so the
     case runs the form CI writes, never a copy of it."""
     with open(CHECKS, encoding="utf-8") as f:
         steps = step_blocks(job_block(f.read(), "checks-hooks"))
-    gates = [step_key(st, "if") for st in steps if "||" in (step_key(st, "if") or "")]
-    assert gates and "records_only_skip != 'true'" in gates[0], "scope: checks-hooks has no `||` step gated on records_only_skip != 'true'"
-    return gates[0]
+    conds = [step_key(st, "if") for st in steps if "||" in (step_key(st, "if") or "")]
+    assert conds and "records_only_skip != 'true'" in conds[0], "scope: checks-hooks has no `||` step gated on records_only_skip != 'true'"
+    return conds[0]
 
 
 class Conditions(Job):
@@ -421,7 +421,7 @@ class Conditions(Job):
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
 
     def test_the_checks_hooks_step_condition_reads_on_with_no_flags(self):
-        rc, lines, out = self.run_job(step("hooks gate", "true", **{"if": checks_hooks_gate()}))
+        rc, lines, out = self.run_job(step("hooks gate", "true", **{"if": checks_hooks_condition()}))
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
 
     def test_not_cancelled_reads_true(self):
@@ -1627,7 +1627,7 @@ class SuiteSteps(Job):
 
     def test_a_sibling_jobs_picked_suite_step_gated_on_records_only_skip_not_true_runs_when_the_flag_is_false(self):
         self.sibling_repo(records_only_skip="false")
-        gated = step("Wiring suite", "python3 hooks/test_wiring.py", **{"if": checks_hooks_gate()})
+        gated = step("Wiring suite", "python3 hooks/test_wiring.py", **{"if": checks_hooks_condition()})
         rc, lines, out = self.run_job(self.DOCS, self.LINT_STEP, job="checks", other=[gated], args=self.LINT)
         self.assertNotIn("UNKNOWN scope", out, "scope: the fixture's script gave no flag the step reads\n" + out)
         self.assertEqual(by_step(lines).get("Wiring suite"), "PASS",
@@ -1636,7 +1636,7 @@ class SuiteSteps(Job):
 
     def test_a_sibling_jobs_picked_suite_step_gated_on_records_only_skip_not_true_is_skipped_when_the_flag_is_true(self):
         self.sibling_repo(records_only_skip="true")
-        gated = step("Wiring suite", "python3 hooks/test_wiring.py", **{"if": checks_hooks_gate()})
+        gated = step("Wiring suite", "python3 hooks/test_wiring.py", **{"if": checks_hooks_condition()})
         rc, lines, out = self.run_job(self.DOCS, self.LINT_STEP, job="checks", other=[gated], args=self.LINT)
         self.assertNotIn("UNKNOWN scope", out, "scope: the fixture's script gave no flag the step reads\n" + out)
         self.assertEqual(by_step(lines).get("Wiring suite"), "skipped",
