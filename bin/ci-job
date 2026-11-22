@@ -74,8 +74,8 @@
 # .github/scripts/ci-scope.sh runs as CI's scope job runs it (EVENT=pull_request, BASE_SHA the base, PR_HEAD the head, no GREEN_HEAD), and
 # a step whose flag reads false prints skipped, as CI skips it. A script that is missing or fails, or a flag it omits, leaves the step to
 # run and prints one `UNKNOWN scope` line (no exit change). Cost: one bash process and one temp file per --lint run with a base, 60 s at most.
-# The one other exception is records_only_skip: it reads as off in every mode, because a local run runs every step (!= 'true' reads true,
-# == 'true' reads false), and the script's value for it is not read.
+# The one other exception is records_only_skip: with no script value for it (no base, no script, or a script that omits it) it reads as off,
+# because a local run runs every step (!= 'true' reads true, == 'true' reads false), and it adds no UNKNOWN scope line. A script value reads like any flag.
 # !cancelled(), always() and success() read as true,
 # and github.event_name == 'pull_request' as true only with a base. ${{ github.base_ref }} is --base without
 # its remote; ${{ github.event.pull_request.head.sha }} is CI_JOB_HEAD_SHA when it is set and not blank (the lane lint sets it to the
@@ -277,8 +277,10 @@ def condition(text, pr):
         return True
     m = EXPR.fullmatch(text.strip())
     expr = m.group(1) if m else text.strip()
-    expr = re.sub(r"needs\.scope\.outputs\.records_only_skip\s*!=\s*'true'", " T ", expr)  # a lane lint runs every step: the skip flag is off
-    expr = re.sub(r"needs\.scope\.outputs\.records_only_skip\s*==\s*'true'", " F ", expr)
+    flags = SCOPE["flags"]
+    if flags is None or flags.get("records_only_skip") not in ("true", "false"):  # no script value: the skip flag is off, and no UNKNOWN scope line for it
+        expr = re.sub(r"needs\.scope\.outputs\.records_only_skip\s*!=\s*'true'", " T ", expr)
+        expr = re.sub(r"needs\.scope\.outputs\.records_only_skip\s*==\s*'true'", " F ", expr)
     expr = SCOPE_TERM.sub(scope_term, expr)
     expr = re.sub(r"github\.event_name\s*==\s*'pull_request'", " T " if pr else " F ", expr)
     expr = re.sub(r"github\.event_name\s*!=\s*'pull_request'", " F " if pr else " T ", expr)
