@@ -271,12 +271,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        ready; `gh issue` create, comment, edit or close; `gh api` with a write method, or with a field
                        or input flag and no method. Judged per segment from the command word. A read, `gh api` with an
                        explicit GET and the merge tool pass. A local session skips it. An override lifts it.
-  records-page-ready   deny. Marking a pull request ready (MCP update_pull_request with draft false, or the gh ready
-                       command without --undo) while its head's records page is stale, or when that read cannot run, in
+  records-page-ready   deny. Marking a pull request ready (MCP update_pull_request with draft false, or the shell
+                       `gh pr ready` without --undo) while its head's records page is stale, or when that read cannot run, in
                        a repo that uses the merge tool. A base that is not the default branch, a head holding a
                        Record-claim, a head behind the base, and a current page pass. (records-index-at-merge)
   ready-mcp-mark-guard deny. Marking a pull request ready by MCP update_pull_request with draft false, or by the
-                       gh ready command without --undo, when this session's transcript shows no `merge <pr> --ready` run that passed its ready checks on the
+                       shell `gh pr ready` without --undo, when this session's transcript shows no `merge <pr> --ready` run that passed its ready checks on the
                        pull request's current head, in a repo that uses the merge tool. A draft true or body-only
                        update, a missing transcript and a pass on the current head pass. (ready-mcp-mark-guard)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
@@ -5971,7 +5971,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     refuse_ready_page(tool, {}, raw, cite_where)
 
     # 6c1a. The same ready mark by the shell form with no `merge <pr> --ready` run that stood for the head in this session's transcript (rule
-    # ready-mcp-mark-guard). Cost: a substring test per call; a transcript read and a head read only on a `gh pr ready`.
+    # ready-mcp-mark-guard). Cost: a substring test per call; the parse of the call's ready text; a transcript read and a head read only on a `gh pr ready`.
     unproved = ready_mark_hit(tool, {}, transcript, cite_where, raw)
     if unproved:
         refuse(tool, "deny", "ready-mcp-mark-guard", unproved[0], unproved[1])

@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 
 from guard_core import (
@@ -409,9 +410,21 @@ def gh_write_of(segment: str) -> str:
 # draft:false, or the gh ready command) skips that step, so the ready run is not the merge run. The read is merge.ready_page_state.
 # Cost: only a call that marks a pull request ready starts anything. Per such call: the pull request's REST reads, one git fetch of the
 # base and one of the head, a temporary worktree, one run of the generator and the worktree's removal. No file stays and no
-# process outlives the call. The whole read shares READY_PAGE_TIMEOUT; the worktree's removal has its own 10 s, so the hook's
-# 60 s timeout holds. A read that cannot run, or runs out of time, refuses as unknown (decision guard-hooks-fail-closed).
+# process outlives the call. One call's ready reads (the page read, the worktree's removal and the head read of rule
+# ready-mcp-mark-guard) share READY_HOOK_BUDGET, counted from the first read, so a passing call ends well under the hook's 60 s
+# timeout, which a guard that runs past lets the call through. A page read gets at most READY_PAGE_TIMEOUT of it and keeps
+# READY_PAGE_CLEANUP_SECONDS back for the removal. A read that cannot run, or runs out of time, refuses as unknown (decision guard-hooks-fail-closed).
 READY_PAGE_TIMEOUT = 40
+READY_PAGE_CLEANUP_SECONDS = 10  # merge.py's own removal budget (READY_PAGE_CLEANUP_SECONDS there), kept back here
+READY_HOOK_BUDGET = 50
+_READY_START = []  # the monotonic time of the first ready read in this hook process: one call per process
+
+
+def ready_budget_left() -> float:
+    """Seconds left of READY_HOOK_BUDGET. The clock starts at the first call."""
+    if not _READY_START:
+        _READY_START.append(time.monotonic())
+    return READY_HOOK_BUDGET - (time.monotonic() - _READY_START[0])
 READY_PAGE_MCP_TOOL = "mcp__github__update_pull_request"
 READY_PAGE_STALE_REASON = (
     "Rule (Git, records-index-at-merge): the records page on the head of #%s is stale, and a pull request marked ready "
@@ -475,13 +488,16 @@ def ready_page_read(selector: str, repo: str, where: str):
     if module is None:
         return "unknown", "the merge tool could not be loaded"
     selector = selector[1:] if selector[:1] == "#" and selector[1:].isdigit() else selector
+    seconds = min(READY_PAGE_TIMEOUT, ready_budget_left() - READY_PAGE_CLEANUP_SECONDS)
+    if seconds < 1:
+        return "unknown", "the call's read budget of %d s ran out" % READY_HOOK_BUDGET
     try:
-        with module.shared_deadline(READY_PAGE_TIMEOUT):
+        with module.shared_deadline(seconds):
             host = module.Host(repo=repo or None, cwd=where)
             number = host.pr_number(selector)
             state = module.ready_page_state(where, number, host)
     except subprocess.TimeoutExpired:  # its text names the resolved program path
-        return "unknown", "a read timed out after %d s" % READY_PAGE_TIMEOUT
+        return "unknown", "a read timed out after %d s" % seconds
     except Exception as e:  # a Stop, a missing gh, malformed JSON: all unread
         return "unknown", " ".join(str(e).split()) or type(e).__name__
     return state, str(number)
@@ -2166,7 +2182,8 @@ def lane_mcp_ready_hit(tool: str, tool_input, transcript: str) -> str:
 # and they reach the guard only as the result of the Bash call in this session's transcript (read by lint/_transcript.py, the one home).
 # The patterns are built from those templates (ready_line_pattern), never copied here. A run stands for a head when its pass line names it, when a dry-merge line maps the
 # pass's sha to it, or, in a repo with no ready checks, when a line of the step names it. `--fast-checks` prints the pass line but builds no records page: it stands for nothing.
-# Cost: only an update with draft false reads anything: one transcript read, then one pull request read when a stood head is found.
+# Cost: a call that marks nothing ready reads nothing: a shell text holding `ready` is only parsed (ready_page_calls). A ready mark costs one transcript read, then the merge
+# tool's load and one pull request read when a stood head is found; that read takes what is left of READY_HOOK_BUDGET after the records-page read.
 # A call with no transcript, or one that cannot be read, is allowed, as the other transcript rules allow it.
 READY_MARK_READ_TIMEOUT = 20
 READY_RUN_FLAGS = ("--ready", "--confirm")
@@ -2252,11 +2269,11 @@ def ready_mark_hit(tool: str, tool_input, transcript: str, where: str, command: 
         return None
     if not isinstance(transcript, str) or not transcript or not where or not uses_merge_tool(where):
         return None
+    calls = ready_page_calls(tool, tool_input if isinstance(tool_input, dict) else {}, command)  # before the merge tool loads: a text with no ready call starts nothing
+    if not calls:
+        return None
     module = merge_module()
     if module is None:
-        return None
-    calls = ready_page_calls(tool, tool_input if isinstance(tool_input, dict) else {}, command)
-    if not calls:
         return None
     shas = _ready_pass_shas(transcript, module)
     if shas is None:
@@ -2268,8 +2285,11 @@ def ready_mark_hit(tool: str, tool_input, transcript: str, where: str, command: 
         number = selector if selector.isdigit() else "<pr>"
         head = ""
         if shas:  # no stood sha at all refuses without a head read
+            seconds = min(READY_MARK_READ_TIMEOUT, ready_budget_left())
+            if seconds < 1:  # the page read spent the call's budget: an unreadable head passes
+                continue
             try:
-                with module.shared_deadline(READY_MARK_READ_TIMEOUT):
+                with module.shared_deadline(seconds):
                     host = module.Host(repo=repo or None, cwd=where)
                     resolved = host.pr_number(selector)
                     number = str(resolved)
