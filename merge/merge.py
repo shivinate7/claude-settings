@@ -3987,9 +3987,9 @@ def refuse_full_disk(root):
 
 def lane_lint_resume_line(target):
     """The one line `merge --lane-lint` prints first. The harness stops a background command at its cap and the session sees only a stopped task, so the line says that is no
-    failure: the same command restarts the lint, and a job that passed on the same head is skipped (saved_pass_read) instead of run again. The mutation test run is not saved."""
+    failure: the same command restarts the lint, and a job that passed on the same key is skipped (saved_pass_read) instead of run again. The key holds the base tip, and a save prunes the clone to SAVED_PASS_KEEP results, so the line names both limits. The mutation test run is not saved."""
     return (f"merge: if this lint is stopped at its background cap before it ends, that is no verdict: restart it with `merge --lane-lint {target}` and the same flags. "
-            "Jobs that passed on this head are kept and skipped.")
+            f"A job that passed on this head is kept and skipped while the base tip is unchanged and fewer than {SAVED_PASS_KEEP} other jobs have saved a pass in this clone since.")
 
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_tests=False, mutate_run=True, pre_join=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
