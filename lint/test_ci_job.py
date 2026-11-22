@@ -57,7 +57,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
 sys.path.append(os.path.join(HERE, "..", "testing"))  # append: the signal-test helpers (testing/proc_fixture.py)
 import proc_fixture  # noqa: E402  the one home of the signal-test helpers; this module's wait_for is the rendezvous helper, so call proc_fixture's qualified
-from workflow_steps import run_body, step_blocks, step_env, step_with  # noqa: E402  the one home of the step parser
+from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
 sys.path.append(os.path.join(HERE, "..", "hooks"))  # append: the pin note's names (hooks/pin_note.py)
 from pin_note import ENV as PIN_NOTE_ENV  # noqa: E402  the one home of the pin note's variable (hooks/pin_note.py)
 RUN_FOLDER = _test_temp.run_folder()
@@ -381,6 +381,16 @@ class Unknowns(Job):
         self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
 
 
+def checks_hooks_gate():
+    """The `if:` of the first checks-hooks step that joins a scope flag and the event with `||`, read from checks.yml so the
+    case runs the form CI writes, never a copy of it."""
+    with open(CHECKS, encoding="utf-8") as f:
+        steps = step_blocks(job_block(f.read(), "checks-hooks"))
+    gates = [step_key(st, "if") for st in steps if "||" in (step_key(st, "if") or "")]
+    assert gates and "records_only_skip != 'true'" in gates[0], "scope: checks-hooks has no `||` step gated on records_only_skip != 'true'"
+    return gates[0]
+
+
 class Conditions(Job):
     PR = "${{ github.event_name == 'pull_request' }}"
 
@@ -402,9 +412,17 @@ class Conditions(Job):
         rc, lines, out = self.run_job(step("flag", "true", **{"if": "${{ needs.scope.outputs.code == 'false' }}"}))
         self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
 
-    def test_a_scope_flag_not_equal_to_true_reads_unknown(self):
+    def test_a_scope_flag_not_equal_to_true_reads_on_with_no_flags(self):  # CI writes this form: records_only_skip != 'true'
         rc, lines, out = self.run_job(step("flag", "true", **{"if": "${{ needs.scope.outputs.code != 'true' }}"}))
-        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
+
+    def test_records_only_skip_not_equal_to_true_reads_on_with_no_flags(self):  # the job-level form of checks and checks-hooks
+        rc, lines, out = self.run_job(step("flag", "true", **{"if": "${{ needs.scope.outputs.records_only_skip != 'true' }}"}))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
+
+    def test_the_checks_hooks_step_condition_reads_on_with_no_flags(self):
+        rc, lines, out = self.run_job(step("hooks gate", "true", **{"if": checks_hooks_gate()}))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
 
     def test_not_cancelled_reads_true(self):
         cond = "${{ !cancelled() && needs.scope.outputs.mods == 'true' }}"
@@ -1521,11 +1539,15 @@ class SuiteSteps(Job):
         except OSError:
             return 0
 
-    def sibling_repo(self, code=0):
+    def sibling_repo(self, code=0, records_only_skip=None):
         """The repo of the sibling-pass cases: the diff holds only hooks/bridge.py, which the counted suite hooks/test_wiring.py
-        opens, so the selector picks that suite and LINT_STEP runs and passes. The suite exits `code`."""
-        self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": self.counted(suite_text(("bridge.py",), code=code))},
-                       {"hooks/bridge.py": "V = 2\n"}, lint=True)
+        opens, so the selector picks that suite and LINT_STEP runs and passes. The suite exits `code`. `records_only_skip`,
+        when given ("true" or "false"), adds the scope script of ScopeLint.SCOPE to the base: it gives code=true and that
+        flag, so a step gated on them reads the flag's value, not the no-flags default."""
+        base = {"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": self.counted(suite_text(("bridge.py",), code=code))}
+        if records_only_skip is not None:
+            base[ScopeLint.SCOPE] = 'echo "code=true" >> "$GITHUB_OUTPUT"\necho "records_only_skip=%s" >> "$GITHUB_OUTPUT"\n' % records_only_skip
+        self.make_repo(base, {"hooks/bridge.py": "V = 2\n"}, lint=True)
         self.assertEqual(self.diff(), ["hooks/bridge.py"], "the scope: the diff holds only the file the suite opens")
 
     DOCS = step("Docs", "echo docs")  # a step of the linted job that is neither lint nor suite
@@ -1602,6 +1624,24 @@ class SuiteSteps(Job):
                 rc, lines, out = self.run_job(unreadable, self.LINT_STEP, job="checks", other=[self.DOCS], args=self.LINT)
                 self.assertEqual((rc, by_step(lines).get("Wiring suite"), self.suite_runs()), (2, "unknown", 0),
                                  "a picked suite step with %s the runner cannot read must read unknown and not run\n" % what + out)
+
+    def test_a_sibling_jobs_picked_suite_step_gated_on_records_only_skip_not_true_runs_when_the_flag_is_false(self):
+        self.sibling_repo(records_only_skip="false")
+        gated = step("Wiring suite", "python3 hooks/test_wiring.py", **{"if": checks_hooks_gate()})
+        rc, lines, out = self.run_job(self.DOCS, self.LINT_STEP, job="checks", other=[gated], args=self.LINT)
+        self.assertNotIn("UNKNOWN scope", out, "scope: the fixture's script gave no flag the step reads\n" + out)
+        self.assertEqual(by_step(lines).get("Wiring suite"), "PASS",
+                         "--lint did not run a sibling job's picked suite step whose if: reads records_only_skip != 'true' with the flag false\n" + out)
+        self.assertEqual((rc, self.suite_runs()), (0, 1), "the suite must run once, and the job exit 0\n" + out)
+
+    def test_a_sibling_jobs_picked_suite_step_gated_on_records_only_skip_not_true_is_skipped_when_the_flag_is_true(self):
+        self.sibling_repo(records_only_skip="true")
+        gated = step("Wiring suite", "python3 hooks/test_wiring.py", **{"if": checks_hooks_gate()})
+        rc, lines, out = self.run_job(self.DOCS, self.LINT_STEP, job="checks", other=[gated], args=self.LINT)
+        self.assertNotIn("UNKNOWN scope", out, "scope: the fixture's script gave no flag the step reads\n" + out)
+        self.assertEqual(by_step(lines).get("Wiring suite"), "skipped",
+                         "--lint did not skip a sibling job's picked suite step whose if: reads records_only_skip != 'true' with the flag true\n" + out)
+        self.assertEqual((rc, self.suite_runs()), (0, 0), "a skipped step must run no suite and leave the exit code 0\n" + out)
 
     def test_a_plan_prints_would_run_for_the_picked_suite_steps_of_another_ubuntu_job_and_runs_none(self):
         # the control is the case below: the same suite in the linted job
