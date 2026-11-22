@@ -379,6 +379,9 @@ UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not r
 ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may merge)"
 BUDGET_CITE = "(decision gh-api-budget, a bulk read stops below a tenth of the GitHub API budget)"
 LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a head that passes `merge --lane-lint`)"
+# The one home of the lane lint's load ceiling: the 5-minute load average per CPU at which no lint starts. The ruling's number, not a measure (decision draft-until-reviewed).
+LANE_LINT_MAX_LOAD_PER_CPU = 4.0
+LANE_LINT_LOAD_CITE = "(decision draft-until-reviewed, a local lane lint starts only while the 5-minute load is under 4 per CPU)"
 WORKFLOW_READ_CITE = "(decision private-repos-no-ci, the workflow files on the base set the wait, so a file the tool cannot read stops the merge)"
 HEAD_STAMP_CITE = "(decision private-repos-no-ci, a setup PR's own stamp that turns CI off is read and checked in full, so a broken one stops the merge)"
 # The paths a review record's `--guard no` refuses: the rule dirs, then the tool and the hooks, as folder prefixes. GUARD_FILES match a whole path.
@@ -3985,6 +3988,24 @@ def refuse_full_disk(root):
                    f"`python3 {shlex.quote(landed_sweep())} --root {shlex.quote(str(root))} --confirm` "
                    "(decision machine-load-brake, the lane lint refuses at the full disk floor in a cloud session too).")
 
+def refuse_loaded_machine():
+    """Refuse a lane lint while the 5-minute load average per CPU is at LANE_LINT_MAX_LOAD_PER_CPU or more: on a loaded machine the lint runs past CI,
+    which then proves the head sooner (decision draft-until-reviewed). The guard's load brake reads memory and disk, never the load average, so its readers do not fit here.
+    A load or a CPU count that cannot be read (no os.getloadavg on this platform, a CPU count of None) prints one line that says so, and the lint goes ahead.
+    Cost: one os.getloadavg call and one os.cpu_count call, no process and no file."""
+    try:
+        five_minute = os.getloadavg()[1]
+        cpus = os.cpu_count()
+    except (AttributeError, OSError):
+        five_minute = cpus = None
+    if five_minute is None or not cpus:
+        print("merge: the 5-minute load or the CPU count read as unknown, so the lane lint goes ahead", file=sys.stderr)
+        return
+    per_cpu = five_minute / cpus
+    if per_cpu >= LANE_LINT_MAX_LOAD_PER_CPU:
+        raise Stop(f"the 5-minute load reads {per_cpu:.1f} per CPU ({five_minute:.2f} over {cpus} CPUs), at or above the {LANE_LINT_MAX_LOAD_PER_CPU:g} limit. "
+                   f"No lane lint starts now; CI proves the head instead. {LANE_LINT_LOAD_CITE}")
+
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_tests=False, mutate_run=True, pre_join=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree, removed on every exit. Takes no lock. Pushes nothing, except the one merge commit below. -> 0 on a pass, else raises Stop.
@@ -4020,7 +4041,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     A job that passes is saved (saved_pass_write) under the clone's git dir, keyed by the head sha, the commit ci-job reads (the pushed merge when the run may push), the merged tree, the base name and tip, the job name, a hash of the PR body and a hash of the tool's folders, the files LINT_FILES names outside them, and the env they read (tool_files, tool_env), taken once before the job. A rerun at
     the same key skips the job and prints "PASS (cached)"; it still posts the lane-lint comment. A fail, a timeout, an unknown and a lifted unknown are never saved,
     and a corrupt, empty or unreadable file is a miss. The mutation test run (mutate_run_check) does not go through this path and is not saved.
-    Before any tree is made, refuse_full_disk refuses a drive under the guard's full disk floor, in a cloud session and a local one."""
+    Before any tree is made, refuse_loaded_machine refuses a 5-minute load of LANE_LINT_MAX_LOAD_PER_CPU per CPU or more, then refuse_full_disk refuses a drive
+    under the guard's full disk floor, in a cloud session and a local one."""
+    refuse_loaded_machine()
     refuse_full_disk(root)
     if target.isdigit():
         host = host or Host(cwd=root)
