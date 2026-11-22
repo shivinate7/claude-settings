@@ -5,8 +5,9 @@
 
 The mutant table is MUTATIONS in hooks/mutate_guard.py; this script imports it and keeps no copy. A "guard" or "audit" mutant is found
 by hooks/mutate_shared.py `find_anchor` across the guard modules: no match is stale, two or more is ambiguous. Any other target is
-read in its own file (TARGETS), and the anchor must occur once there. The mutation run reads the same table, but only after CI has
-started the earlier mutants. A merge of main into a lane can move an anchor, and this read finds it in about a second.
+read in its own file (TARGETS), and the anchor must occur once there. The mutation run reads the same table, but its own pre-check
+covers ambiguity only for guard and audit targets. A merge of main into a lane can move an anchor. This read covers every anchor in one pass,
+in about a second, and names each bad one.
 
 Prints `PASS mutant anchor census: N mutants` and exits 0, or one `FAIL` line per bad mutant, naming its label, its target and the
 file or folder searched, and exits 1. It does not check the required-case name or the mutant file names: the mutation run does.
