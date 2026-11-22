@@ -7978,9 +7978,10 @@ class ReviewedRead:
     """A stand-in for merge.reviewed_read. `batch` are the pull requests whose record passes (act `batch`), `others` are (number, act) pairs, and
     every number is an open pull request on main. `fail` makes the read raise. `calls` counts the reads, so a case proves whether a list was read."""
 
-    def __init__(self, batch=(), others=(), fail=None):
+    def __init__(self, batch=(), others=(), fail=None, stacked=()):
         self.rows = sorted([(n, "batch") for n in batch] + list(others))
         self.fail = fail
+        self.stacked = set(stacked)  # the numbers whose base is another branch, not main
         self.calls = 0
 
     def __call__(self, h, cfgrel=None, facts=None, ledger=None):
@@ -7988,7 +7989,7 @@ class ReviewedRead:
         if self.fail is not None:
             raise self.fail
         ledger.extend({"number": n, "act": act, "owner": "batch runner", "ageHours": 1.0, "red": False} for n, act in self.rows)
-        pulls = [{"number": n, "base": {"ref": "main"}, "head": {"sha": "%040d" % n}} for n, _ in self.rows]
+        pulls = [{"number": n, "base": {"ref": "pr-%d" % n if n in self.stacked else "main"}, "head": {"sha": "%040d" % n}} for n, _ in self.rows]
         return [], pulls, {}
 
 
@@ -8070,6 +8071,18 @@ class CombineHint(LaneFixture):
         for n in range(102, 112):
             self.assertIn("#%d" % n, line, "ready PR #%d is not named: %s" % (n, line))
         self.assertRegex(line, r"combine_train\.py --root \S+ --build --name <name>$", "the line gives no command that builds the train: " + line)
+
+    def test_a_batch_row_on_a_stacked_base_is_not_listed_as_ready(self):
+        self.lock_lint_tree(self.live_pid())
+        rc, text = self.hint_run(ReviewedRead(batch=range(101, 113), stacked=(105,)), "--lane-lint", "7")  # 101 is the front; 105 sits on a stacked base
+        hint = hint_lines(text)
+        self.assertEqual(len(hint), 1, "no one hint line: " + text)
+        line = hint[0]
+        self.assertNotIn("#105", line, "a batch row on a stacked base is listed as ready: " + line)
+        self.assertNotIn("#101", line, "the front PR is listed as ready: " + line)
+        self.assertIn("Combine the 10 ready PRs", line, "the count is not the ten ready PRs on main behind the front: " + line)
+        for n in (102, 103, 104, 106, 107, 108, 109, 110, 111, 112):
+            self.assertIn("#%d" % n, line, "ready PR #%d on main is not named: %s" % (n, line))
 
     def test_a_live_lock_with_no_ready_pr_says_none_and_merge_alone(self):  # the empty state: no `batch` row at all
         self.lock_lint_tree(self.live_pid())
