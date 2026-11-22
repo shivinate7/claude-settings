@@ -54,9 +54,10 @@
                           The fix check's MODEL must be sonnet (exit 2 otherwise), and a reviewer's later rounds must equal their round row's model.
                           The first round takes its row's model (the `1 guard` row with --guard yes, else the `1 other` row), or `unknown`; a first-round model
                           below its row prints with a stderr flag and is not refused.
-                          A review log stays done when the live head differs from its Head only by clean merges of main: each
-                          commit after Head is a merge with two parents, its second parent on main and its tree `git merge-tree --write-tree` of them.
-                          Any commit with one parent ends the walk as stale. `merge --reviewed` proves it
+                          A review log stays done when the live head differs from its Head only by clean merges of main and same-tree commits: each
+                          commit after Head is a merge with two parents, its second parent on main and its tree `git merge-tree --write-tree` of them,
+                          or a commit with one parent whose tree equals its parent's (an empty commit, or a message-only trailer one: owner item 514 b, 13:26 CST Nov 22).
+                          Any other commit with one parent ends the walk as stale. `merge --reviewed` proves it
                           (live_review_state). A read or a merge-tree that cannot run, such as a commit the checkout lacks after one fetch, keeps
                           the record stale and the line says unknown; the fix verifier then refuses. Any other difference keeps today's rules.
                           --accepted adds the optional `Owner accepted: <ruling id>, <time>` line directly before Net value. The id must be own-<PR>-<letters>
@@ -5441,7 +5442,8 @@ def heals_stale_page(root, base, path):
 
 def relayed_head_holds(root, branch, relayed, live, base=None, heals=None):
     """True when the live head is the head a relayed yes named, or sits on it with only this tool's own commits between: a Record-claim
-    commit (head_claim's trailer), its revert (claim_under_head's subject), a page-only commit (page_only), or, where `heals()` is true, a clean merge of `base`
+    commit (head_claim's trailer), its revert (claim_under_head's subject), a page-only commit (page_only), a commit whose tree equals its parent's
+    (same_tree_as_parent; owner item 514 b, widened 13:33 CST Nov 22), or, where `heals()` is true, a clean merge of `base`
     (base_merge_commit): the commits a requiredChecks "none" heal pushes (heals_stale_page). Under any other setting a merge of the base moves the head. The walk follows
     first parents, so the base's own commits behind a merge are not read. The branch is fetched for the commits; the base only when a merge commit is met.
     A fetch or a log that fails, or a live head the fetch did not read, counts as a head that moved: the yes needs no more than a refusal."""
@@ -5458,14 +5460,24 @@ def relayed_head_holds(root, branch, relayed, live, base=None, heals=None):
         if not base_read:
             base_read.append(not git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")[0])
         return base_read[0] and base_merge_commit(root, sha, base)
-    c, out = git(root, "log", "--first-parent", "--format=%H%x09%s%x09%(trailers:key=Record-claim,valueonly,separator=%x2C)", f"{relayed}..{live}")
+    c, out = git(root, "log", "--first-parent", "--format=%H%x09%P%x09%s%x09%(trailers:key=Record-claim,valueonly,separator=%x2C)", f"{relayed}..{live}")
     if c or not out.strip():
         return False
     for line in out.splitlines():
-        sha, subject, ids = (line.split("\t") + ["", ""])[:3]
-        if not (ids.strip() or subject.startswith('Revert "Claim record numbers"') or page_only(root, sha) or base_merge(sha)):
+        sha, parents, subject, ids = (line.split("\t") + ["", "", ""])[:4]
+        if not (ids.strip() or subject.startswith('Revert "Claim record numbers"') or same_tree_as_parent(root, sha, parents) or page_only(root, sha) or base_merge(sha)):
             return False
     return True
+
+def same_tree_as_parent(root, sha, parents):
+    """True when `sha` has one parent (`parents`, the space-separated %P of its log row) and its tree is that parent's: it changes no file, so a yes to the parent's head holds for it.
+    A read that fails is False: the head counts as moved. Cost: one `git rev-parse` start, for a one-parent commit only."""
+    ps = parents.split()
+    if len(ps) != 1:
+        return False
+    c, out = git(root, "rev-parse", f"{sha}^{{tree}}", f"{ps[0]}^{{tree}}")
+    trees = out.split()
+    return not c and len(trees) == 2 and trees[0] == trees[1]
 
 CLAIM_STEP_CITE = "(a claim is a commit, and the merge call reads only a head whose own checks are green, decision records-index-at-merge)"
 
@@ -6127,7 +6139,7 @@ def pr_had_head(h, head, live, base):
         sha = parents[0]
     return False
 
-REVIEW_MERGE_WALK = 50  # the most commits (clean merges of main) clean_merges_after walks between a record's head and the live head
+REVIEW_MERGE_WALK = 50  # the most commits (clean merges of main, and commits whose tree equals their parent's) clean_merges_after walks between a record's head and the live head
 
 def merge_state(h, parents, tree, root=None):
     """-> (state, why): how the merge commit whose parents are `parents` and whose tree is `tree` relates to git's own merge of them (merge_tree,
@@ -6163,18 +6175,23 @@ def edits_outside_conflict(root, parents, tree):
     return sorted(set(f for f in out.split("\0") if f) - set(files))
 
 def clean_merges_after(h, head, live, base=None, claims=None, root=None, merges_only=False):
-    """True when every commit after `head`, up to the live head `live`, is a clean merge of main. A clean merge of main has two
+    """True when every commit after `head`, up to the live head `live`, is a clean merge of main or a commit whose tree equals its parent's (one parent, the same tree id:
+    an empty commit, or one that adds only a message trailer; owner item 514 b, 13:26 CST Nov 22, widened at 13:33 CST to the lane-lint carry). The walk reads only parents and trees,
+    never a message, so a trailer on such a commit (Record-claim, Verified, Red-run) is still read by its own reader over the branch's commits (head_claim, claim_under_head, the
+    git log of relayed_head_holds, lint/check_red_run.py), and the walk carries no trailer's meaning. A one-parent commit whose tree differs from its parent's is not carried by this
+    route. A clean merge of main has two
     parents, a second parent main holds (Host.holds_head_gh, main being `base`, else the host's base), and git's clean merge of its parents as its tree
     (merge_state). `claims`, the stamp config path: a one-parent claim commit also counts (claim_only, read in the host's checkout). A one-parent records-page
     commit (page_only) counts on the walk, with or without `claims`, but only when the committed page is what the generator writes for its tree
     (page_is_generated): the tool's own rebuild, never a hand edit. `root` is the checkout every git read runs in, else the host's (h.cwd).
-    `merges_only` (the lane lint's carry, lint_carried) drops both one-parent routes: any commit with one parent, a claim or a page commit too, ends the walk False. The walk reads the page commit itself, ahead of the claims route, because it must Stop on a
+    `merges_only` (the lane lint's carry, lint_carried) drops both one-parent routes: a claim or a page commit after a merge ends the walk False. The same-tree commit is no route of
+    its own: it is read first, in both modes, and it changes no tree. The walk reads the page commit itself, ahead of the claims route, because it must Stop on a
     read it cannot make and must run with no stamp config; claim_only proves a page the same way for its other callers. Both count since the
     merge tool's own claim and its page rebuild move the reviewed head by exactly that. The walk follows first parents from `live` and must reach `head` within
-    REVIEW_MERGE_WALK commits. A commit with one parent (an empty commit too), a merge of three, a merge of a branch main lacks, an edited or conflicted merge, a
-    longer walk and a head that is never reached are all False. A failed read, a commit read that names no tree, and a merge git cannot read
+    REVIEW_MERGE_WALK commits. A commit with one parent that changes the tree, a merge of three, a merge of a branch main lacks, an edited or conflicted merge, a
+    longer walk and a head that is never reached are all False. A failed read, a commit read that names no tree (a one-parent commit's, or its parent's, too), and a merge git cannot read
     (merge_state "unknown") raise Stop: so do a page commit whose reads fail and a generator run that fails: unknown, never False and never True.
-    Cost: one commit read per commit walked (each sha read once); one holds_head_gh compare (one gh call) and one merge_state per merge commit (four rev-parse starts and one
+    Cost: one commit read per commit walked (each sha read once), and one for the head's own tree when a same-tree commit sits on it; one holds_head_gh compare (one gh call) and one merge_state per merge commit (four rev-parse starts and one
     merge-tree start); and at most one fetch_branch_heads a run (merge_state's, for a commit the checkout lacks), with or without `merges_only`. Without
     `merges_only`, also per one-parent commit, page_only's git reads (one per commit, two only for a commit with the subject PAGE_SUBJECT), and for a page commit
     one temporary worktree, one `git show` and one generator run (at most one per commit, never repeated for a sha; measured median 0.56 s, n=5, on a real tool page commit)."""
@@ -6189,6 +6206,13 @@ def clean_merges_after(h, head, live, base=None, claims=None, root=None, merges_
         if sha == head:
             return True
         parents, tree = commit(sha)
+        if len(parents) == 1:  # a commit whose tree equals its parent's changes nothing, so a record or a lint PASS on the parent holds for it: empty, or a message-only trailer (owner item 514 b, 13:26 CST Nov 22, widened 13:33 CST)
+            parent_tree = commit(parents[0])[1]
+            if not tree or not parent_tree:
+                raise Stop(f"the commit read of {(parents[0] if parent_tree else sha)[:9]} names no tree {READ_CITE}")
+            if tree == parent_tree:
+                sha = parents[0]
+                continue
         if merges_only:
             pass
         elif len(parents) == 1 and page_only(root, sha, strict=True):
