@@ -6329,13 +6329,14 @@ class NoneRequiredChecks(ScopedRepo, Env):
         self.assertEqual(rc, 0, out)
         self.assertIn(MERGE_CALL, self.calls())
 
-    def test_a_red_main_run_still_refuses_the_merge_under_a_listed_check(self):  # control: green on the old code
+    def test_a_red_main_run_does_not_refuse_the_merge_under_a_listed_check(self):
+        """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): a PR may merge onto a red main. It was a refusal under a listed check."""
         push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})
         self.set(base_runs=[main_run(901, "failure")], base_jobs={"901": [main_job("scope", "success"), main_job("checks", "failure", 20)]})
         rc, out = self.go(required=["checks"])
-        self.assertEqual(rc, 1, out)
-        self.assertIn("latest completed run is red", out)
-        self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertEqual(rc, 0, out)
+        self.assertIn("main is RED", out)
+        self.assertIn(MERGE_CALL, self.calls())
 
     def run_main_with_gh_host(self, *args, required="protection"):
         """merge.main with no host argument, so main reads the required checks from the config of the base, as in production. The gh host of
@@ -26576,6 +26577,68 @@ class DraftReady(CloudSession):
         self.run_args("101", "--ready")  # the second run finds #101 ready already
         self.assertEqual(self.host.readies, [101], "a second --ready on a ready lane asked the host to mark it ready again")
 
+    # --ready by a standing cloud session. --confirm refuses a standing pull request whose body lacks the session's own link, so --ready
+    # names the line to add, one line, and goes on. A warning only: a body edit after the ready mark still mends the gap.
+    def ready_as(self, role, body, n=101):
+        """`merge <n> --ready` as a cloud session that records `role` (None: no role file), on lane draft n whose body is `body`. -> (rc, stdout, stderr)."""
+        self.lane(n)
+        self.host.batch_pulls[n]["draft"] = True
+        self.host.batch_pulls[n]["body"] = body
+        if role is None:  # a subtest's earlier role file would otherwise still name a role here
+            if os.path.exists(self.role_file):
+                os.remove(self.role_file)
+        else:
+            self.put_role(role)
+        return self.run_main(str(n), "--ready")
+
+    def session_note(self, text):
+        """The lines of `text` that carry this session's own link. The note is the only ready output that names it."""
+        return [line for line in text.splitlines() if OWN_SESSION_LINK in line]
+
+    def test_a_standing_ready_with_its_own_link_in_the_body_prints_no_session_line(self):
+        self.assertIn(OWN_SESSION_LINK, OWN_PR_BODY, "P7, the scope before the subject: the case's body does not name this session")
+        rc, out, err = self.ready_as("standing", OWN_PR_BODY)
+        self.assertEqual(self.session_note(out + err), [], "--ready named this session's link as missing from a body that holds it: %s" % (out + err))
+        self.assertEqual(rc, 0, "--ready with the session's own link was refused: %s" % (out + err))
+        self.assertEqual(self.host.readies, [101], "--ready did not mark #101 ready: %s" % (out + err))
+
+    def test_a_standing_ready_without_a_session_link_prints_the_line_naming_its_id(self):
+        for n, body in ((101, "Small edit.\n"), (102, "")):  # an empty body is the state a pull request opened with no text holds
+            with self.subTest(body=body):
+                self.assertNotIn("claude.ai/code/", body, "P7, the scope before the subject: the case's body names a session link")
+                rc, out, err = self.ready_as("standing", body, n=n)
+                note = self.session_note(out + err)
+                self.assertEqual(len(note), 1, "--ready printed no one line naming this session's link for a body without it: %s" % (out + err))
+                self.assertIn("Session: " + OWN_SESSION_LINK, note[0], "the line does not give the line to add with this session's id: %s" % note[0])
+                self.assertEqual(rc, 0, "the missing link refused --ready: %s" % (out + err))
+
+    def test_a_standing_ready_with_only_another_sessions_link_prints_the_line(self):
+        self.assertNotIn(OWN_SESSION_LINK, OTHER_PR_BODY, "P7, the scope before the subject: the case's body names this session, so the line would be no gap")
+        self.assertIn("claude.ai/code/session_", OTHER_PR_BODY, "the case's body holds no session link at all")
+        rc, out, err = self.ready_as("standing", OTHER_PR_BODY)
+        note = self.session_note(out + err)
+        self.assertEqual(len(note), 1, "--ready printed no one line naming this session's link when only another session's link is in the body: %s" % (out + err))
+        self.assertIn("Session: " + OWN_SESSION_LINK, note[0], "the line does not give the line to add with this session's id: %s" % note[0])
+        self.assertEqual(rc, 0, "another session's link refused --ready: %s" % (out + err))
+
+    def test_a_batch_runner_or_an_unrecorded_session_gets_no_session_line_on_ready(self):
+        # the body names no session, so only the recorded role decides whether the line is printed. A lane is not driven here: its own-pull-request
+        # check needs the lane fixture's repo name and step, which only LaneOwnMerge sets up.
+        for n, role in ((101, "batch-runner"), (102, None)):
+            with self.subTest(role=role):
+                rc, out, err = self.ready_as(role, "Small edit.\n", n=n)
+                self.assertEqual(self.session_note(out + err), [], "a session with role %r got the standing session's line on --ready: %s" % (role, out + err))
+                self.assertEqual(rc, 0, "a session with role %r was refused its --ready: %s" % (role, out + err))
+                self.assertIn(n, self.host.readies, "a session with role %r did not get #%d marked ready: %s" % (role, n, out + err))
+
+    def test_a_standing_ready_warns_and_goes_on_to_the_ready_mark(self):
+        rc, out, err = self.ready_as("standing", "Small edit.\n")
+        self.assertEqual(len(self.session_note(out + err)), 1, "--ready printed no session line before the ready mark: %s" % (out + err))
+        self.assertEqual(rc, 0, "the session line refused --ready: %s" % (out + err))
+        self.assertEqual(self.host.readies, [101], "--ready did not go on to mark #101 ready after the session line: %s" % (out + err))
+        self.assertFalse(self.host.batch_pulls[101]["draft"], "#101 is still a draft after --ready went on past the session line: %s" % (out + err))
+        self.assertFalse(getattr(self.host, "merged", False), "--ready merged #101: %s" % (out + err))
+
     # --ready on a draft whose head lacks main's tip. A clean merge with the tip is pushed as a merge commit (parents: the head, then the
     # tip), then the records page commit when the page is stale. The merge is git's own, so the tip adds nothing to the pushed tree.
 
@@ -28054,6 +28117,18 @@ class StaleMergeTrees(unittest.TestCase):
         patch = unittest.mock.patch.object(tempfile, "tempdir", self.tmpdir)
         patch.start()
         self.addCleanup(patch.stop)
+        # The hold check reads processes through sweep.processes_in. An empty reader keeps a live pid on the runner from deciding
+        # a dead tree's verdict. A case that needs a live child found by its working folder calls read_real_processes.
+        self.real_processes_in = sweep.processes_in
+        processes = unittest.mock.patch.object(sweep, "processes_in", return_value=([], []))
+        self.fake_processes_in = processes.start()
+        self.addCleanup(processes.stop)
+
+    def read_real_processes(self):
+        """Put the real process reader back for this case."""
+        restore = unittest.mock.patch.object(sweep, "processes_in", self.real_processes_in)
+        restore.start()
+        self.addCleanup(restore.stop)
 
     def make_tree(self, name, reason, root=None, prefix="merge-wt-"):
         """A <prefix><name> folder with a locked worktree in it, as the merge tool makes one (prefix merge-wt- or merge-fresh-),
@@ -28089,6 +28164,8 @@ class StaleMergeTrees(unittest.TestCase):
         tmp, wt = merge.add_worktree(self.repo, self.head)
         self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
 
+        self.assertTrue(self.fake_processes_in.called,
+                        "scope: the hold check must read processes through the fake, or the fake decides nothing")
         self.assertFalse(os.path.exists(stale_tmp),
                          "a merge-wt tree whose merge pid %d is dead must be removed when add_worktree starts" % dead)
         self.assertNotIn(os.path.realpath(stale_wt), self.locked_trees(),
@@ -28199,6 +28276,7 @@ class StaleMergeTrees(unittest.TestCase):
         dead = reaped_child_pid()
         control_tmp, _ = self.make_tree("gone", "merge tool, pid %d" % dead, prefix="merge-fresh-")
         held_tmp, held_wt = self.make_tree("held", "merge tool, pid %d" % dead, prefix="merge-fresh-")
+        self.read_real_processes()  # the live child is found by its working folder, which only the real reader reads
         holder = self.start_holder(held_wt)
         self.assertTrue(self.holds_inside(holder, held_tmp), "scope: the live child must have its working folder in the tree before add_worktree runs")
 
@@ -28232,6 +28310,7 @@ class StaleMergeTrees(unittest.TestCase):
         it. A dead folder with no process in it, in the same sweep, goes."""
         dead = reaped_child_pid()
         held, holders, control = {}, {}, {}
+        self.read_real_processes()  # each live child is found by its working folder, which only the real reader reads
         for kind, pattern in self.PLAIN_KINDS.items():
             control[kind] = self.make_folder(pattern % dead)
             held[kind] = self.make_folder((pattern % dead).replace("run", "held"))

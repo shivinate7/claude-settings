@@ -205,7 +205,7 @@
                           A head whose diff against the base touches hooks/mutate_*.py or hooks/mutate_*.mjs also runs, after a passing lint, the command of each of the head's mutation test shard jobs (CI step "Guard mutation test, shard i/M") in that same worktree.
                           The run happens at the hand-off lint; the batch runner's pre-join lint skips it when a hand-off PASS names the live head.
                           It FAILs on any survivor, on any wrong-cause or unknown mutant (as CI does), on a run past a shard job's
-                          timeout-minutes, on a command that cannot start, on a report it cannot read at any exit, and on a tally at a
+                          timeout-minutes (stretched by the 5-minute load per CPU, up to four times; a cut-off run reads "stopped at cap under load X"), on a command that cannot start, on a report it cannot read at any exit, and on a tally at a
                           nonzero exit (a table is judged by its counts, not its exit code). It prints its wall time and killed,
                           survived and unknown counts, on the PASS line or in the FAIL text. Extra cost, only then: up to three shard runs
                           one after another (decision lanes-run-no-full-ci-job holds the measured cost); on any other head, one `git diff --name-only`. A pre-join lint that skips
@@ -243,6 +243,8 @@
                           ready) and nothing more. A PR that is ready already is left as it is. It
                           merges no pull request, takes no lock and needs no merge role. A red head or a head that conflicts with the base is not marked ready.
                           The step also closes each open PR the body names as replaced, after the checks and the push and before the ready mark.
+                          A cloud session that records the standing role gets one warning line first when the body lacks its own `Session: https://claude.ai/code/<id>` link
+                          (session_link_note, the read --confirm refuses on); the ready mark goes ahead.
                           A repo with merge.readyChecks gets the pre-ready run: the checks, the debt-close lint and the open-PR clash (the head against every
                           other open PR on its base), each one line `pass NAME`, `fail NAME: why` or `unknown NAME: why`, before any push. A PR on a base
                           other than the default branch gets its ci-job steps run on the merge of its head with that base.
@@ -3690,6 +3692,21 @@ def mutate_report_counts(out):
         return int(line.group(1)), by_label.get("survived", 0), by_label.get("unknown", 0), unread, True, by_label.get("wrong cause", 0)
     return (0, 0, 0, unread, False, 0) if unread else None
 
+MUTATE_LOAD_MAX_FACTOR = 4.0  # most a shard's cap grows under load: a stuck run still ends in bounded time (unmeasured; a first value)
+
+def mutate_load_per_cpu():
+    """The 5-minute load average per CPU, or None where it cannot be read (Windows has no load average). The brake's readings
+    (hooks/guard.py read_load) hold memory and disk only, and the brake never reads the load average; the cap stretch here is no brake, it
+    refuses nothing. A shard's cap is a wall-clock time measured on an idle machine, so a loaded one needs the load average to size it."""
+    try:
+        return os.getloadavg()[1] / (os.cpu_count() or 1)
+    except (AttributeError, OSError):
+        return None
+
+def mutate_cap_factor(load):
+    """How many times a shard's cap stretches under `load` per CPU: 1 at or below one run per CPU, then the load itself, to MUTATE_LOAD_MAX_FACTOR."""
+    return 1.0 if load is None else min(MUTATE_LOAD_MAX_FACTOR, max(1.0, load))
+
 MUTATE_VERDICT_DIR_ENV = "MUTATE_VERDICT_DIR"  # the env name hooks/mutate_shared.py reads for the folder a leg saves its judged mutants in
 
 def mutate_verdict_dir():
@@ -3755,11 +3772,17 @@ def mutate_run_check(wt):
         except (OSError, ValueError):
             pass
 
+    # One read, before any shard starts: a later shard would read a load that holds the earlier shard's own workers (one per CPU), and so stretch a cap for load that is the lint's own.
+    load = mutate_load_per_cpu()
+    factor = mutate_cap_factor(load)
+
     def run_one(job, body, cap, env, label):
         start = time.monotonic()
         start_error = ""
         tag = f"mutation test shard {label}"
-        progress(f"{tag}: start, job {job}, cap {cap} min")
+        seconds = cap * 60 * factor
+        load_text = f", load {load:.1f} per CPU, cap x{factor:.1f}" if factor > 1 else ""
+        progress(f"{tag}: start, job {job}, cap {cap} min{load_text}")
         stop, interval = threading.Event(), MUTATE_HEARTBEAT_SECONDS
         def heartbeat():  # the runner's stdout is captured, so these lines are the only sign a long shard is alive; no mutant id, as none is read here
             while not stop.wait(interval):
@@ -3767,7 +3790,7 @@ def mutate_run_check(wt):
         beat = threading.Thread(target=heartbeat, name="mutate-heartbeat", daemon=True)
         try:
             beat.start()
-            c, out = sh(shlex.split(body), cwd=wt, env=env, timeout=cap * 60, live_stderr=True)
+            c, out = sh(shlex.split(body), cwd=wt, env=env, timeout=seconds, live_stderr=True)
         except subprocess.TimeoutExpired as e:  # the stdout read before the timeout is bytes on POSIX even under text=True, and None when nothing was read
             partial = e.stdout if e.stdout is not None else e.output
             c, out = None, (partial.decode("utf-8", errors="replace") if isinstance(partial, bytes) else partial or "").strip()
@@ -3780,13 +3803,18 @@ def mutate_run_check(wt):
         if start_error:
             progress(f"{tag}: did not start")
             return "mutation test run did not start", [f"the mutation test command could not start ({start_error}), so no mutation test run was made"]
-        wall = round(time.monotonic() - start) if c is not None else cap * 60
+        wall = round(time.monotonic() - start) if c is not None else round(seconds)
         counts = mutate_report_counts(out)
         killed, survived, unknown, unread, tally, wrong = counts or (0, 0, 0, 0, False, 0)
         progress(f"{tag}: end, {wall} s, killed {killed}, survived {survived}, unknown {unknown}")
         failures = []
-        if c is None or wall > cap * 60:
-            failures.append(f"the mutation test run took {wall} s, past the {cap}-minute cap of job {job}")
+        if c is None or wall > seconds:
+            # A shard stopped at its cap judged no mutant survived: it proves nothing either way. It still fails the lint, but as a stop, never as a failed mutant.
+            if factor > 1:
+                failures.append(f"the mutation test run stopped at cap under load {load:.1f} per CPU: it took {wall} s, past the {cap}-minute cap of job {job}, stretched x{factor:.1f} for the load. "
+                                "The stop is no mutant verdict: the run was cut off, so rerun it when the load drops")
+            else:
+                failures.append(f"the mutation test run stopped at its cap: it took {wall} s, past the {cap}-minute cap of job {job}. The stop is no mutant verdict: the run was cut off")
         if counts is None:
             tail = out.splitlines()[-TOUCHED_TAIL_LINES:]  # the cause is the last stdout lines (mutate_guard prints `ERROR ...`); the whole stdout would bury it
             failures.append("\n".join([f"the mutation test run exited {'at its timeout' if c is None else c} and printed no report that can be read"
@@ -7514,6 +7542,16 @@ def own_session_link(body):
     own = remote_session_id()
     return bool(own) and own in re.findall(r"https://claude\.ai/code/(session_[A-Za-z0-9_-]+)", body or "", re.ASCII)
 
+def session_link_note(info):
+    """The one line `--ready` prints when a standing session's own link is missing from the pull request body, or None. It reads what --confirm reads (own_session_link),
+    for the same session (a cloud one that records the standing role), so the gap shows at the ready pass and not at the last step. A warning, not a refusal: --confirm
+    refuses, and a body edit after the ready mark still mends it. A session with no id has no line to name, so it gets no note."""
+    from override import remote_session_id
+    own = remote_session_id()
+    if not own or own_session_link(info.get("body")):
+        return None
+    return f"merge: this pull request's body lacks this session's link, so --confirm will refuse it. Add the line: Session: https://claude.ai/code/{own}"
+
 def standing_refusal(h, n, info, head, main=None, claims=None):
     """-> why a standing session may not merge pull request `n`, or "" when it may (ruling own-tiny-fixes-b). It must be the session's own,
     and the head's own checks must be green. A pull request past docs, code and guard paths included, needs one passing reviewer record, of any model, on the relayed head `head`,
@@ -8112,6 +8150,10 @@ def main(argv, host=None, lock=None, hosts=None):
         if a.fast_checks:  # before any lock: it reads a dry merge and writes nothing
             return fast_checks(root, cfg, a.pr, h, info)
         if a.ready:  # before any lock: a lane marks its own draft ready once, and a ready pull request is left as it is
+            if os.environ.get("CLAUDE_CODE_REMOTE") == "true" and read_merge_role() == STANDING_ROLE:  # the session --confirm reads the link for (standing_refusal)
+                note = session_link_note(info)
+                if note:
+                    say(note)
             if not info["draft"]:
                 say(f"merge: #{a.pr} is ready already. Nothing was changed.")
                 return 0
