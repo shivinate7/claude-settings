@@ -94,7 +94,7 @@ Decision `shared-resource-owner` (a shared machine names one owning repo) govern
 
 ## Rules this skill does not restate
 
-- `git-integration-branch-merge`: how lanes join a batch and how a red batch drops a lane, until the cutover. After it, a PR merges alone or joins a batch by the situation (decision `session-tiers`, the owner's 10:23 CST Nov 20 ruling), and a red main reverts the blamed lane (decision `no-merge-onto-red-main`).
+- `git-integration-branch-merge`: how lanes join a batch and how a red batch drops a lane, until the cutover. After it, a PR merges alone or joins a batch by the situation (decision `session-tiers`, the owner's 10:23 CST Nov 20 ruling), and a red main becomes the top lane at once, by revert or fix (ruling Q5 v, decision `no-merge-onto-red-main`).
 - `roles-review-cap-three`: review rounds.
 - `speak-cite-id-plus-gloss`: give every id a plain name.
 - `parallelism-no-mid-task-talk`: lanes do not talk mid-task.
