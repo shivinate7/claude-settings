@@ -43,12 +43,12 @@ def _pcsl_scope():
         if not os.path.isdir(os.path.join(where, ".git")):
             problems.append("%s is not a git tree" % where)
         try:
-            with open(os.path.join(where, ".github", "stamp.json"), encoding="utf-8") as handle:
-                stamp = json.load(handle)
+            with open(os.path.join(where, ".github", "stamp.json"), encoding="utf-8") as handle:  # glossary-ok: the repo's own file name
+                claim_config = json.load(handle)
         except (OSError, ValueError) as error:
             problems.append("%s has no readable stamp (%s)" % (where, error))
             continue
-        if ("merge" in stamp) != has_block:
+        if ("merge" in claim_config) != has_block:
             problems.append("%s has %s merge block" % (where, "no" if has_block else "a"))
     if problems:
         return False, "; ".join(problems)
