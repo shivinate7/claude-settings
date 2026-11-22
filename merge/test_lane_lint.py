@@ -4140,6 +4140,10 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assertEqual(self.host.readies, [7], out)
         self.assertEqual(self.show("feat", merge.RECORDS_PAGE), tm.page("gap-one").strip())
 
+    def test_ready_checks_that_pass_still_run_and_mark_ready_at_4_per_cpu(self):  # the ready checks take no load gate
+        with load_readings([LOAD_AT_CEILING]):
+            self.test_declared_steps_that_pass_run_ci_job_once_on_the_tree_pushed_and_mark_ready()
+
     def test_a_declared_step_that_passes_on_a_current_page_runs_ci_job_on_the_pr_head(self):
         self.declare(["check invariants"])
         self.on("feat", {merge.RECORDS_PAGE: tm.page()})  # the page is current: nothing to rebuild or push
@@ -4330,6 +4334,10 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
                         "the final line does not list the declared qualified name: " + out)
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.host.readies, [7], out)
+
+    def test_ready_checks_of_two_jobs_still_run_once_each_at_4_per_cpu(self):  # pre_ready_rows takes no load gate either
+        with load_readings([LOAD_AT_CEILING]):
+            self.test_two_jobs_run_ci_job_once_each_in_first_appearance_order_with_only_their_own_steps()
 
     def test_two_jobs_run_ci_job_once_each_in_first_appearance_order_with_only_their_own_steps(self):
         self.pre_ready_lane([SCAFFOLD_READY, "STE lint"])  # the qualified job is listed first: the order is the list's, not a fixed one
@@ -7214,28 +7222,47 @@ class LaneLintDiskFloor(LaneFixture):
 LOAD_CPUS = 2  # on 2 CPUs, a load of 8.0 reads 4.0 per CPU and a load of 7.8 reads 3.9
 LOAD_AT_CEILING = 8.0
 LOAD_UNDER_CEILING = 7.8
+LOAD_IDLE = 0.0
+
+
+@contextlib.contextmanager
+def load_readings(readings, cpus=LOAD_CPUS):
+    """Patch os.getloadavg to answer `readings` in turn, the last one for every later call, and os.cpu_count to `cpus` (None: unknown). A reading
+    that is an exception is raised instead. -> the list of readings taken so far, which grows as the block runs."""
+    taken = []
+
+    def getloadavg():
+        reading = readings[min(len(taken), len(readings) - 1)]
+        taken.append(reading)
+        if isinstance(reading, BaseException):
+            raise reading
+        return (0.0, reading, 0.0)
+
+    with unittest.mock.patch.object(os, "getloadavg", side_effect=getloadavg), \
+            unittest.mock.patch.object(os, "cpu_count", return_value=cpus):
+        yield taken
 
 
 class LaneLintLoadCeiling(LaneFixture):
     """`merge --lane-lint` on a machine whose 5-minute load is at or above 4 per CPU: refused before any worktree is made, in a cloud session and a
     local one, and the refusal names the reading and the decision (decision draft-until-reviewed). Under 4 per CPU the lint starts. An unknown CPU
-    count goes ahead with one line that says so. Cost per case: one lint, one stub start; the load and the CPU count are patched, so no real reading
-    is taken (unmeasured)."""
+    count goes ahead with one line that says so. Each job start reads the load again, so a rise after the entry read refuses that job. Cost per
+    case: one lint, one stub start; the load and the CPU count are patched, so no real reading is taken (unmeasured)."""
 
-    @contextlib.contextmanager
-    def load_reading(self, five_minute, cpus):
-        """Patch the 5-minute load to `five_minute` and the CPU count to `cpus` (None: unknown) for the block."""
-        with unittest.mock.patch.object(os, "getloadavg", return_value=(0.0, five_minute, 0.0)), \
-                unittest.mock.patch.object(os, "cpu_count", return_value=cpus):
-            yield
-
-    def lint_at_load(self, cloud, five_minute, cpus):
-        """`merge 7 --lane-lint` at the reading, the lint stubbed to PASS (use_ci_job first). -> (rc, output, worktree adds)."""
+    def lint_at_readings(self, cloud, readings, cpus=LOAD_CPUS, keep_saved=False):
+        """`merge 7 --lane-lint` with the load answering `readings` (load_readings), the lint stubbed to PASS (use_ci_job first). keep_saved: the
+        saved PASS of this head stays, so a rerun can take it. -> (rc, output, worktree adds, readings taken)."""
         if os.path.exists(self.log):
             os.remove(self.log)  # lint_calls reads the whole log, so an earlier lint in the same case must not count here
-        self.forget_saved_passes()  # a saved PASS of this head skips the job, and these cases count the job's runs
-        with self.load_reading(five_minute, cpus), self.worktree_adds() as adds:
+        if not keep_saved:
+            self.forget_saved_passes()  # a saved PASS of this head skips the job, and these cases count the job's runs
+        with load_readings(readings, cpus) as taken, self.worktree_adds() as adds:
             rc, text = self.run_lane("--lane-lint", "7", cloud=cloud)
+        return rc, text, adds, taken
+
+    def lint_at_load(self, cloud, five_minute, cpus):
+        """One reading for the whole lint. -> (rc, output, worktree adds)."""
+        rc, text, adds, _ = self.lint_at_readings(cloud, [five_minute], cpus)
         return rc, text, adds
 
     def test_a_load_of_3_9_per_cpu_starts_the_lint(self):  # the control: a lint at this load starts on the old code too
@@ -7274,8 +7301,43 @@ class LaneLintLoadCeiling(LaneFixture):
         self.assertEqual(len(lines), 1, "an unknown CPU count printed %d lines that name it, want one: %s" % (len(lines), text))
         self.assertIn("unknown", lines[0], "the one line does not say the reading is unknown: " + lines[0])
 
+    def test_an_unreadable_load_prints_one_line_and_the_lint_goes_ahead(self):
+        # The platform raises OSError on the load read. That is unknown, as a missing CPU count is, and the read must not end the lint.
+        self.use_ci_job(PASSING, 0)
+        try:
+            rc, text, _, taken = self.lint_at_readings(True, [OSError("the load is unreadable")])
+        except OSError as err:
+            self.fail("the unreadable load ended merge with an OSError: %s" % err)
+        self.assertGreaterEqual(len(taken), 1, "the gate did not read the load: " + text)  # scope before the subject
+        self.assertEqual(rc, 0, "an unreadable load refused the lint: " + text)
+        self.assertEqual(len(self.lint_calls()), 1, "an unreadable load did not let the lint run its job once: " + text)
+        lines = [line for line in text.splitlines() if "read as unknown" in line]
+        self.assertEqual(len(lines), 1, "an unreadable load printed %d lines that say so, want one: %s" % (len(lines), text))
 
-VERDICT_DIR_ENV = "MUTATE_VERDICT_DIR"  # the one name of the folder a mutate shard saves its verdicts in (hooks/test_mutate_shared.py ResumeTests names it too)
+    def test_a_load_that_rises_to_4_per_cpu_before_the_job_refuses_the_job(self):
+        # The entry read is old by the job's start. A rise to the ceiling in between refuses the job, and the ci-job stub never runs.
+        self.use_ci_job(PASSING, 0)
+        for cloud in (True, False):
+            with self.subTest(cloud=cloud):
+                rc, text, _, taken = self.lint_at_readings(cloud, [LOAD_IDLE, LOAD_AT_CEILING])
+                self.assertGreaterEqual(len(taken), 2, "the lint did not read the load again before its job: " + text)  # scope before the subject
+                self.assertEqual(rc, 1, "a lint whose load rose to 4 per CPU before its job went ahead: " + text)
+                self.assertRegex(text, r"reads 4\.0 per CPU", "the refusal at the job's start does not name the reading: " + text)
+                self.assertEqual(self.lint_calls(), [], "the ci-job stub ran after the load rose to 4 per CPU: " + text)
+
+    def test_a_saved_pass_rerun_under_high_load_reads_no_load_at_the_job_start(self):
+        # A saved PASS starts no job. The rerun reads the load at entry only, so the 4-per-CPU reading that follows is never taken.
+        self.use_ci_job(PASSING, 0)
+        rc, text, _, _ = self.lint_at_readings(True, [LOAD_IDLE])
+        self.assertEqual(len(self.lint_calls()), 1, "precondition: the first lint did not run its job, so no PASS is saved: " + text)
+        rc, text, _, taken = self.lint_at_readings(True, [LOAD_IDLE, LOAD_AT_CEILING], keep_saved=True)
+        self.assertEqual(len(taken), 1, "the saved-PASS rerun read the load %d times, want the entry read only: %s" % (len(taken), text))  # scope first
+        self.assertIn("PASS (cached)", text, "the rerun did not take the saved PASS: " + text)
+        self.assertEqual(rc, 0, "the saved-PASS rerun was refused: " + text)
+        self.assertEqual(self.lint_calls(), [], "the saved-PASS rerun ran its job: " + text)
+
+
+VERDICT_DIR_ENV ="MUTATE_VERDICT_DIR"  # the one name of the folder a mutate shard saves its verdicts in (hooks/test_mutate_shared.py ResumeTests names it too)
 
 
 class MutateLegVerdictDir(unittest.TestCase):
@@ -7939,6 +8001,22 @@ class CiJobHeadCopy(LaneFixture):
         self.assertNotEqual(rc, 0, "the lint passed though the head copy's own step FAILed: " + text)
         self.assertIn("head-only step", text, "the refusal does not name the head copy's FAIL: " + text)
         self.assertEqual(pass_lines(text), [], "the lint printed a PASS line beside the head copy's FAIL: " + text)
+
+    def test_the_head_copy_start_reads_the_load_again_and_4_per_cpu_refuses_it(self):
+        # The tool copy starts on an idle reading and the head copy's start reads 4 per CPU, so the head copy must not run.
+        head = self.push_lane({"bin/ci-job": self.stub_text(PASSING, 0) + "# the lane's edit of the tool\n"}, from_main=True)
+        self.assertIn("bin/ci-job", self.scope(head), "the lane does not change bin/ci-job, so the case probes no head copy")
+        if os.path.exists(self.log):
+            os.remove(self.log)
+        with load_readings([LOAD_IDLE, LOAD_IDLE, LOAD_AT_CEILING]) as taken, self.worktree_adds():
+            rc, text = self.run_lane("--lane-lint", head, cloud=False)
+        self.assertGreaterEqual(len(taken), 3, "the lint read the load %d times, want the entry, the tool copy's start and the head copy's start: %s"
+                                % (len(taken), text))  # scope before the subject
+        tool, copy = self.copies()
+        self.assertEqual(len(tool), 1, "the tool copy did not run once before the head copy's start: " + text)
+        self.assertEqual(copy, [], "the head copy ran though its start read 4 per CPU: " + text)
+        self.assertEqual(rc, 1, "a lint whose head copy started at 4 per CPU went ahead: " + text)
+        self.assertRegex(text, r"reads 4\.0 per CPU", "the refusal at the head copy's start does not name the reading: " + text)
 
     def test_pr_touching_ci_job_import_runs_head_copy(self):
         head = self.push_lane({"hooks/pin_note.py": "# the lane's edit to a module that ci-job imports\n"}, from_main=True)
