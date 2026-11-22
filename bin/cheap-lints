@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+# cheap-lints [base]: run the repo's ready checks (merge.readyChecks in .github/stamp.json) on this checkout, the same steps
+# `merge <pr> --ready` runs before a draft goes ready, so a builder or test-author finds a dated comment, a bad STE line, a long record
+# slug or a glossary name in seconds, not after a lane lint of 8 to 40 minutes. It is no hand-off proof: `merge --lane-lint` stays that.
+# base: main (default) or origin/main. Add new files to git first: the comment narration check reads the tracked working-tree diff from the
+# merge base of origin/<base>, so an untracked file is not read; STE lint also reads untracked files.
+# Run it from the repo being changed, not from claude-settings.
+# The list is the repo's own: this file names no check. It calls merge.pre_ready_rows, the one home of the per-job grouping, the
+# bin/ci-job run (--pinned, one run per job) and the verdict per check, as merge/combine_train.py does. It prints no line that the
+# merge guard reads as a ready run (merge.READY_PASS_FMT).
+# Output: one `pass|fail|unknown NAME` line per check, then one summary line. Exit 0 all pass, 1 any fail, 2 any unknown. A read that
+# cannot run (no checkout, a copy with no hooks/, a bad call, no readyChecks declared) prints `unknown cheap-lints: <why>` and exits 2,
+# never 1: no list is no proof, never a pass. Report an exit 2 as unknown.
+# Cost: one bin/ci-job run per job of the list (one process per check), one ci-job log; no worktree, no push, no timer.
+# Windows: bin\cheap-lints.cmd. Checkout: this file's clone, else the one the global CLAUDE.md names (as bin/ste-changed).
+import json, os, re, sys
+
+MERGE = os.path.join("merge", "merge.py")
+
+
+def find_root():
+    """The checkout that holds the merge tool: this file's own clone, else the one the global CLAUDE.md points at. None when neither does."""
+    own = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    if os.path.isfile(os.path.join(own, MERGE)):
+        return own
+    try:
+        import guard_pointer  # noqa: E402  the one reader of the pointer line (hooks/guard_pointer.py)
+        pointed = guard_pointer.pointer_checkout()
+    except ImportError:
+        pointed = ""
+    return pointed if pointed and os.path.isfile(os.path.join(pointed, MERGE)) else None
+
+
+def main(argv):
+    if len(argv) > 1:
+        print("unknown cheap-lints: usage: cheap-lints [base]")
+        return 2
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
+    try:
+        import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+    except ImportError as e:  # a copy install has no hooks/ beside it
+        print("unknown cheap-lints: hooks/ is not beside this file (%s). Run the copy in the claude-settings checkout." % e)
+        return 2
+    base = re.sub(r"^origin/", "", argv[0]) if argv else "main"
+    top = _nowindow.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True).stdout.strip()
+    if not top:
+        print("unknown cheap-lints: not inside a git checkout")
+        return 2
+    try:
+        with open(os.path.join(top, ".github", "stamp.json"), encoding="utf-8") as f:
+            checks = json.load(f).get("merge", {}).get("readyChecks")
+    except (OSError, ValueError, AttributeError) as e:
+        print("unknown cheap-lints: .github/stamp.json cannot be read: %s" % e)
+        return 2
+    if not checks:
+        print("unknown cheap-lints: no merge.readyChecks declared, so nothing ran")
+        return 2
+    root = find_root()
+    if not root:
+        print("unknown cheap-lints: no claude-settings checkout found. Looked at the `@<dir>/CLAUDE.md` pointer line "
+              "in the CLAUDE.md of the config dir.")
+        return 2
+    sys.path.insert(0, os.path.join(root, "merge"))
+    try:
+        import merge  # noqa: E402  the grouping, the ci-job run and the verdicts (merge.pre_ready_rows)
+    except ImportError as e:
+        print("unknown cheap-lints: the merge tool cannot be loaded: %s" % e)
+        return 2
+    rows, (state, lines, log) = merge.pre_ready_rows(top, 0, base, checks, None)
+    bad = [r for r in rows if r[0] != "pass"]
+    if bad:
+        print("\n".join(log))  # each row above names its failing check; the log holds the detail
+    print("cheap-lints: %d of %d checks pass against origin/%s%s" % (len(rows) - len(bad), len(rows), base,
+          "" if not bad else "; " + ", ".join("%s %s" % (v, n) for v, n, _ in bad)))
+    return 1 if state == "fail" or any(v == "fail" for v, _, _ in bad) else 2 if bad or state != "pass" else 0
+
+
+sys.exit(main(sys.argv[1:]))

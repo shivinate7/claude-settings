@@ -64,6 +64,8 @@ A fix loop reruns only the suites the fix changed, then runs each touched suite 
 Run PowerShell with the PowerShell tool, never powershell.exe from Bash (agent-powershell-tool).
 When worktree isolation refuses a command as too complex, split it into plain, separate commands. A step that still needs a script file is a need to report.
 
+After your last commit and before you report, run `~/.claude/bin/cheap-lints main` in your worktree. It runs the checks that `.github/stamp.json` lists under `merge.readyChecks`, in seconds. Fix each `fail` in your own files and commit again. Report a `fail` in a test file to the orchestrator. Report an `unknown` as unknown. It is no hand-off proof: `merge --lane-lint` stays that.
+
 When your commit is in, report at once. Never wait on a CI run, a pull request check, or
 another agent. The orchestrator reads the run. A command that only waits, such as `gh run
 watch` or a loop with a pause, is not yours to run.
