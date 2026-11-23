@@ -1331,7 +1331,7 @@ WIDENS_ASK = (
     "I recommend A.\n"
 )
 WIDENS_FINDING = {"ok": False, "reason": WIDENS_RULE + ": A widens a shared tool; label it and recommend B."}
-COUNT_WORDS = ("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten")
+COUNT_WORDS = ("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven")
 
 
 def judged_rules():
@@ -1416,8 +1416,8 @@ def case_prompt_flags_a_pick_one_question_whose_options_could_combine():
           sentences)
     check("prompt: a sentence never flags options that exclude each other",
           has_pin(sentences, ("never flag",), ("exclude",)), sentences)
-    check("prompt: the prompt judges against ten rules",
-          has_pin(sentences, ("against ten rules",)), sentences[:2])
+    check("prompt: the prompt judges against eleven rules",
+          has_pin(sentences, ("against eleven rules",)), sentences[:2])
 
 
 def case_widens_finding_logs_its_rule():
@@ -1879,17 +1879,17 @@ def case_prompt_never_flags_a_search_used_only_for_candidates():
           has_pin(sentences, ("never flag",), ("search",), ("candidate",)), sentences)
 
 
-def case_prompt_says_ten_rules_with_the_counts_rule():
+def case_prompt_says_eleven_rules_with_the_counts_rule():
     run = run_hook(SEARCH_COUNT_REPLY, answer=OK_ANSWER)
     sentences = rule_sentences(run, SEARCH_COUNT_REPLY)
-    check("ten rules: the prompt says against ten rules", has_pin(sentences, ("against ten rules",)),
+    check("eleven rules: the prompt says against eleven rules", has_pin(sentences, ("against eleven rules",)),
           sentences[:2])
     rules = judged_rules()
-    check("ten rules: JUDGED_RULES holds ten rules", len(rules) == 10, rules)
-    check("ten rules: JUDGED_RULES holds %s" % SEARCH_RULE, SEARCH_RULE in rules, rules)
+    check("eleven rules: JUDGED_RULES holds eleven rules", len(rules) == 11, rules)
+    check("eleven rules: JUDGED_RULES holds %s" % SEARCH_RULE, SEARCH_RULE in rules, rules)
     with open(MODULE_PATH, encoding="utf-8") as f:
         first = f.read().split("\n", 2)[1]
-    check("ten rules: the docstring says against ten rules", "against ten rules" in first, first[:120])
+    check("eleven rules: the docstring says against eleven rules", "against eleven rules" in first, first[:120])
 
 
 # Cost. A Stop that the trigger does not match starts no process and writes no file beyond the count file. Stop 1
@@ -2370,6 +2370,105 @@ def case_bold_or_parenthesized_cost_question_is_not_judged_off_sample():
         check("cost question, %s: Stop 2 never calls the model" % label, not run.calls, run.calls)
 
 
+# verification-report-unknown-reads: a reply that says a change matches main, is main's own, or is no worse than main is
+# judged, unless the reply cites a read of origin/main (a path:line on main or a main screenshot). The judge reads the
+# claim; a regex on reply prose cries wolf (decision reply-judge-samples-never-refuses).
+MAIN_RULE = "verification-report-unknown-reads"
+MAIN_CLAIM_REPLY = (  # the claim, with no read of main behind it
+    "> **Done**\n> BUILT: the settings layout, commit abc1234. It is main's own layout, no worse than main.\n"
+)
+MAIN_FINDING = {"ok": False, "reason": MAIN_RULE + ": the layout is called main's own with no read of origin/main; cite the read."}
+
+
+def case_judged_rules_names_the_main_claim_rule():
+    rules = judged_rules()
+    check("main claim: JUDGED_RULES holds %s" % MAIN_RULE, MAIN_RULE in rules, rules)
+
+
+def case_prompt_flags_a_main_claim_with_no_read():
+    run = run_hook(MAIN_CLAIM_REPLY, answer=OK_ANSWER)
+    sentences = rule_sentences(run, MAIN_CLAIM_REPLY)
+    check("main claim: a sentence of the prompt names %s" % MAIN_RULE,
+          any(MAIN_RULE + ":" in s for s in sentences), sentences[:2])
+    check("main claim: a sentence flags a claim that a change matches main, is main's own, or is no worse than main, "
+          "with no read of origin/main, and names the read: a path:line on main or a main screenshot",
+          has_pin(sentences, ("flag",), ("origin/main",), ("match", "main's own", "no worse", "regression"),
+                  ("path:line", "screenshot")), sentences)
+    check("main claim: a sentence never flags a claim that cites a read of origin/main",
+          has_pin(sentences, ("never flag", "not flag", "unless"), ("origin/main",), ("cit",)), sentences)
+
+
+def case_main_claim_finding_logs_its_rule():
+    config = sample_config("main-claim-log")
+    run = run_hook(MAIN_CLAIM_REPLY, answer=json.dumps(MAIN_FINDING), config=config, session="main-claim-log")
+    parts = (guard_lines(config) or [""])[0].split("\t")
+    check("main claim finding: guard.log rule is %s" % MAIN_RULE, len(parts) == 6 and parts[3] == MAIN_RULE, parts)
+    out = parse_stdout(run)
+    check("main claim finding: a note, never a block, exit 0",
+          run.code == 0 and isinstance(out, dict) and "decision" not in out
+          and out.get("hookSpecificOutput", {}).get("additionalContext") == MAIN_FINDING["reason"],
+          (run.code, run.out))
+
+
+# --------------------------------------------------------------------------- main claim, off sample
+# verification-report-unknown-reads: a reply that says a change matches main is judged on every Stop, so the model
+# can check it cites a read of origin/main. Code finds the phrase (MAIN_CLAIM in reply_judge.py); quoted text and the
+# words domain and maintain never match. The rows mirror the cost-rank table above.
+MAIN_CLAIM_JUDGED = (  # (phrase, reply): each alternative of MAIN_CLAIM, and its case-insensitive and curly forms
+    ("main's own", "Done: the settings layout is main's own."),
+    ("curly main's own", "Done: the settings layout is main’s own."),
+    ("same as main", "Done: the layout is the same as main."),
+    ("matches main", "Done: the layout matches main."),
+    ("matched main", "Done: the layout matched main on the run."),
+    ("no worse than main", "Done: the layout is no worse than main."),
+    ("not worse than main", "Done: the layout is not worse than main."),
+    ("no regression", "Done: the layout ships with no regression."),
+    ("capitals, No Regression", "Done: the layout ships. No Regression."),
+)
+MAIN_CLAIM_QUOTED = (  # the phrase inside quotes is the owner's words, not the session's claim
+    ("straight quotes", 'Done: the owner wrote "the settings layout is main\'s own", so the lane took it as the task.'),
+    ("curly quotes", "Done: the owner wrote “no regression”, so the lane took it as the task."),
+)
+MAIN_CLAIM_CONTROLS = (  # the words domain and maintain, with no main claim
+    ("domain", "Done: the domain name check passes."),
+    ("domain's own", "Done: the domain's own check passes."),
+    ("maintain regression", "Done: the maintain regression job passes."),
+)
+
+
+def run_main_claim_rows(scope, rows, judged):
+    """Each row's reply on Stop 2. A judged row calls the model once; every other row never calls it."""
+    module = reference_module()
+    for n, (phrase, reply) in enumerate(rows):
+        label = "%s-%02d" % (scope.replace(" ", "-"), n)
+        others = other_triggers(module, reply)
+        check("%s, %s: no other trigger matches the reply" % (scope, phrase), not others, others)
+        check("%s, %s: no cost ranking matches the reply" % (scope, phrase), not module.has_cost_rank(reply), reply)
+        run, _ = second_stop(reply, label=label, session=label)
+        if judged:
+            check("%s, %s: Stop 2 calls the model once" % (scope, phrase), len(run.calls) == 1, run.calls)
+        else:
+            check("%s, %s: Stop 2 never calls the model" % (scope, phrase), not run.calls, run.calls)
+
+
+def case_main_claim_reply_is_judged_off_sample():
+    run, _ = second_stop(MAIN_CLAIM_REPLY, label="main-claim-reply", session="main-claim-reply")
+    check("main claim: Stop 2 exit 0", run.code == 0, run.code)
+    check("main claim: Stop 2 calls the model once", len(run.calls) == 1, run.calls)
+
+
+def case_main_claim_phrases_are_judged_off_sample():
+    run_main_claim_rows("main claim", MAIN_CLAIM_JUDGED, judged=True)
+
+
+def case_main_claim_inside_quotes_is_not_judged_off_sample():
+    run_main_claim_rows("main claim quoted", MAIN_CLAIM_QUOTED, judged=False)
+
+
+def case_domain_and_maintain_are_not_judged_off_sample():
+    run_main_claim_rows("main claim control", MAIN_CLAIM_CONTROLS, judged=False)
+
+
 CASES = (
     case_stop_hook_active_never_calls_model,
     case_ignored_stop_imports_no_guard_family_module,
@@ -2451,7 +2550,7 @@ CASES = (
     case_prompt_never_flags_a_count_read_from_rest,
     case_prompt_names_the_fix_confirm_with_rest,
     case_prompt_never_flags_a_search_used_only_for_candidates,
-    case_prompt_says_ten_rules_with_the_counts_rule,
+    case_prompt_says_eleven_rules_with_the_counts_rule,
     case_rest_count_stop_starts_no_process_and_writes_no_file,
     case_search_total_stop_starts_only_the_judge_call,
     case_searched_word_with_a_digit_is_judged_off_sample,
@@ -2484,6 +2583,13 @@ CASES = (
     case_cost_rank_prompt_flags_no_measure_only_when_work_is_steered,
     case_cost_rank_style_flags_no_measure_only_when_work_is_steered,
     case_bold_or_parenthesized_cost_question_is_not_judged_off_sample,
+    case_judged_rules_names_the_main_claim_rule,
+    case_prompt_flags_a_main_claim_with_no_read,
+    case_main_claim_finding_logs_its_rule,
+    case_main_claim_reply_is_judged_off_sample,
+    case_main_claim_phrases_are_judged_off_sample,
+    case_main_claim_inside_quotes_is_not_judged_off_sample,
+    case_domain_and_maintain_are_not_judged_off_sample,
 )
 
 

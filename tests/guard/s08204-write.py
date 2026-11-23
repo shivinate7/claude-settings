@@ -518,6 +518,50 @@ sh("silent-write: a PowerShell here-string opener mid-word, then a silenced comm
    "echo foo@'\nx'; " + VCS + " commit -m x >/dev/null\n'@'", "deny", "silent-write",
    carries="a redirect silences", tool="PowerShell", cwd=NOGIT)
 
+# Silent write, a filter that drops lines. A last pipe stage that drops lines by pattern (`grep -v` in
+# any spelling, or a `sed` line delete) hides the lines a git write printed, as a discard does: a push
+# that failed is gone from the reader's view. A keep-filter prints what it keeps, and a read, or a
+# quoted or heredoc copy of the command, is text.
+sh("silent-write filter: grep -v after a push's output drops the lines, denies",
+   VCS + " push origin main 2>&1 | grep -v Everything", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write filter: grep -vE with two patterns after a push drops the lines, denies",
+   VCS + " push 2>&1 | grep -vE 'up-to-date|Everything'", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write filter: grep --invert-match after a push drops the lines, denies",
+   VCS + " push origin main | grep --invert-match x", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write filter: a sed line delete after a commit drops the lines, denies",
+   VCS + " commit -m m | sed '/nothing/d'", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write filter: sed -e with a line delete after a push drops the lines, denies",
+   VCS + " push | sed -e '/x/d'", "deny", "silent-write", cwd=NOGIT)
+
+sh("silent-write filter, allow: grep -E is a keep-filter that names the lines it keeps after a push",
+   VCS + " push 2>&1 | grep -E 'rejected|error'", "allow", cwd=NOGIT)
+sh("silent-write filter, allow: grep -v after git log is a read, moves nothing",
+   VCS + " log | grep -v x", "allow", cwd=NOGIT)
+sh("silent-write filter, allow: a heredoc body holding a filtered push is text, not a command",
+   "cat > f.txt <<'EOF'\n" + VCS + " push | grep -v x\nEOF", "allow", cwd=NOGIT)
+sh("silent-write filter, allow: echo quoting a filtered push is text",
+   'echo "' + VCS + ' push | grep -v x"', "allow", cwd=NOGIT)
+
+# A filter that drops lines is judged at any stage after the write, not only the last one. A stage that
+# prints only what it keeps, or a pattern that starts with a dash after -e or --, drops nothing.
+sh("silent-write filter: a grep -v before a tail still drops the push's lines, denies",
+   VCS + " push 2>&1 | grep -v x | tail -1", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write filter: egrep -v after a push drops the lines, denies",
+   VCS + " push 2>&1 | egrep -v x", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write filter: fgrep -v after a push drops the lines, denies",
+   VCS + " push 2>&1 | fgrep -v x", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write filter: grep --color -v after a push drops the lines, denies",
+   VCS + " push 2>&1 | grep --color -v x", "deny", "silent-write", cwd=NOGIT)
+
+sh("silent-write filter, allow: grep -e takes -v as its pattern, so it keeps the lines it names after a push",
+   VCS + " push 2>&1 | grep -e -v", "allow", cwd=NOGIT)
+sh("silent-write filter, allow: grep -- ends the options, so -v is a pattern it keeps, after a push",
+   VCS + " push 2>&1 | grep -- -v", "allow", cwd=NOGIT)
+sh("silent-write filter, allow: sed s/// substitutes text and drops no line after a push",
+   VCS + " push 2>&1 | sed 's/d/x/'", "allow", cwd=NOGIT)
+sh("silent-write filter, allow: sed -n '5p' prints only the line it names after a push",
+   VCS + " push 2>&1 | sed -n '5p'", "allow", cwd=NOGIT)
+
 TEMP_DIR = None   # back to the system temp for the sections below
 
 
