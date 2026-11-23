@@ -30,7 +30,7 @@ The report and the replay refuse nothing. No timer starts them, they start no lo
 
 ## The scores
 
-One run, 10 mutants per file, 3 suites at a time. The gold standard is the guard's own kill rate: `python3 hooks/mutate_guard.py` killed 367 of 367 hand-written mutations (0 survived, 0 wrong cause), each one tied to a named required case. The same ast engine on `hooks/guard_wsl.py` with `hooks/test_guard.py` read UNKNOWN: that suite is not green on the clean, unparsed source. So the gold is the hand-written rate, and the ast rates below are not held against it on equal terms.
+One run, 10 mutants per file, 3 suites at a time. The gold standard is the guard's own kill rate: `python3 hooks/mutate_guard.py` killed 367 of 367 hand-written mutations (0 survived, 0 wrong cause), each one tied to a named required case. The same ast engine on `hooks/guard_wsl.py` with `hooks/test_guard.py` read UNKNOWN: that suite is not green on the clean, unparsed source. So the gold is the hand-written rate, and the ast rates below are not held against it on equal terms. These runs predate the timeout verdict: a timed-out suite then counted under Crashed, and no column shows a timeout.
 
 | File | Mutants | Killed | Crashed | Survived | Rate | Gold |
 |---|---|---|---|---|---|---|
@@ -54,7 +54,7 @@ Not measured (UNKNOWN): `hooks/test_guard.py`, `merge/test_merge.py` and `lint/t
 
 ## Replay results
 
-Measured 2026-11-02. Per repo: its last 50 merged pull requests (PRs). Five mutants per PR, on added lines. A 900 s budget per PR. Kill rate is killed over ran. A crash is not a kill. Gold is the target for each row: the hand-written guard rate.
+Measured 2026-11-02. Per repo: its last 50 merged pull requests (PRs). Five mutants per PR, on added lines. A 900 s budget per PR. Kill rate is killed over ran. A crash is not a kill. Gold is the target for each row: the hand-written guard rate. These runs predate the timeout verdict: a timed-out suite then counted under Crashed, and no column shows a timeout.
 
 | Replay | PRs scored | Ran | Killed | Survived | Crashed | Kill rate | Gold | Gap |
 |---|---|---|---|---|---|---|---|---|
