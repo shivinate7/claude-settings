@@ -819,11 +819,16 @@ def spo_folder_writes(fx, name, writes):
     return problems
 
 
-def spo_folder_case(tag, name, writes, agent, command_of, passed, want="deny", folder=False):
+# The overwrite reason's words (SCRATCHPAD_OVERWRITE_REASON). The folder reason says "removing or moving it" instead.
+SPO_WRITE_OVER = "writing over it destroys work"
+
+
+def spo_folder_case(tag, name, writes, agent, command_of, passed, want="deny", folder=False, overwrite=False):
     """The files of `writes` are made, then `agent`'s call `command_of(scratchpad)` runs. With `want` "deny" the call
     is refused, and the refusal names scratchpad-owner, neither the folder nor the files. With "ask" the call is asked,
     and the ask names scratchpad-owner, neither the folder nor the files. With "allow" it passes. With `folder` a
-    refusal must be the folder's reason, which names a folder; the file's reason names a file, so it fails here."""
+    refusal must be the folder's reason, which names a folder; the file's reason names a file, so it fails here. With
+    `overwrite` a refusal must be the overwrite reason, which says that writing over the file destroys work."""
     fx = spo_fixture(tag)
     problems = spo_folder_writes(fx, name, writes)
     got, reason = spo_run(fx, agent, command_of(fx["scratch"]))
@@ -836,6 +841,8 @@ def spo_folder_case(tag, name, writes, agent, command_of, passed, want="deny", f
         problems.append(spo_refused(name, got, reason, banned))
         if folder and got == "deny" and "folder" not in reason:
             problems.append("%s: the refusal is not the folder's reason (%s)" % (name, reason[:100]))
+        if overwrite and got == "deny" and SPO_WRITE_OVER not in reason:
+            problems.append("%s: the refusal is not the overwrite reason (%s)" % (name, reason[:100]))
     return spo_result(problems, passed)
 
 
@@ -1397,6 +1404,35 @@ spo_register("scratchpad-owner: run and folder control 2, agent B's rm -rf of ag
              lambda: spo_folder_case("run-folder-ctl-2", "run and folder control 2", SPO_RUN_FOLDER, SPO_OTHER,
                                      lambda s: "rm -rf %s" % os.path.join(s, "sub"),
                                      "agent B's rm -rf of agent A's folder with no run is refused"))
+# Rule scratchpad-owner, one call that runs another agent's file and also overwrites, removes or moves another agent's
+# file. The run alone is asked, but an overwrite in the same call is refused with the overwrite reason, never asked: a
+# refused write names its own reason, which says that writing over the file destroys another agent's work. Agent A's
+# script `probe.py` and its file `other.txt` sit at the top of its scratchpad. The control names the same fixture and
+# redirects the run onto agent B's own fresh file, which no agent wrote: that run is asked, as the run control rows are.
+SPO_RUN_OVERWRITE = ((SPO_WRITER, "probe.py", PY_TEXT), (SPO_WRITER, "other.txt", "from A\n"))
+SPO_RUN_OVERWRITE_FORMS = (
+    # (case tag, label, agent B's command for the scratchpad path s)
+    ("run-overwrite-1", "run and overwrite 1, agent B's python3 of agent A's script, a redirect onto agent A's other "
+                        "file",
+     lambda s: "python3 %s > %s" % (os.path.join(s, "probe.py"), os.path.join(s, "other.txt"))),
+    ("run-overwrite-2", "run and overwrite 2, agent B's python3 of agent A's script, then rm of agent A's other file",
+     lambda s: "python3 %s && rm %s" % (os.path.join(s, "probe.py"), os.path.join(s, "other.txt"))),
+    ("run-overwrite-3", "run and overwrite 3, agent B's python3 of agent A's script, then mv of B's x.txt onto agent "
+                        "A's other file",
+     lambda s: "python3 %s && mv x.txt %s" % (os.path.join(s, "probe.py"), os.path.join(s, "other.txt"))),
+)
+for _tag, _label, _command_of in SPO_RUN_OVERWRITE_FORMS:
+    spo_register("scratchpad-owner: %s: refused with the overwrite reason" % _label,
+                 lambda t=_tag, n=_label, c=_command_of: spo_folder_case(t, n, SPO_RUN_OVERWRITE, SPO_OTHER, c,
+                                                                         "%s is refused with the overwrite reason" % n,
+                                                                         overwrite=True))
+spo_register("scratchpad-owner: run and overwrite control 1, agent B's python3 of agent A's script, a redirect onto "
+             "B's own fresh file: asked",
+             lambda: spo_folder_case("run-overwrite-ctl-1", "run and overwrite control 1", SPO_RUN_OVERWRITE, SPO_OTHER,
+                                     lambda s: "python3 %s > %s" % (os.path.join(s, "probe.py"),
+                                                                    os.path.join(s, "b-fresh.txt")),
+                                     "agent B's run of agent A's script, redirected onto B's own fresh file, is asked",
+                                     want="ask"))
 # Rule scratchpad-owner, one call that overwrites, removes or moves another agent's file and also removes or moves a
 # folder that holds another agent's file. The file alone is refused too, and the folder makes the call a refusal
 # whichever word comes first. Agent A's file `top.txt` sits beside its folder `sub`. The control rows are the folder
@@ -1780,6 +1816,18 @@ def spo_message_looks_wrong_check(name, reason):
     return "%s: the refusal lacks the sentence on what to do when the refusal looks wrong (%s)" % (name, reason[:100])
 
 
+def spo_message_ends_check(name, reason):
+    """(e): the reason ends with that sentence, or with it followed only by the decision cite in parentheses. The guard
+    prints its override offer after the cite, so the reason is read up to the cite."""
+    cut = reason.find(" (decision")
+    if cut < 0:
+        return "%s: the refusal holds no decision cite to end the reason on (%s)" % (name, reason[:100])
+    if reason[:cut].rstrip().endswith(SPO_LOOKS_WRONG):
+        return ""
+    return "%s: the reason does not end with the sentence on a refusal that looks wrong, before the cite (%s)" \
+           % (name, reason[:100])
+
+
 def spo_message_case(tag, check, passed):
     """Agent B's overwrite of agent A's file. The verdict is judged first (spo_refused: deny, the rule's id, and no
     file name); then `check` reads the reason. One problem per case, so each failure names one cause."""
@@ -1806,6 +1854,11 @@ spo_register("scratchpad-owner: message 4 the overwrite refusal tells the agent 
              lambda: spo_message_case("message-4", spo_message_looks_wrong_check,
                                       "the overwrite refusal carries the sentence on what to do when the refusal "
                                       "looks wrong"))
+spo_register("scratchpad-owner: message 5 the overwrite reason ends with the sentence on what to do when the refusal "
+             "looks wrong, before the decision cite",
+             lambda: spo_message_case("message-5", spo_message_ends_check,
+                                      "the overwrite reason ends with the sentence on what to do when the refusal "
+                                      "looks wrong, before the decision cite"))
 
 
 # The real layout (hooks/guard_shared_tree.py scratchpad_temp_bases): the scratchpad base is named by
