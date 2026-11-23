@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""At Stop, a model (Haiku) judges the final reply against ten rules. It runs on every fifth Stop and on every Stop whose reply carries an Input Needed label, the words "blocked on", a Markdown table, a GitHub search total or a cost ranking, and never refuses. A finding comes back as a note on the next turn and writes one guard.log line.
+"""At Stop, a model (Haiku) judges the final reply against eleven rules. It runs on every fifth Stop and on every Stop whose reply carries an Input Needed label, the words "blocked on", a Markdown table, a GitHub search total, a cost ranking or a claim about main, and never refuses. A finding comes back as a note on the next turn and writes one guard.log line.
 
 It is a command hook, not a `type: prompt` hook, because a prompt hook cannot exit on a field
 in code. This hook does: `stop_hook_active` true means this Stop is already a rewrite, so it
@@ -95,6 +95,10 @@ COST_RANK = re.compile(r"\b(?:costs|spends|eats|burns|takes)\s+the\s+most\b"
                        r"|\bmost\s+expensive\b|\bcostliest\b"
                        r"|\b(?:bulk|most)\s+of\s+the\s+(?:cost|spend|tokens|money)s?\b", re.I)
 QUOTED_TEXT = re.compile(r'"[^"\n]*"|“[^”\n]*”')
+# A claim about main (rule verification-report-unknown-reads): code finds the phrase, the model judges whether the
+# reply cites a read of origin/main. A hit only runs the judge.
+MAIN_CLAIM = re.compile(r"\bmain['’]s\s+own\b|\bsame\s+as\s+main\b|\bmatch(?:es|ed)?\s+main\b"
+                        r"|\b(?:no|not)\s+worse\s+than\s+main\b|\bno\s+regression\b", re.I)
 # Markdown bold, italics, code and a closing bracket or quote may follow the end mark of a sentence.
 CLOSERS = "*_~`)]}\"' "
 SENTENCE_BREAK = re.compile(r"(?<=[.!?])[*_~`)\]}\"']*\s+|\n")
@@ -108,11 +112,17 @@ def has_cost_rank(reply):
                for s in SENTENCE_BREAK.split(unquoted))
 
 
+def has_main_claim(reply):
+    """True when the reply, outside quoted text, uses a phrase that says a change matches main."""
+    return bool(MAIN_CLAIM.search(QUOTED_TEXT.sub("", reply)))
+
+
 JUDGED_RULES = ("output-start-with-point", "style-cut-narration",
                 "output-never-paste-passing-output", "output-never-hand-off-doable-step",
                 "style-table-gold-column", "questions-go-to-owner",
                 "style-limits-kept-silently", "style-question-form",
-                "verification-counts-from-rest", "measure-before-priority")
+                "verification-counts-from-rest", "measure-before-priority",
+                "verification-report-unknown-reads")
 JUDGE_RULE = "reply-judge"  # the guard.log rule when the reason names none of JUDGED_RULES
 REPLY_MAX = 12000  # the prompt rides stdin, so no argv cap; the clip bounds cost and latency only (unmeasured)
 
@@ -123,7 +133,7 @@ GH_SWITCH_SENTENCE = ("A block that hands the owner a gh command starts, after a
                       % (GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN, GH_DEFAULT_LOGIN))
 
 INSTRUCTIONS = (
-    "Judge the final reply below against ten rules. "
+    "Judge the final reply below against eleven rules. "
     "output-start-with-point: the first sentence is the point, not a preamble. "
     "style-cut-narration: cut narration and recaps; narration means lines like \"I will now...\" or \"Let me...\"; "
     "a Done/Deviations/Input Needed/Next report is never narration. "
@@ -187,6 +197,9 @@ INSTRUCTIONS = (
     "marked unmeasured or not, only when the same reply also ranks, orders or cuts work on it; "
     "the fix is to cite a figure with its unit and a date, a run id or a sample count, or to drop the work order. "
     "Never flag a ranking that cites such a figure, a question, or quoted text. "
+    "verification-report-unknown-reads: flag a reply that says a change matches main, is main's own, or is no worse than main "
+    "(no regression) without citing a read of origin/main, a path:line on main or a main screenshot. "
+    "Never flag such a claim that cites a read of origin/main. "
     "Flag only on a clear breach; when unsure answer {\"ok\": true}. "
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
 )
@@ -355,7 +368,7 @@ def main():
         stop_n = count_this_stop(hook.get("session_id"))
         if (stop_n - 1) % SAMPLE_EVERY and not TABLE_SEPARATOR.search(reply) \
                 and not BLOCKED_ON.search(reply) and not SEARCH_TOTAL.search(reply) \
-                and not has_cost_rank(reply) \
+                and not has_cost_rank(reply) and not has_main_claim(reply) \
                 and not has_input_needed(reply):
             return 0
         import decision_watch
