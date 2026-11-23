@@ -11091,16 +11091,20 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.refs(), before)
         self.assertEqual(self.worktrees(), 1)
 
-    def test_the_ready_preview_says_confirm_refuses_a_stale_page_with_no_claim(self):
+    def test_the_ready_preview_says_confirm_heals_a_stale_page_with_no_claim_under_a_named_list(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): under a named list confirm heals the tool's own page on a green proven head and merges that head,
+        # so the preview says so, and does not name the refusal and its remedy.
         self.kinds_off()
+        self.set_required(["checks"], kinds=[])
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
         before = self.refs()
         rc, out = self.run_merge("7")
         self.assertEqual(rc, 0, out)
         line = self.preview_line(out, "records")
         self.assertIn("rebuild", line)
-        self.assertIn("--confirm refuses it", line, out)
-        self.assert_remedy(line)
+        self.assertIn("--confirm heals it", line, out)
+        self.assertIn("merges that head once its checks are green", line, out)
+        self.assertNotIn("refuses it", line, out)
         self.assertEqual(self.refs(), before)
         self.assertEqual(self.worktrees(), 1)
 
