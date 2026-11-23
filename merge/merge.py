@@ -3758,19 +3758,21 @@ MUTATE_SKIPPED = "mutation test run skipped here: it runs at the lane's hand-off
 
 def mutate_report_counts(out):
     """-> (killed, survived, unknown, unread, tally, wrong) of a mutation test run's stdout, or None when it holds no report. Two forms: the per-file
-    table of hooks/mutate_shared.format_report (columns file mutants killed crashed survived rate silent; unknown is the crashed column), and the tally
-    line that run_mutants prints, which the job's own command ends with (`K of N mutations killed (S survived, W wrong cause, X skipped, U unknown)`;
-    `, U unknown` prints only when U is not 0, and `tally` is True). The tally's counts are read by their labels, not by the whole line, so this
+    table of hooks/mutate_shared.format_report (columns file mutants killed crashed timeout survived rate silent; unknown is crashed + timeout: a
+    timed-out mutant is no kill and no survivor, so it still fails the lint), and the tally line that run_mutants prints, which the job's own command
+    ends with (`K of N mutations killed (S survived, W wrong cause, X skipped, U unknown, T timeout)`; `, U unknown` and `, T timeout` print only when
+    not 0, and `tally` is True). A four-column table (from before the timeout column) is read as no report: the run's own stdout is the only input,
+    and a resumed leg reuses saved per-mutant verdicts, never a saved report. The tally's counts are read by their labels, not by the whole line, so this
     parser holds no copy of the format that hooks/mutate_shared.run_mutants prints (that module's edit is refused to a builder: a debt of one
     shared home). `wrong` is the tally's wrong-cause count, 0 for a table. `unread` counts the table's `UNKNOWN (reason)` rows: a file that read no mutant."""
-    rows = re.findall(r"^\S+[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+\d+%", out, re.M)
+    rows = re.findall(r"^\S+[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+\d+%", out, re.M)  # mutants killed crashed timeout survived
     unread = len(re.findall(r"^\S+[ \t]+UNKNOWN \(", out, re.M))
     if rows:
-        return sum(int(r[1]) for r in rows), sum(int(r[3]) for r in rows), sum(int(r[2]) for r in rows), unread, False, 0
+        return sum(int(r[1]) for r in rows), sum(int(r[4]) for r in rows), sum(int(r[2]) + int(r[3]) for r in rows), unread, False, 0
     line = re.search(r"^(\d+) of \d+ mutations killed \((.*)\)\s*$", out, re.M)
     if line:
-        by_label = {label: int(n) for n, label in re.findall(r"(\d+) (survived|wrong cause|skipped|unknown)", line.group(2))}
-        return int(line.group(1)), by_label.get("survived", 0), by_label.get("unknown", 0), unread, True, by_label.get("wrong cause", 0)
+        by_label = {label: int(n) for n, label in re.findall(r"(\d+) (survived|wrong cause|skipped|unknown|timeout)", line.group(2))}
+        return int(line.group(1)), by_label.get("survived", 0), by_label.get("unknown", 0) + by_label.get("timeout", 0), unread, True, by_label.get("wrong cause", 0)
     return (0, 0, 0, unread, False, 0) if unread else None
 
 MUTATE_LOAD_MAX_FACTOR = 4.0  # most a shard's cap grows under load: a stuck run still ends in bounded time (unmeasured; a first value)
@@ -3900,7 +3902,7 @@ def mutate_run_check(wt):
             tail = out.splitlines()[-TOUCHED_TAIL_LINES:]  # the cause is the last stdout lines (mutate_guard prints `ERROR ...`); the whole stdout would bury it
             failures.append("\n".join([f"the mutation test run exited {'at its timeout' if c is None else c} and printed no report that can be read"
                                        + ("; last stdout lines:" if tail else "; it printed no stdout"), *tail]))
-        # A table is judged on its counts at any exit code. A tally is the command's own verdict, so CI is red on its nonzero exit, and run_mutants exits 1 on any survivor, wrong cause or unknown.
+        # A table is judged on its counts at any exit code. A tally is the command's own verdict, so CI is red on its nonzero exit, and run_mutants exits 1 on any survivor, wrong cause, unknown or timeout.
         if tally and c:
             failures.append(f"the mutation test run exited {c} on a tally of killed {killed}, survived {survived}, wrong cause {wrong}, unknown {unknown}, and CI fails the job on that exit")
         if survived:
