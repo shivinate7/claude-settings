@@ -109,8 +109,31 @@ def gh_call_of(segment: str):
 
 
 # ---- a merge made outside the merge tool
-# The auto-merge tool arms the same merge: GitHub merges once the head's checks pass, so it is judged on the same head read.
-MERGE_TOOLS = ("mcp__github__merge_pull_request", "mcp__github__enable_pr_auto_merge")
+# The two auto-merge tools arm the same merge: GitHub merges once the head's checks pass, so each is judged on the same head read.
+# The desktop app's switch names its pull request by URL and carries `enabled`; turning it off merges nothing.
+APP_AUTO_MERGE_TOOL = "mcp__ccd_pr__set_auto_merge"
+MERGE_TOOLS = ("mcp__github__merge_pull_request", "mcp__github__enable_pr_auto_merge", APP_AUTO_MERGE_TOOL)
+APP_PR_URL_RE = re.compile(r"^https?://(?:www\.)?github\.com/([^/\s]+)/([^/\s]+)/pull/(\d+)", re.I)
+
+
+def merge_tool_merges(tool: str, tool_input: dict) -> bool:
+    """False for the app's auto-merge switch turned off, which merges nothing. Any other value of `enabled`, or none, is judged."""
+    return not (tool == APP_AUTO_MERGE_TOOL and tool_input.get("enabled") is False)
+
+
+def merge_tool_target(tool: str, tool_input: dict):
+    """The (number, repo) a MERGE_TOOLS call names. The app's switch names its pull request by URL; one that is no
+    github.com pull request gives ("", ""), which `merge_check` reads from the checkout, as it does for a host tool call
+    with no number."""
+    if tool == APP_AUTO_MERGE_TOOL:
+        url = tool_input.get("url")
+        found = APP_PR_URL_RE.match(url.strip()) if isinstance(url, str) else None
+        return (found.group(3), found.group(1) + "/" + found.group(2)) if found else ("", "")
+    owner, name, number = (tool_input.get(k) for k in ("owner", "repo", "pullNumber"))
+    repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
+    return "" if number is None else str(number), repo
+
+
 MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject",
                      "--match-head-commit", "-A", "--author-email"}
 # Seconds for the WHOLE read, shared: Host.head_read makes 4 `gh` REST calls (5 with a branch selector, 1 more run-list read when the check runs link more than one run; a settled head adds the
