@@ -14,7 +14,7 @@ Host surface these cases pin (the names the builder implements; IdleHost is the 
   open_pulls()      one list read per sweep; REST rows of the open pulls
   runs(sha)         the pull_request runs of a head: name, status, conclusion, event, createdAt (ISO, GitHub's own field)
   head_state(n, sha) "red: <names>" for a completed failure, "pending: <names>" while a run is still going, "green" otherwise
-  draft(n)          the local `gh pr ready <n> --undo`; a cloud host answers (False, merge.DRAFT_ROUTES)
+  to_draft(n)       the local `gh pr ready <n> --undo`; a cloud host answers (False, merge.DRAFT_ROUTES)
   post_comment(n, body)  one comment per drafted PR
 
 The clock is synthetic: every age is counted from test_merge.FAKE_NOW, so a module that reads the wall clock sees each fixture run
@@ -136,7 +136,7 @@ class IdleHost(tm.FakeHost):
             return "pending: " + ", ".join(going)
         return "green"
 
-    def draft(self, n):
+    def to_draft(self, n):
         if self.draft_refuse:
             return False, merge.DRAFT_ROUTES
         self.drafts.append(n)
