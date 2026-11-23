@@ -10,16 +10,23 @@ line with the count drafted. A failed read is unknown: that PR is left alone, an
 The clash hook (a red idle PR does not block `merge <n> --ready`) is in test_lane_lint.py, class ReadyChecks, beside the pre-ready
 clash cases, and uses IdleHost from here.
 
+A cloud host cannot draft: its route is printed, no comment says the PR returned to draft, and the PR is not counted as drafted, so a
+clash still counts it. A draft that lands before a failed comment is reported as drafted, comment failed.
+
 Host surface these cases pin (the names the builder implements; IdleHost is the fake of each):
   open_pulls()      one list read per sweep; REST rows of the open pulls
   runs(sha)         the pull_request runs of a head: name, status, conclusion, event, createdAt (ISO, GitHub's own field)
   head_state(n, sha) "red: <names>" for a completed failure, "pending: <names>" while a run is still going, "green" otherwise
   to_draft(n)       the local `gh pr ready <n> --undo`; a cloud host answers (False, merge.DRAFT_ROUTES)
   post_comment(n, body)  one comment per drafted PR
+  server_now()      GitHub's clock in epoch seconds, from the Date header of the last REST reply; None when unread. The 2 h age is
+                    judged on it, never on now()
+  now()             the local clock. The 2 h age is never judged on it; a case moves it to show that
 
 The clock is synthetic: every age is counted from test_merge.FAKE_NOW, so a module that reads the wall clock sees each fixture run
 as weeks old and fails the 1 h 59 min and the newest-run cases. The 2-hour threshold is pinned by its edges (exactly 2 h drafts, one
-second less does not), not by the module's constant name.
+second less does not), not by the module's constant name. GitHub's clock and the local clock both start at FAKE_NOW; a case moves one
+of them to show which clock the age is read from.
 
 Cost pin: one open-pulls read per sweep, and at most one runs read per non-draft PR. No file is written, and no timer is started.
 Not pinned here: a PR a person readies again with no push and that goes red and idle again. The sweep then drafts it, and a
@@ -88,6 +95,8 @@ class IdleHost(tm.FakeHost):
     runs_fail: {sha: text}: a runs() read of that head raises merge.Stop with the text (unknown for that head).
     list_fail: the text the open-pulls read raises (unknown for the whole sweep).
     drafts: each n the local draft call drafted. draft_refuse: a cloud host, which cannot send the undo and answers the route.
+    github_now: GitHub's clock, as server_now() answers it (None: unread). local_now: the clock now() answers.
+    comment_fail: the text post_comment raises merge.Stop with (a comment that fails after the draft landed).
     """
 
     def __init__(self, root, other, branch="feat"):
@@ -97,6 +106,18 @@ class IdleHost(tm.FakeHost):
         self.runs_by_sha, self.runs_reads, self.runs_fail = {}, [], {}
         self.list_fail = None
         self.drafts, self.draft_refuse = [], False
+        self.github_now, self.local_now, self.comment_fail = tm.FAKE_NOW, tm.FAKE_NOW, None
+
+    def now(self):
+        return self.local_now
+
+    def server_now(self):
+        return self.github_now
+
+    def post_comment(self, n, body):
+        if self.comment_fail:
+            raise merge.Stop(self.comment_fail)
+        super().post_comment(n, body)
 
     @classmethod
     def adopt(cls, host):
@@ -300,6 +321,69 @@ class IdleSweep(tm.Env):
         rc, text = self.sweep()
         self.assert_sweep_ran(rc, text, reads=2)
         self.assertEqual(len(self.host.posted), 1, "a second sweep posted another comment: %s" % self.host.posted)
+
+    def test_cloud_route_posts_no_comment_that_says_the_pr_returned_to_draft(self):
+        self.pr(7, [red(age=3 * HOUR)])
+        self.host.draft_refuse = True
+        rc, text = self.sweep()
+        self.assert_sweep_ran(rc, text)
+        self.assertIn(sha_of(7), self.host.runs_reads, "the runs of PR #7 were not read, so nothing was judged: " + text)
+        self.assertEqual(self.host.drafts, [], "a cloud host drafted PR #7: " + text)
+        for n, body in self.host.posted:
+            self.assertNotIn("returned to draft", body.lower(),
+                             "a comment on #%s says the PR returned to draft, and this host did not draft it: %s" % (n, body))
+
+    def test_cloud_route_leaves_the_pr_unknown_so_a_clash_still_counts_it_as_ready(self):
+        self.pr(7, [red(age=3 * HOUR)])
+        self.host.draft_refuse = True
+        said = []
+        verdict = merge.idle_prs_module().draft_one(self.host, 7, self.host.pulls[7], self.host.now(), said.append,
+                                                    (merge.Stop, OSError), merge.DRAFT_ROUTES)
+        self.assertNotIn(verdict, ("drafted", "route"),
+                         "a cloud route reads as drafted, so a clash drops PR #7 as not ready: verdict %r, %s" % (verdict, said))
+
+    def test_cloud_route_is_reported_as_unknown_and_not_drafted_in_the_sweep(self):
+        self.pr(7, [red(age=3 * HOUR)])
+        self.host.draft_refuse = True
+        rc, text = self.sweep()
+        self.assert_sweep_ran(rc, text)
+        self.assertEqual(self.host.drafts, [], "a cloud host drafted PR #7: " + text)
+        self.assertRegex(text, r"\bdrafted 0\b", "the summary counts a drafted PR on a cloud route: " + text)
+        lines = [line for line in text.splitlines() if "#7" in line]
+        self.assertTrue(any("unknown" in line or "not done" in line for line in lines),
+                        "the cloud route for PR #7 is not reported as unknown or not done: " + text)
+
+    def test_age_is_read_on_github_clock_not_a_local_clock_three_hours_ahead(self):
+        self.pr(7, [red(age=30 * 60)])
+        self.host.local_now = tm.FAKE_NOW + 3 * HOUR
+        rc, text = self.sweep()
+        self.assert_sweep_ran(rc, text)
+        self.assert_nothing_drafted(text, "a red PR pushed 30 min ago by GitHub's clock, with the local clock 3 h ahead")
+
+    def test_age_is_read_on_github_clock_not_a_local_clock_three_hours_behind(self):
+        self.pr(7, [red(age=2 * HOUR + 30 * 60)])
+        self.host.local_now = tm.FAKE_NOW - 3 * HOUR
+        rc, text = self.sweep()
+        self.assert_sweep_ran(rc, text)
+        self.assertEqual(self.host.drafts, [7], "a red PR idle 2 h 30 min by GitHub's clock was not drafted, with the local clock 3 h behind: " + text)
+
+    def test_unread_github_clock_leaves_the_pr_ready_and_does_not_use_the_local_clock(self):
+        self.pr(7, [red(age=3 * HOUR)])
+        self.host.github_now = None
+        rc, text = self.sweep()
+        self.assert_sweep_ran(rc, text)
+        self.assert_nothing_drafted(text, "a red PR idle 3 h by the local clock, with GitHub's clock unread")
+
+    def test_draft_that_lands_before_a_failed_comment_is_reported_as_drafted_comment_failed(self):
+        self.pr(7, [red(age=3 * HOUR)])
+        self.host.comment_fail = "gh api issues/7/comments failed: HTTP 502"
+        rc, text = self.sweep()
+        self.assert_sweep_ran(rc, text)
+        self.assertEqual(self.host.drafts, [7], "precondition: the draft of PR #7 did not land: " + text)
+        lines = [line for line in text.splitlines() if "#7" in line]
+        self.assertTrue(any("drafted, comment failed" in line for line in lines),
+                        "PR #7 was drafted and its comment failed, but the line does not say so: " + text)
+        self.assertFalse(any("left as it is" in line for line in lines), "PR #7 is said to be left as it is, though its draft landed: " + text)
 
 
 if __name__ == "__main__":
