@@ -1270,6 +1270,7 @@ def main(argv, sibling=False, ran_suites=None):
 
 
 if __name__ == "__main__":
+    for stream in (sys.stdout, sys.stderr): stream.reconfigure(encoding="utf-8", errors="replace")  # a cp1252 pipe (Windows) cannot print a FAIL line that holds a step's non-ASCII output, and merge reads this stdout as utf-8
     _nowindow.end_on_signals()  # TERM and HUP end the run through the `finally` below, so the log folder, the pin trees and the work folder go
     try:
         sys.exit(main(sys.argv[1:]))
