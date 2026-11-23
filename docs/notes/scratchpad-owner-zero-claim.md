@@ -1,0 +1,1 @@
+- scratchpad-owner-zero-claim: docs/decisions/scratchpad-owner.md line 12 says ~/.claude/guard.log holds zero scratchpad-owner lines since September. On 2026-11-23, grep -c finds 10 lines that name scratchpad-owner, so the claim is wrong or undated (the line dates were not read). Seen: 2026-11-23 x1

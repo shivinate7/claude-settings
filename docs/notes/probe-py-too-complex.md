@@ -1,0 +1,1 @@
+- probe-py-too-complex: every live call of hooks/probe.py was refused as "too complex" in an isolated worktree (as reported; not reproduced). The refusal text matches the one in note lane-lint-too-complex-fa. Seen: 2026-11-23 x1

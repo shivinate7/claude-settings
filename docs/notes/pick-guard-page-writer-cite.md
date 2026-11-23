@@ -1,0 +1,1 @@
+- pick-guard-page-writer-cite: the pick guard asks that questions go to a named page writer session. Owner ruling fb-2324-1, cited in docs/decisions/gripe-loop.md, is said to send questions only to the Decisions for Owner file. Unverified: neither fb-2324-1 nor "Decisions for Owner" appears in docs/decisions/gripe-loop.md, hooks/ or lint/ on this checkout. Seen: 2026-11-23 x1

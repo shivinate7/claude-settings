@@ -1,0 +1,1 @@
+- never-raise-temp-sweep-fails: the temp-sweep case in hooks/test_checks_never_raise.py fails on this checkout (verdict rc=1: an old sibling run folder was kept, so the sweep did not remove it). Seen: 2026-11-23 x1

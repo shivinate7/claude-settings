@@ -1,0 +1,1 @@
+- guard-gettempdir-still-tested: hooks/guard.py still tests tempfile.gettempdir() at lines 1336, 1401 and 7297. PR 3801 review F10 cited ~1171, ~1236 and ~7114, and those lines no longer hold the call. Seen: 2026-11-23 x1
