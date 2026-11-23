@@ -10622,7 +10622,7 @@ class RecordsRebuild(RecordsEnv):
     - Under a named list, the proof of a head is its own green rollup (the required checks it reports). A commit a run never read
       does not carry that proof, except a heal commit made of a clean merge of the base and a page-only commit on top of it. Such
       a commit merges on the proof of the head it sits on, with no run read on it. A relayed yes names that head and holds across
-      the heal commit. A red or pending proof refuses. The own-page refusal under a named list stays until the owner rules on it.
+      the heal commit. A red or pending proof refuses. Ruling R1 (owner, 10:49 CST Nov 23, 2026): a stale page the tool rebuilds heals under a named list on a green proven head.
       "protection" is not decided here.
 
     Ruling: records-index-at-merge (confirm on a draft is the records page step)
@@ -10631,10 +10631,11 @@ class RecordsRebuild(RecordsEnv):
         super().setUp()
         self.use_fake_records()
 
-    def set_required(self, required):
+    def set_required(self, required, kinds=CONFIG["kinds"]):
         """Commit the base's config with merge.requiredChecks `required`, and give the fake host the same value: production sets the host's
-        value from this config (root_host), so a case states it once and both places read it. A list is also the names the host reports."""
-        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=required))))
+        value from this config (root_host), so a case states it once and both places read it. A list is also the names the host reports.
+        `kinds`: the base's stamp kinds, CONFIG's unless a case takes them off (kinds=[])."""
+        put_base_config(self, json.dumps(dict(CONFIG, kinds=kinds, merge=dict(CONFIG["merge"], requiredChecks=required))))
         self.assertEqual(json.loads(self.show("main", ".github/stamp.json"))["merge"]["requiredChecks"], required, "fixture: the base does not name " + repr(required))
         self.host.required = required
         if isinstance(required, list):
@@ -10786,14 +10787,19 @@ class RecordsRebuild(RecordsEnv):
         self.assertIn("stale", out.lower())
         self.assert_page_scope(pushed, before)  # the page commit stays on the head: no revert commit sits on it
 
-    def test_a_named_required_list_still_refuses_a_stale_page_on_a_ready_pr(self):
-        # A control: under a named list the ready refusal holds, as today, before any push.
+    def test_a_named_required_list_heals_a_stale_page_on_a_green_proven_head(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): the page the tool rebuilds rides the proof of the head under it. The head reads green, so one
+        # confirm pushes the rebuilt page on it and merges, with no run read on the page commit.
         self.set_required(["checks"])
         self.drop_pending_record()
-        self.on("feat", {"docs/records.md": page("ghost")})
-        refs_before = self.refs()
+        self.on("feat", {"docs/records.md": page("ghost")})  # a page that names a debt nobody has
+        self.rollup_reads(self.head())
         rc, out = self.run_merge_once("7", "--confirm")
-        self.assert_refused_on_ready(rc, out, refs_before)
+        self.assertEqual(rc, 0, "under a named list a stale page on a green proven head did not heal and merge:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertNotIn("ghost", self.show("main", merge.RECORDS_PAGE), "the merge took the stale page, not the rebuilt one")
+        self.assertEqual(self.claims(), 0, "claimed a number for a page heal")
+        self.assertEqual(self.host.waits, [], "the one confirm waited on a check")
 
     def test_heal_under_list_merges_on_proven_head(self):
         # H's green rollup proves H. main gained a record, so H's page is stale for the merge result. One confirm pushes H' (main merged in,
@@ -10961,25 +10967,36 @@ class RecordsRebuild(RecordsEnv):
         self.assertIn("docs/decisions/second.md", changed)
         self.assertEqual(self.log1("%(trailers:key=Record-claim,valueonly)", "origin/main^2").strip(), "D-002")
 
-    def test_pr_1009_ready_with_empty_stamp_kinds_refuses_a_stale_page_before_any_push(self):
-        # A ready PR on a base with kinds [] and a stale page: a page-only push restarts CI after green, so confirm refuses it.
+    def test_pr_1009_ready_with_empty_stamp_kinds_heals_its_own_stale_page_on_a_green_head(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): a page-only commit the tool adds rides the proof of the head under it. Base kinds [] under a
+        # named list: on a green head the tool pushes the page alone and merges it. No stamp runs and no number is claimed.
         mark = stamp_marker(self)
         self.kinds_off()
+        self.set_required(["checks"], kinds=[])
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
-        refs_before = self.refs()
+        self.rollup_reads(self.head())
         rc, out = self.run_merge("7", "--confirm")
-        self.assert_refused_on_ready(rc, out, refs_before)
+        self.assertEqual(rc, 0, "a page-only heal on a green head did not merge:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
         self.assertFalse(os.path.exists(mark), "stamp.mjs ran")
-        self.assertEqual(self.claims(), 0, "claimed a number on a refusal")
-        self.assertNotIn("docs/records.md", self.tree_names("origin/main"))
+        self.assertEqual(self.claims(), 0, "claimed a number for a page heal")
+        self.assertEqual(self.show("main", merge.RECORDS_PAGE), page("gap-one").strip(), "main's page is not the rebuilt one")
+        self.assertEqual(self.host.waits, [], "the heal waited on a check")
 
-    def test_a_ready_pr_with_stamp_kinds_and_nothing_to_claim_refuses_a_stale_page(self):
-        # The refusal turns on the claim, not on the config: with kinds on and no pending record, the page has no claim to ride.
+    def test_a_ready_pr_with_stamp_kinds_and_nothing_to_claim_refuses_a_stale_page_on_a_red_or_pending_head(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): the heal rides a green proof only. With kinds on and nothing to claim, a stale page whose
+        # proven head reads red or pending refuses before any push or wait, and the refusal names that state.
+        self.set_required(["checks"])
         self.drop("feat", "docs/decisions/second.md", "drop the pending decision")
         self.on("feat", {"docs/records.md": page("ghost")})  # a page that names a debt nobody has
-        refs_before = self.refs()
-        rc, out = self.run_merge("7", "--confirm")
-        self.assert_refused_on_ready(rc, out, refs_before)
+        head = self.head()
+        for state in ("red: checks: fail", "pending: checks"):
+            with self.subTest(state=state):
+                self.rollup_reads(head, state)
+                refs_before = self.refs()
+                rc, out = self.run_merge("7", "--confirm")
+                self.assert_refused_untouched(rc, out, refs_before)
+                self.assertIn(state, out, "the refusal does not name the proven head's state " + state + ":\n" + out)
 
     def test_a_claim_head_on_a_base_with_no_stamp_kinds_refuses_a_stale_page_and_names_the_revert(self):
         # The base stamps nothing, so the head's Record-claim is not resumed. The draft step refuses a claim head, so the old
