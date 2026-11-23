@@ -2208,7 +2208,7 @@ class Host:
         could send is unmeasured (route pr-ready-gh-api-cloud). The caller then says to mark it ready by the session's route."""
         return False, f"this tool sends no GraphQL and no unmeasured REST route. {READY_ROUTES}"
 
-    def draft(self, n):
+    def to_draft(self, n):
         """Return pull request n to draft. -> (ok, why). Locally `gh pr ready <n> --undo`. A cloud session gets HTTP 403 on that GraphQL call, so
         it sends nothing and answers (False, DRAFT_ROUTES): the caller prints the route. A failed call is (False, its output)."""
         if os.environ.get("CLAUDE_CODE_REMOTE") == "true":

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The idle red pull request rule (owner, 2026-11-23 10:54 CST): a non-draft pull request whose head is red, and whose newest
+"""The idle red pull request rule: a non-draft pull request whose head is red, and whose newest
 pull_request run is IDLE_SECONDS old or more, goes back to draft. A PR comment says why and how to return, and wakes its session.
 
 Two callers, one judgement: `merge --draft-idle` (the janitor's daily job) sweeps every open pull request; the pre-ready run's
@@ -82,7 +82,7 @@ def draft_one(host, n, row, now, say, errors, routes, runs_first=False):
         return "keep"
     sha = row["head"]["sha"]
     try:
-        ok, why = host.draft(n)
+        ok, why = host.to_draft(n)
         if not ok and why != routes:
             say(f"merge: #{n} unknown, left as it is: the draft call failed: {' '.join(str(why).split())}")
             return "unknown"
