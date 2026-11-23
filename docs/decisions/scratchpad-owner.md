@@ -10,6 +10,13 @@ The rule `scratchpad-owner` in `hooks/guard.py` asks when an agent runs or overw
 - Why the scratchpad is shared: the guard keys a scratchpad by session id, and an agent carries its parent's session id. So every agent of one session shares one scratchpad (note `scratchpad-shared-per-session`).
 - The parallel-write incident, 2026-11-21: five agents of one session overwrote one scratchpad file in turn, and each lost the last one's text. A banchi agent then ran `git push origin --delete` with the 18 branch names that a degen agent had left in a shared file. No guard stopped either act.
 - Why no guard stopped them: the path test never matched on macOS. It required the scratchpad under `tempfile.gettempdir()` (`/var/folders/.../T`), and the harness keeps scratchpads in `/private/tmp/claude-<uid>/<project>/<session>/scratchpad`. `~/.claude/guard.log` holds zero `scratchpad-owner` lines since September, while rule `readonly-shell-write` made 217 false denials on agents' own scratchpads. The test now reads one home, `scratchpad_temp_bases` in `hooks/guard_shared_tree.py`: the gettempdir() folder and `<realpath of /tmp>/claude-<uid>`, a symlinked `/tmp` included.
+- The base list reaches four more callers, which the old gettempdir()-only test never matched on macOS. Each verdict below is the one its code already names, now reachable:
+  - `other_checkout_hit` (other-checkout write): a write into any session's scratchpad passes, and no longer reads as a write into a separate clone.
+  - The brief's destructive-target exemption: a brief whose destructive command targets a scratchpad path is no longer refused for that target.
+  - The agent commit message: a commit message read from a file in any session's scratchpad is refused.
+  - The role write: a role's write into another session's scratchpad is refused as a write outside its own.
+- Shape: under the harness base a path counts as a scratchpad only as `<base>/<project>/<session>/scratchpad`; under Python's temp folder, as `<base>/.../<session>/scratchpad`. No base's own folder is read as a session, so `/private/tmp/claude-<uid>/scratchpad/x` is no scratchpad.
+- The harness base is `<realpath of /tmp>/claude-<uid>` unless the environment variable `CLAUDE_SCRATCHPAD_BASE` names another folder. Only a test run sets it, so its scratchpads sit inside the repo's one test temp root (decision `test-temp-standard`). The guard's own environment is Claude Code's, which a `Bash` call cannot change.
 - Test: could Claude run or overwrite another agent's file by mistake? Yes, as both incidents show. So the guard covers it (`guard-guards-mistakes-only`, guards stop Claude's mistakes, never an attacker).
 
 ## The check
