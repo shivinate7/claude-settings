@@ -10595,7 +10595,12 @@ class RecordsRebuild(RecordsEnv):
       draft step pushed.
     - Under merge.requiredChecks "none" (decision private-repos-no-ci) a ready confirm heals the page itself, in one run and with no
       wait: a page-only commit on the head, or main merged in first when main gained a record, then the merge of that head. A base that
-      moves after the heal's push refuses and keeps the pushed commit. The refusals above stay for a named list and for "protection".
+      moves after the heal's push refuses and keeps the pushed commit.
+    - Under a named list, the proof of a head is its own green rollup (the required checks it reports). A commit a run never read
+      does not carry that proof, except a heal commit made of a clean merge of the base and a page-only commit on top of it. Such
+      a commit merges on the proof of the head it sits on, with no run read on it. A relayed yes names that head and holds across
+      the heal commit. A red or pending proof refuses. The own-page refusal under a named list stays until the owner rules on it.
+      "protection" is not decided here.
 
     Ruling: records-index-at-merge (confirm on a draft is the records page step)
     """
@@ -10605,10 +10610,17 @@ class RecordsRebuild(RecordsEnv):
 
     def set_required(self, required):
         """Commit the base's config with merge.requiredChecks `required`, and give the fake host the same value: production sets the host's
-        value from this config (root_host), so a case states it once and both places read it."""
+        value from this config (root_host), so a case states it once and both places read it. A list is also the names the host reports."""
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=required))))
         self.assertEqual(json.loads(self.show("main", ".github/stamp.json"))["merge"]["requiredChecks"], required, "fixture: the base does not name " + repr(required))
         self.host.required = required
+        if isinstance(required, list):
+            self.host.required_names = lambda: list(required)
+
+    def rollup_reads(self, head, state="green"):
+        """The fake host reads `state` on `head` only, and pending on any other head: a head with no run of its own yet. A case that merges on a
+        proof names the head the proof is on, so a read of any other head is a pending read here."""
+        self.host.head_state = lambda n, sha=None: state if sha == head else f"pending: all-jobs-passed has no run on {(sha or '')[:9]}"
 
     def drop_pending_record(self):
         """The head holds no pending record, so a confirm claims no number and the page is its only change to make."""
@@ -10760,33 +10772,103 @@ class RecordsRebuild(RecordsEnv):
         rc, out = self.run_merge_once("7", "--confirm")
         self.assert_refused_on_ready(rc, out, refs_before)
 
-    def test_a_named_required_list_still_refuses_a_base_that_gained_a_record(self):
-        # A control: under a named list a base that gained a record is refused before any push, as today. Nothing heals it.
-        self.set_required(["checks"])
+    def test_heal_under_list_merges_on_proven_head(self):
+        # H's green rollup proves H. main gained a record, so H's page is stale for the merge result. One confirm pushes H' (main merged in,
+        # the page rebuilt on it) and merges H' on H's proof: no run is read on H'.
+        self.set_required(["all-jobs-passed"])
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})  # current for the head's own debts
+        before = self.head()
+        self.on("main", {"debts/gap-one.md": DEBT_TEXT}, "untooled push")
+        main_tip = self.head("main")
+        self.rollup_reads(before)
+        rc, out = self.run_merge_once("7", "--confirm")  # one run: the case pins the single confirm, as the heal cases under none do
+        self.assertEqual(rc, 0, "under a list a stale page did not heal and merge on the proven head in one confirm:\n" + out)
+        self.assert_healed_merge(out, main_tip, before)
+
+    def test_edited_merge_not_carried(self):
+        # The proof is H's. A merge of main on H whose tree is not git's clean merge is a commit no run read: the proof is not carried.
+        self.set_required(["all-jobs-passed"])
         self.drop_pending_record()
         self.on("feat", {"docs/records.md": page()})
-        self.on("main", {"debts/gap-one.md": DEBT_TEXT}, "untooled push")
-        refs_before = self.refs()
-        rc, out = self.run_merge_once("7", "--confirm")
-        self.assert_refused_untouched(rc, out, refs_before)
-        self.assertIn("stale", out.lower())
-
-    def test_a_named_list_refuses_a_relayed_yes_with_a_base_merge_on_top(self):
-        # Under a named list no heal runs, so a merge of main on the relayed head is not the tool's own commit: the yes does not cover it.
-        self.set_required(["checks"])
-        self.drop_pending_record()
-        self.on("feat", {"docs/records.md": page()})  # current for the head's own debts, so only the relayed yes can refuse the merge
-        relayed = self.head()
+        proven = self.head()
         self.main_moves()
         main_tip = self.head("main")
-        live = self.base_merge_pushed_on("origin/main")
-        self.assert_merge_shape(live, relayed, main_tip, clean=True)
+        live = self.base_merge_pushed_on("origin/main", edit={"edited.txt": "a line the proven head never had\n"})
+        self.assert_merge_shape(live, proven, main_tip, clean=False)
+        self.rollup_reads(proven)  # green on H, and pending on the edited merge
         refs_before = self.refs()
-        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
-        self.assertFalse(getattr(self.host, "merged", False), "a named list merged a relayed yes with a base merge on top:\n" + out)
-        self.assertIn("so that yes does not cover it", out, "a named list let a relayed yes cover a base merge on top:\n" + out)
-        self.assertEqual(self.refs(), refs_before, "a named list pushed on a relayed yes with a base merge on top")
+        rc, out = self.run_merge_once("7", "--confirm")
         self.assertEqual(rc, 1, out)
+        self.assertFalse(getattr(self.host, "merged", False), "merged an edited merge on the proven head:\n" + out)
+        self.assertEqual(self.refs(), refs_before, "pushed over an edited merge on the proven head:\n" + out)
+        self.assertIn("not green", out, "refused for another cause than the head's own run:\n" + out)
+
+    def test_lane_commit_not_carried(self):
+        # The proof is H's. An ordinary lane commit on top of H is a commit no run read: refused until its own run is green.
+        self.set_required(["all-jobs-passed"])
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})
+        proven = self.head()
+        self.rollup_reads(proven)
+        self.on("feat", {"lane-note.txt": "an ordinary lane commit on top of the proven head\n"}, "lane commit")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(len(sh(self.co, "git", "rev-list", f"{proven}..origin/feat").split()), 1, "fixture: the lane commit is not the only commit above the proven head")
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertFalse(getattr(self.host, "merged", False), "merged a lane commit on the proven head:\n" + out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a lane commit on the proven head:\n" + out)
+        self.assertIn("not green", out, "refused for another cause than the lane commit's own run:\n" + out)
+
+    def test_red_proven_head_refuses(self):
+        # H's rollup is red. A heal commit on top of H (main merged in, the page rebuilt) does not make the merge mergeable: the proof is H's.
+        self.set_required(["all-jobs-passed"])
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})
+        proven = self.head()
+        self.on("main", {"debts/gap-one.md": DEBT_TEXT}, "untooled push")
+        self.rollup_reads(proven, "red: all-jobs-passed: fail")  # red on H, and pending on the heal commit: no run reads it yet
+        self.merge_and_page_pushed_on()
+        self.assertNotEqual(self.head(), proven, "scope: the heal commit did not move the branch off the red head")
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertFalse(getattr(self.host, "merged", False), "merged a heal commit on a red proven head:\n" + out)
+        self.assertEqual(self.refs(), refs_before, "pushed on a red proven head:\n" + out)
+        self.assertIn("red: all-jobs-passed", out, "the refusal does not name the red rollup of the proven head:\n" + out)
+
+    def test_pending_proven_head_refuses(self):
+        # H's run is still in progress: there is no proof yet, so the merge is refused and nothing is pushed or waited on.
+        self.set_required(["all-jobs-passed"])
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})
+        self.rollup_reads(self.head(), "pending: all-jobs-passed")
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertFalse(getattr(self.host, "merged", False), "merged a pending proven head:\n" + out)
+        self.assertEqual(self.refs(), refs_before, "pushed on a pending proven head:\n" + out)
+        self.assertEqual(self.host.waits, [], "waited on the run instead of refusing:\n" + out)
+        self.assertIn("pending: all-jobs-passed", out, "the refusal does not name the pending run of the proven head:\n" + out)
+
+    def test_relayed_yes_holds_after_heal_under_list(self):
+        # The relayed yes names H, the proven head. H' is H with main merged in and the page rebuilt: a heal commit. Under a named list the yes
+        # still holds across H', and H's proof merges H'. Today only a requiredChecks "none" lets a base merge sit above the relayed head.
+        self.set_required(["all-jobs-passed"])
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})  # current for the head's own debts
+        relayed = self.head()
+        self.on("main", {"debts/gap-one.md": DEBT_TEXT}, "untooled push")
+        main_tip = self.head("main")
+        self.rollup_reads(relayed)
+        pushed = self.merge_and_page_pushed_on()
+        self.assertNotEqual(self.head(), relayed, "scope: the live head did not move off the relayed head")
+        self.assertEqual(self.show("feat", merge.RECORDS_PAGE), page("gap-one").strip(), "scope: the pushed page is not current")
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
+        self.assertEqual(rc, 0, "under a list a relayed yes did not hold across the heal commit:\n" + out)
+        self.assertEqual(self.rev("origin/main^2"), pushed, "the merge did not take the heal commit that was pushed")
+        self.assert_healed_merge(out, main_tip, relayed)
 
     def test_under_none_a_merge_of_a_commit_main_never_got_refuses_the_relayed_yes(self):
         # The tree is git's clean merge, so only the second parent tells this merge apart: a base merge's second parent is on main.
