@@ -1030,10 +1030,12 @@ class _IfParser:
         return self.env.get(tok, "")
 
 
-def if_env(outs, event):
-    """The names an if: reads: the event, the pull request's draft flag, and each scope output of the run."""
+def if_env(outs, event, results=None):
+    """The names an if: reads: the event, the pull request's draft flag, each scope output of the run, and each job's result.
+    The scope job succeeded unless `results` says otherwise. A name the env does not hold reads as empty."""
     env = {"github.event_name": event, "github.event.pull_request.draft": False if event == "pull_request" else None}
     env.update({f"needs.scope.outputs.{name}": value for name, value in outs.items()})
+    env.update({f"needs.{job}.result": result for job, result in {"scope": "success", **(results or {})}.items()})
     return env
 
 
@@ -1052,9 +1054,9 @@ def job_if(text, job):
     return (wrapped.group(1) if wrapped else raw).strip()
 
 
-def job_runs(expr, outs, event):
-    """True when the job starts on this run: it has no job-level if, or its if: is true on the run's outputs."""
-    return True if expr is None else _IfParser(expr, if_env(outs, event)).parse()
+def job_runs(expr, outs, event, results=None):
+    """True when the job starts on this run: it has no job-level if, or its if: is true on the run's outputs and job results."""
+    return True if expr is None else _IfParser(expr, if_env(outs, event, results)).parse()
 
 
 def running_jobs(text, outs, event):
@@ -1132,6 +1134,21 @@ class RecordsOnlyEveryJob(unittest.TestCase):
                         expr = job_if(text, job)
                         self.assertTrue(job_runs(expr, got, event),
                                         f"{job} does not start on a records-only {event} run; its job-level if is {expr}")
+
+    # Control: checks starts on a code run, and its own if: turns it off for a records-only run and for a failed scope. So the
+    # records-only test above reads checks off for the skip, not because the scope result reads as empty.
+    def test_checks_starts_on_a_code_run_and_stays_off_on_a_records_only_run_or_a_failed_scope(self):
+        expr = job_if(self.workflow(), "checks")
+        self.assertIsNotNone(expr, "checks has no job-level if")
+        cases = (
+            ("a records-only run", {"records_only_skip": "true"}, {"scope": "success"}, False),
+            ("a code run", {"records_only_skip": "false"}, {"scope": "success"}, True),
+            ("a failed scope", {"records_only_skip": "false"}, {"scope": "failure"}, False),
+        )
+        for label, outs, results, want in cases:
+            with self.subTest(run=label):
+                got = job_runs(expr, outs, "pull_request", results)
+                self.assertEqual(got, want, f"checks {'starts' if got else 'stays off'} on {label}; its job-level if is {expr}")
 
     # Control: the reader reads the wider skip's form as off when records_only_skip is 'true' and on when it is
     # 'false', and refuses a form it does not know rather than reading it as true.
