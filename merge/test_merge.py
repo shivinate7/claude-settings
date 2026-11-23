@@ -10992,16 +10992,98 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(rc, 0, "one clean main merge above a green head did not merge on its parent's proof:\n" + out)
         self.assertTrue(getattr(self.host, "merged", False), out)
 
-    def test_two_clean_main_merges_stacked_above_a_green_head_refuse(self):
-        # Ruling R1 (owner, 10:49 CST Nov 23, 2026) names one clean merge of main. The same green head under two stacked merges of main refuses,
-        # where one merge with the same own run state (no run yet) carries.
+    # Ruling (owner, 15:36 CST Nov 23, 2026, option a): no cap on stacked clean merges of main above a proven head, on either path. A busy main
+    # never forces a second full CI run: main's own run after the merge is the net. The live head's own run decides only when it is red or unread.
+
+    def test_two_clean_main_merges_stacked_above_a_green_head_carry_the_proof(self):
+        # The live head has no run of its own yet, so the green head under both stacked merges of main is the proof, and no run is waited on.
         proven, live = self.main_merged_in_above_green_head(merges=2)
         self.rollup_reads(proven)
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "two clean main merges stacked above a green head did not merge on the head's proof:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on a stacked merge's own run instead of merging on the head's proof:\n" + out)
+
+    def test_three_clean_main_merges_stacked_above_a_green_head_carry_the_proof(self):
+        proven, live = self.main_merged_in_above_green_head(merges=3)
+        self.rollup_reads(proven)
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "three clean main merges stacked above a green head did not merge on the head's proof:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on a stacked merge's own run instead of merging on the head's proof:\n" + out)
+
+    def test_a_relayed_yes_holds_over_two_stacked_clean_main_merges_with_the_live_run_pending(self):
+        # The relayed yes names the proven head. The stacked merges of main above it hold the yes, and the proof is the proven head's green run.
+        proven, live = self.main_merged_in_above_green_head(merges=2)
+        self.rollup_reads(proven)
+        rc, out = self.run_merge_once("7", "--confirm", "--head", proven)
+        self.assertEqual(rc, 0, "a relayed yes did not hold over two stacked clean main merges with the live run pending:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on a stacked merge's own run instead of merging on the relayed head's proof:\n" + out)
+
+    def test_a_relayed_yes_holds_over_three_stacked_clean_main_merges_with_the_live_run_pending(self):
+        proven, live = self.main_merged_in_above_green_head(merges=3)
+        self.rollup_reads(proven)
+        rc, out = self.run_merge_once("7", "--confirm", "--head", proven)
+        self.assertEqual(rc, 0, "a relayed yes did not hold over three stacked clean main merges with the live run pending:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on a stacked merge's own run instead of merging on the relayed head's proof:\n" + out)
+
+    def test_a_red_own_run_on_two_stacked_clean_main_merges_still_refuses(self):
+        # The merge under the live head reads green, so the refusal is the live head's own red run, as it is on one merge.
+        proven, live = self.main_merged_in_above_green_head(merges=2)
+        self.rollup_reads(proven, states={self.rev(f"{live}^"): "green", live: "red: all-jobs-passed: fail"})
         refs_before = self.refs()
         rc, out = self.run_merge_once("7", "--confirm")
-        self.assertFalse(getattr(self.host, "merged", False), "merged two clean main merges stacked above a green head, on the head's proof:\n" + out)
+        self.assertFalse(getattr(self.host, "merged", False), "merged two stacked clean main merges whose live run finished red, on the head's proof:\n" + out)
         self.assertEqual(rc, 1, out)
-        self.assertEqual(self.refs(), refs_before, "pushed over two stacked clean main merges:\n" + out)
+        self.assertEqual(self.refs(), refs_before, "pushed over two stacked clean main merges whose live run finished red:\n" + out)
+        self.assertIn("red: all-jobs-passed", out, "the refusal does not name the red own run of the live head:\n" + out)
+
+    def test_an_unread_own_run_on_two_stacked_clean_main_merges_refuses_as_unknown(self):
+        proven, live = self.main_merged_in_above_green_head(merges=2)
+        self.rollup_reads(proven, states={self.rev(f"{live}^"): "green", live: "unknown (the read of the merge's checks failed: HTTP 500)"})
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged two stacked clean main merges whose live run was unread, on the head's proof:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over two stacked clean main merges whose live run was unread:\n" + out)
+        self.assertIn("unknown", out, "the refusal does not name the unread own run of the live head:\n" + out)
+
+    def test_an_edited_main_merge_under_a_clean_one_does_not_carry_the_proof(self):
+        # The walk stops at a merge of main that is not git's clean merge, even with a clean merge stacked above it: that merge is a commit no run read.
+        self.set_required(["all-jobs-passed"])
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})
+        proven = self.head()
+        self.on("main", {"unrelated-0.txt": "main change 0, with no record\n"}, "untooled push")
+        self.base_merge_pushed_on("origin/main", edit={"edited.txt": "a line the proven head never had\n"})
+        edited = self.head()
+        self.assert_merge_shape(edited, proven, self.rev("origin/main"), clean=False)
+        self.on("main", {"unrelated-1.txt": "main change 1, with no record\n"}, "untooled push")
+        live = self.base_merge_pushed_on("origin/main")
+        self.assert_merge_shape(live, edited, self.rev("origin/main"), clean=True)
+        self.rollup_reads(proven)  # green on the proven head, pending on the edited merge and on the clean merge above it
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a clean main merge stacked above an edited one, on the proven head:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a clean main merge stacked above an edited one:\n" + out)
+        self.assertIn("not green", out, "refused for another cause than the edited merge's own run:\n" + out)
+
+    def test_a_lane_commit_above_a_clean_main_merge_does_not_carry_the_proof(self):
+        # The walk stops at a commit this tool did not make, however many clean merges of main sit below it.
+        proven, live = self.main_merged_in_above_green_head(merges=1)
+        self.rollup_reads(proven)
+        self.on("feat", {"lane-note.txt": "an ordinary lane commit above the clean merge of main\n"}, "lane commit")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(len(sh(self.co, "git", "rev-list", f"{live}..origin/feat").split()), 1, "fixture: the lane commit is not the only commit above the clean merge")
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a lane commit above a clean main merge on the proven head:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a lane commit above a clean main merge:\n" + out)
+        self.assertIn("not green", out, "refused for another cause than the lane commit's own run:\n" + out)
 
     def test_an_unread_own_run_on_a_clean_main_merge_refuses_as_unknown(self):
         # A merge's own run the tool could not read is unknown: the green parent does not stand in for it, and nothing is pushed or merged.
