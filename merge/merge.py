@@ -275,7 +275,7 @@ A list read asks for each page by number (`Host.pages`), so no `gh` flag beyond 
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, ast, concurrent.futures, contextlib, datetime, email.utils, fnmatch, functools, hashlib, importlib.util, inspect, io, json, math, os, pathlib, re, shlex, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, ast, calendar, concurrent.futures, contextlib, datetime, email.utils, fnmatch, functools, hashlib, importlib.util, inspect, io, json, math, os, pathlib, re, shlex, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -1268,8 +1268,10 @@ class Host:
         if headers:
             self.budget = {k: _seconds(headers.get("x-ratelimit-" + k)) for k in ("remaining", "limit", "reset")}
             try:
-                self.server_time = email.utils.parsedate_to_datetime(headers["date"]).timestamp()
-            except (KeyError, TypeError, ValueError):
+                # parsedate_tz keeps the offset (a `-0000` Date too), so timegm gives the UTC instant whatever the local zone
+                parsed = email.utils.parsedate_tz(headers["date"])
+                self.server_time = None if parsed is None else calendar.timegm(parsed[:9]) - (parsed[9] or 0)
+            except (KeyError, TypeError, ValueError, OverflowError):
                 self.server_time = None
 
     def server_now(self):
@@ -3521,10 +3523,15 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
             reports.append(f"{named}. Not counted: #{m}'s own head conflicts with {base}, so the clash comes through {base}. Its own lint names it.")
         elif integration:
             reports.append(f"{named}. Not counted: this PR is a batch integration PR, so #{m} rebases after the merge.")
-        elif scope == "ready" and draft_idle and idle_prs_module().draft_one(host, m, rows[m], host.server_now(), say, (Stop, OSError), DRAFT_ROUTES) == "drafted":
-            reports.append(f"{named}. Not counted: #{m} is red and idle, so it went back to draft.")
         else:
-            conflicts.append(named)
+            printed = []
+            def say_kept(line):
+                printed.append(line)
+                say(line)
+            if scope == "ready" and draft_idle and idle_prs_module().draft_one(host, m, rows[m], host.server_now(), say_kept, (Stop, OSError), DRAFT_ROUTES) == "drafted":
+                reports.append(f"{named}. Not counted: #{m} is red and idle, so it went back to draft.")
+            else:  # a cloud host that cannot draft printed the route on an earlier line; the fail line carries it too
+                conflicts.append(named + (f"\n  #{m} is red and idle but this session cannot draft it. {DRAFT_ROUTES}" if any(DRAFT_ROUTES in line for line in printed) else ""))
     fails = []
     if conflicts:
         fails.append("\n".join(["its head conflicts with another PR's head (git merge-tree), file by file:", *conflicts,
