@@ -43,7 +43,8 @@ REFUSE_TOKENS = (
     "echo XXX",
 )
 
-# Each line looks near a token and is a real shell form. Each one passes.
+# Each line is a real shell form. Each one passes. The tag-shaped words sit in a heredoc body or in a quoted
+# string, where the shell reads them as text.
 ALLOW_LINES = (
     "cat > f <<'EOF'\nline one\nEOF",
     "sort < in.txt",
@@ -56,6 +57,10 @@ ALLOW_LINES = (
     "curl -s 'https://example.com/api?x=1'",
     "git log a..b",
     "instance-type xxxlarge",
+    "cat > ~/Library/LaunchAgents/x.plist <<'EOF'\n<dict>\nEOF",
+    "cat > /tmp/x.html <<'EOF'\n<html>\nEOF",
+    "sed 's/<br>//g' page.html",
+    "grep -o '<title>.*</title>' f",
 )
 
 # The same tokens in the `powershell` string, with a plain `mac` string beside them.
