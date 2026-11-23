@@ -44,7 +44,7 @@ output style load in each session on each repo.
   ready after its review, and again after any return to draft, by the merge tool, and never marks another PR ready. It merges on whichever proof of its head arrives first: a green `all-jobs-passed` rollup, or a local lane-lint PASS. Source:
   decision `draft-until-reviewed` (every PR opens as a draft).
 - **Main merge into handed-in branches** (owner, 2026-11-13 13:12 CST; until withdrawn; changed by owner,
-  23:40 CST, waiting-page item 806 d; changed by owner, 14:46 CST Nov 23, 2026, ruling Q4 a). The batch runner may push a plain merge of main into a handed-in draft PR, with no clock rule. A ready PR takes no push: main merges into it only on a conflict, after it returns to draft. A lane that pushes again to a handed-in branch says so first. No rebase,
+  23:40 CST, waiting-page item 806 d; changed by owner, 14:46 CST Nov 23, 2026, ruling Q4 a). The batch runner may push a plain merge of main into a handed-in draft PR, with no clock rule. A ready PR takes no push: it returns to draft first, and main merges into it only on a conflict. A lane that pushes again to a handed-in draft branch says so first. No rebase,
   no force push. A conflict that changes behaviour goes back to the coordinator. Each new head gets a fix
   verifier and a fresh review log, except a clean merge of main, which takes none (decision `pr-review-record`,
   the review record). Source: decision `standing-merge-grant`.
