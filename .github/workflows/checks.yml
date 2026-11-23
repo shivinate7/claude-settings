@@ -2416,7 +2416,7 @@ jobs:
           job: checks-windows-guard-3
 
   # The merge suites on Windows. The full git-half suite runs in shards, shard 1 here and the rest in checks-windows-merge-<i> (the shard
-  # switch in merge/test_merge.py). A ready pull_request runs a step only when checks_windows_merge is set; push, schedule and dispatch run them all.
+  # switch in merge/test_merge.py). A ready pull_request runs a step only when checks_windows_merge is set; the scheduled and dispatched runs run them all (a push skips every Windows shard).
   checks-windows-merge:
     runs-on: windows-latest
     needs: scope
