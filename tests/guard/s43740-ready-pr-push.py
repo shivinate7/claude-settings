@@ -12,9 +12,9 @@ FAMILY = "ready-pr-push"
 # fakes are make_fake_gh stand-ins (section 442): one pull request per fake, its head, its draft flag and its run. RPP_WT is
 # a linked worktree of RPR_REPO on feat-current, for the push-from-a-worktree form.
 #
-# UNREADABLE READ. A read that cannot run is refused, unknown. Main's ready-state rules refuse the same way (records-page-ready
-# and merge-checks, guard-hooks-fail-closed), so this rule does too: it must not pass a push that might cancel a run.
-# The rule reads GitHub only for a `git push` command, and at most once per push (the cost pin below).
+# FAILED READ. A failed pull-request list read is allowed, with one stderr line that names the read that failed. Owner
+# ruling handed-in-push-fourth-way, 21:17 CST Nov 18, point 2: a refusal on a failed read would block every push when GitHub
+# cannot be reached. The rule reads GitHub only for a `git push` command, and at most once per push (the cost pin below).
 #
 # THE MERGE TOOL. The guard recognises the merge tool as caller by its command word (guard_merge.merge_tool_args: the shim
 # or python on merge/merge.py). The tool's own pushes run as subprocesses no hook sees, so the one call the rule meets is the
@@ -35,7 +35,7 @@ RPP_WT = os.path.join(RPR, "wt-current")                       # a linked worktr
 
 PPUSH_LAST = "If this refusal looks wrong for your task, comply anyway and say so in your report."
 PPUSH_CARRIES = (("cancel",), ("wait",), "gh pr ready --undo", ("red job",))   # why, the way out, the red-job exception
-PPUSH_UNKNOWN = ("could not be read", "could not run", "unknown")
+PPUSH_READ_NAMES = ("pull request", "pr list")                                 # the stderr line names the failed read by one of these
 PPUSH_LACKS = ("git switch", "cherry-pick", "replacement PR", "--force")      # the acts a refusal must never name
 
 
@@ -98,11 +98,11 @@ ppush_refuse("a push after a quoted comment opener on the ready branch, run gree
 ppush_refuse("a merge-tool word in another segment does not make git push on the ready branch the tool's",
              "echo merge 12 && " + VCS + " push origin feat-stale", RPR_NOSEL, GHPUSH_GREEN)
 
-# UNKNOWN. The pull request read cannot run: gh answers text that is not JSON, or gh is missing. Refused, named unknown.
-ppush_refuse("a bare git push when the pull request read answers text that is not JSON", VCS + " push", RPR_NOSEL, GHPUSH_BROKEN,
-             carries=PPUSH_UNKNOWN)
-sh("ready-pr-push: a bare git push when gh is missing from PATH is refused unknown", VCS + " push", "deny", PPUSH_RULE,
-   cwd=RPR_NOSEL, env_path=GHNONE_PATH, carries=PPUSH_UNKNOWN, lacks=PPUSH_LACKS)
+# FAILED READ. The pull request read cannot run: gh answers text that is not JSON, or gh is missing. Allowed, and one stderr
+# line names the failed read (the stderr checks below). Each allow passes on the old code too: it is the control.
+ppush_allow("a bare git push when the pull request read answers text that is not JSON", VCS + " push", RPR_NOSEL, GHPUSH_BROKEN)
+sh("ready-pr-push: a bare git push when gh is missing from PATH is allowed", VCS + " push", "allow", cwd=RPR_NOSEL,
+   env_path=GHNONE_PATH)
 
 # ALLOWED. The states and forms the rule must not touch. Each passes on the old code: they are the controls.
 ppush_allow("a bare git push on a branch whose pull request is a draft", VCS + " push", RPR_NOSEL, GHPUSH_DRAFT)
@@ -175,9 +175,60 @@ def ppush_no_read_case():
     return True, "a commit and a status on the ready branch make no gh call"
 
 
+# THE FAILED READ'S LINE. A failed read is allowed, with one warning line on stderr that names the read. decide drops a
+# run's stderr, so the check runs the guard through section 43501's wrapper (TGT_WRAP): it runs the guard named by TGT_GUARD,
+# and writes that run's stderr to TGT_STDERR.
+def _ppush_stderr_run(command, cwd, fake, stderr_file, env_path=None):
+    """(the decision, its reason, the non-empty stderr lines) of one push judged through the stderr wrapper."""
+    materialize(fake)
+    if os.path.exists(stderr_file):
+        os.remove(stderr_file)
+    case = _rr_case(command, cwd, env_path if env_path is not None else _rpr_env(fake))
+    case["guard"] = TGT_WRAP
+    case["env"] = {"TGT_GUARD": GUARD, "TGT_STDERR": stderr_file}
+    got, reason = decide(case)
+    lines = []
+    if os.path.exists(stderr_file):
+        with open(stderr_file, encoding="utf-8") as handle:
+            lines = [line for line in handle.read().splitlines() if line.strip()]
+    return got, reason, lines
+
+
+def _ppush_warning(name, command, cwd, fake, stderr_name, env_path=None):
+    """The failed read is allowed, and its stderr holds exactly one line that names the read."""
+    stderr_file = os.path.join(RPP, stderr_name)
+    got, reason, lines = _ppush_stderr_run(command, cwd, fake, stderr_file, env_path)
+    if got != "allow":
+        return False, "%s: expected allow, got %s (%s)" % (name, got, reason[:70])
+    if len(lines) != 1:
+        return False, "%s: expected one stderr line, found %d" % (name, len(lines))
+    if not any(word in lines[0].lower() for word in PPUSH_READ_NAMES):
+        return False, "%s: the stderr line names no read: %r" % (name, lines[0][:120])
+    return True, "%s: allowed, and one stderr line names the read" % name
+
+
+def ppush_warn_json_case():
+    """The pull request read answers text, not JSON: the push is allowed, and one stderr line names the read."""
+    return _ppush_warning("a bare git push when the pull request read answers text that is not JSON", VCS + " push",
+                          RPR_NOSEL, GHPUSH_BROKEN, "read-broken.stderr")
+
+
+def ppush_warn_missing_case():
+    """gh is missing from PATH: the push is allowed, and one stderr line names the read. The fake is not on this PATH."""
+    return _ppush_warning("a bare git push when gh is missing from PATH", VCS + " push", RPR_NOSEL, GHPUSH_BROKEN,
+                          "read-missing.stderr", env_path=GHNONE_PATH)
+
+
 PPUSH_PUSH_READS_LABEL = "ready-pr-push: a push to a ready branch reads GitHub exactly once"
 PPUSH_NO_READ_LABEL = "ready-pr-push: a commit or a status on a ready branch reads GitHub not at all"
+PPUSH_WARN_JSON_LABEL = ("ready-pr-push: a failed pull-request read that answers text, not JSON, is allowed, with one stderr "
+                         "line naming the read")
+PPUSH_WARN_MISSING_LABEL = ("ready-pr-push: a failed pull-request read with gh missing from PATH is allowed, with one stderr "
+                            "line naming the read")
 LOG_FAMILY[PPUSH_PUSH_READS_LABEL] = FAMILY
 LOG_FAMILY[PPUSH_NO_READ_LABEL] = FAMILY
+LOG_FAMILY[PPUSH_WARN_JSON_LABEL] = FAMILY
+LOG_FAMILY[PPUSH_WARN_MISSING_LABEL] = FAMILY
 LOG_CHECKS = LOG_CHECKS + ((PPUSH_ENDS_LABEL, ppush_ends_case), (PPUSH_PUSH_READS_LABEL, ppush_cost_case),
-                           (PPUSH_NO_READ_LABEL, ppush_no_read_case))
+                           (PPUSH_NO_READ_LABEL, ppush_no_read_case), (PPUSH_WARN_JSON_LABEL, ppush_warn_json_case),
+                           (PPUSH_WARN_MISSING_LABEL, ppush_warn_missing_case))
