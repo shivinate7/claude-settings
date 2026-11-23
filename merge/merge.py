@@ -4984,6 +4984,13 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
             if records != "current" and not (info["draft"] or trailer or resumed):  # confirm refuses a page with no claim to ride, so a ready PR never gets a page-only push
                 if cfg.get("merge", {}).get("requiredChecks") == "none" and not head_claim(wt):  # no check gates the merge: confirm heals the page itself
                     records += ". --confirm heals it: it pushes a page commit (the base merged in first when the base gained a record), waits on no check, and merges that head in the one run"
+                elif not head_claim(wt):  # a list or "protection": confirm heals on a green proven head (proven_head carries its proof to the heal commits) and refuses a red, pending or unread one
+                    proof = proven_head(wt, info["head"], base, lambda: True)
+                    state = host.head_state(n, proof)
+                    if state == "green":
+                        records += ". --confirm heals it: it pushes a page commit (the base merged in first when the base gained a record), carries the checks of the green head under it as the proof, and merges that head once its checks are green"
+                    else:
+                        records += f". --confirm refuses it: the head's own checks are not green ({state}), so nothing is healed. " + stale_page_remedy(n)
                 else:
                     records += ". --confirm refuses it. " + stale_page_remedy(n, head_claim(wt))
             elif info["draft"] and records != "current" and not (trailer or resumed or stale):  # a claim commits at confirm anyway, so the draft step would save no run; it refuses a stale head
