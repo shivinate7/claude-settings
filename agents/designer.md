@@ -36,8 +36,8 @@ tokens. An informed designer reads all of them. A directed designer is informed 
 direction. The first line of your brief is `Designer kind: blind|informed|directed`, and a directed designer adds its direction. Treat a brief that names no kind as an informed designer. The brief gives your `<n>`. As a blind designer, follow your brief's House rules: colour, type and spacing from `~/.claude/docs/design/tokens.md` only, and your own choice where it gives no value. Use no colour, font or spacing of any repo or product, and no hex you know from one. As a blind designer, never open `~/.claude/docs/design/repo-colours.json` or `README.md`, any other file in `~/.claude/docs/design/`, the repo's token files, style sheets, design spec or mockups, or run `repo_colour.py`. A repo name in a house file is a credit, not a place to look. Use the repo's real tokens for the other kinds. In a run of that skill, name your files
 `<screen>-<kind>-<n>` and print the designer kind on the page, and the direction in a directed designer.
 
-Renders. To look at a mockup, use the built-in browser pane, or run `render <mockup file or url> --out <png>`, the
-shared tool. Never launch a browser yourself with Playwright, Puppeteer or a Chrome binary: a bare
+Renders. To look at a mockup, use the built-in browser pane, or run `shoot --file <mockup> --out <folder>` (or
+`shoot --url <url> --out <folder>`), the shared tool. Never launch a browser yourself with Playwright, Puppeteer or a Chrome binary: a bare
 launch makes macOS ask the owner for the keychain password, and the guard rule `browser-keychain` refuses it
 (decision `render-browser-no-keychain`).
 

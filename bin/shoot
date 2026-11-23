@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 // shoot [--config F] [--out DIR]: one PNG per route x width x theme, then one verdict line.
+// shoot (--url URL | --file HTML) [--width N] [--height N] [--theme light|dark] [--no-full-page] [--out DIR]: the single-target mode,
+//   one PNG of one page, with no config. --file takes a path to an HTML file. Defaults: width 1440, height 900, theme light, full page.
+//   The PNG is DIR/<file or last path name>-<width>-<theme>.png, and --out defaults as below. A URL keeps its query and #hash.
+//   The same checks, blank image included, and the same one verdict line as a config run. Decision render-browser-no-keychain.
 // Beside each PNG it writes the rendered page as .html, for lint/label_once.py (ux-label-once).
 // F defaults to .claude/shoot.json in the current folder. DIR defaults to a new shoot-* folder in the temp folder.
 // Config keys (decision shoot-is-one-shared-command):
@@ -45,14 +49,43 @@ const TOUCH_BELOW = 1024;
 
 function die(msg) { console.log("shoot: " + msg); process.exit(2); }
 
+const USAGE = "usage: shoot [--config FILE] [--out DIR] | shoot (--url URL | --file HTML) [--width N] [--height N] [--theme light|dark] [--no-full-page] [--out DIR]";
+
 function args(argv) {
-  const o = { config: path.join(".claude", "shoot.json"), out: null };
+  const o = { config: null, out: null, url: null, file: null, width: null, height: null, theme: null, fullPage: true };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if ((a === "--config" || a === "--out") && i + 1 < argv.length) o[a.slice(2)] = argv[++i];
-    else die("usage: shoot [--config FILE] [--out DIR]");
+    if (a === "--no-full-page") o.fullPage = false;
+    else if (["--config", "--out", "--url", "--file", "--width", "--height", "--theme"].includes(a) && i + 1 < argv.length) o[a.slice(2)] = argv[++i];
+    else die(USAGE);
   }
+  const single = o.url !== null || o.file !== null;
+  if (single && (o.config !== null || (o.url !== null && o.file !== null))) die(USAGE);
+  if (!single && (o.width !== null || o.height !== null || o.theme !== null || !o.fullPage)) die(USAGE);
+  if (!single) o.config = o.config ?? path.join(".claude", "shoot.json");
   return o;
+}
+
+// The one-route config of the single-target mode: the same shape readConfig returns, and the defaults of a one-page look.
+function singleConfig(o) {
+  const num = (name, v, dflt) => {
+    const n = v === null ? dflt : Number(v);
+    if (!Number.isInteger(n) || n < 1) die(`--${name} is a whole number of pixels`);
+    return n;
+  };
+  if (o.theme !== null && o.theme !== "light" && o.theme !== "dark") die("--theme is light or dark");
+  let url = o.url;
+  if (o.file !== null) {
+    const file = path.resolve(o.file);
+    if (!fs.existsSync(file)) die(`no such file: ${file}`);
+    url = require("url").pathToFileURL(file).href;
+  }
+  if (!/^(https?|file):/i.test(url)) die("--url is an http(s) or file URL");
+  const name = slug(path.basename(decodeURIComponent(new URL(url).pathname)) || "root");
+  return {
+    baseUrl: url, single: url, routes: [{ name, path: "/" + name }], sizes: [num("width", o.width, 1440)], themes: [o.theme ?? "light"],
+    height: num("height", o.height, 900), fullPage: o.fullPage, timeoutMs: 15000, simulator: null, ignoreHTTPSErrors: false,
+  };
 }
 
 function readConfig(file) {
@@ -262,13 +295,13 @@ function simShot(udid, out) {
 
 async function main() {
   const o = args(process.argv.slice(2));
-  const cfg = readConfig(o.config);
+  const cfg = o.config === null ? singleConfig(o) : readConfig(o.config);
   const pw = loadPlaywright();
   const out = o.out ? path.resolve(o.out) : fs.mkdtempSync(path.join(os.tmpdir(), "shoot-"));
   fs.mkdirSync(out, { recursive: true });
   let browser;
   // The two switches keep Chromium from asking for the owner's keychain password (decision render-browser-no-keychain).
-  // Spelled here, not required from bin/render: a copy of this file under test runs with no sibling.
+  // Spelled here, not required from a sibling file: skills/waiting-page/check_designs.mjs spells the same two, and a copy of this file under test runs with no sibling.
   try { browser = await pw.chromium.launch({ args: ["--use-mock-keychain", "--password-store=basic"] }); }
   catch (e) { die(`FAIL: Chromium did not launch: ${String(e.message).split("\n")[0]}. This tool never runs playwright install.`); }
   const fails = [], skips = [];
@@ -282,7 +315,7 @@ async function main() {
           for (const r of cfg.routes) {
             shots++;
             const name = `${slug(r.name || r.path)}-${width}-${theme}`;
-            const url = join(cfg.baseUrl, r.path);
+            const url = cfg.single || join(cfg.baseUrl, r.path);
             // Storage and cookies are per context, so a route with steps (a click can write them) or a seed gets its own.
             const own = r.localStorage !== undefined || r.steps !== undefined ? await browser.newContext(opts) : null;
             const page = await (own || ctx).newPage();

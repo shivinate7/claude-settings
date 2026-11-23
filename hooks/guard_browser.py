@@ -15,14 +15,14 @@ from guard_core import (
 )
 from guard_kill import _PW_RUNNERS, _pw_name   # the one home of "this token names the Playwright CLI"
 
-# The two switches. bin/render, bin/shoot and skills/waiting-page/check_designs.mjs each spell them as a literal.
+# The two switches. bin/shoot and skills/waiting-page/check_designs.mjs each spell them as a literal.
 BROWSER_FLAGS = ("--use-mock-keychain", "--password-store=basic")
 
 BROWSER_KEYCHAIN_REASON = (
     "Rule (browser-keychain): this launches a Chromium without both `--use-mock-keychain` and "
     "`--password-store=basic`. On macOS a test browser then asks for the owner's keychain password "
     "(\"Chromium Safe Storage\"), and a click on Allow hands it the owner's stored secrets. "
-    "Remedy: render with the built-in browser pane, or run `render <html file or url> --out shot.png` "
+    "Remedy: render with the built-in browser pane, or run `shoot --file <html file> --out <folder>` or `shoot --url <url> --out <folder>` "
     "(the shared tool). A script that must launch a Chromium passes "
     "`args: [\"--use-mock-keychain\", \"--password-store=basic\"]` (Python: `args=[...]`). "
     "(decision render-browser-no-keychain)"
@@ -37,6 +37,9 @@ _INTERPRETERS = {
     "node": "js", "nodejs": "js", "bun": "js", "deno": "js", "tsx": "js", "ts-node": "js",
 }
 _PYTHON = re.compile(r"python[\d.]*$")
+# A package runner carries the real program after its own words and flags: `npx -p playwright node -e`, `pnpm exec tsx -e`,
+# `uv run python -c`, `python3 -m playwright open`. These are the runners beside the Playwright ones in guard_kill.
+_RUNNERS = set(_PW_RUNNERS) | {"uv", "uvx", "pipx"}
 _SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 
 # The launch call of the two libraries. Python's `launch_persistent_context` is the same call.
@@ -45,8 +48,9 @@ _LAUNCH = re.compile(r"\b(?:chromium|puppeteer)\s*\.\s*(?:launch|launchPersisten
 # where the same spot is live code in the masked text.
 _REQUIRE_LAUNCH = re.compile(
     r"\brequire\s*\(\s*['\"](?:puppeteer|puppeteer-core)['\"]\s*\)\s*\.\s*launch\s*\(")
-# An `args` that is no literal list (a name, a spread), so the switches may sit in a constant beside the call.
-_NAMED_ARGS = re.compile(r"\bargs\b(?!\s*[:=]\s*\[)|\.\.\.|\*\*")
+# A literal `args` list. A call with none and an argument (`launch(opts)`, `launch({ ...base })`) takes its switches from a
+# constant beside it, so both switches in the text pass it.
+_LITERAL_ARGS = re.compile(r"\bargs\b\s*[:=]\s*\[")
 # The Playwright CLI commands that open Chromium by default. The CLI takes no Chromium switches.
 _PW_CHROMIUM_COMMANDS = {"screenshot", "pdf", "open", "codegen", "cr", "chromium"}
 _PW_OTHER_BROWSERS = {"firefox", "ff", "webkit", "wk"}
@@ -120,7 +124,8 @@ def _code_hits(text: str, lang: str) -> list:
         span = plain[inside]
         if all(flag in span for flag in BROWSER_FLAGS):
             continue
-        if _NAMED_ARGS.search(masked[inside]) and all(flag in plain for flag in BROWSER_FLAGS):
+        if (masked[inside].strip() and not _LITERAL_ARGS.search(masked[inside])
+                and all(flag in plain for flag in BROWSER_FLAGS)):
             continue
         hits.append(re.sub(r"\s+", " ", found.group(0) + span.strip()[:60]))
     return hits
@@ -148,11 +153,24 @@ def _interpreter_lang(word: str) -> str:
     return "py" if _PYTHON.match(word) else _INTERPRETERS.get(word, "")
 
 
+def _program(tokens, index) -> int:
+    """The index of the program a package runner starts, else `index`. `npx tsx -e`, `pnpm exec node -e` and
+    `npx -p playwright node -e` start an interpreter. The first later token that is one is read as the program, so a
+    flag's value never hides it. A runner that starts no interpreter keeps its own index."""
+    if basename(tokens[index]) not in _RUNNERS:
+        return index
+    for at in range(index + 1, len(tokens)):
+        word = basename(tokens[at])
+        if _interpreter_lang(word) or word in _SHELLS:
+            return at
+    return index
+
+
 def _cli_hit(tokens, index) -> str:
     """The Playwright CLI command that opens Chromium (it takes no Chromium switch), or the Puppeteer launch command."""
     word = basename(tokens[index])
     rest = tokens[index:]
-    if not (word in _PW_RUNNERS or word.startswith("node") or _pw_name(word)):
+    if not (word in _RUNNERS or word.startswith("node") or _PYTHON.match(word) or _pw_name(word)):
         return ""
     for at, token in enumerate(rest):
         if token.lstrip("-").startswith("@puppeteer/browsers") and rest[at + 1:at + 2] == ["launch"]:
@@ -204,6 +222,7 @@ def command_hit(command: str, depth: int = 0) -> str:
         for segment in split_segments(header):
             tokens = segment_tokens(segment) or []
             index = resolve_command(tokens) if tokens else None
+            index = _program(tokens, index) if index is not None else None
             lang = _interpreter_lang(basename(tokens[index])) if index is not None else ""
             lang = lang or (_lang_of(_redirect_target(tokens), "") if tokens else "")
             if lang == "sh":
@@ -222,6 +241,7 @@ def command_hit(command: str, depth: int = 0) -> str:
         hit = _cli_hit(tokens, index) or _binary_hit(tokens, index)
         if hit:
             return hit
+        index = _program(tokens, index)
         word = basename(tokens[index])
         lang = _interpreter_lang(word)
         written = _redirect_target(tokens)

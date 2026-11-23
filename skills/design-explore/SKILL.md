@@ -31,7 +31,7 @@ worktree (`parallelism-each-own-checkout`).
   primary action. The orchestrator picks directions that differ from each other.
 
 A designer, and the orchestrator, renders a mockup in the built-in browser pane or with the shared tool
-(`render <file or url> --out <png>`), never with a bare Playwright, Puppeteer or Chrome launch: on macOS
+(`shoot --file <html> --out <folder>`, or `shoot --url <url> --out <folder>`), never with a bare Playwright, Puppeteer or Chrome launch: on macOS
 that asks the owner for the keychain password, and the guard rule `browser-keychain` refuses it (decision
 `render-browser-no-keychain`).
 

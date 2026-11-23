@@ -646,7 +646,7 @@ if sys.path[:1] != [_HERE]:
 # The rule families in import order: each one imports only guard_core and the families before it.
 _FAMILY_MODULES = ("guard_branch_worktree", "guard_shared_tree", "guard_pointer",
                    "guard_push_delete", "guard_merge", "guard_review_log", "guard_frozen", "guard_env",
-                   "guard_kill", "guard_argv", "guard_stream", "guard_rm_var", "guard_mask_script", "guard_wsl")
+                   "guard_kill", "guard_browser", "guard_argv", "guard_stream", "guard_rm_var", "guard_mask_script", "guard_wsl")
 # guard.py and each guard_*.py the installer copies carry `INSTALL_ID = "<id>"`, one value per install
 # run, stamped at copy time in place of the whole commented placeholder line below. A file with no such line is a placeholder
 # (the repo copy, or an old file from before the stamp). A set of all placeholders matches, which is the
