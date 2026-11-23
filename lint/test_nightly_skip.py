@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """Tests for .github/scripts/nightly-skip.py, the step that lets the daily scheduled run skip.
 
-The gate writes skip=true to $GITHUB_OUTPUT only when every one of these holds (owner page item 880, 11:53 CST Nov 15):
+The gate writes skip=true to $GITHUB_OUTPUT only when every one of these holds (owner, 13:44 CST Nov 23, answer a to Q5):
   (a) the newest schedule run of checks.yml, other than this run, is completed and succeeded, and no other schedule
       run is still going;
-  (b) every push run of checks.yml on main created after that green daily concluded success AND was proven by the
-      push skip (its push-skip job succeeded and its scope job was skipped), and no push run after it is still going;
-  (c) the newest push run of checks.yml on main has this run's head sha, and when no push run is after the green daily,
-      the green daily's head is this run's head (owner pick on item 893, relayed 14:14 CST Nov 15: a day main did not move skips);
+  (b) no push run of checks.yml on main was created after that green daily: main has not moved since it. A push run
+      after it gives skip=false whether or not the push skip proved it, since a push never runs the Windows shards;
+  (c) the newest push run of checks.yml on main, if there is one, has this run's head sha, and the green daily's head is
+      this run's head (owner pick on item 893, relayed 14:14 CST Nov 15: a day main did not move skips);
   (d) the push runs read reach the green daily: a full page of push runs (100) must not end newer than it.
-Any read failure writes skip=false and says "unknown". Each push run record carries its jobs (the jobs read), so a push
-run with no jobs read is unproven.
+Any read failure writes skip=false and says "unknown".
 
 The gate also prints the range line, `range: <green daily head>..<this head> (<N> merges)`, to stdout and to
 $GITHUB_STEP_SUMMARY, where N counts the push runs created after the green daily; `range: unknown (no green daily)`
@@ -197,11 +196,19 @@ class NightlySkip(unittest.TestCase):
         self.assertEqual(got["rc"], 0, "the gate exits %d, so the nightly job fails on the gate: %s" % (got["rc"], got["text"][-300:]))
         return got["value"], got["text"]
 
-    # Re-pointed (owner page item 880, 11:53 CST Nov 15): a push run counts for the skip only when its jobs prove it. The old
-    # case gave skip=true on a green push run with no jobs, which the daily now has to cover.
-    def test_skip_true_when_the_push_run_after_the_green_nightly_is_proven(self):
+    # Owner, 13:44 CST Nov 23, answer a to Q5: the daily skips only while main has not moved since the last green daily. A push run
+    # the push skip proved still moved main, so the daily runs everything.
+    def test_skip_false_when_a_proven_push_run_follows_the_green_nightly(self):
         value, _ = self.nightly_skip(runs=[run("schedule", created=OLDER), proven(created=LATE)])
-        self.assertEqual(value, "true", "a proven push run after the green nightly, at main's head, must give skip=true")
+        self.assertEqual(value, "false", "a proven push run after the green nightly moved main, so skip=false (owner, 13:44 CST Nov 23, Q5 a)")
+
+    # Owner, 13:44 CST Nov 23, answer a to Q5: the newest push run is not the only one that counts. A proven push run between the
+    # green nightly and this head also moved main, so skip=false.
+    def test_skip_false_when_an_earlier_proven_push_run_follows_the_green_nightly(self):
+        value, _ = self.nightly_skip(runs=[run("schedule", created=OLDER, sha=OTHER), proven(sha=MERGE, created=MID),
+                                   proven(sha=HEAD, created=LATE)])
+        self.assertEqual(value, "false", "a proven push run between the green nightly and this head moved main, so skip=false "
+                         "(owner, 13:44 CST Nov 23, Q5 a)")
 
     def test_skip_false_when_the_newest_nightly_failed(self):
         value, _ = self.nightly_skip(runs=[run("push"), run("schedule", created=OLDER), run("schedule", conclusion="failure")])
@@ -241,8 +248,10 @@ class NightlySkip(unittest.TestCase):
                                    run("schedule", status="in_progress", id_=SELF_RUN + 1, created=LATE)])
         self.assertEqual(value, "false", "another daily still going is unknown, so skip=false, whatever the green one before it says")
 
+    # Re-shaped (owner, 13:44 CST Nov 23, answer a to Q5): main has not moved since the green daily, so the skip holds and only this
+    # run's own record is under test. The push run that was here moved main, so it is gone.
     def test_this_runs_own_in_progress_record_does_not_block_the_skip(self):
-        value, _ = self.nightly_skip(runs=[run("schedule", created=OLDER), proven(created=LATE),
+        value, _ = self.nightly_skip(runs=[run("schedule", created=OLDER),
                                    run("schedule", status="in_progress", id_=SELF_RUN, created=LATE)], run_id=SELF_RUN)
         self.assertEqual(value, "true", "the run that is deciding is in progress by definition, so its own record must not block")
 
@@ -254,12 +263,12 @@ class NightlySkip(unittest.TestCase):
         value, _ = self.nightly_skip(runs=[])
         self.assertEqual(value, "false", "an empty run list has no push run on main, so skip=false")
 
-    # Re-pointed (owner page item 880, 11:53 CST Nov 15): a full page holding the green push run and nightly still gives skip=true,
-    # with the push run proven.
-    def test_full_size_list_with_the_proven_push_run_and_nightly_gives_skip_true(self):
+    # Owner, 13:44 CST Nov 23, answer a to Q5: a full list that holds a proven push run after the green nightly moved main, so skip=false.
+    def test_full_size_list_with_a_proven_push_run_after_the_nightly_gives_skip_false(self):
         full = [run("pull_request", sha=OTHER, created=OLDER) for _ in range(PAGE - 2)]
         value, _ = self.nightly_skip(runs=full + [proven(created=LATE), run("schedule", created=OLDER)])
-        self.assertEqual(value, "true", "a hundred-run list that holds the proven push run and the green nightly must give skip=true")
+        self.assertEqual(value, "false", "a hundred-run list whose proven push run follows the green nightly must give skip=false "
+                         "(owner, 13:44 CST Nov 23, Q5 a)")
 
     # Re-pointed (owner pick on item 893, relayed 14:14 CST Nov 15): main has not moved since the green daily at this head, so the day
     # skips. The old expectation required a full run on that day, which the pick rules out.
@@ -381,16 +390,18 @@ class NightlySkipFailureClasses(unittest.TestCase):
                          "a full page of push runs that ends newer than the green nightly hides pushes after it, so skip=false")
 
     def test_a_full_page_of_push_runs_that_reaches_the_green_nightly_can_skip(self):
-        # Control, green on the old code: the same full page, with its oldest run before the green nightly, reaches it.
-        full = [proven(sha=HEAD, created=LATE) for _ in range(PAGE - 1)] + [linux_only(sha=OTHER, created=BEFORE)]
-        self.assertEqual(self.value([run("schedule", created=OLDER)] + full), "true",
-                         "a full page whose oldest run is before the green nightly reaches it, so the proven head can skip")
+        # Control, green on the old code (owner, 13:44 CST Nov 23, Q5 a): a full page of 100 pushes, all before the green nightly at
+        # this head, reaches it, and main has not moved since. Each push run is before the nightly, so none counts as a move.
+        full = pushes_since(PAGE)
+        self.assertEqual(self.value([run("schedule", created=NEWER)] + full), "true",
+                         "a full page whose oldest run is before the green nightly reaches it, so the no-push skip can read it")
 
     def test_a_red_push_run_before_the_green_nightly_is_not_judged(self):
-        # Control, green on the old code: a push run before the green daily is covered by that daily, so it does not block.
-        self.assertEqual(self.value([run("push", sha=OTHER, conclusion="failure", created=BEFORE), run("schedule", created=MID),
-                                   proven(created=LATE)]), "true",
-                         "a red push run before the green nightly is covered by it, so the proven head can skip")
+        # Control, green on the old code (owner, 13:44 CST Nov 23, Q5 a): a red push run before the green daily is covered by that
+        # daily and moved nothing after it, so the daily at this head can skip.
+        self.assertEqual(self.value([run("push", sha=OTHER, conclusion="failure", created=BEFORE), run("push", sha=HEAD, created=MID),
+                                   run("schedule", created=LATE)]), "true",
+                         "a red push run before the green nightly is covered by it, so the no-push skip at this head can apply")
 
 
 class NightlySkipNarrowedPush(unittest.TestCase):
@@ -474,13 +485,17 @@ class NightlySkipLivePages(unittest.TestCase):
     the green daily, the newest at this head. Page 2 holds one push run from before the daily: a short page that ends the read. A read
     stopped after page 1 sees a full page that does not reach the daily, so it says unknown and skips nothing."""
 
-    def test_skip_true_when_the_push_runs_since_the_daily_fill_page_one_and_page_two_reaches_it(self):
+    # Owner, 13:44 CST Nov 23, answer a to Q5: the pushes since the daily moved main, so the decision is skip=false. The case keeps its
+    # purpose: page two must be read to reach the daily, and the answer must be a decision, not an unknown.
+    def test_skip_false_when_the_push_runs_since_the_daily_fill_page_one_and_page_two_reaches_it(self):
         daily = run("schedule", created=OLDER, sha=OTHER)
         pages = {"schedule": [[daily]], "push": [pushes_since(PAGE), [run("push", sha=MERGE, created=BEFORE)]]}
         got, urls = live_run_skip(pages)
-        self.assertIn(1, requested_pages(urls, "push"), "scope: the push runs were never requested, so the case proves nothing")
+        self.assertIn(2, requested_pages(urls, "push"), "scope: page two of the push runs was never requested, so the case proves nothing")
         self.assertEqual(got["rc"], 0, "the skip exits %d: %s" % (got["rc"], got["text"][-300:]))
-        self.assertEqual(got["value"], "true", "the proven push runs since the daily, read through page two, must give skip=true: %s"
+        self.assertNotIn("nightly-skip: unknown", got["text"], "the read reached the daily, so the pushes since it are a decision: %s"
+                         % got["text"][-300:])
+        self.assertEqual(got["value"], "false", "the pushes since the daily, read through page two, moved main, so skip=false: %s"
                          % got["text"][-300:])
 
 
