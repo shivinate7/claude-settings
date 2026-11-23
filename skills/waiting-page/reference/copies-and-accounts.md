@@ -20,15 +20,22 @@ never runs it. There is one path: the record branch's own worktree. Never write 
    pending, stops the run: touch no `.complete` file and run no export. A missed cursor page leaves its docs
    stale in the copy. After the last page of a collection, touch `.complete` in its folder. An empty collection
    is an empty folder with that marker. Make the folder by hand if the tool wrote none.
-3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --fetched <folder> --out <copy folder> --page <file>`.
+3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --fetched <folder> --out <copy folder> --page <file> --account <label>`.
+   `<label>` is this account's label in the registry's `links`. Without it the export records no sightings and deletes nothing.
    `<file>` is the page that "Keep the page on main's code" step 1 already read. Its HTML lands in the copy as
    `page/page.html`, written only when it changed.
    Name a collection that really emptied with `--allow-empty <collection>`. Without it, an emptied
    collection is `unknown`.
 4. Read the verdict line.
    - `same`: stop. Commit nothing.
-   - `changed <n>`: in the same worktree, run `git add` on the copy folder, then
-     commit and push the record branch. The commit message names the count.
+   - `changed <n>`: in the same worktree, run `git add -A` on the copy folder, then
+     commit and push the record branch. The commit message names the count. `changed <n> deleted <k>`: the export
+     deleted each item that no account holds open and that was already marked closed, with its answer, receipt and
+     sightings file, and printed one `deleted <path>` line each. The commit message starts `DELETE:` and lists each
+     deleted path. Each path is relative to the copy folder; under `--all` the line starts `<id>: `. `git show
+     --name-status --diff-filter=D HEAD` lists repo paths, so it must list exactly the copy folder's path, `/`, and each
+     printed path. A `sightings unknown: <path>` line names a sightings file the export could not read: its item was not
+     deleted. Fix the file by hand to `{"open": [...]}`, never delete it: a missing file reads as no account holding the item open. Then export again. Never restore a deleted item.
    - `held item <n>: <sentence>` after the verdict line (exit 4): after `changed`, the copy was written; commit it as for `changed`. After `same`, commit nothing. The page would
      draw that item's picture wrong. Fix the item, export again, and do not republish while one is held.
    - `refused`: nothing was written. Make no commit. The reply names each find: the file, the JSON path and
@@ -92,8 +99,8 @@ the waiting page. A page that moves loses its read access, and the repo then hol
    nothing. An entry with a link for the label exports, whatever its other links. A label no link holds, or an empty
    one, prints one `unknown` line, writes nothing and exits 2. The page and each
    text file are scanned like the docs; a find refuses that artifact only.
-4. Run `git add` on the export folder of each artifact whose line says `changed`. Then commit and push the record
-   branch. A `refused` artifact wrote nothing, so its folder is as it was. An `unknown` one wrote nothing too. A `checks unknown: collections lack <name>` line is not a verdict: its artifact wrote the copy, says `same` or `changed <n>`, and exits 2. Say each such line in
+4. Run `git add -A` on the export folder of each artifact whose line says `changed`. Then commit and push the record
+   branch. When a line says `deleted <k>`, the message starts `DELETE:` and lists each `deleted <path>` line. A `refused` artifact wrote nothing, so its folder is as it was. An `unknown` one wrote nothing too. A `checks unknown: collections lack <name>` line is not a verdict: its artifact wrote the copy, says `same` or `changed <n>`, and exits 2. Say each such line in
    the reply, and fix the cause first.
 
 Cost: one list call per page of each collection of each entry, one python process, and one commit when something

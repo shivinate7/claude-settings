@@ -1,0 +1,1 @@
+- export-ruling-flag-churn: two accounts whose pages disagree on a ruling's arbiter flag rewrite its copy row back and forth at each export; no row is lost (decision waiting-data-in-repo). Seen: 2026-11-22 x1
