@@ -1,0 +1,1 @@
+- start-hook-bak-wording: hooks/session_start.sh (line 447) says the app's save "saves it as settings.json.bak". That is stale after a second save, which writes settings.json.bak.2 or a later copy. Suggested wording: "saves a copy beside it". Decision merge-reinstalls-from-main (each merge reinstalls from main) holds the save. Seen: 2026-11-22 x1
