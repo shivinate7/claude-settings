@@ -1729,7 +1729,7 @@ PUSH_MAIN_REASON = (
 PUSH_MAIN_BRANCH_REASON = (
     "Rule (Git): this push writes the default branch, main or master "
     "(decision guard-remedy-not-to-owner, a guard never asks the owner). "
-    "Remedy: push the commit to a branch, `git push origin HEAD:<branch>`, and name that branch in your report. "
+    "Remedy: push the commit to your own branch, `git push origin HEAD:<branch>`, and name that branch in your report. "
     + guard_core.COMPLY_TAIL
 )
 PUSH_ALL_REASON = (
@@ -1761,7 +1761,7 @@ PUSH_ASK_BRANCH_REASON = (
     "Rule (Git): this forced push may overwrite the history of the default branch, or its target is "
     "unreadable. A retry would force the same branch again "
     "(decision guard-remedy-not-to-owner, a guard never asks the owner). "
-    "Remedy: push the commit to a branch, `git push origin HEAD:<branch>`, and name that branch in your report. "
+    "Remedy: push the commit to your own branch, `git push origin HEAD:<branch>`, and name that branch in your report. "
     + guard_core.COMPLY_TAIL
 )
 
