@@ -96,11 +96,12 @@ PROBLEM_LINE = re.compile(r"^[ \t]*Problem[ \t]*\((?:%s)\):[ \t]*\S" % _STAKES, 
 # A Based on line starts `Based on (` or `Based on:`; prose that starts "Based on the log" is not one.
 BASED_LABEL = re.compile(r"^[ \t]*Based on[ \t]*[(:]", re.I | re.M)
 BASED_LINE = re.compile(r"^[ \t]*Based on[ \t]*\(([^()\n]*)\):[ \t]*(\S[^\n]*)", re.I | re.M)
-# decision premise-format: a `read` premise names `path:line`. The path holds a "/" or ends in a file extension;
-# the lookbehind stops a match from starting inside a longer token, so a URL's host:port ("//localhost:8080")
-# is no path:line.
+# decision premise-format: a `read` premise names `path:line`. The path holds a "/" or ends in a file extension.
+# The lookbehinds stop a match from starting inside a longer token or right after "//", the start of a URL's
+# host, so "http://example.com:8080" is no path:line. A "/" before the path is allowed: an absolute path, or
+# the path part of a URL ("https://github.com/o/r/blob/main/hooks/guard.py:120").
 READ_KIND = "read"
-PATH_LINE = re.compile(r"(?<![\w/.:@~+-])[\w.@~+-]+(?:/[\w.@~+-]+)*:\d+")
+PATH_LINE = re.compile(r"(?<![\w.:@~+-])(?<!//)[\w.@~+-]+(?:/[\w.@~+-]+)*:\d+")
 _PATH_SHAPE = re.compile(r"/|\.[A-Za-z]\w*:")
 
 
@@ -1141,6 +1142,12 @@ def form_str_replace_hit(entry):
         return FORM_RULE, "context edit that removes the Problem line"
     if BASED_LABEL.search(old) and not BASED_LABEL.search(new):
         return FORM_RULE, "context edit that removes the Based on line"
+    # The new text is judged by the one Based on check when it holds a Based on line, so a swap cannot
+    # leave a read premise with no path:line.
+    if BASED_LABEL.search(new):
+        hit = _based_hit(new)
+        if hit[0]:
+            return hit
     hit = placeholder_form_hit(new)
     if hit[0]:
         return hit
