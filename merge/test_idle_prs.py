@@ -28,6 +28,11 @@ as weeks old and fails the 1 h 59 min and the newest-run cases. The 2-hour thres
 second less does not), not by the module's constant name. GitHub's clock and the local clock both start at FAKE_NOW; a case moves one
 of them to show which clock the age is read from.
 
+The Date-header classes (GitHubDateHeader, GitHubDateZoneOffset, GitHubDateSweep) read GitHub's clock from a reply's Date header, as
+Host does. Their ages count from DATE_EPOCH, the instant that header names, never from FAKE_NOW. GitHubDateHeader and GitHubDateZoneOffset
+answer gh at merge.sh (the seam RateLimitWait.replies patches), so Host.gh and its header read run as in production. GitHubDateSweep
+answers gh with the fake gh on PATH (test_merge.FAKE_GH_PR), so the subprocess call runs too.
+
 Cost pin (CostHost, the real merge.Host with each gh call answered here, so every call that reaches gh is counted): one open-pulls read
 per sweep. Per non-draft PR under a pinned requiredChecks list: one run list (memoized per head) and two checks page reads (check runs,
 statuses). Under "none": the run list only, and no checks read. Per drafted PR: one `gh pr ready --undo` and one comment POST. A draft PR
@@ -41,6 +46,8 @@ report, not a case.
 Each case runs the sweep first, then asserts its outcome, so a must-not case is never a pass on a missing entry. Each failure message
 names one cause.
 """
+import calendar
+import contextlib
 import io
 import itertools
 import json
@@ -472,6 +479,118 @@ class IdleSweep(tm.Env):
         self.assertTrue(any("drafted, comment failed" in line for line in lines),
                         "PR #7 was drafted and its comment failed, but the line does not say so: " + text)
         self.assertFalse(any("left as it is" in line for line in lines), "PR #7 is said to be left as it is, though its draft landed: " + text)
+
+
+DATE_TEXT = "Mon, 23 Nov 2026 20:00:00 GMT"  # the Date header GitHub sends for the instant DATE_EPOCH names
+DATE_EPOCH = calendar.timegm((2026, 11, 23, 20, 0, 0))  # that instant in epoch seconds: timegm reads the fields as UTC, never as the local zone
+ZONES = ("America/Chicago", "Asia/Kolkata") if hasattr(time, "tzset") else ("",)  # one local zone behind UTC and one ahead; "" runs in the current zone
+
+
+@contextlib.contextmanager
+def in_zone(zone):
+    """Run the block with TZ set to `zone`, then put TZ back. An empty zone, or a platform with no time.tzset, runs the block as it is."""
+    if not zone or not hasattr(time, "tzset"):
+        yield
+        return
+    old = os.environ.get("TZ")
+    os.environ["TZ"] = zone
+    time.tzset()
+    try:
+        yield
+    finally:
+        if old is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = old
+        time.tzset()
+
+
+def make_host(now=tm.FAKE_NOW, cwd=None, required=("checks",)):
+    """A real merge.Host, no method overridden, whose local clock is `now`. A server_now that returns the local clock fails against it."""
+    return merge.Host(required=list(required), base="main", minute=60, now=lambda: now, pause=lambda s: None, repo=tm.FAKE_REPO, cwd=cwd)
+
+
+def reply(date=None):
+    """A 200 `gh api -i` reply as gh prints it: the status line and headers, a Date header when `date` is given, then the body."""
+    return (0, tm.gh_i(200, '{"login": "o"}', **({"Date": date} if date is not None else {})))
+
+
+def answer(test, host, *replies):
+    """Answer each of `host`'s next gh calls with the next of `replies` (the last one again), at merge.sh, the seam RateLimitWait.replies
+    patches. Each call is `gh api -i`, so Host.gh reads the header block of its reply as it does in production."""
+    tm.RateLimitWait.replies(test, *replies)
+    for _ in replies:
+        host.gh(["api", "repos/owner/repo/pulls", "-i"])
+
+
+class GitHubDateHeader(unittest.TestCase):
+    """Host.server_now reads GitHub's clock from the Date header of the newest `gh api -i` reply that had a header block (Host.note_budget).
+    Only the gh answers are scripted; Host's own methods run. The local clock is tm.FAKE_NOW, never the Date."""
+
+    def test_a_date_header_reads_as_the_instant_it_names_in_every_local_zone(self):
+        for zone in ZONES:
+            with self.subTest(zone=zone or "current zone"), in_zone(zone):
+                host = make_host()
+                answer(self, host, reply(DATE_TEXT))
+                self.assertEqual(host.server_now(), DATE_EPOCH,
+                                 f"the Date header {DATE_TEXT!r} did not read as the instant it names: server_now() is {host.server_now()!r}, expected {DATE_EPOCH}")
+
+    def test_a_reply_with_headers_and_no_date_leaves_the_clock_unread(self):
+        host = make_host()
+        answer(self, host, reply(DATE_TEXT))
+        self.assertEqual(host.server_now(), DATE_EPOCH, "precondition: the Date reply did not set GitHub's clock, so the None below would prove nothing")
+        answer(self, host, reply(None))
+        self.assertIsNone(host.server_now(), f"a reply with a header block and no Date header set GitHub's clock to {host.server_now()!r}, not None")
+
+    def test_a_reply_with_no_header_block_keeps_the_clock_read_last(self):
+        host = make_host()
+        answer(self, host, reply(DATE_TEXT))
+        self.assertEqual(host.server_now(), DATE_EPOCH, "precondition: the Date reply did not set GitHub's clock, so the kept value below would prove nothing")
+        answer(self, host, (0, "[]"))  # a `-i` reply that starts with no status line: note_budget reads no headers from it
+        self.assertEqual(host.server_now(), DATE_EPOCH, f"a reply with no header block moved GitHub's clock to {host.server_now()!r}")
+
+    def test_before_any_reply_the_clock_is_unread(self):
+        host = make_host()
+        self.assertIsNone(host.server_now(), f"a host that has read no reply reports GitHub's clock as {host.server_now()!r}, not None")
+
+
+class GitHubDateZoneOffset(unittest.TestCase):
+    """A Date written `-0000` says UTC and that the local offset is unknown (RFC 2822): it names the same instant as the GMT form. email.utils
+    parses `-0000` as a naive datetime, and a naive .timestamp() reads it as local time, so the instant moves with the zone. Red until the
+    parse reads the `-0000` form as UTC."""
+
+    def test_a_date_written_with_offset_minus_zero_reads_as_the_same_utc_instant(self):
+        for zone in ZONES:
+            with self.subTest(zone=zone or "current zone"), in_zone(zone):
+                host = make_host()
+                answer(self, host, reply("Mon, 23 Nov 2026 20:00:00 -0000"))
+                self.assertEqual(host.server_now(), DATE_EPOCH,
+                                 f"a Date ending -0000 read as local time, not UTC, in zone {zone or 'current'}: server_now() is {host.server_now()!r}, expected {DATE_EPOCH}")
+
+
+class GitHubDateSweep(tm.Env):
+    """`merge --draft-idle` through the real merge.Host, its gh calls answered by the fake gh on PATH (test_merge.FAKE_GH_PR). GitHub's clock is
+    the Date header of the fake's replies (DATE_TEXT); the local clock runs 3 h ahead of it. The PR's one red run is 30 min old by GitHub's
+    clock, so the PR is kept. Counted from the local clock, the same run is 3 h 30 min old: idle, and drafted."""
+
+    def setUp(self):
+        super().setUp()
+        tm.install_gh_shim(self)
+
+    def test_a_red_run_30_min_old_by_githubs_date_is_kept_though_the_local_clock_runs_3_h_ahead(self):
+        created = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(DATE_EPOCH - 30 * 60))
+        tm.GhHalf.set(self, open_prs=[["feat", self.head("feat"), "main", 7]], checks_seq=[[(RED_JOB, "fail", "https://x/y")]],
+                      runs_seq=[[(RED_JOB, "completed", "failure")]], date=DATE_TEXT, runs_created=created)
+        host = make_host(now=DATE_EPOCH + 3 * HOUR, cwd=self.co, required=[RED_JOB])
+        with unittest.mock.patch.dict(os.environ):
+            os.environ.pop("CLAUDE_CODE_REMOTE", None)
+            os.environ.pop("GH_REPO", None)
+            rc, text = self.run_merge_once("--draft-idle", host=host)
+        calls = tm.GhHalf.calls(self)
+        self.assertIn("run list", calls, "the red head's runs were not read, so PR #7 was not judged: " + text)  # scope first
+        self.assertEqual(host.server_now(), DATE_EPOCH, f"GitHub's clock is not the Date header of the replies: server_now() is {host.server_now()!r}: " + text)
+        self.assertRegex(text, r"\bkept 1\b", "PR #7 was not kept, though its newest run is 30 min old by GitHub's clock: " + text)
+        self.assertNotIn("pr ready", calls, "PR #7 was drafted, which counts its age from the local clock 3 h ahead: " + text)
 
 
 if __name__ == "__main__":

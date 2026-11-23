@@ -4164,12 +4164,12 @@ def next_runs():
     seq = S.get("runs_seq") or [[]]; cur = seq.pop(0) if len(seq) > 1 else seq[0]; save()
     return [(r[0], r[1], r[2], r[3] if len(r) > 3 else 9000 + i, r[4] if len(r) > 4 else sum(map(ord, r[0]))) for i, r in enumerate(cur)]
 def run_list_json(runs, sha, argv):
-    """`gh run list --json F,...` as gh prints it: only the fields asked for. A field the fake does not know is gh's refusal. Every run's createdAt is one hour before FAKE_NOW, the same for each run."""
+    """`gh run list --json F,...` as gh prints it: only the fields asked for. A field the fake does not know is gh's refusal. Every run's createdAt is one hour before FAKE_NOW (S runs_created sets it), the same for each run."""
     fields = argv[argv.index("--json") + 1].split(",") if "--json" in argv else list(RUN_FIELDS)
     bad = [f for f in fields if f not in RUN_FIELDS]
     if bad:
         print('Unknown JSON field: "%s"' % bad[0]); sys.exit(1)
-    created = "2026-10-01T23:00:00Z"  # GitHub's ISO time, an hour before the fixture clock (FAKE_NOW); this script runs in its own process and has no clock
+    created = S.get("runs_created", "2026-10-01T23:00:00Z")  # GitHub's ISO time, an hour before the fixture clock (FAKE_NOW) unless a case sets runs_created; this script runs in its own process and has no clock
     def obj(name, status, conclusion, rid, wf):
         full = {"databaseId": rid, "name": name, "workflowName": name, "workflowDatabaseId": wf, "status": status, "conclusion": conclusion,
                 "headSha": sha, "headBranch": "feat", "event": "pull_request", "createdAt": created, "url": "https://github.com/o/r/actions/runs/%d" % rid}
@@ -4192,7 +4192,7 @@ def ratelimit_lines():
 def finish(text, code, include=False, link=None):
     if include and not (code and not re.search(r"\(HTTP \d{3}\)\s*$", text)):  # a transport error has no HTTP reply, so no header block
         got = int(re.search(r"\(HTTP (\d{3})\)\s*$", text).group(1)) if code else 200
-        sys.stdout.buffer.write(("HTTP/1.1 %d %s\r\nContent-Type: application/json\r\n%s%s\r\n" % (got, "Error" if code else "OK", ratelimit_lines(), "Link: %s\r\n" % link if link else "")).encode())
+        sys.stdout.buffer.write(("HTTP/1.1 %d %s\r\nContent-Type: application/json\r\n%s%s%s\r\n" % (got, "Error" if code else "OK", ratelimit_lines(), "Link: %s\r\n" % link if link else "", "Date: %s\r\n" % S["date"] if S.get("date") else "")).encode())  # S["date"]: GitHub's clock, as a case sets it; unset, the block has no Date line
     print(text)
     sys.exit(code)
 def graphql():
