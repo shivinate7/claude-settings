@@ -451,6 +451,19 @@ def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False, ra
 def git(cwd, *a, input=None):
     return sh(["git", "-C", cwd, *a], input=input)
 
+def merge_dates(wt, *shas):
+    """The environment for a commit made of `shas`: author and committer dates both the latest committer date among them, so a rerun of one head and one
+    tip builds the same commit whatever date the environment holds. None when a date cannot be read: the commit then takes the clock."""
+    c, out = git(wt, "show", "-s", "--format=%ct", *shas)
+    try:
+        when = max(int(x) for x in out.split())
+    except ValueError:
+        return None
+    if c:
+        return None
+    date = f"@{when} +0000"
+    return {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
+
 def ancestor(cwd, tip, base):
     """True when `tip` is reachable from `base`, False when it is not, None when git could not tell. A shallow clone
     that cut the history reads None, never False. The one home is hooks/git_reads.branch_is_ancestor."""
@@ -4215,14 +4228,16 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
                     elif base != default:
                         main_in_skip = "base is not the default branch"
         if lacks_tip and not main_in_skip:
-            c, made = git(wt, *identity(wt), "commit-tree", merged[0], "-p", head, "-p", merged[1], "-m", base_merge_message(base, info["branch"]))
+            c, made = sh(["git", "-C", wt, *identity(wt), "commit-tree", merged[0], "-p", head, "-p", merged[1], "-m", base_merge_message(base, info["branch"])],
+                         env=merge_dates(wt, head, merged[1]))  # dated by the head and the tip, so a rerun builds the same M and the job's key holds
             if c:
                 raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the merge of the head with {base} could not be made: {made} {LANE_LINT_CITE}")
             pushed_merge = made.strip()
         # The lint tree is a merge commit of the base (first parent) and the head (second; M when pushed), so every file is the merged copy and HEAD is clean: a step
         # that diffs the base against HEAD or the work tree reads only the lane's own changes, and the history steps see the lane's commits under one merge commit.
         c, made = sh(["git", "-C", wt, "-c", "user.name=merge-lane-lint", "-c", "user.email=merge-lane-lint@invalid", "commit-tree", merged[0],
-                      "-p", merged[1], "-p", pushed_merge or head, "-m", f"lane-lint merge of {head[:9]} into {base}"])
+                      "-p", merged[1], "-p", pushed_merge or head, "-m", f"lane-lint merge of {head[:9]} into {base}"],
+                     env=merge_dates(wt, head, merged[1]))
         merge_commit = made.strip()
         c2, out = (c, made) if c else git(wt, "checkout", "-q", "--detach", merge_commit)
         if c2:
