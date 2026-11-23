@@ -488,6 +488,38 @@ def copy_repos(t):
             shutil.rmtree(os.path.join(t, name), True)
         return False
 
+class RepoTemplate(unittest.TestCase):
+    """copy_repos gives each test a copy of the template build_repos makes once per process. A copy must hold what a fresh build holds: the
+    same refs and trees in origin and in each clone, and each clone's url at its own origin. A copy is private to its test."""
+
+    def copies(self):
+        """-> (fresh, copied): one folder of this run built by build_repos, one filled by copy_repos."""
+        root = os.path.realpath(tempfile.mkdtemp(prefix="repo-template-", dir=run_folder()))
+        fresh, copied = os.path.join(root, "fresh"), os.path.join(root, "copied")
+        os.makedirs(fresh)
+        os.makedirs(copied)
+        build_repos(fresh)
+        self.assertTrue(copy_repos(copied), "copy_repos could not copy the template")
+        return fresh, copied
+
+    def refs_and_trees(self, folder):
+        """-> each repo's refs, one line per ref with the tree that ref names: origin.git, co and other. Commit ids differ between builds, trees do not."""
+        return {name: sh(os.path.join(folder, name), "git", "for-each-ref", "--format=%(refname) %(tree)") for name in ("origin.git", "co", "other")}
+
+    def test_a_copy_matches_a_fresh_build_and_is_private_to_its_test(self):
+        fresh, copied = self.copies()
+        self.assertEqual(self.refs_and_trees(copied), self.refs_and_trees(fresh),
+                         "a copy's refs or trees differ from a fresh build's")
+        norm = lambda p: os.path.normcase(os.path.realpath(p))
+        for name in ("co", "other"):
+            url = sh(os.path.join(copied, name), "git", "config", "--get", "remote.origin.url")
+            self.assertEqual(norm(url), norm(os.path.join(copied, "origin.git")), f"the copied clone {name} does not point at its own origin: {url}")
+        second = os.path.join(os.path.dirname(copied), "second")
+        os.makedirs(second)
+        self.assertTrue(copy_repos(second), "copy_repos could not copy the template for the second copy")
+        put(os.path.join(copied, "co", "only-here.txt"), "one test's edit\n")
+        self.assertFalse(os.path.exists(os.path.join(second, "co", "only-here.txt")), "an edit in one copy reached another copy")
+
 class Env(unittest.TestCase):
     def setUp(self):
         self.new_repos()
