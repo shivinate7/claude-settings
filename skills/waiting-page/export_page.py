@@ -14,12 +14,13 @@ The session touches `.complete` in each collection folder after the last list pa
 shows: a collection with no marker is unknown. A collection that is empty now while the copy holds docs of it is
 unknown too, unless the session names it with --allow-empty.
 Every account's page shares one copy. With --account LABEL, the export records in `sightings/<item id>.json` whether
-this account's page holds each item open. A closed item leaves the copy with its answer (keyed by its id, or naming it
+this account's page holds each item open; a fetch that lacks the item leaves the record as it was. Without --account the
+export runs none of the closed rules below. A closed item leaves the copy with its answer (keyed by its id, or naming it
 in `item`), that answer's receipt and its sightings file only when an export with --account fetches it closed, the copy
 item is already marked closed by an earlier export, and no account's latest export holds it open. An item waits while
 the page holds an answer tied to it. An arbiter ruling is never deleted. An export with no --account deletes nothing.
 The match is the doc key, never `n`. A closed item the copy does not hold is copied only while the page holds its
-answer. A doc the fetch no longer lists stays (owner rulings 2026-11-22 21:02 and 21:05 CST). Each delete prints
+answer. A doc the fetch no longer lists stays (decision waiting-data-in-repo). Each delete prints
 `deleted <path>` before the verdict, the path relative to WAITING_DIR. A sightings file that cannot be read prints
 `sightings unknown: <path> ...`; its item is not deleted and the file is left as it was. These rules are the waiting
 page's: another role's `items` collection, and --rebuild or --merge with --collections, keep a closed doc.
@@ -75,7 +76,7 @@ Rebuild, the recovery path. It reads only the repo copy, never the live page:
 Writes OUT_DIR/batch-NNN.json, each a JSON list of at most 50 `{op: "set", collection, doc_id, data}` entries and
 under 900,000 bytes, one entry per doc in WAITING_DIR except `page/` and `sightings/`, and prints `batches K docs N`.
 A closed item that is no arbiter ruling, its answer and its receipt get no entry, in --merge too: no session restores a
-deleted item to a page. With --collections neither folder nor closed item is special. The session
+deleted item to a page. With --collections, `sightings/` is a folder like any other and no closed item is special. The session
 sends each list as an `ArtifactData batch`. Unknown, exit 2: a missing or empty WAITING_DIR, a folder in it that is
 neither one of the six collections (or the `--collections` names) nor `page/`, or one doc over the byte cap.
 For an artifact other than the waiting page, `--collections NAME [NAME ...]` names its collections (the registry
@@ -142,8 +143,8 @@ COLLECTIONS = ("items", "answers", "groups", "asks", "meta", "receipts")
 ITEMS, ANSWERS, RECEIPTS = "items", "answers", "receipts"
 SIGHTINGS = "sightings"  # sightings/<item id>.json: {"open": [account labels whose latest export held the item open]}
 # A doc the fetch no longer lists stays: another account's page may still hold it open. Only an item whose own data says
-# closed leaves the copy, matched by its key, never its `n`, with its answer and receipt (owner rulings 2026-11-22 21:02
-# and 21:05 CST; decision waiting-data-in-repo).
+# closed leaves the copy, matched by its key, never its `n`, with its answer and receipt (decision
+# waiting-data-in-repo).
 KEEP_UNFETCHED = COLLECTIONS
 COLLECTION_SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")  # copy of lint/layout.py COLLECTION, for the same reason
 PAGE_FOLDER, DESIGN_FILE, PAGE_FILE, FILES_FOLDER = "page", "designData.json", "page.html", "files"
@@ -683,7 +684,8 @@ def read_sightings(out, doc_id):
 def open_sightings(collections, docs, have, out, account):
     """{item id: sorted labels whose latest export holds it open}, after this export, for each item of the copy or the
     fetch, or None for an item whose sightings file is unreadable. None without --account, when no sighting is recorded.
-    An item the fetch does not hold, or holds closed, drops this account's label."""
+    A fetch that holds the item open adds this account's label, and one that holds it closed drops it. A fetch that lacks
+    the item keeps the label: absence is no closed sighting."""
     if ITEMS not in collections or not account:
         return None
     held = {label[len(ITEMS) + 1:-len(".json")] for label in have if label.startswith(ITEMS + "/")}
@@ -694,22 +696,23 @@ def open_sightings(collections, docs, have, out, account):
         if recorded is None:
             found[doc_id] = None
             continue
-        labels = set(recorded) - {account}
-        if data is not None and not is_closed(data):
-            labels.add(account)
+        labels = set(recorded)
+        if data is not None:
+            (labels.discard if is_closed(data) else labels.add)(account)
         found[doc_id] = sorted(labels)
     return found
 
 
 def closed_sightings(collections, docs, have, sightings):
-    """(item ids to delete, closed item ids the copy does not hold and will not copy). Every account's page shares one
+    """(item ids to delete, closed item ids the copy does not hold and will not copy, ruling ids whose copy row is kept
+    as it is because the fetched closed row lacks the copy's `arbiter: true`). Every account's page shares one
     copy. An item is deleted only by an export with --account (`sightings` not None) that fetches it closed, when the
     copy item is already marked closed by an earlier export and no account's latest export holds it open. An item waits
     while the page holds an answer tied to it. An arbiter ruling is never deleted. A closed item the copy does not hold
     is copied only while the page holds its answer. An item the fetch does not hold is never deleted."""
     if ITEMS not in collections:
-        return set(), set()
-    gone, unseen = set(), set()
+        return set(), set(), set()
+    gone, unseen, rulings = set(), set(), set()
     page_answers = docs.get(ANSWERS, {})
     for doc_id, data in docs[ITEMS].items():
         label = "%s/%s.json" % (ITEMS, doc_id)
@@ -719,10 +722,14 @@ def closed_sightings(collections, docs, have, sightings):
         if label not in have:
             if not answered:
                 unseen.add(doc_id)
-        elif (sightings is not None and sightings.get(doc_id) == [] and not answered and data.get("arbiter") is not True
-              and is_closed(parsed(have[label]))):
-            gone.add(doc_id)
-    return gone, unseen
+        else:
+            kept = parsed(have[label])
+            ruling = data.get("arbiter") is True or (isinstance(kept, dict) and kept.get("arbiter") is True)
+            if ruling and data.get("arbiter") is not True:
+                rulings.add(doc_id)  # a closed row that lost the flag never overwrites the copy's ruling
+            if sightings is not None and sightings.get(doc_id) == [] and not answered and not ruling and is_closed(kept):
+                gone.add(doc_id)
+    return gone, unseen, rulings
 
 
 def copy_answers(have):
@@ -747,9 +754,11 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
             raise Stop("unknown - %s is empty but the copy holds %d doc(s) of it; pass --allow-empty %s if it emptied"
                        % (name, len(kept), name), UNKNOWN)
 
-    rules = collections if design else ()  # the closed rules are the waiting page's, never another role's `items`
+    # The closed rules are the waiting page's, never another role's `items`, and need --account: the writer passes it
+    # only for the waiting page's export. Without it the export copies a closed item as it always did.
+    rules = collections if design and account else ()
     sightings = open_sightings(rules, docs, have, out, account)
-    gone, unseen = closed_sightings(rules, docs, have, sightings)
+    gone, unseen, rulings = closed_sightings(rules, docs, have, sightings)
     for doc_id, labels in sorted((sightings or {}).items()):
         if labels is None:
             print("%ssightings unknown: %s/%s.json is not readable; its item is not deleted" % (prefix, SIGHTINGS, doc_id))
@@ -760,7 +769,8 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
     finds = []
     for name in collections:
         for doc_id, data in docs[name].items():
-            if "%s/%s.json" % (name, doc_id) in drop or "%s/%s.json" % (name, doc_id) in skip:
+            if "%s/%s.json" % (name, doc_id) in drop or "%s/%s.json" % (name, doc_id) in skip \
+                    or (name == ITEMS and doc_id in rulings):
                 continue
             hits = [("$id", kind) for kind in kinds_in(doc_id)]
             label = "%s/%s.json" % (name, "<redacted>" if hits else doc_id)
