@@ -122,13 +122,13 @@ def merge_tool_merges(tool: str, tool_input: dict) -> bool:
 
 
 def merge_tool_target(tool: str, tool_input: dict):
-    """The (number, repo) a MERGE_TOOLS call names. The app's switch names its pull request by URL; one that is no
-    github.com pull request gives ("", ""), which `merge_check` reads from the checkout, as it does for a host tool call
-    with no number."""
+    """The (number, repo) a MERGE_TOOLS call names, or None for the app's switch whose url names no github.com pull
+    request. The caller refuses None: reading the checkout's own branch pull request instead could allow another one.
+    A host tool call with no number gives ("", repo), which `merge_check` reads from the checkout."""
     if tool == APP_AUTO_MERGE_TOOL:
         url = tool_input.get("url")
         found = APP_PR_URL_RE.match(url.strip()) if isinstance(url, str) else None
-        return (found.group(3), found.group(1) + "/" + found.group(2)) if found else ("", "")
+        return (found.group(3), found.group(1) + "/" + found.group(2)) if found else None
     owner, name, number = (tool_input.get(k) for k in ("owner", "repo", "pullNumber"))
     repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
     return "" if number is None else str(number), repo

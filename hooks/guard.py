@@ -8350,8 +8350,10 @@ def judge(payload) -> None:
 
     # A merge through the MCP tool is judged by the same merge guard as `gh pr merge`.
     if tool in MERGE_TOOLS and merge_tool_merges(tool, tool_input):
-        number, repo = merge_tool_target(tool, tool_input)
-        verdict, detail = merge_check(number, repo, cwd)
+        target = merge_tool_target(tool, tool_input)
+        number, repo = target or ("", "")
+        verdict, detail = ("unknown", "the url names no github.com pull request") if target is None \
+            else merge_check(number, repo, cwd)
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
                    "merge tool " + verdict)

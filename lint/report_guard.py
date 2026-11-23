@@ -311,6 +311,7 @@ LANDING_TOOLS = {
     "mcp__github__delete_file",
     "mcp__github__update_pull_request_branch",
     "mcp__github__enable_pr_auto_merge",
+    "mcp__ccd_pr__set_auto_merge",
 }
 LABEL_ORDER = ["Done", "Deviations", "Input Needed", "Next"]
 # A bold "**Departs from:**" starts a line of the item (rule `question-departs`), and a bold
@@ -537,8 +538,8 @@ def turn_landed(records):
                 for segment in guard.split_segments(stripped):
                     if _segment_lands_a_git_write(segment) or _segment_lands_a_gh_write(segment):
                         return True
-            elif name in LANDING_TOOLS:
-                return True
+            elif name in LANDING_TOOLS and guard.merge_tool_merges(name, b.get("input") or {}):
+                return True   # the app's auto-merge switch turned off lands nothing, as `gh pr merge --disable-auto`
     return False
 
 
@@ -2295,6 +2296,7 @@ GITHUB_REACH = "github-reach"
 CANNOT_TOOL_ACTS = {
     "mcp__github__create_pull_request": "pr-open",
     "mcp__github__merge_pull_request": "pr-merge", "mcp__github__enable_pr_auto_merge": "pr-merge",
+    "mcp__ccd_pr__set_auto_merge": "pr-merge",
     "mcp__github__push_files": "push", "mcp__github__create_or_update_file": "push",
     "mcp__github__delete_file": "push",
     "mcp__github__update_pull_request": "pr-edit", "mcp__github__add_issue_comment": "pr-edit",
