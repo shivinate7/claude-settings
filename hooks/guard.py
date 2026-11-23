@@ -78,9 +78,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        reason names the EnterWorktree tool. An override lifts a direct pointer path. A
                        config-dir spelling of a pointer file is frozen (never_lifted calls is_frozen
                        per target), so no override lifts it, as with frozen-path. It spawns no git.
-  silent-write         deny. A git write whose own trace is silenced, by a null redirect or by
-                       git's `-q`. The measured carve-outs are the comments above
-                       SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
+  silent-write         deny. A git write whose own trace is silenced, by a null redirect, by
+                       git's `-q`, or by a last pipe stage that drops lines (`grep -v` in any
+                       spelling, a `sed` delete script). The measured carve-outs are the comments
+                       above SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
   hook-bypass          deny. A git commit, merge or push that skips or redirects the git hooks:
                        `-c core.hooksPath` (key in any case), `--no-verify`, `-n` on commit alone (push
                        -n and merge -n pass), core.hooksPath set through GIT_CONFIG_KEY_<n> or
@@ -883,6 +884,8 @@ SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-
 # output is silenced: `pull` (a fetch plus a merge; its `-q` joins the quiet arm), a `fetch` that
 # names a `src:dst` refspec (it moves a local ref; a bare `fetch` stays a read), `make merge`,
 # `gh pr merge`, and a closed descriptor (`2>&-`, `>&-`), which silences like /dev/null.
+# A last pipe stage that drops lines by pattern (`tail_drops_lines`) hides what the write printed
+# the same way, so it counts too. `tail` and `head` keep the lines they print, so they stay allowed.
 # `--dry-run` moves nothing and stays allowed. Output sent to a FILE stays allowed: the owner held
 # that until measured.
 
@@ -988,8 +991,10 @@ def discards_output(segment: str) -> bool:
 
 
 # A write whose output feeds a pipe is judged by that pipe's tail: silenced by a redirect, or a
-# `grep -q`, which prints nothing by itself. A printing tail (`| tail -5`, `| tee f`) is not.
-# `bash -c '...'` stays unparsed, a known gap the owner left.
+# `grep -q`, which prints nothing by itself, or dropped by a filter that deletes lines by pattern
+# (`tail_drops_lines`). A printing tail (`| tail -5`, `| tee f`) is not.
+# `bash -c '...'` stays unparsed, a known gap the owner left. A filter inside a script file the
+# tail runs is out of reach.
 def tail_discards(tail: str) -> bool:
     """True when a pipe's last segment prints nothing the session can read."""
     tail = tail.strip().lstrip("&").strip()   # `|&` leaves a leading `&`
@@ -999,6 +1004,153 @@ def tail_discards(tail: str) -> bool:
     index = resolve_command(tokens) if tokens else None
     return (index is not None and basename(tokens[index]) == "grep"
             and any(t in ("-q", "--quiet", "--silent") for t in tokens[index + 1:]))
+
+
+# `grep` flags that take a value, as a separate word or as the rest of a short cluster.
+GREP_VALUE_FLAGS = set("efmABCd")
+GREP_LONG_VALUE_FLAGS = {"--regexp", "--file", "--max-count", "--after-context", "--before-context",
+                         "--context", "--directories", "--include", "--exclude", "--exclude-dir",
+                         "--label", "--binary-files", "--devices", "--color", "--colour"}
+
+
+def grep_inverts(args) -> bool:
+    """True when a grep's argv carries an invert flag in any spelling: `-v`, a short cluster with
+    `v` ahead of any value letter (`-vE`, `-Ev`), or `--invert-match` (or a prefix of it GNU grep
+    still reads). A word read as a flag's value (`-e -v`) or after `--` is a pattern, never a flag."""
+    skip = False
+    for token in args:
+        if skip:
+            skip = False
+        elif token == "--":
+            return False
+        elif token.startswith("--"):
+            name = token.partition("=")[0]
+            if len(name) > 3 and "--invert-match".startswith(name):
+                return True
+            if name in GREP_LONG_VALUE_FLAGS and "=" not in token:
+                skip = True
+        elif token.startswith("-") and len(token) > 1:
+            for at, letter in enumerate(token[1:], 1):
+                if letter == "v":
+                    return True
+                if letter in GREP_VALUE_FLAGS:
+                    skip = at == len(token) - 1
+                    break
+    return False
+
+
+SED_VALUE_FLAGS = set("efl")   # `-e script`, `-f file`, `-l N`: a letter that takes a value
+
+
+def sed_scripts(args):
+    """The inline sed scripts of an argv: each `-e` / `--expression` value, else the first plain
+    word. A `-f file` script is not read (the file is out of reach), so it adds none."""
+    scripts, plain, skip = [], [], None
+    explicit = False
+    for token in args:
+        if skip:
+            if skip == "e":
+                scripts.append(token)
+            skip = None
+        elif token == "--":
+            continue
+        elif token.startswith("--"):
+            name, eq, value = token.partition("=")
+            if name == "--expression":
+                explicit = True
+                if eq:
+                    scripts.append(value)
+                else:
+                    skip = "e"
+            elif name == "--file":
+                explicit = True
+                skip = None if eq else "f"
+        elif token.startswith("-") and len(token) > 1:
+            for at, letter in enumerate(token[1:], 1):
+                if letter in SED_VALUE_FLAGS:
+                    explicit = explicit or letter != "l"
+                    rest = token[at + 1:]
+                    if rest:
+                        if letter == "e":
+                            scripts.append(rest)
+                    else:
+                        skip = letter
+                    break
+        else:
+            plain.append(token)
+    return scripts if explicit else plain[:1]
+
+
+def sed_deletes(script: str) -> bool:
+    """True when a sed script holds a delete command (`d`): `/re/d`, `5d`, `$d`, `/a/,/b/d`,
+    `/x/{d}`. Read statement by statement, so a `d` inside a regex, an `s` replacement or the text
+    of an `a`/`i`/`c` command is text, never a delete."""
+    at, end = 0, len(script)
+
+    def delimited(i, delimiter):
+        """Index after a delimiter-closed section that starts at i, honouring a backslash."""
+        while i < end and script[i] != delimiter:
+            i += 2 if script[i] == "\\" else 1
+        return i + 1
+
+    while at < end:
+        while at < end and script[at] in " \t\n;{}":
+            at += 1
+        # Addresses: a number, `$`, `first~step`, `/re/` or `\cREc`, joined by `,`, then `!`.
+        while at < end:
+            if script[at] == "/":
+                at = delimited(at + 1, "/")
+            elif script[at] == "\\" and at + 1 < end:
+                at = delimited(at + 2, script[at + 1])
+            elif script[at].isdigit() or script[at] in "$~+":
+                at += 1
+            else:
+                break
+            while at < end and script[at] in "IM":
+                at += 1
+            if at < end and script[at] == ",":
+                at += 1
+            else:
+                break
+        while at < end and script[at] in " \t!":
+            at += 1
+        if at >= end:
+            return False
+        command = script[at]
+        at += 1
+        if command in "dD":
+            return True
+        if command == "{":
+            continue
+        if command in "sy" and at < end:
+            delimiter = script[at]
+            at = delimited(delimited(at + 1, delimiter), delimiter)
+        # Everything else runs to the next `;`, newline or `}`, except the text commands, which
+        # run to the end of the line.
+        if command in "aicrRwW":
+            while at < end and script[at] != "\n":
+                at += 1
+        else:
+            while at < end and script[at] not in ";\n}":
+                at += 1
+    return False
+
+
+def tail_drops_lines(tail: str) -> bool:
+    """True when a pipe's last segment drops lines by pattern: a `grep` with an invert flag, or a
+    `sed` whose inline script holds a delete. `tail`, `head` and a plain `grep` print what they
+    keep, so they pass."""
+    tail = tail.strip().lstrip("&").strip()
+    tokens = segment_tokens(tail) or []
+    index = resolve_command(tokens) if tokens else None
+    if index is None:
+        return False
+    word, args = basename(tokens[index]), tokens[index + 1:]
+    if word == "grep":
+        return grep_inverts(args)
+    if word == "sed":
+        return any(sed_deletes(script) for script in sed_scripts(args))
+    return False
 
 
 def quiet_write(args) -> bool:
@@ -1075,7 +1227,7 @@ def silent_write_hit(segment: str, tail: str = ""):
     """Return (matched text, mechanism, kind) for a write whose own trace is silenced, else
     ("", "", "").
 
-    `mechanism` is `"redirect"` or `"quiet"`, so the caller can print the reason that matches
+    `mechanism` is `"redirect"`, `"filter"` (a last pipe stage that drops lines) or `"quiet"`, so the caller can print the reason that matches
     what actually fired; `kind` is the act's name (`push`, `commit`, `merge`). A redirect can hide
     a refusal AND a proof of landing on any of the subcommands, while the quiet flag is judged per
     subcommand against `QUIET_FLAG_SUBCOMMANDS`, the measured set. Only `SILENT_WRITE_SUBCOMMANDS`
@@ -1086,6 +1238,7 @@ def silent_write_hit(segment: str, tail: str = ""):
     `tail` is the last segment of the pipe this segment feeds, if any (see `tail_discards`).
     """
     silenced = discards_output(segment) or (bool(tail) and tail_discards(tail))
+    dropped = not silenced and bool(tail) and tail_drops_lines(tail)
     for subcommand, args in git_calls(segment):
         if subcommand == "fetch":
             # Only a fetch that moves a local branch (`src:dst`) is a write; a bare one is a read.
@@ -1100,16 +1253,19 @@ def silent_write_hit(segment: str, tail: str = ""):
         matched = ("git " + subcommand + " " + " ".join(args)).strip()
         if silenced:
             return matched, "redirect", subcommand
+        if dropped:
+            return matched, "filter", subcommand
         if subcommand in QUIET_FLAG_SUBCOMMANDS and quiet_write(args):
             return matched, "quiet", subcommand
-    if silenced:
+    if silenced or dropped:
+        mechanism = "redirect" if silenced else "filter"
         tokens = segment_tokens(segment)
         index = resolve_command(tokens) if tokens else None
         if index is not None:
             word, rest = basename(tokens[index]), tokens[index + 1:]
             if (word == "make" and "merge" in rest) or (
                     word in ("gh", "gh.exe") and rest[:2] == ["pr", "merge"]):
-                return word + " " + " ".join(rest), "redirect", ("make merge" if word == "make" else "gh pr merge")
+                return word + " " + " ".join(rest), mechanism, ("make merge" if word == "make" else "gh pr merge")
     return "", "", ""
 
 
@@ -1278,6 +1434,13 @@ SILENT_WRITE_REDIRECT_REASON = (
     "Rule (Git): command {command} of {total}, the {kind}: a redirect silences this write's own "
     "output (>/dev/null), so neither a refusal nor the line that proves it landed would reach "
     "the session. "
+    "Remedy: run {program} again with its output kept, ending the line with `2>&1 | tail -1`, "
+    "and read what it prints before you say it landed."
+)
+SILENT_WRITE_FILTER_REASON = (
+    "Rule (Git): command {command} of {total}, the {kind}: the last pipe stage drops lines "
+    "(`grep -v` or a `sed` delete), so the line that says whether this write was refused or landed "
+    "can vanish before it reaches the session. "
     "Remedy: run {program} again with its output kept, ending the line with `2>&1 | tail -1`, "
     "and read what it prints before you say it landed."
 )
@@ -5816,8 +5979,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"
                       else SILENT_WRITE_QUIET_REASON)
             refuse(tool, "deny", "silent-write",
-                   reason.format(command=live.index(number) + 1, total=len(live), kind=kind,
-                                 program=kind if " " in kind else "git " + kind), matched)
+                   (SILENT_WRITE_FILTER_REASON if mechanism == "filter" else reason).format(
+                       command=live.index(number) + 1, total=len(live), kind=kind,
+                       program=kind if " " in kind else "git " + kind), matched)
 
     # 1c1. A git commit, merge or push that skips the git hooks. Placed after silent-write, so a
     # silenced commit is caught on that defect first. `texts` reads a command substitution as its own command.
