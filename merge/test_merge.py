@@ -10967,7 +10967,7 @@ class RecordsRebuild(RecordsEnv):
         self.assertIn("docs/decisions/second.md", changed)
         self.assertEqual(self.log1("%(trailers:key=Record-claim,valueonly)", "origin/main^2").strip(), "D-002")
 
-    def test_pr_1009_ready_with_empty_stamp_kinds_heals_its_own_stale_page_on_a_green_head(self):
+    def test_pr_1009_ready_on_a_base_with_no_kinds_heals_its_own_stale_page_on_a_green_head(self):
         # Ruling R1 (owner, 10:49 CST Nov 23, 2026): a page-only commit the tool adds rides the proof of the head under it. Base kinds [] under a
         # named list: on a green head the tool pushes the page alone and merges it. No stamp runs and no number is claimed.
         mark = stamp_marker(self)
@@ -10983,7 +10983,7 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.show("main", merge.RECORDS_PAGE), page("gap-one").strip(), "main's page is not the rebuilt one")
         self.assertEqual(self.host.waits, [], "the heal waited on a check")
 
-    def test_a_ready_pr_with_stamp_kinds_and_nothing_to_claim_refuses_a_stale_page_on_a_red_or_pending_head(self):
+    def test_a_ready_pr_with_kinds_and_nothing_to_claim_refuses_a_stale_page_on_a_red_or_pending_head(self):
         # Ruling R1 (owner, 10:49 CST Nov 23, 2026): the heal rides a green proof only. With kinds on and nothing to claim, a stale page whose
         # proven head reads red or pending refuses before any push or wait, and the refusal names that state.
         self.set_required(["checks"])
