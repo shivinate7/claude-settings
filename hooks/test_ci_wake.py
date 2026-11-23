@@ -55,6 +55,8 @@ Seams under test:
   with checkout= (default CHECKOUT_DEFINES, the repo defines the rollup job; CHECKOUT_NO_JOB; CHECKOUT_NO_FOLDER for no
   .github folder). For wait_for, the cwd it is given is that folder; wait_for_on_fakes takes checkout= and passes one.
   The discriminator reads the files from the checkout only and makes no GitHub read for them.
+  The checkout root is the nearest folder at or above the cwd that holds `.git` (a folder, or a file in a worktree).
+  The root's workflow files decide; no folder above that root is read. A cwd with no `.git` above it is its own root.
 - `watch_run(run_id, cwd, deadline)` keeps its signature (deadline: a time.monotonic() value). It
   reads through the module's `gh()`, reads the clock with the module's `time.monotonic`, pauses
   with the module's `time.sleep`, and makes no direct `subprocess` call.
@@ -744,16 +746,34 @@ def read_calls(log):
     return GH.read_log(log)
 
 
-def checkout_folder(checkout, prefix="checkout-"):
+def checkout_folder(checkout, prefix="checkout-", git=None):
     """A folder of this run that holds `checkout` under .github/workflows/, or no .github folder when `checkout` is None.
+    git: None for no `.git` marker, "dir" for a `.git` folder, "file" for a `.git` file (a worktree's).
     Each run_hook case folder and each in-process wait takes its checkout from here (one home)."""
     folder = tempfile.mkdtemp(prefix=prefix, dir=TMP)
+    write_checkout(folder, checkout, git)
+    return folder
+
+
+def write_checkout(folder, checkout, git=None):
+    """Make the existing `folder` a checkout: the `.git` marker `git` names, and `checkout`'s files under .github/workflows/."""
+    if git == "dir":
+        os.makedirs(os.path.join(folder, ".git"))
+    elif git == "file":
+        with open(os.path.join(folder, ".git"), "w", encoding="utf-8") as f:
+            f.write("gitdir: ../.git/worktrees/case\n")
     if checkout is not None:
         flow = os.path.join(folder, ".github", "workflows")
         os.makedirs(flow)
         for name, text in checkout.items():
             with open(os.path.join(flow, name), "w", encoding="utf-8", newline="\n") as f:
                 f.write(text)
+
+
+def nested_folder(root, sub):
+    """The folder `sub` ("hooks", or "a/b") under `root`, made here: a cwd in it is a subfolder of the checkout at `root`."""
+    folder = os.path.join(root, *sub.split("/"))
+    os.makedirs(folder)
     return folder
 
 
@@ -1243,6 +1263,120 @@ def is_file_read(argv):
             or list(argv[:2]) == ["workflow", "view"])
 
 
+# The cwd of these cases is a subfolder of a checkout: one level down, and two levels down (see the docstring on the root).
+SUBFOLDERS = ("hooks", "a/b")
+
+
+def case_a_subfolder_of_a_defining_checkout_settles_as_its_root_does():
+    """F2. The watcher decides "this repo defines the rollup job" from the checkout that holds the cwd, not the cwd folder
+    alone. The checkout's workflow files define all-jobs-passed. A draft-era checks run (rollup skipped) beside a green
+    lane-touched-tests run is not CI green with cwd at the checkout root: the wait keeps listing to its deadline. With cwd
+    in a subfolder of that checkout, the wait ends with the same line at the same time. Fake clock, 100 s budget."""
+    runs = [DRAFT_RAN, LANE_GREEN]
+    root = checkout_folder(CHECKOUT_DEFINES, git="dir")
+    _, root_clock, root_calls, root_deadline = wait_for_on_fakes(runs, 100, line=True, cwd=root)
+    root_detail = wait_detail(None, root_clock, root_calls, root_deadline) + " line=%r" % root_clock.line
+    check("checkout root: the line is not CI green", not str(root_clock.line).startswith("CI green"), root_detail)
+    check("checkout root: the wait ends at its deadline", abs(root_clock.now - root_deadline) < 1e-6, root_detail)
+    for sub in SUBFOLDERS:
+        raised, clock, calls, deadline = wait_for_on_fakes(runs, 100, line=True, cwd=nested_folder(root, sub))
+        detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
+        check("cwd in %s: the line is not CI green" % sub, not str(clock.line).startswith("CI green"), detail)
+        check("cwd in %s: the wait ends at its deadline" % sub, abs(clock.now - deadline) < 1e-6, detail)
+        check("cwd in %s: the line is the checkout root's line" % sub, clock.line == root_clock.line, detail)
+
+
+def case_a_worktree_subfolder_settles_as_its_checkout_root_does():
+    """F2, a worktree: the checkout root holds a `.git` file, not a folder. The same wanted result as the case above, with
+    cwd in "hooks": not CI green, the checkout root's line, and the wait ends at its deadline. Fake clock, 100 s budget."""
+    runs = [DRAFT_RAN, LANE_GREEN]
+    root = checkout_folder(CHECKOUT_DEFINES, git="file")
+    _, root_clock, _, _ = wait_for_on_fakes(runs, 100, line=True, cwd=root)
+    raised, clock, calls, deadline = wait_for_on_fakes(runs, 100, line=True, cwd=nested_folder(root, "hooks"))
+    detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
+    check("worktree, cwd in hooks: the line is not CI green", not str(clock.line).startswith("CI green"), detail)
+    check("worktree, cwd in hooks: the wait ends at its deadline", abs(clock.now - deadline) < 1e-6, detail)
+    check("worktree, cwd in hooks: the line is the checkout root's line", clock.line == root_clock.line, detail)
+
+
+def case_a_subfolder_of_a_checkout_with_no_rollup_job_reads_run_conclusions():
+    """F2 control. A subfolder of a checkout whose workflow files define no all-jobs-passed job, or of a checkout with no
+    .github folder, reads the run conclusions as its root does: a passed checks run with no rollup job is CI green on the
+    head. Fake clock, 100 s budget."""
+    for label, checkout in (("no-job checkout", CHECKOUT_NO_JOB), ("no-.github checkout", CHECKOUT_NO_FOLDER)):
+        root = checkout_folder(checkout, git="dir")
+        for sub in SUBFOLDERS:
+            raised, clock, calls, deadline = wait_for_on_fakes([NO_ROLLUP_GREEN], 100, line=True,
+                                                               cwd=nested_folder(root, sub))
+            detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
+            check("control: %s, cwd in %s: the line is CI green on the head" % (label, sub),
+                  str(clock.line).startswith("CI green on %s" % SHA7), detail)
+
+
+def case_a_no_job_checkout_nested_in_a_defining_one_is_read_alone():
+    """F2 pin: no checkout above the cwd's own root is read. An outer checkout defines all-jobs-passed. A no-job checkout,
+    with its own `.git` folder, sits inside it. With cwd in that inner checkout, and in a folder below it, a passed checks
+    run with no rollup job is CI green, as the inner checkout's files say. A walk that reaches the outer checkout's
+    workflow files waits instead. Fake clock, 100 s budget."""
+    outer = checkout_folder(CHECKOUT_DEFINES, git="dir")
+    inner = nested_folder(outer, "vendor/inner")
+    write_checkout(inner, CHECKOUT_NO_JOB, git="dir")
+    for where, cwd in (("the inner root", inner), ("a folder below the inner root", nested_folder(inner, "hooks"))):
+        raised, clock, calls, deadline = wait_for_on_fakes([NO_ROLLUP_GREEN], 100, line=True, cwd=cwd)
+        detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
+        check("nested no-job checkout, cwd in %s: the line is CI green on the head" % where,
+              str(clock.line).startswith("CI green on %s" % SHA7), detail)
+
+
+# F3: the forms of a workflow file that decide whether it defines the rollup job. Each row: (label, file name, file text,
+# whether the file defines the rollup job). The name is the constant the rule reads (merge.py ROLLUP_JOB is this one).
+F3_FORMS = [
+    ("a comment line holds the name", "checks.yml",
+     "name: checks\non: pull_request\njobs:\n  # %s:\n  lint:\n    runs-on: ubuntu-latest\n" % REQUIRED_CHECK, False),
+    ("a run script body holds the name", "checks.yml",
+     "name: checks\non: pull_request\njobs:\n  lint:\n    runs-on: ubuntu-latest\n    steps:\n"
+     "      - run: |\n          echo ok\n          name: %s\n" % REQUIRED_CHECK, False),
+    ("a quoted run string holds the name", "checks.yml",
+     "name: checks\non: pull_request\njobs:\n  lint:\n    runs-on: ubuntu-latest\n    steps:\n"
+     "      - run: echo \"%s:\"\n" % REQUIRED_CHECK, False),
+    ("a single-quoted job key", "checks.yml",
+     "name: checks\non: pull_request\njobs:\n  '%s':\n    runs-on: ubuntu-latest\n" % REQUIRED_CHECK, True),
+    ("a double-quoted job key", "checks.yml",
+     "name: checks\non: pull_request\njobs:\n  \"%s\":\n    runs-on: ubuntu-latest\n" % REQUIRED_CHECK, True),
+    ("CRLF line ends", "checks.yml",
+     "name: checks\r\non: pull_request\r\njobs:\r\n  %s:\r\n    runs-on: ubuntu-latest\r\n" % REQUIRED_CHECK, True),
+    ("a .yaml file", "checks.yaml", workflow_text([REQUIRED_CHECK]), True),
+    ("a job whose name property is the rollup name", "checks.yml",
+     "name: checks\non: pull_request\njobs:\n  gate:\n    name: %s\n    runs-on: ubuntu-latest\n" % REQUIRED_CHECK, True),
+    ("a lone quote in text before the jobs block", "checks.yml",
+     "name: checks\ndescription: it's the checks run\non: pull_request\njobs:\n  %s:\n    runs-on: ubuntu-latest\n"
+     % REQUIRED_CHECK, True),
+    ("a comment opener in a quoted string before the jobs block", "checks.yml",
+     "name: \"checks # not a comment\"\non: pull_request\njobs:\n  %s:\n    runs-on: ubuntu-latest\n" % REQUIRED_CHECK, True),
+    ("a comment after the jobs key", "checks.yml",
+     "name: checks\non: pull_request\njobs:  # the jobs\n  %s:\n    runs-on: ubuntu-latest\n" % REQUIRED_CHECK, True),
+    ("a UTF-8 BOM before the name line", "checks.yml",
+     "\ufeffname: checks\non: pull_request\njobs:\n  %s:\n    runs-on: ubuntu-latest\n" % REQUIRED_CHECK, True),
+    ("a UTF-8 BOM before the jobs key", "checks.yml",
+     "\ufeffjobs:\n  %s:\n    runs-on: ubuntu-latest\n" % REQUIRED_CHECK, True),
+]
+
+
+def case_rollup_name_forms_in_a_workflow_file():
+    """F3. Wanted: a job key or a `name:` property of a job under `jobs:` counts as defining the rollup job, in any quoting,
+    in CRLF line ends, in a .yaml file, after a lone quote, after a comment opener inside a quoted string, after a comment
+    on the jobs line, and behind a UTF-8 BOM. The name counts nowhere in a comment, a run script body or a quoted run
+    string. job_named (the text) and defines_job (the checkout folder holding the file) must agree on each row.
+    The BOM row before the jobs key is the one a fix must reach. No clock: a file read."""
+    mod = ci_wake_module()
+    for label, filename, text, defines in F3_FORMS:
+        wanted = "defines the rollup job" if defines else "defines no job"
+        got_text = bool(mod.job_named(text, REQUIRED_CHECK))
+        check("job_named, %s: %s" % (label, wanted), got_text == defines, "got %r" % got_text)
+        got_file = bool(mod.defines_job(checkout_folder({filename: text}), REQUIRED_CHECK))
+        check("defines_job, %s: %s" % (label, wanted), got_file == defines, "got %r" % got_file)
+
+
 def case_the_real_checks_run_is_read_after_a_draft_era_run():
     """The draft's checks run ends success and is listed first. The real run shows only at the third list, after the
     at-once re-list. Green waits for the real run: the hook reads it, and prints one green line for one wake. On main
@@ -1727,17 +1861,24 @@ def case_failed_job_wakes_the_watch_at_the_poll_that_shows_it():
 
 # wait_for, in process, on fakes: the pace and the deadline of the run lists. The module's `gh` answers
 # `run list` (by the number of the call, as the stub does) and `run view`. Its `time` is the fake clock.
-def wait_for_on_fakes(runs, budget, ends_at=None, line=False, checkout=CHECKOUT_DEFINES):
-    """Run wait_for(SHA, cwd, deadline) in process, with cwd a folder holding `checkout` (see CHECKOUT_DEFINES).
+def ci_wake_module():
+    """A fresh load of the module under test, for the in-process cases (one home of the load)."""
+    spec = importlib.util.spec_from_file_location("ci_wake_under_test", MODULE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def wait_for_on_fakes(runs, budget, ends_at=None, line=False, checkout=CHECKOUT_DEFINES, cwd=None):
+    """Run wait_for(SHA, cwd, deadline) in process, with cwd a folder holding `checkout` (see CHECKOUT_DEFINES), or the
+    `cwd` given (a subfolder of a checkout, for the checkout-root cases).
     budget: seconds from the clock's start to the deadline. -> (exception or None, clock, gh calls [(time, args)], deadline). shutil is a fake with
     no gh, so a read that bypasses the module's `gh()` ends as Unknown and reaches no real gh.
     ends_at: {run id: seconds from the clock's start}. Until then such a run lists and reads in progress
     with no conclusion; from then on it reads as its fixture says. line: also set clock.result (what
     wait_for returned) and clock.line (the line the hook prints for it). A run with refuse_jobs_read: its
     `run view ... jobs` read exits 1 with HTTP 403. Its status read does not."""
-    spec = importlib.util.spec_from_file_location("ci_wake_under_test", MODULE)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    mod = ci_wake_module()
     clock, calls = FakeTime(), []
 
     def as_of_clock(r, out):
@@ -1770,7 +1911,7 @@ def wait_for_on_fakes(runs, budget, ends_at=None, line=False, checkout=CHECKOUT_
     with mock.patch.object(mod, "time", clock), mock.patch.object(mod, "gh", fake_gh), \
             mock.patch.object(mod, "shutil", fake_shutil):
         try:
-            clock.result = mod.wait_for(SHA, checkout_folder(checkout), deadline)
+            clock.result = mod.wait_for(SHA, cwd or checkout_folder(checkout), deadline)
             raised = None
         except Exception as e:
             raised = e
@@ -3030,6 +3171,11 @@ def main():
     case_no_rollup_line_never_names_a_job_the_repo_lacks()
     case_a_defining_checkout_never_reads_a_run_without_the_rollup_job_green()
     case_the_checkout_read_makes_no_github_call()
+    case_a_subfolder_of_a_defining_checkout_settles_as_its_root_does()
+    case_a_worktree_subfolder_settles_as_its_checkout_root_does()
+    case_a_subfolder_of_a_checkout_with_no_rollup_job_reads_run_conclusions()
+    case_a_no_job_checkout_nested_in_a_defining_one_is_read_alone()
+    case_rollup_name_forms_in_a_workflow_file()
     case_the_real_checks_run_is_read_after_a_draft_era_run()
     case_a_failed_job_still_wakes_beside_a_draft_era_run()
     case_run_visible_at_the_at_once_relist_is_judged()
