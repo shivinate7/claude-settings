@@ -51,6 +51,7 @@ _REQUIRE_LAUNCH = re.compile(
 # A literal `args` list. A call with none and an argument (`launch(opts)`, `launch({ ...base })`) takes its switches from a
 # constant beside it, so both switches in the text pass it.
 _LITERAL_ARGS = re.compile(r"\bargs\b\s*[:=]\s*\[")
+_SPREAD = re.compile(r"\.\.\.|(?:^|,)\s*\*")
 # The Playwright CLI commands that open Chromium by default. The CLI takes no Chromium switches.
 _PW_CHROMIUM_COMMANDS = {"screenshot", "pdf", "open", "codegen", "cr", "chromium"}
 _PW_OTHER_BROWSERS = {"firefox", "ff", "webkit", "wk"}
@@ -109,6 +110,19 @@ def _mask(text: str, lang: str):
     return "".join(masked), "".join(plain)
 
 
+def _lists_take_constant(call: str) -> bool:
+    """True when the call holds no literal `args` list, or each such list holds a spread (`...SW`, `*SW`): its switches then
+    come from a constant beside it. A bare literal list names its own switches, so it must hold them itself."""
+    for found in _LITERAL_ARGS.finditer(call):
+        depth, end = 1, found.end()
+        while end < len(call) and depth:
+            depth += (call[end] in "([{") - (call[end] in ")]}")
+            end += 1
+        if not _SPREAD.search(call[found.end():end]):
+            return False
+    return True
+
+
 def _code_hits(text: str, lang: str) -> list:
     """Every launch in script text whose call carries no both switches. Each hit reads as the call and its start of args."""
     masked, plain = _mask(text, lang)
@@ -124,7 +138,7 @@ def _code_hits(text: str, lang: str) -> list:
         span = plain[inside]
         if all(flag in span for flag in BROWSER_FLAGS):
             continue
-        if (masked[inside].strip() and not _LITERAL_ARGS.search(masked[inside])
+        if (masked[inside].strip() and _lists_take_constant(masked[inside])
                 and all(flag in plain for flag in BROWSER_FLAGS)):
             continue
         hits.append(re.sub(r"\s+", " ", found.group(0) + span.strip()[:60]))
@@ -273,3 +287,7 @@ def write_hit(path: str, old, new: str) -> str:
     file passes, and so does an edit that gives the launch its switches."""
     added = collections.Counter(file_hits(path, new)) - collections.Counter(file_hits(path, old or ""))
     return next(iter(added), "")
+
+# The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
+# ids across the modules it loads. In the repo it stays a comment, which counts as a match.
+# INSTALL_ID = "uninstalled"
