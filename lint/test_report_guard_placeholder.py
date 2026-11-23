@@ -44,6 +44,13 @@ REFUSE_LINES = (
     "git commit -m xxx",
     "echo XXX",
     "Get-Item <path>",
+    'cd "<repo>"',
+    'git checkout "<branch>"',
+    'ssh "<user>@<host>" ls',
+    'sh -c "git checkout <branch>"',
+    "ssh h 'git checkout <branch>'",
+    "# don't forget\ngit checkout <branch>\n# it's done",
+    "bash <<EOF\ngit checkout <branch>\nEOF",
 )
 
 # Each block holds one of these shell forms. Each one passes, unlanded and landed. The tag-shaped words sit in a
@@ -64,6 +71,8 @@ ALLOW_BLOCKS = (
     "cat > /tmp/x.html <<'EOF'\n<html>\nEOF",
     "sed 's/<br>//g' page.html",
     "grep -o '<title>.*</title>' f",
+    'echo "<b>bold</b>"',
+    "# see <docs> for more\nls",
 )
 
 # A report's blockquote is the report, not a hand-off: a placeholder in one of its lines, or a fence inside it, passes.

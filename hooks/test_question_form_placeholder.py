@@ -61,6 +61,20 @@ ALLOW_LINES = (
     "cat > /tmp/x.html <<'EOF'\n<html>\nEOF",
     "sed 's/<br>//g' page.html",
     "grep -o '<title>.*</title>' f",
+    'echo "<b>bold</b>"',
+    "# see <docs> for more\nls",
+)
+
+# A placeholder inside quotes, in a comment, or in a run body still counts, except a comment (`#` to the end of
+# its line, outside quotes) is not scanned. A lone apostrophe in a comment opens no quote.
+REFUSE_QUOTED = (
+    'cd "<repo>"',
+    'git checkout "<branch>"',
+    'ssh "<user>@<host>" ls',
+    'sh -c "git checkout <branch>"',
+    "ssh h 'git checkout <branch>'",
+    "# don't forget\ngit checkout <branch>\n# it's done",
+    "bash <<EOF\ngit checkout <branch>\nEOF",
 )
 
 # The same tokens in the `powershell` string, with a plain `mac` string beside them.
@@ -108,6 +122,8 @@ def allow(name, item):
 def main():
     for token in REFUSE_TOKENS:
         must_refuse("mac " + token, task_with(token))
+    for text in REFUSE_QUOTED:
+        must_refuse("mac " + repr(text), task_with(text))
     for line in ALLOW_LINES:
         allow("mac " + line.splitlines()[0], task_with(line))
     for line in POWERSHELL_REFUSE:
