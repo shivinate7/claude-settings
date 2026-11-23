@@ -825,7 +825,6 @@ REFUSAL_UNCITED_EXEMPT = {
     "playwright-install": "refusal-matches-rule",
     "port-question": "refusal-matches-rule",
     "press-link": "refusal-matches-rule",
-    "question-form": "refusal-matches-rule",
     "record-writer-scope": "refusal-matches-rule",
     "records-page": "refusal-matches-rule",
     "rm-after-cd": "refusal-matches-rule",
