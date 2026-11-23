@@ -1,0 +1,1 @@
+- export-ruling-false-delete-text: decision waiting-data-in-repo and the closed_sightings docstring in skills/waiting-page/export_page.py do not say that a ruling whose fetched row carries arbiter false is deleted one export after its row is rewritten plain closed. Seen: 2026-11-22 x1

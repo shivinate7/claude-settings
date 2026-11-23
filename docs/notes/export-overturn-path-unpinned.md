@@ -1,0 +1,1 @@
+- export-overturn-path-unpinned: no test drives the page's Overturn write (status open, arbiter false) through the waiting-page export; only a closed row with arbiter false is pinned (decision waiting-data-in-repo). Seen: 2026-11-22 x1
