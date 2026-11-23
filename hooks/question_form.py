@@ -95,7 +95,18 @@ PROBLEM_LABEL = re.compile(r"^[ \t]*Problem\b", re.I | re.M)
 PROBLEM_LINE = re.compile(r"^[ \t]*Problem[ \t]*\((?:%s)\):[ \t]*\S" % _STAKES, re.I | re.M)
 # A Based on line starts `Based on (` or `Based on:`; prose that starts "Based on the log" is not one.
 BASED_LABEL = re.compile(r"^[ \t]*Based on[ \t]*[(:]", re.I | re.M)
-BASED_LINE = re.compile(r"^[ \t]*Based on[ \t]*\(([^()\n]*)\):[ \t]*\S", re.I | re.M)
+BASED_LINE = re.compile(r"^[ \t]*Based on[ \t]*\(([^()\n]*)\):[ \t]*(\S[^\n]*)", re.I | re.M)
+# decision premise-format: a `read` premise names `path:line`. The path holds a "/" or ends in a file extension;
+# the lookbehind stops a match from starting inside a longer token, so a URL's host:port ("//localhost:8080")
+# is no path:line.
+READ_KIND = "read"
+PATH_LINE = re.compile(r"(?<![\w/.:@~+-])[\w.@~+-]+(?:/[\w.@~+-]+)*:\d+")
+_PATH_SHAPE = re.compile(r"/|\.[A-Za-z]\w*:")
+
+
+def names_path_line(text) -> bool:
+    """Whether `text` holds a path:line token: a path with a "/" or a file extension, then ":" and digits."""
+    return any(_PATH_SHAPE.search(m.group(0)) for m in PATH_LINE.finditer(text))
 GAIN_TEXT = re.compile(r"\bGain:[ \t]*(?!Lose:)\S", re.I)
 LOSE_TEXT = re.compile(r"\bLose:[ \t]*\S", re.I)
 BASED_MAX = 3
@@ -123,7 +134,9 @@ def placeholder_form_hit(text):
 FORM_REASON = ("A question to the owner states the form, in this order: a line \"Goal: <the goal, in his "
                "terms>\", a line \"Problem (<stake>): <the problem in one plain sentence, and why it needs "
                "his word>\" where stake is one of %s, and one to three lines \"Based on (<kind>): <one "
-               "premise>\" where kind is one of %s. Each option states its gain and its loss."
+               "premise>\" where kind is one of %s. A \"Based on (read)\" line names the file and line it read as "
+               "path:line, such as hooks/guard.py:120; a summary you did not read is kind notes (decision "
+               "premise-format). Each option states its gain and its loss."
                % (", ".join(OWNER_STAKES), ", ".join(PREMISE_KINDS)))
 PAGE_FORM_REASON = FORM_REASON + (" On the page the lines go in `context`, and each option has a "
                                   "non-empty `gain` and `lose`. An open decision also names the option you "
@@ -173,9 +186,11 @@ def _based_hit(text):
         return FORM_RULE, "no Based on line"
     if len(labels) > BASED_MAX:
         return FORM_RULE, "%d Based on lines, one to %d allowed" % (len(labels), BASED_MAX)
-    kinds = [m.group(1).strip().lower() for m in BASED_LINE.finditer(text)]
-    if len(kinds) != len(labels) or any(k not in PREMISE_KINDS for k in kinds):
+    found = [(m.group(1).strip().lower(), m.group(2)) for m in BASED_LINE.finditer(text)]
+    if len(found) != len(labels) or any(k not in PREMISE_KINDS for k, _ in found):
         return FORM_RULE, "Based on line with no kind, or a kind outside the premise kinds"
+    if any(k == READ_KIND and not names_path_line(rest) for k, rest in found):
+        return FORM_RULE, "Based on (read) line that names no path:line"
     return PASS
 
 
