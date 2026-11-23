@@ -411,12 +411,12 @@ sh("merge-checks: a heredoc body that names a merge is data",
 #
 # A bare `gh pr merge` in a repo whose `.github/stamp.json` has a `merge` block skips the shared merge
 # tool: no claim, and the local main stays behind (incident claude-sharables 2026-10-06, four merges
-# left the local main four commits behind origin). The guard ASKS, never denies: a broken merge tool
-# leaves a bare merge as the only way out (`verification-recovery-independent-of-state`; owner
-# ruling, orchestrator call, lane bare-gh-merge-ask). Every other repo state allows, silently: no
-# stamp, a stamp with no `merge` block, a stamp that cannot be read as a stamp. The head is green in
-# every case, so merge-checks (5b) says nothing and only this rule can ask. BARE_MERGE is the rule id
-# the ask prints; one edit re-points every case below.
+# left the local main four commits behind origin). The guard DENIES (decision `guard-remedy-not-to-owner`:
+# a write that overwrites shared state is denied, never asked). Its reason names the merge tool as the
+# correct act and ends with the owner's line for a refusal that looks wrong. Every other repo state
+# allows, silently: no stamp, a stamp with no `merge` block, a stamp that cannot be read as a stamp.
+# The head is green in every case, so merge-checks (5b) says nothing and only this rule can deny.
+# BARE_MERGE is the rule id the deny prints; one edit re-points every case below.
 BARE_MERGE = "bare-merge"
 BARE_SAYS = (("--confirm", "merge tool"),)   # any-of: the ask points at the tool it skips
 STAMPREPO = os.path.join(ROOT, "stamp_merge")        # stamp.json with a merge block
@@ -501,35 +501,35 @@ add("merge-checks: the merge tool of the host still denies a head with no check 
     tool="mcp__github__merge_pull_request", cwd=STAMPHEAD, pullNumber=12, repo="x", owner="y", env_path=GHEMPTY + os.pathsep + PY_PATH)
 
 _BARE_GUARD = dict(env_path=GREEN_ON, config=MERGECFG)
-# ASK: the repo uses the merge tool, and the call skips it.
-sh("bare-merge: gh pr merge in a repo with a merge block asks",
-   "gh pr merge 12 --squash", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, **_BARE_GUARD)
-# `--auto` queues the same merge, and merge_call_of judges it like any merge, so the same ask holds for it.
-sh("bare-merge: gh pr merge --auto in a repo with a merge block asks",
-   "gh pr merge 12 --auto --squash", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, **_BARE_GUARD)
-sh("bare-merge: a URL for the pull request asks",
-   "gh pr merge --merge https://github.com/y/x/pull/12", "ask", BARE_MERGE, carries=BARE_SAYS,
+# DENY: the repo uses the merge tool, and the call skips it.
+sh("bare-merge: gh pr merge in a repo with a merge block denies",
+   "gh pr merge 12 --squash", "deny", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, **_BARE_GUARD)
+# `--auto` queues the same merge, and merge_call_of judges it like any merge, so the same deny holds for it.
+sh("bare-merge: gh pr merge --auto in a repo with a merge block denies",
+   "gh pr merge 12 --auto --squash", "deny", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, **_BARE_GUARD)
+sh("bare-merge: a URL for the pull request denies",
+   "gh pr merge --merge https://github.com/y/x/pull/12", "deny", BARE_MERGE, carries=BARE_SAYS,
    cwd=STAMPREPO, **_BARE_GUARD)
 sh("bare-merge: a cd into the repo names the repo that is read",
-   "cd " + slash(STAMPREPO) + " && gh pr merge 3", "ask", BARE_MERGE, carries=BARE_SAYS,
+   "cd " + slash(STAMPREPO) + " && gh pr merge 3", "deny", BARE_MERGE, carries=BARE_SAYS,
    cwd=NOGIT, **_BARE_GUARD)
 # The stamp is the repo's, not the folder's: a call from a subfolder, or a cd into one, reads the same repo.
-sh("bare-merge: gh pr merge from a subfolder of a repo with a merge block asks",
-   "gh pr merge 12", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=os.path.join(STAMPREPO, "hooks"),
+sh("bare-merge: gh pr merge from a subfolder of a repo with a merge block denies",
+   "gh pr merge 12", "deny", BARE_MERGE, carries=BARE_SAYS, cwd=os.path.join(STAMPREPO, "hooks"),
    **_BARE_GUARD)
-sh("bare-merge: a cd into a subfolder of a repo with a merge block asks",
-   "cd hooks && gh pr merge 12", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, **_BARE_GUARD)
+sh("bare-merge: a cd into a subfolder of a repo with a merge block denies",
+   "cd hooks && gh pr merge 12", "deny", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, **_BARE_GUARD)
 # A cwd that links from outside the repo into it is read where it really is, not where it is spelled.
 if LINKS_MADE:
-    sh("bare-merge: a cwd that is a symlink into a subfolder of the repo asks",
-       "gh pr merge 12", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPLINK, **_BARE_GUARD)
+    sh("bare-merge: a cwd that is a symlink into a subfolder of the repo denies",
+       "gh pr merge 12", "deny", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPLINK, **_BARE_GUARD)
 # building-scanner-respects-strings: text in the call's own arguments hides no merge.
 sh("bare-merge: comment openers inside a quoted argument hide no merge",
-   'gh pr merge 3 --subject "fix // x # y /* z */"', "ask", BARE_MERGE, cwd=STAMPREPO, **_BARE_GUARD)
+   'gh pr merge 3 --subject "fix // x # y /* z */"', "deny", BARE_MERGE, cwd=STAMPREPO, **_BARE_GUARD)
 sh("bare-merge: a lone quote in an argument hides no merge",
-   'gh pr merge 3 --body "don\'t"', "ask", BARE_MERGE, cwd=STAMPREPO, **_BARE_GUARD)
+   'gh pr merge 3 --body "don\'t"', "deny", BARE_MERGE, cwd=STAMPREPO, **_BARE_GUARD)
 sh("bare-merge: a multi-line quoted argument with a # line hides no merge",
-   'gh pr merge 3 --body "line one\n# line two\nline three"', "ask", BARE_MERGE, cwd=STAMPREPO,
+   'gh pr merge 3 --body "line one\n# line two\nline three"', "deny", BARE_MERGE, cwd=STAMPREPO,
    **_BARE_GUARD)
 # A deny of 5b still wins: an ask must not turn a refusal into an ask.
 sh("bare-merge: a pending head in a repo with a merge block still denies",

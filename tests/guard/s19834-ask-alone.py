@@ -3,40 +3,38 @@ FAMILY = "ask-alone"
 #
 # A command the guard would ASK on, chained with other commands (`&&`, `||`, `;`, `|`, newline), denies to
 # the agent, and the remedy says to run that command alone or drop it (CHAIN_ASK and ALONE, near sh()).
-# A lone ask command still asks. A deny anywhere in the command still wins. The ask commands, one case
-# each below, are the four shell routes that print an "ask" (guard.py, judge_shell):
-#   rule 1  `git worktree prune`, with a stale record to drop        (WORKTREE_PRUNE_ASK_REASON)
-#   rule 1  a discard in a linked worktree: reset --hard, restore .  (TREE_ASK_REASON)
-#   rule 4  a forced push that may reach the default branch          (PUSH_ASK_REASON)
-#   rule 8  a shell write of a settings file that names the cap key  (CAP_ASK_REASON)
+# A lone ask command still asks. A deny anywhere in the command still wins. Decision `guard-remedy-not-to-owner`: a prune is allowed, and a discard or a forced or main push is denied by its own rule. So the only
+# ask left is the shell route of rule 8, a settings write that names the cap key (CAP_ASK_REASON). The
+# discard, prune and push rows below are re-pointed to their own verdicts; a chain with them has no ask to hold.
 # The fifth route, rule 8 on a Write/Edit/MultiEdit call, holds one tool call and no chain, so it has
-# no chained form. The re-pointed cases above (named "denies as a chained ask command") cover the
-# cd, export, PowerShell, pipe and `-C` shapes of the same rules.
+# no chained form. The re-pointed cases above (named "allows" or "denies") cover the cd, export,
+# PowerShell, pipe and `-C` shapes of the same rules.
 
 PRUNE = VCS + " worktree prune"
 
 
 def chained_prune(name, command, **kw):
-    """A chained prune: a deny that names the prune command and says to run it alone."""
-    chained_ask(name, command, cwd=WTPRUNE, carries=("worktree prune",), **kw)
+    """A chained prune. A prune is allowed alone and in a chain (decision `guard-remedy-not-to-owner`), so the
+    chain holds no ask to hold: it allows, and the chain's other commands decide for themselves."""
+    sh(name, command, "allow", cwd=WTPRUNE, lacks=(CHAIN_ASK,), **kw)
 
 
 # (a) THE INCIDENT, then every chain operator, a command before the prune, the PowerShell tool, a
 # agent, and two ask commands in one command.
-chained_prune("ask-alone: the incident, prune then worktree add then grep, denies and names the prune",
-              PRUNE + " && " + VCS + ' worktree add -b x "$TEMP/wt-x" origin/y && grep -c x README.md')
+own_refuse("ask-alone: the incident, prune then worktree add then grep, denies",
+         PRUNE + " && " + VCS + ' worktree add -b x "$TEMP/wt-x" origin/y && grep -c x README.md', cwd=WTPRUNE)
 for _label, _tail in (("||", " || echo x"), (";", "; echo x"),
                       ("a pipe", " | cat"), ("a newline", "\necho x")):
-    chained_prune("ask-alone: a prune joined to another command by %s denies" % _label, PRUNE + _tail)
+    chained_prune("ask-alone: a prune joined to another command by %s allows" % _label, PRUNE + _tail)
 # An output tail is no second command (ask-commands-run-alone): the echo after `&&` is the named tail form.
-sh("ask-alone: a prune with an && echo tail asks, the echo is no second command", PRUNE + " && echo x",
-   "ask", "shared-tree", cwd=WTPRUNE, lacks=(CHAIN_ASK,))
-chained_prune("ask-alone: a command before the prune denies", "echo x && " + PRUNE)
-chained_prune("ask-alone: a line before the prune denies", "echo x\n" + PRUNE)
-chained_prune("ask-alone: two prunes in one command deny", PRUNE + " && " + PRUNE)
-chained_prune("ask-alone: a prune chained in the PowerShell tool denies", PRUNE + "; Write-Output x",
+sh("ask-alone: a prune with an && echo tail allows, the echo is no second command", PRUNE + " && echo x",
+   "allow", cwd=WTPRUNE, lacks=(CHAIN_ASK,))
+chained_prune("ask-alone: a command before the prune allows", "echo x && " + PRUNE)
+chained_prune("ask-alone: a line before the prune allows", "echo x\n" + PRUNE)
+chained_prune("ask-alone: two prunes in one command allows", PRUNE + " && " + PRUNE)
+chained_prune("ask-alone: a prune chained in the PowerShell tool allows", PRUNE + "; Write-Output x",
               tool="PowerShell")
-chained_prune("ask-alone: an agent's chained prune denies the same way", PRUNE + "; echo x",
+chained_prune("ask-alone: an agent's chained prune allows the same way", PRUNE + "; echo x",
               agent_id="agent-ask-alone")
 
 # STRINGS AND COMMENTS (building-scanner-respects-strings). The count of commands comes from the shell's
@@ -51,40 +49,40 @@ chained_prune("ask-alone: a // inside a quoted argument before the prune does no
               "echo 'http://x' && " + PRUNE)
 chained_prune("ask-alone: a newline inside a quoted argument adds no command, the command after it does",
               PRUNE + ' --expire "a\nb"; echo x')
-chained_prune("ask-alone: a heredoc with a lone apostrophe in its body, after the prune, denies",
+chained_prune("ask-alone: a heredoc with a lone apostrophe in its body, after the prune, allows",
               PRUNE + "\ncat <<'EOF'\ndon't\nEOF")
 
 # (b) A LONE ASK COMMAND STILL ASKS, whatever its text holds: a trailing newline, a comment line, a
 # trailing comment with && and a lone quote, a flag, a quoted flag value full of separators and
 # comment openers, a multi-line quoted flag value, and heredoc bodies with separators or a lone quote.
-sh("ask-alone: a prune alone in the PowerShell tool still asks", PRUNE, "ask", "shared-tree",
+sh("ask-alone: a prune alone in the PowerShell tool still allows", PRUNE, "allow",
    tool="PowerShell", cwd=WTPRUNE)
-sh("ask-alone: a prune with a trailing newline is alone, so it asks", PRUNE + "\n", "ask",
-   "shared-tree", cwd=WTPRUNE)
-sh("ask-alone: a prune under a comment line is alone, so it asks",
-   "# drop the stale record\n" + PRUNE, "ask", "shared-tree", cwd=WTPRUNE)
-sh("ask-alone: a prune with a trailing comment holding && and a lone quote is alone, so it asks",
-   PRUNE + " # it's && echo x", "ask", "shared-tree", cwd=WTPRUNE)
-sh("ask-alone: a prune with a flag is alone, so it asks", PRUNE + " --expire 2.days", "ask",
-   "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a prune with a trailing newline is alone, so it allows", PRUNE + "\n", "allow",
+   cwd=WTPRUNE)
+sh("ask-alone: a prune under a comment line is alone, so it allows",
+   "# drop the stale record\n" + PRUNE, "allow", cwd=WTPRUNE)
+sh("ask-alone: a prune with a trailing comment holding && and a lone quote is alone, so it allows",
+   PRUNE + " # it's && echo x", "allow", cwd=WTPRUNE)
+sh("ask-alone: a prune with a flag is alone, so it allows", PRUNE + " --expire 2.days", "allow",
+   cwd=WTPRUNE)
 sh("ask-alone: a quoted flag value holding every separator and comment opener is no chain",
-   PRUNE + ' --expire "a && b; c || d | e # f // g /* h"', "ask", "shared-tree", cwd=WTPRUNE)
+   PRUNE + ' --expire "a && b; c || d | e # f // g /* h"', "allow", cwd=WTPRUNE)
 sh("ask-alone: a quoted flag value holding a newline is no chain",
-   PRUNE + ' --expire "1.day\n2.days"', "ask", "shared-tree", cwd=WTPRUNE)
+   PRUNE + ' --expire "1.day\n2.days"', "allow", cwd=WTPRUNE)
 sh("ask-alone: a heredoc body holding && and ; is no chain",
-   PRUNE + " <<'EOF'\na && b; c\nEOF", "ask", "shared-tree", cwd=WTPRUNE)
+   PRUNE + " <<'EOF'\na && b; c\nEOF", "allow", cwd=WTPRUNE)
 sh("ask-alone: a heredoc body holding a lone apostrophe is no chain",
-   PRUNE + " <<'EOF'\ndon't && stop\nEOF", "ask", "shared-tree", cwd=WTPRUNE)
+   PRUNE + " <<'EOF'\ndon't && stop\nEOF", "allow", cwd=WTPRUNE)
 
 # (c) THE OTHER ASK COMMANDS, each alone (still asks) and chained with an echo (denies, except the named
 # `&& echo done` tail, which asks: ask-commands-run-alone). The reason
 # names the command by its own text or by the rule that asked for it, and says to run it alone.
-sh("ask-alone: a whole-tree restore alone in a worktree still asks, and names the -C form",
-   VCS + " restore .", "ask", "shared-tree", cwd=GITWT, carries="git -C <lane> restore <file>")
-sh("ask-alone: a hard reset in a worktree with an && echo done tail asks",
-   VCS + " reset --hard && echo done", "ask", "shared-tree", cwd=GITWT, lacks=(CHAIN_ASK,))
-sh("ask-alone: a forced push to the default branch with an && echo done tail asks",
-   VCS + " push --force origin HEAD:main && echo done", "ask", "force-push", cwd=PUSHFEAT,
+sh("ask-alone: a whole-tree restore alone in a worktree still denies, and names the -C form",
+   VCS + " restore .", "deny", "shared-tree", cwd=GITWT, carries="git -C <lane> restore <file>")
+sh("ask-alone: a hard reset in a worktree with an && echo done tail denies",
+   VCS + " reset --hard && echo done", "deny", "shared-tree", cwd=GITWT, lacks=(CHAIN_ASK,))
+sh("ask-alone: a forced push to the default branch with an && echo done tail denies",
+   VCS + " push --force origin HEAD:main && echo done", "deny", "force-push", cwd=PUSHFEAT,
    lacks=(CHAIN_ASK,))
 CHAIN_CAP_WRITE = "printf '%s' '" + cap_settings(compact=True) + "' > settings.local.json"
 sh("ask-alone: a cap write alone to a settings file still asks", CHAIN_CAP_WRITE, "ask",
@@ -219,18 +217,20 @@ ASK_LEASE = VCS + " push " + LE + "origin HEAD:main"
 ASK_CAP = CAP_PLAIN
 
 
-def asks_alone(name, command, rule, **kw):
-    """One case: `command` holds a harmless lead or tail around one ask command, so it asks, once."""
-    sh(name, command, "ask", rule, lacks=(CHAIN_ASK,), **kw)
+def asks_alone(name, command, rule, want="ask", **kw):
+    """One case: `command` holds a harmless lead or tail around one command. The cap rows keep `want` at ask,
+    the one ask left (rule 8). A discard, force or main push row says want="deny", and a prune row says
+    want="allow" with rule None (decision `guard-remedy-not-to-owner`)."""
+    sh(name, command, want, rule, lacks=(CHAIN_ASK,), **kw)
 
 
 # The leading forms: cd, Set-Location, export.
-asks_alone("ask-alone: a cd into the prune's checkout, then the prune, asks",
-           "cd " + slash(WTPRUNE) + " && " + ASK_PRUNE, "shared-tree", cwd=NOGIT)
+asks_alone("ask-alone: a cd into the prune's checkout, then the prune, allows",
+           "cd " + slash(WTPRUNE) + " && " + ASK_PRUNE, None, want="allow", cwd=NOGIT)
 # cwd is the lane itself: the guard reads only a `cd` as the run directory, so a Set-Location into
 # another folder from a plain folder is judged where the shell stands (a separate gap, reported).
-asks_alone("ask-alone: a Set-Location to the lane's own folder, then the reset, in the PowerShell tool asks",
-           "Set-Location " + slash(GITWT) + "; " + ASK_DISCARD, "shared-tree", tool="PowerShell",
+asks_alone("ask-alone: a Set-Location to the lane's own folder, then the reset, in the PowerShell tool denies",
+           "Set-Location " + slash(GITWT) + "; " + ASK_DISCARD, "shared-tree", want="deny", tool="PowerShell",
            cwd=GITWT)
 asks_alone("ask-alone: an export before the cap write asks",
            "export LANE_NOTE=ask && " + ASK_CAP, "agent-model-cap", cwd=PROJ)
@@ -242,38 +242,39 @@ asks_alone("ask-alone: a PowerShell Set-Location to a Windows path, then the cap
            r"Set-Location C:\Users\x\repo; " + ASK_CAP, "agent-model-cap", tool="PowerShell", cwd=PROJ)
 
 # The output tails: tail, head, Out-Null, && echo done, and PowerShell ; Write-Host done.
-asks_alone("ask-alone: the lease push to the default branch, piped to tail, asks",
+asks_alone("ask-alone: the lease push to the default branch, piped to tail, denies",
            ASK_LEASE + " | tail -5", "force-push", cwd=PUSHFEAT)
-asks_alone("ask-alone: the reset in a worktree, piped to head, asks",
-           ASK_DISCARD + " | head -3", "shared-tree", cwd=GITWT)
-asks_alone("ask-alone: the prune piped to Out-Null in the PowerShell tool asks",
-           ASK_PRUNE + " | Out-Null", "shared-tree", tool="PowerShell", cwd=WTPRUNE)
+asks_alone("ask-alone: the reset in a worktree, piped to head, denies",
+           ASK_DISCARD + " | head -3", "shared-tree", want="deny", cwd=GITWT)
+asks_alone("ask-alone: the prune piped to Out-Null in the PowerShell tool allows",
+           ASK_PRUNE + " | Out-Null", None, want="allow", tool="PowerShell", cwd=WTPRUNE)
 asks_alone("ask-alone: the cap write with an && echo done tail asks",
            ASK_CAP + " && echo done", "agent-model-cap", cwd=PROJ)
-asks_alone("ask-alone: the lease push to the default branch, then Write-Host done in the PowerShell tool asks",
-           ASK_LEASE + "; Write-Host done", "force-push", tool="PowerShell", cwd=PUSHFEAT)
+asks_alone("ask-alone: the lease push to the default branch, then Write-Host done in the PowerShell tool denies",
+           ASK_LEASE + "; Write-Host done", "force-push", want="deny", tool="PowerShell", cwd=PUSHFEAT)
 
 # Both harmless forms in one shell call still add no command.
-asks_alone("ask-alone: a cd, the prune, then an && echo done tail, asks",
-           "cd " + slash(WTPRUNE) + " && " + ASK_PRUNE + " && echo done", "shared-tree", cwd=NOGIT)
+asks_alone("ask-alone: a cd, the prune, then an && echo done tail, allows",
+           "cd " + slash(WTPRUNE) + " && " + ASK_PRUNE + " && echo done", None, want="allow", cwd=NOGIT)
 
 # DENY CONTROLS. A tail that is a command with effects, and a real
 # second command, are not harmless, so the chain still denies as a chained ask command.
-chained_ask("ask-alone: the discard piped to tee, a command with effects, still denies",
+own_refuse("ask-alone: the discard piped to tee, a command with effects, still denies",
             ASK_DISCARD + " | tee lane.log", cwd=GITWT)
-chained_ask("ask-alone: the prune piped to sh, a command with effects, still denies",
-            ASK_PRUNE + " | sh", cwd=WTPRUNE)
-chained_ask("ask-alone: a cd, the prune, then a removal of y, still denies",
+# No rule reads a pipe into sh (`printf x | sh` allows on main), and the prune allows, so the pair allows.
+sh("ask-alone: the prune piped to sh allows, no rule reads a pipe into sh",
+   ASK_PRUNE + " | sh", "allow", cwd=WTPRUNE, lacks=(CHAIN_ASK,))
+own_refuse("ask-alone: a cd, the prune, then a removal of y, still denies",
             "cd " + slash(WTPRUNE) + " && " + ASK_PRUNE + " && rm -rf /tmp/y", cwd=NOGIT)
 
 # TWO SAFETY HOLES, from an owner review. Both must DENY. The first: the `\"` inside the echo is an
 # escaped quote, so the `; rm -rf y` after it is a real command. The second: `cd -` moves to the previous
 # folder, which no path in the command names, so it is no harmless lead, and the prune after it is a
 # chained ask command.
-chained_prune("ask-alone: an escaped quote in an echo tail does not hide a removal after it, the prune denies",
-              ASK_PRUNE + ' && echo "a \\" b" ; rm -rf y')
-chained_prune("ask-alone: a cd - to the previous folder before the prune is no named lead, so it denies",
-              "cd - && " + ASK_PRUNE)
+own_refuse("ask-alone: an escaped quote in an echo tail does not hide a removal after it, denies",
+              ASK_PRUNE + ' && echo "a \\" b" ; rm -rf y', cwd=WTPRUNE)
+own_refuse("ask-alone: a cd - to the previous folder before the prune is no named lead, so it denies",
+              "cd - && " + ASK_PRUNE, cwd=WTPRUNE)
 
 
 # =========================================================================== 6d. an interpreter heredoc is one command

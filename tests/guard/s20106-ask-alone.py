@@ -9,20 +9,20 @@ FAMILY = "ask-alone"
 LANE_STASH = VCS + " stash push -u -m lane"
 FORCE_PUSH = VCS + " push --force origin HEAD:main"
 
-sh("ask-alone: a one-command python heredoc holding a prune asks, not denies",
-   "python3 - <<'PY'\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a one-command python heredoc holding a prune allows, not denies",
+   "python3 - <<'PY'\n" + PRUNE + "\nPY", "allow", cwd=WTPRUNE)
 sh("ask-alone: a one-command python heredoc with a print line and a prune asks once",
-   "python3 - <<'PY'\nprint(1)\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+   "python3 - <<'PY'\nprint(1)\n" + PRUNE + "\nPY", "allow", cwd=WTPRUNE)
 sh("ask-alone: a one-command node heredoc holding a prune asks, not denies",
-   "node <<'JS'\n" + PRUNE + "\nJS", "ask", "shared-tree", cwd=WTPRUNE)
+   "node <<'JS'\n" + PRUNE + "\nJS", "allow", cwd=WTPRUNE)
 sh("ask-alone: a one-command perl heredoc holding a prune asks, not denies",
-   "perl <<'PL'\n" + PRUNE + "\nPL", "ask", "shared-tree", cwd=WTPRUNE)
+   "perl <<'PL'\n" + PRUNE + "\nPL", "allow", cwd=WTPRUNE)
 sh("ask-alone: a one-command ruby heredoc holding a prune asks, not denies",
-   "ruby <<'RB'\n" + PRUNE + "\nRB", "ask", "shared-tree", cwd=WTPRUNE)
+   "ruby <<'RB'\n" + PRUNE + "\nRB", "allow", cwd=WTPRUNE)
 sh("ask-alone: a one-command python heredoc holding a forced push asks, not denies",
-   "python3 - <<'PY'\n" + FORCE_PUSH + "\nPY", "ask", "force-push", cwd=PUSHFEAT)
+   "python3 - <<'PY'\n" + FORCE_PUSH + "\nPY", "deny", "force-push", cwd=PUSHFEAT)
 sh("ask-alone: a one-command python heredoc holding a hard reset in a worktree asks, not denies",
-   "python3 - <<'PY'\n" + VCS + " reset --hard\nPY", "ask", "shared-tree", cwd=GITWT)
+   "python3 - <<'PY'\n" + VCS + " reset --hard\nPY", "deny", "shared-tree", cwd=GITWT)
 sh("cap data: a one-command python heredoc holding a cap write as text allows "
    "[step agent-model-cap-string-false-alarm: a false-alarm fix, interpreter string data that writes no file "
    "is not the act; incident 2026-11-02 01:16 CST]",
@@ -140,21 +140,21 @@ sh("cap data: a python heredoc printing a path join beside a cap write as text, 
 # Scanner cases (building-scanner-respects-strings): a comment opener, a lone apostrophe and a
 # multi-line template literal inside the body. None of them hides the prune or adds a command.
 sh("ask-alone: a # line with a lone apostrophe in a python body holds no quote, so the prune asks",
-   "python3 - <<'PY'\n# don't\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+   "python3 - <<'PY'\n# don't\n" + PRUNE + "\nPY", "allow", cwd=WTPRUNE)
 sh("ask-alone: a // line with a lone apostrophe in a python body holds no quote, so the prune asks",
-   "python3 - <<'PY'\n// don't\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+   "python3 - <<'PY'\n// don't\n" + PRUNE + "\nPY", "allow", cwd=WTPRUNE)
 sh("ask-alone: a /* opener in a python body opens no quote, so the prune asks",
-   "python3 - <<'PY'\n/* x */\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+   "python3 - <<'PY'\n/* x */\n" + PRUNE + "\nPY", "allow", cwd=WTPRUNE)
 sh("ask-alone: a lone apostrophe in plain python body text, then the prune, asks",
-   "python3 - <<'PY'\ndon't stop\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+   "python3 - <<'PY'\ndon't stop\n" + PRUNE + "\nPY", "allow", cwd=WTPRUNE)
 sh("ask-alone: a prune inside a multi-line node template literal asks, not denies",
-   "node <<'JS'\nconst s = `\n" + PRUNE + "\n`;\nJS", "ask", "shared-tree", cwd=WTPRUNE)
+   "node <<'JS'\nconst s = `\n" + PRUNE + "\n`;\nJS", "allow", cwd=WTPRUNE)
 sh("ask-alone: a python body that holds a shell prune only as a # comment is no command, so it allows",
    "python3 - <<'PY'\n# " + PRUNE + "\nPY", "allow", cwd=WTPRUNE)
 
 # The delimiter `E-F` is read as the whole word.
 sh("ask-alone: a one-command python heredoc with the delimiter E-F, holding a prune, asks",
-   "python3 - <<E-F\n" + PRUNE + "\nE-F", "ask", "shared-tree", cwd=WTPRUNE)
+   "python3 - <<E-F\n" + PRUNE + "\nE-F", "allow", cwd=WTPRUNE)
 chained_prune("ask-alone: a whole-word delimiter E-F, a python body, then a prune, still denies",
               "python3 - <<E-F\nprint(1)\nE-F\n" + PRUNE)
 
@@ -200,12 +200,12 @@ chained_prune("ask-alone: r1-hd a python heredoc with no closer, a prune after i
 
 # Two prune lines in one python body are one command, so the call asks once.
 sh("ask-alone: r1-hd two prune lines in one python body ask once, not deny",
-   "python3 - <<'PY'\n" + PRUNE + "\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+   "python3 - <<'PY'\n" + PRUNE + "\n" + PRUNE + "\nPY", "allow", cwd=WTPRUNE)
 
 # SCANNERS (building-scanner-respects-strings): a comment with a lone apostrophe, a lone apostrophe in
 # body text, a header shape inside quoted text, and a multi-line template literal.
 sh("ask-alone: r1-hd a comment with a lone apostrophe after a python header asks once for the prune",
-   "python3 - <<'PY' # don't\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+   "python3 - <<'PY' # don't\n" + PRUNE + "\nPY", "allow", cwd=WTPRUNE)
 chained_prune("ask-alone: r1-hd a lone apostrophe in a python body under a backslash delimiter, then a prune, denies",
               "python3 - <<E\\OF\nDon't\nEOF\n" + PRUNE)
 chained_prune("ask-alone: r1-hd a header shape inside a double-quoted echo, then a prune, denies",
@@ -213,7 +213,7 @@ chained_prune("ask-alone: r1-hd a header shape inside a double-quoted echo, then
 chained_prune("ask-alone: r1-hd a template literal in a node body closed at E'OF', then a prune, denies",
               "node <<E'OF'\nconst s = `\nEOF\n" + PRUNE)
 sh("ask-alone: r1-hd a prune in a node template literal under a backslash delimiter asks once",
-   "node <<E\\OF\nconst s = `\n" + PRUNE + "\n`;\nEOF", "ask", "shared-tree", cwd=WTPRUNE)
+   "node <<E\\OF\nconst s = `\n" + PRUNE + "\n`;\nEOF", "allow", cwd=WTPRUNE)
 
 # A plain cat heredoc piped to sh, with a prune in its body.
 chained_prune("ask-alone: r1-hd a plain cat heredoc piped to sh, a prune in the body, denies (red on main too)",
@@ -235,7 +235,7 @@ for _label, _form in R2_FORMS + (R2_EVAL_FORM,):
 # across lines, with `$(cat <<'EOF-1'` text and one prune in it. An interpreter body is one command, so it asks
 # once.
 sh("ask-alone: r2-hd a node heredoc whose template literal holds $( heredoc text and a prune asks once",
-   "node <<E\\OF\nconst s = `\n$(cat <<'EOF-1'\n" + PRUNE + "\n`;\nEOF", "ask", "shared-tree", cwd=WTPRUNE)
+   "node <<E\\OF\nconst s = `\n$(cat <<'EOF-1'\n" + PRUNE + "\n`;\nEOF", "allow", cwd=WTPRUNE)
 
 
 # A prune or a push delete in a body that is kept in view is a second command, so the command denies as a chained ask.
