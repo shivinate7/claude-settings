@@ -392,7 +392,7 @@ Other tools, in `judge` order:
                        `.git`, a target outside the clone, reads and non-writing shell pass. A git
                        `clean` counts only with a force flag. An
                        override lifts it. It adds no git spawn beyond what the call already spends.
-  scratchpad-owner     refuse a run of, a write over, or an `rm` or `mv` of another agent's file or folder (a run: owner, 2026-11-23 11:07 CST). A call with a valid `agent_id` that runs a file in this session's scratchpad, or
+  scratchpad-owner     refuse a run of, a write over, or an `rm` or `mv` of another agent's file or folder. A call with a valid `agent_id` that runs a file in this session's scratchpad, or
                        writes over one, that another agent wrote. Each such write records its agent in a
                        sidecar `<scratchpad>/.writers/<hash>`. A run is an interpreter or the path as the
                        command word; a write is a Write-family target or a shell write target. A first
