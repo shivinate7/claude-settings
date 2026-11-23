@@ -267,7 +267,9 @@ async function main() {
   const out = o.out ? path.resolve(o.out) : fs.mkdtempSync(path.join(os.tmpdir(), "shoot-"));
   fs.mkdirSync(out, { recursive: true });
   let browser;
-  try { browser = await pw.chromium.launch(); }
+  // The two switches keep Chromium from asking for the owner's keychain password (decision render-browser-no-keychain).
+  // Spelled here, not required from bin/render: a copy of this file under test runs with no sibling.
+  try { browser = await pw.chromium.launch({ args: ["--use-mock-keychain", "--password-store=basic"] }); }
   catch (e) { die(`FAIL: Chromium did not launch: ${String(e.message).split("\n")[0]}. This tool never runs playwright install.`); }
   const fails = [], skips = [];
   let shots = 0;

@@ -30,6 +30,11 @@ worktree (`parallelism-each-own-checkout`).
 - **Directed designer.** An informed designer plus one named direction, such as denser, phone first, or one
   primary action. The orchestrator picks directions that differ from each other.
 
+A designer, and the orchestrator, renders a mockup in the built-in browser pane or with the shared tool
+(`render <file or url> --out <png>`), never with a bare Playwright, Puppeteer or Chrome launch: on macOS
+that asks the owner for the keychain password, and the guard rule `browser-keychain` refuses it (decision
+`render-browser-no-keychain`).
+
 ## Default mix
 
 Per screen: two blind designers, one informed designer, two directed designers. The mix is a default. A brief or

@@ -125,6 +125,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (fg-bash-while-bg)
   playwright-browsers-path, playwright-install
                        deny. (playwright-browsers-path, playwright-install-once)
+  browser-keychain    deny. A Chromium launched by Playwright or Puppeteer (a shell command, or a script a Write or Edit
+                       leaves) without both --use-mock-keychain and --password-store=basic. (render-browser-no-keychain)
   rm-var-unguarded     deny. A recursive delete under an unguarded variable.
                        (rm-on-a-variable-needs-a-guard)
   rm-after-cd          deny. A recursive delete of a relative target after a cd.
@@ -801,6 +803,8 @@ while True:
         )
         _loading = "guard_wsl"
         from guard_wsl import WSL_REASON, wsl_hit
+        _loading = "guard_browser"
+        from guard_browser import BROWSER_KEYCHAIN_REASON, BROWSER_SCRIPT_EXTENSIONS, command_hit as browser_command_hit, write_hit as browser_write_hit
         # Flat modules the guard reads on every call. A failed import takes this same wait-then-refuse
         # path (decision install-hooks-whole), never a fallback that judges with the read missing.
         # guard_kill imports proc_env above, so its failure surfaces under guard_kill's name.
@@ -5949,6 +5953,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = playwright_install_hit(stripped, agent)
     if matched:
         refuse(tool, "deny", "playwright-install", PLAYWRIGHT_INSTALL_REASON, matched)
+    # 3c'. A Chromium launched with no mock keychain (decision render-browser-no-keychain). Reads the raw command: a heredoc body is the script.
+    matched = browser_command_hit(raw)
+    if matched:
+        refuse(tool, "deny", "browser-keychain", BROWSER_KEYCHAIN_REASON, matched)
     # 3d. A recursive delete under an unguarded variable (decision rm-on-a-variable-needs-a-guard).
     # The guard syntax `${NAME:?}` is POSIX, so a PowerShell tool call is not judged.
     hits = [] if POWERSHELL_CALL[0] else rm_var_hits(stripped, cwd)
@@ -8576,6 +8584,11 @@ def judge(payload) -> None:
         # holding checkout's extras file, read once per call, only when the target sits in a checkout.
         if is_protected(target, cwd):
             refuse(tool, "deny", "protected-path", protected_reason(target), target)
+        # 7e. A script that launches a Chromium with no mock keychain (decision render-browser-no-keychain). Judged on the
+        # launches the write adds. Cost: one read of the target, only for a script file (an extension in BROWSER_SCRIPT_EXTENSIONS, or none).
+        launch = browser_launch_write_hit(tool, tool_input, target, cwd)
+        if launch:
+            refuse(tool, "deny", "browser-keychain", BROWSER_KEYCHAIN_REASON, launch)
     for target in targets:
         # 7b. A project config edit: allowed (Decision 7), and noted in the log only.
         if is_project_config(target, cwd):
@@ -8593,6 +8606,26 @@ def judge(payload) -> None:
                 refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, target),
                        log_path_and_text(target, change))
     scratchpad_owner_write(payload, tool, tool_input, cwd)   # every refusal above passed: refuse an overwrite, else record the writer
+
+
+def browser_launch_write_hit(tool, tool_input, target, cwd) -> str:
+    """The Chromium launch with no mock keychain that a Write, Edit or MultiEdit would add to a script file, else ''.
+    The text the call leaves is judged against the text the file holds now, so a launch the file already holds passes."""
+    if tool not in ("Write", "Edit", "MultiEdit"):
+        return ""
+    if os.path.splitext(target)[1].lower() not in BROWSER_SCRIPT_EXTENSIONS:
+        return ""   # not a script, and no read of the file
+    path = os.path.expanduser(target)
+    path = path if os.path.isabs(path) else os.path.join(cwd or "", path)
+    if tool == "Write" and isinstance(tool_input.get("content"), str):
+        try:
+            with open(path, encoding="utf-8") as handle:
+                old = handle.read()
+        except (OSError, ValueError):
+            old = None
+        return browser_write_hit(path, old, tool_input["content"])
+    result = write_result_texts(tool_input, path)
+    return browser_write_hit(path, result[0], result[1]) if result else ""
 
 
 def write_targets(tool_input: dict) -> list:

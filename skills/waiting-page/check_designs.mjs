@@ -107,7 +107,8 @@ try {
   if (!item.id) item.id = "item";
   // An update may carry options and designs but no kind. The page draws option cards only for a decision, so default it.
   if (item.kind == null) item.kind = "decision";
-  browser = await playwright.chromium.launch();
+  // The two switches keep Chromium from asking for the owner's keychain password (decision render-browser-no-keychain).
+  browser = await playwright.chromium.launch({ args: ["--use-mock-keychain", "--password-store=basic"] });
   const page = await browser.newPage({ viewport: { width: WIDTH, height: 900 } });
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body: html }) : r.abort()));
   await page.addInitScript(stubDb, { doc: item, answers });
