@@ -103,6 +103,9 @@ once waits on the draft run, reads it as skipped, and prints "CI red ...: workfl
   No list comes after the deadline. A list made at the deadline after that pause is allowed.
 - A head with no real run at the deadline wakes with `CI unknown`, never red or green.
 - A real run that failed still reads red, with its own failing job names.
+- Green needs a completed `checks` run whose `all-jobs-passed` job passed (REQUIRED_CHECK). A draft-era run
+  (a `checks` run with that job skipped, or a green lane-touched-tests run) is never the green result: the
+  watch keeps waiting for the real run, and a red job still wakes at once.
 - After the first judged run, the hook re-lists the head once at once. A run visible at that re-list is
   judged too. Every later list is 30 s or more after the one before it, so a stream of new runs costs
   one list per 30 s.
@@ -147,6 +150,8 @@ sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
+sys.path.insert(0, HERE)
+from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check name (hooks/required_check.py)
 # Absolute: each case runs the hook with its own temp folder as cwd, so a relative path breaks there.
 MODULE = os.path.abspath(os.environ.get("CI_WAKE_MODULE") or os.path.join(HERE, "ci_wake.py"))
 PY = sys.executable
@@ -584,33 +589,41 @@ def powershell(command):
 
 READY = [pr(12)]
 TWO_PRS = [pr(12), pr(13, branch="second-branch", sha=SHA_B)]
-GREEN = run(901, "checks", "success", [job("lint", "success"), job("unit", "success")])
+GREEN = run(901, "checks", "success", [job("lint", "success"), job("unit", "success"), job(REQUIRED_CHECK, "success")])
 RED = run(902, "checks", "failure",
           [job("lint", "success"), job("unit", "failure"), job("e2e", "failure")])
 RED_B = run(911, "checks", "failure", [job("unit", "failure")], sha=SHA_B)
 CANCEL_903 = run(903, "checks", "cancelled", [job("unit", "cancelled")])
-RAN_904 = run(904, "checks", "success", [job("unit", "success")])
+RAN_904 = run(904, "checks", "success", [job("unit", "success"), job(REQUIRED_CHECK, "success")])
 CANCEL_905 = run(905, "checks", "cancelled", [job("unit", "cancelled")])
-INPROG_906 = run(906, "checks", "success", [job("unit", "success")], in_progress_at_list=True)
-LATE_906 = run(906, "checks", "success", [job("unit", "success")], in_progress_at_list=True,
+INPROG_906 = run(906, "checks", "success", [job("unit", "success"), job(REQUIRED_CHECK, "success")],
+                 in_progress_at_list=True)
+LATE_906 = run(906, "checks", "success", [job("unit", "success"), job(REQUIRED_CHECK, "success")],
+               in_progress_at_list=True,
                in_progress_reads=2)  # in progress for 2 reads of `run view`, completed at the 3rd
 LATE_907 = run(907, "codeql", "success", [job("scan", "success")], in_progress_at_list=True,
                in_progress_reads=3)  # in progress for 3 reads, completed at the 4th
 PENDING = run(908, "checks", None, [], status="in_progress")  # never ends: only the deadline wakes the hook
 HOLD = run(909, "checks", None, [], status="in_progress", ping=True)  # a live watcher: its status read pings, then it pauses
 BAD_STATUS = run(912, "checks", "success", [job("unit", "success")], fail_status=True)  # its status read exits 1
-QUEUED_913 = run(913, "checks", "success", [job("unit", "success")], in_progress_reads=2,
+QUEUED_913 = run(913, "checks", "success", [job("unit", "success"), job(REQUIRED_CHECK, "success")], in_progress_reads=2,
                  early_status="queued")  # queued for 2 reads of `run view`, completed at the 3rd
 # The draft PR's run: every job skipped. DRAFT_LIVE lists with no conclusion at the first list, and ends
 # skipped. DRAFT_DONE lists skipped from the first list.
 DRAFT_LIVE = run(920, "checks", "skipped", [job("unit", "skipped")], unfinished_to_list=1)
 DRAFT_DONE = run(921, "checks", "skipped", [job("unit", "skipped")])
+# A draft-era run that ends success: on a draft, the nightly-skip and push-skip jobs still run and pass, while
+# the rollup skips with the real jobs. It is not the CI result of the ready head. LANE_GREEN is a green
+# lane-touched-tests run on the same draft head: a green run of another workflow, never the CI result either.
+DRAFT_RAN = run(990, "checks", "success", [job("nightly-skip", "success"), job("push-skip", "success"),
+                                           job("unit", "skipped"), job(REQUIRED_CHECK, "skipped")])
+LANE_GREEN = run(991, "lane-touched-tests", "success", [job("lane-touched-tests", "success")])
 
 
 def late(run_id, appears, conclusion="success", jobs=None):
     """The real run of `gh pr ready`, which the lists before list number `appears` do not show. It
     lists in progress when it first shows, and its first status read is in progress too."""
-    jobs = jobs or [job("lint", "success"), job("unit", "success")]
+    jobs = jobs or [job("lint", "success"), job("unit", "success"), job(REQUIRED_CHECK, "success")]
     return run(run_id, "checks", conclusion, jobs, appears_at_list=appears, unfinished_to_list=appears,
                in_progress_reads=1)
 
@@ -1082,6 +1095,64 @@ def case_draft_run_ending_skipped_is_no_run_yet():
     check("%s: run list read at most twice" % label, count(res, "run", "list") <= 2, why(res))
 
 
+def case_draft_era_runs_are_never_green():
+    """A head whose only completed runs are draft-era runs never reads green. The draft's checks run ends success with
+    its all-jobs-passed job skipped, and a green lane-touched-tests run is no CI result either. The wait keeps listing
+    until its deadline, so the line is not green and the wait ends at the deadline. Fake clock: the verdict depends on
+    the deadline. Control: the draft-era run beside a completed checks run whose all-jobs-passed job passed is green."""
+    for label, runs in (("draft-era checks run alone", [DRAFT_RAN]),
+                        ("green lane-touched-tests run alone", [LANE_GREEN]),
+                        ("draft-era checks run beside a green lane-touched-tests run", [DRAFT_RAN, LANE_GREEN])):
+        raised, clock, calls, deadline = wait_for_on_fakes(runs, 100, line=True)
+        detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
+        check("%s: the line is not CI green" % label, not str(clock.line).startswith("CI green"), detail)
+        check("%s: the wait keeps listing and ends at its deadline" % label, abs(clock.now - deadline) < 1e-6, detail)
+    raised, clock, calls, deadline = wait_for_on_fakes([DRAFT_RAN, GREEN], 3600, line=True)
+    detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
+    check("control: draft-era run beside a checks run with all-jobs-passed passed reads CI green",
+          str(clock.line).startswith("CI green on"), detail)
+
+
+def case_checks_run_without_a_passed_rollup_is_never_green():
+    """Green needs the completed checks run's all-jobs-passed job to have passed. A checks run that ends success with
+    its real jobs passed, and no all-jobs-passed job, is not green: the wait keeps listing to its deadline. Controls: a
+    failed all-jobs-passed job reads CI red and names it, on a fake clock with no deadline in reach."""
+    no_rollup = run(992, "checks", "success", [job("lint", "success"), job("unit", "success")])
+    raised, clock, calls, deadline = wait_for_on_fakes([no_rollup], 100, line=True)
+    detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
+    check("checks run with no all-jobs-passed job: the line is not CI green",
+          not str(clock.line).startswith("CI green"), detail)
+    check("checks run with no all-jobs-passed job: the wait ends at its deadline",
+          abs(clock.now - deadline) < 1e-6, detail)
+    rollup_failed = run(993, "checks", "failure", [job("unit", "success"), job(REQUIRED_CHECK, "failure")])
+    raised, clock, calls, deadline = wait_for_on_fakes([rollup_failed], 3600, line=True)
+    detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
+    check("control: a failed all-jobs-passed job reads CI red and names it",
+          str(clock.line).startswith("CI red on") and REQUIRED_CHECK in str(clock.line), detail)
+
+
+def case_the_real_checks_run_is_read_after_a_draft_era_run():
+    """The draft's checks run ends success and is listed first. The real run shows only at the third list, after the
+    at-once re-list. Green waits for the real run: the hook reads it, and prints one green line for one wake. On main
+    the draft-era run is judged green at the first list, and the real run is never read. Control: the same real run
+    listed with a skipped draft run reads green (case_draft_run_then_real_run)."""
+    label = "draft-era checks run listed first, real checks run with all-jobs-passed passed at the third list"
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [DRAFT_RAN, late(994, 3)]), launcher=FAST_SLEEP_LAUNCHER)
+    check("%s: the hook read the real run (994) before any green" % label, "994" in watched(res), why(res))
+    expect_verdict(label, res, "green")
+
+
+def case_a_failed_job_still_wakes_beside_a_draft_era_run():
+    """Control: the real run is in progress with its unit job failed, and it is listed first. The
+    draft-era run is listed after it. The watch wakes at the first poll that shows the failed job, reads no other run,
+    and prints a red line that names unit. Never green."""
+    label = "in-progress checks run with a failed unit job, draft-era run listed after it (control)"
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [RUNNING_FAILED, DRAFT_RAN]), launcher=FAST_SLEEP_LAUNCHER)
+    expect_verdict(label, res, "red", names_in=["unit"], names_out=["e2e", "lint"])
+    check("%s: one status read, of the failed run (971), and none of the draft-era run" % label,
+          watched(res) == ["971"], why(res))
+
+
 def case_run_visible_at_the_at_once_relist_is_judged():
     """The first real run is judged, and wait_for re-lists at once. A run visible at that re-list is judged
     too: a hook that returns after the first judged run never reads it, and says green while it goes on. The
@@ -1216,7 +1287,8 @@ def case_new_runs_on_every_list_are_paced_after_the_at_once_relist():
     judged run; from then on each list is 30 s or more after the one before it, so the stream costs one gh
     list per 30 s, not one per run at +0 s. Only the pace is checked: a run first shown after the re-list is
     not judged here."""
-    stream = [run(940 + k, "checks", "success", [job("unit", "success")], appears_at_list=k + 1)
+    stream = [run(940 + k, "checks", "success", [job("unit", "success"), job(REQUIRED_CHECK, "success")],
+                  appears_at_list=k + 1)
               for k in range(12)]
     raised, clock, calls, deadline = wait_for_on_fakes(stream, 3600)
     times = list_times(calls)
@@ -1652,7 +1724,8 @@ def case_wait_for_lists_again_until_a_real_run_shows():
     """wait_for: the real run (922) shows at list 3, after a draft run listed skipped. wait_for lists
     again, 30 s or more apart, and reads that run. Main lists twice, 20 s apart, and gives up."""
     label = "wait_for, draft run skipped, real run at the third list"
-    runs = [DRAFT_DONE, run(922, "checks", "success", [job("unit", "success")], appears_at_list=3)]
+    runs = [DRAFT_DONE, run(922, "checks", "success", [job("unit", "success"), job(REQUIRED_CHECK, "success")],
+                            appears_at_list=3)]
     raised, clock, calls, deadline = wait_for_on_fakes(runs, 3600)
     times, detail = list_times(calls), wait_detail(raised, clock, calls, deadline)
     check("%s: returns, no exception" % label, raised is None, detail)
@@ -2385,6 +2458,24 @@ class CostTests(unittest.TestCase):
         self.assertEqual(len(reads), 4, "the failed job's poll is the last read, at 90 s: 4 reads; got %d" % len(reads))
         self.assertAlmostEqual(clock.now - T0, 90, places=6, msg="the watch ends at the poll that shows the failure")
 
+    def test_a_head_with_only_draft_era_runs_lists_no_more_than_the_status_schedule(self):
+        # Decision ci-wait-reads-run-status, Cost: a head whose runs are all draft-era is listed on the status schedule,
+        # and once at the deadline, never more: the 35 reads of a never-completing run, plus that one list. Each run is
+        # read for its jobs once, not once per list, so the new wait adds no read past the cap.
+        budget = self.mod.DEFAULT_DEADLINE
+        runs = [DRAFT_RAN, LANE_GREEN]
+        raised, clock, calls, deadline = wait_for_on_fakes(runs, budget)
+        lists, gaps, walk, t = list_times(calls), self.mod.pauses(), 0, 0.0
+        while t < budget:
+            walk += 1
+            t += next(gaps)
+        self.assertIsNotNone(raised, "a head with no passed checks run ends at its deadline; wait_for returned a verdict")
+        self.assertLessEqual(len(lists), walk + 1, "%d lists in a %d s wait: the status schedule is %d, plus the "
+                             "list at the deadline" % (len(lists), budget, walk))
+        for r in runs:
+            reads = sum(1 for _, a in calls if judged_read(a, runs) and a[2] == str(r["databaseId"]))
+            self.assertLessEqual(reads, 1, "run %s is read for its jobs %d times; once is the cost" % (r["databaseId"], reads))
+
     def test_the_default_budget_ends_before_the_hook_is_killed(self):
         row = cost_probe.settings_timeout("ci_wake.py")
         self.assertIsNotNone(row, "settings.json has a hook row for ci_wake.py")
@@ -2821,6 +2912,10 @@ def main():
     case_real_run_listed_late()
     case_real_failed_run_beside_a_draft_run_is_red()
     case_draft_run_ending_skipped_is_no_run_yet()
+    case_draft_era_runs_are_never_green()
+    case_checks_run_without_a_passed_rollup_is_never_green()
+    case_the_real_checks_run_is_read_after_a_draft_era_run()
+    case_a_failed_job_still_wakes_beside_a_draft_era_run()
     case_run_visible_at_the_at_once_relist_is_judged()
     case_the_at_once_relist_judges_the_newest_run_of_a_name()
     case_failed_re_list_keeps_the_judged_verdict()
