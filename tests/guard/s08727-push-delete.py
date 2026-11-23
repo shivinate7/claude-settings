@@ -1382,11 +1382,14 @@ sh("push: text, a heredoc body naming a push to main, is silent",
 sh("push: text, a multi-line quoted string naming a push to main, is silent",
    'echo "one line\n' + VCS + ' push origin main"', "allow", cwd=PUSHFEAT, silent=True)
 # A comment opener inside a string does not hide the real push after it, and a lone quote in a message
-# does not either (building-scanner-respects-strings). The push is a second command, so it denies alone.
-chained_ask("push: a comment opener inside a string does not hide a push to main that follows it",
-            'echo "#" && ' + VCS + " push origin main", cwd=PUSHMAIN)
-chained_ask("push: a lone quote in a commit message does not hide a push to main that follows it",
-            VCS + ' commit -m "don\'t" && ' + VCS + " push origin main", cwd=PUSHFEAT)
+# does not either (building-scanner-respects-strings). The push to main is refused by its own rule, push-main,
+# and no run-alone ask is chained with it (decision guard-remedy-not-to-owner).
+sh("push: a comment opener inside a string does not hide a push to main that follows it",
+   'echo "#" && ' + VCS + " push origin main", "deny", PUSH_MAIN_RULE, cwd=PUSHMAIN,
+   lacks=(CHAIN_ASK, REMEDY))
+sh("push: a lone quote in a commit message does not hide a push to main that follows it",
+   VCS + ' commit -m "don\'t" && ' + VCS + " push origin main", "deny", PUSH_MAIN_RULE, cwd=PUSHFEAT,
+   lacks=(CHAIN_ASK, REMEDY))
 sh("push: a lone quote in a commit message does not hide a force push that follows it",
    VCS + ' commit -m "don\'t" && ' + VCS + " push --force origin HEAD", "deny", "force-push",
    cwd=PUSHFEAT, lacks=(CHAIN_ASK,))
