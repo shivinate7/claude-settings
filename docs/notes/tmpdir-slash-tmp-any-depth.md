@@ -1,0 +1,1 @@
+- tmpdir-slash-tmp-any-depth: with TMPDIR=/tmp, the temp-folder test allows any depth under /tmp (PR 3801 review F9, as filed; not run). hooks/guard.py lines 1336 and 1401 take tempfile.gettempdir() as the root. Seen: 2026-11-23 x1

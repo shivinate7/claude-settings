@@ -1,0 +1,1 @@
+- reply-judge-main-claim-misses: MAIN_CLAIM in hooks/reply_judge.py (lines 100-101) misses a claim worded with an origin/main variant, such as "matches origin/main". It also misses "no regressions", since `\bno\s+regression\b` needs a word end after "regression". Seen: 2026-11-23 x1

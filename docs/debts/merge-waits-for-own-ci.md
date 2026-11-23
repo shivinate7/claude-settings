@@ -1,0 +1,6 @@
+# Merge accepts a pending head on a lane-lint PASS
+
+- **What.** The merge tool lets a PR merge while its own required CI run is still pending, when a local lane-lint PASS names the head's sha. The consultant merged PRs 3799, 3805 and 3806 before their own PR CI finished (timing from the session report; not re-read from CI). Main then went red with five causes: guard fixtures, a refusal text that named guard.py, the brief word cap, shellcheck SC2010 in `merge/test_install_from_main.sh`, and the compliance shoot-config regex. PR 3811 fixed them. Harm: a red main blocks every lane.
+- **Where.** `merge/merge.py`, the ready check for a pending head (lines 36-39). `pending_lifted` (line 1221) records a lint PASS that lifted a pending run.
+- **Decision.** `merge-needs-current-base` (rule M3). Its pending clause came from owner ruling `own-merge-on-lint-pass` (2026-11-15 18:21 CST). Decision `draft-until-reviewed` (owner, 2026-11-20 15:08 CST) also lets a lane-lint PASS merge while CI runs. The fix idea below reverses both rulings, so the owner must decide it first.
+- **Retire.** Close when `merge --confirm` refuses a head whose own required run is still pending, and a case in `merge/test_merge.py` pins that refusal.

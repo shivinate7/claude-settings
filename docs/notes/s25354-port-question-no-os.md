@@ -1,0 +1,1 @@
+- s25354-port-question-no-os: tests/guard/s25354-port-question.py uses `os` at line 13, and its first import is at line 193, so it raises NameError on this checkout (read, not run). Seen: 2026-11-23 x1

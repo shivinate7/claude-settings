@@ -1,0 +1,1 @@
+- silent-write-awk-sed-unread: the silent-write guard does not read `awk` or `sed -n '/x/!p'` (hooks/guard.py:84). PR 3807 review F6, for the owner to confirm: `grep -E` and `sed -n '/x/p'` also drop unnamed lines, yet they are allowed (unverified by run). Seen: 2026-11-23 x1
