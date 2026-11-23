@@ -87,6 +87,13 @@ def linux_only(sha=HEAD, created=LATE, id_=None):
     return run("push", sha=sha, created=created, id_=id_, jobs=jobs)
 
 
+def narrowed_push(sha=HEAD, created=LATE, id_=None):
+    """A push run the push skip proved after a narrowed pull request: push-skip succeeded, scope was skipped, and the Windows merge
+    shard the narrowed run left out was skipped with it."""
+    jobs = [job("push-skip"), job("scope", "skipped"), job("checks-windows-merge-3", "skipped")]
+    return run("push", sha=sha, created=created, id_=id_, jobs=jobs)
+
+
 def run_in_process(env, api_get):
     """The gate's main() in this process, with `api_get` standing in for the live read. A read error that escapes main() comes
     back as rc 1 and the escaped type named in the text, which is what an uncaught exception does to the step's exit status."""
@@ -385,6 +392,29 @@ class NightlySkipFailureClasses(unittest.TestCase):
                                    proven(created=LATE)]), "true",
                          "a red push run before the green nightly is covered by it, so the proven head can skip")
 
+
+class NightlySkipNarrowedPush(unittest.TestCase):
+    """The daily may skip after a push the push skip proved, while main has not moved past that push. A narrowed push runs none of
+    the Windows shards it leaves out, so a daily that skips after one runs those shards on no tree of main."""
+
+    def test_a_daily_skips_when_main_has_not_moved_past_a_narrowed_push(self):
+        # Control, green on the old code: main is unmoved since the green daily, and the narrowed push sits at that head before it.
+        got = run_skip(runs=[narrowed_push(sha=OTHER, created=BEFORE), run("schedule", sha=OTHER, created=OLDER)], head=OTHER)
+        self.assertEqual(got["rc"], 0, "the gate exits %d: %s" % (got["rc"], got["text"][-300:]))
+        self.assertEqual(got["value"], "true", "the daily does not skip with main unmoved since the green daily: %s" % got["text"][-300:])
+
+    def test_a_daily_does_not_skip_after_a_narrowed_push_moved_main(self):
+        push = narrowed_push(sha=HEAD, created=LATE)
+        runs = [run("schedule", sha=OTHER, created=OLDER), push]
+        # Scope first: the push is at a new head, and its own jobs show it was proven and that a Windows shard was left out.
+        jobs = {j["name"]: j["conclusion"] for j in push["jobs"]}
+        self.assertNotEqual(push["head_sha"], OTHER, "the push did not move main past the green daily")
+        self.assertEqual(jobs.get("push-skip"), "success", "the push was not proven by the push skip: %s" % jobs)
+        self.assertEqual(jobs.get("checks-windows-merge-3"), "skipped", "the push ran the Windows merge shard: %s" % jobs)
+        got = run_skip(runs=runs, head=HEAD)
+        self.assertEqual(got["rc"], 0, "the gate exits %d: %s" % (got["rc"], got["text"][-300:]))
+        self.assertEqual(got["value"], "false", "the daily skips after main moved past a push that left a Windows shard out: %s"
+                         % got["text"][-300:])
 
 
 class NightlySkipRange(unittest.TestCase):
