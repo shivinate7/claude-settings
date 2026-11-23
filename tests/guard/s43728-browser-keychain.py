@@ -96,7 +96,7 @@ sh("browser-keychain: a Chrome for Testing binary with --version is allowed", CH
 sh("browser-keychain: node -e with a puppeteer require().launch() and both switches is allowed",
    "node -e \"require('puppeteer').launch({ args: ['--use-mock-keychain', '--password-store=basic'] })\"",
    "allow", tool="Bash")
-sh("browser-keychain: the render tool is allowed", "render page.html --out shot.png", "allow", tool="Bash")
+sh("browser-keychain: the shoot tool is allowed", "shoot --file page.html --out shots", "allow", tool="Bash")
 sh("browser-keychain: grep for the launch text is allowed",
    "grep -rn \"chromium.launch(\" lint/", "allow", tool="Bash")
 sh("browser-keychain: echo of the launch text is allowed",
@@ -119,8 +119,8 @@ add("browser-keychain: a Write of a Python script with a bare launch is refused"
 add("browser-keychain: a Write of a shell script with the Playwright CLI is refused", "deny", "browser-keychain",
     tool="Write", file_path=os.path.join(BK_DIR, "shot.sh"),
     content="npx playwright screenshot https://example.com shot.png\n", carries=BK_REMEDY)
-add("browser-keychain: a Write of an extensionless tool with a node shebang and a bare launch is refused",
-    "deny", "browser-keychain", tool="Write", file_path=os.path.join(BK_DIR, "render-tool"),
+add("browser-keychain: a whole-file Write of bin/shoot with a bare launch is refused",
+    "deny", "browser-keychain", tool="Write", file_path=os.path.join(BK_DIR, "bin", "shoot"),
     content="#!/usr/bin/env node\n" + BK_BARE_LINE + "\n", carries=BK_REMEDY)
 add("browser-keychain: a Write over an empty script with a bare launch is refused", "deny", "browser-keychain",
     tool="Write", file_path=BK_EMPTY, content=BK_BARE_LINE + "\n", carries=BK_REMEDY)

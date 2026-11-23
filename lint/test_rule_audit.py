@@ -2280,14 +2280,7 @@ def _guard_switches(root):
     return None
 
 
-BROWSER_RENDER_ARGS_RE = re.compile(r"const CHROMIUM_ARGS = \[([^\]]*)\];")
 BROWSER_ARGS_LIST_RE = re.compile(r"args:\s*\[([^\[\]]*)\]")
-
-
-def _render_switches(root):
-    """CHROMIUM_ARGS of bin/render, the list the tool launches Chromium with. None when it is absent."""
-    found = BROWSER_RENDER_ARGS_RE.search(_text_or_empty(os.path.join(root, "bin", "render")))
-    return None if found is None else tuple(re.findall(r'"([^"]*)"', found.group(1)))
 
 
 def _args_lists(path):
@@ -2309,13 +2302,6 @@ class BrowserSwitchLiteralTests(unittest.TestCase):
         flags = _guard_switches(rule_audit.ROOT)
         self.assertIsNotNone(flags, "hooks/guard_browser.py has no BROWSER_FLAGS tuple of string literals")
         self.assertEqual(sorted(flags), sorted(["--password-store=basic", "--use-mock-keychain"]), flags)
-
-    def test_bin_render_passes_the_guard_switches(self):
-        render = _render_switches(rule_audit.ROOT)
-        self.assertIsNotNone(render, "bin/render has no CHROMIUM_ARGS list")
-        flags = _guard_switches(rule_audit.ROOT)
-        self.assertIsNotNone(flags, "hooks/guard_browser.py has no BROWSER_FLAGS tuple of string literals")
-        self.assertEqual(render, flags, "bin/render launches with %r, the guard reads %r" % (render, flags))
 
     def test_bin_shoot_passes_the_guard_switches(self):
         lists = _args_lists(os.path.join(rule_audit.ROOT, "bin", "shoot"))
