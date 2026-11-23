@@ -7395,12 +7395,13 @@ class LintResumesPassedJobs(LaneFixture):
     EDIT = b"\n# an edit the tool's key must see\n"  # appended to a copy of a file the tool reads
     STALE = 1600000000  # a fixed, old mtime for a planted .part file
 
-    def lint_at(self, when, *extra, module=None):
+    def lint_at(self, when, *extra, module=None, at_head=False):
         """One `--lane-lint 7` run with the merge commit's dates set to `when`. `module` runs a loaded copy of merge.py instead of this process's.
+        `at_head`: the checkout is first detached at the pull request head, as a lane's own lint runs it (a head behind main pushes its merge then).
         -> (rc, stdout and stderr together)."""
         with unittest.mock.patch.dict(os.environ, {"GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}):
             if module is None:
-                return self.run_lane("--lane-lint", "7", *extra, at_head=False)
+                return self.run_lane("--lane-lint", "7", *extra, at_head=at_head)
             return self.run_copy(module, "--lane-lint", "7", *extra)
 
     def run_copy(self, module, *argv):
@@ -7952,6 +7953,112 @@ class LintResumesPassedJobs(LaneFixture):
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.ran(), ran + 1, "scope: the next save did not run its job: " + out)
         self.assertFalse(os.path.exists(stale), "the next save left the .part file of a killed run: " + stale)
+
+
+class LintResumesPushedMerge(LaneFixture):
+    """A rerun of a lint that pushes its merged commit M builds the same M when the head and the tip are unchanged, so the job's saved PASS serves
+    it (the job's key holds M). M's author and committer dates are the later of the head's and the tip's committer dates, whatever GIT_AUTHOR_DATE
+    and GIT_COMMITTER_DATE hold. A new main tip makes a new M and a miss: the control, green on the old code, where the tip is in the key. Each
+    rerun case first lints a head behind main, which pushes M to the pull request branch; the rerun puts the branch back at the head
+    (put_pr_head_back), so both lints read the same head. Cost per case: two lint runs and at most two stub starts, and one fixture pair (unmeasured)."""
+
+    DATE_A = LintResumesPassedJobs.DATE_A  # the two dates LintResumesPassedJobs reruns under
+    DATE_B = LintResumesPassedJobs.DATE_B
+    HEAD_WHEN = "@1700000100 +0000"  # a commit date in the dates cases: the earlier of the two
+    TIP_WHEN = "@1700000900 +0000"  # the other commit date: the later of the two
+    EARLY = "@1700000000 +0000"  # an inherited date before both commits: the merged commit must not take it
+    LATE = "@1800000000 +0000"  # an inherited date after both commits: the merged commit must not take it either
+
+    behind_main = MergedLintTree.behind_main  # the head behind main, and main's new tip: MergedLintTree's
+    main_edits = MergedLintTree.main_edits  # main moves a file after the head branched: MergedLintTree's
+    own_writes = CrossMeasure.own_writes  # the head gains a commit: CrossMeasure's
+    commit_on = CrossMeasure.commit_on  # a pushed commit on a branch: CrossMeasure's
+    clash = CrossMeasure.clash  # the merge-tree precondition: CrossMeasure's
+    contains = LaneLint.contains  # the ancestor read: LaneLint's
+    lint_at = LintResumesPassedJobs.lint_at  # one lint run with the merge commit's dates set: LintResumesPassedJobs's
+    ran = LintResumesPassedJobs.ran  # how many times the stub ci-job ran the lint: LintResumesPassedJobs's
+    cached = staticmethod(LintResumesPassedJobs.cached)  # the lines that say a job's PASS was reused: LintResumesPassedJobs's
+
+    @staticmethod
+    def dated(when):
+        """Every commit made inside the `with` block has author and committer dates `when`, a git date such as "@1700000100 +0000"."""
+        return unittest.mock.patch.dict(os.environ, {"GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when})
+
+    def put_pr_head_back(self, sha):
+        """The pull request branch goes back to `sha`. A pushing lint moves the branch to its merged commit, so a rerun of the same head puts it back first."""
+        tm.sh(self.other, "git", "push", "-q", "-f", "origin", sha + ":refs/heads/feat")
+
+    def dates_of(self, sha):
+        """-> (author date, committer date) of commit `sha` in unix seconds, read in the lane checkout after a fetch."""
+        tm.sh(self.co, "git", "fetch", "-q", "origin")
+        at, ct = tm.sh(self.co, "git", "log", "-1", "--format=%at %ct", sha).split()
+        return int(at), int(ct)
+
+    def first_pushing_lint(self, when):
+        """A head behind main lints once at the dates `when`, and pushes its merged commit: the precondition of each rerun case.
+        -> (the head, the merged commit the lint pushed, main's tip that the lint merged)."""
+        old, tip = self.behind_main()
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.lint_at(when, at_head=True)
+        self.assertEqual(rc, 0, "precondition: the first pushing lint did not pass: " + text)
+        pushed = self.head("feat")
+        self.assertNotEqual(pushed, old, "precondition: the first lint pushed nothing, so the case probes nothing: " + text)
+        return old, pushed, tip
+
+    def test_a_rerun_of_the_same_head_and_tip_builds_the_same_merged_commit_and_hits_the_saved_pass(self):
+        old, pushed, _ = self.first_pushing_lint(self.DATE_A)
+        self.put_pr_head_back(old)
+        ran = self.ran()
+        rc, text = self.lint_at(self.DATE_B, at_head=True)
+        rerun = self.head("feat")
+        self.assertEqual(rerun, pushed, "the rerun of the same head and tip built merged commit %s, not %s: the merge's dates come from the "
+                         "environment, so the step and job keys miss: %s" % (rerun[:9], pushed[:9], text))
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(self.ran(), ran, "the rerun ran the job again, though its merged commit is the first run's: " + text)
+        self.assertTrue(self.cached(text), "the rerun printed no PASS (cached) for the job: " + text)
+
+    def test_a_new_main_tip_builds_a_new_merged_commit_and_misses_the_saved_pass(self):  # control: green on the old code, where the tip is in the key
+        old, pushed, tip = self.first_pushing_lint(self.DATE_A)
+        self.put_pr_head_back(old)
+        self.main_edits("later.txt", "main moved again\n")
+        self.assertNotEqual(self.head("main"), tip, "precondition: main did not move, so the case probes nothing")
+        ran = self.ran()
+        rc, text = self.lint_at(self.DATE_A, at_head=True)
+        self.assertNotEqual(self.head("feat"), pushed, "a new main tip built the same merged commit, so the key does not see the tip: " + text)
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(self.ran(), ran + 1, "a new main tip was served by the saved pass, so the job did not run: " + text)
+        self.assertFalse(self.cached(text), "a new main tip printed PASS (cached): " + text)
+
+    def dated_head_and_tip(self, head_when, tip_when):
+        """A lane commit dated `head_when` and a main commit dated `tip_when`, which the head lacks, so a lint of the head pushes its merge.
+        -> (the head, main's tip, the later committer date of the two)."""
+        with self.dated(head_when):
+            old = self.own_writes({"lane-dated.txt": "lane\n"})
+        with self.dated(tip_when):
+            tip = self.commit_on("main", {"elsewhere.txt": "main moved past the head\n"}, "origin/main")
+        self.assertFalse(self.contains(old, tip), "precondition: the head holds origin/main's new tip, so the case probes nothing")
+        head_ct, tip_ct = self.dates_of(old)[1], self.dates_of(tip)[1]
+        self.assertNotEqual(head_ct, tip_ct, "precondition: the head and the tip have one committer date, so the case cannot tell them apart")
+        return old, tip, max(head_ct, tip_ct)
+
+    def check_merged_dates(self, head_when, tip_when, inherited):
+        """The merged commit of a head dated `head_when` and a tip dated `tip_when`, linted with `inherited` as the environment's dates. Its author
+        and committer dates are the later committer date of the head and the tip."""
+        old, _, later = self.dated_head_and_tip(head_when, tip_when)
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.lint_at(inherited, at_head=True)
+        self.assertEqual(rc, 0, text)
+        pushed = self.head("feat")
+        self.assertNotEqual(pushed, old, "precondition: the lint pushed nothing, so the case probes nothing: " + text)
+        at, ct = self.dates_of(pushed)
+        self.assertEqual(ct, later, "the merged commit's committer date is %d, not the later of the head's and the tip's, %d: %s" % (ct, later, text))
+        self.assertEqual(at, later, "the merged commit's author date is %d, not the later of the head's and the tip's, %d: %s" % (at, later, text))
+
+    def test_the_merged_commit_takes_the_later_date_when_the_tip_is_later_whatever_the_environment_holds(self):
+        self.check_merged_dates(self.HEAD_WHEN, self.TIP_WHEN, self.EARLY)
+
+    def test_the_merged_commit_takes_the_later_date_when_the_head_is_later_whatever_the_environment_holds(self):
+        self.check_merged_dates(self.TIP_WHEN, self.HEAD_WHEN, self.LATE)
 
 
 class CiJobHeadCopy(LaneFixture):
