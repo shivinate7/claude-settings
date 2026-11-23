@@ -199,7 +199,7 @@ INSTRUCTIONS = (
     "Never flag a ranking that cites such a figure, a question, or quoted text. "
     "verification-report-unknown-reads: flag a reply that says a change matches main, is main's own, or is no worse than main "
     "(no regression) without citing a read of origin/main, a path:line on main or a main screenshot. "
-    "Never flag such a claim that cites a read of origin/main. "
+    "Never flag such a claim that cites such a read: a path:line on main, a main screenshot or a read of origin/main. "
     "Flag only on a clear breach; when unsure answer {\"ok\": true}. "
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
 )
