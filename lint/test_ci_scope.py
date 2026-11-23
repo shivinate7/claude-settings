@@ -1719,5 +1719,24 @@ class WindowsGuardShards(unittest.TestCase):
                 self.assertEqual(have, sorted(want), f"a flag changed for {paths}: {got}")
 
 
+# Change B on the scope side (owner, 2026-11-23 10:49 CST): the merge and rest shards read the flags below. Each named path sets the merge
+# or the rest flag, the one whose shard runs the suite that path loads, and a docs-only diff sets neither. Controls: green on the old one.
+class WindowsMergeAndRestFlags(unittest.TestCase):
+    NAMED_PATHS = ("merge/merge.py", "hooks/guard.py", "bin/merge", ".github/workflows/checks.yml", ".github/scripts/ci-scope.sh")
+
+    def test_a_docs_only_diff_sets_neither_the_merge_nor_the_rest_flag(self):
+        for paths in (["docs/notes/n.md"], ["README.md", "docs/map/x.md"]):
+            with self.subTest(paths=paths):
+                got = run(paths)
+                for flag in ("checks_windows_merge", "checks_windows_rest"):
+                    self.assertEqual(got[flag], "false", f"{flag} is {got[flag]} for {paths}: {got}")
+
+    def test_each_named_path_sets_the_merge_or_the_rest_flag(self):
+        for path in self.NAMED_PATHS:
+            with self.subTest(path=path):
+                got = run([path])
+                self.assertTrue("true" in (got["checks_windows_merge"], got["checks_windows_rest"]), f"{path} sets neither flag: {got}")
+
+
 if __name__ == "__main__":
     unittest.main()

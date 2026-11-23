@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_windows_split import (CHECKS, RECORDS_ONLY_CONDITION, CONDITIONED_JOBS, SPLIT_CONDITIONED_JOBS, UNCONDITIONED_JOBS, all_jobs, eval_if,  # noqa: E402  the one home of the checks.yml reader
                                 condition_problem, job_if_without_records, scope_named_steps)
 from all_jobs_passed_rules import needs_of  # noqa: E402  the one home of the needs reader
+from test_windows_split import SUITE_FLAG, eval_with  # noqa: E402  the one home of the merge and rest flags and the flag evaluator
 from workflow_steps import job_block  # noqa: E402  the one home of the job parser
 
 REST_PREFIX = "checks-windows-rest"
@@ -155,6 +156,56 @@ class RecordsOnlySkipCondition(unittest.TestCase):
                 skipped = [ev for ev in ("push", "schedule", "workflow_dispatch", "pull_request")
                            if not if_with_condition(st.get("if"), "false", ev, "true")]
                 self.assertEqual(skipped, [], f"{name} / {label} does not run with the condition open on: {skipped}")
+
+
+# Change B (owner, 2026-11-23 10:49 CST): each merge and rest suite step reads its job's own scope flag, the step-level gate the gated
+# Windows jobs use. checks-windows quotes it on its checkout:
+#   if: ${{ needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request' }}
+# So with the flag false a ready pull_request skips the step, and push, schedule and dispatch keep their rules. Each job still runs, so its
+# result is success and all-jobs-passed reads it as a pass (lint/test_all_jobs_passed.py).
+def suite_steps(job):
+    return [st for st in job["steps"] if "run" in st]
+
+
+def runs_flagged(job, st, values, default):
+    """True when step `st` of `job` runs on a ready pull_request, with the scope outputs in `values` and `default` for every other one:
+    the job's own if first, then the step's."""
+    if job["if"] is not None and not eval_with(job["if"], "pull_request", values, default=default):
+        return False
+    return st.get("if") is None or eval_with(st["if"], "pull_request", values, default=default)
+
+
+class MergeAndRestFlagGate(unittest.TestCase):
+    def setUp(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            self.text = f.read()
+        self.jobs = all_jobs(self.text)
+
+    def test_each_merge_and_rest_job_is_in_checks_yml(self):
+        for name in SUITE_FLAG:
+            self.assertIn(name, self.jobs, f"{name} is not a job in checks.yml, so its flag gates nothing")
+
+    def test_with_its_flag_false_a_ready_pull_request_skips_each_suite_step(self):
+        # Named failure: a suite step still runs on a ready pull_request when its job's flag is false, so no flag gates it.
+        for name, flag in SUITE_FLAG.items():
+            job = self.jobs[name]
+            self.assertTrue(suite_steps(job), f"{name} has no suite step")
+            for st in suite_steps(job):
+                label = st.get("name") or st["run"]
+                with self.subTest(job=name, step=label):
+                    runs = runs_flagged(job, st, {"records_only_skip": "false", flag: "false"}, default="true")
+                    self.assertFalse(runs, f"{name} / {label} runs on a ready pull_request with {flag} false: if {st.get('if')}")
+
+    def test_with_its_flag_alone_true_a_ready_pull_request_runs_each_suite_step(self):
+        # Named failure: a suite step needs a second flag as well, so its job's own flag alone does not run it.
+        for name, flag in SUITE_FLAG.items():
+            job = self.jobs[name]
+            for st in suite_steps(job):
+                label = st.get("name") or st["run"]
+                with self.subTest(job=name, step=label):
+                    runs = runs_flagged(job, st, {"records_only_skip": "false", flag: "true"}, default="false")
+                    self.assertTrue(runs, f"{name} / {label} does not run on a ready pull_request with only {flag} true: if {st.get('if')}")
+
 
 if __name__ == "__main__":
     unittest.main()
