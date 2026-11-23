@@ -30,7 +30,7 @@ The rule is in `merge/idle_prs.py`. It judges one open PR that is not a draft.
 
 ## Cost
 
-Cost: each sweep reads the open PR list once. A non-draft PR costs three GitHub calls (`CostHost`, pinned in `merge/test_idle_prs.py`) when required checks are read, and one call when they are not (`CostHost`, pinned in `merge/test_idle_prs.py`). A drafted PR costs one ready-undo call and one comment (`CostHost`, pinned in `merge/test_idle_prs.py`). Each repository the janitor sweeps costs one git read and one merge process (`DraftIdlePassTests`, pinned in `janitor/test_sweep.py`). Unmeasured: a draft also fires the `converted_to_draft` event, which starts the touched-tests workflow.
+Cost: each sweep reads the open PR list once (`CostHost`, pinned in `merge/test_idle_prs.py`). A non-draft PR costs three GitHub calls (`CostHost`, pinned in `merge/test_idle_prs.py`) when required checks are read, and one call when they are not (`CostHost`, pinned in `merge/test_idle_prs.py`). A drafted PR costs one ready-undo call and one comment (`CostHost`, pinned in `merge/test_idle_prs.py`). Each repository the janitor sweeps costs one git read and one merge process (`DraftIdlePassTests`, pinned in `janitor/test_sweep.py`). Unmeasured: a draft also fires the `converted_to_draft` event, which starts the touched-tests workflow.
 
 ## Why
 
