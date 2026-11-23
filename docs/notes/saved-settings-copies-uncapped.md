@@ -1,0 +1,1 @@
+- saved-settings-copies-uncapped: The settings.json.bak copies that merge/install_from_main.sh (lines 121-139) makes have no cap. Each app save adds one, and each move carries every copy. Small, bounded by the number of app saves. Decision merge-reinstalls-from-main (each merge reinstalls from main) holds the move. Seen: 2026-11-22 x1
