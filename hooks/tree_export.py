@@ -17,16 +17,23 @@ def export_tree(src, sha, dest):
     The target may come later in the stream, so those copies wait until the stream is read.
     A partial export may be left in `dest`: the caller removes the folder either way."""
     deferred = []  # symlink members whose os.symlink was refused
-    extract_args = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
+    has_filter = hasattr(tarfile, "data_filter")
+    extract_args = {"filter": "data"} if has_filter else {}
     try:
         with _nowindow.Popen(["git", "archive", "--format=tar", sha], cwd=src, stdout=subprocess.PIPE,
                              stderr=subprocess.DEVNULL) as proc, tarfile.open(fileobj=proc.stdout, mode="r|") as tar:
             for member in tar:  # the stream is read once; a member is extracted as it passes
-                try:
+                if not member.issym():
                     tar.extract(member, dest, **extract_args)
+                    continue
+                # tar.extract would fall back to copying the target when os.symlink fails, and that seeks back in a stream
+                if has_filter:
+                    tarfile.data_filter(member, dest)  # raises for a link or a target outside dest: the check extract applies
+                link = os.path.join(dest, member.name)
+                os.makedirs(os.path.dirname(link), exist_ok=True)
+                try:
+                    os.symlink(member.linkname, link)
                 except OSError:
-                    if not member.issym():
-                        raise
                     deferred.append(member)
         if proc.returncode != 0:
             return "git archive exited %d" % proc.returncode
