@@ -6,8 +6,10 @@ registered with `asyncRewake: true`. Two calls start a watch: `gh pr ready <N>`,
 with `draft` false (the cloud's ready route, since `gh pr ready` gets 403 in cloud; route pr-ready-gh-cli-cloud;
 decision ci-wait-reads-run-status, The CI wake-up). The MCP call names its PR by `owner`, `repo` and `pullNumber` in tool_input.
 A call with `draft` absent or true starts none. Each `gh pr ready` in a command gets its own watch, in this one
-process. A push starts none. Per PR it reads the head once. It lists that head's runs until a run that
-ran shows (a skipped draft run is no run), waits on it, lists once more at once for a late run, and prints one line:
+process. A push starts none. Per PR it reads the head once. It lists that head's runs until a run settles the
+wait (`settled`: a red run, a run still going, or a completed run whose rollup job `all-jobs-passed` passed; a skipped
+draft run, a draft-era checks run whose rollup job is skipped or absent, and a green run of another workflow settle
+nothing, so green never comes from them), waits on it, lists once more at once for a late run, and prints one line:
 
     CI <green|red|cancelled> on <sha7>: <failing job names>
     CI unknown on <sha7 or PR>: <reason>        (also "still running" at the deadline)
@@ -296,6 +298,22 @@ def judge(merge, runs):
     return red, pending
 
 
+def settled(runs):
+    """True when `runs` may end the wait: a run is red (a failed job included), a run is still going (an unknown line, never
+    green), or a completed run has its rollup job (merge.py ROLLUP_JOB, the one home of the name) passed. A head whose runs
+    are all draft-era (a checks run whose rollup job is skipped or absent, a green run of another workflow) is none of these:
+    the real run is still to come, so the wait keeps listing. An unloadable merge tool settles at once: verdict raises Unknown."""
+    from guard_merge import merge_module
+    merge = merge_module()
+    if merge is None:
+        return True
+    red, pending = judge(merge, runs)
+    rollup = getattr(merge, "ROLLUP_JOB", None)
+    return bool(red or pending) or any(
+        r.get("status") == "completed" and any(j.get("name") == rollup and j.get("conclusion") == "success" for j in r.get("jobs") or [])
+        for r in runs)
+
+
 def wait_for(sha, cwd, deadline, repo=""):
     """List the head's runs, watch each one (not a cancelled twin), then read each with its jobs.
     A run that ends skipped is no run: the draft PR's run skips, and the run of `gh pr ready`
@@ -306,7 +324,9 @@ def wait_for(sha, cwd, deadline, repo=""):
     newest first, as judge_runs reads them: the re-list's runs go ahead of the runs read before,
     so a newer run of a name outranks the older one. A refused re-list list or view returns the runs already
     judged only when they judge red: a red run stays red. Otherwise it raises Unknown, as a refused first
-    list does, since the unread list could hold a red or a running run (rule verification-report-unknown-reads). A run that first shows after the re-list is not judged (debt ci-wake-lists-runs-once)."""
+    list does, since the unread list could hold a red or a running run (rule verification-report-unknown-reads). A run that first shows after the re-list is not judged (debt ci-wake-lists-runs-once).
+    Runs that `settled` does not accept (draft-era runs only) end no wait and start no at-once re-list: the lists follow `pauses`,
+    each run is viewed once, and the deadline ends in Unknown. The rollup job's name is merge.py ROLLUP_JOB, read from the runs' own jobs: no extra read."""
     extra = ["-R", repo] if repo else []
     list_args = ["run", "list", "--commit", sha, "--limit", "100", *extra, "--json", RUN_FIELDS]
     gaps = pauses()
@@ -336,14 +356,14 @@ def wait_for(sha, cwd, deadline, repo=""):
         seen.update(r["databaseId"] for r in fresh)
         ran = [r for r in got if r.get("conclusion") != "skipped"]   # it ended skipped: no run
         viewed = ran + viewed   # newest first: gh lists newest first, and a later list shows newer runs
-        if ran and not relisted:
+        if ran and not relisted and settled(viewed):
             relisted = True
-            continue   # the first judged run: list once more at once for a later one, even at the deadline
-        if viewed:
+            continue   # the first settled run: list once more at once for a later one, even at the deadline
+        if viewed and settled(viewed):
             return viewed
         left = deadline - time.monotonic()
         if left <= 0:
-            raise Unknown("no run yet")
+            raise Unknown("no run with a passed rollup job yet" if viewed else "no run yet")
         time.sleep(min(next(gaps), left))
 
 
