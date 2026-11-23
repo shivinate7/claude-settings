@@ -2410,6 +2410,65 @@ def case_main_claim_finding_logs_its_rule():
           (run.code, run.out))
 
 
+# --------------------------------------------------------------------------- main claim, off sample
+# verification-report-unknown-reads: a reply that says a change matches main is judged on every Stop, so the model
+# can check it cites a read of origin/main. Code finds the phrase (MAIN_CLAIM in reply_judge.py); quoted text and the
+# words domain and maintain never match. The rows mirror the cost-rank table above.
+MAIN_CLAIM_JUDGED = (  # (phrase, reply): each alternative of MAIN_CLAIM, and its case-insensitive and curly forms
+    ("main's own", "Done: the settings layout is main's own."),
+    ("curly main's own", "Done: the settings layout is main’s own."),
+    ("same as main", "Done: the layout is the same as main."),
+    ("matches main", "Done: the layout matches main."),
+    ("matched main", "Done: the layout matched main on the run."),
+    ("no worse than main", "Done: the layout is no worse than main."),
+    ("not worse than main", "Done: the layout is not worse than main."),
+    ("no regression", "Done: the layout ships with no regression."),
+    ("capitals, No Regression", "Done: the layout ships. No Regression."),
+)
+MAIN_CLAIM_QUOTED = (  # the phrase inside quotes is the owner's words, not the session's claim
+    ("straight quotes", 'Done: the owner wrote "the settings layout is main\'s own", so the lane took it as the task.'),
+    ("curly quotes", "Done: the owner wrote “no regression”, so the lane took it as the task."),
+)
+MAIN_CLAIM_CONTROLS = (  # the words domain and maintain, with no main claim
+    ("domain", "Done: the domain name check passes."),
+    ("domain's own", "Done: the domain's own check passes."),
+    ("maintain regression", "Done: the maintain regression job passes."),
+)
+
+
+def run_main_claim_rows(scope, rows, judged):
+    """Each row's reply on Stop 2. A judged row calls the model once; every other row never calls it."""
+    module = reference_module()
+    for n, (phrase, reply) in enumerate(rows):
+        label = "%s-%02d" % (scope.replace(" ", "-"), n)
+        others = other_triggers(module, reply)
+        check("%s, %s: no other trigger matches the reply" % (scope, phrase), not others, others)
+        check("%s, %s: no cost ranking matches the reply" % (scope, phrase), not module.has_cost_rank(reply), reply)
+        run, _ = second_stop(reply, label=label, session=label)
+        if judged:
+            check("%s, %s: Stop 2 calls the model once" % (scope, phrase), len(run.calls) == 1, run.calls)
+        else:
+            check("%s, %s: Stop 2 never calls the model" % (scope, phrase), not run.calls, run.calls)
+
+
+def case_main_claim_reply_is_judged_off_sample():
+    run, _ = second_stop(MAIN_CLAIM_REPLY, label="main-claim-reply", session="main-claim-reply")
+    check("main claim: Stop 2 exit 0", run.code == 0, run.code)
+    check("main claim: Stop 2 calls the model once", len(run.calls) == 1, run.calls)
+
+
+def case_main_claim_phrases_are_judged_off_sample():
+    run_main_claim_rows("main claim", MAIN_CLAIM_JUDGED, judged=True)
+
+
+def case_main_claim_inside_quotes_is_not_judged_off_sample():
+    run_main_claim_rows("main claim quoted", MAIN_CLAIM_QUOTED, judged=False)
+
+
+def case_domain_and_maintain_are_not_judged_off_sample():
+    run_main_claim_rows("main claim control", MAIN_CLAIM_CONTROLS, judged=False)
+
+
 CASES = (
     case_stop_hook_active_never_calls_model,
     case_ignored_stop_imports_no_guard_family_module,
@@ -2527,6 +2586,10 @@ CASES = (
     case_judged_rules_names_the_main_claim_rule,
     case_prompt_flags_a_main_claim_with_no_read,
     case_main_claim_finding_logs_its_rule,
+    case_main_claim_reply_is_judged_off_sample,
+    case_main_claim_phrases_are_judged_off_sample,
+    case_main_claim_inside_quotes_is_not_judged_off_sample,
+    case_domain_and_maintain_are_not_judged_off_sample,
 )
 
 
