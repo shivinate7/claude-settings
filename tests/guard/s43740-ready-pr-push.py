@@ -14,7 +14,7 @@ FAMILY = "ready-pr-push"
 #
 # FAILED READ. A failed pull-request list read is allowed, with one stderr line that names the read that failed. Owner
 # ruling handed-in-push-fourth-way, 21:17 CST Nov 18, point 2: a refusal on a failed read would block every push when GitHub
-# cannot be reached. The rule reads GitHub only for a `git push` command, and at most once per push (the cost pin below).
+# cannot be reached. The rule reads GitHub only for a `git push` command, and at most twice per push (the cost pins below).
 #
 # THE MERGE TOOL. The guard recognises the merge tool as caller by its command word (guard_merge.merge_tool_args: the shim
 # or python on merge/merge.py). The tool's own pushes run as subprocesses no hook sees, so the one call the rule meets is the
@@ -30,7 +30,7 @@ GHPUSH_RED = os.path.join(RPP, "gh-red")                       # feat-stale: rea
 GHPUSH_DRAFT = os.path.join(RPP, "gh-draft")                   # feat-stale: a draft pull request, checks passed
 GHPUSH_OTHER = os.path.join(RPP, "gh-other-branch")            # the only pull request is for feat-other: none for feat-stale
 GHPUSH_BROKEN = os.path.join(RPP, "gh-broken")                 # feat-stale: ready, but every call answers text that is not JSON
-RPP_COUNT = os.path.join(RPP, "gh-calls.log")                  # the call log of GHPUSH_GREEN: one line per gh call
+RPP_COUNT = os.path.join(RPP, "gh-calls.log")                  # the call log of the cost pins: one line per gh call of a fake that names it
 RPP_WT = os.path.join(RPR, "wt-current")                       # a linked worktree of RPR_REPO on feat-current
 
 PPUSH_LAST = "If this refusal looks wrong for your task, comply anyway and say so in your report."
@@ -50,13 +50,13 @@ def _build_ready_push():
     make_fake_gh(GHPUSH_CURRENT, "main", head_sha=current, head_ref="feat-current", draft=False)
     make_fake_gh(GHPUSH_RUNNING, "main", head_sha=stale, head_ref="feat-stale", draft=False,
                  checks=[{"name": "checks", "bucket": "pending", "link": ""}],
-                 runs=[{"status": "in_progress", "conclusion": None, "name": "checks"}])
+                 runs=[{"status": "in_progress", "conclusion": None, "name": "checks"}], count_file=RPP_COUNT)
     make_fake_gh(GHPUSH_EMPTY, "main", head_sha=stale, head_ref="feat-stale", draft=False, checks=[], runs=[])
     make_fake_gh(GHPUSH_RED, "main", head_sha=stale, head_ref="feat-stale", draft=False,
                  checks=[{"name": "checks", "bucket": "fail", "link": ""}],
-                 runs=[{"status": "completed", "conclusion": "failure", "name": "checks"}])
-    make_fake_gh(GHPUSH_DRAFT, "main", head_sha=stale, head_ref="feat-stale", draft=True)
-    make_fake_gh(GHPUSH_OTHER, "main", head_sha=current, head_ref="feat-other", draft=False)
+                 runs=[{"status": "completed", "conclusion": "failure", "name": "checks"}], count_file=RPP_COUNT)
+    make_fake_gh(GHPUSH_DRAFT, "main", head_sha=stale, head_ref="feat-stale", draft=True, count_file=RPP_COUNT)
+    make_fake_gh(GHPUSH_OTHER, "main", head_sha=current, head_ref="feat-other", draft=False, count_file=RPP_COUNT)
     make_fake_gh(GHPUSH_BROKEN, "main", head_sha=stale, head_ref="feat-stale", draft=False, broken=True)
     if not os.path.isdir(RPP_WT):
         _rpr_git(RPR_REPO, "worktree", "add", "-q", "-b", "feat-current", RPP_WT, "origin/feat-current")
@@ -140,9 +140,11 @@ PPUSH_ENDS_LABEL = ("ready-pr-push: a refused push's reason ends with the comply
 LOG_FAMILY[PPUSH_ENDS_LABEL] = FAMILY
 
 
-# THE COST PIN. The rule reads GitHub only for a git push, once per push. Another call reads it not at all.
+# THE COST PINS. The rule reads GitHub only for a git push, and by what the branch holds: one read of the open pull request
+# list when no ready pull request holds the pushed branch, and a second read, of the head's check runs, when one does. Another
+# call reads it not at all.
 def _ppush_reads(command, cwd, fake):
-    """(the number of gh calls the guard made for this call, its verdict). The call log is the fake's own, reset first."""
+    """(the number of gh calls the guard made for this call, its verdict). The call log is RPP_COUNT, reset first."""
     materialize(fake)
     if os.path.exists(RPP_COUNT):
         os.remove(RPP_COUNT)
@@ -154,15 +156,30 @@ def _ppush_reads(command, cwd, fake):
     return calls, got
 
 
-def ppush_cost_case():
-    """A push to the ready branch reads GitHub exactly once. Why: the refusal needs one read of the pull request, and a second
-    read would add a GitHub call to every push, the cost the decision holds the guard to."""
-    calls, got = _ppush_reads(VCS + " push origin feat-stale", RPR_NOSEL, GHPUSH_GREEN)
-    if got != "deny":
-        return False, "a push to the ready branch is %s, want deny before its read is counted" % got
-    if calls != 1:
-        return False, "a push to the ready branch makes %d gh call(s), want exactly 1" % calls
-    return True, "a push to the ready branch makes exactly one gh call"
+def ppush_one_read_case():
+    """A push to a branch no ready pull request holds reads GitHub exactly once, the pull request list. Why: the list is the
+    one read that tells a draft or no pull request from a ready one, so a push that needs no check read must not pay for one."""
+    for fake, state in ((GHPUSH_DRAFT, "a draft pull request"), (GHPUSH_OTHER, "no pull request for it")):
+        calls, got = _ppush_reads(VCS + " push origin feat-stale", RPR_NOSEL, fake)
+        if got != "allow":
+            return False, "a push to feat-stale with %s is %s, want allow before its read is counted" % (state, got)
+        if calls != 1:
+            return False, "a push to feat-stale with %s makes %d gh call(s), want exactly 1" % (state, calls)
+    return True, "a push to a branch no ready pull request holds makes exactly one gh call"
+
+
+def ppush_two_reads_case():
+    """A push to a ready branch reads GitHub exactly twice: the pull request list, then the head's check runs. Why: a ready
+    pull request's red or green lives only in its check runs, so the second read is the one the verdict needs, and a third
+    would be a GitHub call the decision does not allow a push."""
+    for fake, state, want in ((GHPUSH_GREEN, "run green", "deny"), (GHPUSH_RUNNING, "run running", "deny"),
+                              (GHPUSH_RED, "run with a red job", "allow")):
+        calls, got = _ppush_reads(VCS + " push origin feat-stale", RPR_NOSEL, fake)
+        if got != want:
+            return False, "a push to the ready branch feat-stale, %s, is %s, want %s before its read is counted" % (state, got, want)
+        if calls != 2:
+            return False, "a push to the ready branch feat-stale, %s, makes %d gh call(s), want exactly 2" % (state, calls)
+    return True, "a push to a ready branch makes exactly two gh calls, whatever its run's state"
 
 
 def ppush_no_read_case():
@@ -219,16 +236,20 @@ def ppush_warn_missing_case():
                           "read-missing.stderr", env_path=GHNONE_PATH)
 
 
-PPUSH_PUSH_READS_LABEL = "ready-pr-push: a push to a ready branch reads GitHub exactly once"
+PPUSH_ONE_READ_LABEL = ("ready-pr-push: a push to a branch no ready pull request holds reads GitHub exactly once, the pull "
+                        "request list")
+PPUSH_TWO_READS_LABEL = ("ready-pr-push: a push to a ready branch reads GitHub exactly twice, the pull request list then the "
+                         "check runs")
 PPUSH_NO_READ_LABEL = "ready-pr-push: a commit or a status on a ready branch reads GitHub not at all"
 PPUSH_WARN_JSON_LABEL = ("ready-pr-push: a failed pull-request read that answers text, not JSON, is allowed, with one stderr "
                          "line naming the read")
 PPUSH_WARN_MISSING_LABEL = ("ready-pr-push: a failed pull-request read with gh missing from PATH is allowed, with one stderr "
                             "line naming the read")
-LOG_FAMILY[PPUSH_PUSH_READS_LABEL] = FAMILY
+LOG_FAMILY[PPUSH_ONE_READ_LABEL] = FAMILY
+LOG_FAMILY[PPUSH_TWO_READS_LABEL] = FAMILY
 LOG_FAMILY[PPUSH_NO_READ_LABEL] = FAMILY
 LOG_FAMILY[PPUSH_WARN_JSON_LABEL] = FAMILY
 LOG_FAMILY[PPUSH_WARN_MISSING_LABEL] = FAMILY
-LOG_CHECKS = LOG_CHECKS + ((PPUSH_ENDS_LABEL, ppush_ends_case), (PPUSH_PUSH_READS_LABEL, ppush_cost_case),
-                           (PPUSH_NO_READ_LABEL, ppush_no_read_case), (PPUSH_WARN_JSON_LABEL, ppush_warn_json_case),
-                           (PPUSH_WARN_MISSING_LABEL, ppush_warn_missing_case))
+LOG_CHECKS = LOG_CHECKS + ((PPUSH_ENDS_LABEL, ppush_ends_case), (PPUSH_ONE_READ_LABEL, ppush_one_read_case),
+                           (PPUSH_TWO_READS_LABEL, ppush_two_reads_case), (PPUSH_NO_READ_LABEL, ppush_no_read_case),
+                           (PPUSH_WARN_JSON_LABEL, ppush_warn_json_case), (PPUSH_WARN_MISSING_LABEL, ppush_warn_missing_case))
