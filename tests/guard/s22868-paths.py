@@ -157,6 +157,12 @@ OTHER_SCRATCH_OUT = os.path.join(ROOT, SCRATCH_OTHER, "scratchpad", "notes", "ou
 for _tool in ("Edit", "Write"):
     add("audit-high paths: test-author %s of another session's scratchpad outside a repo is refused"
         % _tool, "deny", rule=TA, tool=_tool, file_path=OTHER_SCRATCH_OUT, session=SCRATCH_SID, **A)
+# The scratchpad base (s00442 SCRATCH_BASE): another session's scratchpad under it is refused the same way, so the
+# base's folder shape is the one the role check reads.
+add("audit-high paths: test-author Write of another session's scratchpad under the scratchpad base is refused",
+    "deny", rule=TA, tool="Write",
+    file_path=os.path.join(SCRATCH_BASE, "paths-proj", OTHER_SESSION, "scratchpad", "notes", "out.txt"),
+    session=SCRATCH_SID, env=SCRATCH_BASE_ENV, **A)
 # Windows folder names are case-insensitive: `Scratchpad` and `SCRATCHPAD` are the same folder as
 # `scratchpad`, so another session's folder spelled either way is refused there. On Linux and macOS
 # they are different folders, judged as no scratchpad, so allowed.

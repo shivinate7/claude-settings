@@ -19,9 +19,10 @@ XCL_PLAIN = os.path.join(ROOT, "xcl_sep_like")                      # no .git an
 XCL_TEMP = os.path.join(ROOT, "tmp")                                # the guard's temp folder for this block
 XCL_TMP = os.path.join(XCL_TEMP, "xcl_tmp_clone")                   # the same repo, under the temp folder
 XCL_SCRATCH = os.path.join(XCL_TEMP, FAKE_SESSION, "scratchpad", "xcl_clone")  # the session's scratchpad
+XCL_BASE_SCRATCH = os.path.join(SCRATCH_BASE, "xcl-proj", OTHER_SESSION, "scratchpad", "xcl_clone")  # another session's, under the scratchpad base
 XCL_KEYS = (XCL_PRIMARY, XCL_NESTED, XCL_SEP, XCL_SEP_SSH, XCL_SEP_PROXY, XCL_SEP_LOCAL, XCL_SEP_LINKED,
             XCL_SEP_NOORIGIN, XCL_SEP_BADCONF, XCL_SEP_EMPTY, XCL_DIFF, XCL_NEAR, XCL_PLAIN, XCL_TMP,
-            XCL_SCRATCH)
+            XCL_SCRATCH, XCL_BASE_SCRATCH)
 
 
 def _xcl_clone(where, origin=None, commit=True):
@@ -54,6 +55,7 @@ def _build_separate_clones():
     _xcl_clone(XCL_NEAR, "https://github.com/example-owner/claude-settings-old.git")
     _xcl_clone(XCL_TMP, XCL_ORIGIN)
     _xcl_clone(XCL_SCRATCH, XCL_ORIGIN)
+    _xcl_clone(XCL_BASE_SCRATCH, XCL_ORIGIN)
     _xcl_clone(XCL_THIRD, XCL_ORIGIN)
     made = run_vcs(XCL_THIRD, "worktree", "add", "-q", XCL_SEP_LINKED, "-b", "xcl-linked")
     if made.returncode != 0:
@@ -150,6 +152,11 @@ add("other-checkout: a Write into a same-repo clone under the temp folder is all
 add("other-checkout: a Write into a same-repo clone in this session's scratchpad is allowed",
     "allow", tool="Write", cwd=XCL_PRIMARY, session=FAKE_SESSION,
     file_path=os.path.join(XCL_SCRATCH, "note.txt"), content="x")
+# The scratchpad base (s00442 SCRATCH_BASE): another session's scratchpad under it is one, so its clone is no
+# separate clone. This is the caller that asks whether a path is in any session's scratchpad.
+add("other-checkout: a Write into a same-repo clone in another session's scratchpad under the scratchpad base is allowed",
+    "allow", tool="Write", cwd=XCL_PRIMARY, file_path=os.path.join(XCL_BASE_SCRATCH, "note.txt"), content="x",
+    env=SCRATCH_BASE_ENV)
 add("other-checkout: a Read of a separate clone is allowed",
     "allow", tool="Read", cwd=XCL_PRIMARY, file_path=os.path.join(XCL_SEP, "src", "app.py"))
 sh("other-checkout: a shell read of a separate clone is allowed",
