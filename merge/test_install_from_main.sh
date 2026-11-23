@@ -1381,17 +1381,29 @@ case36() {
   if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
 }
 
-# ---- Case 37: a pin whose settings.json changes one value is refused and not moved ----
+# ---- Case 37: a pin whose settings.json the app saved with one changed value moves; the app's copy is kept ----
+# The app rewrites the linked settings.json (a first-time prompt, /config), and that file is then the pin's only tracked
+# change. The move restores it, keeps the saved bytes as settings.json.bak in the pin, and names the changed key on stderr.
+# The saved file also reorders its keys: order alone is no change, so key "b" is not named. Cases 59 to 63 hold the other
+# key kinds, the target commit, and the refusals that stay.
 case37() {
-  name="case37: a pin whose settings.json changes a value is refused and not moved"
+  name="case37: a pin whose only change is a settings.json with a changed value moves to main, restores the file, keeps the app's copy as settings.json.bak and names the changed key"
+  command -v python3 >/dev/null 2>&1 || { skip "$name" "no python3"; return; }
   d="$work/case37"; settings_fixture "$d"
   printf '{"b": [1, 2], "a": 2}\n' > "$d/clone-live/settings.json"
+  cp "$d/clone-live/settings.json" "$d/app-saved.json"
   run_live "$d/clone"
   why=""
-  [ "$rc" -eq 1 ] || why="$why; helper exited $rc, want 1"
-  printf '%s' "$errs" | grep -q "tracked changes" || why="$why; no tracked-changes line: $errs"
-  [ "$(git -C "$d/clone-live" rev-parse HEAD)" = "$c0" ] || why="$why; the pin moved"
-  grep -q '"a": 2' "$d/clone-live/settings.json" || why="$why; the changed value was lost"
+  [ "$rc" -eq 0 ] || why="$why; helper exited $rc, want 0: $out"
+  [ "$(git -C "$d/clone-live" rev-parse HEAD 2>/dev/null)" = "$(git -C "$d/clone" rev-parse main)" ] || why="$why; the pin did not move to main"
+  cmp -s "$d/clone-live/settings.json" "$d/clone/settings.json" || why="$why; the pin's settings.json is not main's"
+  cmp -s "$d/clone-live/settings.json.bak" "$d/app-saved.json" || why="$why; settings.json.bak in the moved pin is not the app's saved file"
+  [ -e "$d/clone-live/ran-sh.txt" ] || why="$why; the installer did not run from the moved pin"
+  [ "$(printf '%s\n' "$errs" | grep -c 'WARN: settings.json key')" -eq 1 ] || why="$why; want one key line, got: $errs"
+  printf '%s\n' "$errs" | grep 'key "a"' | grep -q 'is changed' || why="$why; no line says key a is changed"
+  printf '%s\n' "$errs" | grep 'key "a"' | grep -q 'settings.json.bak' || why="$why; the key a line does not name settings.json.bak"
+  printf '%s\n' "$errs" | grep -q 'key "b"' && why="$why; key b was named though only its order differs: $errs"
+  [ -z "$(ls -A "$h/.claude-cfg" 2>/dev/null | grep 'settings.json.bak')" ] || why="$why; a temp copy of the app's file is left in the config dir: $(ls -A "$h/.claude-cfg")"
   if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
 }
 
@@ -1893,7 +1905,106 @@ case58() {
   else ok "$name"; fi
 }
 
-ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35 case36 case37 case38 case39 case40 case41 case42 case43 case44 case45 case46 case47 case48 case49 case50 case51 case52 case53 case54 case55 case56 case57 case58"
+# ---- Cases 59 to 63: a settings.json the app saved is the pin's only change (the rule case37 shows) ----
+# 59 and 60 are the moves: every key kind, and the target commit. 61 to 63 are the refusals that stay (a second dirty file,
+# bad JSON, JSON that is no object): the pin stays at its commit, the file keeps the app's bytes, no .bak is made, and no
+# key line says the file was restored. Each refusal has the same one-file change as a move, so it is the control for it.
+
+# no_key_lines: adds to why when $errs says a settings.json key was restored.
+no_key_lines() { if printf '%s\n' "$errs" | grep -q 'WARN: settings.json key'; then why="$why; a key line was printed for a refused pin: $errs"; fi; }
+
+# ---- Case 59: added, changed and removed keys each get one line ----
+case59() {
+  name="case59: an app-saved settings.json with a key added, one changed and one removed moves to main and names each key once"
+  command -v python3 >/dev/null 2>&1 || { skip "$name" "no python3"; return; }
+  d="$work/case59"; settings_fixture "$d"
+  printf '{"a": 2, "c": true}\n' > "$d/clone-live/settings.json"
+  run_live "$d/clone"
+  why=""
+  [ "$rc" -eq 0 ] || why="$why; helper exited $rc, want 0: $out"
+  [ "$(git -C "$d/clone-live" rev-parse HEAD 2>/dev/null)" = "$(git -C "$d/clone" rev-parse main)" ] || why="$why; the pin did not move to main"
+  [ "$(printf '%s\n' "$errs" | grep -c 'WARN: settings.json key')" -eq 3 ] || why="$why; want three key lines, got: $errs"
+  printf '%s\n' "$errs" | grep 'key "c"' | grep -q 'is added' || why="$why; no line says key c is added"
+  printf '%s\n' "$errs" | grep 'key "a"' | grep -q 'is changed' || why="$why; no line says key a is changed"
+  printf '%s\n' "$errs" | grep 'key "b"' | grep -q 'is missing' || why="$why; no line says key b is missing"
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+# ---- Case 60: the keys are read against the target commit, not against the pin's own commit ----
+# Main's tip adds key z after the pin's commit. The app's file has no z, so against the target z is missing; against the
+# pin's own commit it would be no difference. Each line names the target commit's short hash.
+case60() {
+  name="case60: the key lines compare the app's file with the commit the pin moves to, and name that commit"
+  command -v python3 >/dev/null 2>&1 || { skip "$name" "no python3"; return; }
+  d="$work/case60"; settings_fixture "$d"
+  printf '{"a": 1, "b": [1, 2], "z": 9}\n' > "$d/clone/settings.json"
+  git -C "$d/clone" add settings.json; git -C "$d/clone" commit -q -m "main adds z"
+  printf '{"a": 1, "b": [1, 2], "q": 1}\n' > "$d/clone-live/settings.json"
+  want_short=$(git -C "$d/clone" rev-parse --short main)
+  run_live "$d/clone"
+  why=""
+  [ "$rc" -eq 0 ] || why="$why; helper exited $rc, want 0: $out"
+  [ "$(git -C "$d/clone-live" rev-parse HEAD 2>/dev/null)" = "$(git -C "$d/clone" rev-parse main)" ] || why="$why; the pin did not move to main"
+  cmp -s "$d/clone-live/settings.json" "$d/clone/settings.json" || why="$why; the pin's settings.json is not main's"
+  printf '%s\n' "$errs" | grep 'key "q"' | grep -q 'is added' || why="$why; no line says key q is added"
+  printf '%s\n' "$errs" | grep 'key "z"' | grep -q 'is missing' || why="$why; no line says key z is missing against the target commit"
+  [ "$(printf '%s\n' "$errs" | grep 'WARN: settings.json key' | grep -c "$want_short")" -eq 2 ] || why="$why; each key line should name the target commit $want_short"
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+# ---- Case 61: a second dirty file refuses, and the app's file is left as the app saved it ----
+case61() {
+  name="case61: an app-saved settings.json plus a change to another tracked file is refused, not moved, and settings.json is not restored"
+  command -v python3 >/dev/null 2>&1 || { skip "$name" "no python3"; return; }
+  d="$work/case61"; settings_fixture "$d"
+  printf '{"a": 1, "b": [1, 2], "c": true}\n' > "$d/clone-live/settings.json"
+  cp "$d/clone-live/settings.json" "$d/app-saved.json"
+  printf 'edited\n' > "$d/clone-live/other.txt"
+  run_live "$d/clone"
+  why=""
+  [ "$rc" -eq 1 ] || why="$why; helper exited $rc, want 1"
+  printf '%s' "$errs" | grep -q "tracked changes" || why="$why; no tracked-changes line: $errs"
+  [ "$(git -C "$d/clone-live" rev-parse HEAD)" = "$c0" ] || why="$why; the pin moved"
+  [ "$(cat "$d/clone-live/other.txt")" = "edited" ] || why="$why; the other change was lost"
+  cmp -s "$d/clone-live/settings.json" "$d/app-saved.json" || why="$why; settings.json no longer holds the app's bytes"
+  [ ! -e "$d/clone-live/settings.json.bak" ] || why="$why; a settings.json.bak was made for a refused pin"
+  no_key_lines
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+# settings_refused DIR CONTENT: the pin's settings.json is CONTENT, which the helper must refuse to save. Sets why.
+settings_refused() {
+  d="$1"; settings_fixture "$d"
+  printf '%s\n' "$2" > "$d/clone-live/settings.json"
+  cp "$d/clone-live/settings.json" "$d/app-saved.json"
+  run_live "$d/clone"
+  why=""
+  [ "$rc" -eq 1 ] || why="$why; helper exited $rc, want 1"
+  printf '%s' "$errs" | grep -q "tracked changes" || why="$why; no tracked-changes line: $errs"
+  [ "$(git -C "$d/clone-live" rev-parse HEAD)" = "$c0" ] || why="$why; the pin moved"
+  cmp -s "$d/clone-live/settings.json" "$d/app-saved.json" || why="$why; settings.json no longer holds the app's bytes"
+  [ ! -e "$d/clone-live/settings.json.bak" ] || why="$why; a settings.json.bak was made for a refused pin"
+  no_key_lines
+}
+
+# ---- Case 62: a settings.json that is not valid JSON refuses ----
+case62() {
+  name="case62: a settings.json that does not parse as JSON is refused as before, not moved, not restored, no .bak"
+  command -v python3 >/dev/null 2>&1 || { skip "$name" "no python3"; return; }
+  settings_refused "$work/case62" '{"a": 1, "b": [1, 2],'
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+# ---- Case 63: a settings.json that parses but is no JSON object refuses ----
+# An empty list: no key of main's is in it, so a run that skipped the object check would save it and call every key removed.
+case63() {
+  name="case63: a settings.json that parses as JSON but is not an object is refused as before, not moved, not restored, no .bak"
+  command -v python3 >/dev/null 2>&1 || { skip "$name" "no python3"; return; }
+  settings_refused "$work/case63" '[]'
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+ALL="case1 case2 case3case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35 case36 case37 case38 case39 case40 case41 case42 case43 case44 case45 case46 case47 case48 case49 case50 case51 case52 case53 case54 case55 case56 case57 case58 case59 case60 case61 case62 case63"
 if [ $# -gt 0 ]; then WANT="$*"; else WANT="$ALL"; fi
 for c in $WANT; do "$c"; done
 
