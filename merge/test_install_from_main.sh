@@ -1406,7 +1406,7 @@ case37() {
   printf '%s\n' "$errs" | grep 'key "a"' | grep -q 'is changed' || why="$why; no line says key a is changed"
   printf '%s\n' "$errs" | grep 'key "a"' | grep -q 'settings.json.bak' || why="$why; the key a line does not name settings.json.bak"
   printf '%s\n' "$errs" | grep -q 'key "b"' && why="$why; key b was named though only its order differs: $errs"
-  [ -z "$(ls -A "$h/.claude-cfg" 2>/dev/null | grep 'settings.json.bak')" ] || why="$why; a temp copy of the app's file is left in the config dir: $(ls -A "$h/.claude-cfg")"
+  [ -z "$(find "$h/.claude-cfg" -maxdepth 1 -name '*settings.json.bak*' 2>/dev/null)" ] || why="$why; a temp copy of the app's file is left in the config dir: $(ls -A "$h/.claude-cfg")"
   if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
 }
 
