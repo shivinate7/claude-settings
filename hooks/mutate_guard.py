@@ -61,6 +61,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 
 import mutate_shared
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -4902,11 +4903,16 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
     # stderr (spawn_live_parent), and run() waits for a pipe's EOF. Measured: every mutant took 306 s.
     # A file has no EOF to wait for. It is read after the run, only for unittest's ERROR blocks.
     with tempfile.TemporaryFile() as errors:
-        result = _nowindow.run(
-            # text=True keeps the default decoding: the child inherits env, so both sides share one encoding.
-            [sys.executable, suite], stdout=subprocess.PIPE, stderr=errors, text=True,
-            env=env, timeout=3600,  # interim stopgap, owner 12:11 CST Nov 10, decision ci-job-caps, ends with step time-pinned-tests-go
-        )
+        started = time.monotonic()
+        try:
+            result = _nowindow.run(
+                # text=True keeps the default decoding: the child inherits env, so both sides share one encoding.
+                [sys.executable, suite], stdout=subprocess.PIPE, stderr=errors, text=True,
+                env=env, timeout=3600,  # interim stopgap, owner 12:11 CST Nov 10, decision ci-job-caps, ends with step time-pinned-tests-go
+            )
+        except subprocess.TimeoutExpired:
+            # A suite past its cap is its mutant's verdict, a timeout: the caller scores it and runs on.
+            return mutate_shared.timed_out_run(time.monotonic() - started)
         errors.seek(0)
         error_text = errors.read().decode("utf-8", "replace")
     lines = result.stdout.splitlines()
@@ -5095,7 +5101,8 @@ def run_mutant(sources, work: str, entry):
     `required` is the case name (or a distinctive fragment of it) the caller must find among the
     FAIL lines before trusting this mutant's death: see `mutate_shared.report_verdict`. `skip`,
     when not None, is why this mutant did not run on this platform at all: the caller reports it
-    and counts it as neither killed, survived, nor wrong cause. This verdict is not yet trusted: `run_mutants`
+    and counts it as neither killed, survived, nor wrong cause. A suite past its time cap gives `mutate_shared.TIMED_OUT`
+    as the code: a verdict of its own, which `run_mutants` counts apart. This verdict is not yet trusted: `run_mutants`
     judges it against its target's clean-layout control (`run_controls`).
     """
     label, old, new, target, required, only_on = mutation_parts(entry)

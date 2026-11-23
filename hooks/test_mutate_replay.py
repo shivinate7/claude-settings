@@ -8,7 +8,7 @@ A replay scores the suites a pull request changed against mechanical mutants of 
 that pull request added. Each case builds a small fixture repository of merged pull requests and
 asks for the score. The failure classes under test:
 
-- a crash (a throw, an import error, a hang killed at the timeout) is not a kill;
+- a crash (a throw, an import error) is not a kill, and a hang cut at the time cap is a timeout, counted apart from crashed;
 - a suite red on the clean source is unusable, and a row with no usable suite is UNKNOWN;
 - UNKNOWN never reads as a rate or as green;
 - a mutant that a suite kills is not run on the suites after it, and a mutant that suite misses is;
@@ -1716,7 +1716,11 @@ class HangTests(unittest.TestCase):
         repo, sha, _log = hang_fixture()
         row = replay(repo, sha, JS_PROFILE, suite_timeout=5)
         self.assertEqual(row["status"], "OK")
-        self.assertEqual((row["made"], row["killed"], row["crashed"], row["survived"]), (4, 2, 2, 0))
+        self.assertEqual((row["made"], row["killed"], row["survived"]), (4, 2, 0))
+        # A mutant that hits its time cap is a timeout, counted apart from crashed (decision `mutation-report-scores-suites`).
+        # Both unkilled mutants of the drain fixture loop forever, so both are timeouts and neither is a crash.
+        self.assertEqual((row["crashed"], row["timeout"]), (0, 2),
+                         "the two hung mutants must be timeouts, not crashes: %r" % row)
 
 
 class ToolTests(unittest.TestCase):
