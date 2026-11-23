@@ -1368,13 +1368,14 @@ class LintStepWorkflow(unittest.TestCase):
         self.scope = job_block(self.text, "scope")
 
     def step_if(self, name):
-        """The `if:` of the `checks` job's step named `name`. A missing step, or a step with no if:, fails by name."""
+        """The `if:` of the `checks` job's step named `name`, without its keep-running guard (split.keep_running_off). A missing step,
+        or a step with no if:, fails by name."""
         self.assertIsNotNone(self.checks, "checks.yml has no checks job")
         for s in step_blocks(self.checks):
             if step_key(s, "name") == name:
                 raw = step_key(s, "if")
                 self.assertIsNotNone(raw, f"the step {name!r} has no if:")
-                return raw
+                return split.keep_running_off(raw)
         self.fail(f"the checks job has no step named {name!r}")
 
     def test_each_lint_step_names_its_flag_and_the_pull_request_condition(self):

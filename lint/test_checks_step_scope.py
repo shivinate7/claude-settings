@@ -43,7 +43,8 @@ from test_ci_scope import DOC_CASES, DOC_FLAGS, doc_groups, run as scope_run  # 
 from test_windows_split import (  # noqa: E402  the one home of the `if:` evaluator, the scope conditions and the doc condition builder
     NO_MD_SCOPE_CONDITION, SCOPE_DOC_AGENTS, SCOPE_DOC_ANY, SCOPE_DOC_DECISIONS, SCOPE_DOC_DECISIONS_MAP_OTHER, SCOPE_DOC_DECISIONS_OTHER,
     SCOPE_DOC_DECISIONS_RULES, SCOPE_DOC_DECISIONS_RULES_OTHER, SCOPE_DOC_RULES, SCOPE_DOC_SKILLS, SCOPE_DOC_SKILLS_AGENTS,
-    SCOPE_DOC_SKILLS_DECISIONS, SCOPE_DOC_SKILLS_OTHER, doc_scope_condition, drop_condition, eval_if, run_lines, unwrap, LINUX_SUITES)
+    SCOPE_DOC_SKILLS_DECISIONS, SCOPE_DOC_SKILLS_OTHER, doc_scope_condition, drop_condition, eval_if, keep_running_off, run_lines, unwrap,
+    LINUX_SUITES)
 from test_windows_split import top_level_conjuncts, yaml_scalar  # noqa: E402  the one home of the conjunct splitter and the scalar reader
 
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
@@ -575,7 +576,8 @@ def identity(st):
 
 
 def if_of(st):
-    return value(st, "if")
+    """A checks-job step's `if:` without its keep-running guard (keep_running_off, the one home of that strip)."""
+    return keep_running_off(value(st, "if"))
 
 
 def checks_steps():

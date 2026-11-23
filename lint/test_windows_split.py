@@ -82,7 +82,7 @@ LINUX_SPLIT = CHECKS_SUITE_JOBS
 LINUX_CODE = "needs.scope.outputs.code == 'true'"
 LINUX_CODE_SWEEP = f"{LINUX_CODE} && needs.scope.outputs.sweep == 'true'"
 LINUX_SWEEP = "needs.scope.outputs.sweep == 'true'"
-LINUX_MODS = "!cancelled() && needs.scope.outputs.mods == 'true'"
+LINUX_MODS = "needs.scope.outputs.mods == 'true'"  # its keep-running guard comes off before the pin reads it (keep_running_off)
 # The scope condition on a step that reads no .md file, unwrapped as unwrap() reads an `if:`. lint/test_checks_step_scope.py pins which steps take it.
 NO_MD_SCOPE_CONDITION = "needs.scope.outputs.code == 'true' || github.event_name != 'pull_request'"
 # The scope condition of a step that reads the doc groups in `groups` (ci-scope.sh's doc_<group> flags): code, those flags, and a
@@ -553,6 +553,33 @@ def drop_condition(expr):
         return None
     m = re.fullmatch(rf"\((.+)\) && {re.escape(RECORDS_ONLY_CONDITION)}", expr or "")
     return m.group(1) if m else expr
+
+
+# The keep-running guard on each step of the checks job after its checkout, setup and tools install: a failed step stops none after
+# it. KeepRunningAfterFailure reads the guard on checks.yml. A pin reads the condition after it.
+KEEP_RUNNING = "!cancelled()"
+
+
+def keep_running_off(raw):
+    """A step's raw `if:` (with its `${{ }}`) without the keep-running guard. `${{ !cancelled() && E }}` gives `${{ E }}`, and
+    `${{ !cancelled() }}` gives None, the no-if: default. When E is one `||` condition in the parentheses the build wrapped it in,
+    that pair comes off too: `${{ !cancelled() && (A || B) }}` gives `${{ A || B }}`. Nothing else comes off. A `||` after the guard
+    with no parentheses is no keep-running condition, so raw comes back whole and the pin fails on it. A step without the guard
+    comes back whole too: KeepRunningAfterFailure names that step."""
+    e = unwrap(raw)
+    if raw is None or not raw.lstrip().startswith("${{") or not e.startswith(KEEP_RUNNING):
+        return raw
+    rest = e[len(KEEP_RUNNING):]
+    if rest == "":
+        return None
+    if not rest.startswith(" && "):
+        return raw
+    rest = rest[len(" && "):]
+    if rest.startswith("(") and _pair_closes_at_end(rest) and top_level_or(rest[1:-1]):
+        rest = rest[1:-1].strip()
+    elif top_level_or(rest):
+        return raw
+    return "${{ %s }}" % rest
 
 
 def step_if(st):
@@ -1028,9 +1055,11 @@ def split_homes(text, jobs, cmd):
     return [(job, st) for job in jobs for st in step_blocks(job_block(text, job)) if cmd in run_lines(st)]
 
 
-def pin_problems(name, st, cmd, want_if, want_shell, want_env=None):
-    """A suite's step keeps the `if:` and `shell:` pinned for it, and its env: none, or the shard value (want_env)."""
-    got_if, got_env = drop_condition(unwrap(step_key(st, "if"))), step_env(st)
+def pin_problems(name, st, cmd, want_if, want_shell, want_env=None, keep_running=False):
+    """A suite's step keeps the `if:` and `shell:` pinned for it, and its env: none, or the shard value (want_env). With keep_running,
+    the step is a checks-job step: its keep-running guard comes off before the pin reads it (keep_running_off)."""
+    raw_if = keep_running_off(step_key(st, "if")) if keep_running else step_key(st, "if")
+    got_if, got_env = drop_condition(unwrap(raw_if)), step_env(st)
     problems = []
     if got_if != want_if:
         problems.append(f"{name}: {cmd!r} if is {got_if!r}, want {want_if!r}")
@@ -1055,7 +1084,7 @@ def linux_split_problems(text):
         if len(homes) != 1:
             problems.append(f"{cmd!r} runs {len(homes)} times in {LINUX_SPLIT}: {[j for j, _ in homes]}")
         else:
-            problems += pin_problems(homes[0][0], homes[0][1], cmd, want_if, want_shell)
+            problems += pin_problems(homes[0][0], homes[0][1], cmd, want_if, want_shell, keep_running=True)
     return problems
 
 
@@ -1731,7 +1760,7 @@ class SplitJobs(unittest.TestCase):
                     "        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}\n"
                     "        run: python3 lint/check_unknown_reads_contract.py\n")
         linux_step = ("      - name: Unknown-read contract (guard + session_start)\n"
-                      "        if: ${{ needs.scope.outputs.code == 'true' }}\n"
+                      "        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}\n"
                       "        run: python3 lint/check_unknown_reads_contract.py\n")
         self.assertIn(mac_step, self.text)  # the fixture: checks-macos runs the check
         self.assertIn(linux_step, self.text)  # the fixture: checks runs the check
@@ -3566,6 +3595,52 @@ class CiCoverageCollector(unittest.TestCase):
         self.assertIsNotNone(error, "the scan passed although the collector exits 3; a failed collector must fail it")
         self.assertNotIsInstance(error, AssertionError, "a failed collector reads as a gap report, not as an error")
         self.assertRegex(str(error), r"\b3\b", "the collector's error does not name its exit code 3: %s" % error)
+
+
+class KeepRunningOff(unittest.TestCase):
+    """keep_running_off strips exactly `!cancelled() && ` from the start of a checks-job step's `if:`, and one pair of parentheses
+    around a `||` condition. Each case is one `if:` as checks.yml writes it."""
+
+    OR_CONDITION = NO_MD_SCOPE_CONDITION
+
+    def test_the_guard_comes_off_a_plain_condition(self):
+        self.assertEqual(keep_running_off("${{ !cancelled() && needs.scope.outputs.code == 'true' }}"),
+                         "${{ needs.scope.outputs.code == 'true' }}")
+
+    def test_a_bare_guard_is_the_no_if_default(self):
+        self.assertIsNone(keep_running_off("${{ !cancelled() }}"))
+
+    def test_one_pair_around_an_or_condition_comes_off(self):
+        self.assertEqual(keep_running_off("${{ !cancelled() && (%s) }}" % self.OR_CONDITION), "${{ %s }}" % self.OR_CONDITION)
+
+    def test_only_the_outer_pair_comes_off(self):
+        self.assertEqual(keep_running_off("${{ !cancelled() && ((x) || (y)) }}"), "${{ (x) || (y) }}")
+
+    def test_an_or_without_parentheses_stays_whole(self):
+        # `!cancelled() && A || B` reads as `(!cancelled() && A) || B`: the guard is no top-level conjunct, so the text stays whole.
+        raw = "${{ !cancelled() && A || B }}"
+        self.assertEqual(keep_running_off(raw), raw)
+
+    def test_a_first_pair_that_does_not_close_at_the_end_is_no_wrapper(self):
+        raw = "${{ !cancelled() && (A) && (B || C) }}"
+        self.assertEqual(keep_running_off(raw), "${{ (A) && (B || C) }}")
+
+    def test_a_guard_under_an_or_is_no_guard(self):
+        raw = "${{ !cancelled() || needs.scope.outputs.checks_macos == 'true' }}"
+        self.assertEqual(keep_running_off(raw), raw)
+
+    def test_a_guard_that_does_not_lead_is_no_guard(self):
+        raw = "${{ needs.scope.outputs.code == 'true' && !cancelled() }}"
+        self.assertEqual(keep_running_off(raw), raw)
+
+    def test_a_step_without_the_guard_comes_back_whole(self):
+        raw = "${{ %s }}" % self.OR_CONDITION
+        self.assertEqual(keep_running_off(raw), raw)
+        self.assertIsNone(keep_running_off(None))
+
+    def test_guard_text_inside_quotes_is_no_guard(self):
+        raw = "${{ x == '!cancelled() && y' }}"
+        self.assertEqual(keep_running_off(raw), raw)
 
 
 if __name__ == "__main__":
