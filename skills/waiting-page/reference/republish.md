@@ -55,15 +55,15 @@ live page.
 3. Make one new empty folder. Run
    `python3 ~/.claude/skills/waiting-page/export_page.py --rebuild <copy folder> --batches <new folder>`.
    For an artifact other than the waiting page, add `--collections <names>`: the `collections` of its registry entry,
-   or its folders are `unknown`. It prints `batches <k> docs <n>`. It loads open items only: a closed item, its answer
-   and its receipt stay deleted. An empty or missing copy folder is `unknown`. Stop
+   or its folders are `unknown`. It prints `batches <k> docs <n>`. It loads open items and arbiter rulings only: another
+   closed item, its answer and its receipt stay deleted. An empty or missing copy folder is `unknown`. Stop
    and say so. A page-only copy (registry `collections: []`) has no docs, so `--rebuild` reports it holds no docs.
    Restore it by publishing its `page/page.html` (and `page/files/`) to a new page.
 4. Send each `batch-NNN.json` list to the new page as one `ArtifactData batch`, in order. Each entry is a `set`.
 5. Put the mockups back. Take main's `page.html`. Replace the text inside its `designData` script element with
    the JSON of `page/designData.json`. Write each `<` as `\u003c`, so no string can close the script. Publish
    it to the new URL, as "Keep the page on main's code" step 4 says.
-6. Read the new page's items back. Their count must equal the count of open items in the copy's `items` folder.
+6. Read the new page's items back. Their count must equal the count of open items plus arbiter rulings in the copy's `items` folder.
 7. Write the new URL into the repo's extras file, in a pull request. Write the account's link in the `links`
    of the `waiting-page` role entry in `artifacts`, never a `url` field. If the repo has no such entry, set the `waiting-page` key.
 

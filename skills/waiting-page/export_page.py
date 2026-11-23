@@ -18,9 +18,9 @@ this account's page holds each item open; a fetch that lacks the item leaves the
 export runs none of the closed rules below. A closed item leaves the copy with its answer (keyed by its id, or naming it
 in `item`), that answer's receipt and its sightings file only when an export with --account fetches it closed, the copy
 item is already marked closed by an earlier export, and no account's latest export holds it open. An item waits while
-the page holds an answer tied to it. An arbiter ruling is never deleted. An export with no --account deletes nothing.
-The match is the doc key, never `n`. A closed item the copy does not hold is copied only while the page holds its
-answer. A doc the fetch no longer lists stays (decision waiting-data-in-repo). Each delete prints
+the page holds an answer tied to it. An arbiter ruling is never deleted, and a new one is copied; a fetched row with
+`arbiter: false` is no ruling. An export with no --account deletes nothing. The match is the doc key, never `n`.
+Another closed item the copy does not hold is copied only while the page holds its answer. A doc the fetch no longer lists stays (decision waiting-data-in-repo). Each delete prints
 `deleted <path>` before the verdict, the path relative to WAITING_DIR. A sightings file that cannot be read prints
 `sightings unknown: <path> ...`; its item is not deleted and the file is left as it was. These rules are the waiting
 page's: another role's `items` collection, and --rebuild or --merge with --collections, keep a closed doc.
@@ -708,8 +708,8 @@ def closed_sightings(collections, docs, have, sightings):
     as it is because the fetched closed row lacks the copy's `arbiter: true`). Every account's page shares one
     copy. An item is deleted only by an export with --account (`sightings` not None) that fetches it closed, when the
     copy item is already marked closed by an earlier export and no account's latest export holds it open. An item waits
-    while the page holds an answer tied to it. An arbiter ruling is never deleted. A closed item the copy does not hold
-    is copied only while the page holds its answer. An item the fetch does not hold is never deleted."""
+    while the page holds an answer tied to it. An arbiter ruling is never deleted, and a new one is copied. Another
+    closed item the copy does not hold is copied only while the page holds its answer. An item the fetch does not hold is never deleted."""
     if ITEMS not in collections:
         return set(), set(), set()
     gone, unseen, rulings = set(), set(), set()
@@ -720,14 +720,18 @@ def closed_sightings(collections, docs, have, sightings):
             continue
         answered = bool(tied_to({doc_id}, page_answers)[0])
         if label not in have:
-            if not answered:
+            if not answered and data.get("arbiter") is not True:  # a new ruling is copied: rebuild restores it
                 unseen.add(doc_id)
         else:
             kept = parsed(have[label])
-            ruling = data.get("arbiter") is True or (isinstance(kept, dict) and kept.get("arbiter") is True)
-            if ruling and data.get("arbiter") is not True:
-                rulings.add(doc_id)  # a closed row that lost the flag never overwrites the copy's ruling
-            if sightings is not None and sightings.get(doc_id) == [] and not answered and not ruling and is_closed(kept):
+            # An explicit `arbiter: false` (an overturn) ends the ruling; a row with no flag keeps the copy's ruling.
+            kept_ruling = "arbiter" not in data and isinstance(kept, dict) and kept.get("arbiter") is True
+            ruling = data.get("arbiter") is True or kept_ruling
+            if kept_ruling:
+                rulings.add(doc_id)  # a closed row with no flag never overwrites the copy's ruling
+            was_ruling = isinstance(kept, dict) and kept.get("arbiter") is True  # an overturn marks it plain closed first
+            if (sightings is not None and sightings.get(doc_id) == [] and not answered and not ruling and not was_ruling
+                    and is_closed(kept)):
                 gone.add(doc_id)
     return gone, unseen, rulings
 
