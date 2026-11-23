@@ -2126,6 +2126,48 @@ spo_register("scratchpad-owner: syntax 6, agent B's bash -n -c string that runs 
                                          lambda fx, p: 'bash -n -c "bash %s"' % p,
                                          "agent B's bash -n -c string that runs agent A's script is refused",
                                          text=SH_TEXT))
+# A shell's `-n` or `--noexec` among its own flags is a check, a cluster included. The other flags are no check:
+# a `-n` after the script is the script's argument, `-x` and `-e` run it, and a preload (`node -r`, `--import`) runs it.
+spo_register("scratchpad-owner: syntax 7, agent B's bash F -n, a -n after the script, is refused",
+             lambda: pr2015_spo_run_case("syn-n-after", "syntax 7, bash F -n", "a_sh.sh",
+                                         lambda fx, p: "bash %s -n" % p,
+                                         "agent B's bash F -n run of agent A's script is refused: the -n is the script's argument",
+                                         text=SH_TEXT))
+spo_register("scratchpad-owner: syntax 8, agent B's bash -nc string that runs agent A's script is refused",
+             lambda: pr2015_spo_run_case("syn-nc-run", "syntax 8, bash -nc 'bash F'", "a_sh.sh",
+                                         lambda fx, p: 'bash -nc "bash %s"' % p,
+                                         "agent B's bash -nc string that runs agent A's script is refused",
+                                         text=SH_TEXT))
+spo_register("scratchpad-owner: syntax 9, agent B's bash -x F, a trace that runs the script, is refused",
+             lambda: pr2015_spo_run_case("syn-x-run", "syntax 9, bash -x F", "a_sh.sh",
+                                         lambda fx, p: "bash -x %s" % p,
+                                         "agent B's bash -x F run of agent A's script is refused", text=SH_TEXT))
+spo_register("scratchpad-owner: syntax 10, agent B's bash -e F, an errexit run of the script, is refused",
+             lambda: pr2015_spo_run_case("syn-e-run", "syntax 10, bash -e F", "a_sh.sh",
+                                         lambda fx, p: "bash -e %s" % p,
+                                         "agent B's bash -e F run of agent A's script is refused", text=SH_TEXT))
+spo_register("scratchpad-owner: syntax 11, agent B's node --check -r F G, a preload that runs F, is refused",
+             lambda: pr2015_spo_run_case("syn-preload-check", "syntax 11, node --check -r F G", "a_js.js",
+                                         lambda fx, p: "node --check -r %s %s" % (p, os.path.join(fx["work"], "g.js")),
+                                         "agent B's node --check -r F G, a preload of agent A's script, is refused",
+                                         text=TS_TEXT))
+spo_register("scratchpad-owner: syntax 12, agent B's node --import F --check G, an import that runs F, is refused",
+             lambda: pr2015_spo_run_case("syn-import-check", "syntax 12, node --import F --check G", "a_js.js",
+                                         lambda fx, p: "node --import %s --check %s" % (p, os.path.join(fx["work"], "g.js")),
+                                         "agent B's node --import F --check G, an import of agent A's script, is refused",
+                                         text=TS_TEXT))
+spo_register("scratchpad-owner: syntax 13, agent B's node -r ./x.js F, a preload then a run of F, is refused",
+             lambda: pr2015_spo_run_case("syn-r-run", "syntax 13, node -r ./x.js F", "a_js.js",
+                                         lambda fx, p: "node -r ./x.js %s" % p,
+                                         "agent B's node -r ./x.js F run of agent A's script is refused", text=TS_TEXT))
+spo_register("scratchpad-owner: syntax 14, agent B's bash -nv of agent A's script is allowed",
+             lambda: spo_data_case("syn-nv", "syntax 14, bash -nv F", "a_sh.sh", SH_TEXT,
+                                   lambda path: "bash -nv %s" % path,
+                                   "agent B's bash -nv of agent A's script is a syntax check, and is allowed"))
+spo_register("scratchpad-owner: syntax 15, agent B's bash --noexec of agent A's script is allowed",
+             lambda: spo_data_case("syn-noexec", "syntax 15, bash --noexec F", "a_sh.sh", SH_TEXT,
+                                   lambda path: "bash --noexec %s" % path,
+                                   "agent B's bash --noexec of agent A's script is a syntax check, and is allowed"))
 
 
 # =========================================================================== mask_script lexemes
