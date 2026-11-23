@@ -554,22 +554,61 @@ def session_id_of(payload) -> str:
     return value if SESSION_ID_RE.match(value or "") else ""
 
 
+# Names the harness base for a test run, the one place the real default can be replaced (the guard's own environment
+# is Claude Code's, which a `Bash` call cannot change). It lets a test build its scratchpads inside the repo's one
+# test temp root and not under `/tmp/claude-<uid>`.
+SCRATCHPAD_BASE_ENV = "CLAUDE_SCRATCHPAD_BASE"
+
+
+def scratchpad_temp_bases() -> tuple:
+    """The real folders a scratchpad lives under: Python's own temp folder, and the harness base, which is
+    `<realpath of /tmp>/claude-<uid>` unless `SCRATCHPAD_BASE_ENV` names another folder (macOS keeps scratchpads in
+    /private/tmp, never under the `/var/folders/.../T` that `tempfile.gettempdir()` names). `os.getuid` is absent
+    on Windows, so only the first base applies there. The one home of the scratchpad-root test: every caller reads
+    it from here."""
+    bases = []
+    try:
+        bases.append(os.path.realpath(tempfile.gettempdir()))
+        override = os.environ.get(SCRATCHPAD_BASE_ENV, "")
+        getuid = getattr(os, "getuid", None)
+        if override:
+            bases.append(os.path.realpath(override))
+        elif getuid:
+            bases.append(os.path.realpath(os.path.join("/tmp", "claude-%d" % getuid())))
+    except Exception:
+        pass
+    return tuple(bases)
+
+
+def _scratchpad_shapes(real: str):
+    """Yield `(root, session)` for each base that `real` lies under as `<base>/.../<session>/scratchpad`, `root`
+    being that folder. Under the harness base (every base after Python's temp folder) a project folder comes
+    first, `<base>/<project>/<session>/scratchpad`. No base's own folder counts as a session: the harness
+    base's `claude-<uid>` name fits the session id's shape, and on Linux it lies inside Python's temp folder."""
+    shown = os.path.normcase(real)
+    bases = scratchpad_temp_bases()
+    skip = {os.path.normcase(base) for base in bases}
+    for number, base in enumerate(bases):
+        prefix = os.path.normcase(base) + os.sep
+        if not shown.startswith(prefix):
+            continue
+        rel = real[len(prefix):].split(os.sep)
+        for index in range(1 if number else 0, len(rel) - 1):
+            if SESSION_ID_RE.match(rel[index]) and os.path.normcase(rel[index + 1]) == "scratchpad":
+                root = os.sep.join([real[:len(prefix) - 1]] + rel[:index + 2])
+                if os.path.normcase(os.path.dirname(root)) not in skip:
+                    yield root, rel[index]
+
+
 def session_scratchpad_root(where: str, session_id: str) -> str:
     """The scratchpad folder of this session that `where` resolves into (the folder itself counts), else ''."""
     if not where or not session_id or not SESSION_ID_RE.match(session_id):
         return ""
     try:
         real = os.path.realpath(where)
-        temp = os.path.realpath(tempfile.gettempdir())
     except Exception:
         return ""
-    if not (os.path.normcase(real) + os.sep).startswith(os.path.normcase(temp) + os.sep):
-        return ""
-    parts = real.split(os.sep)
-    for index in range(len(parts) - 1):
-        if parts[index] == session_id and os.path.normcase(parts[index + 1]) == "scratchpad":
-            return os.sep.join(parts[:index + 2])
-    return ""
+    return next((root for root, sid in _scratchpad_shapes(real) if sid == session_id), "")
 
 
 def under_session_scratchpad(where: str, session_id: str) -> bool:
@@ -761,17 +800,12 @@ def scratchpad_clear_writer(where: str, session_id: str) -> None:
 
 
 def in_any_session_scratchpad(where: str) -> bool:
-    """True when `where` resolves into the scratchpad of ANY session under the temp folder."""
+    """True when `where` resolves into the scratchpad of ANY session under a scratchpad base."""
     try:
         real = os.path.realpath(where)
-        temp = os.path.realpath(tempfile.gettempdir())
     except Exception:
         return False
-    if not (os.path.normcase(real) + os.sep).startswith(os.path.normcase(temp) + os.sep):
-        return False
-    parts = real.split(os.sep)
-    return any(os.path.normcase(parts[i + 1]) == "scratchpad" and SESSION_ID_RE.match(parts[i])
-               for i in range(len(parts) - 1))
+    return any(True for _ in _scratchpad_shapes(real))
 
 
 TREE_DENY_REASON = (

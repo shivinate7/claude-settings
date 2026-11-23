@@ -363,7 +363,7 @@ class Design(unittest.TestCase):
 
     def test_shoot_config_matches_bin_shoot(self):
         with open(os.path.join(os.path.dirname(HERE), "bin", "shoot"), encoding="utf-8") as handle:
-            found = re.search(r"config: path\.join\(([^)]*)\)", handle.read())
+            found = re.search(r"config\s*[:=][^;\n]*?path\.join\(([^)]*)\)", handle.read())
         parts = re.findall(r'"([^"]+)"', found.group(1))
         code, out = Repo(self).write("a.tsx").write("/".join(parts), SHOOT).run("design")
         self.assertIn("screens named: pass", out)

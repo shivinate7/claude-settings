@@ -230,6 +230,8 @@ def control_verdict(code, red, seen=(), ran=None):
     ran no case (`ran` is an empty list) is the other crash signature: the suite never reached its cases, so
     it proved nothing about the layout. `ran=None` means the caller has no case lines to read.
     Report mode's `score_target` applies the same idea to its normalized clean source."""
+    if code == TIMED_OUT:
+        return "clean layout timed out", list(red) + list(seen)
     if code != 0:
         return "clean layout red (exit %s)" % code, list(red) + list(seen)
     if ran is not None and not ran:
@@ -247,6 +249,26 @@ def clean_verdict(code, red, required: str) -> bool:
     line names `required`). A signal, a nonzero exit with no FAIL line, and a wrong cause are neither, so a rerun judges
     the mutant again. It agrees with the clean reads of `report_verdict`."""
     return code == 0 or names_required(red, required)
+
+
+# The code a suite run returns when it reached its time cap. A timeout is its mutant's own verdict (decision
+# `mutation-report-scores-suites`): never a kill, never a survivor, counted apart from a crash.
+TIMED_OUT = "timeout"
+
+
+def timeout_reason(seen) -> str:
+    """The reason a timed-out suite left in `seen` (its `TIMEOUT: <reason>` line), or a plain one when it left none."""
+    for line in seen:
+        if line.startswith("TIMEOUT:"):
+            return line.partition(":")[2].strip()
+    return "suite timed out"
+
+
+def timed_out_run(elapsed: float):
+    """run_suite's return for a suite that reached its time cap, after `elapsed` seconds: TIMED_OUT, no FAIL line,
+    no case line, and the TIMEOUT line that `timeout_reason` reads back. The one home of that shape: the guard and the
+    janitor both return it."""
+    return TIMED_OUT, [], [], ["TIMEOUT: suite timed out after %.1fs" % elapsed]
 
 
 def report_verdict(label: str, code, red, required: str, seen=()) -> str:
@@ -286,11 +308,16 @@ def staged_suite(run, required: str):
     case in stage 1. A stage 1 that ran no named case falls back to the full suite: none selected,
     a crash before the case, or a required case whose only row is a SKIP, which is not collected.
     MUTATE_FULL=1 runs the full suite alone.
+
+    A stage 1 that reaches the time cap returns TIMED_OUT at once: the cap is the verdict, and a second run
+    would wait out the cap again.
     """
     if os.environ.get("MUTATE_FULL"):
         code, red, _ran = run(None)
         return code, red
     code, red, ran = run(required)
+    if code == TIMED_OUT:
+        return code, red
     if any(required in line for line in ran):
         return code, red
     code, red, _ran = run(None)
@@ -430,6 +457,8 @@ def run_mutants(entries, run_one, controls=None, control_of=None, verdict_key=No
     `unknown`, the optional seventh field, is a reason this mutant's verdict cannot be trusted (see
     `control_verdict`). It prints `UNKNOWN <label> <reason>` with `seen` under it, counts in the tally, and
     exits 1 (decision `ci-unknown-is-red`). It is not `skip`: a skip means the mutant does not apply here and exits 0.
+    A mutant whose code is TIMED_OUT prints `TIMEOUT`, counts apart from killed, survived and wrong cause, and exits 1.
+    The run goes on to the next mutant.
 
     `controls` is {key: function returning run_suite's (code, red, ran, seen)}: one clean-layout control per
     key, and `control_of(entry)` names the key whose control judges that entry. The controls go into the same
@@ -467,6 +496,7 @@ def run_mutants(entries, run_one, controls=None, control_of=None, verdict_key=No
     wrong_cause = 0
     skipped = 0
     unknown = 0
+    timed_out = 0
     folder = (os.environ.get(VERDICT_DIR_ENV) or None) if verdict_key is not None else None
     if folder is not None:
         prune_verdicts(folder)
@@ -529,17 +559,23 @@ def run_mutants(entries, run_one, controls=None, control_of=None, verdict_key=No
                 print("UNKNOWN     %-62s %s" % (label, reason), flush=True)
                 print_saw(lines)
                 continue
-            status = report_verdict(label, code, red, required, more[0] if more else ())
+            seen = more[0] if more else ()
+            if code == TIMED_OUT:
+                timed_out += 1
+                print("TIMEOUT     %-62s %s" % (label, timeout_reason(seen)), flush=True)
+                continue
+            status = report_verdict(label, code, red, required, seen)
             if status == "survived":
                 survivors += 1
             elif status == "wrong_cause":
                 wrong_cause += 1
     print()
     ran = len(entries) - skipped
-    killed = ran - survivors - wrong_cause - unknown
-    print("%d of %d mutations killed (%d survived, %d wrong cause, %d skipped%s)" % (
-        killed, ran, survivors, wrong_cause, skipped, ", %d unknown" % unknown if unknown else ""))
-    return 1 if (survivors or wrong_cause or unknown) else 0
+    killed = ran - survivors - wrong_cause - unknown - timed_out
+    print("%d of %d mutations killed (%d survived, %d wrong cause, %d skipped%s%s)" % (
+        killed, ran, survivors, wrong_cause, skipped, ", %d unknown" % unknown if unknown else "",
+        ", %d timeout" % timed_out if timed_out else ""))
+    return 1 if (survivors or wrong_cause or unknown or timed_out) else 0
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -552,14 +588,17 @@ def run_mutants(entries, run_one, controls=None, control_of=None, verdict_key=No
 #
 # TWO WAYS TO COUNT A KILL WRONG, BOTH CLOSED HERE.
 # 1. A crash is not a kill. A mutant counts killed only when a suite prints a FAIL line (an assertion
-#    went red). A throw, an import error or a timeout leaves no FAIL line, or ends at the timeout, and
-#    reads "crashed".
+#    went red). A throw or an import error leaves no FAIL line and reads "crashed". A suite that reaches
+#    its time cap reads "timeout", its own verdict, never a kill or a survivor.
 # 2. A suite red on the clean source is not a killer. Every suite first runs on the NORMALIZED clean
 #    source (the same `ast.unparse` text every mutant carries, so a suite that reads source text fails
 #    here and not as a fake kill). A suite that is not green there is UNUSABLE for that file. A file
 #    with no usable suite, a parse error, or a missing target reads UNKNOWN, never green or killed.
 
 FAIL_LINE = re.compile(r"^FAIL(?::|\s|$)", re.M)
+XCTEST_FAIL_LINE = re.compile(r"^\S[^\n]*:\d+: error: .*\bXCT\w+ failed", re.M)  # an XCTest assertion, macOS or Linux shape
+SWIFT_BUILD_ERROR = re.compile(r"^(?:\S[^\n]*:\d+:\d+: )?error:", re.M)  # a Swift compile error, or a SwiftPM plugin error
+NOT_RED_KINDS = frozenset({"crash", "build", "timeout"})  # the kinds that are no kill: a suite that did not reach an assertion
 SCAFFOLD_SKIP = (".git", ".claude", "node_modules", "__pycache__")
 _SWAPS = {ast.Eq: ast.NotEq, ast.NotEq: ast.Eq, ast.Lt: ast.GtE, ast.GtE: ast.Lt, ast.Gt: ast.LtE,
           ast.LtE: ast.Gt, ast.In: ast.NotIn, ast.NotIn: ast.In, ast.Is: ast.IsNot, ast.IsNot: ast.Is}
@@ -718,13 +757,16 @@ def changed_lines(repo: str, base: str, head: str, path: str) -> set:
 
 
 def classify_run(code, output: str, timed_out: bool) -> str:
-    """One suite run: "pass", "assert" (a FAIL line, an assertion went red), "crash" (red with no FAIL
-    line: a throw, an import error) or "timeout". Only "assert" is evidence a mutant was caught."""
+    """One suite run: "pass", "assert" (a FAIL line, or an XCTest assertion, went red), "build" (red with no
+    assertion and a compile or plugin error line), "crash" (red with none of those: a throw, an import error)
+    or "timeout". Only "assert" is evidence a mutant was caught."""
     if timed_out:
         return "timeout"
     if code == 0:
         return "pass"
-    return "assert" if FAIL_LINE.search(output) else "crash"
+    if FAIL_LINE.search(output) or XCTEST_FAIL_LINE.search(output):
+        return "assert"
+    return "build" if SWIFT_BUILD_ERROR.search(output) else "crash"
 
 
 _TAP_ENTRY = re.compile(r"^\s*(?:not ok|ok)\b|^\s*1\.\.\d|^\s*# Subtest:", re.M)
@@ -851,12 +893,12 @@ def score_target(root: str, target: str, tests, limit: int = 10, timeout=None, j
                  repo_init: bool = True, seed: int = 0) -> dict:
     """Score the suites `tests` against mechanical mutants of `target`, both paths relative to `root`.
 
-    Returns a row: file, status ("OK" or "UNKNOWN"), reason, made, killed, crashed, survived, rate
+    Returns a row: file, status ("OK" or "UNKNOWN"), reason, made, killed, crashed, timeout, survived, rate
     (killed / made, None when UNKNOWN), killers {suite: mutants it killed}, silent [usable suites that
     killed none], unusable {suite: why}, unloaded [usable suites that stay green on a wholly broken copy
     of the target: they never loaded it]. See the report-mode comment above for what counts as a kill.
     """
-    row = {"file": target, "status": "UNKNOWN", "reason": "", "made": 0, "killed": 0, "crashed": 0,
+    row = {"file": target, "status": "UNKNOWN", "reason": "", "made": 0, "killed": 0, "crashed": 0, "timeout": 0,
            "survived": 0, "rate": None, "killers": {}, "silent": [], "unusable": {},
            "unloaded": []}
     path = os.path.join(root, target)
@@ -936,7 +978,9 @@ def score_target(root: str, target: str, tests, limit: int = 10, timeout=None, j
                 row["killers"][rel] += 1
         if "assert" in kinds:
             row["killed"] += 1
-        elif kinds & {"crash", "timeout"}:
+        elif "timeout" in kinds:
+            row["timeout"] += 1
+        elif kinds & NOT_RED_KINDS:
             row["crashed"] += 1
         else:
             row["survived"] += 1
@@ -950,14 +994,14 @@ def score_target(root: str, target: str, tests, limit: int = 10, timeout=None, j
 
 def format_report(rows, gold=None) -> str:
     """The per-file table, the suites that were unusable, then the gold-standard line."""
-    lines = ["%-28s %7s %6s %7s %9s %5s  %s" % (
-        "file", "mutants", "killed", "crashed", "survived", "rate", "silent suites")]
+    lines = ["%-28s %7s %6s %7s %7s %9s %5s  %s" % (
+        "file", "mutants", "killed", "crashed", "timeout", "survived", "rate", "silent suites")]
     for row in rows:
         if row["status"] != "OK":
             lines.append("%-28s UNKNOWN (%s)" % (row["file"], row["reason"]))
             continue
-        lines.append("%-28s %7d %6d %7d %9d %4d%%  %s" % (
-            row["file"], row["made"], row["killed"], row["crashed"], row["survived"],
+        lines.append("%-28s %7d %6d %7d %7d %9d %4d%%  %s" % (
+            row["file"], row["made"], row["killed"], row["crashed"], row["timeout"], row["survived"],
             round(row["rate"] * 100), ", ".join(row["silent"]) or "none"))
     for row in rows:
         for rel, why in sorted(row["unusable"].items()):
@@ -1217,7 +1261,7 @@ def _drop_checkout(repo: str, dest: str) -> None:
 def _replay_row(repo: str, sha: str) -> dict:
     number, title = _pr_of(repo, sha)
     return {"pr": number, "sha": sha, "title": title, "status": "UNKNOWN", "reason": "", "made": 0,
-            "killed": 0, "crashed": 0, "survived": 0, "not_run": 0, "survivors": [], "not_run_at": [],
+            "killed": 0, "crashed": 0, "timeout": 0, "survived": 0, "not_run": 0, "survivors": [], "not_run_at": [],
             "unusable": {}, "skipped": {}, "notes": []}
 
 
@@ -1228,7 +1272,7 @@ def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0
     lines it added. Returns a row: pr, sha, title, status ("OK", "UNKNOWN", "NO_PRODUCT" for no product
     file changed, "NO_TESTS" for product code with no suite changed), reason, made, killed, crashed,
     survived, not_run, survivors [(path, line, label)], unusable {suite: why}, skipped {file: why},
-    notes [text]. `made` counts every mutant, so killed + crashed + survived + not_run == made.
+    notes [text]. `made` counts every mutant, so killed + crashed + timeout + survived + not_run == made.
     `no_run_cause` is set only when no mutant ran because the run stopped first (the diff could not be read, no mutant
     could be made of a file that does not parse, the checkout or the install was refused, or the replay raised): it
     holds the cause, and `--changed` exits 1 on it.
@@ -1495,8 +1539,8 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
             if "assert" not in kinds and expired.is_set():
                 return CUT  # the deadline killed a suite part way: its exit says nothing about the mutant
             if progress:
-                verdict = ("killed" if "assert" in kinds else "crashed" if kinds & {"crash", "timeout"}
-                           else "survived")
+                verdict = ("killed" if "assert" in kinds else "timeout" if "timeout" in kinds
+                           else "crashed" if kinds & NOT_RED_KINDS else "survived")
                 with progress_lock:
                     progress("  #%d mutant %s  %s:%d %s" % (row["pr"], verdict, path, _line_of(label), label))
             return kinds
@@ -1531,7 +1575,9 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
             cut += kinds is CUT
         elif "assert" in kinds:
             row["killed"] += 1
-        elif kinds & {"crash", "timeout"}:
+        elif "timeout" in kinds:
+            row["timeout"] += 1
+        elif kinds & NOT_RED_KINDS:
             row["crashed"] += 1
         else:
             row["survived"] += 1
@@ -1563,7 +1609,7 @@ def replay_profile(repo: str, sha: str, profile: dict, **options) -> list:
             if _STOP.is_set():
                 raise
             row = {"pr": 0, "sha": sha, "title": "", "status": "UNKNOWN", "made": 0, "killed": 0, "crashed": 0,
-                   "survived": 0, "not_run": 0, "survivors": [], "unusable": {}, "skipped": {}, "notes": [],
+                   "timeout": 0, "survived": 0, "not_run": 0, "survivors": [], "unusable": {}, "skipped": {}, "notes": [],
                    "reason": "the replay raised %s: %s" % (type(error).__name__, error)}
             row["no_run_cause"] = row["reason"]
             try:
@@ -1590,9 +1636,10 @@ def _row_line(row: dict) -> str:
     tag = " [%s]" % row["part"] if row.get("part") else ""
     head = "#%d%s %s" % (row["pr"], tag, row["status"])
     if row["status"] == "OK":
+        timeout = ", timeout %d" % row["timeout"] if row.get("timeout") else ""
         not_run = ", not_run %d" % row["not_run"] if row.get("not_run") else ""
-        return "%s  made %d, killed %d, crashed %d, survived %d%s  %s" % (
-            head, row["made"], row["killed"], row["crashed"], row["survived"], not_run, row["title"])
+        return "%s  made %d, killed %d, crashed %d, survived %d%s%s  %s" % (
+            head, row["made"], row["killed"], row["crashed"], row["survived"], timeout, not_run, row["title"])
     if row["status"] == "UNKNOWN":
         return "%s  %s  %s" % (head, row["reason"], row["title"])
     return "%s  %s" % (head, row["title"])
@@ -1621,10 +1668,11 @@ def format_replay(rows) -> str:
     scored = [row for row in rows if row["status"] == "OK"]
     if scored:
         not_run = sum(r.get("not_run", 0) for r in scored)
-        lines.append("scored %d: killed %d of %d mutants run (%d crashed, %d survived%s)" % (
+        timeout = sum(r.get("timeout", 0) for r in scored)
+        lines.append("scored %d: killed %d of %d mutants run (%d crashed, %d survived%s%s)" % (
             len(scored), sum(r["killed"] for r in scored), sum(r["made"] - r.get("not_run", 0) for r in scored),
             sum(r["crashed"] for r in scored), sum(r["survived"] for r in scored),
-            ", %d not_run" % not_run if not_run else ""))
+            ", %d timeout" % timeout if timeout else "", ", %d not_run" % not_run if not_run else ""))
     return "\n".join(lines)
 
 
@@ -1632,7 +1680,8 @@ def changed_summary(rows) -> dict:
     """The totals of the rows that `--changed` scored: made, killed, crashed, survived, not_run, and `untested`, the
     sorted unique `path:line` of each line with a mutant that survived or was not run. A line with one killed and one
     surviving mutant is untested: the share counts mutants, and the list names the lines where a wrong edit got through."""
-    total = {key: sum(row.get(key, 0) for row in rows) for key in ("made", "killed", "crashed", "survived", "not_run")}
+    total = {key: sum(row.get(key, 0) for row in rows)
+             for key in ("made", "killed", "crashed", "timeout", "survived", "not_run")}
     lines = {(path, line) for row in rows for path, line, _label in row.get("survivors", []) + row.get("not_run_at", [])}
     total["untested"] = ["%s:%d" % pair for pair in sorted(lines)]
     return total
@@ -1722,6 +1771,7 @@ def _known_defect(dest: str, defect: dict, suite_timeout: float) -> dict:
     result["verdict"] = "CAUGHT" if kind == "assert" else "MISS"
     if kind != "assert":
         result["reason"] = {"pass": "the suite passed on the planted defect", "crash": "the suite crashed with no assertion",
+                            "build": "the suite did not build: a compile or plugin error with no assertion",
                             "timeout": "the suite passed the timeout"}.get(kind, kind)
     return result
 

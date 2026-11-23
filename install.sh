@@ -1047,12 +1047,37 @@ stage_skills_dir() {
   done
 }
 
+# link_over_flag: the mv flag that renames a link over a link to a folder (the no-target-directory form): -T on
+# GNU, -h on BSD and macOS. It is found once by trying each flag on scratch links. Trying a flag on the real rename
+# would make a failed mv and then a second one, two renames over the live name where the switch must be one.
+# Prints nothing when neither flag works.
+LINK_OVER_FLAG=""
+link_over_flag() {
+  [ -z "$LINK_OVER_FLAG" ] || { printf '%s' "$LINK_OVER_FLAG"; return 0; }
+  lf_dir="$CLAUDE_DIR/.cs-mvprobe.$$"
+  rm -rf "$lf_dir"
+  if mkdir -p "$lf_dir/d" && ln -s d "$lf_dir/a"; then
+    for lf in -fT -fh; do
+      rm -f "$lf_dir/b" "$lf_dir/d/b"
+      ln -s d "$lf_dir/b" || break
+      if mv "$lf" "$lf_dir/b" "$lf_dir/a" 2>/dev/null && [ ! -e "$lf_dir/d/b" ] && [ ! -L "$lf_dir/b" ]; then
+        LINK_OVER_FLAG=$lf; break
+      fi
+    done
+  fi
+  rm -rf "$lf_dir"
+  printf '%s' "$LINK_OVER_FLAG"
+}
+
 # link_over TMP DEST: rename the link TMP over DEST in one step. DEST that is a link to a folder needs mv's
-# no-target-directory form, or mv puts TMP inside that folder: -T on GNU, -h on BSD and macOS. The idiom of
+# no-target-directory form (link_over_flag), or mv puts TMP inside that folder. The idiom of
 # point_at in merge/install_from_main.sh. Never ln -sfn: GNU ln -f removes DEST before it makes the link.
 link_over() {
   if [ -L "$2" ]; then
-    mv -fT "$1" "$2" 2>/dev/null || mv -fh "$1" "$2" || return 1
+    lo_flag=$(link_over_flag)
+    [ -n "$lo_flag" ] || return 1
+    LINK_OVER_FLAG=$lo_flag
+    mv "$lo_flag" "$1" "$2" || return 1
   else
     mv -f "$1" "$2" || return 1
   fi
@@ -1133,7 +1158,7 @@ gen_switch() {
   rm -f "$gs_tmp"
   ln -s "$gs_to" "$gs_tmp" || return 1
   if [ -L "$GEN_CUR" ]; then
-    mv -fT "$gs_tmp" "$GEN_CUR" 2>/dev/null || mv -fh "$gs_tmp" "$GEN_CUR" || { rm -f "$gs_tmp"; return 1; }
+    link_over "$gs_tmp" "$GEN_CUR" || { rm -f "$gs_tmp"; return 1; }
   elif [ -e "$GEN_CUR" ]; then
     rm -f "$gs_tmp"; return 1
   else

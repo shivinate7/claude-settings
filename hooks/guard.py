@@ -78,8 +78,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        reason names the EnterWorktree tool. An override lifts a direct pointer path. A
                        config-dir spelling of a pointer file is frozen (never_lifted calls is_frozen
                        per target), so no override lifts it, as with frozen-path. It spawns no git.
-  silent-write         deny. A git write whose own trace is silenced, by a null redirect or by
-                       git's `-q`. The measured carve-outs are the comments above
+  silent-write         deny. A git write whose own trace is silenced, by a null redirect, by
+                       git's `-q`, or by a pipe stage after the write that drops lines: `grep`,
+                       `egrep` or `fgrep` with an invert flag (`-v`, a short cluster holding `v`,
+                       `--invert-match`), or a `sed` delete script. `awk` and `sed -n '/x/!p'` are
+                       not read. The measured carve-outs are the comments above
                        SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
   hook-bypass          deny. A git commit, merge or push that skips or redirects the git hooks:
                        `-c core.hooksPath` (key in any case), `--no-verify`, `-n` on commit alone (push
@@ -125,6 +128,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (fg-bash-while-bg)
   playwright-browsers-path, playwright-install
                        deny. (playwright-browsers-path, playwright-install-once)
+  browser-keychain    deny. A Chromium launched by Playwright or Puppeteer (a shell command, or a script a Write or Edit
+                       leaves) without both --use-mock-keychain and --password-store=basic. (render-browser-no-keychain)
   rm-var-unguarded     deny. A recursive delete under an unguarded variable.
                        (rm-on-a-variable-needs-a-guard)
   rm-after-cd          deny. A recursive delete of a relative target after a cd.
@@ -387,7 +392,7 @@ Other tools, in `judge` order:
                        `.git`, a target outside the clone, reads and non-writing shell pass. A git
                        `clean` counts only with a force flag. An
                        override lifts it. It adds no git spawn beyond what the call already spends.
-  scratchpad-owner     ask (deny for an `rm` or `mv` of a folder holding such a file). A call with a valid `agent_id` that runs a file in this session's scratchpad, or
+  scratchpad-owner     ask for a run, refuse a write over one or an `rm` or `mv` of a file or folder. A call with a valid `agent_id` that runs a file in this session's scratchpad, or
                        writes over one, that another agent wrote. Each such write records its agent in a
                        sidecar `<scratchpad>/.writers/<hash>`. A run is an interpreter or the path as the
                        command word; a write is a Write-family target or a shell write target. A first
@@ -644,7 +649,7 @@ if sys.path[:1] != [_HERE]:
 # The rule families in import order: each one imports only guard_core and the families before it.
 _FAMILY_MODULES = ("guard_branch_worktree", "guard_shared_tree", "guard_pointer",
                    "guard_push_delete", "guard_merge", "guard_review_log", "guard_frozen", "guard_env",
-                   "guard_kill", "guard_argv", "guard_stream", "guard_rm_var", "guard_mask_script", "guard_wsl")
+                   "guard_kill", "guard_browser", "guard_argv", "guard_stream", "guard_rm_var", "guard_mask_script", "guard_wsl")
 # guard.py and each guard_*.py the installer copies carry `INSTALL_ID = "<id>"`, one value per install
 # run, stamped at copy time in place of the whole commented placeholder line below. A file with no such line is a placeholder
 # (the repo copy, or an old file from before the stamp). A set of all placeholders matches, which is the
@@ -801,6 +806,8 @@ while True:
         )
         _loading = "guard_wsl"
         from guard_wsl import WSL_REASON, wsl_hit
+        _loading = "guard_browser"
+        from guard_browser import BROWSER_KEYCHAIN_REASON, BROWSER_SCRIPT_EXTENSIONS, command_hit as browser_command_hit, write_hit as browser_write_hit
         # Flat modules the guard reads on every call. A failed import takes this same wait-then-refuse
         # path (decision install-hooks-whole), never a fallback that judges with the read missing.
         # guard_kill imports proc_env above, so its failure surfaces under guard_kill's name.
@@ -879,6 +886,9 @@ SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-
 # output is silenced: `pull` (a fetch plus a merge; its `-q` joins the quiet arm), a `fetch` that
 # names a `src:dst` refspec (it moves a local ref; a bare `fetch` stays a read), `make merge`,
 # `gh pr merge`, and a closed descriptor (`2>&-`, `>&-`), which silences like /dev/null.
+# A pipe stage after the write that drops lines by pattern (`stage_drops_lines`) hides what the write
+# printed the same way, so it counts too, whether or not it is the last stage. `tail` and `head` keep
+# the lines they print, so they stay allowed.
 # `--dry-run` moves nothing and stays allowed. Output sent to a FILE stays allowed: the owner held
 # that until measured.
 
@@ -984,8 +994,10 @@ def discards_output(segment: str) -> bool:
 
 
 # A write whose output feeds a pipe is judged by that pipe's tail: silenced by a redirect, or a
-# `grep -q`, which prints nothing by itself. A printing tail (`| tail -5`, `| tee f`) is not.
-# `bash -c '...'` stays unparsed, a known gap the owner left.
+# `grep -q`, which prints nothing by itself, or dropped by a filter that deletes lines by pattern
+# (`stage_drops_lines`, any stage after the write). A printing tail (`| tail -5`, `| tee f`) is not.
+# `bash -c '...'` stays unparsed, a known gap the owner left. A filter inside a script file the
+# tail runs is out of reach.
 def tail_discards(tail: str) -> bool:
     """True when a pipe's last segment prints nothing the session can read."""
     tail = tail.strip().lstrip("&").strip()   # `|&` leaves a leading `&`
@@ -995,6 +1007,154 @@ def tail_discards(tail: str) -> bool:
     index = resolve_command(tokens) if tokens else None
     return (index is not None and basename(tokens[index]) == "grep"
             and any(t in ("-q", "--quiet", "--silent") for t in tokens[index + 1:]))
+
+
+# `grep` flags that take a value, as a separate word or as the rest of a short cluster.
+GREP_VALUE_FLAGS = set("efmABCd")
+GREP_LONG_VALUE_FLAGS = {"--regexp", "--file", "--max-count", "--after-context", "--before-context",
+                         "--context", "--directories", "--include", "--exclude", "--exclude-dir",
+                         "--label", "--binary-files", "--devices"}
+
+
+def grep_inverts(args) -> bool:
+    """True when a grep's argv carries an invert flag in any spelling: `-v`, a short cluster with
+    `v` ahead of any value letter (`-vE`, `-Ev`), or `--invert-match` (or a prefix of it GNU grep
+    still reads). A word read as a flag's value (`-e -v`) or after `--` is a pattern, never a flag."""
+    skip = False
+    for token in args:
+        if skip:
+            skip = False
+        elif token == "--":
+            return False
+        elif token.startswith("--"):
+            name = token.partition("=")[0]
+            if len(name) > 3 and "--invert-match".startswith(name):
+                return True
+            if name in GREP_LONG_VALUE_FLAGS and "=" not in token:
+                skip = True
+        elif token.startswith("-") and len(token) > 1:
+            for at, letter in enumerate(token[1:], 1):
+                if letter == "v":
+                    return True
+                if letter in GREP_VALUE_FLAGS:
+                    skip = at == len(token) - 1
+                    break
+    return False
+
+
+SED_VALUE_FLAGS = set("efl")   # `-e script`, `-f file`, `-l N`: a letter that takes a value
+
+
+def sed_scripts(args):
+    """The inline sed scripts of an argv: each `-e` / `--expression` value, else the first plain
+    word. A `-f file` script is not read (the file is out of reach), so it adds none."""
+    scripts, plain, skip = [], [], None
+    explicit = False
+    for token in args:
+        if skip:
+            if skip == "e":
+                scripts.append(token)
+            skip = None
+        elif token == "--":
+            continue
+        elif token.startswith("--"):
+            name, eq, value = token.partition("=")
+            if name == "--expression":
+                explicit = True
+                if eq:
+                    scripts.append(value)
+                else:
+                    skip = "e"
+            elif name == "--file":
+                explicit = True
+                skip = None if eq else "f"
+        elif token.startswith("-") and len(token) > 1:
+            for at, letter in enumerate(token[1:], 1):
+                if letter in SED_VALUE_FLAGS:
+                    explicit = explicit or letter != "l"
+                    rest = token[at + 1:]
+                    if rest:
+                        if letter == "e":
+                            scripts.append(rest)
+                    else:
+                        skip = letter
+                    break
+        else:
+            plain.append(token)
+    return scripts if explicit else plain[:1]
+
+
+def sed_deletes(script: str) -> bool:
+    """True when a sed script holds a delete command (`d`): `/re/d`, `5d`, `$d`, `/a/,/b/d`,
+    `/x/{d}`. Read statement by statement, so a `d` inside a regex, an `s` replacement or the text
+    of an `a`/`i`/`c` command is text, never a delete."""
+    at, end = 0, len(script)
+
+    def delimited(i, delimiter):
+        """Index after a delimiter-closed section that starts at i, honouring a backslash."""
+        while i < end and script[i] != delimiter:
+            i += 2 if script[i] == "\\" else 1
+        return i + 1
+
+    while at < end:
+        while at < end and script[at] in " \t\n;{}":
+            at += 1
+        # Addresses: a number, `$`, `first~step`, `/re/` or `\cREc`, joined by `,`, then `!`.
+        while at < end:
+            if script[at] == "/":
+                at = delimited(at + 1, "/")
+            elif script[at] == "\\" and at + 1 < end:
+                at = delimited(at + 2, script[at + 1])
+            elif script[at].isdigit() or script[at] in "$~+":
+                at += 1
+            else:
+                break
+            while at < end and script[at] in "IM":
+                at += 1
+            if at < end and script[at] == ",":
+                at += 1
+            else:
+                break
+        while at < end and script[at] in " \t!":
+            at += 1
+        if at >= end:
+            return False
+        command = script[at]
+        at += 1
+        if command in "dD":
+            return True
+        if command == "{":
+            continue
+        if command in "sy" and at < end:
+            delimiter = script[at]
+            at = delimited(delimited(at + 1, delimiter), delimiter)
+        # Everything else runs to the next `;`, newline or `}`, except the text commands, which
+        # run to the end of the line.
+        if command in "aicrRwW":
+            while at < end and script[at] != "\n":
+                at += 1
+        else:
+            while at < end and script[at] not in ";\n}":
+                at += 1
+    return False
+
+
+def stage_drops_lines(tail: str) -> bool:
+    """True when a pipe stage drops lines by pattern: `grep`, `egrep` or `fgrep` with an invert flag,
+    or a `sed` whose inline script holds a delete. `tail`, `head` and a plain `grep` print what they
+    keep, so they pass. `--color` and `--colour` take a value only after `=`, so `grep --color -v`
+    still inverts."""
+    tail = tail.strip().lstrip("&").strip()
+    tokens = segment_tokens(tail) or []
+    index = resolve_command(tokens) if tokens else None
+    if index is None:
+        return False
+    word, args = basename(tokens[index]), tokens[index + 1:]
+    if word in ("grep", "egrep", "fgrep"):
+        return grep_inverts(args)
+    if word == "sed":
+        return any(sed_deletes(script) for script in sed_scripts(args))
+    return False
 
 
 def quiet_write(args) -> bool:
@@ -1071,7 +1231,7 @@ def silent_write_hit(segment: str, tail: str = ""):
     """Return (matched text, mechanism, kind) for a write whose own trace is silenced, else
     ("", "", "").
 
-    `mechanism` is `"redirect"` or `"quiet"`, so the caller can print the reason that matches
+    `mechanism` is `"redirect"`, `"filter"` (a pipe stage after the write that drops lines) or `"quiet"`, so the caller can print the reason that matches
     what actually fired; `kind` is the act's name (`push`, `commit`, `merge`). A redirect can hide
     a refusal AND a proof of landing on any of the subcommands, while the quiet flag is judged per
     subcommand against `QUIET_FLAG_SUBCOMMANDS`, the measured set. Only `SILENT_WRITE_SUBCOMMANDS`
@@ -1079,9 +1239,11 @@ def silent_write_hit(segment: str, tail: str = ""):
     which is what keeps the test-by-exit-code shape `git rev-parse -q --verify <ref> >/dev/null
     2>&1` allowed. `merge --abort` is carved out inside the loop: it lands nothing, so it has no
     landing to prove. A call whose argv names a read (`read_verb`) is carved out the same way.
-    `tail` is the last segment of the pipe this segment feeds, if any (see `tail_discards`).
+    `tail` is the pipe stage this segment feeds that judges it, if any: the first stage that drops lines,
+    else the last (see `tail_discards`).
     """
     silenced = discards_output(segment) or (bool(tail) and tail_discards(tail))
+    dropped = not silenced and bool(tail) and stage_drops_lines(tail)
     for subcommand, args in git_calls(segment):
         if subcommand == "fetch":
             # Only a fetch that moves a local branch (`src:dst`) is a write; a bare one is a read.
@@ -1096,16 +1258,19 @@ def silent_write_hit(segment: str, tail: str = ""):
         matched = ("git " + subcommand + " " + " ".join(args)).strip()
         if silenced:
             return matched, "redirect", subcommand
+        if dropped:
+            return matched, "filter", subcommand
         if subcommand in QUIET_FLAG_SUBCOMMANDS and quiet_write(args):
             return matched, "quiet", subcommand
-    if silenced:
+    if silenced or dropped:
+        mechanism = "redirect" if silenced else "filter"
         tokens = segment_tokens(segment)
         index = resolve_command(tokens) if tokens else None
         if index is not None:
             word, rest = basename(tokens[index]), tokens[index + 1:]
             if (word == "make" and "merge" in rest) or (
                     word in ("gh", "gh.exe") and rest[:2] == ["pr", "merge"]):
-                return word + " " + " ".join(rest), "redirect", ("make merge" if word == "make" else "gh pr merge")
+                return word + " " + " ".join(rest), mechanism, ("make merge" if word == "make" else "gh pr merge")
     return "", "", ""
 
 
@@ -1274,6 +1439,13 @@ SILENT_WRITE_REDIRECT_REASON = (
     "Rule (Git): command {command} of {total}, the {kind}: a redirect silences this write's own "
     "output (>/dev/null), so neither a refusal nor the line that proves it landed would reach "
     "the session. "
+    "Remedy: run {program} again with its output kept, ending the line with `2>&1 | tail -1`, "
+    "and read what it prints before you say it landed."
+)
+SILENT_WRITE_FILTER_REASON = (
+    "Rule (Git): command {command} of {total}, the {kind}: a pipe stage after it drops lines "
+    "(`grep -v` or a `sed` delete), so the line that says whether this write was refused or landed "
+    "can vanish before it reaches the session. "
     "Remedy: run {program} again with its output kept, ending the line with `2>&1 | tail -1`, "
     "and read what it prints before you say it landed."
 )
@@ -4639,6 +4811,7 @@ from shared_names import REPO_TAG, repo_tag_names  # noqa: E402  the one home of
 EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")  # the rounds of ROLE_ROUND_FALLBACK's reviewer rows, one home for the default
 ROLE_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL"
+ROLE_WORKFLOW_MODEL_ENV = "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL"  # the model a no-model Workflow agent() call is served
 ROLE_MODEL_REASON = (
     "Rule (configuration): this spawn names a model above the one its role runs on. Remedy: drop the model "
     "field, or name the role's model%s. (decision agent-model-cap)"
@@ -4660,6 +4833,14 @@ ROLE_NO_MODEL_REASON = (
     "Rule (configuration): this spawn names no model, its role has no model of its own, and no default "
     "model is set, so it would run on its parent's model. Remedy: name the role's model%s. "
     "(decision agent-model-cap)"
+)
+# A Workflow agent() call that names a role with a row and no model: the agent file's pin does not reach it, so it runs
+# the Workflow default model. It is refused when that default is unset or not the row's model. Its remedy names no model
+# for a Haiku row, as the reason above.
+ROLE_WORKFLOW_NO_MODEL_REASON = (
+    "Rule (configuration): this Workflow agent() call names a role that has a row in the role table, but no `model`, "
+    "and the Workflow default model is unset or is not that row's model, so it would not run on its role's model. "
+    "Remedy: add `model` to the call's options, and name the role's model%s. (decision agent-model-cap)"
 )
 
 
@@ -4997,6 +5178,7 @@ def role_name(table, subagent_type) -> str:
 # A Workflow spawn whose brief the scan could not read carries BRIEF_UNREAD; its refusal adds BRIEF_LITERAL_REMEDY.
 # The remedy stays lowercase mid-sentence, so both refusals carry the same words.
 BRIEF_UNREAD = "brief_unread"
+WORKFLOW_NO_MODEL = "workflow_no_model"   # set on a spawn_inputs yield for a Workflow call with a literal agentType and no model key
 BRIEF_LITERAL_REMEDY = "write the brief as a literal string so the marker is readable"
 
 
@@ -5004,11 +5186,12 @@ def spawn_inputs(tool: str, tool_input):
     """Yield each spawn a call makes, shaped as an Agent input (`subagent_type`, `model`, `prompt`). An Agent or Task
     call is one spawn. A Workflow script yields one per agent() call that names a model, with agentType as the role
     and the model read from the script, so the role and Opus checks judge it as they judge an Agent spawn
-    (decision agent-model-cap). A brief the scan cannot read (a variable, or a prompt key beside a spread) carries no
+    (decision agent-model-cap). A call with a literal agentType, no `model` key and no spread yields too, with
+    WORKFLOW_NO_MODEL set and an empty model: role_model_one refuses it when the role has a row and the Workflow default (ROLE_WORKFLOW_MODEL_ENV) is unset or not that row's model. A brief the scan cannot read (a variable, or a prompt key beside a spread) carries no
     marker and grants nothing, so the spawn is judged with an empty brief and BRIEF_UNREAD set, and its refusal names
     BRIEF_LITERAL_REMEDY, so the author can make the marker readable. A
-    call whose model or agentType the scan cannot read, or that names no model, is skipped: a static read never
-    guesses a role or a model. A shorthand or a spread with no literal agentType may set the role, so it is unread;
+    call whose model or agentType the scan cannot read is skipped, and so is one with no model and no literal
+    agentType, or with a spread that may hold the model: a static read never guesses a role or a model. A shorthand or a spread with no literal agentType may set the role, so it is unread;
     a literal agentType beside a spread is read. step_up_hit still skips an unread brief, as a marker it cannot read
     has no round to check. Other tools yield nothing."""
     if tool in SPAWN_TOOLS:
@@ -5019,7 +5202,12 @@ def spawn_inputs(tool: str, tool_input):
             for k, u, _ in bodies:
                 keys.update(k)
                 unseen |= u
-            if unseen & {"model", "agentType"} or not keys.get("model"):
+            if unseen & {"model", "agentType"}:
+                continue
+            if not keys.get("model"):
+                if "model" not in keys and "..." not in unseen and keys.get("agentType"):
+                    yield {"subagent_type": keys["agentType"], "model": "", "prompt": prompt or "",
+                           BRIEF_UNREAD: prompt is None, WORKFLOW_NO_MODEL: True}
                 continue
             if "..." in unseen and "agentType" not in keys:
                 continue
@@ -5127,6 +5315,14 @@ def role_model_one(tool_input):
                 extra += ROLE_TEST_AUTHOR_NOTE if "1" in free else ROLE_REVIEWER_FIRST_ROUND_NOTE
             return ROLE_MODEL_REASON % extra, model, False
         return "", "", False
+    if tool_input.get(WORKFLOW_NO_MODEL):
+        if role not in table:
+            return "", "", False
+        served = role_model_rank(os.environ.get(ROLE_WORKFLOW_MODEL_ENV, ""))
+        if served is not None and served == role_model_rank(table[role]):
+            return "", "", False  # the Workflow default is the role's own row
+        return (ROLE_WORKFLOW_NO_MODEL_REASON % ("" if table[role] == ROLE_MODEL_RANK[0] else " (%s)" % table[role]),
+                ROLE_NO_MODEL_MATCH + role, False)
     if os.environ.get(ROLE_MODEL_ENV, "").strip():
         return "", "", False
     pinned = role_has_model_pin(pointer, role)
@@ -5807,13 +6003,20 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         last = number
         while last < len(segments) - 1 and ends[last] == "|":
             last += 1
+        if last > number and not tail_discards(segments[last]):
+            # A filter that drops lines in the middle of the chain hides the write's lines as the last
+            # stage does, and a printing `tail` after it brings them back no more. The tail handed on is
+            # the first such stage.
+            last = next((stage for stage in range(number + 1, last)
+                         if stage_drops_lines(segments[stage])), last)
         matched, mechanism, kind = silent_write_hit(segment, segments[last] if last > number else "")
         if matched and not in_throwaway(segments, number, cwd, ends):
             reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"
                       else SILENT_WRITE_QUIET_REASON)
             refuse(tool, "deny", "silent-write",
-                   reason.format(command=live.index(number) + 1, total=len(live), kind=kind,
-                                 program=kind if " " in kind else "git " + kind), matched)
+                   (SILENT_WRITE_FILTER_REASON if mechanism == "filter" else reason).format(
+                       command=live.index(number) + 1, total=len(live), kind=kind,
+                       program=kind if " " in kind else "git " + kind), matched)
 
     # 1c1. A git commit, merge or push that skips the git hooks. Placed after silent-write, so a
     # silenced commit is caught on that defect first. `texts` reads a command substitution as its own command.
@@ -5949,6 +6152,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = playwright_install_hit(stripped, agent)
     if matched:
         refuse(tool, "deny", "playwright-install", PLAYWRIGHT_INSTALL_REASON, matched)
+    # 3c'. A Chromium launched with no mock keychain (decision render-browser-no-keychain). Reads the raw command: a heredoc body is the script.
+    matched = browser_command_hit(raw)
+    if matched:
+        refuse(tool, "deny", "browser-keychain", BROWSER_KEYCHAIN_REASON, matched)
     # 3d. A recursive delete under an unguarded variable (decision rm-on-a-variable-needs-a-guard).
     # The guard syntax `${NAME:?}` is POSIX, so a PowerShell tool call is not judged.
     hits = [] if POWERSHELL_CALL[0] else rm_var_hits(stripped, cwd)
@@ -7128,6 +7335,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
         # holds scratchpads and throwaway clones, so it passes.
         clone_hit[target] = (
             path_is_inside(resolved, temp) is not True
+            and not in_any_session_scratchpad(resolved)
             and ((stranded and bool(owner) and path_is_inside(resolved, os.path.join(owner, ".git")) is not True)
                  or (not owner and _separate_clone(resolved, tops, common))))
         if clone_hit[target]:
@@ -7371,7 +7579,7 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # Rule scratchpad-owner (decision scratchpad-owner). Every agent of a session shares the session's
 # scratchpad, so one agent can run a script another agent left there. A call from an agent that writes a
 # file in the scratchpad records the agent as its writer (`scratchpad_record_writer`); a shell call from an
-# agent that runs a scratchpad file another agent recorded asks, and so does a write over such a file; a folder removal is refused. A call
+# agent that runs a scratchpad file another agent recorded asks; a write over such a file and a folder removal are refused. A call
 # with no `agent_id`, a file with no record, an agent's own file and a read pass. The text gate (`SCRATCHPAD_WORD`) keeps a call that names no scratchpad from
 # touching the disk: a path that reaches the scratchpad by a symlink is the ceiling, and passes.
 SCRATCHPAD_WORD = "scratchpad"
@@ -7382,9 +7590,10 @@ SCRATCHPAD_OWNER_REASON = (
     "(decision scratchpad-owner, an agent runs only its own read copy of a scratchpad file, and never overwrites another agent's)"
 )
 SCRATCHPAD_OVERWRITE_REASON = (
-    "Rule (scratchpad-owner): this file was written by another agent of this session, and writing over it "
+    "Rule (scratchpad-owner): this file was written by another agent of this session, and removing, moving or writing over it "
     "destroys work that agent may still need. "
-    "Remedy: write your own file under a fresh file name of your own. "
+    "Remedy: write your own file under a fresh file name in the scratchpad. "
+    "If this refusal looks wrong for your task, comply anyway and say so in your report. "
     "(decision scratchpad-owner, an agent runs only its own read copy of a scratchpad file, and never overwrites another agent's)"
 )
 SCRATCHPAD_FOLDER_REASON = (
@@ -7519,7 +7728,7 @@ def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
     return agent, session, files, removed, moved
 
 
-def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> None:
+def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str, record: bool = True) -> None:
     """Rule scratchpad-owner, the write form. A call with no `agent_id` clears the record of each scratchpad
     file it writes: the file is its own now. An agent's call records the agent as the writer of each file it
     writes, and is refused when a file's record named another agent. A refused write moves no record; an owner
@@ -7527,7 +7736,8 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
     `rm` names is judged but not recorded. A `cp` destination is the caller's file; an `mv` destination carries
     the record of its source, or the caller's when the source lies outside the scratchpad. A first write, a
     rewrite of its own file and a file that no longer exists pass (`scratchpad_writer_of`). Run once the call's
-    other rules passed."""
+    other rules passed. `record=False` judges only: the run ask calls it so an overwrite is refused before the
+    ask, and the call that the ask holds records nothing."""
     agent, session, files, removed, moved = scratchpad_writes(payload, tool, tool_input, cwd)
     after = {}   # the writer each recorded file gets, read before any record changes
 
@@ -7544,6 +7754,8 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
     for full in files:
         after[full] = writer_after(full)
     if not agent:
+        if not record:
+            return
         for full in files:
             if full in moved and under_session_scratchpad(moved[full], session):
                 scratchpad_record_writer(full, session, after[full])
@@ -7558,8 +7770,8 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
                 taken = "agent %s writes over a scratchpad file agent %s wrote: %s" % (agent, writer, full)
         elif full in removed:
             # An `rm` or `mv` that names a folder, the scratchpad itself or a glob removes each file under it, and
-            # only a file has a record: read the files (`scratchpad_folder_writer`). A folder is a deny and a file
-            # an ask, so the folder wins whatever its place in the call: a file listed first must not hide it.
+            # only a file has a record: read the files (`scratchpad_folder_writer`). A folder and a file are both
+            # refused, each with its own reason, so the folder wins whatever its place in the call: a file listed first must not hide it.
             held = scratchpad_folder_writer(full, session, agent)
             if held:
                 taken = "agent %s removes a scratchpad folder holding a file agent %s wrote: %s" % (agent, held[1], held[0])
@@ -7573,15 +7785,16 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
 
     if taken:
         # A refused write lands nothing, so the record stays with the first writer; an override that lifts it moves it.
-        refuse(tool, "deny" if reason is SCRATCHPAD_FOLDER_REASON else "ask", "scratchpad-owner", reason, taken,
+        refuse(tool, "deny", "scratchpad-owner", reason, taken,
                on_lift=record_writers)
-    record_writers()
+    if record:
+        record_writers()
 
 
 def scratchpad_folder_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     """Rule scratchpad-owner, the folder form: the log detail when an agent's call removes or moves a folder, the
     scratchpad itself or a glob that holds a file another agent wrote, else ''. A removed file that is itself
-    another agent's is an overwrite ask (`scratchpad_owner_write`), not a folder, so it is skipped here. The shell
+    another agent's is an overwrite refusal (`scratchpad_owner_write`), not a folder, so it is skipped here. The shell
     path reads this before the run ask: a folder removal is a deny, and the run ask must not hide it."""
     agent, session, files, removed, _moved = scratchpad_writes(payload, tool, tool_input, cwd)
     if not agent:
@@ -8520,6 +8733,7 @@ def judge(payload) -> None:
                 folder = scratchpad_folder_hit(payload, tool, tool_input, cwd)
                 if folder:
                     refuse(tool, "deny", "scratchpad-owner", SCRATCHPAD_FOLDER_REASON, folder)
+                scratchpad_owner_write(payload, tool, tool_input, cwd, record=False)   # an overwrite, `rm` or `mv` of another agent's file is a refusal too: judged before the run ask
                 refuse(tool, "ask", "scratchpad-owner", SCRATCHPAD_OWNER_REASON, owned)
             scratchpad_owner_write(payload, tool, tool_input, cwd)   # the call passed: refuse an overwrite, else record the writer
         return
@@ -8577,6 +8791,11 @@ def judge(payload) -> None:
         # holding checkout's extras file, read once per call, only when the target sits in a checkout.
         if is_protected(target, cwd):
             refuse(tool, "deny", "protected-path", protected_reason(target), target)
+        # 7e. A script that launches a Chromium with no mock keychain (decision render-browser-no-keychain). Judged on the
+        # launches the write adds. Cost: one read of the target, only for a script file (an extension in BROWSER_SCRIPT_EXTENSIONS, or none).
+        launch = browser_launch_write_hit(tool, tool_input, target, cwd)
+        if launch:
+            refuse(tool, "deny", "browser-keychain", BROWSER_KEYCHAIN_REASON, launch)
     for target in targets:
         # 7b. A project config edit: allowed (Decision 7), and noted in the log only.
         if is_project_config(target, cwd):
@@ -8594,6 +8813,26 @@ def judge(payload) -> None:
                 refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, target),
                        log_path_and_text(target, change))
     scratchpad_owner_write(payload, tool, tool_input, cwd)   # every refusal above passed: refuse an overwrite, else record the writer
+
+
+def browser_launch_write_hit(tool, tool_input, target, cwd) -> str:
+    """The Chromium launch with no mock keychain that a Write, Edit or MultiEdit would add to a script file, else ''.
+    The text the call leaves is judged against the text the file holds now, so a launch the file already holds passes."""
+    if tool not in ("Write", "Edit", "MultiEdit"):
+        return ""
+    if os.path.splitext(target)[1].lower() not in BROWSER_SCRIPT_EXTENSIONS:
+        return ""   # not a script, and no read of the file
+    path = os.path.expanduser(target)
+    path = path if os.path.isabs(path) else os.path.join(cwd or "", path)
+    if tool == "Write" and isinstance(tool_input.get("content"), str):
+        try:
+            with open(path, encoding="utf-8") as handle:
+                old = handle.read()
+        except (OSError, ValueError):
+            old = None
+        return browser_write_hit(path, old, tool_input["content"])
+    result = write_result_texts(tool_input, path)
+    return browser_write_hit(path, result[0], result[1]) if result else ""
 
 
 def write_targets(tool_input: dict) -> list:

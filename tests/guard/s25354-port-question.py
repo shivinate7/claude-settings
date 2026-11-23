@@ -23,7 +23,9 @@ with open(os.path.join(PQ_REPO, ".claude", "layout-extras.json"), "w", encoding=
 # no port word and no press word.
 OJ_GOAL = "Goal: keep the CI checks fast, and keep every check"
 OJ_STAKE = "Problem (risk): a wrong pick here changes what the guard lets through, so it needs your word"
-OJ_BASED = "Based on (read): the stamp check runs in the lint job today"
+# A read premise names its path:line (decision premise-format). OJ_READ_AT is the one home of that cite.
+OJ_READ_AT = ".github/workflows/checks.yml:190"
+OJ_BASED = "Based on (read): the stamp check runs in the lint job today (%s)" % OJ_READ_AT
 OJ_FORM = "\n".join((OJ_GOAL, OJ_STAKE, OJ_BASED))
 # The Departs from line a question carries (rule question-departs, its cases in that section). A port item
 # carries it too, so the port rule's own no-line cases build their item without it (pq_item's default).

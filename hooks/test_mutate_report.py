@@ -199,6 +199,33 @@ class PartsTests(unittest.TestCase):
         self.assertEqual(classify(1, "FAIL: slow\n", True), "timeout")
         self.assertEqual(classify(0, "", True), "timeout")
 
+    def test_an_xctest_assertion_on_macos_reads_as_assert(self):
+        out = ("/p/Tests/KitTests/ATests.swift:12: error: -[KitTests.ATests testX] : "
+               "XCTAssertEqual failed: (\"1\") is not equal to (\"2\")\n"
+               "Test Case '-[KitTests.ATests testX]' failed (0.002 seconds).\n")
+        self.assertEqual(mutate_shared.classify_run(1, out, False), "assert",
+                         "an XCTest assertion (macOS shape, no FAIL line) did not read as assert")
+
+    def test_an_xctest_assertion_on_linux_reads_as_assert(self):
+        out = ("/p/Tests/ATests.swift:12: error: ATests.testX : XCTAssertTrue failed\n"
+               "Test Case 'ATests.testX' failed (0.002 seconds).\n")
+        self.assertEqual(mutate_shared.classify_run(1, out, False), "assert",
+                         "an XCTest assertion (Linux shape, no FAIL line) did not read as assert")
+
+    def test_a_swift_compile_error_reads_as_build(self):
+        out = "/p/Sources/Kit/A.swift:3:5: error: cannot find 'x' in scope\n"
+        self.assertEqual(mutate_shared.classify_run(1, out, False), "build",
+                         "a Swift compile error did not read as build")
+
+    def test_a_swiftpm_plugin_error_reads_as_build(self):
+        out = "error: No OpenAPI document found\n"
+        self.assertEqual(mutate_shared.classify_run(1, out, False), "build",
+                         "a SwiftPM plugin error did not read as build")
+
+    def test_a_nonzero_exit_with_neither_shape_reads_as_crash(self):
+        self.assertEqual(mutate_shared.classify_run(1, "", False), "crash",
+                         "a nonzero exit with no output and neither shape did not read as crash")
+
     def test_ast_mutants_are_valid_distinct_and_bounded(self):
         mutants = mutate_shared.ast_mutants(SUBJECT, limit=3)
         self.assertEqual(len(mutants), 3)
@@ -219,17 +246,17 @@ class PartsTests(unittest.TestCase):
             mutate_shared.ast_mutants("def broken(:\n", limit=5)
 
     def test_format_report_names_an_unloaded_suite(self):
-        row = {"file": "subject.py", "status": "OK", "made": 10, "killed": 0, "crashed": 0, "survived": 10,
-               "rate": 0.0, "silent": [], "unusable": {}, "reason": "", "unloaded": ["test_s.py"]}
+        row = {"file": "subject.py", "status": "OK", "made": 10, "killed": 0, "crashed": 0, "timeout": 0,
+               "survived": 10, "rate": 0.0, "silent": [], "unusable": {}, "reason": "", "unloaded": ["test_s.py"]}
         text = mutate_shared.format_report([row])
         self.assertTrue(any("test_s.py" in line and "unloaded" in line for line in text.splitlines()),
                         "format_report does not name the unloaded suite:\n" + text)
 
     def test_format_report_prints_unknown_never_a_rate(self):
         rows = [
-            {"file": "a.py", "status": "OK", "made": 10, "killed": 4, "crashed": 1, "survived": 5, "rate": 0.4,
-             "silent": ["test_n.py"], "unusable": {}, "reason": "", "target": 0.9},
-            {"file": "b.py", "status": "UNKNOWN", "made": 0, "killed": 0, "crashed": 0, "survived": 0,
+            {"file": "a.py", "status": "OK", "made": 10, "killed": 4, "crashed": 1, "timeout": 0, "survived": 5,
+             "rate": 0.4, "silent": ["test_n.py"], "unusable": {}, "reason": "", "target": 0.9},
+            {"file": "b.py", "status": "UNKNOWN", "made": 0, "killed": 0, "crashed": 0, "timeout": 0, "survived": 0,
              "rate": None, "silent": [], "unusable": {}, "reason": "baseline red", "target": 0.9},
         ]
         text = mutate_shared.format_report(rows)
@@ -239,6 +266,14 @@ class PartsTests(unittest.TestCase):
         self.assertIn("UNKNOWN", line)
         self.assertNotIn("%", line)
         self.assertIn("test_n.py", text)
+
+    def test_format_report_counts_a_timeout_apart_from_crashed(self):
+        row = {"file": "subject.py", "status": "OK", "made": 10, "killed": 3, "crashed": 1, "timeout": 2,
+               "survived": 4, "rate": 0.3, "silent": [], "unusable": {}, "reason": "", "unloaded": []}
+        lines = mutate_shared.format_report([row]).splitlines()
+        self.assertIn("timeout", lines[0].split(), "format_report has no timeout column:\n" + lines[0])
+        self.assertEqual(lines[1].split()[:7], ["subject.py", "10", "3", "1", "2", "4", "30%"],
+                         "format_report does not put the timeout count in its own column: %r" % lines[1])
 
 
 class CliTests(unittest.TestCase):

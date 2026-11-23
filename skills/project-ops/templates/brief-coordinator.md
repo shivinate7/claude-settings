@@ -7,8 +7,9 @@ request and says the pick in one line before it starts. It tags itself `cs-repo:
 ## Task
 
 Run the build of {{repo}}. Start triage and the batch runner together, as a trio, before any lane. Then start each
-lane in roadmap order, with its brief, effort `medium`, and the tags `cs-repo`, `cs-build:lane`, `cs-step` and
-`cs-topic`. Keep lane state, write each lane brief and talk with the owner.
+lane in roadmap order, with its brief, effort `medium`, `model` set to the lane row of decision
+`agent-model-cap`, and the tags `cs-repo`, `cs-build:lane`, `cs-step` and `cs-topic`. Keep lane state, write each lane
+brief and talk with the owner.
 
 Limits:
 - It never merges. A batch runner runs each merge under the coordinator's standing merge grant. The owner grants

@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+"""Cases for hooks/tree_export.py (`export_tree`): what an export of a commit that tracks a symlink leaves in a folder.
+
+    python3 hooks/test_tree_export.py
+
+The fixture commit tracks `spec/openapi.yaml` and `Sources/Kit/openapi.yaml`, a symlink to `../../spec/openapi.yaml`.
+The link is a symlink entry in the index (`git update-index --cacheinfo 120000`), so the fixture builds where
+os.symlink is refused. The archive lists the link before its target, so the export meets the link first.
+Standard library only.
+"""
+import os
+import subprocess
+import sys
+import unittest
+from unittest import mock
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(REPO, "lint"))
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+sys.path.insert(0, os.path.join(REPO, "testing"))
+import tracked_tree  # noqa: E402  rm_tree clears the read-only bit of git objects (testing/tracked_tree.py)
+import tree_export  # noqa: E402  the one home of the export (hooks/tree_export.py)
+
+ROOT = _test_temp.run_folder()
+SPEC = "openapi: 3.0.3\ninfo:\n  title: Kit\n"
+LINK = "../../spec/openapi.yaml"
+LINK_PATH = os.path.join("Sources", "Kit", "openapi.yaml")
+REFUSED = OSError(1, "symlink refused: no symlink privilege")
+SCRUBBED = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES")
+SRC = None
+SHA = None
+
+
+def git(repo, *args, stdin=None):
+    """One git call in the fixture repo. Raises RuntimeError on a nonzero exit: a broken fixture is not a red case."""
+    env = {key: value for key, value in os.environ.items() if key not in SCRUBBED}
+    for key, value in (("GIT_AUTHOR_NAME", "fixture"), ("GIT_AUTHOR_EMAIL", "fixture@example.invalid"),
+                       ("GIT_COMMITTER_NAME", "fixture"), ("GIT_COMMITTER_EMAIL", "fixture@example.invalid")):
+        env.setdefault(key, value)
+    done = subprocess.run(["git", "-C", repo] + list(args), input=stdin, capture_output=True, text=True, env=env)
+    if done.returncode != 0:
+        raise RuntimeError("git %s failed: %s" % (args[0], done.stderr.strip()))
+    return done.stdout.strip()
+
+
+def make_fixture(root, files=None, links=None):
+    """A repo under `root` whose one commit tracks `files` (path -> text) and `links` (path -> link target, each a symlink
+    entry). The default is the spec and the symlink to it. -> (repo, commit sha)."""
+    if files is None:
+        files = {"spec/openapi.yaml": SPEC}
+    if links is None:
+        links = {LINK_PATH.replace(os.sep, "/"): LINK}
+    repo = os.path.join(root, "src")
+    os.makedirs(repo, exist_ok=True)
+    git(repo, "init", "-q")
+    for rel, text in files.items():
+        path = os.path.join(repo, *rel.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+    if files:
+        git(repo, "add", "--", *files)
+    for rel, target in links.items():
+        blob = git(repo, "hash-object", "-w", "--stdin", stdin=target)
+        git(repo, "update-index", "--add", "--cacheinfo", "120000,%s,%s" % (blob, rel))
+    git(repo, "commit", "-q", "--no-gpg-sign", "-m", "Track the fixture files and links")
+    return repo, git(repo, "rev-parse", "HEAD")
+
+
+def escapes(dest):
+    """(path, real path) of each entry under dest whose real path lies outside dest. Links are not followed into."""
+    root = os.path.realpath(dest)
+    found = []
+    for folder, names, files in os.walk(dest):
+        for name in names + files:
+            path = os.path.join(folder, name)
+            real = os.path.realpath(path)
+            if os.path.commonpath([root, real]) != root:
+                found.append((os.path.relpath(path, dest), real))
+    return found
+
+
+def setUpModule():
+    global SRC, SHA
+    SRC, SHA = make_fixture(ROOT)
+
+
+def tearDownModule():
+    tracked_tree.rm_tree(ROOT)  # test-temp-standard: teardown removes the run folder
+
+
+class TreeExportSymlinkCases(unittest.TestCase):
+    """A commit that tracks a symlink: the export keeps the link, and a host that refuses os.symlink still gets the target's text."""
+
+    def export(self, name):
+        """Export the fixture commit into a fresh folder. -> (folder, error), error None when the export worked."""
+        dest = os.path.join(ROOT, name)
+        os.makedirs(dest)
+        return dest, tree_export.export_tree(SRC, SHA, dest)
+
+    def read(self, path):
+        with open(path, encoding="utf-8", newline="") as handle:
+            return handle.read()
+
+    def test_a_tracked_relative_symlink_stays_a_link_in_the_export(self):
+        dest, error = self.export("kept")
+        self.assertIsNone(error, "the export of a commit with a tracked symlink failed: %s" % error)
+        link = os.path.join(dest, LINK_PATH)
+        self.assertTrue(os.path.islink(link), "the tracked symlink is missing from the export")
+        self.assertEqual(os.readlink(link), LINK, "the exported link does not point at the tracked target")
+        self.assertEqual(self.read(link), SPEC, "reading the exported link does not give the target's text")
+
+    def test_a_refused_symlink_leaves_the_target_text_at_its_path(self):
+        with mock.patch("os.symlink", side_effect=REFUSED):
+            dest, error = self.export("refused")
+        self.assertIsNone(error, "a refused symlink failed the whole export: %s" % error)
+        link = os.path.join(dest, LINK_PATH)
+        self.assertTrue(os.path.exists(link), "a refused symlink left nothing at its path in the export")
+        self.assertEqual(self.read(link), SPEC, "the file at a refused symlink's path does not hold the target's text")
+
+    def test_a_refused_symlink_does_not_fail_the_other_files(self):
+        with mock.patch("os.symlink", side_effect=REFUSED):
+            dest, error = self.export("refused-other")
+        self.assertIsNone(error, "a refused symlink failed the whole export: %s" % error)
+        self.assertEqual(self.read(os.path.join(dest, "spec", "openapi.yaml")), SPEC,
+                         "the other file did not export where os.symlink is refused")
+
+
+SECRET = "not for the export\n"
+
+
+def escape_export(name, links):
+    """Export a commit that tracks `links` into dest, a folder two levels below ROOT/<name>. The secret one level above dest
+    is at inner/secret.txt, and the one two levels above is at secret2.txt. -> (dest, error)."""
+    base = os.path.join(ROOT, name)
+    parent = os.path.join(base, "inner")
+    dest = os.path.join(parent, "dest")
+    os.makedirs(dest)
+    for path in (os.path.join(parent, "secret.txt"), os.path.join(base, "secret2.txt")):
+        with open(path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(SECRET)
+    repo, sha = make_fixture(base, files={}, links=links)
+    return dest, tree_export.export_tree(repo, sha, dest)
+
+
+class TreeExportLinkTargetCases(unittest.TestCase):
+    """A link whose real path leaves the export fails the export, and the error names it. Where os.symlink is refused,
+    a link to a tracked directory copies the directory's contents."""
+
+    def assert_refused_by_name(self, dest, error, names):
+        self.assertIsNotNone(error, "the export let an escaping link through and returned None")
+        self.assertTrue(any(name in error for name in names),
+                        "the export's error names none of the escaping links %s: %s" % (names, error))
+        found = escapes(dest)
+        self.assertEqual(found, [], "a link under the export still resolves outside it: %s" % found)
+
+    def test_a_direct_link_out_of_the_export_is_refused_by_name(self):
+        dest, error = escape_export("direct", {"escape-link.txt": "../secret.txt"})
+        self.assert_refused_by_name(dest, error, ["escape-link.txt"])
+
+    def test_an_absolute_link_out_of_the_export_is_refused_by_name(self):
+        secret = os.path.join(ROOT, "absolute", "inner", "secret.txt")
+        dest, error = escape_export("absolute", {"abs-link.txt": secret})
+        self.assert_refused_by_name(dest, error, ["abs-link.txt"])
+
+    def test_a_chain_through_a_link_to_the_export_is_refused_by_name(self):
+        dest, error = escape_export("chain", {"chain-a": "chain-b/../secret.txt", "chain-b": "."})
+        self.assert_refused_by_name(dest, error, ["chain-a"])
+
+    def test_a_three_level_chain_out_of_the_export_is_refused_by_name(self):
+        links = {"chain3-a": "chain3-b/../secret2.txt", "chain3-b": "chain3-c/..", "chain3-c": "."}
+        dest, error = escape_export("chain3", links)
+        self.assert_refused_by_name(dest, error, ["chain3-a", "chain3-b"])
+
+    def test_a_refused_link_to_a_tracked_directory_copies_its_contents(self):
+        base = os.path.join(ROOT, "dirlink")
+        dest = os.path.join(base, "dest")
+        os.makedirs(dest)
+        repo, sha = make_fixture(base, files={"spec/openapi.yaml": SPEC}, links={"Sources/Kit/spec": "../../spec"})
+        with mock.patch("os.symlink", side_effect=REFUSED):
+            error = tree_export.export_tree(repo, sha, dest)
+        self.assertIsNone(error, "a refused link to a tracked directory failed the export: %s" % error)
+        with open(os.path.join(dest, "Sources", "Kit", "spec", "openapi.yaml"), encoding="utf-8", newline="") as handle:
+            self.assertEqual(handle.read(), SPEC, "the directory's contents are not at the refused link's path")
+
+
+if __name__ == "__main__":
+    unittest.main()

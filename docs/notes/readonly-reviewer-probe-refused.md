@@ -1,0 +1,1 @@
+- readonly-reviewer-probe-refused: readonly-shell-write refused a reviewer's read-only probe (as reported; the command was not recorded). It may share a cause with debt readonly-write-paren-redirect (a `)` after a descriptor duplicate), which is unverified for this case. Seen: 2026-11-23 x1

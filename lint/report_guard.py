@@ -997,6 +997,47 @@ def hassio_path_problem(text):
     return ""
 
 
+# style-hand-off-runs-as-is: a fenced shell block the reply hands the owner must run as it stands. The detector is
+# question_form.command_placeholder, the one home also read by the waiting page. A fence inside the report blockquote
+# is no hand-off and is skipped; an unclosed fence reads to the end of the reply.
+PLACEHOLDER_CHECK = "Hand-off placeholder guard"
+PLACEHOLDER_REASON = owner_line(
+    PLACEHOLDER_CHECK,
+    "the %s block holds the unfilled placeholder %r, so it does not run as it stands (rule style-hand-off-runs-as-is)")
+SHELL_FENCE_LANGS = {"bash", "sh", "zsh", "powershell", "pwsh", "ps1", "shell"}
+FENCE_OPEN_RE = re.compile(r"^[ \t]*(```+|~~~+)[ \t]*([\w+-]*)")
+
+
+def shell_blocks(text):
+    """(language, body) of each fenced shell block of `text` that sits outside a blockquote."""
+    lang, fence, body = "", "", []
+    for line in text.splitlines():
+        if not fence:
+            opened = FENCE_OPEN_RE.match(line)
+            if opened:
+                fence, lang, body = opened.group(1), opened.group(2).lower(), []
+            continue
+        if line.strip().startswith(fence):
+            if lang in SHELL_FENCE_LANGS:
+                yield lang, "\n".join(body)
+            fence = ""
+        else:
+            body.append(line)
+    if fence and lang in SHELL_FENCE_LANGS:
+        yield lang, "\n".join(body)
+
+
+def placeholder_problem(text):
+    """The refusal for a reply whose fenced shell block holds an unfilled placeholder, else ''. One refusal names the first."""
+    _hooks_on_path()
+    import question_form
+    for lang, body in shell_blocks(text):
+        token = question_form.command_placeholder(body)
+        if token:
+            return PLACEHOLDER_REASON % (lang, token)
+    return ""
+
+
 # reports-done-names-models: a Done item that agents built or reviewed names each one's role
 # and model, as "(builder sonnet, reviewer sonnet)". Only these roles build or review; an Explore
 # search or a Plan spawn needs no name. A Workflow agent() is unseen: its model can sit in a variable.
@@ -3683,6 +3724,10 @@ def main():
             pass
         try:
             relay.append(hassio_path_problem(text))
+        except Exception:
+            pass
+        try:
+            relay.append(placeholder_problem(text))
         except Exception:
             pass
     cannot = ""

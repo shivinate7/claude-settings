@@ -307,17 +307,17 @@ def mutate_script(log, out="", err="", rc=0, shards=None, sleeps=None):
             .replace("__RC__", repr(rc)).replace("__SHARDS__", repr(shards or {})).replace("__SLEEPS__", repr(sleeps or {})))
 
 
-def mutate_report(made, killed, crashed, survived):
+def mutate_report(made, killed, crashed, survived, timeout=0):
     """The per-file table a mutation test run prints, from hooks/mutate_shared.py's format_report (the one home of that format). Its crashed
-    column counts the mutants a run could not read (a crash or a timeout); the lint calls those unknown."""
+    column counts the mutants a run could not read; a timed-out mutant has its own timeout column."""
     row = {"file": "hooks/guard.py", "status": "OK", "reason": "", "made": made, "killed": killed, "crashed": crashed,
-           "survived": survived, "rate": killed / made, "silent": [], "unusable": {}, "unloaded": []}
+           "timeout": timeout, "survived": survived, "rate": killed / made, "silent": [], "unusable": {}, "unloaded": []}
     return mutate_shared.format_report([row]) + "\n"
 
 
 def real_tally(killed, survived=0, wrong=0, unknown=0):
     """The output a mutation test run prints, from mutate_shared.run_mutants itself (the one home of the tally's format): one stub mutant per
-    verdict, so the tally line and the verdict lines are the job's own. `unknown` mutants read UNKNOWN, as a crashed or timed-out mutant does."""
+    verdict, so the tally line and the verdict lines are the job's own. `unknown` mutants read UNKNOWN, as a mutant that could not be read does."""
     entries = (["kill-%d" % i for i in range(killed)] + ["survive-%d" % i for i in range(survived)]
                + ["wrong-%d" % i for i in range(wrong)] + ["unknown-%d" % i for i in range(unknown)])
 
@@ -2119,6 +2119,19 @@ def lane_lint_usage():
         return None
     end = next((i for i in range(starts[0] + 1, len(lines)) if lines[i].startswith("  merge ")), len(lines))
     return "\n".join(lines[starts[0]:end])
+
+
+class MutateReportReader(unittest.TestCase):
+    """merge.mutate_report_counts reads the per-file table that format_report prints. Its columns are file, mutants, killed,
+    crashed, timeout, survived, rate and silent suites, so the reader takes its counts by column, not by position of a four-count row."""
+
+    def test_the_reader_takes_killed_survived_and_unknown_from_a_table_with_a_timeout_column(self):
+        out = mutate_report(12, 6, 1, 3, timeout=2)
+        counts = merge.mutate_report_counts(out)
+        self.assertIsNotNone(counts, "the reader finds no report in a table with a timeout column, so the lint reads the run as unread:\n" + out)
+        # unknown is the crashed count plus the timeout count: a timed-out mutant is one the lint could not read, so it still fails the lint.
+        self.assertEqual(counts[:3], (6, 3, 3),
+                         "the reader takes the wrong columns of the table (want killed 6, survived 3, unknown 1 crashed + 2 timeout):\n" + out)
 
 
 class MutateLoadCap(unittest.TestCase):

@@ -271,3 +271,60 @@ LOG_CHECKS_EXTRA.append(("audit-high fail-closed list: a new guard_* file is pic
 # guard reads the old damaged file or the whole new one, never half of one. A guard that does not
 # wait finishes on its first load, well inside that delay, and so is caught refusing or allowing
 # before the fix lands.
+
+
+# ---- The install stamp. An installer swaps each module's exact placeholder line for INSTALL_ID = "<id>". Every
+# module the guard loads must carry that line, or an installed copy leaves it unstamped, and the guard refuses every
+# call as guard-crash (decision install-hooks-whole, the stamp check of guard.py).
+PLACEHOLDER_LINE = '# INSTALL_ID = "uninstalled"'
+
+
+def _every_loaded_module_carries_the_placeholder():
+    """guard.py and each module of its load list hold the placeholder line, so an install stamps every one."""
+    folder = os.path.dirname(GUARD)
+    names = ("guard",) + _guard_family_constant(GUARD)
+    bare = []
+    for name in names:
+        try:
+            with open(os.path.join(folder, name + ".py"), encoding="utf-8") as handle:
+                lines = [line.strip() for line in handle]
+        except OSError:
+            lines = []
+        if PLACEHOLDER_LINE not in lines:
+            bare.append(name)
+    if bare:
+        return False, "no placeholder line in %s: an installed copy leaves them unstamped" % ", ".join(sorted(bare))
+    return True, "guard.py and the %d modules it loads each carry the placeholder line" % (len(names) - 1)
+
+
+def _stamped_copy(name, install_id):
+    """A copy of guard.py and its modules as an install lays them down: each exact placeholder line is swapped for
+    INSTALL_ID = "<id>", and a file with no placeholder line is copied as it is."""
+    folder = _guard_copy(name, None)
+    for entry in sorted(os.listdir(folder)):
+        if not entry.endswith(".py"):
+            continue
+        path = os.path.join(folder, entry)
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.read().split("\n")
+        lines = ['INSTALL_ID = "%s"' % install_id if line.strip() == PLACEHOLDER_LINE else line for line in lines]
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines))
+    return folder
+
+
+def stamped_install_check():
+    """A stamped copy allows the plain call. Any module the stamp missed makes the guard refuse it as guard-crash."""
+    run = _run_copy(_stamped_copy("stamped-install", "stampedtest"), FAILCLOSED_CALL, "stamped-install")
+    decision, reason = _decision(run)
+    if GUARD_CRASH in run.stdout:
+        return False, "a stamped copy refuses the plain call as guard-crash: a module without the placeholder line stays unstamped"
+    if decision != "allow" or run.returncode != 0:
+        return False, "a stamped copy gave %r, exit %d: %r" % (decision, run.returncode, reason[:90])
+    return True, "a stamped copy allows the plain call, exit 0"
+
+
+LOG_CHECKS_EXTRA.append(("install-stamp: every module the guard loads carries the placeholder line",
+                         _every_loaded_module_carries_the_placeholder))
+LOG_CHECKS_EXTRA.append(("install-stamp: a stamped copy allows the plain call, not guard-crash",
+                         stamped_install_check))

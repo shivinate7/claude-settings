@@ -141,8 +141,9 @@ function runFolder(root = TEMP_ROOT) {
 }
 
 function serve(req, res) {
-  if (req.url === "/slow.html") return; // never answers: the route must time out
-  const body = PAGES[req.url];
+  const pathname = req.url.split("?")[0]; // a query is no part of the page's name
+  if (pathname === "/slow.html") return; // never answers: the route must time out
+  const body = PAGES[pathname];
   res.writeHead(body ? 200 : 404, { "content-type": "text/html", connection: "close" });
   res.end(body || "not found");
 }
@@ -819,3 +820,177 @@ for (const [label, key, cfg] of REFUSED) {
     assert.deepEqual(r.pngs, []);
   });
 }
+
+// ---- Single-target mode: shoot --file HTML | shoot --url URL (decision shoot-is-one-shared-command) ----
+// One page, no config: one PNG named <file or last path name>-<width>-<theme>.png, with the page's .html beside it.
+// A usage error exits 2 and its usage line names this mode. Each run gets its own folder under this run's folder.
+Object.assign(PAGES, {
+  // The query and the hash the URL carries, written into the body, so the .html shows what the browser was sent.
+  "/hash.html": `<!doctype html><style>${LOOK}</style><p id="out"></p>
+    <script>document.getElementById("out").textContent = "search=" + location.search + " hash=" + location.hash; document.body.className = "ready";</script>`,
+});
+
+function singleDir() {
+  const dir = path.join(tmp, `single-${++n}`);
+  fs.mkdirSync(dir);
+  return dir;
+}
+
+// One single-target run in `dir`. Its PNGs and .html files are read from dir/out, the --out folder it is given.
+async function single(dir, args, env = {}) {
+  const out = path.join(dir, "out");
+  const child = spawn(process.execPath, [SHOOT, ...args, "--out", out], { env: { ...process.env, ...env }, timeout: 120000 });
+  let text = "";
+  child.stdout.on("data", (d) => (text += d));
+  child.stderr.on("data", (d) => (text += d));
+  const code = await new Promise((r) => child.on("close", r));
+  const files = fs.existsSync(out) ? fs.readdirSync(out).sort() : [];
+  return { code, out: text, dir: out, pngs: files.filter((f) => f.endsWith(".png")), htmls: files.filter((f) => f.endsWith(".html")) };
+}
+
+// A page on disk for --file, with the fixture's content.
+function singleFile(dir, name = "mockup.html") {
+  const file = path.join(dir, name);
+  fs.writeFileSync(file, PAGES["/content.html"]);
+  return file;
+}
+
+test("single target: --file gives one PNG named <file>-<width>-<theme>.png, with the page's .html beside it", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const dir = singleDir();
+  const r = await single(dir, ["--file", singleFile(dir)]);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /shoot: PASS 1 shots, 0 failed, out=/);
+  assert.deepEqual(r.pngs, ["mockup.html-1440-light.png"]);
+  assert.deepEqual(r.htmls, ["mockup.html-1440-light.html"]);
+  const shot = await pixels(b, path.join(r.dir, "mockup.html-1440-light.png"));
+  assert.equal(shot.width, 1440);
+  assert.ok(shot.colours > 2, `known content rendered ${shot.colours} colour(s): blank`);
+  assert.match(fs.readFileSync(path.join(r.dir, "mockup.html-1440-light.html"), "utf8"), /<h1>Shoot fixture<\/h1>/);
+});
+
+test("single target: --url gives one PNG named by its last path name, with the page's .html beside it", async (t) => {
+  if (!(await chromium(t))) return;
+  const r = await single(singleDir(), ["--url", `${base}/content.html`]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.pngs, ["content.html-1440-light.png"]);
+  assert.deepEqual(r.htmls, ["content.html-1440-light.html"]);
+});
+
+test("single target: a URL keeps its query and its #hash", async (t) => {
+  if (!(await chromium(t))) return;
+  const r = await single(singleDir(), ["--url", `${base}/hash.html?q=7#step-2`]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.pngs, ["hash.html-1440-light.png"]);
+  assert.match(fs.readFileSync(path.join(r.dir, "hash.html-1440-light.html"), "utf8"), /search=\?q=7 hash=#step-2/);
+});
+
+test("single target: --no-full-page takes the viewport height, and the default takes the whole page", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const cut = await single(singleDir(), ["--url", `${base}/tall-bar.html`, "--no-full-page"]);
+  assert.equal(cut.code, 0, cut.out);
+  const whole = await single(singleDir(), ["--url", `${base}/tall-bar.html`]);
+  assert.equal(whole.code, 0, whole.out);
+  assert.equal((await pixels(b, path.join(cut.dir, "tall-bar.html-1440-light.png"))).height, 900);
+  assert.equal((await pixels(b, path.join(whole.dir, "tall-bar.html-1440-light.png"))).height, 1200);
+});
+
+test("single target: --theme dark names the PNG dark and applies the dark scheme", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await single(singleDir(), ["--url", `${base}/content.html`, "--theme", "dark"]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.pngs, ["content.html-1440-dark.png"]);
+  const dark = await pixels(b, path.join(r.dir, "content.html-1440-dark.png"));
+  assert.ok(dark.mean < 55, `dark mean ${dark.mean}: the theme did not apply`);
+});
+
+test("single target: --width 390 names the PNG at 390 and makes it 390 px wide", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const dir = singleDir();
+  const r = await single(dir, ["--file", singleFile(dir), "--width", "390"]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.pngs, ["mockup.html-390-light.png"]);
+  assert.equal((await pixels(b, path.join(r.dir, "mockup.html-390-light.png"))).width, 390);
+});
+
+test("single target: --config with --file is a usage error, exit 2, and the usage line names the single-target form", async () => {
+  const dir = singleDir();
+  const cfg = path.join(dir, "shoot.json");
+  fs.writeFileSync(cfg, JSON.stringify({ baseUrl: base, routes: ["/content.html"], sizes: [820], themes: ["light"] }));
+  const r = await single(dir, ["--config", cfg, "--file", singleFile(dir)]);
+  assert.equal(r.code, 2, r.out);
+  assert.match(r.out, /usage: shoot .*--url URL \| --file HTML/);
+  assert.deepEqual(r.pngs, []);
+});
+
+test("single target: --url with --file is a usage error, exit 2, and the usage line names the single-target form", async () => {
+  const dir = singleDir();
+  const r = await single(dir, ["--url", `${base}/content.html`, "--file", singleFile(dir)]);
+  assert.equal(r.code, 2, r.out);
+  assert.match(r.out, /usage: shoot .*--url URL \| --file HTML/);
+  assert.deepEqual(r.pngs, []);
+});
+
+test("single target: a size or theme flag with no target is a usage error, exit 2", async () => {
+  for (const flags of [["--width", "390"], ["--theme", "dark"], ["--no-full-page"]]) {
+    const r = await single(singleDir(), flags);
+    assert.equal(r.code, 2, `${flags.join(" ")}: ${r.out}`);
+    assert.match(r.out, /usage: shoot .*--url URL \| --file HTML/, flags.join(" "));
+    assert.deepEqual(r.pngs, [], flags.join(" "));
+  }
+});
+
+test("single target: a --file that does not exist is a refusal, exit 2, that names the path", async () => {
+  const dir = singleDir();
+  const r = await single(dir, ["--file", path.join(dir, "absent.html")]);
+  assert.equal(r.code, 2, r.out);
+  assert.match(r.out, /shoot: no such file: .*absent\.html/);
+  assert.deepEqual(r.pngs, []);
+});
+
+test("single target: a theme that is neither light nor dark is a refusal, exit 2", async () => {
+  const dir = singleDir();
+  const r = await single(dir, ["--file", singleFile(dir), "--theme", "sepia"]);
+  assert.equal(r.code, 2, r.out);
+  assert.match(r.out, /shoot: --theme is light or dark/);
+  assert.deepEqual(r.pngs, []);
+});
+
+test("single target: an HTTP status of 400 or more is a fail, exit 1", async (t) => {
+  if (!(await chromium(t))) return;
+  const r = await single(singleDir(), ["--url", `${base}/missing.html`]);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /shoot: FAIL missing\.html-1440-light: HTTP 404/);
+  assert.match(r.out, /shoot: FAIL 1 shots, 1 failed/);
+});
+
+test("single target: the launch passes both switches", async (t) => {
+  if (!(await chromium(t))) return;
+  const dir = singleDir();
+  const log = path.join(dir, "launch.json");
+  // A stand-in for the Playwright module: it writes the options of each launch, then launches for real.
+  const shim = path.join(dir, "shim.cjs");
+  fs.writeFileSync(shim, `const fs = require("node:fs");
+const pw = require("playwright");
+const launch = pw.chromium.launch.bind(pw.chromium);
+pw.chromium.launch = (opts) => { fs.writeFileSync(${JSON.stringify(log)}, JSON.stringify(opts ?? null)); return launch(opts); };
+module.exports = pw;
+`);
+  const r = await single(dir, ["--url", `${base}/content.html`], { SHOOT_PLAYWRIGHT: shim });
+  assert.equal(r.code, 0, r.out);
+  assert.ok(fs.existsSync(log), "no launch went through the Playwright module");
+  const opts = JSON.parse(fs.readFileSync(log, "utf8"));
+  assert.ok(Array.isArray(opts?.args) && opts.args.includes("--use-mock-keychain"), JSON.stringify(opts));
+  assert.ok(Array.isArray(opts?.args) && opts.args.includes("--password-store=basic"), JSON.stringify(opts));
+});
+
+test("a config route with a url key is still ignored: the shot is baseUrl plus the route's path", async (t) => {
+  if (!(await chromium(t))) return;
+  const r = await run({ routes: [{ path: "/content.html", url: "http://127.0.0.1:9/never-answers" }], sizes: [820], themes: ["light"] });
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.pngs, ["content.html-820-light.png"]);
+});

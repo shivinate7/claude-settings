@@ -16,11 +16,14 @@ Decision ci-wait-reads-run-status, section "The CI wake-up":
 - Only a ready call starts a watch: the shell `gh pr ready <N>`, or a GitHub MCP
   update_pull_request call with draft false. A `git push` in any form starts none, and makes no gh call.
 - Each `gh pr ready` in one command gets its own watch, in one process. The hook prints one
-  verdict line per PR, then exits 2 once.
+  verdict line per PR, then exits 2 once. A red line is followed by its detail lines: the failing
+  lines of the first red job (at most 12, each at most 200 characters), or one `log unread:` line.
 - Text inside quotes, inside a heredoc body, or after an unquoted `#` is no command. A lone quote
   in earlier text does not hide a later `gh pr ready`. A `#` inside quotes is no comment.
+- A failed job wakes the watch at the first status read that shows it, while the run goes on. The
+  line names the failed jobs known so far.
 - The watch has its own deadline. A run still pending at the deadline wakes with exit 2 and a
-  "still running" line. It does not wait for the run to end.
+  "still running" line.
 - One watcher runs per PR. A second watcher for the same PR exits 0 with no output and no watch.
   A killed watcher, or a finished one, releases the PR.
 - Any uncaught error exits 2 with one "unknown" line, never exit 1.
@@ -30,8 +33,9 @@ Decision ci-wait-reads-run-status, section "The CI wake-up":
 Decision ci-wait-reads-run-status ("CI waits read the run status"): the hook never runs
 `gh run watch` (one watch made 131 API calls in 60 s). `watch_run` reads `gh run view <id> --json
 status` at once, then every 30 s for 4 minutes, then at growing gaps of 120 s at most, and returns when
-the status is `completed` or when the deadline passes (55 minutes): its last pause ends at the
-deadline, never past it. A call made at its deadline
+the status is `completed`, when a job has failed, or when the deadline passes (55 minutes): its last
+pause ends at the deadline, never past it. The status read also asks for the run's jobs
+(`--json status,jobs`), so a poll is still one call. Its jobs answer the failed-job wake without a second read. A call made at its deadline
 or past it makes no read and returns at once. A failed or non-JSON read gets one retry after the
 STATUS_PAUSE pause (decision ci-wait-reads-run-status). A second failed read raises Unknown, so the wake
 line is `CI unknown`. A status that is not `completed` (in_progress, queued) means read again.
@@ -319,9 +323,21 @@ def rest_pr(p):
             "html_url": p["url"], "head": {"ref": p["headRefName"], "sha": p["headRefOid"]},
             "merged": False, "merged_at": None}
 
+def job_log(job_id, fx):
+    """The job log read, `repos/O/R/actions/jobs/<id>/logs`: the fixture's text for that job (job_logs, keyed by the
+    job id as a string). A job with no text prints nothing and exits 0. The fixture key log_error makes it refused."""
+    if fx.get("log_error"):
+        sys.stderr.write("HTTP 403: Resource not accessible by integration\n")
+        return 1
+    sys.stdout.write(fx.get("job_logs", {}).get(job_id, ""))
+    return 0
+
 def rest(path, full, args, fx):
-    """The pulls endpoints: `repos/O/R/pulls/N`, and `repos/O/R/pulls` with fields head=OWNER:BRANCH, state=open."""
+    """The pulls endpoints: `repos/O/R/pulls/N`, and `repos/O/R/pulls` with fields head=OWNER:BRANCH, state=open.
+    And the job log of `repos/O/R/actions/jobs/<id>/logs`."""
     parts = path.split("/")
+    if len(parts) == 7 and parts[0] == "repos" and parts[3:5] == ["actions", "jobs"] and parts[6] == "logs":
+        return job_log(parts[5], fx)
     if len(parts) < 4 or parts[0] != "repos" or parts[3] != "pulls":
         sys.stderr.write("stub gh: unsupported api path: %s\n" % full)
         return 1
@@ -431,10 +447,11 @@ def main(args):
             return 1
         r = hits[0]
         fields = flag(args, "--json")
-        if fields == "status" and r.get("fail_status_read"):
+        poll = fields is not None and set(fields.split(",")) in ({"status"}, {"status", "jobs"})
+        if poll and r.get("fail_status_read"):
             sys.stderr.write("HTTP 502: Bad Gateway\n")
             return 1
-        if fields == "status" and r.get("ping_on_status_read"):
+        if poll and r.get("ping_on_status_read"):
             ready_ping()
         if views_of(key) <= r.get("in_progress_reads", 0):
             r = dict(r, status=r.get("early_status", "in_progress"), conclusion=None)
@@ -598,6 +615,55 @@ def late(run_id, appears, conclusion="success", jobs=None):
                in_progress_reads=1)
 
 
+# A poll reads the run's jobs with its status, so a job
+# that shows failed wakes the watch at that poll, while the run goes on. The red line names the failed jobs known so far.
+# Its detail lines: the failing lines of the first red job's log (at most 12, each at most 200 characters), or one
+# `log unread: <reason>` line. The job log is read once per watch.
+LOG_UNIT = "\n".join(
+    ["2026-11-23T16:02:10.1111111Z ##[group]Run python3 hooks/test_unit.py",
+     "2026-11-23T16:02:11.2222222Z Running unit tests",
+     "2026-11-23T16:02:12.3333333Z \x1b[31mFAIL\x1b[0m test_unit.py::test_one",
+     "2026-11-23T16:02:12.4444444Z E   AssertionError: expected 3",
+     "2026-11-23T16:02:12.5555555Z Error: boom at line 9",
+     "2026-11-23T16:02:12.6666666Z ##[error]Process completed with exit code 1."]
+    + ["2026-11-23T16:02:13.%07dZ FAIL test_unit.py::case_%02d" % (i, i) for i in range(20)]
+    + ["2026-11-23T16:02:14.0000000Z ERROR " + "x" * 400]) + "\n"
+LOG_E2E = "\n".join(
+    ["2026-11-23T16:03:01.0000000Z \x1b[31mFAIL\x1b[0m test_e2e.py::test_two e2e-only-marker",
+     "2026-11-23T16:03:01.1000000Z ERROR e2e-only-marker again"]) + "\n"
+LOG_NOISE = "2026-11-23T16:02:10.0000000Z building the wheel\n2026-11-23T16:02:11.0000000Z done\n"
+TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d")
+
+
+def job_row(name, conclusion, job_id):
+    """A job as `gh run view --json jobs` gives it. A job with no conclusion is still running."""
+    return {"name": name, "conclusion": conclusion, "status": "completed" if conclusion else "in_progress",
+            "databaseId": job_id, "id": job_id}
+
+
+def jobs_reply(status, jobs):
+    """One poll answer, as `gh run view <id> --json status,jobs` prints it for a run in `status`."""
+    return (0, json.dumps({"status": status, "conclusion": None, "jobs": jobs}) + "\n", "")
+
+
+LOGGED_RED = run(951, "checks", "failure",
+                 [job_row("lint", "success", 1001), job_row("unit", "failure", 1002), job_row("e2e", "failure", 1003)])
+LIVE_RED = run(952, "checks", None,
+               [job_row("lint", "success", 1001), job_row("unit", "failure", 1002), job_row("e2e", None, 1003)],
+               status="in_progress")   # the run never completes: only a failed job or the deadline ends the watch
+CANCELLED_LOGGED = run(953, "checks", "cancelled", [job_row("unit", "cancelled", 1005)])
+# A run that failed a job while it is in progress, and a newer run of its name that only the re-list shows. The newer
+# run's one job is e2e, so a verdict that reads its jobs names e2e, not unit.
+RUNNING_FAILED = run(971, "checks", None,
+                     [job_row("lint", "success", 1011), job_row("unit", "failure", 1012), job_row("e2e", None, 1013)],
+                     status="in_progress")
+NEWER_RUNNING = run(972, "checks", None, [job_row("e2e", None, 1021)], status="in_progress", appears_at_list=2)
+TIMED_OUT_BUILD = run(961, "checks", "failure", [job_row("lint", "success", 1031), job_row("build", "timed_out", 1032)])
+STARTUP_FAILED = run(962, "checks", "startup_failure", [])
+# The rollup job's log holds only its own verdict. The log reader keeps this line, so it would reach the wake if read.
+ROLLUP_LOG = "2026-11-23T16:05:00.0000000Z ##[error]rollup-only-marker: all-jobs-passed failed\n"
+
+
 PUSH_FORMS = [
     "git push",
     "git push origin hook-wave-2",
@@ -707,10 +773,41 @@ def start_watcher(payload, scen, extra=None):
     return proc, case
 
 
+POLL_FIELDS = (frozenset(["status"]), frozenset(["status", "jobs"]))   # a poll: today's read, or the same read with its jobs
+
+
+def poll_fields(args):
+    """The fields of a `run view <id> --json <fields>` call, as a set, else None. The -R of the call is dropped first.
+    A call that names databaseId is wait_for's judged read, not a poll."""
+    plain = GH.strip_repo(list(args))
+    if plain[:2] != ["run", "view"] or len(plain) < 5 or plain[3] != "--json":
+        return None
+    return frozenset(plain[4].split(","))
+
+
+def is_poll(args, run_id=None):
+    """True for one status read of a watch (POLL_FIELDS), of run_id when given. Each poll is one such call, so the
+    count of these calls is the read count of the schedule."""
+    plain = GH.strip_repo(list(args))
+    return poll_fields(plain) in POLL_FIELDS and (run_id is None or plain[2] == run_id)
+
+
 def watched(res):
-    """The ids of the runs the hook waited on: one `gh run view <id> --json status` read each. The -R of
-    a call is not compared: GH.strip_repo drops it, so the check reads the same wherever -R sits."""
-    return [c[2] for c in map(GH.strip_repo, res.calls) if c[:2] == ["run", "view"] and c[3:] == ["--json", "status"]]
+    """The ids of the runs the hook waited on: one status read (is_poll) each. The -R of a call is not compared:
+    GH.strip_repo drops it, so the check reads the same wherever -R sits."""
+    return [GH.strip_repo(c)[2] for c in res.calls if is_poll(c)]
+
+
+def log_reads(res):
+    """The job-log reads of a hook run: `gh api repos/O/R/actions/jobs/<id>/logs`, or a run view that asks for a log
+    (`--log`, `--log-failed`). The cost cases count them: at most one per watch (decision ci-wait-reads-run-status)."""
+    found = []
+    for c in res.calls:
+        plain = GH.strip_repo(c)
+        if any(a.startswith("repos/") and "/actions/jobs/" in a and a.endswith("/logs") for a in plain) \
+                or any(a.startswith("--log") for a in plain):
+            found.append(plain)
+    return found
 
 
 def run_watches(res):
@@ -722,23 +819,39 @@ def count(res, *prefix):
     return sum(1 for c in res.calls if GH.strip_repo(c)[:len(prefix)] == list(prefix))
 
 
+def wake_groups(res):
+    """-> [(verdict, sha, names, detail lines)] for the output of one hook run, or None when it is not a wake. A CI
+    line starts a group. A line that is not a CI line belongs to the red group just before it: its failing lines, or
+    one `log unread:` line. Any other detail line (after a green, cancelled, unknown or none line, or first) makes the
+    output None. So a second CI line for one PR still fails the shape, as a closing line beside a red one does."""
+    groups = []
+    for line in res.lines:
+        m = LINE.match(line.strip())
+        if m:
+            groups.append((m.group(1), m.group(2), m.group(3).strip(), []))
+        elif groups and groups[-1][0] == "red":
+            groups[-1][3].append(line.strip())
+        else:
+            return None
+    return groups
+
+
 def verdict_of(res):
-    """(verdict, sha, names) when the output is exactly one CI line, else None."""
-    if len(res.lines) != 1:
-        return None
-    m = LINE.match(res.lines[0].strip())
-    return (m.group(1), m.group(2), m.group(3).strip()) if m else None
+    """(verdict, sha, names) when the output is one CI line, which a red line may carry detail lines after, else None."""
+    groups = wake_groups(res)
+    return groups[0][:3] if groups is not None and len(groups) == 1 else None
 
 
 def verdicts_of(res):
-    """[(verdict, sha, names)] for every output line, or None when a line is not a CI line."""
-    found = []
-    for line in res.lines:
-        m = LINE.match(line.strip())
-        if not m:
-            return None
-        found.append((m.group(1), m.group(2), m.group(3).strip()))
-    return found
+    """[(verdict, sha, names)] for each CI line, or None when the output is not a list of CI lines."""
+    groups = wake_groups(res)
+    return None if groups is None else [g[:3] for g in groups]
+
+
+def details_of(res):
+    """The detail lines of the one red wake in res (its failing lines, or its `log unread:` line), else None."""
+    groups = wake_groups(res)
+    return groups[0][3] if groups is not None and len(groups) == 1 and groups[0][0] == "red" else None
 
 
 def why(res):
@@ -1052,7 +1165,7 @@ def case_green_run_judged_past_the_deadline_is_not_green():
     label = "green run ends at the deadline, a red run shows only at a later list"
     raised, clock, calls, deadline = wait_for_on_fakes([GREEN, later_red], budget, ends_at={901: budget}, line=True)
     detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
-    jobs_reads = [t for t, a in calls if a[:3] == ["run", "view", "901"] and "jobs" in " ".join(a)]
+    jobs_reads = [t for t, a in calls if a[:3] == ["run", "view", "901"] and "databaseId" in " ".join(a)]
     check("%s: the green run's jobs read is at or past the deadline (scope)" % label,
           bool(jobs_reads) and jobs_reads[-1] >= deadline - 1e-6, detail)
     check("%s: the line is not CI green, the later run is unread" % label,
@@ -1080,7 +1193,7 @@ def case_refused_re_list_view_keeps_a_judged_red():
         label = "red run judged %s, the re-list's new run has a refused jobs read" % where
         raised, clock, calls, deadline = wait_for_on_fakes([RED, refused_new_run()], budget, ends_at=ends_at, line=True)
         detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
-        refused = [t for t, a in calls if a[:3] == ["run", "view", "931"] and "jobs" in " ".join(a)]
+        refused = [t for t, a in calls if a[:3] == ["run", "view", "931"] and "databaseId" in " ".join(a)]
         check("%s: the new run's jobs read is reached (scope)" % label, bool(refused), detail)
         check("%s: the line is CI red, naming unit and e2e" % label,
               str(clock.line).startswith("CI red") and "unit" in clock.line and "e2e" in clock.line, detail)
@@ -1093,7 +1206,7 @@ def case_refused_re_list_view_after_a_green_run_is_unknown():
         label = "green run judged %s, the re-list's new run has a refused jobs read (control)" % where
         raised, clock, calls, deadline = wait_for_on_fakes([GREEN, refused_new_run()], budget, ends_at=ends_at, line=True)
         detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
-        refused = [t for t, a in calls if a[:3] == ["run", "view", "931"] and "jobs" in " ".join(a)]
+        refused = [t for t, a in calls if a[:3] == ["run", "view", "931"] and "databaseId" in " ".join(a)]
         check("%s: the new run's jobs read is reached (scope)" % label, bool(refused), detail)
         check("%s: the line is CI unknown, never CI green" % label, str(clock.line).startswith("CI unknown"), detail)
 
@@ -1114,7 +1227,6 @@ def case_new_runs_on_every_list_are_paced_after_the_at_once_relist():
 
 
 # watch_run, in process, on fakes (decision ci-wait-reads-run-status). No gh runs and no wait is real.
-STATUS_READ = ["run", "view", "7", "--json", "status"]
 T0 = 1000.0   # where the fake clock starts
 
 
@@ -1206,7 +1318,12 @@ def watch_run_on_fakes(replies, budget):
 
 
 def read_times(calls):
-    return [t for t, a in calls if a == STATUS_READ]
+    return [t for t, a in calls if is_poll(a, "7")]
+
+
+def only_polls(calls, n):
+    """True when the watch made exactly n gh calls, and each one is a poll read of run 7 (is_poll)."""
+    return len(calls) == n and all(is_poll(a, "7") for _, a in calls)
 
 
 def spaced(times, gap=30):
@@ -1227,8 +1344,8 @@ def case_watch_run_reads_the_status_until_completed():
     check("%s: returns, no exception" % label, raised is None, detail)
     check("%s: never starts `gh run watch`" % label,
           direct == [] and not any(a[:2] == ["run", "watch"] for _, a in calls), detail)
-    check("%s: reads `gh run view 7 --json status` three times, and makes no other gh call" % label,
-          [a for _, a in calls] == [STATUS_READ] * 3, detail)
+    check("%s: makes three poll reads of run 7 (status), and no other gh call" % label,
+          only_polls(calls, 3), detail)
     check("%s: reads at least 30 s apart" % label, len(times) == 3 and spaced(times), detail)
     check("%s: the first read comes before any pause" % label, times[:1] == [T0], detail)
 
@@ -1237,7 +1354,7 @@ def case_watch_run_completed_at_the_first_read_does_not_pause():
     label = "watch_run, completed at the first read"
     mod, raised, clock, calls, direct = watch_run_on_fakes([status_reply("completed")], 3600)
     check("%s: one read, no pause, no exception, no `gh run watch`" % label,
-          raised is None and [a for _, a in calls] == [STATUS_READ] and clock.sleeps == [] and direct == [],
+          raised is None and only_polls(calls, 1) and clock.sleeps == [] and direct == [],
           watch_detail(raised, clock, calls, direct))
 
 
@@ -1302,7 +1419,7 @@ def case_watch_run_retries_a_failed_read_once_and_goes_on():
         check("watch_run, %s: returns, no exception, no `gh run watch`" % label,
               raised is None and direct == [], detail)
         check("watch_run, %s: %d status reads, 30 s or more apart" % (label, reads),
-              [a for _, a in calls] == [STATUS_READ] * reads and spaced(read_times(calls)), detail)
+              only_polls(calls, reads) and spaced(read_times(calls)), detail)
 
 
 def case_watch_run_reads_past_a_queued_status():
@@ -1313,7 +1430,7 @@ def case_watch_run_reads_past_a_queued_status():
     detail = watch_detail(raised, clock, calls, direct)
     check("watch_run, queued twice then completed: returns, no exception", raised is None, detail)
     check("watch_run, queued twice then completed: three status reads, 30 s or more apart",
-          [a for _, a in calls] == [STATUS_READ] * 3 and spaced(read_times(calls)), detail)
+          only_polls(calls, 3) and spaced(read_times(calls)), detail)
 
 
 def case_watch_run_retry_never_reads_or_pauses_past_the_deadline():
@@ -1403,6 +1520,27 @@ def case_watch_run_completed_wakes_on_the_next_read():
               rel != [] and rel[-1] - flip <= BACKOFF_CAP, detail)
 
 
+def case_failed_job_wakes_the_watch_at_the_poll_that_shows_it():
+    """case 1, on fakes: a run that never completes. Its unit job fails 90 s after the first poll, and the poll at 90 s
+    shows it. watch_run returns there: the reads are the schedule's 0, 30, 60 and 90 s, no read after, no pause after.
+    Old code reads on to the deadline, since it judges a run only at its end."""
+    label = "case 1: watch_run, a job fails at 90 s, the run never completes"
+    flip = 90
+
+    def replies(now):
+        failed = now - T0 >= flip
+        return jobs_reply("in_progress", [job_row("lint", "success", 1001),
+                                          job_row("unit", "failure" if failed else None, 1002),
+                                          job_row("e2e", None, 1003)])
+
+    mod, raised, clock, calls, direct = watch_run_on_fakes(replies, WATCH_BUDGET)
+    rel = [round(t - T0, 6) for t in read_times(calls)]
+    detail = watch_detail(raised, clock, calls, direct) + " reads=%r" % rel[-3:]
+    check("%s: returns, no exception, no `gh run watch`" % label, raised is None and direct == [], detail)
+    check("%s: the last read is the poll at 90 s, and the watch ends there" % label,
+          rel == [0.0, 30.0, 60.0, 90.0] and abs(clock.now - T0 - flip) < 1e-6, detail)
+
+
 # wait_for, in process, on fakes: the pace and the deadline of the run lists. The module's `gh` answers
 # `run list` (by the number of the call, as the stub does) and `run view`. Its `time` is the fake clock.
 def wait_for_on_fakes(runs, budget, ends_at=None, line=False):
@@ -1435,7 +1573,7 @@ def wait_for_on_fakes(runs, budget, ends_at=None, line=False):
         if args[:2] == ["run", "view"]:
             hits = [r for r in runs if str(r["databaseId"]) == args[2]]
             if hits:
-                if hits[0].get("refuse_jobs_read") and "jobs" in " ".join(args):
+                if hits[0].get("refuse_jobs_read") and "databaseId" in " ".join(args):
                     return 1, "", "HTTP 403: Resource not accessible by integration"
                 out = as_of_clock(hits[0], GH.view(hits[0], False))
                 fields = args[args.index("--json") + 1].split(",") if "--json" in args else None
@@ -1472,9 +1610,12 @@ def list_times(calls):
 
 
 def judged_read(args, runs):
-    """True for the jobs read (`run view <id> --json ...,jobs`) of a run that ran: the judgement that
-    wait_for makes before it lists again."""
-    if args[:2] != ["run", "view"] or "jobs" not in " ".join(args[3:]):
+    """True for the judged read (`run view <id> --json databaseId,...,jobs`) of a run that ran: the judgement that
+    wait_for makes before it lists again. A poll read carries jobs too, but names no databaseId, so it is not one."""
+    if args[:2] != ["run", "view"] or "--json" not in args:
+        return False
+    fields = args[args.index("--json") + 1].split(",")
+    if "databaseId" not in fields or "jobs" not in fields:
         return False
     hits = [r for r in runs if str(r["databaseId"]) == args[2]]
     return bool(hits) and hits[0]["conclusion"] not in (None, "skipped")
@@ -1672,8 +1813,8 @@ def case_workflows_but_no_run_on_head_still_says_no_run_yet():
 def case_failed_workflow_read_is_not_no_workflows():
     """Pins existing behaviour (a control). A failed `gh workflow list` read is not "no workflows": the watch
     runs as it does today, so a red run still wakes the session with its failing jobs. Rows: exit 1, non-JSON.
-    The red verdict is the only line: verdict_of needs exactly one, so a closing line written beside it fails
-    here. An unknown read writes no closing line."""
+    The red verdict is the only CI line: a closing CI line written beside it is a second group, which wake_groups
+    reads as a second wake, so it fails here. An unknown read writes no closing line."""
     for name, switch in (("exit 1", "error"), ("non-JSON", "garbage")):
         label = "workflow list %s, red run (control)" % name
         fx = fixture([pr(214, repo=REPO_APP)], [in_repo(RED, REPO_APP)], cwd_repo=REPO_APP,
@@ -2231,6 +2372,19 @@ class CostTests(unittest.TestCase):
                          % (budget, len(reads)))
         self.assertAlmostEqual(clock.now - T0, budget, places=6, msg="the watch ends at its deadline")
 
+    def test_a_failed_job_ends_the_status_reads_at_the_poll_that_shows_it(self):
+        # Case 1, cost: the poll that shows the failed job is the last read. A run that never completes, with a unit job
+        # that fails at 90 s, makes 4 reads (0, 30, 60, 90 s), not the reads of a watch that runs to its deadline.
+        def replies(now):
+            failed = now - T0 >= 90
+            return jobs_reply("in_progress", [job_row("unit", "failure" if failed else None, 1002)])
+
+        mod, raised, clock, calls, direct = watch_run_on_fakes(replies, self.mod.DEFAULT_DEADLINE)
+        reads = read_times(calls)
+        self.assertIsNone(raised, "watch_run returns with no exception; got %r" % raised)
+        self.assertEqual(len(reads), 4, "the failed job's poll is the last read, at 90 s: 4 reads; got %d" % len(reads))
+        self.assertAlmostEqual(clock.now - T0, 90, places=6, msg="the watch ends at the poll that shows the failure")
+
     def test_the_default_budget_ends_before_the_hook_is_killed(self):
         row = cost_probe.settings_timeout("ci_wake.py")
         self.assertIsNotNone(row, "settings.json has a hook row for ci_wake.py")
@@ -2308,6 +2462,171 @@ def case_api_reads_are_gets_unless_the_case_opts_in():
         rc, _, _ = stub_once(args, fixture([]))
         check("%s: the stub answers it, exit 0" % label, rc == 0, "rc=%s" % rc)
         check("%s: the sweep passes it" % label, post_read_faults([args], False) == [])
+
+
+def case_failed_job_wakes_a_run_still_going():
+    """case 1: a run that never completes, with its unit job failed, wakes the watch at once. The red line names the
+    failed job and not the job still running. Old code waits to the deadline and says CI unknown, still running. The
+    4 s deadline is a hang guard only: no verdict here depends on elapsed time."""
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [LIVE_RED], job_logs={"1002": LOG_UNIT}),
+                   extra={"CI_WAKE_DEADLINE": "4"})
+    check("case 1: the watch polled the run (scope)", len(watched(res)) >= 1, why(res))
+    expect_verdict("case 1: run still going, unit job failed: CI red at the poll", res, "red",
+                   names_in=["unit"], names_out=["e2e", "lint"])
+
+
+def case_failed_job_wake_carries_the_first_red_jobs_failing_lines():
+    """case 2: two failed jobs in a run that has ended. The red line names both. Its detail lines are the failing lines of
+    the first red job's log: at most 12, each at most 200 characters, with no escape code and no timestamp, and no line
+    of the second job's log. Noise lines are not kept. Every detail check needs a detail line, so none passes vacuously."""
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [LOGGED_RED], job_logs={"1002": LOG_UNIT, "1003": LOG_E2E}))
+    label = "case 2: red run, two failed jobs, the first job's log has failing lines"
+    expect_verdict(label, res, "red", names_in=["unit", "e2e"], names_out=["lint"])
+    check("%s: the first red job's log was read (scope)" % label, len(log_reads(res)) >= 1, why(res))
+    d = details_of(res) or []
+    check("%s: 1 to 12 detail lines (the log has 25 matches)" % label, 1 <= len(d) <= 12, "details=%r" % d[:3])
+    check("%s: each detail line is at most 200 characters (the log has a 400-character match)" % label,
+          bool(d) and all(len(x) <= 200 for x in d), "lengths=%r" % [len(x) for x in d])
+    check("%s: no escape code is left in a detail line" % label,
+          bool(d) and not any("\x1b" in x or "[31m" in x for x in d), "details=%r" % d[:3])
+    check("%s: no timestamp is left in a detail line" % label,
+          bool(d) and not any(TIMESTAMP.match(x) for x in d), "details=%r" % d[:3])
+    check("%s: the coloured FAIL line is kept, stripped" % label,
+          any("FAIL test_unit.py::test_one" in x for x in d), "details=%r" % d[:3])
+    check("%s: an AssertionError line and a ##[error] line are kept" % label,
+          any("AssertionError: expected 3" in x for x in d) and any("##[error]Process completed" in x for x in d),
+          "details=%r" % d[:3])
+    check("%s: group and noise lines are not kept" % label,
+          bool(d) and not any("Running unit tests" in x or "##[group]" in x for x in d), "details=%r" % d[:3])
+    check("%s: no line of the second red job's log" % label,
+          bool(d) and not any("e2e-only-marker" in x for x in d), "details=%r" % d[:3])
+
+
+def case_failed_job_log_unread_still_wakes_with_one_line():
+    """case 3: the first red job's log is refused, empty, or has no failing line. The wake still fires: the red line, then
+    exactly one `log unread: <reason>` line, and no line of the second red job's log. Each row reads one log. The rule
+    pinned: a red wake always has at least one detail line, failing lines or this one."""
+    rows = (
+        ("the log read is refused", dict(log_error=True)),
+        ("the first red job's log is empty, the second's has lines", dict(job_logs={"1003": LOG_E2E})),
+        ("the first red job's log has no failing line", dict(job_logs={"1002": LOG_NOISE, "1003": LOG_E2E})),
+    )
+    for name, extra in rows:
+        label = "case 3: %s" % name
+        res = run_hook(bash("gh pr ready 12"), fixture(READY, [LOGGED_RED], **extra))
+        expect_verdict(label, res, "red", names_in=["unit"])
+        check("%s: one log read (scope)" % label, len(log_reads(res)) == 1, why(res))
+        d = details_of(res) or []
+        check("%s: exactly one detail line, `log unread: <reason>`, with a reason" % label,
+              len(d) == 1 and d[0].startswith("log unread: ") and d[0][len("log unread: "):].strip() != "",
+              "details=%r" % d)
+        check("%s: no line of the second red job's log" % label,
+              bool(d) and not any("e2e-only-marker" in x for x in d), "details=%r" % d)
+
+
+def case_green_and_cancelled_wakes_read_no_job_log():
+    """case 4, controls: a green run and a cancelled run wake as today, with one line and no job-log read. Only a failed
+    job is a trigger for the log read."""
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [GREEN]))
+    expect_verdict("case 4: green run (control)", res, "green")
+    check("case 4: green run: no job-log read", log_reads(res) == [], why(res))
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [CANCELLED_LOGGED], job_logs={"1005": LOG_UNIT}))
+    expect_verdict("case 4: cancelled run, its job cancelled (control)", res, "cancelled")
+    check("case 4: cancelled run: no job-log read", log_reads(res) == [], why(res))
+    check("case 4: cancelled run: the wake is one line, no detail", len(res.lines) == 1, why(res))
+
+
+def case_one_job_log_read_per_watch_with_two_red_jobs():
+    """case 5, cost: two red jobs in one watch make one job-log read, the first red job's (at most one log read per
+    watch)."""
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [LOGGED_RED], job_logs={"1002": LOG_UNIT, "1003": LOG_E2E}))
+    reads = log_reads(res)
+    check("case 5: one job-log read for two red jobs", len(reads) == 1,
+          "log reads=%r" % [" ".join(c) for c in reads])
+    check("case 5: the read is the first red job's log (job 1002)",
+          any(any("/actions/jobs/1002/logs" in a for a in c) for c in reads), why(res))
+
+
+def case_failed_job_wakes_once_and_exits():
+    """case 6, controls: a red run wakes once, with one CI line and exit 2. A run still going with a failed job stops its
+    watch at that job's poll: one poll, then the wake, no second poll (the poll is one read, not a loop)."""
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [LOGGED_RED], job_logs={"1002": LOG_UNIT}))
+    check("case 6: a red run: exit 2, one CI line (control)", res.rc == 2 and len(wake_groups(res) or []) == 1, why(res))
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [LIVE_RED], job_logs={"1002": LOG_UNIT}),
+                   extra={"CI_WAKE_DEADLINE": "4"})
+    check("case 6: a run still going with a failed job: one poll (control)", len(watched(res)) == 1, why(res))
+
+
+def case_failed_job_then_newer_run_listed_is_never_green():
+    """A run has a failed job while it is in progress. At the re-list a newer run of its name is in progress, and the
+    failed run is listed beside it, in either order. The wake is never `CI green` and never says `no failing jobs`:
+    it is the red line for the failed job (unit, not the newer run's e2e), or the watch keeps waiting (unknown). The
+    4 s deadline is a hang guard only: no verdict here depends on elapsed time."""
+    orders = (("listed newer run first", [NEWER_RUNNING, RUNNING_FAILED]),
+              ("listed failed run first", [RUNNING_FAILED, NEWER_RUNNING]))
+    for order, runs in orders:
+        label = "failed run 971 beside newer run 972, %s" % order
+        res = run_hook(bash("gh pr ready 12"), fixture(READY, runs, job_logs={"1012": LOG_UNIT}),
+                       extra={"CI_WAKE_DEADLINE": "4"})
+        check("%s: the watch polled run 971 (scope)" % label, "971" in watched(res), why(res))
+        check("%s: two run lists, the re-list shows run 972 (scope)" % label, count(res, "run", "list") == 2, why(res))
+        v = verdict_of(res)
+        check("%s: one CI line, exit 2" % label, res.rc == 2 and not res.hung and v is not None, why(res))
+        check("%s: the line is not CI green" % label, v is not None and v[0] != "green", why(res))
+        check("%s: no line says no failing jobs" % label,
+              not any("no failing jobs" in x for x in res.lines), why(res))
+        if v is not None and v[0] == "red":
+            check("%s: the red line names the failed job, unit" % label, "unit" in v[2], why(res))
+            check("%s: the red line does not name run 972's job, e2e" % label, "e2e" not in v[2], why(res))
+
+
+def case_rollup_job_listed_first_reads_the_real_failed_jobs_log():
+    """The run's jobs list the merge tool's rollup job (ROLLUP_JOB) as failed, before a real failed job. The detail
+    lines come from the real failed job's log, read once. The rollup's log is never read into the wake. The rollup name
+    is read from the merge tool, not copied here."""
+    from guard_merge import merge_module
+    merge = merge_module()
+    rollup = getattr(merge, "ROLLUP_JOB", None) if merge is not None else None
+    check("rollup job name loads from the merge tool (scope)", isinstance(rollup, str) and rollup != "",
+          "rollup=%r" % (rollup,))
+    if not (isinstance(rollup, str) and rollup):
+        return
+    rollup_first = run(981, "checks", "failure",
+                       [job_row(rollup, "failure", 1010), job_row("unit", "failure", 1002), job_row("lint", "success", 1001)])
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [rollup_first], job_logs={"1010": ROLLUP_LOG, "1002": LOG_UNIT}))
+    label = "rollup job failed and listed before the real failed job"
+    expect_verdict(label, res, "red", names_in=["unit"])
+    check("%s: one job-log read (scope)" % label, len(log_reads(res)) == 1, why(res))
+    check("%s: the log read is job 1002's, the real failed job, not the rollup's 1010" % label,
+          any(any("/actions/jobs/1002/logs" in a for a in c) for c in log_reads(res)), why(res))
+    d = details_of(res) or []
+    check("%s: a detail line is a failing line of the real job's log (FAIL test_unit.py::test_one)" % label,
+          any("FAIL test_unit.py::test_one" in x for x in d), "details=%r" % d[:3])
+    check("%s: no detail line comes from the rollup's log (rollup-only-marker)" % label,
+          bool(d) and not any("rollup-only-marker" in x for x in d), "details=%r" % d[:3])
+
+
+def case_timed_out_job_names_its_conclusion_in_the_detail():
+    """A red run whose jobs have no failure conclusion, but one timed_out job. Its detail line names that conclusion
+    and the job, and never says `no failed job` while a timed-out job exists."""
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [TIMED_OUT_BUILD]))
+    label = "run with a timed_out job and no failure conclusion"
+    expect_verdict(label, res, "red", names_in=["build"])
+    d = details_of(res) or []
+    check("%s: a detail line names the job and the conclusion, build and timed_out" % label,
+          any("build" in x and "timed_out" in x for x in d), "details=%r" % d[:3])
+    check("%s: no detail line says no failed job" % label,
+          not any("no failed job" in x for x in d), "details=%r" % d[:3])
+
+
+def case_startup_failure_run_names_its_conclusion_in_the_detail():
+    """A red run with no jobs, concluded startup_failure. Its detail line names that conclusion."""
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [STARTUP_FAILED]))
+    label = "run concluded startup_failure with no jobs"
+    expect_verdict(label, res, "red", names_in=["workflow checks"])
+    d = details_of(res) or []
+    check("%s: a detail line names the conclusion, startup_failure" % label,
+          any("startup_failure" in x for x in d), "details=%r" % d[:3])
 
 
 def main():
@@ -2544,6 +2863,19 @@ def main():
     case_gh_json_passes_its_timeout_to_gh()
     case_hash_number_selector_reads_the_number_route()
     case_api_reads_are_gets_unless_the_case_opts_in()
+
+    # The failed-job wake: cases 1 to 6.
+    case_failed_job_wakes_the_watch_at_the_poll_that_shows_it()
+    case_failed_job_wakes_a_run_still_going()
+    case_failed_job_wake_carries_the_first_red_jobs_failing_lines()
+    case_failed_job_log_unread_still_wakes_with_one_line()
+    case_green_and_cancelled_wakes_read_no_job_log()
+    case_one_job_log_read_per_watch_with_two_red_jobs()
+    case_failed_job_wakes_once_and_exits()
+    case_failed_job_then_newer_run_listed_is_never_green()
+    case_rollup_job_listed_first_reads_the_real_failed_jobs_log()
+    case_timed_out_job_names_its_conclusion_in_the_detail()
+    case_startup_failure_run_names_its_conclusion_in_the_detail()
     if not cost_probe.run_class(CostTests):
         FAILS.append("CostTests")
     check_api_reads()

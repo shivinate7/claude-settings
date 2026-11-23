@@ -61,6 +61,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 
 import mutate_shared
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -1200,11 +1201,11 @@ MUTATIONS = [
      'def under_session_scratchpad(where: str, session_id: str) -> bool:',
      'def under_session_scratchpad(where: str, session_id: str) -> bool:\n    return False', "guard", "scratchpad: a discard in this session's own scratchpad is private"),
     ("scratchpad: every path reads as this session's scratchpad",
-     '    parts = real.split(os.sep)\n    for index in range(len(parts) - 1):',
-     '    return True\n    parts = real.split(os.sep)\n    for index in range(len(parts) - 1):', "guard", "scratchpad: another session's scratchpad is not this session's"),
+     '    return next((root for root, sid in _scratchpad_shapes(real) if sid == session_id), "")',
+     '    return real', "guard", "scratchpad: another session's scratchpad is not this session's"),
     ("scratchpad: no path reads as any session's scratchpad",
-     '    return any(os.path.normcase(parts[i + 1]) == "scratchpad"',
-     '    return False and any(os.path.normcase(parts[i + 1]) == "scratchpad"', "guard",
+     '    return any(True for _ in _scratchpad_shapes(real))',
+     '    return False and any(True for _ in _scratchpad_shapes(real))', "guard",
      "audit-high paths: test-author Edit of another session's scratchpad outside a repo is refused"),
     ("scratchpad-commit-msg-owner: the rule never fires",
      "matched = agent and scratchpad_message_file(segment, cite_where)",
@@ -1414,15 +1415,15 @@ MUTATIONS = [
      'if builder_third_round(brief):', "guard",
      "ceiling: Agent reviewer on opus with the brief 'Try 3 of 3. Finish the f' is denied"),
     ("ceiling: the Workflow scan yields no spawn, so a workflow builder on opus passes unrefused",
-     'if unseen & {"model", "agentType"} or not keys.get("model"):',
+     'if unseen & {"model", "agentType"}:',
      'if True:', "guard", 'role-model: Workflow builder on opus with no round line is denied under agent-model-cap'),
     ("ceiling: the Workflow scan skips a call whose brief it cannot read, so a variable-brief builder on opus passes",
-     'if unseen & {"model", "agentType"} or not keys.get("model"):',
-     'if prompt is None or unseen & {"model", "agentType"} or not keys.get("model"):', "guard",
+     'if unseen & {"model", "agentType"}:',
+     'if prompt is None or unseen & {"model", "agentType"}:', "guard",
      'role-model: Workflow builder on opus with a variable brief holding a Round 3 marker is denied'),
     ("ceiling: the Workflow scan skips a call with a spread in its options, so a spread-first builder on opus passes",
-     'if unseen & {"model", "agentType"} or not keys.get("model"):',
-     'if unseen & {"model", "agentType", "..."} or not keys.get("model"):', "guard",
+     'if unseen & {"model", "agentType"}:',
+     'if unseen & {"model", "agentType", "..."}:', "guard",
      'role-model: Workflow builder on opus with a spread before its literal keys is denied'),
     ("ceiling: the Workflow scan judges a shorthand agentType as general-purpose, so a designer loop on opus is refused",
      'if "..." in unseen and "agentType" not in keys:',
@@ -1544,6 +1545,11 @@ MUTATIONS = [
      'def unquoted_at(text: str, index: int) -> bool:',
      'def unquoted_at(text: str, index: int) -> bool:\n    return True', "guard",
      "silent-write scanner: a discard named before a space inside a message is text"),
+
+    ("silent-write: the dropped-line filter arm no longer denies, so grep -v after a write is silent",
+     '        if dropped:\n            return matched, "filter", subcommand',
+     '        if False:\n            return matched, "filter", subcommand', "guard",
+     "silent-write filter: grep -v after a push's output drops the lines, denies"),
 
     # ---- the PostToolUse watch. These break `hooks/config_watch.py` and must be killed by
     # `hooks/test_config_watch.py`, which writes the cap for real and reads the file back.
@@ -4028,6 +4034,7 @@ GUARD_MODULE_FAMILIES = {
     "hooks/guard_mask_script.py": ["mask-script"],
     "hooks/guard_argv.py": ["argv"],
     "hooks/guard_review_log.py": ["review-log"],
+    "hooks/guard_browser.py": ["browser-keychain"],
     # hooks/guard.py holds the rules that no guard_<x>.py module owns. A mutant of it meets six families that read those rules.
     "hooks/guard.py": ["write", "paths", "diff", "model-cap", "cite", "hook-bypass"],
 }
@@ -4896,11 +4903,16 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
     # stderr (spawn_live_parent), and run() waits for a pipe's EOF. Measured: every mutant took 306 s.
     # A file has no EOF to wait for. It is read after the run, only for unittest's ERROR blocks.
     with tempfile.TemporaryFile() as errors:
-        result = _nowindow.run(
-            # text=True keeps the default decoding: the child inherits env, so both sides share one encoding.
-            [sys.executable, suite], stdout=subprocess.PIPE, stderr=errors, text=True,
-            env=env, timeout=3600,  # interim stopgap, owner 12:11 CST Nov 10, decision ci-job-caps, ends with step time-pinned-tests-go
-        )
+        started = time.monotonic()
+        try:
+            result = _nowindow.run(
+                # text=True keeps the default decoding: the child inherits env, so both sides share one encoding.
+                [sys.executable, suite], stdout=subprocess.PIPE, stderr=errors, text=True,
+                env=env, timeout=3600,  # interim stopgap, owner 12:11 CST Nov 10, decision ci-job-caps, ends with step time-pinned-tests-go
+            )
+        except subprocess.TimeoutExpired:
+            # A suite past its cap is its mutant's verdict, a timeout: the caller scores it and runs on.
+            return mutate_shared.timed_out_run(time.monotonic() - started)
         errors.seek(0)
         error_text = errors.read().decode("utf-8", "replace")
     lines = result.stdout.splitlines()
@@ -5089,7 +5101,8 @@ def run_mutant(sources, work: str, entry):
     `required` is the case name (or a distinctive fragment of it) the caller must find among the
     FAIL lines before trusting this mutant's death: see `mutate_shared.report_verdict`. `skip`,
     when not None, is why this mutant did not run on this platform at all: the caller reports it
-    and counts it as neither killed, survived, nor wrong cause. This verdict is not yet trusted: `run_mutants`
+    and counts it as neither killed, survived, nor wrong cause. A suite past its time cap gives `mutate_shared.TIMED_OUT`
+    as the code: a verdict of its own, which `run_mutants` counts apart. This verdict is not yet trusted: `run_mutants`
     judges it against its target's clean-layout control (`run_controls`).
     """
     label, old, new, target, required, only_on = mutation_parts(entry)

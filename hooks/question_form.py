@@ -95,7 +95,19 @@ PROBLEM_LABEL = re.compile(r"^[ \t]*Problem\b", re.I | re.M)
 PROBLEM_LINE = re.compile(r"^[ \t]*Problem[ \t]*\((?:%s)\):[ \t]*\S" % _STAKES, re.I | re.M)
 # A Based on line starts `Based on (` or `Based on:`; prose that starts "Based on the log" is not one.
 BASED_LABEL = re.compile(r"^[ \t]*Based on[ \t]*[(:]", re.I | re.M)
-BASED_LINE = re.compile(r"^[ \t]*Based on[ \t]*\(([^()\n]*)\):[ \t]*\S", re.I | re.M)
+BASED_LINE = re.compile(r"^[ \t]*Based on[ \t]*\(([^()\n]*)\):[ \t]*(\S[^\n]*)", re.I | re.M)
+# decision premise-format: a `read` premise names `path:line`. The path holds a "/" or ends in a file extension.
+# The lookbehinds stop a match from starting inside a longer token or right after "//", the start of a URL's
+# host, so "http://example.com:8080" is no path:line. A "/" before the path is allowed: an absolute path, or
+# the path part of a URL ("https://github.com/o/r/blob/main/hooks/guard.py:120").
+READ_KIND = "read"
+PATH_LINE = re.compile(r"(?<![\w.:@~+-])(?<!//)[\w.@~+-]+(?:/[\w.@~+-]+)*:\d+")
+_PATH_SHAPE = re.compile(r"/|\.[A-Za-z]\w*:")
+
+
+def names_path_line(text) -> bool:
+    """Whether `text` holds a path:line token: a path with a "/" or a file extension, then ":" and digits."""
+    return any(_PATH_SHAPE.search(m.group(0)) for m in PATH_LINE.finditer(text))
 GAIN_TEXT = re.compile(r"\bGain:[ \t]*(?!Lose:)\S", re.I)
 LOSE_TEXT = re.compile(r"\bLose:[ \t]*\S", re.I)
 BASED_MAX = 3
@@ -123,7 +135,9 @@ def placeholder_form_hit(text):
 FORM_REASON = ("A question to the owner states the form, in this order: a line \"Goal: <the goal, in his "
                "terms>\", a line \"Problem (<stake>): <the problem in one plain sentence, and why it needs "
                "his word>\" where stake is one of %s, and one to three lines \"Based on (<kind>): <one "
-               "premise>\" where kind is one of %s. Each option states its gain and its loss."
+               "premise>\" where kind is one of %s. A \"Based on (read)\" line names the file and line it read as "
+               "path:line, such as docs/plan.md:12; a summary you did not read is kind notes (decision "
+               "premise-format). Each option states its gain and its loss."
                % (", ".join(OWNER_STAKES), ", ".join(PREMISE_KINDS)))
 PAGE_FORM_REASON = FORM_REASON + (" On the page the lines go in `context`, and each option has a "
                                   "non-empty `gain` and `lose`. An open decision also names the option you "
@@ -173,9 +187,11 @@ def _based_hit(text):
         return FORM_RULE, "no Based on line"
     if len(labels) > BASED_MAX:
         return FORM_RULE, "%d Based on lines, one to %d allowed" % (len(labels), BASED_MAX)
-    kinds = [m.group(1).strip().lower() for m in BASED_LINE.finditer(text)]
-    if len(kinds) != len(labels) or any(k not in PREMISE_KINDS for k in kinds):
+    found = [(m.group(1).strip().lower(), m.group(2)) for m in BASED_LINE.finditer(text)]
+    if len(found) != len(labels) or any(k not in PREMISE_KINDS for k, _ in found):
         return FORM_RULE, "Based on line with no kind, or a kind outside the premise kinds"
+    if any(k == READ_KIND and not names_path_line(rest) for k, rest in found):
+        return FORM_RULE, "Based on (read) line that names no path:line"
     return PASS
 
 
@@ -744,9 +760,75 @@ def _ps_bash_form(text) -> bool:
     return False
 
 
+# An unfilled placeholder in a shell command handed to the owner (rule `style-hand-off-runs-as-is`): the command
+# must run as it stands. The one home of the check: command_in_item_hit below and lint/report_guard.py
+# placeholder_problem (a reply's fenced shell block) both call command_placeholder. Each lookbehind stops a match
+# inside a longer word, a `$VAR` or `${VAR}`, or a heredoc `<<`; the angle form takes letters, digits, `-` and `_`
+# only, so `< in.txt`, `<<'EOF'`, `2>&1`, `List<int>` and a closing tag `</b>` pass. A heredoc body is data and is
+# dropped first (guard_core.strip_heredoc_bodies keeps a body that a shell runs). A comment (`#` to the end of its
+# line) is not scanned. An angle word whose name is in KNOWN_MARKUP_TAGS is markup, not a placeholder; any other
+# angle word counts, quoted or not (`cd "<repo>"`).
+COMMAND_PLACEHOLDER = re.compile(
+    r"/dev/sdX\d?(?!\w)"
+    r"|(?<![<\w])<[\w-]+>"
+    r"|(?<![\w${])YOUR_\w+\b(?!=)"
+    r"|(?<![\w$-])your-[\w-]+"
+    r"|(?<![\w${])(?:REPLACE_ME|CHANGEME)(?!\w)"
+    r"|(?<![\w$.-])(?:xxx|XXX)(?![\w-])")
+COMMAND_PLACEHOLDER_HINT = ": fill the real value before it reaches the owner"
+
+# Tag names of the HTML and XML (plist) text that a command greps, seds or echoes.
+KNOWN_MARKUP_TAGS = frozenset((
+    "br", "title", "div", "html", "body", "head", "p", "b", "i", "a", "span",
+    "dict", "key", "string", "array", "plist", "true", "false", "integer", "real", "data", "date"))
+
+
+def _comment_spans(text):
+    """(start, end) of each shell comment of `text`: a `#` outside quotes, at the start or after whitespace, to
+    the end of its line. A backslash skips the next character outside single quotes. A quote that never closes
+    is a plain character, so one lone apostrophe in prose hides nothing."""
+    spans, i, n = [], 0, len(text)
+    while i < n:
+        char = text[i]
+        if char == "\\":
+            i += 2
+            continue
+        if char in "'\"":
+            j = i + 1
+            while j < n and text[j] != char:
+                j += 2 if char == '"' and text[j] == "\\" else 1
+            if j < n:
+                i = j
+        elif char == "#" and (i == 0 or text[i - 1].isspace()):
+            end = text.find("\n", i)
+            end = n if end < 0 else end
+            spans.append((i, end))
+            i = end
+        i += 1
+    return spans
+
+
+def command_placeholder(text) -> str:
+    """The first unfilled placeholder token in a shell command, or ''."""
+    if not isinstance(text, str):
+        return ""
+    if "<<" in text:
+        import guard_core   # loads only for a command with a heredoc
+        text = guard_core.strip_heredoc_bodies(text)
+    comments = _comment_spans(text)
+    for found in COMMAND_PLACEHOLDER.finditer(text):
+        token = found.group(0)
+        if token.startswith("<") and token[1:-1].lower() in KNOWN_MARKUP_TAGS:
+            continue
+        if any(a <= found.start() < b for a, b in comments):
+            continue
+        return token
+    return ""
+
+
 def command_in_item_hit(data) -> str:
     """The matched text when a task's `command` is not {powershell, mac}, when its powershell string
-    holds bash syntax, when its steps, joined, send the owner to a file for a command, or when a
+    holds bash syntax, when either string holds an unfilled placeholder (command_placeholder), when its steps, joined, send the owner to a file for a command, or when a
     step holds a shell line in backticks. A `command` on the item excuses only the loose verb match
     (COMMAND_VERB); "the command in <file>" and "its command" still point at the file. An update
     with no `command` key leaves the stored one alone."""
@@ -757,6 +839,10 @@ def command_in_item_hit(data) -> str:
         return "command is not {powershell, mac}"
     if has_command and _ps_bash_form(data["command"]["powershell"]):
         return "powershell command holds a bash operator"
+    for shell in ("mac", "powershell") if has_command else ():
+        token = command_placeholder(data["command"][shell])
+        if token:
+            return "%s command holds the placeholder %r%s" % (shell, token, COMMAND_PLACEHOLDER_HINT)
     steps = data.get("steps")
     if not isinstance(steps, list):
         return ""
@@ -1126,6 +1212,12 @@ def form_str_replace_hit(entry):
         return FORM_RULE, "context edit that removes the Problem line"
     if BASED_LABEL.search(old) and not BASED_LABEL.search(new):
         return FORM_RULE, "context edit that removes the Based on line"
+    # The new text is judged by the one Based on check when it holds a Based on line, so a swap cannot
+    # leave a read premise with no path:line.
+    if BASED_LABEL.search(new):
+        hit = _based_hit(new)
+        if hit[0]:
+            return hit
     hit = placeholder_form_hit(new)
     if hit[0]:
         return hit
