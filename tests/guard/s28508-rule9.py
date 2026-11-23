@@ -251,24 +251,8 @@ for _name, _verdict, _script in (
          "// agent('Round 2 of 3.', {agentType: 'reviewer'})\nawait agent('x', {model: 'sonnet'})")):
     add("floor step-up: Workflow %s is %s" % (_name, "denied" if _verdict == "deny" else "allowed"),
         _verdict, *((STEP_UP,) if _verdict == "deny" else ()), tool="Workflow", script=_script)
-# A Workflow call whose literal agentType has a row and that names NO model is refused under agent-role-model, whatever
-# its brief (decision agent-model-cap). A model in a variable, a shorthand, a spread or a ternary agentType stays allowed
-# in the step-up loop above, since the static read cannot see the model or the role. Failure class: a false allow (a
-# no-model Workflow call with a row runs the parent's model).
-for _name, _script in (
-        ("reviewer Round 1", _step_flow("'Round 1 of 3. Check the diff.'", "agentType: 'reviewer'")),
-        ("builder Round 3", _step_flow("'Round 3 of 3. Finish the fix.'", "agentType: 'builder'")),
-        ("reviewer with the prompt in a variable", _step_flow("brief", "agentType: 'reviewer'")),
-        ("reviewer with a concatenated prompt", _step_flow("'Round 2 of 3. ' + rest", "agentType: 'reviewer'")),
-        ("reviewer whose marker is only interpolated", _step_flow("`${'Round 2 of 3.'} Re-check.`", "agentType: 'reviewer'")),
-        ("reviewer whose round number is interpolated", _step_flow("`Round ${n} of 3. Re-check.`", "agentType: 'reviewer'")),
-        ("reviewer whose marker is split by an interpolation", _step_flow("`Round 2${x} of 3. Re-check.`", "agentType: 'reviewer'")),
-        ("reviewer Round 1 in an interpolated template", _step_flow("`Round 1 of 3. Branch ${b}`", "agentType: 'reviewer'")),
-        ("prose round 2 only", _step_flow("'The round 2 of 3 notes are in the record.'", "agentType: 'reviewer'")),
-        ("reviewer with a fix verifier in a variable brief",
-         "const brief = '%s. Re-check the diff.';\n" % FIX_VERIFIER + _step_flow("brief", "agentType: 'reviewer'"))):
-    add("floor step-up: Workflow %s, with no model, is denied under agent-role-model" % _name, "deny", "agent-role-model",
-        tool="Workflow", script=_script)
+# The no-model Workflow cases that expect a deny under agent-role-model live in s40805, beside workflow_refuse, where the
+# pointer config they need is built (one home for it).
 # A reviewer's last step-up is a per-spawn word, so the Opus ceiling refuses it on a Workflow agent() call as on an
 # Agent spawn (decision agent-model-cap).
 add("floor step-up: Workflow reviewer Round 3 on opus is denied under agent-model-cap", "deny",
