@@ -287,7 +287,7 @@ WAITING_ROLE = "waiting-page"  # the role of the registry entry that is the repo
 ARTIFACT_ID = re.compile(r"[A-Za-z0-9_-]{1,32}")  # a slug of 32 characters or fewer, as a record slug is (git-slug-then-claim-number)
 ROLE = re.compile(r"[a-z0-9][a-z0-9-]*")
 COLLECTION = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
-RECEIPTS = "receipts"  # a waiting collection: the export drops a receipt only with its closed or gone item, whatever an entry lists
+RECEIPTS = "receipts"  # a waiting collection: the export drops a receipt only with an item whose data says closed, whatever an entry lists
 WAITING_COLLECTIONS = ("items", "answers", "groups", "asks", "meta", RECEIPTS)  # what the waiting page's database holds
 
 

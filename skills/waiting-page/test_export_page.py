@@ -73,8 +73,7 @@ Contract the page cases assume (the builder builds to it):
     `checks unknown: time budget spent, <k> item(s) not checked`; --check exits 3; export keeps its copy and its exit code.
   Receipts, the sixth waiting collection: `receipts/<doc_id>.json` (a doc id may hold a dot, `park.colour-pick`) exports,
     is scanned, rebuilds and merges as the other five do, and the live page wins a merge. A receipt the copy holds and the
-    fetch no longer lists stays, unless its item is closed or gone (owner ruling 2026-11-22 21:02 CST: the item leaves the
-    copy with its answer and receipt). An emptied receipts fetch is unknown unless
+    fetch no longer lists stays, unless its item's own data says closed: then it leaves the copy with its item (owner rulings 2026-11-22 21:02 and 21:05 CST). An emptied receipts fetch is unknown unless
     `--allow-empty receipts` names it. A fetch with no receipts folder, or no marker in it, is unknown.
 """
 import collections
@@ -1059,8 +1058,8 @@ class Scan(Base):
 
 
 class Mirror(Base):
-    def test_counts_each_write_and_delete_and_drops_an_item_no_longer_fetched(self):
-        """An item the fetch no longer lists leaves the copy (owner ruling 2026-11-22 21:02 CST). Its delete counts in `changed N`.""" 
+    def test_counts_each_write_and_keeps_every_doc_no_longer_fetched(self):
+        """An item the fetch no longer lists stays: another account's page may hold it open (owner rulings 2026-11-22 21:02 and 21:05 CST).""" 
         fetched = self.fetch(items={"a": {"id": "a"}, "b": {"id": "b"}, "c": {"id": "c"}},
                              answers={"x": {"id": "x"}}, meta={"page": META})
         out = self.out()
@@ -1071,11 +1070,10 @@ class Mirror(Base):
         write_text(os.path.join(fetched, "items", "d.json"), canonical({"id": "d"}))
         os.remove(os.path.join(fetched, "items", "b.json"))
         r = self.export(fetched, out)
-        self.assertChanged(r, 3)
-        self.assertVerdict(r, "changed 3 deleted 1")
+        self.assertChanged(r, 2)
         self.assertEqual(r.returncode, 0, shown(r))
         self.assertEqual(os.stat(c_path).st_mtime, SENTINEL, "an unchanged doc was rewritten")
-        self.assertFalse(os.path.exists(os.path.join(out, "items", "b.json")), "an item no longer fetched stayed in the copy")
+        self.assertTrue(os.path.exists(os.path.join(out, "items", "b.json")), "a doc no longer fetched was deleted")
         self.assertEqual(read_text(os.path.join(out, "items", "a.json")), canonical({"id": "a", "title": "new"}))
         self.assertEqual(read_text(os.path.join(out, "items", "d.json")), canonical({"id": "d"}))
 
@@ -1109,9 +1107,9 @@ class Mirror(Base):
         self.assertEqual(r.returncode, 0, shown(r))
         self.assertEqual(read_text(os.path.join(out, "items", "a.json")), canonical({"id": "a", "n": 2}))
 
-    def test_an_emptied_collection_removes_no_file_except_emptied_items_and_their_receipts(self):
-        """A page cleanup that empties a collection other than items erases nothing from the copy: --allow-empty only
-        lifts the unknown stop. An emptied items deletes each item with its answer and receipt (owner ruling 2026-11-22 21:02 CST)."""
+    def test_an_emptied_collection_removes_no_file_in_any_of_the_six(self):
+        """A page cleanup that empties a collection erases nothing from the copy: --allow-empty only lifts the unknown
+        stop. Only an item whose own data says closed is deleted (owner rulings 2026-11-22 21:02 and 21:05 CST)."""
         docs = {"items": {"a": {"id": "a"}}, "answers": {"x": {"id": "x"}}, "groups": {"g": {"id": "g"}},
                 "asks": {"k": {"id": "k"}}, "meta": {"page": META}, "receipts": {"a": receipt(1)}}
         for name in layout.WAITING_COLLECTIONS:
@@ -1122,15 +1120,11 @@ class Mirror(Base):
                 emptied = dict(docs, **{name: {}})
                 r = self.export(self.fetch(**emptied), out, allow_empty=(name,))
                 self.assertEqual(r.returncode, 0, shown(r))
-                if name == "items":
-                    want = {rel: data for rel, data in before.items() if rel not in ("items/a.json", "receipts/a.json")}
-                    self.assertEqual(snapshot(out), want, "an emptied items did not delete exactly item a and its receipt")
-                else:
-                    self.assertEqual(snapshot(out), before, "an emptied %s removed or changed a file in the copy" % name)
+                self.assertEqual(snapshot(out), before, "an emptied %s removed or changed a file in the copy" % name)
 
-    def test_every_waiting_collection_but_items_keeps_a_doc_no_longer_fetched(self):
-        self.assertEqual(tuple(export_page.KEEP_UNFETCHED), tuple(c for c in layout.WAITING_COLLECTIONS if c != "items"),
-                         "export_page.KEEP_UNFETCHED is not lint/layout.py WAITING_COLLECTIONS less items")
+    def test_every_waiting_collection_keeps_a_doc_no_longer_fetched(self):
+        self.assertEqual(tuple(export_page.KEEP_UNFETCHED), tuple(layout.WAITING_COLLECTIONS),
+                         "export_page.KEEP_UNFETCHED is not lint/layout.py WAITING_COLLECTIONS")
 
     def test_an_emptied_collection_is_unknown_unless_the_session_allows_it(self):
         fetched = self.fetch(items={"a": {"id": "a"}, "b": {"id": "b"}, "c": {"id": "c"}})
@@ -1147,9 +1141,9 @@ class Mirror(Base):
         self.assertVerdict(r, "unknown")
         self.assertEqual(snapshot(out), before, "--allow-empty for another collection deleted docs")
         r = self.export(fetched, out, allow_empty=("items",))
-        self.assertVerdict(r, "changed 3 deleted 3")  # owner ruling 2026-11-22 21:02 CST: the items the page no longer holds leave the copy
+        self.assertVerdict(r, "same")
         self.assertEqual(r.returncode, 0, shown(r))
-        self.assertEqual(snapshot(out), {"items/": None}, "an allowed empty items kept an item the page no longer holds")
+        self.assertEqual(snapshot(out), before, "the allowed empty collection deleted docs that no data says are closed")
 
     def test_a_collection_without_its_completeness_marker_is_unknown_and_writes_nothing(self):
         fetched = self.fetch(items={"a": {"id": "a"}}, meta={"page": META})
@@ -1224,8 +1218,8 @@ class Mirror(Base):
 
 class Receipts(Base):
     """The sixth waiting collection. `receipts/<doc_id>.json` is written by the owning session, never by the page. An export
-    writes, scans and copies it like the other five. A receipt the fetch no longer lists stays, unless its item is closed
-    or gone: then it leaves the copy with its item (owner ruling 2026-11-22 21:02 CST). The pins at the end hold the export's list equal to the
+    writes, scans and copies it like the other five. A receipt the fetch no longer lists stays, unless its item's own
+    data says closed: then it leaves the copy with its item (owner rulings 2026-11-22 21:02 and 21:05 CST). The pins at the end hold the export's list equal to the
     registry's."""
 
     def test_807_items_and_442_receipts_export_and_a_second_run_is_same(self):
@@ -1309,9 +1303,9 @@ class Receipts(Base):
                         "the receipt item-003 that the fetch lists was not exported")
         self.assertEqual(read_text(os.path.join(out, "receipts", "item-002.json")), archived,
                          "the archived receipt item-002 was changed or deleted")
-        self.assertFalse(os.path.exists(os.path.join(out, "items", "item-002.json")),
-                         "the item the fetch no longer lists stayed in the copy")
-        self.assertChanged(r, 2)  # one receipt written, item-002 deleted
+        self.assertTrue(os.path.isfile(os.path.join(out, "items", "item-002.json")),
+                        "an open item the fetch no longer lists was deleted")
+        self.assertChanged(r, 1)  # one receipt written; a doc no longer fetched counts for nothing
 
     def export_in_process(self, fetched, out):
         """export() with receipts among its collections and no design block, run in this process. A Stop is a failure."""
@@ -1339,7 +1333,7 @@ class Receipts(Base):
 
     def test_a_receipt_the_fetch_lacks_stays_when_the_export_runs_without_its_design_block(self):
         """The keep rule follows the collection name, not the design flag: export(design=False) with receipts among its
-        collections keeps a receipt tied to no copied item, and drops an item the fetch no longer lists (owner ruling 2026-11-22 21:02 CST)."""
+        collections keeps a receipt and an item the fetch no longer lists (owner rulings 2026-11-22 21:02 and 21:05 CST)."""
         out = self.out()
         self.export_in_process(self.fetch(folders={"items": {"item-001": item(1), "item-gone": item(9)},
                                                    "receipts": {"item-001": receipt(1), "item-002": receipt(2)}}), out)
@@ -1350,8 +1344,8 @@ class Receipts(Base):
         self.export_in_process(self.fetch(folders={"items": {"item-001": item(1)}, "receipts": {"item-001": receipt(1)}}), out)
         self.assertTrue(os.path.isfile(os.path.join(out, "receipts", "item-002.json")),
                         "export(design=False) deleted an archived receipt the fetch no longer lists")
-        self.assertFalse(os.path.exists(os.path.join(out, "items", "item-gone.json")),
-                         "export(design=False) kept an item the fetch no longer lists")
+        self.assertTrue(os.path.isfile(os.path.join(out, "items", "item-gone.json")),
+                        "export(design=False) deleted an open item the fetch no longer lists")
 
     def test_an_emptied_receipts_fetch_is_unknown_unless_named_and_the_archive_stays(self):
         out = self.out()
@@ -1387,9 +1381,10 @@ class Receipts(Base):
 
 
 class ClosedItems(Base):
-    """Owner ruling, 2026-11-22 21:02 CST: a closed item is deleted from the copy, with its answer and receipt, and no
-    session restores it. An item the fetch no longer lists goes the same way. An open item keeps its answer and receipt,
-    and a doc tied to no item (a park answer or receipt) and the groups, asks and meta docs stay as the copy held them."""
+    """Owner rulings, 2026-11-22 21:02 and 21:05 CST: an item whose own data says closed is deleted from the copy, with
+    its answer and receipt, and no session restores it. The delete follows the doc key and the content, never `n` and
+    never absence: an item the fetch no longer lists stays, since another account's page may hold it open. A doc tied to
+    no item (a park answer or receipt) and the groups, asks and meta docs stay as the copy held them."""
 
     def seeded(self):
         """A copy holding open items 1 and 2, item 1's answer keyed by item id, item 2's answer keyed `ans-2` with an
@@ -1429,12 +1424,52 @@ class ClosedItems(Base):
         self.assertKept(out, "items/item-001.json", "answers/item-001.json", "receipts/item-001.json")
         self.assertVerdict(r, "changed 3 deleted 3")
 
-    def test_an_item_the_fetch_no_longer_lists_leaves_the_copy_with_its_answer_and_receipt(self):
+    def test_an_open_item_the_fetch_no_longer_lists_stays_with_its_answer_and_receipt(self):
         out = self.seeded()
         r = self.export(self.later({"item-001": item(1)}), out, allow_empty=("groups", "asks"))
         self.assertEqual(r.returncode, 0, shown(r))
+        self.assertKept(out, "items/item-002.json", "answers/ans-2.json", "receipts/ans-2.json")
+        self.assertVerdict(r, "same")
+
+    def test_each_delete_prints_its_key_before_the_verdict(self):
+        out = self.seeded()
+        r = self.export(self.later({"item-001": item(1), "item-002": dict(item(2), status="closed")}), out,
+                        allow_empty=("groups", "asks"))
+        lines = verdict_lines(r)
+        self.assertEqual(lines, ["deleted answers/ans-2.json", "deleted items/item-002.json", "deleted receipts/ans-2.json",
+                                 "changed 3 deleted 3"], shown(r))
+
+    def test_the_delete_follows_the_key_and_the_content_never_n(self):
+        """Two pages number one question differently. Page A holds q-x as n 9, closed; the copy holds q-x as n 11 from
+        page B, open, and another question q-y as n 9, open. The export of page A deletes q-x and keeps q-y."""
+        out = self.out()
+        seed = self.fetch(items={"q-x": dict(item(11), id="q-x", n=11), "q-y": dict(item(9), id="q-y", n=9)},
+                          answers={"q-x": {"item": "q-x", "pick": "a"}, "q-y": {"item": "q-y", "pick": "b"}},
+                          receipts={"q-x": receipt(1), "q-y": receipt(2)})
+        self.assertEqual(self.export(seed, out).returncode, 0, "scope: the seeding export did not run")
+        page_a = self.fetch(items={"q-x": dict(item(9), id="q-x", n=9, status="closed")},
+                            answers={"q-x": {"item": "q-x", "pick": "a"}}, receipts={"q-x": receipt(1)})
+        r = self.export(page_a, out)
+        self.assertEqual(r.returncode, 0, shown(r))
+        self.assertGone(out, "items/q-x.json", "answers/q-x.json", "receipts/q-x.json")
+        self.assertKept(out, "items/q-y.json", "answers/q-y.json", "receipts/q-y.json")
+        self.assertEqual(json.loads(read_text(os.path.join(out, "items", "q-y.json")))["n"], 9, "q-y was changed")
+
+    def test_a_closed_item_the_copy_holds_leaves_when_the_fetch_does_not_hold_it_open(self):
+        """An older copy may hold a closed item that the page has since deleted: its own data says closed, so it goes."""
+        out = self.seeded()
+        write_text(os.path.join(out, "items", "item-002.json"), canonical(dict(item(2), status="closed")))
+        r = self.export(self.later({"item-001": item(1)}), out, allow_empty=("groups", "asks"))
+        self.assertEqual(r.returncode, 0, shown(r))
         self.assertGone(out, "items/item-002.json", "answers/ans-2.json", "receipts/ans-2.json")
-        self.assertVerdict(r, "changed 3 deleted 3")
+
+    def test_an_item_open_on_the_page_and_closed_in_the_copy_is_kept_and_rewritten_open(self):
+        out = self.seeded()
+        write_text(os.path.join(out, "items", "item-002.json"), canonical(dict(item(2), status="closed")))
+        r = self.export(self.later({"item-001": item(1), "item-002": item(2)}), out, allow_empty=("groups", "asks"))
+        self.assertEqual(r.returncode, 0, shown(r))
+        self.assertEqual(read_text(os.path.join(out, "items", "item-002.json")), canonical(item(2)))
+        self.assertKept(out, "answers/ans-2.json", "receipts/ans-2.json")
 
     def test_a_closed_item_keyed_answer_and_receipt_leave_with_it(self):
         out = self.seeded()

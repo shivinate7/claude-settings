@@ -24,13 +24,14 @@ never runs it. There is one path: the record branch's own worktree. Never write 
    `<file>` is the page that "Keep the page on main's code" step 1 already read. Its HTML lands in the copy as
    `page/page.html`, written only when it changed.
    Name a collection that really emptied with `--allow-empty <collection>`. Without it, an emptied
-   collection is `unknown`. `--allow-empty items` deletes every item from the copy.
+   collection is `unknown`.
 4. Read the verdict line.
    - `same`: stop. Commit nothing.
    - `changed <n>`: in the same worktree, run `git add -A` on the copy folder, then
      commit and push the record branch. The commit message names the count. `changed <n> deleted <k>`: the export
-     deleted the copy of each item closed on the page or gone from it, with its answer and receipt. The commit message
-     starts `DELETE:` and names the count. Never restore a deleted item.
+     deleted each item whose own data says closed, with its answer and receipt, and printed one `deleted <path>` line
+     each. The commit message starts `DELETE:` and lists each deleted path. Then run step 3 again: it must print `same`,
+     which confirms each path is gone and no open item left. Never restore a deleted item.
    - `held item <n>: <sentence>` after the verdict line (exit 4): after `changed`, the copy was written; commit it as for `changed`. After `same`, commit nothing. The page would
      draw that item's picture wrong. Fix the item, export again, and do not republish while one is held.
    - `refused`: nothing was written. Make no commit. The reply names each find: the file, the JSON path and
@@ -95,7 +96,7 @@ the waiting page. A page that moves loses its read access, and the repo then hol
    one, prints one `unknown` line, writes nothing and exits 2. The page and each
    text file are scanned like the docs; a find refuses that artifact only.
 4. Run `git add -A` on the export folder of each artifact whose line says `changed`. Then commit and push the record
-   branch, with `DELETE:` first in the message when a line says `deleted <k>`. A `refused` artifact wrote nothing, so its folder is as it was. An `unknown` one wrote nothing too. A `checks unknown: collections lack <name>` line is not a verdict: its artifact wrote the copy, says `same` or `changed <n>`, and exits 2. Say each such line in
+   branch. When a line says `deleted <k>`, the message starts `DELETE:` and lists each `deleted <path>` line. A `refused` artifact wrote nothing, so its folder is as it was. An `unknown` one wrote nothing too. A `checks unknown: collections lack <name>` line is not a verdict: its artifact wrote the copy, says `same` or `changed <n>`, and exits 2. Say each such line in
    the reply, and fix the cause first.
 
 Cost: one list call per page of each collection of each entry, one python process, and one commit when something
