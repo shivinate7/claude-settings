@@ -4989,7 +4989,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
                 if cfg.get("merge", {}).get("requiredChecks") == "none" and not head_claim(wt):  # no check gates the merge: confirm heals the page itself
                     records += ". --confirm heals it: it pushes a page commit (the base merged in first when the base gained a record), waits on no check, and merges that head in the one run"
                 elif not head_claim(wt):  # a list or "protection": confirm heals on a green proven head (proven_head carries its proof to the heal commits) and refuses a red, pending or unread one
-                    proof = proven_head(wt, info["head"], base, lambda: True, max_merges=1)
+                    proof = proven_head(wt, info["head"], base, lambda: True)
                     state = host.head_state(n, proof)
                     if state == "green":
                         records += ". --confirm heals it: it pushes a page commit (the base merged in first when the base gained a record), carries the checks of the green head under it as the proof, and merges that head once its checks are green"
@@ -5451,24 +5451,22 @@ def heals_stale_page(root, base, path):
             return False
     return base == cfg["defaultBranch"]
 
-def proven_head(root, live, base, merges=None, claims=False, until=None, max_merges=None):
+def proven_head(root, live, base, merges=None, claims=False, until=None):
     """The one reader of which head a PR's checks prove. Walk first parents down from `live` over this tool's own commits only, and return the commit under them, or
     `live` when none sits on top: a page-only commit (page_only), and, where `merges()` is true, a merge of `base` that is git's clean merge of its parents
     (base_merge_commit). A heal pushes exactly those two: the base merged in, then the page rebuilt on it. `claims`: a Record-claim commit and its revert count too, for a relayed
     yes (relayed_head_holds), which binds to a head and needs no run; the checks of a claim commit are its own, so confirm leaves `claims` off. Any other commit ends the walk: a lane commit,
-    an edited merge, a merge of a commit the base never got. `until`: stop at that sha (the relayed head). `merges` is called at most once, at the first merge commit, and
-    the base is fetched then, once. `max_merges`: stop below that many merges of the base, so a confirm carries the proof over one clean merge of the base and refuses two stacked
-    (decision merge-needs-current-base, rule d: no second full run, and no unread stack). A read that fails ends the walk at that commit, so the head counts as unproven, never as carried."""
+    an edited merge, a merge of a commit the base never got. `until`: stop at that sha (the relayed head). `merges` is called at each merge commit, and
+    the base is fetched at the first, once. Stacked clean merges of the base all carry, so a busy base never forces a second full run (decision merge-needs-current-base, rule d).
+    A read that fails ends the walk at that commit, so the head counts as unproven, never as carried."""
     base_read = []  # the one fetch of the base, made when a merge commit needs it
-    walked = [0]  # merges of the base the walk has passed
 
     def base_merge(sha):
-        if not (base and merges and merges()) or (max_merges is not None and walked[0] >= max_merges):
+        if not (base and merges and merges()):
             return False
         if not base_read:
             base_read.append(not git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")[0])
         if base_read[0] and base_merge_commit(root, sha, base):
-            walked[0] += 1
             return True
         return False
     sha = live
@@ -5611,7 +5609,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         pushed = False  # true once this run pushed a commit: the run stops there, and the next confirm reads that commit's checks
         with timed_phase("head-checks"):
             say("merge: checking the head's checks and runs ...")  # before the read, which can block
-            proof = info["head"] if no_ci or not heal else proven_head(wt, info["head"], base, lambda: heal, max_merges=1)  # only this tool's own page and base-merge commits carry the proof of the head under them; a resumed claim is not one: the claim commit's own checks are read, never the head under it
+            proof = info["head"] if no_ci or not heal else proven_head(wt, info["head"], base, lambda: heal)  # only this tool's own page and base-merge commits carry the proof of the head under them; a resumed claim is not one: the claim commit's own checks are read, never the head under it
             if proof != info["head"]:
                 say(f"merge: {info['head'][:9]} is only this tool's own page and base-merge commits on {proof[:9]}, so the checks of {proof[:9]} are the proof.")
                 host.pending_lifted = True  # the commits above the proof have no run of their own: GitHub reads a required check on them pending (BLOCKED), and that one cause goes on to the PUT, as for a lint PASS
