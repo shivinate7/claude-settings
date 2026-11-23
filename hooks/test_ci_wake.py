@@ -51,6 +51,10 @@ Seams under test:
 - CI_WAKE_MODULE: the module under test (default hooks/ci_wake.py beside this file).
 - CI_WAKE_LOCK_DIR: the folder that holds the per-PR watch locks. Each case sets its own.
 - CI_WAKE_DEADLINE: the watch budget in seconds. Unset, the hook uses its own default.
+- The checkout: the folder the hook runs in holds the repo's .github/workflows/*.yml. A run_hook case gets its folder
+  with checkout= (default CHECKOUT_DEFINES, the repo defines the rollup job; CHECKOUT_NO_JOB; CHECKOUT_NO_FOLDER for no
+  .github folder). For wait_for, the cwd it is given is that folder; wait_for_on_fakes takes checkout= and passes one.
+  The discriminator reads the files from the checkout only and makes no GitHub read for them.
 - `watch_run(run_id, cwd, deadline)` keeps its signature (deadline: a time.monotonic() value). It
   reads through the module's `gh()`, reads the clock with the module's `time.monotonic`, pauses
   with the module's `time.sleep`, and makes no direct `subprocess` call.
@@ -103,8 +107,9 @@ once waits on the draft run, reads it as skipped, and prints "CI red ...: workfl
   No list comes after the deadline. A list made at the deadline after that pause is allowed.
 - A head with no real run at the deadline wakes with `CI unknown`, never red or green.
 - A real run that failed still reads red, with its own failing job names.
-- Green needs a completed `checks` run whose `all-jobs-passed` job passed (REQUIRED_CHECK), on a head that carries that job.
-  A head where no job of any run carries that name reads green by its run conclusions, as main does. A draft-era run
+- Green needs a completed `checks` run whose `all-jobs-passed` job passed (REQUIRED_CHECK), in a repo whose workflow
+  files define that job. A repo whose workflow files define no such job (or have no .github/workflows folder) reads green
+  by the run conclusions, as main does. The repo is the checkout the hook runs in, read from disk, with no GitHub read. A draft-era run
   (a `checks` run with that job skipped, or a green lane-touched-tests run) is never the green result: the
   watch keeps waiting for the real run, and a red job still wakes at once.
 - After the first judged run, the hook re-lists the head once at once. A run visible at that re-list is
@@ -624,6 +629,21 @@ NO_ROLLUP_GREEN = run(992, "checks", "success", [job("lint", "success"), job("un
 NO_ROLLUP_RED = run(995, "checks", "failure", [job("lint", "success"), job("unit", "failure")])
 
 
+def workflow_text(jobs):
+    """A minimal workflow file that defines each named job: plain YAML, one key per job under `jobs:`."""
+    return "name: checks\non: pull_request\njobs:\n" + "".join(
+        "  %s:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n" % name for name in jobs)
+
+
+# The checkout the hook reads its workflow files from: the folder it runs in (a run_hook case folder, or the cwd given
+# to wait_for). A checkout maps each file name under .github/workflows/ to its text, or is None for no .github folder.
+# The default defines the rollup job, as every repo the rule was written for does, so the rollup cases keep their
+# verdicts. A case for another repo passes checkout= explicitly.
+CHECKOUT_DEFINES = {"checks.yml": workflow_text([REQUIRED_CHECK, "unit"])}   # the repo defines the rollup job
+CHECKOUT_NO_JOB = {"checks.yml": workflow_text(["lint", "unit"])}            # its workflows define no rollup job
+CHECKOUT_NO_FOLDER = None                                                      # no .github folder at all
+
+
 def late(run_id, appears, conclusion="success", jobs=None):
     """The real run of `gh pr ready`, which the lists before list number `appears` do not show. It
     lists in progress when it first shows, and its first status read is in progress too."""
@@ -724,8 +744,21 @@ def read_calls(log):
     return GH.read_log(log)
 
 
-def new_case(scen):
-    case = tempfile.mkdtemp(prefix="case-", dir=TMP)
+def checkout_folder(checkout, prefix="checkout-"):
+    """A folder of this run that holds `checkout` under .github/workflows/, or no .github folder when `checkout` is None.
+    Each run_hook case folder and each in-process wait takes its checkout from here (one home)."""
+    folder = tempfile.mkdtemp(prefix=prefix, dir=TMP)
+    if checkout is not None:
+        flow = os.path.join(folder, ".github", "workflows")
+        os.makedirs(flow)
+        for name, text in checkout.items():
+            with open(os.path.join(flow, name), "w", encoding="utf-8", newline="\n") as f:
+                f.write(text)
+    return folder
+
+
+def new_case(scen, checkout=CHECKOUT_DEFINES):
+    case = checkout_folder(checkout, prefix="case-")   # the hook runs in this folder, so its .github folder is the checkout
     fixture_path = os.path.join(case, "fixture.json")
     log = os.path.join(case, "gh.log")
     with open(fixture_path, "w", encoding="utf-8") as f:
@@ -745,12 +778,13 @@ def base_env(search, fixture_path, log, lock, extra):
 
 
 def run_hook(payload, scen, path="stub", extra=None, lock=None, stdin=None, module=None,
-             launcher=None):
+             launcher=None, checkout=CHECKOUT_DEFINES):
     """Run the real hook once and wait for it. path "stub": PATH is the stub folder only.
     path "missing": PATH is empty. lock: the watch-lock folder (default: this case's folder).
     stdin: raw text for stdin, in place of the JSON of payload. module: a copy of the hook to
-    run instead. launcher: a script that runs the module with a changed stderr, given the module."""
-    case, fixture_path, log = new_case(scen)
+    run instead. launcher: a script that runs the module with a changed stderr, given the module.
+    checkout: the workflow files of the folder the hook runs in (see CHECKOUT_DEFINES)."""
+    case, fixture_path, log = new_case(scen, checkout)
     search = BIN
     if path == "missing":
         search = os.path.join(case, "empty")
@@ -1103,15 +1137,16 @@ def case_draft_era_runs_are_never_green():
     """A head whose only completed runs are draft-era runs never reads green. The draft's checks run ends success with
     its all-jobs-passed job skipped, and a green lane-touched-tests run is no CI result either. The wait keeps listing
     until its deadline, so the line is not green and the wait ends at the deadline. Fake clock: the verdict depends on
-    the deadline. Control: the draft-era run beside a completed checks run whose all-jobs-passed job passed is green."""
+    the deadline. The checkout defines the all-jobs-passed job, so the rollup rule applies, and a lane-touched-tests run
+    alone is never green. Control: the draft-era run beside a completed checks run whose all-jobs-passed job passed is green."""
     for label, runs in (("draft-era checks run alone", [DRAFT_RAN]),
                         ("green lane-touched-tests run alone", [LANE_GREEN]),
                         ("draft-era checks run beside a green lane-touched-tests run", [DRAFT_RAN, LANE_GREEN])):
-        raised, clock, calls, deadline = wait_for_on_fakes(runs, 100, line=True)
+        raised, clock, calls, deadline = wait_for_on_fakes(runs, 100, line=True, checkout=CHECKOUT_DEFINES)
         detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
         check("%s: the line is not CI green" % label, not str(clock.line).startswith("CI green"), detail)
         check("%s: the wait keeps listing and ends at its deadline" % label, abs(clock.now - deadline) < 1e-6, detail)
-    raised, clock, calls, deadline = wait_for_on_fakes([DRAFT_RAN, GREEN], 3600, line=True)
+    raised, clock, calls, deadline = wait_for_on_fakes([DRAFT_RAN, GREEN], 3600, line=True, checkout=CHECKOUT_DEFINES)
     detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
     check("control: draft-era run beside a checks run with all-jobs-passed passed reads CI green",
           str(clock.line).startswith("CI green on"), detail)
@@ -1124,30 +1159,31 @@ def no_rollup_scope(label, fixture):
 
 
 def case_checks_run_without_a_rollup_job_reads_its_run_conclusion():
-    """(a) A head whose runs carry no all-jobs-passed job at all is judged by its run conclusions, as main judges it: a
-    checks run that ended success with its real jobs passed reads CI green, at the second run list (the at-once re-list
-    after the first judged run). Control: a failed all-jobs-passed job still reads CI red and names it, on a fake clock
-    with no deadline in reach."""
+    """(a) A checkout whose workflow files define no all-jobs-passed job, and a head whose checks run carries none: the
+    verdict reads from the run conclusions, as main reads them. A passed checks run reads CI green at the second run list
+    (the at-once re-list after the first judged run). A checkout with no .github folder at all reads the same way.
+    Control: on a defining checkout, a failed all-jobs-passed job still reads CI red and names it, on a fake clock with
+    no deadline in reach."""
     no_rollup_scope("checks run with success, no rollup job", NO_ROLLUP_GREEN)
-    raised, clock, calls, deadline = wait_for_on_fakes([NO_ROLLUP_GREEN], 100, line=True)
-    detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
-    check("checks run with no all-jobs-passed job: the line is CI green on the head",
-          str(clock.line).startswith("CI green on %s" % SHA7), detail)
-    lists = [t for t, a in calls if a[:2] == ["run", "list"]]
-    check("checks run with no all-jobs-passed job: two run lists, the at-once re-list included",
-          len(lists) == 2, detail)
+    for label, checkout in (("checkout with no rollup job", CHECKOUT_NO_JOB),
+                            ("checkout with no .github folder", CHECKOUT_NO_FOLDER)):
+        raised, clock, calls, deadline = wait_for_on_fakes([NO_ROLLUP_GREEN], 100, line=True, checkout=checkout)
+        detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
+        check("%s: the line is CI green on the head" % label, str(clock.line).startswith("CI green on %s" % SHA7), detail)
+        lists = [t for t, a in calls if a[:2] == ["run", "list"]]
+        check("%s: two run lists, the at-once re-list included" % label, len(lists) == 2, detail)
     rollup_failed = run(993, "checks", "failure", [job("unit", "success"), job(REQUIRED_CHECK, "failure")])
-    raised, clock, calls, deadline = wait_for_on_fakes([rollup_failed], 3600, line=True)
+    raised, clock, calls, deadline = wait_for_on_fakes([rollup_failed], 3600, line=True, checkout=CHECKOUT_DEFINES)
     detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
     check("control: a failed all-jobs-passed job reads CI red and names it",
           str(clock.line).startswith("CI red on") and REQUIRED_CHECK in str(clock.line), detail)
 
 
 def case_checks_run_without_a_rollup_job_that_failed_is_red():
-    """(b) Control: a checks run with no all-jobs-passed job that failed reads CI red and names its failed job, and
-    names no job that passed. Fake clock, no deadline in reach."""
+    """(b) Control: on a checkout that defines no all-jobs-passed job, a checks run with no such job that failed reads CI
+    red and names its failed job, and names no job that passed. Fake clock, no deadline in reach."""
     no_rollup_scope("checks run with a failed job, no rollup job", NO_ROLLUP_RED)
-    raised, clock, calls, deadline = wait_for_on_fakes([NO_ROLLUP_RED], 3600, line=True)
+    raised, clock, calls, deadline = wait_for_on_fakes([NO_ROLLUP_RED], 3600, line=True, checkout=CHECKOUT_NO_JOB)
     detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
     check("checks run with no all-jobs-passed job and a failed unit job: the line is CI red and names unit only",
           str(clock.line).startswith("CI red on %s" % SHA7) and "unit" in str(clock.line)
@@ -1155,16 +1191,56 @@ def case_checks_run_without_a_rollup_job_that_failed_is_red():
 
 
 def case_no_rollup_line_never_names_a_job_the_repo_lacks():
-    """(d) The verdict line of a head with no all-jobs-passed job names no such job, whatever the wait ends in. The
-    line is read from a passed checks run with no such job. The wait runs on a fake clock, so its end is synthetic. A
-    line that names the rollup job, a job this repo does not have, fails the case."""
+    """(d) On a checkout that defines no all-jobs-passed job, the verdict line names no such job, whatever the wait ends
+    in. The line is read from a passed checks run with no such job. The wait runs on a fake clock, so its end is
+    synthetic. A line that names the rollup job, a job this repo does not have, fails the case."""
     no_rollup_scope("checks run with success, no rollup job (line text)", NO_ROLLUP_GREEN)
-    raised, clock, calls, deadline = wait_for_on_fakes([NO_ROLLUP_GREEN], 100, line=True)
+    raised, clock, calls, deadline = wait_for_on_fakes([NO_ROLLUP_GREEN], 100, line=True, checkout=CHECKOUT_NO_JOB)
     detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
-    check("no-rollup head: a verdict line is printed", clock.line is not None, detail)
+    check("no-rollup checkout: a verdict line is printed", clock.line is not None, detail)
     line = str(clock.line)
-    check("no-rollup head: the verdict line names no rollup job, by word or by job name",
+    check("no-rollup checkout: the verdict line names no rollup job, by word or by job name",
           "rollup" not in line.lower() and REQUIRED_CHECK not in line, detail)
+
+
+def case_a_defining_checkout_never_reads_a_run_without_the_rollup_job_green():
+    """(e) On a checkout whose workflow files define the all-jobs-passed job, a head with one passed checks run that
+    carries no such job is never green: the wait keeps listing to its deadline, and the line is not CI green. The rule
+    holds for the defining checkout only, so this case pins the side the builder must not loosen. Fake clock."""
+    no_rollup_scope("checks run with success, no rollup job, defining checkout", NO_ROLLUP_GREEN)
+    raised, clock, calls, deadline = wait_for_on_fakes([NO_ROLLUP_GREEN], 100, line=True, checkout=CHECKOUT_DEFINES)
+    detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
+    check("defining checkout: a passed run with no rollup job is not CI green",
+          not str(clock.line).startswith("CI green"), detail)
+    check("defining checkout: the wait ends at its deadline", abs(clock.now - deadline) < 1e-6, detail)
+
+
+def case_the_checkout_read_makes_no_github_call():
+    """The discriminator reads the checkout's workflow files from disk, and makes no GitHub read for them. Pin: on each
+    checkout the in-process watch makes only run list and run view calls. The subprocess watch, on the no-job checkout,
+    makes no call that reads a repo or workflow file (a contents path, an actions/workflows path, a .github or .yml
+    name, or a workflow view). A builder that asks GitHub for the workflow files fails here."""
+    reads = {("run", "list"), ("run", "view")}
+    for label, checkout in (("defining", CHECKOUT_DEFINES), ("no-job", CHECKOUT_NO_JOB),
+                            ("no-folder", CHECKOUT_NO_FOLDER)):
+        raised, clock, calls, deadline = wait_for_on_fakes([NO_ROLLUP_GREEN], 100, line=True, checkout=checkout)
+        kinds = sorted({tuple(a[:2]) for _, a in calls})
+        check("%s checkout: the watch reads runs only (calls %r)" % (label, kinds), set(kinds) <= reads,
+              wait_detail(raised, clock, calls, deadline))
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [NO_ROLLUP_GREEN]), checkout=CHECKOUT_NO_JOB,
+                   extra={"CI_WAKE_DEADLINE": "4"})
+    file_reads = [c for c in res.calls if is_file_read(c)]
+    check("no-job checkout, subprocess watch: no call reads a repo or workflow file (%r)" % file_reads,
+          not file_reads, why(res))
+    check("no-job checkout, subprocess watch: the run list was read (the pin is not vacuous)",
+          count(res, "run", "list") >= 1, why(res))
+
+
+def is_file_read(argv):
+    """True for a gh call that reads a repo or workflow file, by its path or its verb."""
+    text = " ".join(argv)
+    return (any(part in text for part in ("contents", "actions/workflows", ".github", ".yml", ".yaml"))
+            or list(argv[:2]) == ["workflow", "view"])
 
 
 def case_the_real_checks_run_is_read_after_a_draft_era_run():
@@ -1651,9 +1727,9 @@ def case_failed_job_wakes_the_watch_at_the_poll_that_shows_it():
 
 # wait_for, in process, on fakes: the pace and the deadline of the run lists. The module's `gh` answers
 # `run list` (by the number of the call, as the stub does) and `run view`. Its `time` is the fake clock.
-def wait_for_on_fakes(runs, budget, ends_at=None, line=False):
-    """Run wait_for(SHA, cwd, deadline) in process. budget: seconds from the clock's start to the
-    deadline. -> (exception or None, clock, gh calls [(time, args)], deadline). shutil is a fake with
+def wait_for_on_fakes(runs, budget, ends_at=None, line=False, checkout=CHECKOUT_DEFINES):
+    """Run wait_for(SHA, cwd, deadline) in process, with cwd a folder holding `checkout` (see CHECKOUT_DEFINES).
+    budget: seconds from the clock's start to the deadline. -> (exception or None, clock, gh calls [(time, args)], deadline). shutil is a fake with
     no gh, so a read that bypasses the module's `gh()` ends as Unknown and reaches no real gh.
     ends_at: {run id: seconds from the clock's start}. Until then such a run lists and reads in progress
     with no conclusion; from then on it reads as its fixture says. line: also set clock.result (what
@@ -1694,7 +1770,7 @@ def wait_for_on_fakes(runs, budget, ends_at=None, line=False):
     with mock.patch.object(mod, "time", clock), mock.patch.object(mod, "gh", fake_gh), \
             mock.patch.object(mod, "shutil", fake_shutil):
         try:
-            clock.result = mod.wait_for(SHA, os.getcwd(), deadline)
+            clock.result = mod.wait_for(SHA, checkout_folder(checkout), deadline)
             raised = None
         except Exception as e:
             raised = e
@@ -2952,6 +3028,8 @@ def main():
     case_checks_run_without_a_rollup_job_reads_its_run_conclusion()
     case_checks_run_without_a_rollup_job_that_failed_is_red()
     case_no_rollup_line_never_names_a_job_the_repo_lacks()
+    case_a_defining_checkout_never_reads_a_run_without_the_rollup_job_green()
+    case_the_checkout_read_makes_no_github_call()
     case_the_real_checks_run_is_read_after_a_draft_era_run()
     case_a_failed_job_still_wakes_beside_a_draft_era_run()
     case_run_visible_at_the_at_once_relist_is_judged()
