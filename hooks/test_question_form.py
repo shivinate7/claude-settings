@@ -289,6 +289,8 @@ FORM_VARIANTS = [
      parts(based=["Based on (read): hooks/guard.py holds the merge check."]), (FORM_RULE, "path:line")),
     ("a read premise whose only cite is a URL with a port is refused",
      parts(based=["Based on (read): http://localhost:8080"]), (FORM_RULE, "path:line")),
+    ("a read premise whose only cite is a URL with a dotted host and a port is refused",
+     parts(based=["Based on (read): see http://example.com:8080 for it"]), (FORM_RULE, "path:line")),
     ("three Based on lines, one read with no path:line, is refused",
      parts(based=[BASED[0], "Based on (read): the cloud allow rules cover only the plain merge form.", THIRD]),
      (FORM_RULE, "path:line")),
