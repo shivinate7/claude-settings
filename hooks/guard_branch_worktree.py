@@ -101,16 +101,6 @@ WORKTREE_REMOVE_DENY_REASON = (
     "unlock the tree if a lock holds it, and let a session standing in it finish or leave "
     "before the tree is removed."
 )
-# Pruning deletes no files: it drops the administrative record of a worktree whose directory is
-# already gone. The worst case is clearing another session's record of a tree it still means to
-# use, so this asks, never refuses, whatever the run location.
-WORKTREE_PRUNE_ASK_REASON = (
-    "Rule (shared trees): this drops the administrative record of a worktree whose directory no "
-    "longer exists. It deletes no files, but the record it drops could belong to another "
-    "session. "
-    "The click in this prompt is the grant."
-)
-
 # Two worktrees never hold one branch. Git 2.43 refuses a plain `checkout x` of a branch another
 # worktree holds, but lets `checkout -B x` and `switch -C x` re-point it with no warning, and a
 # commit in either tree then moves the branch under the other tree. The forms this rule reads:

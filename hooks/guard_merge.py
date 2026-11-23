@@ -16,7 +16,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from guard_core import (
-    SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, GIT_WRITES, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
+    COMPLY_TAIL, SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, GIT_WRITES, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
     REPLAY_MARKS, command_indexes, dir_before_segment, heredoc_heads, inline_script, inner_commands, own_heredoc_bodies, resolve_command, resolve_default_base, segment_tokens, split_segments,
     is_cloud, lint_dir, shell_abs, strip_heredoc_bodies, strip_redirections,
 )
@@ -290,10 +290,10 @@ def ignored_checks(module, where: str):
 
 
 BARE_MERGE_REASON = (
-    "Rule (Git): this repo merges with the merge tool, and a bare `gh pr merge` skips its claim and "
+    "Rule (Git): this repo merges with the merge tool, and a bare merge skips its claim and "
     "leaves the local main behind origin. "
-    "Remedy: run the merge tool, `merge <pr> --confirm`. If the tool is broken, confirm this call. "
-    "(decision bare-merge-asks, a bare merge in a merge-tool repo asks the owner)"
+    "Remedy: run the merge tool, `merge <pr> --confirm`. "
+    + COMPLY_TAIL
 )
 
 

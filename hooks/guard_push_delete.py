@@ -706,7 +706,8 @@ def push_refspecs(args):
 
 
 def push_verdict(args, cwd: str, overrides=None) -> str:
-    """'' for an allowed push, else 'ask' or 'deny', for the `git push` arguments `args`.
+    """'' for an allowed push, else 'ask' or 'deny', for the `git push` arguments `args`. 'ask' is the word for a
+    push that may reach the default branch; the caller refuses it with PUSH_ASK_REASON (the guard never asks).
 
     Not forced: ''. Forced or deleting at the default branch, or at a destination this cannot
     resolve: 'ask'. Forced by `--force`, `-f`, a `--fo...` prefix or a `+refspec`: 'deny'. Forced
@@ -1719,13 +1720,10 @@ PUSH_REASON = (
 )
 PUSH_MAIN_REASON = (
     "Rule (Git): this push writes the default branch, main or master. Main moves only by pull request "
-    "(rule git-main-only-by-pr, decision plain-push-asks). Approving the prompt lets this one push through; it is not a grant."
-)
-PUSH_STRAY_REASON = (
-    "Rule (Git): this push writes a branch name other than the one this branch tracks (its upstream), "
-    "so it may land on a stray branch, and no such branch exists on the remote yet (rule push-stray-branch, "
-    "decision plain-push-asks). Name the destination: `git push origin HEAD:<branch>`. "
-    "Approving the prompt lets this one push through; it is not a grant."
+    "(rule git-main-only-by-pr, decision guard-remedy-not-to-owner). "
+    "Remedy: push the lane's own branch by name, `git push origin HEAD:<lane-branch>`, and merge it by "
+    "pull request with the merge tool. "
+    + guard_core.COMPLY_TAIL
 )
 PUSH_ALL_REASON = (
     "Rule (Git): this push sends every branch, and it may update the default branch on the remote: the "
@@ -1742,9 +1740,13 @@ PUSH_AGENT_REASON = (
     "claude/agent-<hex> or worktree-agent-<hex>), not a lane branch (decision plain-push-asks). "
     "Remedy: push the lane's own branch by name: `git push origin HEAD:<lane-branch>`."
 )
+# The reason of a forced push that may rewrite the default branch, or whose target git cannot read. The name
+# keeps "ASK" because hooks/mutate_guard.py anchors its mutants on it.
 PUSH_ASK_REASON = (
-    "Rule (Git): this forced push may rewrite the default branch, or its target is unreadable. "
-    "The click in this prompt is the grant."
+    "Rule (Git): this forced push may overwrite the history of the default branch, or its target is "
+    "unreadable. A retry would force the same branch again. "
+    "Remedy: push the lane's own branch by name, `git push origin HEAD:<lane-branch>`, and open a pull request. "
+    + guard_core.COMPLY_TAIL
 )
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the

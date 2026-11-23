@@ -2323,6 +2323,11 @@ def lift_notice() -> str:
     return "override lifted: " + ", ".join(_lifted_rules)
 
 
+# The last words of a refusal that took the place of an ask (decision guard-remedy-not-to-owner): the guard never
+# asks the owner, so a refusal that may be wrong is complied with and reported. One home, read by each family.
+COMPLY_TAIL = "If this refusal looks wrong for your task, comply anyway and say so in your report."
+
+
 def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None, on_lift=None,
            continue_on_lift: bool = False):
     """Print a deny or an ask and exit, unless an owner override lifts it (decision
@@ -2356,6 +2361,10 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
                                  separators=(",", ":")))
                 sys.exit(0)
     record(tool, decision, rule, matched)
+    # A reason that ends with COMPLY_TAIL keeps it last: the notice and the override line go before it.
+    comply = COMPLY_TAIL if reason.rstrip().endswith(COMPLY_TAIL) else ""
+    if comply:
+        reason = reason.rstrip()[:-len(comply)]
     if _lifted_rules:  # an earlier rule of this call was lifted: say so inside the refusal, never as a second object
         reason = reason.rstrip() + " (" + lift_notice() + ")"
     try:  # the line the owner types to lift this refusal, or the words that none does; last in the reason
@@ -2364,6 +2373,8 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
         reason = reason.rstrip() + " " + line
     except Exception:
         pass
+    if comply:
+        reason = reason.rstrip() + " " + comply
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",

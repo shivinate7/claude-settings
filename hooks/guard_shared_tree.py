@@ -814,7 +814,8 @@ TREE_DENY_REASON = (
     "Remedy: copy the file to a name ending in .bak and change the copy. "
     "Commit work you must set aside on your own branch, never a stash: a stash entry "
     "belongs to no branch, and it outlives no session that holds its tag. "
-    "Run the command in a worktree of your own when the tree must change."
+    "Run the command in a worktree of your own when the tree must change. "
+    + guard_core.COMPLY_TAIL
 )
 _MOVES_SHELL = re.compile(
     r"(?<![\w.-])(?:cd|pushd|popd|set-location|sl|chdir|push-location|pop-location)(?![\w-])"
@@ -884,13 +885,13 @@ def names_only_files(subcommand: str, args, root: str, segment: str = "") -> boo
     return True
 
 
-TREE_ASK_REASON = (
-    "Rule (shared trees): this command throws away work in a working tree. "
-    "This checkout is a worktree, so the loss is limited to this lane. "
-    "Commit work you must set aside on your own branch, never a stash. "
-    "A per-file discard in a worktree runs with no ask when the command holds no cd: "
+TREE_WORKTREE_REFUSE_REASON = (
+    "Rule (shared trees): this command throws away uncommitted work in a working tree, and no step "
+    "puts it back. "
+    "Remedy: commit the work on a branch of your own, never a stash. "
+    "A per-file discard in a worktree runs when the command holds no cd: "
     "git -C <lane> restore <file>. "
-    "The click in this prompt is the grant."
+    + guard_core.COMPLY_TAIL
 )
 
 
