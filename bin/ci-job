@@ -183,6 +183,17 @@ def slashed(path):
     return path.replace("\\", "/")
 
 
+def under(top, path):
+    """`path` as the step's command names it: relative to `top` when it lies inside the checkout (the step runs with cwd `top`), so two worktrees of
+    one tree make one cache key; else the absolute path, slashed."""
+    try:
+        if os.path.commonpath([os.path.abspath(top), os.path.abspath(path)]) == os.path.abspath(top):
+            return slashed(os.path.relpath(path, top))
+    except ValueError:  # another drive on Windows
+        pass
+    return slashed(path)
+
+
 def no_shell(name, nt=None):
     """The detail of a step whose shell is missing."""
     if os.name == "nt" if nt is None else nt:
@@ -526,7 +537,7 @@ def plan(step, pr, values, top, lint=False, pinned=False):
             if env["ZIZMOR_PATHS"] is None:
                 return "unknown", "with: paths needs an expression this runner cannot read: %s" % step_with(step)["paths"], None, None, None
         # A missing run.sh of a local uses: must FAIL, as in CI; bash alone would exit 127 and read as a missing tool.
-        path = slashed(path)  # $BASH: the bash running this script, never a PATH lookup that may find the WSL launcher
+        path = under(top, path)  # $BASH: the bash running this script, never a PATH lookup that may find the WSL launcher. Inside the checkout the path is relative, so the key holds no worktree folder
         return "run", 'test -f "%s" || { echo "no run.sh at %s" >&2; exit 1; }\n"$BASH" "%s"\n' % (path, path, path), shell_argv(None), env, None
     if action:
         if not pr:
@@ -539,7 +550,7 @@ def plan(step, pr, values, top, lint=False, pinned=False):
             path, looked = code_check(top, step, pinned)
             if not path:
                 return "unknown", looked if pinned and SHA_PIN.fullmatch(uses(step)) else "no code_check.py: looked for %s" % looked, None, None, None
-            return "run", 'python3 "%s" --base "%s"' % (slashed(path), values["base"]), shell_argv(None), {}, None
+            return "run", 'python3 "%s" --base "%s"' % (under(top, path), values["base"]), shell_argv(None), {}, None
         # Always the local bin/ste-changed, even under --pinned: only a checkout with .git can see pin drift. A --lint run passes with a
         # stale pin and says so (decision action-pins-follow-sessions); a --step or plain run still exits 3.
         return "run", '"%s" "%s"' % (slashed(os.path.join(BIN, "ste-changed")), values["base"]), shell_argv(None), {PIN_NOTE_ENV: "1"} if lint else {}, None
