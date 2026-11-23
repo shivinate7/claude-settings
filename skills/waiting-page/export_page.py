@@ -13,13 +13,15 @@ saves them; an empty collection is an empty folder. A script cannot call that to
 The session touches `.complete` in each collection folder after the last list page, so a fetch that stopped early
 shows: a collection with no marker is unknown. A collection that is empty now while the copy holds docs of it is
 unknown too, unless the session names it with --allow-empty.
-A doc the copy holds and the fetch no longer lists stays: all six collections are append-only.
+An item closed on the page or missing from the fetch leaves the copy, with its answer (keyed by its id, or naming it in
+`item`) and that answer's receipt (owner ruling 2026-11-22 21:02 CST). Any other doc the fetch no longer lists stays.
 WAITING_DIR is the `waiting-data` folder of the record branch (`layout.py path <root> waiting-data`). With --page,
 the page's bytes land in `page/page.html`, and its designData block in `page/designData.json`. A file is written
 only when its bytes differ. The script never runs git: the session commits.
 
 Verdict, one line, then exit:
-  changed N  N files written or deleted in WAITING_DIR; exit 0
+  changed N  N files written or deleted in WAITING_DIR; exit 0. `changed N deleted K` when K of them were deletes:
+             the session commits them with DELETE in the message
   same       nothing differs; exit 0
   refused    a value or key has the shape of a secret or of personal data; one line per find (file, JSON path,
              kind, never the value); nothing is written; exit 1
@@ -48,8 +50,8 @@ not count),
 `PWD=<path>`, a no-reply address and an ssh remote of a public git host.
 A personal fact in plain words passes too. A postal address (street, PO box, "City, ST ZIP") is a shape.
 A doc is written with sorted keys, two-space indent and a final newline, so an unchanged doc is byte-identical. A doc no
-longer fetched stays in a waiting collection folder: the export adds and updates, and a truncated fetch deletes nothing
-there. A collection outside the six, from another role's registry entry, still mirror-deletes.
+longer fetched stays in a waiting collection folder other than `items`. A fetch cut short is unknown by its marker, so it
+deletes nothing. A collection outside the six, from another role's registry entry, still mirror-deletes.
 
 Check, before a republish, writes nothing:
 
@@ -64,7 +66,8 @@ Rebuild, the recovery path. It reads only the repo copy, never the live page:
     python3 ~/.claude/skills/waiting-page/export_page.py --rebuild WAITING_DIR --batches OUT_DIR [--collections NAME ...]
 
 Writes OUT_DIR/batch-NNN.json, each a JSON list of at most 50 `{op: "set", collection, doc_id, data}` entries and
-under 900,000 bytes, one entry per doc in WAITING_DIR except `page/`, and prints `batches K docs N`. The session
+under 900,000 bytes, one entry per doc in WAITING_DIR except `page/`, and prints `batches K docs N`. A closed item, its
+answer and its receipt get no entry, in --merge too: no session restores a deleted item to a page. The session
 sends each list as an `ArtifactData batch`. Unknown, exit 2: a missing or empty WAITING_DIR, a folder in it that is
 neither one of the six collections (or the `--collections` names) nor `page/`, or one doc over the byte cap.
 For an artifact other than the waiting page, `--collections NAME [NAME ...]` names its collections (the registry
@@ -128,7 +131,10 @@ import page_check  # noqa: E402  the one home that runs the page's picture check
 # The same six as lint/layout.py WAITING_COLLECTIONS. A copy, because a single export and the rebuild must run with no
 # lint/ beside them: the recovery path may not depend on the repo it recovers (verification-recovery-independent-of-state).
 COLLECTIONS = ("items", "answers", "groups", "asks", "meta", "receipts")
-APPEND_ONLY = COLLECTIONS  # the export adds and updates, never deletes a doc: a page cleanup drops archived rows, and the copy is their only home
+ITEMS, ANSWERS, RECEIPTS = "items", "answers", "receipts"
+# A doc the fetch no longer lists stays in these. Items mirror the page's open items instead: a closed or missing item
+# leaves the copy with its answer and receipt (owner ruling, 2026-11-22 21:02 CST; decision waiting-data-in-repo).
+KEEP_UNFETCHED = tuple(name for name in COLLECTIONS if name != ITEMS)
 COLLECTION_SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")  # copy of lint/layout.py COLLECTION, for the same reason
 PAGE_FOLDER, DESIGN_FILE, PAGE_FILE, FILES_FOLDER = "page", "designData.json", "page.html", "files"
 MARKER = ".complete"  # the session touches it in a collection folder after the last list page
@@ -619,6 +625,42 @@ def picture_checks(page, docs):
     return ["held item %s: %s" % (n, sentence) for n, sentence in held], ("checks unknown: " + why) if why else None
 
 
+def is_closed(data):
+    return isinstance(data, dict) and data.get("status") == "closed"
+
+
+def tied_to(gone, answers):
+    """(answer ids, receipt ids) that go with the item ids in `gone`. An answer goes when its doc id or its `item` field
+    is a gone item; a receipt goes when its doc id is a gone item or a gone answer. A park doc names no item and stays."""
+    answer_ids = {doc_id for doc_id, data in answers.items()
+                  if doc_id in gone or (isinstance(data, dict) and data.get("item") in gone)}
+    return answer_ids, set(gone) | answer_ids
+
+
+def gone_labels(collections, gone, answers):
+    """The `<collection>/<id>.json` labels of the items in `gone` and of their answers and receipts."""
+    if ITEMS not in collections:
+        return set()
+    answer_ids, receipt_ids = tied_to(gone, answers)
+    labels = {"%s/%s.json" % (ITEMS, doc_id) for doc_id in gone}
+    labels |= {"%s/%s.json" % (ANSWERS, doc_id) for doc_id in answer_ids if ANSWERS in collections}
+    labels |= {"%s/%s.json" % (RECEIPTS, doc_id) for doc_id in receipt_ids if RECEIPTS in collections}
+    return labels
+
+
+def copy_answers(have):
+    """{doc id: data} of the answers the copy holds, read from `existing`'s bytes. A doc that is not JSON reads as {}."""
+    found = {}
+    for label, raw in have.items():
+        name, _, file = label.partition("/")
+        if name == ANSWERS:
+            try:
+                found[file[:-len(".json")]] = json.loads(raw.decode("utf-8"))
+            except ValueError:
+                found[file[:-len(".json")]] = {}
+    return found
+
+
 def check_lacks(collections):
     """The collections of `collections` that the picture check needs and that are missing (items, answers), in that order."""
     return [name for name in CHECK_COLLECTIONS if name not in collections]
@@ -636,10 +678,18 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
             raise Stop("unknown - %s is empty but the copy holds %d doc(s) of it; pass --allow-empty %s if it emptied"
                        % (name, len(kept), name), UNKNOWN)
 
+    gone = set()
+    if ITEMS in collections:
+        held = {label[len(ITEMS) + 1:-len(".json")] for label in have if label.startswith(ITEMS + "/")}
+        gone = {doc_id for doc_id, data in docs[ITEMS].items() if is_closed(data)} | (held - set(docs[ITEMS]))
+    drop = gone_labels(collections, gone, dict(copy_answers(have), **docs.get(ANSWERS, {})))
+
     want = {}
     finds = []
     for name in collections:
         for doc_id, data in docs[name].items():
+            if "%s/%s.json" % (name, doc_id) in drop:
+                continue
             hits = [("$id", kind) for kind in kinds_in(doc_id)]
             label = "%s/%s.json" % (name, "<redacted>" if hits else doc_id)
             scan(data, "$", hits)
@@ -682,11 +732,12 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
             with open(target, "wb") as handle:
                 handle.write(raw)
             changed += 1
-    keep = APPEND_ONLY
+    deleted = 0
     for label in have:
-        if label not in want and label.split("/")[0] not in keep:
+        if label not in want and (label in drop or label.split("/")[0] not in KEEP_UNFETCHED):
             os.remove(os.path.join(out, *label.split("/")))
-            changed += 1
+            deleted += 1
+    changed += deleted
     unknown, held = None, []
     lacking = check_lacks(collections) if design else []
     if lacking:  # the check needs both: with no answers it would hold an item the page draws as answered
@@ -696,7 +747,8 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
             held, unknown = picture_checks(page, docs)
         elif page_check.pictured_items(docs["items"])[0]:  # a pictured item and no page: the check cannot run
             unknown = "checks unknown: no page file"
-    return ("changed %d" % changed if changed else "same"), unknown, held
+    verdict = ("changed %d" % changed + (" deleted %d" % deleted if deleted else "")) if changed else "same"
+    return verdict, unknown, held
 
 
 def export_all(root, fetched, worktree, allow_empty, account=None):
@@ -788,6 +840,11 @@ def read_copy(waiting, collections):
                 raise Stop("unknown - %s/%s is neither a collection folder nor %s/" % (waiting, name, PAGE_FOLDER), UNKNOWN)
             for doc_id, data in docs_in(folder, name).items():
                 entries.append({"op": "set", "collection": name, "doc_id": doc_id, "data": data})
+    if ITEMS in collections:  # an older copy may still hold a closed item: no session restores one to a page
+        gone = {e["doc_id"] for e in entries if e["collection"] == ITEMS and is_closed(e["data"])}
+        answers = {e["doc_id"]: e["data"] for e in entries if e["collection"] == ANSWERS}
+        drop = gone_labels(collections, gone, answers)
+        entries = [e for e in entries if "%s/%s.json" % (e["collection"], e["doc_id"]) not in drop]
     if not entries:
         raise Stop("unknown - %s holds no docs" % waiting, UNKNOWN)
     return entries
@@ -920,7 +977,7 @@ def main(argv):
     ap.add_argument("--out", help="the waiting-data folder to copy into")
     ap.add_argument("--page", help="the fetched page.html, for its designData block")
     ap.add_argument("--allow-empty", action="append", default=[], metavar="COLLECTION",
-                    help="a collection that really emptied: lifts the unknown stop, deletes no doc of the six")
+                    help="a collection that really emptied: lifts the unknown stop; an emptied items deletes every item from the copy")
     ap.add_argument("--all", help="the repo root whose artifacts registry lists each artifact to export")
     ap.add_argument("--worktree", help="with --all: the record branch worktree each artifact's export path is under")
     ap.add_argument("--check", action="store_true", help="with --fetched and --page: run the picture checks only, write nothing")
