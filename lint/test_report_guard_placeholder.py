@@ -8,7 +8,7 @@ the owner must fill is refused. The tokens: `/dev/sdX` with an optional digit, a
 and both read one detector.
 
 Each reply is the same frame: a prose line, one fenced block, then the report. Only the line in the block changes.
-Deny cases run once unlanded and once landed (a git commit in the turn). Allow cases run the same two ways, so a
+Refuse cases run once unlanded and once landed (a git commit in the turn). Allow cases run the same two ways, so a
 look-alike line that is a real shell form must pass in both branches of the guard.
 
 The fixture, the transcript records and the guard runner come from lint/test_report_guard.py, the one home. Run it
@@ -31,7 +31,7 @@ SHELL_LANGS = ("bash", "sh", "zsh", "powershell")
 LANDING = "git commit -m x"
 
 # Each line sits alone in the block. A person must fill the token before the line runs.
-DENY_LINES = (
+REFUSE_LINES = (
     "sudo e2fsck -f -D /dev/sdX1",
     "sudo e2fsck -f -D /dev/sdX",
     "git checkout <branch>",
@@ -109,12 +109,12 @@ class PlaceholderFenceTests(unittest.TestCase):
 
     def test_unlanded_placeholder_in_each_shell_block_is_refused(self):
         for lang in SHELL_LANGS:
-            for line in DENY_LINES:
+            for line in REFUSE_LINES:
                 with self.subTest(lang=lang, line=line):
                     self.assert_refused(line, lang, landed=False)
 
     def test_landed_placeholder_in_a_bash_block_is_refused(self):
-        for line in DENY_LINES:
+        for line in REFUSE_LINES:
             with self.subTest(line=line):
                 self.assert_refused(line, "bash", landed=True)
 

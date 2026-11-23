@@ -6,7 +6,7 @@ with an optional digit, an angle-bracket word such as `<branch>` or `<your-path>
 `your-`, `REPLACE_ME`, `CHANGEME`, and a standalone `xxx` or `XXX`. The report surface (a reply's fenced shell block)
 has its own cases in lint/test_report_guard_placeholder.py, and both read one detector.
 
-Deny cases: a token in the `mac` or the `powershell` string makes command_in_item_hit return a reason.
+Refuse cases: a token in the `mac` or the `powershell` string makes command_in_item_hit return a reason.
 Allow cases: a line with a look-alike shape that is a real shell form (a heredoc, a redirect, a fd duplicate, a
 variable, an all-caps env var, a real device, a regex alternation, a URL query, a git range, `xxx` inside a longer
 word) returns "" from the same check, with the same frame.
@@ -30,7 +30,7 @@ question_form = tqf.question_form
 STEP = "Run the command below."
 
 # Each token sits in its own command line, which the owner would run as it stands.
-DENY_TOKENS = (
+REFUSE_TOKENS = (
     "sudo e2fsck -f -D /dev/sdX1",
     "sudo e2fsck -f -D /dev/sdX",
     "git checkout <branch>",
@@ -59,7 +59,7 @@ ALLOW_LINES = (
 )
 
 # The same tokens in the `powershell` string, with a plain `mac` string beside them.
-POWERSHELL_DENY = (
+POWERSHELL_REFUSE = (
     "Set-Location your-repo",
     "$env:TOKEN = 'YOUR_TOKEN'",
     "Write-Output CHANGEME",
@@ -88,7 +88,7 @@ def verdict(item):
     return ("hit" if reason else "pass"), reason
 
 
-def deny(name, item):
+def must_refuse(name, item):
     scoped(name, item)
     kind, detail = verdict(item)
     check("refused: " + name, kind == "hit", "want a refusal, got %s %r" % (kind, detail))
@@ -101,12 +101,12 @@ def allow(name, item):
 
 
 def main():
-    for token in DENY_TOKENS:
-        deny("mac " + token, task_with(token))
+    for token in REFUSE_TOKENS:
+        must_refuse("mac " + token, task_with(token))
     for line in ALLOW_LINES:
         allow("mac " + line.splitlines()[0], task_with(line))
-    for line in POWERSHELL_DENY:
-        deny("powershell " + line, task_with("git status", powershell=line))
+    for line in POWERSHELL_REFUSE:
+        must_refuse("powershell " + line, task_with("git status", powershell=line))
     print("FAIL: %d failed" % len(FAILED) if FAILED else "all checks passed")
     return 1 if FAILED else 0
 
