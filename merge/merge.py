@@ -192,8 +192,8 @@
                           check or the cross-measure stops there too: the ci-job never runs beside it, and one refusal lists every FAIL block, with
                           no PASS line and no comment. Two heads clash when `git merge-tree` of them conflicts. A clash counts only when both
                           heads merge clean with the base. A clash that comes through the base is a report line after the PASS line, and it
-                          names the PR that conflicts with the base. A counted clash FAILs, naming each PR and file, with its remedy
-                          (--lint-unknown-ok never lifts it); on a batch integration PR (a freeze block in its body, and its branch is that
+                          names the PR that conflicts with the base. A counted clash is ordered by PR number: the lower number goes first and passes the pair (a report line); the higher FAILs, naming each PR and file and the
+                          PRs that go first, with its remedy to merge after them (--lint-unknown-ok never lifts it); on a batch integration PR (a freeze block in its body, and its branch is that
                           batch's `batch-NAME`) it is a report line instead, because the lanes rebase after the merge. A base conflict still FAILs. PRs in one stack (one head holds the other) are skipped. Added cost: one `git merge-tree` of the
                           head against main (its base), two merge-trees per other PR compared (that PR against the base, and against the head),
                           and exactly one PR-list read; no merge-tree for a stack-skipped PR, and none beyond the head's when there is no other
@@ -256,7 +256,7 @@
                           no push, no ready mark, no comment, no records page; it still fetches (writes refs and FETCH_HEAD) and adds a worktree (.git/worktrees).
                           Exit 0 only when every line is a pass.
                           The open-PR clash reads the open PRs through the host's open_pulls (GitHub REST `GET pulls`, the read a lane or runner has),
-                          and a failed list read prints `unknown open-PR clash`, never a pass. A clash counts only with a PR that is not a draft; a clash
+                          and a failed list read prints `unknown open-PR clash`, never a pass. A clash counts only with a PR that is not a draft, and a counted clash is ordered by PR number as in --lane-lint; a clash
                           with a draft is a report line `#N shares files: a, b`, read from the changed files alone, with no merge-tree (PRE_READY_CLASH_SCOPE: "ready", or "all" for every open PR).
                           A repo with no readyChecks prints `unknown pre-ready: no merge.readyChecks declared` and exits 1.
                           Cost: see fast_checks, run_ready_checks, pre_ready_rows, cross_measure.
@@ -3399,6 +3399,7 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
     -> (fails, reports, stop). fails: one text block for the clashes that count. reports: one line per clash that does not count. stop: "" or the text
     of an unknown (a read git cannot answer, a head origin does not hold); the caller raises it, with the fails above it, never as a pass.
     A clash counts only when both heads merge clean with the base: otherwise it comes through the base, and its line names the head that conflicts with it.
+    A counted clash is ordered by PR number: the lower number goes first and passes the pair (a report line), the higher FAILs and names the PRs that go first. The check stays on the higher PR. An open batch integration PR that is not a draft goes first against a lane PR, whatever the numbers (the lane rebases after the batch merges, as on main). A draft never goes first, a draft batch included: a clash with a draft is a report line.
     `integration` is true for a batch integration PR (is_integration_pr): a clash that would count is a report line instead, for the lane rebases after the merge.
     A PR that --with names and that is not open is a Stop here: never a pass. --lint-unknown-ok lifts none of it. A PR posted under another
     session id is found only through --with.
@@ -3423,7 +3424,7 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
     c, out = fetch_branch_heads(root)
     if c:
         raise Stop(f"the cross-measure of {head[:9]} is unknown: git fetch origin failed: {out} {LANE_LINT_CITE}")
-    conflicts, reports, unknown, unfetched = [], [], [], []
+    conflicts, goes_first, reports, unknown, unfetched = [], [], [], [], []
     wide = scope in ("all", "ready")
     mine, theirs = (changed_paths(root, base, head) if wide else None), {}
     if mine is not None:  # a diff that succeeds proves the head is in the clone; one that fails (None) falls through to the checks below
@@ -3488,12 +3489,22 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
             reports.append(f"{named}. Not counted: #{m}'s own head conflicts with {base}, so the clash comes through {base}. Its own lint names it.")
         elif integration:
             reports.append(f"{named}. Not counted: this PR is a batch integration PR, so #{m} rebases after the merge.")
+        elif rows[m].get("draft") is not True and is_integration_pr({"branch": rows[m]["head"]["ref"], "body": rows[m].get("body") or ""}):  # an open non-draft batch integration PR goes first whatever the numbers: the lanes rebase after it merges. A draft batch falls through to the draft rule below
+            conflicts.append(named)
+            goes_first.append(m)
+        elif n < m:  # the pair is ordered by number: the lower goes first and passes the pair, the higher still fails it
+            reports.append(f"{named}. Not counted: this PR goes first (#{n} is lower than #{m}), so #{m} waits for it.")
+        elif rows[m].get("draft") is True:  # a parked draft never goes first: it must not hold a ready PR back (scope "ready" reports a draft before this point)
+            reports.append(f"{named}. Not counted: #{m} is a draft, so it does not go first.")
         else:
             conflicts.append(named)
+            goes_first.append(m)
     fails = []
     if conflicts:
+        first = ", ".join(f"#{m}" for m in goes_first)
         fails.append("\n".join(["its head conflicts with another PR's head (git merge-tree), file by file:", *conflicts,
-                                "Merge one head into the other, or rebase one on the other, so the two stack (either way, for a PR on main or on a release base)."]))
+                                f"{first} go{'es' if len(goes_first) == 1 else ''} first (the lower number goes first in a clashing pair; an open non-draft batch integration PR goes first whatever the numbers). Merge after {first} land{'s' if len(goes_first) == 1 else ''}: then merge {base} into this lane, "
+                                "push, and run again."]))
     stop = ""
     if unfetched:  # no run clears it: the fork's owner must push the head to origin, or the lane compares it by hand
         stop = "\n".join([f"the cross-measure of {head[:9]} is unknown, not a pass:", *unfetched, *unknown,
