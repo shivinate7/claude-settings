@@ -242,7 +242,7 @@ def decision_item(text):
     reaches the Departs from line (question_form.departs_hit), whose change side holds no `;`."""
     goal = " ".join(text.split()) or "x"
     return {"kind": "decision",
-            "context": "Goal: %s\nProblem (goal): why the owner judges it\nBased on (read): one premise\n"
+            "context": "Goal: %s\nProblem (goal): why the owner judges it\nBased on (read): one premise (hooks/guard.py:120)\n"
                        "Departs from: main — adds a check" % goal,
             "options": [{"label": "a", "gain": "saves time", "lose": "one more check"}]}
 
