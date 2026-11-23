@@ -1880,7 +1880,7 @@ def case_agent_compaction_owes_nothing():
 
 def case_agent_transcript_compaction_owes_nothing():
     """The same agent compaction with no agent_id on the payload. Its transcript_path is the agent's own file
-    under the session's subagents folder, so the PostCompact sets no owed flag for the main session."""
+    under the session's `subagents` folder, so the PostCompact sets no owed flag for the main session."""
     c = Case("agent-transcript")
     try:
         c.seed_handoff(SID)
