@@ -2085,4 +2085,47 @@ spo_register("scratchpad-owner: shape 1 <harness base>/scratchpad/x is no scratc
              spo_shape_case)
 
 
+# Rule scratchpad-owner, a syntax check of another agent's script. `bash -n F`, `sh -n F`, `zsh -n F` and
+# `node --check F` read the file and run nothing, so agent B's check of agent A's file is allowed. A run of the same
+# file, a check chained to a run, and a `-c` string that runs the file are refused. `python3 -m py_compile F` is a
+# control: the module form names no file to the rule, so it is allowed with or without this change.
+spo_register("scratchpad-owner: syntax 1, agent B's bash -n of agent A's script is allowed",
+             lambda: spo_data_case("syn-bash-n", "syntax 1, bash -n F", "a_sh.sh", SH_TEXT,
+                                   lambda path: "bash -n %s" % path,
+                                   "agent B's bash -n of agent A's script is a syntax check, and is allowed"))
+spo_register("scratchpad-owner: syntax 2, agent B's node --check of agent A's script is allowed",
+             lambda: spo_data_case("syn-node-check", "syntax 2, node --check F", "a_js.js", TS_TEXT,
+                                   lambda path: "node --check %s" % path,
+                                   "agent B's node --check of agent A's script is a syntax check, and is allowed"))
+spo_register("scratchpad-owner: syntax control 1, agent B's sh -n of agent A's script is allowed",
+             lambda: spo_data_case("syn-sh-n", "syntax control 1, sh -n F", "a_sh.sh", SH_TEXT,
+                                   lambda path: "sh -n %s" % path,
+                                   "agent B's sh -n of agent A's script is a syntax check, and is allowed"))
+spo_register("scratchpad-owner: syntax control 2, agent B's zsh -n of agent A's script is allowed",
+             lambda: spo_data_case("syn-zsh-n", "syntax control 2, zsh -n F", "a_sh.sh", SH_TEXT,
+                                   lambda path: "zsh -n %s" % path,
+                                   "agent B's zsh -n of agent A's script is a syntax check, and is allowed"))
+spo_register("scratchpad-owner: syntax control 3, agent B's python3 -m py_compile of agent A's script is allowed",
+             lambda: spo_data_case("syn-py-compile", "syntax control 3, python3 -m py_compile F", "a_py.py", PY_TEXT,
+                                   lambda path: "python3 -m py_compile %s" % path,
+                                   "agent B's python3 -m py_compile of agent A's script is a syntax check, and is allowed"))
+spo_register("scratchpad-owner: syntax 3, agent B's bash run of agent A's script is refused",
+             lambda: pr2015_spo_run_case("syn-bash-run", "syntax 3, bash F", "a_sh.sh",
+                                         lambda fx, p: "bash %s" % p,
+                                         "agent B's bash F run of agent A's script is refused", text=SH_TEXT))
+spo_register("scratchpad-owner: syntax 4, agent B's node run of agent A's script is refused",
+             lambda: pr2015_spo_run_case("syn-node-run", "syntax 4, node F", "a_js.js",
+                                         lambda fx, p: "node %s" % p,
+                                         "agent B's node F run of agent A's script is refused", text=TS_TEXT))
+spo_register("scratchpad-owner: syntax 5, agent B's bash -n F && bash F, a check then a run, is refused",
+             lambda: pr2015_spo_run_case("syn-chain", "syntax 5, bash -n F && bash F", "a_sh.sh",
+                                         lambda fx, p: "bash -n %s && bash %s" % (p, p),
+                                         "agent B's bash -n F && bash F is refused", text=SH_TEXT))
+spo_register("scratchpad-owner: syntax 6, agent B's bash -n -c string that runs agent A's script is refused",
+             lambda: pr2015_spo_run_case("syn-c-run", "syntax 6, bash -n -c 'bash F'", "a_sh.sh",
+                                         lambda fx, p: 'bash -n -c "bash %s"' % p,
+                                         "agent B's bash -n -c string that runs agent A's script is refused",
+                                         text=SH_TEXT))
+
+
 # =========================================================================== mask_script lexemes
