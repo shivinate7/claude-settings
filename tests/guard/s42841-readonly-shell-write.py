@@ -222,6 +222,17 @@ ro_allow("readonly-shell-write: mktemp of a template in its own scratchpad is al
          "mktemp " + RO_SCRATCH_CMD + "/ro-own.XXXXXX", session=FAKE_SESSION)
 ro_allow("readonly-shell-write: a relative redirect from a cwd inside its own scratchpad is allowed",
          "echo x > out.txt", cwd=os.path.join(RO_SCRATCH, "notes"), session=FAKE_SESSION)
+# The real layout: this session's scratchpad under the harness base (s00442 real_run_folder), which gettempdir()
+# does not name, so TEMP_DIR (RO_TEMP) stays out of it. The guard writes its writer record into the scratchpad
+# (`.writers`), so the folder sits in this run's folder under that base, and it goes with the run at exit. POSIX
+# only, since the base is /tmp/claude-<uid>. TEMP_DIR must exist, or gettempdir() skips it for /tmp, which is
+# the base this case must stay out of.
+if os.name != "nt":
+    os.makedirs(RO_TEMP, exist_ok=True)
+    RO_REAL_SCRATCH = os.path.join(real_run_folder(), "ro-real", "-home-user-claude-settings", FAKE_SESSION,
+                                   "scratchpad")
+    ro_allow("readonly-shell-write: a read-only agent's redirect into its own scratchpad under the harness base is allowed",
+             "echo x > " + slash(RO_REAL_SCRATCH) + "/ro-real.txt", session=FAKE_SESSION)
 
 # ---- F. Not judged: a writing role, the orchestrator, and a call that names no read-only role.
 ro_allow("readonly-shell-write: a builder's redirect to a file is allowed", RO_WRITE, agent_type="builder")
