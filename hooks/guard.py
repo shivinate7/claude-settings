@@ -285,7 +285,6 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        request, a run with a red job, another branch, an archive push, a repo with no CI and the merge tool
                        pass. A failed pull request read passes with one stderr line. GitHub reads only on a push: a list read, and
                        a check-runs read when a ready pull request holds the branch.
-                       (owner ruling 13:05 CST Nov 23, 2026, one CI run per pull request)
   ready-mcp-mark-guard deny. Marking a pull request ready by MCP update_pull_request with draft false, or by the
                        shell `gh pr ready` without --undo, when this session's transcript shows no `merge <pr> --ready` run that passed its ready checks on the
                        pull request's current head, in a repo that uses the merge tool. A draft true or body-only

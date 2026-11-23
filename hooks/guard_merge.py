@@ -520,14 +520,13 @@ def ready_page_hit(tool: str, tool_input: dict, command: str, where: str):
 
 
 
-# ---- a push to the branch of a ready pull request (rule ready-pr-push, owner ruling 13:05 CST Nov 23, 2026, option a:
-# one CI run per pull request, never restarted by a push)
+# ---- a push to the branch of a ready pull request (rule ready-pr-push): one CI run per pull request, never restarted by a push
 # A push cancels the ready pull request's running CI run (checks.yml cancels in progress), and the run is the one the merge
 # reads. The push is refused while that run is running, queued or green. Allowed: a draft, no pull request for the branch, a
 # run with a red job (the push may fix it), a push to another branch, an archive push, a repo with no CI run to cancel, and a
 # push whose pull request read fails (a destination git cannot name is read the same way: the list read still runs, and
-# matches no branch) (owner ruling handed-in-push-fourth-way, 21:17 CST Nov 18, point 2: one stderr line,
-# never a refusal). The merge tool's own pushes run as subprocesses no hook sees; a segment that runs the tool is skipped.
+# matches no branch): one stderr line, never a refusal, since a refusal on a failed read would block every push while GitHub
+# is out of reach. The merge tool's own pushes run as subprocesses no hook sees; a segment that runs the tool is skipped.
 # Cost: only a call that holds a `git push` reads GitHub, and only in a repo that uses the merge tool. Per such
 # push: one open-pull-request list read (a draft, no pull request or another branch ends there), and, when a ready pull request
 # holds the branch, one read of its head's check runs. Two gh calls at most, one deadline each. No other tool call reads anything.
