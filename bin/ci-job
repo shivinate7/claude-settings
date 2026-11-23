@@ -286,10 +286,26 @@ def condition(text, pr):
     return bool(eval(expr.replace("T", "True").replace("F", "False"), {"__builtins__": {}}))  # only T, F, and, or, not, ()
 
 
+LITERAL = re.compile(r"('[^']*')")
+OTHER_JOB_REF = re.compile(r"\b(?:needs|steps)\.[\w-]+(?:\.[\w-]+)*")
+
+
+def other_job_value(expr):
+    """'' for an expression whose only reads are other jobs' results and outputs and earlier steps' outputs, or None for any other
+    term. This runner runs one job alone, so none of those reads has a value and the whole expression reads as no value: the
+    expression is never evaluated, because a test of a missing read (`!= 'success'`, `== ''`) would come out true and read as a proof.
+    The terms it accepts around the reads are string literals, ==, !=, &&, ||, ! and parentheses."""
+    bare = LITERAL.sub("", expr)
+    if not OTHER_JOB_REF.search(bare):
+        return None
+    return "" if not re.sub(r"==|!=|&&|\|\||!|[\s()]", "", OTHER_JOB_REF.sub("", bare)) else None
+
+
 def expand(value, values):
-    """value with each known ${{ }} replaced, or None when one is unknown."""
-    missing = [m.group(1) for m in EXPR.finditer(value) if m.group(1) not in values]
-    return None if missing else EXPR.sub(lambda m: values[m.group(1)], value)
+    """value with each known ${{ }} replaced, or None when one is unknown. A ${{ }} that reads only other jobs' results
+    and outputs reads as other_job_value says."""
+    read = {m.group(1): values[m.group(1)] if m.group(1) in values else other_job_value(m.group(1)) for m in EXPR.finditer(value)}
+    return None if any(v is None for v in read.values()) else EXPR.sub(lambda m: read[m.group(1)], value)
 
 
 def commands(script):
