@@ -2067,7 +2067,7 @@ def _pair_closes_at_end(e):
 
 def top_level_conjuncts(expr):
     """The `&&` parts of an `if:` at the top level: outside quotes and parentheses. A status function inside a quoted string or
-    under an `||` is not one of them."""
+    under an `||` is not one of them. A top-level `||` binds loosest: the whole expression is one part."""
     e = unwrap(expr) or ""
     while e.startswith("(") and e.endswith(")") and _pair_closes_at_end(e):  # one pair around all of the expression
         e = e[1:-1].strip()
@@ -2081,6 +2081,8 @@ def top_level_conjuncts(expr):
                 depth += 1
             elif ch == ")":
                 depth -= 1
+            elif depth == 0 and e.startswith("||", i):
+                return [e.strip()]
             elif depth == 0 and e.startswith("&&", i):
                 parts.append(e[start:i].strip())
                 start = i + 2
