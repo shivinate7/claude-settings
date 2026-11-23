@@ -4386,7 +4386,7 @@ try:
         if raw:
             cur = raw[min(i, len(raw) - 1)]
         else:
-            seq = S["checks_seq"]; rows_now = seq[min(i, len(seq) - 1)]
+            seq = S["checks_seq"]; rows_now = (S.get("sha_checks") or {}).get(sha) or seq[min(i, len(seq) - 1)]  # sha_checks: the rows one sha answers, when a case's commits differ
             cur = {"check_runs": [check_run(r, k) for k, r in enumerate(rows_now) if len(r) < 4 or r[3] != "status"],
                    "statuses": [status_entry(r, k) for k, r in enumerate(rows_now) if len(r) >= 4 and r[3] == "status"]}
         if m_run:
@@ -4761,6 +4761,15 @@ class GhHalf(Env):
 
     def go(self, **kw):
         return self.run_merge("7", "--confirm", host=self.gh_host(**kw))
+
+    def proven_parent(self, rows=None):
+        """Teach the fake gh the commit the proof is read on. drop_config ends with feat a clean merge of main (head_takes_base), and a clean base
+        merge carries the proof of its first parent, the commit the lane pushed. The fake gh answers a check read only for a sha a head read
+        returned or the head ref, so that parent answers HTTP 422 until it is taught here. `rows`: the check rows that parent answers, when they
+        differ from the head's own (sha_checks). -> that sha."""
+        sha = sh(self.other, "git", "rev-parse", "HEAD^1")
+        self.set(shown=[sha], sha_checks={sha: rows} if rows else {})
+        return sha
 
     def test_a_red_main_run_read_through_gh_merges_the_merge(self):
         """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): a PR may merge onto a red main, so the red run read through gh does not refuse it."""
@@ -6032,7 +6041,9 @@ class GhHalf(Env):
         self.assertIn("is not the default branch (trunk)", out)
 
     def test_no_config_merges_on_the_defaults_and_claims_nothing(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): the base merge the tool adds rides the proof of the commit under it, read green here.
         drop_config(self)
+        self.proven_parent()
         self.set(contexts=["checks"])
         self.host = None  # main builds the real Host from the defaults: requiredChecks "protection"
         rc, out = self.run_merge("7", "--confirm")
@@ -6047,12 +6058,24 @@ class GhHalf(Env):
         self.assertIn("default", named[0].lower())
 
     def test_no_config_pending_check_is_refused_before_the_claim(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): the proof of the clean main merge is the commit under it, read pending here.
         drop_config(self)
+        self.proven_parent()
         self.set(contexts=["checks"], checks_seq=[[("checks", "pending", "")]])
         rc, out = self.go(required="protection")
         self.assertEqual(rc, 1)
         self.assertIn("a check is pending: checks", out)
         self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_no_config_a_clean_main_merge_whose_proven_parent_is_red_refuses(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): the clean main merge rides the proof of its parent, so a red parent refuses it before any merge call.
+        drop_config(self)
+        self.proven_parent(rows=[("checks", "fail", "")])  # the parent's run is red
+        self.set(contexts=["checks"], checks_seq=[[("checks", "pass", "")]])  # the merge's own run reads green, so only the parent can refuse it
+        rc, out = self.go(required="protection")
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn(MERGE_CALL, self.calls(), "merged a clean main merge on a red proven parent:\n" + out)
+        self.assertIn("red: checks", out, "the refusal does not name the red check of the proven parent:\n" + out)
 
     def test_no_config_never_runs_stamp(self):
         drop_config(self)
