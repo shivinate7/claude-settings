@@ -1794,27 +1794,52 @@ SPO_SHAPE_PROBE = (
 )
 
 
-def spo_shape_case():
-    """`<harness base>/scratchpad/x` is no scratchpad; `<harness base>/<project>/<session>/scratchpad/x` is one."""
-    fx = spo_fixture("shape")
-    harness = os.path.join(os.path.realpath("/tmp"), "claude-%d" % os.getuid())
-    cases = [("<harness base>/scratchpad/x", os.path.join(harness, "scratchpad", "x"), False),
-             ("<harness base>/<project>/<session>/scratchpad/x",
-              os.path.join(harness, SPO_SLUG, fx["sid"], "scratchpad", "x"), True)]
+def spo_shape_probe(cases, tmp):
+    """Run the shape probe over (name, path, want) rows with TMPDIR at `tmp` and no scratchpad base variable.
+    Returns the rows that read the other way. A probe that does not run is one problem."""
     env = dict(os.environ)
     env.pop("CLAUDE_SCRATCHPAD_BASE", None)
-    env.update(TMPDIR=fx["tmp"], TEMP=fx["tmp"], TMP=fx["tmp"])
+    env.update(TMPDIR=tmp, TEMP=tmp, TMP=tmp)
     run = subprocess.run([sys.executable, "-c", SPO_SHAPE_PROBE, os.path.join(REPO, "hooks"),
                           json.dumps([path for _, path, _ in cases])],
                          env=env, capture_output=True, text=True, timeout=120)
     if run.returncode != 0:
-        return spo_result(["shape, setup: the probe did not run: %s" % run.stderr.strip()[-160:]], "")
+        return ["shape, setup: the probe did not run: %s" % run.stderr.strip()[-160:]]
     values = json.loads(run.stdout)
-    problems = ["shape: %s reads as a scratchpad: %s, want %s" % (name, got, want)
-                for (name, _, want), got in zip(cases, values) if got != want]
-    return spo_result(problems, "the harness base's own folder is no scratchpad, and a project folder under it is")
+    return ["shape: %s reads as a scratchpad: %s, want %s" % (name, got, want)
+            for (name, _, want), got in zip(cases, values) if got != want]
 
 
+def spo_shape_case():
+    """Under the harness base a project folder comes first. `<base>/scratchpad/x` is no scratchpad, `<base>/<project>/
+    <session>/scratchpad/x` is one, and `<base>/<project>/scratchpad/x` is none: its `scratchpad` is not a session id.
+    TMPDIR is the case's own folder, so the base is the harness base and not the temp folder."""
+    fx = spo_fixture("shape")
+    harness = os.path.join(os.path.realpath("/tmp"), "claude-%d" % os.getuid())
+    cases = [("<harness base>/scratchpad/x", os.path.join(harness, "scratchpad", "x"), False),
+             ("<harness base>/<project>/<session>/scratchpad/x",
+              os.path.join(harness, SPO_SLUG, fx["sid"], "scratchpad", "x"), True),
+             ("<harness base>/<project>/scratchpad/x", os.path.join(harness, SPO_SLUG, "scratchpad", "x"), False)]
+    return spo_result(spo_shape_probe(cases, fx["tmp"]),
+                      "the harness base's own folder and a folder under a project with no session are no scratchpad")
+
+
+def spo_shape_linux_case():
+    """The Linux layout: TMPDIR is realpath(/tmp), so the harness base's own folder `claude-<uid>` lies inside
+    Python's temp folder. The `skip` branch of _scratchpad_shapes keeps `<base>/scratchpad/x` from reading as the
+    scratchpad of a session named `claude-<uid>`. A mutant that drops that branch (`if True:`) makes this row red."""
+    tmp = os.path.realpath("/tmp")
+    harness = os.path.join(tmp, "claude-%d" % os.getuid())
+    sid = "spo-" + uuid.uuid4().hex
+    cases = [("<harness base>/scratchpad/x", os.path.join(harness, "scratchpad", "x"), False),
+             ("<harness base>/<project>/<session>/scratchpad/x",
+              os.path.join(harness, SPO_SLUG, sid, "scratchpad", "x"), True)]
+    return spo_result(spo_shape_probe(cases, tmp),
+                      "with TMPDIR at /tmp, the harness base's own folder is no scratchpad, and a project folder under it is")
+
+
+spo_register("scratchpad-owner: shape 2 with TMPDIR at realpath(/tmp), the Linux layout: <harness base>/scratchpad/x is "
+             "no scratchpad", spo_shape_linux_case)
 spo_register("scratchpad-owner: real 1 agent B's Write over agent A's file under the scratchpad base: asked",
              spo_real_overwrite_case)
 spo_register("scratchpad-owner: real 2 agent B's Write over agent A's file through a symlinked /tmp: asked",
