@@ -246,17 +246,17 @@ class PartsTests(unittest.TestCase):
             mutate_shared.ast_mutants("def broken(:\n", limit=5)
 
     def test_format_report_names_an_unloaded_suite(self):
-        row = {"file": "subject.py", "status": "OK", "made": 10, "killed": 0, "crashed": 0, "survived": 10,
-               "rate": 0.0, "silent": [], "unusable": {}, "reason": "", "unloaded": ["test_s.py"]}
+        row = {"file": "subject.py", "status": "OK", "made": 10, "killed": 0, "crashed": 0, "timeout": 0,
+               "survived": 10, "rate": 0.0, "silent": [], "unusable": {}, "reason": "", "unloaded": ["test_s.py"]}
         text = mutate_shared.format_report([row])
         self.assertTrue(any("test_s.py" in line and "unloaded" in line for line in text.splitlines()),
                         "format_report does not name the unloaded suite:\n" + text)
 
     def test_format_report_prints_unknown_never_a_rate(self):
         rows = [
-            {"file": "a.py", "status": "OK", "made": 10, "killed": 4, "crashed": 1, "survived": 5, "rate": 0.4,
-             "silent": ["test_n.py"], "unusable": {}, "reason": "", "target": 0.9},
-            {"file": "b.py", "status": "UNKNOWN", "made": 0, "killed": 0, "crashed": 0, "survived": 0,
+            {"file": "a.py", "status": "OK", "made": 10, "killed": 4, "crashed": 1, "timeout": 0, "survived": 5,
+             "rate": 0.4, "silent": ["test_n.py"], "unusable": {}, "reason": "", "target": 0.9},
+            {"file": "b.py", "status": "UNKNOWN", "made": 0, "killed": 0, "crashed": 0, "timeout": 0, "survived": 0,
              "rate": None, "silent": [], "unusable": {}, "reason": "baseline red", "target": 0.9},
         ]
         text = mutate_shared.format_report(rows)
@@ -266,6 +266,14 @@ class PartsTests(unittest.TestCase):
         self.assertIn("UNKNOWN", line)
         self.assertNotIn("%", line)
         self.assertIn("test_n.py", text)
+
+    def test_format_report_counts_a_timeout_apart_from_crashed(self):
+        row = {"file": "subject.py", "status": "OK", "made": 10, "killed": 3, "crashed": 1, "timeout": 2,
+               "survived": 4, "rate": 0.3, "silent": [], "unusable": {}, "reason": "", "unloaded": []}
+        lines = mutate_shared.format_report([row]).splitlines()
+        self.assertIn("timeout", lines[0].split(), "format_report has no timeout column:\n" + lines[0])
+        self.assertEqual(lines[1].split()[:7], ["subject.py", "10", "3", "1", "2", "4", "30%"],
+                         "format_report does not put the timeout count in its own column: %r" % lines[1])
 
 
 class CliTests(unittest.TestCase):

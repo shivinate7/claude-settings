@@ -958,6 +958,9 @@ KILL_LABEL = "timeout-case-kill"
 HANG_REQUIRED = "timeout-case-hang-required"
 KILL_REQUIRED = "timeout-case-kill-required"
 SLOW_SUITE = "import time\ntime.sleep(%d)\n" % SLOW_SECONDS
+# A suite that finishes well under TIMEOUT_CAP: the cap is four times its run, so a slow host still reads it as a pass.
+FAST_SECONDS = 0.5
+FAST_SUITE = "import sys\nimport time\ntime.sleep(%s)\nprint('PASS: clean layout')\nsys.exit(0)\n" % FAST_SECONDS
 # The suite of the timeout cases. It reads the mutant's copy folder, since an anchor lands in whichever guard module
 # holds it: the hung mutant carries HANG_TOKEN, hangs and logs each hang; the killed mutant carries KILL_TOKEN and
 # FAILs its required case; the clean layout passes.
@@ -1016,9 +1019,11 @@ class GuardTimeoutTests(unittest.TestCase):
         self.config = os.path.join(self.run, "cfg")
         os.makedirs(self.config)
         self.log = os.path.join(self.run, "hang.log")
-        write_files(self.run, {"timeout_suite.py": TIMEOUT_SUITE, "slow_suite.py": SLOW_SUITE})
+        write_files(self.run, {"timeout_suite.py": TIMEOUT_SUITE, "slow_suite.py": SLOW_SUITE,
+                               "fast_suite.py": FAST_SUITE})
         self.suite = os.path.join(self.run, "timeout_suite.py")
         self.slow = os.path.join(self.run, "slow_suite.py")
+        self.fast = os.path.join(self.run, "fast_suite.py")
         self.real_run_suite = mutate_guard.run_suite
         path, _suite, variable, stem = mutate_guard.TARGETS["guard"]
         self.patch(mock.patch.dict(mutate_guard.TARGETS, {"guard": (path, self.suite, variable, stem)}))
@@ -1046,6 +1051,14 @@ class GuardTimeoutTests(unittest.TestCase):
             self.fail("run_suite let TimeoutExpired escape at the cap, so the whole run aborts: %s" % error)
         self.assertNotEqual(result[0], 0, "a suite past its cap reads as a pass: %r" % (result,))
         self.assertRegex(repr(result), r"timed? ?out", "run_suite names no timeout for a suite past its cap: %r" % (result,))
+
+    def test_a_suite_that_finishes_under_the_cap_is_not_a_timeout(self):
+        result = mutate_guard.run_suite(self.fast, "GUARD_UNDER_TEST",
+                                        os.path.join(self.run, "copy.py"), self.config)
+        self.assertNotEqual(result[0], mutate_shared.TIMED_OUT,
+                            "a suite that finishes in %s s under a %s s cap reads as a timeout: %r"
+                            % (FAST_SECONDS, TIMEOUT_CAP, result))
+        self.assertEqual(result[0], 0, "a green suite that finishes under its cap does not exit 0: %r" % (result,))
 
     def test_a_hung_mutant_runs_its_suite_once(self):
         try:
@@ -1086,6 +1099,41 @@ class GuardTimeoutTests(unittest.TestCase):
         self.assertRegex(summary[-1], r"\b1 timeout", "the summary does not count the timeout apart: %r" % summary[-1])
         self.assertTrue([line for line in lines if line.startswith("KILLED") and KILL_LABEL in line],
                         "the mutant after the hung one was not scored KILLED: the run did not go on: %r" % lines)
+
+
+class ControlTimeoutTests(unittest.TestCase):
+    """A clean-layout control that reaches its cap says it timed out, not that its layout went red."""
+
+    def test_a_timed_out_clean_control_says_it_timed_out(self):
+        verdict = mutate_shared.control_verdict(mutate_shared.TIMED_OUT, [], ["TIMEOUT: suite timed out after 2.0s"])
+        self.assertIsNotNone(verdict, "a clean control that timed out reads green, so its mutants would be judged on it")
+        self.assertEqual(verdict[0], "clean layout timed out",
+                         "a clean control that timed out reads as a red exit: %r" % (verdict,))
+
+
+class SweepTimeoutTests(unittest.TestCase):
+    """The janitor's suite run shares the guard's cap: a suite past it is a timeout of its mutant, and the sweep runs on."""
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, self.run, True)
+        self.config = os.path.join(self.run, "cfg")
+        os.makedirs(self.config)
+        write_files(self.run, {"slow_suite.py": SLOW_SUITE})
+        self.slow = os.path.join(self.run, "slow_suite.py")
+        patcher = mock.patch.object(_nowindow, "run", side_effect=capped_suite_run(_nowindow.run))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_sweep_suite_past_the_cap_returns_a_timeout_and_does_not_raise(self):
+        try:
+            result = mutate_sweep.run_suite(self.slow, self.config)
+        except subprocess.TimeoutExpired as error:
+            self.fail("mutate_sweep.run_suite let TimeoutExpired escape at the cap, so the whole sweep aborts: %s" % error)
+        self.assertEqual(result[0], mutate_shared.TIMED_OUT,
+                         "a sweep suite past its cap is not read as a timeout: %r" % (result,))
+        self.assertTrue(any(line.startswith("TIMEOUT:") for line in result[3]),
+                        "a sweep suite past its cap names no TIMEOUT line: %r" % (result,))
 
 
 class ErrorBlockReportTests(unittest.TestCase):
