@@ -230,6 +230,8 @@ def control_verdict(code, red, seen=(), ran=None):
     ran no case (`ran` is an empty list) is the other crash signature: the suite never reached its cases, so
     it proved nothing about the layout. `ran=None` means the caller has no case lines to read.
     Report mode's `score_target` applies the same idea to its normalized clean source."""
+    if code == TIMED_OUT:
+        return "clean layout timed out", list(red) + list(seen)
     if code != 0:
         return "clean layout red (exit %s)" % code, list(red) + list(seen)
     if ran is not None and not ran:
@@ -260,6 +262,13 @@ def timeout_reason(seen) -> str:
         if line.startswith("TIMEOUT:"):
             return line.partition(":")[2].strip()
     return "suite timed out"
+
+
+def timed_out_run(elapsed: float):
+    """run_suite's return for a suite that reached its time cap, after `elapsed` seconds: TIMED_OUT, no FAIL line,
+    no case line, and the TIMEOUT line that `timeout_reason` reads back. The one home of that shape: the guard and the
+    janitor both return it."""
+    return TIMED_OUT, [], [], ["TIMEOUT: suite timed out after %.1fs" % elapsed]
 
 
 def report_verdict(label: str, code, red, required: str, seen=()) -> str:
@@ -579,8 +588,8 @@ def run_mutants(entries, run_one, controls=None, control_of=None, verdict_key=No
 #
 # TWO WAYS TO COUNT A KILL WRONG, BOTH CLOSED HERE.
 # 1. A crash is not a kill. A mutant counts killed only when a suite prints a FAIL line (an assertion
-#    went red). A throw, an import error or a timeout leaves no FAIL line, or ends at the timeout, and
-#    reads "crashed".
+#    went red). A throw or an import error leaves no FAIL line and reads "crashed". A suite that reaches
+#    its time cap reads "timeout", its own verdict, never a kill or a survivor.
 # 2. A suite red on the clean source is not a killer. Every suite first runs on the NORMALIZED clean
 #    source (the same `ast.unparse` text every mutant carries, so a suite that reads source text fails
 #    here and not as a fake kill). A suite that is not green there is UNUSABLE for that file. A file

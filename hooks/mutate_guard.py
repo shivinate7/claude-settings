@@ -4912,8 +4912,7 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
             )
         except subprocess.TimeoutExpired:
             # A suite past its cap is its mutant's verdict, a timeout: the caller scores it and runs on.
-            elapsed = time.monotonic() - started
-            return mutate_shared.TIMED_OUT, [], [], ["TIMEOUT: suite timed out after %.1fs" % elapsed]
+            return mutate_shared.timed_out_run(time.monotonic() - started)
         errors.seek(0)
         error_text = errors.read().decode("utf-8", "replace")
     lines = result.stdout.splitlines()
