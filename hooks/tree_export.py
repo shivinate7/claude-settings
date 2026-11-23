@@ -11,11 +11,19 @@ import tarfile
 import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
 
 
+def _inside(root, path):
+    """True when the real path of `path` lies in the real folder `root` (or is it)."""
+    root = os.path.realpath(root)
+    return os.path.commonpath([root, os.path.realpath(path)]) == root
+
+
 def export_tree(src, sha, dest):
     """Extract `git archive <sha>` of the repo at `src` into the existing folder `dest`. -> None when it worked, else the reason it did not.
-    A tracked symlink is extracted as a symlink. A host that refuses os.symlink gets a copy of the target's text at the link's path instead.
-    The target may come later in the stream, so those copies wait until the stream is read.
-    A partial export may be left in `dest`: the caller removes the folder either way."""
+    A tracked symlink is extracted as a symlink with its tracked text as the target. A host that refuses os.symlink gets a copy of the
+    target's file or folder at the link's path instead; the target may come later in the stream, so those copies wait until it is read.
+    A link whose real path leaves `dest` (the target alone looks safe, but a chain of links reaches out) fails the export: each is
+    removed and the reason names it. A partial export may be left in `dest`: the caller removes the folder either way."""
+    made = []  # the symlinks os.symlink made
     deferred = []  # symlink members whose os.symlink was refused
     has_filter = hasattr(tarfile, "data_filter")
     extract_args = {"filter": "data"} if has_filter else {}
@@ -28,21 +36,32 @@ def export_tree(src, sha, dest):
                     continue
                 # tar.extract would fall back to copying the target when os.symlink fails, and that seeks back in a stream
                 if has_filter:
-                    tarfile.data_filter(member, dest)  # raises for a link or a target outside dest: the check extract applies
+                    tarfile.data_filter(member, dest)  # an early refusal of an absolute or lexically outside target; the real-path check below is the one that holds
                 link = os.path.join(dest, member.name)
                 os.makedirs(os.path.dirname(link), exist_ok=True)
                 try:
                     os.symlink(member.linkname, link)
+                    made.append(member)
                 except OSError:
                     deferred.append(member)
         if proc.returncode != 0:
             return "git archive exited %d" % proc.returncode
+        escaping = [m.name for m in made if not _inside(dest, os.path.join(dest, m.name))]
+        for name in escaping:
+            os.remove(os.path.join(dest, name))
+        if escaping:
+            return "symlink leaves the export: %s" % ", ".join(escaping)
         for member in deferred:
             link = os.path.join(dest, member.name)
-            target = os.path.normpath(os.path.join(os.path.dirname(link), member.linkname))
-            if os.path.commonpath([os.path.realpath(dest), os.path.realpath(target)]) != os.path.realpath(dest):
-                raise OSError("symlink %s points outside the export" % member.name)
-            shutil.copyfile(target, link)
+            target = os.path.join(os.path.dirname(link), member.linkname)
+            if not _inside(dest, target):
+                return "symlink leaves the export: %s" % member.name
+            if os.path.isdir(target):
+                if _inside(target, link):
+                    return "symlink to a folder that holds it: %s" % member.name
+                shutil.copytree(target, link, symlinks=True)
+            else:
+                shutil.copyfile(target, link)
         return None
     except (OSError, tarfile.TarError) as exc:
         return "%s: %s" % (type(exc).__name__, exc)
