@@ -554,16 +554,37 @@ def session_id_of(payload) -> str:
     return value if SESSION_ID_RE.match(value or "") else ""
 
 
+def scratchpad_temp_bases() -> tuple:
+    """The real folders a scratchpad lives under: Python's own temp folder, and the harness's
+    `<realpath of /tmp>/claude-<uid>` (macOS keeps scratchpads in /private/tmp, never under the
+    `/var/folders/.../T` that `tempfile.gettempdir()` names). `os.getuid` is absent on Windows, so only the
+    first base applies there. The one home of the scratchpad-root test: every caller reads it from here."""
+    bases = []
+    try:
+        bases.append(os.path.realpath(tempfile.gettempdir()))
+        getuid = getattr(os, "getuid", None)
+        if getuid:
+            bases.append(os.path.realpath(os.path.join("/tmp", "claude-%d" % getuid())))
+    except Exception:
+        pass
+    return tuple(bases)
+
+
+def _under_scratchpad_base(real: str) -> bool:
+    """True when the resolved path `real` lies inside one of the folders `scratchpad_temp_bases` names."""
+    shown = os.path.normcase(real) + os.sep
+    return any(shown.startswith(os.path.normcase(base) + os.sep) for base in scratchpad_temp_bases())
+
+
 def session_scratchpad_root(where: str, session_id: str) -> str:
     """The scratchpad folder of this session that `where` resolves into (the folder itself counts), else ''."""
     if not where or not session_id or not SESSION_ID_RE.match(session_id):
         return ""
     try:
         real = os.path.realpath(where)
-        temp = os.path.realpath(tempfile.gettempdir())
     except Exception:
         return ""
-    if not (os.path.normcase(real) + os.sep).startswith(os.path.normcase(temp) + os.sep):
+    if not _under_scratchpad_base(real):
         return ""
     parts = real.split(os.sep)
     for index in range(len(parts) - 1):
@@ -764,10 +785,9 @@ def in_any_session_scratchpad(where: str) -> bool:
     """True when `where` resolves into the scratchpad of ANY session under the temp folder."""
     try:
         real = os.path.realpath(where)
-        temp = os.path.realpath(tempfile.gettempdir())
     except Exception:
         return False
-    if not (os.path.normcase(real) + os.sep).startswith(os.path.normcase(temp) + os.sep):
+    if not _under_scratchpad_base(real):
         return False
     parts = real.split(os.sep)
     return any(os.path.normcase(parts[i + 1]) == "scratchpad" and SESSION_ID_RE.match(parts[i])
