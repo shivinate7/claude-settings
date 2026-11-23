@@ -6,7 +6,17 @@ Owner, 2026-10-11: claude-settings cannot disable the built-in browser pane's ap
 
 - `settings.json` already allows every built-in browser tool (`mcp__Claude_Browser`).
 - The prompts come from the desktop app's own safety check, not from `settings.json`. An extra allow rule changes nothing.
-- Unmeasured: which sites and actions trigger the check. The app does not publish it.
+- Measured 2026-11-21: the app asks before it opens a file outside the session's folder that sits in a folder on its sensitive list (`.claude`, `.git`, `.ssh`, `.aws` and others, read from the app bundle, Claude desktop 6.28899.6). The card offers only Deny and Allow once. It ignores bypass mode and never times out. Agent worktrees sit under `.claude/worktrees`, so an agent that opens its own file there hits it. Which outside sites trigger it stays unmeasured.
+
+## Guard
+
+Owner, 2026-11-21 13:58 CST, "ya approved": refuse the call, and point at the solution, headless Chrome.
+
+- Rule `agent-browser-file-open` in `hooks/guard.py` refuses a call by an agent (a non-empty `agent_id`) that opens a `file:` URL. The scheme is read in any case. The calls are `mcp__Claude_Browser__navigate` and `mcp__Claude_Browser__preview_start` (`url`), and each `navigate` or `preview_start` item of `mcp__Claude_Browser__browser_batch` (its input `url`). The cloud-linked names (`mcp__remote-devices__Claude_Browser__*`) are covered too, and a batch item may carry the full tool name.
+- The reason says a file opened in the built-in browser can stop on an app card nobody answers. It names headless Chrome (Playwright) or a localhost URL as the way.
+- The main session passes: a person sees its card. A localhost or https URL passes. An owner override lifts the rule.
+- Incident: 2026-11-21, a designer agent in the home repo opened its mockup by `file://` and waited 12 hours (01:13 to 13:13 CST).
+- Cost: at most one guard run per `navigate`, `preview_start` or `browser_batch` call, from the six tool names added to the guard's PreToolUse matcher in `settings.json`, pinned by `lint/test_settings_matcher.py`.
 
 Kind: process
-Home: settings.json
+Home: hooks/guard.py
