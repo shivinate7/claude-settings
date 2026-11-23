@@ -259,6 +259,10 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_report_guard_route.py
 
+      - name: Stop-hook placeholder suite
+        if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
+        run: python3 lint/test_report_guard_placeholder.py
+
       - name: Stop-hook page writer suite
         if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_report_guard_page_writer.py
