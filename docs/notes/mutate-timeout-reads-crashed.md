@@ -1,1 +1,0 @@
-- mutate-timeout-reads-crashed: a mutant past the suite timeout reads crashed. Fix: report a timed-out mutant as timeout, apart from crashed.
