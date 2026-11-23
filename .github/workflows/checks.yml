@@ -259,6 +259,10 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_report_guard_route.py
 
+      - name: Stop-hook placeholder suite
+        if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
+        run: python3 lint/test_report_guard_placeholder.py
+
       - name: Stop-hook page writer suite
         if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_report_guard_page_writer.py
@@ -870,6 +874,10 @@ jobs:
       - name: Question form letters-frozen suite
         if: ${{ (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_question_form_letters_frozen.py
+
+      - name: Question form placeholder suite
+        if: ${{ (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 hooks/test_question_form_placeholder.py
 
       - name: Remove-prompt answer fixture suite
         if: ${{ (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
