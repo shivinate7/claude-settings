@@ -4,11 +4,11 @@
 
 `hooks/mutate_guard.py --report` scores the suites of other verdict-deciding files with mechanical mutants, on demand. It answers the owner's question: do the tests pin anything that matters, or a static result? It is the report mode of the one home of mutation testing (`hooks/mutate_guard.py` with `hooks/mutate_shared.py`). It is not a second tool.
 
-The mode makes mutants of a target file mechanically, with the `ast` module. It flips a comparison, swaps `and` with `or`, drops a `not`, and swaps `True` with `False`. It negates an `if` or `while` test, sets a return value to `None`, and drops a `return`. It samples 10 mutants per file, the same 10 on every run (seed 0). It runs each suite that names the file, in a copy of the repository, against each mutant. It prints, per file: mutants made, killed, crashed, survived, the kill rate, and the suites that killed no mutant. `REPORT_TARGETS` in `hooks/mutate_guard.py` lists the files and their suites. A new verdict-deciding file joins the report by one line there.
+The mode makes mutants of a target file mechanically, with the `ast` module. It flips a comparison, swaps `and` with `or`, drops a `not`, and swaps `True` with `False`. It negates an `if` or `while` test, sets a return value to `None`, and drops a `return`. It samples 10 mutants per file, the same 10 on every run (seed 0). It runs each suite that names the file, in a copy of the repository, against each mutant. It prints, per file: mutants made, killed, crashed, timeout, survived, the kill rate, and the suites that killed no mutant. `REPORT_TARGETS` in `hooks/mutate_guard.py` lists the files and their suites. A new verdict-deciding file joins the report by one line there.
 
 Two counts are held shut:
 
-- A crash is not a kill. A mutant is killed only when a suite prints a `FAIL` line. A throw, an import error and a timeout leave no `FAIL` line, or end at the timeout, so they count as crashed.
+- A crash is not a kill. A mutant is killed only when a suite prints a `FAIL` line. A throw or an import error leaves no `FAIL` line, and counts as crashed. A suite that passes the time cap gets its own verdict, `timeout`, counted apart from crashed. It is never a kill or a survivor. The run goes on to the next mutant and exits non-zero (owner, 11:51 CST Nov 23, option a).
 - A suite that is not green on the clean source is not a killer. Each suite first runs on the clean source after the same parse and unparse that every mutant carries. A suite that is red there is listed as unusable for that file. A file with no usable suite, a parse error or a missing target reads UNKNOWN, never a rate.
 - A usable suite that stays green on a wholly broken copy of the file never loaded it: the report lists it as `unloaded`. A file whose every usable suite is unloaded reads UNKNOWN, never a rate.
 
@@ -30,7 +30,7 @@ The report and the replay refuse nothing. No timer starts them, they start no lo
 
 ## The scores
 
-One run, 10 mutants per file, 3 suites at a time. The gold standard is the guard's own kill rate: `python3 hooks/mutate_guard.py` killed 367 of 367 hand-written mutations (0 survived, 0 wrong cause), each one tied to a named required case. The same ast engine on `hooks/guard_wsl.py` with `hooks/test_guard.py` read UNKNOWN: that suite is not green on the clean, unparsed source. So the gold is the hand-written rate, and the ast rates below are not held against it on equal terms.
+One run, 10 mutants per file, 3 suites at a time. The gold standard is the guard's own kill rate: `python3 hooks/mutate_guard.py` killed 367 of 367 hand-written mutations (0 survived, 0 wrong cause), each one tied to a named required case. The same ast engine on `hooks/guard_wsl.py` with `hooks/test_guard.py` read UNKNOWN: that suite is not green on the clean, unparsed source. So the gold is the hand-written rate, and the ast rates below are not held against it on equal terms. These runs predate the timeout verdict: a timed-out suite then counted under Crashed, and no column shows a timeout.
 
 | File | Mutants | Killed | Crashed | Survived | Rate | Gold |
 |---|---|---|---|---|---|---|
@@ -54,7 +54,7 @@ Not measured (UNKNOWN): `hooks/test_guard.py`, `merge/test_merge.py` and `lint/t
 
 ## Replay results
 
-Measured 2026-11-02. Per repo: its last 50 merged pull requests (PRs). Five mutants per PR, on added lines. A 900 s budget per PR. Kill rate is killed over ran. A crash is not a kill. Gold is the target for each row: the hand-written guard rate.
+Measured 2026-11-02. Per repo: its last 50 merged pull requests (PRs). Five mutants per PR, on added lines. A 900 s budget per PR. Kill rate is killed over ran. A crash is not a kill. Gold is the target for each row: the hand-written guard rate. These runs predate the timeout verdict: a timed-out suite then counted under Crashed, and no column shows a timeout.
 
 | Replay | PRs scored | Ran | Killed | Survived | Crashed | Kill rate | Gold | Gap |
 |---|---|---|---|---|---|---|---|---|
