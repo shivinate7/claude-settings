@@ -528,18 +528,19 @@ def ready_page_hit(tool: str, tool_input: dict, command: str, where: str):
 # push whose pull request read fails (a destination git cannot name is read the same way: the list read still runs, and
 # matches no branch) (owner ruling handed-in-push-fourth-way, 21:17 CST Nov 18, point 2: one stderr line,
 # never a refusal). The merge tool's own pushes run as subprocesses no hook sees; a segment that runs the tool is skipped.
-# Cost: only a call that holds a `git push` reads GitHub, and only in a repo that uses the merge tool. Per such push: one
-# open-pull-request list read (a draft, no pull request or another branch ends there), and for a ready pull request the
-# head read of rule merge-checks (Host.head_read, one shared deadline, no batch read). No other tool call reads anything.
+# Cost: only a call that holds a `git push` reads GitHub, and only in a repo that uses the merge tool. Per such
+# push: one open-pull-request list read (a draft, no pull request or another branch ends there), and, when a ready pull request
+# holds the branch, one read of its head's check runs. Two gh calls at most, one deadline each. No other tool call reads anything.
+READY_PUSH_RED = ("failure", "timed_out", "startup_failure")  # a check run conclusion that is a red job; cancelled and skipped are not
 READY_PUSH_LIST_SECONDS = 10  # the list read's share of the hook's budget; head_read keeps its own MERGE_READ_TIMEOUT
 READY_PUSH_REASON = (
     "Rule (Git, one CI run per pull request): this push goes to the branch of #%s, a ready pull request whose CI run is %s. "
     "A push cancels that run, and the merge needs the run to finish on this head. "
     "Remedy: wait for the run to finish. To push before then, return the pull request to draft with `gh pr ready --undo %s`, "
     "push, and mark it ready again with the merge tool. When the run has a red job, a push may go ahead and fix it. "
-    "(owner ruling 13:05 CST Nov 23, 2026, a push never restarts a ready pull request's run) "
-    "If this refusal looks wrong for your task, comply anyway and say so in your report."
+    "(owner ruling 13:05 CST Nov 23, 2026, a push never restarts a ready pull request's run)"
 )
+READY_PUSH_CLOSING = "If this refusal looks wrong for your task, comply anyway and say so in your report."  # read last, after the override line
 READY_PUSH_WARNING = "ready-pr-push: the pull request list read failed (%s), so the push is allowed unchecked"
 
 
@@ -575,11 +576,11 @@ def ready_push_hit(stripped: str, cwd: str, read_verb):
             for number, info in rows:
                 same_repo = info["head_repo"] in (None, info["base_repo"])
                 if info["branch"] in branches and not info["draft"] and same_repo:
-                    verdict, detail = _ready_push_run(host, number, where)
+                    verdict, detail = _ready_push_run(host, number, info["head"])
                     if verdict == "unknown":
                         warning = warning or ("warn", READY_PUSH_WARNING % cap_safe(detail, 120), "")
                     elif verdict != "red":
-                        state = "running" if verdict == "pending" else "finished green"
+                        state = "running or queued" if verdict == "pending" else "finished green"
                         return "deny", READY_PUSH_REASON % (number, state, number), "push to ready #%d" % number
     return warning
 
@@ -599,10 +600,21 @@ def _ready_push_pulls(where: str):
         return None, " ".join(str(e).split()) or type(e).__name__
 
 
-def _ready_push_run(host, number: int, where: str):
-    """(verdict, detail) of the ready pull request's head: red, pending, green, held or unknown (Host.head_read, no batch read)."""
-    host.batch_brake = None
-    return host.head_read(number, nothing_is_green=not has_workflows(where))
+def _ready_push_run(host, number: int, head: str):
+    """(verdict, detail) of the ready pull request's head, from one read of its check runs: "red" when a job failed or timed out
+    (the push may fix it, even while the run goes on), "pending" for any other state, including no job reported yet, and
+    "unknown" with the cause when the read cannot run."""
+    try:
+        with merge_module().shared_deadline(MERGE_READ_TIMEOUT):
+            rows = host.pages(f"commits/{head}/check-runs", "check_runs")
+    except subprocess.TimeoutExpired:  # its text names the resolved program path
+        return "unknown", "a read timed out after %d s" % MERGE_READ_TIMEOUT
+    except Exception as e:  # a Stop, a missing gh, malformed JSON: all unread
+        return "unknown", " ".join(str(e).split()) or type(e).__name__
+    if any(r.get("status") == "completed" and r.get("conclusion") in READY_PUSH_RED for r in rows):
+        return "red", ""
+    done = rows and all(r.get("status") == "completed" for r in rows)
+    return ("green" if done else "pending"), ""
 
 
 # ---- a lane commit of the generated records page (decision records-index-at-merge)
