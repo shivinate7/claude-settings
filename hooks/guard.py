@@ -392,7 +392,7 @@ Other tools, in `judge` order:
                        `.git`, a target outside the clone, reads and non-writing shell pass. A git
                        `clean` counts only with a force flag. An
                        override lifts it. It adds no git spawn beyond what the call already spends.
-  scratchpad-owner     ask (deny for an `rm` or `mv` of a folder holding such a file). A call with a valid `agent_id` that runs a file in this session's scratchpad, or
+  scratchpad-owner     ask for a run, deny for a write over one or an `rm` or `mv` of a file or folder. A call with a valid `agent_id` that runs a file in this session's scratchpad, or
                        writes over one, that another agent wrote. Each such write records its agent in a
                        sidecar `<scratchpad>/.writers/<hash>`. A run is an interpreter or the path as the
                        command word; a write is a Write-family target or a shell write target. A first
@@ -7555,7 +7555,7 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # Rule scratchpad-owner (decision scratchpad-owner). Every agent of a session shares the session's
 # scratchpad, so one agent can run a script another agent left there. A call from an agent that writes a
 # file in the scratchpad records the agent as its writer (`scratchpad_record_writer`); a shell call from an
-# agent that runs a scratchpad file another agent recorded asks, and so does a write over such a file; a folder removal is refused. A call
+# agent that runs a scratchpad file another agent recorded asks; a write over such a file and a folder removal are refused. A call
 # with no `agent_id`, a file with no record, an agent's own file and a read pass. The text gate (`SCRATCHPAD_WORD`) keeps a call that names no scratchpad from
 # touching the disk: a path that reaches the scratchpad by a symlink is the ceiling, and passes.
 SCRATCHPAD_WORD = "scratchpad"
@@ -7568,7 +7568,8 @@ SCRATCHPAD_OWNER_REASON = (
 SCRATCHPAD_OVERWRITE_REASON = (
     "Rule (scratchpad-owner): this file was written by another agent of this session, and writing over it "
     "destroys work that agent may still need. "
-    "Remedy: write your own file under a fresh file name of your own. "
+    "Remedy: write your own file under a fresh file name in the scratchpad. "
+    "If this refusal looks wrong for your task, comply anyway and say so in your report. "
     "(decision scratchpad-owner, an agent runs only its own read copy of a scratchpad file, and never overwrites another agent's)"
 )
 SCRATCHPAD_FOLDER_REASON = (
@@ -7742,8 +7743,8 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
                 taken = "agent %s writes over a scratchpad file agent %s wrote: %s" % (agent, writer, full)
         elif full in removed:
             # An `rm` or `mv` that names a folder, the scratchpad itself or a glob removes each file under it, and
-            # only a file has a record: read the files (`scratchpad_folder_writer`). A folder is a deny and a file
-            # an ask, so the folder wins whatever its place in the call: a file listed first must not hide it.
+            # only a file has a record: read the files (`scratchpad_folder_writer`). A folder and a file are both
+            # refused, each with its own reason, so the folder wins whatever its place in the call: a file listed first must not hide it.
             held = scratchpad_folder_writer(full, session, agent)
             if held:
                 taken = "agent %s removes a scratchpad folder holding a file agent %s wrote: %s" % (agent, held[1], held[0])
@@ -7757,7 +7758,7 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
 
     if taken:
         # A refused write lands nothing, so the record stays with the first writer; an override that lifts it moves it.
-        refuse(tool, "deny" if reason is SCRATCHPAD_FOLDER_REASON else "ask", "scratchpad-owner", reason, taken,
+        refuse(tool, "deny", "scratchpad-owner", reason, taken,
                on_lift=record_writers)
     record_writers()
 
@@ -7765,7 +7766,7 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
 def scratchpad_folder_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     """Rule scratchpad-owner, the folder form: the log detail when an agent's call removes or moves a folder, the
     scratchpad itself or a glob that holds a file another agent wrote, else ''. A removed file that is itself
-    another agent's is an overwrite ask (`scratchpad_owner_write`), not a folder, so it is skipped here. The shell
+    another agent's is an overwrite refusal (`scratchpad_owner_write`), not a folder, so it is skipped here. The shell
     path reads this before the run ask: a folder removal is a deny, and the run ask must not hide it."""
     agent, session, files, removed, _moved = scratchpad_writes(payload, tool, tool_input, cwd)
     if not agent:
