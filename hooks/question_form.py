@@ -764,9 +764,10 @@ def _ps_bash_form(text) -> bool:
 # must run as it stands. The one home of the check: command_in_item_hit below and lint/report_guard.py
 # placeholder_problem (a reply's fenced shell block) both call command_placeholder. Each lookbehind stops a match
 # inside a longer word, a `$VAR` or `${VAR}`, or a heredoc `<<`; the angle form takes letters, digits, `-` and `_`
-# only, so `< in.txt`, `<<'EOF'`, `2>&1` and `List<int>` pass. A heredoc body is data and is dropped first
-# (guard_core.strip_heredoc_bodies keeps a body that a shell runs). A tag-shaped word inside a quoted string is
-# text (`sed 's/<br>//g'`), so the angle form skips it; the other forms count inside quotes.
+# only, so `< in.txt`, `<<'EOF'`, `2>&1`, `List<int>` and a closing tag `</b>` pass. A heredoc body is data and is
+# dropped first (guard_core.strip_heredoc_bodies keeps a body that a shell runs). A comment (`#` to the end of its
+# line) is not scanned. An angle word whose name is in KNOWN_MARKUP_TAGS is markup, not a placeholder; any other
+# angle word counts, quoted or not (`cd "<repo>"`).
 COMMAND_PLACEHOLDER = re.compile(
     r"/dev/sdX\d?(?!\w)"
     r"|(?<![<\w])<[\w-]+>"
@@ -776,10 +777,16 @@ COMMAND_PLACEHOLDER = re.compile(
     r"|(?<![\w$.-])(?:xxx|XXX)(?![\w-])")
 COMMAND_PLACEHOLDER_HINT = ": fill the real value before it reaches the owner"
 
+# Tag names of the HTML and XML (plist) text that a command greps, seds or echoes.
+KNOWN_MARKUP_TAGS = frozenset((
+    "br", "title", "div", "html", "body", "head", "p", "b", "i", "a", "span",
+    "dict", "key", "string", "array", "plist", "true", "false", "integer", "real", "data", "date"))
 
-def _quoted_spans(text):
-    """(start, end) of each closed '...' or "..." string of `text`. A backslash skips the next character outside
-    single quotes. A quote that never closes opens no span, so one lone apostrophe in prose hides nothing."""
+
+def _comment_spans(text):
+    """(start, end) of each shell comment of `text`: a `#` outside quotes, at the start or after whitespace, to
+    the end of its line. A backslash skips the next character outside single quotes. A quote that never closes
+    is a plain character, so one lone apostrophe in prose hides nothing."""
     spans, i, n = [], 0, len(text)
     while i < n:
         char = text[i]
@@ -791,8 +798,12 @@ def _quoted_spans(text):
             while j < n and text[j] != char:
                 j += 2 if char == '"' and text[j] == "\\" else 1
             if j < n:
-                spans.append((i, j))
                 i = j
+        elif char == "#" and (i == 0 or text[i - 1].isspace()):
+            end = text.find("\n", i)
+            end = n if end < 0 else end
+            spans.append((i, end))
+            i = end
         i += 1
     return spans
 
@@ -804,14 +815,13 @@ def command_placeholder(text) -> str:
     if "<<" in text:
         import guard_core   # loads only for a command with a heredoc
         text = guard_core.strip_heredoc_bodies(text)
-    spans = None
+    comments = _comment_spans(text)
     for found in COMMAND_PLACEHOLDER.finditer(text):
         token = found.group(0)
-        if token.startswith("<"):
-            if spans is None:
-                spans = _quoted_spans(text)
-            if any(a < found.start() < b for a, b in spans):
-                continue
+        if token.startswith("<") and token[1:-1].lower() in KNOWN_MARKUP_TAGS:
+            continue
+        if any(a <= found.start() < b for a, b in comments):
+            continue
         return token
     return ""
 
