@@ -764,7 +764,9 @@ def _ps_bash_form(text) -> bool:
 # must run as it stands. The one home of the check: command_in_item_hit below and lint/report_guard.py
 # placeholder_problem (a reply's fenced shell block) both call command_placeholder. Each lookbehind stops a match
 # inside a longer word, a `$VAR` or `${VAR}`, or a heredoc `<<`; the angle form takes letters, digits, `-` and `_`
-# only, so `< in.txt`, `<<'EOF'`, `2>&1` and `List<int>` pass.
+# only, so `< in.txt`, `<<'EOF'`, `2>&1` and `List<int>` pass. A heredoc body is data and is dropped first
+# (guard_core.strip_heredoc_bodies keeps a body that a shell runs). A tag-shaped word inside a quoted string is
+# text (`sed 's/<br>//g'`), so the angle form skips it; the other forms count inside quotes.
 COMMAND_PLACEHOLDER = re.compile(
     r"/dev/sdX\d?(?!\w)"
     r"|(?<![<\w])<[\w-]+>"
@@ -775,10 +777,43 @@ COMMAND_PLACEHOLDER = re.compile(
 COMMAND_PLACEHOLDER_HINT = ": fill the real value before it reaches the owner"
 
 
+def _quoted_spans(text):
+    """(start, end) of each closed '...' or "..." string of `text`. A backslash skips the next character outside
+    single quotes. A quote that never closes opens no span, so one lone apostrophe in prose hides nothing."""
+    spans, i, n = [], 0, len(text)
+    while i < n:
+        char = text[i]
+        if char == "\\":
+            i += 2
+            continue
+        if char in "'\"":
+            j = i + 1
+            while j < n and text[j] != char:
+                j += 2 if char == '"' and text[j] == "\\" else 1
+            if j < n:
+                spans.append((i, j))
+                i = j
+        i += 1
+    return spans
+
+
 def command_placeholder(text) -> str:
     """The first unfilled placeholder token in a shell command, or ''."""
-    found = COMMAND_PLACEHOLDER.search(text) if isinstance(text, str) else None
-    return found.group(0) if found else ""
+    if not isinstance(text, str):
+        return ""
+    if "<<" in text:
+        import guard_core   # loads only for a command with a heredoc
+        text = guard_core.strip_heredoc_bodies(text)
+    spans = None
+    for found in COMMAND_PLACEHOLDER.finditer(text):
+        token = found.group(0)
+        if token.startswith("<"):
+            if spans is None:
+                spans = _quoted_spans(text)
+            if any(a < found.start() < b for a, b in spans):
+                continue
+        return token
+    return ""
 
 
 def command_in_item_hit(data) -> str:

@@ -208,8 +208,8 @@ Text: `HASSIO_REASON`. Home Assistant app pages are `/<app slug>` now, so a `/ha
 
 Text: `PLACEHOLDER_REASON`. Rule `style-hand-off-runs-as-is` (a handed block runs as it stands). The detector is `question_form.command_placeholder`, the one home the waiting page's `command` also reads.
 
-- A fenced bash, sh, zsh or powershell block outside the report blockquote holds an unfilled token: `/dev/sdX` with an optional digit, an angle-bracket word like `<branch>`, a word starting `YOUR_` or `your-`, `REPLACE_ME`, `CHANGEME`, or a standalone `xxx` or `XXX`. Look the value up and put it in the block, or ask the owner for it in Input Needed.
-- Heredocs, redirects, `$VAR` and `${VAR}`, all-caps env vars, `/dev/sda1`, regex alternation, URL queries, git ranges and `xxx` inside a longer word pass.
+- A fenced bash, sh, zsh, powershell, pwsh, ps1 or shell block outside the report blockquote holds an unfilled token: `/dev/sdX` with an optional digit, an angle-bracket word like `<branch>`, a word starting `YOUR_` or `your-`, `REPLACE_ME`, `CHANGEME`, or a standalone `xxx` or `XXX`. Look the value up and put it in the block, or ask the owner for it in Input Needed.
+- A heredoc body that is data (a file written with `cat > f <<'EOF'`) is not read; a body that a shell runs is. An angle-bracket word inside a quoted string, like `sed 's/<br>//g'`, passes; the other tokens count inside quotes. Redirects, `$VAR` and `${VAR}`, all-caps env vars, `/dev/sda1`, regex alternation, URL queries, git ranges and `xxx` inside a longer word pass.
 
 ## Shared tails
 

@@ -1003,7 +1003,7 @@ PLACEHOLDER_CHECK = "Hand-off placeholder guard"
 PLACEHOLDER_REASON = owner_line(
     PLACEHOLDER_CHECK,
     "the %s block holds the unfilled placeholder %r, so it does not run as it stands (rule style-hand-off-runs-as-is)")
-SHELL_FENCE_LANGS = {"bash", "sh", "zsh", "powershell"}
+SHELL_FENCE_LANGS = {"bash", "sh", "zsh", "powershell", "pwsh", "ps1", "shell"}
 FENCE_OPEN_RE = re.compile(r"^[ \t]*(```+|~~~+)[ \t]*([\w+-]*)")
 
 
