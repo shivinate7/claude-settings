@@ -4811,6 +4811,7 @@ from shared_names import REPO_TAG, repo_tag_names  # noqa: E402  the one home of
 EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")  # the rounds of ROLE_ROUND_FALLBACK's reviewer rows, one home for the default
 ROLE_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL"
+ROLE_WORKFLOW_MODEL_ENV = "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL"  # the model a no-model Workflow agent() call is served
 ROLE_MODEL_REASON = (
     "Rule (configuration): this spawn names a model above the one its role runs on. Remedy: drop the model "
     "field, or name the role's model%s. (decision agent-model-cap)"
@@ -4833,12 +4834,13 @@ ROLE_NO_MODEL_REASON = (
     "model is set, so it would run on its parent's model. Remedy: name the role's model%s. "
     "(decision agent-model-cap)"
 )
-# A Workflow agent() call that names a role with a row and no model: neither the default model nor the agent file's pin
-# reaches it, so it runs its parent's model. Its remedy names no model for a Haiku row, as the reason above.
+# A Workflow agent() call that names a role with a row and no model: the agent file's pin does not reach it, so it runs
+# the Workflow default model. It is refused when that default is unset or not the row's model. Its remedy names no model
+# for a Haiku row, as the reason above.
 ROLE_WORKFLOW_NO_MODEL_REASON = (
     "Rule (configuration): this Workflow agent() call names a role that has a row in the role table, but no `model`, "
-    "so it would run on its parent's model. Remedy: add `model` to the call's options, and name the role's model%s. "
-    "(decision agent-model-cap)"
+    "and the Workflow default model is unset or is not that row's model, so it would not run on its role's model. "
+    "Remedy: add `model` to the call's options, and name the role's model%s. (decision agent-model-cap)"
 )
 
 
@@ -5185,7 +5187,7 @@ def spawn_inputs(tool: str, tool_input):
     call is one spawn. A Workflow script yields one per agent() call that names a model, with agentType as the role
     and the model read from the script, so the role and Opus checks judge it as they judge an Agent spawn
     (decision agent-model-cap). A call with a literal agentType, no `model` key and no spread yields too, with
-    WORKFLOW_NO_MODEL set and an empty model: role_model_one refuses it when the role has a row. A brief the scan cannot read (a variable, or a prompt key beside a spread) carries no
+    WORKFLOW_NO_MODEL set and an empty model: role_model_one refuses it when the role has a row and the Workflow default (ROLE_WORKFLOW_MODEL_ENV) is unset or not that row's model. A brief the scan cannot read (a variable, or a prompt key beside a spread) carries no
     marker and grants nothing, so the spawn is judged with an empty brief and BRIEF_UNREAD set, and its refusal names
     BRIEF_LITERAL_REMEDY, so the author can make the marker readable. A
     call whose model or agentType the scan cannot read is skipped, and so is one with no model and no literal
@@ -5316,6 +5318,9 @@ def role_model_one(tool_input):
     if tool_input.get(WORKFLOW_NO_MODEL):
         if role not in table:
             return "", "", False
+        served = role_model_rank(os.environ.get(ROLE_WORKFLOW_MODEL_ENV, ""))
+        if served is not None and served == role_model_rank(table[role]):
+            return "", "", False  # the Workflow default is the role's own row
         return (ROLE_WORKFLOW_NO_MODEL_REASON % ("" if table[role] == ROLE_MODEL_RANK[0] else " (%s)" % table[role]),
                 ROLE_NO_MODEL_MATCH + role, False)
     if os.environ.get(ROLE_MODEL_ENV, "").strip():
