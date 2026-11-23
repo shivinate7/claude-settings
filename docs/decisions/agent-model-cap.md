@@ -293,8 +293,8 @@ scan as the Haiku floor and the step-up). Item 127 pick a and the coordinator ru
 a variable brief, or a prompt key beside a spread, grants nothing. It is judged as an empty brief. The override or a literal
 brief lifts the refusal. A call whose model or `agentType` the scan cannot read is skipped. The floor reads the model, and the role only to exempt
 a Haiku role. The step-up skips an unread brief. A Workflow `agent()` call that sets its model through a variable is unseen by all four
-checks. A call that names no model is unseen by the floor and the Opus ceiling. The step-up still judges a reviewer's later round. A builder brief with `Round 3 of 3` and no model passes (owner item 893). The role row refuses it on an Agent or Task call only, when the role's agent file
-pins no model (`floor-workflow-runtime-models`, `model-ceiling-no-after-read`). The refusal never reads a `start_session` on Opus, and no hook reads it before the call (decision `start-session-not-pretooluse`).
+checks. A call that names no model is unseen by the floor and the Opus ceiling. The step-up still judges a reviewer's later round. A builder brief with `Round 3 of 3` and no model passes (owner item 893). The role row refuses it on an Agent or Task call when the role's agent file
+pins no model and no default is set, and on a Workflow call when the Workflow default is unset or is not the role's row (`floor-workflow-runtime-models`, `model-ceiling-no-after-read`). The refusal never reads a `start_session` on Opus, and no hook reads it before the call (decision `start-session-not-pretooluse`).
 
 A step grant also lifts the Opus spawn refusal (owner, 2026-10-29 13:44 CDT: grants live in the roadmap).
 Triage writes the owner's grant in the `grants` field of the lane's roadmap step. The step names its
