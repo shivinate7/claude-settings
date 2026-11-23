@@ -103,7 +103,8 @@ once waits on the draft run, reads it as skipped, and prints "CI red ...: workfl
   No list comes after the deadline. A list made at the deadline after that pause is allowed.
 - A head with no real run at the deadline wakes with `CI unknown`, never red or green.
 - A real run that failed still reads red, with its own failing job names.
-- Green needs a completed `checks` run whose `all-jobs-passed` job passed (REQUIRED_CHECK). A draft-era run
+- Green needs a completed `checks` run whose `all-jobs-passed` job passed (REQUIRED_CHECK), on a head that carries that job.
+  A head where no job of any run carries that name reads green by its run conclusions, as main does. A draft-era run
   (a `checks` run with that job skipped, or a green lane-touched-tests run) is never the green result: the
   watch keeps waiting for the real run, and a red job still wakes at once.
 - After the first judged run, the hook re-lists the head once at once. A run visible at that re-list is
@@ -618,6 +619,9 @@ DRAFT_DONE = run(921, "checks", "skipped", [job("unit", "skipped")])
 DRAFT_RAN = run(990, "checks", "success", [job("nightly-skip", "success"), job("push-skip", "success"),
                                            job("unit", "skipped"), job(REQUIRED_CHECK, "skipped")])
 LANE_GREEN = run(991, "lane-touched-tests", "success", [job("lane-touched-tests", "success")])
+# A head whose runs carry no all-jobs-passed job at all: its verdict reads from the run conclusions, as main reads them.
+NO_ROLLUP_GREEN = run(992, "checks", "success", [job("lint", "success"), job("unit", "success")])
+NO_ROLLUP_RED = run(995, "checks", "failure", [job("lint", "success"), job("unit", "failure")])
 
 
 def late(run_id, appears, conclusion="success", jobs=None):
@@ -1113,22 +1117,55 @@ def case_draft_era_runs_are_never_green():
           str(clock.line).startswith("CI green on"), detail)
 
 
-def case_checks_run_without_a_passed_rollup_is_never_green():
-    """Green needs the completed checks run's all-jobs-passed job to have passed. A checks run that ends success with
-    its real jobs passed, and no all-jobs-passed job, is not green: the wait keeps listing to its deadline. Controls: a
-    failed all-jobs-passed job reads CI red and names it, on a fake clock with no deadline in reach."""
-    no_rollup = run(992, "checks", "success", [job("lint", "success"), job("unit", "success")])
-    raised, clock, calls, deadline = wait_for_on_fakes([no_rollup], 100, line=True)
+def no_rollup_scope(label, fixture):
+    """Scope before subject: the fixture's jobs carry no REQUIRED_CHECK name, so the case tests the no-rollup rule."""
+    names = [j["name"] for j in fixture["jobs"]]
+    check("%s: no job of the head is named %s" % (label, REQUIRED_CHECK), REQUIRED_CHECK not in names, repr(names))
+
+
+def case_checks_run_without_a_rollup_job_reads_its_run_conclusion():
+    """(a) A head whose runs carry no all-jobs-passed job at all is judged by its run conclusions, as main judges it: a
+    checks run that ended success with its real jobs passed reads CI green, at the second run list (the at-once re-list
+    after the first judged run). Control: a failed all-jobs-passed job still reads CI red and names it, on a fake clock
+    with no deadline in reach."""
+    no_rollup_scope("checks run with success, no rollup job", NO_ROLLUP_GREEN)
+    raised, clock, calls, deadline = wait_for_on_fakes([NO_ROLLUP_GREEN], 100, line=True)
     detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
-    check("checks run with no all-jobs-passed job: the line is not CI green",
-          not str(clock.line).startswith("CI green"), detail)
-    check("checks run with no all-jobs-passed job: the wait ends at its deadline",
-          abs(clock.now - deadline) < 1e-6, detail)
+    check("checks run with no all-jobs-passed job: the line is CI green on the head",
+          str(clock.line).startswith("CI green on %s" % SHA7), detail)
+    lists = [t for t, a in calls if a[:2] == ["run", "list"]]
+    check("checks run with no all-jobs-passed job: two run lists, the at-once re-list included",
+          len(lists) == 2, detail)
     rollup_failed = run(993, "checks", "failure", [job("unit", "success"), job(REQUIRED_CHECK, "failure")])
     raised, clock, calls, deadline = wait_for_on_fakes([rollup_failed], 3600, line=True)
     detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
     check("control: a failed all-jobs-passed job reads CI red and names it",
           str(clock.line).startswith("CI red on") and REQUIRED_CHECK in str(clock.line), detail)
+
+
+def case_checks_run_without_a_rollup_job_that_failed_is_red():
+    """(b) Control: a checks run with no all-jobs-passed job that failed reads CI red and names its failed job, and
+    names no job that passed. Fake clock, no deadline in reach."""
+    no_rollup_scope("checks run with a failed job, no rollup job", NO_ROLLUP_RED)
+    raised, clock, calls, deadline = wait_for_on_fakes([NO_ROLLUP_RED], 3600, line=True)
+    detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
+    check("checks run with no all-jobs-passed job and a failed unit job: the line is CI red and names unit only",
+          str(clock.line).startswith("CI red on %s" % SHA7) and "unit" in str(clock.line)
+          and "lint" not in str(clock.line), detail)
+
+
+def case_no_rollup_line_never_names_a_job_the_repo_lacks():
+    """(d) The verdict line of a head with no all-jobs-passed job names no such job. Before the fix, this passed run
+    waits to its deadline and prints "no run with a passed rollup job yet", a job this repo does not have: red on head.
+    The wait runs on a fake clock, so its end is synthetic. After the fix the run reads green, so this case guards the
+    line text only."""
+    no_rollup_scope("checks run with success, no rollup job (line text)", NO_ROLLUP_GREEN)
+    raised, clock, calls, deadline = wait_for_on_fakes([NO_ROLLUP_GREEN], 100, line=True)
+    detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
+    check("no-rollup head: a verdict line is printed", clock.line is not None, detail)
+    line = str(clock.line)
+    check("no-rollup head: the verdict line names no rollup job, by word or by job name",
+          "rollup" not in line.lower() and REQUIRED_CHECK not in line, detail)
 
 
 def case_the_real_checks_run_is_read_after_a_draft_era_run():
@@ -2913,7 +2950,9 @@ def main():
     case_real_failed_run_beside_a_draft_run_is_red()
     case_draft_run_ending_skipped_is_no_run_yet()
     case_draft_era_runs_are_never_green()
-    case_checks_run_without_a_passed_rollup_is_never_green()
+    case_checks_run_without_a_rollup_job_reads_its_run_conclusion()
+    case_checks_run_without_a_rollup_job_that_failed_is_red()
+    case_no_rollup_line_never_names_a_job_the_repo_lacks()
     case_the_real_checks_run_is_read_after_a_draft_era_run()
     case_a_failed_job_still_wakes_beside_a_draft_era_run()
     case_run_visible_at_the_at_once_relist_is_judged()
