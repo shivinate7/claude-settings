@@ -3891,7 +3891,9 @@ def proof_wrong(expr):
         results = {"scope": "success", **dict(zip(LINUX_GUARD_JOBS, shards))}
         want = GUARD_PATH if all(r == "success" for r in shards) and flag == "true" and equal == "true" else ""
         try:
-            got = eval_value(expr, "pull_request", flag, results=results, needs=needs, steps={TREE_STEP: {"equal": equal}})
+            got = eval_value(expr, "pull_request", flag, results=results, needs=needs,
+                             steps={TREE_STEP: {"equal": equal, "tree": "t1"}},
+                             outputs={job: {SHARD_TREE_OUT: "t1"} for job in LINUX_GUARD_JOBS})
         except (KeyError, NameError, SyntaxError) as e:
             return ["%s reads %r, which no step or job of checks sets" % (DEBT_PROOF_VAR, e)]
         if (got or "") != want:
@@ -3997,6 +3999,15 @@ def shard_tree_cases():
         yield dict(zip(LINUX_GUARD_JOBS, shards)), flag, equal, same, "t1"
     for trees, debt in itertools.product(itertools.product(("t1", "t2", ""), repeat=len(LINUX_GUARD_JOBS)), ("t1", "t2", "")):
         yield ALL_SHARDS_OK, "true", "true", dict(zip(LINUX_GUARD_JOBS, trees)), debt
+
+
+def reference_proof():
+    """A proof that reads every tree the rule names, built from the job names: the green control of the tree rule, so the cases
+    above can all go green. It is a fixture of these cases, not the product's proof."""
+    results = " && ".join(f"needs.{job}.result == 'success'" for job in LINUX_GUARD_JOBS)
+    trees = " && ".join(f"needs.{job}.outputs.{SHARD_TREE_OUT} == steps.{TREE_STEP}.outputs.{SHARD_TREE_OUT}" for job in LINUX_GUARD_JOBS)
+    return ("${{ " + results + " && needs.scope.outputs.checks_guard == 'true' && steps." + TREE_STEP + ".outputs.equal == 'true'"
+            " && steps." + TREE_STEP + ".outputs." + SHARD_TREE_OUT + " != '' && " + trees + " && '" + GUARD_PATH + "' || '' }}")
 
 
 def shard_tree_proof_wrong(expr):
@@ -4112,9 +4123,7 @@ class ChecksShardCases(unittest.TestCase):
         for shard in LINUX_GUARD_JOBS:
             for result in ("failure", "skipped", "cancelled"):
                 with self.subTest(shard=shard, result=result):
-                    results = {"scope": "success", **{j: "success" for j in LINUX_GUARD_JOBS}, shard: result}
-                    got = eval_value(raw, "pull_request", "true", results=results, needs=("scope", *LINUX_GUARD_JOBS),
-                                     steps={TREE_STEP: {"equal": "true"}})
+                    got = shard_tree_value(raw, {**ALL_SHARDS_OK, shard: result}, "true", "true", same_tree("t1"), "t1")
                     self.assertFalse(got, "%s is %r with %s %s, so the guard suite is skipped on a shard that did not pass"
                                      % (DEBT_PROOF_VAR, got, shard, result))
 
@@ -4192,6 +4201,13 @@ class ChecksShardCases(unittest.TestCase):
     def test_g16_the_proof_reads_the_tree_rule_in_every_case(self):
         wrong = shard_tree_proof_wrong(self.proof_raw())
         self.assertFalse(wrong, "%s is set wrongly in %d cases, first: %s" % (DEBT_PROOF_VAR, len(wrong), wrong[:1]))
+
+    def test_g17_a_proof_that_reads_every_tree_passes_the_tree_rule(self):
+        """The green control of the tree rule: a proof that reads each shard's tree and the debt check's tree passes the sweeps
+        above and the older proof sweep, so g8, g13 to g16 can all go green."""
+        ref = reference_proof()
+        self.assertEqual(shard_tree_proof_wrong(ref), [], "the tree rule refuses a proof that reads every tree it names")
+        self.assertEqual(proof_wrong(ref), [], "the older proof sweep refuses a proof that reads every tree it names")
 
 
 if __name__ == "__main__":
