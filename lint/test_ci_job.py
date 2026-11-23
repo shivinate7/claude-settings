@@ -3474,6 +3474,10 @@ code = os.path.join(folder, sys.argv[1] + ".exit")
 sys.exit(int(open(code, encoding="utf-8").read()) if os.path.exists(code) else 0)
 '''
 ZIZMOR_PROBE = 'echo zizmor >> "$PROBE_DIR/runs.txt"\n'  # stands in for actions/zizmor/run.sh: it records each run, and passes
+CODE_CHECK_PROBE = '''import os
+with open(os.path.join(os.environ["PROBE_DIR"], "runs.txt"), "a", encoding="utf-8") as f:
+    f.write("code-check\\n")
+'''  # stands in for actions/code-check/code_check.py: it records each run, and passes
 
 
 def rerun_step(name, script=None):
@@ -3812,16 +3816,36 @@ class RerunCache(unittest.TestCase):
         script, _ = self.install(pointer, folder=cfg)  # the copy has no actions/: run.sh comes from the pointer checkout
         self.zizmor_edit_misses(script, run_sh, cfg)
 
-    def test_the_same_commit_in_a_worktree_at_another_path_hits_the_saved_passes(self):
-        self.fixture()
-        steps = (rerun_step("check-a"), rerun_step("check-b"))
-        _, _, first, out = self.lane_run(*steps)
-        self.assertEqual(sorted(first), ["check-a", "check-b"], "the first run should run both steps, got %r\n%s" % (first, out))
+    def worktree_rerun_hits(self, steps, first, args=(), ambient=None):
+        """The fixture repo's HEAD run twice: once in the repo, then in a second worktree at another path. The second run runs no step, so
+        a step's key holds no path of its checkout. `first` is the sorted list of the probes the first run runs. `args` and `ambient` go to
+        every run (see lane_run)."""
+        _, _, ran_first, out = self.lane_run(*steps, args=args, ambient=ambient)
+        self.assertEqual(sorted(ran_first), first, "the first run should run %r, got %r\n%s" % (first, ran_first, out))
         other = os.path.join(self.sandbox, "worktree-b")
         subprocess.run(["git", "worktree", "add", "--detach", other, "HEAD"], cwd=self.root, check=True, env=ENV)
         self.assertEqual(self.rev("HEAD", cwd=other), self.rev("HEAD"), "scope: the other worktree is not at the same commit")
-        _, _, ran, out = self.lane_run(*steps, root=other)
+        _, _, ran, out = self.lane_run(*steps, args=args, ambient=ambient, root=other)
         self.assertEqual(ran, [], "the same commit at another path ran %r again: the key holds the checkout's path\n%s" % (ran, out))
+
+    def test_the_same_commit_in_a_worktree_at_another_path_hits_the_saved_passes(self):
+        self.fixture()
+        self.worktree_rerun_hits((rerun_step("check-a"), rerun_step("check-b")), ["check-a", "check-b"])
+
+    def test_a_code_check_step_at_another_worktree_path_hits_its_saved_pass(self):  # the command names the code_check.py of the checkout it runs in
+        self.fixture()
+        path = os.path.join(self.root, "actions", "code-check", "code_check.py")
+        os.makedirs(os.path.dirname(path))
+        write_lf(path, CODE_CHECK_PROBE)
+        self.commit("code-check probe")
+        self.worktree_rerun_hits((step("Code check", uses="$/actions/code-check"),), ["code-check"], args=("--base", "main"))
+
+    def test_a_zizmor_step_at_another_worktree_path_hits_its_saved_pass(self):  # the command names the run.sh of the checkout it runs in
+        self.fixture()
+        self.plant_run_sh(self.root)
+        self.commit("zizmor probe")
+        self.worktree_rerun_hits((step(ZIZMOR, uses="$/actions/zizmor"),), ["zizmor"], args=("--base", "main"),
+                                 ambient={"PATH": stub_pipx()[0]})
 
     def test_a_volatile_variable_that_changes_between_runs_still_hits(self):
         self.fixture()
