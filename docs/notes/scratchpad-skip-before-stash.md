@@ -1,0 +1,1 @@
+- scratchpad-skip-before-stash: hooks/guard.py line 5890 skips a segment (`continue`) for this session's own scratchpad before the stash refusals at lines 5917 and 5923. The position of the branch -D refusal is unverified. The review cited ~5719, and that line has moved. Seen: 2026-11-23 x1

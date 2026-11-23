@@ -1,0 +1,1 @@
+- rule-mechanisms-test-ref: lint/rule_mechanisms.json (lines 348-351, entry verification-report-unknown-reads) names a guard test function, subject_unread_log_case, that has no def at head. The name is only a stub in lint/test_check_unknown_reads_contract.py. Seen: 2026-11-23 x1

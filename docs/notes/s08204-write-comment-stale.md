@@ -1,0 +1,1 @@
+- s08204-write-comment-stale: the comment at tests/guard/s08204-write.py:521 is stale after PR 3807 (silent-write filter). Which words are stale is unverified. The comment names `grep -v` and a `sed` line delete, while hooks/guard.py:84 now says `awk` and `sed -n '/x/!p'` are not read. Seen: 2026-11-23 x1

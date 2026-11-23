@@ -1,0 +1,1 @@
+- shared-tree-throwaway-refused: the shared-tree guard (hooks/guard_shared_tree.py) refused removing a throwaway worktree in this session's own scratchpad (as reported; the command was not recorded). It is a different act from the reset refusal filed as shared-tree-scratch-repo-false-alarm in docs/debts/notes.md. Seen: 2026-11-23 x1
