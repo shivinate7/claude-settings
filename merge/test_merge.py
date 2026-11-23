@@ -4763,18 +4763,21 @@ class GhHalf(Env):
         return self.run_merge("7", "--confirm", host=self.gh_host(**kw))
 
     def proven_parent(self, rows=None):
-        """Teach the fake gh the commit the proof is read on. drop_config ends with feat a clean merge of main (head_takes_base), and a clean base
-        merge carries the proof of its first parent, the commit the lane pushed. The fake gh answers a check read only for a sha a head read
-        returned or the head ref, so that parent answers HTTP 422 until it is taught here. `rows`: the check rows that parent answers, when they
-        differ from the head's own (sha_checks). -> that sha."""
-        sha = sh(self.other, "git", "rev-parse", "HEAD^1")
-        self.set(shown=[sha], sha_checks={sha: rows} if rows else {})
-        return sha
+        """Teach the fake gh the commits a clean base merge's proof is read on: the PR head as it stands, and its first parent. A base merge the
+        tool makes in the run has the lane's head as its parent, and a merge already on the head has the commit it merged onto, so both are taught.
+        The fake gh answers a check read only for a sha a head read returned or the head ref, so the parent answers HTTP 422 until it is taught
+        here. `rows`: the check rows the parent answers, when they differ from the head's own (sha_checks). -> the parent's sha."""
+        sh(self.other, "git", "fetch", "-q", "origin")
+        head = sh(self.other, "git", "rev-parse", "origin/feat")
+        parent = sh(self.other, "git", "rev-parse", "origin/feat^1")
+        self.set(shown=[head, parent], sha_checks={parent: rows} if rows else {})
+        return parent
 
     def test_a_red_main_run_read_through_gh_merges_the_merge(self):
         """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): a PR may merge onto a red main, so the red run read through gh does not refuse it."""
         # the red-main check's REST reads through the real gh call: one page of main's runs, then the red run's jobs
         push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})  # only a workflow file on main is judged
+        self.proven_parent()  # the merge the tool makes on the head reads its proof on the lane's head, which the fake gh must know
         self.set(base_runs=[main_run(901, "failure")], base_jobs={"901": [main_job("scope", "success"), main_job("checks", "failure", 20)]})
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
@@ -4785,6 +4788,7 @@ class GhHalf(Env):
     def red_main_then_merge(self, *flags, unreadable=False):
         """Main's latest run is red, the flags go on the --confirm, and the merge call is the fake gh's. -> (rc, out, fields of each merge call)."""
         push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})
+        self.proven_parent()  # the merge the tool makes on the head reads its proof on the lane's head, which the fake gh must know
         self.set(base_runs=[main_run(901, "failure")], base_jobs={"901": [main_job("scope", "success"), main_job("checks", "failure", 20)]})
         with contextlib.ExitStack() as stack:
             if unreadable:
@@ -5958,6 +5962,7 @@ class GhHalf(Env):
         """A pending run that no workflow file shows to be outside the required names makes the head pending: refused at once, with no pause,
         and nothing claimed or pushed. The required names pass, so only the run holds the head."""
         before = self.head()
+        self.proven_parent()  # the head is a clean merge of main (the tool's base merge): its proof is read on the parent
         self.set(checks_seq=[[(n, "pass", "") for n in required]], runs_seq=[[(runs_name, "in_progress", "")], [(runs_name, "completed", "success")]])
         rc, out = self.go(required=required)
         self.assertEqual(self.paused, [], f"the pending run {runs_name!r} waited before it refused")
@@ -6079,6 +6084,7 @@ class GhHalf(Env):
 
     def test_no_config_never_runs_stamp(self):
         drop_config(self)
+        self.proven_parent()  # the clean main merge's proof is read on its parent, which the fake gh must know
         mark = stamp_marker(self)
         self.set(contexts=["checks"])
         rc, out = self.go(required="protection")
