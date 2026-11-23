@@ -29,9 +29,9 @@ never runs it. There is one path: the record branch's own worktree. Never write 
    - `same`: stop. Commit nothing.
    - `changed <n>`: in the same worktree, run `git add -A` on the copy folder, then
      commit and push the record branch. The commit message names the count. `changed <n> deleted <k>`: the export
-     deleted each item whose own data says closed, with its answer and receipt, and printed one `deleted <path>` line
-     each. The commit message starts `DELETE:` and lists each deleted path. Then run step 3 again: it must print `same`,
-     which confirms each path is gone and no open item left. Never restore a deleted item.
+     deleted each item it saw closed in the copy and in the fetch, with its answer and receipt, and printed one
+     `deleted <path>` line each. The commit message starts `DELETE:` and lists each deleted path. Then run step 3
+     again: it must print `same`, so the commit holds every write. Never restore a deleted item.
    - `held item <n>: <sentence>` after the verdict line (exit 4): after `changed`, the copy was written; commit it as for `changed`. After `same`, commit nothing. The page would
      draw that item's picture wrong. Fix the item, export again, and do not republish while one is held.
    - `refused`: nothing was written. Make no commit. The reply names each find: the file, the JSON path and

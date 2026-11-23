@@ -306,7 +306,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
   a page link or a promise does not pass.
 
 - The writer keeps the page on main's code (see "Keep the page on main's code").
-- The writer keeps a copy of the page's data in the repo (see "Keep a copy in the repo"). A closed item leaves the page and the copy with its answer and receipt (owner, 2026-11-22 21:02 and 21:05 CST; decision `waiting-data-in-repo`). The export deletes by the item's key and its own `closed` status, never by `n` or absence, and the record-branch commit message starts `DELETE:` and lists each key. No session restores a deleted item.
+- The writer keeps a copy of the page's data in the repo (see "Keep a copy in the repo"). A closed item leaves the page and the copy with its answer and receipt (owner, 2026-11-22 21:02 and 21:05 CST; decision `waiting-data-in-repo`). The export deletes by the item's key and its own `closed` status, on the second closed sighting in a row, never by `n` or absence. The record-branch commit message starts `DELETE:` and lists each key. No session restores a deleted item.
 
 ## Add an item
 

@@ -13,10 +13,12 @@ saves them; an empty collection is an empty folder. A script cannot call that to
 The session touches `.complete` in each collection folder after the last list page, so a fetch that stopped early
 shows: a collection with no marker is unknown. A collection that is empty now while the copy holds docs of it is
 unknown too, unless the session names it with --allow-empty.
-An item whose own data says `status: closed`, in the fetch or in the copy when the fetch does not hold it, leaves the
-copy with its answer (keyed by its id, or naming it in `item`) and that answer's receipt. The match is the doc key, never
-`n`. A doc the fetch no longer lists stays, since another account's page may hold it open (owner rulings 2026-11-22
-21:02 and 21:05 CST). Each delete prints `deleted <collection>/<id>.json` before the verdict.
+A closed item leaves the copy with its answer (keyed by its id, or naming it in `item`) and that answer's receipt, on its
+second closed sighting: the copy item is already closed and the fetch holds it closed. The first sighting only marks the
+copy item closed; an open sighting between writes it back open, since every account's page shares the copy. A routed
+closed item (`lane` and `lastAnswer`) waits while the page holds its answer. The match is the doc key, never `n`. A
+closed item the copy does not hold is not copied. A doc the fetch no longer lists stays (owner rulings 2026-11-22 21:02
+and 21:05 CST). Each delete prints `deleted <collection>/<id>.json` before the verdict.
 WAITING_DIR is the `waiting-data` folder of the record branch (`layout.py path <root> waiting-data`). With --page,
 the page's bytes land in `page/page.html`, and its designData block in `page/designData.json`. A file is written
 only when its bytes differ. The script never runs git: the session commits.
@@ -635,7 +637,7 @@ def tied_to(gone, answers):
     """(answer ids, receipt ids) that go with the item ids in `gone`. An answer goes when its doc id or its `item` field
     is a gone item; a receipt goes when its doc id is a gone item or a gone answer. A park doc names no item and stays."""
     answer_ids = {doc_id for doc_id, data in answers.items()
-                  if doc_id in gone or (isinstance(data, dict) and data.get("item") in gone)}
+                  if doc_id in gone or (isinstance(data, dict) and isinstance(data.get("item"), str) and data["item"] in gone)}
     return answer_ids, set(gone) | answer_ids
 
 
@@ -656,6 +658,27 @@ def parsed(raw):
         return json.loads(raw.decode("utf-8"))
     except ValueError:
         return {}
+
+
+def closed_sightings(collections, docs, have):
+    """(item ids to delete, closed item ids the copy does not hold). All accounts share one copy, so a delete takes two
+    closed sightings: the export that first fetches an item closed only marks the copy item closed (it is rewritten as
+    fetched), and a later export deletes it when the copy item is already closed and the fetch holds it closed. An open
+    sighting between them writes it back open. An item the fetch does not hold is never deleted. A routed closed item
+    (`lane` and `lastAnswer`) waits while the page holds its answer: the lane's done report deletes that answer."""
+    if ITEMS not in collections:
+        return set(), set()
+    gone, unseen = set(), set()
+    for doc_id, data in docs[ITEMS].items():
+        label = "%s/%s.json" % (ITEMS, doc_id)
+        if not is_closed(data):
+            continue
+        if label not in have:
+            unseen.add(doc_id)
+        elif is_closed(parsed(have[label])) and not (
+                data.get("lane") and data.get("lastAnswer") and tied_to({doc_id}, docs.get(ANSWERS, {}))[0]):
+            gone.add(doc_id)
+    return gone, unseen
 
 
 def copy_answers(have):
@@ -680,20 +703,15 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
             raise Stop("unknown - %s is empty but the copy holds %d doc(s) of it; pass --allow-empty %s if it emptied"
                        % (name, len(kept), name), UNKNOWN)
 
-    gone = set()
-    if ITEMS in collections:
-        gone = {doc_id for doc_id, data in docs[ITEMS].items() if is_closed(data)}  # the fetch says closed
-        for label, raw in have.items():  # the copy says closed, and the fetch does not hold it open
-            doc_id = label[len(ITEMS) + 1:-len(".json")]
-            if label.startswith(ITEMS + "/") and doc_id not in docs[ITEMS] and is_closed(parsed(raw)):
-                gone.add(doc_id)
+    gone, unseen = closed_sightings(collections, docs, have)
     drop = gone_labels(collections, gone, dict(copy_answers(have), **docs.get(ANSWERS, {})))
+    skip = gone_labels(collections, unseen, docs.get(ANSWERS, {}))  # closed and never copied: write none of it
 
     want = {}
     finds = []
     for name in collections:
         for doc_id, data in docs[name].items():
-            if "%s/%s.json" % (name, doc_id) in drop:
+            if "%s/%s.json" % (name, doc_id) in drop or "%s/%s.json" % (name, doc_id) in skip:
                 continue
             hits = [("$id", kind) for kind in kinds_in(doc_id)]
             label = "%s/%s.json" % (name, "<redacted>" if hits else doc_id)

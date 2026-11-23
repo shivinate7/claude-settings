@@ -1315,8 +1315,8 @@ class Receipts(Base):
             self.fail("export(design=False) stopped: %s" % stop)
 
     def test_a_collection_outside_the_six_still_mirror_deletes(self):
-        """Control for append-only: only the six waiting collections keep their docs. Another role's own collection
-        mirrors the fetch, so the delete branch is still proved to run."""
+        """Control for the keep rule: only the six waiting collections keep a doc the fetch no longer lists. Another role's
+        own collection mirrors the fetch, so the delete branch is still proved to run."""
         out = self.out()
         self.export_in_process_with(("steps",), self.fetch(folders={"steps": {"a": item(1), "b": item(2)}}), out)
         self.assertTrue(os.path.isfile(os.path.join(out, "steps", "b.json")), "scope: steps/b.json did not land")
@@ -1381,10 +1381,14 @@ class Receipts(Base):
 
 
 class ClosedItems(Base):
-    """Owner rulings, 2026-11-22 21:02 and 21:05 CST: an item whose own data says closed is deleted from the copy, with
-    its answer and receipt, and no session restores it. The delete follows the doc key and the content, never `n` and
-    never absence: an item the fetch no longer lists stays, since another account's page may hold it open. A doc tied to
-    no item (a park answer or receipt) and the groups, asks and meta docs stay as the copy held them."""
+    """Owner rulings, 2026-11-22 21:02 and 21:05 CST: a closed item leaves the copy with its answer and receipt, and no
+    session restores it. The delete follows the doc key and the content, never `n` and never absence. All accounts share
+    one copy, so a delete takes two closed sightings: the first export that fetches the item closed marks the copy item
+    closed, and a later export deletes it only when the copy item is already closed and the fetch holds it closed. An
+    open sighting between them writes it back open. A closed item the copy does not hold is never copied. An item the
+    fetch does not hold stays. A routed closed item (`lane`
+    and `lastAnswer`) whose answer the page still holds waits for the lane's done report. A doc tied to no item (a park
+    answer or receipt) and the groups, asks and meta docs stay as the copy held them."""
 
     def seeded(self):
         """A copy holding open items 1 and 2, item 1's answer keyed by item id, item 2's answer keyed `ans-2` with an
@@ -1401,11 +1405,20 @@ class ClosedItems(Base):
             self.assertTrue(os.path.isfile(os.path.join(out, *rel.split("/"))), "scope: the copy holds no %s" % rel)
         return out
 
-    def later(self, items):
-        """The next fetch: item 1 as given in `items`, the same answers and receipts, and no group, ask or park doc."""
+    def later(self, items, answers=None):
+        """The next fetch: `items`, the same answers and receipts unless `answers` is given, and no group, ask or park doc."""
         return self.fetch(items=items,
-                          answers={"item-001": {"item": "item-001", "pick": "a"}, "ans-2": {"item": "item-002", "pick": "b"}},
+                          answers=answers if answers is not None else
+                          {"item-001": {"item": "item-001", "pick": "a"}, "ans-2": {"item": "item-002", "pick": "b"}},
                           receipts={"item-001": receipt(1), "ans-2": receipt(2)}, groups={}, asks={}, meta={"page": META})
+
+    def run_later(self, out, items, answers=None):
+        r = self.export(self.later(items, answers), out, allow_empty=("groups", "asks"))
+        self.assertEqual(r.returncode, 0, shown(r))
+        return r
+
+    def closed_two(self, **extra):
+        return {"item-001": item(1), "item-002": dict(item(2), status="closed", **extra)}
 
     def assertGone(self, out, *rels):
         for rel in rels:
@@ -1415,103 +1428,133 @@ class ClosedItems(Base):
         for rel in rels:
             self.assertTrue(os.path.isfile(os.path.join(out, *rel.split("/"))), "%s left the copy" % rel)
 
-    def test_a_closed_item_leaves_the_copy_with_its_answer_and_receipt(self):
+    def copy_status(self, out, doc_id):
+        return json.loads(read_text(os.path.join(out, "items", doc_id + ".json"))).get("status")
+
+    def test_the_first_closed_sighting_marks_the_copy_and_deletes_nothing(self):
         out = self.seeded()
-        r = self.export(self.later({"item-001": item(1), "item-002": dict(item(2), status="closed")}), out,
-                        allow_empty=("groups", "asks"))
-        self.assertEqual(r.returncode, 0, shown(r))
+        r = self.run_later(out, self.closed_two())
+        self.assertKept(out, "items/item-002.json", "answers/ans-2.json", "receipts/ans-2.json")
+        self.assertEqual(self.copy_status(out, "item-002"), "closed", "the first closed sighting did not mark the copy")
+        self.assertVerdict(r, "changed 1")
+        self.assertFalse(says(r, "changed 1 deleted"), "the first closed sighting deleted. Output:\n" + shown(r))
+
+    def test_a_second_closed_sighting_deletes_the_item_with_its_answer_and_receipt(self):
+        out = self.seeded()
+        self.run_later(out, self.closed_two())
+        r = self.run_later(out, self.closed_two())
         self.assertGone(out, "items/item-002.json", "answers/ans-2.json", "receipts/ans-2.json")
         self.assertKept(out, "items/item-001.json", "answers/item-001.json", "receipts/item-001.json")
-        self.assertVerdict(r, "changed 3 deleted 3")
+        self.assertEqual(verdict_lines(r), ["deleted answers/ans-2.json", "deleted items/item-002.json",
+                                            "deleted receipts/ans-2.json", "changed 3 deleted 3"], shown(r))
 
-    def test_an_open_item_the_fetch_no_longer_lists_stays_with_its_answer_and_receipt(self):
+    def test_another_accounts_open_sighting_between_keeps_the_item(self):
+        """Account X fetches K closed, account Y fetches K open, X fetches K closed again: K stays, marked closed. Only
+        X's next closed sighting, with no open one between, deletes it."""
         out = self.seeded()
-        r = self.export(self.later({"item-001": item(1)}), out, allow_empty=("groups", "asks"))
-        self.assertEqual(r.returncode, 0, shown(r))
+        self.run_later(out, self.closed_two())                              # X: marks closed
+        self.run_later(out, {"item-001": item(1), "item-002": item(2)})     # Y: open again
+        self.assertEqual(self.copy_status(out, "item-002"), "open", "account Y's open sighting did not rewrite the copy")
+        self.run_later(out, self.closed_two())                              # X: marks closed, deletes nothing
+        self.assertKept(out, "items/item-002.json", "answers/ans-2.json", "receipts/ans-2.json")
+        self.run_later(out, self.closed_two())                              # X: second sighting in a row
+        self.assertGone(out, "items/item-002.json", "answers/ans-2.json", "receipts/ans-2.json")
+
+    def test_an_item_the_fetch_does_not_hold_stays_even_when_closed_in_the_copy(self):
+        out = self.seeded()
+        self.run_later(out, self.closed_two())
+        r = self.run_later(out, {"item-001": item(1)})
         self.assertKept(out, "items/item-002.json", "answers/ans-2.json", "receipts/ans-2.json")
         self.assertVerdict(r, "same")
 
-    def test_each_delete_prints_its_key_before_the_verdict(self):
+    def test_an_item_open_on_the_page_and_closed_in_the_copy_is_kept_and_rewritten_open(self):
         out = self.seeded()
-        r = self.export(self.later({"item-001": item(1), "item-002": dict(item(2), status="closed")}), out,
-                        allow_empty=("groups", "asks"))
-        lines = verdict_lines(r)
-        self.assertEqual(lines, ["deleted answers/ans-2.json", "deleted items/item-002.json", "deleted receipts/ans-2.json",
-                                 "changed 3 deleted 3"], shown(r))
+        self.run_later(out, self.closed_two())
+        self.run_later(out, {"item-001": item(1), "item-002": item(2)})
+        self.assertEqual(read_text(os.path.join(out, "items", "item-002.json")), canonical(item(2)))
+        self.assertKept(out, "answers/ans-2.json", "receipts/ans-2.json")
 
     def test_the_delete_follows_the_key_and_the_content_never_n(self):
         """Two pages number one question differently. Page A holds q-x as n 9, closed; the copy holds q-x as n 11 from
-        page B, open, and another question q-y as n 9, open. The export of page A deletes q-x and keeps q-y."""
+        page B, open, and another question q-y as n 9, open. Two exports of page A delete q-x and keep q-y."""
         out = self.out()
         seed = self.fetch(items={"q-x": dict(item(11), id="q-x", n=11), "q-y": dict(item(9), id="q-y", n=9)},
                           answers={"q-x": {"item": "q-x", "pick": "a"}, "q-y": {"item": "q-y", "pick": "b"}},
                           receipts={"q-x": receipt(1), "q-y": receipt(2)})
         self.assertEqual(self.export(seed, out).returncode, 0, "scope: the seeding export did not run")
-        page_a = self.fetch(items={"q-x": dict(item(9), id="q-x", n=9, status="closed")},
-                            answers={"q-x": {"item": "q-x", "pick": "a"}}, receipts={"q-x": receipt(1)})
-        r = self.export(page_a, out)
-        self.assertEqual(r.returncode, 0, shown(r))
+        for _ in range(2):
+            page_a = self.fetch(items={"q-x": dict(item(9), id="q-x", n=9, status="closed")},
+                                answers={"q-x": {"item": "q-x", "pick": "a"}}, receipts={"q-x": receipt(1)})
+            r = self.export(page_a, out)
+            self.assertEqual(r.returncode, 0, shown(r))
         self.assertGone(out, "items/q-x.json", "answers/q-x.json", "receipts/q-x.json")
         self.assertKept(out, "items/q-y.json", "answers/q-y.json", "receipts/q-y.json")
         self.assertEqual(json.loads(read_text(os.path.join(out, "items", "q-y.json")))["n"], 9, "q-y was changed")
 
-    def test_a_closed_item_the_copy_holds_leaves_when_the_fetch_does_not_hold_it_open(self):
-        """An older copy may hold a closed item that the page has since deleted: its own data says closed, so it goes."""
-        out = self.seeded()
-        write_text(os.path.join(out, "items", "item-002.json"), canonical(dict(item(2), status="closed")))
-        r = self.export(self.later({"item-001": item(1)}), out, allow_empty=("groups", "asks"))
-        self.assertEqual(r.returncode, 0, shown(r))
-        self.assertGone(out, "items/item-002.json", "answers/ans-2.json", "receipts/ans-2.json")
-
-    def test_an_item_open_on_the_page_and_closed_in_the_copy_is_kept_and_rewritten_open(self):
-        out = self.seeded()
-        write_text(os.path.join(out, "items", "item-002.json"), canonical(dict(item(2), status="closed")))
-        r = self.export(self.later({"item-001": item(1), "item-002": item(2)}), out, allow_empty=("groups", "asks"))
-        self.assertEqual(r.returncode, 0, shown(r))
-        self.assertEqual(read_text(os.path.join(out, "items", "item-002.json")), canonical(item(2)))
-        self.assertKept(out, "answers/ans-2.json", "receipts/ans-2.json")
-
     def test_a_closed_item_keyed_answer_and_receipt_leave_with_it(self):
         out = self.seeded()
-        r = self.export(self.later({"item-001": dict(item(1), status="closed"), "item-002": item(2)}), out,
-                        allow_empty=("groups", "asks"))
-        self.assertEqual(r.returncode, 0, shown(r))
+        closed_one = {"item-001": dict(item(1), status="closed"), "item-002": item(2)}
+        self.run_later(out, closed_one)
+        self.run_later(out, closed_one)
         self.assertGone(out, "items/item-001.json", "answers/item-001.json", "receipts/item-001.json")
         self.assertKept(out, "items/item-002.json", "answers/ans-2.json", "receipts/ans-2.json")
 
     def test_park_docs_groups_asks_and_meta_stay_when_no_longer_fetched(self):
         out = self.seeded()
-        r = self.export(self.later({"item-001": item(1), "item-002": dict(item(2), status="closed")}), out,
-                        allow_empty=("groups", "asks"))
-        self.assertEqual(r.returncode, 0, shown(r))
+        self.run_later(out, self.closed_two())
+        self.run_later(out, self.closed_two())
         self.assertKept(out, "answers/park.colour-pick.json", "receipts/park.colour-pick.json", "groups/g.json",
                         "asks/k.json", "meta/page.json")
 
-    def test_a_closed_item_never_lands_in_the_copy(self):
+    def test_a_closed_item_new_to_the_copy_never_lands(self):
+        """Nothing to mark or delete: a closed item the copy does not hold is not copied, nor its answer or receipt, so a
+        later export does not write it and delete it again."""
         out = self.out()
-        r = self.export(self.fetch(items={"item-001": item(1), "item-009": dict(item(9), status="closed")},
-                                   answers={"item-009": {"item": "item-009", "pick": "a"}},
-                                   receipts={"item-009": receipt(9)}), out)
+        fetched = self.fetch(items={"item-001": item(1), "item-009": dict(item(9), status="closed")},
+                             answers={"item-009": {"item": "item-009", "pick": "a"}}, receipts={"item-009": receipt(9)})
+        r = self.export(fetched, out)
         self.assertEqual(r.returncode, 0, shown(r))
         self.assertKept(out, "items/item-001.json")
         self.assertGone(out, "items/item-009.json", "answers/item-009.json", "receipts/item-009.json")
-        self.assertVerdict(r, "changed 1")
-        self.assertFalse(says(r, "changed 1 deleted"), "nothing was in the copy to delete. Output:\n" + shown(r))
+        self.assertVerdict(self.export(fetched, out), "same")
+
+    def test_a_routed_closed_item_waits_while_the_page_holds_its_answer(self):
+        """Fail closed: a closed item with `lane` and `lastAnswer` keeps its answer until the lane's done report, which
+        deletes the answer on the page. Then the next closed sightings delete the item, its answer and its receipt."""
+        out = self.seeded()
+        routed = self.closed_two(lane="fix-lane")
+        for _ in range(3):
+            self.run_later(out, routed)
+        self.assertKept(out, "items/item-002.json", "answers/ans-2.json", "receipts/ans-2.json")
+        done = {"item-001": {"item": "item-001", "pick": "a"}}  # the done report deleted ans-2 on the page
+        self.run_later(out, routed, answers=done)
+        self.assertGone(out, "items/item-002.json", "answers/ans-2.json", "receipts/ans-2.json")
+
+    def test_an_answer_whose_item_field_is_a_list_does_not_crash_the_export(self):
+        out = self.seeded()
+        answers = {"item-001": {"item": "item-001", "pick": "a"}, "ans-2": {"item": "item-002", "pick": "b"},
+                   "odd": {"item": ["item-002"], "pick": "a"}}
+        self.run_later(out, self.closed_two(), answers=answers)
+        r = self.run_later(out, self.closed_two(), answers=answers)
+        self.assertKept(out, "answers/odd.json")
+        self.assertGone(out, "items/item-002.json")
+        self.assertNotIn("crashed", shown(r))
 
     def test_a_second_run_after_the_deletes_is_same(self):
         out = self.seeded()
-        later = self.later({"item-001": item(1), "item-002": dict(item(2), status="closed")})
-        self.export(later, out, allow_empty=("groups", "asks"))
-        self.assertVerdict(self.export(later, out, allow_empty=("groups", "asks")), "same")
+        self.run_later(out, self.closed_two())
+        self.run_later(out, self.closed_two())
+        self.assertVerdict(self.run_later(out, self.closed_two()), "same")
 
     def test_a_cut_short_fetch_still_deletes_nothing(self):
         out = self.seeded()
-        later = self.later({"item-001": item(1)})
-        os.remove(os.path.join(later, "items", MARKER))
+        self.run_later(out, self.closed_two())
+        later = self.later(self.closed_two())
+        os.remove(os.path.join(later, "answers", MARKER))
         before = snapshot(out)
         r = self.export(later, out, allow_empty=("groups", "asks"))
         self.assertEqual(r.returncode, 2, shown(r))
-        self.assertEqual(snapshot(out), before, "a fetch with no items marker changed the copy")
+        self.assertEqual(snapshot(out), before, "a fetch with no answers marker changed the copy")
 
 
 class Page(Base):
