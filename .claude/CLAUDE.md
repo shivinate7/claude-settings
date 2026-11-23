@@ -37,11 +37,11 @@ output style load in each session on each repo.
   not covered. The yes binds to the head the pull request had when the consultant relayed it. That binding
   rests on the runner passing that head as `--head`, and on the classifier reading the chat. The merge tool
   accepts a live head that equals the `--head` passed, or sits on it with only a Record-claim commit,
-  its revert or a page-only commit. It does not check that `--head` against the relay.
+  its revert, a page-only commit, or, on the default branch, a clean merge of main. It does not check that `--head` against the relay.
   `relayed_head_holds` in `merge/merge.py` reads no review record.
 - **Lane draft PR** (owner, 2026-11-12 17:19 CST; changed by owner, 12:58 CST Nov 16, "No now everyone merges",
   and 13:06 CST Nov 20, "let's lock that"; ruling Q2). Any lane that a coordinator or another lane started may open its own draft PR. It marks that PR
-  ready once, by the merge tool, after its last review, and never marks another PR ready. It merges on whichever proof of its head arrives first: a green `all-jobs-passed` rollup, or a local lane-lint PASS. Source:
+  ready once, by the merge tool, after its last review, and never marks another PR ready. It merges on whichever proof of its head arrives first: a green `all-jobs-passed` rollup, or a local lane-lint PASS. The proof may sit under the merge tool's own page-only commit or one clean merge of main; the live head's own run must not be red or unknown. Source:
   decision `draft-until-reviewed` (every PR opens as a draft).
 - **Main merge into handed-in branches** (owner, 2026-11-13 13:12 CST; until withdrawn; changed by owner,
   23:40 CST, waiting-page item 806 d). The batch runner may push a plain merge of main into a PR that a lane
