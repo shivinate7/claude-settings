@@ -3798,9 +3798,8 @@ class ShardControls(unittest.TestCase):
         self.assertEqual(sorted(picked), sorted(all_names), f"the {count} shards do not select each case once")
 
 
-# ---- The Debt retire check takes the Linux guard suite's proof from the guard shards (owner ruling, 11:07 CST Nov 23: "3466 can
-# also be done now rather than later"; decision ci-cut-in-steps). checks waits for every guard shard in LINUX_GUARD_JOBS, the family
-# SHARD_COUNTS sets, so a count change moves the gate with it and no shard list is written here. A skip that trusts half the shards
+# ---- The Debt retire check takes the Linux guard suite's proof from the guard shards (decision ci-cut-in-steps). checks waits for every guard shard in LINUX_GUARD_JOBS, the family
+# SHARD_COUNTS sets, so a count change moves the proof's shard list with it and no shard list is written here. A skip that trusts half the shards
 # proves half the suite.
 CHECKS_JOB = "checks"
 CHECKS_NEEDS = {"scope", *LINUX_GUARD_JOBS}
@@ -3867,8 +3866,8 @@ def checks_if_problems(needs, expr):
     return []
 
 
-def gate_wrong(expr):
-    """The cases where the Debt retire gate `expr` reads other than the proof rule: the guard path only when every Linux guard
+def proof_wrong(expr):
+    """The cases where the Debt retire proof `expr` reads other than the proof rule: the guard path only when every Linux guard
     shard succeeded, the scope flag is 'true' and the merge commit's tree equals the PR head's; '' in every other case."""
     needs = ("scope", *LINUX_GUARD_JOBS)
     wrong = []
@@ -3941,7 +3940,7 @@ class ChecksShardCases(unittest.TestCase):
         self.assertEqual(len(steps), 1, "scope: checks.yml has %d steps in checks that run the Debt retire check, want 1" % len(steps))
         return steps[0]
 
-    def gate_raw(self):
+    def proof_raw(self):
         env = step_env(self.debt_step())
         self.assertIn(DEBT_PROOF_VAR, env, "checks.yml: the Debt retire check sets no %s, so the guard shards' proof never reaches it" % DEBT_PROOF_VAR)
         return env[DEBT_PROOF_VAR]
@@ -3953,7 +3952,7 @@ class ChecksShardCases(unittest.TestCase):
         self.assertEqual(checks_if_problems(job_needs_of(self.text, CHECKS_JOB), job_if_of(self.text, CHECKS_JOB)), [])
 
     def test_g3_the_debt_step_sets_the_proof_only_when_every_shard_scope_flag_and_trees_hold(self):
-        wrong = gate_wrong(self.gate_raw())
+        wrong = proof_wrong(self.proof_raw())
         self.assertFalse(wrong, "%s is set wrongly in %d cases, first: %s" % (DEBT_PROOF_VAR, len(wrong), wrong[:1]))
 
     def test_g4_the_run_condition_check_refuses_each_wrong_if(self):
@@ -4005,19 +4004,19 @@ class ChecksShardCases(unittest.TestCase):
                 else:
                     self.assertNotEqual(equal, "true", "the tree step reported equal trees for: %s" % label)
 
-    def test_g7_the_gate_names_every_linux_guard_shard_and_one_it_omits_is_refused(self):
-        raw = self.gate_raw()
+    def test_g7_the_proof_names_every_linux_guard_shard_and_one_it_omits_is_refused(self):
+        raw = self.proof_raw()
         named = set(re.findall(r"needs\.([\w-]+)\.result", raw))
         self.assertEqual(sorted(set(LINUX_GUARD_JOBS) - named), [],
-                         "checks.yml: the Debt retire gate reads no result of these guard shards, so one can fail and still skip the suite")
+                         "checks.yml: the Debt retire proof reads no result of these guard shards, so one can fail and still skip the suite")
         for shard in LINUX_GUARD_JOBS:
             with self.subTest(omits=shard):
                 cut = raw.replace("needs.%s.result" % shard, "'success'")
-                self.assertNotEqual(cut, raw, "the fixture: the gate reads no result of %s" % shard)
-                self.assertTrue(gate_wrong(cut), "a gate that reads %s as success passes the suite when %s fails" % (shard, shard))
+                self.assertNotEqual(cut, raw, "the fixture: the proof reads no result of %s" % shard)
+                self.assertTrue(proof_wrong(cut), "a proof that reads %s as success passes the suite when %s fails" % (shard, shard))
 
     def test_g8_one_shard_that_did_not_succeed_leaves_the_proof_unset(self):
-        raw = self.gate_raw()
+        raw = self.proof_raw()
         for shard in LINUX_GUARD_JOBS:
             for result in ("failure", "skipped", "cancelled"):
                 with self.subTest(shard=shard, result=result):

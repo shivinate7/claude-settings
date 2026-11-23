@@ -752,7 +752,7 @@ class CiStepRunsMainCopy(Case):
 
 
 class ShardProof(Case):
-    """The guard suite's proof from its shard jobs (owner ruling, 11:07 CST Nov 23: "3466 can also be done now rather than later").
+    """The guard suite's proof from its shard jobs (decision ci-cut-in-steps).
     When DEBT_RETIRE_SHARD_PROVEN names a Retire span's path, the check skips that span and judges the close on the rest. Any other
     value, or none, runs every span as before. checks.yml sets the var only when every guard shard and the scope flag hold
     (ChecksShardCases in lint/test_windows_split.py). The shards' result is not re-read here: that is the workflow's proof."""

@@ -665,8 +665,8 @@ def with_job_if(text, job, expr):
     return text.replace(body, body.replace(lines[0], "" if expr is None else "    if: %s\n" % expr, 1), 1)
 
 
-# checks' gate if: it runs on any guard shard's result, and skips only when scope did not succeed or the records-only skip is set.
-GATE_IF = "${{ !cancelled() && needs.scope.result == 'success' && needs.scope.outputs.records_only_skip != 'true' }}"
+# checks' run condition: it runs on any guard shard's result, and skips only when scope did not succeed or the records-only skip is set.
+CHECKS_IF = "${{ !cancelled() && needs.scope.result == 'success' && needs.scope.outputs.records_only_skip != 'true' }}"
 
 
 class ExemptionCases(unittest.TestCase):
@@ -684,13 +684,13 @@ class ExemptionCases(unittest.TestCase):
         problems = off_problems(self.text)
         self.assertEqual(problems, [], "checks with its workflow if is flagged: %s" % problems)
 
-    def test_a2_checks_with_the_gate_if_is_not_flagged(self):
+    def test_a2_checks_with_the_run_condition_is_not_flagged(self):
         """checks runs on any shard result and skips only when scope did not succeed or the records-only skip is set (the wider
-        run condition that the shards' gate needs, test_windows_split.py checks_if_problems). The rules must accept that if."""
-        text = with_job_if(self.text, "checks", GATE_IF)
+        run condition that the shards' proof needs, test_windows_split.py checks_if_problems). The rules must accept that if."""
+        text = with_job_if(self.text, "checks", CHECKS_IF)
         self.assertIsNotNone(text, "scope: checks.yml has no single job-level if line in checks to swap")
         problems = off_problems(text)
-        self.assertEqual(problems, [], "checks with the gate if is flagged: %s" % problems)
+        self.assertEqual(problems, [], "checks with the run condition is flagged: %s" % problems)
 
     def test_b_checks_with_always_is_flagged(self):
         text = with_job_if(self.text, "checks", "${{ always() }}")
