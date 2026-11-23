@@ -158,6 +158,9 @@ class FakeHost:
         # A method, not an instance attribute: a subclass that moves its own clock (LagHost) overrides it.
         return FAKE_NOW  # Host.now: reviewed_read reads it, so an age is the same on every run
 
+    def server_now(self):
+        return FAKE_NOW  # Host.server_now: GitHub's clock in epoch seconds; the idle red rule reads a PR's age on it, never on now()
+
     def __init__(self, root, other, branch="feat"):
         self.root, self.other, self.branch = root, other, branch
         self.cwd = root  # Host.cwd, the checkout that git reads run in (main sets it as Host(cwd=root))

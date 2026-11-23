@@ -4763,16 +4763,17 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assertEqual(self.host.posted, [], "a red clash not yet idle was commented on: " + out)
         self.assertEqual(self.host.readies, [], "the lane went ready past a clash that still counts: " + out)
 
-    def test_cloud_host_prints_the_return_route_for_an_idle_red_clash_and_still_comments(self):
+    def test_cloud_host_prints_the_return_route_for_an_idle_red_clash_and_still_counts_it(self):  # round 1 review, 15:06 CST Nov 23, under the owner's R6 ruling: a cloud host cannot draft, so the clash counts PR #9
         self.idle_red_clash(3 * idle.HOUR)
         self.host.draft_refuse = True
         rc, out = self.pre_ready()
-        self.assertFalse(verdict_line(out, "fail", "open-PR clash"),
-                         "the idle red clashing PR #9 still fails the ready check on a cloud host: " + out)
-        self.assertEqual(rc, 0, "the cloud host refused the ready check: " + out)
+        self.assertTrue(verdict_line(out, "fail", "open-PR clash"),
+                        "the idle red clashing PR #9 does not fail the ready check on a cloud host that cannot draft it: " + out)
+        self.assertNotEqual(rc, 0, "the cloud host let the ready check pass with PR #9 still counted as ready: " + out)
         self.assertIn("update_pull_request draft=true", out, "the cloud host did not print the MCP route to draft PR #9: " + out)
-        self.assertEqual([n for n, _ in self.host.posted], [9], "the cloud host did not still comment on PR #9: " + out)
-        self.assertEqual(self.host.readies, [7], "the lane PR #7 did not go ready on a cloud host: " + out)
+        self.assertEqual(self.host.drafts, [], "the cloud host drafted PR #9: " + out)
+        self.assertEqual(self.host.posted, [], "the cloud host commented on PR #9, though it did not draft it, so the comment would say it returned to draft: " + out)
+        self.assertEqual(self.host.readies, [], "the lane PR #7 went ready past a clash that still counts PR #9: " + out)
 
 
 MUTATE_SKIPPED = "mutation test run skipped here: it runs at the lane's hand-off lint"  # the pre-join lint prints this where the run would start, verbatim
