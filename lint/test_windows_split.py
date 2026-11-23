@@ -1414,12 +1414,14 @@ class WindowsSplit(unittest.TestCase):
     def test_a_comment_that_names_a_shard_value_is_no_home(self):
         # Rows: a full-line comment, a trailing comment on a shard key, and a comment after a lone apostrophe.
         # Named failure: a comment that names GUARD_SHARD counts as a shard home, so checks.yml goes red for a comment.
-        self.assertIn("          GUARD_SHARD: 1/2\n", self.text)  # the fixture: a full step's shard key
+        # The value is the live first shard of the Linux guard, so a new shard count does not stale it.
+        shard = LINUX_GUARD_SHARD["checks-guard"]
+        key = f"          GUARD_SHARD: {shard}\n"
+        self.assertIn(key, self.text)  # the fixture: a full step's shard key
         cases = {
-            "a full-line comment": self.text + "# GUARD_SHARD=1/2 sets the shard on the full step only\n",
-            "a trailing comment on a shard key": self.text.replace("          GUARD_SHARD: 1/2\n",
-                                                                  "          GUARD_SHARD: 1/2  # GUARD_SHARD\n", 1),
-            "a comment after a lone apostrophe": self.text + "      - run: echo Don't # GUARD_SHARD=1/2\n",
+            "a full-line comment": self.text + f"# GUARD_SHARD={shard} sets the shard on the full step only\n",
+            "a trailing comment on a shard key": self.text.replace(key, f"          GUARD_SHARD: {shard}  # GUARD_SHARD\n", 1),
+            "a comment after a lone apostrophe": self.text + f"      - run: echo Don't # GUARD_SHARD={shard}\n",
         }
         baseline = hardening_problems(self.text)  # a comment changes no verdict, whatever the file's own verdict is
         for label, text in cases.items():
