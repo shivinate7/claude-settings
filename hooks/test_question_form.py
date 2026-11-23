@@ -128,7 +128,7 @@ GOAL = "Goal: the batch runner merges each batch with no help from the coordinat
 PROBLEM = ("Problem (rule): auto mode refuses the runner's merge, and the lane that would allow it changes "
            "the sessions' own rules, so it needs your word.")
 BASED = ("Based on (measured): auto mode refused the runner's merge at 03:04 CDT.",
-         "Based on (read): the cloud allow rules cover only the plain merge form.")
+         "Based on (read): the cloud allow rules cover only the plain merge form (hooks/guard.py:120).")
 THIRD = "Based on (ruling): your 16:54 CDT ruling says no owner step per merge."
 
 
@@ -279,12 +279,12 @@ FORM_VARIANTS = [
     # Real text around angle brackets is text, not a placeholder.
     ("placeholder: real text with angle brackets passes",
      parts(goal="Goal: render <Button> right", problem="Problem (risk): the <Modal> in the lint job needs your word.",
-           based=["Based on (read): the <Card> prop renders twice."]), None),
+           based=["Based on (read): the <Card> prop renders twice (skills/waiting-page/export_page.py:1046)."]), None),
     ("placeholder: a JSX lone quote and comment openers beside angle brackets pass",
      parts(goal="Goal: fix the <p>Don't</p> text, and keep // and /* in paths as plain text."), None),
 ]
 for _kind in PREMISE_KINDS:
-    FORM_VARIANTS.append(("a Based on kind %s" % _kind, parts(based=["Based on (%s): the premise." % _kind]), None))
+    FORM_VARIANTS.append(("a Based on kind %s" % _kind, parts(based=["Based on (%s): the premise (hooks/guard.py:120)." % _kind]), None))
 for _stake in OWNER_STAKES:
     FORM_VARIANTS.append(("a Problem stake %s" % _stake,
                           parts(problem="Problem (%s): the pick needs your word." % _stake), None))
@@ -3078,7 +3078,7 @@ MA144_ID = "ma144-tab-bar"
 MA144_OWNER_SESSION = "session_013NEJKymmzw37seAr3Qq5nv"  # the session id in MA144's owner field
 VI_FRAGMENTS = (r"\brepo\b", r"shivinate7/claude-settings")
 
-MA144 = json.loads(r'''{"added":"2026-11-08T04:12:00Z","context":"Goal: MANIFEST works well on the open iPhone Duo, in the Card in Hand design you picked on 2026-10-27 12:25 CDT.\nProblem (rule): degen puts its tab bar under the left page. The design lane's pick departs from that ruling, so it needs your word.\nBased on (read): README, choice 3.\nDeparts from: degen's Duo layout, tab bar under the left page — MANIFEST puts it under the right page.","designs":[{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-a.png","label":"Under the right page","option":"a","slug":"ma144-3-a"},{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-b.png","label":"Under the left page, on the keys","option":"b","slug":"ma144-3-b"},{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-c.png","label":"Under the left page, under the keys","option":"c","slug":"ma144-3-c"}],"home":"mailaudit #144","id":"ma144-tab-bar","kind":"decision","look":true,"n":389,"options":[{"design":"ma144-3-a","gain":"It never moves, and it shows while you type.","how":"The tab bar stays under the right page in every pose.","key":"a","label":"Under the right page, always","lose":"Degen puts it on the left, so the two apps differ."},{"design":"ma144-3-b","gain":"Same side as degen.","how":"The tab bar sits under the left page and rides on top of the keys.","key":"b","label":"Under the left page, on top of the keys","lose":"It jumps 256 pt each time the keys move."},{"design":"ma144-3-c","gain":"Same as degen.","how":"The tab bar sits under the left page, below the keys.","key":"c","label":"Under the left page, under the keys, as degen does","lose":"You must drop the keys to change tabs."}],"owner":"batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)","pick":"a","ref":"mailaudit #144 (Duo round 2, Card in Hand; branch design/duo-round2, head 441b4e46d); its README, section Choices","short":"Duo tab bar place","status":"open","title":"Duo tab bar: where does it sit?","why":"The design lane picks a: it never moves, and it shows while you type."}''')
+MA144 = json.loads(r'''{"added":"2026-11-08T04:12:00Z","context":"Goal: MANIFEST works well on the open iPhone Duo, in the Card in Hand design you picked on 2026-10-27 12:25 CDT.\nProblem (rule): degen puts its tab bar under the left page. The design lane's pick departs from that ruling, so it needs your word.\nBased on (read): README.md:12, choice 3.\nDeparts from: degen's Duo layout, tab bar under the left page — MANIFEST puts it under the right page.","designs":[{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-a.png","label":"Under the right page","option":"a","slug":"ma144-3-a"},{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-b.png","label":"Under the left page, on the keys","option":"b","slug":"ma144-3-b"},{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-c.png","label":"Under the left page, under the keys","option":"c","slug":"ma144-3-c"}],"home":"mailaudit #144","id":"ma144-tab-bar","kind":"decision","look":true,"n":389,"options":[{"design":"ma144-3-a","gain":"It never moves, and it shows while you type.","how":"The tab bar stays under the right page in every pose.","key":"a","label":"Under the right page, always","lose":"Degen puts it on the left, so the two apps differ."},{"design":"ma144-3-b","gain":"Same side as degen.","how":"The tab bar sits under the left page and rides on top of the keys.","key":"b","label":"Under the left page, on top of the keys","lose":"It jumps 256 pt each time the keys move."},{"design":"ma144-3-c","gain":"Same as degen.","how":"The tab bar sits under the left page, below the keys.","key":"c","label":"Under the left page, under the keys, as degen does","lose":"You must drop the keys to change tabs."}],"owner":"batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)","pick":"a","ref":"mailaudit #144 (Duo round 2, Card in Hand; branch design/duo-round2, head 441b4e46d); its README, section Choices","short":"Duo tab bar place","status":"open","title":"Duo tab bar: where does it sit?","why":"The design lane picks a: it never moves, and it shows while you type."}''')
 
 
 def ma144(repo=OTHER_REPO, checked=None, **over):
@@ -3182,8 +3182,8 @@ def case_cross_repo_str_replace_not_judged():
     cross("(viii) str_replace with a foreign repo", "str_replace",
           {"repo": OTHER_REPO, "kind": "decision", "status": "open"}, PAGE_REPO_NAME)
     at_page("(viii) str_replace on context", "str_replace",
-            entry_of(None, doc_id=MA144_ID, field="context", old_str="README, choice 3.",
-                     new_str="README, choice 3, and the Duo sizes."), tcj.origin_page_repo())
+            entry_of(None, doc_id=MA144_ID, field="context", old_str="README.md:12, choice 3.",
+                     new_str="README.md:12, choice 3, and the Duo sizes."), tcj.origin_page_repo())
 
 
 def case_cross_repo_update_carrying_repo():
