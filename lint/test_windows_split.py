@@ -582,6 +582,16 @@ def keep_running_off(raw):
     return "${{ %s }}" % rest
 
 
+# The only if: a checks-job step may carry is the keep-running guard alone, which never skips the step on a normal run. Any other if: can
+# skip it, and a skipped step then reads as passing. The CiWiring pins of the fixture suites read this one home.
+KEEP_RUNNING_IF = "${{ %s }}" % KEEP_RUNNING
+
+
+def only_keep_running_if(step):
+    """True when a checks-job step has no if:, or exactly the keep-running condition. Any other if: fails the pin."""
+    return "if" not in step or step["if"] == KEEP_RUNNING_IF
+
+
 def step_if(st):
     """A step's `if:` expression with the records-only condition taken off, or None when the step has none. The pins read a step's
     own condition this way, and condition_problems pins the condition."""
