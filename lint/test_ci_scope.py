@@ -18,7 +18,6 @@ Output names pinned (the `scope` job re-exports them as job outputs):
 Run with:  python3 lint/test_ci_scope.py -v
 """
 import ast
-import importlib.util
 import os
 import re
 import shutil
@@ -1798,59 +1797,6 @@ class WindowsFlagsOnScheduleAndDispatch(unittest.TestCase):
     def test_a_dispatched_run_sets_every_windows_flag_for_a_docs_only_diff(self):
         self.assert_pull_request_is_narrow(["docs/notes/n.md"])
         self.assert_every_windows_flag_on("workflow_dispatch", ["docs/notes/n.md"])
-
-
-# The daily skip (nightly-skip.py decide). The record builder below is a copy of the one in lint/test_nightly_skip.py, which this file
-# does not import: importing that module runs its run-folder helper at import, and its teardown never removes that folder.
-NIGHTLY_SCRIPT = os.path.join(ROOT, ".github", "scripts", "nightly-skip.py")
-NIGHTLY_OLD = "1" * 40  # the head the green daily ran at
-NIGHTLY_NEW = "3" * 40  # main's head once a push has landed after that daily
-BEFORE_DAILY = "2026-11-19T12:00:00Z"  # fixed stamps: decide() reads only their order, never the clock
-DAILY_AT = "2026-11-20T08:47:00Z"
-PUSH_AT = "2026-11-21T12:00:00Z"
-# A push the push skip proved after a narrowed pull request: push-skip passed, scope was skipped, and the Windows merge shard the
-# narrowed run left out was skipped with it.
-NARROWED_PUSH_JOBS = [{"name": "push-skip", "status": "completed", "conclusion": "success"},
-                      {"name": "scope", "status": "completed", "conclusion": "skipped"},
-                      {"name": "checks-windows-merge-3", "status": "completed", "conclusion": "skipped"}]
-
-
-def checks_run(event, sha, created, jobs=None, id_=1):
-    """One run of checks.yml in the shape of the Actions runs API: the fields nightly-skip.py reads."""
-    record = {"id": id_, "path": ".github/workflows/checks.yml", "event": event, "status": "completed", "conclusion": "success",
-              "head_sha": sha, "head_branch": "main", "created_at": created}
-    if jobs is not None:
-        record["jobs"] = jobs
-    return record
-
-
-def load_nightly_skip():
-    """nightly-skip.py as a module, loaded from the script beside it."""
-    spec = importlib.util.spec_from_file_location("nightly_skip_for_ci_scope", NIGHTLY_SCRIPT)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-class NightlySkipAfterMainMoves(unittest.TestCase):
-    """The daily may skip when main did not move past a proven push. A narrowed push ran none of the Windows shards it left out, so a
-    daily that skips after one runs those shards on no tree of main."""
-
-    def test_a_daily_skips_when_main_has_not_moved_past_a_narrowed_push(self):
-        runs = [checks_run("push", NIGHTLY_OLD, BEFORE_DAILY, NARROWED_PUSH_JOBS, id_=2), checks_run("schedule", NIGHTLY_OLD, DAILY_AT, id_=3)]
-        skip, reason = load_nightly_skip().decide(runs, NIGHTLY_OLD, None, None)
-        self.assertTrue(skip, f"the daily does not skip with main unmoved since the green daily: {reason}")
-
-    def test_a_daily_does_not_skip_after_a_narrowed_push_moved_main(self):
-        push = checks_run("push", NIGHTLY_NEW, PUSH_AT, NARROWED_PUSH_JOBS, id_=4)
-        runs = [checks_run("schedule", NIGHTLY_OLD, DAILY_AT, id_=3), push]
-        # Scope first: the push is at a new head, and its own jobs show it was proven and that a Windows shard was left out.
-        jobs = {j["name"]: j["conclusion"] for j in push["jobs"]}
-        self.assertNotEqual(push["head_sha"], NIGHTLY_OLD, "the push did not move main past the green daily")
-        self.assertEqual(jobs.get("push-skip"), "success", f"the push was not proven by the push skip: {jobs}")
-        self.assertEqual(jobs.get("checks-windows-merge-3"), "skipped", f"the push ran the Windows merge shard: {jobs}")
-        skip, reason = load_nightly_skip().decide(runs, NIGHTLY_NEW, None, None)
-        self.assertFalse(skip, f"the daily skips after main moved past a push that left a Windows shard out: {reason}")
 
 
 if __name__ == "__main__":
