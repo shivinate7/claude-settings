@@ -204,6 +204,13 @@ Text: `HASSIO_REASON`. Home Assistant app pages are `/<app slug>` now, so a `/ha
 - The reply names `/hassio/...`, bare or inside a URL, like `/hassio/ingress/core_configurator` or `/hassio/addon/core_configurator`. Name the page as `/<app slug>` instead.
 - `/api/hassio/...` is the supervisor API and passes. Paths in code spans, fences and question lines are not checked.
 
+### Hand-off placeholder guard (any reply)
+
+Text: `PLACEHOLDER_REASON`. Rule `style-hand-off-runs-as-is` (a handed block runs as it stands). The detector is `question_form.command_placeholder`, the one home the waiting page's `command` also reads.
+
+- A fenced bash, sh, zsh or powershell block outside the report blockquote holds an unfilled token: `/dev/sdX` with an optional digit, an angle-bracket word like `<branch>`, a word starting `YOUR_` or `your-`, `REPLACE_ME`, `CHANGEME`, or a standalone `xxx` or `XXX`. Look the value up and put it in the block, or ask the owner for it in Input Needed.
+- Heredocs, redirects, `$VAR` and `${VAR}`, all-caps env vars, `/dev/sda1`, regex alternation, URL queries, git ranges and `xxx` inside a longer word pass.
+
 ## Shared tails
 
 - Every refusal, except a notes fix (R14; not built; step `notes-fix-no-owner-line`), opens with the owner line from `owner_line()`, which cites this record, and ends with ` (rule reports-order-of-labels)`, then, from a reply guard, the correction line below. That rule says the report's four labels go in order: Done, Deviations, Input Needed, Next. On the rewrite after a refusal, a triage hold gets the tail too.
