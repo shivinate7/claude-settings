@@ -11025,6 +11025,67 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.refs(), refs_before, "pushed over a page-only heal whose own run was unread:\n" + out)
         self.assertIn("unknown", out, "the refusal does not name the unread own run:\n" + out)
 
+    def lint_carried_head(self, kind, live_state):
+        """A proven head whose run reads pending, with the live head above it carried by `kind`: "merge" (one clean merge of main) or "heal"
+        (a page-only heal). The live head's own run reads `live_state`, and a lane-lint PASS names the live head. -> (the proven head, the live head)."""
+        proven, live = self.main_merged_in_above_green_head() if kind == "merge" else self.page_only_heal_on_stale_head()
+        self.host.issue_comments = lambda since: ({}, {7: [lint_body(live)]}, {}, {})  # the lane-lint PASS on the live head, as the comment read gives it
+        self.rollup_reads(proven, "pending: all-jobs-passed", states={live: live_state})
+        return proven, live
+
+    # A lane-lint PASS on the live head lifts the pending run of the proven head under it. The live head's own run is then never read, so a red
+    # or unread own run does not refuse a clean merge of main or a page-only heal. Decision merge-needs-current-base.
+
+    def test_a_lint_pass_over_a_pending_proof_refuses_a_clean_main_merge_on_its_own_red_run(self):
+        self.lint_carried_head("merge", "red: all-jobs-passed: fail")
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a clean main merge whose own run finished red, on a lane-lint PASS:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a clean main merge whose own run finished red:\n" + out)
+        self.assertIn("red: all-jobs-passed", out, "the refusal does not name the red own run of the clean merge:\n" + out)
+
+    def test_a_lint_pass_over_a_pending_proof_refuses_a_page_only_heal_on_its_own_red_run(self):
+        self.lint_carried_head("heal", "red: all-jobs-passed: fail")
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a page-only heal whose own run finished red, on a lane-lint PASS:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a page-only heal whose own run finished red:\n" + out)
+        self.assertIn("red: all-jobs-passed", out, "the refusal does not name the red own run of the heal:\n" + out)
+
+    def test_a_lint_pass_over_a_pending_proof_refuses_a_clean_main_merge_with_its_own_run_unread(self):
+        self.lint_carried_head("merge", "unknown (the read of the merge's checks failed: HTTP 500)")
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a clean main merge whose own run was unread, on a lane-lint PASS:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a clean main merge whose own run was unread:\n" + out)
+        self.assertIn("unknown", out, "the refusal does not name the unread own run of the clean merge:\n" + out)
+
+    def test_a_lint_pass_over_a_pending_proof_refuses_a_page_only_heal_with_its_own_run_unread(self):
+        self.lint_carried_head("heal", "unknown (the read of the heal's checks failed: HTTP 500)")
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a page-only heal whose own run was unread, on a lane-lint PASS:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a page-only heal whose own run was unread:\n" + out)
+        self.assertIn("unknown", out, "the refusal does not name the unread own run of the heal:\n" + out)
+
+    def test_a_lint_pass_over_a_pending_proof_merges_a_clean_main_merge_with_its_own_run_pending(self):
+        self.lint_carried_head("merge", "pending: all-jobs-passed")
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "a lane-lint PASS on the live head did not merge a clean main merge above a pending proof:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on the merge's own pending run instead of merging on the PASS:\n" + out)
+
+    def test_a_lint_pass_over_a_pending_proof_merges_a_page_only_heal_with_its_own_run_pending(self):
+        self.lint_carried_head("heal", "pending: all-jobs-passed")
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "a lane-lint PASS on the live head did not merge a page-only heal above a pending proof:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on the heal's own pending run instead of merging on the PASS:\n" + out)
+
     def test_relayed_yes_holds_after_heal_under_list(self):
         # The relayed yes names H, the proven head. H' is H with main merged in and the page rebuilt: a heal commit. Under a named list the yes
         # still holds across H', and H's proof merges H'. Today only a requiredChecks "none" lets a base merge sit above the relayed head.
