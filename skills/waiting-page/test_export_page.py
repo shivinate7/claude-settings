@@ -1386,8 +1386,9 @@ class ClosedItems(Base):
     page shares one copy, so each export with --account records, in `sightings/<item id>.json`, whether its page holds
     the item open. An item is deleted only by an export with --account that fetches it closed, when the copy item is
     already marked closed and no account's latest export holds it open. An export with no --account deletes nothing.
-    An item waits while the page holds an answer tied to it. An arbiter ruling is never deleted. A closed item the copy
-    does not hold is copied only while the page holds its answer. An item the fetch does not hold stays. A doc tied to
+    An item waits while the page holds an answer tied to it. An arbiter ruling is never deleted, until a closed fetch says
+    `arbiter: false`. A closed item the copy does not hold is copied only while the page holds its answer, or when it is
+    an arbiter ruling. An item the fetch does not hold stays. A doc tied to
     no item (a park answer or receipt) and the groups, asks and meta docs stay as the copy held them."""
 
     def seeded(self):
@@ -1571,6 +1572,21 @@ class ClosedItems(Base):
             self.assertTrue(os.path.isfile(os.path.join(out, "items", "item-002.json")),
                             "closed fetch %d, with no arbiter flag, deleted the arbiter ruling the copy holds" % run)
 
+    def test_an_explicit_arbiter_false_on_the_fetched_closed_row_ends_the_ruling(self):
+        """An explicit `arbiter: false` on the fetched closed row ends the ruling, as Overturn writes it: the copy row is
+        rewritten from the fetch on that run, and the next closed sighting deletes the item with its answer and receipt."""
+        out = self.seeded()
+        answers = {"item-001": {"item": "item-001", "pick": "a"}}
+        self.run_later(out, self.closed_two(arbiter=True), answers=answers)
+        self.run_later(out, self.closed_two(arbiter=False), answers=answers)
+        self.assertKept(out, "items/item-002.json")
+        self.assertEqual(read_text(os.path.join(out, "items", "item-002.json")),
+                         canonical(dict(item(2), status="closed", arbiter=False)),
+                         "items/item-002.json was not rewritten from the fetch that says arbiter false: the copy still holds the "
+                         "ruling")
+        self.run_later(out, self.closed_two(arbiter=False), answers=answers)
+        self.assertGone(out, "items/item-002.json", "answers/ans-2.json", "receipts/ans-2.json")
+
     def test_an_item_the_fetch_does_not_hold_stays_even_when_closed_in_the_copy(self):
         out = self.seeded()
         self.run_later(out, self.closed_two())
@@ -1631,6 +1647,19 @@ class ClosedItems(Base):
         self.assertEqual(r.returncode, 0, shown(r))
         self.assertKept(out, "items/item-001.json")
         self.assertGone(out, "items/item-009.json", "answers/item-009.json", "receipts/item-009.json")
+        self.assertVerdict(self.export(fetched, out, account="x"), "same")
+
+    def test_a_closed_arbiter_ruling_the_copy_never_held_is_copied_with_no_answer_on_the_page(self):
+        """An arbiter ruling lands in a fresh copy even with no answer on the page, and a second identical export is same."""
+        out = self.out()
+        fetched = self.fetch(items={"item-001": item(1), "item-007": dict(item(7), status="closed", arbiter=True)})
+        r = self.export(fetched, out, account="x")
+        self.assertEqual(r.returncode, 0, "scope: the export with --account did not run. Output:\n" + shown(r))
+        self.assertTrue(os.path.isfile(os.path.join(out, "items", "item-007.json")),
+                        "a closed arbiter ruling the copy never held, with no answer on the page, was not copied. Output:\n"
+                        + shown(r))
+        self.assertEqual(json.loads(read_text(os.path.join(out, "items", "item-007.json"))).get("arbiter"), True,
+                         "items/item-007.json was copied without its arbiter flag")
         self.assertVerdict(self.export(fetched, out, account="x"), "same")
 
     def test_a_routed_closed_item_waits_while_the_page_holds_its_answer(self):
