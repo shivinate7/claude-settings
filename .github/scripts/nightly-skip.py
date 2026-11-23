@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-"""The daily skip decision: it decides whether the daily scheduled run of checks.yml can skip (decision push-skip-on-proven-tree, owner
-page item 880, 11:53 CST Nov 15). A push to main runs the Linux fast jobs only; the daily runs every other job.
+"""The daily skip decision: it decides whether the daily scheduled run of checks.yml can skip (decision push-skip-on-proven-tree;
+owner, 13:44 CST Nov 23, answer a to Q5). A push to main runs the Linux fast jobs only, and a PR run may narrow its Windows scope, so
+the daily is the net for a Windows break that an import caused. A push run the push skip proved does not stand in for it.
 
 Writes one line to $GITHUB_OUTPUT (stdout when unset): skip=true or skip=false. It exits 0 on every path, so the skip job is a
 visible success and scope reads its output. skip=true only when ALL of these hold:
   (a) the newest completed schedule run of checks.yml, other than this run, succeeded, and no other schedule run is still going;
-  (b) every push run of checks.yml on main created after that daily completed with success AND was proven by the push skip (its
-      push-skip job succeeded and its scope job was skipped, so every Linux and slow job rode a PR run), and none is still going;
-  (c) the newest push run of checks.yml on main has this run's head sha.
-With no push run after the green daily (main did not move; owner pick on item 893, relayed 14:14 CST Nov 15) it skips only when that
-daily's own head sha is this run's head sha; every other class stays skip=false.
-A push run that ran only the Linux fast jobs (scope ran) is unproven: the daily is the only run that covers the slow jobs for it.
+  (b) no push run of checks.yml on main was created after that daily: main has not moved since it (a push run after it gives
+      skip=false, proven by the push skip or not);
+  (c) the newest push run of checks.yml on main, if there is one, has this run's head sha, and that daily's own head sha is this
+      run's head sha (owner pick on item 893, relayed 14:14 CST Nov 15: a day main did not move skips).
 Any read failure, a missing page, a red, cancelled or running daily, and no prior daily write skip=false and say "unknown" or the
 reason. The push runs read must reach the green daily: a full page of push runs that ends newer than it hides the pushes after it.
 
@@ -22,8 +21,8 @@ Input (env): REPO (owner/name), HEAD_SHA, GITHUB_RUN_ID (this run, whose own rec
 for the read: a JSON list of run records in the shape of the Actions runs API, with a `jobs` list (the jobs API's name, status and
 conclusion) on each push run (lint/test_nightly_skip.py).
 Cost per daily, no file kept, no process kept: one schedule runs read, one push runs read per 100 push runs back to the green daily
-(up to five pages), and one jobs read per push run after it, newest first, stopping at the first push run that is not proven.
-A day main did not move reads no jobs: the head compare decides.
+(up to five pages), and one jobs read of the newest push run after it when that run succeeded, to say in the log whether the push skip
+proved it. The jobs never change the answer. A day main did not move reads no jobs: the head compare decides.
 """
 import json
 import os
@@ -201,14 +200,16 @@ def decide(runs, head, self_id=None, jobs_reader=None):
         if newest.get("head_sha") == head:
             return True, "no push run since the green daily, and it ran at this run's head"
         return False, "no push run since the green daily, and it ran at another head, so this head is unknown"
-    for r in since:
-        if r.get("status") != "completed":
-            return False, "push run %s is still running, which is unknown" % r.get("id")
-        if r.get("conclusion") != "success":
-            return False, "push run %s concluded '%s'" % (r.get("id"), r.get("conclusion"))
-        if not proven(r, jobs_reader):
-            return False, "push run %s is not proven by the push skip, so the slow legs never ran for it" % r.get("id")
-    return True, "every push run since the green daily was proven by the push skip"
+    # Main moved since the green daily, so the daily runs everything (owner, 13:44 CST Nov 23, Q5 a). The newest push run since gives
+    # the reason; a failed jobs read is unknown.
+    r = since[0]
+    if r.get("status") != "completed":
+        return False, "push run %s is still running, which is unknown" % r.get("id")
+    if r.get("conclusion") != "success":
+        return False, "push run %s concluded '%s'" % (r.get("id"), r.get("conclusion"))
+    how = "proven by the push skip" if proven(r, jobs_reader) else "not proven by the push skip"
+    return False, "main moved since the green daily (%d push runs, the newest %s %s), and a push never runs the Windows shards" % (
+        len(since), r.get("id"), how)
 
 
 def emit(line, summary):
