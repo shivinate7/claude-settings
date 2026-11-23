@@ -16,11 +16,14 @@ Decision ci-wait-reads-run-status, section "The CI wake-up":
 - Only a ready call starts a watch: the shell `gh pr ready <N>`, or a GitHub MCP
   update_pull_request call with draft false. A `git push` in any form starts none, and makes no gh call.
 - Each `gh pr ready` in one command gets its own watch, in one process. The hook prints one
-  verdict line per PR, then exits 2 once.
+  verdict line per PR, then exits 2 once. A red line is followed by its detail lines: the failing
+  lines of the first red job (at most 12, each at most 200 characters), or one `log unread:` line.
 - Text inside quotes, inside a heredoc body, or after an unquoted `#` is no command. A lone quote
   in earlier text does not hide a later `gh pr ready`. A `#` inside quotes is no comment.
+- A failed job wakes the watch at the first status read that shows it (owner, 2026-11-23 10:28 CST,
+  "A is approved"), while the run goes on. The line names the failed jobs known so far.
 - The watch has its own deadline. A run still pending at the deadline wakes with exit 2 and a
-  "still running" line. It does not wait for the run to end.
+  "still running" line.
 - One watcher runs per PR. A second watcher for the same PR exits 0 with no output and no watch.
   A killed watcher, or a finished one, releases the PR.
 - Any uncaught error exits 2 with one "unknown" line, never exit 1.
@@ -30,8 +33,9 @@ Decision ci-wait-reads-run-status, section "The CI wake-up":
 Decision ci-wait-reads-run-status ("CI waits read the run status"): the hook never runs
 `gh run watch` (one watch made 131 API calls in 60 s). `watch_run` reads `gh run view <id> --json
 status` at once, then every 30 s for 4 minutes, then at growing gaps of 120 s at most, and returns when
-the status is `completed` or when the deadline passes (55 minutes): its last pause ends at the
-deadline, never past it. A call made at its deadline
+the status is `completed`, when a job has failed, or when the deadline passes (55 minutes): its last
+pause ends at the deadline, never past it. The status read also asks for the run's jobs
+(`--json status,jobs`), so a poll is still one call. Its jobs answer the failed-job wake without a second read. A call made at its deadline
 or past it makes no read and returns at once. A failed or non-JSON read gets one retry after the
 STATUS_PAUSE pause (decision ci-wait-reads-run-status). A second failed read raises Unknown, so the wake
 line is `CI unknown`. A status that is not `completed` (in_progress, queued) means read again.
@@ -319,9 +323,21 @@ def rest_pr(p):
             "html_url": p["url"], "head": {"ref": p["headRefName"], "sha": p["headRefOid"]},
             "merged": False, "merged_at": None}
 
+def job_log(job_id, fx):
+    """The job log read, `repos/O/R/actions/jobs/<id>/logs`: the fixture's text for that job (job_logs, keyed by the
+    job id as a string). A job with no text prints nothing and exits 0. The fixture key log_error makes it refused."""
+    if fx.get("log_error"):
+        sys.stderr.write("HTTP 403: Resource not accessible by integration\n")
+        return 1
+    sys.stdout.write(fx.get("job_logs", {}).get(job_id, ""))
+    return 0
+
 def rest(path, full, args, fx):
-    """The pulls endpoints: `repos/O/R/pulls/N`, and `repos/O/R/pulls` with fields head=OWNER:BRANCH, state=open."""
+    """The pulls endpoints: `repos/O/R/pulls/N`, and `repos/O/R/pulls` with fields head=OWNER:BRANCH, state=open.
+    And the job log of `repos/O/R/actions/jobs/<id>/logs`."""
     parts = path.split("/")
+    if len(parts) == 7 and parts[0] == "repos" and parts[3:5] == ["actions", "jobs"] and parts[6] == "logs":
+        return job_log(parts[5], fx)
     if len(parts) < 4 or parts[0] != "repos" or parts[3] != "pulls":
         sys.stderr.write("stub gh: unsupported api path: %s\n" % full)
         return 1
@@ -431,10 +447,11 @@ def main(args):
             return 1
         r = hits[0]
         fields = flag(args, "--json")
-        if fields == "status" and r.get("fail_status_read"):
+        poll = fields is not None and set(fields.split(",")) in ({"status"}, {"status", "jobs"})
+        if poll and r.get("fail_status_read"):
             sys.stderr.write("HTTP 502: Bad Gateway\n")
             return 1
-        if fields == "status" and r.get("ping_on_status_read"):
+        if poll and r.get("ping_on_status_read"):
             ready_ping()
         if views_of(key) <= r.get("in_progress_reads", 0):
             r = dict(r, status=r.get("early_status", "in_progress"), conclusion=None)
@@ -707,10 +724,41 @@ def start_watcher(payload, scen, extra=None):
     return proc, case
 
 
+POLL_FIELDS = (frozenset(["status"]), frozenset(["status", "jobs"]))   # a poll: today's read, or the same read with its jobs
+
+
+def poll_fields(args):
+    """The fields of a `run view <id> --json <fields>` call, as a set, else None. The -R of the call is dropped first.
+    A call that names databaseId is wait_for's judged read, not a poll."""
+    plain = GH.strip_repo(list(args))
+    if plain[:2] != ["run", "view"] or len(plain) < 5 or plain[3] != "--json":
+        return None
+    return frozenset(plain[4].split(","))
+
+
+def is_poll(args, run_id=None):
+    """True for one status read of a watch (POLL_FIELDS), of run_id when given. Each poll is one such call, so the
+    count of these calls is the read count of the schedule."""
+    plain = GH.strip_repo(list(args))
+    return poll_fields(plain) in POLL_FIELDS and (run_id is None or plain[2] == run_id)
+
+
 def watched(res):
-    """The ids of the runs the hook waited on: one `gh run view <id> --json status` read each. The -R of
-    a call is not compared: GH.strip_repo drops it, so the check reads the same wherever -R sits."""
-    return [c[2] for c in map(GH.strip_repo, res.calls) if c[:2] == ["run", "view"] and c[3:] == ["--json", "status"]]
+    """The ids of the runs the hook waited on: one status read (is_poll) each. The -R of a call is not compared:
+    GH.strip_repo drops it, so the check reads the same wherever -R sits."""
+    return [GH.strip_repo(c)[2] for c in res.calls if is_poll(c)]
+
+
+def log_reads(res):
+    """The job-log reads of a hook run: `gh api repos/O/R/actions/jobs/<id>/logs`, or a run view that asks for a log
+    (`--log`, `--log-failed`). The cost cases count them: at most one per watch (decision ci-wait-reads-run-status)."""
+    found = []
+    for c in res.calls:
+        plain = GH.strip_repo(c)
+        if any(a.startswith("repos/") and "/actions/jobs/" in a and a.endswith("/logs") for a in plain) \
+                or any(a.startswith("--log") for a in plain):
+            found.append(plain)
+    return found
 
 
 def run_watches(res):
@@ -722,23 +770,39 @@ def count(res, *prefix):
     return sum(1 for c in res.calls if GH.strip_repo(c)[:len(prefix)] == list(prefix))
 
 
+def wake_groups(res):
+    """-> [(verdict, sha, names, detail lines)] for the output of one hook run, or None when it is not a wake. A CI
+    line starts a group. A line that is not a CI line belongs to the red group just before it: its failing lines, or
+    one `log unread:` line. Any other detail line (after a green, cancelled, unknown or none line, or first) makes the
+    output None. So a second CI line for one PR still fails the shape, as a closing line beside a red one does."""
+    groups = []
+    for line in res.lines:
+        m = LINE.match(line.strip())
+        if m:
+            groups.append((m.group(1), m.group(2), m.group(3).strip(), []))
+        elif groups and groups[-1][0] == "red":
+            groups[-1][3].append(line.strip())
+        else:
+            return None
+    return groups
+
+
 def verdict_of(res):
-    """(verdict, sha, names) when the output is exactly one CI line, else None."""
-    if len(res.lines) != 1:
-        return None
-    m = LINE.match(res.lines[0].strip())
-    return (m.group(1), m.group(2), m.group(3).strip()) if m else None
+    """(verdict, sha, names) when the output is one CI line, which a red line may carry detail lines after, else None."""
+    groups = wake_groups(res)
+    return groups[0][:3] if groups is not None and len(groups) == 1 else None
 
 
 def verdicts_of(res):
-    """[(verdict, sha, names)] for every output line, or None when a line is not a CI line."""
-    found = []
-    for line in res.lines:
-        m = LINE.match(line.strip())
-        if not m:
-            return None
-        found.append((m.group(1), m.group(2), m.group(3).strip()))
-    return found
+    """[(verdict, sha, names)] for each CI line, or None when the output is not a list of CI lines."""
+    groups = wake_groups(res)
+    return None if groups is None else [g[:3] for g in groups]
+
+
+def details_of(res):
+    """The detail lines of the one red wake in res (its failing lines, or its `log unread:` line), else None."""
+    groups = wake_groups(res)
+    return groups[0][3] if groups is not None and len(groups) == 1 and groups[0][0] == "red" else None
 
 
 def why(res):
@@ -1052,7 +1116,7 @@ def case_green_run_judged_past_the_deadline_is_not_green():
     label = "green run ends at the deadline, a red run shows only at a later list"
     raised, clock, calls, deadline = wait_for_on_fakes([GREEN, later_red], budget, ends_at={901: budget}, line=True)
     detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
-    jobs_reads = [t for t, a in calls if a[:3] == ["run", "view", "901"] and "jobs" in " ".join(a)]
+    jobs_reads = [t for t, a in calls if a[:3] == ["run", "view", "901"] and "databaseId" in " ".join(a)]
     check("%s: the green run's jobs read is at or past the deadline (scope)" % label,
           bool(jobs_reads) and jobs_reads[-1] >= deadline - 1e-6, detail)
     check("%s: the line is not CI green, the later run is unread" % label,
@@ -1080,7 +1144,7 @@ def case_refused_re_list_view_keeps_a_judged_red():
         label = "red run judged %s, the re-list's new run has a refused jobs read" % where
         raised, clock, calls, deadline = wait_for_on_fakes([RED, refused_new_run()], budget, ends_at=ends_at, line=True)
         detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
-        refused = [t for t, a in calls if a[:3] == ["run", "view", "931"] and "jobs" in " ".join(a)]
+        refused = [t for t, a in calls if a[:3] == ["run", "view", "931"] and "databaseId" in " ".join(a)]
         check("%s: the new run's jobs read is reached (scope)" % label, bool(refused), detail)
         check("%s: the line is CI red, naming unit and e2e" % label,
               str(clock.line).startswith("CI red") and "unit" in clock.line and "e2e" in clock.line, detail)
@@ -1093,7 +1157,7 @@ def case_refused_re_list_view_after_a_green_run_is_unknown():
         label = "green run judged %s, the re-list's new run has a refused jobs read (control)" % where
         raised, clock, calls, deadline = wait_for_on_fakes([GREEN, refused_new_run()], budget, ends_at=ends_at, line=True)
         detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
-        refused = [t for t, a in calls if a[:3] == ["run", "view", "931"] and "jobs" in " ".join(a)]
+        refused = [t for t, a in calls if a[:3] == ["run", "view", "931"] and "databaseId" in " ".join(a)]
         check("%s: the new run's jobs read is reached (scope)" % label, bool(refused), detail)
         check("%s: the line is CI unknown, never CI green" % label, str(clock.line).startswith("CI unknown"), detail)
 
@@ -1114,7 +1178,6 @@ def case_new_runs_on_every_list_are_paced_after_the_at_once_relist():
 
 
 # watch_run, in process, on fakes (decision ci-wait-reads-run-status). No gh runs and no wait is real.
-STATUS_READ = ["run", "view", "7", "--json", "status"]
 T0 = 1000.0   # where the fake clock starts
 
 
@@ -1206,7 +1269,12 @@ def watch_run_on_fakes(replies, budget):
 
 
 def read_times(calls):
-    return [t for t, a in calls if a == STATUS_READ]
+    return [t for t, a in calls if is_poll(a, "7")]
+
+
+def only_polls(calls, n):
+    """True when the watch made exactly n gh calls, and each one is a poll read of run 7 (is_poll)."""
+    return len(calls) == n and all(is_poll(a, "7") for _, a in calls)
 
 
 def spaced(times, gap=30):
@@ -1227,8 +1295,8 @@ def case_watch_run_reads_the_status_until_completed():
     check("%s: returns, no exception" % label, raised is None, detail)
     check("%s: never starts `gh run watch`" % label,
           direct == [] and not any(a[:2] == ["run", "watch"] for _, a in calls), detail)
-    check("%s: reads `gh run view 7 --json status` three times, and makes no other gh call" % label,
-          [a for _, a in calls] == [STATUS_READ] * 3, detail)
+    check("%s: makes three poll reads of run 7 (status), and no other gh call" % label,
+          only_polls(calls, 3), detail)
     check("%s: reads at least 30 s apart" % label, len(times) == 3 and spaced(times), detail)
     check("%s: the first read comes before any pause" % label, times[:1] == [T0], detail)
 
@@ -1237,7 +1305,7 @@ def case_watch_run_completed_at_the_first_read_does_not_pause():
     label = "watch_run, completed at the first read"
     mod, raised, clock, calls, direct = watch_run_on_fakes([status_reply("completed")], 3600)
     check("%s: one read, no pause, no exception, no `gh run watch`" % label,
-          raised is None and [a for _, a in calls] == [STATUS_READ] and clock.sleeps == [] and direct == [],
+          raised is None and only_polls(calls, 1) and clock.sleeps == [] and direct == [],
           watch_detail(raised, clock, calls, direct))
 
 
@@ -1302,7 +1370,7 @@ def case_watch_run_retries_a_failed_read_once_and_goes_on():
         check("watch_run, %s: returns, no exception, no `gh run watch`" % label,
               raised is None and direct == [], detail)
         check("watch_run, %s: %d status reads, 30 s or more apart" % (label, reads),
-              [a for _, a in calls] == [STATUS_READ] * reads and spaced(read_times(calls)), detail)
+              only_polls(calls, reads) and spaced(read_times(calls)), detail)
 
 
 def case_watch_run_reads_past_a_queued_status():
@@ -1313,7 +1381,7 @@ def case_watch_run_reads_past_a_queued_status():
     detail = watch_detail(raised, clock, calls, direct)
     check("watch_run, queued twice then completed: returns, no exception", raised is None, detail)
     check("watch_run, queued twice then completed: three status reads, 30 s or more apart",
-          [a for _, a in calls] == [STATUS_READ] * 3 and spaced(read_times(calls)), detail)
+          only_polls(calls, 3) and spaced(read_times(calls)), detail)
 
 
 def case_watch_run_retry_never_reads_or_pauses_past_the_deadline():
@@ -1435,7 +1503,7 @@ def wait_for_on_fakes(runs, budget, ends_at=None, line=False):
         if args[:2] == ["run", "view"]:
             hits = [r for r in runs if str(r["databaseId"]) == args[2]]
             if hits:
-                if hits[0].get("refuse_jobs_read") and "jobs" in " ".join(args):
+                if hits[0].get("refuse_jobs_read") and "databaseId" in " ".join(args):
                     return 1, "", "HTTP 403: Resource not accessible by integration"
                 out = as_of_clock(hits[0], GH.view(hits[0], False))
                 fields = args[args.index("--json") + 1].split(",") if "--json" in args else None
@@ -1472,9 +1540,12 @@ def list_times(calls):
 
 
 def judged_read(args, runs):
-    """True for the jobs read (`run view <id> --json ...,jobs`) of a run that ran: the judgement that
-    wait_for makes before it lists again."""
-    if args[:2] != ["run", "view"] or "jobs" not in " ".join(args[3:]):
+    """True for the judged read (`run view <id> --json databaseId,...,jobs`) of a run that ran: the judgement that
+    wait_for makes before it lists again. A poll read carries jobs too, but names no databaseId, so it is not one."""
+    if args[:2] != ["run", "view"] or "--json" not in args:
+        return False
+    fields = args[args.index("--json") + 1].split(",")
+    if "databaseId" not in fields or "jobs" not in fields:
         return False
     hits = [r for r in runs if str(r["databaseId"]) == args[2]]
     return bool(hits) and hits[0]["conclusion"] not in (None, "skipped")
@@ -1672,8 +1743,8 @@ def case_workflows_but_no_run_on_head_still_says_no_run_yet():
 def case_failed_workflow_read_is_not_no_workflows():
     """Pins existing behaviour (a control). A failed `gh workflow list` read is not "no workflows": the watch
     runs as it does today, so a red run still wakes the session with its failing jobs. Rows: exit 1, non-JSON.
-    The red verdict is the only line: verdict_of needs exactly one, so a closing line written beside it fails
-    here. An unknown read writes no closing line."""
+    The red verdict is the only CI line: a closing CI line written beside it is a second group, which wake_groups
+    reads as a second wake, so it fails here. An unknown read writes no closing line."""
     for name, switch in (("exit 1", "error"), ("non-JSON", "garbage")):
         label = "workflow list %s, red run (control)" % name
         fx = fixture([pr(214, repo=REPO_APP)], [in_repo(RED, REPO_APP)], cwd_repo=REPO_APP,
