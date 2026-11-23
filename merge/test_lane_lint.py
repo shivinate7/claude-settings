@@ -4058,6 +4058,24 @@ class LintTreeFileMain(LaneFixture):
 DECLARED_READY = ["STE lint", "Windows split guard", "Cost line pins"]  # the checks-job steps the pre-ready run runs by name
 SCAFFOLD_READY = "checks-rest:project-ops skill scaffold suite"  # the scaffold suite as a qualified ready check: its job checks-rest, its step below
 SCAFFOLD_STEP = "project-ops skill scaffold suite"  # the same step's bare name, as checks.yml names it
+CHECKS_YML = os.path.join(os.path.dirname(HERE), ".github", "workflows", "checks.yml")
+REAL_MERGE_CONFIG = os.path.join(os.path.dirname(HERE), ".github", "stamp.json")  # merge.readyChecks lives here
+# The six CI-only checks a draft's ready run must read, so no CI rerun is paid to a cheap check. Each is one step of job checks, found by the script its run: line calls.
+CHEAP_CHECK_SCRIPTS = ("lint/hook_catalog.py", "lint/test_retired_names.py", "lint/check_silent_undo.py",
+                       "lint/check_ruling_kind.py", "lint/test_check_skill_model_rows.py", "lint/test_check_project_ops_roles.py")
+
+
+def cheap_check_steps(script):
+    """The names of job checks' steps whose run: calls `script`, read from checks.yml. The one home of the six's names: the stamp test and the ready cases read it."""
+    with open(CHECKS_YML, encoding="utf-8") as f:
+        block = job_block(f.read(), "checks")
+    return [step_key(st, "name") for st in step_blocks(block) if re.search(r"(?m)^\s*python3 %s(\s|$)" % re.escape(script), run_body(st) or "")]
+
+
+def real_ready_checks():
+    """merge.readyChecks in the repo's own .github/stamp.json: the list the pre-ready run reads on this checkout."""
+    with open(REAL_MERGE_CONFIG, encoding="utf-8") as f:
+        return json.load(f).get("merge", {}).get("readyChecks") or []
 
 
 def steps_for(failing=()):
@@ -4730,8 +4748,101 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assertEqual(merge_trees, [], "git merge-tree ran on draft PR #9's head, so the draft was not read from shared paths alone: %s" % merge_trees)
         self.assertEqual(self.host.readies, [7], "a clash with draft PR #9 kept the draft from going ready: " + out)
 
+    def assert_cheap_check_refuses_the_draft(self, script, fault):
+        """The pre-ready run of the repo's real stamp list refuses a draft when the step that runs `script` FAILs. `fault` is a path the PR's
+        head holds: the stub run of that step FAILs on it, standing for the check's own fault (each case names the case in its suite).
+        Scope first: the real list must name the step, or the ready run never runs it."""
+        names = cheap_check_steps(script)
+        self.assertEqual(len(names), 1, "checks.yml job checks holds %d steps that run %s, want one: %r" % (len(names), script, names))
+        name, declared = names[0], real_ready_checks()
+        self.assertIn(name, declared, "merge.readyChecks does not name %r, the step that runs %s, so the ready run never runs that check" % (name, script))
+        self.on("feat", {fault: "the fault this check reports\n"})
+        self.pre_ready_lane(declared=declared)
+        self.use_ci_job([("PASS", job_and_step(entry)[1]) for entry in declared], 0, file_fails={name: fault})
+        refs_before = self.refs()
+        rc, out = self.pre_ready()
+        self.assertTrue(verdict_line(out, "fail", name), "the pre-ready run printed no `fail %s` line for the fault at %s: %s" % (name, fault, out))
+        self.assertEqual(rc, 1, "a failing %s step did not refuse the pre-ready run: %s" % (name, out))
+        self.assertEqual(self.host.readies, [], "a failing %s step marked the draft ready: %s" % (name, out))
+        self.assertEqual(self.refs(), refs_before, "the pre-ready run pushed beside a failing %s step: %s" % (name, out))
 
-MUTATE_SKIPPED = "mutation test run skipped here: it runs at the lane's hand-off lint"  # the pre-join lint prints this where the run would start, verbatim
+    def test_cheap_check_control_six_names_declared_by_the_fixture_pass_and_go_ready(self):
+        """Green control, on head: the fixture declares the six step names itself, each passes, and the draft goes ready. The red cases differ
+        only in whether the real stamp list names the steps, so a red here would mean the harness, not the list, is wrong."""
+        names = [name for script in CHEAP_CHECK_SCRIPTS for name in cheap_check_steps(script)]
+        self.pre_ready_lane(declared=names)
+        self.use_ci_job([("PASS", name) for name in names], 0)
+        rc, out = self.pre_ready()
+        for name in names:
+            self.assertTrue(verdict_line(out, "pass", name), "no `pass %s` line for a fixture-declared passing step: %s" % (name, out))
+        self.assertEqual((rc, self.host.readies), (0, [7]), "the fixture's six passing steps did not mark the draft ready: " + out)
+
+    def test_cheap_check_hook_catalog_failing_refuses_the_draft(self):
+        """Hook catalog check, a stale docs/catalog.md. Its suite: lint/test_hook_catalog.py test_f18_stale_page_fails."""
+        self.assert_cheap_check_refuses_the_draft("lint/hook_catalog.py", "faults/stale-catalog-page")
+
+    def test_cheap_check_retired_names_failing_refuses_the_draft(self):
+        """Retired names, one word per meaning: a retired word in a tracked file. Its suite: lint/test_retired_names.py test_no_retired_name."""
+        self.assert_cheap_check_refuses_the_draft("lint/test_retired_names.py", "faults/retired-word-in-tracked-file")
+
+    def test_cheap_check_silent_undo_failing_refuses_the_draft(self):
+        """Silent undo check, a reversed hunk. Its suite: lint/test_check_silent_undo.py test_reversal_widened_by_an_adjacent_edit."""
+        self.assert_cheap_check_refuses_the_draft("lint/check_silent_undo.py", "faults/reversed-hunk")
+
+    def test_cheap_check_ruling_kind_failing_refuses_the_draft(self):
+        """Ruling kind check, a record with two Kind lines. Its suite: lint/test_check_ruling_kind.py test_pr_record_with_two_kind_lines_fails."""
+        self.assert_cheap_check_refuses_the_draft("lint/check_ruling_kind.py", "faults/record-with-two-kind-lines")
+
+    def test_cheap_check_skill_model_rows_failing_refuses_the_draft(self):
+        """Skill model rows fixture suite, a broken skill model row. Its suite: lint/test_check_skill_model_rows.py test_stale_row_fails_and_is_named."""
+        self.assert_cheap_check_refuses_the_draft("lint/test_check_skill_model_rows.py", "faults/broken-skill-model-row")
+
+    def test_cheap_check_project_ops_roles_failing_refuses_the_draft(self):
+        """Project-ops roles fixture suite, a broken project-ops role. Its suite: lint/test_check_project_ops_roles.py test_a_role_without_text_fails_alone."""
+        self.assert_cheap_check_refuses_the_draft("lint/test_check_project_ops_roles.py", "faults/broken-project-ops-role")
+
+    def test_cheap_check_hook_catalog_on_a_record_only_branch_is_not_refused(self):
+        """A branch that only adds a record leaves docs/records.md stale. The merge tool rebuilds that page, and the catalog check waives a stale
+        records page on a pull-request run (lint/hook_catalog.py pull_request_run, which reads GITHUB_BASE_REF: ci-job sets it from --base). A
+        stale docs/catalog.md still fails (lint/test_hook_catalog.py test_b10_the_catalog_page_stays_strict_on_a_pull_request). Wanted: the step
+        passes here and the draft goes ready."""
+        names = cheap_check_steps("lint/hook_catalog.py")
+        self.assertEqual(len(names), 1, "checks.yml job checks holds %d steps that run the catalog check, want one: %r" % (len(names), names))
+        name, declared = names[0], real_ready_checks()
+        self.assertIn(name, declared, "merge.readyChecks does not name %r, so the ready run never runs the catalog check on this branch" % name)
+        self.on("feat", {"docs/decisions/cheap-check-note.md": "Owner ruling, 2026-11-23. Process only.\n\nKind: process\n"})
+        self.pre_ready_lane(declared=declared)
+        self.use_ci_job([("PASS", job_and_step(entry)[1]) for entry in declared], 0)
+        rc, out = self.pre_ready()
+        self.assertTrue(verdict_line(out, "pass", name), "the catalog check did not pass on a branch that only adds a record: " + out)
+        self.assertEqual(rc, 0, "a branch that only adds a record was refused by the ready run: " + out)
+        self.assertEqual(self.host.readies, [7], "a branch that only adds a record did not go ready: " + out)
+
+    def test_six_cheap_checks_share_one_ci_job_start_and_read_no_github(self):
+        """Cost: the six checks run inside the checks job's one ci-job start, which the stub logs as one lint run. Each step's own shell and python
+        start sit inside that run (bin/ci-job). No check reads GitHub: the ready run starts no `gh` call."""
+        declared = real_ready_checks()
+        names = [name for script in CHEAP_CHECK_SCRIPTS for name in cheap_check_steps(script)]
+        for name in names:
+            self.assertIn(name, declared, "merge.readyChecks does not name %r, so the checks job's one ready start does not carry it" % name)
+        self.pre_ready_lane(declared=declared)
+        self.use_ci_job([("PASS", job_and_step(entry)[1]) for entry in declared], 0)
+        real_sh, gh_calls = merge.sh, []
+
+        def counting(args, *rest, **kwargs):
+            if args[:1] == ["gh"]:
+                gh_calls.append(list(args))
+            return real_sh(args, *rest, **kwargs)
+        with unittest.mock.patch.object(merge, "sh", counting):
+            rc, out = self.pre_ready()
+        starts = [c for c in self.lint_calls() if c["argv"][:1] == ["checks"]]
+        self.assertEqual(len(starts), 1, "the ready run started the checks job %d times, want one for all six: %s" % (len(starts), out))
+        for name in names:
+            self.assertIn(name, step_names(starts[0]["argv"]), "the checks job's one start does not run %r: %s" % (name, starts[0]["argv"]))
+        self.assertEqual(gh_calls, [], "the ready run called gh for the cheap checks: %s" % gh_calls)
+
+
+MUTATE_SKIPPED ="mutation test run skipped here: it runs at the lane's hand-off lint"  # the pre-join lint prints this where the run would start, verbatim
 
 
 class BatchHeadMutation(LaneFixture):
@@ -4873,8 +4984,7 @@ class PreReadyDeclared(unittest.TestCase):
     root = os.path.dirname(HERE)
 
     def declared(self):
-        with open(os.path.join(self.root, ".github", "stamp.json"), encoding="utf-8") as f:
-            return json.load(f).get("merge", {}).get("readyChecks") or []
+        return real_ready_checks()
 
     def assert_ci_job_reads(self, entry):
         job, step = job_and_step(entry)
@@ -4894,6 +5004,16 @@ class PreReadyDeclared(unittest.TestCase):
     def test_pre_ready_the_declared_list_names_the_scaffold_suite_under_checks_rest(self):
         self.assertIn(SCAFFOLD_READY, self.declared(), "merge.readyChecks does not name the scaffold suite as %r, so the pre-ready run does not read it" % SCAFFOLD_READY)
         self.assert_ci_job_reads(SCAFFOLD_READY)
+
+    def test_pre_ready_the_declared_list_names_the_six_cheap_checks_by_their_workflow_step(self):
+        """Each of the six CI-only checks is named in merge.readyChecks under the step name checks.yml gives the step that runs its script, and bin/ci-job reads that name."""
+        declared = self.declared()
+        for script in CHEAP_CHECK_SCRIPTS:
+            with self.subTest(script=script):
+                names = cheap_check_steps(script)
+                self.assertEqual(len(names), 1, "checks.yml job checks holds %d steps that run %s, want one: %r" % (len(names), script, names))
+                self.assertIn(names[0], declared, "merge.readyChecks does not name %r, the step that runs %s, so the draft's ready run never reads it" % (names[0], script))
+                self.assert_ci_job_reads(names[0])
 
 
 class RunFolderSweep(unittest.TestCase):
