@@ -7713,8 +7713,8 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str, recor
     `rm` names is judged but not recorded. A `cp` destination is the caller's file; an `mv` destination carries
     the record of its source, or the caller's when the source lies outside the scratchpad. A first write, a
     rewrite of its own file and a file that no longer exists pass (`scratchpad_writer_of`). Run once the call's
-    other rules passed. `record=False` judges only: the run ask calls it so an overwrite is refused before the
-    ask, and the call that the ask holds records nothing."""
+    other rules passed. `record=False` judges only: the run rule calls it so an overwrite is refused as an overwrite,
+    and the refused run records nothing."""
     agent, session, files, removed, moved = scratchpad_writes(payload, tool, tool_input, cwd)
     after = {}   # the writer each recorded file gets, read before any record changes
 
@@ -7772,7 +7772,7 @@ def scratchpad_folder_hit(payload, tool: str, tool_input: dict, cwd: str) -> str
     """Rule scratchpad-owner, the folder form: the log detail when an agent's call removes or moves a folder, the
     scratchpad itself or a glob that holds a file another agent wrote, else ''. A removed file that is itself
     another agent's is an overwrite refusal (`scratchpad_owner_write`), not a folder, so it is skipped here. The shell
-    path reads this before the run ask: a folder removal is a deny, and the run ask must not hide it."""
+    path reads this before the run refusal: a folder removal is its own refusal, and the run refusal must not hide it."""
     agent, session, files, removed, _moved = scratchpad_writes(payload, tool, tool_input, cwd)
     if not agent:
         return ""
@@ -7905,6 +7905,31 @@ def scratchpad_verb_run(name, args):
     return at if at < len(args) else None
 
 
+# The shells whose `-n` (or `--noexec`) reads a script and runs none. `node --check` is the same for node.
+SCRATCHPAD_SYNTAX_SHELLS = ("bash", "sh", "zsh", "dash", "ksh")
+
+
+def scratchpad_syntax_only(name, args, at):
+    """True when interpreter `name` with `args` only checks the syntax of its script and runs nothing: a shell
+    with `-n` or `--noexec` among its own flags (a combined `-nv` too), or `node --check`. `at` is the script
+    index `workflow_script_index` found, so a `-n` after the script is the script's own argument. Any `-c`,
+    alone or in a cluster, anywhere in `args` is a command string that may run the file, so it is never a check.
+    A value flag before the script (`node -r F --check G`) is a preload that runs, so it is no check either."""
+    flags = args if at is None else args[:at]
+    if "--" in flags:
+        flags = flags[:flags.index("--")]
+    if any(arg.startswith("-") and not arg.startswith("--") and "c" in arg for arg in args):
+        return False
+    if any(arg in WORKFLOW_VALUE_FLAGS for arg in flags):
+        return False
+    if name == "node":
+        return "--check" in flags
+    if name not in SCRATCHPAD_SYNTAX_SHELLS:
+        return False
+    return any(arg == "--noexec" or (arg.startswith("-") and not arg.startswith("--") and "n" in arg)
+               for arg in flags)
+
+
 def scratchpad_script(word, args):
     """([the files the command `word args` runs], the file it reads its script from stdin, whether it reads its
     script from stdin). A run is an interpreter or runner word (`SCRATCHPAD_RUNNER`) with the file as its first
@@ -7934,6 +7959,8 @@ def scratchpad_script(word, args):
             files += inner[0] + ([inner[1]] if inner[1] else [])
         return files, "", False
     at = workflow_script_index(args, name)   # past the interpreter's flags and their values
+    if scratchpad_syntax_only(name, args, at):
+        return [], "", False
     # A lone `-` before the script position reads the script from stdin, so no scratchpad file runs.
     script = args[at] if at is not None and "-" not in args[:at] else ""
     if script and SCRATCHPAD_RUNNER(basename(script)) and name in WORKFLOW_RUNNER_VERBS:
