@@ -760,9 +760,30 @@ def _ps_bash_form(text) -> bool:
     return False
 
 
+# An unfilled placeholder in a shell command handed to the owner (rule `style-hand-off-runs-as-is`): the command
+# must run as it stands. The one home of the check: command_in_item_hit below and lint/report_guard.py
+# placeholder_problem (a reply's fenced shell block) both call command_placeholder. Each lookbehind stops a match
+# inside a longer word, a `$VAR` or `${VAR}`, or a heredoc `<<`; the angle form takes letters, digits, `-` and `_`
+# only, so `< in.txt`, `<<'EOF'`, `2>&1` and `List<int>` pass.
+COMMAND_PLACEHOLDER = re.compile(
+    r"/dev/sdX\d?(?!\w)"
+    r"|(?<![<\w])<[\w-]+>"
+    r"|(?<![\w${])YOUR_\w+\b(?!=)"
+    r"|(?<![\w$-])your-[\w-]+"
+    r"|(?<![\w${])(?:REPLACE_ME|CHANGEME)(?!\w)"
+    r"|(?<![\w$.-])(?:xxx|XXX)(?![\w-])")
+COMMAND_PLACEHOLDER_HINT = ": fill the real value before it reaches the owner"
+
+
+def command_placeholder(text) -> str:
+    """The first unfilled placeholder token in a shell command, or ''."""
+    found = COMMAND_PLACEHOLDER.search(text) if isinstance(text, str) else None
+    return found.group(0) if found else ""
+
+
 def command_in_item_hit(data) -> str:
     """The matched text when a task's `command` is not {powershell, mac}, when its powershell string
-    holds bash syntax, when its steps, joined, send the owner to a file for a command, or when a
+    holds bash syntax, when either string holds an unfilled placeholder (command_placeholder), when its steps, joined, send the owner to a file for a command, or when a
     step holds a shell line in backticks. A `command` on the item excuses only the loose verb match
     (COMMAND_VERB); "the command in <file>" and "its command" still point at the file. An update
     with no `command` key leaves the stored one alone."""
@@ -773,6 +794,10 @@ def command_in_item_hit(data) -> str:
         return "command is not {powershell, mac}"
     if has_command and _ps_bash_form(data["command"]["powershell"]):
         return "powershell command holds a bash operator"
+    for shell in ("mac", "powershell") if has_command else ():
+        token = command_placeholder(data["command"][shell])
+        if token:
+            return "%s command holds the placeholder %r%s" % (shell, token, COMMAND_PLACEHOLDER_HINT)
     steps = data.get("steps")
     if not isinstance(steps, list):
         return ""
