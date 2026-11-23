@@ -301,14 +301,28 @@ def judge(merge, runs):
     return red, pending
 
 
+def checkout_root(cwd):
+    """The nearest folder at or above `cwd` that holds `.git` (a folder, or the file of a worktree), or `cwd` itself when no
+    folder above it does. The walk stops at that folder: a parent checkout above it is never read. File reads only."""
+    start = os.path.abspath(cwd or os.getcwd())
+    here = start
+    while True:
+        if os.path.exists(os.path.join(here, ".git")):
+            return here
+        parent = os.path.dirname(here)
+        if parent == here:
+            return start
+        here = parent
+
+
 def defines_job(cwd, name):
-    """True when a workflow file under `cwd`/.github/workflows defines a job called `name` (its key under `jobs:`, or its
+    """True when a workflow file under the checkout root of `cwd` (checkout_root) in .github/workflows defines a job called `name` (its key under `jobs:`, or its
     `name:` property), or when that cannot be told (an unreadable folder or file): the stricter rule then holds. False
     for a checkout with no such folder, or with files that define no such job. A local read, no GitHub call. A line
     scan, stdlib only: lint/workflow_steps.py is the repo's step parser, but a hook imports nothing from lint/. A key
     counts only at the job indent under a column-0 `jobs:` line, so a comment, a string or a script body holding the
     name matches nothing."""
-    folder = os.path.join(cwd or os.getcwd(), ".github", "workflows")
+    folder = os.path.join(checkout_root(cwd), ".github", "workflows")
     try:
         names = sorted(n for n in os.listdir(folder) if n.endswith((".yml", ".yaml")))
     except FileNotFoundError:
@@ -328,6 +342,7 @@ def defines_job(cwd, name):
 
 def job_named(text, name):
     """True when the workflow `text` has a job keyed `name`, or a job with a `name: <name>` property (see defines_job)."""
+    text = text.lstrip("\ufeff")   # a UTF-8 BOM would hide the first column-0 key
     in_jobs, job_indent, body_indent = False, None, None
     key = re.compile(r"""^(\s+)(["']?)%s\2\s*:\s*(#.*)?$""" % re.escape(name))
     prop = re.compile(r"""^\s+name\s*:\s*(["']?)%s\1\s*(#.*)?$""" % re.escape(name))
