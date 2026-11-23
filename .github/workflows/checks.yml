@@ -201,7 +201,7 @@ jobs:
       actions: read
       pull-requests: write
     # Every step after setup carries !cancelled(), so a failed step stops none of the later ones and the job ends red with each red
-    # step shown (lint/test_checks_step_scope.py KeepRunningAfterFailure). The checkout, setup and tools-install steps need no such guard.
+    # step shown (lint/test_checks_step_scope.py KeepRunningAfterFailure). The checkout and setup steps need no such guard.
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -220,6 +220,7 @@ jobs:
 
       # The pinned tsc and astro-check on PATH for the fixture suites below that run them (code-check, comment scan).
       - name: Code-check tools
+        if: ${{ !cancelled() }}
         timeout-minutes: 5
         run: |
           npm ci --ignore-scripts --prefix actions/code-check/tools
