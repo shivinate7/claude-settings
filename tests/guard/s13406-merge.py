@@ -327,6 +327,20 @@ add("merge-checks: the app's auto-merge switch reads the repo its url names, z/w
 add("merge-checks: the app's auto-merge switch takes pull/12/files as pull request 12, and allows", "allow",
     silent=True, tool=APP_AUTO_MERGE_TOOL, cwd=NOGIT, url="https://github.com/y/x/pull/12/files", enabled=True,
     method="squash", env_path=GHNEED + os.pathsep + PY_PATH, config=MERGECFG)
+# A url that does not parse gives no number and no repo, so the read falls to the checkout's own branch pull request.
+# CURREPO is a real checkout on `feat`, and GHMAIN's pull request on it is green. An unparsed url that names another pull
+# request would then allow it. The parsed url is the control: it names pull request 12 and is read as that one.
+for _name, _url in (
+    ("a scheme-less github url", "github.com/y/x/pull/12"),
+    ("a github pulls url", "https://github.com/y/x/pulls/12"),
+    ("a pull request url on another host", "https://gitlab.com/y/x/pull/12"),
+):
+    add("merge-checks: the app's auto-merge switch with %s is denied in a checkout whose branch pull request is green"
+        % _name, "deny", "merge-checks", tool=APP_AUTO_MERGE_TOOL, cwd=CURREPO, url=_url, enabled=True,
+        method="squash", env_path=GHMAIN + os.pathsep + PY_PATH + os.pathsep + GIT_PATH)
+add("merge-checks: the app's auto-merge switch with a parsed url is read as its pull request in a green checkout, and allows",
+    "allow", silent=True, tool=APP_AUTO_MERGE_TOOL, cwd=CURREPO, url=APP_PR_URL, enabled=True, method="squash",
+    env_path=GHMAIN + os.pathsep + PY_PATH + os.pathsep + GIT_PATH)
 # Another ready pull request on the base, with a required check pending, refuses a merge, by `gh pr merge` and by the
 # host's merge tool. The merged pull request is 1, the other is 2 (its head is pr-two-head).
 BATCH_ON = GHBATCH + os.pathsep + PY_PATH
