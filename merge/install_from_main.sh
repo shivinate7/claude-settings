@@ -18,8 +18,9 @@
 # Without symlink rights the pinned checkout is switched in place (git switch --detach), which
 # writes the files one at a time (a live reader can see a mix there).
 # A settings.json that only reordered keys is restored from HEAD first and does not count as a change. One the app saved
-# with a changed key, as the pin's only tracked change, is saved to settings.json.bak and restored, and the run names each
-# key (save_app_settings); the app rewrites that linked file, and no session may write in the pin to clear it.
+# with a changed key, as the pin's only tracked change, is saved as a new settings.json.bak copy (never over an earlier
+# one; settings.json.bak.2, .3 follow) and restored, and the run names each key (save_app_settings). Every copy moves
+# into each new pin tree before the old one is pruned. The app rewrites that linked file, and no session may write in the pin.
 # A pin with tracked changes is never moved, switched or removed, nor is an old tree with them: the
 # run prints one stderr line naming the pin and exits 1; the SessionStart hook writes that line to
 # the install log. A <clone>-live-<commit> tree whose only changes are missing tracked files (a git
@@ -36,7 +37,7 @@
 # ponytail: this lock code copies install.sh's, because install.sh runs on load and cannot be
 # sourced; one shared lock file is the one home. A shared lock script is the upgrade.
 # Every pinned worktree is locked, so the janitor sweep never removes it.
-fail() { echo "install not run: $1" >&2; exit 1; }
+fail() { [ -z "$saved_keys" ] || report_saved_settings; echo "install not run: $1" >&2; exit 1; }
 
 clone=$(git worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')
 [ -n "$clone" ] || fail "no git clone found here; run merge/install_from_main.sh from inside the clone"
@@ -57,7 +58,6 @@ release_lock() {   # the EXIT trap: the end line with the run's real exit, then 
   rc=$?
   trap - EXIT
   log_line "end exit=$rc"
-  [ -z "$bak_path" ] || rm -f "$bak_path"
   [ "$(head -n 1 "$INSTALL_LOCK" 2>/dev/null)" = "$INSTALL_ID" ] && rm -f "$INSTALL_LOCK"
   return "$rc"
 }
@@ -101,10 +101,11 @@ sys.exit(0 if json.load(sys.stdin) == json.load(open(sys.argv[1])) else 1)' "$1/
 
 # Frees DIR of a settings.json the app saved with a changed top-level key (a first-time prompt, /config). Only when
 # settings.json is DIR's one tracked change and parses as a JSON object (and so does the target commit's copy): the file
-# is copied to settings.json.bak beside it, restored from HEAD, and one stderr line per key that is added, changed or
-# removed against the target commit says it lands on main by PR (the saved value is in the .bak). Key order is ignored.
-# Any other change, bad JSON or no python3 leaves DIR as it is, so the caller refuses as before. Sets bak_path.
-bak_path=""
+# is copied to a new settings.json.bak copy beside it (the first free of settings.json.bak, .bak.2, .bak.3; no copy is
+# overwritten) and restored from HEAD. The keys that are added, changed or removed against the target commit are kept in
+# saved_keys, and report_saved_settings prints one line per key once the move has put the copy in the new pin. Key
+# order is ignored. Any other change, bad JSON, a failed copy or no python3 leaves DIR as it is, so the caller refuses.
+saved_keys=""; saved_name=""; saved_src=""
 save_app_settings() {
   [ "$(git -C "$1" status --porcelain --untracked-files=no 2>/dev/null)" = " M settings.json" ] || return 0
   command -v python3 >/dev/null 2>&1 || return 0
@@ -117,20 +118,40 @@ for k in sorted(set(want) | set(have)):
     if k not in want: print("added\t" + k)
     elif k not in have: print("removed\t" + k)
     elif want[k] != have[k]: print("changed\t" + k)' "$1/settings.json" 2>/dev/null) || return 0
-  cp "$1/settings.json" "$1/settings.json.bak" 2>/dev/null || return 0
+  name=settings.json.bak; n=1
+  while [ -e "$1/$name" ]; do n=$((n + 1)); name="settings.json.bak.$n"; done
+  cp "$1/settings.json" "$1/$name" 2>/dev/null \
+    || { echo "install_from_main.sh: WARN: could not save a copy of the app's settings.json as $1/$name, so the file was left as it is" >&2; return 0; }
   git -C "$1" checkout -q -- settings.json >/dev/null 2>&1 || return 0
-  bak_path="$CLAUDE_DIR/.settings.json.bak.$$"   # the move renames DIR, so main puts the copy back beside the pin's file
-  cp "$1/settings.json.bak" "$bak_path" 2>/dev/null || bak_path=""
-  short=$(git rev-parse --short "$commit")
-  printf '%s\n' "$keys" | while IFS="$(printf '\t')" read -r how key; do
+  saved_keys="$keys"; saved_name="$name"; saved_src=$(canon "$1")
+  return 0
+}
+
+# Copies every settings.json.bak* copy from the pin tree $1 into the new tree $2, keeping any copy that is already there.
+# It runs before the old tree can be pruned. A copy that cannot be carried stays in $1, and the run says where.
+carry_saved_settings() {
+  [ -n "$1" ] && [ "$(canon "$1")" != "$(canon "$2")" ] || return 0
+  for f in "$1"/settings.json.bak*; do
+    [ -f "$f" ] || continue
+    [ -e "$2/${f##*/}" ] || cp "$f" "$2/${f##*/}" 2>/dev/null \
+      || echo "install_from_main.sh: WARN: could not copy $f into $2; it stays in $1" >&2
+  done
+}
+
+# Prints one line per key save_app_settings found, once. The line names the copy's path only where the copy exists.
+report_saved_settings() {
+  [ -n "$saved_keys" ] || return 0
+  where="$pin/$saved_name"; [ -f "$where" ] || where="$saved_src/$saved_name"
+  short=$(git rev-parse --short "$commit" 2>/dev/null)
+  printf '%s\n' "$saved_keys" | while IFS="$(printf '\t')" read -r how key; do
     [ -n "$key" ] || continue
     if [ "$how" = removed ]; then
-      echo "install_from_main.sh: WARN: settings.json key \"$key\" is missing from the app's file but is in $short; the file was restored from $short and the app's copy is $pin/settings.json.bak" >&2
+      echo "install_from_main.sh: WARN: settings.json key \"$key\" is missing from the app's file but is in $short; the file was restored from $short and the app's copy is $where" >&2
     else
-      echo "install_from_main.sh: WARN: settings.json key \"$key\" is $how against $short; the file was restored and the app's copy is $pin/settings.json.bak; land the key on main by PR to keep it" >&2
+      echo "install_from_main.sh: WARN: settings.json key \"$key\" is $how against $short; the file was restored and the app's copy is $where; land the key on main by PR to keep it" >&2
     fi
   done
-  return 0
+  saved_keys=""
 }
 
 # Makes $pin a link to worktree $1 by one rename of the link. Returns 1 when no real link can be made.
@@ -200,6 +221,7 @@ move_pin() {
     err=$(git worktree add -q --detach --lock --reason "$REASON" "$tree" "$commit" 2>&1) \
       || fail "cannot make the pinned checkout $tree: $err; fix that, then run merge/install_from_main.sh"
   fi
+  carry_saved_settings "$prev" "$tree"   # before the rename and the prune, so no copy is lost with the old tree
   if [ ! -L "$pin" ]; then
     # A plain directory (made by install.sh): rename it to <clone>-live-<its commit>, retrying while a reader holds a file.
     old=$(git -C "$pin" rev-parse --short=12 HEAD 2>/dev/null)
@@ -291,8 +313,7 @@ else
   { [ -n "$a" ] && [ "$a" = "$b" ]; } \
     || fail "$pin is not a worktree of this clone; move it aside, then run merge/install_from_main.sh"
   at_main "$pin" || move_pin
-  # The saved copy goes with the pin: a move leaves the old tree behind, and the next move removes it.
-  [ -z "$bak_path" ] || cp "$bak_path" "$pin/settings.json.bak" 2>/dev/null
+  report_saved_settings
   git worktree lock --reason "$REASON" "$pin" >/dev/null 2>&1   # lock an unlocked pin; fails harmlessly when locked
 fi
 
