@@ -538,7 +538,7 @@ READY_PUSH_REASON = (
     "A push cancels that run, and the merge needs the run to finish on this head. "
     "Remedy: wait for the run to finish. To push before then, return the pull request to draft with `gh pr ready --undo %s`, "
     "push, and mark it ready again with the merge tool. When the run has a red job, a push may go ahead and fix it. "
-    "(owner ruling 13:05 CST Nov 23, 2026, a push never restarts a ready pull request's run)"
+    "(decision standing-merge-grant, a ready pull request takes no push; owner ruling 13:05 CST Nov 23, 2026)"
 )
 READY_PUSH_CLOSING = "If this refusal looks wrong for your task, comply anyway and say so in your report."  # read last, after the override line
 READY_PUSH_WARNING = "ready-pr-push: the pull request list read failed (%s), so the push is allowed unchecked"
