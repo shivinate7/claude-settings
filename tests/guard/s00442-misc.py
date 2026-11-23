@@ -2755,6 +2755,23 @@ lazy_fixture([GITMAIN, GITWT, AGENTWT, FARWT, SYMWT, DECOYMAIN], _build_gitmain)
 lazy_fixture([SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT, SUBJSTASHDIRTY,
               SUBJSTAGED], _build_subject)
 lazy_fixture([PRIVREPO], _build_privrepo)
+
+# The scratchpad base's dirty repositories (SCRATCH_BASE, named by CLAUDE_SCRATCHPAD_BASE): one under this session's
+# own scratchpad, one under another session's. The same dirty state as PRIVREPO, so a discard is a real one.
+BASE_PRIV_OWN = os.path.join(SCRATCH_BASE, "priv-proj", FAKE_SESSION, "scratchpad", "priv")
+BASE_PRIV_OTHER = os.path.join(SCRATCH_BASE, "priv-proj", OTHER_SESSION, "scratchpad", "priv")
+
+
+def _build_base_privrepos():
+    """BASE_PRIV_OWN and BASE_PRIV_OTHER: a dirty repository each, as _build_privrepo makes PRIVREPO."""
+    for where in (BASE_PRIV_OWN, BASE_PRIV_OTHER):
+        make_repo(where, {"f.txt": "base\n", "keep.txt": "base\n"})
+        write(os.path.join(where, "f.txt"), "uncommitted\n")
+        write(os.path.join(where, "new.txt"), "untracked\n")
+        _require_dirty(where, "f.txt", "new.txt", "keep.txt")
+
+
+lazy_fixture([BASE_PRIV_OWN, BASE_PRIV_OTHER], _build_base_privrepos)
 lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTROFF, PTROFFCFG, PTRAHEAD, PTRAHEADCFG, PTRNOORIGIN,
               PTRNOORIGINCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND], _build_pointer)
 lazy_fixture([CONFLICT], _build_conflict)
