@@ -541,7 +541,7 @@ READY_PUSH_REASON = (
     "(decision standing-merge-grant, a ready pull request takes no push; owner ruling 13:05 CST Nov 23, 2026)"
 )
 READY_PUSH_CLOSING = "If this refusal looks wrong for your task, comply anyway and say so in your report."  # read last, after the override line
-READY_PUSH_WARNING = "ready-pr-push: the pull request list read failed (%s), so the push is allowed unchecked"
+READY_PUSH_WARNING = "ready-pr-push: the pull request list read failed (%s), so the push is allowed unchecked (decision standing-merge-grant)"
 
 
 def _ready_push_branches(args, where: str, overrides):
@@ -571,14 +571,16 @@ def ready_push_hit(stripped: str, cwd: str, read_verb):
                 pulls[where] = _ready_push_pulls(where)
             host, rows = pulls[where]
             if host is None:
-                warning = warning or ("warn", READY_PUSH_WARNING % cap_safe(rows, 120), "")
+                if warning is None:
+                    warning = ("warn", READY_PUSH_WARNING % cap_safe(rows, 120), "")
                 continue
             for number, info in rows:
                 same_repo = info["head_repo"] in (None, info["base_repo"])
                 if info["branch"] in branches and not info["draft"] and same_repo:
                     verdict, detail = _ready_push_run(host, number, info["head"])
                     if verdict == "unknown":
-                        warning = warning or ("warn", READY_PUSH_WARNING % cap_safe(detail, 120), "")
+                        if warning is None:
+                            warning = ("warn", READY_PUSH_WARNING % cap_safe(detail, 120), "")
                     elif verdict != "red":
                         state = "running or queued" if verdict == "pending" else "finished green"
                         return "deny", READY_PUSH_REASON % (number, state, number), "push to ready #%d" % number
