@@ -24,7 +24,7 @@ Owner, 2026-11-23 10:49 CST, "go", on the plan route.
 - A failed step stops none of the later steps. The job ends red, with each red step shown.
 - Exempt: the checkout and setup-python steps. They carry no guard.
 
-Kind: process
+R3 is a process ruling.
 Home: .github/workflows/checks.yml
 
 ## R4a: Windows shards on a pull request run with their scope flag
@@ -36,5 +36,5 @@ Owner, 2026-11-23 10:28 and 10:49 CST, option a.
 - Known gap: the daily run can skip after a proven push that left a Windows shard out. Accepted under the push-skip decision, `push-skip-on-proven-tree`.
 - Measure (consultant, 13:26 CST, not a ruling): on the last 40 merged pull requests (3764 to 3813), the merge flag was set on 18 under the narrow rule, against 29 by imports.
 
-Kind: process
+R4a is a process ruling.
 Home: .github/scripts/ci-scope.sh
