@@ -1830,7 +1830,8 @@ class ShallowMain(unittest.TestCase):
 
     def setUp(self):
         self.t = tempfile.mkdtemp(dir=self.run_dir)
-        build_repos(self.t)  # origin.git, and the clones seed, co and other: main holds the seed commit
+        if not copy_repos(self.t):  # origin.git and the clones co and other, with main at the seed commit
+            build_repos(self.t)
         bare, other = os.path.join(self.t, "origin.git"), os.path.join(self.t, "other")
         put(os.path.join(other, "old.txt"), "old\n")
         sh(other, "git", "add", "-A"); sh(other, "git", "commit", "-q", "-m", "old"); sh(other, "git", "push", "-q", "origin", "main")
@@ -19066,9 +19067,13 @@ class ReviewEnv(Env):
 
         if tree is None:
             git_in("git", "read-tree", parent)
-            for path, text in changes.items():
-                blob = git_in("git", "hash-object", "-w", "--stdin", text=text)
-                git_in("git", "update-index", "--add", "--cacheinfo", f"100644,{blob},{path}")
+            if changes:  # one hash-object and one update-index for all the changes: five git processes a commit, whatever its change count
+                names = [os.path.join(self.t, "fixture.blob.%d" % i) for i in range(len(changes))]
+                for name, text in zip(names, changes.values()):
+                    put(name, text)
+                blobs = git_in("git", "hash-object", "-w", "--no-filters", *names).split()
+                git_in("git", "update-index", *(arg for blob, path in zip(blobs, changes)
+                                                for arg in ("--add", "--cacheinfo", f"100644,{blob},{path}")))
             tree = git_in("git", "write-tree")
         parents = [arg for p in (parent, *more_parents) for arg in ("-p", p)]
         return git_in("git", "commit-tree", tree, *parents, "-m", message)
