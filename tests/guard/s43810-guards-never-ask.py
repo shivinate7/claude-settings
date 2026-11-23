@@ -6,7 +6,8 @@
 # under the family of the rule the call names. The forbidden fragments and the generic hygiene check are
 # the same as every other deny (names_the_target, FORBIDDEN_IN_A_REASON).
 
-NA_TAIL = "If this refusal looks wrong for your task, comply anyway and say so in your report."
+# The owner's line a refusal ends with. Its one home is guard_core.COMPLY_TAIL, imported here and never copied.
+from guard_core import COMPLY_TAIL as NA_TAIL
 
 
 def na_payload(command, cwd, **extra):
@@ -88,3 +89,84 @@ NA_MERGE_REFUSED = ("confirm this call", "asks the owner", "gh pr merge")
 na_register("never ask: a bare merge in a merge-tool repo is denied, and names the merge tool",
             "merge", na_payload("gh pr merge 12 --squash", STAMPREPO, env_path=GREEN_ON, config=MERGECFG),
             "bare-merge", NA_MERGE_WHY, NA_MERGE_ACT, NA_MERGE_REFUSED)
+
+
+# A command that would have asked, chained with two commands no harmless lead or tail names (`make test`,
+# `make lint`). The guard must deny the chain, and the deny must not be the run-alone ask, which says the command
+# needs the owner's answer. The deny ends with the owner's line.
+NA_CHAIN_TAIL = " && make test && make lint"
+NA_OWNER_ANSWER = "owner's answer"
+
+
+def na_chained_check(case):
+    """(ok, note): the chained call is denied, its reason does not say the command needs the owner's answer, and
+    it ends with the owner's line. It carries no forbidden fragment."""
+    got, reason = decide(case)
+    if got != "deny":
+        return False, "verdict %s, want deny: %s" % (got, reason[:110])
+    if NA_OWNER_ANSWER in reason:
+        return False, "the reason says the command needs the owner's answer (the run-alone ask)"
+    if not reason.endswith(NA_TAIL):
+        return False, "the reason does not end with the owner's line"
+    leak = names_the_target(reason)
+    if leak:
+        return False, "the reason carries the forbidden fragment %r" % leak
+    return True, "denied, with no owner's-answer ask, and the owner's line last"
+
+
+def na_chained_register(label, family, case):
+    global LOG_CHECKS
+    LOG_CHECKS = LOG_CHECKS + ((label, lambda: na_chained_check(case)),)
+    LOG_FAMILY[label] = family
+
+
+na_chained_register("never ask: a forced push to main, chained with two commands, is denied, not run-alone asked",
+                    "push-delete", na_payload(VCS + " push --force origin HEAD:main" + NA_CHAIN_TAIL, PUSHFEAT))
+na_chained_register("never ask: a push of main, chained with two commands, is denied, not run-alone asked",
+                    "push-delete", na_payload(VCS + " push origin main" + NA_CHAIN_TAIL, PUSHFEAT))
+na_chained_register("never ask: a bare merge in a merge-tool repo, chained with two commands, is denied, "
+                    "not run-alone asked",
+                    "merge", na_payload("gh pr merge 12 --squash" + NA_CHAIN_TAIL, STAMPREPO, env_path=GREEN_ON,
+                                        config=MERGECFG))
+
+
+# A push of main in a repo that does not use the merge tool: a plain checkout with an origin and no
+# .github/stamp.json, so there is no pull request flow. Its remedy names a branch to push the commit to, and never
+# a pull request or the merge tool.
+NOMERGEPUSH = os.path.join(ROOT, "nomergepush")   # a plain checkout, origin set, no merge tool
+make_repo(NOMERGEPUSH, {"README.md": "plain\n"})
+run_vcs(NOMERGEPUSH, "remote", "add", "origin", PUSHREMOTE)
+NA_BRANCH = "branch"
+NA_PULL_REQUEST = "pull request"
+NA_MERGE_TOOL = "merge tool"
+
+
+def na_plain_check(case):
+    """(ok, note): the push of main is denied in a repo with no merge tool. Its reason names a branch, names no pull
+    request and no merge tool, ends with the owner's line, and carries no forbidden fragment."""
+    got, reason = decide(case)
+    if got != "deny":
+        return False, "verdict %s, want deny: %s" % (got, reason[:110])
+    if NA_BRANCH not in reason:
+        return False, "the reason does not name a branch to push the commit to"
+    if NA_PULL_REQUEST in reason:
+        return False, "the reason names a pull request, and this repo has no pull request flow"
+    if NA_MERGE_TOOL in reason:
+        return False, "the reason names the merge tool, and this repo does not use it"
+    if not reason.endswith(NA_TAIL):
+        return False, "the reason does not end with the owner's line"
+    leak = names_the_target(reason)
+    if leak:
+        return False, "the reason carries the forbidden fragment %r" % leak
+    return True, "denied, with a branch to name in the report, and the owner's line last"
+
+
+def na_plain_register(label, family, case):
+    global LOG_CHECKS
+    LOG_CHECKS = LOG_CHECKS + ((label, lambda: na_plain_check(case)),)
+    LOG_FAMILY[label] = family
+
+
+na_plain_register("never ask: a push of main in a repo with no merge tool is denied, "
+                  "and names a branch, not a pull request",
+                  "push-delete", na_payload(VCS + " push origin main", NOMERGEPUSH))
