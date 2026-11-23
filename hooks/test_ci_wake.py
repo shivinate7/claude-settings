@@ -1155,10 +1155,9 @@ def case_checks_run_without_a_rollup_job_that_failed_is_red():
 
 
 def case_no_rollup_line_never_names_a_job_the_repo_lacks():
-    """(d) The verdict line of a head with no all-jobs-passed job names no such job. Before the fix, this passed run
-    waits to its deadline and prints "no run with a passed rollup job yet", a job this repo does not have: red on head.
-    The wait runs on a fake clock, so its end is synthetic. After the fix the run reads green, so this case guards the
-    line text only."""
+    """(d) The verdict line of a head with no all-jobs-passed job names no such job, whatever the wait ends in. The
+    line is read from a passed checks run with no such job. The wait runs on a fake clock, so its end is synthetic. A
+    line that names the rollup job, a job this repo does not have, fails the case."""
     no_rollup_scope("checks run with success, no rollup job (line text)", NO_ROLLUP_GREEN)
     raised, clock, calls, deadline = wait_for_on_fakes([NO_ROLLUP_GREEN], 100, line=True)
     detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
