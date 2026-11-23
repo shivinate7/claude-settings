@@ -280,6 +280,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        `gh pr ready` without --undo) while its head's records page is stale, or when that read cannot run, in
                        a repo that uses the merge tool. A base that is not the default branch, a head holding a
                        Record-claim, a head behind the base, and a current page pass. (records-index-at-merge)
+  ready-pr-push        deny. A `git push` to the branch of an open ready pull request while its CI run is running, queued or
+                       green, in a repo that uses the merge tool: a push cancels that run. A draft, a branch with no pull
+                       request, a run with a red job, another branch, an archive push, a repo with no CI and the merge tool
+                       pass. A failed pull request read passes with one stderr line. One GitHub read, only on a push.
+                       (owner ruling 13:05 CST Nov 23, 2026, one CI run per pull request)
   ready-mcp-mark-guard deny. Marking a pull request ready by MCP update_pull_request with draft false, or by the
                        shell `gh pr ready` without --undo, when this session's transcript shows no `merge <pr> --ready` run that passed its ready checks on the
                        pull request's current head, in a repo that uses the merge tool. A draft true or body-only
@@ -763,7 +768,7 @@ while True:
             records_page_hit, repo_proof_hit, role_proof_hit, lane_ready_hit, lane_mcp_ready_hit, self_role_child_hit, self_role_hit,
             DEFAULT_RECORD_BRANCH, record_reason, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, PRIOR_WORK_REASON, prior_work_lane_hit, prior_work_named, header_time_hit, step_dup_hit, step_pr_hit, target_roster_hit, trust_card_hit, written_time_hit,
             BRIEF_ID_REASON, BRIEF_TOPIC_REASON, STEP_DUP_REASON,
-            undrafted_pr_create, uses_merge_tool, ready_page_hit, ready_mark_hit, create_pr_link_hit,
+            undrafted_pr_create, uses_merge_tool, ready_page_hit, ready_mark_hit, ready_push_hit, create_pr_link_hit,
         )
         _loading = "guard_review_log"
         from guard_review_log import review_log_hit
@@ -6293,6 +6298,14 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     unproved = ready_mark_hit(tool, {}, transcript, cite_where, raw)
     if unproved:
         refuse(tool, "deny", "ready-mcp-mark-guard", unproved[0], unproved[1])
+
+    # 6c1b. A push to the branch of a ready pull request whose CI run is running, queued or green (rule ready-pr-push). Cost: one
+    # GitHub read, only for a call that holds a `git push` in a merge-tool repo; every other call starts nothing (guard_merge states it).
+    pushed = ready_push_hit(stripped, cwd, read_verb)
+    if pushed and pushed[0] == "deny":
+        refuse(tool, "deny", "ready-pr-push", pushed[1], pushed[2])
+    elif pushed:
+        print(pushed[1], file=sys.stderr)
 
     # 6c2. A commit or push that would carry all three conflict markers in one file (rule conflict-markers).
     # Cost: per judged commit, one `git rev-parse --show-toplevel --verify -q HEAD` (one more for an add in

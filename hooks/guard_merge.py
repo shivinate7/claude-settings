@@ -519,6 +519,92 @@ def ready_page_hit(tool: str, tool_input: dict, command: str, where: str):
     return None
 
 
+
+# ---- a push to the branch of a ready pull request (rule ready-pr-push, owner ruling 13:05 CST Nov 23, 2026, option a:
+# one CI run per pull request, never restarted by a push)
+# A push cancels the ready pull request's running CI run (checks.yml cancels in progress), and the run is the one the merge
+# reads. The push is refused while that run is running, queued or green. Allowed: a draft, no pull request for the branch, a
+# run with a red job (the push may fix it), a push to another branch, an archive push, a repo with no CI run to cancel, and a
+# push whose pull request read fails (a destination git cannot name is read the same way: the list read still runs, and
+# matches no branch) (owner ruling handed-in-push-fourth-way, 21:17 CST Nov 18, point 2: one stderr line,
+# never a refusal). The merge tool's own pushes run as subprocesses no hook sees; a segment that runs the tool is skipped.
+# Cost: only a call that holds a `git push` reads GitHub, and only in a repo that uses the merge tool. Per such push: one
+# open-pull-request list read (a draft, no pull request or another branch ends there), and for a ready pull request the
+# head read of rule merge-checks (Host.head_read, one shared deadline, no batch read). No other tool call reads anything.
+READY_PUSH_LIST_SECONDS = 10  # the list read's share of the hook's budget; head_read keeps its own MERGE_READ_TIMEOUT
+READY_PUSH_REASON = (
+    "Rule (Git, one CI run per pull request): this push goes to the branch of #%s, a ready pull request whose CI run is %s. "
+    "A push cancels that run, and the merge needs the run to finish on this head. "
+    "Remedy: wait for the run to finish. To push before then, return the pull request to draft with `gh pr ready --undo %s`, "
+    "push, and mark it ready again with the merge tool. When the run has a red job, a push may go ahead and fix it. "
+    "(owner ruling 13:05 CST Nov 23, 2026, a push never restarts a ready pull request's run) "
+    "If this refusal looks wrong for your task, comply anyway and say so in your report."
+)
+READY_PUSH_WARNING = "ready-pr-push: the pull request list read failed (%s), so the push is allowed unchecked"
+
+
+def _ready_push_branches(args, where: str, overrides):
+    """(names, archive_only): the branches this `git push` writes, an unreadable one left out, and whether every destination
+    is an archive name. An archive-only push can hold no ready pull request, so it reads nothing."""
+    found = push_destinations(args, where, overrides)
+    names = [name for name in found if name and not name.startswith(ARCHIVE_PREFIX)]
+    return names, bool(found) and all(name and name.startswith(ARCHIVE_PREFIX) for name in found)
+
+
+def ready_push_hit(stripped: str, cwd: str, read_verb):
+    """None, or ("deny", reason, matched) for a push to the branch of a ready pull request whose run is running, queued or
+    green, or ("warn", line, "") when the pull request read failed and the push passes. `read_verb(subcommand, args)` is
+    guard.py's test for a dry run, which writes nothing. One list read serves every push of the call."""
+    pulls = {}  # where -> (host, open pull requests) or the failure text: one read per folder
+    warning = None
+    for segment in split_segments(stripped):
+        if merge_tool_args(segment) is not None:
+            continue
+        for args, where, overrides in _push_calls(segment, stripped, cwd):
+            if not where or read_verb("push", args) or not uses_merge_tool(where):
+                continue
+            branches, archive_only = _ready_push_branches(args, where, overrides)
+            if archive_only or pinned_required(where) == "none":  # a repo that runs no CI has no run to cancel
+                continue
+            if where not in pulls:
+                pulls[where] = _ready_push_pulls(where)
+            host, rows = pulls[where]
+            if host is None:
+                warning = warning or ("warn", READY_PUSH_WARNING % cap_safe(rows, 120), "")
+                continue
+            for number, info in rows:
+                same_repo = info["head_repo"] in (None, info["base_repo"])
+                if info["branch"] in branches and not info["draft"] and same_repo:
+                    verdict, detail = _ready_push_run(host, number, where)
+                    if verdict == "unknown":
+                        warning = warning or ("warn", READY_PUSH_WARNING % cap_safe(detail, 120), "")
+                    elif verdict != "red":
+                        state = "running" if verdict == "pending" else "finished green"
+                        return "deny", READY_PUSH_REASON % (number, state, number), "push to ready #%d" % number
+    return warning
+
+
+def _ready_push_pulls(where: str):
+    """(host, [(number, pull request fields)]) of the open pull requests, or (None, why) when the read cannot run."""
+    module = merge_module()
+    if module is None:
+        return None, "the merge tool could not be loaded"
+    try:
+        with module.shared_deadline(READY_PUSH_LIST_SECONDS):
+            host = module.Host(required=pinned_required(where) or "protection", cwd=os.path.normpath(where))
+            return host, host.open_prs()
+    except subprocess.TimeoutExpired:  # its text names the resolved program path
+        return None, "a read timed out after %d s" % READY_PUSH_LIST_SECONDS
+    except Exception as e:  # a Stop, a missing gh, malformed JSON: all unread
+        return None, " ".join(str(e).split()) or type(e).__name__
+
+
+def _ready_push_run(host, number: int, where: str):
+    """(verdict, detail) of the ready pull request's head: red, pending, green, held or unknown (Host.head_read, no batch read)."""
+    host.batch_brake = None
+    return host.head_read(number, nothing_is_green=not has_workflows(where))
+
+
 # ---- a lane commit of the generated records page (decision records-index-at-merge)
 #
 # The page is rebuilt only at merge. The commit is refused when the page it would hold differs from
