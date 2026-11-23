@@ -36,8 +36,14 @@ output style load in each session on each repo.
   The owner's own typed words do not name the triage hop. A yes that started at triage with no consultant is
   not covered. The yes binds to the head the pull request had when the consultant relayed it. That binding
   rests on the runner passing that head as `--head`, and on the classifier reading the chat. The merge tool
-  accepts a live head that equals the `--head` passed, or sits on it with only a Record-claim commit,
-  its revert or a page-only commit. It does not check that `--head` against the relay.
+  accepts a live head that equals the `--head` passed. It also accepts a live head that sits on the `--head`,
+  with only these commits between: a Record-claim commit, its revert, a page-only commit, or a commit with one
+  parent whose tree equals its parent's (an empty commit, or one that adds only a message trailer). The same-tree
+  form is owner item 514 b, the same-tree ruling: "yes", 13:26 CST Nov 22, widened at 13:33 CST to the lane-lint
+  PASS and a relayed yes. Where `merge.requiredChecks` is "none" and the base is the default branch, a clean merge
+  of main also counts: two parents, the second on main, and a tree that is git's own clean merge of the two. The relayed head (`--head`) must be an ancestor of the live
+  head. A live head that does not contain it refuses, even with a claim or same-tree commit on top. It does not
+  check `--head` against the relay.
   `relayed_head_holds` in `merge/merge.py` reads no review record.
 - **Lane draft PR** (owner, 2026-11-12 17:19 CST; changed by owner, 12:58 CST Nov 16, "No now everyone merges",
   and 13:06 CST Nov 20, "let's lock that"; ruling Q2). Any lane that a coordinator or another lane started may open its own draft PR. It marks that PR
