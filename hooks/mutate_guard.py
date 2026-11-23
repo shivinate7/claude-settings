@@ -272,11 +272,9 @@ MUTATIONS = [
      '    return not (answer.stdout.strip() or answer.stderr.strip())',
      '    return not answer.stdout.strip()', "guard",
      'worktree prune: a stale record allows, never denies or asks'),
-    ("worktree-prune: never asks, so a dropped record is silent",
-     '        if subcommand == "worktree-prune":\n'
-     '            ask_command("shared-tree", WORKTREE_PRUNE_ASK_REASON, matched, "worktree prune")',
-     '        if False:\n'
-     '            ask_command("shared-tree", WORKTREE_PRUNE_ASK_REASON, matched, "worktree prune")', "guard",
+    ("worktree-prune: refused again, so a harmless prune denies",
+     '            # Prune drops only the record of a worktree whose directory is gone and deletes no file: allowed.',
+     '            refuse(tool, "deny", "shared-tree", WORKTREE_REMOVE_DENY_REASON, matched)', "guard",
      'worktree prune: a stale record allows, never denies or asks'),
     ("ask-alone: a chained ask command asks instead of denying",
      '    if count_commands(text) > 1:',

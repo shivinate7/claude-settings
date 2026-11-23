@@ -1387,8 +1387,12 @@ chained_ask("push: a comment opener inside a string does not hide a push to main
             'echo "#" && ' + VCS + " push origin main", cwd=PUSHMAIN)
 chained_ask("push: a lone quote in a commit message does not hide a push to main that follows it",
             VCS + ' commit -m "don\'t" && ' + VCS + " push origin main", cwd=PUSHFEAT)
-chained_ask("push: a lone quote in a commit message does not hide a stray push that follows it",
-            VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", cwd=PUSHSTRAY)
+sh("push: a lone quote in a commit message does not hide a force push that follows it",
+   VCS + ' commit -m "don\'t" && ' + VCS + " push --force origin HEAD", "deny", "force-push",
+   cwd=PUSHFEAT, lacks=(CHAIN_ASK,))
+# A stray-branch push is allowed (decision guard-remedy-not-to-owner), so the chain with it allows too.
+sh("push: a lone quote in a commit message, then a stray push, allows: a stray push is no ask",
+   VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", "allow", cwd=PUSHSTRAY, lacks=(CHAIN_ASK,))
 # The agent push is refused on its own, by its rule, not by the ask-alone chain: no ask is chained with it.
 agent_refused("push: agent branch, a lone quote in a commit message does not hide a push to an agent name",
               VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", cwd=PUSHAGENT)

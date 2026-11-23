@@ -21,8 +21,11 @@ def chained_prune(name, command, **kw):
 
 # (a) THE INCIDENT, then every chain operator, a command before the prune, the PowerShell tool, a
 # agent, and two ask commands in one command.
-own_refuse("ask-alone: the incident, prune then worktree add then grep, denies",
-         PRUNE + " && " + VCS + ' worktree add -b x "$TEMP/wt-x" origin/y && grep -c x README.md', cwd=WTPRUNE)
+chained_ask("ask-alone: the incident's chain, a cap write then worktree add then grep, denies",
+            "echo " + CAP_KEY + "=" + OPUS + " > settings.local.json && " + VCS
+            + ' worktree add -b x "$TEMP/wt-x" origin/y && grep -c x README.md', cwd=PROJ)
+chained_prune("ask-alone: the incident's chain, prune then worktree add then grep, allows",
+              PRUNE + " && " + VCS + ' worktree add -b x "$TEMP/wt-x" origin/y && grep -c x README.md')
 for _label, _tail in (("||", " || echo x"), (";", "; echo x"),
                       ("a pipe", " | cat"), ("a newline", "\necho x")):
     chained_prune("ask-alone: a prune joined to another command by %s allows" % _label, PRUNE + _tail)
@@ -243,7 +246,7 @@ asks_alone("ask-alone: a PowerShell Set-Location to a Windows path, then the cap
 
 # The output tails: tail, head, Out-Null, && echo done, and PowerShell ; Write-Host done.
 asks_alone("ask-alone: the lease push to the default branch, piped to tail, denies",
-           ASK_LEASE + " | tail -5", "force-push", cwd=PUSHFEAT)
+           ASK_LEASE + " | tail -5", "force-push", want="deny", cwd=PUSHFEAT)
 asks_alone("ask-alone: the reset in a worktree, piped to head, denies",
            ASK_DISCARD + " | head -3", "shared-tree", want="deny", cwd=GITWT)
 asks_alone("ask-alone: the prune piped to Out-Null in the PowerShell tool allows",
@@ -264,17 +267,24 @@ own_refuse("ask-alone: the discard piped to tee, a command with effects, still d
 # No rule reads a pipe into sh (`printf x | sh` allows on main), and the prune allows, so the pair allows.
 sh("ask-alone: the prune piped to sh allows, no rule reads a pipe into sh",
    ASK_PRUNE + " | sh", "allow", cwd=WTPRUNE, lacks=(CHAIN_ASK,))
-own_refuse("ask-alone: a cd, the prune, then a removal of y, still denies",
-            "cd " + slash(WTPRUNE) + " && " + ASK_PRUNE + " && rm -rf /tmp/y", cwd=NOGIT)
+chained_ask("ask-alone: a cd, the prune, then a cap write, denies",
+            "cd " + slash(WTPRUNE) + " && " + ASK_PRUNE + " && " + ASK_CAP, cwd=NOGIT)
+# No rule denies a removal of /tmp/y alone, so the chain with it allows: the prune adds no ask to hold.
+sh("ask-alone: a cd, the prune, then a removal of /tmp/y, allows: no rule denies that removal alone",
+   "cd " + slash(WTPRUNE) + " && " + ASK_PRUNE + " && rm -rf /tmp/y", "allow", cwd=NOGIT, lacks=(CHAIN_ASK,))
 
 # TWO SAFETY HOLES, from an owner review. Both must DENY. The first: the `\"` inside the echo is an
-# escaped quote, so the `; rm -rf y` after it is a real command. The second: `cd -` moves to the previous
-# folder, which no path in the command names, so it is no harmless lead, and the prune after it is a
-# chained ask command.
-own_refuse("ask-alone: an escaped quote in an echo tail does not hide a removal after it, denies",
-              ASK_PRUNE + ' && echo "a \\" b" ; rm -rf y', cwd=WTPRUNE)
-own_refuse("ask-alone: a cd - to the previous folder before the prune is no named lead, so it denies",
-              "cd - && " + ASK_PRUNE, cwd=WTPRUNE)
+# escaped quote, so the `; rm -rf ~/` after it is a real command, and destructive-delete denies it alone.
+# The second: `cd -` moves to the previous folder, which no path in the command names, so it is no harmless
+# lead: a cap write after it is a chained ask command.
+sh("ask-alone: an escaped quote in an echo tail does not hide a removal after it, denies",
+   ASK_PRUNE + ' && echo "a \\" b" ; rm -rf ~/', "deny", "destructive-delete", cwd=WTPRUNE, lacks=(CHAIN_ASK,))
+sh("ask-alone: an escaped quote in an echo tail, then a removal of y, allows: no rule denies rm -rf y alone",
+   ASK_PRUNE + ' && echo "a \\" b" ; rm -rf y', "allow", cwd=WTPRUNE, lacks=(CHAIN_ASK,))
+chained_ask("ask-alone: a cd - to the previous folder before a cap write is no named lead, so it denies",
+            "cd - && " + ASK_CAP, cwd=PROJ)
+sh("ask-alone: a cd - to the previous folder before the prune is no ask, so it allows",
+   "cd - && " + ASK_PRUNE, "allow", cwd=WTPRUNE, lacks=(CHAIN_ASK,))
 
 
 # =========================================================================== 6d. an interpreter heredoc is one command
