@@ -10650,10 +10650,13 @@ class RecordsRebuild(RecordsEnv):
         if isinstance(required, list):
             self.host.required_names = lambda: list(required)
 
-    def rollup_reads(self, head, state="green"):
+    def rollup_reads(self, head, state="green", states=None):
         """The fake host reads `state` on `head` only, and pending on any other head: a head with no run of its own yet. A case that merges on a
-        proof names the head the proof is on, so a read of any other head is a pending read here."""
-        self.host.head_state = lambda n, sha=None: state if sha == head else f"pending: all-jobs-passed has no run on {(sha or '')[:9]}"
+        proof names the head the proof is on, so a read of any other head is a pending read here. `states`: {sha: state} for the other heads a
+        case reads apart, such as a merge's own run above the green head it sits on."""
+        reads = dict(states or {})
+        reads[head] = state
+        self.host.head_state = lambda n, sha=None: reads.get(sha, f"pending: all-jobs-passed has no run on {(sha or '')[:9]}")
 
     def drop_pending_record(self):
         """The head holds no pending record, so a confirm claims no number and the page is its only change to make."""
@@ -10810,6 +10813,19 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.claims(), 0, "claimed a number for a page heal")
         self.assertEqual(self.host.waits, [], "the one confirm waited on a check")
 
+    def test_a_named_protection_heals_a_stale_page_on_a_green_proven_head(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): "protection" heals a stale page the tool rebuilds on a green proven head, as a named list does.
+        self.set_required("protection")
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page("ghost")})  # a page that names a debt nobody has
+        self.rollup_reads(self.head())
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "under protection a stale page on a green proven head did not heal and merge:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertNotIn("ghost", self.show("main", merge.RECORDS_PAGE), "the merge took the stale page, not the rebuilt one")
+        self.assertEqual(self.claims(), 0, "claimed a number for a page heal")
+        self.assertEqual(self.host.waits, [], "the one confirm waited on a check")
+
     def test_heal_under_list_merges_on_proven_head(self):
         # H's green rollup proves H. main gained a record, so H's page is stale for the merge result. One confirm pushes H' (main merged in,
         # the page rebuilt on it) and merges H' on H's proof: no run is read on H'.
@@ -10889,6 +10905,125 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.refs(), refs_before, "pushed on a pending proven head:\n" + out)
         self.assertEqual(self.host.waits, [], "waited on the run instead of refusing:\n" + out)
         self.assertIn("pending: all-jobs-passed", out, "the refusal does not name the pending run of the proven head:\n" + out)
+
+    def main_merged_in_above_green_head(self, merges=1):
+        """A green proven head with its page current, then main merged in as git's clean merge `merges` times. Each main change is a file with no
+        record, so the page stays current on every merge result, and each merge stacks on the one before it. -> (the proven head, the live head)."""
+        self.set_required(["all-jobs-passed"])
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})  # current on the head's own debts
+        proven = self.head()
+        below = proven
+        for k in range(merges):
+            self.on("main", {f"unrelated-{k}.txt": f"main change {k}, with no record\n"}, "untooled push")
+            self.base_merge_pushed_on("origin/main")
+            sh(self.co, "git", "fetch", "-q", "origin")
+            self.assert_merge_shape(self.head(), below, self.rev("origin/main"), clean=True)
+            below = self.head()
+        return proven, below
+
+    def page_only_heal_on_stale_head(self):
+        """A green proven head whose page is stale, and the tool's own page-only commit on it: the page rebuilt alone. -> (the proven head, the heal)."""
+        self.set_required(["all-jobs-passed"])
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page("ghost")})  # a page that names a debt nobody has
+        proven = self.head()
+        sh(self.co, "git", "fetch", "-q", "origin")
+        heal = self.tool_page(proven)
+        sh(self.co, "git", "push", "-q", "origin", f"{heal}:refs/heads/feat")
+        self.assert_page_scope(heal, proven)
+        return proven, heal
+
+    def test_a_clean_main_merge_above_a_green_head_refuses_on_its_own_red_run(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): the clean merge of main rides the proof of the head under it, and no second run is waited on.
+        # A run that finished red on the merge itself still refuses: the green parent does not cover it.
+        proven, live = self.main_merged_in_above_green_head()
+        self.rollup_reads(proven, states={live: "red: all-jobs-passed: fail"})
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a clean main merge whose own run finished red, on its parent's proof:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a clean main merge whose own run finished red:\n" + out)
+        self.assertIn("red: all-jobs-passed", out, "the refusal does not name the red own run of the clean merge:\n" + out)
+
+    def test_a_page_only_heal_above_a_green_head_refuses_on_its_own_red_run(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): the page-only heal rides the proof of the head under it. Its own run finished red, so the green parent does not cover it.
+        proven, heal = self.page_only_heal_on_stale_head()
+        self.rollup_reads(proven, states={heal: "red: all-jobs-passed: fail"})
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a page-only heal whose own run finished red, on its parent's proof:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a page-only heal whose own run finished red:\n" + out)
+        self.assertIn("red: all-jobs-passed", out, "the refusal does not name the red own run of the heal:\n" + out)
+
+    def test_a_pending_own_run_on_a_clean_main_merge_carries_the_green_parent(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): no second full run. A clean merge of main whose own run is still pending merges on its parent's proof.
+        proven, live = self.main_merged_in_above_green_head()
+        self.rollup_reads(proven, states={live: "pending: all-jobs-passed"})
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "a clean main merge with its own run pending did not merge on its parent's proof:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on the merge's own pending run:\n" + out)
+
+    def test_a_pending_own_run_on_a_page_only_heal_carries_the_green_parent(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): a page-only heal whose own run is still pending merges on the proof of the head under it.
+        proven, heal = self.page_only_heal_on_stale_head()
+        self.rollup_reads(proven, states={heal: "pending: all-jobs-passed"})
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "a page-only heal with its own run pending did not merge on its parent's proof:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on the heal's own pending run:\n" + out)
+
+    def test_a_page_only_heal_with_no_run_of_its_own_carries_the_green_parent(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): a page-only heal with no run of its own yet merges on the proof of the head under it.
+        proven, heal = self.page_only_heal_on_stale_head()
+        self.rollup_reads(proven)
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "a page-only heal with no run of its own did not merge on its parent's proof:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on a run the heal does not have:\n" + out)
+
+    def test_one_clean_main_merge_with_no_run_of_its_own_carries_the_green_parent(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): the one clean merge of main the ruling names carries the proof of its parent.
+        proven, live = self.main_merged_in_above_green_head(merges=1)
+        self.rollup_reads(proven)
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "one clean main merge above a green head did not merge on its parent's proof:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+
+    def test_two_clean_main_merges_stacked_above_a_green_head_refuse(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026) names one clean merge of main. The same green head under two stacked merges of main refuses,
+        # where one merge with the same own run state (no run yet) carries.
+        proven, live = self.main_merged_in_above_green_head(merges=2)
+        self.rollup_reads(proven)
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged two clean main merges stacked above a green head, on the head's proof:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over two stacked clean main merges:\n" + out)
+
+    def test_an_unread_own_run_on_a_clean_main_merge_refuses_as_unknown(self):
+        # A merge's own run the tool could not read is unknown: the green parent does not stand in for it, and nothing is pushed or merged.
+        proven, live = self.main_merged_in_above_green_head()
+        self.rollup_reads(proven, states={live: "unknown (the read of the merge's checks failed: HTTP 500)"})
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a clean main merge whose own run was unread, on its parent's proof:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a clean main merge whose own run was unread:\n" + out)
+        self.assertIn("unknown", out, "the refusal does not name the unread own run:\n" + out)
+
+    def test_an_unread_own_run_on_a_page_only_heal_refuses_as_unknown(self):
+        # A page-only heal whose own run the tool could not read is unknown: the green parent does not stand in for it, and nothing is pushed or merged.
+        proven, heal = self.page_only_heal_on_stale_head()
+        self.rollup_reads(proven, states={heal: "unknown (the read of the heal's checks failed: HTTP 500)"})
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a page-only heal whose own run was unread, on its parent's proof:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a page-only heal whose own run was unread:\n" + out)
+        self.assertIn("unknown", out, "the refusal does not name the unread own run:\n" + out)
 
     def test_relayed_yes_holds_after_heal_under_list(self):
         # The relayed yes names H, the proven head. H' is H with main merged in and the page rebuilt: a heal commit. Under a named list the yes
@@ -11116,6 +11251,26 @@ class RecordsRebuild(RecordsEnv):
         self.assertNotIn("refuses it", line, out)
         self.assertEqual(self.refs(), before)
         self.assertEqual(self.worktrees(), 1)
+
+    def test_the_ready_preview_says_confirm_refuses_a_stale_page_on_a_red_or_pending_head_under_a_named_list(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): a stale page heals under a named list only on a green proven head. The preview of a red or
+        # pending head says confirm refuses it, names that state, and never says confirm heals it.
+        self.kinds_off()
+        self.set_required(["checks"], kinds=[])
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        head = self.head()
+        for state in ("red: checks", "pending: checks"):
+            with self.subTest(state=state):
+                self.rollup_reads(head, state)
+                before = self.refs()
+                rc, out = self.run_merge("7")
+                self.assertEqual(rc, 0, out)
+                line = self.preview_line(out, "records")
+                self.assertIn("--confirm refuses it", line, out)
+                self.assertIn("(" + state + ")", line, "the preview does not name the head's state " + state + ":\n" + out)
+                self.assertNotIn("heals it", line, "the preview says confirm heals a page on a head that is " + state + ":\n" + out)
+                self.assertEqual(self.refs(), before)
+                self.assertEqual(self.worktrees(), 1)
 
     def test_the_ready_preview_names_the_revert_for_a_claim_head_on_a_base_with_no_stamp_kinds(self):
         self.kinds_off()
