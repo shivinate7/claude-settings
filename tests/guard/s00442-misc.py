@@ -31,6 +31,20 @@ os.makedirs(TEMP_ROOT, exist_ok=True)
 ROOT = os.path.join(TEMP_ROOT, "%d-%s" % (os.getpid(), uuid.uuid4().hex))
 os.makedirs(ROOT)
 sweep_run_folders(TEMP_ROOT, ROOT)
+
+# The scratchpad base the guard reads from CLAUDE_SCRATCHPAD_BASE in place of the harness base
+# (hooks/guard_shared_tree.py scratchpad_temp_bases). A case that needs the real layout builds its scratchpad
+# under this folder, which sits in this run's folder under the repo's one temp root (TEMP_ROOT), and names the
+# base through `env`. Nothing is written under the harness base itself. The guard's TMPDIR is SCRATCH_TEMP, a
+# folder that exists and sits outside the base: a missing TMPDIR falls back to /tmp, and the system temp holds
+# ROOT, so either would make the base read as gettempdir() and hide the difference.
+SCRATCH_BASE = os.path.join(ROOT, "scratch-base")
+SCRATCH_TEMP = os.path.join(ROOT, "scratch-temp")
+os.makedirs(SCRATCH_TEMP, exist_ok=True)
+SCRATCH_BASE_ENV = {"CLAUDE_SCRATCHPAD_BASE": SCRATCH_BASE, "TMPDIR": SCRATCH_TEMP, "TEMP": SCRATCH_TEMP,
+                    "TMP": SCRATCH_TEMP}
+
+
 CFG = os.path.join(ROOT, "cfg")            # stands in for the config directory
 LOGDIR = os.path.join(ROOT, "logcfg")      # a second config directory, for the log case
 PROJ = os.path.join(ROOT, "proj")          # an ordinary project with its own .claude folder
@@ -2741,6 +2755,23 @@ lazy_fixture([GITMAIN, GITWT, AGENTWT, FARWT, SYMWT, DECOYMAIN], _build_gitmain)
 lazy_fixture([SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT, SUBJSTASHDIRTY,
               SUBJSTAGED], _build_subject)
 lazy_fixture([PRIVREPO], _build_privrepo)
+
+# The scratchpad base's dirty repositories (SCRATCH_BASE, named by CLAUDE_SCRATCHPAD_BASE): one under this session's
+# own scratchpad, one under another session's. The same dirty state as PRIVREPO, so a discard is a real one.
+BASE_PRIV_OWN = os.path.join(SCRATCH_BASE, "priv-proj", FAKE_SESSION, "scratchpad", "priv")
+BASE_PRIV_OTHER = os.path.join(SCRATCH_BASE, "priv-proj", OTHER_SESSION, "scratchpad", "priv")
+
+
+def _build_base_privrepos():
+    """BASE_PRIV_OWN and BASE_PRIV_OTHER: a dirty repository each, as _build_privrepo makes PRIVREPO."""
+    for where in (BASE_PRIV_OWN, BASE_PRIV_OTHER):
+        make_repo(where, {"f.txt": "base\n", "keep.txt": "base\n"})
+        write(os.path.join(where, "f.txt"), "uncommitted\n")
+        write(os.path.join(where, "new.txt"), "untracked\n")
+        _require_dirty(where, "f.txt", "new.txt", "keep.txt")
+
+
+lazy_fixture([BASE_PRIV_OWN, BASE_PRIV_OTHER], _build_base_privrepos)
 lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTROFF, PTROFFCFG, PTRAHEAD, PTRAHEADCFG, PTRNOORIGIN,
               PTRNOORIGINCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND], _build_pointer)
 lazy_fixture([CONFLICT], _build_conflict)
