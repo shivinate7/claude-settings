@@ -1716,7 +1716,9 @@ class HangTests(unittest.TestCase):
         repo, sha, _log = hang_fixture()
         row = replay(repo, sha, JS_PROFILE, suite_timeout=5)
         self.assertEqual(row["status"], "OK")
-        self.assertEqual((row["made"], row["killed"], row["crashed"], row["survived"]), (4, 2, 2, 0))
+        self.assertEqual((row["made"], row["killed"], row["survived"]), (4, 2, 0))
+        # A mutant that hits its time cap is a timeout, counted apart from crashed (decision `mutation-report-scores-suites`).
+        self.assertGreaterEqual(row.get("timeout", 0), 1, "the hung mutant is counted as crashed, not as timeout: %r" % row)
 
 
 class ToolTests(unittest.TestCase):
