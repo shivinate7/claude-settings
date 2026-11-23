@@ -1545,6 +1545,11 @@ MUTATIONS = [
      'def unquoted_at(text: str, index: int) -> bool:\n    return True', "guard",
      "silent-write scanner: a discard named before a space inside a message is text"),
 
+    ("silent-write: the dropped-line filter arm no longer denies, so grep -v after a write is silent",
+     '        if dropped:\n            return matched, "filter", subcommand',
+     '        if False:\n            return matched, "filter", subcommand', "guard",
+     "silent-write filter: grep -v after a push's output drops the lines, denies"),
+
     # ---- the PostToolUse watch. These break `hooks/config_watch.py` and must be killed by
     # `hooks/test_config_watch.py`, which writes the cap for real and reads the file back.
     ("watch: never restore, only report",
