@@ -20,6 +20,7 @@ Run with:  python3 lint/test_ci_scope.py -v
 import ast
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -1737,6 +1738,204 @@ class WindowsMergeAndRestFlags(unittest.TestCase):
             with self.subTest(path=path):
                 got = run([path])
                 self.assertTrue("true" in (got["checks_windows_merge"], got["checks_windows_rest"]), f"{path} sets neither flag: {got}")
+
+
+# The Windows shard import scan (F3, F4). A merge or rest shard runs its suites, and a suite imports or runs repo files. A diff that
+# touches one of those files must set that shard's flag, or the shard is skipped and the change is not run there. The suites are the
+# run lines of the jobs that SUITE_FLAG maps to each flag (lint/test_windows_split.py), read from checks.yml. The closure is an `ast`
+# walk of their imports, plus the literal paths of subprocess calls. Stated limits: a subprocess path built with a join or a variable
+# is not read; a .mjs or .sh suite has its own file read but not its imports; a bare import name that matches two repo files is listed.
+ROOT = os.path.normpath(os.path.join(HERE, ".."))
+SHARD_FLAGS = ("checks_windows_merge", "checks_windows_rest", "checks_windows_rest_2")
+SHARD_INTERPRETERS = ("python", "python3", "node", "bash")
+SHARD_SUBPROCESS = ("run", "Popen", "call", "check_call", "check_output")
+SHARD_SKIP_DIRS = ("__pycache__", "node_modules")  # dependencies and caches, never a suite's import; dot-folders are skipped too
+# The files each shard must flag, named by hand. Each must set its shard's flag. The derived cases below find these and more.
+NAMED_MERGE_MISSES = ("hooks/guard.py", "hooks/merge_options.py", "hooks/decision_watch.py", "hooks/required_check.py",
+                      "janitor/sweep.py", "lint/_test_temp.py", "lint/ruled_store.py", "lint/stale_cites.py", "lint/test_rule_audit.py",
+                      "testing/shallow_clone.py", "testing/proc_fixture.py")
+NAMED_REST_MISSES = ("testing/cost_probe.py", "lint/_test_temp.py", "lint/test_ruled_store.py", "testing/proc_fixture.py",
+                     "lint/test_now_central.py", "lint/test_report_guard_falsifier.py", "lint/test_hook_platform_exit.py")
+_SHARD_SCAN = {}   # the scan, built on first use inside a test
+_SHARD_FLAGS = {}  # path -> run()'s output for a diff that touches that path alone, so each path runs once
+
+
+def shard_flags_of(path):
+    """run()'s output for a diff that touches `path` alone, cached: a named case and the closure share the one run."""
+    if path not in _SHARD_FLAGS:
+        _SHARD_FLAGS[path] = run([path])
+    return _SHARD_FLAGS[path]
+
+
+def repo_index(root):
+    """-> (files, by_base): every file under root as a `/` path, and the .py modules by basename. The index is a walk, not git: a
+    red-run copy holds no .git."""
+    files, by_base = set(), {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in SHARD_SKIP_DIRS]
+        for name in filenames:
+            rel = os.path.relpath(os.path.join(dirpath, name), root).replace(os.sep, "/")
+            files.add(rel)
+            if name.endswith(".py"):
+                by_base.setdefault(name[:-3], []).append(rel)
+    return files, by_base
+
+
+def import_targets(name, importer, files, by_base):
+    """The repo files an import name stands for. A dotted name is a path from the importer's folder or from the root (a/b.py, or
+    a/b/__init__.py). A bare name that neither holds is every repo module of that name: the suites put hooks/, lint/ and testing/ on
+    sys.path, so the module can sit in any of them."""
+    rel = name.replace(".", "/")
+    folder = os.path.dirname(importer)
+    hits = []
+    for cand in (rel + ".py", rel + "/__init__.py"):
+        for base in (folder, ""):
+            q = os.path.normpath(os.path.join(base, cand)).replace(os.sep, "/")
+            if q in files and q not in hits:
+                hits.append(q)
+    if not hits and "." not in name:
+        hits = list(by_base.get(name, []))
+    return hits
+
+
+def subprocess_paths(tree):
+    """The string constants in the positional arguments of a subprocess call (subprocess.run and its kin, os.system, os.popen,
+    os.spawn*): the literal paths the call runs. A path built with a join or a variable is not read here."""
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name)):
+            continue
+        owner, attr = node.func.value.id, node.func.attr
+        if not ((owner == "subprocess" and attr in SHARD_SUBPROCESS) or (owner == "os" and (attr in ("system", "popen") or attr.startswith("spawn")))):
+            continue
+        for arg in node.args:
+            for sub in ast.walk(arg):
+                if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                    yield sub.value
+
+
+def shard_closure(seeds, root, files, by_base):
+    """-> (closure, unreadable, ambiguous): the repo files the seed suites import or run, transitively, sorted. A .py file is parsed by
+    ast; another kind is a node with no imports read. A .py that cannot be read or parsed is listed in unreadable, never skipped. A bare
+    import name with two or more repo files is listed in ambiguous, and each of them joins the closure."""
+    closure, todo, unreadable, ambiguous = set(seeds), list(seeds), [], []
+    while todo:
+        path = todo.pop()
+        if not path.endswith(".py"):
+            continue
+        try:
+            with open(os.path.join(root, path), encoding="utf-8") as f:
+                tree = ast.parse(f.read(), path)
+        except (OSError, SyntaxError, UnicodeDecodeError) as ex:
+            unreadable.append("%s (%s)" % (path, type(ex).__name__))
+            continue
+        reads = []
+        for name in imported_names(tree):
+            hits = import_targets(name, path, files, by_base)
+            if len(hits) > 1:
+                ambiguous.append("%s imports %s: %s" % (path, name, ", ".join(hits)))
+            reads += hits
+        reads += [p for p in subprocess_paths(tree) if p in files]
+        for hit in reads:
+            if hit not in closure:
+                closure.add(hit)
+                todo.append(hit)
+    return sorted(closure), unreadable, ambiguous
+
+
+def shard_suites(root):
+    """-> {flag: sorted suite paths}: the script that each run line of the jobs SUITE_FLAG maps to the flag runs, the first path after an
+    interpreter in SHARD_INTERPRETERS. Read from the repo's checks.yml with the one run-line reader (lint/test_windows_split.py)."""
+    with open(os.path.join(root, ".github", "workflows", "checks.yml"), encoding="utf-8") as f:
+        text = f.read()
+    out = {}
+    for job, flag in split.SUITE_FLAG.items():
+        for st in step_blocks(job_block(text, job)):
+            for line in split.run_lines(st):
+                toks = shlex.split(line)
+                for i, tok in enumerate(toks[:-1]):
+                    if tok in SHARD_INTERPRETERS:
+                        out.setdefault(flag, set()).add(toks[i + 1])
+                        break
+    return {flag: sorted(paths) for flag, paths in out.items()}
+
+
+def shard_scan():
+    """-> {files, suites, closures, unreadable, ambiguous}, built on first use: the repo index, each flag's suites and closure, and the
+    files the scan could not read. The ci-scope runs are shard_flags_of, one per path in a closure."""
+    if not _SHARD_SCAN:
+        files, by_base = repo_index(ROOT)
+        suites = shard_suites(ROOT)
+        closures, unreadable, ambiguous = {}, [], []
+        for flag in SHARD_FLAGS:
+            closures[flag], bad, amb = shard_closure(suites.get(flag, []), ROOT, files, by_base)
+            unreadable += bad
+            ambiguous += amb
+        _SHARD_SCAN.update(files=files, suites=suites, closures=closures,
+                           unreadable=sorted(set(unreadable)), ambiguous=sorted(set(ambiguous)))
+    return _SHARD_SCAN
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class WindowsShardImports(unittest.TestCase):
+    """F3, F4: a file that a Windows shard's suite imports or runs sets that shard's flag. The controls: a merge arm sets the merge flag,
+    and a path no arm names sets every shard flag."""
+
+    def assert_every_read_file_sets(self, flag, label):
+        scan = shard_scan()
+        # Scope first (P7): an empty suite list would leave the derived set empty, and the case would pass with nothing checked.
+        self.assertTrue(scan["suites"].get(flag), f"no suite is read for {flag}, so the derived set is empty")
+        unflagged = [p for p in scan["closures"][flag] if shard_flags_of(p)[flag] != "true"]
+        self.assertEqual(unflagged, [], f"{len(unflagged)} file(s) that {label} import or run set no {flag} flag, so a diff to one "
+                         f"skips {label}: {', '.join(unflagged)}")
+
+    def test_each_shard_flag_reads_suites_that_are_repo_files(self):
+        scan = shard_scan()
+        for flag in SHARD_FLAGS:
+            with self.subTest(flag=flag):
+                self.assertTrue(scan["suites"].get(flag), f"{flag} reads no suite: its jobs run no script")
+                missing = [p for p in scan["suites"][flag] if p not in scan["files"]]
+                self.assertEqual(missing, [], f"{flag} runs script(s) that are not repo files: {missing}")
+
+    def test_every_file_the_scan_reads_parses(self):
+        # Named failure: a file that cannot be read or parsed is listed, not skipped, so its imports are unknown.
+        unreadable = shard_scan()["unreadable"]
+        self.assertEqual(unreadable, [], f"these files cannot be read or parsed, so their imports are not scanned: {unreadable}")
+
+    def test_each_bare_import_name_matches_one_repo_module(self):
+        # Named failure: a bare name that matches two repo modules leaves the closure a guess between them.
+        ambiguous = shard_scan()["ambiguous"]
+        self.assertEqual(ambiguous, [], f"these bare import names match two repo modules: {ambiguous}")
+
+    def test_a_merge_arm_path_sets_the_merge_flag(self):
+        # Control: merge/merge.py is in the merge arm of ci-scope.sh, which sets the merge flag.
+        self.assertEqual(shard_flags_of("merge/merge.py")["checks_windows_merge"], "true", "merge/merge.py sets no checks_windows_merge flag")
+
+    def test_a_path_no_arm_names_sets_every_shard_flag(self):
+        # Control: the default arm of ci-scope.sh sets every flag for a path no arm names.
+        got = shard_flags_of("zz-unnamed/never-a-real-path.xyz")
+        self.assertEqual([f for f in SHARD_FLAGS if got[f] != "true"], [], f"a path no arm names leaves a shard flag off: {got}")
+
+    def test_each_named_merge_miss_sets_the_merge_flag(self):
+        for path in NAMED_MERGE_MISSES:
+            with self.subTest(path=path):
+                self.assertEqual(shard_flags_of(path)["checks_windows_merge"], "true",
+                                 f"{path} is read by the merge shards but sets no checks_windows_merge flag")
+
+    def test_each_named_rest_miss_sets_both_rest_flags(self):
+        for path in NAMED_REST_MISSES:
+            with self.subTest(path=path):
+                got = shard_flags_of(path)
+                for flag in ("checks_windows_rest", "checks_windows_rest_2"):
+                    self.assertEqual(got[flag], "true", f"{path} is read by the rest shards but sets no {flag} flag")
+
+    def test_every_file_the_merge_shards_read_sets_the_merge_flag(self):
+        self.assert_every_read_file_sets("checks_windows_merge", "the merge shards")
+
+    def test_every_file_the_rest_shard_reads_sets_the_rest_flag(self):
+        self.assert_every_read_file_sets("checks_windows_rest", "the rest shard")
+
+    def test_every_file_the_rest_2_shard_reads_sets_the_rest_2_flag(self):
+        self.assert_every_read_file_sets("checks_windows_rest_2", "the rest-2 shard")
 
 
 if __name__ == "__main__":
