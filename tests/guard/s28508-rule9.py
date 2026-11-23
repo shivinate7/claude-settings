@@ -210,8 +210,6 @@ for _name, _verdict, _script in (
          _step_flow('"Try 3 of 3. Finish the fix."', 'agentType: "builder", model: "opus"')),
         ("builder Round 3 on sonnet, its own row", "allow",
          _step_flow('"Round 3 of 3. Finish the fix."', 'agentType: "builder", model: "sonnet"')),
-        ("builder Round 3 with no model, the pin runs sonnet", "allow",
-         _step_flow("'Round 3 of 3. Finish the fix.'", "agentType: 'builder'")),
         ("builder Round 3 on opus", "allow",
          _step_flow('"Round 3 of 3. Finish the fix."', 'agentType: "builder", model: "opus"')),
         ("builder Round 3 after a role word on line one, on sonnet", "allow",
@@ -222,8 +220,6 @@ for _name, _verdict, _script in (
          "await agent({prompt: 'Round 3 of 3. Finish.', agentType: 'builder', model: 'sonnet'})"),
         ("builder Round 2 on sonnet", "allow",
          _step_flow("'Round 2 of 3. Continue the fix.'", "agentType: 'builder', model: 'sonnet'")),
-        ("reviewer Round 1 with no model", "allow",
-         _step_flow("'Round 1 of 3. Check the diff.'", "agentType: 'reviewer'")),
         ("reviewer Round 2 with the model in a variable", "allow",
          _step_flow("'Round 2 of 3. Re-check.'", "agentType: 'reviewer', model: m")),
         ("reviewer Round 2 with a shorthand model", "allow",
@@ -232,10 +228,6 @@ for _name, _verdict, _script in (
          _step_flow("'Round 2 of 3. Re-check.'", "agentType: 'reviewer', ...opts")),
         ("reviewer Round 2 with a templated model", "allow",
          _step_flow("'Round 2 of 3. Re-check.'", "agentType: 'reviewer', model: `${fam}`")),
-        ("reviewer with the prompt in a variable", "allow",
-         _step_flow("brief", "agentType: 'reviewer'")),
-        ("reviewer with a concatenated prompt", "allow",
-         _step_flow("'Round 2 of 3. ' + rest", "agentType: 'reviewer'")),
         ("reviewer Round 2 in an interpolated template prompt", "deny",
          _step_flow("`Round 2 of 3. ${rest}`", "agentType: 'reviewer'")),
         ("reviewer Round 2 on line two of an interpolated template on haiku", "deny",
@@ -243,14 +235,6 @@ for _name, _verdict, _script in (
                     "agentType: 'reviewer', model: 'haiku'")),
         ("reviewer Round 2 as an interpolated prompt key with no model", "deny",
          "await agent({prompt: `Round 2 of 3. Branch ${b}`, agentType: 'reviewer'})"),
-        ("reviewer whose marker is only interpolated", "allow",
-         _step_flow("`${'Round 2 of 3.'} Re-check.`", "agentType: 'reviewer'")),
-        ("reviewer whose round number is interpolated", "allow",
-         _step_flow("`Round ${n} of 3. Re-check.`", "agentType: 'reviewer'")),
-        ("reviewer whose marker is split by an interpolation", "allow",
-         _step_flow("`Round 2${x} of 3. Re-check.`", "agentType: 'reviewer'")),
-        ("reviewer Round 1 in an interpolated template", "allow",
-         _step_flow("`Round 1 of 3. Branch ${b}`", "agentType: 'reviewer'")),
         ("reviewer Round 2 after an escaped newline and tab", "deny",
          _step_flow("'ctx\\n\\tRound 2 of 3.'", "agentType: 'reviewer'")),
         ("reviewer Round 2 in a template prompt with no model", "deny",
@@ -263,12 +247,29 @@ for _name, _verdict, _script in (
          "await agent({prompt: 'Round 2 of 3. Re-check.', agentType: 'reviewer', model: 'sonnet'})"),
         ("reviewer with a ternary agentType", "allow",
          _step_flow("'Round 2 of 3. Re-check.'", "agentType: x ? 'reviewer' : 'builder'")),
-        ("prose round 2 only", "allow",
-         _step_flow("'The round 2 of 3 notes are in the record.'", "agentType: 'reviewer'")),
         ("a commented-out Round 2 call", "allow",
          "// agent('Round 2 of 3.', {agentType: 'reviewer'})\nawait agent('x', {model: 'sonnet'})")):
     add("floor step-up: Workflow %s is %s" % (_name, "denied" if _verdict == "deny" else "allowed"),
         _verdict, *((STEP_UP,) if _verdict == "deny" else ()), tool="Workflow", script=_script)
+# Re-pointed from allow (decision agent-model-cap, the Workflow row): a call whose literal agentType has a row and that names
+# NO model is refused under agent-role-model, whatever its brief. These were pinned as the skip, and now expect the deny.
+# The step-up loop above no longer carries them. A model in a variable, a shorthand, a spread or a ternary agentType stays
+# allowed above: the static read cannot see the model or the role, so it skips the call. Failure class: a false allow (a
+# no-model Workflow call with a row runs the parent's model, as the incident of 2026-11-21 did).
+for _name, _script in (
+        ("reviewer Round 1", _step_flow("'Round 1 of 3. Check the diff.'", "agentType: 'reviewer'")),
+        ("builder Round 3", _step_flow("'Round 3 of 3. Finish the fix.'", "agentType: 'builder'")),
+        ("reviewer with the prompt in a variable", _step_flow("brief", "agentType: 'reviewer'")),
+        ("reviewer with a concatenated prompt", _step_flow("'Round 2 of 3. ' + rest", "agentType: 'reviewer'")),
+        ("reviewer whose marker is only interpolated", _step_flow("`${'Round 2 of 3.'} Re-check.`", "agentType: 'reviewer'")),
+        ("reviewer whose round number is interpolated", _step_flow("`Round ${n} of 3. Re-check.`", "agentType: 'reviewer'")),
+        ("reviewer whose marker is split by an interpolation", _step_flow("`Round 2${x} of 3. Re-check.`", "agentType: 'reviewer'")),
+        ("reviewer Round 1 in an interpolated template", _step_flow("`Round 1 of 3. Branch ${b}`", "agentType: 'reviewer'")),
+        ("prose round 2 only", _step_flow("'The round 2 of 3 notes are in the record.'", "agentType: 'reviewer'")),
+        ("reviewer with a fix verifier in a variable brief",
+         "const brief = '%s. Re-check the diff.';\n" % FIX_VERIFIER + _step_flow("brief", "agentType: 'reviewer'"))):
+    add("floor step-up: Workflow %s, with no model, is denied under agent-role-model" % _name, "deny", "agent-role-model",
+        tool="Workflow", script=_script)
 # A reviewer's last step-up is a per-spawn word, so the Opus ceiling refuses it on a Workflow agent() call as on an
 # Agent spawn (decision agent-model-cap).
 add("floor step-up: Workflow reviewer Round 3 on opus is denied under agent-model-cap", "deny",
@@ -284,9 +285,6 @@ add("floor step-up: Workflow reviewer with a literal fix verifier on haiku is de
     tool="Workflow", script=_step_flow("'%s. Re-check the diff.'" % FIX_VERIFIER, "agentType: 'reviewer', model: 'haiku'"))
 add("floor step-up: Workflow reviewer with a literal fix verifier on sonnet is allowed", "allow",
     tool="Workflow", script=_step_flow("'%s. Re-check the diff.'" % FIX_VERIFIER, "agentType: 'reviewer', model: 'sonnet'"))
-add("floor step-up: Workflow reviewer with a fix verifier in a variable brief and no model is allowed, the static read skips it",
-    "allow", tool="Workflow",
-    script="const brief = '%s. Re-check the diff.';\n" % FIX_VERIFIER + _step_flow("brief", "agentType: 'reviewer'"))
 add("floor step-up: Workflow reviewer with a fix verifier and a model in a variable is allowed, the static read skips it",
     "allow", tool="Workflow", script=_step_flow("'%s. Re-check the diff.'" % FIX_VERIFIER, "agentType: 'reviewer', model: m"))
 add("floor step-up: Workflow reviewer with a fix verifier and a spread is allowed, the static read skips it", "allow",
