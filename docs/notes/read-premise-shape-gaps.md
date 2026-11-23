@@ -1,1 +1,0 @@
-- read-premise-shape-gaps: decision premise-format has four gaps. A bare `example.com:8080` passes (unverified; hooks/test_question_form.py:293 pins only the `http://` form). `Makefile:12` is refused (unverified). No test pins `//host.com:80` (grep: none). docs/decisions/premise-format.md line 15 says "and the commit". Seen: 2026-11-23 x1
