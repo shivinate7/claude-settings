@@ -5940,6 +5940,7 @@ class GhHalf(Env):
     def test_a_pending_run_of_a_workflow_without_the_required_job_does_not_hold_the_wait(self):
         """A pending run of a workflow that does not define a required job does not hold the wait. Ruling: step merge-waits-required-only, wait only on the required check."""
         push_base(self, {".github/workflows/ci.yml": workflow_text("ci", "ci")})  # a readable folder whose one workflow has no required job
+        self.proven_parent()  # the head is a clean merge of main: its proof is read on the parent the fake gh must know
         self.set(runs_seq=[[("ci", "in_progress", "")], [("ci", "completed", "success")]])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
@@ -5949,6 +5950,7 @@ class GhHalf(Env):
         # The folder defines the required job `checks`, so its pending run makes the head pending: refused at once, the later complete run is never read.
         push_base(self, {".github/workflows/checks.yml": workflow_text("checks", "checks")})
         before = self.head()
+        self.proven_parent()  # the head is a clean merge of main: its proof is read on the parent the fake gh must know
         self.set(runs_seq=[[("checks", "in_progress", "")], [("checks", "completed", "success")]])
         rc, out = self.go()
         self.assertEqual(rc, 1, out)
@@ -6105,6 +6107,7 @@ class GhHalf(Env):
 
     def test_a_partial_merge_block_takes_the_defaults_for_the_missing_fields(self):
         put_base_config(self, json.dumps({"defaultBranch": "main", "merge": {"method": "squash"}}))
+        self.proven_parent()  # put_base_config merges main into the head, a clean base merge whose proof is read on its parent
         self.set(contexts=["checks"])
         self.host = None  # main builds the Host from the filled defaults: requiredChecks "protection"
         rc, out = self.run_merge("7", "--confirm")
