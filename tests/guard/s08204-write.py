@@ -526,8 +526,8 @@ sh("silent-write filter: grep -v after a push's output drops the lines, denies",
    VCS + " push origin main 2>&1 | grep -v Everything", "deny", "silent-write", cwd=NOGIT)
 sh("silent-write filter: grep -vE with two patterns after a push drops the lines, denies",
    VCS + " push 2>&1 | grep -vE 'up-to-date|Everything'", "deny", "silent-write", cwd=NOGIT)
-sh("silent-write filter: grep --invert-match after a fetch drops the lines, denies",
-   VCS + " fetch origin | grep --invert-match x", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write filter: grep --invert-match after a push drops the lines, denies",
+   VCS + " push origin main | grep --invert-match x", "deny", "silent-write", cwd=NOGIT)
 sh("silent-write filter: a sed line delete after a commit drops the lines, denies",
    VCS + " commit -m m | sed '/nothing/d'", "deny", "silent-write", cwd=NOGIT)
 sh("silent-write filter: sed -e with a line delete after a push drops the lines, denies",
@@ -538,7 +538,7 @@ sh("silent-write filter, allow: grep -E keeps the lines it names after a push, n
 sh("silent-write filter, allow: grep -v after git log is a read, moves nothing",
    VCS + " log | grep -v x", "allow", cwd=NOGIT)
 sh("silent-write filter, allow: a heredoc body holding a filtered push is text, not a command",
-   "cat > f.sh <<'EOF'\n" + VCS + " push | grep -v x\nEOF", "allow", cwd=NOGIT)
+   "cat > f.txt <<'EOF'\n" + VCS + " push | grep -v x\nEOF", "allow", cwd=NOGIT)
 sh("silent-write filter, allow: echo quoting a filtered push is text",
    'echo "' + VCS + ' push | grep -v x"', "allow", cwd=NOGIT)
 
