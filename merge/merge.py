@@ -3761,7 +3761,7 @@ def mutate_report_counts(out):
     table of hooks/mutate_shared.format_report (columns file mutants killed crashed timeout survived rate silent; unknown is crashed + timeout: a
     timed-out mutant is no kill and no survivor, so it still fails the lint), and the tally line that run_mutants prints, which the job's own command
     ends with (`K of N mutations killed (S survived, W wrong cause, X skipped, U unknown, T timeout)`; `, U unknown` and `, T timeout` print only when
-    not 0, and `tally` is True). A four-column table (from before the timeout column) is read as no report: the run's own stdout is the only input,
+    not 0, and `tally` is True). A table with four count columns does not match, so it reads as no report and fails the lint: the run's own stdout is the only input,
     and a resumed leg reuses saved per-mutant verdicts, never a saved report. The tally's counts are read by their labels, not by the whole line, so this
     parser holds no copy of the format that hooks/mutate_shared.run_mutants prints (that module's edit is refused to a builder: a debt of one
     shared home). `wrong` is the tally's wrong-cause count, 0 for a table. `unread` counts the table's `UNKNOWN (reason)` rows: a file that read no mutant."""
