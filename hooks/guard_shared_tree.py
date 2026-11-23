@@ -337,7 +337,7 @@ def shared_tree_hit(segment: str) -> str:
 #
 # The outcome this rule protects is the OTHER session's tree, so the reflog does not make the
 # named-commit form safe: it makes it whole for one tree only. `git reset --hard HEAD~1` therefore
-# keeps today's answer, deny in a shared checkout and ask in a worktree, whatever the tree holds.
+# keeps today's answer, deny in a shared checkout and a refusal to commit on a branch in a worktree, whatever the tree holds.
 # (MEASURED on 1be660c in a pristine repository with an empty
 # porcelain: `git reset --hard HEAD` answered allow, and so did `git reset --hard HEAD~1`.)
 RESTORE_OPT_WITH_VALUE = {"-s", "--source", "--conflict", "--pathspec-from-file"}
@@ -815,6 +815,7 @@ TREE_DENY_REASON = (
     "Commit work you must set aside on your own branch, never a stash: a stash entry "
     "belongs to no branch, and it outlives no session that holds its tag. "
     "Run the command in a worktree of your own when the tree must change. "
+    "(decision guard-remedy-not-to-owner, a guard never asks the owner) "
     + guard_core.COMPLY_TAIL
 )
 _MOVES_SHELL = re.compile(
@@ -891,6 +892,7 @@ TREE_WORKTREE_REFUSE_REASON = (
     "Remedy: commit the work on a branch of your own, never a stash. "
     "A per-file discard in a worktree runs when the command holds no cd: "
     "git -C <lane> restore <file>. "
+    "(decision guard-remedy-not-to-owner, a guard never asks the owner) "
     + guard_core.COMPLY_TAIL
 )
 
@@ -916,9 +918,9 @@ STACK_DENY_REASON = (
 # `push`, `save` and a bare `git stash` PUT work onto that same one ref. A worktree limits a
 # `reset --hard` or a `restore`, because those write the WORKTREE's own tree. They do not limit
 # a stash push, because `refs/stash` is not the worktree's own ref: it is the one the primary
-# checkout and every other linked worktree already share (MEASURED above, TREE_ASK_REASON's own
+# checkout and every other linked worktree already share (shown above, TREE_WORKTREE_REFUSE_REASON's own
 # comment). A push from a worktree lands on the same branchless, one-entry-wide stack a `pop` or
-# an `apply` would take from, so the worktree exemption that TREE_ASK_REASON grants never
+# an `apply` would take from, so the worktree exemption that TREE_WORKTREE_REFUSE_REASON grants never
 # applies here.
 PUSH_DENY_REASON = (
     "Rule (shared trees): this command puts work onto the stash stack, and that stack is one "

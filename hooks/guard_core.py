@@ -1432,7 +1432,7 @@ def pathspec_from_file_flag(arg: str) -> bool:
 # ------------------------------------------------------------------ which tree the command runs in
 #
 # THE COMMAND IS JUDGED WHERE IT RUNS, NOT WHERE THE HOOK LIVES. A lane is built in a worktree and a
-# discard there loses only that lane's own work, so a worktree earns an "ask". The shared checkout is
+# discard there loses only that lane's own work, so a worktree earns a refusal that tells it to commit on its own branch. The shared checkout is
 # the owner's editor and every other session, so a discard there earns a "deny".
 #
 # The directory is the last `cd <path>` in the command, or a `git -C <path>`, or the shell's own cwd.
@@ -2330,7 +2330,7 @@ COMPLY_TAIL = "If this refusal looks wrong for your task, comply anyway and say 
 
 def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None, on_lift=None,
            continue_on_lift: bool = False):
-    """Print a deny or an ask and exit, unless an owner override lifts it (decision
+    """Print a deny (an ask only for the agent-model cap write) and exit, unless an owner override lifts it (decision
     owner-override). A lifted act prints one context line and no decision, so the normal permission flow runs. The
     veto runs before the override is taken, so a call that also holds a never-lifted act spends no override.
     spawn_role is set only on the Opus spawn refusal, the one refusal an Opus override may lift.

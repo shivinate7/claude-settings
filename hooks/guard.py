@@ -13,7 +13,7 @@ JSON object on stdin and answers on stdout.
 
   stdin  : {"tool_name": str, "tool_input": {...}, "cwd": str}
   allow  : print nothing, exit 0
-  refuse : print one hookSpecificOutput object with "deny" or "ask", exit 0; when the owner
+  refuse : print one hookSpecificOutput object with "deny" ("ask" only for the agent-model cap write), exit 0; when the owner
            override lifts the refusal, print nothing, exit 0 (the allow output)
 
 Fail open. Unreadable input, a payload that is not an object, or a missing key
@@ -343,7 +343,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        design-reviewer, refuter, a builder's third-round marker or an Explore's `Audit:` marker
                        covers it. The owner's model name lifts agent-model-floor only (owner_names_model), never this ceiling. The general override, `opus [role] <time>` or a step grant lifts the
                        spawn refusal; none lifts the settings-write ask.
-  ask-alone            deny. An ask command chained with other commands. (ask-commands-run-alone)
+  ask-alone            deny. The one remaining ask (the agent-model cap write) chained with other commands. (ask-commands-run-alone)
   guard-crash          crash. The guard itself raised. The call is allowed and the log shows it.
 
 Other tools, in `judge` order:
@@ -613,7 +613,7 @@ Every refusal names its rule and says what to do instead. The remedy never names
 command or path, because Claude would copy it as the way round (`git-remedy-never-names-target`).
 The matched text goes to the log, so a person can still see what fired.
 
-An "ask" decision puts the answer in the owner's hands. The one lift is the owner override
+Only the agent-model cap write still asks: that decision puts the answer in the owner's hands. The one lift is the owner override
 (decision owner-override): the owner types `override` as a whole prompt, and refuse() lets the
 next refused act through, or every refused act for a time. The narrower Opus override (`opus 2h`) lifts
 only the Opus spawn refusal, and so does a step grant on the lane's roadmap step (decision agent-model-cap).
@@ -749,7 +749,8 @@ while True:
         )
         _loading = "guard_push_delete"
         from guard_push_delete import (
-            DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
+            DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_BRANCH_REASON, PUSH_ASK_REASON,
+            PUSH_MAIN_BRANCH_REASON, PUSH_MAIN_REASON,
             PUSH_AGENT_REASON, PUSH_ALL_AGENT_REASON, PUSH_ALL_REASON, PUSH_REASON,
             ARCHIVE_GUARD_REASON, archive_guard_hits,
             cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_ask_hit, push_verdict,
@@ -5713,20 +5714,19 @@ def opus_without_grant(tool_input) -> bool:
 # harmless lead or tail (harmless_commands, below). The deny
 # names the command by its kind, never its text. Only the first ask command is held: it is the one that
 # printed before.
-PENDING_ASK = []   # [(rule, reason, matched, command, verdict, chained)], at most one
+PENDING_ASK = []   # [(rule, reason, matched, command, verdict)], at most one
 ASK_ALONE_REASON = ("this shell call chains a command that needs the owner's answer (%s) with "
                     "other commands. Run that command alone, in its own call, or drop it. "
                     "(decision ask-commands-run-alone, a command that asks the owner runs alone)")
 
 
-def ask_command(rule: str, reason: str, matched: str, command: str, verdict: str = "ask",
-                chained: bool = True) -> None:
+def ask_command(rule: str, reason: str, matched: str, command: str, verdict: str = "ask") -> None:
     """Hold one refusal until the other rules have run, so a deny anywhere still wins. `verdict` is what it
     prints at the end: "ask" only for the cap write (rule agent-model-cap), "deny" for the rules that once asked
-    (decision guard-remedy-not-to-owner). `chained` False keeps the refusal's own reason when the call chains other
-    commands, where True turns it into the run-alone deny (settle_ask)."""
+    (decision guard-remedy-not-to-owner). A held deny prints its own reason, chained or not; only the held ask
+    turns into the run-alone deny when the call chains other commands (settle_ask)."""
     if not PENDING_ASK:
-        PENDING_ASK.append((rule, reason, matched, rule + ", " + command, verdict, chained))
+        PENDING_ASK.append((rule, reason, matched, rule + ", " + command, verdict))
 
 
 def background_commands(segment: str) -> int:
@@ -5829,12 +5829,12 @@ def harmless_commands(text: str) -> int:
 def settle_ask(tool: str, raw: str) -> None:
     if not PENDING_ASK:
         return
-    rule, reason, matched, command, verdict, chained = PENDING_ASK[0]
+    rule, reason, matched, command, verdict = PENDING_ASK[0]
     # An interpreter heredoc (python, node, perl, ruby) is one command: its body is not counted line by line.
     # Strip the RAW command once. A second strip of stripped text reads a stray delimiter line as a new body.
     text = strip_heredoc_bodies(raw, shells_only=True)
     if count_commands(text) > 1:
-        if chained and count_commands(text) - harmless_commands(text) > 1:
+        if verdict == "ask" and count_commands(text) - harmless_commands(text) > 1:
             refuse(tool, "deny", "ask-alone", ASK_ALONE_REASON % command, matched)
     refuse(tool, verdict, rule, reason, matched)
 
@@ -5963,7 +5963,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             # only write this lane's own change to those files, so no ask.
             if names_only_files(subcommand, args, root, segment) and one_place(stripped):
                 continue
-            ask_command("shared-tree", TREE_WORKTREE_REFUSE_REASON, matched, "worktree discard", "deny", chained=False)
+            ask_command("shared-tree", TREE_WORKTREE_REFUSE_REASON, matched, "worktree discard", "deny")
             continue
         refuse(tool, "deny", "shared-tree", TREE_DENY_REASON, matched)
 
@@ -6213,7 +6213,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         for args, where, overrides in _push_calls(segment, stripped, cwd):
             verdict = push_verdict(args, where, overrides)
             if verdict == "ask":   # push_verdict's word for a forced push that may reach the default branch: denied
-                ask_command("force-push", PUSH_ASK_REASON, "git push " + " ".join(args), "forced push", "deny")
+                ask_command("force-push", PUSH_ASK_REASON if uses_merge_tool(where) else PUSH_ASK_BRANCH_REASON,
+                            "git push " + " ".join(args), "forced push", "deny")
             elif verdict:
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
             elif not read_verb("push", args):
@@ -6224,7 +6225,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 # upstream (rule push-stray-branch) is allowed. A dry run writes nothing.
                 kind = push_ask_hit(args, where, overrides)
                 if kind == "main":
-                    ask_command("push-main", PUSH_MAIN_REASON, "git push " + " ".join(args),
+                    ask_command("push-main", PUSH_MAIN_REASON if uses_merge_tool(where) else PUSH_MAIN_BRANCH_REASON,
+                                "git push " + " ".join(args),
                                 "push to the default branch", "deny")
                 elif kind == "all":
                     refuse(tool, "deny", "push-all-main", PUSH_ALL_REASON, "git push " + " ".join(args))

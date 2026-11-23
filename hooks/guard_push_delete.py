@@ -1725,6 +1725,13 @@ PUSH_MAIN_REASON = (
     "pull request with the merge tool. "
     + guard_core.COMPLY_TAIL
 )
+# The same refusal in a repo that does not use the merge tool: it has no pull request flow, so the remedy is a branch.
+PUSH_MAIN_BRANCH_REASON = (
+    "Rule (Git): this push writes the default branch, main or master "
+    "(decision guard-remedy-not-to-owner, a guard never asks the owner). "
+    "Remedy: push the commit to a branch, `git push origin HEAD:<branch>`, and name that branch in your report. "
+    + guard_core.COMPLY_TAIL
+)
 PUSH_ALL_REASON = (
     "Rule (Git): this push sends every branch, and it may update the default branch on the remote: the "
     "remote-tracking ref for it is missing or differs from the local one (rule push-all-main, decision plain-push-asks). "
@@ -1745,7 +1752,16 @@ PUSH_AGENT_REASON = (
 PUSH_ASK_REASON = (
     "Rule (Git): this forced push may overwrite the history of the default branch, or its target is "
     "unreadable. A retry would force the same branch again. "
-    "Remedy: push the lane's own branch by name, `git push origin HEAD:<lane-branch>`, and open a pull request. "
+    "Remedy: push the lane's own branch by name, `git push origin HEAD:<lane-branch>`, and open a pull request "
+    "(decision guard-remedy-not-to-owner, a guard never asks the owner). "
+    + guard_core.COMPLY_TAIL
+)
+# The same refusal in a repo that does not use the merge tool: the branch is named in the report.
+PUSH_ASK_BRANCH_REASON = (
+    "Rule (Git): this forced push may overwrite the history of the default branch, or its target is "
+    "unreadable. A retry would force the same branch again "
+    "(decision guard-remedy-not-to-owner, a guard never asks the owner). "
+    "Remedy: push the commit to a branch, `git push origin HEAD:<branch>`, and name that branch in your report. "
     + guard_core.COMPLY_TAIL
 )
 
