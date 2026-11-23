@@ -291,6 +291,10 @@ FORM_VARIANTS = [
      parts(based=["Based on (read): http://localhost:8080"]), (FORM_RULE, "path:line")),
     ("a read premise whose only cite is a URL with a dotted host and a port is refused",
      parts(based=["Based on (read): see http://example.com:8080 for it"]), (FORM_RULE, "path:line")),
+    ("a read premise with an absolute path and a line passes",
+     parts(based=["Based on (read): /abs/path/hooks/guard.py:120"]), None),
+    ("a read premise with an https URL whose path ends in a line passes",
+     parts(based=["Based on (read): https://github.com/o/r/blob/main/hooks/guard.py:120"]), None),
     ("three Based on lines, one read with no path:line, is refused",
      parts(based=[BASED[0], "Based on (read): the cloud allow rules cover only the plain merge form.", THIRD]),
      (FORM_RULE, "path:line")),
@@ -434,6 +438,13 @@ def case_str_replace():
     replace("on the title is allowed", "Let the batch runner merge each batch on its own?",
             "Let the runner merge alone?", None, field="title")
     replace("on why is not judged", PROBLEM, "A keeps the allow list to one form.", None, field="why")
+    # A read cite is judged on the edit's new text too (decision premise-format): a swap that drops path:line refuses.
+    replace("that swaps a read cite for a premise with no path:line is refused",
+            "Based on (read): hooks/guard.py:120",
+            "Based on (read): the cloud allow rules cover only the merge form", (FORM_RULE, "path:line"))
+    replace("that swaps a read cite for a premise that names path:line is allowed",
+            "Based on (read): hooks/guard.py:120",
+            "Based on (read): the cloud allow rules cover only the merge form, at hooks/guard.py:121", None)
 
 
 # ------------------------------------------------------------------ a stands:true item is an ordinary item
