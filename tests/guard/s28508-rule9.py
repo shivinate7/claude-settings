@@ -251,11 +251,10 @@ for _name, _verdict, _script in (
          "// agent('Round 2 of 3.', {agentType: 'reviewer'})\nawait agent('x', {model: 'sonnet'})")):
     add("floor step-up: Workflow %s is %s" % (_name, "denied" if _verdict == "deny" else "allowed"),
         _verdict, *((STEP_UP,) if _verdict == "deny" else ()), tool="Workflow", script=_script)
-# Re-pointed from allow (decision agent-model-cap, the Workflow row): a call whose literal agentType has a row and that names
-# NO model is refused under agent-role-model, whatever its brief. These were pinned as the skip, and now expect the deny.
-# The step-up loop above no longer carries them. A model in a variable, a shorthand, a spread or a ternary agentType stays
-# allowed above: the static read cannot see the model or the role, so it skips the call. Failure class: a false allow (a
-# no-model Workflow call with a row runs the parent's model, as the incident of 2026-11-21 did).
+# A Workflow call whose literal agentType has a row and that names NO model is refused under agent-role-model, whatever
+# its brief (decision agent-model-cap). A model in a variable, a shorthand, a spread or a ternary agentType stays allowed
+# in the step-up loop above, since the static read cannot see the model or the role. Failure class: a false allow (a
+# no-model Workflow call with a row runs the parent's model).
 for _name, _script in (
         ("reviewer Round 1", _step_flow("'Round 1 of 3. Check the diff.'", "agentType: 'reviewer'")),
         ("builder Round 3", _step_flow("'Round 3 of 3. Finish the fix.'", "agentType: 'builder'")),

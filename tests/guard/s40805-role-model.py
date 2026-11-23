@@ -360,8 +360,8 @@ workflow_refuse("role-model: Workflow builder on opus after a spread of base wit
 
 # ---- H5: a Workflow agent() call that names NO model is refused when its literal agentType has a row in the role table
 # (decision agent-model-cap, the row `teammates, Workflow agent()`). With no model the call runs the parent's model: the
-# incident of 2026-11-21 ran 13 Explore agents on sonnet at xhigh in one Workflow. Each deny runs under a set default and
-# under an unset one, so neither the default nor the agent file's pin lets the call through. The static read skips a call
+# a run of 13 Explore agents went to sonnet at xhigh this way. Each deny runs under a set default and under an unset
+# one, so neither the default nor the agent file's pin lets the call through. The static read skips a call
 # whose agentType it cannot read, and a call with no agentType has no row, so those are allowed.
 # Failure classes: a false allow (a no-model call with a row runs the parent's model); a false deny (a call with no
 # agentType, or an agentType the scan cannot read, is refused).
@@ -389,8 +389,8 @@ workflow_allow("role-model: Workflow call with no agentType and an empty options
                "await agent('Find the file.', {});", env=UNSET_DEFAULT)
 workflow_allow("role-model: Workflow prompt-key call with no agentType and no model is allowed",
                "await agent({prompt: 'Find the file.'});", env=UNSET_DEFAULT)
-# Pinned to origin/main's current result: an agentType held in a variable is unread, so the call is skipped and allowed.
-# A later build may read it; this case then changes with that build, and says so.
+# An agentType held in a variable is unread, so the static read skips the call and it is allowed. A build that reads
+# the variable changes this case.
 workflow_allow("role-model: Workflow agent() whose agentType is a variable and names no model is allowed (pinned to main)",
                "const t = 'builder';\nawait agent('Fix the failing case.', {agentType: t});", env=UNSET_DEFAULT)
 
