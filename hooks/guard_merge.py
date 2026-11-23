@@ -291,7 +291,8 @@ def ignored_checks(module, where: str):
 
 BARE_MERGE_REASON = (
     "Rule (Git): this repo merges with the merge tool, and a bare merge skips its claim and "
-    "leaves the local main behind origin. "
+    "leaves the local main behind origin "
+    "(decision bare-merge-asks, decision guard-remedy-not-to-owner). "
     "Remedy: run the merge tool, `merge <pr> --confirm`. "
     + COMPLY_TAIL
 )
