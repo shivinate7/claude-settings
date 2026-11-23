@@ -44,6 +44,7 @@ from test_windows_split import (  # noqa: E402  the one home of the `if:` evalua
     NO_MD_SCOPE_CONDITION, SCOPE_DOC_AGENTS, SCOPE_DOC_ANY, SCOPE_DOC_DECISIONS, SCOPE_DOC_DECISIONS_MAP_OTHER, SCOPE_DOC_DECISIONS_OTHER,
     SCOPE_DOC_DECISIONS_RULES, SCOPE_DOC_DECISIONS_RULES_OTHER, SCOPE_DOC_RULES, SCOPE_DOC_SKILLS, SCOPE_DOC_SKILLS_AGENTS,
     SCOPE_DOC_SKILLS_DECISIONS, SCOPE_DOC_SKILLS_OTHER, doc_scope_condition, drop_condition, eval_if, run_lines, unwrap, LINUX_SUITES)
+from test_windows_split import top_level_conjuncts, yaml_scalar  # noqa: E402  the one home of the conjunct splitter and the scalar reader
 
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
 WORKFLOW = ".github/workflows/checks.yml"
@@ -1164,6 +1165,72 @@ class DocsOnlyPullRequestSteps(ChecksStepBase):
         self.assertEqual(got.get("code"), "false", f"{path} set code: {got}")
         step = self.named(self.steps(), "Landed-directory check fixture suite")
         self.assertFalse(runs_on(if_of(step), got), f"the landed-dirs suite runs for a docs-only edit to {path}: its if is {if_of(step)!r}")
+
+
+# Change A (owner, 2026-11-23 10:28 CST): a failed step no longer stops the later steps of the `checks` job. Every test and lint step
+# runs, and the job ends red when any step failed. A step keeps running when `!cancelled()` is a top-level `&&` part of its `if:`,
+# joined with its own condition. GitHub reads a step with no `if:` as success(), which stops at the first failure.
+KEEP_RUNNING = "!cancelled()"
+# The steps with no keep-running condition, by label: the checkout and setup steps every later step needs, and the install whose
+# PATH the code-check steps read. No other step is exempt. A label is the step's name, else `uses:` and its action path (no pin).
+KEEP_RUNNING_EXEMPT = ("uses: actions/checkout", "uses: actions/setup-python", "Code-check tools")
+
+
+def step_label(st):
+    name = ws.step_key(st, "name")
+    if name is not None:
+        return yaml_scalar(name)
+    uses = ws.step_key(st, "uses")
+    return ("uses: " + yaml_scalar(uses).split("@")[0]) if uses is not None else "(no name, no uses)"
+
+
+def keeps_running(expr):
+    """True when a step's raw `if:` (or None, which GitHub reads as success()) has `!cancelled()` as a top-level `&&` part."""
+    return KEEP_RUNNING in top_level_conjuncts(expr)
+
+
+class KeepRunningAfterFailure(unittest.TestCase):
+    """Change A on checks.yml: every step of the `checks` job after the checkout and setup steps keeps running after a failure, and no
+    step is allowed to go green past one (continue-on-error). Each case reads the real file."""
+
+    def steps(self):
+        block = ws.job_block(read_repo(WORKFLOW), JOB)
+        self.assertIsNotNone(block, "%s has no `%s` job" % (WORKFLOW, JOB))
+        return ws.step_blocks(block)
+
+    def test_each_step_after_setup_carries_the_keep_running_condition(self):
+        # Named failure: a step with no `if:`, or an `if:` without `!cancelled()` as a top-level part, stops at the first failed step.
+        missing = [step_label(st) for st in self.steps()
+                   if step_label(st) not in KEEP_RUNNING_EXEMPT and not keeps_running(ws.step_key(st, "if"))]
+        self.assertEqual(missing, [], "%d step(s) of the %s job lack %s as a top-level part of their if:, so a failure stops them: %s"
+                         % (len(missing), JOB, KEEP_RUNNING, missing))
+
+    def test_no_step_of_the_checks_job_uses_continue_on_error(self):
+        # Named failure: continue-on-error on a step, or on the job, lets a red step leave the job green.
+        found = [step_label(st) for st in self.steps() if ws.step_key(st, "continue-on-error") is not None]
+        self.assertEqual(found, [], "these steps set continue-on-error, so a red step leaves the job green: %s" % found)
+        job_level = re.search(r"^    continue-on-error:", ws.job_block(read_repo(WORKFLOW), JOB), re.M)
+        self.assertIsNone(job_level, "the %s job sets continue-on-error at job level, so a red step leaves it green" % JOB)
+
+    def test_the_exemption_names_only_steps_of_the_checks_job_and_each_once(self):
+        # Named failure: an exemption names no step of the job, so it is stale, or it repeats, so it is no one list.
+        labels = [step_label(st) for st in self.steps()]
+        stale = [n for n in KEEP_RUNNING_EXEMPT if n not in labels]
+        self.assertEqual(stale, [], "these exempt labels name no step of the %s job: %s" % (JOB, stale))
+        self.assertEqual(len(set(KEEP_RUNNING_EXEMPT)), len(KEEP_RUNNING_EXEMPT), "the exemption list repeats a label")
+
+    def test_the_keep_running_reader_takes_only_a_top_level_conjunct(self):
+        # Scanner cases (building-scanner-respects-strings): a comment opener or a doubled quote inside a string is text, and a
+        # `!cancelled()` under an `||`, inside quotes, or with a lone quote before it is no keep-running condition.
+        self.assertTrue(keeps_running("${{ !cancelled() }}"))
+        self.assertTrue(keeps_running("${{ needs.scope.outputs.code == 'true' && !cancelled() }}"))
+        self.assertTrue(keeps_running("${{ (a || b) && !cancelled() }}"))
+        self.assertTrue(keeps_running("${{ x == '#' && !cancelled() }}"))
+        self.assertTrue(keeps_running("${{ a == 'it''s' && !cancelled() }}"))
+        self.assertFalse(keeps_running("${{ a || !cancelled() }}"))
+        self.assertFalse(keeps_running("${{ x == '!cancelled()' }}"))
+        self.assertFalse(keeps_running("${{ x == 'Don't' && !cancelled() }}"))
+        self.assertFalse(keeps_running(None))
 
 
 if __name__ == "__main__":
