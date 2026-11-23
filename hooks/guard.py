@@ -79,9 +79,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        config-dir spelling of a pointer file is frozen (never_lifted calls is_frozen
                        per target), so no override lifts it, as with frozen-path. It spawns no git.
   silent-write         deny. A git write whose own trace is silenced, by a null redirect, by
-                       git's `-q`, or by a last pipe stage that drops lines (`grep -v` in any
-                       spelling, a `sed` delete script). The measured carve-outs are the comments
-                       above SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
+                       git's `-q`, or by a pipe stage after the write that drops lines: `grep`,
+                       `egrep` or `fgrep` with an invert flag (`-v`, a short cluster holding `v`,
+                       `--invert-match`), or a `sed` delete script. `awk` and `sed -n '/x/!p'` are
+                       not read. The measured carve-outs are the comments above
+                       SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
   hook-bypass          deny. A git commit, merge or push that skips or redirects the git hooks:
                        `-c core.hooksPath` (key in any case), `--no-verify`, `-n` on commit alone (push
                        -n and merge -n pass), core.hooksPath set through GIT_CONFIG_KEY_<n> or
@@ -884,8 +886,9 @@ SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-
 # output is silenced: `pull` (a fetch plus a merge; its `-q` joins the quiet arm), a `fetch` that
 # names a `src:dst` refspec (it moves a local ref; a bare `fetch` stays a read), `make merge`,
 # `gh pr merge`, and a closed descriptor (`2>&-`, `>&-`), which silences like /dev/null.
-# A last pipe stage that drops lines by pattern (`tail_drops_lines`) hides what the write printed
-# the same way, so it counts too. `tail` and `head` keep the lines they print, so they stay allowed.
+# A pipe stage after the write that drops lines by pattern (`stage_drops_lines`) hides what the write
+# printed the same way, so it counts too, whether or not it is the last stage. `tail` and `head` keep
+# the lines they print, so they stay allowed.
 # `--dry-run` moves nothing and stays allowed. Output sent to a FILE stays allowed: the owner held
 # that until measured.
 
@@ -992,7 +995,7 @@ def discards_output(segment: str) -> bool:
 
 # A write whose output feeds a pipe is judged by that pipe's tail: silenced by a redirect, or a
 # `grep -q`, which prints nothing by itself, or dropped by a filter that deletes lines by pattern
-# (`tail_drops_lines`). A printing tail (`| tail -5`, `| tee f`) is not.
+# (`stage_drops_lines`, any stage after the write). A printing tail (`| tail -5`, `| tee f`) is not.
 # `bash -c '...'` stays unparsed, a known gap the owner left. A filter inside a script file the
 # tail runs is out of reach.
 def tail_discards(tail: str) -> bool:
@@ -1010,7 +1013,7 @@ def tail_discards(tail: str) -> bool:
 GREP_VALUE_FLAGS = set("efmABCd")
 GREP_LONG_VALUE_FLAGS = {"--regexp", "--file", "--max-count", "--after-context", "--before-context",
                          "--context", "--directories", "--include", "--exclude", "--exclude-dir",
-                         "--label", "--binary-files", "--devices", "--color", "--colour"}
+                         "--label", "--binary-files", "--devices"}
 
 
 def grep_inverts(args) -> bool:
@@ -1136,17 +1139,18 @@ def sed_deletes(script: str) -> bool:
     return False
 
 
-def tail_drops_lines(tail: str) -> bool:
-    """True when a pipe's last segment drops lines by pattern: a `grep` with an invert flag, or a
-    `sed` whose inline script holds a delete. `tail`, `head` and a plain `grep` print what they
-    keep, so they pass."""
+def stage_drops_lines(tail: str) -> bool:
+    """True when a pipe stage drops lines by pattern: `grep`, `egrep` or `fgrep` with an invert flag,
+    or a `sed` whose inline script holds a delete. `tail`, `head` and a plain `grep` print what they
+    keep, so they pass. `--color` and `--colour` take a value only after `=`, so `grep --color -v`
+    still inverts."""
     tail = tail.strip().lstrip("&").strip()
     tokens = segment_tokens(tail) or []
     index = resolve_command(tokens) if tokens else None
     if index is None:
         return False
     word, args = basename(tokens[index]), tokens[index + 1:]
-    if word == "grep":
+    if word in ("grep", "egrep", "fgrep"):
         return grep_inverts(args)
     if word == "sed":
         return any(sed_deletes(script) for script in sed_scripts(args))
@@ -1227,7 +1231,7 @@ def silent_write_hit(segment: str, tail: str = ""):
     """Return (matched text, mechanism, kind) for a write whose own trace is silenced, else
     ("", "", "").
 
-    `mechanism` is `"redirect"`, `"filter"` (a last pipe stage that drops lines) or `"quiet"`, so the caller can print the reason that matches
+    `mechanism` is `"redirect"`, `"filter"` (a pipe stage after the write that drops lines) or `"quiet"`, so the caller can print the reason that matches
     what actually fired; `kind` is the act's name (`push`, `commit`, `merge`). A redirect can hide
     a refusal AND a proof of landing on any of the subcommands, while the quiet flag is judged per
     subcommand against `QUIET_FLAG_SUBCOMMANDS`, the measured set. Only `SILENT_WRITE_SUBCOMMANDS`
@@ -1235,10 +1239,11 @@ def silent_write_hit(segment: str, tail: str = ""):
     which is what keeps the test-by-exit-code shape `git rev-parse -q --verify <ref> >/dev/null
     2>&1` allowed. `merge --abort` is carved out inside the loop: it lands nothing, so it has no
     landing to prove. A call whose argv names a read (`read_verb`) is carved out the same way.
-    `tail` is the last segment of the pipe this segment feeds, if any (see `tail_discards`).
+    `tail` is the pipe stage this segment feeds that judges it, if any: the first stage that drops lines,
+    else the last (see `tail_discards`).
     """
     silenced = discards_output(segment) or (bool(tail) and tail_discards(tail))
-    dropped = not silenced and bool(tail) and tail_drops_lines(tail)
+    dropped = not silenced and bool(tail) and stage_drops_lines(tail)
     for subcommand, args in git_calls(segment):
         if subcommand == "fetch":
             # Only a fetch that moves a local branch (`src:dst`) is a write; a bare one is a read.
@@ -1438,7 +1443,7 @@ SILENT_WRITE_REDIRECT_REASON = (
     "and read what it prints before you say it landed."
 )
 SILENT_WRITE_FILTER_REASON = (
-    "Rule (Git): command {command} of {total}, the {kind}: the last pipe stage drops lines "
+    "Rule (Git): command {command} of {total}, the {kind}: a pipe stage after it drops lines "
     "(`grep -v` or a `sed` delete), so the line that says whether this write was refused or landed "
     "can vanish before it reaches the session. "
     "Remedy: run {program} again with its output kept, ending the line with `2>&1 | tail -1`, "
@@ -5974,6 +5979,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         last = number
         while last < len(segments) - 1 and ends[last] == "|":
             last += 1
+        if last > number and not tail_discards(segments[last]):
+            # A filter that drops lines in the middle of the chain hides the write's lines as the last
+            # stage does, and a printing `tail` after it brings them back no more. The tail handed on is
+            # the first such stage.
+            last = next((stage for stage in range(number + 1, last)
+                         if stage_drops_lines(segments[stage])), last)
         matched, mechanism, kind = silent_write_hit(segment, segments[last] if last > number else "")
         if matched and not in_throwaway(segments, number, cwd, ends):
             reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"
