@@ -33,7 +33,7 @@ Owner ruling, 2026-11-23 13:05 CST (question Q4, option a). Guard rule `ready-pr
 - Allowed: a draft PR; a run with a red job; a branch with no PR, or a fork's branch; another branch; an archive branch; a repo with no CI; a segment that runs the merge tool (its own pushes, such as its tidy-up commit, run as subprocesses the guard does not see); a failed PR read, which passes with one stderr line.
 - To change a ready PR, return it to draft first, push, then mark it ready again with the merge tool.
 - Main merges into a ready PR only on a conflict. A clean merge of main is a push, so it is refused here too.
-- Cost: one GitHub read per `git push` in a merge-tool repo, two when a ready PR holds the branch. Other tool calls read nothing.
+- Cost: at most two GitHub reads per `git push` in a merge-tool repo: one list read, and one check-run read when a ready PR holds the branch. Other tool calls read nothing.
 
 ## The switch
 
