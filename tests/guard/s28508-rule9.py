@@ -566,6 +566,7 @@ BRIEF_DESTRUCTIVE = "brief-destructive-git"
 # The spans below single-quote this path: the brief reader tokenizes a span like bash, which drops the backslashes of an
 # unquoted Windows path, so the path would stop reading as a scratchpad. The forward-slash form needs no quotes.
 SCRATCH_REPO = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "repo")
+SCRATCH_BASE_REPO = os.path.join(SCRATCH_BASE, "rule9-proj", FAKE_SESSION, "scratchpad", "repo")  # under the scratchpad base
 from agent_brief import COMMON  # noqa: E402  the standing-rules text the SubagentStart hook gives every agent
 STANDING_LINE_ONE = "\n".join(text for _, text in COMMON[:2])   # the heading, then the first rule line
 STANDING_ALL = "\n".join(text for _, text in COMMON)
@@ -660,6 +661,10 @@ add("brief-destructive-git: a reset --hard in a scratch repo under a session scr
 add("brief-destructive-git: a reset --hard in a scratch repo named with forward slashes is allowed", "allow",
     tool="Agent", prompt="Try it first: `git -C " + SCRATCH_REPO.replace(os.sep, "/") + " reset --hard`.",
     subagent_type="builder", model="sonnet")
+# The scratchpad base (s00442 SCRATCH_BASE): a brief's reset in a scratch repo under it is exempt the same way.
+add("brief-destructive-git: a reset --hard in a scratch repo under the scratchpad base is allowed", "allow",
+    tool="Agent", prompt="Try it first: `git -C '" + SCRATCH_BASE_REPO + "' reset --hard`.",
+    subagent_type="builder", model="sonnet", env=SCRATCH_BASE_ENV)
 add("brief-destructive-git: the brief's own allow paragraphs, as a test-author brief, are allowed", "allow",
     tool="Agent", prompt=BRIEF_ALLOW_PARAGRAPHS, subagent_type="test-author")
 add("brief-destructive-git: an empty brief is allowed", "allow",

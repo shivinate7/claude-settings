@@ -110,6 +110,9 @@ def decide(case):
     # The home clone that other-checkout's stranded-cwd act reads from CLAUDE_PROJECT_DIR. The runner's own
     # value would reach every case, so it is dropped here, and a case that names one sets it through `env`.
     env.pop("CLAUDE_PROJECT_DIR", None)
+    # The scratchpad base the guard reads from CLAUDE_SCRATCHPAD_BASE. The runner's own value would move the base of
+    # every case, so it is dropped here, and a case that names one sets it through `env` (SCRATCH_BASE_ENV).
+    env.pop("CLAUDE_SCRATCHPAD_BASE", None)
     # A cloud session (CLAUDE_CODE_REMOTE "true") skips the load brake. Every run judges a
     # local machine, as lb_run does.
     env.pop("CLAUDE_CODE_REMOTE", None)

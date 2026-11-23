@@ -9,14 +9,23 @@ SH_TEXT = "echo hi\n"
 SPO_NT = "skipped: these cases use POSIX shell forms and POSIX paths"
 
 
-def spo_fixture(tag):
+def spo_fixture(tag, real=False):
     """One case's folders under this run's folder: a temp folder the guard reads as TMPDIR, this
     session's scratchpad inside it (`<tmp>/<slug>/<session>/scratchpad`), and a working folder that
-    sits in no checkout. The session id is new for each case."""
+    sits in no checkout. The session id is new for each case. With `real`, the scratchpad sits under
+    the scratchpad base (SCRATCH_BASE, named by CLAUDE_SCRATCHPAD_BASE in `env`) instead, and TMPDIR stays
+    the case's own folder, so the guard must find the scratchpad by its base and not by TMPDIR."""
     folder = os.path.join(ROOT, "spo", tag)
     fx = {"tmp": os.path.join(folder, "tmp"), "sid": "spo-" + uuid.uuid4().hex,
-          "work": os.path.join(folder, "work")}
-    fx["scratch"] = os.path.join(fx["tmp"], SPO_SLUG, fx["sid"], "scratchpad")
+          "work": os.path.join(folder, "work"), "folder": folder}
+    if real:
+        fx["env"] = SCRATCH_BASE_ENV
+        fx["scratch"] = os.path.join(SCRATCH_BASE, "spo", tag, SPO_SLUG, fx["sid"], "scratchpad")
+    else:
+        fx["scratch"] = os.path.join(fx["tmp"], SPO_SLUG, fx["sid"], "scratchpad")
+    # TMPDIR must name a folder that exists: tempfile.gettempdir() skips a missing one for /tmp, and the
+    # guard would then read /tmp as its base and find the real scratchpad there.
+    os.makedirs(fx["tmp"], exist_ok=True)
     os.makedirs(fx["scratch"], exist_ok=True)
     os.makedirs(fx["work"], exist_ok=True)
     return fx
@@ -26,7 +35,7 @@ def spo_call(fx, tool, agent, **tool_input):
     """One guard call, as the harness sends it in this case: its session, its temp folder and its
     working folder. `agent` is None for the top-level session."""
     return _decide_full(tool, fx["work"], agent_id=agent, session=fx["sid"], temp=fx["tmp"],
-                        **tool_input)
+                        env=fx.get("env"), **tool_input)
 
 
 def spo_run(fx, agent, command):
@@ -1720,6 +1729,125 @@ spo_register("scratchpad-owner: remedy 3 the overwrite refusal names no ask and 
 spo_register("scratchpad-owner: remedy 4 the run refusal names no ask and no overwrite", spo_remedy_route_run)
 spo_register("scratchpad-owner: record 1 a refused overwrite leaves the record with agent A: B's retry and B's "
              "run are refused", spo_record_case)
+
+
+# The real layout (hooks/guard_shared_tree.py scratchpad_temp_bases): the scratchpad base is named by
+# CLAUDE_SCRATCHPAD_BASE (SCRATCH_BASE, in this run's folder), not gettempdir(). These cases build the
+# scratchpad there (spo_fixture real=True), so each one is red on a guard that reads only gettempdir(). POSIX only.
+
+
+def spo_real_overwrite_case():
+    """Agent A writes msg.txt with Write under the scratchpad base; agent B writes the same file with Write:
+    asked. Agent A's rewrite of its own file is the control, and is allowed."""
+    fx = spo_fixture("real1", real=True)
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "real 1", msg)] + spo_wrote(fx, "real 1", SPO_WRITER, msg, "from A\n")
+    got, reason = spo_call(fx, "Write", SPO_OTHER, file_path=msg, content="from B\n")
+    problems.append(spo_asked("real 1", got, reason, (fx["scratch"], "msg.txt")))
+    got, reason = spo_call(fx, "Write", SPO_WRITER, file_path=msg, content="from A again\n")
+    problems.append(spo_allowed("real 1, control: agent A's own rewrite", got, reason))
+    return spo_result(problems, "agent B's Write over agent A's file under the scratchpad base is asked")
+
+
+def spo_real_symlink_case():
+    """Agent A writes msg.txt with Write, named through a symlink to the scratchpad base; agent B writes the
+    same file, named the same way: asked. The guard reads the path by its real path, so the symlinked
+    /tmp still counts."""
+    fx = spo_fixture("real2", real=True)
+    link = os.path.join(fx["folder"], "tmp-link")
+    os.symlink(SCRATCH_BASE, link)
+    msg = os.path.join(link, os.path.relpath(fx["scratch"], SCRATCH_BASE), "msg.txt")
+    problems = [spo_scope(fx, "real 2", msg)] + spo_wrote(fx, "real 2", SPO_WRITER, msg, "from A\n")
+    got, reason = spo_call(fx, "Write", SPO_OTHER, file_path=msg, content="from B\n")
+    problems.append(spo_asked("real 2", got, reason, (fx["scratch"], "msg.txt")))
+    return spo_result(problems, "agent B's Write over agent A's file, reached through a symlinked /tmp, is asked")
+
+
+def spo_real_outside_case():
+    """Agent A writes probe2.py into a folder shaped like a scratchpad, outside every base; agent B runs it
+    with python3: not asked under scratchpad-owner. A green control: the path is no scratchpad on the old
+    guard or on the head, so the rule must not reach it."""
+    fx = spo_fixture("real3")
+    path = os.path.join(fx["folder"], "outside", SPO_SLUG, fx["sid"], "scratchpad", "probe2.py")
+    problems = []
+    for base in (fx["tmp"], SCRATCH_BASE):
+        if (os.path.realpath(path) + os.sep).startswith(os.path.realpath(base) + os.sep):
+            problems.append("real 3, setup: the path lies under the base %s" % base)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    problems += spo_wrote(fx, "real 3", SPO_WRITER, path, PY_TEXT)
+    got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % path)
+    if got == "ask" and SPO_RULE in reason:
+        problems.append("real 3: agent B's run of a script outside every base is asked by %s (%s)"
+                        % (SPO_RULE, reason[:100]))
+    return spo_result(problems, "a script under a scratchpad-shaped folder outside every base is not a scratchpad")
+
+
+# The shape a base sets (hooks/guard_shared_tree.py _scratchpad_shapes): under the harness base a project folder
+# comes first, so `<base>/scratchpad/x` is no scratchpad and `<base>/<project>/<sid>/scratchpad/x` is one. The
+# probe runs in a child process with CLAUDE_SCRATCHPAD_BASE unset, so the harness base is the one read. It only
+# judges text: nothing is made under the harness base.
+SPO_SHAPE_PROBE = (
+    "import json, sys\n"
+    "sys.path.insert(0, sys.argv[1])\n"
+    "import guard_shared_tree\n"
+    "print(json.dumps([bool(guard_shared_tree.in_any_session_scratchpad(p)) for p in json.loads(sys.argv[2])]))\n"
+)
+
+
+def spo_shape_probe(cases, tmp):
+    """Run the shape probe over (name, path, want) rows with TMPDIR at `tmp` and no scratchpad base variable.
+    Returns the rows that read the other way. A probe that does not run is one problem."""
+    env = dict(os.environ)
+    env.pop("CLAUDE_SCRATCHPAD_BASE", None)
+    env.update(TMPDIR=tmp, TEMP=tmp, TMP=tmp)
+    run = subprocess.run([sys.executable, "-c", SPO_SHAPE_PROBE, os.path.join(REPO, "hooks"),
+                          json.dumps([path for _, path, _ in cases])],
+                         env=env, capture_output=True, text=True, timeout=120)
+    if run.returncode != 0:
+        return ["shape, setup: the probe did not run: %s" % run.stderr.strip()[-160:]]
+    values = json.loads(run.stdout)
+    return ["shape: %s reads as a scratchpad: %s, want %s" % (name, got, want)
+            for (name, _, want), got in zip(cases, values) if got != want]
+
+
+def spo_shape_case():
+    """Under the harness base a project folder comes first. `<base>/scratchpad/x` is no scratchpad, `<base>/<project>/
+    <session>/scratchpad/x` is one, and `<base>/<project>/scratchpad/x` is none: its `scratchpad` is not a session id.
+    TMPDIR is the case's own folder, so the base is the harness base and not the temp folder."""
+    fx = spo_fixture("shape")
+    harness = os.path.join(os.path.realpath("/tmp"), "claude-%d" % os.getuid())
+    cases = [("<harness base>/scratchpad/x", os.path.join(harness, "scratchpad", "x"), False),
+             ("<harness base>/<project>/<session>/scratchpad/x",
+              os.path.join(harness, SPO_SLUG, fx["sid"], "scratchpad", "x"), True),
+             ("<harness base>/<project>/scratchpad/x", os.path.join(harness, SPO_SLUG, "scratchpad", "x"), False)]
+    return spo_result(spo_shape_probe(cases, fx["tmp"]),
+                      "the harness base's own folder and a folder under a project with no session are no scratchpad")
+
+
+def spo_shape_linux_case():
+    """The Linux layout: TMPDIR is realpath(/tmp), so the harness base's own folder `claude-<uid>` lies inside
+    Python's temp folder. The `skip` branch of _scratchpad_shapes keeps `<base>/scratchpad/x` from reading as the
+    scratchpad of a session named `claude-<uid>`. A mutant that drops that branch (`if True:`) makes this row red."""
+    tmp = os.path.realpath("/tmp")
+    harness = os.path.join(tmp, "claude-%d" % os.getuid())
+    sid = "spo-" + uuid.uuid4().hex
+    cases = [("<harness base>/scratchpad/x", os.path.join(harness, "scratchpad", "x"), False),
+             ("<harness base>/<project>/<session>/scratchpad/x",
+              os.path.join(harness, SPO_SLUG, sid, "scratchpad", "x"), True)]
+    return spo_result(spo_shape_probe(cases, tmp),
+                      "with TMPDIR at /tmp, the harness base's own folder is no scratchpad, and a project folder under it is")
+
+
+spo_register("scratchpad-owner: shape 2 with TMPDIR at realpath(/tmp), the Linux layout: <harness base>/scratchpad/x is "
+             "no scratchpad", spo_shape_linux_case)
+spo_register("scratchpad-owner: real 1 agent B's Write over agent A's file under the scratchpad base: asked",
+             spo_real_overwrite_case)
+spo_register("scratchpad-owner: real 2 agent B's Write over agent A's file through a symlinked /tmp: asked",
+             spo_real_symlink_case)
+spo_register("scratchpad-owner: real 3 a script under a scratchpad-shaped folder outside every base: not asked",
+             spo_real_outside_case)
+spo_register("scratchpad-owner: shape 1 <harness base>/scratchpad/x is no scratchpad, and a project folder under it is",
+             spo_shape_case)
 
 
 # =========================================================================== mask_script lexemes

@@ -7311,6 +7311,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
         # holds scratchpads and throwaway clones, so it passes.
         clone_hit[target] = (
             path_is_inside(resolved, temp) is not True
+            and not in_any_session_scratchpad(resolved)
             and ((stranded and bool(owner) and path_is_inside(resolved, os.path.join(owner, ".git")) is not True)
                  or (not owner and _separate_clone(resolved, tops, common))))
         if clone_hit[target]:

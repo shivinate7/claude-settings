@@ -26,6 +26,15 @@ def scratch_allow(name, command, cwd=NOGIT, session=FAKE_SESSION, agent_id=SCRAT
 
 
 SCRATCH_CMD = VCS + " commit -F " + slash(SCRATCH_MSG)
+# Another session's message file under the scratchpad base (s00442 SCRATCH_BASE), written the first time a case names it.
+SCRATCH_BASE_OTHER_MSG = os.path.join(SCRATCH_BASE, "msg-proj", OTHER_SESSION, "scratchpad", "probe", "commit_msg.txt")
+
+
+def _build_scratch_base_msg():
+    write(SCRATCH_BASE_OTHER_MSG, "title\n\nthe message of another session, under the scratchpad base\n")
+
+
+lazy_fixture([SCRATCH_BASE_OTHER_MSG], _build_scratch_base_msg)
 # Each flag form reaches its own branch of message_sources: the long form, the value after the flag,
 # the glued value, a cluster of short flags, and the amend act.
 scratch_refuse("scratchpad-message: an agent's commit -F of a scratchpad file is refused", SCRATCH_CMD)
@@ -48,6 +57,11 @@ scratch_refuse("scratchpad-message: an agent's commit -F of an empty scratchpad 
              VCS + " commit -F " + slash(SCRATCH_EMPTY))
 scratch_refuse("scratchpad-message: an agent's commit -F of another session's scratchpad file is refused",
              VCS + " commit -F " + slash(SCRATCH_OTHER_MSG))
+# The scratchpad base (s00442 SCRATCH_BASE): another session's file under it is refused the same way. The caller
+# asks whether the file sits in any session's scratchpad, so the base's own folder layout must name it.
+sh("scratchpad-message: an agent's commit -F of another session's file under the scratchpad base is refused",
+   VCS + " commit -F " + slash(SCRATCH_BASE_OTHER_MSG), "deny", SCRATCH_RULE, carries=SCRATCH_REMEDY,
+   cwd=NOGIT, session=FAKE_SESSION, agent_id=SCRATCH_AGENT, env=SCRATCH_BASE_ENV)
 scratch_refuse("scratchpad-message: an agent's commit -F of a scratchpad file with no session id is refused",
              SCRATCH_CMD, session=None)
 # A scanner reads the commit after a comment opener in a string, a multi-line string, or a lone quote.

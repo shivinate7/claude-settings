@@ -401,6 +401,23 @@ add("scratchpad: no session id names no scratchpad", "deny", "shared-tree", cwd=
     command=VCS + " reset --hard HEAD")
 add("scratchpad: the same session id outside the scratchpad proves nothing", "deny",
     "shared-tree", cwd=SUBJDIRTY, session=FAKE_SESSION, command=VCS + " reset --hard HEAD")
+# THE SCRATCHPAD BASE (s00442 SCRATCH_BASE, named by CLAUDE_SCRATCHPAD_BASE): a discard in a repository under this
+# session's own scratchpad is private, for the top-level call and for an agent; the same discard under another
+# session's scratchpad is shared and denied. Each row is judged by the rule's own scratchpad exemption, so the base
+# must be the one the guard reads. On an origin/main without the base read, the own rows are denied (red).
+SCRATCH_BASE_AGENT = "ab12cd34ef56a7890"  # an agent id on the payload, in the shape AGENT_ID accepts
+SCRATCH_BASE_DISCARDS = ("reset --hard HEAD", "clean -fd", "checkout -- .")
+for _sub in SCRATCH_BASE_DISCARDS:
+    add("scratchpad base: git %s in this session's own scratchpad is private, top-level call" % _sub, "allow",
+        cwd=BASE_PRIV_OWN, session=FAKE_SESSION, env=SCRATCH_BASE_ENV, command=VCS + " " + _sub)
+    add("scratchpad base: git %s in this session's own scratchpad is private, agent call" % _sub, "allow",
+        cwd=BASE_PRIV_OWN, session=FAKE_SESSION, agent_id=SCRATCH_BASE_AGENT, env=SCRATCH_BASE_ENV,
+        command=VCS + " " + _sub)
+    add("scratchpad base: git %s in another session's scratchpad is shared, top-level call" % _sub, "deny",
+        "shared-tree", cwd=BASE_PRIV_OTHER, session=FAKE_SESSION, env=SCRATCH_BASE_ENV, command=VCS + " " + _sub)
+    add("scratchpad base: git %s in another session's scratchpad is shared, agent call" % _sub, "deny",
+        "shared-tree", cwd=BASE_PRIV_OTHER, session=FAKE_SESSION, agent_id=SCRATCH_BASE_AGENT,
+        env=SCRATCH_BASE_ENV, command=VCS + " " + _sub)
 # AN UNREADABLE SUBJECT IS ALLOWED, and logged under its own rule (checked in
 # subject_unread_log_case). The cwd is the REAL dirty repository, so the only difference from the
 # deny case above is that the git on PATH gives no answer.
