@@ -4154,21 +4154,22 @@ def ref(name):
         pass
     return ""
 def feat_head(): return ref("refs/heads/" + S.get("head_ref", "feat"))  # the pull request's head branch: feat, or the case's head_ref (a batch integration PR's batch-x, whose claim commit moves it)
-RUN_FIELDS = ("databaseId", "name", "workflowName", "workflowDatabaseId", "status", "conclusion", "headSha", "headBranch", "event", "url")
+RUN_FIELDS = ("databaseId", "name", "workflowName", "workflowDatabaseId", "status", "conclusion", "headSha", "headBranch", "event", "createdAt", "url")
 def next_runs():
     """The next answer to a workflow-run read: runs_seq, one entry a read, the last one again. An entry is (name, status, conclusion[, databaseId[, workflowDatabaseId]]).
     Without an id a run gets 9000 plus its place; without a workflow id, one derived from its name, so runs of one name share one workflow."""
     seq = S.get("runs_seq") or [[]]; cur = seq.pop(0) if len(seq) > 1 else seq[0]; save()
     return [(r[0], r[1], r[2], r[3] if len(r) > 3 else 9000 + i, r[4] if len(r) > 4 else sum(map(ord, r[0]))) for i, r in enumerate(cur)]
 def run_list_json(runs, sha, argv):
-    """`gh run list --json F,...` as gh prints it: only the fields asked for. A field the fake does not know is gh's refusal. No createdAt: a newer run is a larger databaseId."""
+    """`gh run list --json F,...` as gh prints it: only the fields asked for. A field the fake does not know is gh's refusal. Every run's createdAt is one hour before FAKE_NOW, the same for each run."""
     fields = argv[argv.index("--json") + 1].split(",") if "--json" in argv else list(RUN_FIELDS)
     bad = [f for f in fields if f not in RUN_FIELDS]
     if bad:
         print('Unknown JSON field: "%s"' % bad[0]); sys.exit(1)
+    created = "2026-10-01T23:00:00Z"  # GitHub's ISO time, an hour before the fixture clock (FAKE_NOW); this script runs in its own process and has no clock
     def obj(name, status, conclusion, rid, wf):
         full = {"databaseId": rid, "name": name, "workflowName": name, "workflowDatabaseId": wf, "status": status, "conclusion": conclusion,
-                "headSha": sha, "headBranch": "feat", "event": "pull_request", "url": "https://github.com/o/r/actions/runs/%d" % rid}
+                "headSha": sha, "headBranch": "feat", "event": "pull_request", "createdAt": created, "url": "https://github.com/o/r/actions/runs/%d" % rid}
         return {f: full[f] for f in fields}
     return json.dumps([obj(*r) for r in runs])
 def hold(kind):  # the first such call starts a helper that keeps this process's stdout open, as a detached git or gh helper can
@@ -6814,8 +6815,8 @@ class SupersededRuns(Env):
         rest = [(r["id"], r["name"], r["status"], r["conclusion"], r["workflow_id"]) for r in json.loads(out2)["workflow_runs"]]
         self.assertEqual(rest, listed)
         self.assertEqual(listed[0], (NEW_RUN, "checks", "completed", "success", 7))
-        c3, out3 = host.gh(["run", "list", "--commit", sha, "--json", "createdAt"], self.co)
-        self.assertNotEqual(c3, 0, out3)  # no createdAt: a newer run is a larger run id
+        c3, out3 = host.gh(["run", "list", "--commit", sha, "--json", "noSuchField"], self.co)
+        self.assertNotEqual(c3, 0, out3)  # an unknown field is gh's refusal
         self.set(runs_fail="failed to get runs: HTTP 500")
         c4, _ = host.gh(["api", f"repos/{{owner}}/{{repo}}/actions/runs?head_sha={sha}", "-X", "GET"])
         self.assertNotEqual(c4, 0)
