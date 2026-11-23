@@ -473,8 +473,9 @@ SHELL = {"sh hooks/test_install_windows.sh": "bash", "bash actions/stamp/test_ac
 # pull_request included, and on its scope flag.
 IF_PIN = {"python janitor/mutate_sweep.py":
           "${{ !cancelled() && needs.scope.outputs.sweep == 'true' }}",
-          # The full merge suite runs on a ready pull_request whatever the flags say, and on push when code changed (R62).
-          "python merge/test_merge.py": "${{ !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}",
+          # The full merge suite runs on a ready pull_request when its own flag is set (owner, 2026-11-23 10:49 CST, Change B), and on
+          # push when code changed (R62). Each merge shard's step carries this text.
+          "python merge/test_merge.py": "${{ !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request') }}",
           # The full guard suite: the same rule as the merge suite (R62), and the guard-inputs gate: a diff that touches no guard input
           # (windows_guard, .github/guard-inputs.txt) runs no guard shard, a ready pull_request included. No slice step.
           GUARD_CMD: "${{ !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && needs.scope.outputs.windows_guard == 'true' }}"}
@@ -719,9 +720,16 @@ def draft_guard_only(expr):
         return False
 
 
-# R62: the full Windows suite runs on a ready pull_request whatever the flags say. Its steps carry the draft guard, bare (checkout and
-# setup) or as `(draft guard) && E`. A suite step's E reads code at most, the push condition, and never the job's own flag.
+# The full Windows suite's steps carry the draft guard, bare (checkout and setup) or as `(draft guard) && E`. The guard suite's E reads
+# code and windows_guard. The merge and rest suites' E reads code (merge) and their own flag (SUITE_FLAG): owner, 2026-11-23 10:49 CST
+# (Change B), a ready pull_request runs them only with that flag set.
 DRAFT_GUARD = "github.event_name != 'pull_request' || !github.event.pull_request.draft"
+# Each merge and rest job's scope output, read by its suite steps as the gated Windows jobs read theirs (checks-windows reads
+# checks_windows). checks-windows-rest-2 reads its own output, which repeats checks_windows_rest's value.
+SUITE_FLAG = {"checks-windows-merge": "checks_windows_merge", "checks-windows-merge-2": "checks_windows_merge",
+              "checks-windows-merge-3": "checks_windows_merge", "checks-windows-merge-4": "checks_windows_merge",
+              "checks-windows-merge-5": "checks_windows_merge", "checks-windows-rest": "checks_windows_rest",
+              "checks-windows-rest-2": "checks_windows_rest_2"}
 SWEEP_STEP_CMDS = ("python3 janitor/mutate_sweep.py", "python janitor/mutate_sweep.py")
 SWEEP_JOBS = ("checks-macos", "checks-windows-sweep")
 
@@ -733,8 +741,8 @@ def sweep_union(own):
 
 def full_suite_problems(name, job):
     """R62 for a full-suite job (full_suite_job). Every step carries the draft guard, bare or as `(draft guard) && E`. A suite
-    step keeps !cancelled(), and its E reads code at most (the push condition on the steps that have one). No step reads the job's
-    own flag: a ready pull_request runs the suite whatever the flags say."""
+    step keeps !cancelled(), and its E reads code (the push condition on the steps that have one), the guard family's windows_guard,
+    and the merge and rest job's own flag (SUITE_FLAG, Change B), and no other scope flag."""
     problems = []
     for st in job["steps"]:
         expr = step_if(st)
@@ -750,8 +758,11 @@ def full_suite_problems(name, job):
         flags = set(re.findall(r"needs\.scope\.outputs\.(\w+)", rest))
         if name in (GUARD_JOB, "checks-windows-merge") and "code" not in flags:
             problems.append(f"{name}: step {label} does not read code, so a push runs the suite with no code change: {expr}")
-        # The guard family (the base and its shards) also reads windows_guard, the guard-inputs gate. No other suite reads it.
-        want = {"code", "windows_guard"} if (shard_base(name) or name) == GUARD_JOB else {"code"}
+        # The guard family (the base and its shards) also reads windows_guard, the guard-inputs gate. Merge and rest read their own flag.
+        if (shard_base(name) or name) == GUARD_JOB:
+            want = {"code", "windows_guard"}
+        else:
+            want = {"code", SUITE_FLAG[name]} if name in SUITE_FLAG else {"code"}
         if flags - want:
             problems.append(f"{name}: step {label} reads scope flags {sorted(flags - want)}, want only {sorted(want)}: {expr}")
     return problems
@@ -1409,7 +1420,8 @@ class WindowsSplit(unittest.TestCase):
                     good.replace("    steps:\n", "    steps:\n      - run: echo MERGE_TESTS=windows-slice >> $GITHUB_ENV\n")):
             self.assertTrue(any("MERGE_TESTS appears 1 times" in p for p in hardening_problems(bad)), bad)
         self.assertTrue(hardening_problems(doc(full=full_e.replace("needs.scope.outputs.code == 'true' || ", ""))))  # the push condition dropped
-        self.assertTrue(any("reads scope flags" in p for p in hardening_problems(doc(full=full_e.replace("outputs.code", "outputs.checks_windows_merge")))))  # own flag read
+        # Another job's flag is read by no merge suite step (Change B lets the merge suite read its own flag only).
+        self.assertTrue(any("reads scope flags" in p for p in hardening_problems(doc(full=full_e.replace("outputs.code", "outputs.checks_windows")))))
 
     def test_checker_sees_the_shard_defects(self):
         scope_condition = DRAFT_GUARD  # R62: the base job's steps carry the draft guard, and the code condition rides in the full step
@@ -2451,10 +2463,10 @@ class ReadyPullShards(unittest.TestCase):
 
 
 class ReadyPullFullSuite(unittest.TestCase):
-    """R62, "each suite once per batch, on the batch PR", with its lean: the Windows merge and rest jobs run on a ready pull_request
-    whatever the scope flags say. The guard shards run there too, but only with windows_guard set (the guard-inputs gate). A draft
-    pull_request with no flag set runs none of their steps, and a shard's draft guard stays on its job. Push, schedule and dispatch
-    keep their flag rules. Each case reads the real file."""
+    """R62, "each suite once per batch, on the batch PR", with its lean: a ready pull_request runs the Windows merge and rest suites
+    when their own scope flag is set (owner, 2026-11-23 10:49 CST, Change B). The guard shards run there when windows_guard is set (the
+    guard-inputs gate). A draft pull_request with no flag set runs none of their steps, and a shard's draft guard stays on its job.
+    Push, schedule and dispatch keep their flag rules. Each case reads the real file."""
 
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
@@ -2469,13 +2481,17 @@ class ReadyPullFullSuite(unittest.TestCase):
         return names
 
     # R62 re-pointed for windows_guard: the owner granted the narrowing (waiting-page item 901 a, 18:20 CST Nov 15).
-    def test_a_docs_only_ready_pull_request_runs_every_step_of_the_full_suite_jobs(self):
-        # Named failure: a step of a full-suite job is conditioned on a scope flag or on code, which a docs-only PR leaves false.
-        # The guard shards read windows_guard, so this case sets it true; the sibling case below sets it false.
+    def test_a_ready_pull_request_with_each_suite_flag_set_runs_every_step_of_the_full_suite_jobs(self):
+        # Named failure: a step of a full-suite job is conditioned on a scope flag other than its own, or on code, which a docs-only PR
+        # leaves false. The guard shards read windows_guard, and the merge and rest suites read their own flag (SUITE_FLAG), so this
+        # case sets each one true; the sibling case below sets the guard's false.
         # The records-only condition is the one a ready pull_request does not meet: with it shut, no run step runs.
         for name in self.suite_jobs():
             job = self.jobs[name]
-            values = {"windows_guard": "true"} if (shard_base(name) or name) == GUARD_JOB else {}
+            if (shard_base(name) or name) == GUARD_JOB:
+                values = {"windows_guard": "true"}
+            else:
+                values = {SUITE_FLAG[name]: "true"} if name in SUITE_FLAG else {}
             for st in job["steps"]:
                 with self.subTest(job=name, step=step_label(st)):
                     self.assertTrue(runs_with_values(job, st, "pull_request", values),
