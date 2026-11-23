@@ -738,9 +738,9 @@ add("brief-destructive-git: a plugin-prefixed reviewer role my-plugin:reviewer t
 # Failure classes: a false allow on a Workflow spawn that names no model, or names one through a variable (spawn_inputs
 # skips both, so no brief is read), and a false deny on prohibitions joined by commas (the comma ends the clause the
 # negator sits in, so the second span reads as an order).
-add("brief-destructive-git: Workflow builder agent with no model key that orders `git reset --hard origin/main` "
+add("brief-destructive-git: Workflow builder agent on sonnet that orders `git reset --hard origin/main` "
     "is denied", "deny", BRIEF_DESTRUCTIVE, tool="Workflow",
-    script=_step_flow("'Run `git reset --hard origin/main`'", "agentType: 'builder'"))
+    script=_step_flow("'Run `git reset --hard origin/main`'", "agentType: 'builder', model: 'sonnet'"))
 add("brief-destructive-git: Workflow builder agent whose model is held in a variable and that orders "
     "`git reset --hard origin/main` is denied", "deny", BRIEF_DESTRUCTIVE, tool="Workflow",
     script="const m = 'sonnet'; "
