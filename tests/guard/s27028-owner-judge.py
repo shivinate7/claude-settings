@@ -138,8 +138,9 @@ for _kind in OJ_KINDS:
     oj("a Problem line of stake %s is allowed" % _kind, "allow",
        oj_item(context=oj_ctx(problem="Problem (%s): the pick changes what ships" % _kind)))
 for _premise in PREMISE_KINDS:
+    _where = " (%s)" % OJ_READ_AT if _premise == "read" else ""
     oj("a Based on line of kind %s is allowed" % _premise, "allow",
-       oj_item(context=oj_ctx(based=("Based on (%s): the lint job is slow." % _premise,))))
+       oj_item(context=oj_ctx(based=("Based on (%s): the lint job is slow.%s" % (_premise, _where),))))
 oj("three Based on lines are allowed", "allow",
    oj_item(context=oj_ctx(based=(OJ_BASED, "Based on (notes): two", "Based on (assumed): three"))))
 oj("a Problem line with no dash is allowed", "allow",

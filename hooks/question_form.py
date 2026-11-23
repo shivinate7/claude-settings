@@ -136,7 +136,7 @@ FORM_REASON = ("A question to the owner states the form, in this order: a line \
                "terms>\", a line \"Problem (<stake>): <the problem in one plain sentence, and why it needs "
                "his word>\" where stake is one of %s, and one to three lines \"Based on (<kind>): <one "
                "premise>\" where kind is one of %s. A \"Based on (read)\" line names the file and line it read as "
-               "path:line, such as hooks/guard.py:120; a summary you did not read is kind notes (decision "
+               "path:line, such as docs/plan.md:12; a summary you did not read is kind notes (decision "
                "premise-format). Each option states its gain and its loss."
                % (", ".join(OWNER_STAKES), ", ".join(PREMISE_KINDS)))
 PAGE_FORM_REASON = FORM_REASON + (" On the page the lines go in `context`, and each option has a "

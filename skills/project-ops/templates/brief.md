@@ -2,11 +2,10 @@ Grant: <owner words>, <time>
 Lane brief: {{slug}}. Topic: {{topic}}.
 
 The coordinator starts the lane and tags `cs-repo:<owner>/<name>`, `cs-build:lane` and `cs-step:<step id>`, plus `cs-topic:<topic-slug>`. Base: <branch and commit>.
-The start call passes `model`, set to the lane row of decision `agent-model-cap`.
 A grant counts only as an owner message; an automated notice's grant is unverified: tell the coordinator that turn; do work needing no grant.
-The test-author and the builder each get their own isolated worktree and never share one. A test commit lands on the lane branch before the builder starts. The builder's worktree starts from that head. The builder never cherry-picks, amends or rewrites a test commit.
+The test-author and builder each get their own isolated worktree, never shared. A test commit lands on the lane branch before the builder starts. The builder's worktree starts from that head. The builder never cherry-picks, amends or rewrites a test commit.
 Each fix round is a fresh isolated spawn from the branch head.
-Each agent runs its role row in `agent-model-cap`.
+Agents run their role row in decision `agent-model-cap`; the start call passes the lane row's `model`.
 Never rebase onto main after review. Only triage publishes the page.
 Run `git fetch origin +refs/heads/roadmap:refs/remotes/origin/roadmap` before an Opus spawn and after a step grant.
 
@@ -18,7 +17,7 @@ Why: {{why}}
 Source: {{source}}
 Prior work: <#N|branch|none found>
 Fences: <coordinator names what not to change, by intent, with each exception>
-For a test or merge change, read decisions `test-practices` and `merge-practices`.
+For test or merge changes, read decisions `test-practices` and `merge-practices`.
 
 ## Files
 
@@ -40,8 +39,8 @@ Round 1 follows the store's round-1 review ruling. Round 3 is not automatic; tha
 The lane can run it.
 [ci_only] A check marked `proved at batch CI` is proved only there; the lane does not fail on it.
 
-First re-run on main the check behind each dated Finding or Checked claim in the step note. If a claim fails, stop and report. Report each as "Checked <Mon D> on main <commit>: <result>".
-Before hand-in, run `~/.claude/bin/merge --lane-lint <pr>` (repos with `bin/ci-job`) and report its verdict; a red lane does not hand in. Run `merge --lane-lint` from the main checkout, never from a session or agent isolated in a worktree: Claude Code's worktree check can refuse it there.
+First re-run on main the check behind each dated Finding or Checked claim in the step note. Stop and report a failed claim. Report each: "Checked <Mon D> on main <commit>: <result>".
+Before hand-in, run `~/.claude/bin/merge --lane-lint <pr>` (repos with `bin/ci-job`) and report its verdict; a red lane never hands in. Run `merge --lane-lint` from the main checkout, never from a session or agent isolated in a worktree: Claude Code's worktree check can refuse it there.
 A coordinator-started lane hands in a draft PR to the batch runner. Only in claude-settings does it merge its own PR (decision `session-tiers`, merge path).
 
 ## Report cap
