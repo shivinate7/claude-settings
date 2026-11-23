@@ -2852,6 +2852,37 @@ class SessionStartStableFreshnessTests(GitFixtureMixin, SessionStartAgentWorktre
         self.assertIn("settings.json", found[0], "the line does not name the modified settings.json: %r" % found[0])
         self.assertEqual([line for line in lines if "not main" in line], [], "the stalled pin also printed an off-main line: %r" % lines)
 
+    # A save that only reordered the keys is restored by merge/install_from_main.sh, so the line has nothing to name. The line
+    # reads the file with python3, as the helper does; a host without it prints the note, so these two cases skip there.
+
+    @unittest.skipUnless(shutil.which("python3"), "the hook compares the saved file with python3")
+    def test_a_pin_behind_origin_stable_with_a_reordered_settings_json_names_no_file(self):
+        self.stalled_pin(2, settings='{"a": 1, "b": [1, 2]}\n')
+        self.put(os.path.join(self.primary, "settings.json"), '{"b": [1, 2], "a": 1}\n')
+        self.assertEqual(vcs(self.primary, "status", "--porcelain", "--untracked-files=no").stdout, " M settings.json\n",
+                         "scope: settings.json is not the one modified file")
+        lines = self.run_hook()
+        self.assert_hook_ran(lines)
+        found = self.behind_lines(lines)
+        self.assertEqual(len(found), 1, "want one behind-stable line for a pin 2 commits behind origin/stable, got %r" % lines)
+        self.assertRegex(found[0], r"^claude-settings: .+ is behind stable by 2 commits; global rules and hooks are stale$",
+                         "a settings.json that only reordered its keys is named in the line: %r" % found[0])
+
+    @unittest.skipUnless(shutil.which("python3"), "the hook compares the saved file with python3")
+    def test_a_pin_behind_origin_stable_with_a_reordered_settings_json_and_another_change_names_the_file(self):
+        # The control: the helper restores a reordered file only when it is the pin's one change, so with a second
+        # modified file the move is refused and settings.json is still worth naming.
+        self.stalled_pin(2, settings='{"a": 1, "b": [1, 2]}\n')
+        self.put(os.path.join(self.primary, "settings.json"), '{"b": [1, 2], "a": 1}\n')
+        self.put(os.path.join(self.primary, "f.txt"), "edited\n")
+        self.assertEqual(vcs(self.primary, "status", "--porcelain", "--untracked-files=no").stdout, " M f.txt\n M settings.json\n",
+                         "scope: the pin is not modified in settings.json and f.txt only")
+        lines = self.run_hook()
+        self.assert_hook_ran(lines)
+        found = self.behind_lines(lines)
+        self.assertEqual(len(found), 1, "want one behind-stable line for a pin 2 commits behind origin/stable, got %r" % lines)
+        self.assertIn("settings.json", found[0], "the line does not name the modified settings.json: %r" % found[0])
+
     def test_a_pin_at_origin_stable_tip_with_a_modified_settings_json_prints_nothing_about_stable(self):
         self.track_settings('{"a": 1}\n')
         stable = self.other_commit("stable", "stable")
