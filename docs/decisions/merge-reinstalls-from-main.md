@@ -21,6 +21,12 @@
    it (owner ruling 2026-11-11 14:19 CST: 'the installer fetches and uses origin's main'). A local main that holds commits origin
    lacks, including unrelated history, is refused: one 'install not run' stderr line, exit 1, nothing installs, the pin does not
    move. Only a failed or impossible fetch (offline, no origin remote) warns and installs local main, as before.
+7. The app rewrites the linked `settings.json` when it saves a setting, and no session may write in the pin to clear that. When
+   that file is the pin's only tracked change and parses as JSON, the script copies it to `settings.json.bak` beside the file,
+   restores it, moves the pin, and prints one WARN line per top-level key that differs from the target commit's file (added,
+   changed or removed; key order ignored). The key reaches main by PR. Any other tracked change, or bad JSON, refuses as in
+   item 6. The SessionStart hook says "behind stable by N commits" for a pin detached behind `origin/stable`, and names a
+   modified `settings.json` (incident 2026-11-22: the app added `switchModelsOnFlag`).
 
 Open: the SessionStart refresh lock has no test. A refresh child that outlives 10 minutes can remove a
 newer start's lock (debt `refresh-lock-untested`).

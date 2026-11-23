@@ -17,7 +17,9 @@
 # renames the path is absent for a moment, and a guard load retries through that.
 # Without symlink rights the pinned checkout is switched in place (git switch --detach), which
 # writes the files one at a time (a live reader can see a mix there).
-# A settings.json that only reordered keys is restored from HEAD first and does not count as a change.
+# A settings.json that only reordered keys is restored from HEAD first and does not count as a change. One the app saved
+# with a changed key, as the pin's only tracked change, is saved to settings.json.bak and restored, and the run names each
+# key (save_app_settings); the app rewrites that linked file, and no session may write in the pin to clear it.
 # A pin with tracked changes is never moved, switched or removed, nor is an old tree with them: the
 # run prints one stderr line naming the pin and exits 1; the SessionStart hook writes that line to
 # the install log. A <clone>-live-<commit> tree whose only changes are missing tracked files (a git
@@ -55,6 +57,7 @@ release_lock() {   # the EXIT trap: the end line with the run's real exit, then 
   rc=$?
   trap - EXIT
   log_line "end exit=$rc"
+  [ -z "$bak_path" ] || rm -f "$bak_path"
   [ "$(head -n 1 "$INSTALL_LOCK" 2>/dev/null)" = "$INSTALL_ID" ] && rm -f "$INSTALL_LOCK"
   return "$rc"
 }
@@ -93,6 +96,40 @@ restore_reordered_settings() {
 import json, sys
 sys.exit(0 if json.load(sys.stdin) == json.load(open(sys.argv[1])) else 1)' "$1/settings.json" 2>/dev/null \
     && git -C "$1" checkout -q -- settings.json >/dev/null 2>&1
+  return 0
+}
+
+# Frees DIR of a settings.json the app saved with a changed top-level key (a first-time prompt, /config). Only when
+# settings.json is DIR's one tracked change and parses as a JSON object (and so does the target commit's copy): the file
+# is copied to settings.json.bak beside it, restored from HEAD, and one stderr line per key that is added, changed or
+# removed against the target commit says it lands on main by PR (the saved value is in the .bak). Key order is ignored.
+# Any other change, bad JSON or no python3 leaves DIR as it is, so the caller refuses as before. Sets bak_path.
+bak_path=""
+save_app_settings() {
+  [ "$(git -C "$1" status --porcelain --untracked-files=no 2>/dev/null)" = " M settings.json" ] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  keys=$(git -C "$1" show "$commit:settings.json" 2>/dev/null | python3 -c '
+import json, sys
+want, have = json.load(sys.stdin), json.load(open(sys.argv[1]))
+if not isinstance(want, dict) or not isinstance(have, dict):
+    sys.exit(1)
+for k in sorted(set(want) | set(have)):
+    if k not in want: print("added\t" + k)
+    elif k not in have: print("removed\t" + k)
+    elif want[k] != have[k]: print("changed\t" + k)' "$1/settings.json" 2>/dev/null) || return 0
+  cp "$1/settings.json" "$1/settings.json.bak" 2>/dev/null || return 0
+  git -C "$1" checkout -q -- settings.json >/dev/null 2>&1 || return 0
+  bak_path="$CLAUDE_DIR/.settings.json.bak.$$"   # the move renames DIR, so main puts the copy back beside the pin's file
+  cp "$1/settings.json.bak" "$bak_path" 2>/dev/null || bak_path=""
+  short=$(git rev-parse --short "$commit")
+  printf '%s\n' "$keys" | while IFS="$(printf '\t')" read -r how key; do
+    [ -n "$key" ] || continue
+    if [ "$how" = removed ]; then
+      echo "install_from_main.sh: WARN: settings.json key \"$key\" is missing from the app's file but is in $short; the file was restored from $short and the app's copy is $pin/settings.json.bak" >&2
+    else
+      echo "install_from_main.sh: WARN: settings.json key \"$key\" is $how against $short; the file was restored and the app's copy is $pin/settings.json.bak; land the key on main by PR to keep it" >&2
+    fi
+  done
   return 0
 }
 
@@ -144,6 +181,7 @@ prune_trees() {
 # Moves the pinned checkout to main's commit.
 move_pin() {
   restore_reordered_settings "$pin"
+  save_app_settings "$pin"
   if [ -n "$(git -C "$pin" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
     # Tracked changes in the pin are someone's work: move, switch and remove nothing.
     fail "the pinned checkout $pin has tracked changes, so it was not moved; commit or discard them there (git -C \"$pin\" status), then run merge/install_from_main.sh"
@@ -253,6 +291,8 @@ else
   { [ -n "$a" ] && [ "$a" = "$b" ]; } \
     || fail "$pin is not a worktree of this clone; move it aside, then run merge/install_from_main.sh"
   at_main "$pin" || move_pin
+  # The saved copy goes with the pin: a move leaves the old tree behind, and the next move removes it.
+  [ -z "$bak_path" ] || cp "$bak_path" "$pin/settings.json.bak" 2>/dev/null
   git worktree lock --reason "$REASON" "$pin" >/dev/null 2>&1   # lock an unlocked pin; fails harmlessly when locked
 fi
 

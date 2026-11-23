@@ -427,6 +427,17 @@ if [ -n "$d" ] && [ -e "$d/.git" ]; then
     stable_head=$(cd "$d" 2>/dev/null && git rev-parse --verify -q refs/remotes/origin/stable 2>/dev/null)
     if [ -n "$pin_head" ] && { [ "$pin_head" = "$main_head" ] || [ "$pin_head" = "$origin_head" ] || [ "$pin_head" = "$stable_head" ]; }; then
       pointer_branch=main
+    elif [ "${CLAUDE_SETTINGS_REF:-stable}" != main ] && [ -n "$stable_head" ] && [ -n "$pin_head" ] \
+         && (cd "$d" 2>/dev/null && git merge-base --is-ancestor "$pin_head" "$stable_head" 2>/dev/null); then
+      # The designed pin state is origin/stable's tip, so an older commit is a stalled pin, not an off-main checkout. A
+      # settings.json the app rewrote is the usual cause, so the line names it.
+      stable_behind=$(cd "$d" 2>/dev/null && git rev-list --count "$pin_head..$stable_head" 2>/dev/null)
+      pin_dirty=""
+      [ "$(cd "$d" 2>/dev/null && git status --porcelain --untracked-files=no 2>/dev/null | grep -c ' settings.json$')" -gt 0 ] \
+        && pin_dirty="; its settings.json is modified, which can block the move (run merge/install_from_main.sh)"
+      printf 'claude-settings: %s is behind stable by %s commits%s; global rules and hooks are stale\n' \
+        "$d" "$stable_behind" "$pin_dirty"
+      pointer_branch=""
     else
       pointer_branch="a detached HEAD"
     fi
