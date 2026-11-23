@@ -1520,7 +1520,7 @@ class WindowsSplit(unittest.TestCase):
             "n disagrees": doc(base, job("checks-windows-guard-2", "2/2"), job("checks-windows-guard-3", "3/3")),
             "a slice step left in the base job": doc(job("checks-windows-guard", "1/3", base=True, slice_=True),
                                                      job("checks-windows-guard-2", "2/3"), job("checks-windows-guard-3", "3/3")),
-            "a lone shard": doc(job("checks-windows-guard", "1/2", base=True, slice_=True)),
+            "a lone shard": doc(job("checks-windows-guard", "1/3", base=True, slice_=True)),
             "a stray job name": doc(base, job("checks-windows-guard-2", "2/3"), job("checks-windows-rest", "3/3")),
         }
         for label, text in bad.items():
@@ -1822,21 +1822,23 @@ class SplitJobs(unittest.TestCase):
 
     def test_checker_sees_the_linux_guard_split_defects(self):
         self.assertEqual(linux_guard_split_problems(linux_guard_doc()), [])  # the control: the planned split passes
+        # Each row carries the live first shard value, so a row is flagged only for its own defect, not for a wrong total.
+        first = LINUX_GUARD_SHARD["checks-guard"]
         bad = {
-            "the second shard missing": split_doc({"checks-guard": ("ubuntu-latest", [linux_guard_shard("1/2")])}),
+            "the second shard missing": split_doc({"checks-guard": ("ubuntu-latest", [linux_guard_shard(first)])}),
             "the second shard's value dropped": linux_guard_doc(b=[(LINUX_GUARD, LINUX_GUARD_IF, None, dict(LINUX_GUARD_ENV))]),
-            "both shards 1/2": linux_guard_doc(b=[linux_guard_shard("1/2")]),
-            "a third Linux job runs the guard": linux_guard_doc(
-                extra={"checks-guard-3": ("ubuntu-latest", [linux_guard_shard("1/2")])}),
+            "both shards carry the first value": linux_guard_doc(b=[linux_guard_shard(first)]),
+            "a fifth Linux job runs the guard": linux_guard_doc(
+                extra={f"checks-guard-{len(LINUX_GUARD_JOBS) + 1}": ("ubuntu-latest", [linux_guard_shard(first)])}),
             "the guard in neither shard job": linux_guard_doc(a=[], b=[]),
             "no job at all": "jobs:\n",
             "GUARD_SHARD in a job's env": linux_guard_doc().replace(
-                "    needs: scope\n    steps:", "    needs: scope\n    env:\n      GUARD_SHARD: 1/2\n    steps:", 1),
+                "    needs: scope\n    steps:", f"    needs: scope\n    env:\n      GUARD_SHARD: {first}\n    steps:", 1),
             "the shard's if changed": linux_guard_doc(a=[linux_guard_shard(
-                "1/2", if_="needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request'")]),
-            "the shard's if dropped": linux_guard_doc(a=[linux_guard_shard("1/2", if_=None)]),
-            "a shell added to a shard": linux_guard_doc(a=[linux_guard_shard("1/2", shell="bash")]),
-            "the suite's env changed": linux_guard_doc(a=[linux_guard_shard("1/2", env={"GUARD_CHROMIUM": '"0"'})]),
+                first, if_="needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request'")]),
+            "the shard's if dropped": linux_guard_doc(a=[linux_guard_shard(first, if_=None)]),
+            "a shell added to a shard": linux_guard_doc(a=[linux_guard_shard(first, shell="bash")]),
+            "the suite's env changed": linux_guard_doc(a=[linux_guard_shard(first, env={"GUARD_CHROMIUM": '"0"'})]),
         }
         for label, text in bad.items():
             with self.subTest(defect=label):
@@ -3720,7 +3722,7 @@ class ShardFamilies(unittest.TestCase):
         self.ci_done = needs_of(job_block(self.text, "ci-done")) or []
 
     def test_windows_merge_runs_in_the_counted_shard_jobs(self):
-        # Named failure: the merge suite runs in 5 shard jobs, not the counted 10, so its cases past the fifth shard never run.
+        # Named failure: the merge suite runs in fewer shard jobs than the counted total, so its cases past the last shard never run.
         self.assertEqual(shard_env(self.text, MERGE_CMD, MERGE_VAR), expected_values(WINDOWS_MERGE_JOBS))
 
     def test_windows_guard_runs_in_the_counted_shard_jobs(self):
