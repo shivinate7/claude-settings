@@ -21,7 +21,7 @@ Then it exits 2 once, which wakes the session. A repo with no active workflow, w
 Stop check closes its CI wait on that line and reads only the transcript (stall_watch `open_ci_wait`). A workflow
 list with stderr output reads unknown, and the watch runs. It prints nothing and exits 0 when no watch starts, for a
 draft or when another watcher already holds every PR it would watch. Any error exits 2 with an unknown
-line, never 1. It lists runs, and reads a run's status and jobs (one call), 30 s apart for the first 4 minutes, then at
+line, never 1. It lists runs, and reads a run's status and jobs (one `gh` child per poll; API requests per poll unmeasured), 30 s apart for the first 4 minutes, then at
 gaps that grow to 120 s (`pauses`). One extra list comes at once after the first judged run, to catch a
 run that shows late (debt ci-wake-lists-runs-once). It never loops on a red run. Cost: no more status reads than that
 schedule, plus one job-log read per watch, made only for a red wake (the first failed job's log).
@@ -285,7 +285,15 @@ def early_red(run):
 
 def judge(merge, runs):
     """-> (red, pending) as judge_runs gives them, with a run that goes on and has a failed job judged red, not pending."""
-    return merge.Host.judge_runs([dict(r, status="completed", conclusion="failure") if early_red(r) else r for r in runs])
+    red, pending = merge.Host.judge_runs([dict(r, status="completed", conclusion="failure") if early_red(r) else r for r in runs])
+    for r in runs:
+        # judge_runs keeps one run per name, the newest. A failed run that a newer run of its name hides (one still going)
+        # must stay red: a green line would claim the failed job passed.
+        newest = next(x for x in runs if x["name"] == r["name"])
+        if early_red(r) and newest.get("status") != "completed" \
+                and not any(t.startswith("workflow %s: " % r["name"]) for t in red):
+            red.append("workflow %s: failure" % r["name"])
+    return red, pending
 
 
 def wait_for(sha, cwd, deadline, repo=""):
@@ -352,7 +360,7 @@ def verdict(sha, runs):
         return "CI green on %s: no failing jobs" % sha[:7]
     names, cancelled = [], True
     for text in red:
-        run = next((r for r in runs if text.startswith("workflow %s: " % r["name"])), None)
+        run = next((r for r in sorted(runs, key=lambda x: not early_red(x)) if text.startswith("workflow %s: " % r["name"])), None)   # a failed run before the newer run of its name that hides it
         if run is None:
             names.append(text)
             cancelled = False
@@ -365,30 +373,45 @@ def verdict(sha, runs):
     return "CI %s on %s: %s" % ("cancelled" if cancelled else "red", sha[:7], ", ".join(dict.fromkeys(names)))
 
 
-def first_failed_job(runs):
-    """-> (name, job id) of the first failed job of the runs, newest run first, else None."""
+def first_failed_job(runs, rollup=None):
+    """-> (name, job id) of the first failed job of the runs, newest run first, else None. The rollup job (merge.py
+    ROLLUP_JOB, passed as `rollup`) is skipped: it logs only its own verdict."""
     for run in runs:
         for j in run.get("jobs") or []:
-            if j.get("conclusion") == "failure":
+            if j.get("conclusion") == "failure" and j.get("name") != rollup:
                 return j.get("name") or "?", j.get("databaseId") or j.get("id")
     return None
+
+
+def unlogged_cause(runs, rollup=None):
+    """-> the `log unread` line for a red run with no failed job: the first job that ended badly (timed_out and the like) with
+    its conclusion, else the first red run's own conclusion (startup_failure), else a plain no-failed-job line."""
+    for run in runs:
+        for j in run.get("jobs") or []:
+            if j.get("conclusion") not in GOOD + (None, "failure", "cancelled") and j.get("name") != rollup:
+                return "log unread: job %s concluded %s" % (j.get("name") or "?", j["conclusion"])
+    for run in runs:
+        if run.get("status") == "completed" and run.get("conclusion") not in GOOD:
+            return "log unread: workflow %s concluded %s, with no failed job" % (run.get("name") or "?", run.get("conclusion"))
+    return "log unread: no failed job in the run"
 
 
 def detail_lines(runs, cwd, repo):
     """-> the lines after a red line: the failing lines of the first failed job's log, else one `log unread: <reason>`
     line. This is the watch's one log read. A refused or empty read is unknown, never clear. The lines come from
     merge.py `failing_log_lines`, the one home of the log reader, with timestamp and colour codes removed."""
-    job = first_failed_job(runs)
+    from guard_merge import merge_module
+    merge = merge_module()
+    rollup = getattr(merge, "ROLLUP_JOB", None) if merge is not None else None
+    job = first_failed_job(runs, rollup)
     if job is None:
-        return ["log unread: no failed job in the run"]
+        return [unlogged_cause(runs, rollup)]
     name, job_id = job
     slug, tail = repo_route(repo)
     try:
         rc, out, err = gh(["api", "-X", "GET", "repos/%s/actions/jobs/%s/logs" % (slug, job_id), *tail], cwd)
         if rc != 0:
             return ["log unread: reading the log of job %s failed: %s" % (name, (err or out).strip() or "gh exited %d" % rc)]
-        from guard_merge import merge_module
-        merge = merge_module()
         if merge is None:
             return ["log unread: the merge tool (failing_log_lines) could not be loaded"]
         lines = []
