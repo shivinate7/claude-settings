@@ -32,6 +32,6 @@ Residual risk: a clean merge can still break a suite, and a head can merge befor
 Kind: process
 Home: merge/merge.py
 
-Cost: per merge, one read of the head's run and two `git merge-tree --write-tree` starts (unmeasured). A carried proof adds one `git log` per commit walked, one base fetch when a base merge is met, and one read of the live head's run (unmeasured). A pending head adds one paged read of the repo's comments and the carry checks (unmeasured).
+Cost: per merge, one read of the head's run and two `git merge-tree --write-tree` starts (unmeasured). A carried proof adds, per page-only commit walked, 3 git starts (two `git log`, one `git diff-tree`), and per clean base merge walked, 8 git starts (two `git log`, `git rev-list`, `git merge-base --is-ancestor`, two `git rev-parse`, `git merge-tree`, one `git rev-parse` of the tree), plus one base fetch per walk; the count grows with the depth of the stack (unmeasured by a test). On the relayed path, each merge commit met also runs the config read of `heals_stale_page` (unmeasured by a test). A confirm makes 2 GitHub reads at any depth (unmeasured by a test). A pending head adds one paged read of the repo's comments and the carry checks (unmeasured).
 
 Risk: likely. Lanes merge while main moves, so main often moves under a green or pending head.
