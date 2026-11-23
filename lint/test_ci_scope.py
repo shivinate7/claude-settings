@@ -1719,8 +1719,8 @@ class WindowsGuardShards(unittest.TestCase):
                 self.assertEqual(have, sorted(want), f"a flag changed for {paths}: {got}")
 
 
-# Change B on the scope side (owner, 2026-11-23 10:49 CST): the merge and rest shards read the flags below. Each named path sets the merge
-# or the rest flag, the one whose shard runs the suite that path loads, and a docs-only diff sets neither. Controls: green on the old one.
+# The merge and rest shards read the flags below. Each named path sets the merge or the rest flag, the one whose shard runs the suite
+# that path loads, and a docs-only diff sets neither. Controls: green on the old script.
 class WindowsMergeAndRestFlags(unittest.TestCase):
     NAMED_PATHS = ("merge/merge.py", "hooks/guard.py", "bin/merge", ".github/workflows/checks.yml", ".github/scripts/ci-scope.sh")
 

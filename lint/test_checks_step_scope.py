@@ -1167,8 +1167,8 @@ class DocsOnlyPullRequestSteps(ChecksStepBase):
         self.assertFalse(runs_on(if_of(step), got), f"the landed-dirs suite runs for a docs-only edit to {path}: its if is {if_of(step)!r}")
 
 
-# Change A (owner, 2026-11-23 10:28 CST): a failed step no longer stops the later steps of the `checks` job. Every test and lint step
-# runs, and the job ends red when any step failed. A step keeps running when `!cancelled()` is a top-level `&&` part of its `if:`,
+# A failed step does not stop the later steps of the `checks` job. Every test and lint step runs, and the job ends red when any step
+# failed. A step keeps running when `!cancelled()` is a top-level `&&` part of its `if:`,
 # joined with its own condition. GitHub reads a step with no `if:` as success(), which stops at the first failure.
 KEEP_RUNNING = "!cancelled()"
 # The steps with no keep-running condition, by label: the checkout and setup steps every later step needs, and the install whose
@@ -1190,7 +1190,7 @@ def keeps_running(expr):
 
 
 class KeepRunningAfterFailure(unittest.TestCase):
-    """Change A on checks.yml: every step of the `checks` job after the checkout and setup steps keeps running after a failure, and no
+    """On checks.yml: every step of the `checks` job after the checkout and setup steps keeps running after a failure, and no
     step is allowed to go green past one (continue-on-error). Each case reads the real file."""
 
     def steps(self):

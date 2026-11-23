@@ -615,8 +615,7 @@ class ChildActionAndLayouts(unittest.TestCase):
         self.assertEqual(child_problems(text), [], "a push-only job left out of needs has problems under child_problems")
 
 
-# Change B on the rollup side (owner, 2026-11-23 10:49 CST): a merge or rest shard whose suite steps skip by its flag still ends success,
-# because its job runs. all-jobs-passed passes that result, fails a failed shard, and needs each shard. Controls: green on the old check.sh.
+# The rollup side of the merge and rest flags: a shard whose suite steps skip by its flag still ends success, because its job runs. all-jobs-passed passes that result, fails a failed shard, and needs each shard. Controls: green on the old check.sh.
 class ShardsRunWithTheirFlagFalse(unittest.TestCase):
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:

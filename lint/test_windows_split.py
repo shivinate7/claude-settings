@@ -473,8 +473,8 @@ SHELL = {"sh hooks/test_install_windows.sh": "bash", "bash actions/stamp/test_ac
 # pull_request included, and on its scope flag.
 IF_PIN = {"python janitor/mutate_sweep.py":
           "${{ !cancelled() && needs.scope.outputs.sweep == 'true' }}",
-          # The full merge suite runs on a ready pull_request when its own flag is set (owner, 2026-11-23 10:49 CST, Change B), and on
-          # push when code changed (R62). Each merge shard's step carries this text.
+          # The full merge suite runs on a ready pull_request when its own flag is set, and on push when code changed (R62). Each
+          # merge shard's step carries this text.
           "python merge/test_merge.py": "${{ !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request') }}",
           # The full guard suite: the same rule as the merge suite (R62), and the guard-inputs gate: a diff that touches no guard input
           # (windows_guard, .github/guard-inputs.txt) runs no guard shard, a ready pull_request included. No slice step.
@@ -721,8 +721,8 @@ def draft_guard_only(expr):
 
 
 # The full Windows suite's steps carry the draft guard, bare (checkout and setup) or as `(draft guard) && E`. The guard suite's E reads
-# code and windows_guard. The merge and rest suites' E reads code (merge) and their own flag (SUITE_FLAG): owner, 2026-11-23 10:49 CST
-# (Change B), a ready pull_request runs them only with that flag set.
+# code and windows_guard. The merge and rest suites' E reads code (merge) and their own flag (SUITE_FLAG): a ready pull_request runs
+# them only with that flag set.
 DRAFT_GUARD = "github.event_name != 'pull_request' || !github.event.pull_request.draft"
 # Each merge and rest job's scope output, read by its suite steps as the gated Windows jobs read theirs (checks-windows reads
 # checks_windows). checks-windows-rest-2 reads its own output, which repeats checks_windows_rest's value.
@@ -742,7 +742,7 @@ def sweep_union(own):
 def full_suite_problems(name, job):
     """R62 for a full-suite job (full_suite_job). Every step carries the draft guard, bare or as `(draft guard) && E`. A suite
     step keeps !cancelled(), and its E reads code (the push condition on the steps that have one), the guard family's windows_guard,
-    and the merge and rest job's own flag (SUITE_FLAG, Change B), and no other scope flag."""
+    and the merge and rest job's own flag (SUITE_FLAG), and no other scope flag."""
     problems = []
     for st in job["steps"]:
         expr = step_if(st)
@@ -1420,7 +1420,7 @@ class WindowsSplit(unittest.TestCase):
                     good.replace("    steps:\n", "    steps:\n      - run: echo MERGE_TESTS=windows-slice >> $GITHUB_ENV\n")):
             self.assertTrue(any("MERGE_TESTS appears 1 times" in p for p in hardening_problems(bad)), bad)
         self.assertTrue(hardening_problems(doc(full=full_e.replace("needs.scope.outputs.code == 'true' || ", ""))))  # the push condition dropped
-        # Another job's flag is read by no merge suite step (Change B lets the merge suite read its own flag only).
+        # A merge suite step may read its own flag, but not another job's.
         self.assertTrue(any("reads scope flags" in p for p in hardening_problems(doc(full=full_e.replace("outputs.code", "outputs.checks_windows")))))
 
     def test_checker_sees_the_shard_defects(self):
@@ -2464,7 +2464,7 @@ class ReadyPullShards(unittest.TestCase):
 
 class ReadyPullFullSuite(unittest.TestCase):
     """R62, "each suite once per batch, on the batch PR", with its lean: a ready pull_request runs the Windows merge and rest suites
-    when their own scope flag is set (owner, 2026-11-23 10:49 CST, Change B). The guard shards run there when windows_guard is set (the
+    when their own scope flag is set. The guard shards run there when windows_guard is set (the
     guard-inputs gate). A draft pull_request with no flag set runs none of their steps, and a shard's draft guard stays on its job.
     Push, schedule and dispatch keep their flag rules. Each case reads the real file."""
 

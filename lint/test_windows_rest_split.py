@@ -158,7 +158,7 @@ class RecordsOnlySkipCondition(unittest.TestCase):
                 self.assertEqual(skipped, [], f"{name} / {label} does not run with the condition open on: {skipped}")
 
 
-# Change B (owner, 2026-11-23 10:49 CST): each merge and rest suite step reads its job's own scope flag, the step-level gate the gated
+# Each merge and rest suite step reads its job's own scope flag, the step-level gate the gated
 # Windows jobs use. checks-windows quotes it on its checkout:
 #   if: ${{ needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request' }}
 # So with the flag false a ready pull_request skips the step, and push, schedule and dispatch keep their rules. Each job still runs, so its
@@ -175,7 +175,7 @@ def runs_flagged(job, st, values, default):
     return st.get("if") is None or eval_with(st["if"], "pull_request", values, default=default)
 
 
-class MergeAndRestFlagGate(unittest.TestCase):
+class MergeAndRestScopeFlags(unittest.TestCase):
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
             self.text = f.read()
