@@ -282,6 +282,22 @@ FORM_VARIANTS = [
            based=["Based on (read): the <Card> prop renders twice (skills/waiting-page/export_page.py:1046)."]), None),
     ("placeholder: a JSX lone quote and comment openers beside angle brackets pass",
      parts(goal="Goal: fix the <p>Don't</p> text, and keep // and /* in paths as plain text."), None),
+    # A read premise names path:line (decision premise-format). Each refusal names the cause, "path:line".
+    ("a read premise that names no path:line is refused",
+     parts(based=["Based on (read): the cloud allow rules cover only the plain merge form."]), (FORM_RULE, "path:line")),
+    ("a read premise that names a path with no line is refused",
+     parts(based=["Based on (read): hooks/guard.py holds the merge check."]), (FORM_RULE, "path:line")),
+    ("a read premise whose only cite is a URL with a port is refused",
+     parts(based=["Based on (read): http://localhost:8080"]), (FORM_RULE, "path:line")),
+    ("three Based on lines, one read with no path:line, is refused",
+     parts(based=[BASED[0], "Based on (read): the cloud allow rules cover only the plain merge form.", THIRD]),
+     (FORM_RULE, "path:line")),
+    ("a read premise that names path:line in its text passes",
+     parts(based=["Based on (read): the merge check in hooks/guard.py:120 refuses the runner's form."]), None),
+    ("a read premise with a relative path with folders and an extension passes",
+     parts(based=["Based on (read): skills/waiting-page/export_page.py:1046 writes the page."]), None),
+    ("a notes premise with no line passes",
+     parts(based=["Based on (notes): an Explore summary says the runner merges alone."]), None),
 ]
 for _kind in PREMISE_KINDS:
     FORM_VARIANTS.append(("a Based on kind %s" % _kind, parts(based=["Based on (%s): the premise (hooks/guard.py:120)." % _kind]), None))
