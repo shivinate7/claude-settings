@@ -2243,6 +2243,97 @@ class RefusalCiteRepoTests(unittest.TestCase):
                 self.assertGreaterEqual(len((reason or "").split()), EXEMPT_REASON_WORDS, rid)
 
 
+class BrowserKeychainCiteTests(unittest.TestCase):
+    """Rule browser-keychain prints a cite, so it has no exempt row: the ratchet reads a row for a cited refusal as
+    stale (decision render-browser-no-keychain)."""
+
+    def test_the_browser_keychain_refusal_prints_its_decision_cite(self):
+        world = _hooks_world()
+        statuses, _ = refusal_status(world, cite_homes(), set(world), guards=_guard_names())
+        rows = statuses.get("browser-keychain", [])
+        self.assertTrue(rows, "no guard refusal prints the browser-keychain id")
+        uncited = [where for where, status, _ in rows if status != "cited"]
+        self.assertEqual(uncited, [], "browser-keychain refusal prints no cite at: " + ", ".join(uncited))
+        self.assertNotIn("browser-keychain", REFUSAL_UNCITED_EXEMPT)
+
+
+def _text_or_empty(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read()
+    except OSError:
+        return ""
+
+
+def _guard_switches(root):
+    """BROWSER_FLAGS of hooks/guard_browser.py, read with ast: the constant the guard reads. None when it is absent."""
+    try:
+        tree = ast.parse(_text_or_empty(os.path.join(root, "hooks", "guard_browser.py")))
+    except SyntaxError:
+        return None
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "BROWSER_FLAGS"
+                                                for t in node.targets):
+            if isinstance(node.value, (ast.Tuple, ast.List)) and all(
+                    isinstance(e, ast.Constant) and isinstance(e.value, str) for e in node.value.elts):
+                return tuple(e.value for e in node.value.elts)
+    return None
+
+
+BROWSER_RENDER_ARGS_RE = re.compile(r"const CHROMIUM_ARGS = \[([^\]]*)\];")
+BROWSER_ARGS_LIST_RE = re.compile(r"args:\s*\[([^\[\]]*)\]")
+
+
+def _render_switches(root):
+    """CHROMIUM_ARGS of bin/render, the list the tool launches Chromium with. None when it is absent."""
+    found = BROWSER_RENDER_ARGS_RE.search(_text_or_empty(os.path.join(root, "bin", "render")))
+    return None if found is None else tuple(re.findall(r'"([^"]*)"', found.group(1)))
+
+
+def _args_lists(path):
+    """Each `args: [...]` list of a file that names --use-mock-keychain, as its string values."""
+    lists = []
+    for found in BROWSER_ARGS_LIST_RE.finditer(_text_or_empty(path)):
+        values = tuple(re.findall(r'"([^"]*)"', found.group(1)))
+        if "--use-mock-keychain" in values:
+            lists.append(values)
+    return lists
+
+
+class BrowserSwitchLiteralTests(unittest.TestCase):
+    """The two Chromium switches are one list: hooks/guard_browser.py BROWSER_FLAGS. Each file that launches a
+    Chromium spells the same switches, so a drift in one of them fails here (rule building-allow-list-is-the-constant,
+    decision render-browser-no-keychain)."""
+
+    def test_the_guard_constant_names_both_switches(self):
+        flags = _guard_switches(rule_audit.ROOT)
+        self.assertIsNotNone(flags, "hooks/guard_browser.py has no BROWSER_FLAGS tuple of string literals")
+        self.assertEqual(sorted(flags), sorted(["--password-store=basic", "--use-mock-keychain"]), flags)
+
+    def test_bin_render_passes_the_guard_switches(self):
+        render = _render_switches(rule_audit.ROOT)
+        self.assertIsNotNone(render, "bin/render has no CHROMIUM_ARGS list")
+        flags = _guard_switches(rule_audit.ROOT)
+        self.assertIsNotNone(flags, "hooks/guard_browser.py has no BROWSER_FLAGS tuple of string literals")
+        self.assertEqual(render, flags, "bin/render launches with %r, the guard reads %r" % (render, flags))
+
+    def test_bin_shoot_passes_the_guard_switches(self):
+        lists = _args_lists(os.path.join(rule_audit.ROOT, "bin", "shoot"))
+        self.assertTrue(lists, "bin/shoot passes no args list with --use-mock-keychain")
+        flags = _guard_switches(rule_audit.ROOT)
+        self.assertIsNotNone(flags, "hooks/guard_browser.py has no BROWSER_FLAGS tuple of string literals")
+        self.assertEqual([v for v in lists if v != flags], [],
+                         "bin/shoot launches with a list the guard does not read as %r" % (flags,))
+
+    def test_check_designs_passes_the_guard_switches(self):
+        lists = _args_lists(os.path.join(rule_audit.ROOT, "skills", "waiting-page", "check_designs.mjs"))
+        self.assertTrue(lists, "check_designs.mjs passes no args list with --use-mock-keychain")
+        flags = _guard_switches(rule_audit.ROOT)
+        self.assertIsNotNone(flags, "hooks/guard_browser.py has no BROWSER_FLAGS tuple of string literals")
+        self.assertEqual([v for v in lists if v != flags], [],
+                         "check_designs.mjs launches with a list the guard does not read as %r" % (flags,))
+
+
 HOMES = ({"alpha"}, {"anchor-one"})
 SCOPE = {"guard"}
 
