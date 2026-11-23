@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Tests for the idle red pull request rule (owner, 2026-11-23 10:54 CST, "2 hours is great"): a non-draft PR whose head is red and
-whose newest pull_request run is 2 hours old or more goes back to draft. Its comment says why and how to return.
+"""Tests for the idle red pull request rule: a non-draft PR whose head is red and whose newest pull_request run is 2 hours old
+or more goes back to draft. Its comment says why and how to return.
 
 Run: python3 merge/test_idle_prs.py
 
