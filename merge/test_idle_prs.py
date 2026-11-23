@@ -28,19 +28,28 @@ as weeks old and fails the 1 h 59 min and the newest-run cases. The 2-hour thres
 second less does not), not by the module's constant name. GitHub's clock and the local clock both start at FAKE_NOW; a case moves one
 of them to show which clock the age is read from.
 
-Cost pin: one open-pulls read per sweep, and at most one runs read per non-draft PR. No file is written, and no timer is started.
-Not pinned here: a PR a person readies again with no push and that goes red and idle again. The sweep then drafts it, and a
-second comment is not blocked by a comment read. That is an open design question for the report, not a case.
+Cost pin (CostHost, the real merge.Host with each gh call answered here, so every call that reaches gh is counted): one open-pulls read
+per sweep. Per non-draft PR under a pinned requiredChecks list: one run list (memoized per head) and two checks page reads (check runs,
+statuses). Under "none": the run list only, and no checks read. Per drafted PR: one `gh pr ready --undo` and one comment POST. A draft PR
+is read for nothing. No file is written, and no timer is started.
+Not pinned here: the required-names read (the ruleset, then the classic protection) that a non-list requiredChecks makes once per base, since
+the pin names a list; a second page of check runs or statuses (each case answers one page); the gh retries of a network fault; and the
+arguments of `gh pr ready --undo` past the PR number. A PR a person readies again with no push and that goes red and idle again is not
+pinned either. The sweep then drafts it, and a second comment is not blocked by a comment read. That is an open design question for the
+report, not a case.
 
 Each case runs the sweep first, then asserts its outcome, so a must-not case is never a pass on a missing entry. Each failure message
 names one cause.
 """
 import io
 import itertools
+import json
 import os
+import re
 import sys
 import time
 import unittest
+import unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -166,6 +175,46 @@ class IdleHost(tm.FakeHost):
         return True, ""
 
 
+class CostHost(merge.Host):
+    """The real merge.Host for the cost pin. Its one home of GitHub calls, gh (merge.Host.gh), is answered here, so every call that reaches
+    it is one GitHub call, and `calls` keeps each one's route: ("run list", sha), ("GET", rel), ("POST", rel), ("pr ready --undo", n).
+    Every read is one page (no Link header), so each read is one call. The judgment, the paging and the draft and comment calls are merge.Host's
+    own code; only the answers are scripted. pulls: {number: REST row}. runs_by_sha: {sha: runs}. check_rows: {sha: check-run rows}."""
+
+    def __init__(self, required, pulls, runs_by_sha, check_rows, cwd):
+        super().__init__(required=required, base="main", minute=60, now=lambda: tm.FAKE_NOW, pause=lambda s: None, repo=tm.FAKE_REPO, cwd=cwd)
+        self.pulls, self.runs_by_sha, self.check_rows = pulls, runs_by_sha, check_rows
+        self.calls = []
+
+    def server_now(self):
+        return tm.FAKE_NOW
+
+    def gh(self, args, cwd=None, idempotent=False, landed=None):
+        if args[:2] == ["run", "list"]:
+            sha = args[args.index("--commit") + 1]
+            self.calls.append(("run list", sha))
+            return 0, json.dumps(self.runs_by_sha.get(sha, []))
+        if args[:2] == ["pr", "ready"]:
+            self.calls.append(("pr ready --undo", int(args[2])))
+            return 0, ""
+        if args[0] == "api":
+            method, rel = args[args.index("-X") + 1], re.sub(r"^repos/[^/]+/[^/]+/?", "", args[1])
+            self.calls.append((method, rel))
+            m = re.fullmatch(r"commits/([0-9a-f]+)/(check-runs|status)", rel)
+            if method == "GET" and rel == "pulls":
+                body = [row for row in self.pulls.values() if row["state"] == "open"]
+            elif method == "GET" and m and m.group(2) == "check-runs":
+                body = {"check_runs": self.check_rows.get(m.group(1), [])}
+            elif method == "GET" and m:
+                body = {"statuses": []}
+            elif method == "POST" and re.fullmatch(r"issues/\d+/comments", rel):
+                body = {"id": 1}
+            else:
+                raise AssertionError("the sweep made a GitHub call the cost pin does not expect: %s %s" % (method, rel))
+            return 0, "HTTP/2.0 200 OK\nContent-Type: application/json\n\n" + json.dumps(body)
+        raise AssertionError("the sweep ran a gh call the cost pin does not expect: %s" % (args,))
+
+
 class IdleSweep(tm.Env):
     """One repo pair with an IdleHost. Pull requests are added with pr(); each sweep is one `merge --draft-idle` run."""
 
@@ -180,11 +229,11 @@ class IdleSweep(tm.Env):
         self.host.runs_by_sha[sha] = list(runs)
         return sha
 
-    def sweep(self):
-        """`merge --draft-idle` in this checkout. -> (rc, text). An argparse refusal of the flag is an answer too, not a crash."""
+    def sweep(self, host=None):
+        """`merge --draft-idle` in this checkout, through `host` (the IdleHost when none). -> (rc, text). An argparse refusal of the flag is an answer too, not a crash."""
         out, err = io.StringIO(), io.StringIO()
         try:
-            rc, text = self.run_merge_once("--draft-idle", stdout=out, stderr=err)
+            rc, text = self.run_merge_once("--draft-idle", host=host, stdout=out, stderr=err)
         except SystemExit as e:
             rc, text = (e.code if isinstance(e.code, int) else 1), out.getvalue() + err.getvalue()
         return rc, text
@@ -304,14 +353,53 @@ class IdleSweep(tm.Env):
         self.assertEqual([n for n, _ in self.host.posted], [7, 8, 9, 10], "the mixed sweep commented on the wrong PRs: " + text)
         self.assertRegex(text, r"\bdrafted 4\b", "the summary does not count 4 drafted: " + text)
 
-    def test_cost_one_list_read_and_at_most_one_runs_read_per_non_draft_pr(self):
-        self.pr(7, [red(age=3 * HOUR)])
-        self.pr(8, [green(age=3 * HOUR)])
-        self.pr(9, [red(age=3 * HOUR)], draft=True)
-        rc, text = self.sweep()
-        self.assert_sweep_ran(rc, text)
-        self.assertEqual(sorted(self.host.runs_reads), sorted([sha_of(7), sha_of(8)]),
-                         "the runs reads are not one per non-draft PR: %s" % self.host.runs_reads)
+    def cost_sweep(self, required, rows):
+        """One `merge --draft-idle` through a CostHost of `required` (a list of check names, or "none"), over the REST rows {number: (row, runs, check rows)}.
+        -> (the host, its text). The environment names that route a cloud session takes are stripped: the local `gh pr ready --undo` is the route counted."""
+        pulls = {n: r for n, (r, _, _) in rows.items()}
+        runs = {r["head"]["sha"]: rr for r, rr, _ in rows.values()}
+        checks = {r["head"]["sha"]: cr for r, _, cr in rows.values()}
+        host = CostHost(required, pulls, runs, checks, self.co)
+        with unittest.mock.patch.dict(os.environ):
+            os.environ.pop("CLAUDE_CODE_REMOTE", None)
+            os.environ.pop("GH_REPO", None)
+            rc, text = self.sweep(host=host)
+        self.assertEqual(rc, 0, "the cost sweep exited %s: %s" % (rc, text))
+        return host, text
+
+    def test_cost_per_non_draft_pr_is_one_run_list_and_two_checks_page_reads_under_a_pinned_list(self):
+        sha7, sha8, sha9 = sha_of(7), sha_of(8), sha_of(9)
+        rows = {
+            7: (tm.REST.list_item(7, sha7, "pr-7", "main", body="", draft=False), [red(age=3 * HOUR)], [tm.draft_row(RED_JOB, "failure")]),
+            8: (tm.REST.list_item(8, sha8, "pr-8", "main", body="", draft=False), [green(age=3 * HOUR)], [tm.draft_row(RED_JOB, "success")]),
+            9: (tm.REST.list_item(9, sha9, "pr-9", "main", body="", draft=True), [red(age=3 * HOUR)], [tm.draft_row(RED_JOB, "failure")]),
+        }
+        host, text = self.cost_sweep([RED_JOB], rows)
+        calls = host.calls
+        self.assertEqual(calls.count(("GET", "pulls")), 1, "the sweep did not read the open list once: %s" % calls)
+        for sha in (sha7, sha8):
+            self.assertEqual(calls.count(("run list", sha)), 1, "head %s was not read through the run list once: %s" % (sha, calls))
+            self.assertEqual(calls.count(("GET", "commits/%s/check-runs" % sha)), 1, "head %s did not read its check runs once: %s" % (sha, calls))
+            self.assertEqual(calls.count(("GET", "commits/%s/status" % sha)), 1, "head %s did not read its statuses once: %s" % (sha, calls))
+        self.assertEqual([c for c in calls if sha9 in str(c)], [], "the draft PR #9 was read, and a draft costs nothing: %s" % calls)
+        self.assertEqual(calls.count(("pr ready --undo", 7)), 1, "the red idle PR #7 was not drafted once: " + text)
+        self.assertEqual(calls.count(("POST", "issues/7/comments")), 1, "the drafted PR #7 did not get one comment: " + text)
+        self.assertEqual(len(calls), 9, "the sweep made %d GitHub calls, and the cost pin names 9 (1 open list, 3 per non-draft PR, 2 for the draft): %s" % (len(calls), calls))
+
+    def test_cost_under_none_is_one_run_list_per_non_draft_pr_and_no_checks_read(self):
+        sha7, sha8 = sha_of(7), sha_of(8)
+        rows = {
+            7: (tm.REST.list_item(7, sha7, "pr-7", "main", body="", draft=False), [red(age=3 * HOUR)], []),
+            8: (tm.REST.list_item(8, sha8, "pr-8", "main", body="", draft=False), [green(age=3 * HOUR)], []),
+        }
+        host, text = self.cost_sweep("none", rows)
+        calls = host.calls
+        self.assertEqual(calls.count(("GET", "pulls")), 1, "the sweep did not read the open list once: %s" % calls)
+        for sha in (sha7, sha8):
+            self.assertEqual(calls.count(("run list", sha)), 1, "head %s was not read through the run list once under none: %s" % (sha, calls))
+        self.assertEqual([c for c in calls if c[0] == "GET" and c[1].startswith("commits/")], [], "a checks page was read under none, which reads no check: %s" % calls)
+        self.assertEqual(calls.count(("pr ready --undo", 7)), 0, "under none the red PR #7 was drafted, though none reads no check: " + text)
+        self.assertEqual(len(calls), 3, "the sweep made %d GitHub calls under none, and the cost pin names 3 (1 open list, 1 run list per non-draft PR): %s" % (len(calls), calls))
 
     def test_second_sweep_posts_no_second_comment(self):
         self.pr(7, [red(age=3 * HOUR)])

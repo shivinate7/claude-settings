@@ -4763,7 +4763,7 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assertEqual(self.host.posted, [], "a red clash not yet idle was commented on: " + out)
         self.assertEqual(self.host.readies, [], "the lane went ready past a clash that still counts: " + out)
 
-    def test_cloud_host_prints_the_return_route_for_an_idle_red_clash_and_still_counts_it(self):  # round 1 review, 15:06 CST Nov 23, under the owner's R6 ruling: a cloud host cannot draft, so the clash counts PR #9
+    def test_cloud_host_prints_the_return_route_for_an_idle_red_clash_and_still_counts_it(self):  # a cloud host cannot draft, so the clash counts PR #9 (owner's R6 ruling, 10:54 CST Nov 23; review ruling, 15:06 CST Nov 23)
         self.idle_red_clash(3 * idle.HOUR)
         self.host.draft_refuse = True
         rc, out = self.pre_ready()
