@@ -427,6 +427,28 @@ if [ -n "$d" ] && [ -e "$d/.git" ]; then
     stable_head=$(cd "$d" 2>/dev/null && git rev-parse --verify -q refs/remotes/origin/stable 2>/dev/null)
     if [ -n "$pin_head" ] && { [ "$pin_head" = "$main_head" ] || [ "$pin_head" = "$origin_head" ] || [ "$pin_head" = "$stable_head" ]; }; then
       pointer_branch=main
+    elif [ "${CLAUDE_SETTINGS_REF:-stable}" != main ] && [ -n "$stable_head" ] && [ -n "$pin_head" ] \
+         && (cd "$d" 2>/dev/null && git merge-base --is-ancestor "$pin_head" "$stable_head" 2>/dev/null); then
+      # The designed pin state is origin/stable's tip, so an older commit is a stalled pin, not an off-main checkout. A
+      # settings.json the app rewrote is the usual cause, so the line names it.
+      stable_behind=$(cd "$d" 2>/dev/null && git rev-list --count "$pin_head..$stable_head" 2>/dev/null)
+      pin_dirty=""
+      pin_status=$(cd "$d" 2>/dev/null && git status --porcelain --untracked-files=no 2>/dev/null)
+      if printf '%s\n' "$pin_status" | grep -q ' settings.json$'; then
+        # A save that only reordered keys is restored by merge/install_from_main.sh, so it is no change to name.
+        pin_reorder=""
+        if [ "$pin_status" = " M settings.json" ] && command -v python3 >/dev/null 2>&1 \
+           && (cd "$d" 2>/dev/null && git show HEAD:settings.json 2>/dev/null | python3 -c '
+import json, sys
+sys.exit(0 if json.load(sys.stdin) == json.load(open(sys.argv[1])) else 1)' settings.json 2>/dev/null); then
+          pin_reorder=1
+        fi
+        [ -n "$pin_reorder" ] \
+          || pin_dirty="; its settings.json is modified (merge/install_from_main.sh saves it as settings.json.bak and moves the pin when it is the only change)"
+      fi
+      printf 'claude-settings: %s is behind stable by %s commits%s; global rules and hooks are stale\n' \
+        "$d" "$stable_behind" "$pin_dirty"
+      pointer_branch=""
     else
       pointer_branch="a detached HEAD"
     fi

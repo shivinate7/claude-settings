@@ -2787,6 +2787,141 @@ class SessionStartStableFreshnessTests(GitFixtureMixin, SessionStartAgentWorktre
         self.assertEqual(self.stale_lines(lines), [("1", "origin/main")],
                          "under CLAUDE_SETTINGS_REF=main want one stale line counting the pin 1 behind origin/main, got %r" % lines)
 
+    # A pin detached at an ancestor of origin/stable's tip is a stalled pin, not an off-main checkout. The cause is usually a
+    # settings.json the app rewrote, which blocks the move, so its line says so. These cases build that pin: it is neither
+    # local main, origin/main nor origin/stable, and the hook has origin/stable already (the line runs no fetch of its own).
+
+    def track_settings(self, text):
+        """A settings.json with `text` in main and on origin, before any stable commit is made from it."""
+        self.put(os.path.join(self.primary, "settings.json"), text)
+        vcs(self.primary, "add", "--", "settings.json")
+        self.commit("settings.json")
+        vcs(self.primary, "push", "-q", "origin", "main")
+
+    def stalled_pin(self, behind, settings=None):
+        """Detaches the primary `behind` commits before origin/stable's tip, at a commit that is not on main. With `settings`,
+        a tracked settings.json with that text is in the tree, clean. Checks the fixture itself, so a bad setup never reads
+        as a hook result."""
+        if settings is not None:
+            self.track_settings(settings)
+        pin = self.other_commit("stalled pin", "stable")
+        for step in range(behind):
+            self.other_commit("stable moves on %d" % step, "stable")
+        vcs(self.primary, "fetch", "-q", "origin", "stable")
+        vcs(self.primary, "checkout", "-q", "--detach", pin)
+        self.assertEqual(self.head_sha(), pin, "scope: the primary is not at the pin")
+        self.assertNotIn(pin, (self.resolve("main"), self.resolve("origin/main"), self.resolve("origin/stable")),
+                         "scope: the pin is local main, origin/main or origin/stable's tip")
+        self.assertEqual(vcs(self.primary, "rev-list", "--count", "HEAD..origin/stable").stdout.strip(), str(behind),
+                         "scope: origin/stable is not %d commits past the pin" % behind)
+        self.assertEqual(vcs(self.primary, "rev-list", "--count", "origin/stable..HEAD").stdout.strip(), "0",
+                         "scope: the pin is not an ancestor of origin/stable")
+        self.assertEqual(vcs(self.primary, "status", "--porcelain", "--untracked-files=no").stdout, "",
+                         "scope: the pin is not clean")
+        return pin
+
+    def behind_lines(self, lines):
+        return [line for line in lines if "behind stable" in line]
+
+    def assert_hook_ran(self, lines):
+        # Without the checkout line, "prints nothing" would pass for a hook that never ran.
+        self.assertTrue(any(line.startswith("checkout ") for line in lines), "the hook printed no checkout line: %r" % lines)
+
+    def test_a_pin_behind_origin_stable_with_a_clean_settings_json_says_how_far_behind_and_names_no_file(self):
+        self.stalled_pin(3, settings='{"a": 1}\n')
+        # A changed file other than settings.json is no reason for the settings.json note.
+        self.put(os.path.join(self.primary, "f.txt"), "edited\n")
+        lines = self.run_hook()
+        self.assert_hook_ran(lines)
+        found = self.behind_lines(lines)
+        self.assertEqual(len(found), 1, "want one behind-stable line for a pin 3 commits behind origin/stable, got %r" % lines)
+        self.assertRegex(found[0], r"^claude-settings: .+ is behind stable by 3 commits; global rules and hooks are stale$")
+        self.assertEqual([line for line in lines if "not main" in line], [], "the stalled pin also printed an off-main line: %r" % lines)
+        self.assertEqual(self.stale_lines(lines), [], "the stalled pin also printed a stale line against origin: %r" % lines)
+
+    def test_a_pin_behind_origin_stable_with_a_modified_settings_json_names_the_file(self):
+        self.stalled_pin(1, settings='{"a": 1}\n')
+        self.put(os.path.join(self.primary, "settings.json"), '{"a": 2}\n')
+        self.assertEqual(vcs(self.primary, "status", "--porcelain", "--untracked-files=no").stdout, " M settings.json\n",
+                         "scope: settings.json is not the one modified file")
+        lines = self.run_hook()
+        self.assert_hook_ran(lines)
+        found = self.behind_lines(lines)
+        self.assertEqual(len(found), 1, "want one behind-stable line for a pin 1 commit behind origin/stable, got %r" % lines)
+        self.assertRegex(found[0], r"^claude-settings: .+ is behind stable by 1 commits")
+        self.assertIn("settings.json", found[0], "the line does not name the modified settings.json: %r" % found[0])
+        self.assertEqual([line for line in lines if "not main" in line], [], "the stalled pin also printed an off-main line: %r" % lines)
+
+    # A save that only reordered the keys is restored by merge/install_from_main.sh, so the line has nothing to name. The line
+    # reads the file with python3, as the helper does; a host without it prints the note, so these two cases skip there.
+
+    @unittest.skipUnless(shutil.which("python3"), "the hook compares the saved file with python3")
+    def test_a_pin_behind_origin_stable_with_a_reordered_settings_json_names_no_file(self):
+        self.stalled_pin(2, settings='{"a": 1, "b": [1, 2]}\n')
+        self.put(os.path.join(self.primary, "settings.json"), '{"b": [1, 2], "a": 1}\n')
+        self.assertEqual(vcs(self.primary, "status", "--porcelain", "--untracked-files=no").stdout, " M settings.json\n",
+                         "scope: settings.json is not the one modified file")
+        lines = self.run_hook()
+        self.assert_hook_ran(lines)
+        found = self.behind_lines(lines)
+        self.assertEqual(len(found), 1, "want one behind-stable line for a pin 2 commits behind origin/stable, got %r" % lines)
+        self.assertRegex(found[0], r"^claude-settings: .+ is behind stable by 2 commits; global rules and hooks are stale$",
+                         "a settings.json that only reordered its keys is named in the line: %r" % found[0])
+
+    @unittest.skipUnless(shutil.which("python3"), "the hook compares the saved file with python3")
+    def test_a_pin_behind_origin_stable_with_a_reordered_settings_json_and_another_change_names_the_file(self):
+        # The control: the helper restores a reordered file only when it is the pin's one change, so with a second
+        # modified file the move is refused and settings.json is still worth naming.
+        self.stalled_pin(2, settings='{"a": 1, "b": [1, 2]}\n')
+        self.put(os.path.join(self.primary, "settings.json"), '{"b": [1, 2], "a": 1}\n')
+        self.put(os.path.join(self.primary, "f.txt"), "edited\n")
+        self.assertEqual(vcs(self.primary, "status", "--porcelain", "--untracked-files=no").stdout, " M f.txt\n M settings.json\n",
+                         "scope: the pin is not modified in settings.json and f.txt only")
+        lines = self.run_hook()
+        self.assert_hook_ran(lines)
+        found = self.behind_lines(lines)
+        self.assertEqual(len(found), 1, "want one behind-stable line for a pin 2 commits behind origin/stable, got %r" % lines)
+        self.assertIn("settings.json", found[0], "the line does not name the modified settings.json: %r" % found[0])
+
+    def test_a_pin_at_origin_stable_tip_with_a_modified_settings_json_prints_nothing_about_stable(self):
+        self.track_settings('{"a": 1}\n')
+        stable = self.other_commit("stable", "stable")
+        vcs(self.primary, "fetch", "-q", "origin", "stable")
+        vcs(self.primary, "checkout", "-q", "--detach", stable)
+        self.put(os.path.join(self.primary, "settings.json"), '{"a": 2}\n')
+        self.assertEqual(self.head_sha(), self.resolve("origin/stable"), "scope: the pin is not at origin/stable's tip")
+        self.assertNotEqual(self.head_sha(), self.resolve("main"), "scope: the pin is local main, so the stable test is not the one that matches")
+        self.assertEqual(vcs(self.primary, "status", "--porcelain", "--untracked-files=no").stdout, " M settings.json\n",
+                         "scope: settings.json is not the one modified file")
+        lines = self.run_hook()
+        self.assert_hook_ran(lines)
+        self.assertEqual(self.behind_lines(lines), [], "the pin at origin/stable's tip printed a behind-stable line: %r" % lines)
+        self.assertEqual([line for line in lines if "not main" in line], [], "the pin at origin/stable's tip printed an off-main line: %r" % lines)
+
+    def test_a_pin_off_origin_stables_history_still_prints_the_off_main_line(self):
+        # The control for the stalled-pin line: a commit that origin/stable does not hold is off main, as before.
+        self.other_commit("stable", "stable")
+        vcs(self.primary, "fetch", "-q", "origin", "stable")
+        vcs(self.primary, "checkout", "-q", "--detach")
+        self.commit("local only")
+        pin = self.head_sha()
+        self.assertEqual(vcs(self.primary, "rev-list", "--count", "origin/stable..HEAD").stdout.strip(), "1",
+                         "scope: the pin is an ancestor of origin/stable")
+        self.assertNotIn(pin, (self.resolve("main"), self.resolve("origin/main"), self.resolve("origin/stable")),
+                         "scope: the pin is local main, origin/main or origin/stable's tip")
+        lines = self.run_hook()
+        self.assert_hook_ran(lines)
+        self.assertEqual(self.behind_lines(lines), [], "a pin that origin/stable does not hold printed a behind-stable line: %r" % lines)
+        self.assertTrue(any("is on a detached HEAD, not main" in line for line in lines), "no off-main line for it: %r" % lines)
+
+    def test_under_ref_main_a_pin_behind_origin_stable_still_prints_the_off_main_line(self):
+        # CLAUDE_SETTINGS_REF=main makes main the ref the pin follows, so a pin behind stable is behind nothing it follows.
+        self.stalled_pin(2)
+        lines = self.run_hook(ref="main")
+        self.assert_hook_ran(lines)
+        self.assertEqual(self.behind_lines(lines), [], "under CLAUDE_SETTINGS_REF=main the pin got a behind-stable line: %r" % lines)
+        self.assertTrue(any("is on a detached HEAD, not main" in line for line in lines), "no off-main line under CLAUDE_SETTINGS_REF=main: %r" % lines)
+
 
 class SessionStartRoleFileTests(SessionStartAgentWorktreeNoticeTests):
     """The launcher's role (bin/claude-role sets CS_SESSION_ROLE) is written at session start to
