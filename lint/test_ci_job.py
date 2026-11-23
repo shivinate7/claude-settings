@@ -3404,14 +3404,32 @@ class WindowsShell(unittest.TestCase):
                                        self.root)[:2]
         self.assertEqual((state, body), ("run", '"C:/cs/bin/ste-changed" "origin/main"'))
 
+    def zizmor_plan(self, uses):
+        """plan() of a zizmor step with bash and pipx present: (state, body)."""
+        from unittest import mock
+        with mock.patch.object(shutil, "which", lambda name, path=None: "/x/" + name):
+            return self.ci_job.plan(step("zizmor", uses=uses), False, {}, self.root)[:2]
+
     def test_the_zizmor_body_runs_run_sh_in_the_bash_running_it(self):
         os.makedirs(os.path.join(self.root, "actions", "zizmor"))
         open(os.path.join(self.root, "actions", "zizmor", "run.sh"), "w").close()
-        from unittest import mock
-        with mock.patch.object(shutil, "which", lambda name, path=None: "/x/" + name):  # bash and pipx present
-            state, body = self.ci_job.plan(step("zizmor", uses="./actions/zizmor"), False, {}, self.root)[:2]
+        state, body = self.zizmor_plan("./actions/zizmor")
         self.assertEqual(state, "run")
-        self.assertIn('\n"$BASH" "%s"\n' % os.path.join(self.root, "actions", "zizmor", "run.sh").replace("\\", "/"), body)
+        # Inside the checkout the path is relative to it, so the step's cache key holds no worktree folder (bin/ci-job under()).
+        self.assertIn('\n"$BASH" "actions/zizmor/run.sh"\n', body, "the body does not run run.sh by its path relative to the checkout\n" + body)
+
+    def test_a_zizmor_run_sh_outside_the_checkout_keeps_its_absolute_path(self):
+        rules = tempfile.mkdtemp(prefix="winsh_rules_", dir=RUN_FOLDER)  # a global rules checkout, outside self.root
+        self.addCleanup(shutil.rmtree, rules, True)
+        claude_settings = os.path.join(rules, "claude-settings")
+        run_sh = os.path.join(claude_settings, "actions", "zizmor", "run.sh")
+        os.makedirs(os.path.dirname(run_sh))
+        open(run_sh, "w").close()
+        self.ci_job.BIN = os.path.join(claude_settings, "bin")  # the action is read from the checkout beside bin/ci-job
+        state, body = self.zizmor_plan("shivinate7/claude-settings/actions/zizmor@main")
+        self.assertEqual(state, "run")
+        self.assertIn('\n"$BASH" "%s"\n' % run_sh.replace("\\", "/"), body,
+                      "a run.sh outside the checkout is not run by its absolute path\n" + body)
 
     def test_off_windows_the_shell_is_path_bash(self):
         self.assertEqual(self.ci_job.shell_argv(None, nt=False), [shutil.which("bash"), "-e"])
