@@ -658,6 +658,16 @@ class CiWorkflow(unittest.TestCase):
         self.assertTrue(any("github.event_name == 'pull_request'" in (step_key(st, "if") or "") for st in steps),
                         "the Retire step does not gate on a pull request, where its base ref exists")
 
+    def test_c8_the_debt_step_sets_the_var_the_check_reads(self):
+        """The workflow and the classifier name one env var. A rename in one place fails here, against ShardProof.VAR."""
+        with open(CHECKS, encoding="utf-8") as f:
+            text = gating_text(f.read())
+        block = job_block(text, "checks") or ""
+        steps = [st for st in step_blocks(block) if RETIRE_RUN_STEP.search(run_body(st) or "")]
+        self.assertTrue(steps, "scope: checks has no step that runs the Debt retire check")
+        self.assertIn(ShardProof.VAR, step_env(steps[0]),
+                      "checks.yml: the Debt retire step sets no %s, so the check never sees the guard shards' proof" % ShardProof.VAR)
+
 
 class CiStepRunsMainCopy(Case):
     """The Retire step runs the classifier as main has it, with the modules it imports, never the copy the PR head holds: a PR
@@ -739,6 +749,71 @@ class CiStepRunsMainCopy(Case):
             block = job_block(gating_text(f.read()), "checks") or ""
         self.assertTrue(any(RETIRE_RUN_STEP.search(run_body(st) or "") for st in step_blocks(block)), "scope: the checks job holds no Retire step")
         self.assertEqual(job_permissions(block).get("actions"), "read", "the checks job does not grant actions: read, so the cited-run read cannot reach the run")
+
+
+class ShardProof(Case):
+    """The guard suite's proof from its shard jobs (owner ruling, 11:07 CST Nov 23: "3466 can also be done now rather than later").
+    When DEBT_RETIRE_SHARD_PROVEN names a Retire span's path, the check skips that span and judges the close on the rest. Any other
+    value, or none, runs every span as before. checks.yml sets the var only when every guard shard and the scope flag hold
+    (ChecksShardCases in lint/test_windows_split.py). The shards' result is not re-read here: that is the workflow's proof."""
+
+    VAR = "DEBT_RETIRE_SHARD_PROVEN"
+    GUARD = "hooks/test_guard.py"
+    GUARD_RETIRE = "Delete the old guard suite copy. Check: `hooks/test_guard.py`."
+    GUARD_AND_FAIL = "Delete the old guard suite copy. Check: `hooks/test_guard.py` and `tests/test_fail.py`."
+
+    def closed_guard(self, retire, suite_exit):
+        """A head that deletes a debt whose Retire is `retire`, with hooks/test_guard.py exiting `suite_exit`."""
+        self.repo(debts={"d-guard": retire})
+        self.change(write={"hooks/test_guard.py": MARKED % suite_exit}, rm=["docs/debts/d-guard.md"])
+        self.assertIsNotNone(D.closes(self.dir, self.base, self.head), "scope: the head closes no debt, so the check judges nothing")
+
+    def judged(self, value):
+        """(the scripts that ran, the findings) for the close, with the var set to `value`, or unset when `value` is None."""
+        if os.path.exists(self.marks):
+            os.remove(self.marks)
+        with unittest.mock.patch.dict(os.environ):
+            os.environ.pop(self.VAR, None)
+            if value is not None:
+                os.environ[self.VAR] = value
+            found = self.findings()
+        return [name for name, _ in self.ran()], found
+
+    def test_s1_the_named_path_is_not_run_and_its_close_holds(self):
+        self.closed_guard(self.GUARD_RETIRE, suite_exit=0)
+        names, found = self.judged(self.GUARD)
+        self.assertNotIn("test_guard.py", names, "the guard suite ran although %s names its path: the shards already proved it" % self.VAR)
+        self.assertEqual(pairs(found), [], "the proven close was not judged ok: %s" % [f.text for f in found])
+
+    def test_s1b_only_the_named_path_is_skipped_and_the_other_span_still_runs(self):
+        self.closed_guard(self.GUARD_AND_FAIL, suite_exit=1)
+        names, found = self.judged(self.GUARD)
+        self.assertNotIn("test_guard.py", names, "the guard suite ran although %s names its path" % self.VAR)
+        self.assertEqual(names, ["test_fail.py"], "the span the var does not name did not run, or another ran: %s" % names)
+        self.assertEqual(pairs(found), [("d-guard", "red")], "the red span the var does not name was not refused: %s" % [f.text for f in found])
+
+    def test_s2_unset_or_empty_runs_the_suite_and_a_red_suite_is_refused(self):
+        self.closed_guard(self.GUARD_RETIRE, suite_exit=1)
+        for value in (None, ""):
+            with self.subTest(value=value):
+                names, found = self.judged(value)
+                self.assertIn("test_guard.py", names, "the suite did not run with %s=%r" % (self.VAR, value))
+                self.assertEqual(pairs(found), [("d-guard", "red")], "a red suite was not refused with %s=%r" % (self.VAR, value))
+
+    def test_s3_another_path_or_a_bare_name_leaves_the_suite_running(self):
+        self.closed_guard(self.GUARD_RETIRE, suite_exit=1)
+        for value in ("tests/test_pass.py", "test_guard.py"):
+            with self.subTest(value=value):
+                names, found = self.judged(value)
+                self.assertIn("test_guard.py", names, "the suite did not run with %s=%r, which names no path of its span" % (self.VAR, value))
+                self.assertEqual(pairs(found), [("d-guard", "red")], "a red suite was not refused with %s=%r" % (self.VAR, value))
+
+    def test_s4_a_proven_path_is_not_run_even_when_its_suite_would_be_red(self):
+        """The classifier reads the var, not the suite's result: the shards carry the proof, so the suite is not run again."""
+        self.closed_guard(self.GUARD_RETIRE, suite_exit=1)
+        names, found = self.judged(self.GUARD)
+        self.assertNotIn("test_guard.py", names, "the guard suite ran although %s names its path" % self.VAR)
+        self.assertEqual(pairs(found), [], "the proven close was refused: %s" % [f.text for f in found])
 
 
 class ChildEnv(Case):
