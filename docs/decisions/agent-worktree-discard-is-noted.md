@@ -105,5 +105,35 @@ holds only over uncommitted work. A clean tree allows, as the rows
   11:40 CDT. Second sighting: lane `findings-ride-in-lane`, 2026-11-08. A builder discarded its own
   edit in its own worktree. Nothing was lost, and the ruling allows it.
 
+## An agent never moves a branch or forces a switch
+
+Rule `agent-git-reset` (step 1a in `judge_shell`; home `agent_branch_move` in `hooks/guard_shared_tree.py`).
+It judges a call whose payload carries `agent_id` (or `agent_type`). A call with neither keeps every verdict
+above (rule `shared-trees-no-destructive-git`).
+
+- Incidents: a fix verifier on banchi PR 1123 and a builder each ran `git reset --soft` in their own worktree
+  (owner gripe, near miss). No content was lost. The standing rule "never run git reset" (`hooks/agent_brief.py`,
+  decision `agents-get-standing-rules`) had no check for that form, and the discard check (`reset_discards` in `hooks/guard_shared_tree.py`) reads only
+  the work tree, which `--soft` and `--mixed` leave alone.
+- Harm: the branch moves off its commits, and a peer standing on that branch is left on rewritten history. No file
+  changes, so no subject read can see it.
+- Refused, in every mode (default, `--soft`, `--mixed`, `--hard`, `--merge`, `--keep`): a `git reset` whose first
+  plain operand is not `HEAD` or `@`. Also `git checkout -f` or `--force` (alone or in a cluster such as `-fb`) and
+  `git switch -f` or `--discard-changes` (`switch_discards`). Nested shells (`sh -c`, `eval`) are read, up to 8 texts.
+- Allowed: a reset with no operand, or `HEAD`, with or without paths (`reset`, `reset HEAD -- <path>`,
+  `reset -- <path>`, `reset --soft HEAD`, `reset --hard HEAD`). Each leaves HEAD where it is. The discard check
+  above still judges the work tree.
+- Read-only roles (`readonly_agent`: reviewer, Explore, Plan, refuter): any `git reset`, unstage included.
+- Departs from: the owner's agent-owned worktree ruling above (2026-10-03, 2026-10-17 11:40 CDT). It allowed
+  `git reset --hard <commit>` there, on the reasoning that an agent's commits are its own copy. A hard reset that
+  names a commit now refuses for an agent. `reset --hard HEAD` stays allowed, noted.
+- Route in the refusal: a new commit on the agent's own branch; `git revert <commit>` to undo a commit;
+  `git restore --staged <path>` to unstage.
+- False alarms: a bare `git reset <path>` with no `--` refuses, since git reads a name that is also a revision as a
+  commit. A `reset HEAD~1 -- <path>` refuses though it moves no branch. A long flag spelled by an abbreviation
+  shorter than `--fo` (checkout) is not read. All rare; none measured.
+- Cost: none beyond a text read. No process starts.
+- The `shared-tree` guard family passed unchanged. A test-author adds the cases for this rule.
+
 Kind: process
 Home: hooks/guard_shared_tree.py

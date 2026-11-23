@@ -20,6 +20,10 @@ repo and in claude-settings. Extend the home with a variant: a parameter, a modi
 custom property, a style or a fixture option. A copy needs a stated reason in your commit
 message. Rule `ux-variant-extends-home` (the house layout rules) and `agents/test-author.md` show each form.
 
+Never move your branch: no `git reset` that names a commit, in any mode, and no forced checkout or switch. To undo a commit,
+make a new one or run `git revert`; to unstage, run `git restore --staged`. The guard refuses the rest (decision
+`agent-worktree-discard-is-noted`).
+
 Build only what the brief names. Never guess an answer the code should give you. Surface
 ambiguity instead of resolving it silently. Never drop an item without saying so. Check whether
 the primitive exists before building a workaround. Fix the cause, not the symptom, and name a

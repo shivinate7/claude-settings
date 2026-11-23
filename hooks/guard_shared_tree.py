@@ -222,6 +222,58 @@ def reset_discards(args) -> bool:
     return any(flag in args for flag in RESET_DISCARD_FLAGS)
 
 
+# An agent's reset that names a commit moves its branch: commits drop off the history other sessions share. The
+# discard check above reads the work tree, which `--soft` and `--mixed` leave alone, so it cannot see this. A target
+# of HEAD names no commit to move to, so an unstage (`reset`, `reset HEAD <path>`, `reset -- <path>`) stays allowed.
+RESET_STAYS_AT_HEAD = ("HEAD", "@")
+
+
+def agent_reset_moves_head(args) -> bool:
+    """True when a `git reset` call names a target other than HEAD, in any mode. A lone bare path (`reset f.txt`)
+    counts: git reads a name that is also a revision as a commit, and the unstage route is `git restore --staged`."""
+    plain = reset_operands(args)
+    return bool(plain) and plain[0] not in RESET_STAYS_AT_HEAD
+
+
+def checkout_forces(args) -> bool:
+    """True when a `git checkout` call carries `-f` or `--force`, as a flag or inside a short cluster (`-fb`).
+    A letter that takes the rest of the word as its value (`-bfix`) ends the cluster. Flags stop at `--`."""
+    for arg in args:
+        if arg == "--":
+            return False
+        if arg.startswith("--"):
+            if long_flag_abbrev(arg, "--force", "--fo"):
+                return True
+        elif arg.startswith("-"):
+            for letter in arg[1:]:
+                if letter == "f":
+                    return True
+                if letter in "bB":
+                    break
+    return False
+
+
+def agent_branch_move(subcommand: str, args, readonly: bool = False) -> str:
+    """The matched text when a git call an agent runs moves HEAD or forces a switch, else ''. The home of rule
+    agent-git-reset. `readonly` is a reviewer or another read-only role: any `git reset` counts."""
+    if subcommand == "reset" and (readonly or agent_reset_moves_head(args)):
+        return ("git reset " + " ".join(args)).strip()
+    if subcommand == "checkout" and checkout_forces(args):
+        return ("git checkout " + " ".join(args)).strip()
+    if subcommand == "switch" and switch_discards(args):
+        return ("git switch " + " ".join(args)).strip()
+    return ""
+
+
+AGENT_RESET_REASON = (
+    "Rule (agent git reset): an agent's git call may not move HEAD or force a switch. It would move the branch "
+    "off its commits, or throw the tree away, and other sessions share that history. "
+    "Remedy: to keep going, make a new commit on your own branch. To undo a commit, run `git revert <commit>`. "
+    "To unstage, run `git restore --staged <path>`. "
+    "(decision agent-worktree-discard-is-noted, an agent never moves a branch or forces a switch)"
+)
+
+
 def restore_discards(args) -> bool:
     """True when a `git restore` call writes the working tree.
 
@@ -399,14 +451,9 @@ def _tree_subject(where: str, pathspecs=(), complete: bool = True):
     return not lines
 
 
-def reset_target(args):
-    """Return the commit a `git reset` names, '' when it names none, or None when the operands
-    cannot be read as one target.
-
-    Operands stop at `--`, flags are skipped, and the one flag that carries a value takes its
-    value with it. More than one plain operand is a form this does not understand, and an
-    unreadable target is never a pass.
-    """
+def reset_operands(args) -> list:
+    """The plain operands of a `git reset` call, in order: operands stop at `--`, flags are skipped, and the
+    one flag that carries a value takes its value with it."""
     plain = []
     skip = False
     for arg in args:
@@ -420,6 +467,17 @@ def reset_target(args):
                 skip = True
             continue
         plain.append(arg)
+    return plain
+
+
+def reset_target(args):
+    """Return the commit a `git reset` names, '' when it names none, or None when the operands
+    cannot be read as one target.
+
+    More than one plain operand is a form this does not understand, and an
+    unreadable target is never a pass.
+    """
+    plain = reset_operands(args)
     if not plain:
         return ""
     if len(plain) == 1:

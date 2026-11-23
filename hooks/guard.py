@@ -64,6 +64,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        its subject. An empty subject passes. An unreadable subject is allowed and
                        noted as `subject-unread`. (stash-stack-is-a-shared-subject,
                        agent-worktree-discard-is-noted)
+  agent-git-reset      deny. An agent's `git reset` that names any commit but HEAD, in any mode, a `git checkout -f` or
+                       `--force`, or a `git switch -f` or `--discard-changes`. A reviewer's `git reset` of any
+                       form. A call with no `agent_id` is not judged. (agent-worktree-discard-is-noted)
   pointer-head         deny. A command that moves HEAD off `main` in the pointer checkout.
                        A move to `main` passes.
   two-worktrees-one-branch
@@ -732,6 +735,7 @@ while True:
         from guard_branch_worktree import TWO_WORKTREES_REFUSE_REASON, two_worktrees_hit
         _loading = "guard_shared_tree"
         from guard_shared_tree import (
+            AGENT_RESET_REASON, agent_branch_move,
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
             checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
             SESSION_ID_RE, STASH_READ_ACTIONS, in_any_session_scratchpad, stash_action, stash_takes_the_stack, subject_state, under_session_scratchpad,
@@ -5765,6 +5769,24 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             ask_command("shared-tree", TREE_ASK_REASON, matched, "worktree discard")
             continue
         refuse(tool, "deny", "shared-tree", TREE_DENY_REASON, matched)
+
+    # 1a. An agent's git call that moves HEAD or forces a switch (decision agent-worktree-discard-is-noted). The discard
+    # check above reads the work tree, so a soft or mixed reset passed it. Each text a nested shell hands on is read
+    # as one more command; the cap stops a loop.
+    if agent:
+        readonly = readonly_agent(payload)
+        pending, seen = list(texts), 0
+        while pending and seen < 8:
+            seen += 1
+            for segment in split_segments(pending.pop(0)):
+                for subcommand, args in git_calls(segment):
+                    matched = agent_branch_move(subcommand, args, readonly)
+                    if matched:
+                        refuse(tool, "deny", "agent-git-reset", AGENT_RESET_REASON, matched)
+                words = segment_tokens(segment)
+                inner = nested_script(words) if words else ""
+                if inner:
+                    pending.append(inner)
 
     # 1b. The pointer checkout's HEAD. Placed AFTER rule 1 on purpose: a `git checkout` that
     # names a path is a path operation, rule 1 already judges it, and this rule never sees it, so
