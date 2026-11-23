@@ -73,7 +73,7 @@ Contract the page cases assume (the builder builds to it):
     `checks unknown: time budget spent, <k> item(s) not checked`; --check exits 3; export keeps its copy and its exit code.
   Receipts, the sixth waiting collection: `receipts/<doc_id>.json` (a doc id may hold a dot, `park.colour-pick`) exports,
     is scanned, rebuilds and merges as the other five do, and the live page wins a merge. A receipt the copy holds and the
-    fetch no longer lists stays, unless its item's own data says closed: then it leaves the copy with its item (owner rulings 2026-11-22 21:02 and 21:05 CST). An emptied receipts fetch is unknown unless
+    fetch no longer lists stays, unless its item's own data says closed: then it leaves the copy with its item (decision waiting-data-in-repo). An emptied receipts fetch is unknown unless
     `--allow-empty receipts` names it. A fetch with no receipts folder, or no marker in it, is unknown.
 """
 import collections
@@ -1059,7 +1059,7 @@ class Scan(Base):
 
 class Mirror(Base):
     def test_counts_each_write_and_keeps_every_doc_no_longer_fetched(self):
-        """An item the fetch no longer lists stays: another account's page may hold it open (owner rulings 2026-11-22 21:02 and 21:05 CST).""" 
+        """An item the fetch no longer lists stays: another account's page may hold it open (decision waiting-data-in-repo).""" 
         fetched = self.fetch(items={"a": {"id": "a"}, "b": {"id": "b"}, "c": {"id": "c"}},
                              answers={"x": {"id": "x"}}, meta={"page": META})
         out = self.out()
@@ -1109,7 +1109,7 @@ class Mirror(Base):
 
     def test_an_emptied_collection_removes_no_file_in_any_of_the_six(self):
         """A page cleanup that empties a collection erases nothing from the copy: --allow-empty only lifts the unknown
-        stop. Only an item whose own data says closed is deleted (owner rulings 2026-11-22 21:02 and 21:05 CST)."""
+        stop. Only an item whose own data says closed is deleted (decision waiting-data-in-repo)."""
         docs = {"items": {"a": {"id": "a"}}, "answers": {"x": {"id": "x"}}, "groups": {"g": {"id": "g"}},
                 "asks": {"k": {"id": "k"}}, "meta": {"page": META}, "receipts": {"a": receipt(1)}}
         for name in layout.WAITING_COLLECTIONS:
@@ -1219,7 +1219,7 @@ class Mirror(Base):
 class Receipts(Base):
     """The sixth waiting collection. `receipts/<doc_id>.json` is written by the owning session, never by the page. An export
     writes, scans and copies it like the other five. A receipt the fetch no longer lists stays, unless its item's own
-    data says closed: then it leaves the copy with its item (owner rulings 2026-11-22 21:02 and 21:05 CST). The pins at the end hold the export's list equal to the
+    data says closed: then it leaves the copy with its item (decision waiting-data-in-repo). The pins at the end hold the export's list equal to the
     registry's."""
 
     def test_807_items_and_442_receipts_export_and_a_second_run_is_same(self):
@@ -1333,7 +1333,7 @@ class Receipts(Base):
 
     def test_a_receipt_the_fetch_lacks_stays_when_the_export_runs_without_its_design_block(self):
         """The keep rule follows the collection name, not the design flag: export(design=False) with receipts among its
-        collections keeps a receipt and an item the fetch no longer lists (owner rulings 2026-11-22 21:02 and 21:05 CST)."""
+        collections keeps a receipt and an item the fetch no longer lists (decision waiting-data-in-repo)."""
         out = self.out()
         self.export_in_process(self.fetch(folders={"items": {"item-001": item(1), "item-gone": item(9)},
                                                    "receipts": {"item-001": receipt(1), "item-002": receipt(2)}}), out)
@@ -1381,7 +1381,7 @@ class Receipts(Base):
 
 
 class ClosedItems(Base):
-    """Owner rulings, 2026-11-22 21:02 and 21:05 CST: a closed item leaves the copy with its answer and receipt, and no
+    """Decision waiting-data-in-repo: a closed item leaves the copy with its answer and receipt, and no
     session restores it. The delete follows the doc key and the content, never `n` and never absence. Every account's
     page shares one copy, so each export with --account records, in `sightings/<item id>.json`, whether its page holds
     the item open. An item is deleted only by an export with --account that fetches it closed, when the copy item is
@@ -1433,6 +1433,11 @@ class ClosedItems(Base):
     def copy_status(self, out, doc_id):
         return json.loads(read_text(os.path.join(out, "items", doc_id + ".json"))).get("status")
 
+    def open_labels(self, out, doc_id):
+        """The account labels that `sightings/<doc_id>.json` lists as holding the item open; None when there is no file."""
+        path = os.path.join(out, "sightings", doc_id + ".json")
+        return json.loads(read_text(path)).get("open") if os.path.isfile(path) else None
+
     def test_the_first_closed_sighting_marks_the_copy_and_deletes_nothing(self):
         out = self.seeded()
         r = self.run_later(out, self.closed_two())
@@ -1462,11 +1467,40 @@ class ClosedItems(Base):
         self.run_later(out, self.closed_two(), account="y")                            # Y: closed too
         self.assertGone(out, "items/item-002.json", "answers/ans-2.json", "receipts/ans-2.json", "sightings/item-002.json")
 
+    def test_a_fetch_that_merely_lacks_an_item_keeps_the_accounts_open_label(self):
+        """An account's open label stays until that account's fetch holds the item closed (decision waiting-data-in-repo).
+        X holds item 2 open, then X's fetch lacks it. Y's two closed sightings do not delete it; X's own
+        closed fetch does."""
+        out = self.seeded()
+        self.run_later(out, {"item-001": item(1)}, account="x")   # X: item 2 absent from the fetch
+        self.run_later(out, self.closed_two(), account="y")
+        self.run_later(out, self.closed_two(), account="y")
+        self.assertTrue(os.path.isfile(os.path.join(out, "items", "item-002.json")),
+                        "Y's two closed sightings deleted item 2, though X's last fetch lacked it and X had held it open")
+        self.assertKept(out, "answers/ans-2.json", "receipts/ans-2.json")
+        self.assertIn("x", self.open_labels(out, "item-002") or [], "sightings/item-002.json lost X's open label")
+        self.run_later(out, self.closed_two(), account="x")
+        self.assertGone(out, "items/item-002.json", "answers/ans-2.json", "receipts/ans-2.json")
+
     def test_an_export_with_no_account_deletes_nothing(self):
         out = self.seeded()
         for _ in range(3):
             self.run_later(out, self.closed_two(), account=None)
         self.assertKept(out, "items/item-002.json", "answers/ans-2.json", "receipts/ans-2.json")
+
+    def test_an_export_with_no_account_copies_a_closed_item_the_copy_never_held(self):
+        """The closed rules run only with --account. With none, a closed item the copy never held lands, as main copies it,
+        and no sightings folder is written. The item has no answer on the page, so only the account rule decides."""
+        out = self.out()
+        fetched = self.fetch(items={"item-001": item(1), "item-009": dict(item(9), status="closed", lane="fix")},
+                             receipts={"item-009": receipt(9)})
+        r = self.export(fetched, out)
+        self.assertEqual(r.returncode, 0, shown(r))
+        self.assertTrue(os.path.isfile(os.path.join(out, "items", "item-009.json")),
+                        "a closed item the copy never held did not land with no --account. Output:\n" + shown(r))
+        self.assertTrue(os.path.isfile(os.path.join(out, "receipts", "item-009.json")),
+                        "the receipt of a closed item the copy never held did not land with no --account. Output:\n" + shown(r))
+        self.assertFalse(os.path.exists(os.path.join(out, "sightings")), "a no-account export wrote a sightings folder")
 
     def test_a_closed_item_waits_while_the_page_holds_an_answer_tied_to_it(self):
         """One rule, whatever the item's fields: a closed item with `waits` and no `lane` stays while the page holds its
@@ -1501,7 +1535,7 @@ class ClosedItems(Base):
         self.assertTrue(any(line.startswith("sightings unknown") and "item-002" in line for line in verdict_lines(r)),
                         "no line names the unreadable sightings file. Output:\n" + shown(r))
 
-    def test_an_items_collection_outside_the_waiting_page_copies_a_closed_doc(self):
+    def test_an_items_collection_of_another_role_copies_a_closed_doc(self):
         """The closed rules belong to the waiting page, not to the collection name `items`: another role's entry with an
         `items` collection copies a closed doc and its answer as fetched, and records no sightings."""
         out = self.out()
@@ -1523,6 +1557,19 @@ class ClosedItems(Base):
             self.run_later(out, ruling, answers=answers)
         self.assertKept(out, "items/item-002.json")
         self.assertEqual(self.copy_status(out, "item-002"), "closed")
+
+    def test_an_arbiter_ruling_the_copy_holds_survives_closed_fetches_that_carry_no_flag(self):
+        """An arbiter ruling is kept when either the copy row or the fetched row says arbiter. X's arbiter close marks the
+        copy; X's later closed fetches carry no arbiter flag, and the ruling stays on every run."""
+        out = self.seeded()
+        answers = {"item-001": {"item": "item-001", "pick": "a"}}
+        self.run_later(out, self.closed_two(arbiter=True), answers=answers)
+        self.assertEqual(json.loads(read_text(os.path.join(out, "items", "item-002.json"))).get("arbiter"), True,
+                         "scope: the arbiter close did not mark the copy")
+        for run in (1, 2, 3):
+            self.run_later(out, self.closed_two(), answers=answers)
+            self.assertTrue(os.path.isfile(os.path.join(out, "items", "item-002.json")),
+                            "closed fetch %d, with no arbiter flag, deleted the arbiter ruling the copy holds" % run)
 
     def test_an_item_the_fetch_does_not_hold_stays_even_when_closed_in_the_copy(self):
         out = self.seeded()
@@ -1580,11 +1627,11 @@ class ClosedItems(Base):
         out = self.out()
         fetched = self.fetch(items={"item-001": item(1), "item-009": dict(item(9), status="closed")},
                              receipts={"item-009": receipt(9)})
-        r = self.export(fetched, out)
+        r = self.export(fetched, out, account="x")
         self.assertEqual(r.returncode, 0, shown(r))
         self.assertKept(out, "items/item-001.json")
         self.assertGone(out, "items/item-009.json", "answers/item-009.json", "receipts/item-009.json")
-        self.assertVerdict(self.export(fetched, out), "same")
+        self.assertVerdict(self.export(fetched, out, account="x"), "same")
 
     def test_a_routed_closed_item_waits_while_the_page_holds_its_answer(self):
         """Fail closed: a closed item with `lane` and `lastAnswer` keeps its answer until the lane's done report, which
@@ -2533,7 +2580,7 @@ class Rebuild(Base):
                             name=name)
 
     def test_a_rebuild_loads_only_open_items_and_skips_a_closed_items_answer_and_receipt(self):
-        """Owner ruling, 2026-11-22 21:02 CST: no session restores a deleted item to a page. An older copy may still hold
+        """Decision waiting-data-in-repo: no session restores a deleted item to a page. An older copy may still hold
         a closed item; the rebuild leaves it, its answer and its receipt out."""
         batches = os.path.join(self.tmp.name, "batches")
         r = self.rebuild(self.old_copy_with_a_closed_item(), batches)
@@ -3145,7 +3192,7 @@ class NoExport(Base):
     def test_check_with_account_gets_the_usage_error_that_account_without_all_gets_and_writes_nothing(self):
         """--check --account LABEL: the usage error `--account goes with --all` (exit 2), and nothing written. --check takes
         no --account, so the run refuses the flag and runs no check. The control: --rebuild with --account gets that error.
-        An export takes --account since the owner's 21:05 CST ruling of 2026-11-22: it records the account's sightings."""
+        An export takes --account to record the account's sightings (decision waiting-data-in-repo)."""
         text = "--account goes with --all"
         fetched = self.fetch()
         page = write_text(os.path.join(self.tmp.name, "page-account.html"), "<!doctype html><title>Queue</title>")
@@ -3366,8 +3413,8 @@ class PictureFalseAlarm(PictureChecks):
         fetched = self.fetch(items=items, answers=answers, meta={"page": META})
         out = self.out()
         r = self.export(fetched, out, page=write_text(os.path.join(self.tmp.name, "page-skips.html"), page_with_mockups(MOCKS_292)))
-        self.assertChanged(r, 6)  # scope: two open items, the answer, the meta doc and the page's two files are in the copy
-        self.assertCopied(r, out, "items/answered-panel.json")  # a closed item and a ruling never land (owner ruling 2026-11-22 21:02 CST)
+        self.assertChanged(r, 8)  # scope: four items, the answer, the meta doc and the page's two files are in the copy
+        self.assertCopied(r, out, "items/answered-panel.json", "items/ruling-panel.json", "items/closed-panel.json")
         held = held_lines(r)
         self.assertIn((292, HELD_SENTENCE), held,
                       "scope: item 292 is not held, so the check did not run on this export. Output:\n" + shown(r))
@@ -3387,8 +3434,8 @@ class PictureFalseAlarm(PictureChecks):
         out = self.out()
         r = self.export(fetched, out, page=write_text(os.path.join(self.tmp.name, "page-skips-alone.html"),
                                                        page_with_mockups(MOCKS_292)))
-        self.assertChanged(r, 5)  # scope: one open item, the answer, the meta doc and the page's two files are in the copy
-        self.assertCopied(r, out, "items/answered-panel.json")  # a closed item and a ruling never land (owner ruling 2026-11-22 21:02 CST)
+        self.assertChanged(r, 7)  # scope: three items, the answer, the meta doc and the page's two files are in the copy
+        self.assertCopied(r, out, "items/answered-panel.json", "items/ruling-panel.json", "items/closed-panel.json")
         self.assertEqual(held_lines(r), [], "an answered, ruling or closed item was held. Output:\n" + shown(r))
         self.assertEqual(r.returncode, 0, "no open decision must export with exit 0. Output:\n" + shown(r))
 
