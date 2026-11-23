@@ -658,7 +658,7 @@ jobs:
       # Any read that fails reads as not equal, so the Debt retire check then runs the guard suite itself.
       - name: Compare the merge commit's tree with the PR head's
         id: debt_proof_tree
-        if: ${{ github.event_name == 'pull_request' }}
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
