@@ -1379,8 +1379,7 @@ class Host:
             c, out = self.api(f"actions/jobs/{job['id']}/logs")
             if c:
                 raise Stop(f"reading the log of job {job['id']} of run {run_id} failed: {out} " + UNKNOWN_CITE)
-            found = [(t, failing_line(t)) for t in out.splitlines()]
-            found = [(t, p) for t, p in found if p is not None]
+            found = failing_log_lines(out)
             if not any(file or case for _t, (file, case) in found):
                 unread.append(f"{name} failure, its log gave no case or file")
             elif any(not (file or case) and not UNITTEST_SUMMARY.fullmatch(LOG_PREFIX.sub("", t, count=1).rstrip()) for t, (file, case) in found):
@@ -7097,6 +7096,21 @@ def failing_line(text):
     if "]" in rest:
         return None, GUARD_NOTE.sub("", rest.split("]", 1)[1].strip()).strip() or None
     return None, None
+
+LOG_DETAIL = re.compile(r"##\[error\]|AssertionError")  # a line that names a failure but starts with no FAIL or ERROR: the runner's error annotation, a pytest assertion
+
+def failing_log_lines(text, detail=False):
+    """-> [(line, parsed)] for each failing line of the job log TEXT, in log order: `line` as the log gives it, `parsed` as failing_line gives it. Host.failed_lines
+    reads a log through this, and so does hooks/ci_wake.py (the one home of the log reader). `detail` also keeps a line that LOG_DETAIL finds (parsed (None, None)),
+    for a wake that shows the lines to a reader rather than parsing a case from them."""
+    found = []
+    for t in text.splitlines():
+        p = failing_line(t)
+        if p is None and detail and LOG_DETAIL.search(LOG_PREFIX.sub("", t, count=1)):
+            p = (None, None)
+        if p is not None:
+            found.append((t, p))
+    return found
 
 def touches_lines(h, run, cases, files):
     """-> (lines, unknown): the lines of `merge --touches` and why it is unknown, or None. A line per open pull request that touches a named file or
