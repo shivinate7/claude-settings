@@ -899,7 +899,8 @@ def scope_needs_of(text):
 
 def scope_problems(text):
     """A `scope` job on ubuntu with every flag as a job output; every other job passes job_check_problems
-    (the lint jobs in LINT_JOBS need scope but run always)."""
+    (the lint jobs in LINT_JOBS need scope but run always). checks has its own needs and if rules (checks_needs_problems,
+    checks_if_problems), so it is skipped here."""
     jobs = all_jobs(text)
     problems = []
     sc = jobs.get("scope")
@@ -917,7 +918,7 @@ def scope_problems(text):
     for name, job in jobs.items():
         # ci-done is the fan-in that comments when a run ends red: it needs every job, not scope
         # alone (actions/ci-done-comment/test_comment.py checks its needs and if). The two skip jobs have their own checks.
-        if name not in ("scope", "ci-done", ALL_JOBS_PASSED_JOB, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB):
+        if name not in ("scope", "ci-done", ALL_JOBS_PASSED_JOB, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB, CHECKS_JOB):
             problems += job_check_problems(name, job, FLAG_OF.get(name))
     return problems
 
@@ -1335,6 +1336,16 @@ class WindowsSplit(unittest.TestCase):
 
     def test_scope_job_checks_every_other_job(self):
         self.assertEqual(scope_problems(self.text), [])
+        # checks has its own home (CHECKS_JOB): assert the job exists first, so a missing job names only that cause.
+        self.assertIsNotNone(job_block(self.text, CHECKS_JOB), "checks.yml has no checks job")
+        # checks needs scope and every Linux guard shard, the shard names derived from SHARD_COUNTS (checks_needs_problems).
+        self.assertEqual(checks_needs_problems(job_needs_of(self.text, CHECKS_JOB)), [])
+        # checks' if begins with !cancelled(), so a failed guard shard cannot skip checks and hide its own lint failures. checks_if_problems
+        # reads always() as the same run, so the first term is pinned on its own.
+        if_raw = unwrap(job_if_of(self.text, CHECKS_JOB))
+        self.assertTrue(if_raw and if_raw.startswith("!cancelled() && "), f"checks: its if does not begin with !cancelled(): {if_raw}")
+        # checks runs iff scope succeeded and the records-only skip is not set, whatever the guard shards did (checks_if_problems).
+        self.assertEqual(checks_if_problems(job_needs_of(self.text, CHECKS_JOB), job_if_of(self.text, CHECKS_JOB)), [])
         self.assertEqual(condition_problems(self.text), [], "a run step does not carry the records-only condition the spec gives it")
         # The guard and mutate jobs skip on the
         # guard flag. Named failure: a cut job runs or never runs on push, schedule and dispatch.
