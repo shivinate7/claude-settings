@@ -14,7 +14,7 @@ The contract these cases read:
   - `bin/red-run <commit> [--add <path>]... [--replace <path> <old> <new>]... -- <test cmd>`, run from the caller's repo.
   - The test command runs in a copy at <TMPDIR>/claude-settings-test-temp/<pid>-<uuid>. Each case sets TMPDIR to a
     folder beside its fixture repo, never inside it.
-  - The output names the class of the run as one word: pass, assert, crash or timeout (mutate_shared classify_run).
+  - The output names the class of the run as one word: pass, assert, build, crash or timeout (mutate_shared classify_run).
   - Exit 2 for a commit that does not exist, for a missing `--`, for a --replace whose old text is missing (STALE), and for
     a test command that cannot start. That call prints one verdict line, and leaves no copy.
   - The exit codes of a pass and of a fail are not read here.
@@ -84,7 +84,7 @@ CRASH_CODE = 'raise RuntimeError("boom")'
 FAIL_CODE = 'import sys\nprint("FAIL: probe")\nsys.exit(1)'
 PASS_CODE = 'print("green")'
 # The verdict line bin/red-run prints last: `red-run <sha7>: <class>`. A class word anywhere else in the output is the child's, not the verdict.
-VERDICT_LINE = re.compile(r"^red-run [0-9a-f]{7,}: (pass|assert|crash|timeout)$", re.M)
+VERDICT_LINE = re.compile(r"^red-run [0-9a-f]{7,}: (pass|assert|build|crash|timeout)$", re.M)
 
 
 def write(path, text):

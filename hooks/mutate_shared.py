@@ -560,6 +560,9 @@ def run_mutants(entries, run_one, controls=None, control_of=None, verdict_key=No
 #    with no usable suite, a parse error, or a missing target reads UNKNOWN, never green or killed.
 
 FAIL_LINE = re.compile(r"^FAIL(?::|\s|$)", re.M)
+XCTEST_FAIL_LINE = re.compile(r"^\S[^\n]*:\d+: error: .*\bXCT\w+ failed", re.M)  # an XCTest assertion, macOS or Linux shape
+SWIFT_BUILD_ERROR = re.compile(r"^(?:\S[^\n]*:\d+:\d+: )?error:", re.M)  # a Swift compile error, or a SwiftPM plugin error
+NOT_RED_KINDS = frozenset({"crash", "build", "timeout"})  # the kinds that are no kill: a suite that did not reach an assertion
 SCAFFOLD_SKIP = (".git", ".claude", "node_modules", "__pycache__")
 _SWAPS = {ast.Eq: ast.NotEq, ast.NotEq: ast.Eq, ast.Lt: ast.GtE, ast.GtE: ast.Lt, ast.Gt: ast.LtE,
           ast.LtE: ast.Gt, ast.In: ast.NotIn, ast.NotIn: ast.In, ast.Is: ast.IsNot, ast.IsNot: ast.Is}
@@ -718,13 +721,16 @@ def changed_lines(repo: str, base: str, head: str, path: str) -> set:
 
 
 def classify_run(code, output: str, timed_out: bool) -> str:
-    """One suite run: "pass", "assert" (a FAIL line, an assertion went red), "crash" (red with no FAIL
-    line: a throw, an import error) or "timeout". Only "assert" is evidence a mutant was caught."""
+    """One suite run: "pass", "assert" (a FAIL line, or an XCTest assertion, went red), "build" (red with no
+    assertion and a compile or plugin error line), "crash" (red with none of those: a throw, an import error)
+    or "timeout". Only "assert" is evidence a mutant was caught."""
     if timed_out:
         return "timeout"
     if code == 0:
         return "pass"
-    return "assert" if FAIL_LINE.search(output) else "crash"
+    if FAIL_LINE.search(output) or XCTEST_FAIL_LINE.search(output):
+        return "assert"
+    return "build" if SWIFT_BUILD_ERROR.search(output) else "crash"
 
 
 _TAP_ENTRY = re.compile(r"^\s*(?:not ok|ok)\b|^\s*1\.\.\d|^\s*# Subtest:", re.M)
@@ -936,7 +942,7 @@ def score_target(root: str, target: str, tests, limit: int = 10, timeout=None, j
                 row["killers"][rel] += 1
         if "assert" in kinds:
             row["killed"] += 1
-        elif kinds & {"crash", "timeout"}:
+        elif kinds & NOT_RED_KINDS:
             row["crashed"] += 1
         else:
             row["survived"] += 1
@@ -1495,7 +1501,7 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
             if "assert" not in kinds and expired.is_set():
                 return CUT  # the deadline killed a suite part way: its exit says nothing about the mutant
             if progress:
-                verdict = ("killed" if "assert" in kinds else "crashed" if kinds & {"crash", "timeout"}
+                verdict = ("killed" if "assert" in kinds else "crashed" if kinds & NOT_RED_KINDS
                            else "survived")
                 with progress_lock:
                     progress("  #%d mutant %s  %s:%d %s" % (row["pr"], verdict, path, _line_of(label), label))
@@ -1531,7 +1537,7 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
             cut += kinds is CUT
         elif "assert" in kinds:
             row["killed"] += 1
-        elif kinds & {"crash", "timeout"}:
+        elif kinds & NOT_RED_KINDS:
             row["crashed"] += 1
         else:
             row["survived"] += 1
@@ -1722,6 +1728,7 @@ def _known_defect(dest: str, defect: dict, suite_timeout: float) -> dict:
     result["verdict"] = "CAUGHT" if kind == "assert" else "MISS"
     if kind != "assert":
         result["reason"] = {"pass": "the suite passed on the planted defect", "crash": "the suite crashed with no assertion",
+                            "build": "the suite did not build: a compile or plugin error with no assertion",
                             "timeout": "the suite passed the timeout"}.get(kind, kind)
     return result
 

@@ -199,6 +199,33 @@ class PartsTests(unittest.TestCase):
         self.assertEqual(classify(1, "FAIL: slow\n", True), "timeout")
         self.assertEqual(classify(0, "", True), "timeout")
 
+    def test_an_xctest_assertion_on_macos_reads_as_assert(self):
+        out = ("/p/Tests/KitTests/ATests.swift:12: error: -[KitTests.ATests testX] : "
+               "XCTAssertEqual failed: (\"1\") is not equal to (\"2\")\n"
+               "Test Case '-[KitTests.ATests testX]' failed (0.002 seconds).\n")
+        self.assertEqual(mutate_shared.classify_run(1, out, False), "assert",
+                         "an XCTest assertion (macOS shape, no FAIL line) did not read as assert")
+
+    def test_an_xctest_assertion_on_linux_reads_as_assert(self):
+        out = ("/p/Tests/ATests.swift:12: error: ATests.testX : XCTAssertTrue failed\n"
+               "Test Case 'ATests.testX' failed (0.002 seconds).\n")
+        self.assertEqual(mutate_shared.classify_run(1, out, False), "assert",
+                         "an XCTest assertion (Linux shape, no FAIL line) did not read as assert")
+
+    def test_a_swift_compile_error_reads_as_build(self):
+        out = "/p/Sources/Kit/A.swift:3:5: error: cannot find 'x' in scope\n"
+        self.assertEqual(mutate_shared.classify_run(1, out, False), "build",
+                         "a Swift compile error did not read as build")
+
+    def test_a_swiftpm_plugin_error_reads_as_build(self):
+        out = "error: No OpenAPI document found\n"
+        self.assertEqual(mutate_shared.classify_run(1, out, False), "build",
+                         "a SwiftPM plugin error did not read as build")
+
+    def test_a_nonzero_exit_with_neither_shape_reads_as_crash(self):
+        self.assertEqual(mutate_shared.classify_run(1, "", False), "crash",
+                         "a nonzero exit with no output and neither shape did not read as crash")
+
     def test_ast_mutants_are_valid_distinct_and_bounded(self):
         mutants = mutate_shared.ast_mutants(SUBJECT, limit=3)
         self.assertEqual(len(mutants), 3)
