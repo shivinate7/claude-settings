@@ -5627,7 +5627,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 raise Stop(f"{not_green}. Nothing was claimed or pushed. {GREEN_CITE}")
             if not_green:
                 raise Stop(f"{checks_read_of(proof, info['head'])} are not green, so nothing was claimed or pushed {GREEN_CITE}: {not_green}.")
-            if proof != info["head"] and not not_green and not lint_lifted:  # the carried proof covers a run that has not finished, never one that failed or that this tool could not read (decision merge-needs-current-base)
+            if proof != info["head"] and not not_green:  # the carried proof covers a run that has not finished, never one that failed or that this tool could not read, a lane-lint PASS on the pending proof included (decision merge-needs-current-base)
                 own = host.head_state(n, info["head"])  # one more read, the live head's own state
                 if head_check_red(own):
                     raise Stop(f"the own run of {info['head'][:9]} is red, so the green proof of {proof[:9]} under it does not cover it, and nothing was claimed or pushed {GREEN_CITE}: {head_not_green(own)}.")
