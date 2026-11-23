@@ -32,33 +32,17 @@ ROOT = os.path.join(TEMP_ROOT, "%d-%s" % (os.getpid(), uuid.uuid4().hex))
 os.makedirs(ROOT)
 sweep_run_folders(TEMP_ROOT, ROOT)
 
-# The harness base: the second folder the guard reads as a scratchpad base, beside gettempdir()
-# (hooks/guard_shared_tree.py scratchpad_temp_bases). The harness keeps a session's scratchpad there,
-# `<realpath of /tmp>/claude-<uid>/...`, and gettempdir() does not name it. A case that needs that real
-# layout builds its scratchpad under this base, in one run folder of its own, so no TMPDIR override hides
-# the difference. POSIX only: the callers skip on Windows, where the guard names no such base.
-import atexit  # noqa: E402  removes the run folder under the harness base at exit
-import importlib.util  # noqa: E402  loads the lint helper below
-_TEMP_HELPER = os.path.join(REPO, "lint", "_test_temp.py")
-_spec = importlib.util.spec_from_file_location("_test_temp_guard_cases", _TEMP_HELPER)
-_test_temp = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_test_temp)  # the one home of the run folder and its sweep (lint/_test_temp.py)
-REAL_TEMP_ROOT_NAME = "claude-settings-test-temp"
-REAL_RUN = None  # this run's folder under the harness base, made on first use
-
-
-def harness_temp_base():
-    """`<realpath of /tmp>/claude-<uid>`, the base hooks/guard_shared_tree.py names. POSIX only."""
-    return os.path.join(os.path.realpath("/tmp"), "claude-%d" % os.getuid())
-
-
-def real_run_folder():
-    """This run's folder under the harness base, made and swept on first use, removed at exit."""
-    global REAL_RUN
-    if REAL_RUN is None:
-        REAL_RUN = _test_temp.run_folder(os.path.join(harness_temp_base(), REAL_TEMP_ROOT_NAME))
-        atexit.register(shutil.rmtree, REAL_RUN, True)
-    return REAL_RUN
+# The scratchpad base the guard reads from CLAUDE_SCRATCHPAD_BASE in place of the harness base
+# (hooks/guard_shared_tree.py scratchpad_temp_bases). A case that needs the real layout builds its scratchpad
+# under this folder, which sits in this run's folder under the repo's one temp root (TEMP_ROOT), and names the
+# base through `env`. Nothing is written under the harness base itself. The guard's TMPDIR is SCRATCH_TEMP, a
+# folder that exists and sits outside the base: a missing TMPDIR falls back to /tmp, and the system temp holds
+# ROOT, so either would make the base read as gettempdir() and hide the difference.
+SCRATCH_BASE = os.path.join(ROOT, "scratch-base")
+SCRATCH_TEMP = os.path.join(ROOT, "scratch-temp")
+os.makedirs(SCRATCH_TEMP, exist_ok=True)
+SCRATCH_BASE_ENV = {"CLAUDE_SCRATCHPAD_BASE": SCRATCH_BASE, "TMPDIR": SCRATCH_TEMP, "TEMP": SCRATCH_TEMP,
+                    "TMP": SCRATCH_TEMP}
 
 
 CFG = os.path.join(ROOT, "cfg")            # stands in for the config directory
