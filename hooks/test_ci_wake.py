@@ -652,6 +652,16 @@ LIVE_RED = run(952, "checks", None,
                [job_row("lint", "success", 1001), job_row("unit", "failure", 1002), job_row("e2e", None, 1003)],
                status="in_progress")   # the run never completes: only a failed job or the deadline ends the watch
 CANCELLED_LOGGED = run(953, "checks", "cancelled", [job_row("unit", "cancelled", 1005)])
+# A run that failed a job while it is in progress, and a newer run of its name that only the re-list shows. The newer
+# run's one job is e2e, so a verdict that reads its jobs names e2e, not unit.
+RUNNING_FAILED = run(971, "checks", None,
+                     [job_row("lint", "success", 1011), job_row("unit", "failure", 1012), job_row("e2e", None, 1013)],
+                     status="in_progress")
+NEWER_RUNNING = run(972, "checks", None, [job_row("e2e", None, 1021)], status="in_progress", appears_at_list=2)
+TIMED_OUT_BUILD = run(961, "checks", "failure", [job_row("lint", "success", 1031), job_row("build", "timed_out", 1032)])
+STARTUP_FAILED = run(962, "checks", "startup_failure", [])
+# The rollup job's log holds only its own verdict. The log reader keeps this line, so it would reach the wake if read.
+ROLLUP_LOG = "2026-11-23T16:05:00.0000000Z ##[error]rollup-only-marker: all-jobs-passed failed\n"
 
 
 PUSH_FORMS = [
@@ -2547,6 +2557,78 @@ def case_failed_job_wakes_once_and_exits():
     check("case 6: a run still going with a failed job: one poll (control)", len(watched(res)) == 1, why(res))
 
 
+def case_failed_job_then_newer_run_listed_is_never_green():
+    """A run has a failed job while it is in progress. At the re-list a newer run of its name is in progress, and the
+    failed run is listed beside it, in either order. The wake is never `CI green` and never says `no failing jobs`:
+    it is the red line for the failed job (unit, not the newer run's e2e), or the watch keeps waiting (unknown). The
+    4 s deadline is a hang guard only: no verdict here depends on elapsed time."""
+    orders = (("listed newer run first", [NEWER_RUNNING, RUNNING_FAILED]),
+              ("listed failed run first", [RUNNING_FAILED, NEWER_RUNNING]))
+    for order, runs in orders:
+        label = "failed run 971 beside newer run 972, %s" % order
+        res = run_hook(bash("gh pr ready 12"), fixture(READY, runs, job_logs={"1012": LOG_UNIT}),
+                       extra={"CI_WAKE_DEADLINE": "4"})
+        check("%s: the watch polled run 971 (scope)" % label, "971" in watched(res), why(res))
+        check("%s: two run lists, the re-list shows run 972 (scope)" % label, count(res, "run", "list") == 2, why(res))
+        v = verdict_of(res)
+        check("%s: one CI line, exit 2" % label, res.rc == 2 and not res.hung and v is not None, why(res))
+        check("%s: the line is not CI green" % label, v is not None and v[0] != "green", why(res))
+        check("%s: no line says no failing jobs" % label,
+              not any("no failing jobs" in x for x in res.lines), why(res))
+        if v is not None and v[0] == "red":
+            check("%s: the red line names the failed job, unit" % label, "unit" in v[2], why(res))
+            check("%s: the red line does not name run 972's job, e2e" % label, "e2e" not in v[2], why(res))
+
+
+def case_rollup_job_listed_first_reads_the_real_failed_jobs_log():
+    """The run's jobs list the merge tool's rollup job (ROLLUP_JOB) as failed, before a real failed job. The detail
+    lines come from the real failed job's log, read once. The rollup's log is never read into the wake. The rollup name
+    is read from the merge tool, not copied here."""
+    from guard_merge import merge_module
+    merge = merge_module()
+    rollup = getattr(merge, "ROLLUP_JOB", None) if merge is not None else None
+    check("rollup job name loads from the merge tool (scope)", isinstance(rollup, str) and rollup != "",
+          "rollup=%r" % (rollup,))
+    if not (isinstance(rollup, str) and rollup):
+        return
+    rollup_first = run(981, "checks", "failure",
+                       [job_row(rollup, "failure", 1010), job_row("unit", "failure", 1002), job_row("lint", "success", 1001)])
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [rollup_first], job_logs={"1010": ROLLUP_LOG, "1002": LOG_UNIT}))
+    label = "rollup job failed and listed before the real failed job"
+    expect_verdict(label, res, "red", names_in=["unit"])
+    check("%s: one job-log read (scope)" % label, len(log_reads(res)) == 1, why(res))
+    check("%s: the log read is job 1002's, the real failed job, not the rollup's 1010" % label,
+          any(any("/actions/jobs/1002/logs" in a for a in c) for c in log_reads(res)), why(res))
+    d = details_of(res) or []
+    check("%s: a detail line is a failing line of the real job's log (FAIL test_unit.py::test_one)" % label,
+          any("FAIL test_unit.py::test_one" in x for x in d), "details=%r" % d[:3])
+    check("%s: no detail line comes from the rollup's log (rollup-only-marker)" % label,
+          bool(d) and not any("rollup-only-marker" in x for x in d), "details=%r" % d[:3])
+
+
+def case_timed_out_job_names_its_conclusion_in_the_detail():
+    """A red run whose jobs have no failure conclusion, but one timed_out job. Its detail line names that conclusion
+    and the job, and never says `no failed job` while a timed-out job exists."""
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [TIMED_OUT_BUILD]))
+    label = "run with a timed_out job and no failure conclusion"
+    expect_verdict(label, res, "red", names_in=["build"])
+    d = details_of(res) or []
+    check("%s: a detail line names the job and the conclusion, build and timed_out" % label,
+          any("build" in x and "timed_out" in x for x in d), "details=%r" % d[:3])
+    check("%s: no detail line says no failed job" % label,
+          not any("no failed job" in x for x in d), "details=%r" % d[:3])
+
+
+def case_startup_failure_run_names_its_conclusion_in_the_detail():
+    """A red run with no jobs, concluded startup_failure. Its detail line names that conclusion."""
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [STARTUP_FAILED]))
+    label = "run concluded startup_failure with no jobs"
+    expect_verdict(label, res, "red", names_in=["workflow checks"])
+    d = details_of(res) or []
+    check("%s: a detail line names the conclusion, startup_failure" % label,
+          any("startup_failure" in x for x in d), "details=%r" % d[:3])
+
+
 def main():
     hook_exists = os.path.isfile(MODULE)
     check("module under test exists (missing module = red for this reason)", hook_exists, MODULE)
@@ -2790,6 +2872,10 @@ def main():
     case_green_and_cancelled_wakes_read_no_job_log()
     case_one_job_log_read_per_watch_with_two_red_jobs()
     case_failed_job_wakes_once_and_exits()
+    case_failed_job_then_newer_run_listed_is_never_green()
+    case_rollup_job_listed_first_reads_the_real_failed_jobs_log()
+    case_timed_out_job_names_its_conclusion_in_the_detail()
+    case_startup_failure_run_names_its_conclusion_in_the_detail()
     if not cost_probe.run_class(CostTests):
         FAILS.append("CostTests")
     check_api_reads()
