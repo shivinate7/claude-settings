@@ -4833,6 +4833,13 @@ ROLE_NO_MODEL_REASON = (
     "model is set, so it would run on its parent's model. Remedy: name the role's model%s. "
     "(decision agent-model-cap)"
 )
+# A Workflow agent() call that names a role with a row and no model: neither the default model nor the agent file's pin
+# reaches it, so it runs its parent's model. Its remedy names no model for a Haiku row, as the reason above.
+ROLE_WORKFLOW_NO_MODEL_REASON = (
+    "Rule (configuration): this Workflow agent() call names a role that has a row in the role table, but no `model`, "
+    "so it would run on its parent's model. Remedy: add `model` to the call's options, and name the role's model%s. "
+    "(decision agent-model-cap)"
+)
 
 
 def _question_form_module():
@@ -5169,6 +5176,7 @@ def role_name(table, subagent_type) -> str:
 # A Workflow spawn whose brief the scan could not read carries BRIEF_UNREAD; its refusal adds BRIEF_LITERAL_REMEDY.
 # The remedy stays lowercase mid-sentence, so both refusals carry the same words.
 BRIEF_UNREAD = "brief_unread"
+WORKFLOW_NO_MODEL = "workflow_no_model"   # set on a spawn_inputs yield for a Workflow call with a literal agentType and no model key
 BRIEF_LITERAL_REMEDY = "write the brief as a literal string so the marker is readable"
 
 
@@ -5176,11 +5184,12 @@ def spawn_inputs(tool: str, tool_input):
     """Yield each spawn a call makes, shaped as an Agent input (`subagent_type`, `model`, `prompt`). An Agent or Task
     call is one spawn. A Workflow script yields one per agent() call that names a model, with agentType as the role
     and the model read from the script, so the role and Opus checks judge it as they judge an Agent spawn
-    (decision agent-model-cap). A brief the scan cannot read (a variable, or a prompt key beside a spread) carries no
+    (decision agent-model-cap). A call with a literal agentType, no `model` key and no spread yields too, with
+    WORKFLOW_NO_MODEL set and an empty model: role_model_one refuses it when the role has a row. A brief the scan cannot read (a variable, or a prompt key beside a spread) carries no
     marker and grants nothing, so the spawn is judged with an empty brief and BRIEF_UNREAD set, and its refusal names
     BRIEF_LITERAL_REMEDY, so the author can make the marker readable. A
-    call whose model or agentType the scan cannot read, or that names no model, is skipped: a static read never
-    guesses a role or a model. A shorthand or a spread with no literal agentType may set the role, so it is unread;
+    call whose model or agentType the scan cannot read is skipped, and so is one with no model and no literal
+    agentType, or with a spread that may hold the model: a static read never guesses a role or a model. A shorthand or a spread with no literal agentType may set the role, so it is unread;
     a literal agentType beside a spread is read. step_up_hit still skips an unread brief, as a marker it cannot read
     has no round to check. Other tools yield nothing."""
     if tool in SPAWN_TOOLS:
@@ -5191,7 +5200,12 @@ def spawn_inputs(tool: str, tool_input):
             for k, u, _ in bodies:
                 keys.update(k)
                 unseen |= u
-            if unseen & {"model", "agentType"} or not keys.get("model"):
+            if unseen & {"model", "agentType"}:
+                continue
+            if not keys.get("model"):
+                if "model" not in keys and "..." not in unseen and keys.get("agentType"):
+                    yield {"subagent_type": keys["agentType"], "model": "", "prompt": prompt or "",
+                           BRIEF_UNREAD: prompt is None, WORKFLOW_NO_MODEL: True}
                 continue
             if "..." in unseen and "agentType" not in keys:
                 continue
@@ -5299,6 +5313,11 @@ def role_model_one(tool_input):
                 extra += ROLE_TEST_AUTHOR_NOTE if "1" in free else ROLE_REVIEWER_FIRST_ROUND_NOTE
             return ROLE_MODEL_REASON % extra, model, False
         return "", "", False
+    if tool_input.get(WORKFLOW_NO_MODEL):
+        if role not in table:
+            return "", "", False
+        return (ROLE_WORKFLOW_NO_MODEL_REASON % ("" if table[role] == ROLE_MODEL_RANK[0] else " (%s)" % table[role]),
+                ROLE_NO_MODEL_MATCH + role, False)
     if os.environ.get(ROLE_MODEL_ENV, "").strip():
         return "", "", False
     pinned = role_has_model_pin(pointer, role)
