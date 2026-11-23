@@ -32,8 +32,10 @@ never runs it. There is one path: the record branch's own worktree. Never write 
      commit and push the record branch. The commit message names the count. `changed <n> deleted <k>`: the export
      deleted each item that no account holds open and that was already marked closed, with its answer, receipt and
      sightings file, and printed one `deleted <path>` line each. The commit message starts `DELETE:` and lists each
-     deleted path. `git show --name-status --diff-filter=D HEAD` must list exactly those paths. Never restore a
-     deleted item.
+     deleted path. Each path is relative to the copy folder; under `--all` the line starts `<id>: `. `git show
+     --name-status --diff-filter=D HEAD` lists repo paths, so it must list exactly the copy folder's path, `/`, and each
+     printed path. A `sightings unknown: <path>` line names a sightings file the export could not read: its item was not
+     deleted. Fix or delete the file by hand, then export again. Never restore a deleted item.
    - `held item <n>: <sentence>` after the verdict line (exit 4): after `changed`, the copy was written; commit it as for `changed`. After `same`, commit nothing. The page would
      draw that item's picture wrong. Fix the item, export again, and do not republish while one is held.
    - `refused`: nothing was written. Make no commit. The reply names each find: the file, the JSON path and

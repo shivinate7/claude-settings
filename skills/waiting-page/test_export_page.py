@@ -1488,6 +1488,33 @@ class ClosedItems(Base):
             self.assertEqual(r.returncode, 0, shown(r))
         self.assertKept(out, "items/item-009.json", "answers/item-009.json", "receipts/item-009.json")
 
+    def test_an_unreadable_sightings_file_holds_the_delete_and_says_so(self):
+        """A sightings file that is not JSON is unknown, never "no account holds it open": the item stays, the file is
+        left as it was, and a line names it."""
+        out = self.seeded()
+        self.run_later(out, self.closed_two())
+        path = os.path.join(out, "sightings", "item-002.json")
+        write_text(path, "{not json")
+        r = self.run_later(out, self.closed_two())
+        self.assertKept(out, "items/item-002.json", "answers/ans-2.json", "receipts/ans-2.json")
+        self.assertEqual(read_text(path), "{not json", "the unreadable sightings file was rewritten")
+        self.assertTrue(any(line.startswith("sightings unknown") and "item-002" in line for line in verdict_lines(r)),
+                        "no line names the unreadable sightings file. Output:\n" + shown(r))
+
+    def test_an_items_collection_outside_the_waiting_page_copies_a_closed_doc(self):
+        """The closed rules belong to the waiting page, not to the collection name `items`: another role's entry with an
+        `items` collection copies a closed doc and its answer as fetched, and records no sightings."""
+        out = self.out()
+        fetched = self.fetch(folders={"items": {"k": dict(item(1), status="closed")},
+                                      "answers": {"k": {"item": "k", "pick": "a"}}, "receipts": {}})
+        try:
+            export_page.export(fetched, out, None, (), collections=("items", "answers", "receipts"), design=False,
+                               account="x")
+        except export_page.Stop as stop:
+            self.fail("export stopped: %s" % stop)
+        self.assertKept(out, "items/k.json", "answers/k.json")
+        self.assertFalse(os.path.exists(os.path.join(out, "sightings")), "a non-waiting entry recorded sightings")
+
     def test_an_arbiter_ruling_is_never_deleted(self):
         out = self.seeded()
         ruling = self.closed_two(arbiter=True)
@@ -2535,6 +2562,30 @@ class Rebuild(Base):
         live = self.fetch(items={"item-050": item(50)})
         r = self.merge_run(copy, live, os.path.join(self.tmp.name, "sighted-merge"))
         self.assertEqual(r.returncode, 0, shown(r))
+
+    def test_a_rebuild_and_a_merge_restore_an_arbiter_ruling(self):
+        """The export never deletes a ruling, so a rebuild or merge from the copy puts it back on the page."""
+        ruling = dict(item(3), status="closed", arbiter=True)
+        copy = self.copy_of({"items": {"item-001": item(1), "item-003": ruling}}, name="ruled")
+        batches = os.path.join(self.tmp.name, "ruled-batches")
+        r = self.rebuild(copy, batches)
+        self.assertEqual(r.returncode, 0, shown(r))
+        _, entries, _ = self.batch_entries(batches)
+        self.assertIn(("items", "item-003"), {(e["collection"], e["doc_id"]) for e in entries}, shown(r))
+        merged = os.path.join(self.tmp.name, "ruled-merge")
+        r = self.merge_run(copy, self.fetch(items={"item-050": item(50)}), merged)
+        self.assertEqual(r.returncode, 0, shown(r))
+        _, entries, _ = self.batch_entries(merged)
+        self.assertIn(("items", "item-003"), {(e["collection"], e["doc_id"]) for e in entries}, shown(r))
+
+    def test_a_rebuild_with_collections_items_keeps_a_closed_item_and_its_answer(self):
+        """--collections names another artifact's folders: the waiting page's closed rule does not apply, even to a
+        folder named `items`."""
+        copy = self.copy_of({"items": {"k": dict(item(1), status="closed")}, "answers": {"k": {"item": "k", "pick": "a"}}},
+                            name="other-items")
+        batches = os.path.join(self.tmp.name, "other-items-batches")
+        r = self.rebuild(copy, batches, collections=("items", "answers"))
+        self.assertBatches(r, 1, 2)
 
     def test_another_artifacts_folder_named_by_collections_is_not_filtered(self):
         """The closed rule keys on the collection name `items`. A copy rebuilt with --collections steps keeps a closed doc."""

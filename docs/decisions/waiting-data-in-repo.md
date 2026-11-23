@@ -37,8 +37,10 @@ Known limits:
 
 - The scan reads shapes, not meaning. A personal fact in plain words, such as an employer or a city, passes. A password word whose whole value is a placeholder, a mask or a plain word also passes. So do `PWD=<path>`, a no-reply address and the ssh remote of a public git host.
 - A truncated fetch, such as a missed page of results, deletes nothing: an item missing from the fetch always stays.
-- A rebuild or merge skips a copy item marked closed, though another account's page may still hold it open until its next export writes it back open.
+- A rebuild or merge skips a copy item marked closed, though another account's page may still hold it open until its next export writes it back open. It restores an arbiter ruling, which the export never deletes.
 - A rebuild skips a closed item's answer too (`read_copy`), so a page rebuilt before a routed item's done report loses that answer.
+- A sightings file that cannot be read is unknown: its item is not deleted, and the export names the file.
+- These rules are the waiting page's. Another role's `items` collection, and `--rebuild` or `--merge` with `--collections`, keep a closed doc.
 - An account's open sightings count only from its first export with `--account`. An account that has never exported that way is not known, so it cannot hold an item open.
 
 Basis: owner rulings fb-1456-1, fb-1458-1, fb-1458-2 and fb-1512-1 ("wb"), the coordinator's note of 11:49 CST, and a named incident (see Incidents). Landed: set at merge.

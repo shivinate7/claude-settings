@@ -20,7 +20,9 @@ item is already marked closed by an earlier export, and no account's latest expo
 the page holds an answer tied to it. An arbiter ruling is never deleted. An export with no --account deletes nothing.
 The match is the doc key, never `n`. A closed item the copy does not hold is copied only while the page holds its
 answer. A doc the fetch no longer lists stays (owner rulings 2026-11-22 21:02 and 21:05 CST). Each delete prints
-`deleted <path>` before the verdict.
+`deleted <path>` before the verdict, the path relative to WAITING_DIR. A sightings file that cannot be read prints
+`sightings unknown: <path> ...`; its item is not deleted and the file is left as it was. These rules are the waiting
+page's: another role's `items` collection, and --rebuild or --merge with --collections, keep a closed doc.
 WAITING_DIR is the `waiting-data` folder of the record branch (`layout.py path <root> waiting-data`). With --page,
 the page's bytes land in `page/page.html`, and its designData block in `page/designData.json`. A file is written
 only when its bytes differ. The script never runs git: the session commits.
@@ -71,8 +73,9 @@ Rebuild, the recovery path. It reads only the repo copy, never the live page:
     python3 ~/.claude/skills/waiting-page/export_page.py --rebuild WAITING_DIR --batches OUT_DIR [--collections NAME ...]
 
 Writes OUT_DIR/batch-NNN.json, each a JSON list of at most 50 `{op: "set", collection, doc_id, data}` entries and
-under 900,000 bytes, one entry per doc in WAITING_DIR except `page/`, and prints `batches K docs N`. A closed item, its
-answer and its receipt get no entry, in --merge too: no session restores a deleted item to a page. The session
+under 900,000 bytes, one entry per doc in WAITING_DIR except `page/` and `sightings/`, and prints `batches K docs N`.
+A closed item that is no arbiter ruling, its answer and its receipt get no entry, in --merge too: no session restores a
+deleted item to a page. With --collections neither folder nor closed item is special. The session
 sends each list as an `ArtifactData batch`. Unknown, exit 2: a missing or empty WAITING_DIR, a folder in it that is
 neither one of the six collections (or the `--collections` names) nor `page/`, or one doc over the byte cap.
 For an artifact other than the waiting page, `--collections NAME [NAME ...]` names its collections (the registry
@@ -664,27 +667,34 @@ def parsed(raw):
 
 
 def read_sightings(out, doc_id):
-    """The account labels whose latest export held item `doc_id` open, from `sightings/<doc_id>.json`; [] when none."""
+    """The account labels whose latest export held item `doc_id` open, from `sightings/<doc_id>.json`; [] when there is
+    no file. None when the file is not `{"open": [label, ...]}`: unknown, never "no account holds it open"."""
     path = os.path.join(out, SIGHTINGS, doc_id + ".json")
     if not os.path.isfile(path):
         return []
     with open(path, "rb") as handle:
         found = parsed(handle.read())
     labels = found.get("open") if isinstance(found, dict) else None
-    return [label for label in labels if isinstance(label, str)] if isinstance(labels, list) else []
+    if not (isinstance(labels, list) and all(isinstance(label, str) for label in labels)):
+        return None
+    return labels
 
 
 def open_sightings(collections, docs, have, out, account):
     """{item id: sorted labels whose latest export holds it open}, after this export, for each item of the copy or the
-    fetch. None without --account, when no sighting is recorded. An item the fetch does not hold, or holds closed, drops
-    this account's label."""
+    fetch, or None for an item whose sightings file is unreadable. None without --account, when no sighting is recorded.
+    An item the fetch does not hold, or holds closed, drops this account's label."""
     if ITEMS not in collections or not account:
         return None
     held = {label[len(ITEMS) + 1:-len(".json")] for label in have if label.startswith(ITEMS + "/")}
     found = {}
     for doc_id in held | set(docs[ITEMS]):
         data = docs[ITEMS].get(doc_id)
-        labels = set(read_sightings(out, doc_id)) - {account}
+        recorded = read_sightings(out, doc_id)
+        if recorded is None:
+            found[doc_id] = None
+            continue
+        labels = set(recorded) - {account}
         if data is not None and not is_closed(data):
             labels.add(account)
         found[doc_id] = sorted(labels)
@@ -709,7 +719,7 @@ def closed_sightings(collections, docs, have, sightings):
         if label not in have:
             if not answered:
                 unseen.add(doc_id)
-        elif (sightings is not None and not sightings.get(doc_id) and not answered and data.get("arbiter") is not True
+        elif (sightings is not None and sightings.get(doc_id) == [] and not answered and data.get("arbiter") is not True
               and is_closed(parsed(have[label]))):
             gone.add(doc_id)
     return gone, unseen
@@ -737,8 +747,12 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
             raise Stop("unknown - %s is empty but the copy holds %d doc(s) of it; pass --allow-empty %s if it emptied"
                        % (name, len(kept), name), UNKNOWN)
 
-    sightings = open_sightings(collections, docs, have, out, account)
-    gone, unseen = closed_sightings(collections, docs, have, sightings)
+    rules = collections if design else ()  # the closed rules are the waiting page's, never another role's `items`
+    sightings = open_sightings(rules, docs, have, out, account)
+    gone, unseen = closed_sightings(rules, docs, have, sightings)
+    for doc_id, labels in sorted((sightings or {}).items()):
+        if labels is None:
+            print("%ssightings unknown: %s/%s.json is not readable; its item is not deleted" % (prefix, SIGHTINGS, doc_id))
     drop = gone_labels(collections, gone, dict(copy_answers(have), **docs.get(ANSWERS, {})))
     skip = gone_labels(collections, unseen, docs.get(ANSWERS, {}))  # closed and never copied: write none of it
 
@@ -754,7 +768,7 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
             finds.extend((label, path, kind) for path, kind in hits)
             want["%s/%s.json" % (name, doc_id)] = canonical(data).encode("utf-8")
     for doc_id, labels in sorted((sightings or {}).items()):
-        if doc_id not in gone and doc_id not in unseen:
+        if labels is not None and doc_id not in gone and doc_id not in unseen:
             want["%s/%s.json" % (SIGHTINGS, doc_id)] = canonical({"open": labels}).encode("utf-8")
     if page:
         raw, text = read_page(page)
@@ -893,20 +907,23 @@ def batch_bytes(count, entries_total):
     return 3 + 2 * count + entries_total
 
 
-def read_copy(waiting, collections):
-    """The `set` entries of each doc in the copy `waiting`, in sorted folder then doc_id order. `page/` is no doc."""
+def read_copy(waiting, collections, page_rules=True):
+    """The `set` entries of each doc in the copy `waiting`, in sorted folder then doc_id order. `page/` is no doc. With
+    `page_rules` (the waiting page's copy, no --collections), `sightings/` is no doc either, and a closed item that is no
+    arbiter ruling is left out with its answer and receipt."""
     entries = []
     if os.path.isdir(waiting):
         for name in sorted(os.listdir(waiting)):
             folder = os.path.join(waiting, name)
-            if name == PAGE_FOLDER or (name == SIGHTINGS and ITEMS in collections):
+            if name == PAGE_FOLDER or (name == SIGHTINGS and page_rules):
                 continue
             if name not in collections or not os.path.isdir(folder):
                 raise Stop("unknown - %s/%s is neither a collection folder nor %s/" % (waiting, name, PAGE_FOLDER), UNKNOWN)
             for doc_id, data in docs_in(folder, name).items():
                 entries.append({"op": "set", "collection": name, "doc_id": doc_id, "data": data})
-    if ITEMS in collections:  # an older copy may still hold a closed item: no session restores one to a page
-        gone = {e["doc_id"] for e in entries if e["collection"] == ITEMS and is_closed(e["data"])}
+    if page_rules and ITEMS in collections:  # no session restores a deleted item to a page; a ruling is never deleted
+        gone = {e["doc_id"] for e in entries if e["collection"] == ITEMS and is_closed(e["data"])
+                and e["data"].get("arbiter") is not True}
         answers = {e["doc_id"]: e["data"] for e in entries if e["collection"] == ANSWERS}
         drop = gone_labels(collections, gone, answers)
         entries = [e for e in entries if "%s/%s.json" % (e["collection"], e["doc_id"]) not in drop]
@@ -937,8 +954,8 @@ def write_batches(entries, batches):
     return len(pieces)
 
 
-def rebuild(waiting, batches, collections=COLLECTIONS):
-    entries = read_copy(waiting, collections)
+def rebuild(waiting, batches, collections=COLLECTIONS, page_rules=True):
+    entries = read_copy(waiting, collections, page_rules)
     return "batches %d docs %d" % (write_batches(entries, batches), len(entries))
 
 
@@ -1012,10 +1029,10 @@ def merged_design(copy, live_page):
     return dict(ours, **added), len(added)
 
 
-def merge(copy, live, batches, collections=COLLECTIONS, live_page=None):
+def merge(copy, live, batches, collections=COLLECTIONS, live_page=None, page_rules=True):
     """Batches of `set` entries for each doc of the repo copy that the live page lacks, the map of renumbered `n` and the
     merged designData. The live page wins. A copy answer is kept when the live page holds its item."""
-    entries = read_copy(copy, collections)
+    entries = read_copy(copy, collections, page_rules)
     held = live_docs(live, collections)
     live_items = held.get("items", {})
     fresh = [e for e in entries if e["doc_id"] not in held[e["collection"]]
@@ -1042,7 +1059,7 @@ def main(argv):
     ap.add_argument("--out", help="the waiting-data folder to copy into")
     ap.add_argument("--page", help="the fetched page.html, for its designData block")
     ap.add_argument("--allow-empty", action="append", default=[], metavar="COLLECTION",
-                    help="a collection that really emptied: lifts the unknown stop; deletes nothing")
+                    help="a collection that really emptied: lifts the unknown stop; deletes no waiting doc")
     ap.add_argument("--all", help="the repo root whose artifacts registry lists each artifact to export")
     ap.add_argument("--worktree", help="with --all: the record branch worktree each artifact's export path is under")
     ap.add_argument("--check", action="store_true", help="with --fetched and --page: run the picture checks only, write nothing")
@@ -1096,9 +1113,10 @@ def main(argv):
         if export_mode:
             verdict, unknown, held = export(args.fetched, args.out, args.page, args.allow_empty, account=args.account)
         elif merge_mode:
-            verdict = merge(args.merge, args.live, args.batches, tuple(args.collections or COLLECTIONS), args.live_page)
+            verdict = merge(args.merge, args.live, args.batches, tuple(args.collections or COLLECTIONS), args.live_page,
+                            args.collections is None)
         else:
-            verdict = rebuild(args.rebuild, args.batches, tuple(args.collections or COLLECTIONS))
+            verdict = rebuild(args.rebuild, args.batches, tuple(args.collections or COLLECTIONS), args.collections is None)
     except Stop as stop:
         print(str(stop))
         return stop.code
