@@ -13,12 +13,14 @@ saves them; an empty collection is an empty folder. A script cannot call that to
 The session touches `.complete` in each collection folder after the last list page, so a fetch that stopped early
 shows: a collection with no marker is unknown. A collection that is empty now while the copy holds docs of it is
 unknown too, unless the session names it with --allow-empty.
-A closed item leaves the copy with its answer (keyed by its id, or naming it in `item`) and that answer's receipt, on its
-second closed sighting: the copy item is already closed and the fetch holds it closed. The first sighting only marks the
-copy item closed; an open sighting between writes it back open, since every account's page shares the copy. A routed
-closed item (`lane` and `lastAnswer`) waits while the page holds its answer. The match is the doc key, never `n`. A
-closed item the copy does not hold is not copied. A doc the fetch no longer lists stays (owner rulings 2026-11-22 21:02
-and 21:05 CST). Each delete prints `deleted <collection>/<id>.json` before the verdict.
+Every account's page shares one copy. With --account LABEL, the export records in `sightings/<item id>.json` whether
+this account's page holds each item open. A closed item leaves the copy with its answer (keyed by its id, or naming it
+in `item`), that answer's receipt and its sightings file only when an export with --account fetches it closed, the copy
+item is already marked closed by an earlier export, and no account's latest export holds it open. An item waits while
+the page holds an answer tied to it. An arbiter ruling is never deleted. An export with no --account deletes nothing.
+The match is the doc key, never `n`. A closed item the copy does not hold is copied only while the page holds its
+answer. A doc the fetch no longer lists stays (owner rulings 2026-11-22 21:02 and 21:05 CST). Each delete prints
+`deleted <path>` before the verdict.
 WAITING_DIR is the `waiting-data` folder of the record branch (`layout.py path <root> waiting-data`). With --page,
 the page's bytes land in `page/page.html`, and its designData block in `page/designData.json`. A file is written
 only when its bytes differ. The script never runs git: the session commits.
@@ -135,6 +137,7 @@ import page_check  # noqa: E402  the one home that runs the page's picture check
 # lint/ beside them: the recovery path may not depend on the repo it recovers (verification-recovery-independent-of-state).
 COLLECTIONS = ("items", "answers", "groups", "asks", "meta", "receipts")
 ITEMS, ANSWERS, RECEIPTS = "items", "answers", "receipts"
+SIGHTINGS = "sightings"  # sightings/<item id>.json: {"open": [account labels whose latest export held the item open]}
 # A doc the fetch no longer lists stays: another account's page may still hold it open. Only an item whose own data says
 # closed leaves the copy, matched by its key, never its `n`, with its answer and receipt (owner rulings 2026-11-22 21:02
 # and 21:05 CST; decision waiting-data-in-repo).
@@ -660,23 +663,54 @@ def parsed(raw):
         return {}
 
 
-def closed_sightings(collections, docs, have):
-    """(item ids to delete, closed item ids the copy does not hold). All accounts share one copy, so a delete takes two
-    closed sightings: the export that first fetches an item closed only marks the copy item closed (it is rewritten as
-    fetched), and a later export deletes it when the copy item is already closed and the fetch holds it closed. An open
-    sighting between them writes it back open. An item the fetch does not hold is never deleted. A routed closed item
-    (`lane` and `lastAnswer`) waits while the page holds its answer: the lane's done report deletes that answer."""
+def read_sightings(out, doc_id):
+    """The account labels whose latest export held item `doc_id` open, from `sightings/<doc_id>.json`; [] when none."""
+    path = os.path.join(out, SIGHTINGS, doc_id + ".json")
+    if not os.path.isfile(path):
+        return []
+    with open(path, "rb") as handle:
+        found = parsed(handle.read())
+    labels = found.get("open") if isinstance(found, dict) else None
+    return [label for label in labels if isinstance(label, str)] if isinstance(labels, list) else []
+
+
+def open_sightings(collections, docs, have, out, account):
+    """{item id: sorted labels whose latest export holds it open}, after this export, for each item of the copy or the
+    fetch. None without --account, when no sighting is recorded. An item the fetch does not hold, or holds closed, drops
+    this account's label."""
+    if ITEMS not in collections or not account:
+        return None
+    held = {label[len(ITEMS) + 1:-len(".json")] for label in have if label.startswith(ITEMS + "/")}
+    found = {}
+    for doc_id in held | set(docs[ITEMS]):
+        data = docs[ITEMS].get(doc_id)
+        labels = set(read_sightings(out, doc_id)) - {account}
+        if data is not None and not is_closed(data):
+            labels.add(account)
+        found[doc_id] = sorted(labels)
+    return found
+
+
+def closed_sightings(collections, docs, have, sightings):
+    """(item ids to delete, closed item ids the copy does not hold and will not copy). Every account's page shares one
+    copy. An item is deleted only by an export with --account (`sightings` not None) that fetches it closed, when the
+    copy item is already marked closed by an earlier export and no account's latest export holds it open. An item waits
+    while the page holds an answer tied to it. An arbiter ruling is never deleted. A closed item the copy does not hold
+    is copied only while the page holds its answer. An item the fetch does not hold is never deleted."""
     if ITEMS not in collections:
         return set(), set()
     gone, unseen = set(), set()
+    page_answers = docs.get(ANSWERS, {})
     for doc_id, data in docs[ITEMS].items():
         label = "%s/%s.json" % (ITEMS, doc_id)
         if not is_closed(data):
             continue
+        answered = bool(tied_to({doc_id}, page_answers)[0])
         if label not in have:
-            unseen.add(doc_id)
-        elif is_closed(parsed(have[label])) and not (
-                data.get("lane") and data.get("lastAnswer") and tied_to({doc_id}, docs.get(ANSWERS, {}))[0]):
+            if not answered:
+                unseen.add(doc_id)
+        elif (sightings is not None and not sightings.get(doc_id) and not answered and data.get("arbiter") is not True
+              and is_closed(parsed(have[label]))):
             gone.add(doc_id)
     return gone, unseen
 
@@ -691,7 +725,7 @@ def check_lacks(collections):
     return [name for name in CHECK_COLLECTIONS if name not in collections]
 
 
-def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", design=True, files=None):
+def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", design=True, files=None, account=None):
     """(verdict, `checks unknown` line or None, held item lines). The picture check runs after the copy is written, on the
     waiting page's own export only (`design`), and never on a refused or unknown run."""
     docs = fetched_docs(fetched, collections)
@@ -703,7 +737,8 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
             raise Stop("unknown - %s is empty but the copy holds %d doc(s) of it; pass --allow-empty %s if it emptied"
                        % (name, len(kept), name), UNKNOWN)
 
-    gone, unseen = closed_sightings(collections, docs, have)
+    sightings = open_sightings(collections, docs, have, out, account)
+    gone, unseen = closed_sightings(collections, docs, have, sightings)
     drop = gone_labels(collections, gone, dict(copy_answers(have), **docs.get(ANSWERS, {})))
     skip = gone_labels(collections, unseen, docs.get(ANSWERS, {}))  # closed and never copied: write none of it
 
@@ -718,6 +753,9 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
             scan(data, "$", hits)
             finds.extend((label, path, kind) for path, kind in hits)
             want["%s/%s.json" % (name, doc_id)] = canonical(data).encode("utf-8")
+    for doc_id, labels in sorted((sightings or {}).items()):
+        if doc_id not in gone and doc_id not in unseen:
+            want["%s/%s.json" % (SIGHTINGS, doc_id)] = canonical({"open": labels}).encode("utf-8")
     if page:
         raw, text = read_page(page)
         label = "%s/%s" % (PAGE_FOLDER, PAGE_FILE)
@@ -756,11 +794,13 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
                 handle.write(raw)
             changed += 1
     deleted = 0
-    for label in sorted(have):
-        if label not in want and (label in drop or label.split("/")[0] not in KEEP_UNFETCHED):
-            os.remove(os.path.join(out, *label.split("/")))
-            print("%sdeleted %s" % (prefix, label))  # the session lists each deleted key in its DELETE commit
-            deleted += 1
+    doomed = {label for label in have if label not in want and (label in drop or label.split("/")[0] not in KEEP_UNFETCHED)}
+    doomed |= {"%s/%s.json" % (SIGHTINGS, doc_id) for doc_id in gone
+               if os.path.isfile(os.path.join(out, SIGHTINGS, doc_id + ".json"))}
+    for label in sorted(doomed):
+        os.remove(os.path.join(out, *label.split("/")))
+        print("%sdeleted %s" % (prefix, label))  # the session lists each deleted key in its DELETE commit
+        deleted += 1
     changed += deleted
     unknown, held = None, []
     lacking = check_lacks(collections) if design else []
@@ -809,7 +849,8 @@ def export_all(root, fetched, worktree, allow_empty, account=None):
                 raise Stop("unknown - the fetched folder has no %s, and this page-only entry exports nothing else" % PAGE_FILE, UNKNOWN)
             verdict, unknown, held = export(folder, os.path.join(worktree, *entry["export"].split("/")),
                              page if os.path.isfile(page) else None, allow_empty, tuple(entry["collections"]), "%s: " % name,
-                             entry["role"] == layout.WAITING_ROLE, supporting_files(files) if os.path.isdir(files) else None)
+                             entry["role"] == layout.WAITING_ROLE, supporting_files(files) if os.path.isdir(files) else None,
+                             account if entry["role"] == layout.WAITING_ROLE else None)  # sightings are the waiting page's
             code = UNKNOWN if entry["role"] == layout.WAITING_ROLE and check_lacks(entry["collections"]) else 0
         except Stop as stop:
             verdict, unknown, held, code = str(stop), None, [], stop.code
@@ -858,7 +899,7 @@ def read_copy(waiting, collections):
     if os.path.isdir(waiting):
         for name in sorted(os.listdir(waiting)):
             folder = os.path.join(waiting, name)
-            if name == PAGE_FOLDER:
+            if name == PAGE_FOLDER or (name == SIGHTINGS and ITEMS in collections):
                 continue
             if name not in collections or not os.path.isdir(folder):
                 raise Stop("unknown - %s/%s is neither a collection folder nor %s/" % (waiting, name, PAGE_FOLDER), UNKNOWN)
@@ -1005,7 +1046,8 @@ def main(argv):
     ap.add_argument("--all", help="the repo root whose artifacts registry lists each artifact to export")
     ap.add_argument("--worktree", help="with --all: the record branch worktree each artifact's export path is under")
     ap.add_argument("--check", action="store_true", help="with --fetched and --page: run the picture checks only, write nothing")
-    ap.add_argument("--account", help="with --all: export only the entries of this account label; skip the rest")
+    ap.add_argument("--account", help="with --all: export only the entries of this account label; with --all or an export: "
+                                      "record this account's open sightings, which a delete needs")
     ap.add_argument("--rebuild", help="the waiting-data folder to read batches from")
     ap.add_argument("--batches", help="the folder to write batch-NNN.json into")
     ap.add_argument("--merge", help="the repo copy whose docs the live page lacks are batched")
@@ -1032,7 +1074,7 @@ def main(argv):
     if [all_mode, export_mode, rebuild_mode, merge_mode].count(True) != 1 or (all_mode and not (args.all and args.fetched and args.worktree)) \
             or (export_mode and not (args.fetched and args.out) and not args.check) or (rebuild_mode and not (args.rebuild and args.batches)):
         ap.error("use --fetched DIR --out DIR [--page FILE], or --all ROOT --fetched DIR --worktree DIR, or --rebuild DIR --batches DIR, or --merge DIR --live DIR --batches DIR")
-    if args.account is not None and not all_mode:
+    if args.account is not None and (args.check or not (all_mode or export_mode)):
         ap.error("--account goes with --all")
     if args.check:  # after the --account usage error, so a misused --account fails as it does without --check
         if all_mode or rebuild_mode or args.out or not (args.fetched and args.page):
@@ -1052,7 +1094,7 @@ def main(argv):
             return export_all(os.path.abspath(args.all), args.fetched, args.worktree, args.allow_empty, args.account)
         unknown, held = None, []
         if export_mode:
-            verdict, unknown, held = export(args.fetched, args.out, args.page, args.allow_empty)
+            verdict, unknown, held = export(args.fetched, args.out, args.page, args.allow_empty, account=args.account)
         elif merge_mode:
             verdict = merge(args.merge, args.live, args.batches, tuple(args.collections or COLLECTIONS), args.live_page)
         else:

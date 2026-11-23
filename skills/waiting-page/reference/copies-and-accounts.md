@@ -20,7 +20,8 @@ never runs it. There is one path: the record branch's own worktree. Never write 
    pending, stops the run: touch no `.complete` file and run no export. A missed cursor page leaves its docs
    stale in the copy. After the last page of a collection, touch `.complete` in its folder. An empty collection
    is an empty folder with that marker. Make the folder by hand if the tool wrote none.
-3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --fetched <folder> --out <copy folder> --page <file>`.
+3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --fetched <folder> --out <copy folder> --page <file> --account <label>`.
+   `<label>` is this account's label in the registry's `links`. Without it the export records no sightings and deletes nothing.
    `<file>` is the page that "Keep the page on main's code" step 1 already read. Its HTML lands in the copy as
    `page/page.html`, written only when it changed.
    Name a collection that really emptied with `--allow-empty <collection>`. Without it, an emptied
@@ -29,9 +30,10 @@ never runs it. There is one path: the record branch's own worktree. Never write 
    - `same`: stop. Commit nothing.
    - `changed <n>`: in the same worktree, run `git add -A` on the copy folder, then
      commit and push the record branch. The commit message names the count. `changed <n> deleted <k>`: the export
-     deleted each item it saw closed in the copy and in the fetch, with its answer and receipt, and printed one
-     `deleted <path>` line each. The commit message starts `DELETE:` and lists each deleted path. Then run step 3
-     again: it must print `same`, so the commit holds every write. Never restore a deleted item.
+     deleted each item that no account holds open and that was already marked closed, with its answer, receipt and
+     sightings file, and printed one `deleted <path>` line each. The commit message starts `DELETE:` and lists each
+     deleted path. `git show --name-status --diff-filter=D HEAD` must list exactly those paths. Never restore a
+     deleted item.
    - `held item <n>: <sentence>` after the verdict line (exit 4): after `changed`, the copy was written; commit it as for `changed`. After `same`, commit nothing. The page would
      draw that item's picture wrong. Fix the item, export again, and do not republish while one is held.
    - `refused`: nothing was written. Make no commit. The reply names each find: the file, the JSON path and
