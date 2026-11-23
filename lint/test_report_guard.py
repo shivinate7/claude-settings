@@ -2361,7 +2361,7 @@ class PickGuardTests(unittest.TestCase):
     PICK_BARE_LINKED = PICK_BARE.replace("> **Next** wait", "> **Next** wait " + PAGE)
     FORM_LINES = ["Goal: the stamp check runs in the lint job",
                   "Problem (risk): the pick needs your word",
-                  "Based on (read): the report guard reads the Input Needed item"]
+                  "Based on (read): the report guard reads the Input Needed item (hooks/guard.py:120)"]
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

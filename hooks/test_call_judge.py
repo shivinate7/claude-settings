@@ -367,7 +367,7 @@ def spawn_input(kind="Explore", model="haiku", session=SID_A, agent=None, brief=
 # from good_box(), so the box has one home.
 GOAL_LINE = "Goal: ship the change today"
 PROBLEM_LINE = "Problem (risk): the change touches the guard, so it needs your word"
-BASED_LINES = ("Based on (read): the diff changes one rule",)
+BASED_LINES = ("Based on (read): the diff changes one rule (hooks/guard.py:120)",)
 # The line a question to the owner carries (rule question-departs): what is on main, and what changes.
 DEPARTS_LINE = "Departs from: lint/stamp.py:run_stamp — the stamp check moves to the lint job"
 # The line a waiting-page decision carries after Departs from: what is stopped until his answer, and who acts next.
@@ -1508,7 +1508,7 @@ BARE_REPO = make_repo("bare")
 
 APPS_GOAL = "Goal: decide whether the GitHub apps keep access to claude-settings"
 APPS_PROBLEM = "Problem (risk): the apps can reach the repo, so keeping or removing them needs your word"
-APPS_BASED = ("Based on (read): the GitHub audit lists Cloudflare, Render and Renovate beside Claude",)
+APPS_BASED = ("Based on (read): the GitHub audit lists Cloudflare, Render and Renovate beside Claude (hooks/guard.py:120)",)
 APPS_CITED = ("Based on (ruling): %s says revisit only if the apps get bloated; Renovate opened 2 PRs here" % APPS_SLUG,)
 APPS_OPTIONS = [
     {"label": "Keep the apps (Recommended)",
