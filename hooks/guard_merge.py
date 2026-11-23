@@ -21,6 +21,7 @@ from guard_core import (
     is_cloud, lint_dir, shell_abs, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
+from required_check import REQUIRED_CHECK  # the one home of the rollup job's name
 from shared_names import opens_fence, BUILD_TAG, CONSULTANT_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_BRIEF_MARKER, LANE_GRANT_MARKER, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags, repo_tag_names  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
@@ -599,9 +600,15 @@ def _ready_push_pulls(where: str):
         return None, " ".join(str(e).split()) or type(e).__name__
 
 
+def _ready_push_run_id(row):
+    """The workflow run id in a check row's job link (`/actions/runs/<id>/job/<id>`), or None when the row has no such link."""
+    m = re.search(r"/actions/runs/(\d+)/", row.get("details_url") or row.get("html_url") or "")
+    return m.group(1) if m else None
+
+
 def _ready_push_run(host, number: int, head: str):
     """(verdict, detail) of the ready pull request's head, from one read of its check runs: "red" when a job failed or timed out
-    (the push may fix it, even while the run goes on), "pending" for any other state, including no job reported yet, and
+    in the run that carries the rollup job (any run, when none carries it; the push may fix it, even while the run goes on), "pending" for any other state, including no job reported yet, and
     "unknown" with the cause when the read cannot run."""
     try:
         with merge_module().shared_deadline(MERGE_READ_TIMEOUT):
@@ -610,7 +617,9 @@ def _ready_push_run(host, number: int, head: str):
         return "unknown", "a read timed out after %d s" % MERGE_READ_TIMEOUT
     except Exception as e:  # a Stop, a missing gh, malformed JSON: all unread
         return "unknown", " ".join(str(e).split()) or type(e).__name__
-    if any(r.get("status") == "completed" and r.get("conclusion") in READY_PUSH_RED for r in rows):
+    gating = {_ready_push_run_id(r) for r in rows if r.get("name") == REQUIRED_CHECK}  # the run that carries the rollup job
+    counted = [r for r in rows if _ready_push_run_id(r) in gating] if gating else rows  # another run's red row, or a row with no run link, is not the gating run's
+    if any(r.get("status") == "completed" and r.get("conclusion") in READY_PUSH_RED for r in counted):
         return "red", ""
     done = rows and all(r.get("status") == "completed" for r in rows)
     return ("green" if done else "pending"), ""
