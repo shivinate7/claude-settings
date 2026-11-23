@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner pick A for R42 part 2 (per-lane merge). Rule M3, per lane: the head must merge cleanly with the base tip. Its own run must be green, or still pending under a lane-lint PASS that names its live head. The head need not hold the tip.
+Owner pick A for R42 part 2 (per-lane merge). Rule M3, per lane: the head must merge cleanly with the base tip. Its own run must be green, or still pending under a lane-lint PASS that names its live head, or the head sits on a green proof (below). The head need not hold the tip.
 
 Owner ruling `own-merge-on-lint-pass` (owner, 2026-11-15 18:21 CST, typed "B for sure") added the pending case. Main's run after the merge is the check, and a red main gets a revert or a fix (ruling Q5 v).
 
@@ -11,8 +11,9 @@ Owner ruling `own-merge-on-lint-pass` (owner, 2026-11-15 18:21 CST, typed "B for
 - A finished red run refuses. A red main does not: a PR may merge onto it (ruling Q5 v). A lane-lint PASS still lifts no pending head while main is red (decision `no-merge-onto-red-main`).
 - The clean merge is `git merge-tree --write-tree` of the head and the base tip. `confirm` reads it before the claim and again after the claim push. A conflict refuses. So does a read that cannot run.
 - A confirm that must push a claim commit pushes it and stops. The next confirm merges the claim head once its run is green, or pending under a PASS that carries over the claim commit.
-- The tool sends its PUT past a BLOCKED read only when a PASS lifted the pending run. BEHIND still refuses.
-- The batch's wait for the base to move, the heal merge commit and the small-move suite run are gone.
+- The tool sends its PUT past a BLOCKED read only when a PASS lifted the pending run, or a carried proof sits under the head (below). BEHIND still refuses.
+- A stale records page on a ready PR heals inside `--confirm`, on the default base, under any `merge.requiredChecks`. The tool merges the base in when the base gained a record, pushes one page commit, and waits on no check. Under `"none"` no check gates the merge. Otherwise the proof is the green checks of the proven head: the head under this tool's own page-only commits and at most one clean merge of the base (`proven_head`). A pending or red proven head refuses. A lint PASS that lifted a pending run does not heal. The live head's own run is then read: red or unknown refuses, pending carries. A second clean base merge stacked on the proof is not carried. A record-claim commit is not carried; its own run is read.
+- The batch's wait for the base to move and the small-move suite run are gone.
 
 Rule d. Lanes bring main in only on conflict; the merge tool does one main-in at merge time and keeps the green run (needs #3481 and #3552 on main). Skill `ci-hygiene` step 8 holds the same rule.
 
@@ -29,6 +30,6 @@ Residual risk: a clean merge can still break a suite, and a head can merge befor
 Kind: process
 Home: merge/merge.py
 
-Cost: per merge, one read of the head's run and two `git merge-tree --write-tree` starts (unmeasured). A pending head adds one paged read of the repo's comments and the carry checks (unmeasured).
+Cost: per merge, one read of the head's run and two `git merge-tree --write-tree` starts (unmeasured). A carried proof adds one `git log` per commit walked, one base fetch when a base merge is met, and one read of the live head's run (unmeasured). A pending head adds one paged read of the repo's comments and the carry checks (unmeasured).
 
 Risk: likely. Lanes merge while main moves, so main often moves under a green or pending head.
