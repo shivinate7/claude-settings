@@ -3957,7 +3957,11 @@ while i < len(a):
 p = path.split("/git/", 1)[1]; ref = os.path.join(d, "ref")
 def head(code, text):
     if include: sys.stdout.buffer.write(("HTTP/2.0 %d %s\r\nContent-Type: application/json\r\nX-Ratelimit-Remaining: 4999\r\n\r\n" % (code, text)).encode())  # bytes: no newline translation
-def out(v): head(200, "OK"); print(v); sys.exit(0)
+def out(v):
+    head(200, "OK"); print(v)
+    hint = os.path.join(d, "stderr_hint")  # a case's stderr text, printed with exit 0: gh 2.105 prints a hint on stderr for an agent session
+    if os.path.exists(hint): sys.stderr.write(open(hint).read())
+    sys.exit(0)
 def fail(m): head(int(m.split()[1].rstrip(":")) if m.startswith("HTTP ") else 400, "Error"); print(m); sys.exit(1)
 if p == "ref/heads/main": out("head1")
 if p == "commits/head1": out("tree1")
@@ -3977,18 +3981,23 @@ if p == "refs/heads/merge-lock/main" and method == "DELETE":
 fail("unhandled " + p)
 '''
 
+def lock_fake_setup(test):
+    """The fake `gh` of FAKE_GH on PATH for one test, and the GhLock that calls it (test.lock). Its state lives in test.state. GhLockTest and
+    GhStderrHintLock share it."""
+    t = tempfile.mkdtemp(prefix="test-ghlock-", dir=run_folder())
+    test.addCleanup(shutil.rmtree, t, True)
+    bindir = os.path.join(t, "bin"); os.makedirs(bindir)
+    gh = os.path.join(bindir, "gh"); put_shim(gh, FAKE_GH)
+    test.state = os.path.join(t, "state"); os.makedirs(test.state)
+    old = {k: os.environ.get(k) for k in ("PATH", "FAKE_GH_DIR")}
+    os.environ["PATH"] = bindir + os.pathsep + old["PATH"]; os.environ["FAKE_GH_DIR"] = test.state
+    test.addCleanup(lambda: [os.environ.__setitem__(k, v) if v is not None else os.environ.pop(k, None) for k, v in old.items()])
+    test.now = 1000.0
+    test.lock = merge.GhLock(now=lambda: test.now)
+
 class GhLockTest(unittest.TestCase):
     def setUp(self):
-        t = tempfile.mkdtemp(prefix="test-ghlock-", dir=run_folder())
-        self.addCleanup(shutil.rmtree, t, True)
-        bindir = os.path.join(t, "bin"); os.makedirs(bindir)
-        gh = os.path.join(bindir, "gh"); put_shim(gh, FAKE_GH)
-        self.state = os.path.join(t, "state"); os.makedirs(self.state)
-        old = {k: os.environ.get(k) for k in ("PATH", "FAKE_GH_DIR")}
-        os.environ["PATH"] = bindir + os.pathsep + old["PATH"]; os.environ["FAKE_GH_DIR"] = self.state
-        self.addCleanup(lambda: [os.environ.__setitem__(k, v) if v is not None else os.environ.pop(k, None) for k, v in old.items()])
-        self.now = 1000.0
-        self.lock = merge.GhLock(now=lambda: self.now)
+        lock_fake_setup(self)
 
     @unittest.skipIf(os.name == "nt",
         "cmd.exe cannot carry an embedded newline through a .cmd dispatch: lock_message()'s "
@@ -4025,6 +4034,32 @@ class GhLockTest(unittest.TestCase):
         self.assertNotEqual(first, second)
         self.assertEqual(len([l for l in out.getvalue().splitlines() if "took over" in l]), 1, out.getvalue())
 
+
+# What gh 2.105 prints on stderr for some reads in an agent session, with exit 0 (the fakes print it when a case sets stderr_hint). Any text
+# on stderr shows the bug: the wording is not pinned.
+STDERR_HINT = "hint: gh is running in an agent session\nhint: this line is gh's own hint, on stderr\n"
+
+class GhStderrHintLock(unittest.TestCase):
+    """GhLock's lock read (`gh api -i`) against the FAKE_GH shim, which prints STDERR_HINT on stderr on every success (exit 0)."""
+    def setUp(self):
+        lock_fake_setup(self)
+
+    def hint(self):
+        open(os.path.join(self.state, "stderr_hint"), "w").write(STDERR_HINT)
+
+    @unittest.skipIf(os.name == "nt", "the fake gh loses the lock message's newline under cmd.exe (see GhLockTest)")
+    def test_the_lock_ref_read_gives_its_sha_and_no_stderr_text(self):
+        tok = self.lock.acquire("main", 600)
+        self.hint()  # set after the take: the take's own replies stay clean
+        c, out = self.lock.api("repos/{owner}/{repo}/git/ref/heads/merge-lock/main", "--jq", ".object.sha")
+        self.assertEqual(c, 0, out)
+        self.assertEqual(out, tok, "the lock ref read gave the sha with gh's stderr hint after it: " + repr(out))
+
+    @unittest.skipIf(os.name == "nt", "the fake gh loses the lock message's newline under cmd.exe (see GhLockTest)")
+    def test_a_held_lock_reads_back_its_token_with_a_stderr_hint_on_gh(self):
+        tok = self.lock.acquire("main", 600)
+        self.hint()
+        self.assertEqual(self.lock.read("main")[0], tok, "GhLock.read took the sha from a reply that carried gh's stderr hint")
 
 # The fake GitHub REST API behind `gh api`. One home for the routes the merge tool reads and writes (c53): the shim FAKE_GH_PR
 # below runs it as a program, and the in-process fakes (CapsHost, LaneHost) run it through rest_lib(). It models what `gh` does, not
@@ -4244,7 +4279,11 @@ def finish(text, code, include=False, link=None):
     if include and not (code and not re.search(r"\(HTTP \d{3}\)\s*$", text)):  # a transport error has no HTTP reply, so no header block
         got = int(re.search(r"\(HTTP (\d{3})\)\s*$", text).group(1)) if code else 200
         sys.stdout.buffer.write(("HTTP/1.1 %d %s\r\nContent-Type: application/json\r\n%s%s%s\r\n" % (got, "Error" if code else "OK", ratelimit_lines(), "Link: %s\r\n" % link if link else "", "Date: %s\r\n" % S["date"] if S.get("date") else "")).encode())  # S["date"]: GitHub's clock, as a case sets it; unset, the block has no Date line
+    if code and S.get("errors_on_stderr"):  # a failed call's text goes to stderr, as gh prints its error (a case sets it)
+        sys.stderr.write(text + "\n"); sys.exit(code)
     print(text)
+    if not code and (S.get("stderr_hint") or {}).get(hint_route):  # gh's hint for an agent session: stderr text with exit 0, for the route a case names
+        sys.stderr.write(S["stderr_hint"][hint_route])
     sys.exit(code)
 def graphql():
     note("graphql.log", " ".join(a))
@@ -4270,6 +4309,7 @@ if a[:1] != ["api"]:
     graphql()  # gh pr ..., gh repo view, any other command: GraphQL
 
 include = False
+hint_route = "(none)"  # set once a REST route is read; the replies before it (the user read) carry no stderr hint
 try:
     method, path, params, flags, jq = parse(a[1:])
     include = "include" in flags
@@ -4281,6 +4321,7 @@ try:
     if not m:
         raise Refused(api_error(404, "Not Found"))
     repo, rel = m.group(1), m.group(2) or ""
+    hint_route = rel or "(repo)"  # the key of a case's stderr_hint: "pulls/7", "pulls/7/files", "(repo)" for the repo read
     cap = S.get("page_cap", 100)
     refuse = "repositories/%d/%s?page=2" % (REPO_NUMERIC_ID, rel) if S.get("proxy_refuses_paged") else None  # the second page's numeric path, when the proxy refuses it
     fp = S.get("fail_page")  # {"page", "text"}: every read of that page answers the error text, so a later page of a list read fails (the listing is cut there)
@@ -7416,6 +7457,50 @@ class RestRoutes(Env):
             self.gh_host().pr(7)
         self.assertNotIsInstance(raised.exception, merge.NetStop)
         self.assertEqual((self.paused, self.gh_state("route_failed")), ([], {"pr": 1}))
+
+class GhStderrHint(GhHalf):
+    """Host reads against the REST shim (FAKE_GH_PR) with STDERR_HINT on stderr for the route a case names (the shim's stderr_hint knob).
+    A read gives gh's stdout alone. A failed call keeps its stderr text (the shim's errors_on_stderr knob)."""
+
+    def parsed(self, call, what):
+        """The value of `call`. A reply that does not parse, or a read the Host refuses as unreadable, fails this case by name: the stderr text reached it."""
+        try:
+            return call()
+        except (ValueError, merge.Stop) as e:
+            self.fail(f"{what} did not read: gh's stderr text reached the reply ({' '.join(str(e).split())[:200]})")
+
+    def test_a_pull_request_read_with_a_stderr_hint_parses(self):
+        self.set(stderr_hint={"pulls/7": STDERR_HINT})
+        info = self.parsed(lambda: self.gh_host().read_pr(7), "read_pr(7)")
+        self.assertEqual((info["branch"], info["state"]), ("feat", "OPEN"), "read_pr(7) did not give pull request 7's fields")
+
+    def test_the_files_read_with_a_stderr_hint_parses(self):
+        self.set(pull_files=[{"filename": "lane.py", "patch": "+x"}], stderr_hint={"pulls/7/files": STDERR_HINT})
+        files = self.parsed(lambda: self.gh_host().pull_files(7), "pull_files(7)")
+        self.assertEqual([f["filename"] for f in files], ["lane.py"], "pull_files(7) did not give the seeded file")
+
+    def test_a_header_read_with_a_stderr_hint_splits_its_headers_and_gives_its_body(self):
+        self.set(stderr_hint={"pulls/7": STDERR_HINT})
+        h = self.gh_host()
+        c, out = h.api("pulls/7")
+        self.assertEqual(h.budget["remaining"], 4999, "the reply's header block was not split off, so its budget was not read")  # green on the old code: the split holds
+        self.assertEqual(c, 0, out)
+        self.assertEqual(self.parsed(lambda: json.loads(out), "the body of api(pulls/7)")["number"], 7, "the body of api(pulls/7) is not pull request 7")
+
+    def test_a_default_branch_read_with_a_stderr_hint_gives_the_name(self):
+        self.set(default_branch="trunk", stderr_hint={"(repo)": STDERR_HINT})
+        name = self.parsed(lambda: merge.host_default_branch(self.co), "host_default_branch")
+        self.assertEqual(name, "trunk", "host_default_branch did not give the repo's default branch")
+
+    def test_a_failed_read_still_shows_its_stderr_text(self):  # control: green on the old code, and must stay green
+        self.set(route_fail={"pr": {"n": 1, "msg": "gh: could not read this pull request (HTTP 404) from stderr"}}, errors_on_stderr=True)
+        with self.assertRaises(merge.Stop) as raised:
+            self.gh_host().read_pr(7)
+        self.assertIn("could not read this pull request (HTTP 404) from stderr", str(raised.exception), "a failed read dropped its stderr text from the refusal")
+
+    def test_a_read_with_empty_stderr_parses(self):  # control: green on the old code
+        info = self.gh_host().read_pr(7)
+        self.assertEqual(info["branch"], "feat", "read_pr(7) with no stderr text did not give pull request 7")
 
 class CloseReplaced(Env):
     """The draft step (`merge <pr> --ready`) closes each open pull request that the lane's body names as replaced or carried, `Replaces #N` or
