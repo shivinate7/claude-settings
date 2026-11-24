@@ -1404,15 +1404,14 @@ def _push_cost_problems(rows, log, path):
 def record_push_cost_case():
     """roadmap-one-writer's stated cost (session-tiers, the Cost line): per `git push` call, one
     `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
-    `git symbolic-ref` and one `git config`, and reads no push.default. A bare push adds two
+    `git symbolic-ref`, and reads no push.default. A bare push adds two
     `git symbolic-ref` and two `git config` reads, and reads push.default. A literal main destination
     (`origin main`, `HEAD:main`) adds one `git config` read, the remote's URL (rule push-main). A literal
     `HEAD:<branch>` adds no read. A `--all` push (rule push-all-main) reads that URL the same way, then the current
     branch (`symbolic-ref`, the agent test), one `git for-each-ref` of the tracking refs, and, when those refs show no
     update, one more `git for-each-ref` of the local branches (the all-agent test). A glob refspec reads the URL and
     the same two for-each-ref reads, and no branch. A local-path origin stops after the URL read. No push spawns
-    `ls-remote` or `push`. A stray push (rule push-stray-branch: an implied destination off the
-    upstream) adds one `git rev-parse --verify -q` of the destination's remote-tracking ref. The octopus-push
+    `ls-remote` or `push`. A stray push (rule push-stray-branch) is allowed and adds no read of its own. The octopus-push
     rule (decision octopus-push-refused) adds one `git rev-list` for each pushed ref whose destination is not
     main or master, with or without a remote-tracking ref. On a hit under a configured remote's name, it adds one
     `git fetch` of that remote and one more `git rev-list` (section 17974 pins the counts). The conflict-markers
@@ -1438,7 +1437,7 @@ def record_push_cost_case():
         ("a refspec push to lane/foo", "push origin lane/foo",
          {"rev-parse": 1, "symbolic-ref": 1, "diff": 1, "rev-list": 1, "log": 1}),
         ("a HEAD push", "push origin HEAD",
-         {"rev-parse": 1, "symbolic-ref": 2, "config": 1, "diff": 1, "rev-list": 1, "log": 1}),
+         {"rev-parse": 1, "symbolic-ref": 2, "diff": 1, "rev-list": 1, "log": 1}),
         ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "diff": 1, "rev-list": 1, "log": 1}),
         ("a literal destination, origin main", "push origin main", {"rev-parse": 1, "config": 1, "diff": 1, "log": 1}),
         ("a literal destination, HEAD:main", "push origin HEAD:main",
@@ -1447,10 +1446,10 @@ def record_push_cost_case():
          {"rev-parse": 1, "diff": 1, "rev-list": 1, "log": 1}),
         ("a push with no remote-tracking ref and no upstream", "push origin HEAD:lane/bar",
          {"rev-parse": 2, "symbolic-ref": 1, "diff": 3, "rev-list": 1, "log": 1}),
-        # A stray push: HEAD on a branch tracking another name. The destination's ref is read and is absent, so
-        # the conflict check rejects that base and reads the upstream: two diff reads.
+        # A stray push: HEAD on a branch tracking another name. It is allowed, so push_ask_hit reads no upstream. The
+        # conflict check finds no tracking ref for the destination and reads the upstream: two diff reads.
         ("a stray push, HEAD on a branch tracking another name", "push origin HEAD",
-         {"rev-parse": 2, "symbolic-ref": 2, "config": 1, "diff": 2, "rev-list": 1, "log": 1}, PUSHSTRAY),
+         {"rev-parse": 1, "symbolic-ref": 2, "diff": 2, "rev-list": 1, "log": 1}, PUSHSTRAY),
         # rule push-all-main. push_ask_hit alone reads, for a --all push to a network remote, the remote's config, the
         # current branch (the agent test), one for-each-ref of the tracking refs, and one for-each-ref of the local
         # branches when the tracking refs show no update. A glob reads the config and the same two for-each-ref reads.
@@ -1468,7 +1467,7 @@ def record_push_cost_case():
         # one `git log` for the rule's check, and no diff read of its own: the one diff is the conflict-markers base.
         # RR_DOCS is built in section 43400, which loads after this one.
         ("a push of a docs-only commit, no test path", "push origin topic",
-         {"config": 1, "diff": 1, "rev-list": 1, "rev-parse": 1, "symbolic-ref": 1, "log": 1}, RR_DOCS),
+         {"diff": 1, "rev-list": 1, "rev-parse": 1, "symbolic-ref": 1, "log": 1}, RR_DOCS),
     ), log, path)
     unreadable = role_path("unreadable")
     for tail in ("push origin lane/foo", "push origin HEAD", "push"):
@@ -1480,7 +1479,7 @@ def record_push_cost_case():
         problems.append("a push to roadmap with an unreadable transcript: %s, want deny" % got)
     if problems:
         return False, "; ".join(problems)
-    return True, "one rev-parse per push, one more for a stray push, one git log for red-run, " \
+    return True, "one rev-parse per push, one git log for red-run, " \
                  "symbolic-ref for HEAD and bare, " \
                  "push.default for bare only, one rev-list per pushed ref not to main or master; " \
                  "the transcript is read only at the record branch"
