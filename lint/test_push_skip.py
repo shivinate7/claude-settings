@@ -19,6 +19,10 @@ The contract these cases pin. A change to any of it changes these cases first.
   its skip is no gap, and no scope-skips input names it. Any other suite job skipped on the run is still a gap.
   A records-only run (every suite job skipped, scope and all-jobs-passed succeeded) is a passing run: its skips are proven. The
   REST jobs read carries no job outputs, so all-jobs-passed's success stands for its records_only_skip flag.
+- base=<sha> on every push, written even when empty: the head of the newest completed, successful checks.yml run of main whose
+  suites ran (a run with every suite job skipped is no base). A run that is still going is passed over. A completed red or
+  cancelled run newer than the base gives empty, and so does this run's own record (GITHUB_RUN_ID). The output is a full 40-hex
+  sha or empty. A read error, a malformed reply or a full page with no usable run gives empty and says "unknown" (class ProvenBase).
 - Any read error, unknown state or unreadable record writes skip=false and says "unknown".
 - Every other skip=false path prints its reason on one line that names what refused it: the pull request number or the head branch,
   and the trees (short) for a tree mismatch. A push that no pull request covers names the push tree (short).
@@ -200,12 +204,15 @@ def ready_head_runs(changes=None, extra=()):
 class FakeGitHub:
     """The GitHub reads push-skip makes, answered by URL the way the API answers them. The batch head's pull request list, commit and
     check runs are the defaults. `pulls` is the list the push commit's pull request read returns, `trees` maps a head sha to its tree,
-    `workflow_runs` are the runs of the repo (filtered by head_sha and event when the read names them) and `jobs` maps a run id to its
-    jobs. check_name filters the check runs; per_page (default 30) and page cut every list. `fail` is raised by every check-runs read,
-    `runs_fail` by the runs read and `jobs_fail` by the jobs read. A URL no case expects goes to `unexpected`, which the case asserts
-    empty; `reads` keeps every path asked, in order."""
+    `workflow_runs` are the runs of the repo (filtered by head_sha, event and branch when the read names them, as the API does, and
+    never by status: a case's in-progress run reaches the script) and `jobs` maps a run id to its jobs. check_name filters the check
+    runs; per_page (default 30) and page cut every list. `fail` is raised by every check-runs read, `runs_fail` by the runs read and
+    `jobs_fail` by the jobs read. `runs_reply` is returned in place of the list by a runs read that names no head_sha (the base
+    search), so a case can give a malformed reply. A URL no case expects goes to `unexpected`, which the case asserts empty; `reads`
+    keeps every path asked, in order."""
 
-    def __init__(self, runs=(), fail=None, pulls=None, trees=None, workflow_runs=None, jobs=None, runs_fail=None, jobs_fail=None):
+    def __init__(self, runs=(), fail=None, pulls=None, trees=None, workflow_runs=None, jobs=None, runs_fail=None, jobs_fail=None,
+                 runs_reply=None):
         self.runs = list(runs or [])
         self.fail = fail
         self.pulls = [{"head": {"ref": BATCH, "sha": HEAD}}] if pulls is None else pulls
@@ -213,6 +220,7 @@ class FakeGitHub:
         self.workflow_runs = [] if workflow_runs is None else workflow_runs
         self.jobs = {} if jobs is None else jobs
         self.runs_fail, self.jobs_fail = runs_fail, jobs_fail
+        self.runs_reply = runs_reply
         self.unexpected, self.reads = [], []
 
     @staticmethod
@@ -241,9 +249,12 @@ class FakeGitHub:
         if path == "actions/runs":
             if self.runs_fail is not None:
                 raise self.runs_fail
+            if self.runs_reply is not None and "head_sha" not in query:
+                return self.runs_reply
             runs = [r for r in self.workflow_runs
                     if ("head_sha" not in query or r["head_sha"] == query["head_sha"][0])
-                    and ("event" not in query or r["event"] == query["event"][0])]
+                    and ("event" not in query or r["event"] == query["event"][0])
+                    and ("branch" not in query or r.get("head_branch") == query["branch"][0])]
             return {"total_count": len(runs), "workflow_runs": self.page(runs, query)}
         if path.startswith("actions/runs/") and path.endswith("/jobs"):
             if self.jobs_fail is not None:
@@ -1079,6 +1090,144 @@ class PushSkipWiring(unittest.TestCase):
     def test_scope_needs_push_skip_so_a_skipped_push_skips_every_job_through_needs(self):
         needs = needs_of(job_block(self.text, "scope")) or []
         self.assertIn(JOB, needs, f"scope does not need {JOB}, so a matching push would not skip the other jobs")
+
+
+OLDER = "1" * 40  # the head of an older green push run: the base that a newer run which is red, skipped or still going must not hide
+NEWER = "2" * 40  # the head of a newer push run
+
+
+def push_run(id_, head, conclusion="success", status="completed", created_at=EARLY, path=RUN_PATH, event="push", branch="main"):
+    """One checks.yml run of a push to main, in the shape the runs read returns."""
+    return {"id": id_, "name": "checks", "path": path, "event": event, "head_branch": branch, "head_sha": head, "status": status,
+            "conclusion": conclusion, "created_at": created_at, "run_attempt": 1}
+
+
+def skipped_whole_jobs():
+    """The jobs of a push run that push-skip skipped whole: push-skip succeeded, and scope, all-jobs-passed and every suite job skipped."""
+    changes = {name: {"conclusion": "skipped", "steps": []} for name in SUITE_JOBS}
+    changes[SCOPE_JOB] = {"conclusion": "skipped", "steps": []}
+    changes[ROLLUP_NAME] = {"conclusion": "skipped", "steps": []}
+    return full_run_jobs(changes)
+
+
+def half_ran_jobs():
+    """The jobs of a push run whose suites partly ran: the first half of the suite jobs passed and the rest were skipped by scope."""
+    return full_run_jobs({name: {"conclusion": "skipped", "steps": []} for name in SUITE_JOBS[len(SUITE_JOBS) // 2:]})
+
+
+class ProvenBase(LiveHead):
+    """main() on a push with no pull request, so the one runs read is the base search. The base output is the head of the newest
+    completed, successful checks.yml run of main whose suites ran. A run with every suite job skipped is no base (push-skip skipped
+    it whole), and a run still going is passed over. A completed red or cancelled run newer than the base gives no base, because main
+    is then not known green. This run's own record never counts. Each case reads the base output through main(), the entry point the
+    job runs, and each failure names the claim that did not hold. The output must be written on every path: empty is a value."""
+
+    def base_on(self, runs=None, jobs=None, fake=None, extra_env=None):
+        """main() on the push, with FakeGitHub answering. -> (the base output's value, or None when no base line was
+        written; the text printed)."""
+        self.assertTrue(os.path.isfile(PUSH_SKIP), SCRIPT_MISSING)
+        module = load_script()
+        fake = fake if fake is not None else FakeGitHub(pulls=[], workflow_runs=runs, jobs=jobs)
+        out = os.path.join(RUN_FOLDER, "output-%s" % uuid.uuid4().hex)
+        env = {"EVENT": "push", "GH_TOKEN": "t", "REPO": REPO, "HEAD_SHA": SHA, "PUSH_TREE": TREE, "GITHUB_OUTPUT": out, **(extra_env or {})}
+        printed = io.StringIO()
+        with mock.patch.object(module._nightly_skip(), "api_get", side_effect=fake), contextlib.redirect_stdout(printed):
+            code = module.main(env)
+        self.assertEqual(fake.unexpected, [], "the script read a path no case expects, so the case cannot judge it")
+        self.assertEqual(code, 0, "main exits %d, so the push job fails on the decision" % code)
+        bases = []
+        if os.path.isfile(out):
+            with open(out, encoding="utf-8") as f:
+                bases = [line.strip()[len("base="):] for line in f if line.startswith("base=")]
+        return (bases[0] if len(bases) == 1 else None), printed.getvalue()
+
+    def assert_base(self, base, want, claim):
+        if base is None:
+            self.fail("%s: the push wrote no base output line, so the scoped run has no base for it" % claim)
+        self.assertEqual(base, want, "%s: the base output must be %r, got %r" % (claim, want, base))
+
+    def test_the_newest_green_push_run_is_the_base(self):
+        runs = [push_run(2, NEWER, created_at=LATE), push_run(1, OLDER, created_at=EARLY)]
+        base, _ = self.base_on(runs, jobs={1: full_run_jobs(), 2: full_run_jobs()})
+        self.assert_base(base, NEWER, "the newest completed, successful push run of checks.yml on main is the base")
+
+    def test_a_green_push_run_whose_suites_partly_ran_is_a_base(self):
+        base, _ = self.base_on([push_run(1, OLDER, created_at=EARLY)], jobs={1: half_ran_jobs()})
+        self.assert_base(base, OLDER, "a green push run with some suite jobs skipped still ran its suites, so it is the base")
+
+    def test_a_push_run_skipped_whole_by_push_skip_is_never_the_base(self):
+        runs = [push_run(2, NEWER, created_at=LATE), push_run(1, OLDER, created_at=EARLY)]
+        jobs = {1: full_run_jobs(), 2: skipped_whole_jobs()}
+        got = {job["name"]: job["conclusion"] for job in jobs[2]}
+        self.assertEqual({name: got[name] for name in SUITE_JOBS}, {name: "skipped" for name in SUITE_JOBS},
+                         "the fixture must skip every suite job of the newer run, or it proves nothing")
+        self.assertEqual(got.get("push-skip"), "success", "the fixture's push-skip must succeed, as a skipped push run's does")
+        base, _ = self.base_on(runs, jobs=jobs)
+        self.assert_base(base, OLDER, "the newer run is green but every suite job was skipped whole, so the search goes on to the older run")
+
+    def test_a_newer_red_or_cancelled_push_run_gives_no_base(self):
+        for conclusion in ("failure", "cancelled"):
+            with self.subTest(conclusion=conclusion):
+                runs = [push_run(2, NEWER, conclusion=conclusion, created_at=LATE), push_run(1, OLDER, created_at=EARLY)]
+                base, _ = self.base_on(runs, jobs={1: full_run_jobs(), 2: full_run_jobs()})
+                self.assert_base(base, "", "a completed push run that ended %s is newer than the base, so main is not known green" % conclusion)
+                twin, _ = self.base_on([push_run(1, OLDER, created_at=EARLY)], jobs={1: full_run_jobs()})
+                self.assert_base(twin, OLDER, "the control: without the %s run, the older green run is the base" % conclusion)
+
+    def test_a_newer_run_still_going_is_passed_over(self):
+        for status in ("in_progress", "queued"):
+            with self.subTest(status=status):
+                runs = [push_run(2, NEWER, conclusion=None, status=status, created_at=LATE), push_run(1, OLDER, created_at=EARLY)]
+                base, _ = self.base_on(runs, jobs={1: full_run_jobs()})
+                self.assert_base(base, OLDER, "a %s push run is not completed, so the search passes it over to the older green run" % status)
+
+    def test_this_runs_own_record_never_counts(self):
+        runs = [push_run(2, NEWER, created_at=LATE), push_run(1, OLDER, created_at=EARLY)]
+        jobs = {1: full_run_jobs(), 2: full_run_jobs()}
+        base, _ = self.base_on(runs, jobs=jobs, extra_env={"GITHUB_RUN_ID": "2"})
+        self.assert_base(base, OLDER, "run 2 is this run: its record reads green, and it is no base for itself")
+        twin, _ = self.base_on(runs, jobs=jobs)
+        self.assert_base(twin, NEWER, "the control: with no GITHUB_RUN_ID, the same green run 2 is the base")
+
+    def test_a_schedule_pull_request_or_dispatch_run_another_workflow_or_another_branch_is_no_base(self):
+        others = (("a schedule run", {"event": "schedule"}), ("a pull_request run", {"event": "pull_request"}),
+                  ("a dispatch run", {"event": "workflow_dispatch"}), ("a run of another workflow", {"path": OTHER_PATH}),
+                  ("a push run on another branch", {"branch": "lane-x"}))
+        jobs = {1: full_run_jobs(), 2: full_run_jobs()}
+        for label, kind in others:
+            with self.subTest(run=label):
+                runs = [push_run(2, NEWER, created_at=LATE, **kind), push_run(1, OLDER, created_at=EARLY)]
+                base, _ = self.base_on(runs, jobs=jobs)
+                self.assert_base(base, OLDER, "%s is no base, so the older green push run on main is the base" % label)
+
+    def test_a_read_error_a_malformed_reply_or_a_full_page_with_no_usable_run_gives_no_base_and_says_unknown(self):
+        full = [push_run(i, NEWER, conclusion=None, status="in_progress", created_at=LATE) for i in range(1, 101)]
+        replies = (
+            ("a read error", FakeGitHub(pulls=[], runs_fail=http.client.IncompleteRead(b"partial"))),
+            ("a reply with no run list", FakeGitHub(pulls=[], runs_reply={"total_count": 1})),
+            ("a reply that is a list", FakeGitHub(pulls=[], runs_reply=["not a body"])),
+            ("a run entry that is not an object", FakeGitHub(pulls=[], runs_reply={"workflow_runs": ["not a run"]})),
+            ("a full page with no usable run", FakeGitHub(pulls=[], workflow_runs=full)),
+        )
+        for label, fake in replies:
+            with self.subTest(reply=label):
+                base, text = self.base_on(fake=fake)
+                self.assert_base(base, "", "%s gives no base" % label)
+                self.assertIn("unknown", text.lower(), "%s must print a line that says unknown, got %s" % (label, text.strip()[-200:]))
+
+    def test_a_full_page_that_holds_a_usable_run_still_gives_its_base(self):
+        page = [push_run(i, NEWER, conclusion=None, status="in_progress", created_at=LATE) for i in range(1, 100)]
+        page.append(push_run(100, OLDER, created_at=EARLY))
+        base, _ = self.base_on(fake=FakeGitHub(pulls=[], workflow_runs=page, jobs={100: full_run_jobs()}))
+        self.assert_base(base, OLDER, "a full page that holds a usable green run gives that run as the base")
+
+    def test_the_base_is_a_full_hex_sha_or_empty_never_a_short_or_symbolic_ref(self):
+        for head in ("1234567", "main", "refs/heads/main", "G" * 40):
+            with self.subTest(head=head):
+                base, _ = self.base_on([push_run(1, head, created_at=EARLY)], jobs={1: full_run_jobs()})
+                self.assert_base(base, "", "a head_sha of %r is no full sha, so the output must be empty" % head)
+        base, _ = self.base_on([push_run(1, OLDER, created_at=EARLY)], jobs={1: full_run_jobs()})
+        self.assert_base(base, OLDER, "the control: a full 40-hex head_sha is written as the base")
 
 
 def tearDownModule():
