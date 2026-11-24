@@ -1,0 +1,1 @@
+- hang-stop-poll-loop: a silent step that only polls (a loop of `sleep 1`) is not stopped on Linux or macOS: on Linux each short child's CPU counts as work, on macOS each new process does. Closing it needs a rule for how little CPU over N s counts as idle, after a measure of real quiet steps. Decision: hang-stop. Seen: 2026-11-24 x1

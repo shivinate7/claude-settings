@@ -10,7 +10,7 @@ Owner, 2026-11-23 21:21 CST: "Yeah R2 can get worked on now we've built a good a
 
 Ruling: only on a hang. A hang is no new output byte and no CPU advance in any process under the step, for N seconds. This is the rule that decision `stall-watch` (the session stall watch) uses to report.
 
-- Where reaped children's CPU cannot be read (no `/proc`, so macOS), a process under the step that was not in the baseline sample also counts as work. Limit there: a silent step that starts a new idle process on each poll is never stopped; it falls back to its cap.
+- Limit on every platform: a silent step that keeps starting short processes (a poll loop) is not stopped and falls back to its cap. On Linux, reaped children's CPU counts as work (`hooks/_nowindow.py` `tree_cpu`). On macOS, where that CPU cannot be read (no `/proc`), a process under the step that was not in the baseline sample also counts as work.
 - A step that has finished is never a hang: `exited` is checked, and `hang_stop` checks again before it stops.
 - Silence is measured on the monotonic clock, so a sleep or a clock change is not silence.
 - N: 600 s for Linux push steps, the first value. It is 2 x the longest silent gap that does not end on a dot row (291.1 s, measured on the merge tool git-half fixture suite), rounded up. N is at least 300 s. CPU half unmeasured: logs cannot show CPU advance.
