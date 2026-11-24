@@ -86,6 +86,25 @@ VCS = "g" + "it"
 # this suite inherits that. A case that tests the unset or empty default names its own `env`.
 os.environ["CLAUDE_CODE_SUBAGENT_MODEL"] = "sonnet"
 
+
+def _guard_constant(name):
+    """The string value of the module-level constant `name` in GUARD, read with the ast: the guard is not imported
+    here, so this runs before any section loads. A constant that is not there stops the run, so a rename cannot
+    leave the harness clearing nothing."""
+    with open(GUARD, encoding="utf-8") as f:
+        tree = ast.parse(f.read(), filename=GUARD)
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                return node.value.value
+    sys.exit("fixture setup failed: %s has no string constant %s, the name the harness clears" % (GUARD, name))
+
+
+# The Workflow default is the model a no-model Workflow agent() call is served. The shell may export it (settings.json
+# does), so the harness clears it here, under the name the guard reads. A case that needs it sets it through its own
+# `env`, so no verdict depends on the shell that starts the run.
+os.environ.pop(_guard_constant("ROLE_WORKFLOW_MODEL_ENV"), None)
+
 CASES = []
 
 # GUARD_TESTS=windows-slice keeps only the cases tagged "windows": the ones that reach Windows-only

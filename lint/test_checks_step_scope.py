@@ -1173,9 +1173,10 @@ class DocsOnlyPullRequestSteps(ChecksStepBase):
 # failed. A step keeps running when `!cancelled()` is a top-level `&&` part of its `if:`,
 # joined with its own condition. GitHub reads a step with no `if:` as success(), which stops at the first failure.
 KEEP_RUNNING = "!cancelled()"
-# The steps with no keep-running condition, by label: the checkout and setup steps every later step needs, and the install whose
-# PATH the code-check steps read. No other step is exempt. A label is the step's name, else `uses:` and its action path (no pin).
-KEEP_RUNNING_EXEMPT = ("uses: actions/checkout", "uses: actions/setup-python", "Code-check tools")
+# The steps with no keep-running condition, by label: the checkout, which every later step needs, and setup-python, which every later
+# step runs under. No other step is exempt: a step with no `if:` is skipped once an earlier step fails, and the steps that use its
+# tools then fail for a missing tool. A label is the step's name, else `uses:` and its action path (no pin).
+KEEP_RUNNING_EXEMPT = ("uses: actions/checkout", "uses: actions/setup-python")
 
 
 def step_label(st):
@@ -1233,6 +1234,45 @@ class KeepRunningAfterFailure(unittest.TestCase):
         self.assertFalse(keeps_running("${{ x == '!cancelled()' }}"))
         self.assertFalse(keeps_running("${{ x == 'Don't' && !cancelled() }}"))
         self.assertFalse(keeps_running(None))
+
+
+class CodeCheckToolsKeepRunning(unittest.TestCase):
+    """F1, on checks.yml. The code-check tools step has no `if:`, so a failed step before it skips it, and the Code-check action after
+    it reds for the missing tool. The exemption list holds only the checkout and setup steps."""
+
+    steps = KeepRunningAfterFailure.steps
+
+    def test_code_check_tools_carries_the_keep_running_condition(self):
+        # Named failure: "Code-check tools" has no `if:`, so it does not keep running after a failed step.
+        found = [st for st in self.steps() if step_label(st) == "Code-check tools"]
+        self.assertEqual(len(found), 1, "the %s job has %d steps labelled Code-check tools, want one" % (JOB, len(found)))
+        raw = ws.step_key(found[0], "if")
+        self.assertTrue(keeps_running(raw), "Code-check tools does not keep running after a failed step: its if is %r" % raw)
+
+    def test_each_exempt_step_is_the_checkout_or_a_setup_step(self):
+        # Control: the two exempt steps are the checkout and a setup step, each one a step every later step needs.
+        loose = [n for n in KEEP_RUNNING_EXEMPT
+                 if not (n.startswith("uses: actions/checkout") or n.startswith("uses: actions/setup-"))]
+        self.assertEqual(loose, [], "these exempt steps are neither the checkout nor a setup step: %s" % loose)
+
+
+class KeepRunningTopLevelOr(unittest.TestCase):
+    """F2. GitHub reads `!cancelled() && x || y` as `(!cancelled() && x) || y`, so a step with that condition runs after a failure
+    through `y`. Only a `||` inside parentheses after the guard keeps the guard a top-level conjunct."""
+
+    def test_a_top_level_or_after_the_guard_is_not_keep_running(self):
+        # Named failure: keeps_running takes the guard as a conjunct of an `||` expression, so the step runs past a failure it should not.
+        for expr in ("${{ !cancelled() && x || y }}",
+                     "${{ !cancelled() && needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}",
+                     "${{ !cancelled() && a && b || c }}"):
+            with self.subTest(expr=expr):
+                self.assertFalse(keeps_running(expr), "keeps_running reads %r as keep-running, but GitHub reads its `||` at the top level" % expr)
+
+    def test_a_parenthesised_or_after_the_guard_is_keep_running(self):
+        # Control: the `||` inside parentheses is one condition, so the guard stays a top-level conjunct.
+        for expr in ("${{ !cancelled() && (x || y) }}", "${{ !cancelled() && x && (y || z) }}"):
+            with self.subTest(expr=expr):
+                self.assertTrue(keeps_running(expr), "keeps_running does not keep %r running, but its `||` is inside parentheses" % expr)
 
 
 if __name__ == "__main__":

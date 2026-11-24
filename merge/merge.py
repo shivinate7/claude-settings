@@ -451,6 +451,19 @@ def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False, ra
 def git(cwd, *a, input=None):
     return sh(["git", "-C", cwd, *a], input=input)
 
+def merge_dates(wt, *shas):
+    """The environment for a commit made of `shas`: author and committer dates both the latest committer date among them, so a rerun of one head and one
+    tip builds the same commit whatever date the environment holds. None when a date cannot be read: the commit then takes the clock."""
+    c, out = git(wt, "show", "-s", "--format=%ct", *shas)
+    try:
+        when = max(int(x) for x in out.split())
+    except ValueError:
+        return None
+    if c:
+        return None
+    date = f"@{when} +0000"
+    return {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
+
 def ancestor(cwd, tip, base):
     """True when `tip` is reachable from `base`, False when it is not, None when git could not tell. A shallow clone
     that cut the history reads None, never False. The one home is hooks/git_reads.branch_is_ancestor."""
@@ -1379,8 +1392,7 @@ class Host:
             c, out = self.api(f"actions/jobs/{job['id']}/logs")
             if c:
                 raise Stop(f"reading the log of job {job['id']} of run {run_id} failed: {out} " + UNKNOWN_CITE)
-            found = [(t, failing_line(t)) for t in out.splitlines()]
-            found = [(t, p) for t, p in found if p is not None]
+            found = failing_log_lines(out)
             if not any(file or case for _t, (file, case) in found):
                 unread.append(f"{name} failure, its log gave no case or file")
             elif any(not (file or case) and not UNITTEST_SUMMARY.fullmatch(LOG_PREFIX.sub("", t, count=1).rstrip()) for t, (file, case) in found):
@@ -3758,19 +3770,21 @@ MUTATE_SKIPPED = "mutation test run skipped here: it runs at the lane's hand-off
 
 def mutate_report_counts(out):
     """-> (killed, survived, unknown, unread, tally, wrong) of a mutation test run's stdout, or None when it holds no report. Two forms: the per-file
-    table of hooks/mutate_shared.format_report (columns file mutants killed crashed survived rate silent; unknown is the crashed column), and the tally
-    line that run_mutants prints, which the job's own command ends with (`K of N mutations killed (S survived, W wrong cause, X skipped, U unknown)`;
-    `, U unknown` prints only when U is not 0, and `tally` is True). The tally's counts are read by their labels, not by the whole line, so this
+    table of hooks/mutate_shared.format_report (columns file mutants killed crashed timeout survived rate silent; unknown is crashed + timeout: a
+    timed-out mutant is no kill and no survivor, so it still fails the lint), and the tally line that run_mutants prints, which the job's own command
+    ends with (`K of N mutations killed (S survived, W wrong cause, X skipped, U unknown, T timeout)`; `, U unknown` and `, T timeout` print only when
+    not 0, and `tally` is True). A table with four count columns does not match, so it reads as no report and fails the lint: the run's own stdout is the only input,
+    and a resumed leg reuses saved per-mutant verdicts, never a saved report. The tally's counts are read by their labels, not by the whole line, so this
     parser holds no copy of the format that hooks/mutate_shared.run_mutants prints (that module's edit is refused to a builder: a debt of one
     shared home). `wrong` is the tally's wrong-cause count, 0 for a table. `unread` counts the table's `UNKNOWN (reason)` rows: a file that read no mutant."""
-    rows = re.findall(r"^\S+[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+\d+%", out, re.M)
+    rows = re.findall(r"^\S+[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+\d+%", out, re.M)  # mutants killed crashed timeout survived
     unread = len(re.findall(r"^\S+[ \t]+UNKNOWN \(", out, re.M))
     if rows:
-        return sum(int(r[1]) for r in rows), sum(int(r[3]) for r in rows), sum(int(r[2]) for r in rows), unread, False, 0
+        return sum(int(r[1]) for r in rows), sum(int(r[4]) for r in rows), sum(int(r[2]) + int(r[3]) for r in rows), unread, False, 0
     line = re.search(r"^(\d+) of \d+ mutations killed \((.*)\)\s*$", out, re.M)
     if line:
-        by_label = {label: int(n) for n, label in re.findall(r"(\d+) (survived|wrong cause|skipped|unknown)", line.group(2))}
-        return int(line.group(1)), by_label.get("survived", 0), by_label.get("unknown", 0), unread, True, by_label.get("wrong cause", 0)
+        by_label = {label: int(n) for n, label in re.findall(r"(\d+) (survived|wrong cause|skipped|unknown|timeout)", line.group(2))}
+        return int(line.group(1)), by_label.get("survived", 0), by_label.get("unknown", 0) + by_label.get("timeout", 0), unread, True, by_label.get("wrong cause", 0)
     return (0, 0, 0, unread, False, 0) if unread else None
 
 MUTATE_LOAD_MAX_FACTOR = 4.0  # most a shard's cap grows under load: a stuck run still ends in bounded time (unmeasured; a first value)
@@ -3900,7 +3914,7 @@ def mutate_run_check(wt):
             tail = out.splitlines()[-TOUCHED_TAIL_LINES:]  # the cause is the last stdout lines (mutate_guard prints `ERROR ...`); the whole stdout would bury it
             failures.append("\n".join([f"the mutation test run exited {'at its timeout' if c is None else c} and printed no report that can be read"
                                        + ("; last stdout lines:" if tail else "; it printed no stdout"), *tail]))
-        # A table is judged on its counts at any exit code. A tally is the command's own verdict, so CI is red on its nonzero exit, and run_mutants exits 1 on any survivor, wrong cause or unknown.
+        # A table is judged on its counts at any exit code. A tally is the command's own verdict, so CI is red on its nonzero exit, and run_mutants exits 1 on any survivor, wrong cause, unknown or timeout.
         if tally and c:
             failures.append(f"the mutation test run exited {c} on a tally of killed {killed}, survived {survived}, wrong cause {wrong}, unknown {unknown}, and CI fails the job on that exit")
         if survived:
@@ -4214,14 +4228,16 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
                     elif base != default:
                         main_in_skip = "base is not the default branch"
         if lacks_tip and not main_in_skip:
-            c, made = git(wt, *identity(wt), "commit-tree", merged[0], "-p", head, "-p", merged[1], "-m", base_merge_message(base, info["branch"]))
+            c, made = sh(["git", "-C", wt, *identity(wt), "commit-tree", merged[0], "-p", head, "-p", merged[1], "-m", base_merge_message(base, info["branch"])],
+                         env=merge_dates(wt, head, merged[1]))  # dated by the head and the tip, so a rerun builds the same M and the job's key holds
             if c:
                 raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the merge of the head with {base} could not be made: {made} {LANE_LINT_CITE}")
             pushed_merge = made.strip()
         # The lint tree is a merge commit of the base (first parent) and the head (second; M when pushed), so every file is the merged copy and HEAD is clean: a step
         # that diffs the base against HEAD or the work tree reads only the lane's own changes, and the history steps see the lane's commits under one merge commit.
         c, made = sh(["git", "-C", wt, "-c", "user.name=merge-lane-lint", "-c", "user.email=merge-lane-lint@invalid", "commit-tree", merged[0],
-                      "-p", merged[1], "-p", pushed_merge or head, "-m", f"lane-lint merge of {head[:9]} into {base}"])
+                      "-p", merged[1], "-p", pushed_merge or head, "-m", f"lane-lint merge of {head[:9]} into {base}"],
+                     env=merge_dates(wt, head, merged[1]))
         merge_commit = made.strip()
         c2, out = (c, made) if c else git(wt, "checkout", "-q", "--detach", merge_commit)
         if c2:
@@ -7095,6 +7111,21 @@ def failing_line(text):
     if "]" in rest:
         return None, GUARD_NOTE.sub("", rest.split("]", 1)[1].strip()).strip() or None
     return None, None
+
+LOG_DETAIL = re.compile(r"##\[error\]|AssertionError")  # a line that names a failure but starts with no FAIL or ERROR: the runner's error annotation, a pytest assertion
+
+def failing_log_lines(text, detail=False):
+    """-> [(line, parsed)] for each failing line of the job log TEXT, in log order: `line` as the log gives it, `parsed` as failing_line gives it. Host.failed_lines
+    reads a log through this, and so does hooks/ci_wake.py (the one home of the log reader). `detail` also keeps a line that LOG_DETAIL finds (parsed (None, None)),
+    for a wake that shows the lines to a reader rather than parsing a case from them."""
+    found = []
+    for t in text.splitlines():
+        p = failing_line(t)
+        if p is None and detail and LOG_DETAIL.search(LOG_PREFIX.sub("", t, count=1)):
+            p = (None, None)
+        if p is not None:
+            found.append((t, p))
+    return found
 
 def touches_lines(h, run, cases, files):
     """-> (lines, unknown): the lines of `merge --touches` and why it is unknown, or None. A line per open pull request that touches a named file or

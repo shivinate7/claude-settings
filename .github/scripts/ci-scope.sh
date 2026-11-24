@@ -15,7 +15,7 @@
 #     doc_decisions (docs/decisions/), doc_rules (CLAUDE.md, .claude/CLAUDE.md, output-styles/), doc_skills (skills/), doc_agents (agents/*.md),
 #     doc_glossary (GLOSSARY.md, README.md), doc_map (docs/map/), doc_other (the rest of docs/, and mods/<mod>/README.md),
 #     doc_any (every .md path, so a path in no group sets this flag only). A deleted or moved .md path counts through its old name (--no-renames).
-#   checks_windows_rest_2 repeats checks_windows_rest's value (R62). checks-windows-rest-2 reads it in its suite steps, as checks-windows-rest reads checks_windows_rest; the merge shards read checks_windows_merge. A ready pull request runs a merge or rest suite step only with its flag set; push, schedule and dispatch run them all.
+#   checks_windows_rest_2 repeats checks_windows_rest's value (R62). checks-windows-rest-2 reads it in its suite steps, as checks-windows-rest reads checks_windows_rest; the merge shards read checks_windows_merge. A ready pull request runs a merge or rest suite step only with its flag set; the scheduled and dispatched runs run them all (a push skips every Windows shard).
 #   windows_guard (the checks-windows-guard shards): a path that matches a glob of .github/guard-inputs.txt, an added file under a landed dir, or a change to this script, the workflow or that list; read in its own pass over the diff, so a .md input counts, and a path the table names nowhere does not set it.
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event; false on a records-only skip.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this

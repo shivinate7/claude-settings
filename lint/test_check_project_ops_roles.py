@@ -55,7 +55,7 @@ CHECK_STEP = "Project-ops roles check"
 FIXTURE_STEP = "Project-ops roles fixture suite"
 
 sys.path.insert(0, HERE)
-from test_windows_split import all_jobs  # noqa: E402  one home for the checks.yml step parser
+from test_windows_split import all_jobs, only_keep_running_if  # noqa: E402  one home for the checks.yml step parser and its if: pin
 from check_skill_model_rows import live_lines  # noqa: E402  one home for fences and multi-line HTML comments
 import layout  # noqa: E402  one home of where records live (lint/layout.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
@@ -518,13 +518,18 @@ class CiWiring(unittest.TestCase):
         # Pins one checks-job step that runs the check. An if: condition could skip it and read as passing.
         step = self.step(CHECK_STEP)
         self.assertEqual(step.get("run"), "python3 lint/check_project_ops_roles.py")
-        self.assertNotIn("if", step, "an if: condition lets a skipped check read as passing")
+        self.assertTrue(only_keep_running_if(step), "an if: condition lets a skipped check read as passing")
 
     def test_checks_job_runs_the_fixture_suite(self):
         # Pins one checks-job step that runs this suite. An if: condition could skip it and read as passing.
         step = self.step(FIXTURE_STEP)
         self.assertEqual(step.get("run"), "python3 lint/test_check_project_ops_roles.py")
-        self.assertNotIn("if", step, "an if: condition lets a skipped suite read as passing")
+        self.assertTrue(only_keep_running_if(step), "an if: condition lets a skipped suite read as passing")
+
+    def test_checks_job_refuses_another_if_on_the_suite(self):
+        # Control: the real suite step passes above. A different condition can skip the suite, so the pin must refuse it.
+        step = dict(self.step(FIXTURE_STEP), **{"if": "${{ github.event_name == 'push' }}"})
+        self.assertFalse(only_keep_running_if(step), "a checks-job suite with another if: passed the pin")
 
 
 class RealRepo(Fixture):
