@@ -107,9 +107,9 @@ A session reads the verdict of main's run for its merge with `merge --main-run <
 - carried: the red is not this merge's. A carried line marks `not re-run` each red job the run before had and this run skipped.
 - first red: the red becomes the top lane at once, a revert or a fix, the session's pick. Nothing is blamed yet. The line names the command that re-runs the failed jobs.
 - new break: the red becomes the top lane at once, a revert or a fix, the session's pick.
-- cleared: the revert's run is green and re-ran every job that was red in the run before. The red is lifted.
+- cleared: the revert's run is green and re-ran every job that was red in the run before. The red is lifted. A revert line counts only at a line start (`REVERT_OF_LINE`); `read_lanes` takes it anywhere in a message (`REVERT_OF_ANYWHERE`).
 - did not clear: the revert's run is red, or green with a red job not re-run. The base stays red.
-- unknown: a failed read, a run still going or cancelled, no push run of the commit on the newest page, or no earlier run to compare. The tool exits 1. Run it again. Unknown never reads green, first red or carried.
+- unknown: a failed read, a run still going or cancelled, no push run of the commit on the newest page, or a red run with no earlier run to compare (a green run with none reads green). The tool exits 1. Run it again. Unknown never reads green, first red or carried.
 - Cost: one runs read, a jobs read for each run judged, and a log read per failed job of each red run read (unmeasured). No file, process or timer.
 
 Check: `merge/test_merge.py`, class `MainRunVerdict`.
