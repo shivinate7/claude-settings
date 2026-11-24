@@ -1,0 +1,1 @@
+- records-skip-extra-cond-inert: the extra condition in the records-only skip is inert again, so it changes no skip (PR 3856, merged; reviewer's report, unverified). Seen: 2026-11-24 x1

@@ -1,0 +1,1 @@
+- confirm-needs-proof-literals: reviewer's report (PR 3863, open): hard-coded literals at merge/merge.py lines 2097 and 5130 (on the PR 3863 branch: breaking_run and a nested read) should name a constant; unverified. Seen: 2026-11-24 x1
