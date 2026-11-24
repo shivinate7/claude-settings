@@ -13,7 +13,7 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from test_windows_split import (CHECKS, RECORDS_ONLY_CONDITION, CONDITIONED_JOBS, SPEC_JOBS, SUITE_CONDITIONED_JOBS, all_jobs, eval_if,  # noqa: E402  the one home of the checks.yml reader
+from test_windows_split import (CHECKS, RECORDS_ONLY_CONDITION, SPEC_JOBS, SUITE_CONDITIONED_JOBS, all_jobs, eval_if,  # noqa: E402  the one home of the checks.yml reader
                                 condition_problem, job_if_without_records, spec_conditioned, suite_names)
 from all_jobs_passed_rules import needs_of  # noqa: E402  the one home of the needs reader
 from test_windows_split import SUITE_FLAG, WINDOWS_GUARD_JOBS, WINDOWS_MERGE_JOBS, eval_with  # noqa: E402  the one home of the merge and rest flags, the shard families and the flag evaluator

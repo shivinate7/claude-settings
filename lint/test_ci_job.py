@@ -3577,16 +3577,6 @@ class QuietStepKeepsTheStallWatchFed(Job):
         self.assertIn("still running", done.stderr, done.stdout + done.stderr)
 
 
-def load_ci_job():
-    """bin/ci-job as a fresh module, so a case can call or patch its functions."""
-    import importlib.machinery
-    import importlib.util
-    loader = importlib.machinery.SourceFileLoader("ci_job_under_test", CI_JOB)
-    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
-    loader.exec_module(module)
-    return module
-
-
 class WindowsShell(unittest.TestCase):
     """On Windows a step's bash is Git Bash by full path, never the System32 WSL launcher that PATH finds
     first (decision bare-bash-on-windows-can-resolve-to-the-wsl-stub). Built as a fake Windows tree on any host."""
