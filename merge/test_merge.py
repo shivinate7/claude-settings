@@ -6175,8 +6175,9 @@ class GhHalf(Env):
         rc, out = self.run_merge("7", "--confirm", host=self.gh_host())
         self.assert_draft_stops(rc, out, before)
 
-    # A pull request whose lane lint PASSED for its exact head merges while its own run is still in progress or queued. These cases
-    # also pin three refusals: a PASS on an older head, a finished red run on the head, and a red main.
+    # A lane-lint PASS names the live head and never stands in for the head's listed check: a pending run on the head refuses the merge, PASS or
+    # not (ruling R1, owner, 10:49 CST Nov 23, 2026). These cases also pin the controls: a PASS on a finished red run, a PASS on an older head,
+    # a red main, and a green head with a PASS.
 
     def pending_head(self, checks, runs):
         """The live head of feat, with feat's one pending record removed, so the run claims nothing and merges in one step. The head's checks
@@ -6185,23 +6186,26 @@ class GhHalf(Env):
         self.set(checks_seq=[checks], runs_seq=[runs])
         return self.head()
 
-    def lint_pass_merges_past(self, run_status):
-        head = self.pending_head(checks=[("checks", "pending", "")], runs=[("checks", run_status, "")])
-        self.set(issue_comments=[lint_comment(501, head)])
+    def test_a_lint_pass_does_not_lift_a_pending_run_in_progress(self):
+        self.lint_result_keeps_pending_run("PASS")
+
+    def test_a_lint_pass_does_not_lift_a_pending_run_queued(self):
+        self.lint_result_keeps_pending_run("PASS", run_status="queued")
+
+    def test_a_lint_pass_does_not_lift_a_pending_head_with_no_check_row(self):
+        self.lint_result_keeps_pending_run("PASS", no_row=True)
+
+    def test_a_green_head_with_a_lint_pass_merges_on_its_listed_check(self):
+        self.leave_no_pending_record()
+        head = self.head()
+        self.set(checks_seq=[[("checks", "pass", "")]], issue_comments=[lint_comment(501, head)])
         host = self.gh_host()
-        # scope first: a lane-lint PASS names this exact head, and the head's own run has not finished
+        # scope first: the PASS names the live head, and the head's listed check reads green
         self.assertEqual(merge.lint_state(host.issue_comments("1970-01-01T00:00:00Z")[1].get(7, []), head), "pass", "scope: no lane-lint PASS names the live head")
-        self.assertTrue(host.head_state(7).startswith("pending: "), "scope: the head is not pending: " + host.head_state(7))
+        self.assertEqual(host.head_state(7), "green", "scope: the head is not green: " + host.head_state(7))
         rc, out = self.run_merge("7", "--confirm", host=host)
-        self.assertEqual(rc, 0, "a lane-lint PASS on the live head did not let its %s run merge:\n%s" % (run_status, out))
-        self.assertIn(MERGE_CALL, self.calls(), "the merge call was not sent")
-        self.assertEqual(self.paused, [], "the merge waited on the pending run")
-
-    def test_a_lint_pass_on_the_live_head_merges_past_its_run_in_progress(self):
-        self.lint_pass_merges_past("in_progress")
-
-    def test_a_lint_pass_on_the_live_head_merges_past_its_run_queued(self):
-        self.lint_pass_merges_past("queued")
+        self.assertEqual(rc, 0, "a green head with a lane-lint PASS did not merge:\n" + out)
+        self.assertIn(MERGE_CALL, self.calls(), "the merge call was not sent for a green head")
 
     def test_a_lint_pass_does_not_lift_a_finished_red_run_on_the_head(self):
         head = self.pending_head(checks=[("checks", "fail", "https://x/y")], runs=[("checks", "completed", "failure")])
@@ -6247,18 +6251,21 @@ class GhHalf(Env):
     # A lane-lint result that is not a PASS lifts no pending run: a FAIL, an unreadable Result, or no comment for the live head. Each case
     # names its scope first, and asserts the refusal names the pending run, so a refusal from another cause cannot pass.
 
-    def lint_result_keeps_pending_run(self, verdict):
-        """A pending head whose lane lint reads `verdict` for it (None: no comment names it) is refused on its pending run, and no merge call is sent."""
-        head = self.pending_head(checks=[("checks", "pending", "")], runs=[("checks", "in_progress", "")])
+    def lint_result_keeps_pending_run(self, verdict, run_status="in_progress", no_row=False):
+        """A pending head whose lane lint reads `verdict` for it (None: no comment names it) is refused on its pending run, and no merge call is sent.
+        `no_row`: the head has no check row and no run yet, so the listed check reads pending with nothing under it."""
+        checks, runs = ([], []) if no_row else ([("checks", "pending", "")], [("checks", run_status, "")])
+        head = self.pending_head(checks=checks, runs=runs)
         self.set(issue_comments=[] if verdict is None else [lint_comment(501, head, verdict=verdict)])
         host = self.gh_host()
-        want = {"FAIL": "fail", "unreadable": "unknown", None: "none"}[verdict]
-        # scope first: the lane-lint read of the live head is the verdict this case needs, and the head's own run is still pending
+        want = {"PASS": "pass", "FAIL": "fail", "unreadable": "unknown", None: "none"}[verdict]
+        # scope first: the lane-lint read of the live head is the verdict this case needs, and the head's listed check is still pending
         self.assertEqual(merge.lint_state(host.issue_comments("1970-01-01T00:00:00Z")[1].get(7, []), head), want, "scope: the lane-lint read is not " + want)
         self.assertTrue(host.head_state(7).startswith("pending: "), "scope: the head is not pending: " + host.head_state(7))
         rc, out = self.run_merge("7", "--confirm", host=host)
-        self.assertEqual(rc, 1, "a lane lint that reads %r lifted a pending run:\n%s" % (verdict, out))
-        self.assertIn("a check is pending: checks", out, "the refusal does not name the pending run:\n" + out)
+        self.assertEqual(rc, 1, "a lane lint that reads %r let a pending head merge:\n%s" % (verdict, out))
+        self.assertIn("a check is pending: checks", out, "the refusal does not name the pending check:\n" + out)
+        self.assertNotIn("lane-lint PASS names", out, "the refusal names the lane lint as a way through:\n" + out)
         self.assertNotIn(MERGE_CALL, self.calls(), "the merge call was sent for a pending head whose lane lint reads %r" % (verdict,))
 
     def test_a_fail_lane_lint_on_the_live_head_does_not_lift_a_pending_run(self):
@@ -6270,10 +6277,11 @@ class GhHalf(Env):
     def test_an_absent_lane_lint_does_not_lift_a_pending_run(self):
         self.lint_result_keeps_pending_run(None)
 
-    # A lifted head is sent its PUT past GitHub's BLOCKED read, which a pending required check causes. BEHIND still refuses.
+    # GitHub reads a pending required check as BLOCKED. A pending head with a lane-lint PASS is refused on that check whatever the pull request
+    # reads, BLOCKED or BEHIND, and no merge call is sent.
 
-    def lifted_head_reading(self, state):
-        """A pending head with a lane-lint PASS for it, whose pull request reads `state` (GitHub's word). -> (rc, out) of the confirm."""
+    def pending_head_with_pass_reading(self, state):
+        """A pending head with a lane-lint PASS for it, whose pull request reads `state` (GitHub's word). -> (rc, out) of the confirm: refused."""
         head = self.pending_head(checks=[("checks", "pending", "")], runs=[("checks", "in_progress", "")])
         self.set(issue_comments=[lint_comment(501, head)], pr_raw={"mergeable_state": state.lower()})
         host = self.gh_host()
@@ -6281,18 +6289,16 @@ class GhHalf(Env):
         self.assertEqual(merge.lint_state(host.issue_comments("1970-01-01T00:00:00Z")[1].get(7, []), head), "pass", "scope: no lane-lint PASS names the live head")
         self.assertTrue(host.head_state(7).startswith("pending: "), "scope: the head is not pending: " + host.head_state(7))
         self.assertEqual(host.pr(7)["merge_state"], state, "scope: the pull request does not read " + state)
-        return self.run_merge("7", "--confirm", host=host)
+        rc, out = self.run_merge("7", "--confirm", host=host)
+        self.assertEqual(rc, 1, "a pending head with a lane-lint PASS merged, reading %s:\n%s" % (state, out))
+        self.assertIn("a check is pending: checks", out, "the refusal does not name the pending check:\n" + out)
+        self.assertNotIn(MERGE_CALL, self.calls(), "the merge call was sent for a pending head reading %s" % (state,))
 
-    def test_a_lifted_head_reading_blocked_sends_the_merge_call(self):
-        rc, out = self.lifted_head_reading("BLOCKED")
-        self.assertEqual(rc, 0, "a lane-lint PASS on the live head did not merge a pending head that reads BLOCKED:\n" + out)
-        self.assertIn(MERGE_CALL, self.calls(), "the merge call was not sent for a lifted head reading BLOCKED")
+    def test_a_pending_head_with_a_lint_pass_reading_blocked_is_refused(self):
+        self.pending_head_with_pass_reading("BLOCKED")
 
-    def test_a_lifted_head_reading_behind_still_refuses(self):
-        rc, out = self.lifted_head_reading("BEHIND")
-        self.assertEqual(rc, 1, "a lifted head reading BEHIND merged:\n" + out)
-        self.assertIn("reads BEHIND", out, "the refusal does not name BEHIND:\n" + out)
-        self.assertNotIn(MERGE_CALL, self.calls(), "the merge call was sent for a lifted head reading BEHIND")
+    def test_a_pending_head_with_a_lint_pass_reading_behind_is_refused(self):
+        self.pending_head_with_pass_reading("BEHIND")
 
 # Run ids on one head: a concurrency-cancelled run, the newer run of the same workflow, and a run of another workflow.
 OLD_RUN, NEW_RUN, CI_RUN = 41368432206, 41368432483, 41368432300
@@ -11257,58 +11263,37 @@ class RecordsRebuild(RecordsEnv):
         self.rollup_reads(proven, "pending: all-jobs-passed", states={live: live_state})
         return proven, live
 
-    # A lane-lint PASS on the live head lifts the pending run of the proven head under it. The live head's own run is then never read, so a red
-    # or unread own run does not refuse a clean merge of main or a page-only heal. Decision merge-needs-current-base.
+    # A lane-lint PASS on the live head never stands in for the pending run of the proven head under it. A pending proof refuses, with or
+    # without the PASS, before the live head's own run is read (ruling R1, owner, 10:49 CST Nov 23, 2026). Decision merge-needs-current-base.
 
-    def test_a_lint_pass_over_a_pending_proof_refuses_a_clean_main_merge_on_its_own_red_run(self):
-        self.lint_carried_head("merge", "red: all-jobs-passed: fail")
+    def refused_on_a_pending_proof(self, kind, live_state):
+        """A pending proof under a lane-lint PASS on the live head: the confirm is refused on the proof's pending run, and nothing is pushed or merged."""
+        self.lint_carried_head(kind, live_state)
         refs_before = self.refs()
         rc, out = self.run_merge_once("7", "--confirm")
-        self.assertFalse(getattr(self.host, "merged", False), "merged a clean main merge whose own run finished red, on a lane-lint PASS:\n" + out)
+        self.assertFalse(getattr(self.host, "merged", False), "merged a %s on a pending proof, on a lane-lint PASS:\n%s" % (kind, out))
         self.assertEqual(rc, 1, out)
-        self.assertEqual(self.refs(), refs_before, "pushed over a clean main merge whose own run finished red:\n" + out)
-        self.assertIn("red: all-jobs-passed", out, "the refusal does not name the red own run of the clean merge:\n" + out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a %s on a pending proof:\n%s" % (kind, out))
+        self.assertIn("a check is pending: all-jobs-passed", out, "refused for another cause than the pending proof:\n" + out)
+        self.assertEqual(self.host.waits, [], "waited on the pending proof instead of refusing it:\n" + out)
 
-    def test_a_lint_pass_over_a_pending_proof_refuses_a_page_only_heal_on_its_own_red_run(self):
-        self.lint_carried_head("heal", "red: all-jobs-passed: fail")
-        refs_before = self.refs()
-        rc, out = self.run_merge_once("7", "--confirm")
-        self.assertFalse(getattr(self.host, "merged", False), "merged a page-only heal whose own run finished red, on a lane-lint PASS:\n" + out)
-        self.assertEqual(rc, 1, out)
-        self.assertEqual(self.refs(), refs_before, "pushed over a page-only heal whose own run finished red:\n" + out)
-        self.assertIn("red: all-jobs-passed", out, "the refusal does not name the red own run of the heal:\n" + out)
+    def test_a_lint_pass_does_not_lift_a_pending_proof_over_a_clean_main_merge_with_its_own_run_red(self):
+        self.refused_on_a_pending_proof("merge", "red: all-jobs-passed: fail")
 
-    def test_a_lint_pass_over_a_pending_proof_refuses_a_clean_main_merge_with_its_own_run_unread(self):
-        self.lint_carried_head("merge", "unknown (the read of the merge's checks failed: HTTP 500)")
-        refs_before = self.refs()
-        rc, out = self.run_merge_once("7", "--confirm")
-        self.assertFalse(getattr(self.host, "merged", False), "merged a clean main merge whose own run was unread, on a lane-lint PASS:\n" + out)
-        self.assertEqual(rc, 1, out)
-        self.assertEqual(self.refs(), refs_before, "pushed over a clean main merge whose own run was unread:\n" + out)
-        self.assertIn("unknown", out, "the refusal does not name the unread own run of the clean merge:\n" + out)
+    def test_a_lint_pass_does_not_lift_a_pending_proof_over_a_page_only_heal_with_its_own_run_red(self):
+        self.refused_on_a_pending_proof("heal", "red: all-jobs-passed: fail")
 
-    def test_a_lint_pass_over_a_pending_proof_refuses_a_page_only_heal_with_its_own_run_unread(self):
-        self.lint_carried_head("heal", "unknown (the read of the heal's checks failed: HTTP 500)")
-        refs_before = self.refs()
-        rc, out = self.run_merge_once("7", "--confirm")
-        self.assertFalse(getattr(self.host, "merged", False), "merged a page-only heal whose own run was unread, on a lane-lint PASS:\n" + out)
-        self.assertEqual(rc, 1, out)
-        self.assertEqual(self.refs(), refs_before, "pushed over a page-only heal whose own run was unread:\n" + out)
-        self.assertIn("unknown", out, "the refusal does not name the unread own run of the heal:\n" + out)
+    def test_a_lint_pass_does_not_lift_a_pending_proof_over_a_clean_main_merge_with_its_own_run_unread(self):
+        self.refused_on_a_pending_proof("merge", "unknown (the read of the merge's checks failed: HTTP 500)")
 
-    def test_a_lint_pass_over_a_pending_proof_merges_a_clean_main_merge_with_its_own_run_pending(self):
-        self.lint_carried_head("merge", "pending: all-jobs-passed")
-        rc, out = self.run_merge_once("7", "--confirm")
-        self.assertEqual(rc, 0, "a lane-lint PASS on the live head did not merge a clean main merge above a pending proof:\n" + out)
-        self.assertTrue(getattr(self.host, "merged", False), out)
-        self.assertEqual(self.host.waits, [], "waited on the merge's own pending run instead of merging on the PASS:\n" + out)
+    def test_a_lint_pass_does_not_lift_a_pending_proof_over_a_page_only_heal_with_its_own_run_unread(self):
+        self.refused_on_a_pending_proof("heal", "unknown (the read of the heal's checks failed: HTTP 500)")
 
-    def test_a_lint_pass_over_a_pending_proof_merges_a_page_only_heal_with_its_own_run_pending(self):
-        self.lint_carried_head("heal", "pending: all-jobs-passed")
-        rc, out = self.run_merge_once("7", "--confirm")
-        self.assertEqual(rc, 0, "a lane-lint PASS on the live head did not merge a page-only heal above a pending proof:\n" + out)
-        self.assertTrue(getattr(self.host, "merged", False), out)
-        self.assertEqual(self.host.waits, [], "waited on the heal's own pending run instead of merging on the PASS:\n" + out)
+    def test_a_lint_pass_does_not_lift_a_pending_proof_over_a_clean_main_merge_with_its_own_run_pending(self):
+        self.refused_on_a_pending_proof("merge", "pending: all-jobs-passed")
+
+    def test_a_lint_pass_does_not_lift_a_pending_proof_over_a_page_only_heal_with_its_own_run_pending(self):
+        self.refused_on_a_pending_proof("heal", "pending: all-jobs-passed")
 
     def test_relayed_yes_holds_after_heal_under_list(self):
         # The relayed yes names H, the proven head. H' is H with main merged in and the page rebuilt: a heal commit. Under a named list the yes
