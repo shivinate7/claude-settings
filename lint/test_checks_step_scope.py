@@ -17,6 +17,9 @@ Pinned here:
   7. each doc step (DOC_STEPS) carries the scope condition of its doc groups, one constant per group set, and the .md names
      its entry names are under a doc flag its `if:` reads (ALLOWED names aside).
   8. a docs-only change runs exactly the doc steps that list its group, or `any`, with no other step's change.
+  9. the five long steps the hang stop wraps (HangStopWrap): each runs its command through bin/verdict, sets its hang seconds and its
+     full-log switch to 1, drops its step cap and keeps its job cap; the six short caps, the Windows jobs and the mutation jobs stay as
+     they are.
 
 Steps are read by lint/workflow_steps.py. The `if:` evaluator is eval_if in lint/test_windows_split.py.
 Item 5 reads the entry file only. Item 7 reads each name as md_names_reached reads it: a whole path, or the constant
@@ -46,6 +49,7 @@ from test_windows_split import (  # noqa: E402  the one home of the `if:` evalua
     SCOPE_DOC_SKILLS_DECISIONS, SCOPE_DOC_SKILLS_OTHER, doc_scope_condition, drop_condition, eval_if, keep_running_off, run_lines, unwrap,
     LINUX_SUITES)
 from test_windows_split import PUSH_RULING, top_level_conjuncts, top_level_disjuncts, yaml_scalar  # noqa: E402  the one home of the splitters, the scalar reader and the ruling
+from test_windows_split import INSTALL_CMD, INSTALL_SHARD_VAR, MACOS_GUARD, MACOS_SLICE_ENV, VERDICT_FULL_LOG_VAR, VERDICT_RUN, all_jobs, windows_jobs  # noqa: E402  the five steps' commands and env, the verdict prefix, the job readers
 
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
 WORKFLOW = ".github/workflows/checks.yml"
@@ -1373,6 +1377,142 @@ class KeepRunningTopLevelOr(unittest.TestCase):
         for expr in ("${{ !cancelled() && (x || y) }}", "${{ !cancelled() && x && (y || z) }}"):
             with self.subTest(expr=expr):
                 self.assertTrue(keeps_running(expr), "keeps_running does not keep %r running, but its `||` is inside parentheses" % expr)
+
+
+# The five long CI steps the hang stop wraps (decision hang-stop; lane hang-stop-five-step-wrap): (job, step name, the command the
+# step runs today, the env it keeps). The wrap keeps each command and each env value, so no shard or slice is lost.
+HANG_WRAP = (
+    ("checks-install-checkout", "install.sh checkout-detection suite (shard 1 of 3)", INSTALL_CMD, {INSTALL_SHARD_VAR: "1/3"}),
+    ("checks-install-checkout-2", "install.sh checkout-detection suite (shard 2 of 3)", INSTALL_CMD, {INSTALL_SHARD_VAR: "2/3"}),
+    ("checks-install-checkout-3", "install.sh checkout-detection suite (shard 3 of 3)", INSTALL_CMD, {INSTALL_SHARD_VAR: "3/3"}),
+    ("shell-macos", "install.sh checkout-detection suite", INSTALL_CMD, {}),
+    ("checks-macos", "Guard fixture suite (macOS slice)", MACOS_GUARD, MACOS_SLICE_ENV),
+)
+# The three Linux push steps set the hang stop to 600 s (decision hang-stop, N); the two macOS steps to a floor of 300 s.
+HANG_LINUX_JOBS = ("checks-install-checkout", "checks-install-checkout-2", "checks-install-checkout-3")
+# The six short step caps the hang stop does not cover (decision hang-stop, the first build's scope): job, step name, timeout-minutes.
+HANG_SHORT_CAPS = (
+    ("checks", "Code-check tools", "5"),
+    ("pointer-windows", "Install bin eol test, Windows PowerShell 5.1", "3"),
+    ("checks-macos", "Record stamp engine fixture suite", "5"),
+    ("checks-windows", "Session start freshness cases (caseF1, caseG1)", "3"),
+    ("checks-mutate-guard", "Guard progress beat suite", "5"),
+    ("checks-windows-rest-2", "Record stamp engine fixture suite", "5"),
+)
+MUTATION_JOBS = ("checks-mutate-guard", "checks-mutate-guard-b", "checks-mutate-guard-c", "mutation-report")
+
+
+def hang_step(text, job, name):
+    """The step of `job` named `name`, read with the step parser (lint/workflow_steps.py), or None."""
+    return next((st for st in ws.step_blocks(ws.job_block(text, job) or "") if identity(st) == name), None)
+
+
+class HangStopWrap(unittest.TestCase):
+    """The five long CI steps run through bin/verdict, with VERDICT_HANG_SECONDS and VERDICT_FULL_LOG (1) on the step, no step cap, and the
+    job cap kept as the net (decision hang-stop; decision ci-job-caps). The step parser reads the step keys. A job-level key is read by the one-line match
+    lint/test_windows_split.py uses for a job's timeout-minutes, since the step parser has no job-level reader."""
+
+    def setUp(self):
+        self.text = read_repo(WORKFLOW)
+
+    def step(self, job, name):
+        st = hang_step(self.text, job, name)
+        self.assertIsNotNone(st, "%s has no step named %r" % (job, name))
+        return st
+
+    def test_each_wrapped_step_runs_its_command_through_verdict(self):
+        for job, name, cmd, _env in HANG_WRAP:
+            with self.subTest(step=name):
+                got = ws.drop_comment(ws.run_body(self.step(job, name)) or "").strip()
+                self.assertEqual(got, VERDICT_RUN + cmd, "%s: step %r runs %r, want %r (its own command through bin/verdict)"
+                                 % (job, name, got, VERDICT_RUN + cmd))
+
+    def test_each_wrapped_step_keeps_its_env_arguments(self):
+        for job, name, _cmd, env in HANG_WRAP:
+            with self.subTest(step=name):
+                got = ws.step_env(self.step(job, name))
+                for key, want in env.items():
+                    self.assertEqual(got.get(key), want, "%s: step %r env %s is %r, want %r (an argument the wrap must keep)"
+                                     % (job, name, key, got.get(key), want))
+
+    def test_each_wrapped_step_sets_the_hang_stop_seconds(self):
+        for job, name, _cmd, _env in HANG_WRAP:
+            with self.subTest(step=name):
+                got = ws.step_env(self.step(job, name)).get("VERDICT_HANG_SECONDS")
+                if job in HANG_LINUX_JOBS:
+                    self.assertEqual(got, "600", "%s: step %r VERDICT_HANG_SECONDS is %r, want 600 (a Linux push step)" % (job, name, got))
+                else:
+                    self.assertTrue(got is not None and got.isdigit() and int(got) >= 300,
+                                    "%s: step %r VERDICT_HANG_SECONDS is %r, want a whole number of at least 300" % (job, name, got))
+
+    def test_each_wrapped_step_sets_the_full_log_switch_to_one(self):
+        for job, name, _cmd, _env in HANG_WRAP:
+            with self.subTest(step=name):
+                got = ws.step_env(self.step(job, name)).get(VERDICT_FULL_LOG_VAR)
+                self.assertIsNotNone(got, "%s: step %r sets no VERDICT_FULL_LOG, so its FAIL or HANG shows only the excerpt (decision hang-stop)"
+                                     % (job, name))
+                self.assertEqual(yaml_scalar(got), "1", "%s: step %r VERDICT_FULL_LOG is %r, want 1" % (job, name, got))
+
+    def test_no_other_step_sets_the_full_log_switch(self):
+        # Control, green on the old workflow: the steps that set the switch are a subset of the five, and no other line sets it. A job-level
+        # env would reach every step of its job, and it is no step's env, so the line count catches it.
+        found = set()
+        for job in all_jobs(self.text):
+            for st in ws.step_blocks(ws.job_block(self.text, job) or ""):
+                if VERDICT_FULL_LOG_VAR in ws.step_env(st):
+                    found.add((job, identity(st)))
+        wrapped = {(job, name) for job, name, _, _ in HANG_WRAP}
+        self.assertLessEqual(found, wrapped, "steps outside the five set VERDICT_FULL_LOG: %s" % sorted(found - wrapped))
+        set_lines = [line for line in self.text.splitlines() if re.match(r"\s*%s:" % VERDICT_FULL_LOG_VAR, line)]
+        self.assertEqual(len(set_lines), len(found), "VERDICT_FULL_LOG is set on %d lines but on %d steps: a job or top-level env sets it"
+                         % (len(set_lines), len(found)))
+
+    def test_each_wrapped_step_has_no_step_timeout(self):
+        for job, name, _cmd, _env in HANG_WRAP:
+            with self.subTest(step=name):
+                got = ws.step_key(self.step(job, name), "timeout-minutes")
+                self.assertIsNone(got, "%s: step %r still has timeout-minutes %s; the hang stop replaces a covered step's cap"
+                                  % (job, name, got))
+
+    def test_each_wrapped_job_keeps_its_job_timeout_as_the_net(self):
+        for job in sorted({job for job, _, _, _ in HANG_WRAP}):
+            with self.subTest(job=job):
+                self.assertRegex(ws.job_block(self.text, job) or "", r"(?m)^    timeout-minutes:[ \t]*\d+",
+                                 "%s has no job-level timeout-minutes, the net under the hang stop (decision ci-job-caps)" % job)
+
+    def test_exactly_the_five_steps_run_through_verdict(self):
+        routed = set()
+        for job in all_jobs(self.text):
+            for st in ws.step_blocks(ws.job_block(self.text, job) or ""):
+                if ws.drop_comment(ws.run_body(st) or "").strip().startswith(VERDICT_RUN):
+                    routed.add((job, identity(st)))
+        self.assertEqual(routed, {(job, name) for job, name, _, _ in HANG_WRAP},
+                         "the steps that run through bin/verdict are not the five (decision hang-stop)")
+
+    def test_six_short_step_caps_keep_their_timeouts(self):
+        for job, name, want in HANG_SHORT_CAPS:
+            with self.subTest(step=name):
+                got = value(self.step(job, name), "timeout-minutes")
+                self.assertEqual(got, want, "%s: step %r timeout-minutes is %r, want %s (a short cap the hang stop does not cover)"
+                                 % (job, name, got, want))
+
+    def test_no_windows_job_step_sets_the_hang_stop(self):
+        for job in sorted(windows_jobs(self.text)):
+            with self.subTest(job=job):
+                for st in ws.step_blocks(ws.job_block(self.text, job) or ""):
+                    self.assertNotIn("VERDICT_HANG_SECONDS", ws.step_env(st),
+                                     "%s: step %r sets VERDICT_HANG_SECONDS; no stop on Windows (decision hang-stop)" % (job, identity(st)))
+
+    def test_no_mutation_step_runs_through_verdict_or_sets_the_hang_stop(self):
+        for job in MUTATION_JOBS:
+            with self.subTest(job=job):
+                self.assertIsNotNone(ws.job_block(self.text, job), "%s is not a job in %s" % (job, WORKFLOW))
+                for st in ws.step_blocks(ws.job_block(self.text, job)):
+                    run = ws.drop_comment(ws.run_body(st) or "").strip()
+                    self.assertFalse(run.startswith(VERDICT_RUN), "%s: step %r runs through bin/verdict; no mutation step is wrapped yet (decision hang-stop)"
+                                     % (job, identity(st)))
+                    self.assertNotIn("VERDICT_HANG_SECONDS", ws.step_env(st), "%s: step %r sets VERDICT_HANG_SECONDS; no mutation step is stopped yet"
+                                     % (job, identity(st)))
 
 
 if __name__ == "__main__":

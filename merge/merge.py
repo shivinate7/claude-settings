@@ -4715,7 +4715,11 @@ def prose_judge_run(plan, n):
     counts = dict.fromkeys(PROSE_JUDGE_CAUSES, 0)
     try:
         import decision_watch
-        answers = prose_judge_calls(decision_watch, [item[2] for item in plan or [] if not isinstance(item, str) and len(item) == 3])
+        prompts = [item[2] for item in plan or [] if not isinstance(item, str) and len(item) == 3]
+        try:
+            answers = prose_judge_calls(decision_watch, prompts)
+        except Exception:  # the calls could not start: each one reads as a call that raised, so its lines are counted, not judged
+            answers = iter([None] * len(prompts))
         for item in plan or []:
             if isinstance(item, str):
                 plan_failures.append(item)
@@ -4733,12 +4737,19 @@ def prose_judge_run(plan, n):
             if entries is None:
                 counts[prose_judge_cause(verdict, error)] += len(rows)
                 continue
-            said = {(e["path"], e["line"]): e for e in entries}
+            said = {}
+            for e in entries:
+                said.setdefault((e["path"], e["line"]), []).append(e)
             for path, number in rows:
-                e = said.get((path, number))
-                if e is None:
+                given = said.get((path, number))
+                if given is None:
                     counts[SKIPPED] += 1
-                elif e["verdict"] != "holds":
+                    continue
+                if len({g["verdict"] for g in given}) > 1:  # conflicting verdicts for one line are no readable verdict, never the last one
+                    counts[NO_VERDICT] += 1
+                    continue
+                e = given[-1]
+                if e["verdict"] != "holds":
                     findings.append(prose_judge_row(n, path, number, e["verdict"], e.get("why") or ""))
     except Exception as e:
         plan_failures.append(f"merge: #{n} prose judge UNKNOWN: it could not run ({type(e).__name__}: {' '.join(str(e).split())[:200]}).")
