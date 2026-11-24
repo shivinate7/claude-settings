@@ -30,7 +30,7 @@ names its file, line or value and runs no step. A plain run never runs one.
 OwnLogPrune: ci-job removes its own ci-job-* logs over one day old when it starts, and keeps the rest.
 HangStopDefault: a step with no VERDICT_HANG_SECONDS of its own runs with 600 (the caller's value and the step's own win); the
   quiet mutation fixture suite gets none. HangLineFromVerdict: a real bin/verdict hang stop reads as ci-job's hang line.
-  HangExitsOne: a verdict-form HANG line with exit 1 reads FAIL.
+  HangExitsOne: a HANG-shaped line with exit 1 is no hang: with no verdict line the step reads unknown, with a FAIL line it reads FAIL.
 RerunCache: a rerun at the same key runs no passing step and prints PASS (cached); a failed, unknown, unrun, edited, renamed or
   corrupt step runs again. The control case is a first run, which runs every step and prints no cached line. A changed ambient
   variable, a changed tool file that ci-job runs, an edited action file a remote uses: step runs from the install or the pointer
@@ -543,15 +543,34 @@ class HangLineFromVerdict(Job):
 
 
 class HangExitsOne(Job):
-    """A verdict-form HANG line with exit 1 reads FAIL. verdict's own hang line only comes with exit 124, so a step that prints
-    the words and exits 1 failed."""
+    """A HANG-shaped line is a hang only with verdict's own form and exit 124 (decision hang-stop). A step that exits 1 is read by
+    its own verdict line: with none it reads unknown and is no hang, so an unknown reason may lift it; with a FAIL line it reads FAIL."""
 
-    def test_a_verdict_form_hang_line_with_exit_1_reads_fail(self):
-        hang = "HANG hang-exit1 rc=124 no output or CPU for 60s, stopped (61.2s) log=hang-verdict.log"
-        rc, lines, out = self.run_job(step("hang-exit1", "true"), launch=self.verdict_stub("import sys\nprint(%r)\nsys.exit(1)\n" % hang))
+    HANG_SHAPED = "HANG hang-exit1 rc=124 no output or CPU for 60s, stopped (61.2s) log=hang-verdict.log"  # verdict's form, printed with exit 1
+
+    def run_exit_1(self, *printed):
+        """One step whose stub verdict prints each line, then exits 1."""
+        body = "import sys\n" + "".join("print(%r)\n" % ln for ln in printed) + "sys.exit(1)\n"
+        rc, lines, out = self.run_job(step("hang-exit1", "true"), launch=self.verdict_stub(body))
         self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
-        self.assertEqual(by_step(lines), {"hang-exit1": "FAIL"}, "a verdict-form HANG line with exit 1 does not read FAIL: " + out)
-        self.assertEqual(rc, 1, "a verdict-form HANG line with exit 1 does not exit 1: " + out)
+        return rc, lines, out
+
+    def test_a_hang_shaped_line_with_exit_1_and_no_verdict_line_reads_unknown(self):
+        rc, lines, out = self.run_exit_1(self.HANG_SHAPED)
+        self.assertEqual(by_step(lines), {"hang-exit1": "unknown"}, "a HANG-shaped line with exit 1 and no verdict line does not read unknown: " + out)
+        self.assertEqual(rc, 2, "a HANG-shaped line with exit 1 and no verdict line does not exit 2, the unknown code: " + out)
+
+    def test_a_hang_shaped_line_with_exit_1_and_no_verdict_line_is_no_hang(self):  # the step line keeps its no-verdict note, not verdict's HANG line
+        rc, lines, out = self.run_exit_1(self.HANG_SHAPED)
+        line = step_line(lines, "hang-exit1")
+        self.assertIn("(verdict printed no verdict line)", line, "a HANG-shaped line with exit 1 lost the no-verdict note: " + out)
+        self.assertNotIn("HANG hang-exit1", line, "a HANG-shaped line with exit 1 is read as a hang: its line is the step's text\n" + out)
+
+    def test_a_hang_shaped_line_with_exit_1_and_a_fail_line_reads_that_fail(self):  # the control: verdict's own FAIL line is still the verdict
+        rc, lines, out = self.run_exit_1(self.HANG_SHAPED, "FAIL - case name")
+        self.assertEqual(by_step(lines), {"hang-exit1": "FAIL"}, "a HANG-shaped line with exit 1 beside a FAIL line does not read FAIL: " + out)
+        self.assertEqual(rc, 1, "a HANG-shaped line with exit 1 beside a FAIL line does not exit 1: " + out)
+        self.assertIn("FAIL - case name", step_line(lines, "hang-exit1"), "a HANG-shaped line with exit 1 reads another line as the verdict: " + out)
 
 
 def checks_hooks_ifs():

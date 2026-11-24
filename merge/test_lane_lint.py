@@ -881,6 +881,14 @@ class LaneLint(LaneFixture):
         self.assertEqual(pass_lines(out), [], "--lint-unknown-ok printed a PASS line beside a hang: " + out)
         self.assertIn("HANG hang-probe", out, "the refusal does not name the hang: " + out)
 
+    def test_a_no_verdict_line_unknown_is_no_hang_so_an_unknown_reason_still_lifts_it(self):  # ci-job reads a step that exits 1 with no verdict line as unknown, with no HANG text
+        self.use_ci_job([("unknown", "hang-exit1")], 2, details={"hang-exit1": "(verdict printed no verdict line)"})
+        reason = "hang-exit1 printed no verdict line on this box"
+        rc, out = self.lint_run("--lane-lint", "7", "--lint-unknown-ok", reason)
+        self.assertEqual(rc, 0, "--lint-unknown-ok did not lift an unknown with no verdict line, which is no hang: " + out)
+        self.assertEqual(pass_lines(out), [], "--lint-unknown-ok printed a PASS line for an unknown with no verdict line: " + out)
+        self.assertIn(reason, out, "--lint-unknown-ok did not log its reason for an unknown with no verdict line: " + out)
+
     def test_a_tool_missing_unknown_is_still_lifted_by_an_unknown_reason(self):  # the control: only a hang is refused the lift
         self.use_ci_job([("unknown", "shellcheck")], 2, details={"shellcheck": "tool missing (shellcheck); exit 127"})
         reason = "shellcheck is not on this box"
