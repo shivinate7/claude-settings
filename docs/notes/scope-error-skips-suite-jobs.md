@@ -1,0 +1,1 @@
+- scope-error-skips-suite-jobs: checks.yml:108 says an error in ci-scope.sh turns every flag on. A failed scope step writes no outputs, so the suite jobs that need scope skip (the checks job reads needs.scope.result); the rollups all-jobs-passed and ci-done still run. Seen: 2026-11-24 x1
