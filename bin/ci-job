@@ -30,8 +30,9 @@
 # delta between the two saved trees picks none of the step's suites (carry_delta). A delta of docs/records.md alone carries; a delta that touches the selector,
 # bin/ci-job or .github/stamp.json, or that sets every ci-scope.sh flag (an unmapped path), does not. Nor does a dirty tree, a pass saved from one, or a delta
 # that turns on a scope flag the step's `if:` reads. The carry key holds the exact key's environment. Any read that fails runs the step. A carried pass is saved
-# under the exact key marked carried, so a rerun at the head prints PASS (carried). Cost: per such step, one ancestor read and two tree diffs (the selector's
-# included); per delta, one more ci-scope.sh run and one more selector run when the delta holds more than the records file.
+# under the exact key marked carried, so a rerun at the head prints PASS (carried). Cost: per such step, one ancestor read and a git diff of the two saved trees;
+# per delta, when it holds more than the records file, also one ci-scope.sh run, one git diff of the added files of the range, and one selector run with its own
+# git diff of the range (three git diffs in all).
 # An install CI step is a run: whose every line is one install command (INSTALL_CMD: a lockfile install, or type
 # generation such as `npx astro sync`), since a lint step that reads generated files fails on a bare checkout. --lint
 # runs it, in order, only when a later lint step will run, or a later local action passes local_ready (its uses: step and
@@ -954,9 +955,9 @@ def carry_delta(top, a_head, a_tree, b_tree):
     """The suites that a change from the saved tree `a_tree` (a pass at `a_head`) to `b_tree` picks, as a set; None when nothing may carry:
     `a_head` is no ancestor of HEAD, the trees cannot be diffed, the delta holds a CARRY_BLOCKERS file, ci-scope.sh sets every flag for it (an
     unmapped file, a change to the workflow or to ci-scope.sh) or cannot be read, or the selector cannot run. A delta of CARRY_RECORDS alone
-    picks none, whatever the selector would say. Read once per run. Cost: one ancestor read and two tree diffs, the selector's included (git diff
-    of the saved tree and this tree; git diff of the saved head to HEAD, inside the selector); when the delta holds more than the records file, also
-    one ci-scope.sh run and one selector run; each ci-scope.sh run in SCOPE_FILES mode also starts one git diff of the added files of a_head...HEAD (the landed-dir read). carry_scope reads the delta's flags for a step whose `if:` names one: a ci-scope.sh run, once per
+    picks none, whatever the selector would say. Read once per run. Cost: one ancestor read and one git diff of the saved tree and this tree; when the delta
+    holds more than the records file, also one ci-scope.sh run, which starts one git diff of the added files of a_head...HEAD in SCOPE_FILES mode (the
+    landed-dir read), and one selector run, which starts one git diff of the saved head to HEAD; three git diffs in all. carry_scope reads the delta's flags for a step whose `if:` names one: a ci-scope.sh run, once per
     delta, and none when that run already happened here."""
     memo = (top, a_head, a_tree, b_tree)
     if memo not in CARRY_MEMO:
