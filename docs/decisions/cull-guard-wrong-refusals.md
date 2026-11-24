@@ -15,6 +15,19 @@ Owner ruling, 2026-11-10 15:04 CST, relayed by the retrospective session. It is 
 - Triage addition, not ruled, which the cull lane may weigh: the notes lines that say "false-alarm" in a slug without "false alarm" (`grep -i 'false-alarm' docs/debts/notes.md | grep -c -v -i 'false alarm'` gives 26 lines, and two name no refusal: `pair-title-quotes-short-id`, `carried-run-reedit-overstated`); the 3 lines that say "false refusal" (`grep -c -i 'false refusal' docs/debts/notes.md`); and eight debt files that name false alarms: `bg-end-false-alarms`, `heredoc-written-run-false-alarm`, `pycache-rm-false-alarm`, `stamp-read-false-alarms`, `build-disk-guard`, `inplace-edit-under-0-9-flagged`, `scan-quote-led-password-host`, `unstarted-guard-held`.
 - After the cull, a wrong refusal is a note only: one file in the notes folder, with no red test and no decision edit, as the notes tier sets.
 - Not in force, a possible later rule: if wrong refusals become a problem again, revisit threshold lanes. A guard with 3 recorded wrong refusals gets its own lane. The number 3 came from the retrospective session's relayed proposal, not the owner's words.
+- Owner ruling, 2026-11-23 23:02 CST, in the consultant's chat, on the question "false-alarm count per guard" (a: each false-alarm note names its guard; b: an outcome line in the guard log per judged refusal): "on question B, B seems a bit better than A -- would you disargee and say A?" The consultant agreed and took b as his pick, each line marked as a claim. He may reverse it.
+
+## What counts now
+
+A guard's wrong refusals are its `false-alarm` claim lines in guard.log. The session that was refused writes a claim with `guard-outcome RULE false-alarm|right [--why TEXT]` when it judges the refusal wrong or right. `hooks/guard_core.py` `log_line` and `append_log_line` give the line format, and `record` calls both. The why text is capped at 200 characters.
+
+A claim is unchecked. It stays the session's word until a person or a reviewer checks it before a cull.
+
+Reader: `lint/guard_log_report.py --outcomes [--between START END]`, read at each cull. It prints per rule the refusals, the claimed false alarms, the claimed right and the false-alarm share, under a line that says the claims are unchecked. An outcome line counts in no refusal column.
+
+Cost: one append per call, proved by `test_one_call_appends_one_line_and_starts_no_other_process` in `lint/test_guard_outcome.py`. No hook, timer or process.
+
+Not counted: a refusal no session judged. The log holds no automatic outcome.
 
 ## Why
 
