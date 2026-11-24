@@ -1388,7 +1388,7 @@ def main(argv, sibling=False, ran_suites=None):
     logdir = tempfile.mkdtemp(prefix="ci-job-lint-%d-" % os.getpid()) if pool else None  # each parallel step's own log, until it is added to the run's
     kept_logs = False
     futures, logs = {}, {}  # by step index: the queued run, and its log
-    noted = set()  # the suites a `runs in CI` line named in this pass, so a suite that two steps hold prints once
+    told = False  # a `runs in CI` line was printed in this pass: the job's suite steps are read, not skipped unread
     try:
         for n, step in enumerate(steps, 1):
             name = names[n - 1]
@@ -1423,8 +1423,11 @@ def main(argv, sibling=False, ran_suites=None):
                     print("%-15s %s: --lint cannot run suite %s, and the change touches it or a file it tests (scope flags on: %s)" % (
                         "unknown", name, ", ".join(sorted(reach)), flags))
                 for suite in owed:
-                    if suite not in reach and suite not in noted:
-                        noted.add(suite)
+                    if suite not in reach:
+                        told = True
+                        if ("runs in CI", suite) in ran_suites:  # a suite that two steps or two jobs hold prints once per run
+                            continue
+                        ran_suites.add(("runs in CI", suite))
                         print("%-15s %s: --lint did not run suite %s: it runs in CI (scope flags on: %s); the change touches neither it nor a file it tests" % (
                             "not run", name, suite, flags))
                 continue
@@ -1491,7 +1494,7 @@ def main(argv, sibling=False, ran_suites=None):
             pool.shutdown(cancel_futures=True)
             if not kept_logs:  # a log that did not reach the run's log stays in the folder for the reader
                 shutil.rmtree(os.path.abspath(logdir), ignore_errors=True)
-    if lint and not ran_lint and not tally["FAIL"] and not tally["unknown"]:  # a pass that ran no lint CI step proved nothing; any other line already gives the exit
+    if lint and not ran_lint and not tally["FAIL"] and not tally["unknown"] and not (sibling and told):  # a pass that ran no lint CI step proved nothing; any other line already gives the exit
         tally["unknown"] += not sibling  # a sibling job whose picked suite step CI's own if: skips proved nothing, and read nothing
         print("%-15s no lint CI step %s: %d of the job's %d steps are lint CI steps, and each one is skipped, not run, or unknown" % (
             "unknown", "would run" if dry else "ran", sum(k == "lint" for k in kind), len(steps)))
