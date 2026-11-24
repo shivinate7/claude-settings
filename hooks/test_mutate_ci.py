@@ -707,6 +707,16 @@ class ChangedTests(unittest.TestCase):
         self.assertEqual((data["killed"], data["survived"], data["crashed"]), (0, 0, 0),
                          "a mutant the budget killed is neither a kill, a survivor nor a crash")
 
+    def test_the_log_totals_add_up_when_a_mutant_runs_past_the_suite_timeout(self):
+        repo = budget_repo()
+        folder, log = fixture_log()
+        code, out, err = changed_run(repo, CHANGED, extra=["--suite-timeout", "2"], log=log, limit=2)
+        data = read_log(log)
+        self.assertIn("timeout", data, "the log has no timeout key, so a mutant past the suite timeout is not counted\n" + out)
+        self.assertGreaterEqual(data["timeout"], 1, "scope: no mutant ran past the suite timeout: %r" % data)
+        self.assertEqual(data["made"], data["killed"] + data["crashed"] + data["timeout"] + data["survived"] + data["not_run"],
+                         "made must equal killed + crashed + timeout + survived + not_run: %r" % data)
+
     def test_the_log_writes_one_json_file_and_nothing_into_the_repository(self):
         repo = partial_repo()
         before = (tree_of(repo), status_of(repo))
@@ -723,10 +733,10 @@ class ChangedTests(unittest.TestCase):
         code, out, err = changed_run(repo, CHANGED, log=log)
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
         data = read_log(log)
-        for key in ("base", "head", "profile", "made", "killed", "crashed", "survived", "not_run", "untested"):
+        for key in ("base", "head", "profile", "made", "killed", "crashed", "timeout", "survived", "not_run", "untested"):
             self.assertIn(key, data, "the log has no %s key" % key)
-        self.assertEqual(data["made"], data["killed"] + data["crashed"] + data["survived"] + data["not_run"],
-                         "made must equal killed + crashed + survived + not_run")
+        self.assertEqual(data["made"], data["killed"] + data["crashed"] + data["timeout"] + data["survived"] + data["not_run"],
+                         "made must equal killed + crashed + timeout + survived + not_run")
         killed, ran, _percent = share_of(out)
         self.assertEqual((killed, ran), (data["killed"], data["made"] - data["not_run"]),
                          "the printed share must agree with the log")

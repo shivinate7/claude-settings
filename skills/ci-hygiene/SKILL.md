@@ -213,8 +213,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     the runner). Slow legs run daily (owner item 880, 11:53 CST Nov 15). A push runs the Linux fast jobs
     only. The Windows and mutation jobs run in the one daily scheduled run, a pull request and a
     manual run. The macOS jobs run on a manual run, and on a daily that runs, never on a pull request or a push (owner,
-    01:33 CST Nov 16: "turn off all mac runs for now"). The lane-touched-tests workflow has no macOS leg either. `all-jobs-passed` does not need them. When the newest completed daily is green and `push-skip` proved every push run since it, the
-    newest at this head, the daily skips (the `nightly-skip` job). `scope` waits on that job,
+    01:33 CST Nov 16: "turn off all mac runs for now"). The lane-touched-tests workflow has no macOS leg either. `all-jobs-passed` does not need them. The daily skips (the `nightly-skip` job) only when main has not moved since the last green daily; a failed read runs everything. `scope` waits on that job,
     so nothing is cancelled.
 18. **Profile before you refactor test setup.** Compare setup time to test-body time. If the saving is
     under 20%, stop.

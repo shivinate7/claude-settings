@@ -29,7 +29,7 @@ The silent-undo check (`lint/check_silent_undo.py`) does not see these losses. I
 
 ## The log
 
-Each run uploads one artifact, `mutation-report`, with two JSON files: the report (base, head, profile, made, killed, crashed, survived, not_run, untested) and the replay verdicts. The job summary shows the catch share and the untested lines. GitHub keeps artifacts 90 days by default.
+Each run uploads one artifact, `mutation-report`, with two JSON files: the report (base, head, profile, made, killed, crashed, timeout, survived, not_run, untested) and the replay verdicts. The job summary shows the catch share and the untested lines. GitHub keeps artifacts 90 days by default.
 
 Reader: the owner, when item 163 is reopened. The read is on demand: `gh run list --workflow checks.yml --branch <batch>` and then `gh run download <run> -n mutation-report`. Nothing commits a log to the repo.
 

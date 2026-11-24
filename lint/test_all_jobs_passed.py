@@ -23,6 +23,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from test_windows_split import CHECKS, MACOS_JOBS, all_jobs, eval_with, yaml_scalar  # noqa: E402  the one home of the checks.yml path
+from test_windows_split import ALL_JOBS_PASSED_JOB, SUITE_FLAG  # noqa: E402  the one home of the rollup job name and the suite flags
 from all_jobs_passed_rules import (ALL_JOBS_PASSED_USES, all_problems, child_problems, ci_done_problems, needs_of,  # noqa: E402  the one home of the rules
                                    needs_problems, off_problems, scope_if_problems, scope_skips_problems, shape_problems, split_jobs, step_with,
                                    steps_problems, steps_part)
@@ -612,6 +613,46 @@ class ChildActionAndLayouts(unittest.TestCase):
         code, out = child_check(text)
         self.assertEqual(code, 0, "a push-only job left out of needs: exit %d, want 0: %s" % (code, out))
         self.assertEqual(child_problems(text), [], "a push-only job left out of needs has problems under child_problems")
+
+
+# The rollup side of the merge and rest flags: a shard whose suite steps skip by its flag still ends success, because its job runs. all-jobs-passed passes that result, fails a failed shard, and needs each shard. Controls: green on the old check.sh.
+class ShardsRunWithTheirFlagFalse(unittest.TestCase):
+    def setUp(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            self.text = f.read()
+        self.needed = needs_of(job_block(self.text, ALL_JOBS_PASSED_JOB)) or []
+
+    def needs_json(self, failed=None):
+        needs = {name: {"result": "success"} for name in self.needed}
+        if failed is not None:
+            needs[failed]["result"] = "failure"
+        return needs
+
+    def test_the_rollup_needs_every_merge_and_rest_shard(self):
+        missing = [name for name in SUITE_FLAG if name not in self.needed]
+        self.assertEqual(missing, [], f"all-jobs-passed does not need these shards, so their results are not in the verdict: {missing}")
+
+    def test_each_shard_job_still_runs_with_its_flag_false_on_a_ready_pull_request(self):
+        # Named failure: a job-level if that skips the shard with its flag false would make its result skipped, not success.
+        jobs = all_jobs(self.text)
+        for name, flag in SUITE_FLAG.items():
+            with self.subTest(job=name):
+                self.assertIn(name, jobs, f"{name} is not a job in checks.yml")
+                expr = jobs[name]["if"]
+                self.assertIsNotNone(expr, f"{name} has no job-level if")
+                self.assertTrue(eval_with(expr, "pull_request", {flag: "false", "records_only_skip": "false"}, default="true"),
+                                f"{name} is skipped at job level on a ready pull_request with {flag} false: if {expr}")
+
+    def test_a_green_rollup_passes_with_each_shard_success_whatever_its_steps_did(self):
+        code, out = check_sh(self.needs_json())
+        self.assertEqual(code, 0, f"the rollup fails with every job a success: {out}")
+
+    def test_a_failed_shard_fails_the_rollup(self):
+        for name in SUITE_FLAG:
+            with self.subTest(shard=name):
+                self.assertIn(name, self.needed, f"{ALL_JOBS_PASSED_JOB} does not need {name}, so its failure is no verdict")
+                code, out = check_sh(self.needs_json(failed=name))
+                self.assertNotEqual(code, 0, f"a failed {name} passes the rollup: {out}")
 
 
 if __name__ == "__main__":

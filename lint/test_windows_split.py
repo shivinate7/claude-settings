@@ -40,8 +40,25 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 from workflow_steps import CHECKS_SUITE_JOBS, gating_text, job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
+from test_install_src_shards import list_cases  # noqa: E402  the one home of the install suite's case selection (--list)
 CHECKS = os.environ.get("CHECKS_YML") or os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
 MIN_JOBS = 3
+
+# The shard count of each split suite: the one home of the counts. A family is its base job and `<base>-2` to `<base>-<n>`, one job
+# per shard, each full step carrying its shard value (`<VAR>: <i>/<n>`, i = 1..n). Adding a shard means bumping its count here and
+# adding the job: ShardFamilies fails until checks.yml holds both.
+SHARD_COUNTS = {"checks-windows-merge": 10, "checks-windows-guard": 5, "checks-guard": 4, "checks-install-checkout": 3}
+
+
+def family(base):
+    """The job names of one shard family, base first: `base`, `base-2` ... `base-<n>`, with n from SHARD_COUNTS."""
+    return tuple([base] + [f"{base}-{i}" for i in range(2, SHARD_COUNTS[base] + 1)])
+
+
+WINDOWS_MERGE_JOBS = family("checks-windows-merge")
+WINDOWS_GUARD_JOBS = family("checks-windows-guard")
+LINUX_GUARD_JOBS = family("checks-guard")
+INSTALL_JOBS = family("checks-install-checkout")
 
 # The run commands of the old single `checks-windows` job. Edit here only on purpose.
 REQUIRED = [
@@ -82,7 +99,7 @@ LINUX_SPLIT = CHECKS_SUITE_JOBS
 LINUX_CODE = "needs.scope.outputs.code == 'true'"
 LINUX_CODE_SWEEP = f"{LINUX_CODE} && needs.scope.outputs.sweep == 'true'"
 LINUX_SWEEP = "needs.scope.outputs.sweep == 'true'"
-LINUX_MODS = "!cancelled() && needs.scope.outputs.mods == 'true'"
+LINUX_MODS = "needs.scope.outputs.mods == 'true'"  # its keep-running guard comes off before the pin reads it (keep_running_off)
 # The scope condition on a step that reads no .md file, unwrapped as unwrap() reads an `if:`. lint/test_checks_step_scope.py pins which steps take it.
 NO_MD_SCOPE_CONDITION = "needs.scope.outputs.code == 'true' || github.event_name != 'pull_request'"
 # The scope condition of a step that reads the doc groups in `groups` (ci-scope.sh's doc_<group> flags): code, those flags, and a
@@ -243,7 +260,6 @@ LINUX_SUITES = {
     "python3 merge/test_lost_work.py": (LINUX_CODE, None),
     "python3 merge/test_holds_head.py": (LINUX_CODE, None),
     "sh merge/test_install_from_main.sh": (LINUX_CODE, None),
-    "sh hooks/test_install_src.sh": (LINUX_CODE, None),
     "sh hooks/test_cloud_setup.sh": (LINUX_CODE, None),
     "bash .github/scripts/mod-tests.sh": (LINUX_MODS, "bash"),
 }
@@ -265,14 +281,12 @@ MACOS_JOBS = ("shell-macos", "checks-macos", "checks-macos-b")
 # The one R61 list of jobs a push starts no runner for (owner page item 880, 11:53 CST Nov 15): the macOS jobs, every Windows job and
 # every mutation job. The daily scheduled run runs them. Each job keeps `github.event_name != 'push'` as its job-level if; a shard also
 # keeps the draft guard (SHARD_JOB_IF). Linux fast jobs are every other ubuntu job (the default reading of item 880).
-WINDOWS_PUSH_OFF_JOBS = ("pointer-windows", "checks-windows", "checks-windows-guard", "checks-windows-guard-2", "checks-windows-guard-3",
-                         "checks-windows-merge", "checks-windows-merge-2", "checks-windows-merge-3", "checks-windows-merge-4",
-                         "checks-windows-merge-5", "checks-windows-sweep", "checks-windows-rest", "checks-windows-rest-2")
+WINDOWS_PUSH_OFF_JOBS = ("pointer-windows", "checks-windows", *WINDOWS_GUARD_JOBS, *WINDOWS_MERGE_JOBS,
+                         "checks-windows-sweep", "checks-windows-rest", "checks-windows-rest-2")
 MUTATE_PUSH_OFF_JOBS = ("checks-mutate-guard", "checks-mutate-guard-b", "checks-mutate-guard-c", "mutation-report")
 PUSH_OFF_JOBS = MACOS_JOBS + WINDOWS_PUSH_OFF_JOBS + MUTATE_PUSH_OFF_JOBS
 # The shards whose job-level if keeps the draft guard with the push guard (SHARD_JOB_IF). rest-2 has the push guard alone, no draft guard.
-PUSH_OFF_SHARDS = ("checks-windows-guard-2", "checks-windows-guard-3", "checks-windows-merge-2", "checks-windows-merge-3",
-                   "checks-windows-merge-4", "checks-windows-merge-5")
+PUSH_OFF_SHARDS = WINDOWS_GUARD_JOBS[1:] + WINDOWS_MERGE_JOBS[1:]
 # R61 part 3: the 03:17 nightly's skip job, and the one scope output it reads (the skip job's output).
 NIGHTLY_SKIP_JOB = "nightly-skip"
 PUSH_SKIP_JOB = "push-skip"
@@ -403,7 +417,7 @@ WAITING_PAGE_JOB = "checks-waiting-page"
 ROADMAP_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/roadmap/tests/page.test.mjs'
 # The scope flag each job skips on when the flag is not its own name.
 FLAG_OF = {GUARD_JOB: "guard", MUTATE_JOB: "guard", SHOOT_JOB: "shoot", "checks-macos-b": "checks_macos",
-           "checks-guard-2": "checks_guard"}
+           **{name: "checks_guard" for name in LINUX_GUARD_JOBS[1:]}}
 FLAG_OF[WAITING_PAGE_JOB] = "shoot"
 FLAG_OF.update({name: "guard" for name in MUTATE_JOBS})
 # The lint jobs run on every PR with no scope condition: the Linux jobs, read from their one home CHECKS_SUITE_JOBS.
@@ -473,8 +487,9 @@ SHELL = {"sh hooks/test_install_windows.sh": "bash", "bash actions/stamp/test_ac
 # pull_request included, and on its scope flag.
 IF_PIN = {"python janitor/mutate_sweep.py":
           "${{ !cancelled() && needs.scope.outputs.sweep == 'true' }}",
-          # The full merge suite runs on a ready pull_request whatever the flags say, and on push when code changed (R62).
-          "python merge/test_merge.py": "${{ !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}",
+          # The full merge suite runs on a ready pull_request when its own flag is set, and on push when code changed (R62). Each
+          # merge shard's step carries this text.
+          "python merge/test_merge.py": "${{ !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request') }}",
           # The full guard suite: the same rule as the merge suite (R62), and the guard-inputs gate: a diff that touches no guard input
           # (windows_guard, .github/guard-inputs.txt) runs no guard shard, a ready pull_request included. No slice step.
           GUARD_CMD: "${{ !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && needs.scope.outputs.windows_guard == 'true' }}"}
@@ -529,9 +544,7 @@ def unwrap(raw):
 #   SPLIT_CONDITIONED_JOBS: only the run steps named by scope_named_steps(), each with the scope condition as its if:. Its doc steps take none.
 #   UNCONDITIONED_JOBS: no run step.
 RECORDS_ONLY_CONDITION = "needs.scope.outputs.records_only_skip != 'true'"
-CONDITIONED_JOBS = ("checks-windows-guard", "checks-windows-guard-2", "checks-windows-guard-3", "checks-windows-merge",
-              "checks-windows-merge-2", "checks-windows-merge-3", "checks-windows-merge-4", "checks-windows-merge-5",
-              "checks-windows-rest", "checks-windows-rest-2")
+CONDITIONED_JOBS = WINDOWS_GUARD_JOBS + WINDOWS_MERGE_JOBS + ("checks-windows-rest", "checks-windows-rest-2")
 SPLIT_CONDITIONED_JOBS = ("checks-hooks", "checks-rest")
 UNCONDITIONED_JOBS = ("checks",)
 SPEC_JOBS = CONDITIONED_JOBS + SPLIT_CONDITIONED_JOBS + UNCONDITIONED_JOBS
@@ -552,6 +565,43 @@ def drop_condition(expr):
         return None
     m = re.fullmatch(rf"\((.+)\) && {re.escape(RECORDS_ONLY_CONDITION)}", expr or "")
     return m.group(1) if m else expr
+
+
+# The keep-running guard on each step of the checks job after its checkout, setup and tools install: a failed step stops none after
+# it. KeepRunningAfterFailure reads the guard on checks.yml. A pin reads the condition after it.
+KEEP_RUNNING = "!cancelled()"
+
+
+def keep_running_off(raw):
+    """A step's raw `if:` (with its `${{ }}`) without the keep-running guard. `${{ !cancelled() && E }}` gives `${{ E }}`, and
+    `${{ !cancelled() }}` gives None, the no-if: default. When E is one `||` condition in the parentheses the build wrapped it in,
+    that pair comes off too: `${{ !cancelled() && (A || B) }}` gives `${{ A || B }}`. Nothing else comes off. A `||` after the guard
+    with no parentheses is no keep-running condition, so raw comes back whole and the pin fails on it. A step without the guard
+    comes back whole too: KeepRunningAfterFailure names that step."""
+    e = unwrap(raw)
+    if raw is None or not raw.lstrip().startswith("${{") or not e.startswith(KEEP_RUNNING):
+        return raw
+    rest = e[len(KEEP_RUNNING):]
+    if rest == "":
+        return None
+    if not rest.startswith(" && "):
+        return raw
+    rest = rest[len(" && "):]
+    if rest.startswith("(") and _pair_closes_at_end(rest) and top_level_or(rest[1:-1]):
+        rest = rest[1:-1].strip()
+    elif top_level_or(rest):
+        return raw
+    return "${{ %s }}" % rest
+
+
+# The only if: a checks-job step may carry is the keep-running guard alone, which never skips the step on a normal run. Any other if: can
+# skip it, and a skipped step then reads as passing. The CiWiring pins of the fixture suites read this one home.
+KEEP_RUNNING_IF = "${{ %s }}" % KEEP_RUNNING
+
+
+def only_keep_running_if(step):
+    """True when a checks-job step has no if:, or exactly the keep-running condition. Any other if: fails the pin."""
+    return "if" not in step or step["if"] == KEEP_RUNNING_IF
 
 
 def step_if(st):
@@ -719,9 +769,14 @@ def draft_guard_only(expr):
         return False
 
 
-# R62: the full Windows suite runs on a ready pull_request whatever the flags say. Its steps carry the draft guard, bare (checkout and
-# setup) or as `(draft guard) && E`. A suite step's E reads code at most, the push condition, and never the job's own flag.
+# The full Windows suite's steps carry the draft guard, bare (checkout and setup) or as `(draft guard) && E`. The guard suite's E reads
+# code and windows_guard. The merge and rest suites' E reads code (merge) and their own flag (SUITE_FLAG): a ready pull_request runs
+# them only with that flag set.
 DRAFT_GUARD = "github.event_name != 'pull_request' || !github.event.pull_request.draft"
+# Each merge and rest job's scope output, read by its suite steps as the gated Windows jobs read theirs (checks-windows reads
+# checks_windows). checks-windows-rest-2 reads its own output, which repeats checks_windows_rest's value.
+SUITE_FLAG = {**{name: "checks_windows_merge" for name in WINDOWS_MERGE_JOBS}, "checks-windows-rest": "checks_windows_rest",
+              "checks-windows-rest-2": "checks_windows_rest_2"}
 SWEEP_STEP_CMDS = ("python3 janitor/mutate_sweep.py", "python janitor/mutate_sweep.py")
 SWEEP_JOBS = ("checks-macos", "checks-windows-sweep")
 
@@ -733,8 +788,8 @@ def sweep_union(own):
 
 def full_suite_problems(name, job):
     """R62 for a full-suite job (full_suite_job). Every step carries the draft guard, bare or as `(draft guard) && E`. A suite
-    step keeps !cancelled(), and its E reads code at most (the push condition on the steps that have one). No step reads the job's
-    own flag: a ready pull_request runs the suite whatever the flags say."""
+    step keeps !cancelled(), and its E reads code (the push condition on the steps that have one), the guard family's windows_guard,
+    and the merge and rest job's own flag (SUITE_FLAG), and no other scope flag."""
     problems = []
     for st in job["steps"]:
         expr = step_if(st)
@@ -750,8 +805,11 @@ def full_suite_problems(name, job):
         flags = set(re.findall(r"needs\.scope\.outputs\.(\w+)", rest))
         if name in (GUARD_JOB, "checks-windows-merge") and "code" not in flags:
             problems.append(f"{name}: step {label} does not read code, so a push runs the suite with no code change: {expr}")
-        # The guard family (the base and its shards) also reads windows_guard, the guard-inputs gate. No other suite reads it.
-        want = {"code", "windows_guard"} if (shard_base(name) or name) == GUARD_JOB else {"code"}
+        # The guard family (the base and its shards) also reads windows_guard, the guard-inputs gate. Merge and rest read their own flag.
+        if (shard_base(name) or name) == GUARD_JOB:
+            want = {"code", "windows_guard"}
+        else:
+            want = {"code", SUITE_FLAG[name]} if name in SUITE_FLAG else {"code"}
         if flags - want:
             problems.append(f"{name}: step {label} reads scope flags {sorted(flags - want)}, want only {sorted(want)}: {expr}")
     return problems
@@ -1017,9 +1075,11 @@ def split_homes(text, jobs, cmd):
     return [(job, st) for job in jobs for st in step_blocks(job_block(text, job)) if cmd in run_lines(st)]
 
 
-def pin_problems(name, st, cmd, want_if, want_shell, want_env=None):
-    """A suite's step keeps the `if:` and `shell:` pinned for it, and its env: none, or the shard value (want_env)."""
-    got_if, got_env = drop_condition(unwrap(step_key(st, "if"))), step_env(st)
+def pin_problems(name, st, cmd, want_if, want_shell, want_env=None, keep_running=False):
+    """A suite's step keeps the `if:` and `shell:` pinned for it, and its env: none, or the shard value (want_env). With keep_running,
+    the step is a checks-job step: its keep-running guard comes off before the pin reads it (keep_running_off)."""
+    raw_if = keep_running_off(step_key(st, "if")) if keep_running else step_key(st, "if")
+    got_if, got_env = drop_condition(unwrap(raw_if)), step_env(st)
     problems = []
     if got_if != want_if:
         problems.append(f"{name}: {cmd!r} if is {got_if!r}, want {want_if!r}")
@@ -1036,15 +1096,34 @@ def job_env_problems(text, jobs):
             if re.search(r"^    env:", job_block(text, j) or "", re.M)]
 
 
+INSTALL_CMD = "sh hooks/test_install_src.sh"
+INSTALL_SHARD_VAR = "INSTALL_SRC_SHARD"
+
+
+def install_shard_problems(text):
+    """The install.sh checkout-detection suite runs once in each INSTALL_JOBS shard, each step with its INSTALL_SRC_SHARD=i/n value and
+    the Linux code `if:`. Named failure: a case that runs in two shards, or in none, because a shard value is missing or repeated."""
+    homes = split_homes(text, INSTALL_JOBS, INSTALL_CMD)
+    names = sorted(job for job, _ in homes)
+    if names != sorted(INSTALL_JOBS):
+        return [f"{INSTALL_CMD!r} runs in {names}, want one shard in each of {sorted(INSTALL_JOBS)}"]
+    problems = []
+    for job, st in homes:
+        value = f"{INSTALL_JOBS.index(job) + 1}/{len(INSTALL_JOBS)}"
+        problems += pin_problems(job, st, INSTALL_CMD, LINUX_CODE, None, {INSTALL_SHARD_VAR: value}, keep_running=True)
+    return problems
+
+
 def linux_split_problems(text):
-    """Each LINUX_SUITES command runs in exactly one LINUX_SPLIT job, with the `if:` and `shell:` pinned for it."""
+    """Each LINUX_SUITES command runs in exactly one LINUX_SPLIT job, with the `if:` and `shell:` pinned for it. The install suite
+    is no LINUX_SUITES row: its shard family is install_shard_problems'."""
     problems = job_env_problems(text, LINUX_SPLIT)
     for cmd, (want_if, want_shell) in LINUX_SUITES.items():
         homes = split_homes(text, LINUX_SPLIT, cmd)
         if len(homes) != 1:
             problems.append(f"{cmd!r} runs {len(homes)} times in {LINUX_SPLIT}: {[j for j, _ in homes]}")
         else:
-            problems += pin_problems(homes[0][0], homes[0][1], cmd, want_if, want_shell)
+            problems += pin_problems(homes[0][0], homes[0][1], cmd, want_if, want_shell, keep_running=True)
     return problems
 
 
@@ -1112,9 +1191,9 @@ def shoot_doc(lint_run="ruff", install_if=SHOOT_IF, suite_if=SHOOT_IF, suite_run
             + f"      - name: shoot fixture suite\n{suite}        run: {suite_run}\n" + roadmap + shoot_extra + waiting)
 
 
-# The Linux guard split: the guard suite runs in two shards, one per job, each with its GUARD_SHARD value. Each shard step is
+# The Linux guard split: the guard suite runs in the LINUX_GUARD_JOBS shards, one per job, each with its GUARD_SHARD value. Each shard step is
 # pinned as the macOS guard shards are: the scope `if:`, no shell, and the suite's own env plus its shard value.
-LINUX_GUARD_SHARD = {"checks-guard": "1/2", "checks-guard-2": "2/2"}
+LINUX_GUARD_SHARD = {name: f"{i}/{len(LINUX_GUARD_JOBS)}" for i, name in enumerate(LINUX_GUARD_JOBS, 1)}
 LINUX_GUARD = "python3 hooks/test_guard.py"
 LINUX_GUARD_IF = "needs.scope.outputs.checks_guard == 'true' || github.event_name != 'pull_request'"
 LINUX_GUARD_ENV = {"NODE_PATH": "${{ github.workspace }}/.github/shoot/node_modules", "GUARD_CHROMIUM": '"1"'}
@@ -1345,12 +1424,14 @@ class WindowsSplit(unittest.TestCase):
     def test_a_comment_that_names_a_shard_value_is_no_home(self):
         # Rows: a full-line comment, a trailing comment on a shard key, and a comment after a lone apostrophe.
         # Named failure: a comment that names GUARD_SHARD counts as a shard home, so checks.yml goes red for a comment.
-        self.assertIn("          GUARD_SHARD: 1/2\n", self.text)  # the fixture: a full step's shard key
+        # The value is the live first shard of the Linux guard, so a new shard count does not stale it.
+        shard = LINUX_GUARD_SHARD["checks-guard"]
+        key = f"          GUARD_SHARD: {shard}\n"
+        self.assertIn(key, self.text)  # the fixture: a full step's shard key
         cases = {
-            "a full-line comment": self.text + "# GUARD_SHARD=1/2 sets the shard on the full step only\n",
-            "a trailing comment on a shard key": self.text.replace("          GUARD_SHARD: 1/2\n",
-                                                                  "          GUARD_SHARD: 1/2  # GUARD_SHARD\n", 1),
-            "a comment after a lone apostrophe": self.text + "      - run: echo Don't # GUARD_SHARD=1/2\n",
+            "a full-line comment": self.text + f"# GUARD_SHARD={shard} sets the shard on the full step only\n",
+            "a trailing comment on a shard key": self.text.replace(key, f"          GUARD_SHARD: {shard}  # GUARD_SHARD\n", 1),
+            "a comment after a lone apostrophe": self.text + f"      - run: echo Don't # GUARD_SHARD={shard}\n",
         }
         baseline = hardening_problems(self.text)  # a comment changes no verdict, whatever the file's own verdict is
         for label, text in cases.items():
@@ -1409,7 +1490,8 @@ class WindowsSplit(unittest.TestCase):
                     good.replace("    steps:\n", "    steps:\n      - run: echo MERGE_TESTS=windows-slice >> $GITHUB_ENV\n")):
             self.assertTrue(any("MERGE_TESTS appears 1 times" in p for p in hardening_problems(bad)), bad)
         self.assertTrue(hardening_problems(doc(full=full_e.replace("needs.scope.outputs.code == 'true' || ", ""))))  # the push condition dropped
-        self.assertTrue(any("reads scope flags" in p for p in hardening_problems(doc(full=full_e.replace("outputs.code", "outputs.checks_windows_merge")))))  # own flag read
+        # A merge suite step may read its own flag, but not another job's.
+        self.assertTrue(any("reads scope flags" in p for p in hardening_problems(doc(full=full_e.replace("outputs.code", "outputs.checks_windows")))))
 
     def test_checker_sees_the_shard_defects(self):
         scope_condition = DRAFT_GUARD  # R62: the base job's steps carry the draft guard, and the code condition rides in the full step
@@ -1448,7 +1530,7 @@ class WindowsSplit(unittest.TestCase):
             "n disagrees": doc(base, job("checks-windows-guard-2", "2/2"), job("checks-windows-guard-3", "3/3")),
             "a slice step left in the base job": doc(job("checks-windows-guard", "1/3", base=True, slice_=True),
                                                      job("checks-windows-guard-2", "2/3"), job("checks-windows-guard-3", "3/3")),
-            "a lone shard": doc(job("checks-windows-guard", "1/2", base=True, slice_=True)),
+            "a lone shard": doc(job("checks-windows-guard", "1/3", base=True, slice_=True)),
             "a stray job name": doc(base, job("checks-windows-guard-2", "2/3"), job("checks-windows-rest", "3/3")),
         }
         for label, text in bad.items():
@@ -1556,10 +1638,12 @@ def linux_guard_shard(value, if_=LINUX_GUARD_IF, shell=None, env=None):
 
 
 def linux_guard_doc(a=None, b=None, extra=None):
-    """checks.yml text for the planned Linux guard split: checks-guard runs shard 1/2 and checks-guard-2 shard 2/2. The step
-    lists a and b replace those jobs' steps, and extra jobs are added as given."""
-    jobs = {"checks-guard": ("ubuntu-latest", [linux_guard_shard("1/2")] if a is None else a),
-            "checks-guard-2": ("ubuntu-latest", [linux_guard_shard("2/2")] if b is None else b)}
+    """checks.yml text for the planned Linux guard split: every LINUX_GUARD_JOBS shard runs its GUARD_SHARD value from
+    LINUX_GUARD_SHARD. The step lists a and b replace checks-guard's and checks-guard-2's steps, and extra jobs are added as given."""
+    jobs = {name: ("ubuntu-latest", [linux_guard_shard(LINUX_GUARD_SHARD[name])]) for name in LINUX_GUARD_JOBS}
+    jobs["checks-guard"] = ("ubuntu-latest", [linux_guard_shard(LINUX_GUARD_SHARD["checks-guard"])] if a is None else a)
+    if b is not None:
+        jobs["checks-guard-2"] = ("ubuntu-latest", b)
     return split_doc({**jobs, **(extra or {})})
 
 
@@ -1607,6 +1691,8 @@ class SplitJobs(unittest.TestCase):
 
     def test_each_linux_suite_runs_once_in_its_split(self):
         self.assertEqual(linux_split_problems(self.text), [])
+        # The install suite runs once in each of its counted shard jobs, not once in the split (SHARD_COUNTS).
+        self.assertEqual(install_shard_problems(self.text), [])
         linux_conditioned = [n for n in SPEC_JOBS if n in LINUX_SPLIT]
         self.assertEqual(condition_problems(self.text, linux_conditioned), [], "a Linux split job's run step does not carry the records-only condition the spec gives it")
 
@@ -1719,7 +1805,7 @@ class SplitJobs(unittest.TestCase):
                     "        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}\n"
                     "        run: python3 lint/check_unknown_reads_contract.py\n")
         linux_step = ("      - name: Unknown-read contract (guard + session_start)\n"
-                      "        if: ${{ needs.scope.outputs.code == 'true' }}\n"
+                      "        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}\n"
                       "        run: python3 lint/check_unknown_reads_contract.py\n")
         self.assertIn(mac_step, self.text)  # the fixture: checks-macos runs the check
         self.assertIn(linux_step, self.text)  # the fixture: checks runs the check
@@ -1735,8 +1821,9 @@ class SplitJobs(unittest.TestCase):
             with self.subTest(defect=label):
                 self.assertTrue([p for p in check(text) if "check_unknown_reads_contract" in p], label)
 
-    def test_the_linux_guard_runs_in_its_two_shard_jobs(self):
-        # Named failure: the guard suite runs in one Linux job, or in a third, or in neither, so its cases do not each run once.
+    def test_the_linux_guard_runs_in_its_counted_shard_jobs(self):
+        # Named failure: the guard suite runs in one Linux job, or in more or fewer than LINUX_GUARD_JOBS, or in neither, so its cases
+        # do not each run once.
         self.assertEqual(linux_guard_split_problems(self.text), [])
 
     def test_the_linux_guard_shards_install_playwright(self):
@@ -1745,21 +1832,23 @@ class SplitJobs(unittest.TestCase):
 
     def test_checker_sees_the_linux_guard_split_defects(self):
         self.assertEqual(linux_guard_split_problems(linux_guard_doc()), [])  # the control: the planned split passes
+        # Each row carries the live first shard value, so a row is flagged only for its own defect, not for a wrong total.
+        first = LINUX_GUARD_SHARD["checks-guard"]
         bad = {
-            "the second shard missing": split_doc({"checks-guard": ("ubuntu-latest", [linux_guard_shard("1/2")])}),
+            "the second shard missing": split_doc({"checks-guard": ("ubuntu-latest", [linux_guard_shard(first)])}),
             "the second shard's value dropped": linux_guard_doc(b=[(LINUX_GUARD, LINUX_GUARD_IF, None, dict(LINUX_GUARD_ENV))]),
-            "both shards 1/2": linux_guard_doc(b=[linux_guard_shard("1/2")]),
-            "a third Linux job runs the guard": linux_guard_doc(
-                extra={"checks-guard-3": ("ubuntu-latest", [linux_guard_shard("1/2")])}),
+            "both shards carry the first value": linux_guard_doc(b=[linux_guard_shard(first)]),
+            "a fifth Linux job runs the guard": linux_guard_doc(
+                extra={f"checks-guard-{len(LINUX_GUARD_JOBS) + 1}": ("ubuntu-latest", [linux_guard_shard(first)])}),
             "the guard in neither shard job": linux_guard_doc(a=[], b=[]),
             "no job at all": "jobs:\n",
             "GUARD_SHARD in a job's env": linux_guard_doc().replace(
-                "    needs: scope\n    steps:", "    needs: scope\n    env:\n      GUARD_SHARD: 1/2\n    steps:", 1),
+                "    needs: scope\n    steps:", f"    needs: scope\n    env:\n      GUARD_SHARD: {first}\n    steps:", 1),
             "the shard's if changed": linux_guard_doc(a=[linux_guard_shard(
-                "1/2", if_="needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request'")]),
-            "the shard's if dropped": linux_guard_doc(a=[linux_guard_shard("1/2", if_=None)]),
-            "a shell added to a shard": linux_guard_doc(a=[linux_guard_shard("1/2", shell="bash")]),
-            "the suite's env changed": linux_guard_doc(a=[linux_guard_shard("1/2", env={"GUARD_CHROMIUM": '"0"'})]),
+                first, if_="needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request'")]),
+            "the shard's if dropped": linux_guard_doc(a=[linux_guard_shard(first, if_=None)]),
+            "a shell added to a shard": linux_guard_doc(a=[linux_guard_shard(first, shell="bash")]),
+            "the suite's env changed": linux_guard_doc(a=[linux_guard_shard(first, env={"GUARD_CHROMIUM": '"0"'})]),
         }
         for label, text in bad.items():
             with self.subTest(defect=label):
@@ -2026,7 +2115,7 @@ def _pair_closes_at_end(e):
 
 def top_level_conjuncts(expr):
     """The `&&` parts of an `if:` at the top level: outside quotes and parentheses. A status function inside a quoted string or
-    under an `||` is not one of them."""
+    under an `||` is not one of them. A top-level `||` binds loosest: the whole expression is one part."""
     e = unwrap(expr) or ""
     while e.startswith("(") and e.endswith(")") and _pair_closes_at_end(e):  # one pair around all of the expression
         e = e[1:-1].strip()
@@ -2040,6 +2129,8 @@ def top_level_conjuncts(expr):
                 depth += 1
             elif ch == ")":
                 depth -= 1
+            elif depth == 0 and e.startswith("||", i):
+                return [e.strip()]
             elif depth == 0 and e.startswith("&&", i):
                 parts.append(e[start:i].strip())
                 start = i + 2
@@ -2451,10 +2542,10 @@ class ReadyPullShards(unittest.TestCase):
 
 
 class ReadyPullFullSuite(unittest.TestCase):
-    """R62, "each suite once per batch, on the batch PR", with its lean: the Windows merge and rest jobs run on a ready pull_request
-    whatever the scope flags say. The guard shards run there too, but only with windows_guard set (the guard-inputs gate). A draft
-    pull_request with no flag set runs none of their steps, and a shard's draft guard stays on its job. Push, schedule and dispatch
-    keep their flag rules. Each case reads the real file."""
+    """R62, "each suite once per batch, on the batch PR", with its lean: a ready pull_request runs the Windows merge and rest suites
+    when their own scope flag is set. The guard shards run there when windows_guard is set (the
+    guard-inputs gate). A draft pull_request with no flag set runs none of their steps, and a shard's draft guard stays on its job.
+    Push, schedule and dispatch keep their flag rules. Each case reads the real file."""
 
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
@@ -2469,13 +2560,17 @@ class ReadyPullFullSuite(unittest.TestCase):
         return names
 
     # R62 re-pointed for windows_guard: the owner granted the narrowing (waiting-page item 901 a, 18:20 CST Nov 15).
-    def test_a_docs_only_ready_pull_request_runs_every_step_of_the_full_suite_jobs(self):
-        # Named failure: a step of a full-suite job is conditioned on a scope flag or on code, which a docs-only PR leaves false.
-        # The guard shards read windows_guard, so this case sets it true; the sibling case below sets it false.
+    def test_a_ready_pull_request_with_each_suite_flag_set_runs_every_step_of_the_full_suite_jobs(self):
+        # Named failure: a step of a full-suite job is conditioned on a scope flag other than its own, or on code, which a docs-only PR
+        # leaves false. The guard shards read windows_guard, and the merge and rest suites read their own flag (SUITE_FLAG), so this
+        # case sets each one true; the sibling case below sets the guard's false.
         # The records-only condition is the one a ready pull_request does not meet: with it shut, no run step runs.
         for name in self.suite_jobs():
             job = self.jobs[name]
-            values = {"windows_guard": "true"} if (shard_base(name) or name) == GUARD_JOB else {}
+            if (shard_base(name) or name) == GUARD_JOB:
+                values = {"windows_guard": "true"}
+            else:
+                values = {SUITE_FLAG[name]: "true"} if name in SUITE_FLAG else {}
             for st in job["steps"]:
                 with self.subTest(job=name, step=step_label(st)):
                     self.assertTrue(runs_with_values(job, st, "pull_request", values),
@@ -3550,6 +3645,150 @@ class CiCoverageCollector(unittest.TestCase):
         self.assertIsNotNone(error, "the scan passed although the collector exits 3; a failed collector must fail it")
         self.assertNotIsInstance(error, AssertionError, "a failed collector reads as a gap report, not as an error")
         self.assertRegex(str(error), r"\b3\b", "the collector's error does not name its exit code 3: %s" % error)
+
+
+class KeepRunningOff(unittest.TestCase):
+    """keep_running_off strips exactly `!cancelled() && ` from the start of a checks-job step's `if:`, and one pair of parentheses
+    around a `||` condition. Each case is one `if:` as checks.yml writes it."""
+
+    OR_CONDITION = NO_MD_SCOPE_CONDITION
+
+    def test_the_guard_comes_off_a_plain_condition(self):
+        self.assertEqual(keep_running_off("${{ !cancelled() && needs.scope.outputs.code == 'true' }}"),
+                         "${{ needs.scope.outputs.code == 'true' }}")
+
+    def test_a_bare_guard_is_the_no_if_default(self):
+        self.assertIsNone(keep_running_off("${{ !cancelled() }}"))
+
+    def test_one_pair_around_an_or_condition_comes_off(self):
+        self.assertEqual(keep_running_off("${{ !cancelled() && (%s) }}" % self.OR_CONDITION), "${{ %s }}" % self.OR_CONDITION)
+
+    def test_only_the_outer_pair_comes_off(self):
+        self.assertEqual(keep_running_off("${{ !cancelled() && ((x) || (y)) }}"), "${{ (x) || (y) }}")
+
+    def test_an_or_without_parentheses_stays_whole(self):
+        # `!cancelled() && A || B` reads as `(!cancelled() && A) || B`: the guard is no top-level conjunct, so the text stays whole.
+        raw = "${{ !cancelled() && A || B }}"
+        self.assertEqual(keep_running_off(raw), raw)
+
+    def test_a_first_pair_that_does_not_close_at_the_end_is_no_wrapper(self):
+        raw = "${{ !cancelled() && (A) && (B || C) }}"
+        self.assertEqual(keep_running_off(raw), "${{ (A) && (B || C) }}")
+
+    def test_a_guard_under_an_or_is_no_guard(self):
+        raw = "${{ !cancelled() || needs.scope.outputs.checks_macos == 'true' }}"
+        self.assertEqual(keep_running_off(raw), raw)
+
+    def test_a_guard_that_does_not_lead_is_no_guard(self):
+        raw = "${{ needs.scope.outputs.code == 'true' && !cancelled() }}"
+        self.assertEqual(keep_running_off(raw), raw)
+
+    def test_a_step_without_the_guard_comes_back_whole(self):
+        raw = "${{ %s }}" % self.OR_CONDITION
+        self.assertEqual(keep_running_off(raw), raw)
+        self.assertIsNone(keep_running_off(None))
+
+    def test_guard_text_inside_quotes_is_no_guard(self):
+        raw = "${{ x == '!cancelled() && y' }}"
+        self.assertEqual(keep_running_off(raw), raw)
+
+
+# ---- More shards: the shard count of each split suite, pinned against checks.yml. SHARD_COUNTS is the one home of each count.
+# ShardFamilies reads checks.yml, so it is red until the workflow holds the counts. ShardControls reads only the install suite's
+# own case selection, so it stays green.
+MERGE_CMD = "python merge/test_merge.py"
+MERGE_VAR = "MERGE_SHARD"
+GUARD_VAR = "GUARD_SHARD"
+INSTALL_VAR = "INSTALL_SRC_SHARD"
+# (suite, its step's run line, its shard variable, the family of jobs that must hold its shards)
+SHARD_SUITES = (
+    ("windows merge", MERGE_CMD, MERGE_VAR, WINDOWS_MERGE_JOBS),
+    ("windows guard", GUARD_CMD, GUARD_VAR, WINDOWS_GUARD_JOBS),
+    ("linux guard", LINUX_GUARD, GUARD_VAR, LINUX_GUARD_JOBS),
+    ("install checkout-detection", INSTALL_CMD, INSTALL_VAR, INSTALL_JOBS),
+)
+
+
+def shard_env(text, cmd, var):
+    """{job: value} of each job with a step that runs `cmd` and sets `var` in its env. A job with no such step is absent."""
+    found = {}
+    for name, job in all_jobs(text).items():
+        for st in job["steps"]:
+            env = st.get("env") if isinstance(st.get("env"), dict) else {}
+            if key(st) == cmd and var in env:
+                found[name] = env[var]
+    return found
+
+
+def expected_values(family):
+    """{job: "i/n"} for the family in shard order: the value each shard job must carry."""
+    return {job: f"{i}/{len(family)}" for i, job in enumerate(family, 1)}
+
+
+class ShardFamilies(unittest.TestCase):
+    def setUp(self):
+        from all_jobs_passed_rules import needs_of  # noqa: E402  imported here: all_jobs_passed_rules imports this module
+        with open(CHECKS, encoding="utf-8") as f:
+            self.text = f.read()
+        self.needs = needs_of(job_block(self.text, ALL_JOBS_PASSED_JOB)) or []
+        self.ci_done = needs_of(job_block(self.text, "ci-done")) or []
+
+    def test_windows_merge_runs_in_the_counted_shard_jobs(self):
+        # Named failure: the merge suite runs in fewer shard jobs than the counted total, so its cases past the last shard never run.
+        self.assertEqual(shard_env(self.text, MERGE_CMD, MERGE_VAR), expected_values(WINDOWS_MERGE_JOBS))
+
+    def test_windows_guard_runs_in_the_counted_shard_jobs(self):
+        self.assertEqual(shard_env(self.text, GUARD_CMD, GUARD_VAR), expected_values(WINDOWS_GUARD_JOBS))
+
+    def test_linux_guard_runs_in_the_counted_shard_jobs(self):
+        self.assertEqual(shard_env(self.text, LINUX_GUARD, GUARD_VAR), expected_values(LINUX_GUARD_JOBS))
+
+    def test_install_checkout_detection_runs_in_the_counted_shard_jobs(self):
+        # Named failure: the install suite runs whole in one job, so its 27.9 min case list is still one job's cap.
+        self.assertEqual(shard_env(self.text, INSTALL_CMD, INSTALL_VAR), expected_values(INSTALL_JOBS))
+
+    def test_each_shard_total_is_the_number_of_jobs_that_run_the_suite(self):
+        # The one place: the `/n` of every shard value is the count of jobs that run the suite, and that count is SHARD_COUNTS.
+        for label, cmd, var, family in SHARD_SUITES:
+            with self.subTest(suite=label):
+                got = shard_env(self.text, cmd, var)
+                self.assertEqual(len(got), len(family), f"{label}: {len(got)} jobs run it, want {len(family)}: {sorted(got)}")
+                self.assertEqual({v.split("/")[1] for v in got.values()}, {str(len(family))},
+                                 f"{label}: a shard total differs from the job count {len(family)}: {got}")
+
+    def test_all_jobs_passed_needs_every_shard_job(self):
+        # Named failure: a shard job is missing from all-jobs-passed's needs, so its red cannot block the merge.
+        for label, _, _, family in SHARD_SUITES:
+            for job in family:
+                with self.subTest(suite=label, job=job):
+                    self.assertIn(job, self.needs, f"{ALL_JOBS_PASSED_JOB} does not need {job}: {self.needs}")
+
+    def test_ci_done_needs_every_shard_job(self):
+        # Named failure: a shard job is missing from ci-done's needs, so a red run posts no wake comment for it.
+        for label, _, _, family in SHARD_SUITES:
+            for job in family:
+                with self.subTest(suite=label, job=job):
+                    self.assertIn(job, self.ci_done, f"ci-done does not need {job}: {self.ci_done}")
+
+    def test_the_install_shard_variable_is_set_once_per_shard_job(self):
+        # Named failure: INSTALL_SRC_SHARD is set at job level or beside another shard, so one shard's value reaches other steps.
+        lines = [ln for ln in self.text.splitlines() if ln.lstrip().startswith(f"{INSTALL_VAR}:")]
+        self.assertEqual(len(lines), len(INSTALL_JOBS), f"{INSTALL_VAR} is set {len(lines)} times, want one per shard job")
+
+
+class ShardControls(unittest.TestCase):
+    """Green control: the install suite's own case selection covers every case once at the counted total."""
+
+    def test_the_install_suite_selects_each_case_in_exactly_one_counted_shard(self):
+        count = SHARD_COUNTS["checks-install-checkout"]
+        code, all_names, _, _ = list_cases()
+        self.assertEqual(code, 0, "the install suite --list exits non-zero with no shard set")
+        picked = []
+        for i in range(1, count + 1):
+            code, names, _, err = list_cases(f"{i}/{count}")
+            self.assertEqual(code, 0, f"shard {i}/{count} of the install suite exits {code}: {err}")
+            picked += names
+        self.assertEqual(sorted(picked), sorted(all_names), f"the {count} shards do not select each case once")
 
 
 if __name__ == "__main__":

@@ -3,7 +3,8 @@
 
 Modes:
 - --post-compact: After compaction, sets the session's flag that its handoff is not read, and
-  a second flag that the handoff audit (prompt step 3) is owed.
+  a second flag that the handoff audit (prompt step 3) is owed. An agent's compaction (`agent_id`,
+  or a transcript under a `subagents` folder) sets nothing: the agent shares its parent's session_id.
 - --pre-read: Before a Read, clears the session's flag that its handoff is not read, when the
   file is that handoff. Never refuses the read. A payload with `agent_id` (the hook
   fired inside an agent) clears nothing: only the session's own Read counts.
@@ -141,6 +142,19 @@ def audit_reason(handoff):
             "then repeat. (decision precompact-handoff, item 16)" % (EXPLORE_AUDIT_MARKER or "Audit:", handoff))
 
 
+def from_agent(payload):
+    """True when the hook fired inside an agent: `agent_id` on the payload, or a transcript_path with a `subagents`
+    folder segment (the agent's own file, own_session.agent_transcript_dir). An agent shares its parent's
+    session_id, so only the main session's own events may touch the session's flags. Never raises."""
+    try:
+        if payload.get("agent_id"):
+            return True
+        tp = payload.get("transcript_path")
+        return isinstance(tp, str) and "subagents" in re.split(r"[\\/]+", tp)
+    except Exception:
+        return False
+
+
 def main():
     if ph is None:
         return 0
@@ -156,13 +170,15 @@ def main():
         flag = ph.reread_flag_path(sid)
         audit_flag = ph.audit_flag_path(sid)   # inside the try: a stale sibling without it must still exit 0
         if "--post-compact" in args:
+            if from_agent(payload):
+                return 0
             os.makedirs(os.path.dirname(flag), exist_ok=True)
             with open(flag, "w", encoding="utf-8") as f:
                 f.write("1")
             with open(audit_flag, "w", encoding="utf-8") as f:
                 f.write("1")
         elif "--pre-read" in args:
-            if payload.get("agent_id"):
+            if from_agent(payload):
                 return 0
             fp = (payload.get("tool_input") or {}).get("file_path")
             if isinstance(fp, str) and fp and names_handoff(fp, sid) and os.path.isfile(flag):
