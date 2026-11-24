@@ -18053,6 +18053,23 @@ class LocalConfirmNeedsProof(ScopedRepo, CloudSession):
         self.assertNotIn("is not valid", out, f"the stamp's requiredChecks {required!r} was refused at config load, so no proof rule ran: " + out)
         return rc, out
 
+    def local_draft_go(self, checks, runs, required=("all-jobs-passed",)):
+        """A local confirm of a draft PR, run as a computer runs it. merge.Host.ready sends no REST route (route pr-ready-gh-api-cloud is unmeasured),
+        so the case stands in for it: the stand-in records each number it is asked to mark and answers ready. The base's stamp names the same
+        list the host reads, so no defaults notice prints. -> (rc, output, marked numbers)."""
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=list(required)))))
+        self.set(draft=True, checks_seq=[checks], runs_seq=[runs])
+        marked = []
+
+        def mark_ready(n):
+            marked.append(n)
+            return True, ""
+        host = self.gh_host(required=list(required))
+        host.ready = mark_ready
+        with self.cloud(CLAUDE_CODE_REMOTE=None, CLAUDE_CODE_REMOTE_SESSION_ID=None):
+            rc, out = self.run_merge_once("7", "--confirm", host=host)
+        return rc, out, marked
+
     def assert_remedy_is_clean(self, out):
         for fragment in REMEDY_FORBIDDEN:
             self.assertNotIn(fragment, out, f"the refusal names {fragment!r}, a target a refusal never names:\n" + out)
@@ -18195,6 +18212,30 @@ class LocalConfirmNeedsProof(ScopedRepo, CloudSession):
         rc, out = self.local_go()
         self.assertEqual(rc, 0, out)
         self.assertIn(MERGE_CALL, self.calls())
+
+    def test_an_own_head_with_no_check_ran_and_a_skipped_run_merges_above_a_green_proof(self):
+        """Red on the branch head: a draft's own head reads NO_CHECK_RAN and "workflow checks: skipped, no job ran" together, and
+        head_check_red counts that pair as red, so the own-head check refuses the proven head. The own head's run list holds one real
+        skipped run (the control above reads runs_seq=[[]] and never builds this shape). The proof read is the first run read, and it is empty."""
+        self.workflow_base(parent_rows=[("all-jobs-passed", "pass", "")])  # the carried proof is green
+        self.set(checks_seq=[[("all-jobs-passed", "skipping", ""), ("checks", "skipping", "")]], runs_seq=[[], [("checks", "completed", "skipped")]])
+        rc, out = self.local_go()
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls(), "the proven head was refused above a draft's skipped own run")
+
+    def test_a_draft_whose_checks_and_run_all_skipped_is_marked_ready(self):
+        """Red on the branch head: a draft's head reads NO_CHECK_RAN with "workflow checks: skipped, no job ran" (its checks and its run both skip).
+        head_check_red counts that pair as red, so draft_step stops before the ready mark. The stamp is a list, as a repo with a required job has."""
+        rc, out, marked = self.local_draft_go(checks=[("all-jobs-passed", "skipping", ""), ("checks", "skipping", "")], runs=[("checks", "completed", "skipped")])
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(marked, [7], "the draft whose checks and run all skipped did not go ready:\n" + out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_draft_with_a_failed_check_beside_a_skipped_run_stays_a_draft(self):  # control: a failed check is red beside the skipped pair
+        rc, out, marked = self.local_draft_go(checks=[("all-jobs-passed", "skipping", ""), ("checks", "fail", "")], runs=[("checks", "completed", "skipped")])
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(marked, [], "a draft with a failed check was marked ready:\n" + out)
+        self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_an_unreadable_carried_proof_with_a_lane_lint_pass_refuses_under_first_proof(self):
         """The carried proof could not be read, and a PASS names the live head. Deleting unread_proof means the lift
