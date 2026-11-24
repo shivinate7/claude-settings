@@ -24,6 +24,9 @@
 # (optional: the pull request's head sha; HEAD when unset). GREEN_HEAD turns the 14 job and suite flags off on a pull request or a push when it is an
 # ancestor of PR_HEAD and the delta from it to PR_HEAD is docs/records.md alone; the lint flags keep their whole-PR values and mutation_report is false. Any unreadable read: no skip.
 # The last output line, records_only_skip=true|false, is true exactly in that case.
+# SCOPE_FILES (optional, newline-separated paths): read these paths in place of the pull request diff, through the same case table. bin/ci-job gives the
+# paths that differ between two lint trees, to see whether a delta sets every flag (an unmapped path does). It reads the landed-dir rule (and the windows_guard
+# flag it sets) from the added files of the BASE_SHA range, not the guard-inputs.txt pass; a records-only skip never applies.
 set -u
 JOBS="checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos pointer_windows"
 LINTS="lint_red_run lint_plan_refuter lint_ruling_kind lint_comment_narration"
@@ -34,7 +37,14 @@ range=""
 on=" "
 whole_read=0
 # --no-renames lists the old path of a rename too, so a move out of a mapped path counts.
-if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name-only --no-renames "$range" 2>/dev/null) && [ -n "$files" ]; then
+if [ -n "${SCOPE_FILES:-}" ]; then
+  files=$SCOPE_FILES
+elif [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name-only --no-renames "$range" 2>/dev/null) && [ -n "$files" ]; then
+  :
+else
+  files=""
+fi
+if [ -n "$files" ]; then
   W=checks_windows M=checks_windows_merge R=checks_windows_rest Z=checks_windows_sweep X=checks_macos S=shell_macos P=pointer_windows
   while IFS= read -r f; do
     case "$f" in
@@ -43,7 +53,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       # Guard and its installers' inputs: test_guard, the janitor suites and config_watch run guard.py.
       # guard_<family>.py modules are guard.py; guard_test_* is not (it falls to hooks/* below).
       hooks/guard_test_*) on="$on $R $Z $X code guard " ;;
-      hooks/guard.py|hooks/guard_*.py|hooks/shared_names.py|hooks/git_reads.py|hooks/question_form.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/merge_options.py|hooks/override.py|hooks/_nowindow.py|hooks/proc_env.py|hooks/reread_check.py|hooks/call_judge.py|hooks/decision_watch.py|hooks/feedback_guard.py|hooks/local_time.py|hooks/ruling_home.py|hooks/route_match.py|hooks/reply_judge.py|hooks/stall_watch.py|hooks/agent_brief.py|hooks/mail.py|hooks/ci_wait_cap.py|hooks/ci_wake.py|hooks/session_role.py|hooks/answered_claims.py|hooks/ci_wait_cap.json|hooks/route_rows.json|hooks/precompact_handoff_prompt.md|hooks/wait_common.py|hooks/mutate_shared.py) on="$on $W $R $Z $X code guard sweep " ;;
+      hooks/guard.py|hooks/guard_*.py|hooks/shared_names.py|hooks/git_reads.py|hooks/question_form.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/merge_options.py|hooks/override.py|hooks/_nowindow.py|hooks/proc_env.py|hooks/reread_check.py|hooks/call_judge.py|hooks/decision_watch.py|hooks/feedback_guard.py|hooks/local_time.py|hooks/ruling_home.py|hooks/route_match.py|hooks/reply_judge.py|hooks/stall_watch.py|hooks/agent_brief.py|hooks/mail.py|hooks/ci_wait_cap.py|hooks/ci_wake.py|hooks/required_check.py|hooks/session_role.py|hooks/answered_claims.py|hooks/ci_wait_cap.json|hooks/route_rows.json|hooks/precompact_handoff_prompt.md|hooks/wait_common.py|hooks/mutate_shared.py) on="$on $W $R $Z $X code guard sweep " ;;
       # settings.json: the same jobs, plus merge/test_merge.py (CloudAllow reads it).
       settings.json) on="$on $M $W $R $Z $X code guard sweep " ;;
       landed-dirs.txt) on="$on $W $R $Z $X $S code guard " ;;
@@ -120,7 +130,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
     # runs beside the others on its own runner, so it adds billed minutes and no wall time.
     case "$f" in
       hooks/guard_test_*) ;;
-      hooks/guard.py|hooks/guard_*.py|hooks/git_reads.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/shared_names.py|hooks/question_form.py|hooks/_nowindow.py|lint/report_guard.py|lint/_clause.py|lint/check_red_run.py|lint/layout.py|lint/layout.json|lint/_test_temp.py|skills/waiting-page/SKILL.md|skills/waiting-page/reference/*|skills/waiting-page/export_page.py|hooks/answered_claims.py|hooks/call_judge.py|hooks/ci_wake.py|hooks/decision_watch.py|hooks/feedback_guard.py|hooks/local_time.py|hooks/override.py|hooks/proc_env.py|hooks/session_role.py|hooks/reply_judge.py|hooks/reread_check.py|hooks/route_match.py|hooks/ruling_home.py|janitor/sweep.py|janitor/temp_sweep.py|lint/_transcript.py|lint/guard_log_report.py|lint/rule_audit.py|lint/ruled_store.py|hooks/mail.py|hooks/merge_options.py|hooks/agent_brief.py|lint/check_record_slugs.py|lint/_guard_sections.py|hooks/stall_watch.py|hooks/ci_wait_cap.py|hooks/ci_wait_cap.json|hooks/wait_common.py) on="$on shoot " ;;
+      hooks/guard.py|hooks/guard_*.py|hooks/git_reads.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/shared_names.py|hooks/question_form.py|hooks/_nowindow.py|lint/report_guard.py|lint/_clause.py|lint/check_red_run.py|lint/layout.py|lint/layout.json|lint/_test_temp.py|skills/waiting-page/SKILL.md|skills/waiting-page/reference/*|skills/waiting-page/export_page.py|hooks/answered_claims.py|hooks/call_judge.py|hooks/ci_wake.py|hooks/required_check.py|hooks/decision_watch.py|hooks/feedback_guard.py|hooks/local_time.py|hooks/override.py|hooks/proc_env.py|hooks/session_role.py|hooks/reply_judge.py|hooks/reread_check.py|hooks/route_match.py|hooks/ruling_home.py|janitor/sweep.py|janitor/temp_sweep.py|lint/_transcript.py|lint/guard_log_report.py|lint/rule_audit.py|lint/ruled_store.py|hooks/mail.py|hooks/merge_options.py|hooks/agent_brief.py|lint/check_record_slugs.py|lint/_guard_sections.py|hooks/stall_watch.py|hooks/ci_wait_cap.py|hooks/ci_wait_cap.json|hooks/wait_common.py) on="$on shoot " ;;
     esac
     # The four pull-request lint steps of the `checks` job. This is a third case, so the flags each path sets above stay as
     # they are. A path the table above does not name has set every flag already (the `*)` arm).
@@ -169,6 +179,8 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
         esac ;;
     esac
   done <<< "$files"
+  # SCOPE_FILES (the header) skips the guard-inputs pass below, which reads every changed path of the range, and keeps the landed-dir read.
+  if [ -z "${SCOPE_FILES:-}" ]; then
   # windows_guard has its own pass: the case table above skips a .md path, and an input such as agents/builder.md is one. The list is
   # .github/guard-inputs.txt (the one list); an unreadable or empty list turns the flag on.
   globs=$(sed 's/#.*//; s/[[:space:]]//g' .github/guard-inputs.txt 2>/dev/null | grep -v '^$')
@@ -188,13 +200,23 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
     done < <(git diff --name-only --no-renames -z "$range" 2>/dev/null)
     [ "$n" -gt 0 ] || on="$on windows_guard "
   fi
+  fi
   # A new file under a landed dir (landed-dirs.txt, the one list) changes what test_install_src and
-  # the guard suite see. An unreadable or empty list turns everything on.
+  # the guard suite see. An unreadable or empty list turns everything on. In SCOPE_FILES mode the added names come from the same range read
+  # (the delta's commits: bin/ci-job passes EVENT and BASE_SHA); a range that does not read turns everything on, and whole_read stays 0,
+  # since the records-only skip never applies there.
   dirs=$(sed 's/#.*//; s/[[:space:]]//g; s#/$##' landed-dirs.txt 2>/dev/null | grep -v '^$' | paste -sd'|' -)
   if [ -z "$dirs" ]; then
     on="$on $ALL windows_guard "
   else
-    if added=$(git diff --name-only --diff-filter=A --no-renames "$range" 2>/dev/null); then
+    if [ -n "${SCOPE_FILES:-}" ]; then
+      # One NUL-separated read serves both flags, so the carry adds one git start, not two.
+      if added=$(set -o pipefail; git diff --name-only --diff-filter=A --no-renames -z "$range" 2>/dev/null | tr '\0' '\n'); then
+        grep -Eq "^($dirs)/" <<< "$added" && on="$on $W $S code guard windows_guard "
+      else
+        on="$on $ALL windows_guard "
+      fi
+    elif added=$(git diff --name-only --diff-filter=A --no-renames "$range" 2>/dev/null); then
       whole_read=1
       grep -Eq "^($dirs)/" <<< "$added" && on="$on $W $S code guard windows_guard "
       # windows_guard alone reads the added names NUL-separated: the newline form quotes a non-ASCII name, which matches no

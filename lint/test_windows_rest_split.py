@@ -16,16 +16,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_windows_split import (CHECKS, RECORDS_ONLY_CONDITION, CONDITIONED_JOBS, SPLIT_CONDITIONED_JOBS, UNCONDITIONED_JOBS, all_jobs, eval_if,  # noqa: E402  the one home of the checks.yml reader
                                 condition_problem, job_if_without_records, scope_named_steps)
 from all_jobs_passed_rules import needs_of  # noqa: E402  the one home of the needs reader
-from test_windows_split import SUITE_FLAG, eval_with  # noqa: E402  the one home of the merge and rest flags and the flag evaluator
+from test_windows_split import SUITE_FLAG, WINDOWS_GUARD_JOBS, WINDOWS_MERGE_JOBS, eval_with  # noqa: E402  the one home of the merge and rest flags, the shard families and the flag evaluator
 from workflow_steps import job_block  # noqa: E402  the one home of the job parser
 
 REST_PREFIX = "checks-windows-rest"
 ALL_JOBS_PASSED = "all-jobs-passed"
 CI_DONE = "ci-done"
 PROVISIONAL_CAP = 60
-# The Windows full shards that must stay in checks.yml. The held-shard case fails if one is dropped, which would leave its untagged cases unrun.
-HELD_SHARDS = ("checks-windows-guard-2", "checks-windows-guard-3", "checks-windows-merge-2", "checks-windows-merge-3",
-               "checks-windows-merge-4", "checks-windows-merge-5")
+# The Windows full shards that must stay in checks.yml: every shard past the first of the guard and merge families (SHARD_COUNTS).
+# The held-shard case fails if one is dropped, which would leave its untagged cases unrun.
+HELD_SHARDS = WINDOWS_GUARD_JOBS[1:] + WINDOWS_MERGE_JOBS[1:]
 SKIP_EVENTS = ("push", "pull_request", "schedule", "workflow_dispatch")
 
 
@@ -188,6 +188,7 @@ class MergeAndRestScopeFlags(unittest.TestCase):
     def test_with_its_flag_false_a_ready_pull_request_skips_each_suite_step(self):
         # Named failure: a suite step still runs on a ready pull_request when its job's flag is false, so no flag gates it.
         for name, flag in SUITE_FLAG.items():
+            self.assertIn(name, self.jobs, f"{name} is not a job in checks.yml, so its flag gates nothing")
             job = self.jobs[name]
             self.assertTrue(suite_steps(job), f"{name} has no suite step")
             for st in suite_steps(job):
@@ -199,6 +200,7 @@ class MergeAndRestScopeFlags(unittest.TestCase):
     def test_with_its_flag_alone_true_a_ready_pull_request_runs_each_suite_step(self):
         # Named failure: a suite step needs a second flag as well, so its job's own flag alone does not run it.
         for name, flag in SUITE_FLAG.items():
+            self.assertIn(name, self.jobs, f"{name} is not a job in checks.yml, so its flag gates nothing")
             job = self.jobs[name]
             for st in suite_steps(job):
                 label = st.get("name") or st["run"]

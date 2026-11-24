@@ -65,8 +65,10 @@ REAL_GUARD_INPUTS = "real"  # run()'s guard_inputs default: the repo's own list 
 
 
 def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref="", green=None,
-        green_sibling=False, green_head=None, contents=None, facts=None, merged=None, moves=None, guard_inputs=REAL_GUARD_INPUTS):
-    """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit. `head_ref` is HEAD_REF,
+        green_sibling=False, green_head=None, contents=None, facts=None, merged=None, moves=None, guard_inputs=REAL_GUARD_INPUTS,
+        scope_files=None):
+    """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit. `scope_files` (a list of paths), when
+    given, is SCOPE_FILES: the script reads those paths in place of the diff, with the same BASE_SHA range as the other cases. `head_ref` is HEAD_REF,
     empty when not given, so no HEAD_REF of the caller's environment reaches the script. `moves` maps an old path to its new
     one, or to None for a delete: the old path is in the base, and a move keeps the content, so git sees a rename.
     `guard_inputs` is the text of .github/guard-inputs.txt in the base: the repo's own list by default (none when the repo has
@@ -155,6 +157,9 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
         env.pop("PR_HEAD", None)  # a caller's value never reaches the script; only `merged` sets it
         if merged is not None:
             env["PR_HEAD"] = head_sha
+        env.pop("SCOPE_FILES", None)  # a caller's value never reaches the script; only `scope_files` sets it
+        if scope_files is not None:
+            env["SCOPE_FILES"] = "\n".join(scope_files)
         if facts is not None and green_sha:
             delta_head = git(d, "diff", "--name-only", "--no-renames", green_sha, "HEAD").split()
             facts.update(green=green_sha, delta=delta_head, delta_head=delta_head,
@@ -337,6 +342,18 @@ class Scope(unittest.TestCase):
 
     def test_a_modified_md_under_skills_turns_on_nothing(self):
         self.assertFlags(run(["skills/old/SKILL.md"], existing=["skills/old/SKILL.md"]), want_false=ALL)
+
+    def test_scope_files_mode_gives_the_ci_flags_for_a_file_added_under_a_landed_dir(self):
+        # bin/ci-job's carry reads a delta's flags with SCOPE_FILES; CI reads the same added file in range mode. Every flag but
+        # windows_guard must agree, because the carry reads the guard flag from the SCOPE_FILES run.
+        names = ALL + DERIVED_FLAGS + list(LINT_FLAGS) + DOC_FLAGS
+        for p in ("agents/newagent.md", "skills/newx/SKILL.md"):
+            with self.subTest(added=p):
+                ci = run([p])
+                scoped = run([p], scope_files=[p])
+                diff = {n: (ci.get(n), scoped.get(n)) for n in names if ci.get(n) != scoped.get(n)}
+                self.assertEqual(diff, {}, "SCOPE_FILES mode gives other flags than CI's range read for %s, a file added under a landed dir: "
+                                 "name -> (CI, SCOPE_FILES)" % p)
 
     def test_a_new_file_in_hooks_or_janitor_turns_on_the_install_suite(self):
         for p in ("hooks/new.py", "janitor/new.py"):
@@ -1030,10 +1047,12 @@ class _IfParser:
         return self.env.get(tok, "")
 
 
-def if_env(outs, event):
-    """The names an if: reads: the event, the pull request's draft flag, and each scope output of the run."""
+def if_env(outs, event, results=None):
+    """The names an if: reads: the event, the pull request's draft flag, each scope output of the run, and each job's result.
+    The scope job succeeded unless `results` says otherwise. A name the env does not hold reads as empty."""
     env = {"github.event_name": event, "github.event.pull_request.draft": False if event == "pull_request" else None}
     env.update({f"needs.scope.outputs.{name}": value for name, value in outs.items()})
+    env.update({f"needs.{job}.result": result for job, result in {"scope": "success", **(results or {})}.items()})
     return env
 
 
@@ -1052,9 +1071,9 @@ def job_if(text, job):
     return (wrapped.group(1) if wrapped else raw).strip()
 
 
-def job_runs(expr, outs, event):
-    """True when the job starts on this run: it has no job-level if, or its if: is true on the run's outputs."""
-    return True if expr is None else _IfParser(expr, if_env(outs, event)).parse()
+def job_runs(expr, outs, event, results=None):
+    """True when the job starts on this run: it has no job-level if, or its if: is true on the run's outputs and job results."""
+    return True if expr is None else _IfParser(expr, if_env(outs, event, results)).parse()
 
 
 def running_jobs(text, outs, event):
@@ -1132,6 +1151,21 @@ class RecordsOnlyEveryJob(unittest.TestCase):
                         expr = job_if(text, job)
                         self.assertTrue(job_runs(expr, got, event),
                                         f"{job} does not start on a records-only {event} run; its job-level if is {expr}")
+
+    # Control: checks starts on a code run, and its own if: turns it off for a records-only run and for a failed scope. So the
+    # records-only test above reads checks off for the skip, not because the scope result reads as empty.
+    def test_checks_starts_on_a_code_run_and_stays_off_on_a_records_only_run_or_a_failed_scope(self):
+        expr = job_if(self.workflow(), "checks")
+        self.assertIsNotNone(expr, "checks has no job-level if")
+        cases = (
+            ("a records-only run", {"records_only_skip": "true"}, {"scope": "success"}, False),
+            ("a code run", {"records_only_skip": "false"}, {"scope": "success"}, True),
+            ("a failed scope", {"records_only_skip": "false"}, {"scope": "failure"}, False),
+        )
+        for label, outs, results, want in cases:
+            with self.subTest(run=label):
+                got = job_runs(expr, outs, "pull_request", results)
+                self.assertEqual(got, want, f"checks {'starts' if got else 'stays off'} on {label}; its job-level if is {expr}")
 
     # Control: the reader reads the wider skip's form as off when records_only_skip is 'true' and on when it is
     # 'false', and refuses a form it does not know rather than reading it as true.
@@ -1570,10 +1604,10 @@ class MutationReport(unittest.TestCase):
         self.assertEqual(push["mutation_report"], "true", f"a push: {push}")
 
 
-# The guard-inputs gate. The three Windows guard shards (checks-windows-guard, -2, -3) run only when a diff touches a guard input:
+# The guard-inputs gate. The Windows guard shards (checks-windows-guard and its -2 to -n copies) run only when a diff touches a guard input:
 # windows_guard in ci-scope.sh, read from .github/guard-inputs.txt. The gate is read from checks.yml's own step condition, so each
 # case states what the workflow does with the scope outputs, not the value of one output. Cost: parses checks.yml once per call.
-GUARD_SHARDS = ("checks-windows-guard", "checks-windows-guard-2", "checks-windows-guard-3")
+GUARD_SHARDS = split.WINDOWS_GUARD_JOBS  # the family's count, one home: SHARD_COUNTS in lint/test_windows_split.py
 # Flags the old script sets true for SNAPSHOT_DIFFS, each run() with its default arguments. windows_guard is left out of the
 # comparison: it is the one output the gate adds. Recorded on the script before the gate existed.
 SNAPSHOT_DIFFS = [

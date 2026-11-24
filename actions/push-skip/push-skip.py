@@ -8,15 +8,15 @@ is a visible success and scope reads its output.
 skip=true only when the push commit's tree equals the head tree of a pull request the push commit belongs to, and that pull request's
 run passed, narrowed or full, in one of two forms. Main then runs none of its suites for that merge:
   1. a batch-* head (an integration pull request): its all-jobs-passed check run concluded success and so did every suite job.
-  2. any other merged pull request head (a lone lane): its newest checks run is a completed, successful pull request run in which
-     all-jobs-passed and every suite job succeeded. A suite step that scope skipped (a narrowed run) does not stop the skip: the
+  2. any other merged pull request head (a lone lane): its newest checks run is a completed pull request run, concluded success or cancelled (the
+     cancel-on-close workflow cancels the whole run after a merge), in which all-jobs-passed and every suite job succeeded. A suite step that scope skipped (a narrowed run) does not stop the skip: the
      suites the diff left out are not re-run on main until a later change touches them.
 A suite job that the run skipped (conclusion skipped) is proven, never a gap, only when all three hold: its name is a key of the
 calling workflow's all-jobs-passed scope-skips input, the same run's scope job succeeded, and the same run's all-jobs-passed
 succeeded. The map is read from the caller's workflow file with the rules reader (scope_skips_map), never from testing/, since a
 pinned copy of this action has no testing/. Any other skipped job is not proven.
-Anything else runs everything: a direct push, an admin merge with no green run, a tree mismatch, a red, draft, cancelled or
-in-progress run, a run of another head or workflow. A schedule or workflow_dispatch run (EVENT) never skips. Any error from the read,
+Anything else runs everything: a direct push, an admin merge with no green run, a tree mismatch, a red, draft or
+in-progress run, a cancelled run whose jobs did not all pass, a run of another head or workflow. A schedule or workflow_dispatch run (EVENT) never skips. Any error from the read,
 of any type, writes skip=false and says "unknown": an unknown state runs everything, never skips.
 
 The suite jobs are the jobs all-jobs-passed needs in the CALLING repo's workflow ($GITHUB_WORKSPACE/$WORKFLOW), minus the bookkeeping
@@ -182,7 +182,8 @@ def pull_request_run_gap(env, sha):
     """None when the newest checks run of the pull request head `sha` is a green pull request run. Else the reason it proves
     nothing. Raises Unknown on a read that cannot be judged. Green: the run, all-jobs-passed and every suite job succeeded. A step
     that scope skipped inside a succeeded job is no gap (a narrowed run). So is a records-only run: scope and all-jobs-passed
-    succeeded and every suite job was skipped."""
+    succeeded and every suite job was skipped. A newest run that concluded cancelled counts too when those job checks pass: the
+    cancel-on-close workflow cancels the whole run after a merge, which leaves the run cancelled and its jobs green."""
     body = get("actions/runs", {"head_sha": sha, "event": "pull_request", "per_page": str(PAGE)}, env)
     page = body.get("workflow_runs") if isinstance(body, dict) else None
     if not isinstance(page, list):
@@ -194,7 +195,7 @@ def pull_request_run_gap(env, sha):
     if not mine:
         return "no %s pull request run on the head" % workflow
     newest = max(mine, key=lambda r: (str(r.get("run_started_at") or r.get("created_at") or ""), r.get("id") or 0))
-    if (newest.get("status"), newest.get("conclusion")) != ("completed", "success"):
+    if (newest.get("status"), newest.get("conclusion")) not in (("completed", "success"), ("completed", "cancelled")):
         return "its newest run is %s/%s" % (newest.get("status"), newest.get("conclusion"))
     jobs_body = get("actions/runs/%s/jobs" % newest.get("id"), {"per_page": str(PAGE)}, env)
     jobs = jobs_body.get("jobs") if isinstance(jobs_body, dict) else None
@@ -252,6 +253,7 @@ def read_heads(env):
         branch = head.get("ref") or ""
         batch = branch.startswith(BATCH_PREFIX)
         if not batch and not pr.get("merged_at"):
+            print("push-skip: pull request #%s (%s) is not merged, so it proves nothing for main" % (pr.get("number"), branch))
             continue  # a lone lane's pull request that was not merged is no proof for main, and its head is not read
         commit = get("git/commits/%s" % head["sha"], None, env)
         tree = (commit.get("tree") or {}).get("sha") if isinstance(commit, dict) else None
@@ -259,6 +261,8 @@ def read_heads(env):
             raise Unknown("the commit read of a pull request head has no tree")
         if not batch:
             if tree != env.get("PUSH_TREE"):
+                print("push-skip: pull request #%s (%s) head tree %s is not the push tree %s, so no run proved the push tree"
+                      % (pr.get("number"), branch, tree[:7], str(env.get("PUSH_TREE"))[:7]))
                 continue  # another tree covers nothing, so its run is not read
             gap = pull_request_run_gap(env, head["sha"])
             if gap:
@@ -266,6 +270,9 @@ def read_heads(env):
             else:
                 heads.append({"head_branch": branch, "tree": tree, "status": "completed", "conclusion": "success", "full_run": True})
             continue
+        if tree != env.get("PUSH_TREE"):
+            print("push-skip: batch head %s tree %s is not the push tree %s, so it covers nothing"
+                  % (branch, tree[:7], str(env.get("PUSH_TREE"))[:7]))
         runs = check_runs(env, head["sha"])
         status, conclusion = rollup_result(env, head["sha"], runs)
         if (status, conclusion) == ("completed", "success"):
@@ -274,6 +281,8 @@ def read_heads(env):
             if missing:
                 conclusion = "suite jobs not success: " + ", ".join(missing)
                 print("push-skip: batch head %s is not covered, %s" % (branch, conclusion))
+        else:
+            print("push-skip: batch head %s is not covered, all-jobs-passed is %s" % (branch, conclusion if status == "completed" else status))
         heads.append({"head_branch": branch, "tree": tree, "status": status, "conclusion": conclusion})
     return heads
 
@@ -296,7 +305,10 @@ def main(env=None):
             skip = False  # only a push skips: a schedule or manual run is the check on what a pull request run scoped out
             print("push-skip: a %s run never skips" % event)
         else:
-            skip = decide(read_heads(env), env.get("PUSH_TREE"))
+            heads = read_heads(env)
+            skip = decide(heads, env.get("PUSH_TREE"))
+            if not skip and not heads:
+                print("push-skip: no pull request covers the push tree %s" % str(env.get("PUSH_TREE"))[:7])
             print("push-skip: skip=%s" % str(skip).lower())
     except Exception as ex:  # Unknown, or a record shape the reads did not expect: either way the push runs everything and the job stays green
         skip = False

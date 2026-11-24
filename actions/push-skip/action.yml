@@ -3,8 +3,8 @@ description: >
   Decides whether a push to main can skip its checks, and writes the answer to the `skip` output.
   It says skip=true only when the push commit's tree equals the head tree of a pull request the commit
   belongs to (a batch-* integration pull request, or a merged lone-lane pull request), and that pull request's
-  run passed: all-jobs-passed and every suite job succeeded. A suite step skipped by scope (a narrowed run) is no gap. A direct push,
-  an admin merge with no green run, a tree mismatch, a red, draft, cancelled or in-progress run, a run of another
+  run passed: all-jobs-passed and every suite job succeeded (a cancelled run counts when they did). A suite step skipped by scope (a narrowed run) is no gap. A direct push,
+  an admin merge with no green run, a tree mismatch, a red, draft or in-progress run, a cancelled run whose jobs did not all pass, a run of another
   head or workflow, a schedule or workflow_dispatch run, and any read error give skip=false. The step always
   exits 0, so the calling job is a visible success. The suite jobs are the jobs all-jobs-passed needs in
   the calling workflow (read from the calling checkout), so the caller job needs a checkout. The caller passes
