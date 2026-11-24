@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""UserPromptSubmit hook: in a cloud session, reinstall the hooks when the local origin ref moved past the installed sha, and say so.
+"""UserPromptSubmit hook: reinstall the hooks when the local origin ref moved past the installed sha, and say so.
 
 A cloud session copies hooks at start, so a hook merged later stays stale for the whole session. A prompt reads no
 origin (decision stale-install-cost). It reads the install record that install.sh --cloud
@@ -19,22 +19,34 @@ installs nothing. Unknown is never reported as current.
   wait; it prints "reinstall failed (timed out after N s)".
 - source on a detached HEAD, the live pin, that holds merge/install_from_main.sh: runs it once per new head and prints
   one line that states how many commits the pin is behind the ref it read, counted from local objects.
-  A refresh runs once per head, whatever its outcome. A later prompt on a head the record still does not cover prints
-  "install still stale", and runs nothing.
+  A refresh runs once per head, whatever its outcome, and the head is marked once the refresh has ended. A later prompt
+  on a head the record still does not cover prints "install still stale", and runs nothing. While another install holds
+  the install lock (a fresh <config dir>/.claude-settings-install.lock), the pin refresh prints nothing, runs nothing and
+  leaves the head unseen: a later prompt checks again. A refresh that timed out behind that lock acts the same.
 - the clone the config dir's CLAUDE.md points at (an @path line), when its HEAD is behind its own local origin ref:
   one line that names the clone and its commits behind, once per new head.
+A local session (CLAUDE_CODE_REMOTE not "true": a Mac or a Windows machine) acts on the live pin only. install.sh
+writes a record only with --cloud, so a local session has none. With none, the hook finds the pin from where its own
+file lives (<clone>-live, or the <clone>-live-<12 hex> worktree it links to) and treats the pin's HEAD as the record:
+ref stable, sha the pin's HEAD. A hook that lives in no pin is silent and makes no git call. The pin refreshes by the
+cloud pin's rules: once per new head, from the local origin/stable ref (or local main), through
+merge/install_from_main.sh, which moves the pin and reinstalls (on Windows it hands off to install.ps1). A local
+session never runs `install.sh --cloud`, and never reinstalls a source that is not a pin. A record that exists in a
+local session is read as a cloud one is.
 Once per head: the file <config dir>/.claude-settings-refresh-seen holds the last 20 heads a reinstall, a pin refresh
 or a clone flag acted on.
 The ref comes only from the record: the installer gets it as CLAUDE_SETTINGS_REF, replacing any value in the hook's
 environment. The hook names no branch of its own, bar the pin's fallback (PIN_FALLBACK_BRANCH). The installer also gets a CS_HOOK_INPUT whose source no SessionStart
 entry fires on, so install.sh runs no startup entry for a reinstall in a running session.
 
-Cost: one python process start per prompt. Network calls per prompt: 0. Local reads per prompt in a cloud session:
+Cost: one python process start per prompt. Network calls per prompt: 0. Local reads per prompt:
 the install record, the config dir's CLAUDE.md, and local git reads in a clone: at most 4 on a prompt with no trigger
 (rev-parse of the ref, merge-base, and rev-parse and rev-list of the shared clone) and at most 8 on a trigger prompt
 (those four, symbolic-ref, then rev-list twice for a pin, or diff and two show reads of settings.json for a reinstall;
-a pin with no origin ref adds one rev-parse of local main). None outside a cloud session. A trigger adds one installer
-run (the installer fetches; this hook does not). Files written by this hook: the seen file, only when a reinstall, a
+a pin with no origin ref adds one rev-parse of local main). A local session with no record reads its pin: with no trigger it makes 2 git calls when the pin is current
+(HEAD and origin/stable) and 4 when the pin is behind a head already seen (the pin has no shared clone). A local session
+whose hook lives in no pin reads no git. A trigger adds one installer
+run (the installer fetches; this hook does not) and, for a pin, one stat of the install lock (a read of it when fresh). Files written by this hook: the seen file, only when a reinstall, a
 pin refresh or a clone flag acts on a new head. No timer, no long-lived process.
 """
 import functools
@@ -44,10 +56,18 @@ import re
 import signal
 import subprocess
 import sys
+import time
 try:
     import _nowindow  # the one home of a no-window child start; a flat hooks/ file
 except ImportError:  # the helper lands a moment after the hook in an install; a hook never dies for it
     _nowindow = subprocess
+try:
+    from git_bash import find_git_bash  # the one home of "which bash on Windows" (hooks/git_bash.py)
+except ImportError:  # same: a hook never dies for a helper that has not landed
+    def find_git_bash():
+        return None
+
+from shared_names import LIVE_PIN_SUFFIX, PIN_SCRIPT, PIN_TREE  # the one home of the pin's names (hooks/shared_names.py); not guard_frozen, which is costly to import
 
 RECORD_NAME = ".claude-settings-install.json"
 SEEN_NAME = ".claude-settings-refresh-seen"
@@ -69,9 +89,16 @@ INSTALL_HOOK_INPUT = '{"source":"stale-install"}'
 RESTART_PATHS = ("CLAUDE.md", "output-styles/")
 RESTART_SETTINGS_KEYS = ("model", "effortLevel")
 PREFIX = "claude-settings: "
-PIN_SCRIPT = os.path.join("merge", "install_from_main.sh")
+# The install lock the two installers take, and the age (seconds) past which they remove it as a dead run's. Copies of
+# INSTALL_LOCK in install.sh and merge/install_from_main.sh (their `find -mmin +10`), their home: bash and Python share
+# no source. The hook only reads it, to leave a refresh to the install that holds it.
+LOCK_NAME = ".claude-settings-install.lock"
+LOCK_MAX_AGE = 600
 # The one branch the hook names: install_from_main.sh pins to local main when origin has no ref for the record's ref.
 PIN_FALLBACK_BRANCH = "main"
+# The branch a local session's pin follows. A copy of the default in merge/install_from_main.sh,
+# REF="${CLAUDE_SETTINGS_REF:-stable}", its home: shell and Python share no source, so a change there is made here too.
+PIN_REF = "stable"
 SHARED_LINE = re.compile(r"@(.+)/CLAUDE\.md")
 
 
@@ -202,7 +229,11 @@ def restart_line(source, old, new):
 
 def stop_group(proc):
     """SIGTERM to the installer's group, so install.sh's EXIT trap releases the install lock. SIGKILL to the group
-    after TERM_GRACE, or at once after the leader's exit, for any member still running."""
+    after TERM_GRACE, or at once after the leader's exit, for any member still running. Where os.killpg or
+    signal.SIGKILL does not exist (Windows), stop_tree ends the process tree instead."""
+    if not (hasattr(os, "killpg") and hasattr(signal, "SIGKILL")):
+        stop_tree(proc)
+        return
     try:
         os.killpg(proc.pid, signal.SIGTERM)
         proc.wait(timeout=TERM_GRACE)
@@ -215,21 +246,57 @@ def stop_group(proc):
     proc.wait()
 
 
+def stop_tree(proc):
+    """Ends the installer and its children where there are no process groups, with the tree kill in _nowindow
+    (taskkill /T /F). Windows has no TERM for a child with no console, so the EXIT trap does not run and the install lock
+    stays until its own age limit clears it. Without taskkill the leader gets terminate, then kill. No wait is unbounded:
+    a leader that will not end is left, and the hook still prints its timeout line."""
+    taskkill_tree = getattr(_nowindow, "taskkill_tree", None)  # the stand-in module has none
+    if taskkill_tree is not None:
+        taskkill_tree(proc.pid, GIT_TIMEOUT)
+    for stop in (proc.terminate, proc.kill):
+        if proc.poll() is not None:
+            return
+        try:
+            stop()
+            proc.wait(timeout=TERM_GRACE)
+        except (OSError, AttributeError, subprocess.TimeoutExpired):  # AttributeError: no signal.SIGKILL to kill with
+            pass
+
+
+def script_path(path):
+    """A script path in the form Git Bash reads: forward slashes on Windows."""
+    return path.replace("\\", "/") if os.name == "nt" else path
+
+
+class Failure(str):
+    """The failure text of run_script, which also says whether the run timed out and the pid it ran as."""
+    timed_out = False
+    pid = None
+
+
 def run_script(record, argv, what, cwd=None):
-    """Runs a recorded script once, in `cwd` when given. Returns None on success, else the failure text. It runs in its
-    own session so a stop reaches its children. Its output goes nowhere: the hook prints its own lines."""
+    """Runs a recorded script once, in `cwd` when given. Returns None on success, else the failure text. Where there are
+    process groups it runs in its own session so a stop reaches its children. Its output goes nowhere: the hook
+    prints its own lines. Windows starts the Git Bash that hooks/git_bash.py finds; elsewhere bash on PATH."""
     limit = install_timeout()
     env = dict(os.environ, CLAUDE_SETTINGS_REF=record["ref"], CS_HOOK_INPUT=INSTALL_HOOK_INPUT)
+    own_session = {} if os.name == "nt" else {"start_new_session": True}
+    bash = find_git_bash()
+    if bash is None and os.name == "nt":  # a bare "bash" on Windows is the WSL launcher (hooks/git_bash.py)
+        return "%s not run (Git Bash not found)" % what
     try:
-        proc = _nowindow.Popen(["bash", *argv], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL, env=env, cwd=cwd, start_new_session=True)
+        proc = _nowindow.Popen([bash or "bash", *argv], stdin=subprocess.DEVNULL,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, cwd=cwd, **own_session)
     except OSError as err:
         return "%s failed (%s)" % (what, err)
     try:
         code = proc.wait(timeout=limit)
     except subprocess.TimeoutExpired:
         stop_group(proc)
-        return "%s failed (timed out after %g s)" % (what, limit)
+        failure = Failure("%s failed (timed out after %g s)" % (what, limit))
+        failure.timed_out, failure.pid = True, proc.pid
+        return failure
     return None if code == 0 else "%s failed (exit %d)" % (what, code)
 
 
@@ -270,16 +337,36 @@ def stale_line(record, target, name):
         % (record["sha"][:SHORT], name, target[:SHORT])
 
 
+def lock_held_by_other(own_pid=None):
+    """True when another install holds the install lock: the file exists, is under LOCK_MAX_AGE old, and was not written
+    by the run that had pid `own_pid` (its id ends with its pid). One stat, and a read when the file is fresh."""
+    path = os.path.join(config_dir(), LOCK_NAME)
+    try:
+        if time.time() - os.stat(path).st_mtime > LOCK_MAX_AGE:
+            return False
+        with open(path, encoding="utf-8") as handle:
+            holder = handle.readline().strip()
+    except OSError:
+        return False  # no lock, or it ended during the read
+    return not (own_pid is not None and holder.endswith(str(own_pid)))
+
+
 def pin_lines(record, head, seen, local_ref, where):
     """The one line for a pin refresh toward `head`, the tip of `local_ref` (shown as `where`). The pin's
     merge/install_from_main.sh runs once per head, and the line states the commits the pin was behind, counted from
-    local objects."""
+    local objects. The head is marked seen once the refresh has ended, so a hook that was cut short tries it again.
+    Another install holding the lock is no outcome of this refresh: the hook prints nothing and leaves the head unseen, so
+    a later prompt checks again. It also skips the run, which would only wait behind that lock."""
     source = record["source"]
+    if lock_held_by_other():
+        return []
     before = commits_behind(source, "HEAD", local_ref)
-    add_seen(seen, "pin:" + head)
     # install_from_main.sh finds its clone from the folder it runs in, and takes no argument; the head goes on its command
     # line only so a process listing shows which head the refresh is for.
-    failure = run_script(record, [os.path.join(source, PIN_SCRIPT), head], "pin refresh", cwd=source)
+    failure = run_script(record, [script_path(os.path.join(source, PIN_SCRIPT)), head], "pin refresh", cwd=source)
+    if getattr(failure, "timed_out", False) and lock_held_by_other(failure.pid):
+        return []  # the refresh waited behind another install's lock until the timeout
+    add_seen(seen, "pin:" + head)
     after = commits_behind(source, "HEAD", local_ref)
     if failure:
         return [PREFIX + failure]
@@ -331,12 +418,35 @@ def is_pin(source):
     return done is not None and done.returncode == 1
 
 
+def pin_record():
+    """The record a local session has no file for: the live pin the hook file lives in, read as installed at its own
+    HEAD, following PIN_REF. None, with no git call, when the hook lives in no pin or the pin holds no refresh script
+    or HEAD."""
+    # The installed hook is a symlink into the pin: resolve the file itself, then take its folder.
+    here = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    found = PIN_TREE.fullmatch(here)
+    if not found:
+        return None
+    link = found["clone"] + LIVE_PIN_SUFFIX
+    # The link follows the pin as it moves; a plain <clone>-live directory is its own pin.
+    source = link if os.path.isfile(os.path.join(link, PIN_SCRIPT)) else here
+    if not os.path.isfile(os.path.join(source, PIN_SCRIPT)):
+        return None
+    sha = local_sha(source, "HEAD")
+    if sha is None:
+        return None
+    return {"ref": PIN_REF, "sha": sha, "source": source, "installer": os.path.join(source, "install.sh")}
+
+
 def check():
     """The lines to print for one prompt."""
-    if os.environ.get("CLAUDE_CODE_REMOTE") != "true":
-        return []
+    remote = os.environ.get("CLAUDE_CODE_REMOTE") == "true"
     record, reason = load_record()
-    if record is None:
+    if record is None and not remote:
+        record = pin_record()  # a Mac or Windows session has no record; no pin means nothing to say
+        if record is None:
+            return []
+    elif record is None:
         return [unknown(reason)]
     source = record["source"]
     local_ref, name, head = followed_ref(record)
@@ -351,7 +461,7 @@ def check():
             lines.append(stale_line(record, head, name))
         elif key.startswith("pin:"):
             lines += pin_lines(record, head, seen, local_ref, name)
-        else:
+        elif remote:  # a local session never runs install.sh --cloud
             add_seen(seen, key)
             lines += reinstall_lines(record, head)
     return lines + shared_lines(record, seen)

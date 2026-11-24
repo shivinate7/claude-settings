@@ -3716,6 +3716,41 @@ def main(argv=None) -> int:
         undo()
 
 
+DRAFT_IDLE_SECONDS = 300  # the bound on one repository's `merge --draft-idle` run: a list read, then a runs read and a head read for each open pull request
+
+def github_origin(root):
+    """True when the origin of the checkout at `root` is on github.com. Any other origin, and a read that fails, is False: the idle red pass runs only where `gh` can answer."""
+    done = git_reads._git(root, "remote", "get-url", "origin")
+    return done is not None and done.returncode == 0 and "github.com" in done.stdout
+
+
+def draft_idle_pass(results, confirm):
+    """The idle red pull request step (the rule is in merge/idle_prs.py): once for each swept repository with a GitHub origin, runs the merge tool's own `merge --draft-idle`
+    (found beside this file, never the repository's copy: the sweep runs no code a repository supplies), which returns each non-draft pull request whose head is red
+    and idle 2 hours to draft, with one comment. A preview (no CONFIRM) only says it would run it, and drafts nothing. A run that fails prints its own unknown line and
+    never changes the sweep's exit code. Cost: one git read of the origin for each repository; each GitHub repository starts one merge process (timeout
+    DRAFT_IDLE_SECONDS) that makes one list read and, for each open pull request, the runs and head reads. No file is written here, and no process is kept."""
+    tool = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "merge", "merge.py")
+    todo = [r["root"] for r in results if not r.get("refused") and github_origin(r["root"])]
+    if not todo or not os.path.isfile(tool):
+        return
+    print("")
+    print("== idle red pull requests ==")
+    for root in todo:
+        if not confirm:
+            print("  WOULD run merge --draft-idle in %s" % root)
+            continue
+        try:
+            done = _nowindow.run([sys.executable, tool, "-C", root, "--draft-idle"], capture_output=True, text=True,
+                                 encoding="utf-8", errors="replace", timeout=DRAFT_IDLE_SECONDS)
+            lines, code = (done.stdout + done.stderr).splitlines(), done.returncode
+        except Exception as e:  # a timeout or a tool that cannot start: unknown, never a clear
+            lines, code = ["unknown (%s)" % type(e).__name__], 1
+        print("  %s%s" % (root, "" if code == 0 else ": unknown, exit %d" % code))
+        for line in lines:
+            print("    " + line)
+
+
 def _sweep_roots(args, roots, restore_log_path, mode):
     def one(root):
         result = sweep_repo(root, args.confirm, restore_log_path, mode, args.attended)
@@ -3775,6 +3810,8 @@ def _sweep_roots(args, roots, restore_log_path, mode):
         failed += leftover_temp_pass(args.confirm)
     if not _past_deadline():
         failed += temp_pass(args.confirm)
+    if not session_end and not _past_deadline():  # the daily job and a person's run, not the SessionEnd hook
+        draft_idle_pass(results, args.confirm)
     return 1 if failed else 0
 
 

@@ -48,6 +48,7 @@ sys.path.append(os.path.join(os.path.dirname(HERE), "hooks"))  # append: the pin
 sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import _test_temp  # noqa: E402  test-temp-standard: this run's folder (lint/_test_temp.py)
 import test_merge as tm  # noqa: E402  the git half's fixture and fakes; importing it runs none of its cases
+import test_idle_prs as idle  # noqa: E402  the idle-red fake host (IdleHost) and its runs (one home: test_idle_prs.py); importing it runs none of its cases
 from test_merge import LANE_LINT_MARKER, NOT_OWNER, lint_comment  # noqa: E402  the lint comment's one form, in test_merge.py (decision lanes-run-no-full-ci-job)
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import merge  # noqa: E402
@@ -4778,6 +4779,50 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assertEqual(self.host.readies, [], "a failing %s step marked the draft ready: %s" % (name, out))
         self.assertEqual(self.refs(), refs_before, "the pre-ready run pushed beside a failing %s step: %s" % (name, out))
 
+    def idle_red_clash(self, age):
+        """The lane (PR 7, this session's draft) and PR 9 share shared.txt. PR 9 is a non-draft whose head is red, its newest run `age` seconds
+        old, on a host that reads each head's runs (test_idle_prs.IdleHost). -> PR 9's head."""
+        self.host = idle.IdleHost.adopt(self.host)
+        self.host.include_own = True
+        self.pre_ready_lane()
+        _head, other = self.clashing_pair(n=9, draft=False)
+        self.host.runs_by_sha[other] = [idle.red(age=age)]
+        self.use_ci_job(steps_for(), 0)
+        return other
+
+    def test_idle_red_clashing_pr_does_not_block_the_ready_check_and_is_drafted(self):
+        self.idle_red_clash(3 * idle.HOUR)
+        rc, out = self.pre_ready()
+        self.assertFalse(verdict_line(out, "fail", "open-PR clash"),
+                         "the idle red non-draft PR #9 still fails the ready check's open-PR clash: " + out)
+        self.assertEqual(rc, 0, "the ready check refused with an idle red clash in the way: " + out)
+        self.assertEqual(self.host.drafts, [9], "the idle red clashing PR #9 was not drafted locally: " + out)
+        self.assertEqual(self.host.readies, [7], "the lane PR #7 did not go ready: " + out)
+        self.assertEqual([n for n, _ in self.host.posted], [9], "PR #9 did not get one comment: " + out)
+        self.assertIn("merge 9 --ready", self.host.posted[0][1], "the comment on PR #9 does not say how to return: " + out)
+
+    def test_red_clash_one_second_short_of_idle_still_fails_the_ready_check(self):  # a green control: the old code fails it too
+        self.idle_red_clash(idle.IDLE_SECONDS - 1)
+        rc, out = self.pre_ready()
+        self.assertTrue(verdict_line(out, "fail", "open-PR clash"),
+                        "a red clash 1 h 59 min 59 s old no longer fails the open-PR clash: " + out)
+        self.assertNotEqual(rc, 0, "a red clash 1 h 59 min 59 s old did not refuse the ready check: " + out)
+        self.assertEqual(self.host.drafts, [], "a red clash not yet idle was drafted: " + out)
+        self.assertEqual(self.host.posted, [], "a red clash not yet idle was commented on: " + out)
+        self.assertEqual(self.host.readies, [], "the lane went ready past a clash that still counts: " + out)
+
+    def test_cloud_host_prints_the_return_route_for_an_idle_red_clash_and_still_counts_it(self):  # a cloud host cannot draft, so the clash counts PR #9 (owner's R6 ruling, 10:54 CST Nov 23; review ruling, 15:06 CST Nov 23)
+        self.idle_red_clash(3 * idle.HOUR)
+        self.host.draft_refuse = True
+        rc, out = self.pre_ready()
+        self.assertTrue(verdict_line(out, "fail", "open-PR clash"),
+                        "the idle red clashing PR #9 does not fail the ready check on a cloud host that cannot draft it: " + out)
+        self.assertNotEqual(rc, 0, "the cloud host let the ready check pass with PR #9 still counted as ready: " + out)
+        self.assertIn("update_pull_request draft=true", out, "the cloud host did not print the MCP route to draft PR #9: " + out)
+        self.assertEqual(self.host.drafts, [], "the cloud host drafted PR #9: " + out)
+        self.assertEqual(self.host.posted, [], "the cloud host commented on PR #9, though it did not draft it, so the comment would say it returned to draft: " + out)
+        self.assertEqual(self.host.readies, [], "the lane PR #7 went ready past a clash that still counts PR #9: " + out)
+
     def test_cheap_check_control_six_names_declared_by_the_fixture_pass_and_go_ready(self):
         """Green control, on head: the fixture declares the six step names itself, each passes, and the draft goes ready. The red cases differ
         only in whether the real stamp list names the steps, so a red here would mean the harness, not the list, is wrong."""
@@ -8191,6 +8236,68 @@ class LintResumesPushedMerge(LaneFixture):
 
     def test_the_merged_commit_takes_the_later_date_when_the_head_is_later_whatever_the_environment_holds(self):
         self.check_merged_dates(self.TIP_WHEN, self.HEAD_WHEN, self.LATE)
+
+
+class CarriedVerdictLine(LaneFixture):
+    """The lane lint's PASS verdict line says how many CI steps a carry held. A step whose saved pass carried from an earlier head prints
+    `PASS (carried)`, so a reader can tell a carried PASS from a fresh one. A run with no carried step names none. Whatever the carry, the
+    posted comment keeps its marker, PR, Head and Result lines, and the job's PASS for that head is saved, so a rerun of the head reads it.
+    Cost per case: one lint run and one stub start, as LintResumesPassedJobs counts them (unmeasured)."""
+
+    lint_at = LintResumesPassedJobs.lint_at  # one lint run with the merge commit's dates set: LintResumesPassedJobs's
+    ran = LintResumesPassedJobs.ran  # how many times the stub ci-job ran the lint: LintResumesPassedJobs's
+    cached = staticmethod(LintResumesPassedJobs.cached)  # the lines that say a job's PASS was reused: LintResumesPassedJobs's
+    DATE = LintResumesPassedJobs.DATE_A  # the merge commit's dates for each run here: LintResumesPassedJobs's
+    CARRIED = [("PASS (carried)", "suite check"), ("PASS", "record slugs")]  # one step that a carry held, one fresh step
+
+    def verdict(self, text):
+        """The one PASS verdict line of a lint run's output."""
+        found = [line for line in text.splitlines() if line.startswith("PASS: lint of ")]
+        self.assertEqual(len(found), 1, "expected one PASS verdict line, got %r\n%s" % (found, text))
+        return found[0]
+
+    def test_the_verdict_line_names_the_one_step_a_carry_held(self):
+        self.use_ci_job(self.CARRIED, 0)
+        rc, text = self.lint_at(self.DATE, at_head=True)
+        self.assertEqual(rc, 0, text)
+        self.assertRegex(self.verdict(text), r"\b1\b[^;]*carried|carried[^;]*\b1\b",
+                         "the PASS verdict line does not name the one step a carry held: " + text)
+
+    def test_a_run_with_no_carried_step_names_none(self):  # control: green on the old code, which names no carry at all
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.lint_at(self.DATE, at_head=True)
+        self.assertEqual(rc, 0, text)
+        self.assertNotIn("carried", self.verdict(text), "a run that carried no step names one in its PASS verdict line: " + text)
+
+    def test_a_carried_pass_posts_its_head_and_saves_the_job_pass(self):  # control: green on the old code, where a carried pass is a PASS
+        self.use_ci_job(self.CARRIED, 0)
+        head = self.head("feat")
+        rc, text = self.lint_at(self.DATE, at_head=True)
+        self.assertEqual(rc, 0, text)
+        self.assertTrue(self.host.posted, "the carried PASS posted no lane-lint comment: " + text)
+        body = self.host.posted[-1][1].splitlines()
+        self.assertIn("Head: %s" % head, body, "the comment does not name the head of the carried PASS:\n" + "\n".join(body))
+        self.assertIn("Result: PASS", body, "the comment of the carried PASS does not read PASS:\n" + "\n".join(body))
+        ran = self.ran()
+        rc, text = self.lint_at(self.DATE, at_head=True)
+        self.assertEqual(self.ran(), ran, "the rerun at the same head ran the job again: the carried PASS was not saved: " + text)
+        self.assertTrue(self.cached(text), "the rerun at the same head printed no PASS (cached) for the job: " + text)
+
+    COUNTED = r"\b1\b[^;]*carried|carried[^;]*\b1\b"  # the verdict line's count of the carried step, and its word
+
+    def test_a_rerun_at_the_same_head_keeps_the_carried_count_in_the_verdict_line(self):  # control: green on the old code
+        self.use_ci_job(self.CARRIED, 0)
+        rc, text = self.lint_at(self.DATE, at_head=True)
+        self.assertEqual(rc, 0, text)
+        self.assertRegex(self.verdict(text), self.COUNTED, "scope: the first PASS verdict line does not name the carry: " + text)
+        rc, text = self.lint_at(self.DATE, at_head=True)  # the rerun the saved PASS answers
+        self.assertEqual(rc, 0, text)
+        self.assertRegex(self.verdict(text), self.COUNTED, "the rerun the saved PASS answers lost the carried count: " + text)
+        self.forget_saved_passes()  # the rerun runs the job again, and its carried step prints PASS (carried) again
+        self.use_ci_job(self.CARRIED, 0)
+        rc, text = self.lint_at(self.DATE, at_head=True)
+        self.assertEqual(rc, 0, text)
+        self.assertRegex(self.verdict(text), self.COUNTED, "the rerun that runs the job lost the carried count: " + text)
 
 
 class CiJobHeadCopy(LaneFixture):

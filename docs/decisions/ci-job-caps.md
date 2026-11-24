@@ -26,6 +26,14 @@ Owner, 2026-10-27, roadmap step c95 (the cap rule):
 - A job that ends at its cap with no red test step is re-capped or split, never left (skill `ci-hygiene`, step 5).
 - A cap rises only with a measured figure in the comment beside it. This item is suspended while the stopgap holds, and comes back when roadmap step `time-pinned-tests-go` (time-pinned tests are gone) closes (owner, 2026-11-01 18:44 CST, above).
 
+## The hang stop (decided, not built)
+
+Decision `hang-stop` (the hang stop) holds the rule the consultant reads into the owner's 2026-11-23 ruling R2: a run is stopped only on a hang, never on time. Job caps stay as the last net for a busy-loop hang, Windows and action steps.
+
+Decided, not built: today a run is still stopped by its time cap. Until `hang-stop` is built, the 2026-10-27 bullet above applies: a job that ends at its cap with no red test step is re-capped or split, never left.
+
+A net is never tightened to turn a slow healthy run red. Backing: the owner's 2026-11-10 ruling, quoted at `ci-job-caps.md:7`. The consultant reads the owner's 2026-11-23 words the same way; that reading is the consultant's, not the owner's words.
+
 ## The table
 
 Window: each row names its own. A row marked "window of 2026-11-05" or "window of 2026-11-06" uses the window of that name in the first two notes below. An unmarked row uses the newest 30 completed runs of each job in `checks.yml`, from run 39969158671 (2026-10-23) to run 40551443745 (2026-10-27); checks-windows-sweep is projected from that window. Times are minutes from job start to job end.

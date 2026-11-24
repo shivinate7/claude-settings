@@ -194,6 +194,16 @@ def kill_tree(proc, sig, known=()):
     return pids
 
 
+def taskkill_tree(pid, timeout=5):
+    """Ends `pid` and its children with `taskkill /F /T /PID`, best effort, through run() so the console stays hidden. The one home of the
+    Windows tree kill: Popen.kill ends only the child, and a grandchild (ssh, a nested install) would keep running. Nothing is raised:
+    a missing taskkill, or one past `timeout` seconds, leaves the caller to end the leader itself. Windows only; elsewhere there is no taskkill."""
+    try:
+        run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 def end_on_signals():
     """TERM and HUP end the run as SystemExit, the path INT takes as a KeyboardInterrupt, so the caller's `finally` runs and its folders go.
     A second signal while it cleans up is ignored. Where handlers cannot be set (another thread), nothing changes."""
