@@ -1321,11 +1321,13 @@ class LintMode(unittest.TestCase):
         # --base HEAD: an empty diff, so the selector picks no suite and only the lint steps are planned.
         done = plan_job("checks", "--lint", "--plan", "--base", "HEAD", cwd=os.path.join(HERE, ".."))
         lines = [ln for ln in done.stdout.splitlines() if ln.startswith("would run ") and not SUMMARY.match(ln)]
+        # A planned (`would run`) line names a lint step and no suite. A `not run ... runs in CI` line may name a suite: it is not planned.
+        planned = [ln[len("would run "):].strip() for ln in lines]
+        self.assertEqual(sorted(set(planned) - set(want)), [], "a would-run line names a step that is no lint step:\n" + done.stdout)
         self.assertEqual(len(lines), len(want), done.stdout + done.stderr)
         for expected in want:
             self.assertTrue(any(ln.split("  ", 1)[-1].startswith(expected) or ("  " + expected) in ln for ln in lines),
                             "missing %r in %s" % (expected, done.stdout))
-        self.assertNotIn("test_guard", done.stdout)
 
     def test_a_new_lint_step_is_picked_up(self):
         code, lines, out = plan_lint(self.root, workflow(
