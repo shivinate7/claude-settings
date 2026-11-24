@@ -44,11 +44,18 @@ RPM_BG_NOTICE = os.path.join(RPM, "bg-notice.jsonl")            # a ready run wi
 RPM_BG_OTHER = os.path.join(RPM, "bg-other-job.jsonl")          # a read of the output of `sleep 600`, a background job that is no ready run
 RPM_BG_FAST = os.path.join(RPM, "bg-fast-checks.jsonl")         # a background `--fast-checks` run whose output read shows the pass
 RPM_OTHER_PR = os.path.join(RPM, "other-pr-pass.jsonl")         # a foreground `merge 13 --ready` whose pass is the current head of #12
+RPM_SKIPPED_PASS = os.path.join(RPM, "skipped-pass-current-head.jsonl")  # a ready run whose pass skipped one listed action step, on feat-current
+RPM_SKIPPED_OLD = os.path.join(RPM, "skipped-pass-older-head.jsonl")     # the same pass, skipped step and all, on feat-current^
 
 
 def _rpm_pass(sha):
     """The stdout line of run_ready_checks on a pass, as the Bash result carries it."""
     return "merge: the ready checks (check invariants) pass on %s." % sha[:9]
+
+
+def _rpm_pass_skipped(sha, skipped):
+    """The stdout line of run_ready_checks on a pass beside `skipped` listed action steps this tool cannot run, as the Bash result carries it."""
+    return "merge: the ready checks (check invariants) pass on %s, %d skipped." % (sha[:9], skipped)
 
 
 def _rpm_ready_run(tool_id, *results):
@@ -198,6 +205,8 @@ def _build_readymark():
         RPM_BG_FAST: _rpm_bg_start("bg-fast-start", "bgfast", MERGE_SHIM + " 12 --fast-checks") + _rpm_bg_read("bg-fast-read", "bgfast", outputs["bgfast"]),
         RPM_OTHER_PR: [role_use("other-pr-ready", "Bash", {"command": MERGE_SHIM + " 13 --ready"}),
                        role_result("other-pr-ready", _rpm_pass(current))],
+        RPM_SKIPPED_PASS: _rpm_ready_run("skipped-now", _rpm_pass_skipped(current, 1), RPM_DRAFT_LINE),
+        RPM_SKIPPED_OLD: _rpm_ready_run("skipped-old", _rpm_pass_skipped(older, 1), RPM_DRAFT_LINE),
     }
     for path, rows in lines.items():
         with open(path, "w", encoding="utf-8") as handle:
@@ -208,7 +217,7 @@ lazy_fixture([RPM_NO_PASS, RPM_OLD_PASS, RPM_PASS, RPM_CLAIM_PASS, RPM_CONFIRM_P
               RPM_NOCHECKS_PASS, RPM_NOCHECKS_OLD, RPM_DRY_PASS, RPM_DRY_OLD,
               RPM_UNCHECKED_PASS, RPM_UNCHECKED_OLD, RPM_CLAIM_STOP, RPM_CLAIM_STOP_OLD,
               RPM_BG_READ, RPM_BG_CAT, RPM_BG_OLD, RPM_BG_FAILED, RPM_BG_NEVER, RPM_BG_NOTICE, RPM_BG_OTHER, RPM_BG_FAST,
-              RPM_OTHER_PR], _build_readymark)
+              RPM_OTHER_PR, RPM_SKIPPED_PASS, RPM_SKIPPED_OLD], _build_readymark)
 
 
 def rpm_mcp(name, expected, transcript, fake=GHREADY_CURRENT, carries=(), lacks=(), cwd=RPR_REPO, **tool_input):
@@ -226,6 +235,11 @@ rpm_mcp("ready-mcp-mark: MCP draft false after a ready pass on an older head is 
 # Allowed: the pass on the current head, and the two calls that mark nothing ready (the false-alarm controls).
 rpm_mcp("ready-mcp-mark: MCP draft false after a ready pass on the current head is allowed", "allow", RPM_PASS,
         owner="y", repo="x", pullNumber=12, draft=False)
+# A pass beside a listed action step this tool cannot run prints the skipped pass line, which stands for the head it names like the plain line.
+rpm_mcp("ready-mcp-mark: MCP draft false after a skipped-step pass on the current head is allowed", "allow", RPM_SKIPPED_PASS,
+        owner="y", repo="x", pullNumber=12, draft=False)
+rpm_mcp("ready-mcp-mark: MCP draft false after a skipped-step pass on an older head is refused", "deny", RPM_SKIPPED_OLD,
+        carries=RPM_REMEDY, lacks=RPM_TARGET_LACKS, owner="y", repo="x", pullNumber=12, draft=False)
 rpm_mcp("ready-mcp-mark: MCP draft true with no ready pass is allowed", "allow", RPM_NO_PASS,
         owner="y", repo="x", pullNumber=12, draft=True)
 rpm_mcp("ready-mcp-mark: an MCP body-only update with no ready pass is allowed", "allow", RPM_NO_PASS,

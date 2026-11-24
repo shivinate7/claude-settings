@@ -2330,7 +2330,7 @@ def _ready_stood_shas(text: str, merge) -> set:
     """The shas (7 to 40 hex chars) that the ready run whose result is `text` stands for: its pass shas, the head a dry-merge line maps a pass sha to, and,
     when the run declared no ready checks, the head each sha-bearing line of the draft step names. `merge` is the merge tool module, the home of the line templates."""
     pattern = merge.ready_line_pattern
-    shas = {m.group("sha") for m in pattern(merge.READY_PASS_FMT).finditer(text)}
+    shas = {m.group("sha") for fmt in (merge.READY_PASS_FMT, merge.READY_PASS_SKIPPED_FMT) for m in pattern(fmt).finditer(text)}
     for m in pattern(merge.READY_DRY_FMT).finditer(text):
         if any(sha.startswith(m.group("dry")) or m.group("dry").startswith(sha) for sha in shas):
             shas.add(m.group("head"))
