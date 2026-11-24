@@ -28,11 +28,9 @@ the remedy: return the PR to draft (route pr-draft-mcp-cloud), run
 `merge <n> --confirm` on the draft, then mark it ready after its draft run shows. A head that holds a
 Record-claim on a base with no stamp kinds first reverts that claim commit, since the draft step refuses a
 claim head. A push that changes only docs/records.md after a head whose run was fully green starts no
-second full run of the jobs. CI scope turns off the job and suite flags for that push
-(owner, 2026-11-14 15:02 CST, ruling own-830-c, the records-only CI skip; `.github/scripts/ci-scope.sh`,
-`green-head.sh`). Owner item 857 b (waiting-page save, 2026-11-15 19:48 CST, "Overrule: the ruling reopens")
-holds ruling own-830-c again in full: a records-only change skips every suite job and the `checks` lint job,
-and the all-jobs-passed rollup passes. The `scope`, `nightly-skip` and `push-skip` jobs still run to decide it.
+second full run of the jobs. CI scope turns off the job and suite flags for that push (`.github/scripts/ci-scope.sh`,
+`green-head.sh`): a records-only change skips every suite job and the `checks` lint job, and the all-jobs-passed rollup
+passes (ruling own-830-c, the records-only CI skip; item 857 b). The `scope`, `nightly-skip` and `push-skip` jobs still run to decide it.
 The job and suite flags cover the macOS, Windows, pointer, guard, shoot, mutation and sweep work. CI scope also turns
 off the mutation report. The merge
 tool heals a ready PR's stale page itself, on the default base, under any merge.requiredChecks (page item 926 a, 14:32

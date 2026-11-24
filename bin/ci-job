@@ -156,9 +156,8 @@ from workflow_steps import job_block, job_workflow, run_body, step_blocks, step_
 SELECTOR_LIMIT = 60  # seconds the --lint-suites selector may run (about 10 s on this repo's 123 suites) before it reads unknown
 SELECTED = {}  # (top, base) -> (picked suites, why not): the one selector run of this process; the sibling passes read it
 PREAMBLE_MARK = "ci-job-preamble-done"
-# bin/verdict's hang line (its `print(f"HANG {shown} rc={rc} no output or CPU for {hang}s, stopped ({secs}) log={log}")`): the fixed words
-# after the name, so only that line is the hang line. Copied: bin/verdict is a script with no shared constant to import (the lane code-caps-hang-stop moves it).
-VERDICT_HANG_LINE = re.compile(r"HANG .+ rc=124 no output or CPU for \d+s, stopped \(\d+(?:\.\d+)?s\) log=")
+VERDICT_HANG_LINE = _nowindow.HANG_LINE  # bin/verdict's hang line: the one pattern, in hooks/_nowindow.py
+HANG_DEFAULT_SKIP = "mutate"  # a step whose command names a mutation script gets no default stop: the mutation fixture suite is quiet for 462-615 s, past the default (decision hang-stop)
 PREAMBLE_DONE = "echo; echo " + PREAMBLE_MARK  # the line preamble_marked adds right before a CI step's first suite line; the bare echo ends a preamble line that has no newline, so the mark lands at line start
 SUITE_LINE = re.compile(r"python3 ((?:hooks|merge)/test_[\w.-]+\.py)(?: [^|&;`<>]*)?")  # a CI step's suite line, arguments allowed
 USAGE = "usage: ci-job <job> [--workflow <file>] [--base <ref>] [--plan] [--lint] [--pinned] [--step NAME]..."
@@ -783,7 +782,7 @@ CARRY_MARK, CARRY_STATE = "(carried) ", "PASS (carried)"  # a carried step's lin
 CARRY_BLOCKERS = ("hooks/mutate_guard.py", "bin/ci-job", ".github/stamp.json")  # a delta that touches one never carries: the selector, this runner, the ready-checks list; the workflow and ci-scope.sh set every scope flag, which carry_delta_read reads
 CARRY_RECORDS = "docs/records.md"  # a delta of this one file carries every suite step: its pass reads no other record (ci-scope.sh's records-only skip names it too)
 CARRY_MEMO = {}  # (top, saved head, saved tree, tree) -> {picked: the delta's picked suites, None when it forbids any carry; changed: its paths; flags: its scope flags once read}; one read per run
-SCOPE_APART = {"windows_guard", "mutation_report", "records_only_skip"}  # ci-scope.sh outputs that an unmapped path does not set: carry_delta_read leaves them out of its read of every flag on
+SCOPE_APART = {"windows_guard", "mutation_report", "records_only_skip", "skip_comment_delta"}  # ci-scope.sh outputs that an unmapped path does not set: carry_delta_read leaves them out of its read of every flag on
 CACHE_FILES, CACHE_DAYS = 300, 7
 VOLATILE_ENV = {"GITHUB_WORKSPACE", "VERDICT_LOG", "CI_JOB_LINT_WORKERS", "CI_JOB_NO_CACHE", "PWD", "OLDPWD", "SHLVL", "_", "COLUMNS", "LINES",
                "CLAUDE_CODE_SESSION_ID", "CLAUDE_PID", "TRACEPARENT", "CCR_SPAWN_TIMESTAMP_MS"}  # a variable that differs between runs and changes no step's result; GITHUB_WORKSPACE repeats the repo path, which the key holds once
@@ -883,6 +882,12 @@ def child_env(env, base, values):
     """The whole environment a step runs with: this process's, less what a runner step lacks, then the step's own. The one home: the key reads it as the step does."""
     return {**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF", PIN_NOTE_ENV, HEAD_SHA_ENV}},
             **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}), **env}
+
+
+def hang_default(detail):
+    """The hang stop's default for a step: {VERDICT_HANG_SECONDS: the default}, or {} for a mutation step. Placed under child_env's merge, so the caller's value and the
+    step's own win. Never part of the cache key: child_env alone feeds it, so a saved pass keeps its key."""
+    return {} if HANG_DEFAULT_SKIP in detail else {"VERDICT_HANG_SECONDS": str(_nowindow.HANG_SECONDS_DEFAULT)}
 
 
 def cache_key(name, install, detail, shell, env, cwd, ctx, suite):
@@ -1074,7 +1079,7 @@ def run_step_uncached(name, step, install, detail, shell, env, cwd, ctx, log, su
         with _nowindow.Popen([sys.executable, os.path.join(BIN, "verdict"), *shell, script],
                              cwd=os.path.join(top, cwd) if cwd else top, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, text=True,
-                             env={**child_env(env, base, values), "VERDICT_LOG": log}) as proc:
+                             env={**hang_default(detail), **child_env(env, base, values), "VERDICT_LOG": log}) as proc:
             for line in proc.stdout:  # relay each heartbeat at once: the stall watch reads this job's output
                 if line.startswith("verdict: still running"):
                     err_line(line)
@@ -1088,7 +1093,7 @@ def run_step_uncached(name, step, install, detail, shell, env, cwd, ctx, log, su
             unstarted, only = [], False
     finally:
         os.remove(script)
-    hang = next((ln.rstrip("\n") for ln in kept if VERDICT_HANG_LINE.match(ln)), None) if rc == 124 else None
+    hang = next((ln.rstrip("\n") for ln in kept if VERDICT_HANG_LINE.match(ln)), None) if rc == _nowindow.HANG_EXIT else None
     # verdict's hang stop ends with exit 124 and its own HANG line; a PASS, SKIP, FAIL or HANG-shaped line the step logged is not the verdict
     line = None if hang else next((ln.rstrip("\n") for ln in kept if ln.startswith(("PASS ", "SKIP ", "FAIL "))), None)
     first = line or hang or "(verdict printed no verdict line)"  # a hang stop's own line says why the step read unknown

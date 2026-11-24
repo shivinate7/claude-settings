@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Fixture test for bin/verdict. Run: python lint/test_verdict.py -v"""
-import os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, types, unittest
+import ast, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, types, unittest
 from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -1912,6 +1912,44 @@ class CutStream(unittest.TestCase):
         r, full = self.run_logged(argv=["bash", "-c", line])
         self.assertIn("x\npytest -q\n", full, "the quoted text must reach the log, or this case proves nothing")
         self.assert_pass(r)
+
+
+class HangLineOneHome(unittest.TestCase):
+    """The HANG line's fixed words have one home, hooks/_nowindow.py. bin/verdict, bin/ci-job and merge/merge.py read the line from
+    there and copy none of it (rule building-allow-list-is-the-constant; decision hang-stop). The scan reads each file's string
+    constants with ast, so a comment that names the words does not count, and a string that holds them does."""
+
+    WORDS = "no output or CPU for"  # the fixed words after the name in verdict's hang line
+    HOME = os.path.join(HERE, "..", "hooks", "_nowindow.py")
+    USERS = [os.path.join(HERE, "..", *parts) for parts in (("bin", "verdict"), ("bin", "ci-job"), ("merge", "merge.py"))]
+
+    @staticmethod
+    def constants_with(text, words):
+        """The string constants of the Python source `text` that hold `words`, read with the language's own parser."""
+        return [node.value for node in ast.walk(ast.parse(text)) if isinstance(node, ast.Constant) and isinstance(node.value, str) and words in node.value]
+
+    @staticmethod
+    def read(path):
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+
+    def test_the_hang_words_are_copied_nowhere_outside_the_home(self):
+        for path in self.USERS:
+            with self.subTest(path=os.path.relpath(path, HERE)):
+                found = self.constants_with(self.read(path), self.WORDS)
+                self.assertEqual(found, [], "%s copies the HANG line's words %r; it must read them from the one home, hooks/_nowindow.py"
+                                 % (os.path.relpath(path, os.path.join(HERE, "..")), self.WORDS))
+
+    def test_the_one_home_holds_the_words(self):
+        self.assertTrue(self.constants_with(self.read(self.HOME), self.WORDS),
+                        "hooks/_nowindow.py holds no HANG line words: the one home of the hang line is not built")
+
+    def test_the_scan_reads_strings_and_not_comments(self):  # the scanner's control: a string holding the words counts, a comment does not
+        text = ('# no output or CPU for, in a comment\n'
+                'one = "# no output or CPU for"\n'
+                'two = """\nno output or CPU for\n"""\n'
+                "# don't count this: no output or CPU for\n")
+        self.assertEqual(len(self.constants_with(text, self.WORDS)), 2, "the scan does not read string constants alone")
 
 
 def tearDownModule():

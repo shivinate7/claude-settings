@@ -3605,7 +3605,9 @@ def ci_job_run(wt, *args, notes=None, raw=None, head_sha=None, pr_body=None, scr
     if c == 1:
         return "fail", [l.rstrip() for l in lines if l.startswith("FAIL")] or [f"(no FAIL line read; ci-job exit {c})"], log, False
     if c == 2:
-        return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
+        unknowns = [l.rstrip() for l in lines if l.startswith("unknown")]
+        # decision hang-stop: a hang is no tool missing and no flag lifts it; the rerun keeps the saved passes of the other steps
+        return "unknown", unknowns or [f"(no unknown line read; ci-job exit {c})"], log, not any(_nowindow.HANG_LINE.search(l) for l in unknowns)
     return "unknown", [f"ci-job exited {c}"], log, False
 
 CARRIED_STATE = "PASS (carried)"  # the state word of a suite step whose saved pass of an earlier head carried to this one (bin/ci-job CARRY_STATE)
@@ -4413,8 +4415,10 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             say(f"merge: the touched tests of {short} did not run, because the lint is unknown.")
         return 0
     head_line = f"the lint of {short} against {base} is unknown, not a pass:"
-    if not liftable:  # a timeout or an odd exit says nothing about any step, so no flag lifts it
-        raise Stop("\n".join([head_line, *lines, LANE_LINT_REMEDY]))
+    if not liftable:  # a timeout or an odd exit says nothing about any step, and a hang stopped one, so no flag lifts it
+        hung = any(_nowindow.HANG_LINE.search(l) for l in lines)
+        rerun = ["A step hung and was stopped, and no --lint-unknown-ok reason lifts a hang. Run `merge --lane-lint` again: the saved passes keep the other steps."] if hung else []
+        raise Stop("\n".join([head_line, *lines, *rerun, LANE_LINT_REMEDY]))
     raise Liftable("\n".join([head_line, *lines, *log,
                               'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
 

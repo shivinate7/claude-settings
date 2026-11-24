@@ -28,6 +28,9 @@ lines and each step's log lines in workflow order, and treats an install step as
 LocalActionUnderLint: --lint runs a local uses: action only when the read of its action.yml before any step runs accepts it; FAIL beats unknown, and each refusal
 names its file, line or value and runs no step. A plain run never runs one.
 OwnLogPrune: ci-job removes its own ci-job-* logs over one day old when it starts, and keeps the rest.
+HangStopDefault: a step with no VERDICT_HANG_SECONDS of its own runs with 600 (the caller's value and the step's own win); the
+  quiet mutation fixture suite gets none. HangLineFromVerdict: a real bin/verdict hang stop reads as ci-job's hang line.
+  HangExitsOne: a HANG-shaped line with exit 1 is no hang: with no verdict line the step reads unknown, with a FAIL line it reads FAIL.
 RerunCache: a rerun at the same key runs no passing step and prints PASS (cached); a failed, unknown, unrun, edited, renamed or
   corrupt step runs again. The control case is a first run, which runs every step and prints no cached line. A changed ambient
   variable, a changed tool file that ci-job runs, an edited action file a remote uses: step runs from the install or the pointer
@@ -40,6 +43,8 @@ ScopeLint: --lint with a base reads each needs.scope.outputs flag from the repo'
 Run: python3 lint/test_ci_job.py
 """
 import functools
+import importlib.machinery
+import importlib.util
 import json
 import os
 import re
@@ -58,7 +63,7 @@ import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from 
 sys.path.append(os.path.join(HERE, "..", "testing"))  # append: the signal-test helpers (testing/proc_fixture.py)
 import proc_fixture  # noqa: E402  the one home of the signal-test helpers; this module's wait_for is the rendezvous helper, so call proc_fixture's qualified
 from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
-from test_windows_split import LINUX_GUARD_JOBS  # noqa: E402  the one home of the guard shards (SHARD_COUNTS)
+from test_windows_split import LINUX_GUARD_JOBS, RECORDS_ONLY_CONDITION, drop_condition, unwrap  # noqa: E402  the one home of the guard shards (SHARD_COUNTS) and of the records-only skip's form
 sys.path.append(os.path.join(HERE, "..", "hooks"))  # append: the pin note's names (hooks/pin_note.py)
 from pin_note import ENV as PIN_NOTE_ENV  # noqa: E402  the one home of the pin note's variable (hooks/pin_note.py)
 RUN_FOLDER = _test_temp.run_folder()
@@ -74,6 +79,7 @@ ENV.pop("CI_JOB_LINT_WORKERS", None)
 ENV.pop("CI_JOB_HEAD_SHA", None)  # the lane lint's pushed head: a case sets it, and the unset case needs it absent
 ENV.pop("CI_JOB_NO_CACHE", None)  # the rerun cache's knob: a case sets it, and the cache cases need it absent
 ENV["XDG_CACHE_HOME"] = os.path.join(RUN_FOLDER, "xdg-cache")  # the rerun cache's store: no case writes the real ~/.cache
+ENV.pop("VERDICT_HANG_SECONDS", None)  # ci-job's 600 s default is what the hang-stop cases read: a caller's value, from a CI step, must not leak in
 
 
 def workflow(*steps, job="lane", other=None, other_runner="ubuntu-latest", extra=()):
@@ -492,6 +498,83 @@ class Unknowns(Job):
         self.assertIn("FAIL - timed out after 300s", step_line(lines, "slow"), "a timeout exit reads another line as its verdict: " + out)
 
 
+class HangStopDefault(Job):
+    """ci-job gives each step's verdict the hang stop's 600 s default (decision hang-stop, lane code-caps-hang-stop). The caller's value
+    and the step's own value win. The mutation fixture suite gets none: checks.yml's checks-rest step runs it, its quiet time is 462-615 s
+    in 10 of 10 runs (consultant facts: never wrap it at 600 s), and decision hang-stop's scope leaves mutation steps out."""
+
+    PROBE = 'echo "${VERDICT_HANG_SECONDS-unset}" > hang-env.txt'  # the value the step sees, written into the run's folder
+
+    def seen(self):
+        path = os.path.join(self.root, "hang-env.txt")
+        if not os.path.exists(path):
+            return "no file: the step did not run"
+        with open(path, encoding="utf-8") as f:
+            return f.read().strip()
+
+    def test_a_step_with_no_value_of_its_own_gets_the_600_second_default(self):
+        self.run_job(step("probe", self.PROBE))
+        self.assertEqual(self.seen(), "600", "a step with no VERDICT_HANG_SECONDS of its own ran with %r, not the 600 s default, so its hang stop is off" % self.seen())
+
+    def test_the_callers_value_is_kept_over_the_default(self):  # the control: the default only fills a gap
+        self.run_job(step("probe", self.PROBE), env={"VERDICT_HANG_SECONDS": "45"})
+        self.assertEqual(self.seen(), "45", "a caller's VERDICT_HANG_SECONDS did not reach the step, which ran with %r" % self.seen())
+
+    def test_a_step_that_sets_its_own_value_keeps_it(self):  # the control: a step's own value is never replaced
+        self.run_job(step("probe", self.PROBE, env={"VERDICT_HANG_SECONDS": "900"}))
+        self.assertEqual(self.seen(), "900", "a step's own VERDICT_HANG_SECONDS was replaced: it ran with %r" % self.seen())
+
+    def test_the_quiet_mutation_fixture_suite_gets_no_default(self):
+        os.makedirs(os.path.join(self.root, "hooks"))
+        with open(os.path.join(self.root, "hooks", "test_mutate_ci.py"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("import os\nwith open('hang-env.txt', 'w') as g:\n    g.write(os.environ.get('VERDICT_HANG_SECONDS', 'unset'))\n")
+        self.run_job(step("Mutation CI report fixture suite", "python3 hooks/test_mutate_ci.py"))
+        self.assertEqual(self.seen(), "unset", "the mutation fixture suite got the hang stop default %r; its quiet time is above 600 s, so it takes none" % self.seen())
+
+
+class HangLineFromVerdict(Job):
+    """A real bin/verdict hang stop (no stub) prints a line that ci-job reads as its hang line. The stub cases print the words
+    themselves, so only a real verdict shows that the two copies of the fixed words agree."""
+
+    def test_a_real_hang_stop_reads_as_a_hang_in_the_step_line(self):
+        rc, lines, out = self.run_job(step("hang-real", "sleep 60", env={"VERDICT_HANG_SECONDS": "2"}))  # the 2 s stop ends it long before its 60 s
+        self.assertEqual(by_step(lines), {"hang-real": "unknown"}, "a real hang stop does not read unknown: " + out)
+        self.assertEqual(rc, 2, "a real hang stop does not exit 2, the unknown code: " + out)
+        line = step_line(lines, "hang-real")
+        self.assertIn("rc=124 no output or CPU for", line, "the step line does not carry the real verdict's HANG line: %r\n%s" % (line, out))
+
+
+class HangExitsOne(Job):
+    """A HANG-shaped line is a hang only with verdict's own form and exit 124 (decision hang-stop). A step that exits 1 is read by
+    its own verdict line: with none it reads unknown and is no hang, so an unknown reason may lift it; with a FAIL line it reads FAIL."""
+
+    HANG_SHAPED = "HANG hang-exit1 rc=124 no output or CPU for 60s, stopped (61.2s) log=hang-verdict.log"  # verdict's form, printed with exit 1
+
+    def run_exit_1(self, *printed):
+        """One step whose stub verdict prints each line, then exits 1."""
+        body = "import sys\n" + "".join("print(%r)\n" % ln for ln in printed) + "sys.exit(1)\n"
+        rc, lines, out = self.run_job(step("hang-exit1", "true"), launch=self.verdict_stub(body))
+        self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
+        return rc, lines, out
+
+    def test_a_hang_shaped_line_with_exit_1_and_no_verdict_line_reads_unknown(self):
+        rc, lines, out = self.run_exit_1(self.HANG_SHAPED)
+        self.assertEqual(by_step(lines), {"hang-exit1": "unknown"}, "a HANG-shaped line with exit 1 and no verdict line does not read unknown: " + out)
+        self.assertEqual(rc, 2, "a HANG-shaped line with exit 1 and no verdict line does not exit 2, the unknown code: " + out)
+
+    def test_a_hang_shaped_line_with_exit_1_and_no_verdict_line_is_no_hang(self):  # the step line keeps its no-verdict note, not verdict's HANG line
+        rc, lines, out = self.run_exit_1(self.HANG_SHAPED)
+        line = step_line(lines, "hang-exit1")
+        self.assertIn("(verdict printed no verdict line)", line, "a HANG-shaped line with exit 1 lost the no-verdict note: " + out)
+        self.assertNotIn("HANG hang-exit1", line, "a HANG-shaped line with exit 1 is read as a hang: its line is the step's text\n" + out)
+
+    def test_a_hang_shaped_line_with_exit_1_and_a_fail_line_reads_that_fail(self):  # the control: verdict's own FAIL line is still the verdict
+        rc, lines, out = self.run_exit_1(self.HANG_SHAPED, "FAIL - case name")
+        self.assertEqual(by_step(lines), {"hang-exit1": "FAIL"}, "a HANG-shaped line with exit 1 beside a FAIL line does not read FAIL: " + out)
+        self.assertEqual(rc, 1, "a HANG-shaped line with exit 1 beside a FAIL line does not exit 1: " + out)
+        self.assertIn("FAIL - case name", step_line(lines, "hang-exit1"), "a HANG-shaped line with exit 1 reads another line as the verdict: " + out)
+
+
 def checks_hooks_ifs():
     """The `if:` text of each step of the checks-hooks job, read from checks.yml: the one read the samplers below share."""
     with open(CHECKS, encoding="utf-8") as f:
@@ -509,10 +592,13 @@ def checks_hooks_condition():
 
 
 def checks_hooks_or_condition():
-    """The `if:` of the first checks-hooks step that holds `||` and names no github.event_name, read from checks.yml the same way."""
+    """The `if:` of the first checks-hooks step that holds `||` and names no github.event_name, read from checks.yml the same way, with
+    its records-only skip taken off: the case samples the scope disjunction the step gates on. The skip must be there to come off."""
     conds = [c for c in checks_hooks_ifs() if "||" in c and "github.event_name" not in c]
     assert conds, "scope: checks-hooks has no step whose if: holds || and no github.event_name"
-    return conds[0]
+    expr = unwrap(conds[0])
+    assert RECORDS_ONLY_CONDITION in expr and drop_condition(expr) != expr, "scope: the sampled checks-hooks || step has no records-only skip: " + expr
+    return "${{ %s }}" % drop_condition(expr)
 
 
 class Conditions(Job):
@@ -3572,16 +3658,6 @@ class QuietStepKeepsTheStallWatchFed(Job):
         self.assertIn("still running", done.stderr, done.stdout + done.stderr)
 
 
-def load_ci_job():
-    """bin/ci-job as a fresh module, so a case can call or patch its functions."""
-    import importlib.machinery
-    import importlib.util
-    loader = importlib.machinery.SourceFileLoader("ci_job_under_test", CI_JOB)
-    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
-    loader.exec_module(module)
-    return module
-
-
 class WindowsShell(unittest.TestCase):
     """On Windows a step's bash is Git Bash by full path, never the System32 WSL launcher that PATH finds
     first (decision bare-bash-on-windows-can-resolve-to-the-wsl-stub). Built as a fake Windows tree on any host."""
@@ -4746,6 +4822,66 @@ class ScopeLint(Job):
         self.assertTrue(os.path.exists(os.path.join(self.root, "scope-stub-ran.txt")),
                         "scope: ci-job did not run .github/scripts/ci-scope.sh of the repo under test\n" + out)
         self.assertEqual(by_step(lines).get("flag code"), "skipped", out)
+
+
+BIN_CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
+# The scope flags ci-scope.sh writes for a delta of one path no case arm names: every suite flag on, and the skip outputs false.
+UNMAPPED_FLAGS = {**{n: "true" for n in ("checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos",
+                                         "pointer_windows", "code", "guard", "sweep", "mods", "shoot", "checks_windows_sweep",
+                                         "checks_guard", "windows_guard", "mutation_report")},
+                  "records_only_skip": "false", "skip_comment_delta": "false"}
+# The same delta when the script maps it: only `code` is on, and every other flag and skip output is off.
+MAPPED_FLAGS = {**{n: "false" for n in UNMAPPED_FLAGS}, "code": "true"}
+
+
+def load_ci_job():
+    """bin/ci-job as a module. Its file has no .py suffix, so the loader is named; its entry point is __main__-guarded, so the import runs no step."""
+    loader = importlib.machinery.SourceFileLoader("ci_job_under_test", BIN_CI_JOB)
+    mod = importlib.util.module_from_spec(importlib.util.spec_from_loader("ci_job_under_test", loader))
+    loader.exec_module(mod)
+    return mod
+
+
+def git_repo_with_a_change(root):
+    """A repo of two commits: (its first head, its tree, the second head's tree). The second commit adds lib/tidy.py."""
+    def g(*args):
+        return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+    g("init", "-q")
+    g("config", "user.email", "t@t")
+    g("config", "user.name", "t")
+    g("config", "commit.gpgsign", "false")
+    open(os.path.join(root, "seed.txt"), "w").write("seed\n")
+    g("add", "-A")
+    g("commit", "-qm", "base")
+    a_head = g("rev-parse", "HEAD")
+    os.makedirs(os.path.join(root, "lib"), exist_ok=True)
+    open(os.path.join(root, "lib", "tidy.py"), "w").write("X = 1\n")
+    g("add", "-A")
+    g("commit", "-qm", "change")
+    return a_head, g("rev-parse", f"{a_head}^{{tree}}"), g("rev-parse", "HEAD^{tree}")
+
+
+class CarryUnmappedDelta(unittest.TestCase):
+    """carry_delta_read reads a delta whose every suite flag is on as unmapped, so no suite is carried. ci-scope.sh writes the skip
+    output (skip_comment_delta) as false on such a delta, so it must sit in SCOPE_APART with the other outputs an
+    unmapped path does not set. Left out, they read as a flag off, and the suites the selector picks are carried for the unmapped path."""
+
+    def carried(self, flags):
+        mod = load_ci_job()
+        root = tempfile.mkdtemp(prefix="carry-", dir=RUN_FOLDER)
+        a_head, a_tree, b_tree = git_repo_with_a_change(root)
+        mod.scope_flags = lambda *args, **kwargs: (dict(flags), None)  # the script's answer for this delta, as ci-scope.sh gives it
+        mod.select_suites = lambda *args, **kwargs: ({"hooks/test_tidy.py"}, None)  # the selector would pick one suite
+        return mod.carry_delta_read(root, a_head, a_tree, b_tree)["picked"]
+
+    # Named failure: an unmapped delta carries the selector's suite, because the two skip outputs read as flags off.
+    def test_an_unmapped_delta_with_the_skip_outputs_set_carries_no_suite(self):
+        picked = self.carried(UNMAPPED_FLAGS)
+        self.assertIsNone(picked, f"an unmapped delta carries {sorted(picked or ())}: the skip outputs are not in SCOPE_APART")
+
+    # Control: a delta the script maps picks the selector's suite, as before.
+    def test_a_mapped_delta_still_carries_the_selector_suite(self):
+        self.assertEqual(self.carried(MAPPED_FLAGS), {"hooks/test_tidy.py"}, "a mapped delta no longer carries the selector's suite")
 
 
 if __name__ == "__main__":

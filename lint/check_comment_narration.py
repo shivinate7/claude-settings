@@ -717,6 +717,20 @@ def sh_code_end(src, i, spans, pending, close=None):
     return i
 
 
+def shell_comment_spans(path, src):
+    """The (start, end) offsets of each comment in `src`, the text of a shell file with newline line ends. The one scan that
+    shell_comments and lint/comment_only.py read. Raises Unread on an unclosed quote, expansion or heredoc."""
+    spans, pending = [], []
+    try:
+        first = src.find("\n") if src.startswith("#!") else 0
+        sh_code_end(src, len(src) if first < 0 else first, spans, pending)
+        if pending:
+            raise Unread("heredoc %s never starts" % pending[0][0])
+    except Unread as e:
+        raise Unread("%s: cannot read: %s" % (path, e))
+    return spans
+
+
 def shell_comments(path):
     """Yield (line, text) for each comment in a shell file: sh and bash, the rows of standard.json. zsh is not read:
     no tracked file is zsh, and its quoting differs. No parser: shfmt is not installed in CI, so one pass reads the
@@ -729,15 +743,7 @@ def shell_comments(path):
         raise Unread("%s: cannot read: %s" % (path, e))
     src = re.sub(r"\r\n|\r", "\n", src)
     starts = [0] + [m.end() for m in re.finditer("\n", src)]
-    spans, pending = [], []
-    try:
-        first = src.find("\n") if src.startswith("#!") else 0
-        sh_code_end(src, len(src) if first < 0 else first, spans, pending)
-        if pending:
-            raise Unread("heredoc %s never starts" % pending[0][0])
-    except Unread as e:
-        raise Unread("%s: cannot read: %s" % (path, e))
-    for start, end in spans:
+    for start, end in shell_comment_spans(path, src):
         yield bisect.bisect_right(starts, start), src[start:end]
 
 
