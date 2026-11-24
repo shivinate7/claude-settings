@@ -1338,6 +1338,7 @@ jobs:
         env:
           INSTALL_SRC_SHARD: 1/3
           VERDICT_HANG_SECONDS: 600
+          VERDICT_FULL_LOG: "1"
         run: bin/verdict sh hooks/test_install_src.sh
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
@@ -1372,6 +1373,7 @@ jobs:
         env:
           INSTALL_SRC_SHARD: 2/3
           VERDICT_HANG_SECONDS: 600
+          VERDICT_FULL_LOG: "1"
         run: bin/verdict sh hooks/test_install_src.sh
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
@@ -1406,6 +1408,7 @@ jobs:
         env:
           INSTALL_SRC_SHARD: 3/3
           VERDICT_HANG_SECONDS: 600
+          VERDICT_FULL_LOG: "1"
         run: bin/verdict sh hooks/test_install_src.sh
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
@@ -1858,6 +1861,7 @@ jobs:
         # No step cap: bin/verdict stops the step only on a hang (decision hang-stop); the job cap stays as the net (decision ci-job-caps). The step ran 1293 s (21.6 min) in run 43184587111 and 1221 s in run 43164094808.
         env:
           VERDICT_HANG_SECONDS: 600
+          VERDICT_FULL_LOG: "1"
         run: bin/verdict sh hooks/test_install_src.sh
       - name: install_from_main suite
         if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
@@ -1933,6 +1937,7 @@ jobs:
         env:
           GUARD_TESTS: macos-slice
           VERDICT_HANG_SECONDS: 600
+          VERDICT_FULL_LOG: "1"
         run: bin/verdict python3 hooks/test_guard.py
 
       - name: Load reader against the OS tools

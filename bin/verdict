@@ -4,13 +4,14 @@
 # While it runs, print "verdict: still running, <elapsed>, log=<path>" to stderr every $VERDICT_HEARTBEAT s (default 120), and append it to $STALL_WATCH_BEAT when set.
 # Why stderr: a pipe on stdout (`verdict ... | grep`) hides the line, and the background output file keeps stderr. A quiet verdict over 300 s then draws a false STALL (decision stall-watch, "Tools that are quiet by design"). Why the file too: `2>&1 | grep` or `2>/dev/null` hides stderr as well, and the stall watch reads that file.
 # On a FAIL the excerpt is the last 30 hot lines, plus every earlier line that starts with FAIL, FAILED or ERROR (a failing case's name; at most 300, each cut to 300 chars), in log order: a wrapped CI step shows only this excerpt (decision hang-stop).
+# $VERDICT_FULL_LOG=1 (exactly 1; any other value, set or not, keeps the excerpt): a FAIL and a HANG print the verdict line first, then this run's whole log from its `=== verdict run` header line, every line unchanged and in order, with no line, width or size limit (read in chunks). A HANG prints its process tree between the two, and no log tail, since the log follows whole. PASS and SKIP print one line. Why: a wrapped CI step shows only verdict's output, and its full log stays on the runner (decision hang-stop). The verdict line stays first so bin/ci-job reads it.
 # Exit 0 is FAIL if the output holds a runner marker, no test ran (an XCTest `Executed 0 tests` line beats a unittest `Ran N tests` line; a unittest `Ran 0 tests in` line at a line start counts only when an `OK`, `FAILED` or `NO TESTS RAN` line follows it with no skips, and no other count is read), or a test run read no test count (a test success marker at a line start, or `xcodebuild test` or `swift test` as typed), else SKIP (`SKIP <cmd>, N skipped (<secs>s)`, exit 0) if N > 0 tests skipped, else PASS.
 # N is the larger of two counts: the sum of the runner summaries in the run (`skipped=N`, `N skipped`, node's `# skipped N` and `ℹ skipped N`), and the lines that start `SKIP `, `SKIPPED` or `SKIP:`. A summary line `SKIP: N check` is not one of them, so it never counts on top of its cases. XCTest `Executed N tests, with M tests skipped` lines nest (class, bundle, All tests), so their max is one term of the sum. Colour codes (SGR) are ignored. A count of 10 or more digits reads as 10**9. A count of 0 is PASS. Why: a test that always skips must not read as a pass.
 # Exit 0 is also FAIL (`cut`) for a pytest argv (`pytest`, `py.test`, `python -m pytest`, also through `env`, `uv run`, `uvx` and `bash -c`) with `-q` or a line-start session header, and no line-start summary: the run stopped early. A `-qq` run (no summary line) is complete when a line of progress chars ends `[100%]` (any padding, colour codes ignored), or, with `--co`, when it prints a `<file>: <count>` line. A `bash -c` script is read by its own scanner: a newline, `;`, `&`, `|` or `do`/`then`/`else`/`{`/`!` starts a command, a `#` starts a comment only at a word start, and heredoc text is no command.
 # A run with no $VERDICT_LOG deletes verdict-*.log files older than 1 day from the temp folder: regular files whose first line is our own header only; errors skipped.
 # $VERDICT_HANG_SECONDS=N (off when unset, and on Windows): a child with no new output byte and no CPU advance in any process under it for N s is stopped (where reaped children's CPU cannot be read, as on macOS, a process not seen at the first silent wake also counts as work, since a step that works through short children shows only as new pids): print its process tree and the log tail, end the tree (TERM, then KILL), print one `HANG ...` line, exit 124. It reads the process table (hooks/_nowindow.py) only on a silent wake, never while the child prints (decision hang-stop).
 # Killed by signal N: exit 128+N. Ctrl-C: exit 130. Windows: bin/verdict.cmd.
-import os, re, shutil, signal, subprocess, sys, tempfile, time
+import codecs, os, re, shutil, signal, subprocess, sys, tempfile, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 HOT = re.compile(r"FAIL|Error|assert|Traceback")
@@ -182,16 +183,33 @@ def alive(proc, reached):  # the pids of a TERMed tree still worth a KILL: not t
         try: os.kill(pid, 0); out.append(pid)
         except OSError: pass
     return out
-def hang_stop(proc, f, start, sample):  # print the child's tree and the log tail, then end the tree: TERM, then KILL. -> True when it stopped the tree, False when the child had already finished (it keeps its real rc)
-    if proc.poll() is not None: return False  # it finished between hang_check's answer and now
+def tree_lines(sample):  # the child's process table rows, one printed line each
     rows, cpu = sample
-    print("process tree (pid ppid stat cpu):")
-    for pid in sorted(cpu, key=int): print(f"  {pid} {rows[pid][1] if pid in rows else '?'} {rows[pid][2] if pid in rows else '?'} {cpu[pid]:.1f}s")
-    f.flush()
-    with open(f.name, "rb") as g:
-        g.seek(max(start, os.fstat(g.fileno()).st_size - TAIL)); tail = g.read().decode("utf-8", errors="replace").splitlines()
-    print("log tail:")
-    for l in tail[-CAP:]: print("  " + l)
+    return ["process tree (pid ppid stat cpu):"] + [f"  {pid} {rows[pid][1] if pid in rows else '?'} {rows[pid][2] if pid in rows else '?'} {cpu[pid]:.1f}s" for pid in sorted(cpu, key=int)]
+def full_log():  # True when $VERDICT_FULL_LOG is exactly 1
+    return os.environ.get("VERDICT_FULL_LOG") == "1"
+def print_log(log, start, end):  # print log bytes start..end to stdout in chunks, never the whole file in memory; a byte that is no UTF-8 prints as U+FFFD, as the excerpt does
+    dec = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    try:
+        with open(log, "rb") as g:
+            g.seek(start); left = end - start
+            while left > 0:
+                b = g.read(min(CHUNK, left))
+                if not b: break
+                left -= len(b); sys.stdout.write(dec.decode(b))
+        sys.stdout.write(dec.decode(b"", final=True)); sys.stdout.flush()
+    except OSError as e:
+        try: print(f"\nverdict: full log unreadable: {e}")
+        except OSError: pass
+def hang_stop(proc, f, start, sample, full=False):  # print the child's tree and the log tail (unless full: main prints the tree after the HANG line, then the whole log), then end the tree: TERM, then KILL. -> True when it stopped the tree, False when the child had already finished (it keeps its real rc)
+    if proc.poll() is not None: return False  # it finished between hang_check's answer and now
+    if not full:
+        print("\n".join(tree_lines(sample)))
+        f.flush()
+        with open(f.name, "rb") as g:
+            g.seek(max(start, os.fstat(g.fileno()).st_size - TAIL)); tail = g.read().decode("utf-8", errors="replace").splitlines()
+        print("log tail:")
+        for l in tail[-CAP:]: print("  " + l)
     if proc.poll() is not None: return False  # it finished while the tail was read: no TERM, no HANG line
     reached = []
     try:
@@ -219,8 +237,9 @@ def main(argv):
     try: f = open(log, "ab")
     except OSError as e: print(f"FAIL {name} rc=1 cannot open log: {e} ({time.time() - t:.1f}s) log={log}"); return 1
     with f:
-        f.write(f"=== verdict run {time.strftime('%Y-%m-%d %H:%M:%S')}: {name}\n".encode()); f.flush()
-        start = f.tell()
+        head = f"=== verdict run {time.strftime('%Y-%m-%d %H:%M:%S')}: {name}\n".encode()
+        f.write(head); f.flush()
+        start = f.tell(); first = start - len(head)  # this run's region starts at its header line
         try: beat = int(os.environ.get("VERDICT_HEARTBEAT") or 120)
         except ValueError: beat = 120
         if beat < 1: beat = 120
@@ -240,7 +259,7 @@ def main(argv):
                         if hang:
                             tree = hang_check(proc, f, watch, hang, now)
                             if tree is not None:
-                                if not hang_stop(proc, f, start, tree): continue  # it finished first: the next wait gives its real rc
+                                if not hang_stop(proc, f, start, tree, full_log()): continue  # it finished first: the next wait gives its real rc
                                 hung, rc = True, 124; break
                         if hang and now < next_beat: continue
                         next_beat = now + beat
@@ -264,6 +283,9 @@ def main(argv):
     if hung:
         shown = name if len(name) <= 80 else "..." + name[-77:]
         print(f"HANG {shown} rc={rc} no output or CPU for {hang}s, stopped ({secs}) log={log}")
+        if full_log():
+            print("\n".join(tree_lines(tree)))
+            print_log(log, first, end)
         return rc
     if rc < 0: note, rc = f" killed by signal {-rc}", 128 - rc
     fail = zero = ran = marked = started = summed = done = False; lines = []
@@ -311,6 +333,9 @@ def main(argv):
             else: print(f"PASS {name} ({secs})")
             return 0
     print(f"FAIL {name} rc={rc}{note} ({secs}) log={log}")
+    if full_log():
+        print_log(log, first, end)
+        return rc
     hot = [i for i, l in enumerate(lines) if HOT.search(l)]
     keep = set((hot or range(len(lines)))[-CAP:])
     names = [i for i, l in enumerate(lines) if i not in keep and CASE_NAME.match(l)][-NAMES:]  # a failing case's name line stays even when a long run's hot lines push it out of the last CAP
