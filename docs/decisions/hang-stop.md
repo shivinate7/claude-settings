@@ -10,11 +10,11 @@ Owner, 2026-11-23 21:21 CST: "R2 can get worked on now." The consultant reads th
 
 Ruling: only on a hang. A hang is no new output byte and no CPU advance in any process under the step, for N seconds. This is the rule that decision `stall-watch` (the session stall watch) uses to report.
 
-- N: 2 x the longest healthy silent gap, at least 300 s. N: unmeasured until the first measure lands.
+- N: 600 s for Linux push steps, the first value. It is 2 x the longest silent gap that does not end on a dot row (291.1 s, measured on the merge tool git-half fixture suite), rounded up. N is at least 300 s. CPU half unmeasured: logs cannot show CPU advance.
 - One home: the wait loop of `bin/verdict`. It acts only when the env var `VERDICT_HANG_SECONDS` is set. Unset, nothing is stopped.
 - Before a stop, it prints the process tree and the log tail. Then it ends the tree and prints one `HANG` line. In lane lint, a HANG reads unknown.
 - Scope of the first build: lane lint steps, and the five CI steps that carry a step cap today. Those are the three install checkout-detection shards and the two 45-minute steps in the `checks` workflow. Other CI steps keep only the job cap. The five step caps stay until the build lands.
-- No stop on Windows until it has a CPU read.
+- No stop on Windows until it has a CPU read. No stop on mutation steps yet.
 - Job caps stay as the last net for a busy-loop hang, Windows and action steps. A net sits well above the measured run. It is never tightened to turn a slow healthy run red (owner, 2026-11-10 and 2026-11-23). Decision `ci-job-caps` (the CI job caps) holds the caps.
 - Resume after a stop:
   - Lane lint: its pass cache keeps passed steps.
@@ -24,6 +24,8 @@ Ruling: only on a hang. A hang is no new output byte and no CPU advance in any p
 State: decided, not built. Not built: lane `verdict-hang-stop` (the stop in `bin/verdict`), lane `ci-job-hang-stop` (the CI steps), lane `mutate-verdicts-cached-ci` (the mutation verdict cache), and the five-step wrap.
 
 Measure, 2026-11-23: in the 50 newest push runs of `checks` on main, 4 jobs ended at the 30-minute step cap with no red test, and 0 at a job cap.
+
+Read again at 21:43 CST from runner log timestamps: those 4 jobs (runs 45070046563, 45252280752, 45291804035, 45301573424) were slow, not hung. Their longest silent gap was 60.5 to 65.4 s, and 3 of the 4 had printed the suite's pass summary before the cap cut them. The stamps are per line, so they overstate silence on a pipe: a unittest dot row is stamped only at its newline. In 10 green push runs (150 jobs), the longest silent gap that does not end on a dot row is 291.1 s (merge tool git-half fixture suite). The longest that ends on a dot row is 549 s (Mutation CI report fixture suite), an artifact of line stamping. One schedule run (n=1): Windows 829.2 s, mutation 542.7 s, macOS 183.1 s.
 
 Cost (each unmeasured until its test lands; rule `outcomes-mechanize-rules`):
 - New long-lived process: none.
