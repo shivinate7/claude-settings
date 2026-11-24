@@ -1,0 +1,1 @@
+- mutate-guard-branch-comment: the comment at `hooks/mutate_guard.py` (:179-180) says "on this branch". It should state the rule, not a branch: a hard reset is denied in every tree. Seen: 2026-11-24 x1
