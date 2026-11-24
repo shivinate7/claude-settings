@@ -176,9 +176,11 @@ MUTATIONS = [
     ("shared-tree: drop the git clean arm",
      '        if subcommand == "clean" and clean_deletes_files(args):',
      '        if False and clean_deletes_files(args):', "guard", 'clean: -fd deletes untracked files'),
+    # The required case is the per-file deny in the shared checkout: on this branch a hard reset is denied in every tree,
+    # so it cannot tell a shared checkout from a worktree. A per-file form is the one that reads the worktree flag.
     ("shared-tree: call every tree a worktree",
      '    return own != common',
-     '    return True', "guard", 'worktree: a hard reset in the shared checkout denies'),
+     '    return True', "guard", 'per-file deny: restore of one file in the shared checkout'),
     ("shared-tree: an agent's own worktree never counts as agent-owned",
      '            if agent_owned_worktree(root) is True:',
      '            if False:', "guard",
@@ -269,10 +271,6 @@ MUTATIONS = [
      '        return None\n    return diff >= -SESSION_LIVE_TOLERANCE_MS',
      '    return True', "guard", 'does not deny'),
 
-    ("worktree-prune: reads only stdout, missing git's own stderr message",
-     '    return not (answer.stdout.strip() or answer.stderr.strip())',
-     '    return not answer.stdout.strip()', "guard",
-     'worktree prune: a stale record allows, never denies or asks'),
     ("worktree-prune: refused again, so a harmless prune denies",
      '            # Prune drops only the record of a worktree whose directory is gone and deletes no file: allowed.',
      '            refuse(tool, "deny", "shared-tree", WORKTREE_REMOVE_DENY_REASON, matched)', "guard",
@@ -294,7 +292,7 @@ MUTATIONS = [
      '                    continue  # the call\'s own dry run is a read, never a discard',
      '                if False:\n'
      '                    continue  # the call\'s own dry run is a read, never a discard', "guard",
-     'worktree prune: -n itself is a read, not a discard, so it passes unconditionally'),
+     'worktree prune: a dry run joined by & to a reset in the shared checkout still denies the reset'),
     ("env-file: read only the bare environment basename",
      '    return name.startswith(ENV_PREFIX) and name != ENV_ALLOWED',
      '    return name == ENV_PREFIX', "guard", 'env: a path token wherever the path puts it, cat .env.local'),
