@@ -414,6 +414,10 @@ MACOS_REACH = {
     # hooks/test_precompact_handoff.py proves that line. The row names the handoff family, the nearest
     # reach in the same module, so the arm check passes.
     ("hooks/precompact_handoff.py", "_lint_targets"): lambda family, session: family == "handoff-sections",
+    # No guard case reaches this arm. bin/verdict's hang stop and the stall watch's wrappers call it, and
+    # lint/test_verdict.py and hooks/test_stall_watch.py prove them. The row names the kill family, the nearest
+    # reach in the same module (descendants above), so the arm check passes.
+    ("hooks/_nowindow.py", "proc_table"): lambda family, session: family == "kill",
 }
 
 
