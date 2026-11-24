@@ -16,6 +16,14 @@ POSIX_SKIP = "the form runs through a POSIX shell (bash -c), which Windows does 
 HANG_SKIP = "the hang stop reads CPU through a POSIX ps and stops a process group, which Windows does not have"
 HANG_CAP = 30  # the hang cases' guard: a stop takes about 2 N s, so 30 s sits well above a run of 1-2 s
 PS_SCOPE = "import os, subprocess\nsubprocess.run(['ps', '-p', str(os.getpid())], capture_output=True)\n"  # the child's own ps start: proves the counting shim is on its PATH
+WALL_JUMP = ("import runpy, sys, time\n"  # the launcher: verdict runs in this process with its wall clock patched; the child is a separate process
+             "real, reads = time.time, [0]\n"
+             "def jumped():\n"  # each wall read lands an hour further on than the one before, so any two reads are 3600 s or more apart
+             "    reads[0] += 1\n"
+             "    return real() + 3600.0 * reads[0]\n"
+             "time.time = jumped\n"  # time.monotonic is left as it is
+             "sys.argv = sys.argv[1:]\n"
+             "runpy.run_path(sys.argv[0], run_name='__main__')\n")
 
 def run(code=None, log=None, extra=None, timeout=None, launcher=None, shell=None, argv=None, shim=None, cwd=None):
     """`shell` is an sh -c line in which {cmd} stands for the verdict command, e.g. a pipe or a redirect.
@@ -426,6 +434,71 @@ class T(unittest.TestCase):
             self.assertIn("log=", hang[0], "the HANG line names no log")
             self.assertFalse(any(l.startswith(("FAIL ", "PASS ", "SKIP ")) for l in lines), "a second verdict word printed: " + out)
             self.assertNotEqual(rc, 0, "a hang exits zero")
+
+    def run_bounded(self, *args, **kwargs):
+        """run() with HANG_CAP as its timeout: a verdict that does not return fails the case."""
+        try: return run(*args, timeout=HANG_CAP, **kwargs)
+        except subprocess.TimeoutExpired: self.fail("verdict did not return within %d s" % HANG_CAP)
+
+    @unittest.skipIf(os.name == "nt", HANG_SKIP)
+    def test_hang_stop_wall_clock_jump_does_not_stop_a_quiet_child(self):
+        """Silence is measured on a clock a wall-clock jump cannot move. The launcher's wall clock jumps an hour between reads,
+        and verdict's wakes are 1 s apart, so the wall gap from the baseline to the next wake is an hour while N = 4 s of real
+        time has not passed. The child prints once, sits idle for 4 s, then prints END-MARK: it runs to that end and reads PASS.
+        N is 4, not 2: a wake is at least 1 s, so with N = 2 the child would have to end inside a 1 s window the wakes do not fix."""
+        code = "import time\nprint('LAST-LINE-BEFORE-SILENCE', flush=True)\ntime.sleep(4)\nprint('END-MARK')"
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            log = os.path.join(d, "v.log")
+            r = self.run_bounded(code, log, {"VERDICT_HANG_SECONDS": "4"}, launcher=[sys.executable, "-c", WALL_JUMP, V])
+            self.assertFalse(any(l.startswith("HANG ") for l in r.stdout.splitlines()),
+                             "a wall-clock jump stopped a child that had not been silent for N s of real time: " + r.stdout)
+            with open(log, encoding="utf-8") as h: full = h.read()
+            self.assertIn("END-MARK", full, "the child was stopped before its end")
+            self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
+
+    @unittest.skipIf(os.name == "nt", HANG_SKIP)
+    def test_hang_stop_reaped_children_are_work(self):
+        """A step that prints nothing, and each second starts a short CPU-burning child that exits and is reaped, is working.
+        At N = 2 s verdict runs it to END-MARK and reads PASS: the CPU of a child reaped between two samples still counts (decision hang-stop)."""
+        burst = "%s -c 'for i in range(6000000): pass'" % shlex.quote(sys.executable)
+        script = "for i in 1 2 3 4 5 6 7 8; do %s; sleep 1; done; echo END-MARK" % burst
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            log = os.path.join(d, "v.log")
+            r = self.run_bounded(None, log, {"VERDICT_HANG_SECONDS": "2"}, argv=["bash", "-c", script])
+            self.assertFalse(any(l.startswith("HANG ") for l in r.stdout.splitlines()),
+                             "a step whose reaped children burn CPU was stopped as a hang: " + r.stdout)
+            with open(log, encoding="utf-8") as h: full = h.read()
+            self.assertIn("END-MARK", full, "the step was stopped before its end")
+            self.assertEqual(r.returncode, 0, r.stdout)
+            self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
+
+    @unittest.skipIf(os.name == "nt", HANG_SKIP)
+    def test_hang_stop_ps_down_is_no_stop(self):
+        """Control. When the process-table read fails, verdict has no table to judge CPU by, so a silent child is not stopped:
+        at the baseline and after N = 1 s of silence it runs its 5 s and reads PASS. Two ways for ps to fail: a ps that exits
+        non-zero (an empty table, no note), and a ps that cannot start (the PS_DOWN note). Only the second reaches the mutant at bin/verdict:156."""
+        code = "import time\nprint('LAST-LINE-BEFORE-SILENCE', flush=True)\ntime.sleep(5)\nprint('END-MARK')"
+        for label in ("exits non-zero", "cannot start"):
+            with self.subTest(ps=label), tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+                log = os.path.join(d, "v.log")
+                if label == "exits non-zero":
+                    counter = os.path.join(d, "ps-starts.txt")
+                    body = "#!/bin/sh\necho start >> %s\nexit 1\n" % shlex.quote(counter)
+                    r = self.run_bounded(code, log, {"VERDICT_HANG_SECONDS": "1"}, shim=("ps", body))
+                    starts = 0
+                    if os.path.exists(counter):
+                        with open(counter, encoding="utf-8") as h: starts = h.read().count("start")
+                    self.assertGreaterEqual(starts, 2, "scope: verdict read no process table at the baseline and after silence")
+                else:
+                    no_ps = os.path.join(d, "no-ps")
+                    os.mkdir(no_ps)
+                    self.assertIsNone(shutil.which("ps", path=no_ps), "scope: the PATH with no ps still finds a ps")
+                    r = self.run_bounded(code, log, {"VERDICT_HANG_SECONDS": "1", "PATH": no_ps})
+                self.assertFalse(any(l.startswith("HANG ") for l in r.stdout.splitlines()),
+                                 "a ps with no process table stopped a silent child: " + r.stdout)
+                with open(log, encoding="utf-8") as h: full = h.read()
+                self.assertIn("END-MARK", full, "the silent child was stopped before its end")
+                self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
 
     def test_test_failed_marker_on_exit0_is_fail(self):
         r = run("print('Test Suite All tests')\nprint('** TEST FAILED **')")
