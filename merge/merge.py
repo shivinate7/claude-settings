@@ -133,6 +133,13 @@
                           With --split a pull request lands in `before the split` or `after the split` by when its starting record was posted;
                           without it, one `all` section. A failed read prints `unknown` on stderr and exits 1, with no count. Stands alone; takes no lock, merges and posts nothing.
                           Cost: the one comment list read (one call per 100 comments); no file, process or timer.
+  merge --main-run SHA    one line, `main run <sha9>: <outcome>. <detail>`: the verdict on the push run of commit SHA (7 to 40 hex) on main, judged against the push run before it
+                          (main_run_verdict). Outcomes: green; no verdict (a run that ran no suite); carried (red with nothing new, or a red job skipped, marked `not re-run`);
+                          first red (a new red check or test on a first attempt, or a red job that names no test: prints `gh run rerun <id> --failed`, blames nothing); new break
+                          (the new name red again on the re-run: names this run's commit and pull request); cleared or did not clear (the run is a revert of a red main);
+                          unknown (a failed read, a run still going, no earlier run: exit 1). Stands alone; takes no lock and no merge role, merges and writes nothing.
+                          Cost: one runs read (one page of 50) and one jobs read for the run, one more for the run before and for each run stepped over; one log read per failed
+                          job of a red run, and of the run before when it was red and the run is no revert; no file, process or timer.
   merge --touches [--run RUN_ID|URL] [--case TEXT ...] [--file PATH ...]
                           one line per open PR that touches a named file (a changed file of that path) or holds a named case in a `+` line of its
                           patch: `#N HEADREF SHA9 draft|ready: file PATH; case TEXT`. With --run, the run's failing log lines name the cases
@@ -356,6 +363,22 @@ CANCELLED_NO_RED = "was cancelled with no red job"  # base_state words an unknow
 RERUN_REMEDY = "gh run rerun"  # base_state names it for a cancelled run on the base's head; red_base reads it back to name the remedy in its way out
 RERUN_IN_FLIGHT = "is a re-run still going"  # base_state words an unknown re-run with it; red_base reads it back to give the re-run its own headline
 BREAKING_MERGE = "breaking merge:"  # base_state words the first red run with a green parent, once its re-run is red again, with it
+MAIN_RUNS_READ = 50  # the runs of the base one read holds: base_state and main_run_verdict read one page, never every page
+MAIN_RUN_BASE = "main"  # the branch `merge --main-run` judges
+RUN_OUTCOMES = RUN_GREEN, RUN_NO_VERDICT, RUN_CARRIED, RUN_FIRST_RED, RUN_NEW_BREAK, RUN_UNKNOWN, RUN_CLEARED, RUN_DID_NOT_CLEAR = (
+    "green", "no verdict", "carried", "first red", "new break", "unknown", "cleared", "did not clear")  # the outcome words of a main run's verdict line; one spelling each
+CLEAR_RULE_NO_EVIDENCE = "workflow_dispatch"  # an event that carries no push-skip evidence: clear_rule.empty_without_evidence then asks only whether a suite ran
+
+def load_clear_rule():
+    """The module of actions/ci-alarm/clear_rule.py, beside events.json: the one home of the failed-run clear and the empty-run rule, which the CI alarm calls too. Loaded when asked, not at the top, as the records generator is not: a copy of this file alone still loads."""
+    if os.path.dirname(ALARM_EVENTS) not in sys.path:
+        sys.path.insert(0, os.path.dirname(ALARM_EVENTS))
+    import clear_rule
+    return clear_rule
+
+REVERT_OF_TEXT = r"This reverts commit ([0-9a-f]{40})"  # the one home of the text `git revert` writes into a revert's message; the two readers below build from it
+REVERT_OF_ANYWHERE = re.compile(REVERT_OF_TEXT)  # read_lanes: a revert line anywhere in the message (a subject, a bullet, an indented line), as it read before; a miss would let a dropped lane's files merge
+REVERT_OF_LINE = re.compile(r"(?m)^" + REVERT_OF_TEXT + r"(?![0-9a-f])")  # revert_proven and main_run_verdict: the line alone, so a revert line quoted mid-line never proves a revert
 DROP_CITE = "(decision silent-undo-check-design, a branch that silently undoes earlier work does not merge)"
 BATCH_CITE = "(decision main-branch-protection, the merge tool reads the required checks from the ruleset or the protection; decision private-repos-no-ci, merge.requiredChecks \"none\" merges a repo with no required check)"
 EXPRESS_CITE = "(decision owner-override, ruling R59 part 5 of 15:05 CST Nov 12, a ruled prose change skips the batch queue and runs only the checks that read its files)"
@@ -1388,14 +1411,14 @@ class Host:
         """-> the changed files of pull request n, every page of pulls/N/files: dicts with `filename` and, for a text file, `patch`."""
         return self.pages(f"pulls/{n}/files")
 
-    def failed_lines(self, run_id):
-        """-> the failing lines (see failing_line) of the log of each failed job of run RUN_ID: the jobs read (its pages), then one log read per
+    def failed_lines(self, run_id, jobs=None):
+        """-> the failing lines (see failing_line) of the log of each failed job of run RUN_ID: the jobs read (its pages; `jobs`, when a caller holds them, saves that read), then one log read per
         failed job. Each job is accounted for on its own. The rollup job (ROLLUP_JOB) is skipped, with no log read. A job with a fine conclusion
         (FINE_CONCLUSIONS) needs no log. A failed job must give at least one case or file from its own log lines; an empty log gives none. Any other
         conclusion, a job still running included, is unread. A failed read is a Stop. A job not accounted for raises UnreadJobs once every job is
         read, carrying the lines read, so the caller can still use them and say the rest is unknown."""
         lines, unread = [], []
-        for job in self.pages(f"actions/runs/{run_id}/jobs", "jobs"):
+        for job in (jobs if jobs is not None else self.pages(f"actions/runs/{run_id}/jobs", "jobs")):
             name, conclusion = job.get("name") or job.get("id"), job.get("conclusion")
             if job.get("name") == ROLLUP_JOB or conclusion in FINE_CONCLUSIONS:
                 continue
@@ -1927,10 +1950,8 @@ class Host:
         if self.required == "none":  # a repo with "none" runs no CI, so the base's runs are not read, whatever they hold (decision private-repos-no-ci)
             return "green", ""
         try:
-            if os.path.dirname(ALARM_EVENTS) not in sys.path:
-                sys.path.insert(0, os.path.dirname(ALARM_EVENTS))
-            import clear_rule  # actions/ci-alarm/clear_rule.py, beside events.json: the one home of the failed-run clear, which the CI alarm calls too. Loaded here, not at the top, as the records generator is not: a copy of this file alone still loads
-            c, out = self.api("actions/runs", fields={"branch": base, "per_page": 50})
+            clear_rule = load_clear_rule()
+            c, out = self.api("actions/runs", fields={"branch": base, "per_page": MAIN_RUNS_READ})
             if c:
                 raise Stop(out)
             judged = [r for r in json.loads(out)["workflow_runs"] if (r["status"] == "completed" or (r.get("run_attempt") or 1) > 1)
@@ -2000,15 +2021,13 @@ class Host:
                     continue
                 if r["conclusion"] in ("success", "skipped", "neutral"):
                     continue
-                got = self.buckets([self.run_row(j, j.get("html_url")) for j in jobs_of(r)], warn=False)
-                steps = {k: v for k, rows in got.items() if (v := [x for x in rows if x[0] != "cancel" and not x[0].startswith("timed out")])}
-                jobs = [j for j in self.classify(steps, [], self.ignore)[0] if "no check ran" not in j]
+                got, jobs, names = self.red_jobs(jobs_of(r))
                 where = f"run {r['id']} of {r['name']} at {str(r.get('head_sha'))[:9]} ({r.get('html_url')})"
                 if jobs:
                     if not cleared(r):
                         red.append(f"{where}: " + "; ".join(jobs))
                         red_runs.append(r)
-                        red_names[r["id"]] = sorted(k for k, rows in steps.items() if any(b not in ("pass", "skipping", "pending") for b, _ in rows))
+                        red_names[r["id"]] = names
                 elif any(b.startswith("timed out") for rows in got.values() for b, _ in rows):
                     continue
                 elif r["conclusion"] == "cancelled":
@@ -2031,6 +2050,14 @@ class Host:
                                "red_heads": [r.get("head_sha") for r in red_runs], "red_ids": [r["id"] for r in red_runs], "red_jobs": [red_names[r["id"]] for r in red_runs]}
             return "red", " | ".join(red + blame + cancelled)
         return ("unknown", " | ".join(unknown + cancelled)) if unknown or cancelled else ("green", "")
+
+    def red_jobs(self, job_rows):
+        """-> (got, red, names) for the jobs of one finished run: `got` is buckets' {job: [(bucket, link)]}; `red` the classify lines of its red jobs (a job cancelled or timed out at its
+        cap is not red, and "no check ran" is no job); `names` the red jobs' names, sorted. The one home of what makes a job of a main run red: base_state and main_run_verdict both read it."""
+        got = self.buckets([self.run_row(j, j.get("html_url")) for j in job_rows], warn=False)
+        steps = {k: v for k, rows in got.items() if (v := [x for x in rows if x[0] != "cancel" and not x[0].startswith("timed out")])}
+        red = [j for j in self.classify(steps, [], self.ignore)[0] if "no check ran" not in j]
+        return got, red, sorted(k for k, rows in steps.items() if any(b not in ("pass", "skipping", "pending") for b, _ in rows))
 
     def breaking_line(self, judged, newest_red):
         """The breaking merge of a red base (decision no-merge-onto-red-main, the revert route), read from the page base_state already read: -> a detail
@@ -2763,7 +2790,7 @@ def read_lanes(wt, base_ref, sha):
         if len(parts) != 3:
             continue
         h, parents, body = parts
-        for r in re.findall(r"This reverts commit ([0-9a-f]{40})", body):
+        for r in REVERT_OF_ANYWHERE.findall(body):
             undone[r] = h
         for t in parents.split()[1:]:
             took.setdefault(t, []).append(h)
@@ -4979,8 +5006,7 @@ def revert_proven(root, host, base, beside_ok=False):
             return False
 
         def reverting(s):  # the commits whose message says `This reverts commit <s>`; a longer hex (another sha that starts with s) is no match
-            line = re.compile(rf"(?m)^This reverts commit {re.escape(s)}(?![0-9a-f])")
-            return [x for x, _, text in said if line.search(text)]
+            return [x for x, _, text in said if s in REVERT_OF_LINE.findall(text)]
         reverts = reverting(sha)
         if len(reverts) != 1:
             return False
@@ -5032,6 +5058,16 @@ def base_verdict(root, host, base):
         return "green", ""
     return verdict, detail
 
+def failing_names(lines):
+    """-> the test names of the failing log `lines` (Host.failed_lines), each `file::case` as failing_line parses it, in log order, once each. The one home of how a red run's test is named: red_line and main_run_verdict print the same name."""
+    names = []
+    for text in lines:
+        parsed = failing_line(text)
+        name = "::".join(x for x in (parsed or (None, None)) if x)
+        if name and name not in names:
+            names.append(name)
+    return names
+
 def red_line(host):
     """The text of the one line a merge or a preview prints for a red base (ruling Q5 v, owner, chat, 10:42 CST Nov 20, 2026): each red check of the base's red runs, and the failing tests the red
     jobs' logs name, read through Host.failed_lines. A new break then shows as a new name. A log that cannot be read in full says so, and the tests that were read still print.
@@ -5047,14 +5083,112 @@ def red_line(host):
             lines, why = e.lines, "; some failing tests could not be read"
         except (Stop, subprocess.TimeoutExpired, OSError, KeyError, ValueError, TypeError):
             lines, why = [], "; the failing tests could not be read"
-        for text in lines:
-            parsed = failing_line(text)
-            name = "::".join(x for x in (parsed or (None, None)) if x)
-            if name and name not in tests:
-                tests.append(name)
+        tests += [name for name in failing_names(lines) if name not in tests]
     shown = ", ".join(tests[:RED_TESTS_SHOWN]) + (f" and {len(tests) - RED_TESTS_SHOWN} more" if len(tests) > RED_TESTS_SHOWN else "")
     return (f"Red checks: {', '.join(checks) or 'none named (the run ended red with no red job)'} (run {', '.join(str(i) for i in ids)}). "
             f"Failing tests: {shown or 'none named'}{why}")
+
+def main_run_verdict(host, sha, base=MAIN_RUN_BASE):
+    """-> (outcome, line): the verdict on the push run of commit `sha` on `base`, judged against the push run before it. `line` is `main run <sha9>: <outcome>. <detail>`, and `outcome` is one of RUN_OUTCOMES.
+    It reads and writes nothing else: no merge, no re-run, no API write. The one home of that verdict (decision no-merge-onto-red-main, the red-main check); no git read. Host.api reads the repo from the working directory, so run it inside the repo's checkout: elsewhere every read fails and the verdict is unknown.
+    - green: the run ran a suite and every red job of the run before passed or never was red.
+    - no verdict: a run that ran no suite (push-skip or scope skipped every check) says nothing about the base, so it is neither green nor carried. This reads emptiness alone, with no push-skip evidence (ruling own-812-a-judge-suite-runs; clear_rule.empty_without_evidence with an event that carries none).
+    - carried: red with no red job and no failing test the run before did not have; or a run that skipped a job red before, which the line marks `not re-run`.
+    - first red: a new red job or test on a first attempt, or a red job that names no test (a step timeout). The line names `gh run rerun <id> --failed`; nothing is blamed.
+    - new break: a new name red again on the re-run (`blames`, the one home of when a merge is blamed). The line names this run's commit, never an earlier one.
+    - cleared or did not clear: the run is a revert (a line of its commit message says `This reverts commit`, REVERT_OF_LINE) of a red base, and it is green with every red job re-run, or it is not.
+    - unknown: a failed read, the run or the run before still going, a cancelled run, no run of `sha` on the page, or no earlier run to tell new from carried. Unknown never reads green, first red or carried.
+    Job rules: Host.red_jobs (what makes a job red) and clear_rule (what a suite is). Failing names: Host.failed_lines and failing_names, as red_line prints them.
+    Cost: one runs read (one page) and one jobs read for the run; on a red run one log read per failed job. The run before costs one jobs read, and a run stepped over (cancelled, or with no suite) one more each; when it was red and the run is not a revert,
+    one log read per failed job of it. Nothing else."""
+    sha9 = sha[:9]
+
+    def line(outcome, detail):
+        return outcome, f"main run {sha9}: {outcome}. {detail}"
+
+    def unknown(why):  # a failed read is a verdict line, never a refusal: no Stop leaves this function
+        return line(RUN_UNKNOWN, f"{' '.join(str(why).split()) or type(why).__name__} {UNKNOWN_CITE}")
+    try:
+        clear_rule = load_clear_rule()
+        c, out = host.api("actions/runs", fields={"branch": base, "per_page": MAIN_RUNS_READ})
+        if c:
+            return unknown(out or "Stop")
+        runs = [r for r in json.loads(out)["workflow_runs"] if r["event"] in host.BASE_EVENTS and r["name"] not in host.ignore]
+        at = next((i for i, r in enumerate(runs) if r["event"] == "push" and str(r.get("head_sha")).startswith(sha)), None)
+        if at is None:
+            return line(RUN_UNKNOWN, f"no push run of that commit is among the newest {len(runs)} runs of {base}")
+        now = runs[at]
+        sha9 = now["head_sha"][:9]
+        attempt = now.get("run_attempt") or 1
+        read = {}
+
+        def jobs_of(r):  # a run's jobs, read once per call
+            if r["id"] not in read:
+                read[r["id"]] = host.pages(f"actions/runs/{r['id']}/jobs", "jobs")
+            return read[r["id"]]
+
+        def ran_no_suite(r):
+            return clear_rule.empty_without_evidence(jobs_of(r), CLEAR_RULE_NO_EVIDENCE)
+
+        def tests_of(r):  # -> (failing test names of the run's failed jobs, whether some job's log gave none); any other failed read stops the verdict
+            try:
+                return failing_names(host.failed_lines(r["id"], jobs_of(r))), False
+            except UnreadJobs as e:
+                return failing_names(e.lines), True
+        if now["status"] != "completed":
+            return line(RUN_UNKNOWN, f"run {now['id']} (attempt {attempt}) is still {now['status']}, so it has no verdict yet")
+        if now["conclusion"] == "cancelled":
+            return line(RUN_UNKNOWN, f"run {now['id']} was cancelled, so it has no verdict")
+        jobs = jobs_of(now)
+        passed = now["conclusion"] in ("success", "skipped", "neutral")
+        if passed and ran_no_suite(now):
+            return line(RUN_NO_VERDICT, f"run {now['id']} ran no suite (push-skip or scope skipped every check), so it says nothing about {base}")
+        key = (now["path"], host.BASE_EVENTS["push"])
+        before_state, before = "none", None  # the newest earlier run of this file and group that is a verdict: green with a suite, or red
+        for r in runs[at + 1:]:
+            if (r["path"], host.BASE_EVENTS[r["event"]]) != key:
+                continue
+            if r["status"] != "completed":
+                before_state, before = "unfinished", r
+            elif r["conclusion"] in ("cancelled", "skipped", "neutral") or (r["conclusion"] == "success" and ran_no_suite(r)):
+                continue
+            else:
+                before_state, before = ("green" if r["conclusion"] == "success" else "red"), r
+            break
+        if before_state == "unfinished":
+            return line(RUN_UNKNOWN, f"the push run before it, run {before['id']}, is still {before['status']}, so a new red cannot be told from a carried one")
+        message = (now.get("head_commit") or {}).get("message") or now.get("display_title") or ""
+        revert = before_state == "red" and bool(REVERT_OF_LINE.search(message))
+        before_names = host.red_jobs(jobs_of(before))[2] if before_state == "red" else []
+        skipped = [n for n in before_names if not any(j["name"] == n and j.get("status") == "completed" and j.get("conclusion") not in ("skipped", "cancelled") for j in jobs)]
+        not_re_run = f"; not re-run here, although red in run {before['id']}: {', '.join(skipped)}" if skipped else ""
+        if passed:
+            if revert:
+                return line(RUN_DID_NOT_CLEAR, f"the revert's run {now['id']} is green{not_re_run}") if skipped else line(RUN_CLEARED, f"the revert's run {now['id']} is green and re-ran every job that was red in run {before['id']}")
+            if skipped:
+                return line(RUN_CARRIED, f"run {now['id']} is green{not_re_run}, so its red is still carried")
+            return line(RUN_GREEN, f"run {now['id']} ran its suite and passed")
+        names = host.red_jobs(jobs)[2]
+        tests, unread = tests_of(now)
+        why = "; some failing tests could not be read" if unread else ""
+        shown = ", ".join(tests[:RED_TESTS_SHOWN]) + (f" and {len(tests) - RED_TESTS_SHOWN} more" if len(tests) > RED_TESTS_SHOWN else "")
+        if revert:
+            return line(RUN_DID_NOT_CLEAR, f"the revert's run {now['id']} is red: checks {', '.join(names) or 'none named'}; failing tests {shown or 'none named'}{why}")
+        if before_state == "none":
+            return line(RUN_UNKNOWN, f"run {now['id']} is red, and no earlier push run of this workflow is among the newest {len(runs)} runs of {base}, so a new red cannot be told from a carried one")
+        before_tests = tests_of(before)[0] if before_state == "red" else []
+        new_names, new_tests = [n for n in names if n not in before_names], [t for t in tests if t not in before_tests]
+        if before_state == "red" and not new_names and not new_tests:
+            return line(RUN_CARRIED, f"run {now['id']} is red with the checks and tests run {before['id']} already had (checks {', '.join(names) or 'none named'}), so it adds no new red{not_re_run}{why}")
+        new_shown = ", ".join(new_tests[:RED_TESTS_SHOWN]) + (f" and {len(new_tests) - RED_TESTS_SHOWN} more" if len(new_tests) > RED_TESTS_SHOWN else "")
+        fresh = f"new red checks {', '.join(new_names) or 'none named (the run ended red with no red job)'}; new failing tests {new_shown or 'none named'}{why}"
+        if not host.blames(now):
+            return line(RUN_FIRST_RED, f"run {now['id']}: {fresh}. Nothing is blamed until it is red again on a re-run: `{RERUN_REMEDY} {now['id']} --failed` re-runs its failed jobs")
+        number = pull_number_in_title(message.splitlines()[0] if message else "")
+        return line(RUN_NEW_BREAK, f"run {now['id']}: {fresh}, red again on its re-run (attempt {attempt}). {BREAKING_MERGE} commit {sha9}, "
+                    + (f"pull request #{number}" if number else "no pull request number in its message"))
+    except (Stop, subprocess.TimeoutExpired, OSError, ValueError, KeyError, TypeError, AttributeError, ImportError) as e:
+        return unknown(e)
 
 def red_beside(root, host, base, verdict):
     """True when a red base reads unknown for the merge: a merged revert would lift the red but for a cancelled or running run beside it, and unknown never reads clear.
@@ -7689,6 +7823,12 @@ def lint_arg(text):
         raise argparse.ArgumentTypeError(f"{text!r} is not N@SHA:VERDICT, with SHA a full lowercase 40-hex commit sha (the head the lint ran on) and VERDICT one of {', '.join(RELEASE_LINT_VERDICTS)}")
     return int(m.group(1)), m.group(2), m.group(3)
 
+def main_run_arg(text):
+    """argparse type of --main-run: a commit sha, 7 to 40 lowercase hex characters (a run's head_sha starts with it)."""
+    if not re.fullmatch(r"[0-9a-f]{7,40}", text, re.ASCII):
+        raise argparse.ArgumentTypeError(f"{text!r} is not a commit sha of 7 to 40 lowercase hex characters")
+    return text
+
 def head_arg(text):
     """argparse type of --head: a full lowercase 40-hex sha, the one the review read."""
     if not re.fullmatch(REVIEW_SHA, text, re.ASCII):
@@ -8207,6 +8347,7 @@ def build_parser():
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after the final round (round 3, or 4 with --grant) when that round failed; a passing round, or a passing fix check after any round, owes none")
     p.add_argument("--touches", action="store_true", help="list the open pull requests that touch a failing case or a named file; takes no lock, merges and posts nothing")
     p.add_argument("--run", default=None, metavar="RUN", help="a workflow run, by its id or its Actions run URL. With --touches: the run whose failing log lines name the cases")
+    p.add_argument("--main-run", type=main_run_arg, default=None, metavar="SHA", help="judge the push run of commit SHA on main against the push run before it and print one line, `main run <sha9>: <outcome>. <detail>`; stands alone; takes no lock, merges and writes nothing")
     p.add_argument("--case", action="append", default=[], metavar="TEXT", help="with --touches: a case to find in the `+` lines of an open pull request's patch; repeat it")
     p.add_argument("--file", action="append", default=[], metavar="PATH", help="with --touches: a file an open pull request changes; repeat it")
     return p
@@ -8220,6 +8361,8 @@ def main(argv, host=None, lock=None, hosts=None):
         p.error("--head, --kind, --guard, --round, --fix-check, --net-value and --grant go with --review-record (--head also goes with --confirm)" if a.grant
                 else "--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record (--head also goes with --confirm)" if not a.accepted
                 else "--head, --kind, --guard, --round, --fix-check, --net-value and --accepted go with --review-record (--head also goes with --confirm)")
+    if a.main_run is not None and any(v != p.get_default(k) for k, v in vars(a).items() if k not in ("main_run", "repo_dir")):  # -C names the checkout, not a second mode
+        p.error("--main-run stands alone")
     if a.run is not None and not a.touches:
         p.error("--run goes with --touches")
     if any(not v.strip() for v in [*a.case, *a.file, *([a.run] if a.run is not None else [])]):
@@ -8277,7 +8420,7 @@ def main(argv, host=None, lock=None, hosts=None):
         p.error("--audit-prs stands alone")
     if a.draft_idle and any(v != p.get_default(k) for k, v in vars(a).items() if k not in ("draft_idle", "repo_dir")):  # -C names the checkout, not a second mode
         p.error("--draft-idle stands alone")
-    if a.idle_lanes or a.touches or a.release_check or a.audit_prs or a.review_tally or a.draft_idle:
+    if a.idle_lanes or a.touches or a.release_check or a.audit_prs or a.review_tally or a.draft_idle or a.main_run:
         pass  # stands alone: checked above
     elif a.fast_checks:  # the read-only pre-ready run: no lock, no push, no ready mark
         if a.pr is None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record or a.lane_lint or a.ready:
@@ -8334,6 +8477,10 @@ def main(argv, host=None, lock=None, hosts=None):
         if a.repo_dir is not None and not os.path.isdir(a.repo_dir):  # subprocess raises on a missing cwd; stop with a line instead
             raise Stop(f"-C names no folder: {a.repo_dir} " + REPO_CITE)
         refuse_closing_reason(a.undo_check_unknown_ok, a.base_red_ok)  # first: before the role check, any lock, host read or write
+        if a.main_run:  # before the role check and any lock: it reads, merges and writes nothing
+            outcome, text = main_run_verdict(host or Host(cwd=a.repo_dir), a.main_run)
+            say(text)
+            return 1 if outcome == RUN_UNKNOWN else 0
         if a.touches:  # before the role check and any lock: it reads, merges and posts nothing
             try:
                 lines, unknown = touches_lines(host or Host(), run_id(a.run) if a.run else None, a.case, a.file)

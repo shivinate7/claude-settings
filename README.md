@@ -182,6 +182,9 @@ merge --reviewed        one line per open PR: its review state (bad when the new
                         Then the PRs with no record. Then two number lines: the longest wait from a done record, and the count of open PRs with no next act.
 merge --reviewed --root DIR [--root DIR ...]
                         the same list for each repo checkout DIR, one block each. A failed root prints unknown.
+merge --main-run SHA    one line, `main run <sha9>: <outcome>. <detail>`: the verdict on the push run of commit SHA (7 to 40 hex) on main, judged against the push run before it.
+                        Outcomes: green, no verdict, carried, first red, new break, cleared, did not clear, unknown (exit 1). Stands alone; takes no lock and writes nothing.
+                        Cost: one runs read, a jobs read for each run judged, and a log read per failed job of each red run read; no file, process or timer.
 merge --touches [--run RUN_ID] [--case TEXT ...] [--file PATH ...]
                         one line per open PR that changes a named file or adds a named case in a `+` line of its patch. --run reads the
                         failing lines of that run's failed jobs for the cases (and the files of a pytest or unittest line; a run by path logs
