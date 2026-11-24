@@ -905,7 +905,7 @@ def _push_updates_default(cwd: str, remote: str, reach) -> bool:
 
 
 def push_ask_hit(args, cwd: str, overrides=None) -> str:
-    """'main', 'all', 'all-agent', 'agent', 'stray' or '' for the `git push` arguments `args`, a push `push_verdict`
+    """'main', 'all', 'all-agent', 'agent' or '' for the `git push` arguments `args`, a push `push_verdict`
     let through.
 
     'all' (rule push-all-main, which refuses and never asks): `--all`, `--branches`, or a glob refspec that sends
@@ -921,7 +921,7 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
     `refs/heads/`, once the tracking-ref read has found no update. A failed read of it is 'all'.
 
     'agent' (rule push-agent-branch, which refuses where the other two kinds ask): a push whose destination name is an agent-worktree branch name
-    (`AGENT_BRANCH`), with or without `-u`, checked before 'stray'. An implied destination is the current
+    (`AGENT_BRANCH`), with or without `-u`. An implied destination is the current
     branch (a bare push with no upstream too, under push.autoSetupRemote); an explicit one is the part
     after `:`, `refs/heads/` stripped; a colon-less refspec is its own name. A destination after `:` adds
     no read. A colon-less refspec other than `main` or `master` reads the current branch once
@@ -929,18 +929,9 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
 
     'main' (rule push-main): a non-forced push whose destination is literally `main` or `master`
     to a network remote (`_push_goes_to_network`): a push to a path, a `file://` URL or a remote
-    with no URL is silent. The remote's HEAD is never read. 'stray' (rule push-stray-branch): a push with an implied
-    destination (a bare push, `HEAD`, `@`, or a colon-less refspec naming the current branch) that writes a
-    name other than the branch's upstream. It needs an upstream, the pushed remote equal to
-    branch.<cur>.remote, and an upstream that is not main or master. A `-u` push is silent here: its
-    implied destination is the local name, which becomes the new upstream. A bare push under push.default
-    simple writes the current branch only when the upstream carries its name, else git refuses it. A
-    deletion, a forced push, a mirror, and a push of tags alone are never judged here. A destination that
-    cannot be read is allowed. A 'stray' is silent when the implied destination already exists as
-    `refs/remotes/<pushed remote>/<name>`: that push updates the branch's own ref. A failed ref read keeps
-    the ask. Reads: none for a destination after `:`; one `symbolic-ref` for the current
-    branch for a bare push or a colon-less refspec; one `git config --get-regexp` when the upstream is
-    needed; one `git rev-parse --verify -q` of the destination's remote-tracking ref, on the stray path only;
+    with no URL is silent. The remote's HEAD is never read. A push of a stray branch (rule push-stray-branch) is allowed and
+    returns ''. A deletion, a forced push, a mirror, and a push of tags alone are never judged here. Reads: none for
+    a destination after `:`; one `symbolic-ref` for the current branch for a bare push or a colon-less refspec;
     one more `git config --get-regexp` on the main path only, for the remote's URL (none when the
     remote argument is itself a URL or path).
     """
@@ -1018,7 +1009,7 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
                     to_main = True
                 agent = agent or bool(AGENT_BRANCH.fullmatch(target.removeprefix("refs/heads/")))
             elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:
-                # A local origin makes main() empty; the other refspecs are still read for agent and stray.
+                # A local origin makes main() empty; the other refspecs are still read for agent.
                 if main():
                     to_main = True
             elif source in ("HEAD", "@") or (current() is not None and source == current()):
@@ -1039,21 +1030,7 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
                     return "all-agent"
         if not agent and (to_main or (implied and current() in DEFAULT_BRANCH_FALLBACK and main())):
             return "main"
-    if agent:
-        return "agent"
-    if not implied or current() is None:
-        return ""
-    remote_cfg, merge = config()[:2]
-    pushed = remote or remote_cfg
-    if not merge or not remote_cfg or pushed != remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:
-        return ""
-    # A -u push of the local name sets that name as the new upstream on purpose (a lane stacked on a lane).
-    if merge == current() or upstream:
-        return ""
-    # A destination already on the pushed remote is that branch's own ref, so the push is no stray. A read that
-    # fails (git unavailable, an error other than "no such ref") keeps the ask.
-    seen = guard_core._git(cwd, "rev-parse", "--verify", "-q", "refs/remotes/" + pushed + "/" + current())
-    return "" if seen is not None and seen.returncode == 0 else "stray"
+    return "agent" if agent else ""
 
 
 # ------------------------------------------------------------------ a rewrite and a wide delete
