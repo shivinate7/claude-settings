@@ -194,6 +194,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `guard-log-read-weekly` | Owner, 2026-10-13. | [`docs/decisions/guard-log-read-weekly.md`](../docs/decisions/guard-log-read-weekly.md) |
 | `guard-remedy-not-to-owner` | Question: where does a Stop refusal's remedy live when the owner sees the refusal in chat? | [`docs/decisions/guard-remedy-not-to-owner.md`](../docs/decisions/guard-remedy-not-to-owner.md) |
 | `guard-that-cries-wolf-is-spent` | CLAUDE.md: "Trust a guard only once it goes red on the defect it guards." The other half: a guard that goes red when nothing is wrong is spent, because the reader stops reading it. | [`docs/decisions/guard-that-cries-wolf-is-spent.md`](../docs/decisions/guard-that-cries-wolf-is-spent.md) |
+| `guards-never-ask` | Question: what does a hook guard do with an act it would have asked the owner about? | [`docs/decisions/guards-never-ask.md`](../docs/decisions/guards-never-ask.md) |
 | `haiku-prompt-hooks` | **Prompt hooks judge rules that no script can parse.** Each refuses the call when it finds a breach (owner ruling 2026-10-07). | [`docs/decisions/haiku-prompt-hooks.md`](../docs/decisions/haiku-prompt-hooks.md) |
 | `hold-unsafe-after-round-3` | Owner, 2026-10-15 12:00 CDT. | [`docs/decisions/hold-unsafe-after-round-3.md`](../docs/decisions/hold-unsafe-after-round-3.md) |
 | `hook-if-filters` | Owner, 2026-10-21. | [`docs/decisions/hook-if-filters.md`](../docs/decisions/hook-if-filters.md) |
@@ -247,7 +248,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `page-never-preselects` | Owner, 2026-11-13 13:04 CST, typed to triage: the waiting page never preselects an answer, and nothing is sent unless the owner presses. | [`docs/decisions/page-never-preselects.md`](../docs/decisions/page-never-preselects.md) |
 | `page-stale-publish` | Every republish of a waiting page is main's `skills/waiting-page/page.html` with the live `designData` and roadmap blocks kept, never the live page's own code (decision `questions-go-to-owner`, skill `waiting-page`, "Keep the page on main's code"). | [`docs/decisions/page-stale-publish.md`](../docs/decisions/page-stale-publish.md) |
 | `plain-prose-lint` | The STE lint is a plain-prose lint. | [`docs/decisions/plain-prose-lint.md`](../docs/decisions/plain-prose-lint.md) |
-| `plain-push-asks` | Two kinds of push that are not forced ask. | [`docs/decisions/plain-push-asks.md`](../docs/decisions/plain-push-asks.md) |
+| `plain-push-asks` | No plain push asks. | [`docs/decisions/plain-push-asks.md`](../docs/decisions/plain-push-asks.md) |
 | `plan-refuter` | Owner, 2026-11-06 12:43 CST, waiting-page item 279, pick d. | [`docs/decisions/plan-refuter.md`](../docs/decisions/plan-refuter.md) |
 | `playwright-browsers-path` | No command sets PLAYWRIGHT_BROWSERS_PATH to work around a missing browser build. | [`docs/decisions/playwright-browsers-path.md`](../docs/decisions/playwright-browsers-path.md) |
 | `playwright-install-once` | Rule `playwright-install` in `hooks/guard.py`: | [`docs/decisions/playwright-install-once.md`](../docs/decisions/playwright-install-once.md) |
@@ -334,7 +335,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 |---|---|---|
 | `agents-get-standing-rules` | Owner, 2026-10-12: a SubagentStart hook injects the standing rules, so a brief need not retype them. | [`docs/decisions/agents-get-standing-rules.md`](../docs/decisions/agents-get-standing-rules.md) |
 | `an-agent-outside-its-home-tree-must-stop` | Each session writes only inside its own checkout. | [`docs/decisions/an-agent-outside-its-home-tree-must-stop.md`](../docs/decisions/an-agent-outside-its-home-tree-must-stop.md) |
-| `bare-merge-asks` | Orchestrator call (lane bare-gh-merge-ask); the owner may rule otherwise. | [`docs/decisions/bare-merge-asks.md`](../docs/decisions/bare-merge-asks.md) |
+| `bare-merge-asks` | Orchestrator call (lane bare-gh-merge-ask), changed by the owner's sort of 2026-11-23 11:07 CST (decision `guards-never-ask`). | [`docs/decisions/bare-merge-asks.md`](../docs/decisions/bare-merge-asks.md) |
 | `catalog-cells-never-cut` | The cell cap in `docs/catalog.md` sits above the longest cell, so no cell is cut. | [`docs/decisions/catalog-cells-never-cut.md`](../docs/decisions/catalog-cells-never-cut.md) |
 | `ci-wait-reads-run-status` | Owner, 2026-10-16 01:47 CDT ("Status read only") and 03:00 CDT ("Change them too"): no program and no agent runs `gh run watch`, in the foreground or the background. | [`docs/decisions/ci-wait-reads-run-status.md`](../docs/decisions/ci-wait-reads-run-status.md) |
 | `claims-carry-backing` | Owner goal, 2026-11-06 11:36 CST: every definitive prose claim is backed and verifiable. | [`docs/decisions/claims-carry-backing.md`](../docs/decisions/claims-carry-backing.md) |
