@@ -1,1 +1,1 @@
-- stale-none-comments: `.github/workflows/checks.yml` about line 3401 and `skills/project-ops/scripts/protect.py` lines 7 and 14 still say this repo's `merge.requiredChecks` is "none"; it is "first-proof" (decision `merge-needs-current-base`).
+- stale-none-comments: `.github/workflows/checks.yml` about line 3401 and `skills/project-ops/scripts/protect.py` lines 7 and 14 still say this repo's `merge.requiredChecks` is "none"; it is "first-proof" (decision `merge-needs-current-base`). Seen: 2026-11-24 x1
