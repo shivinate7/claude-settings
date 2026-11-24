@@ -12,13 +12,16 @@ The contract these cases pin. A change to any of it changes these cases first.
   commits/<head>/check-runs (a batch-* head only: its all-jobs-passed run and its suite runs); actions/runs?head_sha&event
   (the checks.yml runs of a merged pull request head that is not a batch head); actions/runs/<id>/jobs (its jobs, with steps).
 - skip=true when the push tree equals the tree of a batch-* head whose ready run passed every suite job, or of a merged pull
-  request head whose newest checks.yml run is a green pull request run: all-jobs-passed and every suite job succeeded. A suite step
-  that scope skipped does not stop the skip: after a passing PR run, narrowed or full, main runs none of its suites for that merge.
+  request head whose newest checks.yml run is a green pull request run: all-jobs-passed and every suite job succeeded. A run that
+  concluded cancelled counts too, when all-jobs-passed and every suite job succeeded: a cancel after those jobs passed is no gap.
+  A suite step that scope skipped does not stop the skip: after a passing PR run, narrowed or full, main runs none of its suites for that merge.
   A macOS job runs on a schedule and a dispatch only (owner, 01:33 CST Nov 16), so it is no suite job of a batch head or a pull request:
   its skip is no gap, and no scope-skips input names it. Any other suite job skipped on the run is still a gap.
   A records-only run (every suite job skipped, scope and all-jobs-passed succeeded) is a passing run: its skips are proven. The
   REST jobs read carries no job outputs, so all-jobs-passed's success stands for its records_only_skip flag.
 - Any read error, unknown state or unreadable record writes skip=false and says "unknown".
+- Every other skip=false path prints its reason on one line that names what refused it: the pull request number or the head branch,
+  and the trees (short) for a tree mismatch. A push that no pull request covers names the push tree (short).
 
 The stand-in PRS_JSON, a JSON list of batch heads, is read by the older cases. The live cases answer the reads through FakeGitHub,
 by URL, as the API does. A ready batch head skips only when every suite job of checks.yml succeeded on its ready run, not only
@@ -543,9 +546,22 @@ def pull_request_run(id_, conclusion="success", status="completed", head=LANE_HE
             "conclusion": conclusion, "created_at": created_at, "run_attempt": 1}
 
 
-def lane_pull(head=LANE_HEAD, merged_at=EARLY, branch="lane-x"):
+LANE_NUMBER = 3819  # a merged lone lane's pull request number, as the pull request read carries it
+
+
+def lane_pull(head=LANE_HEAD, merged_at=EARLY, branch="lane-x", number=LANE_NUMBER):
     """The pull request of the push commit, in the shape the pull request read returns: merged unless merged_at is None."""
-    return {"head": {"ref": branch, "sha": head}, "merged_at": merged_at}
+    return {"number": number, "head": {"ref": branch, "sha": head}, "merged_at": merged_at}
+
+
+def lone_lane_fake(runs, jobs, pulls=None, tree=TREE, **options):
+    """The reads of a push whose tree is a merged lone lane's: its pull request, its head's tree, and its checks.yml runs and jobs."""
+    return FakeGitHub(pulls=[lane_pull()] if pulls is None else pulls, trees={LANE_HEAD: tree}, workflow_runs=runs, jobs=jobs, **options)
+
+
+def reason_lines(text, token):
+    """The printed lines that name `token`. A skip=false prints the reason for it, and the reason names what refused the push."""
+    return [line for line in text.splitlines() if token in line]
 
 
 class MergedPullRequest(LiveHead):
@@ -554,7 +570,7 @@ class MergedPullRequest(LiveHead):
     the other reads do, so a full page is unknown."""
 
     def lane_fake(self, runs, jobs, pulls=None, tree=TREE, **options):
-        return FakeGitHub(pulls=[lane_pull()] if pulls is None else pulls, trees={LANE_HEAD: tree}, workflow_runs=runs, jobs=jobs, **options)
+        return lone_lane_fake(runs, jobs, pulls=pulls, tree=tree, **options)
 
     def test_a_merged_pull_request_with_the_push_tree_and_a_full_green_run_skips(self):
         fake = self.lane_fake([pull_request_run(1)], {1: full_run_jobs()})
@@ -794,7 +810,7 @@ def records_only_check_runs(scope="success", rollup="success"):
 
 def records_only_lone_fake(jobs):
     """A merged lone-lane head whose newest checks.yml pull request run has these jobs."""
-    return FakeGitHub(pulls=[lane_pull()], trees={LANE_HEAD: TREE}, workflow_runs=[pull_request_run(1)], jobs={1: jobs})
+    return lone_lane_fake([pull_request_run(1)], {1: jobs})
 
 
 class RecordsOnlyRun(LiveHead):
@@ -878,6 +894,133 @@ class CallerWorkflow(LiveHead):
         value, text = self.skip_on(fake=fake, extra_env={"GITHUB_WORKSPACE": caller})
         self.assertEqual(value, "true", "every suite job of the caller's checks.yml passed, so the push skips: the suite list must come from the caller (%s)"
                          % text.strip()[-200:])
+
+
+class MismatchReason(LiveHead):
+    """A merged lone lane whose head tree is not the push's covers nothing, and the output says so in one line: the pull request's number,
+    the push's tree and the head's tree (both short), and that no run proved the push tree. Skip stays false. The control is the same
+    pull request on the push's tree: it skips, and its output never says that no run proved the push tree."""
+
+    def test_a_merged_pull_request_with_another_tree_names_the_reason_in_one_line(self):
+        fake = lone_lane_fake([pull_request_run(1)], {1: full_run_jobs()}, tree=OTHER_TREE)
+        self.assertNotEqual(fake.trees[LANE_HEAD], TREE, "the fixture's tree must differ from the push's, or it proves nothing")
+        value, text = self.skip_on(fake=fake)
+        self.assertEqual(value, "false", "a merged pull request whose tree is not the push's covers nothing: skip=false (%s)" % text.strip()[-200:])
+        lines = reason_lines(text, str(LANE_NUMBER))
+        self.assertEqual(len(lines), 1, "the tree mismatch must name pull request %d in one line, got %s" % (LANE_NUMBER, text.strip()[-200:]))
+        self.assertIn(TREE[:7], lines[0], "the reason must name the push's tree, short: %s" % lines[0])
+        self.assertIn(OTHER_TREE[:7], lines[0], "the reason must name the pull request head's tree, short: %s" % lines[0])
+        self.assertIn("no run proved the push tree", lines[0], "the reason must say that no run proved the push tree: %s" % lines[0])
+
+    def test_a_merged_pull_request_on_the_push_tree_skips_and_never_says_no_run_proved_it(self):
+        value, text = self.skip_on(fake=lone_lane_fake([pull_request_run(1)], {1: full_run_jobs()}))
+        self.assertEqual(value, "true", "the control: a merged pull request on the push's tree with a green run skips (%s)" % text.strip()[-200:])
+        self.assertNotIn("no run proved the push tree", text, "a skip proved the push tree, so the output must not say no run did: %s" % text.strip()[-200:])
+
+
+class CancelledRunProof(LiveHead):
+    """A lone lane's newest checks.yml pull request run that concluded cancelled. A cancel of the fan-in job (ci-done) that lands after the
+    jobs passed leaves all-jobs-passed and every suite job succeeded, and that run proves the head, so the push skips. The controls are
+    the refusals the proof keeps: all-jobs-passed missing or not success, a suite job not success, a run still in progress, and a failed
+    run whose jobs read green. The green twin is a run that concluded success."""
+
+    def run_on_lane(self, conclusion, status="completed", changes=None):
+        """The lone lane's one checks.yml run, with this conclusion and status and the jobs `changes` makes. Returns (value, text)."""
+        return self.skip_on(fake=lone_lane_fake([pull_request_run(1, conclusion=conclusion, status=status)], {1: full_run_jobs(changes)}))
+
+    def test_a_cancelled_run_whose_all_jobs_passed_and_suite_jobs_succeeded_proves_the_head(self):
+        changes = {FAN_IN: {"conclusion": "cancelled", "steps": []}}
+        got = {job["name"]: job["conclusion"] for job in full_run_jobs(changes)}
+        self.assertEqual(got[FAN_IN], "cancelled", "the fixture's ci-done must be cancelled, or it proves nothing")
+        self.assertEqual(got[ROLLUP_NAME], "success", "the fixture's all-jobs-passed must succeed, or it proves nothing")
+        self.assertEqual({name: got[name] for name in SUITE_JOBS}, {name: "success" for name in SUITE_JOBS},
+                         "the fixture's every suite job must succeed, or it proves nothing")
+        value, text = self.run_on_lane("cancelled", changes=changes)
+        self.assertEqual(value, "true", "a cancelled pull request run whose all-jobs-passed and every suite job succeeded proves the head, "
+                         "so the push skips (%s)" % text.strip()[-200:])
+
+    def test_the_green_twin_a_run_that_concluded_success_still_skips(self):
+        value, text = self.run_on_lane("success", changes={FAN_IN: {"conclusion": "success", "steps": []}})
+        self.assertEqual(value, "true", "the control: a completed green run with the same jobs skips (%s)" % text.strip()[-200:])
+
+    def test_a_cancelled_run_whose_all_jobs_passed_is_missing_or_not_success_still_refuses(self):
+        for label, rollup in (("missing", None), ("failure", {"conclusion": "failure", "steps": []}),
+                              ("cancelled", {"conclusion": "cancelled", "steps": []})):
+            with self.subTest(all_jobs_passed=label):
+                value, text = self.run_on_lane("cancelled", changes={FAN_IN: {"conclusion": "cancelled", "steps": []}, ROLLUP_NAME: rollup})
+                self.assertEqual(value, "false", "a cancelled run whose all-jobs-passed is %s has no proof of the head: skip=false (%s)"
+                                 % (label, text.strip()[-200:]))
+
+    def test_a_cancelled_run_with_a_suite_job_not_success_still_refuses(self):
+        self.assertIn("checks-windows-rest", SUITE_JOBS, "the fixture's suite job must be a suite job of checks.yml, or it proves nothing")
+        for conclusion in ("failure", "cancelled"):
+            with self.subTest(suite_job=conclusion):
+                changes = {FAN_IN: {"conclusion": "cancelled", "steps": []}, "checks-windows-rest": {"conclusion": conclusion, "steps": []}}
+                value, text = self.run_on_lane("cancelled", changes=changes)
+                self.assertEqual(value, "false", "a suite job that concluded %s is a gap, so the cancelled run proves nothing: skip=false (%s)"
+                                 % (conclusion, text.strip()[-200:]))
+
+    def test_a_run_still_in_progress_refuses_though_its_jobs_read_green(self):
+        value, text = self.run_on_lane(None, status="in_progress")
+        self.assertEqual(value, "false", "a run still in progress has no result yet, so its green jobs prove nothing: skip=false (%s)"
+                         % text.strip()[-200:])
+
+    def test_a_failed_run_refuses_though_its_jobs_read_green(self):
+        value, text = self.run_on_lane("failure")
+        self.assertEqual(value, "false", "a failed run is no green run, whatever its jobs read: skip=false (%s)" % text.strip()[-200:])
+
+
+class SilentRefusals(LiveHead):
+    """A skip=false that printed nothing about why. Each case is a read the script refused with no reason, and its reason names what
+    refused it: a push no pull request covers (the push tree, short); a batch head on another tree (its branch and tree, short); a batch
+    head whose all-jobs-passed is not success (its branch and the result); a merged lone lane that was not merged (its number). Each
+    control is the same read green, and it skips."""
+
+    def test_a_push_no_pull_request_covers_names_the_push_tree_in_its_reason(self):
+        value, text = self.skip_on(fake=FakeGitHub(pulls=[]))
+        self.assertEqual(value, "false", "no pull request covers the push: skip=false (%s)" % text.strip()[-200:])
+        self.assertTrue(reason_lines(text, TREE[:7]), "a push no pull request covers must print why, naming the push tree (short): got %s"
+                        % text.strip()[-200:])
+
+    def test_a_batch_head_on_another_tree_names_its_branch_and_tree_in_its_reason(self):
+        fake = FakeGitHub(ready_head_runs(), trees={HEAD: OTHER_TREE})
+        self.assertNotEqual(fake.trees[HEAD], TREE, "the fixture's batch head tree must differ from the push's, or it proves nothing")
+        value, text = self.skip_on(fake=fake)
+        self.assertEqual(value, "false", "a batch head on another tree covers nothing: skip=false (%s)" % text.strip()[-200:])
+        lines = reason_lines(text, BATCH)
+        self.assertTrue(lines, "a batch head whose tree is not the push's must print why, naming its branch %s: got %s" % (BATCH, text.strip()[-200:]))
+        self.assertIn(OTHER_TREE[:7], lines[0], "the reason must name the batch head's tree, short: %s" % lines[0])
+
+    def test_a_batch_head_whose_all_jobs_passed_failed_names_its_branch_and_result_in_its_reason(self):
+        value, text = self.skip_on(fake=FakeGitHub(ready_head_runs({ROLLUP_NAME: {"conclusion": "failure"}})))
+        self.assertEqual(value, "false", "a batch head whose all-jobs-passed failed is no proof: skip=false (%s)" % text.strip()[-200:])
+        lines = reason_lines(text, BATCH)
+        self.assertTrue(lines, "a batch head whose all-jobs-passed failed must print why, naming its branch %s: got %s" % (BATCH, text.strip()[-200:]))
+        self.assertTrue(any(word in lines[0] for word in ("failure", "failed")), "the reason must name the all-jobs-passed result it refused: %s" % lines[0])
+
+    def test_a_batch_head_whose_all_jobs_passed_is_still_running_names_its_state_in_its_reason(self):
+        value, text = self.skip_on(fake=FakeGitHub(ready_head_runs({ROLLUP_NAME: {"status": "in_progress", "conclusion": None}})))
+        self.assertEqual(value, "false", "a batch head whose all-jobs-passed is still running is no proof: skip=false (%s)" % text.strip()[-200:])
+        lines = reason_lines(text, BATCH)
+        self.assertTrue(lines, "a batch head whose all-jobs-passed is still running must print why, naming its branch %s: got %s" % (BATCH, text.strip()[-200:]))
+        self.assertTrue(any(word in lines[0] for word in ("in_progress", "in progress")), "the reason must name the running all-jobs-passed: %s" % lines[0])
+
+    def test_an_unmerged_lone_lane_pull_request_names_its_number_and_that_it_is_not_merged(self):
+        fake = lone_lane_fake([pull_request_run(1)], {1: full_run_jobs()}, pulls=[lane_pull(merged_at=None)])
+        self.assertIsNone(fake.pulls[0]["merged_at"], "the fixture's pull request must be unmerged, or it proves nothing")
+        value, text = self.skip_on(fake=fake)
+        self.assertEqual(value, "false", "a pull request that was not merged is no proof for main: skip=false (%s)" % text.strip()[-200:])
+        lines = reason_lines(text, str(LANE_NUMBER))
+        self.assertTrue(lines, "an unmerged pull request must print why, naming its number %d: got %s" % (LANE_NUMBER, text.strip()[-200:]))
+        self.assertIn("merged", lines[0], "the reason must say the pull request was not merged: %s" % lines[0])
+
+    def test_the_green_twin_a_matching_green_batch_head_still_skips(self):
+        value, text = self.skip_on(fake=FakeGitHub(ready_head_runs()))
+        self.assertEqual(value, "true", "the control: a green batch head on the push's tree skips (%s)" % text.strip()[-200:])
+
+    def test_the_green_twin_a_merged_lone_lane_on_the_push_tree_still_skips(self):
+        value, text = self.skip_on(fake=lone_lane_fake([pull_request_run(1)], {1: full_run_jobs()}))
+        self.assertEqual(value, "true", "the control: a merged lone lane on the push's tree with a green run skips (%s)" % text.strip()[-200:])
 
 
 class SharedAction(unittest.TestCase):
