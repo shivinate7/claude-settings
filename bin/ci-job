@@ -782,7 +782,7 @@ CARRY_MARK, CARRY_STATE = "(carried) ", "PASS (carried)"  # a carried step's lin
 CARRY_BLOCKERS = ("hooks/mutate_guard.py", "bin/ci-job", ".github/stamp.json")  # a delta that touches one never carries: the selector, this runner, the ready-checks list; the workflow and ci-scope.sh set every scope flag, which carry_delta_read reads
 CARRY_RECORDS = "docs/records.md"  # a delta of this one file carries every suite step: its pass reads no other record (ci-scope.sh's records-only skip names it too)
 CARRY_MEMO = {}  # (top, saved head, saved tree, tree) -> {picked: the delta's picked suites, None when it forbids any carry; changed: its paths; flags: its scope flags once read}; one read per run
-SCOPE_APART = {"windows_guard", "mutation_report", "records_only_skip"}  # ci-scope.sh outputs that an unmapped path does not set: carry_delta_read leaves them out of its read of every flag on
+SCOPE_APART = {"windows_guard", "mutation_report", "records_only_skip", "skip_comment_delta"}  # ci-scope.sh outputs that an unmapped path does not set: carry_delta_read leaves them out of its read of every flag on
 CACHE_FILES, CACHE_DAYS = 300, 7
 VOLATILE_ENV = {"GITHUB_WORKSPACE", "VERDICT_LOG", "CI_JOB_LINT_WORKERS", "CI_JOB_NO_CACHE", "PWD", "OLDPWD", "SHLVL", "_", "COLUMNS", "LINES",
                "CLAUDE_CODE_SESSION_ID", "CLAUDE_PID", "TRACEPARENT", "CCR_SPAWN_TIMESTAMP_MS"}  # a variable that differs between runs and changes no step's result; GITHUB_WORKSPACE repeats the repo path, which the key holds once

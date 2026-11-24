@@ -23,10 +23,10 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from test_windows_split import CHECKS, LINUX_GUARD_JOBS, MACOS_JOBS, all_jobs, eval_with, yaml_scalar  # noqa: E402  the one home of the checks.yml path and the guard shards
-from test_windows_split import ALL_JOBS_PASSED_JOB, SUITE_FLAG  # noqa: E402  the one home of the rollup job name and the suite flags
-from all_jobs_passed_rules import (ALL_JOBS_PASSED_USES, all_problems, child_problems, ci_done_problems, needs_of,  # noqa: E402  the one home of the rules
-                                   needs_problems, off_problems, scope_if_problems, scope_skips_problems, shape_problems, split_jobs, step_with,
-                                   steps_problems, steps_part)
+from test_windows_split import ALL_JOBS_PASSED_JOB, RECORDS_ONLY_CONDITION, SUITE_FLAG, unwrap  # noqa: E402  the one home of the rollup job name, the records-only skip and the suite flags
+from all_jobs_passed_rules import (ALL_JOBS_PASSED_USES, COMMENT_DELTA_CLAUSE, DELTA_CLAUSES, all_problems,  # noqa: E402  the one home of the rules
+                                   child_problems, ci_done_problems, needs_of, needs_problems, off_problems, scope_if_problems,
+                                   scope_skips_problems, shape_problems, split_jobs, step_with, steps_problems, steps_part)
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the job parser
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
@@ -202,8 +202,23 @@ def planned_nightly_skip(text):
 
 
 # checks-hooks' header and its job-level if in checks.yml. A case swaps that if line for its own, so the subject is the job's one if.
+# The if is the records-only skip alone: only the records file's own delta skips it (ruling own-830-c).
 HOOKS_HEAD = "  checks-hooks:\n\n    runs-on: ubuntu-latest\n    needs: scope\n"
-HOOKS_IF = "    if: ${{ needs.scope.outputs.records_only_skip != 'true' }}\n"
+HOOKS_IF = "    if: ${{ " + RECORDS_ONLY_CONDITION + " }}\n"
+
+
+# The delta clauses a job-level if may join after the records-only skip. skip_comment_delta is read by checks (its lint steps read the
+# changed text). A decision, notes or debts file is no delta clause: the record-folder skip is refused, so every lint job names no
+# record clause. The clauses are the rules module's constants, the one home of the delta forms (all_jobs_passed_rules.DELTA_CLAUSES).
+# RECORD_FOLDER_CLAUSE is the refused form, written here as a literal: the rules module no longer names it.
+COMMENT_DELTA = COMMENT_DELTA_CLAUSE
+RECORD_FOLDER_CLAUSE = "needs.scope.outputs.skip_record_delta == 'true'"
+DELTA_FORMS = {name: clauses for name, clauses in DELTA_CLAUSES.items()}
+WRONG_DELTA_FORMS = (("checks", " || ".join((RECORDS_ONLY_CONDITION, COMMENT_DELTA, RECORD_FOLDER_CLAUSE))),
+                     ("checks-hooks", " || ".join((RECORDS_ONLY_CONDITION, RECORD_FOLDER_CLAUSE))),
+                     ("checks-rest", " || ".join((RECORDS_ONLY_CONDITION, RECORD_FOLDER_CLAUSE))),
+                     ("checks-hooks", " || ".join((RECORDS_ONLY_CONDITION, COMMENT_DELTA))),
+                     ("checks-rest", " || ".join((RECORDS_ONLY_CONDITION, COMMENT_DELTA))))
 
 
 class PushOffRollup(unittest.TestCase):
@@ -212,14 +227,30 @@ class PushOffRollup(unittest.TestCase):
     its skip is never read there. The rule (off_problems) refused every job-level if on a needed job, which the push guard is not.
     Synthetic files: one Windows job, needed by all-jobs-passed, with the if under test."""
 
-    def rollup_text(self, job_if):
-        lines = ["jobs:", "  checks-windows:", "    runs-on: windows-latest", "    needs: scope"]
+    def rollup_text(self, job_if, name="checks-windows"):
+        lines = ["jobs:", f"  {name}:", "    runs-on: windows-latest", "    needs: scope"]
         if job_if is not None:
             lines.append(f"    if: {job_if}")
         lines += ["    steps:", "      - run: echo ok", "  all-jobs-passed:", "    runs-on: ubuntu-latest",
                   "    if: ${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}",
-                  "    needs:", "      - checks-windows", "    steps:", "      - run: echo ok"]
+                  "    needs:", f"      - {name}", "    steps:", "      - run: echo ok"]
         return "\n".join(lines) + "\n"
+
+    # Named failure: a lint job's delta form (ci-scope.sh's skip_comment_delta, after the records-only skip) is refused, so
+    # all-jobs-passed reads the job's skip as red. checks reads the comment lints, so it takes that clause; the other two take none.
+    def test_each_named_delta_form_passes_the_rollup_rules(self):
+        for name, clauses in DELTA_FORMS.items():
+            with self.subTest(job=name):
+                form = " || ".join((RECORDS_ONLY_CONDITION, *clauses))
+                self.assertEqual(off_problems(self.rollup_text("${{ " + form + " }}", name)), [], f"{name}'s named delta form is refused")
+
+    # A form the job does not name is refused. The record-folder forms are red on a head whose rules still name that clause; the
+    # comment forms are controls, refused on every head.
+    def test_each_wrong_delta_form_is_refused_by_the_rollup_rules(self):
+        for name, expr in WRONG_DELTA_FORMS:
+            with self.subTest(job=name, if_=expr):
+                self.assertTrue(off_problems(self.rollup_text("${{ " + expr + " }}", name)),
+                                f"{name} takes {expr!r}, a form it does not name, and the rollup rules pass it")
 
     def test_a_needed_job_whose_job_level_if_is_the_push_guard_passes_the_rollup_rules(self):
         # Named failure on the old rules: the push guard is a job-level if on a needed job, so the rule refuses it.
@@ -234,6 +265,31 @@ class PushOffRollup(unittest.TestCase):
     def test_a_needed_job_with_no_job_level_if_passes_the_rollup_rules(self):
         # Control, green on the old rules: a job with no job-level if is needed and passes.
         self.assertEqual(off_problems(self.rollup_text(None)), [])
+
+
+class DeltaClausesOnTheRealWorkflow(unittest.TestCase):
+    """Each lint job's job-level if on checks.yml names its delta clauses (DELTA_CLAUSES, the one home of the forms), so a comment-only or
+    record-folder delta starts that job. The rules above read synthetic files; this reads the real one."""
+
+    def test_each_lint_job_level_if_names_its_delta_clauses(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            jobs = all_jobs(f.read())
+        for name, clauses in DELTA_CLAUSES.items():
+            with self.subTest(job=name):
+                self.assertIn(name, jobs, f"{name} is not a job of checks.yml")
+                form = " || ".join((RECORDS_ONLY_CONDITION, *clauses))
+                self.assertIn(form, unwrap(jobs[name]["if"]) or "", f"{name}'s job-level if does not name its delta clauses: {jobs[name]['if']}")
+
+    # Named failure: checks-hooks or checks-rest reads a delta clause, so a decision, notes or debts file starts it on the record-folder
+    # skip. Their job-level if is main's form: the records-only skip alone.
+    def test_checks_hooks_and_checks_rest_take_the_records_only_skip_alone(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            jobs = all_jobs(f.read())
+        for name in ("checks-hooks", "checks-rest"):
+            with self.subTest(job=name):
+                self.assertIn(name, jobs, f"{name} is not a job of checks.yml")
+                self.assertEqual(unwrap(jobs[name]["if"]), RECORDS_ONLY_CONDITION,
+                                 f"{name}'s job-level if is not the records-only skip alone: {jobs[name]['if']}")
 
 
 class MacOnceByBatchRollup(unittest.TestCase):
@@ -276,7 +332,8 @@ class MacOnceByBatchRollup(unittest.TestCase):
 
     def test_a_flag_reading_job_level_if_on_a_job_with_no_macos_role_is_flagged(self):
         # Control: a job-level if that reads a scope flag is refused on a needed job that is no macOS job.
-        self.assertEqual(self.text.count(HOOKS_HEAD + HOOKS_IF), 1, "checks-hooks' header changed: this case must follow it")
+        self.assertEqual(self.text.count(HOOKS_HEAD + HOOKS_IF), 1,
+                         "checks-hooks' if is not the records-only skip alone (or its header changed): this case must follow it")
         text = self.text.replace(HOOKS_HEAD + HOOKS_IF, HOOKS_HEAD + "    if: ${{ needs.scope.outputs.checks_macos == 'true' }}\n", 1)
         self.assertTrue(off_problems(text) or needs_problems(text), "a flag-reading job-level if on an unnamed job passes the rollup rules")
 
@@ -382,7 +439,8 @@ class DailyOnlyWiring(unittest.TestCase):
 
     def test_a_job_level_if_on_a_job_that_is_no_macos_job_and_runs_on_a_pull_request_is_flagged(self):
         # Control: a needed job with a job-level if that is no macOS job is refused, since all-jobs-passed would read its skip as red.
-        self.assertEqual(self.text.count(HOOKS_HEAD + HOOKS_IF), 1, "checks-hooks' header changed: this case must follow it")
+        self.assertEqual(self.text.count(HOOKS_HEAD + HOOKS_IF), 1,
+                         "checks-hooks' if is not the records-only skip alone (or its header changed): this case must follow it")
         text = self.text.replace(HOOKS_HEAD + HOOKS_IF, HOOKS_HEAD + "    if: ${{ github.event_name != 'push' }}\n", 1)
         clean = all_problems(self.text)
         self.assertTrue([p for p in all_problems(text) if p not in clean], "a needed job with a job-level if passes the rules")

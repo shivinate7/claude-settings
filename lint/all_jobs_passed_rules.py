@@ -21,6 +21,12 @@ from test_windows_split import (ALL_JOBS_PASSED_JOB, CHECKS_JOB, MACOS_JOBS, NIG
                                 job_if_without_records, push_guard_only, push_off_only, shard_base, shard_push_off, unwrap, yaml_scalar)  # NIGHTLY_SKIP_JOB and PUSH_SKIP_JOB are read from here by actions/push-skip/push-skip.py
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
 
+# The comment delta skip (ci-scope.sh's skip_comment_delta) starts the checks job after a records-only skip: it reads the changed text for
+# its comment lints. Its job-level if is the run guard, then the records-only condition, then the clause named here. A clause only runs
+# its job more, so the job still skips on the records-only skip alone. Any other clause, or another order, fails the job-level rules.
+COMMENT_DELTA_CLAUSE = "needs.scope.outputs.skip_comment_delta == 'true'"
+DELTA_CLAUSES = {CHECKS_JOB: (COMMENT_DELTA_CLAUSE,)}
+
 ALL_JOBS_PASSED_USES = "$/actions/all-jobs-passed"
 ALL_JOBS_PASSED_IF = "${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}"
 ALL_JOBS_PASSED_RUNS_ON = "ubuntu-latest"
@@ -174,10 +180,28 @@ def steps_problems(text):
     return problems
 
 
-def records_only_if(expr):
-    """True when a job-level if is the records-only skip alone. check.sh passes the job's skip on a run whose scope job says
-    records_only_skip true, and reads any wider condition as a skip it cannot tell from a failure."""
-    return unwrap(expr) == RECORDS_ONLY_CONDITION
+def delta_clauses_off(name, raw):
+    """`raw` (with its `${{ }}`) with job `name`'s delta clauses taken off: RECORDS_ONLY_CONDITION followed by DELTA_CLAUSES[name], in
+    that order, gives RECORDS_ONLY_CONDITION. checks keeps its run guard before the clauses, `GUARD && (RECORDS_ONLY_CONDITION || clauses)`,
+    and gives `GUARD && RECORDS_ONLY_CONDITION`. Any other if, and a job with no delta clauses, comes back as it is."""
+    clauses = DELTA_CLAUSES.get(name)
+    if not clauses:
+        return raw
+    e = unwrap(raw)
+    joined = " || ".join((RECORDS_ONLY_CONDITION, *clauses))
+    if e == joined:
+        return RECORDS_ONLY_CONDITION
+    guard, sep, tail = (e or "").rpartition(" && ")
+    if sep and guard and tail == f"({joined})":
+        return f"{guard} && {RECORDS_ONLY_CONDITION}"
+    return raw
+
+
+def records_only_if(expr, name):
+    """True when a job-level if is the records-only skip alone, or that skip followed by job `name`'s delta clauses (delta_clauses_off).
+    check.sh passes the job's skip on a run whose scope job says records_only_skip true, and reads any wider condition as a skip it
+    cannot tell from a failure."""
+    return unwrap(delta_clauses_off(name, expr)) == RECORDS_ONLY_CONDITION
 
 
 def shard_records_only_if(expr):
@@ -202,14 +226,14 @@ def off_problems(text):
         if shard_base(name):
             # R62: a Windows full shard runs on a ready pull request, so it is needed. Its job-level if is the draft guard only.
             rest = job_if_without_records(jobs[name]["if"])
-            if not draft_guard_only(jobs[name]["if"] or "") and not shard_push_off(rest or "") and not shard_records_only_if(jobs[name]["if"]) and not records_only_if(jobs[name]["if"]):
+            if not draft_guard_only(jobs[name]["if"] or "") and not shard_push_off(rest or "") and not shard_records_only_if(jobs[name]["if"]) and not records_only_if(jobs[name]["if"], name):
                 problems.append(f"shard {name} is in all-jobs-passed's needs but its job-level if is not the draft guard: "
                                 f"{jobs[name]['if']}")
         elif name in PUSH_OFF_JOBS and jobs[name]["if"] is not None and push_off_only(job_if_without_records(jobs[name]["if"])):
             continue  # a listed job (R61 push-off list) with the push guard alone, or with the records-only skip joined: a pull_request runs it, so the rollup needs it and never reads a skip
-        elif name == CHECKS_JOB and jobs[name]["if"] is not None and not checks_if_problems(job_needs_of(text, name), jobs[name]["if"]):
-            continue  # checks runs on any shard result and skips only when scope did not succeed, which all-jobs-passed already reads red
-        elif name != "scope" and jobs[name]["if"] is not None and not records_only_if(jobs[name]["if"]):
+        elif name == CHECKS_JOB and jobs[name]["if"] is not None and not checks_if_problems(job_needs_of(text, name), delta_clauses_off(name, jobs[name]["if"])):
+            continue  # checks runs on any shard result and skips only when scope did not succeed, which all-jobs-passed already reads red; its delta clauses only run it more
+        elif name != "scope" and jobs[name]["if"] is not None and not records_only_if(jobs[name]["if"], name):
             problems.append(f"{name} is needed and keeps a job-level if: all-jobs-passed reads its skip as red, "
                             "so its scope condition belongs in its steps")
     return problems

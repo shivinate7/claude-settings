@@ -246,7 +246,6 @@
 - records-page-first-adoption: a base with no records page lets any lane commit of the page pass, by design (hooks/guard_merge.py) Fix: none — rare and harmless. Until: 2026-11-19
 - records-page-handwritten-header: a hand-written page opening '# Records index' reads as generated (hooks/guard_merge.py) Fix: none — rare and harmless. Until: 2026-11-19
 - records-page-reader-gaps: the records-page guard misses commit -i, rebase, cherry-pick, am, revert, sh -c scripts and python -m generator runs (hooks/guard_merge.py) Fix: none — rare and harmless. Until: 2026-11-19
-- records-skip-extra-condition-inert: the `records_only_skip` test on checks-hooks and checks-rest steps does nothing today, since `code` already turns them off on records-only pushes; it guards a later CI scope change. Decision: push-skip-on-proven-tree.
 - records-skip-reader-window: `.github/scripts/green-head.sh` reads the newest 100 pull-request runs of checks.yml, with no branch filter; a green run outside that window is not found, so CI runs as before. Decision: push-skip-on-proven-tree.
 - reload-missing-file-unpinned: no kept case covers a missing guard_pointer.py during the reload wait (hooks/test_guard.py, hooks/guard.py) Fix: none — rare and harmless. Until: 2026-11-19
 - repo-home-backtick-then-comma: a repo home of a backtick, then a comma, still blocks as malformed, because unwrap runs before the comma strip. Ruling homes behave the same. Decision: owner-feedback-inbox. Fix: none — rare and harmless. Until: 2026-11-19

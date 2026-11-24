@@ -3,7 +3,7 @@
 #   per job: checks_guard (set when code and guard are both set, or directly by a path the checks-guard job installs from: actions/playwright-setup, .github/shoot), checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep (the janitor sweep suites, set with checks_windows_rest) checks_macos shell_macos pointer_windows, and shoot (below)
 #   per suite: code (any non-docs file changed), mods (a path under mods/, or a .md path under skills/plain-english-map/: the mod tests and the
 #   map skill tests, one CI step in each of the `checks`, `checks-windows` and `checks-macos` jobs), guard (guard mutation test), sweep (janitor mutation test), shoot (the checks-shoot and checks-waiting-page jobs: the bin/shoot suite and the page suites, which install a browser).
-#   The `checks` lint job and the checks-merge-install, checks-install-checkout and checks-merge-git jobs have no flag of their own (their suites carry `code`). A records-only run skips them with the rest (records_only_skip, below).
+#   The `checks` lint job and the checks-merge-install, checks-install-checkout and checks-merge-git jobs have no flag of their own (their suites carry `code`). A records-only run skips their suites with the rest (records_only_skip, below); the `checks` job still starts on a comment-only delta, for its lints.
 #   checks_macos gates both checks-macos and checks-macos-b.
 #   per lint step (the four pull-request steps of the `checks` job; each runs only when a file its lint reads changed):
 #     lint_red_run (Red-run trailer: any non-.md path, and a .md path under a test folder, since lint/check_red_run.py asks hooks/guard.py is_test_rel),
@@ -23,8 +23,11 @@
 # ancestor of HEAD, not HEAD) reads base..HEAD like a pull request (decision push-skip-on-proven-tree). Inputs (env): EVENT,
 # BASE_SHA (a pull request's base, or a push's proven base), HEAD_REF, GREEN_HEAD (optional: the sha green-head.sh prints, the pull request's newest earlier fully green head; a push may carry one too), PR_HEAD
 # (optional: the pull request's head sha; HEAD when unset). GREEN_HEAD turns the 14 job and suite flags off on a pull request or a push when it is an
-# ancestor of PR_HEAD and the delta from it to PR_HEAD is docs/records.md alone; the lint flags keep their whole-PR values and mutation_report is false. Any unreadable read: no skip.
-# The last output line, records_only_skip=true|false, is true exactly in that case.
+# ancestor of PR_HEAD and every path of the delta from it to PR_HEAD is docs/records.md
+# or a .py or .sh file that lint/comment_only.py reads as a change to comments only (a docstring is code); the lint flags keep their whole-PR values and
+# mutation_report is false. The delta needs one path at least. Any unreadable read: no skip.
+# The last output lines are records_only_skip=true|false (true exactly in that case, and it stops every suite job), then skip_comment_delta:
+# true only on such a skip, when the delta holds a comment-only code file. The `checks` job still starts on it (checks.yml job-level if), since a lint reads the changed text.
 # SCOPE_FILES (optional, newline-separated paths): read these paths in place of the pull request diff, through the same case table. bin/ci-job gives the
 # paths that differ between two lint trees, to see whether a delta sets every flag (an unmapped path does). It reads the landed-dir rule (and the windows_guard
 # flag it sets) from the added files of the BASE_SHA range, not the guard-inputs.txt pass; a records-only skip never applies.
@@ -247,25 +250,48 @@ case "$on" in *" code "*) case "$on" in *" guard "*) on="$on checks_guard " ;; e
 # so only docs/records.md moved since. On a pull request the whole PR diff was read above (whole_read). A push has no PR diff to read:
 # its GREEN_HEAD is the caller's word, and the ancestor and delta reads below hold it. A schedule, a dispatch and every other case keep
 # their flags.
-# The delta must be exactly one path: an empty or longer delta, an unreadable one or a head that is not an ancestor keeps `on`.
+# The delta must hold a path, and each path must be docs/records.md
+# or a comment-only .py or .sh file (lint/comment_only.py; never this script, green-head.sh or the three files that judge it: lint/comment_only.py,
+# lint/check_comment_narration.py and hooks/_nowindow.py, which would vouch for their own change). An empty delta, any other path,
+# an unreadable one or a head that is not an ancestor keeps `on`. A SCOPE_FILES run never skips: it reads no earlier head.
 # The delta runs to PR_HEAD, the pull request's own head: HEAD in CI is the merge commit, which also holds every base change since.
 # PR_HEAD counts only when it is a full hex sha, a commit, and an ancestor of HEAD; otherwise the delta runs to HEAD.
 skip=false
+skip_comment=false
+delta_ok=false
 end=HEAD
 if [[ "${PR_HEAD:-}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] && git cat-file -e "$PR_HEAD^{commit}" 2>/dev/null &&
    git merge-base --is-ancestor "$PR_HEAD" HEAD 2>/dev/null; then
   end=$PR_HEAD
 fi
-if { [ "$whole_read" = 1 ] || [ "${EVENT:-}" = push ]; } && [[ "${GREEN_HEAD:-}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] &&
+if [ -z "${SCOPE_FILES:-}" ] && { [ "$whole_read" = 1 ] || [ "${EVENT:-}" = push ]; } && [[ "${GREEN_HEAD:-}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] &&
    git merge-base --is-ancestor "$GREEN_HEAD" "$end" 2>/dev/null &&
-   delta=$(git diff --name-only --no-renames "$GREEN_HEAD" "$end" 2>/dev/null) && [ "$delta" = docs/records.md ]; then
+   delta=$(git diff --name-only --no-renames "$GREEN_HEAD" "$end" 2>/dev/null) && [ -n "$delta" ]; then
+  delta_ok=true
+  set --
+  while IFS= read -r f; do
+    case "$f" in
+      docs/records.md) ;;
+      .github/scripts/ci-scope.sh|.github/scripts/green-head.sh|lint/comment_only.py|lint/check_comment_narration.py|hooks/_nowindow.py) delta_ok=false ;;
+      *.py|*.sh) set -- "$@" "$f"; skip_comment=true ;;
+      *) delta_ok=false ;;
+    esac
+  done <<< "$delta"
+  # One read of every code file in the delta: a path that is not comment-only, or a read that fails, keeps `on`.
+  if [ "$delta_ok" = true ] && [ "$skip_comment" = true ] && ! python3 "$(dirname "${BASH_SOURCE[0]}")/../../lint/comment_only.py" "$GREEN_HEAD" "$end" "$@" 2>/dev/null; then
+    delta_ok=false
+  fi
+fi
+if [ "$delta_ok" = true ]; then
   kept=" "
   for t in $on; do
     case " $JOBS checks_guard code mods guard sweep shoot windows_guard " in *" $t "*) ;; *) kept="$kept$t " ;; esac
   done
   on="$kept"
   skip=true
-  echo "CI scope: records-only push after green head $GREEN_HEAD"
+  echo "CI scope: records-only or comment-only push after green head $GREEN_HEAD"
+else
+  skip_comment=false
 fi
 echo "CI scope: event=${EVENT:-} range=${range:-none} on=$on"
 for n in $ALL windows_guard; do
@@ -282,5 +308,7 @@ case "${EVENT:-}" in
 esac
 [ "$skip" = true ] && v=false
 echo "mutation_report=$v" >> "$GITHUB_OUTPUT"
-# records_only_skip: true exactly when the records-only shortcut above forced the 14 flags off; checks.yml reads it in job-level `if:` to skip the test jobs themselves.
+# records_only_skip: true exactly when the skip above forced the 14 flags off; checks.yml reads it in job-level `if:` to skip the test jobs themselves.
 echo "records_only_skip=$skip" >> "$GITHUB_OUTPUT"
+# skip_comment_delta: a skip whose delta holds a comment-only code file. Its changed text is what the lint steps read, so the `checks` job starts on it.
+echo "skip_comment_delta=$skip_comment" >> "$GITHUB_OUTPUT"

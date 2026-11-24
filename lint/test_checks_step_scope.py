@@ -42,12 +42,12 @@ sys.path.insert(0, HERE)
 
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import workflow_steps as ws  # noqa: E402  the one home of the step parser
-from test_ci_scope import DOC_CASES, DOC_FLAGS, doc_groups, run as scope_run  # noqa: E402  ci-scope.sh run in a temp repo, and the doc groups
+from test_ci_scope import DOC_CASES, DOC_FLAGS, doc_groups, suite_steps, run as scope_run  # noqa: E402  ci-scope.sh run in a temp repo, the doc groups, the suite-step reader
 from test_windows_split import (  # noqa: E402  the one home of the `if:` evaluator, the scope conditions and the doc condition builder
     NO_MD_SCOPE_CONDITION, SCOPE_DOC_AGENTS, SCOPE_DOC_ANY, SCOPE_DOC_DECISIONS, SCOPE_DOC_DECISIONS_MAP_OTHER, SCOPE_DOC_DECISIONS_OTHER,
     SCOPE_DOC_DECISIONS_RULES, SCOPE_DOC_DECISIONS_RULES_OTHER, SCOPE_DOC_RULES, SCOPE_DOC_SKILLS, SCOPE_DOC_SKILLS_AGENTS,
-    SCOPE_DOC_SKILLS_DECISIONS, SCOPE_DOC_SKILLS_OTHER, doc_scope_condition, drop_condition, eval_if, keep_running_off, run_lines, unwrap,
-    LINUX_SUITES)
+    SCOPE_DOC_SKILLS_DECISIONS, SCOPE_DOC_SKILLS_OTHER, doc_scope_condition, drop_condition, eval_if, job_if_without_records, keep_running_off,
+    run_lines, suite_names, unwrap, LINUX_SUITES, RECORDS_ONLY_CONDITION)
 from test_windows_split import PUSH_RULING, top_level_conjuncts, top_level_disjuncts, yaml_scalar  # noqa: E402  the one home of the splitters, the scalar reader and the ruling
 from test_windows_split import INSTALL_CMD, INSTALL_SHARD_VAR, MACOS_GUARD, MACOS_SLICE_ENV, VERDICT_FULL_LOG_VAR, VERDICT_RUN, all_jobs, windows_jobs  # noqa: E402  the five steps' commands and env, the verdict prefix, the job readers
 
@@ -55,7 +55,6 @@ ROOT = os.path.normpath(os.path.join(HERE, ".."))
 WORKFLOW = ".github/workflows/checks.yml"
 JOB = "checks"
 SPLIT_JOBS = ("checks", "checks-hooks", "checks-rest")  # the old checks job split into these three; the rest of CHECKS_SUITE_JOBS were never part of it
-SCOPE_CONDITION = "${{ %s }}" % NO_MD_SCOPE_CONDITION
 PR_ONLY_IF = "${{ github.event_name == 'pull_request' }}"
 # The same if, narrowed by one lint flag that ci-scope.sh sets (step ci-skip-untouched-steps slice 1).
 PR_ONLY_LINT_IF = re.compile(r"^\$\{\{ github\.event_name == 'pull_request' && needs\.scope\.outputs\.lint_\w+ == 'true' \}\}$")
@@ -529,7 +528,7 @@ ALLOWED = {
         "skills/waiting-page/reference/designs.md", "skills/waiting-page/reference/repo-pages.md",
         "skills/waiting-page/reference/republish.md", "skills/waiting-page/reference/routing-and-sessions.md",
         "tests/fixture/docs/map/core.md", "tests/fixture/docs/map/traces/home.md", "docs/records.md",
-        "agents/builder.md", "docs/decisions/agent-model-cap.md", "skills/impeccable/SKILL.md",
+        "agents/builder.md", "docs/decisions/agent-model-cap.md", "docs/decisions/session-tiers.md", "skills/impeccable/SKILL.md",
     ], "paths that run() commits into temp git repos, the doc-group cases' rule and glossary paths and the guard-inputs cases' three modified .md files included; the records-only skip "
        "fixtures name the generated page as the one file a records push changes; the file reads no tracked .md at run time"),
     "lint/test_find_copies.py": ([
@@ -589,6 +588,27 @@ def identity(st):
 def if_of(st):
     """A checks-job step's `if:` without its keep-running guard (keep_running_off, the one home of that strip)."""
     return keep_running_off(value(st, "if"))
+
+
+def suite_step_names():
+    """The names of the steps of the three lint jobs that run a test suite. Each reads the records-only skip (SuiteStepsTakeTheRecordsOnlySkip)."""
+    text = read_repo(WORKFLOW)
+    return set().union(*(suite_names(text, job) for job in SPLIT_JOBS))
+
+
+def scope_skip_problems(name, got, scope):
+    """The problems with step `name`'s `if:` (`got`, its keep-running guard already off, with its `${{ }}`) against its scope condition
+    `scope`. The records-only skip comes off first (drop_condition): what is left must be `scope`. The skip must be there exactly when
+    the step runs a suite. A step that runs no suite carries none; a suite step reads it (SuiteStepsTakeTheRecordsOnlySkip)."""
+    expr = unwrap(got) or ""
+    problems = []
+    if drop_condition(expr) != scope:
+        problems.append("step %r: if is %r, want the scope condition %r, with the records-only skip after it for a suite step" % (name, got, scope))
+    has_skip, suite = RECORDS_ONLY_CONDITION in expr, name in suite_step_names()
+    if has_skip != suite:
+        problems.append("step %r: the records-only skip is %s, want it %s (a suite step reads it; a step that runs no suite carries none)"
+                        % (name, "there" if has_skip else "absent", "there" if suite else "absent"))
+    return problems
 
 
 def checks_steps():
@@ -807,22 +827,19 @@ class ChecksStepBase(unittest.TestCase):
 class ScopeConditionOnNoMdSteps(ChecksStepBase):
     def test_each_no_md_and_names_only_step_carries_the_scope_condition(self):
         steps = self.steps()
-        checks = {identity(st) for st in ws.step_blocks(ws.job_block(read_repo(WORKFLOW), JOB))}
         for name in NO_MD + NAMES_ONLY:
             with self.subTest(step=name):
-                got = if_of(self.named(steps, name))
-                # Outside the checks job, the records-only condition may follow the scope condition: `${{ (SCOPE) && RECORDS_ONLY_CONDITION }}`.
-                conditioned_ok = name not in checks and drop_condition(unwrap(got)) == NO_MD_SCOPE_CONDITION
-                self.assertTrue(got == SCOPE_CONDITION or conditioned_ok,
-                                "step %r: if is %r, want the scope condition with no event fallback (%s)" % (name, got, PUSH_RULING))
+                problems = scope_skip_problems(name, if_of(self.named(steps, name)), NO_MD_SCOPE_CONDITION)
+                self.assertEqual(problems, [], "%s (%s)" % (problems, PUSH_RULING))
 
 
 class UnscopedAndPrOnlySteps(ChecksStepBase):
     def test_each_must_stay_unscoped_step_reads_no_scope_output(self):
+        # The records-only skip is the one scope read a suite step takes (SuiteStepsTakeTheRecordsOnlySkip); any other scope read fails.
         steps = self.steps()
         for name in MUST_STAY_UNSCOPED:
             with self.subTest(step=name):
-                expr = if_of(self.named(steps, name)) or ""
+                expr = job_if_without_records(if_of(self.named(steps, name))) or ""
                 self.assertNotIn("needs.scope.outputs", expr, "step %r reads a scope output in its if: %r" % (name, expr))
 
     def test_each_pr_only_step_keeps_its_pull_request_if(self):
@@ -847,7 +864,7 @@ class StepNames(ChecksStepBase):
             if name in MAIN_STEPS:
                 continue
             with self.subTest(step=name):
-                expr = if_of(st) or ""
+                expr = job_if_without_records(if_of(st)) or ""
                 self.assertNotIn("needs.scope.outputs", expr, "unlisted step %r reads a scope output: %r" % (name, expr))
 
     def test_each_hard_coded_list_names_a_main_step(self):
@@ -1071,9 +1088,8 @@ class DocStepScopeConditions(ChecksStepBase):
         steps = self.steps()
         for name, groups in DOC_STEPS.items():
             with self.subTest(step=name):
-                got = if_of(self.named(steps, name))
-                self.assertEqual(got, expected_if(groups), "step %r: if is %r, want the scope condition of %s alone, with no event fallback (%s)"
-                                 % (name, got, groups, PUSH_RULING))
+                problems = scope_skip_problems(name, if_of(self.named(steps, name)), SCOPE_OF[frozenset(groups)])
+                self.assertEqual(problems, [], "the scope condition of %s, with no event fallback (%s): %s" % (groups, PUSH_RULING, problems))
 
     def test_each_doc_step_group_set_has_one_constant_built_from_its_groups(self):
         for groups in sorted({tuple(g) for g in DOC_STEPS.values()}):
@@ -1305,7 +1321,7 @@ class LinuxSuiteStepsObeyTheirFlag(unittest.TestCase):
     def test_a_step_whose_flag_is_false_is_skipped_on_a_push_as_on_a_pull_request(self):
         for job in LINUX_SUITE_JOBS:
             for st in ws.step_blocks(ws.job_block(self.text, job)):
-                expr = if_of(st)
+                expr = job_if_without_records(if_of(st))  # the records-only skip is no flag: SuiteStepsTakeTheRecordsOnlySkip pins it
                 if expr is None or "needs.scope.outputs." not in expr:
                     continue
                 with self.subTest(job=job, step=identity(st)):
@@ -1377,6 +1393,22 @@ class KeepRunningTopLevelOr(unittest.TestCase):
         for expr in ("${{ !cancelled() && (x || y) }}", "${{ !cancelled() && x && (y || z) }}"):
             with self.subTest(expr=expr):
                 self.assertTrue(keeps_running(expr), "keeps_running does not keep %r running, but its `||` is inside parentheses" % expr)
+
+
+class SuiteStepsTakeTheRecordsOnlySkip(unittest.TestCase):
+    """ci-scope.sh sets records_only_skip on a comment-only delta too, so a job that starts on such a run (checks
+    does, for its comment lints) reads each suite step's own if:. A suite step without the skip clause runs its suite on that run.
+    Each suite step of the three lint jobs must read the clause; a step that runs a suite and reads no clause is named."""
+
+    def test_each_suite_step_in_the_three_lint_jobs_reads_the_records_only_skip(self):
+        text = read_repo(WORKFLOW)
+        for job in SPLIT_JOBS:
+            steps = suite_steps(text, job)
+            self.assertTrue(steps, "the fixture: %s holds no suite step" % job)
+            for name, cond in steps:
+                with self.subTest(job=job, step=name):
+                    self.assertIn(RECORDS_ONLY_CONDITION, cond or "",
+                                  "%s / %r runs a suite and its if: %r has no records-only skip" % (job, name, cond))
 
 
 # The five long CI steps the hang stop wraps (decision hang-stop; lane hang-stop-five-step-wrap): (job, step name, the command the

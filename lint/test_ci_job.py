@@ -43,6 +43,8 @@ ScopeLint: --lint with a base reads each needs.scope.outputs flag from the repo'
 Run: python3 lint/test_ci_job.py
 """
 import functools
+import importlib.machinery
+import importlib.util
 import json
 import os
 import re
@@ -61,7 +63,7 @@ import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from 
 sys.path.append(os.path.join(HERE, "..", "testing"))  # append: the signal-test helpers (testing/proc_fixture.py)
 import proc_fixture  # noqa: E402  the one home of the signal-test helpers; this module's wait_for is the rendezvous helper, so call proc_fixture's qualified
 from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
-from test_windows_split import LINUX_GUARD_JOBS  # noqa: E402  the one home of the guard shards (SHARD_COUNTS)
+from test_windows_split import LINUX_GUARD_JOBS, RECORDS_ONLY_CONDITION, drop_condition, unwrap  # noqa: E402  the one home of the guard shards (SHARD_COUNTS) and of the records-only skip's form
 sys.path.append(os.path.join(HERE, "..", "hooks"))  # append: the pin note's names (hooks/pin_note.py)
 from pin_note import ENV as PIN_NOTE_ENV  # noqa: E402  the one home of the pin note's variable (hooks/pin_note.py)
 RUN_FOLDER = _test_temp.run_folder()
@@ -590,10 +592,13 @@ def checks_hooks_condition():
 
 
 def checks_hooks_or_condition():
-    """The `if:` of the first checks-hooks step that holds `||` and names no github.event_name, read from checks.yml the same way."""
+    """The `if:` of the first checks-hooks step that holds `||` and names no github.event_name, read from checks.yml the same way, with
+    its records-only skip taken off: the case samples the scope disjunction the step gates on. The skip must be there to come off."""
     conds = [c for c in checks_hooks_ifs() if "||" in c and "github.event_name" not in c]
     assert conds, "scope: checks-hooks has no step whose if: holds || and no github.event_name"
-    return conds[0]
+    expr = unwrap(conds[0])
+    assert RECORDS_ONLY_CONDITION in expr and drop_condition(expr) != expr, "scope: the sampled checks-hooks || step has no records-only skip: " + expr
+    return "${{ %s }}" % drop_condition(expr)
 
 
 class Conditions(Job):
@@ -3653,16 +3658,6 @@ class QuietStepKeepsTheStallWatchFed(Job):
         self.assertIn("still running", done.stderr, done.stdout + done.stderr)
 
 
-def load_ci_job():
-    """bin/ci-job as a fresh module, so a case can call or patch its functions."""
-    import importlib.machinery
-    import importlib.util
-    loader = importlib.machinery.SourceFileLoader("ci_job_under_test", CI_JOB)
-    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
-    loader.exec_module(module)
-    return module
-
-
 class WindowsShell(unittest.TestCase):
     """On Windows a step's bash is Git Bash by full path, never the System32 WSL launcher that PATH finds
     first (decision bare-bash-on-windows-can-resolve-to-the-wsl-stub). Built as a fake Windows tree on any host."""
@@ -4827,6 +4822,66 @@ class ScopeLint(Job):
         self.assertTrue(os.path.exists(os.path.join(self.root, "scope-stub-ran.txt")),
                         "scope: ci-job did not run .github/scripts/ci-scope.sh of the repo under test\n" + out)
         self.assertEqual(by_step(lines).get("flag code"), "skipped", out)
+
+
+BIN_CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
+# The scope flags ci-scope.sh writes for a delta of one path no case arm names: every suite flag on, and the skip outputs false.
+UNMAPPED_FLAGS = {**{n: "true" for n in ("checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos",
+                                         "pointer_windows", "code", "guard", "sweep", "mods", "shoot", "checks_windows_sweep",
+                                         "checks_guard", "windows_guard", "mutation_report")},
+                  "records_only_skip": "false", "skip_comment_delta": "false"}
+# The same delta when the script maps it: only `code` is on, and every other flag and skip output is off.
+MAPPED_FLAGS = {**{n: "false" for n in UNMAPPED_FLAGS}, "code": "true"}
+
+
+def load_ci_job():
+    """bin/ci-job as a module. Its file has no .py suffix, so the loader is named; its entry point is __main__-guarded, so the import runs no step."""
+    loader = importlib.machinery.SourceFileLoader("ci_job_under_test", BIN_CI_JOB)
+    mod = importlib.util.module_from_spec(importlib.util.spec_from_loader("ci_job_under_test", loader))
+    loader.exec_module(mod)
+    return mod
+
+
+def git_repo_with_a_change(root):
+    """A repo of two commits: (its first head, its tree, the second head's tree). The second commit adds lib/tidy.py."""
+    def g(*args):
+        return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+    g("init", "-q")
+    g("config", "user.email", "t@t")
+    g("config", "user.name", "t")
+    g("config", "commit.gpgsign", "false")
+    open(os.path.join(root, "seed.txt"), "w").write("seed\n")
+    g("add", "-A")
+    g("commit", "-qm", "base")
+    a_head = g("rev-parse", "HEAD")
+    os.makedirs(os.path.join(root, "lib"), exist_ok=True)
+    open(os.path.join(root, "lib", "tidy.py"), "w").write("X = 1\n")
+    g("add", "-A")
+    g("commit", "-qm", "change")
+    return a_head, g("rev-parse", f"{a_head}^{{tree}}"), g("rev-parse", "HEAD^{tree}")
+
+
+class CarryUnmappedDelta(unittest.TestCase):
+    """carry_delta_read reads a delta whose every suite flag is on as unmapped, so no suite is carried. ci-scope.sh writes the skip
+    output (skip_comment_delta) as false on such a delta, so it must sit in SCOPE_APART with the other outputs an
+    unmapped path does not set. Left out, they read as a flag off, and the suites the selector picks are carried for the unmapped path."""
+
+    def carried(self, flags):
+        mod = load_ci_job()
+        root = tempfile.mkdtemp(prefix="carry-", dir=RUN_FOLDER)
+        a_head, a_tree, b_tree = git_repo_with_a_change(root)
+        mod.scope_flags = lambda *args, **kwargs: (dict(flags), None)  # the script's answer for this delta, as ci-scope.sh gives it
+        mod.select_suites = lambda *args, **kwargs: ({"hooks/test_tidy.py"}, None)  # the selector would pick one suite
+        return mod.carry_delta_read(root, a_head, a_tree, b_tree)["picked"]
+
+    # Named failure: an unmapped delta carries the selector's suite, because the two skip outputs read as flags off.
+    def test_an_unmapped_delta_with_the_skip_outputs_set_carries_no_suite(self):
+        picked = self.carried(UNMAPPED_FLAGS)
+        self.assertIsNone(picked, f"an unmapped delta carries {sorted(picked or ())}: the skip outputs are not in SCOPE_APART")
+
+    # Control: a delta the script maps picks the selector's suite, as before.
+    def test_a_mapped_delta_still_carries_the_selector_suite(self):
+        self.assertEqual(self.carried(MAPPED_FLAGS), {"hooks/test_tidy.py"}, "a mapped delta no longer carries the selector's suite")
 
 
 if __name__ == "__main__":
