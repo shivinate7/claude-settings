@@ -21,14 +21,11 @@ from test_windows_split import (ALL_JOBS_PASSED_JOB, CHECKS_JOB, MACOS_JOBS, NIG
                                 job_if_without_records, push_guard_only, push_off_only, shard_base, shard_push_off, unwrap, yaml_scalar)  # NIGHTLY_SKIP_JOB and PUSH_SKIP_JOB are read from here by actions/push-skip/push-skip.py
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
 
-# The delta skips (ci-scope.sh's skip_comment_delta and skip_record_delta) start a lint job after a records-only skip: checks reads the
-# changed text for its comment lints and its decision steps, checks-hooks and checks-rest for their decision steps. Such a job's
-# job-level if is the records-only condition, then the clauses named here, in this order. A clause only runs its job more, so the job
-# still skips on the records-only skip alone. Any other clause, or another order, fails the job-level rules.
+# The comment delta skip (ci-scope.sh's skip_comment_delta) starts the checks job after a records-only skip: it reads the changed text for
+# its comment lints. Its job-level if is the run guard, then the records-only condition, then the clause named here. A clause only runs
+# its job more, so the job still skips on the records-only skip alone. Any other clause, or another order, fails the job-level rules.
 COMMENT_DELTA_CLAUSE = "needs.scope.outputs.skip_comment_delta == 'true'"
-RECORD_DELTA_CLAUSE = "needs.scope.outputs.skip_record_delta == 'true'"
-DELTA_CLAUSES = {CHECKS_JOB: (COMMENT_DELTA_CLAUSE, RECORD_DELTA_CLAUSE), "checks-hooks": (RECORD_DELTA_CLAUSE,),
-                 "checks-rest": (RECORD_DELTA_CLAUSE,)}
+DELTA_CLAUSES = {CHECKS_JOB: (COMMENT_DELTA_CLAUSE,)}
 
 ALL_JOBS_PASSED_USES = "$/actions/all-jobs-passed"
 ALL_JOBS_PASSED_IF = "${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}"

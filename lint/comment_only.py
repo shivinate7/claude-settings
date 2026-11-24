@@ -11,6 +11,7 @@ a .py or .sh file skips the code suites; a docstring counts as code; the daily r
 
 What stays code, and what goes:
 - A docstring is a string token, so its text is code: the suites read it (the hook catalog, the reinstall and session-role suites).
+- A mode change (the exec bit, a link) is code: the file's content may not move, but whether it runs does.
 - A shebang (line 1) and an encoding cookie (line 1 or 2) are comments to the tokenizer but pick the interpreter and the text
   decoder, so a change to one is code.
 - A `# noqa`, `# type:`, `# pragma`, `# shellcheck` or other tool directive is a comment here, and a change to one reads as
@@ -98,10 +99,21 @@ def blob(ref, path):
     return r.stdout
 
 
+def mode(ref, path):
+    """The file mode git records for `path` at `ref` (100644, 100755, 120000). The exec bit decides whether a .sh runs, so a mode change is code."""
+    r = _nowindow.run(["git", "ls-tree", ref, "--", path], capture_output=True)
+    fields = r.stdout.split(b"\t", 1)[0].split()
+    if r.returncode or not fields:
+        raise narration.Unread("%s:%s has no mode" % (ref, path))
+    return fields[0]
+
+
 def comment_only(old_ref, new_ref, path):
-    """True when `path` differs between the refs in comments only (a docstring is code, for Python)."""
+    """True when `path` differs between the refs in comments only (a docstring is code, for Python). A mode change is not comment-only."""
     ext = os.path.splitext(path)[1]
     if ext not in (".py", ".sh"):
+        return False
+    if mode(old_ref, path) != mode(new_ref, path):
         return False
     old, new = blob(old_ref, path), blob(new_ref, path)
     if ext == ".py":
