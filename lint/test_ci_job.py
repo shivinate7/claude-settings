@@ -155,6 +155,12 @@ class Job(unittest.TestCase):
     VERDICT_CUT = ("import os, signal, sys\n"
                    "print('verdict: still running, 120s, log=verdict.log', file=sys.stderr, flush=True)\n"
                    "os.kill(os.getpid(), signal.SIGKILL)\n")  # a verdict killed after its heartbeat, before any verdict line
+    VERDICT_HANG = ("import sys\n"
+                    "print('HANG hang-probe rc=124 no output or CPU for 60s, stopped (61.2s) log=hang-verdict.log')\n"
+                    "sys.exit(124)\n")  # a verdict its hang stop ended: the HANG line bin/verdict prints, then exit 124
+    VERDICT_BEAT = ("import sys\n"
+                    "print('verdict: still running, 120s, log=HANG-beat.log', flush=True)\n"
+                    "print('PASS beat: no hang here')\n")  # a beat line with HANG in its text, then a PASS
 
     def verdict_stub(self, body):
         """The `launch` of a run whose bin/verdict is a stub that runs `body`: ci-job starts the stub where it would start
@@ -380,6 +386,26 @@ class Unknowns(Job):
     def test_a_real_fail_verdict_still_fails_the_job(self):  # the control: a FAIL line that verdict printed is a verdict, not a dead read
         rc, lines, out = self.run_job(step("bad", "exit 3"))
         self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
+
+    def test_a_hang_stop_reads_unknown_and_the_run_exits_2(self):  # the control: a verdict its hang stop ended is unknown, not PASS or FAIL
+        rc, lines, out = self.run_job(step("hang-probe", "true"), launch=self.verdict_stub(self.VERDICT_HANG))
+        self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
+        self.assertEqual(by_step(lines), {"hang-probe": "unknown"}, "a verdict its hang stop ended does not read unknown: " + out)
+        self.assertEqual(rc, 2, "a verdict its hang stop ended does not exit 2, the unknown code: " + out)
+
+    def test_a_hang_stop_puts_its_hang_line_in_the_step_line(self):  # the step line must carry the HANG line, or a hang reads as a bare "no verdict line"
+        rc, lines, out = self.run_job(step("hang-probe", "true"), launch=self.verdict_stub(self.VERDICT_HANG))
+        self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
+        line = next((ln for ln in lines if ln.partition(": ")[0].split()[-1:] == ["hang-probe"]), "")
+        missing = [words for words in ("HANG hang-probe", "no output or CPU for 60s", "log=hang-verdict.log") if words not in line]
+        self.assertFalse(missing, "the step line %r drops the HANG line's words %s, so the reader cannot tell a hang from a kill\n%s"
+                         % (line, missing, out))
+
+    def test_a_beat_line_with_hang_in_its_text_does_not_turn_a_pass_unknown(self):  # the control against a loose match on HANG
+        rc, lines, out = self.run_job(step("beat", "true"), launch=self.verdict_stub(self.VERDICT_BEAT))
+        self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
+        self.assertEqual(by_step(lines), {"beat": "PASS"}, "a PASS after a beat line with HANG in its text reads otherwise: " + out)
+        self.assertEqual(rc, 0, "a PASS after a beat line with HANG in its text does not exit 0: " + out)
 
 
 def checks_hooks_condition():
@@ -3747,6 +3773,25 @@ class RerunCache(unittest.TestCase):
 
     def test_an_unknown_step_is_never_saved(self):
         self.not_saved_until_a_pass(127, "unknown")
+
+    def test_a_hang_is_never_saved_so_its_rerun_runs_it_again(self):  # check-b beside it still caches: the control that the cache works here
+        self.fixture()
+        script, cfg = self.install(CHECKOUT, folder=os.path.join(self.sandbox, "tool"))
+        # the copy's bin/verdict hangs check-a only: any other step runs the real verdict, so check-b passes and caches
+        write_lf(os.path.join(cfg, "bin", "verdict"),
+                 "import os, subprocess, sys\n"
+                 "if 'check-a' not in open(sys.argv[-1], encoding='utf-8').read():\n"
+                 "    sys.exit(subprocess.run([sys.executable, %r, *sys.argv[1:]]).returncode)\n" % os.path.join(CHECKOUT, "bin", "verdict")
+                 + "open(os.path.join(os.environ['PROBE_DIR'], 'runs.txt'), 'a', encoding='utf-8').write('check-a\\n')\n"
+                 + Job.VERDICT_HANG)
+        steps = (rerun_step("check-a"), rerun_step("check-b"))
+        _, lines, _, out = self.lane_run(*steps, script=script)
+        self.assertEqual(state_of(lines, "check-a"), "unknown", "scope: check-a should read unknown after its hang\n%s" % out)
+        _, lines, ran, out = self.lane_run(*steps, script=script)
+        self.assertIn("check-a", ran, "check-a did not run in the rerun: its hang was saved, so it printed %r\n%s"
+                      % (state_of(lines, "check-a"), out))
+        self.assertNotIn("check-b", ran, "check-b ran again: its pass was not saved, so the check-a case proves nothing\n%s" % out)
+        self.assertEqual(state_of(lines, "check-b"), "PASS (cached)", out)
 
     def edit_misses(self, commit):
         self.fixture()
