@@ -14,7 +14,8 @@ bin/cheap-lints runs the repo's merge.readyChecks (.github/stamp.json) through m
   body is still a body.
 
 Each case builds a fixture repo in its own folder of the run folder. The repo has a two-job workflow of one-line
-Python steps and a stamp.json that names the case's checks. No case reads the real checks.yml. The checks job's
+Python steps and a stamp.json that names the case's checks. The CheapLints cases never read the real checks.yml;
+CodeCheckReady reads its Code check step and the repo's real readyChecks list, and nothing else of checks.yml. The checks job's
 records step is a stub: it exits 0 only when PR_BODY is non-empty, so the cases drive the no-body and body paths
 without the real action.
 """
@@ -84,12 +85,12 @@ def git_env(case):
     return _test_git.apply(env)
 
 
-def make_fixture(case, text):
-    """A git repo at <case>/repo with the workflow and .github/stamp.json holding `text`. None writes no stamp.json."""
+def make_fixture(case, text, workflow=WORKFLOW):
+    """A git repo at <case>/repo with `workflow` as checks.yml and .github/stamp.json holding `text`. None writes no stamp.json."""
     repo = os.path.join(case, "repo")
     os.makedirs(os.path.join(repo, ".github", "workflows"))
     with open(os.path.join(repo, ".github", "workflows", "checks.yml"), "w", encoding="utf-8") as f:
-        f.write(WORKFLOW)
+        f.write(workflow)
     if text is not None:
         with open(os.path.join(repo, ".github", "stamp.json"), "w", encoding="utf-8") as f:
             f.write(text)
@@ -218,6 +219,167 @@ class CheapLints(unittest.TestCase):
         self.assertTrue(any(line.startswith("unknown cheap-lints: no claude-settings checkout found") for line in lines),
                         "no `unknown cheap-lints: no claude-settings checkout found` line: %r" % lines)
         self.assertFalse(any("Traceback" in line for line in lines), "a run with no checkout prints a traceback: %r" % lines)
+
+
+# CodeCheckReady: the checks job's Code check step (uses: $/actions/code-check) is a ready check. Its step text is read from checks.yml
+# and its list entry from the repo's stamp.json, so the case fails on a repo whose list lacks the entry.
+CODE_CHECK = "Code check"
+REAL_CHECKS = os.path.join(ROOT, ".github", "workflows", "checks.yml")
+REAL_CONFIG = os.path.join(ROOT, ".github", "stamp.json")
+# What the step reads from the tree: its action, the tool table and the ruff config (the set LintTools in lint/test_ci_job.py copies).
+CODE_FILES = ("actions/code-check", "lint/code_check_standard.json", "ruff.toml")
+CODE_BASE = "def check():\n    return 1\n"  # origin/main's a.py: clean
+CODE_CLEAN = "def check():\n    return 1\n\n\ndef other():\n    return 2\n"  # a lane's a.py that adds a second, differently named def
+CODE_DUPLICATE = "def check():\n    return 1\n\n\ndef check():\n    return 2\n"  # ruff's F811: a function defined twice
+# A stand-in for ruff 0.17.3: F811 for each top-level def a file repeats, exit 1; else exit 0. code_check.py calls `ruff check --force-exclude FILES`.
+FAKE_RUFF = """#!/usr/bin/env python3
+import re
+import sys
+
+found = False
+for path in (a for a in sys.argv[1:] if a.endswith(".py")):
+    seen = {}
+    with open(path, encoding="utf-8") as f:
+        for number, line in enumerate(f, 1):
+            m = re.match(r"def (\\w+)\\(", line)
+            if m and m.group(1) in seen:
+                print("%s:%d:1: F811 Redefinition of unused `%s` from line %d" % (path, number, m.group(1), seen[m.group(1)]))
+                found = True
+            elif m:
+                seen[m.group(1)] = number
+sys.exit(1 if found else 0)
+"""
+
+
+def checks_step(name):
+    """The raw text of the one step named `name` in checks.yml's job checks, read at test time. A missing or doubled step is a scope failure."""
+    with open(REAL_CHECKS, encoding="utf-8") as f:
+        steps = [st for st in ws.step_blocks(ws.job_block(f.read(), "checks")) if ws.step_key(st, "name") == name]
+    if len(steps) != 1:
+        raise AssertionError("scope: checks.yml job checks holds %d steps named %r, not one" % (len(steps), name))
+    return steps[0]
+
+
+def records_stub():
+    """The records step's raw text, from WORKFLOW: the one fixture's stub, which passes only when PR_BODY is set."""
+    return next(st for st in ws.step_blocks(ws.job_block(WORKFLOW, "checks")) if ws.step_key(st, "name") == RECORDS_STEP)
+
+
+def real_ready_checks():
+    """merge.readyChecks of the repo's own .github/stamp.json: the list the ready run reads on this checkout."""
+    with open(REAL_CONFIG, encoding="utf-8") as f:
+        return json.load(f).get("merge", {}).get("readyChecks") or []
+
+
+def write_file(repo, rel, text):
+    with open(os.path.join(repo, rel), "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+
+
+def git_run(case, repo, *args):
+    """One git command in the fixture repo, with a commit identity. Its output is read only on failure (check=True raises)."""
+    env = dict(git_env(case), GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+    subprocess.run(["git", "-C", repo, *args], check=True, env=env, capture_output=True)
+
+
+def code_case(case, lane_text):
+    """A fixture repo. origin/main holds the Code check step beside the records stub, the code-check action, its table and ruff
+    config, and a clean a.py. The lane branch rewrites a.py to `lane_text`. The stamp lists the real readyChecks entries that
+    this fixture's steps name, in the repo's own order. -> the repo path."""
+    workflow = ("name: code-check fixture\non: push\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
+                + records_stub() + checks_step(CODE_CHECK))
+    ready_json = config_text([name for name in real_ready_checks() if name in (CODE_CHECK, RECORDS_STEP)])
+    repo = make_fixture(case, ready_json, workflow=workflow)
+    for rel in CODE_FILES:
+        src, dst = os.path.join(ROOT, rel), os.path.join(repo, rel)
+        if os.path.isdir(src):
+            shutil.copytree(src, dst, ignore=shutil.ignore_patterns("tools", "__pycache__"))
+        else:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copyfile(src, dst)
+    write_file(repo, "a.py", CODE_BASE)
+    git_run(case, repo, "add", "-A")
+    git_run(case, repo, "commit", "-qm", "base")
+    git_run(case, repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git_run(case, repo, "checkout", "-qb", "lane")
+    write_file(repo, "a.py", lane_text)
+    git_run(case, repo, "add", "-A")
+    git_run(case, repo, "commit", "-qm", "lane")
+    return repo
+
+
+def no_pipx_dir(case):
+    """A PATH folder with python3 and every tool of /bin and /usr/bin except pipx. NO_PIPX (lint/test_ci_job.py) drops each folder
+    that holds pipx, and here that folder holds python3 too (/opt/homebrew/bin), so it cannot serve this case."""
+    shim = os.path.join(case, "no-pipx-bin")
+    os.makedirs(shim)
+    os.symlink(sys.executable, os.path.join(shim, "python3"))
+    for folder in ("/bin", "/usr/bin"):
+        for name in os.listdir(folder):
+            if name not in ("pipx", "python3") and not os.path.lexists(os.path.join(shim, name)):
+                os.symlink(os.path.join(folder, name), os.path.join(shim, name))
+    return shim
+
+
+def ready_run(case, repo, tools):
+    """Runs bin/cheap-lints main in the fixture repo. With `tools`, the stand-in ruff comes first on PATH and CODE_CHECK_TOOLS=path, the
+    switch code_check.py reads for tools already on PATH; without, PATH has no pipx. -> (exit code, output lines)."""
+    env = git_env(case)
+    env.pop("CODE_CHECK_TOOLS", None)
+    env["PR_BODY"] = "a pull request body"  # the records stub runs only with a body; cheap-lints drops it without one
+    if tools:
+        bin_dir = os.path.join(case, "ruff-bin")
+        os.makedirs(bin_dir)
+        write_file(bin_dir, "ruff", FAKE_RUFF)
+        os.chmod(os.path.join(bin_dir, "ruff"), 0o755)
+        env["PATH"] = os.pathsep.join([bin_dir, env.get("PATH", "")])
+        env["CODE_CHECK_TOOLS"] = "path"
+    else:
+        env["PATH"] = no_pipx_dir(case)
+    done = subprocess.run([sys.executable, CHEAP, "main"], cwd=repo, env=env, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, text=True, encoding="utf-8", timeout=300)
+    return done.returncode, done.stdout.splitlines()
+
+
+@unittest.skipUnless(os.name == "posix", "the stand-in ruff is a POSIX script that PATH reaches")
+class CodeCheckReady(unittest.TestCase):
+    """The ready run reads the Code check step and runs it on the tree. The list is the repo's real readyChecks; ruff is FAKE_RUFF, so no
+    case installs a tool or uses the network, and the tool-miss case drops pipx from PATH."""
+
+    def run_on(self, lane_text, tools=True):
+        case = new_case()
+        return ready_run(case, code_case(case, lane_text), tools)
+
+    def test_a_ruff_error_fails_the_ready_run_on_a_code_check_line(self):
+        rc, lines = self.run_on(CODE_DUPLICATE)
+        self.assertIn(("fail", CODE_CHECK), verdicts(lines),
+                      "the ready run printed no `fail Code check` line for a ruff error: Code check is not a ready check: %r" % lines)
+        log = re.search(r"log=(\S+)", "\n".join(lines))  # the ready run prints the ci-job log it wrote; ruff's own line sits there, not in the rows
+        text = ""
+        if log:
+            with open(log.group(1), encoding="utf-8") as f:
+                text = f.read()
+        self.assertIn("F811", text, "the ruff finding is not in the ci-job log the ready run names: %r" % lines)
+        self.assertEqual(rc, 1, "a ready run with a failing check did not exit 1: %r" % lines)
+
+    def test_a_clean_tree_passes_the_code_check_in_the_ready_run(self):
+        rc, lines = self.run_on(CODE_CLEAN)
+        self.assertIn(("pass", CODE_CHECK), verdicts(lines),
+                      "the ready run printed no `pass Code check` line for a clean tree: %r" % lines)
+        self.assertEqual(rc, 0, "a ready run whose checks all pass did not exit 0: %r" % lines)
+
+    def test_the_records_stub_in_the_same_fixture_passes(self):  # the control: a listed step passes here, so the fixture and runner are sound
+        rc, lines = self.run_on(CODE_CLEAN)
+        self.assertIn(("pass", RECORDS_STEP), verdicts(lines), "the records stub did not pass in the fixture: %r" % lines)
+        self.assertEqual(rc, 0, "the fixture's ready run did not exit 0: %r" % lines)
+
+    def test_with_no_pipx_the_code_check_is_unknown_and_names_pipx(self):
+        rc, lines = self.run_on(CODE_CLEAN, tools=False)
+        self.assertNotIn(("pass", CODE_CHECK), verdicts(lines), "a Code check with no pipx reads pass: %r" % lines)
+        row = [line for line in lines if line.startswith("unknown %s" % CODE_CHECK)]
+        self.assertTrue(row, "the ready run printed no `unknown Code check` line with pipx absent: %r" % lines)
+        self.assertIn("pipx", row[0], "the unknown Code check line does not name the missing tool: %r" % row[0])
+        self.assertEqual(rc, 2, "a ready run with an unknown check did not exit 2: %r" % lines)
 
 
 def tearDownModule():
