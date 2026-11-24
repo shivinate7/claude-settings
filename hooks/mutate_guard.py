@@ -3607,6 +3607,12 @@ MUTATIONS = [
      'session, run install.sh from the claude-settings checkout (Windows: install.ps1), ',
      'session, ',
      "guard", "handoff-unread: install-hooks-whole: a missing reread_check's refusal names install.sh as the fix"),
+    # ---- handoff-too-big (decision precompact-handoff, the size limit): the refuse arm of the handoff size check.
+    # Its cases are tests/guard/s43731-handoff-too-big.py, a section of test_guard.py.
+    ("handoff-too-big: the refuse arm is dropped, so a handoff one byte over the limit is allowed",
+     "        if oversize:",
+     "        if False:",
+     "guard", "handoff-too-big: a Write one byte over the limit is refused"),
     ("mockup-home: the refuse arm is dropped, so a design whose file sits under the machine home is allowed",
      "            if unhomed:",
      "            if False:",

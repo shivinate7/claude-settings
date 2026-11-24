@@ -251,6 +251,7 @@ TRACED_READS = (
     "tests/guard/s43410-red-run-commit.py",
     "tests/guard/s43420-red-run-commit-chain.py",
     "tests/guard/s43421-red-run-replay.py",
+    "tests/guard/s43731-handoff-too-big.py",
 )
 
 
