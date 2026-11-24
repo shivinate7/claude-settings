@@ -41,8 +41,8 @@ Cost: one python process start per prompt. Network calls per prompt: 0. Local re
 the install record, the config dir's CLAUDE.md, and local git reads in a clone: at most 4 on a prompt with no trigger
 (rev-parse of the ref, merge-base, and rev-parse and rev-list of the shared clone) and at most 8 on a trigger prompt
 (those four, symbolic-ref, then rev-list twice for a pin, or diff and two show reads of settings.json for a reinstall;
-a pin with no origin ref adds one rev-parse of local main). A local session with no record adds one rev-parse of the
-pin's HEAD, and the pin's own CLAUDE.md is no shared clone, so its no-trigger prompt makes at most 3. A local session
+a pin with no origin ref adds one rev-parse of local main). A local session with no record reads its pin: with no trigger it makes 2 git calls when the pin is current
+(HEAD and origin/stable) and 4 when the pin is behind a head already seen (the pin has no shared clone). A local session
 whose hook lives in no pin reads no git. A trigger adds one installer
 run (the installer fetches; this hook does not). Files written by this hook: the seen file, only when a reinstall, a
 pin refresh or a clone flag acts on a new head. No timer, no long-lived process.
@@ -269,8 +269,11 @@ def run_script(record, argv, what, cwd=None):
     limit = install_timeout()
     env = dict(os.environ, CLAUDE_SETTINGS_REF=record["ref"], CS_HOOK_INPUT=INSTALL_HOOK_INPUT)
     own_session = {} if os.name == "nt" else {"start_new_session": True}
+    bash = find_git_bash()
+    if bash is None and os.name == "nt":  # a bare "bash" on Windows is the WSL launcher (hooks/git_bash.py)
+        return "%s not run (Git Bash not found)" % what
     try:
-        proc = _nowindow.Popen([find_git_bash() or "bash", *argv], stdin=subprocess.DEVNULL,
+        proc = _nowindow.Popen([bash or "bash", *argv], stdin=subprocess.DEVNULL,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, cwd=cwd, **own_session)
     except OSError as err:
         return "%s failed (%s)" % (what, err)
@@ -384,7 +387,8 @@ def pin_record():
     """The record a local session has no file for: the live pin the hook file lives in, read as installed at its own
     HEAD, following PIN_REF. None, with no git call, when the hook lives in no pin or the pin holds no refresh script
     or HEAD."""
-    here = os.path.realpath(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    # The installed hook is a symlink into the pin: resolve the file itself, then take its folder.
+    here = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     found = PIN_TREE.fullmatch(here)
     if not found:
         return None
