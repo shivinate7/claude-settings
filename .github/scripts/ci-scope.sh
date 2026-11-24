@@ -18,9 +18,10 @@
 #   checks_windows_rest_2 repeats checks_windows_rest's value (R62). checks-windows-rest-2 reads it in its suite steps, as checks-windows-rest reads checks_windows_rest; the merge shards read checks_windows_merge. A ready pull request runs a merge or rest suite step only with its flag set; the scheduled and dispatched runs run them all (a push skips every Windows shard).
 #   windows_guard (the checks-windows-guard shards): a path that matches a glob of .github/guard-inputs.txt, an added file under a landed dir, or a change to this script, the workflow or that list; read in its own pass over the diff, so a .md input counts, and a path the table names nowhere does not set it.
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event; false on a records-only skip.
-# Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
-# script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
-# BASE_SHA, HEAD_REF, GREEN_HEAD (optional: the sha green-head.sh prints, the pull request's newest earlier fully green head; a push may carry one too), PR_HEAD
+# Everything is true on schedule and dispatch, on a push with no proven base, on an unreadable diff, on a change to this
+# script or the workflow, and on any path the table below does not name. A push with a proven base (BASE_SHA: a full sha that is an
+# ancestor of HEAD, not HEAD) reads base..HEAD like a pull request (decision push-skip-on-proven-tree). Inputs (env): EVENT,
+# BASE_SHA (a pull request's base, or a push's proven base), HEAD_REF, GREEN_HEAD (optional: the sha green-head.sh prints, the pull request's newest earlier fully green head; a push may carry one too), PR_HEAD
 # (optional: the pull request's head sha; HEAD when unset). GREEN_HEAD turns the 14 job and suite flags off on a pull request or a push when it is an
 # ancestor of PR_HEAD and the delta from it to PR_HEAD is docs/records.md alone; the lint flags keep their whole-PR values and mutation_report is false. Any unreadable read: no skip.
 # The last output line, records_only_skip=true|false, is true exactly in that case.
@@ -34,12 +35,19 @@ DOCS="doc_decisions doc_rules doc_skills doc_agents doc_glossary doc_map doc_oth
 ALL="$JOBS checks_guard code mods guard sweep shoot $LINTS $DOCS"
 range=""
 [ "${EVENT:-}" = pull_request ] && [ -n "${BASE_SHA:-}" ] && range="$BASE_SHA...HEAD"
+# A push scopes only from a proven base (push-skip's base output): a full 40-hex sha that names a commit, is an ancestor of HEAD and is not
+# HEAD. Any other BASE_SHA (empty, short, symbolic, not an ancestor, HEAD itself) leaves the range empty, so every flag stays on. The push
+# base is a diff base only: it is never GREEN_HEAD, so it cannot set the records-only skip. A schedule and a dispatch never scope.
+if [ "${EVENT:-}" = push ] && [[ "${BASE_SHA:-}" =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null &&
+   git merge-base --is-ancestor "$BASE_SHA" HEAD 2>/dev/null && [ "$(git rev-parse "$BASE_SHA^{commit}" 2>/dev/null)" != "$(git rev-parse HEAD 2>/dev/null)" ]; then
+  range="$BASE_SHA...HEAD"
+fi
 on=" "
 whole_read=0
 # --no-renames lists the old path of a rename too, so a move out of a mapped path counts.
 if [ -n "${SCOPE_FILES:-}" ]; then
   files=$SCOPE_FILES
-elif [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name-only --no-renames "$range" 2>/dev/null) && [ -n "$files" ]; then
+elif { [ "${EVENT:-}" = pull_request ] || [ "${EVENT:-}" = push ]; } && [ -n "$range" ] && files=$(git diff --name-only --no-renames "$range" 2>/dev/null) && [ -n "$files" ]; then
   :
 else
   files=""
