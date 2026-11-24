@@ -8,15 +8,15 @@ is a visible success and scope reads its output.
 skip=true only when the push commit's tree equals the head tree of a pull request the push commit belongs to, and that pull request's
 run passed, narrowed or full, in one of two forms. Main then runs none of its suites for that merge:
   1. a batch-* head (an integration pull request): its all-jobs-passed check run concluded success and so did every suite job.
-  2. any other merged pull request head (a lone lane): its newest checks run is a completed, successful pull request run in which
-     all-jobs-passed and every suite job succeeded. A suite step that scope skipped (a narrowed run) does not stop the skip: the
+  2. any other merged pull request head (a lone lane): its newest checks run is a completed pull request run, concluded success or cancelled (the
+     cancel-on-close workflow cancels the whole run after a merge), in which all-jobs-passed and every suite job succeeded. A suite step that scope skipped (a narrowed run) does not stop the skip: the
      suites the diff left out are not re-run on main until a later change touches them.
 A suite job that the run skipped (conclusion skipped) is proven, never a gap, only when all three hold: its name is a key of the
 calling workflow's all-jobs-passed scope-skips input, the same run's scope job succeeded, and the same run's all-jobs-passed
 succeeded. The map is read from the caller's workflow file with the rules reader (scope_skips_map), never from testing/, since a
 pinned copy of this action has no testing/. Any other skipped job is not proven.
-Anything else runs everything: a direct push, an admin merge with no green run, a tree mismatch, a red, draft, cancelled or
-in-progress run, a run of another head or workflow. A schedule or workflow_dispatch run (EVENT) never skips. Any error from the read,
+Anything else runs everything: a direct push, an admin merge with no green run, a tree mismatch, a red, draft or
+in-progress run, a cancelled run whose jobs did not all pass, a run of another head or workflow. A schedule or workflow_dispatch run (EVENT) never skips. Any error from the read,
 of any type, writes skip=false and says "unknown": an unknown state runs everything, never skips.
 
 The suite jobs are the jobs all-jobs-passed needs in the CALLING repo's workflow ($GITHUB_WORKSPACE/$WORKFLOW), minus the bookkeeping
@@ -182,8 +182,8 @@ def pull_request_run_gap(env, sha):
     """None when the newest checks run of the pull request head `sha` is a green pull request run. Else the reason it proves
     nothing. Raises Unknown on a read that cannot be judged. Green: the run, all-jobs-passed and every suite job succeeded. A step
     that scope skipped inside a succeeded job is no gap (a narrowed run). So is a records-only run: scope and all-jobs-passed
-    succeeded and every suite job was skipped. A newest run that concluded cancelled counts too when those job checks pass: a cancel
-    of the fan-in job after the jobs passed leaves the run cancelled and its all-jobs-passed and suite jobs green."""
+    succeeded and every suite job was skipped. A newest run that concluded cancelled counts too when those job checks pass: the
+    cancel-on-close workflow cancels the whole run after a merge, which leaves the run cancelled and its jobs green."""
     body = get("actions/runs", {"head_sha": sha, "event": "pull_request", "per_page": str(PAGE)}, env)
     page = body.get("workflow_runs") if isinstance(body, dict) else None
     if not isinstance(page, list):
@@ -281,7 +281,7 @@ def read_heads(env):
             if missing:
                 conclusion = "suite jobs not success: " + ", ".join(missing)
                 print("push-skip: batch head %s is not covered, %s" % (branch, conclusion))
-        elif (status, conclusion) != ("completed", "success"):
+        else:
             print("push-skip: batch head %s is not covered, all-jobs-passed is %s" % (branch, conclusion if status == "completed" else status))
         heads.append({"head_branch": branch, "tree": tree, "status": status, "conclusion": conclusion})
     return heads
