@@ -102,10 +102,12 @@ LINUX_CODE_SWEEP = f"{LINUX_CODE} && needs.scope.outputs.sweep == 'true'"
 LINUX_SWEEP = "needs.scope.outputs.sweep == 'true'"
 LINUX_MODS = "needs.scope.outputs.mods == 'true'"  # its keep-running guard comes off before the pin reads it (keep_running_off)
 # The scope condition on a step that reads no .md file, unwrapped as unwrap() reads an `if:`. lint/test_checks_step_scope.py pins which steps take it.
-NO_MD_SCOPE_CONDITION = "needs.scope.outputs.code == 'true' || github.event_name != 'pull_request'"
-# The scope condition of a step that reads the doc groups in `groups` (ci-scope.sh's doc_<group> flags): code, those flags, and a
-# non-pull_request event. No group gives NO_MD_SCOPE_CONDITION. The flags come in DOC_GROUPS order, so a group tuple in any order
-# builds one string. lint/test_checks_step_scope.py shares these constants.
+# No event fallback: a Linux suite step obeys its flag on every event (owner ruling A, option b, 19:02 CST Nov 23 2026), so a push
+# runs it only when the flag is true, as a pull request does.
+NO_MD_SCOPE_CONDITION = "needs.scope.outputs.code == 'true'"
+# The scope condition of a step that reads the doc groups in `groups` (ci-scope.sh's doc_<group> flags): code and those flags, with no
+# event fallback (the ruling of NO_MD_SCOPE_CONDITION). The flags come in DOC_GROUPS order, so a group tuple in any order builds one
+# string. lint/test_checks_step_scope.py shares these constants.
 DOC_GROUPS = ("decisions", "rules", "skills", "agents", "glossary", "map", "other", "any")
 
 
@@ -114,8 +116,7 @@ def doc_scope_condition(groups):
     unknown = [g for g in groups if g not in DOC_GROUPS]
     if unknown:
         raise ValueError("not a doc group: %s" % unknown)
-    flags = "".join("needs.scope.outputs.doc_%s == 'true' || " % g for g in DOC_GROUPS if g in groups)
-    return "needs.scope.outputs.code == 'true' || %sgithub.event_name != 'pull_request'" % flags
+    return " || ".join(["needs.scope.outputs.code == 'true'"] + ["needs.scope.outputs.doc_%s == 'true'" % g for g in DOC_GROUPS if g in groups])
 
 
 # One constant per distinct group set that a doc step reads (the set of lint/test_checks_step_scope.py DOC_STEPS).
@@ -411,7 +412,8 @@ SHOOT_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_s
 SHOOT_JOB = "checks-shoot"
 # The export suite runs in SHOOT_JOB too: its picture cases run check_designs.mjs in Playwright, and loadPlaywright reads NODE_PATH.
 EXPORT_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" python3 skills/waiting-page/test_export_page.py'
-EXPORT_IF = "needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request'"
+# The shoot job's Linux steps take the flag alone: no event fallback (owner ruling A, option b, 19:02 CST Nov 23 2026).
+EXPORT_IF = "needs.scope.outputs.shoot == 'true'"
 # The waiting page suite has its own job, so SHOOT_JOB keeps its cap (decision ci-job-caps). ROADMAP_CMD stays in SHOOT_JOB.
 WAITING_PAGE_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs skills/waiting-page/tests/test_check_designs.mjs'
 WAITING_PAGE_JOB = "checks-waiting-page"
@@ -1186,7 +1188,8 @@ def macos_slice_problems(text):
     return problems
 
 
-SHOOT_SCOPE = "needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request'"
+# The flag alone on the shoot job's Linux steps: no event fallback (owner ruling A, option b, 19:02 CST Nov 23 2026).
+SHOOT_SCOPE = "needs.scope.outputs.shoot == 'true'"
 SHOOT_IF = f"${{{{ {SHOOT_SCOPE} }}}}"
 
 
@@ -1220,7 +1223,8 @@ def shoot_doc(lint_run="ruff", install_if=SHOOT_IF, suite_if=SHOOT_IF, suite_run
 # pinned as the macOS guard shards are: the scope `if:`, no shell, and the suite's own env plus its shard value.
 LINUX_GUARD_SHARD = {name: f"{i}/{len(LINUX_GUARD_JOBS)}" for i, name in enumerate(LINUX_GUARD_JOBS, 1)}
 LINUX_GUARD = "python3 hooks/test_guard.py"
-LINUX_GUARD_IF = "needs.scope.outputs.checks_guard == 'true' || github.event_name != 'pull_request'"
+# The flag alone on the Linux guard shards' steps: no event fallback (owner ruling A, option b, 19:02 CST Nov 23 2026).
+LINUX_GUARD_IF = "needs.scope.outputs.checks_guard == 'true'"
 LINUX_GUARD_ENV = {"NODE_PATH": "${{ github.workspace }}/.github/shoot/node_modules", "GUARD_CHROMIUM": '"1"'}
 PLAYWRIGHT_USES = "$/actions/playwright-setup"
 
@@ -2167,6 +2171,31 @@ def top_level_conjuncts(expr):
             elif depth == 0 and e.startswith("||", i):
                 return [e.strip()]
             elif depth == 0 and e.startswith("&&", i):
+                parts.append(e[start:i].strip())
+                start = i + 2
+                i += 2
+                continue
+        i += 1
+    return parts + [e[start:].strip()]
+
+
+def top_level_disjuncts(expr):
+    """The `||` parts of an `if:` at the top level: outside quotes and parentheses, read as top_level_conjuncts reads them. An `&&`
+    binds tighter, so `a && b || c` gives `a && b` and `c`. An expression with no top-level `||` is one part."""
+    e = unwrap(expr) or ""
+    while e.startswith("(") and e.endswith(")") and _pair_closes_at_end(e):  # one pair around all of the expression
+        e = e[1:-1].strip()
+    parts, depth, quoted, start, i = [], 0, False, 0, 0
+    while i < len(e):
+        ch = e[i]
+        if ch == "'":
+            quoted = not quoted
+        elif not quoted:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            elif depth == 0 and e.startswith("||", i):
                 parts.append(e[start:i].strip())
                 start = i + 2
                 i += 2
@@ -3685,7 +3714,7 @@ class KeepRunningOff(unittest.TestCase):
     """keep_running_off strips exactly `!cancelled() && ` from the start of a checks-job step's `if:`, and one pair of parentheses
     around a `||` condition. Each case is one `if:` as checks.yml writes it."""
 
-    OR_CONDITION = NO_MD_SCOPE_CONDITION
+    OR_CONDITION = "needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true'"  # an OR fixture; the event fallback is gone (ruling A)
 
     def test_the_guard_comes_off_a_plain_condition(self):
         self.assertEqual(keep_running_off("${{ !cancelled() && needs.scope.outputs.code == 'true' }}"),
