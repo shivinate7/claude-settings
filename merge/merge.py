@@ -378,6 +378,7 @@ REFUSED_CITE = "(decision standing-merge-grant, only a proven refusal reverts th
 READ_CITE = "(decision no-merge-during-batch-ci, a failed read refuses, and unknown is red)"
 GREEN_CITE = "(rule git-never-merge-failing-ci, a head whose checks are not green never merges)"
 NO_CHECK_RAN = "no check ran on this head (every check skipped)"  # classify's red for a head whose every check skipped; a draft's run reads so
+NO_JOB_RAN = ": skipped, no job ran"  # the end of judge_runs' red entry for a workflow whose every run skipped; head_check_red reads that entry by this end
 RUN_URL_ID = re.compile(r"/actions/runs/(\d+)")
 
 def run_id(run):
@@ -1897,7 +1898,7 @@ class Host:
         runs = list({r["name"]: r for r in reversed(runs)}.values())[::-1]
         red = [f"workflow {r['name']}: {r['conclusion']}" for r in runs if r["status"] == "completed" and r["conclusion"] not in ("success", "skipped", "neutral")]
         if runs and not pending and all(r["conclusion"] == "skipped" for r in runs):
-            red = [f"workflow {r['name']}: skipped, no job ran" for r in runs]
+            red = [f"workflow {r['name']}{NO_JOB_RAN}" for r in runs]
         return red, pending
 
     BASE_EVENTS = json.loads(pathlib.Path(ALARM_EVENTS).read_text())  # event -> group; the runs of the base's own commits, a dispatch being the tool's own remedy. The groups judge apart, except for the cross-group clears in base_state (a failed run, a cancelled run). The CI alarm reads the same file and the failed-run clear; a cancelled run never alarms
@@ -5112,13 +5113,18 @@ def head_not_green(state):
     return "the read of the head's checks is unknown: " + state
 
 def head_check_red(state):
-    """-> the red text of `state` (Host.head_state) when a check of the head failed, else None. A draft's run skips every job, which
-    classify words NO_CHECK_RAN: that is the draft, not a failure, so it is not red here, when it is the only red entry. A failed run beside it is red."""
+    """-> the red text of `state` (Host.head_state) when a check of the head failed, else None. A draft's run skips every job: classify
+    words that NO_CHECK_RAN and judge_runs words each skipped workflow NO_JOB_RAN. That is the draft, not a failure, so those entries are not red
+    here, together or alone. Any other red entry beside them (a failed check or run) is red."""
     if not state.startswith("red: "):
         return None
     body = state[len("red: "):].split(" (ignored: ")[0]  # the ignored note after the red entries is no red
-    sole = body.startswith(NO_CHECK_RAN) and body.endswith(READY_ROUTES)  # classify's entry is first and ends with READY_ROUTES; a failed run joins after it with "; "
-    return None if sole else "a check is " + state
+    if not body.startswith(NO_CHECK_RAN) or READY_ROUTES not in body:
+        return "a check is " + state
+    # classify's entry is first and ends with READY_ROUTES, which holds "; ", so it is cut off whole, not split; the entries after it join with "; "
+    rest = body[body.index(READY_ROUTES) + len(READY_ROUTES):]
+    others = [e for e in rest.split("; ") if e and not (e.startswith("workflow ") and e.endswith(NO_JOB_RAN))]
+    return "a check is " + state if others else None
 
 CI_SCOPE = ".github/scripts/ci-scope.sh"  # the repo's one home of which jobs read which paths; --express reads it for a prose-only diff
 RULED_STORE_PATH = "roadmap/rulings/{id}.json"  # on origin/roadmap: one file per ruling; --express reads one
