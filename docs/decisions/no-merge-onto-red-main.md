@@ -110,7 +110,7 @@ A session reads the verdict of main's run for its merge with `merge --main-run <
 - cleared: the revert's run is green and re-ran every job that was red in the run before. The red is lifted.
 - did not clear: the revert's run is red, or green with a red job not re-run. The base stays red.
 - unknown: a failed read, a run still going or cancelled, no push run of the commit on the newest page, or no earlier run to compare. The tool exits 1. Run it again. Unknown never reads green, first red or carried.
-- Cost: one runs read, a jobs read for each run judged, and a log read per failed job of each red run read. No file, process or timer.
+- Cost: one runs read, a jobs read for each run judged, and a log read per failed job of each red run read (unmeasured). No file, process or timer.
 
 Check: `merge/test_merge.py`, class `MainRunVerdict`.
 
