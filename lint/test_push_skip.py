@@ -20,7 +20,8 @@ The contract these cases pin. A change to any of it changes these cases first.
   A records-only run (every suite job skipped, scope and all-jobs-passed succeeded) is a passing run: its skips are proven. The
   REST jobs read carries no job outputs, so all-jobs-passed's success stands for its records_only_skip flag.
 - base=<sha> on every push, written even when empty: the head of the newest completed, successful checks.yml run of main whose
-  suites ran (a run with every suite job skipped is no base). A run that is still going is passed over. A completed red or
+  suites ran (a run with every suite job skipped is no base). A newer run still queued or in progress is unread, so it gives
+  empty (consultant's pick, 07:10 CST Nov 24 2026, under decision push-skip-on-proven-tree). A completed red or
   cancelled run newer than the base gives empty, and so does this run's own record (GITHUB_RUN_ID). The output is a full 40-hex
   sha or empty. A read error, a malformed reply or a full page with no usable run gives empty and says "unknown" (class ProvenBase).
 - Any read error, unknown state or unreadable record writes skip=false and says "unknown".
@@ -50,9 +51,9 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
-from test_windows_split import ALL_JOBS_PASSED_JOB, CHECKS, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB, all_jobs, eval_if  # noqa: E402  the one home of the checks.yml reader
+from test_windows_split import ALL_JOBS_PASSED_JOB, CHECKS, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB, all_jobs, eval_if, eval_value, job_outputs_of  # noqa: E402  the one home of the checks.yml reader
 from all_jobs_passed_rules import FAN_IN, needs_of, split_jobs  # noqa: E402  the one home of the needs reader
-from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the job parser
+from workflow_steps import job_block, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the job parser
 import test_all_jobs_passed as all_jobs_home  # noqa: E402  the one home of the child workflow fixtures (CHILD_GOOD)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1118,7 +1119,7 @@ def half_ran_jobs():
 class ProvenBase(LiveHead):
     """main() on a push with no pull request, so the one runs read is the base search. The base output is the head of the newest
     completed, successful checks.yml run of main whose suites ran. A run with every suite job skipped is no base (push-skip skipped
-    it whole), and a run still going is passed over. A completed red or cancelled run newer than the base gives no base, because main
+    it whole), and a newer run still queued or in progress is unread, so it gives no base. A completed red or cancelled run newer than the base gives no base, because main
     is then not known green. This run's own record never counts. Each case reads the base output through main(), the entry point the
     job runs, and each failure names the claim that did not hold. The output must be written on every path: empty is a value."""
 
@@ -1174,12 +1175,18 @@ class ProvenBase(LiveHead):
                 twin, _ = self.base_on([push_run(1, OLDER, created_at=EARLY)], jobs={1: full_run_jobs()})
                 self.assert_base(twin, OLDER, "the control: without the %s run, the older green run is the base" % conclusion)
 
-    def test_a_newer_run_still_going_is_passed_over(self):
+    def test_a_newer_queued_or_in_progress_push_run_gives_no_base(self):
+        # Consultant's pick, 07:10 CST Nov 24 2026: a newer push run of main still queued or in progress is unread, so it gives no
+        # base and every flag stays on. The older green run is not used, and the reason line names the run it could not read.
         for status in ("in_progress", "queued"):
             with self.subTest(status=status):
                 runs = [push_run(2, NEWER, conclusion=None, status=status, created_at=LATE), push_run(1, OLDER, created_at=EARLY)]
-                base, _ = self.base_on(runs, jobs={1: full_run_jobs()})
-                self.assert_base(base, OLDER, "a %s push run is not completed, so the search passes it over to the older green run" % status)
+                base, text = self.base_on(runs, jobs={1: full_run_jobs()})
+                self.assert_base(base, "", "a %s push run newer than the candidate is unread (consultant's pick, 07:10 CST Nov 24 2026), so the push has no base" % status)
+                self.assertIn("push run 2", text, "the reason line must name the newer run it could not read: %s" % text.strip()[-200:])
+                self.assertIn(status, text, "the reason line must say the newer run is %s: %s" % (status, text.strip()[-200:]))
+                twin, _ = self.base_on([push_run(1, OLDER, created_at=EARLY)], jobs={1: full_run_jobs()})
+                self.assert_base(twin, OLDER, "the control: with no newer unfinished run, the older green run is the base")
 
     def test_this_runs_own_record_never_counts(self):
         runs = [push_run(2, NEWER, created_at=LATE), push_run(1, OLDER, created_at=EARLY)]
@@ -1215,11 +1222,25 @@ class ProvenBase(LiveHead):
                 self.assert_base(base, "", "%s gives no base" % label)
                 self.assertIn("unknown", text.lower(), "%s must print a line that says unknown, got %s" % (label, text.strip()[-200:]))
 
-    def test_a_full_page_that_holds_a_usable_run_still_gives_its_base(self):
+    def test_a_full_page_holding_a_newer_unfinished_run_gives_no_base(self):
+        # The page holds 99 newer runs still going. Each is unread (consultant's pick, 07:10 CST Nov 24 2026), so the usable green run
+        # below them is no base. The control is the same page with those runs finished: the newest green run is the base.
         page = [push_run(i, NEWER, conclusion=None, status="in_progress", created_at=LATE) for i in range(1, 100)]
         page.append(push_run(100, OLDER, created_at=EARLY))
         base, _ = self.base_on(fake=FakeGitHub(pulls=[], workflow_runs=page, jobs={100: full_run_jobs()}))
-        self.assert_base(base, OLDER, "a full page that holds a usable green run gives that run as the base")
+        self.assert_base(base, "", "a newer run still in progress on a full page is unread (consultant's pick, 07:10 CST Nov 24 2026), so the push has no base")
+        done = [push_run(i, NEWER, created_at=EARLY) for i in range(1, 100)] + [push_run(100, OLDER, created_at=LATE)]
+        twin, _ = self.base_on(fake=FakeGitHub(pulls=[], workflow_runs=done, jobs={100: full_run_jobs()}))
+        self.assert_base(twin, OLDER, "the control: a full page of finished runs gives its newest green run as the base")
+
+    def test_a_full_page_of_jobs_for_a_candidate_run_is_unknown_and_gives_no_base(self):
+        # One job the read did not return may be a suite job that failed, so a full page of jobs is unknown and the candidate gives no base.
+        jobs = [job_row("job-%d" % i) for i in range(99)] + [job_row(SUITE_JOBS[0])]
+        base, text = self.base_on([push_run(1, OLDER, created_at=EARLY)], jobs={1: jobs})
+        self.assert_base(base, "", "a full page of jobs may hide a failed suite job, so the candidate gives no base")
+        self.assertIn("unknown", text.lower(), "the full page must print a line that says unknown, got %s" % text.strip()[-200:])
+        twin, _ = self.base_on([push_run(1, OLDER, created_at=EARLY)], jobs={1: [job_row(SUITE_JOBS[0])]})
+        self.assert_base(twin, OLDER, "the control: the same suite job on a short page gives the candidate as the base")
 
     def test_the_base_is_a_full_hex_sha_or_empty_never_a_short_or_symbolic_ref(self):
         for head in ("1234567", "main", "refs/heads/main", "G" * 40):
@@ -1228,6 +1249,59 @@ class ProvenBase(LiveHead):
                 self.assert_base(base, "", "a head_sha of %r is no full sha, so the output must be empty" % head)
         base, _ = self.base_on([push_run(1, OLDER, created_at=EARLY)], jobs={1: full_run_jobs()})
         self.assert_base(base, OLDER, "the control: a full 40-hex head_sha is written as the base")
+
+
+class ProvenBaseWiring(unittest.TestCase):
+    """checks.yml hands push-skip's proven base to scope (decision push-skip-on-proven-tree). Each case reads checks.yml with the repo's
+    reader, and the scope job's BASE_SHA is resolved with the repo's `if:`/value evaluator, for each event. Each case was shown red by a
+    mutant of the workflow text, made in the copy red-run makes, so a cut in that wiring fails its own case."""
+    PR_BASE = "3" * 40  # the pull request's base sha, as github.event.pull_request.base.sha carries it
+    PUSH_BASE = "4" * 40  # the base push-skip's decide step writes on a push
+
+    def setUp(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            self.text = f.read()
+
+    def scope_steps(self):
+        return step_blocks(job_block(self.text, "scope") or "")
+
+    def resolve(self, event, pr_base, push_base):
+        """BASE_SHA of the scope job's detect step, as GitHub resolves it for `event`: pr_base is the pull request's base sha (None off a
+        pull request) and push_base is the value of needs.push-skip.outputs.base."""
+        steps = [s for s in self.scope_steps() if step_key(s, "id") == "scope"]
+        self.assertEqual(len(steps), 1, "the scope job must have one step with id scope")
+        expr = step_env(steps[0]).get("BASE_SHA")
+        self.assertIsNotNone(expr, "the scope step sets no BASE_SHA, so the scope job reads no base")
+        expr = expr.replace("github.event.pull_request.base.sha", repr(pr_base))
+        got = eval_value(expr, event, "", outputs={PUSH_SKIP_JOB: {"base": push_base}})
+        return "" if got is None else got  # GitHub renders a null or unset value in an env as the empty string
+
+    def test_push_skip_exposes_its_decision_base_as_a_job_output(self):
+        outputs = job_outputs_of(self.text, PUSH_SKIP_JOB)
+        self.assertEqual(outputs.get("base"), "${{ steps.decide.outputs.base }}",
+                         f"{PUSH_SKIP_JOB} does not expose the base its decide step writes, so scope gets no proven base: {outputs}")
+
+    def test_scope_base_is_the_pull_request_base_on_a_pull_request(self):
+        got = self.resolve("pull_request", self.PR_BASE, self.PUSH_BASE)
+        self.assertEqual(got, self.PR_BASE, "on a pull request BASE_SHA must be the pull request's base, got %r" % (got,))
+
+    def test_scope_base_is_the_push_skip_base_output_on_a_push(self):
+        got = self.resolve("push", None, self.PUSH_BASE)
+        self.assertEqual(got, self.PUSH_BASE, "on a push BASE_SHA must be the push-skip base output, got %r" % (got,))
+
+    def test_scope_base_is_empty_on_a_schedule(self):
+        got = self.resolve("schedule", None, self.PUSH_BASE)
+        self.assertEqual(got, "", "a schedule run never scopes, so BASE_SHA must be empty even with a push base, got %r" % (got,))
+
+    def test_scope_base_is_empty_on_a_workflow_dispatch(self):
+        got = self.resolve("workflow_dispatch", None, self.PUSH_BASE)
+        self.assertEqual(got, "", "a dispatch run never scopes, so BASE_SHA must be empty even with a push base, got %r" % (got,))
+
+    def test_scope_checks_out_with_full_history_so_the_base_is_in_the_clone(self):
+        checkouts = [s for s in self.scope_steps() if "actions/checkout@" in s]
+        self.assertEqual(len(checkouts), 1, f"the scope job has {len(checkouts)} checkout steps, want 1")
+        self.assertEqual(step_with(checkouts[0]).get("fetch-depth"), "0",
+                         "the scope checkout is not fetch-depth 0, so the proven base is not in the clone and the range does not read")
 
 
 def tearDownModule():
