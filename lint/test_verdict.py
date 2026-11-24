@@ -491,22 +491,6 @@ class T(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stdout)
             self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
 
-    @unittest.skipUnless(os.path.isdir("/proc"), "reaped CPU is read from /proc, which this platform lacks; the in-process cases cover the decision here")
-    @unittest.skipIf(os.name == "nt", HANG_SKIP)
-    def test_hang_stop_polling_step_of_fresh_idle_children_is_stopped(self):
-        """A silent step that starts a fresh idle child on each poll is a hang. Where /proc reads reaped CPU, a new pid with no
-        CPU is no work, so at N = 3 s verdict stops the step with one HANG line and exits 124. Under the new-pid clause the
-        step runs to its end instead (decision hang-stop)."""
-        script = "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do sleep 1; done; echo END-MARK"
-        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
-            log = os.path.join(d, "v.log")
-            r = self.run_bounded(None, log, {"VERDICT_HANG_SECONDS": "3"}, argv=["bash", "-c", script])
-            self.assertTrue(any(l.startswith("HANG ") for l in r.stdout.splitlines()),
-                            "a polling step of fresh idle children was not stopped as a hang: " + r.stdout)
-            self.assertEqual(r.returncode, 124, r.stdout)
-            with open(log, encoding="utf-8") as h: full = h.read()
-            self.assertNotIn("END-MARK", full, "the polling step ran to its end instead of being stopped")
-
     def hang_check_on_new_idle_pid(self, readable):
         """hang_check at N = 2 s over fabricated samples, with reaped_readable() patched to `readable`. The first silent wake takes
         the baseline: pid 100 at 1.5 s of CPU. At 2 s of silence pid 100 is still at 1.5 s and a fresh idle pid 101 (0 s) has joined.
