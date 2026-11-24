@@ -4607,9 +4607,16 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
 
     def test_control_a_run_step_that_did_not_run_for_want_of_a_tool_still_refuses(self):  # the seam is the kind, not every not-run line
         rc, out = self.action_run(DECLARED_READY + ["Tool step"], steps_for() + [("unknown", "Tool step")], 2,
-                                  details={"Tool step": "--step named it, but it did not run (tool missing: pipx)"})
+                                  details={"Tool step": "tool missing: pipx"})  # bin/ci-job prints this unwrapped: a tool-missing step is unknown already
         self.assertEqual(rc, 1, "a run step that did not run for want of a tool was skipped: " + out)
         self.assertEqual(self.host.readies, [], "a run step that did not run for want of a tool marked the draft ready: " + out)
+
+    def test_control_a_listed_run_step_skipped_by_its_if_still_refuses(self):  # bin/ci-job wraps a skipped listed step's detail in the --step line
+        rc, out = self.action_run(DECLARED_READY + ["Base step"], steps_for() + [("unknown", "Base step")], 2,
+                                  details={"Base step": "--step named it, but it did not run (skipped): a step that runs only off a pull request"})
+        self.assertEqual(rc, 1, "a listed run step skipped by its if: did not refuse the ready run: " + out)
+        self.assertEqual(self.host.readies, [], "a listed run step skipped by its if marked the draft ready: " + out)
+        self.assertFalse(verdict_line(out, "skip", "Base step"), "a listed run step skipped by its if read as the CI-runs skip: " + out)
 
     def test_control_every_listed_step_unrunnable_refuses_and_no_pass_line_prints(self):  # nothing ran: not a pass
         rc, out = self.action_run([ACTION_READY], [("unknown", ACTION_READY)], 2, details={ACTION_READY: ACTION_NOT_RUN})
