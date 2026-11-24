@@ -17,7 +17,7 @@ import sys
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
-from test_windows_split import (ALL_JOBS_PASSED_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_OFF_JOBS, PUSH_SKIP_JOB, RECORDS_ONLY_CONDITION, all_jobs, draft_guard_only, drop_condition, eval_if,  # noqa: E402,F401  the one home of the scope condition and scalar parsers
+from test_windows_split import (ALL_JOBS_PASSED_JOB, CHECKS_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_OFF_JOBS, PUSH_SKIP_JOB, RECORDS_ONLY_CONDITION, all_jobs, checks_if_problems, draft_guard_only, drop_condition, eval_if, eval_value, job_needs_of,  # noqa: E402,F401  the one home of the scope condition and scalar parsers
                                 job_if_without_records, push_guard_only, push_off_only, shard_base, shard_push_off, unwrap, yaml_scalar)  # NIGHTLY_SKIP_JOB and PUSH_SKIP_JOB are read from here by actions/push-skip/push-skip.py
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
 
@@ -79,6 +79,13 @@ def needs_of(block):
     return names
 
 
+class AllSucceeded(dict):
+    """Every needed job's result, success: a job-level if may read needs.<job>.result (checks reads scope's)."""
+
+    def __missing__(self, job):
+        return "success"
+
+
 def split_jobs(text):
     """(needed, off, problems) over the jobs of checks.yml. A job is off all-jobs-passed when its job-level if is false on a
     non-draft pull_request with every scope flag true and the records-only skip not set. all-jobs-passed and ci-done are neither needed nor off."""
@@ -91,7 +98,7 @@ def split_jobs(text):
             continue
         try:
             # A pull request that is not records-only starts the job: the records-only skip reads as not set, whatever flag value the rest reads.
-            on = eval_if(yaml_scalar(job["if"]).replace(RECORDS_ONLY_CONDITION, "'on' != 'off'"), "pull_request", "true")
+            on = bool(eval_value(yaml_scalar(job["if"]).replace(RECORDS_ONLY_CONDITION, "'on' != 'off'"), "pull_request", "true", results=AllSucceeded()))
         except Exception as ex:  # an if this reader cannot evaluate counts as needed, and is named
             problems.append(f"{name}: job-level if is unreadable ({ex!r}): {job['if']}")
             on = True
@@ -181,7 +188,7 @@ def shard_records_only_if(expr):
 
 def off_problems(text):
     """Only a shard job or a macOS job (daily and dispatch only, owner 01:33 CST Nov 16) may stay off all-jobs-passed. A needed job has no job-level if, except scope (its draft rule),
-    a Windows full shard (the draft guard), a job on the R61 push-off list
+    a Windows full shard (the draft guard), checks (its run condition, checks_if_problems), a job on the R61 push-off list
     whose if is the push guard alone (owner page item 880, 11:53 CST Nov 15), and the records-only skip (RECORDS_ONLY_CONDITION alone,
     or after a shard's draft guard or push guard): check.sh passes the skip it makes, and no wider condition. all-jobs-passed runs on
     a pull_request only, a pull_request always runs a push-guarded job, so its skip is never read there; a shard keeps the draft guard
@@ -200,6 +207,8 @@ def off_problems(text):
                                 f"{jobs[name]['if']}")
         elif name in PUSH_OFF_JOBS and jobs[name]["if"] is not None and push_off_only(job_if_without_records(jobs[name]["if"])):
             continue  # a listed job (R61 push-off list) with the push guard alone, or with the records-only skip joined: a pull_request runs it, so the rollup needs it and never reads a skip
+        elif name == CHECKS_JOB and jobs[name]["if"] is not None and not checks_if_problems(job_needs_of(text, name), jobs[name]["if"]):
+            continue  # checks runs on any shard result and skips only when scope did not succeed, which all-jobs-passed already reads red
         elif name != "scope" and jobs[name]["if"] is not None and not records_only_if(jobs[name]["if"]):
             problems.append(f"{name} is needed and keeps a job-level if: all-jobs-passed reads its skip as red, "
                             "so its scope condition belongs in its steps")

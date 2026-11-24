@@ -21,6 +21,7 @@ from guard_core import (
     is_cloud, lint_dir, shell_abs, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
+from required_check import REQUIRED_CHECK  # the one home of the rollup job's name
 from shared_names import opens_fence, BUILD_TAG, CONSULTANT_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_BRIEF_MARKER, LANE_GRANT_MARKER, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags, repo_tag_names  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
@@ -109,8 +110,31 @@ def gh_call_of(segment: str):
 
 
 # ---- a merge made outside the merge tool
-# The auto-merge tool arms the same merge: GitHub merges once the head's checks pass, so it is judged on the same head read.
-MERGE_TOOLS = ("mcp__github__merge_pull_request", "mcp__github__enable_pr_auto_merge")
+# The two auto-merge tools arm the same merge: GitHub merges once the head's checks pass, so each is judged on the same head read.
+# The desktop app's switch names its pull request by URL and carries `enabled`; turning it off merges nothing.
+APP_AUTO_MERGE_TOOL = "mcp__ccd_pr__set_auto_merge"
+MERGE_TOOLS = ("mcp__github__merge_pull_request", "mcp__github__enable_pr_auto_merge", APP_AUTO_MERGE_TOOL)
+APP_PR_URL_RE = re.compile(r"^https?://(?:www\.)?github\.com/([^/\s]+)/([^/\s]+)/pull/(\d+)", re.I)
+
+
+def merge_tool_merges(tool: str, tool_input: dict) -> bool:
+    """False for the app's auto-merge switch turned off, which merges nothing. Any other value of `enabled`, or none, is judged."""
+    return not (tool == APP_AUTO_MERGE_TOOL and tool_input.get("enabled") is False)
+
+
+def merge_tool_target(tool: str, tool_input: dict):
+    """The (number, repo) a MERGE_TOOLS call names, or None for the app's switch whose url names no github.com pull
+    request. The caller refuses None: reading the checkout's own branch pull request instead could allow another one.
+    A host tool call with no number gives ("", repo), which `merge_check` reads from the checkout."""
+    if tool == APP_AUTO_MERGE_TOOL:
+        url = tool_input.get("url")
+        found = APP_PR_URL_RE.match(url.strip()) if isinstance(url, str) else None
+        return (found.group(3), found.group(1) + "/" + found.group(2)) if found else None
+    owner, name, number = (tool_input.get(k) for k in ("owner", "repo", "pullNumber"))
+    repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
+    return "" if number is None else str(number), repo
+
+
 MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject",
                      "--match-head-commit", "-A", "--author-email"}
 # Seconds for the WHOLE read, shared: Host.head_read makes 4 `gh` REST calls (5 with a branch selector, 1 more run-list read when the check runs link more than one run; a settled head adds the
@@ -518,6 +542,113 @@ def ready_page_hit(tool: str, tool_input: dict, command: str, where: str):
             reason = READY_PAGE_BEHIND_REASON if merge_tool_behind_main() else READY_PAGE_UNKNOWN_REASON
             return reason % cap_safe(detail, 200), "ready, page read unknown"
     return None
+
+
+
+# ---- a push to the branch of a ready pull request (rule ready-pr-push): one CI run per pull request, never restarted by a push
+# A push cancels the ready pull request's running CI run (checks.yml cancels in progress), and the run is the one the merge
+# reads. The push is refused while that run is running, queued or green. Allowed: a draft, no pull request for the branch, a
+# run with a red job (the push may fix it), a push to another branch, an archive push, a repo with no CI run to cancel, and a
+# push whose pull request read fails (a destination git cannot name is read the same way: the list read still runs, and
+# matches no branch): one stderr line, never a refusal, since a refusal on a failed read would block every push while GitHub
+# is out of reach. The merge tool's own pushes run as subprocesses no hook sees; a segment that runs the tool is skipped.
+# Cost: only a call that holds a `git push` reads GitHub, and only in a repo that uses the merge tool. Per such
+# push: one open-pull-request list read (a draft, no pull request or another branch ends there), and, when a ready pull request
+# holds the branch, one read of its head's check runs. Two gh calls at most, one deadline each. No other tool call reads anything.
+READY_PUSH_RED = ("failure", "timed_out", "startup_failure")  # a check run conclusion that is a red job; cancelled and skipped are not
+READY_PUSH_LIST_SECONDS = 10  # the list read's share of the hook's budget; head_read keeps its own MERGE_READ_TIMEOUT
+READY_PUSH_REASON = (
+    "Rule (Git, one CI run per pull request): this push goes to the branch of #%s, a ready pull request whose CI run is %s. "
+    "A push cancels that run, and the merge needs the run to finish on this head. "
+    "Remedy: wait for the run to finish. To push before then, return the pull request to draft with `gh pr ready --undo %s`, "
+    "push, and mark it ready again with the merge tool. When the run has a red job, a push may go ahead and fix it. "
+    "(decision standing-merge-grant, a ready pull request takes no push; owner ruling 13:05 CST Nov 23, 2026) "
+    + COMPLY_TAIL
+)
+READY_PUSH_WARNING = "ready-pr-push: the pull request list read failed (%s), so the push is allowed unchecked (decision standing-merge-grant)"
+
+
+def _ready_push_branches(args, where: str, overrides):
+    """(names, archive_only): the branches this `git push` writes, an unreadable one left out, and whether every destination
+    is an archive name. An archive-only push can hold no ready pull request, so it reads nothing."""
+    found = push_destinations(args, where, overrides)
+    names = [name for name in found if name and not name.startswith(ARCHIVE_PREFIX)]
+    return names, bool(found) and all(name and name.startswith(ARCHIVE_PREFIX) for name in found)
+
+
+def ready_push_hit(stripped: str, cwd: str, read_verb):
+    """None, or ("deny", reason, matched) for a push to the branch of a ready pull request whose run is running, queued or
+    green, or ("warn", line, "") when the pull request read failed and the push passes. `read_verb(subcommand, args)` is
+    guard.py's test for a dry run, which writes nothing. One list read serves every push of the call."""
+    pulls = {}  # where -> (host, open pull requests) or the failure text: one read per folder
+    warning = None
+    for segment in split_segments(stripped):
+        if merge_tool_args(segment) is not None:
+            continue
+        for args, where, overrides in _push_calls(segment, stripped, cwd):
+            if not where or read_verb("push", args) or not uses_merge_tool(where):
+                continue
+            branches, archive_only = _ready_push_branches(args, where, overrides)
+            if archive_only or pinned_required(where) == "none":  # a repo that runs no CI has no run to cancel
+                continue
+            if where not in pulls:
+                pulls[where] = _ready_push_pulls(where)
+            host, rows = pulls[where]
+            if host is None:
+                if warning is None:
+                    warning = ("warn", READY_PUSH_WARNING % cap_safe(rows, 120), "")
+                continue
+            for number, info in rows:
+                same_repo = info["head_repo"] in (None, info["base_repo"])
+                if info["branch"] in branches and not info["draft"] and same_repo:
+                    verdict, detail = _ready_push_run(host, number, info["head"])
+                    if verdict == "unknown":
+                        if warning is None:
+                            warning = ("warn", READY_PUSH_WARNING % cap_safe(detail, 120), "")
+                    elif verdict != "red":
+                        state = "running or queued" if verdict == "pending" else "finished green"
+                        return "deny", READY_PUSH_REASON % (number, state, number), "push to ready #%d" % number
+    return warning
+
+
+def _ready_push_pulls(where: str):
+    """(host, [(number, pull request fields)]) of the open pull requests, or (None, why) when the read cannot run."""
+    module = merge_module()
+    if module is None:
+        return None, "the merge tool could not be loaded"
+    try:
+        with module.shared_deadline(READY_PUSH_LIST_SECONDS):
+            host = module.Host(required=pinned_required(where) or "protection", cwd=os.path.normpath(where))
+            return host, host.open_prs()
+    except subprocess.TimeoutExpired:  # its text names the resolved program path
+        return None, "a read timed out after %d s" % READY_PUSH_LIST_SECONDS
+    except Exception as e:  # a Stop, a missing gh, malformed JSON: all unread
+        return None, " ".join(str(e).split()) or type(e).__name__
+
+
+def _ready_push_run_id(row):
+    """The workflow run id in a check row's job link (`/actions/runs/<id>/job/<id>`), or None when the row has no such link."""
+    m = re.search(r"/actions/runs/(\d+)/", row.get("details_url") or row.get("html_url") or "")
+    return m.group(1) if m else None
+
+
+def _ready_push_run(host, number: int, head: str):
+    """(verdict, detail) of the ready pull request's head, from one read of its check runs: "red" when a job failed or timed out
+    in the run that carries the rollup job (any run, when none carries it; the push may fix it, even while the run goes on), "pending" for any other state, including no job reported yet, and
+    "unknown" with the cause when the read cannot run."""
+    try:
+        with merge_module().shared_deadline(MERGE_READ_TIMEOUT):
+            rows = host.pages(f"commits/{head}/check-runs", "check_runs")
+    except subprocess.TimeoutExpired:  # its text names the resolved program path
+        return "unknown", "a read timed out after %d s" % MERGE_READ_TIMEOUT
+    except Exception as e:  # a Stop, a missing gh, malformed JSON: all unread
+        return "unknown", " ".join(str(e).split()) or type(e).__name__
+    gating = {_ready_push_run_id(r) for r in rows if r.get("name") == REQUIRED_CHECK}  # the run that carries the rollup job
+    counted = [r for r in rows if _ready_push_run_id(r) in gating] if gating else rows  # another run's red row, or a row with no run link, is not the gating run's
+    if any(r.get("status") == "completed" and r.get("conclusion") in READY_PUSH_RED for r in counted):
+        return "red", ""
+    done = rows and all(r.get("status") == "completed" for r in rows)
+    return ("green" if done else "pending"), ""
 
 
 # ---- a lane commit of the generated records page (decision records-index-at-merge)

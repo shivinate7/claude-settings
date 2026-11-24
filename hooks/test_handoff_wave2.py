@@ -1707,6 +1707,215 @@ def case_stop_remedy_spawn_clears_unpatched_home():
     spawn_from_remedy(UNPATCHED, "stop")
 
 
+# --------------------------------------------------------------------------- part 5
+# Owed state is per session: PostCompact writes <session_id>.reread and <session_id>.audit under state/handoff/.
+# An agent shares its parent's session_id and carries agent_id, so an agent's compaction must not owe its
+# parent anything. Each case builds its own config dir (Case) and reads the guard's answer on the calls it names.
+
+OTHER_SID = "5b1d7e90-0000-4000-8000-0000000c0b11"   # session B, a second session in the same folder; SID is session A
+OWED_RULES = (HANDOFF_RULE, AUDIT_RULE)
+
+
+def owed_flags(c, sid):
+    """The owed-state flag files that exist for one session, by name."""
+    return [name for name in ("%s.reread" % sid, "%s.audit" % sid) if os.path.isfile(c.state(name))]
+
+
+def owed_refusal(got):
+    """The owed-state rule that refused a call, or '' when neither of them refused it."""
+    decision, reason = got
+    if decision != "deny":
+        return ""
+    return next((rule for rule in OWED_RULES if reason.startswith(rule + ":")), "")
+
+
+def no_owed_flag(c, sid):
+    """'' when the session has no owed flag, else the flag names that are set."""
+    flags = owed_flags(c, sid)
+    return "" if not flags else "session %s has owed flags: %s" % (sid, ", ".join(flags))
+
+
+def owes_read_and_audit(c, sid, other, who, other_who):
+    """Session `sid` (named `who` in messages) compacts. Its next Bash call is refused by handoff-unread, and after
+    its Read of the handoff by compaction-audit. Session `other` (`other_who`) did not compact, so its Bash call is
+    allowed."""
+    c.seed_handoff(sid)
+    post = c.post_compact(sid)
+    if not step("PostCompact for %s exits 0" % who, exit_why(post)):
+        return
+    step("%s's compaction sets its own owed flags" % who,
+         "" if len(owed_flags(c, sid)) == 2 else "owed flags for %s: %s" % (who, owed_flags(c, sid)))
+    step("%s's Bash call is allowed: %s's compaction does not reach it" % (other_who, who),
+         allowed_why(guard_call(c, other, "Bash", BASH)))
+    step("%s's Bash call is refused by handoff-unread before it reads its handoff" % who,
+         refused_by(guard_call(c, sid, "Bash", BASH), HANDOFF_RULE))
+    rd = c.read(sid, c.handoff(sid))
+    if not step("the Read of %s's handoff exits 0" % who, exit_why(rd)):
+        return
+    step("%s's Bash call is refused by compaction-audit after its Read" % who,
+         refused_by(guard_call(c, sid, "Bash", BASH), AUDIT_RULE))
+
+
+def case_other_session_compaction_owes_nothing():
+    """Session B compacts in the same project folder and session A does not. B's PostCompact sets B's own flags
+    (the scope, so the case cannot pass by doing nothing). A has no owed flag, and A's Bash call is allowed."""
+    c = Case("other-sid")
+    try:
+        c.seed_handoff(SID)
+        c.seed_handoff(OTHER_SID)
+        post = c.post_compact(OTHER_SID)
+        if not step("session B's PostCompact exits 0", exit_why(post)):
+            return
+        step("session B's own Bash call is refused by handoff-unread, so its compaction took hold",
+             refused_by(guard_call(c, OTHER_SID, "Bash", BASH), HANDOFF_RULE))
+        step("session A has no owed flag after session B compacted", no_owed_flag(c, SID))
+        step("session A's Bash call is allowed after session B compacted",
+             allowed_why(guard_call(c, SID, "Bash", BASH)))
+    finally:
+        c.cleanup()
+
+
+def case_compacting_session_still_owes_read_and_audit():
+    """Session B's own compaction still makes B owe its read and its audit, and session A stays free. Keying the
+    flags by session must not weaken the session that compacted."""
+    c = Case("own-b")
+    try:
+        owes_read_and_audit(c, OTHER_SID, SID, "session B", "session A")
+    finally:
+        c.cleanup()
+
+
+def case_own_compaction_owes_read_and_audit():
+    """Session A's own compaction makes A owe its read and its audit, and session B stays free."""
+    c = Case("own-a")
+    try:
+        owes_read_and_audit(c, SID, OTHER_SID, "session A", "session B")
+    finally:
+        c.cleanup()
+
+
+def case_stop_checkpoint_owes_nothing():
+    """The Stop-hook checkpoint at a large context (about 358k tokens, decision precompact-handoff) writes its
+    checkpoint state and no owed flag, so session A's Bash call is allowed."""
+    c = Case("checkpoint")
+    try:
+        c.seed_handoff(SID)
+        nudge = c.nudge(SID, size=358000)
+        if not step("the Stop-hook checkpoint exits 0", exit_why(nudge)):
+            return
+        step("the Stop-hook checkpoint sets no owed flag for session A", no_owed_flag(c, SID))
+        step("session A's Bash call is allowed after the Stop-hook checkpoint",
+             allowed_why(guard_call(c, SID, "Bash", BASH)))
+    finally:
+        c.cleanup()
+
+
+def case_main_transcript_compaction_owes_flags():
+    """Control for the agent cases: a PostCompact whose transcript_path is the main session's own transcript
+    sets both owed flags, and session A's Bash call is refused by handoff-unread."""
+    c = Case("main-transcript")
+    try:
+        c.seed_handoff(SID)
+        tp = os.path.join(c.cfg, "projects", "proj", "%s.jsonl" % SID)
+        write_transcript(tp, [transcript_line("user", [{"type": "text", "text": "hello"}])])
+        post = c.run(READ_CHECK, "--post-compact", {
+            "session_id": SID, "hook_event_name": "PostCompact", "trigger": "auto",
+            "cwd": c.proj, "transcript_path": tp})
+        if not step("PostCompact with the main transcript exits 0", exit_why(post)):
+            return
+        step("a PostCompact with the main transcript sets both owed flags",
+             "" if len(owed_flags(c, SID)) == 2 else "owed flags for A: %s" % owed_flags(c, SID))
+        step("session A's Bash call is refused by handoff-unread after its own compaction",
+             refused_by(guard_call(c, SID, "Bash", BASH), HANDOFF_RULE))
+    finally:
+        c.cleanup()
+
+
+def case_agent_handoff_write_keeps_owed_read():
+    """Session A owes its read after its own compaction. An agent of A (agent_id set) writes A's handoff file.
+    The write is not refused by an owed-state rule and leaves A's owed flags as they were, so A's Bash call is
+    still refused by handoff-unread."""
+    c = Case("agent-write")
+    try:
+        c.seed_handoff(SID)
+        post = c.post_compact(SID)
+        if not step("PostCompact for session A exits 0", exit_why(post)):
+            return
+        before = owed_flags(c, SID)
+        if not step("session A owes its read before the agent writes",
+                    "" if "%s.reread" % SID in before else "no reread flag before the write"):
+            return
+        write = guard_call(c, SID, "Write",
+                           {"file_path": c.handoff(SID), "content": "HANDOFF rewritten by an agent\n"},
+                           agent_id=AGENT_ID)
+        step("the agent's Write is not refused by an owed-state rule",
+             "" if not owed_refusal(write) else "the agent's Write was refused by %s" % owed_refusal(write))
+        put(c.handoff(SID), "HANDOFF rewritten by an agent\n")
+        step("the agent's write leaves session A's owed flags as they were",
+             "" if owed_flags(c, SID) == before else "owed flags changed: %s -> %s" % (before, owed_flags(c, SID)))
+        step("session A's Bash call is still refused by handoff-unread after the agent's write",
+             refused_by(guard_call(c, SID, "Bash", BASH), HANDOFF_RULE))
+    finally:
+        c.cleanup()
+
+
+def case_agent_compaction_owes_nothing():
+    """An agent of session A compacts. Its PostCompact carries A's session id and agent_id, and A's main context
+    did not compact. The PostCompact must set no owed flag for A, so A's Bash call is allowed."""
+    c = Case("agent-compact")
+    try:
+        c.seed_handoff(SID)
+        post = c.run(READ_CHECK, "--post-compact", {
+            "session_id": SID, "hook_event_name": "PostCompact", "trigger": "auto",
+            "cwd": c.proj, "agent_id": AGENT_ID})
+        if not step("the agent's PostCompact exits 0", exit_why(post)):
+            return
+        step("an agent's compaction (agent_id set) sets no owed flag for its main session",
+             no_owed_flag(c, SID))
+        step("session A's Bash call is allowed after an agent's compaction",
+             allowed_why(guard_call(c, SID, "Bash", BASH)))
+    finally:
+        c.cleanup()
+
+
+def case_agent_transcript_compaction_owes_nothing():
+    """The same agent compaction with no agent_id on the payload. Its transcript_path is the agent's own file
+    under the session's `subagents` folder, so the PostCompact sets no owed flag for the main session."""
+    c = Case("agent-transcript")
+    try:
+        c.seed_handoff(SID)
+        tp = os.path.join(c.cfg, "projects", "proj", SID, "subagents", "agent-%s.jsonl" % AGENT_ID)
+        write_transcript(tp, [transcript_line("user", [{"type": "text", "text": "hello"}])])
+        post = c.run(READ_CHECK, "--post-compact", {
+            "session_id": SID, "hook_event_name": "PostCompact", "trigger": "auto",
+            "cwd": c.proj, "transcript_path": tp})
+        if not step("the agent transcript's PostCompact exits 0", exit_why(post)):
+            return
+        step("an agent's compaction (its transcript under subagents/) sets no owed flag for the main session",
+             no_owed_flag(c, SID))
+        step("session A's Bash call is allowed after an agent's compaction seen by transcript",
+             allowed_why(guard_call(c, SID, "Bash", BASH)))
+    finally:
+        c.cleanup()
+
+
+def case_unkeyed_legacy_flag_owes_nothing():
+    """A flag left on disk in the old shared form, with no session id in its name, is never read as an owed state.
+    Neither session's Bash call is refused. No file of that form exists on this machine, so none needs migrating."""
+    c = Case("legacy")
+    try:
+        c.seed_handoff(SID)
+        c.seed_handoff(OTHER_SID)
+        for name in ("reread", "audit"):
+            put(c.state(name), "1")
+        step("session A's Bash call is allowed with an unkeyed legacy flag on disk",
+             allowed_why(guard_call(c, SID, "Bash", BASH)))
+        step("session B's Bash call is allowed with an unkeyed legacy flag on disk",
+             allowed_why(guard_call(c, OTHER_SID, "Bash", BASH)))
+    finally:
+        c.cleanup()
+
+
 def main() -> int:
     print("Part 1: SessionEnd pointer, SessionStart reorient (hooks/precompact_handoff.py)")
     case_session_end_clear_writes_pointer()
@@ -1764,6 +1973,17 @@ def main() -> int:
     case_refusal_remedy_spawn_clears_probe_home()
     case_refusal_remedy_spawn_clears_unpatched_home()
     case_stop_remedy_spawn_clears_unpatched_home()
+
+    print("Part 5: owed state is per session, and an agent's compaction owes its parent nothing (hooks/reread_check.py)")
+    case_other_session_compaction_owes_nothing()
+    case_compacting_session_still_owes_read_and_audit()
+    case_own_compaction_owes_read_and_audit()
+    case_stop_checkpoint_owes_nothing()
+    case_main_transcript_compaction_owes_flags()
+    case_agent_handoff_write_keeps_owed_read()
+    case_agent_compaction_owes_nothing()
+    case_agent_transcript_compaction_owes_nothing()
+    case_unkeyed_legacy_flag_owes_nothing()
 
     if FAILED:
         print()

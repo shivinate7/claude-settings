@@ -2336,7 +2336,8 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
     spawn_role is set only on the Opus spawn refusal, the one refusal an Opus override may lift.
     on_lift, when set, runs once when an override lifts the act, so a rule may keep state only for an act that lands.
     continue_on_lift makes a lifted act return True instead of exiting, so the caller can judge the next rule of a
-    group (the lane start's rules); any other outcome exits as before."""
+    group (the lane start's rules); any other outcome exits as before.
+    A reason that ends with COMPLY_TAIL has it read last, after the override line."""
     vetoed = _vetoed()
     if not vetoed:
         try:  # an import or read failure is no override: the refusal stands

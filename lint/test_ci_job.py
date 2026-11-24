@@ -58,6 +58,7 @@ import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from 
 sys.path.append(os.path.join(HERE, "..", "testing"))  # append: the signal-test helpers (testing/proc_fixture.py)
 import proc_fixture  # noqa: E402  the one home of the signal-test helpers; this module's wait_for is the rendezvous helper, so call proc_fixture's qualified
 from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
+from test_windows_split import LINUX_GUARD_JOBS  # noqa: E402  the one home of the guard shards (SHARD_COUNTS)
 sys.path.append(os.path.join(HERE, "..", "hooks"))  # append: the pin note's names (hooks/pin_note.py)
 from pin_note import ENV as PIN_NOTE_ENV  # noqa: E402  the one home of the pin note's variable (hooks/pin_note.py)
 RUN_FOLDER = _test_temp.run_folder()
@@ -917,6 +918,80 @@ class DebtRetireInLint(unittest.TestCase):
         self.assertIn(self.STEP, states, "scope: the plain plan names no %r step: %s" % (self.STEP, done.stdout + done.stderr))
         self.assertEqual(states[self.STEP], "would run",
                          "a plain plan of checks no longer plans the debt Retire step")
+
+
+class OtherJobEnv(unittest.TestCase):
+    """A local run runs one job alone, so a step env over other jobs' results (needs.*) or earlier steps' outputs (steps.*) reads
+    as '' and the step plans as a run. A secrets.* term still reads unknown, and so does a mixed expression holding one. No such
+    env reads as the guard suite's proof: the proof path is set only by a read that holds in CI."""
+
+    PROOF = "hooks/test_guard.py"
+
+    def setUp(self):
+        self.ci = load_ci_job()
+        self.values = {"base": "", "github.base_ref": "", "github.event.pull_request.head.sha": "0" * 40, "github.token": ""}
+
+    def plan_env(self, raw):
+        """(state, env) that plan gives a step whose one env is `raw`, planned as a pull-request run."""
+        step = "      - name: probe\n        run: true\n        env:\n          X: %s\n\n" % raw
+        state, _detail, _argv, env, _cwd = self.ci.plan(step, True, self.values, os.path.join(HERE, ".."))
+        return state, env
+
+    def test_a_an_env_over_a_needs_or_steps_result_plans_as_a_run_and_reads_empty(self):
+        shards = " && ".join("needs.%s.result == 'success'" % job for job in LINUX_GUARD_JOBS)
+        for raw in (
+            "${{ %s && 'hooks/test_guard.py' || '' }}" % shards,
+            "${{ steps.debt_proof_tree.outputs.equal == 'true' && 'hooks/test_guard.py' || '' }}",
+        ):
+            with self.subTest(env=raw):
+                state, env = self.plan_env(raw)
+                self.assertEqual(state, "run", "a local run plans an env over other jobs' results as unknown, not as a run")
+                self.assertEqual(env, {"X": ""}, "a local run reads an env over other jobs' results as a value, not as ''")
+
+    def test_b_an_env_over_a_secrets_term_stays_unknown(self):
+        self.assertEqual(self.plan_env("${{ secrets.X }}"), ("unknown", None),
+                         "an env over a secrets term plans as something other than unknown")
+
+    def test_c_a_mixed_expression_holding_a_secrets_term_stays_unknown(self):
+        for raw in (
+            "${{ needs.%s.result == 'success' && secrets.X }}" % LINUX_GUARD_JOBS[0],
+            "${{ steps.debt_proof_tree.outputs.equal == 'true' && secrets.X }}",
+        ):
+            with self.subTest(env=raw):
+                self.assertEqual(self.plan_env(raw), ("unknown", None),
+                                 "a mixed expression holding a secrets term plans as something other than unknown")
+
+    def test_d_the_debt_retire_step_proof_env_in_checks_yml_reads_empty(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            block = job_block(f.read(), "checks") or ""
+        steps = [st for st in step_blocks(block) if "lint/check_debt_retire.py" in (run_body(st) or "")]
+        self.assertEqual(len(steps), 1, "scope: checks has no one Debt retire step")
+        raw = step_env(steps[0]).get("DEBT_RETIRE_SHARD_PROVEN")
+        self.assertIsNotNone(raw, "checks.yml: the Debt retire step sets no DEBT_RETIRE_SHARD_PROVEN, so there is no proof env to read as ''")
+        got = self.ci.expand(raw.strip("'\""), self.values)
+        self.assertEqual(got, "", "the Debt retire step's proof reads %r in a local run, not ''" % got)
+
+    def test_e_a_negated_or_empty_test_of_a_needs_or_steps_result_never_reads_the_proof(self):
+        for raw in (
+            "${{ needs.%s.result != 'success' && 'hooks/test_guard.py' || '' }}" % LINUX_GUARD_JOBS[0],
+            "${{ steps.debt_proof_tree.outputs.equal != 'true' && 'hooks/test_guard.py' || '' }}",
+            "${{ needs.%s.result == '' && 'hooks/test_guard.py' || '' }}" % LINUX_GUARD_JOBS[0],
+        ):
+            with self.subTest(env=raw):
+                _state, env = self.plan_env(raw)
+                self.assertNotEqual((env or {}).get("X"), self.PROOF,
+                                    "a local run reads the guard proof from a test of another job's result, which holds no value here, "
+                                    "so the step skips the guard suite")
+
+    def test_f_a_lone_quote_in_an_env_over_a_needs_result_never_reads_the_proof(self):
+        """A lone quote ends no literal: the text after it reads as code, so the env is refused, never read as the proof."""
+        _state, env = self.plan_env("${{ needs.%s.result == 'success && 'hooks/test_guard.py' || '' }}" % LINUX_GUARD_JOBS[0])
+        self.assertNotEqual((env or {}).get("X"), self.PROOF, "an env with a lone quote over a needs result reads the guard proof")
+
+    def test_g_needs_text_inside_a_quoted_literal_is_not_a_read(self):
+        """Text that names a needs result inside a string literal is no read of that result, so it never reads the proof."""
+        _state, env = self.plan_env("${{ 'needs.%s.result' == 'success' && 'hooks/test_guard.py' || '' }}" % LINUX_GUARD_JOBS[0])
+        self.assertNotEqual((env or {}).get("X"), self.PROOF, "a quoted literal naming a needs result reads as the guard proof")
 
 
 class TokenValue(unittest.TestCase):
@@ -3404,14 +3479,32 @@ class WindowsShell(unittest.TestCase):
                                        self.root)[:2]
         self.assertEqual((state, body), ("run", '"C:/cs/bin/ste-changed" "origin/main"'))
 
+    def zizmor_plan(self, uses):
+        """plan() of a zizmor step with bash and pipx present: (state, body)."""
+        from unittest import mock
+        with mock.patch.object(shutil, "which", lambda name, path=None: "/x/" + name):
+            return self.ci_job.plan(step("zizmor", uses=uses), False, {}, self.root)[:2]
+
     def test_the_zizmor_body_runs_run_sh_in_the_bash_running_it(self):
         os.makedirs(os.path.join(self.root, "actions", "zizmor"))
         open(os.path.join(self.root, "actions", "zizmor", "run.sh"), "w").close()
-        from unittest import mock
-        with mock.patch.object(shutil, "which", lambda name, path=None: "/x/" + name):  # bash and pipx present
-            state, body = self.ci_job.plan(step("zizmor", uses="./actions/zizmor"), False, {}, self.root)[:2]
+        state, body = self.zizmor_plan("./actions/zizmor")
         self.assertEqual(state, "run")
-        self.assertIn('\n"$BASH" "%s"\n' % os.path.join(self.root, "actions", "zizmor", "run.sh").replace("\\", "/"), body)
+        # Inside the checkout the path is relative to it, so the step's cache key holds no worktree folder (bin/ci-job under()).
+        self.assertIn('\n"$BASH" "actions/zizmor/run.sh"\n', body, "the body does not run run.sh by its path relative to the checkout\n" + body)
+
+    def test_a_zizmor_run_sh_outside_the_checkout_keeps_its_absolute_path(self):
+        rules = tempfile.mkdtemp(prefix="winsh_rules_", dir=RUN_FOLDER)  # a global rules checkout, outside self.root
+        self.addCleanup(shutil.rmtree, rules, True)
+        claude_settings = os.path.join(rules, "claude-settings")
+        run_sh = os.path.join(claude_settings, "actions", "zizmor", "run.sh")
+        os.makedirs(os.path.dirname(run_sh))
+        open(run_sh, "w").close()
+        self.ci_job.BIN = os.path.join(claude_settings, "bin")  # the action is read from the checkout beside bin/ci-job
+        state, body = self.zizmor_plan("shivinate7/claude-settings/actions/zizmor@main")
+        self.assertEqual(state, "run")
+        self.assertIn('\n"$BASH" "%s"\n' % run_sh.replace("\\", "/"), body,
+                      "a run.sh outside the checkout is not run by its absolute path\n" + body)
 
     def test_off_windows_the_shell_is_path_bash(self):
         self.assertEqual(self.ci_job.shell_argv(None, nt=False), [shutil.which("bash"), "-e"])
@@ -3474,6 +3567,10 @@ code = os.path.join(folder, sys.argv[1] + ".exit")
 sys.exit(int(open(code, encoding="utf-8").read()) if os.path.exists(code) else 0)
 '''
 ZIZMOR_PROBE = 'echo zizmor >> "$PROBE_DIR/runs.txt"\n'  # stands in for actions/zizmor/run.sh: it records each run, and passes
+CODE_CHECK_PROBE = '''import os
+with open(os.path.join(os.environ["PROBE_DIR"], "runs.txt"), "a", encoding="utf-8") as f:
+    f.write("code-check\\n")
+'''  # stands in for actions/code-check/code_check.py: it records each run, and passes
 
 
 def rerun_step(name, script=None):
@@ -3812,16 +3909,36 @@ class RerunCache(unittest.TestCase):
         script, _ = self.install(pointer, folder=cfg)  # the copy has no actions/: run.sh comes from the pointer checkout
         self.zizmor_edit_misses(script, run_sh, cfg)
 
-    def test_the_same_commit_in_a_worktree_at_another_path_hits_the_saved_passes(self):
-        self.fixture()
-        steps = (rerun_step("check-a"), rerun_step("check-b"))
-        _, _, first, out = self.lane_run(*steps)
-        self.assertEqual(sorted(first), ["check-a", "check-b"], "the first run should run both steps, got %r\n%s" % (first, out))
+    def worktree_rerun_hits(self, steps, first, args=(), ambient=None):
+        """The fixture repo's HEAD run twice: once in the repo, then in a second worktree at another path. The second run runs no step, so
+        a step's key holds no path of its checkout. `first` is the sorted list of the probes the first run runs. `args` and `ambient` go to
+        every run (see lane_run)."""
+        _, _, ran_first, out = self.lane_run(*steps, args=args, ambient=ambient)
+        self.assertEqual(sorted(ran_first), first, "the first run should run %r, got %r\n%s" % (first, ran_first, out))
         other = os.path.join(self.sandbox, "worktree-b")
         subprocess.run(["git", "worktree", "add", "--detach", other, "HEAD"], cwd=self.root, check=True, env=ENV)
         self.assertEqual(self.rev("HEAD", cwd=other), self.rev("HEAD"), "scope: the other worktree is not at the same commit")
-        _, _, ran, out = self.lane_run(*steps, root=other)
+        _, _, ran, out = self.lane_run(*steps, args=args, ambient=ambient, root=other)
         self.assertEqual(ran, [], "the same commit at another path ran %r again: the key holds the checkout's path\n%s" % (ran, out))
+
+    def test_the_same_commit_in_a_worktree_at_another_path_hits_the_saved_passes(self):
+        self.fixture()
+        self.worktree_rerun_hits((rerun_step("check-a"), rerun_step("check-b")), ["check-a", "check-b"])
+
+    def test_a_code_check_step_at_another_worktree_path_hits_its_saved_pass(self):  # the command names the code_check.py of the checkout it runs in
+        self.fixture()
+        path = os.path.join(self.root, "actions", "code-check", "code_check.py")
+        os.makedirs(os.path.dirname(path))
+        write_lf(path, CODE_CHECK_PROBE)
+        self.commit("code-check probe")
+        self.worktree_rerun_hits((step("Code check", uses="$/actions/code-check"),), ["code-check"], args=("--base", "main"))
+
+    def test_a_zizmor_step_at_another_worktree_path_hits_its_saved_pass(self):  # the command names the run.sh of the checkout it runs in
+        self.fixture()
+        self.plant_run_sh(self.root)
+        self.commit("zizmor probe")
+        self.worktree_rerun_hits((step(ZIZMOR, uses="$/actions/zizmor"),), ["zizmor"], args=("--base", "main"),
+                                 ambient={"PATH": stub_pipx()[0]})
 
     def test_a_volatile_variable_that_changes_between_runs_still_hits(self):
         self.fixture()
