@@ -58,6 +58,7 @@ import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from 
 sys.path.append(os.path.join(HERE, "..", "testing"))  # append: the signal-test helpers (testing/proc_fixture.py)
 import proc_fixture  # noqa: E402  the one home of the signal-test helpers; this module's wait_for is the rendezvous helper, so call proc_fixture's qualified
 from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
+from test_windows_split import LINUX_GUARD_JOBS  # noqa: E402  the one home of the guard shards (SHARD_COUNTS)
 sys.path.append(os.path.join(HERE, "..", "hooks"))  # append: the pin note's names (hooks/pin_note.py)
 from pin_note import ENV as PIN_NOTE_ENV  # noqa: E402  the one home of the pin note's variable (hooks/pin_note.py)
 RUN_FOLDER = _test_temp.run_folder()
@@ -917,6 +918,80 @@ class DebtRetireInLint(unittest.TestCase):
         self.assertIn(self.STEP, states, "scope: the plain plan names no %r step: %s" % (self.STEP, done.stdout + done.stderr))
         self.assertEqual(states[self.STEP], "would run",
                          "a plain plan of checks no longer plans the debt Retire step")
+
+
+class OtherJobEnv(unittest.TestCase):
+    """A local run runs one job alone, so a step env over other jobs' results (needs.*) or earlier steps' outputs (steps.*) reads
+    as '' and the step plans as a run. A secrets.* term still reads unknown, and so does a mixed expression holding one. No such
+    env reads as the guard suite's proof: the proof path is set only by a read that holds in CI."""
+
+    PROOF = "hooks/test_guard.py"
+
+    def setUp(self):
+        self.ci = load_ci_job()
+        self.values = {"base": "", "github.base_ref": "", "github.event.pull_request.head.sha": "0" * 40, "github.token": ""}
+
+    def plan_env(self, raw):
+        """(state, env) that plan gives a step whose one env is `raw`, planned as a pull-request run."""
+        step = "      - name: probe\n        run: true\n        env:\n          X: %s\n\n" % raw
+        state, _detail, _argv, env, _cwd = self.ci.plan(step, True, self.values, os.path.join(HERE, ".."))
+        return state, env
+
+    def test_a_an_env_over_a_needs_or_steps_result_plans_as_a_run_and_reads_empty(self):
+        shards = " && ".join("needs.%s.result == 'success'" % job for job in LINUX_GUARD_JOBS)
+        for raw in (
+            "${{ %s && 'hooks/test_guard.py' || '' }}" % shards,
+            "${{ steps.debt_proof_tree.outputs.equal == 'true' && 'hooks/test_guard.py' || '' }}",
+        ):
+            with self.subTest(env=raw):
+                state, env = self.plan_env(raw)
+                self.assertEqual(state, "run", "a local run plans an env over other jobs' results as unknown, not as a run")
+                self.assertEqual(env, {"X": ""}, "a local run reads an env over other jobs' results as a value, not as ''")
+
+    def test_b_an_env_over_a_secrets_term_stays_unknown(self):
+        self.assertEqual(self.plan_env("${{ secrets.X }}"), ("unknown", None),
+                         "an env over a secrets term plans as something other than unknown")
+
+    def test_c_a_mixed_expression_holding_a_secrets_term_stays_unknown(self):
+        for raw in (
+            "${{ needs.%s.result == 'success' && secrets.X }}" % LINUX_GUARD_JOBS[0],
+            "${{ steps.debt_proof_tree.outputs.equal == 'true' && secrets.X }}",
+        ):
+            with self.subTest(env=raw):
+                self.assertEqual(self.plan_env(raw), ("unknown", None),
+                                 "a mixed expression holding a secrets term plans as something other than unknown")
+
+    def test_d_the_debt_retire_step_proof_env_in_checks_yml_reads_empty(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            block = job_block(f.read(), "checks") or ""
+        steps = [st for st in step_blocks(block) if "lint/check_debt_retire.py" in (run_body(st) or "")]
+        self.assertEqual(len(steps), 1, "scope: checks has no one Debt retire step")
+        raw = step_env(steps[0]).get("DEBT_RETIRE_SHARD_PROVEN")
+        self.assertIsNotNone(raw, "checks.yml: the Debt retire step sets no DEBT_RETIRE_SHARD_PROVEN, so there is no proof env to read as ''")
+        got = self.ci.expand(raw.strip("'\""), self.values)
+        self.assertEqual(got, "", "the Debt retire step's proof reads %r in a local run, not ''" % got)
+
+    def test_e_a_negated_or_empty_test_of_a_needs_or_steps_result_never_reads_the_proof(self):
+        for raw in (
+            "${{ needs.%s.result != 'success' && 'hooks/test_guard.py' || '' }}" % LINUX_GUARD_JOBS[0],
+            "${{ steps.debt_proof_tree.outputs.equal != 'true' && 'hooks/test_guard.py' || '' }}",
+            "${{ needs.%s.result == '' && 'hooks/test_guard.py' || '' }}" % LINUX_GUARD_JOBS[0],
+        ):
+            with self.subTest(env=raw):
+                _state, env = self.plan_env(raw)
+                self.assertNotEqual((env or {}).get("X"), self.PROOF,
+                                    "a local run reads the guard proof from a test of another job's result, which holds no value here, "
+                                    "so the step skips the guard suite")
+
+    def test_f_a_lone_quote_in_an_env_over_a_needs_result_never_reads_the_proof(self):
+        """A lone quote ends no literal: the text after it reads as code, so the env is refused, never read as the proof."""
+        _state, env = self.plan_env("${{ needs.%s.result == 'success && 'hooks/test_guard.py' || '' }}" % LINUX_GUARD_JOBS[0])
+        self.assertNotEqual((env or {}).get("X"), self.PROOF, "an env with a lone quote over a needs result reads the guard proof")
+
+    def test_g_needs_text_inside_a_quoted_literal_is_not_a_read(self):
+        """Text that names a needs result inside a string literal is no read of that result, so it never reads the proof."""
+        _state, env = self.plan_env("${{ 'needs.%s.result' == 'success' && 'hooks/test_guard.py' || '' }}" % LINUX_GUARD_JOBS[0])
+        self.assertNotEqual((env or {}).get("X"), self.PROOF, "a quoted literal naming a needs result reads as the guard proof")
 
 
 class TokenValue(unittest.TestCase):

@@ -263,7 +263,7 @@
   merge --role TIER       cloud only: record this session's merge role (batch-runner, lane with `--step SLUG`, the cs-step slug of the session's own
                           record, or standing: a coordinator, triage or the consultant merges only its own pull request, see standing_refusal). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role). A lane's confirm needs --head and runs only on its own ready pull request: a head ref of that step
-                          (lane_own_pr_refusal). A lane marks its own draft ready once, with --role, --step and --ready in one call, on a pull request whose head is that step's lane branch. A local session reads the role the launcher
+                          (lane_own_pr_refusal). A lane marks its own draft ready after its review, and again after any return to draft, with --role, --step and --ready in one call, on a pull request whose head is that step's lane branch. A local session reads the role the launcher
                           (bin/claude-role) recorded in its role file instead: a session with its own role file runs `--confirm` only when
                           that file names batch-runner, and one the launcher started (CS_SESSION_ROLE set) with no matching own file is refused.
                           A session with neither is as it was, whatever other sessions' files are on disk.
@@ -5071,6 +5071,7 @@ def ready_line_pattern(fmt):
     parts = re.split(r"\{(\w+)\}", fmt)
     return re.compile("".join(re.escape(part) if i % 2 == 0 else f"(?P<{part}>{READY_LINE_FIELDS[part]})" for i, part in enumerate(parts)))
 
+RECORDS_STEP = "Rules and records move together"  # the checks.yml step that uses $/actions/claude-md-cites; it reads the PR body, so a run with no body skips it (bin/cheap-lints)
 READY_JOB_PREFIX = re.compile(r"^([a-z][a-z0-9_-]*):(.+)$")  # a `<job>:<step>` ready check; a step name that does not open this way is a step of job `checks`
 
 STEP_LINE = re.compile(r"^(PASS \(cached\)|PASS \(carried\)|PASS|FAIL|SKIP|skipped|unknown|not run)\s+(.*)$")  # PASS (cached): a pass that ci-job's rerun cache answered; PASS (carried): one that its carry served
@@ -5083,9 +5084,13 @@ def step_verdicts(raw, checks, state):
     step broke. The caller (run_ready_checks) refuses on any state other than "pass", whatever the lines read."""
     rows = []
     for name in checks:
-        hit = next((m for m in (STEP_LINE.match(l.rstrip()) for l in raw) if m and (m.group(2) == name or m.group(2).startswith(name + ":"))), None)
+        at = next((i for i, m in enumerate(STEP_LINE.match(l.rstrip()) for l in raw) if m and (m.group(2) == name or m.group(2).startswith(name + ":"))), None)
+        hit = STEP_LINE.match(raw[at].rstrip()) if at is not None else None
         word = hit.group(1) if hit else None
         detail = hit.group(2)[len(name):].lstrip(": ") if hit else f"ci-job printed no line for this check (ci-job: {state})"
+        if hit:  # the indented lines under it: a local action's own output, which ci-job prints under a step that is not a pass (bin/ci-job local_action)
+            under = [l.rstrip() for l in raw[at + 1:]]
+            detail = "\n".join([detail, *under[:next((i for i, l in enumerate(under) if not l.startswith("  ")), len(under))]])
         if word in ("PASS", "PASS (cached)", CARRIED_STATE):
             rows.append(("pass", name, detail))
         elif word == "SKIP":
@@ -5139,18 +5144,20 @@ def ready_job_groups(checks):
         groups.setdefault(m.group(1) if m else "checks", []).append((entry, m.group(2) if m else entry))
     return groups
 
-def pre_ready_rows(wt, n, base, checks, pre):
+def pre_ready_rows(wt, n, base, checks, pre, body=None):
     """The pre-ready run: one ci-job run per job of `merge.readyChecks` `checks` in the tree `wt` (ready_job_groups), then, when `pre` is (root, host, info), the debt-close lint
     and the open-PR clash of the PR's head info["head"] (the lint reads it through `wt`'s git), each once. Prints one verdict line per check, `pass NAME`, `fail NAME: why` or `unknown NAME: why`, all before any
     refusal; NAME is the declared entry.
     -> (rows, (state, lines, log)): rows of (verdict, name, detail), and the jobs' ci_job_run answers combined: state fail over unknown over pass, lines and log joined.
     Each job's steps are read from that job's own lines, so a step name two jobs hold reads only its own job.
-    Cost: one ci-job run per job, one debt-close lint (a scratch worktree and one Retire test run per closed debt), one cross_measure; no file but ci-job's log and the temporary worktrees."""
+    Each job's run gets the PR body (info["body"], else `body`, which a run with no `pre` passes) as PR_BODY, which the records-and-rules step (actions/claude-md-cites, a ready check by name) reads; with no body it reads unknown when it finds a gap.
+    Cost of the six cheap checks (Hook catalog check, Retired names, Silent undo check, Ruling kind check, the Skill model rows and Project-ops roles fixture suites), measured through bin/ci-job on one machine, one run each: 1.4 s, 3.9 s, 2.4 s, 0.3 s, 7.1 s and 14.9 s, 30.0 s in all, no run past 20 s (the Glossary fixture suite, 112.4 s, is left out of the list). They join the checks job's one ci-job run, so they add no ci-job start; each step is one bin/verdict start and one shell, as every named step is. The silent-undo and ruling-kind steps read the base and head sha ci-job sets, the catalog step reads GITHUB_BASE_REF. No gh call and no GitHub read (merge/test_lane_lint.py test_six_cheap_checks_share_one_ci_job_start_and_read_no_github).
+    Cost: one ci-job run per job (a ready check that names a local action adds no run of its own: its three probe steps are three bin/verdict starts and shells inside that run, a git diff, and one live GitHub read per Facts claim, which reads unknown when it fails), one debt-close lint (a scratch worktree and one Retire test run per closed debt), one cross_measure; no file but ci-job's log and the temporary worktrees."""
     rows, states, lines, log = [], [], [], []
     for job, group in ready_job_groups(checks).items():
         raw = []
         args = [job, "--pinned", *[a for _, bare in group for a in ("--step", bare)], "--base", f"origin/{base}"]
-        state, job_lines, job_log, _ = ci_job_run(wt, *args, raw=raw)
+        state, job_lines, job_log, _ = ci_job_run(wt, *args, raw=raw, pr_body=pre[2].get("body") if pre else body)  # the records-and-rules check reads the body; a body that is None is unread, and its probe reads unknown
         states.append(state)
         lines += job_lines
         log += job_log
@@ -7914,7 +7921,7 @@ def build_parser():
     p.add_argument("--touched-tests", action="store_true", help="with --lane-lint: after the lint passes, run the test files the diff touches in the lint worktree; a failing test refuses, a timeout is unknown (lifted by --lint-unknown-ok)")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner, lane with --step, or standing)")  # glossary-ok: existing name
     p.add_argument("--step", metavar="SLUG", help="with --role lane: the cs-step slug of this session's own record; the lane's confirm runs only on a pull request whose head is that step's lane branch")
-    p.add_argument("--ready", action="store_true", help="mark a lane's draft pull request ready, once: on the default branch a merge of origin/<base> into a head that lacks its tip, the records step and the repo's ready checks, then close each open pull request the body names as replaced, then the host's mark; a ready pull request is left as it is; merges no pull request, takes no lock")
+    p.add_argument("--ready", action="store_true", help="mark a lane's draft pull request ready (after its review, and again after any return to draft): on the default branch a merge of origin/<base> into a head that lacks its tip, the records step and the repo's ready checks, then close each open pull request the body names as replaced, then the host's mark; a ready pull request is left as it is; merges no pull request, takes no lock")
     p.add_argument("--fast-checks", action="store_true", help="the pre-ready run on a dry merge of the pull request onto its base, read-only: one pass, fail or unknown line per check; takes no lock, pushes nothing, marks nothing ready, posts nothing")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
@@ -8279,7 +8286,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 raise Stop(why + " Nothing was claimed or pushed. " + ROLE_CITE)
         if a.fast_checks:  # before any lock: it reads a dry merge and writes nothing
             return fast_checks(root, cfg, a.pr, h, info)
-        if a.ready:  # before any lock: a lane marks its own draft ready once, and a ready pull request is left as it is
+        if a.ready:  # before any lock: a lane marks its own draft ready after its review and again after any return to draft, and a ready pull request is left as it is
             if os.environ.get("CLAUDE_CODE_REMOTE") == "true" and read_merge_role() == STANDING_ROLE:  # the session --confirm reads the link for (standing_refusal)
                 note = session_link_note(info)
                 if note:

@@ -22,7 +22,8 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from test_windows_split import CHECKS, MACOS_JOBS, all_jobs, eval_with, yaml_scalar  # noqa: E402  the one home of the checks.yml path
+from test_windows_split import CHECKS, LINUX_GUARD_JOBS, MACOS_JOBS, all_jobs, eval_with, yaml_scalar  # noqa: E402  the one home of the checks.yml path and the guard shards
+from test_windows_split import ALL_JOBS_PASSED_JOB, SUITE_FLAG  # noqa: E402  the one home of the rollup job name and the suite flags
 from all_jobs_passed_rules import (ALL_JOBS_PASSED_USES, all_problems, child_problems, ci_done_problems, needs_of,  # noqa: E402  the one home of the rules
                                    needs_problems, off_problems, scope_if_problems, scope_skips_problems, shape_problems, split_jobs, step_with,
                                    steps_problems, steps_part)
@@ -612,6 +613,105 @@ class ChildActionAndLayouts(unittest.TestCase):
         code, out = child_check(text)
         self.assertEqual(code, 0, "a push-only job left out of needs: exit %d, want 0: %s" % (code, out))
         self.assertEqual(child_problems(text), [], "a push-only job left out of needs has problems under child_problems")
+
+
+# The rollup side of the merge and rest flags: a shard whose suite steps skip by its flag still ends success, because its job runs. all-jobs-passed passes that result, fails a failed shard, and needs each shard. Controls: green on the old check.sh.
+class ShardsRunWithTheirFlagFalse(unittest.TestCase):
+    def setUp(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            self.text = f.read()
+        self.needed = needs_of(job_block(self.text, ALL_JOBS_PASSED_JOB)) or []
+
+    def needs_json(self, failed=None):
+        needs = {name: {"result": "success"} for name in self.needed}
+        if failed is not None:
+            needs[failed]["result"] = "failure"
+        return needs
+
+    def test_the_rollup_needs_every_merge_and_rest_shard(self):
+        missing = [name for name in SUITE_FLAG if name not in self.needed]
+        self.assertEqual(missing, [], f"all-jobs-passed does not need these shards, so their results are not in the verdict: {missing}")
+
+    def test_each_shard_job_still_runs_with_its_flag_false_on_a_ready_pull_request(self):
+        # Named failure: a job-level if that skips the shard with its flag false would make its result skipped, not success.
+        jobs = all_jobs(self.text)
+        for name, flag in SUITE_FLAG.items():
+            with self.subTest(job=name):
+                self.assertIn(name, jobs, f"{name} is not a job in checks.yml")
+                expr = jobs[name]["if"]
+                self.assertIsNotNone(expr, f"{name} has no job-level if")
+                self.assertTrue(eval_with(expr, "pull_request", {flag: "false", "records_only_skip": "false"}, default="true"),
+                                f"{name} is skipped at job level on a ready pull_request with {flag} false: if {expr}")
+
+    def test_a_green_rollup_passes_with_each_shard_success_whatever_its_steps_did(self):
+        code, out = check_sh(self.needs_json())
+        self.assertEqual(code, 0, f"the rollup fails with every job a success: {out}")
+
+    def test_a_failed_shard_fails_the_rollup(self):
+        for name in SUITE_FLAG:
+            with self.subTest(shard=name):
+                self.assertIn(name, self.needed, f"{ALL_JOBS_PASSED_JOB} does not need {name}, so its failure is no verdict")
+                code, out = check_sh(self.needs_json(failed=name))
+                self.assertNotEqual(code, 0, f"a failed {name} passes the rollup: {out}")
+
+
+def with_job_if(text, job, expr):
+    """checks.yml with `job`'s one job-level if line replaced by `expr`, or removed when expr is None. None unless the job has
+    exactly one if line."""
+    body = job_block(text, job) or ""
+    lines = [ln for ln in body.splitlines(keepends=True) if ln.startswith("    if:")]
+    if len(lines) != 1:
+        return None
+    return text.replace(body, body.replace(lines[0], "" if expr is None else "    if: %s\n" % expr, 1), 1)
+
+
+# checks' run condition: it runs on any guard shard's result, and skips only when scope did not succeed or the records-only skip is set.
+CHECKS_IF = "${{ !cancelled() && needs.scope.result == 'success' && needs.scope.outputs.records_only_skip != 'true' }}"
+
+
+class ExemptionCases(unittest.TestCase):
+    """off_problems on checks.yml with checks' job-level if swapped: a control on the workflow's own if, the ifs the rules must
+    refuse (always(), a run condition that drops the scope result), and an if on another needed job, which keeps the rule. Each
+    refused if is a run that could go green when scope did not succeed, or a lint suite that skips when a shard failed."""
+
+    def setUp(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            self.text = f.read()
+
+    def test_a_checks_with_its_workflow_if_is_not_flagged(self):
+        # Control: the if the workflow has now passes the rules, so off_problems reads checks clean.
+        self.assertIsNotNone(all_jobs(self.text).get("checks", {}).get("if"), "scope: checks has no job-level if, so the control reads nothing")
+        problems = off_problems(self.text)
+        self.assertEqual(problems, [], "checks with its workflow if is flagged: %s" % problems)
+
+    def test_a2_checks_with_the_run_condition_is_not_flagged(self):
+        """checks runs on any shard result and skips only when scope did not succeed or the records-only skip is set (the wider
+        run condition that the shards' proof needs, test_windows_split.py checks_if_problems). The rules must accept that if."""
+        text = with_job_if(self.text, "checks", CHECKS_IF)
+        self.assertIsNotNone(text, "scope: checks.yml has no single job-level if line in checks to swap")
+        problems = off_problems(text)
+        self.assertEqual(problems, [], "checks with the run condition is flagged: %s" % problems)
+
+    def test_b_checks_with_always_is_flagged(self):
+        text = with_job_if(self.text, "checks", "${{ always() }}")
+        self.assertIsNotNone(text, "scope: checks.yml has no single job-level if line in checks to swap")
+        self.assertTrue(off_problems(text), "checks with always() passes the rules: its lint suite would run when scope did not succeed")
+
+    def test_c_checks_whose_if_drops_the_scope_result_is_flagged(self):
+        shard_results = " && ".join("needs.%s.result == 'success'" % job for job in LINUX_GUARD_JOBS)
+        for label, expr in (
+            ("!cancelled() alone", "${{ !cancelled() }}"),
+            ("the shard results without the scope result", "${{ !cancelled() && %s }}" % shard_results),
+        ):
+            with self.subTest(if_=label):
+                text = with_job_if(self.text, "checks", expr)
+                self.assertIsNotNone(text, "scope: checks.yml has no single job-level if line in checks to swap")
+                self.assertTrue(off_problems(text), "checks with %s passes the rules: a skipped scope would still run its lint" % label)
+
+    def test_d_another_needed_job_with_a_different_job_level_if_is_still_flagged(self):
+        text = with_job_if(self.text, "checks-hooks", "${{ needs.scope.outputs.code == 'true' }}")
+        self.assertIsNotNone(text, "scope: checks-hooks has no single job-level if line to swap")
+        self.assertTrue(off_problems(text), "checks-hooks with a job-level if that is not the records-only skip passes the rules")
 
 
 if __name__ == "__main__":
