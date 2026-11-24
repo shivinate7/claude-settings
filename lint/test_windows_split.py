@@ -1189,7 +1189,7 @@ def macos_slice_problems(text):
     return problems
 
 
-SHOOT_SCOPE ="needs.scope.outputs.shoot == 'true'"
+SHOOT_SCOPE = "needs.scope.outputs.shoot == 'true'"
 SHOOT_IF = f"${{{{ {SHOOT_SCOPE} }}}}"
 
 
