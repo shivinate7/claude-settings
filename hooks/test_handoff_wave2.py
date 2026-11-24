@@ -69,6 +69,7 @@ a hook that does nothing. The Read spelling cases and the twin use the same live
 """
 import ast
 import collections
+import importlib.util
 import json
 import os
 import re
@@ -82,7 +83,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from test_precompact_handoff import (  # noqa: E402
-    HANDOFF_WITH_PREMISES, RUN_FOLDER, ids_in, put, transcript_line, write_transcript)
+    HANDOFF_WITH_PREMISES, RUN_FOLDER, ids_in, put, put_bytes, transcript_line, write_transcript)
 
 PRECOMPACT = os.environ.get("PRECOMPACT_HANDOFF_UNDER_TEST") or os.path.join(
     HERE, "precompact_handoff.py")
@@ -1163,10 +1164,11 @@ def write_call(c):
     return {"file_path": os.path.join(c.proj, "notes.md"), "content": "x"}
 
 
-def guard_call(c, sid, tool, tool_input, agent_id=None, home=None):
+def guard_call(c, sid, tool, tool_input, agent_id=None, home=None, extra_env=None, src=None):
     """One PreToolUse payload through hooks/guard.py, as Claude Code sends it: (decision, reason).
     An empty stdout is an allow. `agent_id` is set on a call made from inside an agent. `home` is the
-    audit marker the home holds for this call (see ROOMY_DISK_SRC); None leaves the home as it is."""
+    audit marker the home holds for this call (see ROOMY_DISK_SRC); None leaves the home as it is.
+    `extra_env` adds variables to the guard's environment; `src` replaces the launcher (ROOMY_DISK_SRC)."""
     body = {"hook_event_name": "PreToolUse", "session_id": sid, "tool_name": tool,
             "tool_input": tool_input, "cwd": c.proj}
     if agent_id:
@@ -1177,7 +1179,8 @@ def guard_call(c, sid, tool, tool_input, agent_id=None, home=None):
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
     if home is not None:
         env[HOME_MARKER_ENV] = home
-    proc = subprocess.run([sys.executable, "-c", ROOMY_DISK_SRC, GUARD], input=json.dumps(body),
+    env.update(extra_env or {})
+    proc = subprocess.run([sys.executable, "-c", src or ROOMY_DISK_SRC, GUARD], input=json.dumps(body),
                           capture_output=True, text=True, env=env, cwd=c.proj, timeout=120)
     out = (proc.stdout or "").strip()
     if proc.returncode != 0:
@@ -1916,6 +1919,150 @@ def case_unkeyed_legacy_flag_owes_nothing():
         c.cleanup()
 
 
+# --------------------------------------------------------------------------- part 6
+# A Read clears the reread flag only when the Reads so far cover the whole handoff (decision
+# precompact-handoff, item 9). Each case puts the handoff on disk, sets the flag with PostCompact, then Reads.
+
+LINES50 = "".join("line %02d\n" % i for i in range(1, 51))   # 50 lines of 8 bytes each
+
+
+def flag_set(c, sid):
+    return os.path.isfile(c.state("%s.reread" % sid))
+
+
+def read_range(c, sid, path, offset=None, limit=None):
+    """One PreToolUse Read of `path`. offset and limit are sent only when given, as Claude Code sends them."""
+    tool_input = {"file_path": path}
+    if offset is not None:
+        tool_input["offset"] = offset
+    if limit is not None:
+        tool_input["limit"] = limit
+    return c.run(READ_CHECK, "--pre-read", {
+        "session_id": sid, "hook_event_name": "PreToolUse", "tool_name": "Read",
+        "tool_input": tool_input, "cwd": c.proj})
+
+
+def compact_with(c, sid, text):
+    """The handoff on disk holds `text` byte for byte, and PostCompact sets the flag. Returns the PostCompact run."""
+    put_bytes(c.handoff(sid), text.encode("utf-8"))
+    return c.post_compact(sid)
+
+
+def case_partial_read_keeps_flag():
+    """A Read of lines 1-10 of a 50-line handoff keeps the flag set. The next Bash call is refused by
+    handoff-unread, and the refusal names the unread lines 11-50."""
+    c = Case("partial-read")
+    try:
+        if not step("PostCompact exits 0", exit_why(compact_with(c, SID, LINES50))):
+            return
+        rd = read_range(c, SID, c.handoff(SID), offset=1, limit=10)
+        if not step("the Read of lines 1-10 exits 0", exit_why(rd)):
+            return
+        step("a Read of lines 1-10 keeps the reread flag set",
+             "" if flag_set(c, SID) else "the Read of lines 1-10 cleared the reread flag")
+        got = guard_call(c, SID, "Bash", BASH)
+        if step("the Bash call is refused by handoff-unread after the partial Read",
+                refused_by(got, HANDOFF_RULE)):
+            step("the refusal names the unread lines 11-50",
+                 "" if "11-50" in got[1] else "the refusal does not name 11-50: %r" % got[1][:120])
+    finally:
+        c.cleanup()
+
+
+def case_pages_clear_flag_when_covered():
+    """Lines 1-25, then lines 26-50, of a 50-line handoff. The flag stays set after the first page and is
+    cleared by the second."""
+    c = Case("pages")
+    try:
+        if not step("PostCompact exits 0", exit_why(compact_with(c, SID, LINES50))):
+            return
+        first = read_range(c, SID, c.handoff(SID), offset=1, limit=25)
+        if not step("the Read of lines 1-25 exits 0", exit_why(first)):
+            return
+        step("after lines 1-25 the reread flag is still set",
+             "" if flag_set(c, SID) else "the Read of lines 1-25 cleared the reread flag")
+        second = read_range(c, SID, c.handoff(SID), offset=26, limit=25)
+        if not step("the Read of lines 26-50 exits 0", exit_why(second)):
+            return
+        step("after lines 26-50 the reread flag is cleared",
+             "" if not flag_set(c, SID) else "the reread flag is still set after lines 26-50")
+    finally:
+        c.cleanup()
+
+
+def case_out_of_order_pages_clear_flag():
+    """Lines 26-50, then lines 1-25. The flag stays set after the first page and is cleared by the second."""
+    c = Case("out-of-order")
+    try:
+        if not step("PostCompact exits 0", exit_why(compact_with(c, SID, LINES50))):
+            return
+        first = read_range(c, SID, c.handoff(SID), offset=26, limit=25)
+        if not step("the Read of lines 26-50 exits 0", exit_why(first)):
+            return
+        step("after lines 26-50 the reread flag is still set",
+             "" if flag_set(c, SID) else "the Read of lines 26-50 cleared the reread flag")
+        second = read_range(c, SID, c.handoff(SID), offset=1, limit=25)
+        if not step("the Read of lines 1-25 exits 0", exit_why(second)):
+            return
+        step("after lines 1-25 the reread flag is cleared",
+             "" if not flag_set(c, SID) else "the reread flag is still set after both pages")
+    finally:
+        c.cleanup()
+
+
+def case_overlapping_pages_clear_flag():
+    """Lines 1-30, then lines 20-50. The two overlap and together cover the handoff, so the flag is cleared by
+    the second Read. The first Read alone leaves it set."""
+    c = Case("overlap")
+    try:
+        if not step("PostCompact exits 0", exit_why(compact_with(c, SID, LINES50))):
+            return
+        first = read_range(c, SID, c.handoff(SID), offset=1, limit=30)
+        if not step("the Read of lines 1-30 exits 0", exit_why(first)):
+            return
+        step("after lines 1-30 the reread flag is still set",
+             "" if flag_set(c, SID) else "the Read of lines 1-30 cleared the reread flag")
+        second = read_range(c, SID, c.handoff(SID), offset=20, limit=31)
+        if not step("the Read of lines 20-50 exits 0", exit_why(second)):
+            return
+        step("after lines 20-50 the reread flag is cleared",
+             "" if not flag_set(c, SID) else "the reread flag is still set after the overlapping Read")
+    finally:
+        c.cleanup()
+
+
+def case_plain_read_of_small_handoff_clears_flag():
+    """A plain Read (no offset, no limit) of a handoff under the size limit clears the flag. Green on the
+    old code: a regression pin for the one Read that clears it whole."""
+    c = Case("plain-read")
+    try:
+        if not step("PostCompact exits 0", exit_why(compact_with(c, SID, LINES50))):
+            return
+        rd = read_range(c, SID, c.handoff(SID))
+        if not step("the plain Read exits 0", exit_why(rd)):
+            return
+        step("a plain Read of the handoff clears the reread flag",
+             "" if not flag_set(c, SID) else "the plain Read did not clear the reread flag")
+    finally:
+        c.cleanup()
+
+
+def case_limit5_read_keeps_flag():
+    """A Read with limit 5 of a 50-line handoff keeps the flag set. A real session made this Read and the
+    flag cleared, so the rule was too loose."""
+    c = Case("limit5")
+    try:
+        if not step("PostCompact exits 0", exit_why(compact_with(c, SID, LINES50))):
+            return
+        rd = read_range(c, SID, c.handoff(SID), limit=5)
+        if not step("the Read with limit 5 exits 0", exit_why(rd)):
+            return
+        step("a Read with limit 5 keeps the reread flag set",
+             "" if flag_set(c, SID) else "the Read with limit 5 cleared the reread flag")
+    finally:
+        c.cleanup()
+
+
 def main() -> int:
     print("Part 1: SessionEnd pointer, SessionStart reorient (hooks/precompact_handoff.py)")
     case_session_end_clear_writes_pointer()
@@ -1984,6 +2131,14 @@ def main() -> int:
     case_agent_compaction_owes_nothing()
     case_agent_transcript_compaction_owes_nothing()
     case_unkeyed_legacy_flag_owes_nothing()
+
+    print("Part 6: a Read clears the reread flag only when its ranges cover the handoff (hooks/reread_check.py)")
+    case_partial_read_keeps_flag()
+    case_pages_clear_flag_when_covered()
+    case_out_of_order_pages_clear_flag()
+    case_overlapping_pages_clear_flag()
+    case_plain_read_of_small_handoff_clears_flag()
+    case_limit5_read_keeps_flag()
 
     if FAILED:
         print()
