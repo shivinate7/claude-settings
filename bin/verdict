@@ -157,17 +157,29 @@ def hang_sample(proc):  # (the child's process-table rows, {pid: CPU seconds} fo
     table = _nowindow.proc_table()
     if table[2] or str(proc.pid) not in table[0]: return None
     return table[0], _nowindow.tree_cpu(table, proc.pid, own=True)
+def exited(proc):  # True when the child has exited, reaped or not: a peek that leaves the zombie for the wait loop to reap, so Popen still reads the real rc. False where waitid is missing (Windows, where hang stop is off) or the pid is not our child
+    try: return os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
+    except (OSError, AttributeError): return False
 def hang_check(proc, f, w, n, now):  # one wake with the child still running: the sample of a hang to stop on, else None. No read of the process table while output grows
     size = os.fstat(f.fileno()).st_size
     if size != w["seen"]: w["seen"], w["quiet"], w["base"] = size, None, None; return None
     if w["quiet"] is not None and now - w["quiet"] < n: return None
     sample = hang_sample(proc)  # the first silent wake takes the baseline; a later one, at least N after silence began, compares to it
+    if exited(proc): return None  # it finished during the read: its zombie row still shows in ps, but a finished step is no hang; the wait loop's next wait gives its rc
     # where reaped CPU cannot be read (macOS), a pid not in the baseline is work too: ps time leaves out reaped children, so a step that works through short children shows only as new pids
     stop = sample is not None and w["base"] is not None and not _nowindow.cpu_advanced(w["base"], sample[1])
     if stop and not _nowindow.reaped_readable(): stop = set(sample[1]) <= set(w["base"])
     w["quiet"], w["base"] = now, sample[1] if sample else None  # CPU that advanced starts the count again
     return sample if stop else None
-def hang_stop(proc, f, start, sample):  # print the child's tree and the log tail, then end the tree: TERM, then KILL. -> the ended tree's pids
+def alive(proc, reached):  # the pids of a TERMed tree still worth a KILL: not the child once it is reaped (its pid may be another process's now), and not a pid that has gone
+    out = []
+    for pid in reached:
+        if pid == proc.pid and proc.returncode is not None: continue
+        try: os.kill(pid, 0); out.append(pid)
+        except OSError: pass
+    return out
+def hang_stop(proc, f, start, sample):  # print the child's tree and the log tail, then end the tree: TERM, then KILL. -> True when it stopped the tree, False when the child had already finished (it keeps its real rc)
+    if proc.poll() is not None: return False  # it finished between hang_check's answer and now
     rows, cpu = sample
     print("process tree (pid ppid stat cpu):")
     for pid in sorted(cpu, key=int): print(f"  {pid} {rows[pid][1] if pid in rows else '?'} {rows[pid][2] if pid in rows else '?'} {cpu[pid]:.1f}s")
@@ -176,12 +188,13 @@ def hang_stop(proc, f, start, sample):  # print the child's tree and the log tai
         g.seek(max(start, os.fstat(g.fileno()).st_size - TAIL)); tail = g.read().decode("utf-8", errors="replace").splitlines()
     print("log tail:")
     for l in tail[-CAP:]: print("  " + l)
+    if proc.poll() is not None: return False  # it finished while the tail was read: no TERM, no HANG line
     reached = []
     try:
         reached = _nowindow.kill_tree(proc, signal.SIGTERM)
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired: pass
-    finally: _nowindow.kill_tree(proc, getattr(signal, "SIGKILL", signal.SIGTERM), reached); proc.kill(); proc.wait()
+    finally: _nowindow.kill_tree(proc, getattr(signal, "SIGKILL", signal.SIGTERM), alive(proc, reached)); proc.kill(); proc.wait()
     return True
 def main(argv):
 
@@ -223,8 +236,8 @@ def main(argv):
                         if hang:
                             tree = hang_check(proc, f, watch, hang, now)
                             if tree is not None:
-                                hung = hang_stop(proc, f, start, tree)
-                                rc = 124; break
+                                if not hang_stop(proc, f, start, tree): continue  # it finished first: the next wait gives its real rc
+                                hung, rc = True, 124; break
                         if hang and now < next_beat: continue
                         next_beat = now + beat
                         line = f"verdict: still running, {time.time() - t:.0f}s, log={log}"
@@ -241,7 +254,7 @@ def main(argv):
                     reached = _nowindow.kill_tree(proc, signal.SIGTERM)  # an INT to verdict alone leaves the child's tree running
                     proc.wait(timeout=5)
                 except (subprocess.TimeoutExpired, KeyboardInterrupt): pass
-                finally: _nowindow.kill_tree(proc, getattr(signal, "SIGKILL", signal.SIGTERM), reached); proc.kill(); proc.wait()
+                finally: _nowindow.kill_tree(proc, getattr(signal, "SIGKILL", signal.SIGTERM), alive(proc, reached)); proc.kill(); proc.wait()
         f.flush(); end = f.tell()
     secs = f"{time.time() - t:.1f}s"
     if hung:
