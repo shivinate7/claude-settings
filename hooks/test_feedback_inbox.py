@@ -458,11 +458,23 @@ def reorient(cfg, sid, ok_state=False):
                args=("--reorient",))
 
 
+def size_sentence():
+    """The reorient message's closing sentence on the handoff size limit (decision precompact-handoff, rule 1; owner
+    ruling 19:07 CST Nov 23, 2026). The number is read from reread_check.HANDOFF_MAX_TOKENS, its one home."""
+    sys.path.insert(0, HERE)
+    try:
+        from reread_check import HANDOFF_MAX_TOKENS
+    finally:
+        sys.path.remove(HERE)
+    return (" The handoff holds at most %d estimated tokens; step 4 of that prompt says what to cut first."
+            % HANDOFF_MAX_TOKENS)
+
+
 def ends_with_note(p, note):
-    """Exit 0, one reorient message, and the message ends with `note` ("" when there is none)."""
+    """Exit 0, one reorient message, and the message ends with `note` ("" when there is none), then the size sentence."""
     out = p.out.rstrip()  # Windows prints CRLF, so strip all trailing whitespace, not only "\n"
     return p.code == 0 and out.count("Context was compacted") == 1 and out.endswith(
-        "continue the last task." + note)
+        "continue the last task." + note + size_sentence())
 
 
 def inbox_of(cfg, sid):

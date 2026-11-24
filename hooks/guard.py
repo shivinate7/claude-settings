@@ -29,7 +29,9 @@ rule is the constant it emits. Its limits are in its decision, or in the comment
 Every tool the guard judges, first of the refusals (`judge`, after the Read and Grep exit,
 set_override_veto and session_home_keep):
   handoff-unread       deny. After compaction, a call from the main session while its handoff is
-                       unread. The reason names the handoff and says to Read it. A payload with
+                       unread, or an agent rewrote it (the main session's own write sets nothing; main() sets the flag
+                       through reread_check.agent_rewrite once judge() lets an agent's write through). The reason
+                       names the handoff, the lines still unread, and says to Read it in pages. A payload with
                        `agent_id` passes. An override lifts it. A failed import of reread_check, or of its sibling precompact_handoff, refuses as guard-crash at load.
                        (precompact-handoff, item 9)
   compaction-audit     deny. After compaction, once the handoff is read, a call from the main session
@@ -570,6 +572,13 @@ Other tools, in `judge` order:
                        An override lifts it. Cost: reads on demand inside this call, one small read of the
                        prompt file and, for an edit, of the handoff; no new log, hook, file or process start.
                        (precompact-handoff, item 14)
+  handoff-too-big      deny. A Write, Edit or MultiEdit to a session handoff, from the session or an agent, whose resulting text
+                       estimates over HANDOFF_MAX_TOKENS (reread_check.py; ceil(UTF-8 bytes / 3.5)), unless the result is
+                       smaller than the file on disk. The reason gives the estimate, the limit and the cut order
+                       (history, then past review rounds, then mid-run CI reads). An edit that cannot be applied allows.
+                       An override lifts it. Cost: a path compare for any other file; the handoff on disk is read for an
+                       Edit (as handoff-sections does) and statted for a Write whose text is over the limit.
+                       (precompact-handoff, "Every handoff and compaction check", rule 1)
   handoff-checked-stamp
                        deny. A Write, Edit or MultiEdit to a session handoff (as handoff-sections judges it)
                        that changes a premise's stamp (the line's text from its last `Checked` or `Re-checked`
@@ -824,6 +833,12 @@ while True:
             raise ImportError("reread_check could not use precompact_handoff")
         if not callable(getattr(reread_check, "unread_handoff", None)):
             raise ImportError("reread_check has no unread_handoff")
+        # The rest of what judge() and main() take from it: a stale copy that lacks one would raise mid-judge, and main()
+        # fails open on a raise, so the refusal it was loaded for would turn into an allow.
+        _missing = [_name for _name in ("unread_note", "too_big_estimate", "agent_rewrite") if not callable(getattr(reread_check, _name, None))]
+        _missing += [_name for _name in ("HANDOFF_MAX_TOKENS", "READ_CAP_TOKENS", "READ_MAX_LINES") if not isinstance(getattr(reread_check, _name, None), int)]
+        if _missing:
+            raise ImportError("reread_check lacks %s" % ", ".join(_missing))
 
         _loading = "install-id"
         if _install_ids_differ():
@@ -1557,9 +1572,31 @@ WORKTREE_HOME_REASON = (
 )
 
 HANDOFF_UNREAD_REASON = (
-    "Rule (handoff unread): context was compacted and this session has not read its handoff. "
-    "Remedy: Read %s now. The Read clears this check. Then repeat the call."
+    "Rule (handoff unread): %(why)s "
+    "Remedy: Read %(path)s now%(span)s. The Reads clear this check once together they cover every line. "
+    "A Read of more than %(lines)d lines or %(cap)d estimated tokens covers nothing, so read it in pages. "
+    "Then repeat the call."
 )
+HANDOFF_UNREAD_WHY = "context was compacted and this session has not read its handoff."
+HANDOFF_UNREAD_WHY_AGENT = "an agent rewrote this session's handoff and this session has not read the rewrite."
+
+HANDOFF_TOO_BIG_REASON = (
+    "Rule (handoff-too-big): this write leaves the session handoff at an estimated %d tokens, over the limit of %d "
+    "(ceil(UTF-8 bytes / 3.5)). "
+    "Remedy: summarize more and write it again. Cut history first, then past review rounds, then mid-run CI reads, "
+    "as step 4 of the installed precompact_handoff_prompt.md says. Keep every ruling and every open id. "
+    "A write that leaves the file smaller than it is now passes, so trim in steps. "
+    "(decision precompact-handoff, the handoff size limit)"
+)
+
+
+def handoff_unread_fields(path, payload):
+    """The fields of HANDOFF_UNREAD_REASON: the cause (compaction, or an agent's rewrite), the handoff path, and the
+    lines still unread. reread_check holds the flag and the counts."""
+    agent, unread = reread_check.unread_note(payload)
+    return {"why": HANDOFF_UNREAD_WHY_AGENT if agent else HANDOFF_UNREAD_WHY, "path": path,
+            "span": " (lines still unread: %s)" % unread if unread else "",
+            "lines": reread_check.READ_MAX_LINES, "cap": reread_check.READ_CAP_TOKENS}
 
 from shared_names import EXPLORE_AUDIT_MARKER as _AUDIT_MARKER  # noqa: E402  the one home of the marker the remedy names; reread_check.audit_reason reads it too
 
@@ -1619,6 +1656,12 @@ def handoff_sections_result(tool, tool_input, target, cwd):
     return before, text
 
 
+def handoff_target_path(target, cwd):
+    """A write target as a path: `~` expanded, a relative path joined to the call's cwd."""
+    path = os.path.expanduser(target)
+    return path if os.path.isabs(path) else os.path.join(cwd or "", path)
+
+
 def handoff_sections_hit(tool, tool_input, target, cwd, result=False):
     """The required handoff sections a write to a session handoff would drop, as one text, else "". The
     list is the prompt's marker, read by precompact_handoff.missing_sections, which fails open: an unread
@@ -1668,8 +1711,7 @@ def handoff_stamp_hit(tool, tool_input, target, cwd, transcript, result):
         if not name:
             return None
         before, after = result
-        path = os.path.expanduser(target)
-        path = path if os.path.isabs(path) else os.path.join(cwd or "", path)
+        path = handoff_target_path(target, cwd)
         if before is None:
             try:
                 with open(path, "r", encoding="utf-8") as handle:
@@ -8442,7 +8484,7 @@ def judge(payload) -> None:
     # Not in never_lifted: the owner may mean the call. A failed import of reread_check refuses as guard-crash at load.
     unread = reread_check.unread_handoff(payload)
     if unread:
-        refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % unread, unread)
+        refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % handoff_unread_fields(unread, payload), unread)
     # 0, compaction-audit. Once the handoff is read, no call runs from the main session until it sends the audit
     # step 3 of the handoff prompt asks for: a spawn whose brief opens with `Audit:`. The spawn passes this rule
     # and is marked in AUDIT_SPAWN_PASSED. main() clears the flag when judge() returns, or when a later rule crashes
@@ -8829,6 +8871,13 @@ def judge(payload) -> None:
         dropped = handoff_sections_hit(tool, tool_input, target, cwd, handoff_result)
         if dropped:
             refuse(tool, "deny", "handoff-sections", HANDOFF_SECTIONS_REASON % dropped, dropped)
+        # 7a''. A write that leaves a session handoff over the size limit (rule handoff-too-big), from any writer.
+        # Not in never_lifted: the owner may mean the write. Cost: a path compare for any other file; the stat of the
+        # handoff on disk only for a Write whose text is over the limit.
+        oversize = reread_check.too_big_estimate(handoff_result, handoff_target_path(target, cwd)) if handoff_result else 0
+        if oversize:
+            refuse(tool, "deny", "handoff-too-big", HANDOFF_TOO_BIG_REASON % (oversize, reread_check.HANDOFF_MAX_TOKENS),
+                   "%d estimated tokens" % oversize)
         # 7a'. A write that restamps a premise's Checked value with no evidence (rule handoff-checked-stamp).
         stamped = handoff_stamp_hit(tool, tool_input, target, cwd, payload.get("transcript_path"), handoff_result)
         if stamped:
@@ -8906,6 +8955,7 @@ def main() -> None:
     try:
         judge(payload)
         audit_flag_clear_after_allow(payload)
+        reread_check.agent_rewrite(payload)
     except SystemExit:
         raise
     except Exception as exc:
@@ -8913,6 +8963,7 @@ def main() -> None:
         record(str(payload.get("tool_name", "")), "crash", "guard-crash",
                cap_safe(type(exc).__name__ + ": " + str(exc), 200))
         audit_flag_clear_after_allow(payload)  # the failed-open spawn runs, so the audit it owed is sent
+        reread_check.agent_rewrite(payload)  # the failed-open write runs, so the main session owes a read of it
         sys.exit(0)  # fail open on a guard defect
     sys.exit(0)
 

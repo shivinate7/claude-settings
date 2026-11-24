@@ -77,6 +77,26 @@ drops one, and the Stop hook names one that is missing. Each sits under its own 
 
 <!-- handoff-sections: Goal | Working premises | Where things stand | Work in flight | Next steps | Files and commands -->
 
+Size. The whole handoff holds at most 10000 estimated tokens: ceil(UTF-8 bytes / 3.5). The
+guard refuses a write over that limit, from any writer. Summarize all of the session's
+context to fit. Never cut the text at the limit, and never leave out part of the session.
+Write each item in the fewest words.
+
+Always keep: the owner's open rulings, each with its home; the goal line above; the premises
+above, each with its source; open questions; each open PR or branch, with its head and its
+next act; the pid and port of each running server; each `## ` section the marker line above
+names, and the owner section above; and each open `[standing]` item's `fb-` id, as a whole
+token.
+
+Cut in this order: the history of past review rounds; mid-run CI reads; pace numbers that
+another file already holds; anything a tracked record on main already holds. A refused
+write is fixed by summarizing more, never by dropping a ruling or an open id. A write that
+leaves the file smaller than it is now passes, even while it is still over the limit, so
+trim in steps.
+
+Summary lines: a ruling is one line with its home. A PR is `#N`, its head, and its next
+act. A server is its pid and port.
+
 For a list that has a home (a page collection, a roadmap ref, a git ref or a GitHub query), name the home and never copy the list.
 A batch runner's merge queue, folds, gos, holds and archive pass have one: `plans/runner-state.json` on the record branch. Write one line, `Runner state: origin/roadmap:plans/runner-state.json, last sent version <N>.`, and no list; the successor reads the file first.
 

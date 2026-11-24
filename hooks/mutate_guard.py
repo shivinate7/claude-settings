@@ -3500,14 +3500,17 @@ MUTATIONS = [
     # ---- handoff-unread (decision precompact-handoff, item 9): one mutant per arm. The anchors sit in
     # guard.py and in reread_check.py; a "guard" mutant lands in whichever module holds the anchor.
     ("handoff-unread: the refusal is never printed",
-     '        refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % unread, unread)',
+     '        refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % handoff_unread_fields(unread, payload), unread)',
      '        pass',
      "guard", "handoff-unread: after compaction, Bash is refused while the handoff is unread"),
     ("handoff-unread: a failed import of reread_check fails open again",
      '        _loading = "reread_check"\n        import reread_check\n',
      '        _loading = "reread_check"\n        try:\n            import reread_check\n'
      '        except ImportError:\n'
-     '            reread_check = type("R", (), {"ph": 1, "unread_handoff": staticmethod(lambda payload: "")})\n',
+     '            reread_check = type("R", (), {"ph": 1, "unread_handoff": staticmethod(lambda payload: ""),\n'
+     '                "unread_note": staticmethod(lambda payload: ""), "too_big_estimate": staticmethod(lambda result, path: 0),\n'
+     '                "agent_rewrite": staticmethod(lambda payload: None),\n'
+     '                "HANDOFF_MAX_TOKENS": 10000, "READ_CAP_TOKENS": 25000, "READ_MAX_LINES": 2000})\n',
      "guard", "a guard copy without reread_check.py refuses as guard-crash"),
     ("handoff-unread: a reread_check without its precompact_handoff sibling is let load again",
      '        if reread_check.ph is None:',
@@ -3582,6 +3585,12 @@ MUTATIONS = [
      'session, run install.sh from the claude-settings checkout (Windows: install.ps1), ',
      'session, ',
      "guard", "handoff-unread: install-hooks-whole: a missing reread_check's refusal names install.sh as the fix"),
+    # ---- handoff-too-big (decision precompact-handoff, the size limit): the refuse arm of the handoff size check.
+    # Its cases are tests/guard/s43731-handoff-too-big.py, a section of test_guard.py.
+    ("handoff-too-big: the refuse arm is dropped, so a handoff one byte over the limit is allowed",
+     "        if oversize:",
+     "        if False:",
+     "guard", "handoff-too-big: a Write one byte over the limit is refused"),
     ("mockup-home: the refuse arm is dropped, so a design whose file sits under the machine home is allowed",
      "            if unhomed:",
      "            if False:",

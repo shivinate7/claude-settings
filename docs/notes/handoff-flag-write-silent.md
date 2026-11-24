@@ -1,0 +1,1 @@
+- handoff-flag-write-silent: in hooks/reread_check.py, `agent_rewrite` swallows a failed flag write and `too_big_estimate` returns 0 on any error, with no guard.log line; a failed write leaves an agent rewrite unflagged with no trace. Not reached in normal work. Decision `precompact-handoff`, rules 1 and 3. Found in review round 1 of PR 3840. Seen: 2026-11-23 x1

@@ -104,3 +104,4 @@ that does not apply.<!-- rule:reports-drop-unused-label --> A report from a spaw
 
 Keep the session's handoff path (~/.claude/handoffs/<session_id>.md), the owner's open rulings with their homes, the Goal, and the Working premises with their sources.
 The handoff's contents are listed in hooks/precompact_handoff_prompt.md step 4.
+The handoff holds at most 10000 estimated tokens (owner ruling, 2026-11-23 19:07 CST; decision `precompact-handoff`, rule 1); step 4 of the prompt file says what it keeps.
