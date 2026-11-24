@@ -102,11 +102,12 @@ LINUX_CODE_SWEEP = f"{LINUX_CODE} && needs.scope.outputs.sweep == 'true'"
 LINUX_SWEEP = "needs.scope.outputs.sweep == 'true'"
 LINUX_MODS = "needs.scope.outputs.mods == 'true'"  # its keep-running guard comes off before the pin reads it (keep_running_off)
 # The scope condition on a step that reads no .md file, unwrapped as unwrap() reads an `if:`. lint/test_checks_step_scope.py pins which steps take it.
-# No event fallback: a Linux suite step obeys its flag on every event (owner ruling A, option b, 19:02 CST Nov 23 2026), so a push
-# runs it only when the flag is true, as a pull request does.
+# No event fallback: a push runs a Linux suite step only when its flag is true, as a pull request does.
 NO_MD_SCOPE_CONDITION = "needs.scope.outputs.code == 'true'"
+# The failure messages of the flag-alone pins carry this text.
+PUSH_RULING = "owner ruling A, option b, 19:02 CST Nov 23 2026: a Linux suite step obeys its scope flag on every event"
 # The scope condition of a step that reads the doc groups in `groups` (ci-scope.sh's doc_<group> flags): code and those flags, with no
-# event fallback (the ruling of NO_MD_SCOPE_CONDITION). The flags come in DOC_GROUPS order, so a group tuple in any order builds one
+# event fallback, as NO_MD_SCOPE_CONDITION has it. The flags come in DOC_GROUPS order, so a group tuple in any order builds one
 # string. lint/test_checks_step_scope.py shares these constants.
 DOC_GROUPS = ("decisions", "rules", "skills", "agents", "glossary", "map", "other", "any")
 
@@ -412,7 +413,7 @@ SHOOT_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_s
 SHOOT_JOB = "checks-shoot"
 # The export suite runs in SHOOT_JOB too: its picture cases run check_designs.mjs in Playwright, and loadPlaywright reads NODE_PATH.
 EXPORT_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" python3 skills/waiting-page/test_export_page.py'
-# The shoot job's Linux steps take the flag alone: no event fallback (owner ruling A, option b, 19:02 CST Nov 23 2026).
+# The shoot job's Linux steps take the flag alone, with no event fallback.
 EXPORT_IF = "needs.scope.outputs.shoot == 'true'"
 # The waiting page suite has its own job, so SHOOT_JOB keeps its cap (decision ci-job-caps). ROADMAP_CMD stays in SHOOT_JOB.
 WAITING_PAGE_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs skills/waiting-page/tests/test_check_designs.mjs'
@@ -1188,8 +1189,7 @@ def macos_slice_problems(text):
     return problems
 
 
-# The flag alone on the shoot job's Linux steps: no event fallback (owner ruling A, option b, 19:02 CST Nov 23 2026).
-SHOOT_SCOPE = "needs.scope.outputs.shoot == 'true'"
+SHOOT_SCOPE ="needs.scope.outputs.shoot == 'true'"
 SHOOT_IF = f"${{{{ {SHOOT_SCOPE} }}}}"
 
 
@@ -1223,7 +1223,7 @@ def shoot_doc(lint_run="ruff", install_if=SHOOT_IF, suite_if=SHOOT_IF, suite_run
 # pinned as the macOS guard shards are: the scope `if:`, no shell, and the suite's own env plus its shard value.
 LINUX_GUARD_SHARD = {name: f"{i}/{len(LINUX_GUARD_JOBS)}" for i, name in enumerate(LINUX_GUARD_JOBS, 1)}
 LINUX_GUARD = "python3 hooks/test_guard.py"
-# The flag alone on the Linux guard shards' steps: no event fallback (owner ruling A, option b, 19:02 CST Nov 23 2026).
+# The Linux guard shards' steps take the flag alone, with no event fallback.
 LINUX_GUARD_IF = "needs.scope.outputs.checks_guard == 'true'"
 LINUX_GUARD_ENV = {"NODE_PATH": "${{ github.workspace }}/.github/shoot/node_modules", "GUARD_CHROMIUM": '"1"'}
 PLAYWRIGHT_USES = "$/actions/playwright-setup"
@@ -1294,7 +1294,7 @@ class WindowsSplit(unittest.TestCase):
     def test_the_export_suite_is_pinned_in_the_shoot_job(self):
         # Named failure: the export suite runs in `checks` again, which installs no browser, or in SHOOT_JOB without the
         # NODE_PATH prefix, so its picture cases find no Playwright and go red.
-        self.assertEqual(export_suite_problems(self.text), [])
+        self.assertEqual(export_suite_problems(self.text), [], PUSH_RULING)
 
     def test_the_export_suite_checker_sees_its_defects(self):
         export = (f"      - name: export suite\n        if: ${{{{ {EXPORT_IF} }}}}\n"
@@ -1729,7 +1729,7 @@ class SplitJobs(unittest.TestCase):
             self.text = f.read()
 
     def test_each_linux_suite_runs_once_in_its_split(self):
-        self.assertEqual(linux_split_problems(self.text), [])
+        self.assertEqual(linux_split_problems(self.text), [], PUSH_RULING)
         # The install suite runs once in each of its counted shard jobs, not once in the split (SHARD_COUNTS).
         self.assertEqual(install_shard_problems(self.text), [])
         linux_conditioned = [n for n in SPEC_JOBS if n in LINUX_SPLIT]
@@ -1863,11 +1863,11 @@ class SplitJobs(unittest.TestCase):
     def test_the_linux_guard_runs_in_its_counted_shard_jobs(self):
         # Named failure: the guard suite runs in one Linux job, or in more or fewer than LINUX_GUARD_JOBS, or in neither, so its cases
         # do not each run once.
-        self.assertEqual(linux_guard_split_problems(self.text), [])
+        self.assertEqual(linux_guard_split_problems(self.text), [], PUSH_RULING)
 
     def test_the_linux_guard_shards_install_playwright(self):
         # Named failure: a guard shard job has no Playwright install, so the guard's checker has no browser to render with.
-        self.assertEqual(linux_guard_install_problems(self.text), [])
+        self.assertEqual(linux_guard_install_problems(self.text), [], PUSH_RULING)
 
     def test_checker_sees_the_linux_guard_split_defects(self):
         self.assertEqual(linux_guard_split_problems(linux_guard_doc()), [])  # the control: the planned split passes
@@ -1896,14 +1896,14 @@ class SplitJobs(unittest.TestCase):
     def test_the_planned_linux_guard_split_passes_the_split_and_install_checks(self):
         # The full-size control: the planned split of the real file passes both checks, so each defect below is the only flag.
         planned = planned_linux_guard_split(self.text)
-        self.assertEqual(linux_guard_split_problems(planned), [])
+        self.assertEqual(linux_guard_split_problems(planned), [], PUSH_RULING)
         self.assertEqual(linux_guard_install_problems(planned), [])
 
     def test_checker_sees_the_planned_install_defects(self):
         planned = planned_linux_guard_split(self.text)
         job = job_block(planned, "checks-guard-2")
         install = f"        if: ${{{{ {LINUX_GUARD_IF} }}}}\n        uses: {PLAYWRIGHT_USES}\n"
-        self.assertIn(install, job, "the fixture: checks-guard-2's install step carries the scope if")
+        self.assertIn(install, job, "the fixture: checks-guard-2's install step carries the scope if (%s)" % PUSH_RULING)
         bad = {
             "the install step's if changed": planned.replace(job, job.replace(
                 install, install.replace(LINUX_GUARD_IF, "needs.scope.outputs.code == 'true'"), 1), 1),
@@ -3714,7 +3714,7 @@ class KeepRunningOff(unittest.TestCase):
     """keep_running_off strips exactly `!cancelled() && ` from the start of a checks-job step's `if:`, and one pair of parentheses
     around a `||` condition. Each case is one `if:` as checks.yml writes it."""
 
-    OR_CONDITION = "needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true'"  # an OR fixture; the event fallback is gone (ruling A)
+    OR_CONDITION = "needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true'"  # an OR fixture, with no event fallback
 
     def test_the_guard_comes_off_a_plain_condition(self):
         self.assertEqual(keep_running_off("${{ !cancelled() && needs.scope.outputs.code == 'true' }}"),

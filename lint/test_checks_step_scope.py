@@ -1,8 +1,8 @@
 """Pins the scope condition on the `checks` job's steps (lane ci-skip-untouched-steps, slice 2).
 
 ci-scope.sh sets `code` false for a change that touches only .md files. A step that reads no .md file takes the scope condition
-`needs.scope.outputs.code == 'true'`, with no event fallback (owner ruling A, option b, 19:02 CST Nov 23 2026), so a docs-only pull
-request skips it, and so does a push whose flag is false. A step that reads a .md file stays unscoped. The step lists are the audit of main's checks.yml when this was written, by step name.
+`needs.scope.outputs.code == 'true'`, with no event fallback, so a docs-only pull request skips it, and so does a push whose flag is
+false. A step that reads a .md file stays unscoped. The step lists are the audit of main's checks.yml when this was written, by step name.
 
 Pinned here:
   1. each NO-MD and NAMES-ONLY step carries the scope condition, exactly.
@@ -45,7 +45,7 @@ from test_windows_split import (  # noqa: E402  the one home of the `if:` evalua
     SCOPE_DOC_DECISIONS_RULES, SCOPE_DOC_DECISIONS_RULES_OTHER, SCOPE_DOC_RULES, SCOPE_DOC_SKILLS, SCOPE_DOC_SKILLS_AGENTS,
     SCOPE_DOC_SKILLS_DECISIONS, SCOPE_DOC_SKILLS_OTHER, doc_scope_condition, drop_condition, eval_if, keep_running_off, run_lines, unwrap,
     LINUX_SUITES)
-from test_windows_split import top_level_conjuncts, top_level_disjuncts, yaml_scalar  # noqa: E402  the one home of the splitters and the scalar reader
+from test_windows_split import PUSH_RULING, top_level_conjuncts, top_level_disjuncts, yaml_scalar  # noqa: E402  the one home of the splitters, the scalar reader and the ruling
 
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
 WORKFLOW = ".github/workflows/checks.yml"
@@ -62,7 +62,6 @@ DOC = "docs/decisions/x.md"
 LINUX_SUITE_JOBS = ("checks", "checks-hooks", "checks-rest", "checks-guard", "checks-guard-2", "checks-guard-3", "checks-guard-4",
                     "checks-shoot", "checks-waiting-page")
 FALLBACK = "github.event_name != 'pull_request'"
-PUSH_RULING = "owner ruling A, option b, 19:02 CST Nov 23 2026: a Linux suite step obeys its scope flag on every event"
 
 # The audit's NO-MD steps: each reads no .md file at run time, so each takes the scope condition.
 NO_MD = [
@@ -780,7 +779,7 @@ def describe_hits(hits):
 def scoped_steps(steps):
     """(identity, step) for each step the entry guard covers: the audit's NO-MD and NAMES-ONLY steps. A named step missing from the
     job is left out here; the scope condition test reports it. An unlisted step is no audit step even when its `if:` is the bare
-    code flag: that form is also a flag-only step's, and the flag-only steps are not audited on main (owner ruling A, 19:02 CST Nov 23 2026)."""
+    code flag: that form is also a flag-only step's, and the flag-only steps are not audited."""
     by_id = {identity(st): st for st in steps}
     names = NO_MD + NAMES_ONLY
     return [(n, by_id[n]) for n in names if n in by_id]
@@ -1310,7 +1309,7 @@ class LinuxSuiteStepsObeyTheirFlag(unittest.TestCase):
                                      % (job, identity(st), PUSH_RULING, expr))
 
     def test_the_windows_steps_stay_outside_the_case_and_keep_the_fallback(self):
-        # Control, green on main: the case reads only the Linux suite jobs, and the Windows steps keep their fallback.
+        # Control: the case reads only the Linux suite jobs, and the Windows steps keep their fallback.
         for job in ("checks-windows", "checks-windows-rest"):
             with self.subTest(job=job):
                 self.assertNotIn(job, LINUX_SUITE_JOBS)
