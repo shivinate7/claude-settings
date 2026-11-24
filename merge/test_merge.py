@@ -15853,6 +15853,144 @@ def github_read(args, rules, contexts, read_error=None):
         return 0, REST.listing(rules, None, params, flags, jq, 100)
     raise AssertionError("unexpected gh call: " + " ".join(args))
 
+class MainRunVerdict(Env):
+    """`merge --main-run <sha>` judges the push run of commit <sha> on main against the push run before it, and prints one line
+    `main run <sha9>: <outcome>. <detail>`. Each case drives that CLI and asserts the outcome word of the line. On a main without the option
+    the argparse refusal leaves no such line, so each case fails on its assert. Shapes come from main's red runs in the audit of Nov 21-24 2026: a push run
+    skipped whole by push-skip (run 14774), a stacked break (14734, 14745), a step timeout (14673), a scoped push run, a revert."""
+    GREEN, NO_VERDICT, CARRIED, FIRST_RED, NEW_BREAK, UNKNOWN, CLEARED, DID_NOT_CLEAR = (
+        "green", "no verdict", "carried", "first red", "new break", "unknown", "cleared", "did not clear")  # one spelling each
+    PREV, NOW = 1001, 1002  # run ids: PREV is the push run before, NOW the push run of the judged sha
+    GREEN_SHA, OLD_SHA = "a09e6d13" + "6" * 32, "3f0b2a6e" + "8" * 32  # a green main; the breaking merge that made main red
+    NEW_SHA, REVERT_SHA = "5e7a1c0d" + "9" * 32, "c4d81f2b" + "7" * 32  # the merge judged; a revert of OLD_SHA
+    FLAKY_LOG = RedMainBrake.FLAKY_LOG  # a failing test the run before also names
+    NEW_LOG = "FAILED tests/test_fresh.py::FreshTest::test_new - AssertionError: 2 != 0\n"  # a failing test no earlier run named
+    TIMEOUT_LOG = "##[error]The job running on the runner has exceeded the maximum execution time of 30 minutes.\n"  # no test named
+    REVERT_MESSAGE = f"Revert \"breaking change\"\n\nThis reverts commit {OLD_SHA}.\n"
+
+    def red_job(self, name, job_id, minutes=20):
+        """A failed job of a main run, with the id its log is served by."""
+        return {**main_job(name, "failure", minutes), "id": job_id}
+
+    def verdict(self, sha, runs, jobs, **reads):
+        """-> (exit code, output, outcome word, verdict line) of `merge --main-run <sha>` on a host that serves `runs`, `jobs` and `reads`.
+        An argparse refusal is kept as the exit code, so the case fails on its missing verdict line."""
+        jobs = {run: [{"id": 70000 + run * 10 + i, **row} for i, row in enumerate(rows)] for run, rows in jobs.items()}  # every job row has an id, as GitHub gives it; a red job keeps its own
+        self.host = MainRunsHost(self.co, self.other, runs, jobs, **reads)
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            rc, _ = self.run_merge_once("--main-run", sha, host=self.host, stdout=out, stderr=err)
+        except SystemExit as e:
+            rc = e.code
+        text = out.getvalue() + err.getvalue()
+        prefix = f"main run {sha[:9]}: "
+        lines = [line for line in text.splitlines() if line.startswith(prefix)]
+        self.assertEqual(len(lines), 1, f"the output holds no one `{prefix}<outcome>.` line, so no outcome:\n{text}")
+        line = lines[0]
+        rest = line[len(prefix):]
+        word = rest.split(".", 1)[0] if "." in rest else None
+        return rc, text, word, line
+
+    def judged(self, want, sha, runs, jobs, **reads):
+        """Judge `sha` and assert its outcome word is `want`; -> the verdict tuple of `verdict`."""
+        got = self.verdict(sha, runs, jobs, **reads)
+        self.assertEqual(got[2], want, got[1])
+        return got
+
+    def test_a_green_push_run_with_the_rollup_skipped_reads_green(self):
+        """all-jobs-passed and ci-done are skipped on every push run of main (measured on the last 100 push runs, Nov 2026), so a green push run with them skipped is green."""
+        runs = [main_run(self.NOW, "success", sha=self.NEW_SHA), main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.NOW: [main_job("scope", "success"), main_job("checks", "success", 20), main_job("checks-macos", "success", 30),
+                           main_job("all-jobs-passed", "skipped"), main_job("ci-done", "skipped")],
+                self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        self.judged(self.GREEN, self.NEW_SHA, runs, jobs)
+
+    def test_a_push_run_skipped_whole_by_push_skip_has_no_verdict(self):
+        """Audit run 14774: push-skip succeeded, scope and every check were skipped, after a red run. It says nothing about main, so it is no
+        verdict. It is not green, and it is not carried either."""
+        runs = [main_run(self.NOW, "success", sha=self.NEW_SHA), main_run(self.PREV, "failure", sha=self.OLD_SHA)]
+        jobs = {self.NOW: [main_job("push-skip", "success"), main_job("scope", "skipped"), main_job("checks", "skipped"),
+                           main_job("checks-macos", "skipped"), main_job("all-jobs-passed", "skipped"), main_job("ci-done", "skipped")],
+                self.PREV: [self.red_job("checks", 9101)]}
+        self.judged(self.NO_VERDICT, self.NEW_SHA, runs, jobs, job_logs={9101: self.FLAKY_LOG})
+
+    def test_a_red_job_and_test_the_previous_run_already_named_is_carried(self):
+        """The same red job and the same failing test as the run before: an inherited red, not a new break."""
+        runs = [main_run(self.NOW, "failure", sha=self.NEW_SHA), main_run(self.PREV, "failure", sha=self.OLD_SHA)]
+        jobs = {self.NOW: [main_job("scope", "success"), self.red_job("checks", 9102)], self.PREV: [self.red_job("checks", 9101)]}
+        self.judged(self.CARRIED, self.NEW_SHA, runs, jobs, job_logs={9101: self.FLAKY_LOG, 9102: self.FLAKY_LOG})
+
+    def test_a_scoped_push_run_that_skipped_the_red_job_is_carried_and_marked_not_re_run(self):
+        """A scoped push run skips the job that failed in the run before, and its other jobs pass. That job did not run, so the run is not green:
+        `carried`, with the mark `not re-run` on the verdict line."""
+        runs = [main_run(self.NOW, "success", sha=self.NEW_SHA), main_run(self.PREV, "failure", sha=self.OLD_SHA)]
+        jobs = {self.NOW: [main_job("scope", "success"), main_job("checks", "skipped"), main_job("checks-macos", "success", 30),
+                           main_job("all-jobs-passed", "skipped"), main_job("ci-done", "skipped")],
+                self.PREV: [self.red_job("checks", 9101)]}
+        _rc, text, _word, line = self.judged(self.CARRIED, self.NEW_SHA, runs, jobs, job_logs={9101: self.FLAKY_LOG})
+        self.assertIn("not re-run", line, text)
+
+    def test_a_new_red_on_its_first_attempt_is_first_red_and_prints_the_rerun(self):
+        """A failing test the previous green run did not name, on the first attempt: first red. Nothing is blamed yet. The output names the test
+        and prints `gh run rerun <id> --failed`."""
+        runs = [main_run(self.NOW, "failure", sha=self.NEW_SHA), main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.NOW: [main_job("scope", "success"), self.red_job("checks", 9102)], self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        _rc, text, _word, line = self.judged(self.FIRST_RED, self.NEW_SHA, runs, jobs, job_logs={9102: self.NEW_LOG})
+        self.assertIn("test_new", text, "the first red names no failing test:\n" + text)
+        self.assertIn(f"gh run rerun {self.NOW} --failed", text, "the first red prints no re-run remedy:\n" + text)
+        self.assertNotIn("breaking merge", line, "a first red blames its merge before its re-run:\n" + line)
+
+    def test_a_new_name_red_again_on_its_rerun_is_a_new_break(self):
+        """The same new name red again on the re-run: only now is the merge judged the breaking merge."""
+        runs = [main_run(self.NOW, "failure", sha=self.NEW_SHA, run_attempt=2), main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.NOW: [main_job("scope", "success"), self.red_job("checks", 9102)], self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        _rc, text, _word, _line = self.judged(self.NEW_BREAK, self.NEW_SHA, runs, jobs, job_logs={9102: self.NEW_LOG})
+        self.assertIn("test_new", text, "the new break names no failing test:\n" + text)
+
+    def test_a_new_break_on_an_already_red_main_names_the_new_merge_not_the_old_one(self):
+        """Stacked: main was red at OLD_SHA, and NEW_SHA's run red again on its re-run with a new job and test. The new merge is the breaking
+        merge. The walk to the first green run would name OLD_SHA (breaking_run), so the verdict line must not name it."""
+        runs = [main_run(self.NOW, "failure", sha=self.NEW_SHA, run_attempt=2), main_run(self.PREV, "failure", sha=self.OLD_SHA)]
+        jobs = {self.NOW: [self.red_job("checks", 9102), self.red_job("checks-macos", 9103)], self.PREV: [self.red_job("checks", 9101)]}
+        _rc, text, _word, line = self.judged(self.NEW_BREAK, self.NEW_SHA, runs, jobs,
+                                             job_logs={9101: self.FLAKY_LOG, 9102: self.FLAKY_LOG, 9103: self.NEW_LOG})
+        self.assertIn("test_new", text, "the stacked break names no new failing test:\n" + text)
+        self.assertNotIn(self.OLD_SHA[:9], line, "the stacked break names the old merge:\n" + line)
+
+    def test_a_red_job_whose_log_names_no_test_is_first_red(self):
+        """A step timeout or runner fault ends a job red and names no test (run 14673 in the audit). A new red job is a first red all the same."""
+        runs = [main_run(self.NOW, "failure", sha=self.NEW_SHA), main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.NOW: [main_job("scope", "success"), self.red_job("checks-install-checkout", 9104, 30)], self.PREV: [main_job("checks", "success", 20)]}
+        _rc, text, _word, _line = self.judged(self.FIRST_RED, self.NEW_SHA, runs, jobs, job_logs={9104: self.TIMEOUT_LOG})
+        self.assertIn("checks-install-checkout", text, "the first red names no red job:\n" + text)
+
+    def test_a_previous_push_run_still_going_is_unknown(self):
+        """The run before is not finished, so a red run cannot be told new from carried: unknown, never first red."""
+        runs = [main_run(self.NOW, "failure", sha=self.NEW_SHA), main_run(self.PREV, None, status="in_progress", sha=self.OLD_SHA)]
+        jobs = {self.NOW: [main_job("scope", "success"), self.red_job("checks", 9102)],
+                self.PREV: [{**main_job("checks", "success"), "status": "in_progress", "conclusion": None}]}
+        self.judged(self.UNKNOWN, self.NEW_SHA, runs, jobs, job_logs={9102: self.NEW_LOG})
+
+    def test_a_revert_whose_own_push_run_is_green_reads_cleared(self):
+        """A revert of the breaking merge whose own push run is green, with its checks run: the red clears."""
+        runs = [main_run(self.NOW, "success", sha=self.REVERT_SHA, message=self.REVERT_MESSAGE), main_run(self.PREV, "failure", sha=self.OLD_SHA)]
+        jobs = {self.NOW: [main_job("scope", "success"), main_job("checks", "success", 20), main_job("all-jobs-passed", "skipped"), main_job("ci-done", "skipped")],
+                self.PREV: [self.red_job("checks", 9101)]}
+        self.judged(self.CLEARED, self.REVERT_SHA, runs, jobs, job_logs={9101: self.FLAKY_LOG})
+
+    def test_a_revert_whose_own_push_run_is_red_reads_did_not_clear(self):
+        """A revert whose own push run is red with the test the breaking merge left: it did not clear. The revert is not blamed as a new break."""
+        runs = [main_run(self.NOW, "failure", sha=self.REVERT_SHA, message=self.REVERT_MESSAGE), main_run(self.PREV, "failure", sha=self.OLD_SHA)]
+        jobs = {self.NOW: [main_job("scope", "success"), self.red_job("checks", 9102)], self.PREV: [self.red_job("checks", 9101)]}
+        self.judged(self.DID_NOT_CLEAR, self.REVERT_SHA, runs, jobs, job_logs={9101: self.FLAKY_LOG, 9102: self.FLAKY_LOG})
+
+    def test_a_failed_jobs_read_of_the_judged_run_is_unknown(self):
+        """A jobs read that fails is unknown. It never reads as a first red or as green."""
+        runs = [main_run(self.NOW, "failure", sha=self.NEW_SHA), main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.NOW: [main_job("scope", "success"), self.red_job("checks", 9102)], self.PREV: [main_job("checks", "success", 20)]}
+        self.judged(self.UNKNOWN, self.NEW_SHA, runs, jobs, jobs_fail_of={self.NOW: "HTTP 502 Bad Gateway"})
+
+
 class ProtectionHost(merge.Host):
     """Host whose reads of main answer as GitHub does with no ruleset (see github_read): `contexts` (a list) is the classic required checks,
     None for no classic protection (a 404). No other gh call is answered."""
