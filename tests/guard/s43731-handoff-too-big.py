@@ -1,5 +1,5 @@
 # section 43731
-# The handoff size limit (decision precompact-handoff, the owner's 10000-token ruling, 19:07 CST Nov 23, 2026). A write
+# The handoff size limit (decision precompact-handoff, 10000 estimated tokens, set 19:07 CST Nov 23, 2026). A write
 # that leaves a session handoff over the limit is refused by handoff-too-big. The estimate is ceil(UTF-8 bytes / 3.5), so
 # 35000 bytes is the last size that passes. The fixtures keep all six sections, so handoff-sections allows them and only
 # the size is judged.
