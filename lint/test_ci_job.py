@@ -460,12 +460,29 @@ class Unknowns(Job):
         self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "a PASS run with HANG mid-line in a log line reads otherwise: " + out)
 
-    def test_a_hang_shaped_line_in_a_fail_run_is_no_hang(self):  # the control on rc 124: only a hang stop's exit makes its HANG line the verdict
+    def test_a_hang_shaped_line_in_a_fail_run_on_rc_124_is_no_hang(self):  # a step that exits 124 by itself and prints a HANG-shaped line reads its FAIL, not a hang
         rc, lines, out = self.run_job(step("bad", "true"), launch=self.verdict_stub(
-            "import sys\nprint('HANG case-x printed by the step')\nprint('FAIL - case name')\nsys.exit(1)\n"))
+            "import sys\nprint('HANG case-x printed by the step')\nprint('FAIL - case name')\nsys.exit(124)\n"))
         self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
-        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "a FAIL run with a HANG-shaped line reads it as a hang: " + out)
-        self.assertIn("FAIL - case name", step_line(lines, "bad"), "a FAIL run with a HANG-shaped line reads that line as its verdict: " + out)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "a FAIL run on rc 124 with a HANG-shaped line reads it as a hang: " + out)
+        self.assertIn("FAIL - case name", step_line(lines, "bad"), "a FAIL run on rc 124 with a HANG-shaped line reads that line as its verdict: " + out)
+
+    def test_a_hang_line_off_verdicts_form_after_a_fail_line_on_rc_124_is_no_hang(self):  # the form check: verdict's line ends `, stopped (...) log=...`
+        near_miss = "HANG hang-probe rc=124 no output or CPU for 60s"  # verdict's line cut short before `, stopped (...) log=...`
+        rc, lines, out = self.run_job(step("bad", "true"), launch=self.verdict_stub(
+            "import sys\nprint('FAIL - case name')\nprint(%r)\nsys.exit(124)\n" % near_miss))
+        self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "a FAIL run on rc 124 with a HANG line off verdict's form reads it as a hang: " + out)
+        self.assertIn("FAIL - case name", step_line(lines, "bad"), "a FAIL run on rc 124 with a HANG line off verdict's form reads that HANG line as its verdict: " + out)
+
+    def test_a_hang_stop_line_is_verdicts_own_line_beside_a_hang_shaped_log_line_ahead_of_it(self):  # only verdict's form is its hang line; the ahead-of order is one bin/verdict does not print today
+        rc, lines, out = self.run_job(step("hang-probe", "true"), launch=self.verdict_stub(
+            self.hung_verdict(before=("HANG case-x printed by the step",))))
+        self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
+        self.assertEqual(by_step(lines), {"hang-probe": "unknown"}, "a hang stop with a HANG-shaped log line ahead of its line does not read unknown: " + out)
+        self.assertEqual(rc, 2, "a hang stop with a HANG-shaped log line ahead of its line does not exit 2: " + out)
+        self.assertIn(self.HANG_LINE, step_line(lines, "hang-probe"),
+                      "the step line does not carry verdict's HANG line: a HANG-shaped log line ahead of it was read as the hang\n" + out)
 
     def test_a_timeout_exit_with_its_own_fail_line_reads_that_fail(self):  # the control: no HANG line, so verdict's own FAIL line is the verdict
         rc, lines, out = self.run_job(step("slow", "true"), launch=self.verdict_stub(
