@@ -4697,8 +4697,12 @@ class ScopeLint(Job):
     def ran(self, flag):
         return os.path.exists(os.path.join(self.root, "ran-%s.txt" % flag))
 
-    def lint(self, *steps):
-        return self.run_job(*steps, args=("--lint", "--base", "main"))
+    def lint(self, *steps, extra=()):
+        return self.run_job(*steps, args=("--lint", "--base", "main"), extra=extra)
+
+    def marker_text(self, name):
+        with open(os.path.join(self.root, name), encoding="utf-8") as f:
+            return f.read()
 
     def test_a_docs_notes_change_skips_a_step_gated_on_code(self):
         self.commit_base(self.real_script())
@@ -4924,6 +4928,182 @@ class ScopeLint(Job):
         self.assert_code_on("a hooks/guard.py change")
         rc, lines, out = self.lint(SuiteSteps.LINT_STEP, self.NODE_STEP)
         self.assert_not_run_in_ci(rc, lines, "scanner-traps", "test_scanner_traps.mjs", out)
+
+    # F1-F4. The env-prefixed export step and the windows step are the real checks.yml lines; the suites they run are fixtures.
+    # The macOS job, the ungated steps and the three suite line forms are fixture-only: no real step has them today.
+    EXPORT_PATH = "skills/waiting-page/test_export_page.py"  # the real suite's path: it opens export_page.py beside it
+    EXPORT_SUBJECT = "skills/waiting-page/export_page.py"  # ci-scope.sh turns shoot on for this file, not for the suite file alone
+    EXPORT_STEP = checks_step("Waiting page export fixture suite", job="checks-shoot")  # NODE_PATH=... python3 <the suite>
+    PS_PATH = "install-set.test.ps1"  # the real Windows suite at the repo root; ci-scope.sh turns pointer_windows on for it
+    WINDOWS_STEP = checks_step("Install set test, Windows PowerShell 5.1", job="pointer-windows")  # gated on pointer_windows and code
+    WINDOWS_JOB = [("pointer-windows", "windows-latest", [WINDOWS_STEP])]
+    MACOS_JOB = [("macos-fixture", "macos-latest", [step("macOS suite fixture", "sh hooks/test_install_src.sh",
+                                                         **{"if": "${{ needs.scope.outputs.code == 'true' }}"})])]
+    CODE_IF = "${{ needs.scope.outputs.code == 'true' }}"
+    UNGATED = (("sh", "sh hooks/test_install_src.sh", "test_install_src.sh", "install-src"),
+               ("node", "node lint/test_scanner_traps.mjs", "test_scanner_traps.mjs", "scanner-traps"))  # label, run, suite, marker
+    SUITE_FORMS = ("cd hooks; sh test_install_src.sh", 'sh "$REPO_ROOT/hooks/test_install_src.sh"', "sh hooks/test_install_src.sh;")
+    SUITE_TOUCH = "touch ran-install-src.txt\necho changed\n"  # the install suite file, changed
+
+    @staticmethod
+    def export_suite(code):
+        """A fixture at the real suite's path. It opens export_page.py beside it, writes its NODE_PATH to a marker, then exits `code`."""
+        return ("import os\nimport sys\nHERE = os.path.dirname(os.path.abspath(__file__))\n"
+                "with open(os.path.join(HERE, 'export_page.py'), encoding='utf-8') as f:\n    f.read()\n"
+                "with open('ran-export-page.txt', 'w', encoding='utf-8') as f:\n    f.write(os.environ.get('NODE_PATH', ''))\n"
+                "sys.exit(%d)\n") % code
+
+    def runner_note(self, lines, suite, runner, out):
+        """The one `not run` line that names `suite` (assert_not_run_in_ci has counted it) must also name `runner`."""
+        note = [ln for ln in lines if NOT_RUN.match(ln) and suite in ln and "runs in CI" in ln]
+        self.assertIn(runner, note[0] if note else "", "the not-run line for %s does not name its runner %s\n%s" % (suite, runner, out))
+
+    def assert_suite_step_reads_unknown(self, run):
+        """The change touches the install suite file, and the step runs `run` gated on code: the change reaches the suite, so lint
+        reads unknown on a line that names it, and exits 2."""
+        self.base_with_suites()
+        self.lane({self.INSTALL_SUITE[0]: self.SUITE_TOUCH})
+        self.assert_code_on("a change to the install suite file")
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, step("Suite step", run, **{"if": self.CODE_IF}))
+        self.assert_unknown_names(rc, lines, "install-src", "test_install_src.sh", out)
+
+    def assert_suite_text_is_no_step(self, run, label):
+        """A step whose run: text only names the suite is no suite step: the change to the suite reads no unknown, no line says the
+        suite runs in CI, and lint passes."""
+        self.base_with_suites()
+        self.lane({self.INSTALL_SUITE[0]: self.SUITE_TOUCH})
+        self.assert_code_on("a change to the install suite file")
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, step("Quoted suite note", run, **{"if": self.CODE_IF}))
+        self.assertEqual([ln for ln in lines if ln.startswith("unknown")], [], "%s reads unknown, though it runs no suite\n%s" % (label, out))
+        self.assertEqual([ln for ln in lines if "runs in CI" in ln], [],
+                         "%s prints a runs-in-CI line, though it runs no suite\n%s" % (label, out))
+        self.assertEqual(rc, 0, "%s makes --lint exit %d, and it runs no suite\n%s" % (label, rc, out))
+        self.assertFalse(self.ran("install-src"), "--lint ran the install suite from %s\n%s" % (label, out))
+
+    def test_an_env_prefixed_suite_step_runs_the_suite_the_change_picks_with_its_env(self):
+        """F1 (red now): a CI step `NODE_PATH=... python3 <folder>/test_*.py` is a picked suite like any other, so a change to its
+        subject runs it, with that env. The step is the real checks-shoot line; its suite is a fixture at the real path."""
+        self.base_with_suites({self.EXPORT_PATH: self.export_suite(0), self.EXPORT_SUBJECT: "V = 1\n"})
+        self.lane({self.EXPORT_SUBJECT: "V = 2\n"})
+        self.assertEqual(self.flags_of_script().get("shoot"), "true", "scope: the script does not turn shoot on for a change to export_page.py")
+        self.selector_picks(self.EXPORT_PATH)
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, self.EXPORT_STEP)
+        self.assertTrue(self.ran("export-page"), "--lint did not run the env-prefixed suite the selector picks\n" + out)
+        self.assertIn(".github/shoot/node_modules", self.marker_text("ran-export-page.txt"),
+                      "--lint ran the env-prefixed suite without its NODE_PATH\n" + out)
+        self.assertEqual((rc, by_step(lines).get("Waiting page export fixture suite")), (0, "PASS"), out)
+
+    def test_an_env_prefixed_suite_step_that_fails_makes_lint_fail(self):
+        """F1 (red now): the env-prefixed suite runs, and its exit 1 reads FAIL and exits 1. A not-run line never makes it pass."""
+        self.base_with_suites({self.EXPORT_PATH: self.export_suite(1), self.EXPORT_SUBJECT: "V = 1\n"})
+        self.lane({self.EXPORT_SUBJECT: "V = 2\n"})
+        self.selector_picks(self.EXPORT_PATH)
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, self.EXPORT_STEP)
+        self.assertTrue(self.ran("export-page"), "--lint did not run the env-prefixed suite the selector picks\n" + out)
+        self.assertEqual((rc, by_step(lines).get("Waiting page export fixture suite")), (1, "FAIL"), out)
+
+    def test_a_change_to_an_env_prefixed_suite_file_runs_it_and_does_not_read_unknown(self):
+        """F1 (red now): a change to the suite's own file runs it. Lint can run this suite, so an unknown line is a false alarm. The
+        change also touches export_page.py, because the script turns shoot on for that file and not for the suite file alone."""
+        self.base_with_suites({self.EXPORT_PATH: self.export_suite(0), self.EXPORT_SUBJECT: "V = 1\n"})
+        self.lane({self.EXPORT_PATH: self.export_suite(0) + "# changed\n", self.EXPORT_SUBJECT: "V = 2\n"})
+        self.assertEqual(self.flags_of_script().get("shoot"), "true", "scope: the script does not turn shoot on for this change")
+        self.selector_picks(self.EXPORT_PATH)
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, self.EXPORT_STEP)
+        self.assertEqual((rc, by_step(lines).get("Waiting page export fixture suite")), (0, "PASS"),
+                         "--lint reads the env-prefixed suite the change touches as unknown, though it can run it\n" + out)
+        self.assertTrue(self.ran("export-page"), "--lint did not run the env-prefixed suite the change touches\n" + out)
+
+    def test_a_change_that_turns_on_a_windows_suite_flag_prints_one_not_run_line_naming_its_runner(self):
+        """F2 (red now): a suite step on a windows-latest job, which the change's flag turns on. The change touches install.ps1, not the
+        suite file, so lint cannot run the suite here: one `not run` line names the suite and its runner, and lint still passes."""
+        self.base_with_suites({"install.ps1": "Write-Output 'install'\n", self.PS_PATH: "Write-Output 'set'\n"})
+        self.lane({"install.ps1": "Write-Output 'install v2'\n"})
+        self.assertEqual(self.flags_of_script().get("pointer_windows"), "true", "scope: the script does not turn pointer_windows on for install.ps1")
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, extra=self.WINDOWS_JOB)
+        self.assert_not_run_in_ci(rc, lines, "install-set", self.PS_PATH, out)
+        self.runner_note(lines, self.PS_PATH, "windows-latest", out)
+
+    def test_a_change_to_the_windows_suite_file_makes_lint_unknown_naming_it(self):
+        """F2 (red now): self-reach on a non-ubuntu job. The change touches the suite's own file, which lint cannot run here, so lint
+        reads unknown on a line that names the suite and exits 2."""
+        self.base_with_suites({self.PS_PATH: "Write-Output 'set'\n"})
+        self.lane({self.PS_PATH: "Write-Output 'set v2'\n"})
+        self.assertEqual(self.flags_of_script().get("pointer_windows"), "true", "scope: the script does not turn pointer_windows on for the suite file")
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, extra=self.WINDOWS_JOB)
+        self.assert_unknown_names(rc, lines, "install-set", self.PS_PATH, out)
+
+    def test_a_docs_change_prints_no_line_for_a_windows_suite_whose_flag_is_off(self):  # the control: a flag that is off prints nothing
+        self.base_with_suites({"install.ps1": "Write-Output 'install'\n", self.PS_PATH: "Write-Output 'set'\n"})
+        self.lane({"docs/notes/x.md": "a note\n"})
+        self.assertEqual(self.flags_of_script().get("pointer_windows"), "false", "scope: the script turns pointer_windows on for a docs-only diff")
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, extra=self.WINDOWS_JOB)
+        self.assertEqual((rc, by_step(lines).get("Python lint")), (0, "PASS"), out)
+        self.assertEqual([ln for ln in lines if self.PS_PATH in ln], [], "a docs-only diff prints a line for the windows suite\n" + out)
+
+    def test_a_code_change_prints_one_not_run_line_naming_a_macos_suite_runner(self):
+        """F2 (red now): a suite step on a macos-latest job, gated on code, which a hooks change turns on. Fixture-only: no real macOS
+        step has this form."""
+        self.base_with_suites()
+        self.lane({"hooks/guard.py": "x = 1\n"})
+        self.assert_code_on("a hooks/guard.py change")
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, extra=self.MACOS_JOB)
+        self.assert_not_run_in_ci(rc, lines, "install-src", "test_install_src.sh", out)
+        self.runner_note(lines, "test_install_src.sh", "macos-latest", out)
+
+    def test_a_code_change_prints_one_not_run_line_for_an_ungated_sh_or_node_suite_step(self):
+        """F2 (red now): a sh or node suite step whose if: names no scope flag. On a code change lint cannot run it, so one `not run`
+        line names it: never silent. Fixture-only: no real step has these forms without a flag."""
+        self.base_with_suites({self.NODE_SUITE[0]: self.NODE_SUITE[1]})
+        self.lane({"hooks/guard.py": "x = 1\n"})
+        self.assert_code_on("a hooks/guard.py change")
+        for label, run, suite, marker in self.UNGATED:
+            with self.subTest(step=label):
+                rc, lines, out = self.lint(SuiteSteps.LINT_STEP, step("Ungated %s suite" % label, run))
+                self.assert_not_run_in_ci(rc, lines, marker, suite, out)
+
+    def test_a_docs_change_prints_no_line_for_an_ungated_sh_or_node_suite_step(self):  # the control: lint stays PASS
+        """The docs-only control for an ungated suite step: no new line names the suite, and lint passes, so the rule cannot turn every
+        docs lane unknown."""
+        self.base_with_suites({self.NODE_SUITE[0]: self.NODE_SUITE[1]})
+        self.lane({"docs/notes/x.md": "a note\n"})
+        self.assertEqual(self.flags_of_script()["code"], "false", "scope: the script does not give a docs-only diff code false")
+        for label, run, suite, marker in self.UNGATED:
+            with self.subTest(step=label):
+                rc, lines, out = self.lint(SuiteSteps.LINT_STEP, step("Ungated %s suite" % label, run))
+                self.assertEqual((rc, by_step(lines).get("Python lint")), (0, "PASS"), out)
+                self.assertEqual([ln for ln in lines if suite in ln], [], "a docs-only diff prints a line that names %s\n%s" % (suite, out))
+                self.assertFalse(self.ran(marker), "--lint ran %s for a docs-only diff\n%s" % (suite, out))
+
+    def test_a_change_to_the_install_suite_reads_unknown_in_each_suite_line_form(self):
+        """F3 (red now): self-reach finds the suite in each line form, not only `sh hooks/test_install_src.sh`: after a `cd`, behind a
+        quoted `$REPO_ROOT` path, and with a trailing `;`. Fixture-only: no real step runs these forms; checks.yml's install step is
+        `bin/verdict sh hooks/test_install_src.sh`."""
+        self.base_with_suites()
+        self.lane({self.INSTALL_SUITE[0]: self.SUITE_TOUCH})
+        self.assert_code_on("a change to the install suite file")
+        for form in self.SUITE_FORMS:
+            with self.subTest(form=form):
+                rc, lines, out = self.lint(SuiteSteps.LINT_STEP, step("Install suite form", form, **{"if": self.CODE_IF}))
+                self.assert_unknown_names(rc, lines, "install-src", "test_install_src.sh", out)
+
+    def test_a_step_that_only_quotes_a_suite_is_not_a_suite_step(self):
+        """F4 (red now): `echo "next: sh hooks/test_install_src.sh"` quotes the suite and runs none of it. A change to the suite reads
+        no unknown for it and prints no runs-in-CI line for it."""
+        self.assert_suite_text_is_no_step('echo "next: sh hooks/test_install_src.sh"\necho ok', "an echo that quotes the suite")
+
+    def test_a_comment_that_names_a_suite_is_not_a_suite_step(self):  # green now: run_lines drops comment lines; this pins it
+        """F4: a `#` comment line that names the suite runs nothing. A change to the suite reads no unknown for it."""
+        self.assert_suite_text_is_no_step("# sh hooks/test_install_src.sh runs in CI\necho ok", "a comment that names the suite")
+
+    def test_a_suite_after_a_comment_opener_inside_a_string_is_still_a_suite_step(self):  # the control: a '#' in a quote does not hide it
+        self.assert_suite_step_reads_unknown('echo "# banner" && sh hooks/test_install_src.sh\necho ok')
+
+    def test_a_suite_after_a_lone_quote_in_text_is_still_a_suite_step(self):  # the control: a lone quote does not hide it
+        self.assert_suite_step_reads_unknown("echo it's here\nsh hooks/test_install_src.sh")
+
+    def test_a_suite_line_in_a_multi_line_run_block_with_other_commands_is_still_a_suite_step(self):  # the control
+        self.assert_suite_step_reads_unknown("echo prep\nsh hooks/test_install_src.sh")
 
 
 if __name__ == "__main__":
