@@ -1,6 +1,6 @@
 # Lane lint passes over a far shell or Node suite until CI runs
 
-**What.** A shell or Node suite that a change breaks is still passed over by lane lint when the change touches neither the suite nor a path it names. Lane lint prints a `not run` line for it, not unknown, until CI runs. Claude meets it on any code change that merges on a lint PASS before its CI run ends.
+**What.** A shell or Node suite that a change breaks is still passed over by lane lint when the change touches neither the suite nor a path it names. Until CI runs, lane lint prints a `not run` line for it and moves on, so the change still reads PASS. Claude meets it on any code change that merges on a lint PASS before its CI run ends.
 
 **Where.** `bin/ci-job`, the `not run` line for a scope-gated suite (`flag_suite`, `reached_suites`).
 
