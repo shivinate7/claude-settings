@@ -382,8 +382,8 @@ class BaseRun(unittest.TestCase):
         self.assertIsNotNone(re.match(PASSES_ON_BASE, rest), "the second run's row does not say `passes on <sha9>`: %r" % rest)
 
     def test_history_check_never_claims_a_base_result_it_did_not_read(self):
-        """The silent undo check reads history, and a copy with no .git cannot show it. Its row may name a pass on the base or a base not read,
-        never a fail on it: a copy that failed for want of history would be a wrong claim."""
+        """The silent undo check reads history, which a copy with no .git cannot show. Its row names the base as passing, or says the base
+        was not read. It never names a base fail, since that would come from the copy's missing history."""
         case = new_case()
         repo, base = make_change(case, ["Silent undo check"])
         rc, lines = cheap_in(repo, case)
