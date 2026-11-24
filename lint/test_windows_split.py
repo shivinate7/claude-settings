@@ -1124,9 +1124,14 @@ def run_lines(st):
     return [ln.strip() for ln in (run_body(st) or "").split("\n") if ln.strip()]
 
 
+# The hang stop wraps a step's command in bin/verdict (decision hang-stop). A step that runs its command through it still runs it.
+VERDICT_RUN = "bin/verdict "
+
+
 def split_homes(text, jobs, cmd):
-    """(job, step) for each step of the named jobs that runs `cmd` on one of its lines."""
-    return [(job, st) for job in jobs for st in step_blocks(job_block(text, job)) if cmd in run_lines(st)]
+    """(job, step) for each step of the named jobs that runs `cmd` on one of its lines, bare or through VERDICT_RUN."""
+    return [(job, st) for job in jobs for st in step_blocks(job_block(text, job))
+            if cmd in run_lines(st) or VERDICT_RUN + cmd in run_lines(st)]
 
 
 def pin_problems(name, st, cmd, want_if, want_shell, want_env=None, keep_running=False):
