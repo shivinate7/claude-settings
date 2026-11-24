@@ -149,6 +149,11 @@ def reaped_seconds(pid):
         return 0.0
 
 
+def reaped_readable():
+    """True where reaped_seconds can read (the /proc stat file exists), so a tree's CPU counts the short children it has waited for."""
+    return os.path.exists("/proc/self/stat")
+
+
 def tree_cpu(table, pid, own=False, reaped=None):
     """{pid: CPU seconds} for every process under pid in a proc_table, each with the time of the children it has reaped
     (reaped_seconds; `reaped(pid)` stands in for it, a caller's own seam). pid's own time is left out unless `own`, its reaped

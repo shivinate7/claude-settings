@@ -7,7 +7,7 @@
 # N is the larger of two counts: the sum of the runner summaries in the run (`skipped=N`, `N skipped`, node's `# skipped N` and `ℹ skipped N`), and the lines that start `SKIP `, `SKIPPED` or `SKIP:`. A summary line `SKIP: N check` is not one of them, so it never counts on top of its cases. XCTest `Executed N tests, with M tests skipped` lines nest (class, bundle, All tests), so their max is one term of the sum. Colour codes (SGR) are ignored. A count of 10 or more digits reads as 10**9. A count of 0 is PASS. Why: a test that always skips must not read as a pass.
 # Exit 0 is also FAIL (`cut`) for a pytest argv (`pytest`, `py.test`, `python -m pytest`, also through `env`, `uv run`, `uvx` and `bash -c`) with `-q` or a line-start session header, and no line-start summary: the run stopped early. A `-qq` run (no summary line) is complete when a line of progress chars ends `[100%]` (any padding, colour codes ignored), or, with `--co`, when it prints a `<file>: <count>` line. A `bash -c` script is read by its own scanner: a newline, `;`, `&`, `|` or `do`/`then`/`else`/`{`/`!` starts a command, a `#` starts a comment only at a word start, and heredoc text is no command.
 # A run with no $VERDICT_LOG deletes verdict-*.log files older than 1 day from the temp folder: regular files whose first line is our own header only; errors skipped.
-# $VERDICT_HANG_SECONDS=N (off when unset, and on Windows): a child with no new output byte and no CPU advance in any process under it for N s is stopped: print its process tree and the log tail, end the tree (TERM, then KILL), print one `HANG ...` line, exit 124. It reads the process table (hooks/_nowindow.py) only on a silent wake, never while the child prints (decision hang-stop).
+# $VERDICT_HANG_SECONDS=N (off when unset, and on Windows): a child with no new output byte and no CPU advance in any process under it for N s is stopped (where reaped children's CPU cannot be read, as on macOS, a process not seen at the first silent wake also counts as work, since a step that works through short children shows only as new pids): print its process tree and the log tail, end the tree (TERM, then KILL), print one `HANG ...` line, exit 124. It reads the process table (hooks/_nowindow.py) only on a silent wake, never while the child prints (decision hang-stop).
 # Killed by signal N: exit 128+N. Ctrl-C: exit 130. Windows: bin/verdict.cmd.
 import os, re, shutil, signal, subprocess, sys, tempfile, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
@@ -162,8 +162,9 @@ def hang_check(proc, f, w, n, now):  # one wake with the child still running: th
     if size != w["seen"]: w["seen"], w["quiet"], w["base"] = size, None, None; return None
     if w["quiet"] is not None and now - w["quiet"] < n: return None
     sample = hang_sample(proc)  # the first silent wake takes the baseline; a later one, at least N after silence began, compares to it
-    # a pid not in the baseline is work too: ps time leaves out reaped children (macOS), so a step that works through short children shows only as new pids
-    stop = sample is not None and w["base"] is not None and not _nowindow.cpu_advanced(w["base"], sample[1]) and set(sample[1]) <= set(w["base"])
+    # where reaped CPU cannot be read (macOS), a pid not in the baseline is work too: ps time leaves out reaped children, so a step that works through short children shows only as new pids
+    stop = sample is not None and w["base"] is not None and not _nowindow.cpu_advanced(w["base"], sample[1])
+    if stop and not _nowindow.reaped_readable(): stop = set(sample[1]) <= set(w["base"])
     w["quiet"], w["base"] = now, sample[1] if sample else None  # CPU that advanced starts the count again
     return sample if stop else None
 def hang_stop(proc, f, start, sample):  # print the child's tree and the log tail, then end the tree: TERM, then KILL. -> the ended tree's pids
