@@ -18,7 +18,11 @@ was written has no zone: `when` is its naked time and `at` is None, never assume
 count of old lines that could fall in it under some zone, for the batch pace read (window()).
 --rule narrows --between to one rule id (the pace read uses load-brake).
 In a cloud session (CLAUDE_CODE_REMOTE=true) that read prints `n/a (cloud)` and no count.
-The brake guards the owner's own machine."""
+The brake guards the owner's own machine.
+--outcomes prints one row per rule: its refusals (deny and ask lines), the false-alarm and right claims
+sessions wrote with bin/guard-outcome (`outcome` lines), and the false-alarm share of the refusals. A
+claim is a session's word, never checked, and the report says so. It reads the --between window, else the
+last --days days. An `outcome` line never counts in the refuse, ask or noted counts."""
 import argparse
 import os
 import re
@@ -37,6 +41,9 @@ FIRST = "first line"  # the --all-rules column: YYYY-MM-DD of the rule's first l
 COMBINED = re.compile(r"STE\d+(,STE\d+)+")  # one id the removed STE guard wrote for several codes found at once
 UNKNOWN = "unknown session"
 BRAKE_RULE = "load-brake"
+OUTCOME = "outcome"  # the decision bin/guard-outcome writes; the claim is the first word of `matched`
+CLAIM_FALSE, CLAIM_RIGHT = "false-alarm", "right"
+REFUSALS = ("deny", "ask")
 BY_SESSION_ROWS = 200
 Row = namedtuple("Row", "line when tool decision rule matched session at", defaults=(None,))
 MAX_ZONE_HOURS = 14  # the widest UTC offset in use is +14:00, the narrowest -12:00
@@ -127,6 +134,8 @@ def summarize(lines, days, now, session=None):
         elif day not in out["per_day"]:
             continue
         decision, rule, label = row.decision, row.rule, row.session
+        if decision == OUTCOME:
+            continue  # a claim about a refusal is no refusal, and no verdict to show verbatim
         if session is not None and label != session:
             continue
         if decision == "fixed":
@@ -186,6 +195,31 @@ def render(s, by_session=False, ids=None):
     return "\n".join(out)
 
 
+def outcome_rows(rows):
+    """Per rule, [refusals, false-alarm claims, right claims] over the rows given."""
+    counts = {}
+    for row in rows:
+        if row.decision in REFUSALS:
+            counts.setdefault(row.rule, [0, 0, 0])[0] += 1
+        elif row.decision == OUTCOME:
+            claim = row.matched.split(" ", 1)[0]
+            if claim in (CLAIM_FALSE, CLAIM_RIGHT):
+                counts.setdefault(row.rule, [0, 0, 0])[1 if claim == CLAIM_FALSE else 2] += 1
+    return counts
+
+
+def render_outcomes(rows):
+    """The --outcomes report: a line saying the claims are unchecked, then a table sorted by claimed
+    false alarms, most first. The share is false-alarm claims over refusals; `n/a` for a rule with no refusal."""
+    counts = sorted(outcome_rows(rows).items(), key=lambda kv: (-kv[1][1], kv[0]))
+    out = ["Claims are unchecked: each is the word of the session that wrote it, not a verified fact.", "",
+           "| rule | refusals | false alarms | right | false-alarm share |", "|---|---|---|---|---|"]
+    for rule, (refused, false_alarm, right) in counts:
+        share = "%d%%" % round(100 * false_alarm / refused) if refused else "n/a"
+        out.append("| %s | %d | %d | %d | %s |" % (rule, refused, false_alarm, right, share))
+    return "\n".join(out)
+
+
 def days_arg(text):
     if text == "all":
         return None
@@ -210,7 +244,9 @@ def main(argv):
     ap.add_argument("--by-session", action="store_true", help="add counts per session")
     ap.add_argument("--between", nargs=2, metavar=("START", "END"), type=datetime.fromisoformat,
                     help="print the rows inside this window (aware ISO 8601 times) and the old-line unknown count")
-    ap.add_argument("--rule", help="with --between: keep one rule id")
+    ap.add_argument("--rule", help="with --between or --outcomes: keep one rule id")
+    ap.add_argument("--outcomes", action="store_true",
+                    help="print per rule the refusals, the claimed false alarms and right claims, and the false-alarm share")
     args = ap.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):  # absent when stdout is redirected to StringIO
         sys.stdout.reconfigure(errors="replace")
@@ -226,9 +262,18 @@ def main(argv):
         ids = rule_audit.emitted_rule_ids()
     try:
         with open(args.log, encoding="utf-8", errors="replace") as handle:
+            if args.outcomes:
+                if args.between:
+                    rows, _ = window(handle, args.between[0], args.between[1], args.rule)
+                else:  # the last --days days by the reader's clock; "all" keeps every line
+                    since = None if args.days is None else datetime.now() - timedelta(days=args.days)
+                    rows = [r for r in map(parse_line, handle) if r is not None
+                            and (since is None or r.when >= since) and args.rule in (None, r.rule)]
+                print(render_outcomes(rows))
+                return 0
             if args.between:
                 rows, unknown = window(handle, args.between[0], args.between[1], args.rule)
-                print("\n".join(row.line for row in rows))
+                print("\n".join(row.line for row in rows if row.decision != OUTCOME))  # the pace read lists verdicts, not claims
                 print("unknown (old lines with no zone that could fall inside): %d" % unknown)
                 return 0
             print(render(summarize(handle, args.days, datetime.now(), args.session), args.by_session, ids))
