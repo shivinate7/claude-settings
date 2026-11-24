@@ -749,10 +749,32 @@ def step_rest(st, scope_condition):
     return scope_condition_rest(step_if(st), scope_condition)
 
 
-def scope_condition_property_problems(name, scope_condition, flag=None):
-    """G keeps the scope condition's rules: it reads the job's own scope flag, it is one disjunction (a `&&` in it means a step's E
-    was not parenthesised, so E runs inside the scope condition), it is true on push, schedule and dispatch with every flag false,
-    true on pull_request with every flag true, and false on pull_request with every flag false."""
+LINUX_RULE_EVENTS = ("push", "schedule", "workflow_dispatch", "pull_request")
+
+
+def is_linux(job):
+    """A Linux job: its runs-on starts with ubuntu, as scope_problems reads the scope job's own runner."""
+    return (job.get("os") or "").startswith("ubuntu")
+
+
+def linux_flag_problems(name, scope_condition):
+    """A Linux job's scope condition is true exactly when the flags say so: with every flag false it skips, with every flag true it
+    runs, on every event (PUSH_RULING)."""
+    problems = []
+    for ev in LINUX_RULE_EVENTS:
+        for flag_value in ("false", "true"):
+            got = eval_if(scope_condition, ev, flag_value)
+            if got != (flag_value == "true"):
+                verb = "runs" if got else "skips"
+                problems.append(f"{name}: scope condition {verb} on {ev} with every flag {flag_value}: {scope_condition} ({PUSH_RULING})")
+    return problems
+
+
+def scope_condition_property_problems(name, scope_condition, job, flag=None):
+    """G keeps the scope condition's rules: it reads the job's own scope flag, and it is one disjunction (a `&&` in it means a step's E
+    was not parenthesised, so E runs inside the scope condition). A Linux job's condition follows the flags exactly (linux_flag_problems).
+    Any other job's condition is true on push, schedule and dispatch with every flag false, true on pull_request with every flag true,
+    and false on pull_request with every flag false."""
     own = flag or name.replace("-", "_")
     problems = []
     if f"needs.scope.outputs.{own}" not in scope_condition:
@@ -760,13 +782,16 @@ def scope_condition_property_problems(name, scope_condition, flag=None):
     if "&&" in scope_condition:
         problems.append(f"{name}: scope condition has &&, so a step's condition is not parenthesised: {scope_condition}")
     try:
-        for ev in ("push", "schedule", "workflow_dispatch"):
-            if not eval_if(scope_condition, ev, "false"):
-                problems.append(f"{name}: scope condition skips on {ev}: {scope_condition}")
-        if not eval_if(scope_condition, "pull_request", "true"):
-            problems.append(f"{name}: scope condition skips on pull_request with every flag true: {scope_condition}")
-        if eval_if(scope_condition, "pull_request", "false"):
-            problems.append(f"{name}: scope condition runs on pull_request with every flag false: {scope_condition}")
+        if is_linux(job):
+            problems += linux_flag_problems(name, scope_condition)
+        else:
+            for ev in ("push", "schedule", "workflow_dispatch"):
+                if not eval_if(scope_condition, ev, "false"):
+                    problems.append(f"{name}: scope condition skips on {ev}: {scope_condition}")
+            if not eval_if(scope_condition, "pull_request", "true"):
+                problems.append(f"{name}: scope condition skips on pull_request with every flag true: {scope_condition}")
+            if eval_if(scope_condition, "pull_request", "false"):
+                problems.append(f"{name}: scope condition runs on pull_request with every flag false: {scope_condition}")
     except Exception as ex:
         problems.append(f"{name}: scope condition is not in the allowed form ({ex!r}): {scope_condition}")
     return problems
@@ -854,7 +879,7 @@ def sweep_job_problems(name, job, flag=None):
     if len(conds) != 1:
         return problems + [f"{name}: its suite steps carry no one scope condition (none carries one, or they disagree)"]
     scope_condition = conds.pop()
-    problems += scope_condition_property_problems(name, scope_condition, flag)
+    problems += scope_condition_property_problems(name, scope_condition, job, flag)
     for st in suite:
         if scope_condition_rest(step_if(st), scope_condition) is None:
             problems.append(f"{name}: step {st.get('name') or st.get('run')} lacks the scope condition: {step_if(st)}")
@@ -900,7 +925,7 @@ def job_check_problems(name, job, flag=None):
     scope_condition = read_scope_condition(job)
     if scope_condition is None:
         return problems + [f"{name}: its steps carry no one scope condition (none carries one, or they disagree)"]
-    return problems + scope_condition_property_problems(name, scope_condition, flag) + scope_condition_step_problems(name, job, scope_condition)
+    return problems + scope_condition_property_problems(name, scope_condition, job, flag) + scope_condition_step_problems(name, job, scope_condition)
 
 
 def scope_needs_of(text):
@@ -1379,7 +1404,7 @@ class WindowsSplit(unittest.TestCase):
         self.assertEqual(self.text.count(job), 1, "the fixture: checks-guard-2's block appears once in checks.yml")
         self.assertEqual(job.count(LINUX_GUARD_IF), len(step_blocks(job)),
                          "the fixture: every step of checks-guard-2 carries LINUX_GUARD_IF")
-        swapped = job.replace(LINUX_GUARD_IF, "needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request'")
+        swapped = job.replace(LINUX_GUARD_IF, "needs.scope.outputs.checks_macos == 'true'")
         problems = [p for p in scope_problems(self.text.replace(job, swapped, 1)) if p.startswith("checks-guard-2:")]
         self.assertEqual(len(problems), 1, f"checks-guard-2 problems: {problems}")
         self.assertIn("does not read needs.scope.outputs.checks_guard", problems[0])
