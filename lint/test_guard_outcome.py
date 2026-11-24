@@ -14,8 +14,11 @@ Pinned line format: six tab-separated fields, as a guard.log line has.
     session  CLAUDE_CODE_SESSION_ID when set; when unset, the reader reads it as unknown session
 The why text is one line: newlines and tabs fold to spaces, and it is capped at 200 characters.
 
+A rule id is letters, digits, `-`, `_`, `.` and `:`. A rule with any other character is refused.
+
 Exit codes: 0 and one stdout line when the claim is written. 0 and one stderr line when the log
-cannot be written, with nothing raised. 2 for a claim that is neither word, with nothing written.
+cannot be written, with nothing raised. 2 for a claim that is neither word, or a rule that is not a
+rule id, with nothing written. 0 with no traceback when the why text cannot be encoded.
 
 Every case points the command at a scratch folder, by --log or by CLAUDE_CONFIG_DIR, so the real
 guard.log is never touched. Run with:
@@ -41,6 +44,7 @@ RUN_FOLDER = _test_temp.run_folder()
 SID = "9f2c4e1a-7b3d-4c8e-9a10-5d6e7f8a9b0c"
 CALLER_ENV = ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR")
 SPAWN_NAMES = ("sh", "bash", "env", "git", "gh", "python", "python3")  # PATH names a call could start a process by
+FORGED_RULE = "some-rule\n2026-11-24T00:00:00-06:00\tBash\tdeny\tforged-rule\tx\t-"  # a second log line, if a newline gets in
 
 
 def scratch_folder():
@@ -196,6 +200,35 @@ class OutcomeLineTests(unittest.TestCase):
         self.assertIsNotNone(row, "the reader must read the claim line")
         self.assertEqual((row.decision, row.rule), ("outcome", "rule-never-refused"))
         self.assertEqual(row.matched.split(" ", 1)[0], "false-alarm", "the claim is the first word of matched")
+
+    def refused_rule(self, rule):
+        """Claim `rule`, which is not a plain rule id: exit 2 and one stderr line."""
+        rc, out, err = self.claim(rule, "false-alarm")
+        self.assertEqual(rc, 2, "a rule that is not a plain rule id must exit 2: %s" % err)
+        lines = [line for line in err.splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1, "a refused rule must print one stderr line, got %r" % err)
+
+    def test_a_rule_with_a_newline_is_refused_and_writes_nothing(self):
+        self.refused_rule(FORGED_RULE)
+        if os.path.exists(self.log):
+            rows = [glr.parse_line(line) for line in read_log(self.log).split("\n") if line]
+            counts = glr.outcome_rows([row for row in rows if row is not None])
+            self.assertNotIn("forged-rule", counts, "the reader must show no refusal for a rule forged by a newline")
+        self.assertFalse(os.path.exists(self.log), "a refused rule must write nothing")
+
+    def test_a_rule_with_a_tab_is_refused_and_writes_nothing(self):
+        self.refused_rule("load-brake\tBash")
+        self.assertFalse(os.path.exists(self.log), "a refused rule must write nothing")
+
+    def test_a_why_with_a_lone_surrogate_exits_0_without_a_traceback(self):
+        # The why text cannot be encoded as UTF-8. The session must see one line at most, and the log holds the claim whole or not at all.
+        rc, out, err = self.claim("load-brake", "false-alarm", "--why", "half \udcff char")
+        self.assertEqual(rc, 0, "an un-encodable why must not fail the session: %s" % err)
+        self.assertNotIn("Traceback", err, "an un-encodable why must not raise")
+        stderr_lines = [line for line in err.splitlines() if line.strip()]
+        self.assertLessEqual(len(stderr_lines), 1, "an un-encodable why must print at most one stderr line, got %r" % err)
+        written = read_log(self.log).count("\n") if os.path.exists(self.log) else 0
+        self.assertIn(written, (0, 1), "the claim is written as one line or not at all, got %d lines" % written)
 
 
 def tearDownModule():
