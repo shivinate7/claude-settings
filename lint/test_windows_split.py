@@ -1130,6 +1130,7 @@ def run_lines(st):
 VERDICT_RUN = "bin/verdict "
 VERDICT_HANG_VAR = "VERDICT_HANG_SECONDS"
 VERDICT_FULL_LOG_VAR = "VERDICT_FULL_LOG"
+WRAP_ENV_VARS = (VERDICT_HANG_VAR, VERDICT_FULL_LOG_VAR)  # the env keys a wrapped step adds, and no other
 
 
 def split_homes(text, jobs, cmd):
@@ -1144,7 +1145,7 @@ def pin_problems(name, st, cmd, want_if, want_shell, want_env=None, keep_running
     raw_if = keep_running_off(step_key(st, "if")) if keep_running else step_key(st, "if")
     got_if, got_env = drop_condition(unwrap(raw_if)), step_env(st)
     if VERDICT_RUN + cmd in run_lines(st):
-        got_env = {k: v for k, v in got_env.items() if k != VERDICT_HANG_VAR}  # the wrap's only added key; every other key stays pinned
+        got_env = {k: v for k, v in got_env.items() if k not in WRAP_ENV_VARS}  # the wrap's two added keys; every other key stays pinned
     problems = []
     if got_if != want_if:
         problems.append(f"{name}: {cmd!r} if is {got_if!r}, want {want_if!r}")
