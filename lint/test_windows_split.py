@@ -1731,6 +1731,18 @@ class SplitJobs(unittest.TestCase):
         linux_conditioned = [n for n in SPEC_JOBS if n in LINUX_SPLIT]
         self.assertEqual(condition_problems(self.text, linux_conditioned), [], "a Linux split job's run step does not carry the records-only condition the spec gives it")
 
+    def test_the_guard_outcome_suite_is_pinned_in_the_linux_split(self):
+        # Named failure: the guard outcome suite has no LINUX_SUITES row, so the `if:` of its checks.yml step is not pinned.
+        self.assertTrue("python3 lint/test_guard_outcome.py" in LINUX_SUITES,
+                        "the guard outcome suite has no LINUX_SUITES row, so its if: in checks.yml is not pinned")
+        step = ("      - name: Guard outcome claims fixture suite\n"
+                "        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') }}\n"
+                "        run: python3 lint/test_guard_outcome.py\n")
+        self.assertIn(step, self.text, "the fixture: checks.yml runs the guard outcome suite with this if:")
+        drifted = self.text.replace(step, step.replace("needs.scope.outputs.code == 'true' || ", "", 1), 1)
+        self.assertTrue([p for p in linux_split_problems(drifted) if "lint/test_guard_outcome.py" in p],
+                        "an if: that drops the code scope from the guard outcome suite is not flagged")
+
     def test_every_lint_form_step_stays_in_the_checks_job(self):
         """`merge --lane-lint` runs the `checks` job by name (bin/ci-job checks --lint), so a lint step moved into another Linux
         split job would run in CI but never in lane lint. What counts as a lint step is bin/ci-job's one definition (is_lint),
