@@ -160,7 +160,7 @@ jobs:
           persist-credentials: false
 
       # The pull request's newest earlier fully green head, or an empty line (.github/scripts/green-head.sh). It lets ci-scope.sh skip the
-      # jobs for a push that changes docs/records.md alone. A failed read prints an empty line: unknown never skips. Two reads per pull_request run (unmeasured).
+      # jobs for a delta that changes only records or comments (docs/records.md, a record folder, a comment-only .py or .sh file). A failed read prints an empty line: unknown never skips. Two reads per pull_request run (unmeasured).
       - name: Find the newest earlier green head
         id: green
         if: ${{ github.event_name == 'pull_request' }}
@@ -2558,9 +2558,10 @@ jobs:
   # shard 1 here, the rest in checks-windows-guard-<i> (the shard switch in hooks/test_guard.py; lint/test_windows_split.py proves each
   # case runs once). A ready pull_request runs every step of the Windows guard jobs (the draft test stands in for scope there, which skips on a draft),
   # and a merge or rest suite step only with its job's own scope flag set (checks_windows_merge, checks_windows_rest, checks_windows_rest_2). The records-only skip (records_only_skip, from .github/scripts/ci-scope.sh) is a change to
-  # docs/records.md alone after a fully green head, on a pull request or a push. Every job but scope, nightly-skip, push-skip and
-  # all-jobs-passed starts nothing then: each job-level `if` reads it (lint/all_jobs_passed_rules.py allows that condition and no wider
-  # one on a needed job), and all-jobs-passed passes the skips (actions/all-jobs-passed/check.sh). The macOS jobs never start on a pull
+  # docs/records.md, a record folder or a comment-only .py or .sh file alone after a fully green head, on a pull request or a push. Every job but
+  # scope, nightly-skip, push-skip and all-jobs-passed starts nothing then, except a lint job on a delta its lints read (checks, checks-hooks, checks-rest end their
+  # job-level `if` in the delta clauses, and every suite step reads the skip): each job-level `if` reads it
+  # (lint/all_jobs_passed_rules.py allows that condition and no wider one on a needed job, but a lint job's named delta clauses), and all-jobs-passed passes the skips (actions/all-jobs-passed/check.sh). The macOS jobs never start on a pull
   # request or a push. A step-level `if` still starts a runner, so the skip sits on the job. R62 ("each suite runs once per batch, on
   # the batch PR"; "Part 3 keeps the full shards once per batch") puts the full suites on every ready pull_request; own-830-c, widened by
   # owner item 857 pick b (19:48 CST Nov 15), narrows that: the green head's run already proved what a records-only change moves.
