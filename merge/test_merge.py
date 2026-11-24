@@ -494,7 +494,7 @@ def copy_repos(t):
 
 class RepoTemplate(unittest.TestCase):
     """copy_repos gives each test a copy of the template build_repos makes once per process. A copy must hold what a fresh build holds: the
-    same refs and trees in origin and in each clone, and each clone's url at its own origin. A copy is private to its test."""
+    same refs and trees in origin and in each clone, and each clone's url at its own origin. A copy is private to its test, its origin included."""
 
     def copies(self):
         """-> (fresh, copied): one folder of this run built by build_repos, one filled by copy_repos."""
@@ -505,6 +505,13 @@ class RepoTemplate(unittest.TestCase):
         build_repos(fresh)
         self.assertTrue(copy_repos(copied), "copy_repos could not copy the template")
         return fresh, copied
+
+    def new_copy(self, root, name):
+        """-> root/name, filled by copy_repos: one more copy of the template, made the way copies() makes its copy."""
+        folder = os.path.join(root, name)
+        os.makedirs(folder)
+        self.assertTrue(copy_repos(folder), f"copy_repos could not copy the template for the copy {name}")
+        return folder
 
     def refs_and_trees(self, folder):
         """-> each repo's refs, one line per ref with the tree that ref names: origin.git, co and other. Commit ids differ between builds, trees do not."""
@@ -518,11 +525,21 @@ class RepoTemplate(unittest.TestCase):
         for name in ("co", "other"):
             url = sh(os.path.join(copied, name), "git", "config", "--get", "remote.origin.url")
             self.assertEqual(norm(url), norm(os.path.join(copied, "origin.git")), f"the copied clone {name} does not point at its own origin: {url}")
-        second = os.path.join(os.path.dirname(copied), "second")
-        os.makedirs(second)
-        self.assertTrue(copy_repos(second), "copy_repos could not copy the template for the second copy")
+        second = self.new_copy(os.path.dirname(copied), "second")
         put(os.path.join(copied, "co", "only-here.txt"), "one test's edit\n")
         self.assertFalse(os.path.exists(os.path.join(second, "co", "only-here.txt")), "an edit in one copy reached another copy")
+
+    def test_a_push_into_one_copys_origin_is_absent_from_the_origin_of_every_other_copy(self):
+        fresh, copied = self.copies()
+        root, ref = os.path.dirname(copied), "refs/heads/only-in-copied"
+        before = self.new_copy(root, "before")  # made before the write
+        sh(os.path.join(copied, "co"), "git", "push", "-q", "origin", "HEAD:" + ref)  # the write: a push from a clone to its own origin
+        after = self.new_copy(root, "after")  # made after the write: a write that reached the template shows here
+        def refs_of(folder):
+            return sh(os.path.join(folder, "origin.git"), "git", "for-each-ref", "--format=%(refname)", ref)
+        self.assertEqual(refs_of(copied), ref, "the push did not land in the origin of the copy it was pushed from")  # the scope first
+        for when, folder in (("before the write", before), ("after the write", after)):
+            self.assertEqual(refs_of(folder), "", f"a push into one copy's origin reached the origin of the copy made {when}")
 
 class Env(unittest.TestCase):
     def setUp(self):
