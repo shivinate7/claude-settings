@@ -26,11 +26,11 @@ Owner, 2026-10-27, roadmap step c95 (the cap rule):
 - A job that ends at its cap with no red test step is re-capped or split, never left (skill `ci-hygiene`, step 5).
 - A cap rises only with a measured figure in the comment beside it. This item is suspended while the stopgap holds, and comes back when roadmap step `time-pinned-tests-go` (time-pinned tests are gone) closes (owner, 2026-11-01 18:44 CST, above).
 
-## The hang stop (decided, not built)
+## The hang stop (built for five steps)
 
-Decision `hang-stop` (the hang stop) holds the rule the consultant reads into the owner's 2026-11-23 ruling R2: a run is stopped only on a hang, never on time. Job caps stay as the last net for a busy-loop hang, Windows and action steps.
+Decision `hang-stop` (the hang stop) holds the rule the consultant reads into the owner's 2026-11-23 ruling R2: a run is stopped only on a hang, never on time. Built for the five steps it names: no step cap, and the job cap is their net. Other steps keep their caps. Job caps stay as the last net for a busy-loop hang, Windows and action steps.
 
-Decided, not built: today a run is still stopped by its time cap. Until `hang-stop` is built, the 2026-10-27 bullet above applies: a job that ends at its cap with no red test step is re-capped or split, never left.
+The 2026-10-27 bullet above still applies to every step outside the five and to each job cap: a job that ends at its cap with no red test step is re-capped or split, never left.
 
 A net is never tightened to turn a slow healthy run red. Backing: the owner's 2026-11-10 ruling, quoted at `ci-job-caps.md:7`. The consultant reads the owner's 2026-11-23 words the same way; that reading is the consultant's, not the owner's words.
 
@@ -79,8 +79,7 @@ Window: each row names its own. A row marked "window of 2026-11-05" or "window o
 - Lane shoot-job-cap, measured in run 42733987294 (a `workflow_dispatch` on branch `shoot-job-cap-b`, head cf004ea64, n 1 per job):
   - `checks-shoot` took 1.35 min and keeps its cap 10, a stopgap. `checks-waiting-page` took 12.7 min in one run, and that run was red. A new job keeps the provisional cap 60 until 5 green runs (How to measure again, step 6). Re-measure on a green run, then set the cap from 5 green runs.
   - The step "install.sh checkout-detection suite" has no step cap in `checks-install-checkout` to `-3` or in `shell-macos` (decision `hang-stop`).
-  - install.sh checkout-detection suite step (first in `checks-merge-install`): no step cap (decision `hang-stop`). Run 43164094808 attempt 1 ran the step 888 s, a floor, since the old job cap cut it. The green max is 754 s (run 43164094808 attempt 2).
-  - Step ci-merge-install-split moved that step to `checks-install-checkout` to `-3` (three shards) with no step cap (decision `hang-stop`); the step stays in `shell-macos` too.
+  - install.sh checkout-detection suite steps (`checks-install-checkout` to `-3`): no step cap (decision `hang-stop`). Before the split, in `checks-merge-install`, run 43164094808 attempt 1 ran the step 888 s, a floor, since the old job cap cut it. The green max is 754 s (run 43164094808 attempt 2).
   - `shell-macos` install.sh step: no step cap. The hang stop and the job cap bound it (decision `hang-stop`). The step took 1293 s in run 43184587111 and 1221 s in run 43164094808. Both runs were green.
   - `shell-macos` job cap 75 (interim, stopgap, owner 12:11 CST Nov 10). The slowest of 29 runs took 31.3 min (run 43184587111).
   - Run 42733987294 is red in `checks-waiting-page`: 126 of 1934 narrow-width layout cases fail, from batch 70's waiting page lanes (the commits are not on main 624dcc188). A defect to fix in those lanes, so no cap changes for it, and no test was skipped or weakened.
