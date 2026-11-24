@@ -209,11 +209,12 @@ class FakeGitHub:
     never by status: a case's in-progress run reaches the script) and `jobs` maps a run id to its jobs. check_name filters the check
     runs; per_page (default 30) and page cut every list. `fail` is raised by every check-runs read, `runs_fail` by the runs read and
     `jobs_fail` by the jobs read. `runs_reply` is returned in place of the list by a runs read that names no head_sha (the base
-    search), so a case can give a malformed reply. A URL no case expects goes to `unexpected`, which the case asserts empty; `reads`
-    keeps every path asked, in order."""
+    search), so a case can give a malformed reply. `ignore_query` names the runs-read filters (event, branch) this fake does not
+    apply, so a case whose run the API would have filtered out reaches the script, and the script's own filter is what drops it.
+    A URL no case expects goes to `unexpected`, which the case asserts empty; `reads` keeps every path asked, in order."""
 
     def __init__(self, runs=(), fail=None, pulls=None, trees=None, workflow_runs=None, jobs=None, runs_fail=None, jobs_fail=None,
-                 runs_reply=None):
+                 runs_reply=None, ignore_query=()):
         self.runs = list(runs or [])
         self.fail = fail
         self.pulls = [{"head": {"ref": BATCH, "sha": HEAD}}] if pulls is None else pulls
@@ -222,6 +223,7 @@ class FakeGitHub:
         self.jobs = {} if jobs is None else jobs
         self.runs_fail, self.jobs_fail = runs_fail, jobs_fail
         self.runs_reply = runs_reply
+        self.ignore_query = tuple(ignore_query)
         self.unexpected, self.reads = [], []
 
     @staticmethod
@@ -254,8 +256,8 @@ class FakeGitHub:
                 return self.runs_reply
             runs = [r for r in self.workflow_runs
                     if ("head_sha" not in query or r["head_sha"] == query["head_sha"][0])
-                    and ("event" not in query or r["event"] == query["event"][0])
-                    and ("branch" not in query or r.get("head_branch") == query["branch"][0])]
+                    and ("event" not in query or "event" in self.ignore_query or r["event"] == query["event"][0])
+                    and ("branch" not in query or "branch" in self.ignore_query or r.get("head_branch") == query["branch"][0])]
             return {"total_count": len(runs), "workflow_runs": self.page(runs, query)}
         if path.startswith("actions/runs/") and path.endswith("/jobs"):
             if self.jobs_fail is not None:
@@ -1196,6 +1198,48 @@ class ProvenBase(LiveHead):
         twin, _ = self.base_on(runs, jobs=jobs)
         self.assert_base(twin, NEWER, "the control: with no GITHUB_RUN_ID, the same green run 2 is the base")
 
+    def test_this_runs_own_unfinished_record_is_passed_over(self):
+        # push-skip reads the runs while this run is still going, so its own record is queued or in progress. It is passed over, and the
+        # older green run is the base. The control is the same unfinished run without GITHUB_RUN_ID: it is another run, so it is unread.
+        own_id = 2
+        for status in ("in_progress", "queued"):
+            with self.subTest(status=status):
+                runs = [push_run(own_id, NEWER, conclusion=None, status=status, created_at=LATE), push_run(1, OLDER, created_at=EARLY)]
+                jobs = {1: full_run_jobs()}
+                base, text = self.base_on(runs, jobs=jobs, extra_env={"GITHUB_RUN_ID": str(own_id)})
+                self.assert_base(base, OLDER, "this run's own record is %s, so it is passed over and the older green push run is the base: %s"
+                                 % (status, text.strip()[-200:]))
+                twin, _ = self.base_on(runs, jobs=jobs)
+                self.assert_base(twin, "", "the control: the same %s run, not named by GITHUB_RUN_ID, is unread, so the push has no base" % status)
+
+    def test_an_unfinished_run_of_another_workflow_is_passed_over(self):
+        jobs = {1: full_run_jobs()}
+        other = [push_run(2, NEWER, conclusion=None, status="in_progress", created_at=LATE, path=OTHER_PATH), push_run(1, OLDER, created_at=EARLY)]
+        base, _ = self.base_on(other, jobs=jobs)
+        self.assert_base(base, OLDER, "an in-progress run of another workflow is no base and is passed over, so the older green run of checks.yml is the base")
+        twin = [push_run(2, NEWER, conclusion=None, status="in_progress", created_at=LATE), push_run(1, OLDER, created_at=EARLY)]
+        got, _ = self.base_on(twin, jobs=jobs)
+        self.assert_base(got, "", "the control: the same unfinished run of checks.yml is unread, so the push has no base")
+
+    def test_an_unfinished_schedule_pull_request_or_dispatch_run_is_passed_over(self):
+        # The fake returns the run whatever its event, so the script's own event filter is what passes it over.
+        jobs = {1: full_run_jobs()}
+        for label, event in (("a schedule run", "schedule"), ("a pull_request run", "pull_request"), ("a dispatch run", "workflow_dispatch")):
+            with self.subTest(run=label):
+                runs = [push_run(2, NEWER, conclusion=None, status="in_progress", created_at=LATE, event=event), push_run(1, OLDER, created_at=EARLY)]
+                fake = FakeGitHub(pulls=[], workflow_runs=runs, jobs=jobs, ignore_query=("event", "branch"))
+                base, _ = self.base_on(fake=fake)
+                self.assert_base(base, OLDER, "%s in progress is no push run, so it is passed over and the older green push run is the base" % label)
+                twin = [push_run(2, NEWER, conclusion=None, status="in_progress", created_at=LATE), push_run(1, OLDER, created_at=EARLY)]
+                got, _ = self.base_on(twin, jobs=jobs)
+                self.assert_base(got, "", "the control: the same unfinished run as a push run is unread, so the push has no base")
+
+    def test_an_unfinished_push_run_on_another_branch_is_passed_over(self):
+        runs = [push_run(2, NEWER, conclusion=None, status="in_progress", created_at=LATE, branch="lane-x"), push_run(1, OLDER, created_at=EARLY)]
+        fake = FakeGitHub(pulls=[], workflow_runs=runs, jobs={1: full_run_jobs()}, ignore_query=("event", "branch"))
+        base, _ = self.base_on(fake=fake)
+        self.assert_base(base, OLDER, "an in-progress push run on another branch is no base for main and is passed over, so the older green run is the base")
+
     def test_a_schedule_pull_request_or_dispatch_run_another_workflow_or_another_branch_is_no_base(self):
         others = (("a schedule run", {"event": "schedule"}), ("a pull_request run", {"event": "pull_request"}),
                   ("a dispatch run", {"event": "workflow_dispatch"}), ("a run of another workflow", {"path": OTHER_PATH}),
@@ -1204,7 +1248,8 @@ class ProvenBase(LiveHead):
         for label, kind in others:
             with self.subTest(run=label):
                 runs = [push_run(2, NEWER, created_at=LATE, **kind), push_run(1, OLDER, created_at=EARLY)]
-                base, _ = self.base_on(runs, jobs=jobs)
+                fake = FakeGitHub(pulls=[], workflow_runs=runs, jobs=jobs, ignore_query=("event", "branch"))
+                base, _ = self.base_on(fake=fake)
                 self.assert_base(base, OLDER, "%s is no base, so the older green push run on main is the base" % label)
 
     def test_a_read_error_a_malformed_reply_or_a_full_page_with_no_usable_run_gives_no_base_and_says_unknown(self):
@@ -1232,6 +1277,23 @@ class ProvenBase(LiveHead):
         done = [push_run(i, NEWER, created_at=EARLY) for i in range(1, 100)] + [push_run(100, OLDER, created_at=LATE)]
         twin, _ = self.base_on(fake=FakeGitHub(pulls=[], workflow_runs=done, jobs={100: full_run_jobs()}))
         self.assert_base(twin, OLDER, "the control: a full page of finished runs gives its newest green run as the base")
+
+    def test_a_full_page_of_green_runs_all_skipped_whole_reads_unknown_and_gives_no_base(self):
+        # Every run on the page is completed and green, and push-skip skipped each one whole, so no run on it is usable. An older run may
+        # sit past the page, so the read is unknown. The control puts one usable run at the page's end, and that run is the base.
+        page = [push_run(i, OLDER, created_at=LATE) for i in range(1, 101)]
+        jobs = {i: skipped_whole_jobs() for i in range(1, 101)}
+        fake = FakeGitHub(pulls=[], workflow_runs=page, jobs=jobs)
+        base, text = self.base_on(fake=fake)
+        self.assertEqual(len([path for path in fake.reads if path.endswith("/jobs")]), 100,
+                         "the fixture must walk all 100 runs of the page, or it does not reach the full-page arm")
+        self.assert_base(base, "", "a full page with no usable run may hide an older run, so the push has no base")
+        self.assertIn("unknown", text.lower(), "a full page with no usable run must print a line that says unknown, got %s" % text.strip()[-200:])
+        with_end = [push_run(i, OLDER, created_at=LATE) for i in range(1, 100)] + [push_run(100, NEWER, created_at=EARLY)]
+        end_jobs = {i: skipped_whole_jobs() for i in range(1, 100)}
+        end_jobs[100] = full_run_jobs()
+        twin, _ = self.base_on(with_end, jobs=end_jobs)
+        self.assert_base(twin, NEWER, "the control: the same full page with one usable run last gives that run as the base")
 
     def test_a_full_page_of_jobs_for_a_candidate_run_is_unknown_and_gives_no_base(self):
         # One job the read did not return may be a suite job that failed, so a full page of jobs is unknown and the candidate gives no base.
