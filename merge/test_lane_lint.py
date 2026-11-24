@@ -8305,6 +8305,68 @@ class LintResumesPushedMerge(LaneFixture):
         self.check_merged_dates(self.TIP_WHEN, self.HEAD_WHEN, self.LATE)
 
 
+class CarriedVerdictLine(LaneFixture):
+    """The lane lint's PASS verdict line says how many CI steps a carry held. A step whose saved pass carried from an earlier head prints
+    `PASS (carried)`, so a reader can tell a carried PASS from a fresh one. A run with no carried step names none. Whatever the carry, the
+    posted comment keeps its marker, PR, Head and Result lines, and the job's PASS for that head is saved, so a rerun of the head reads it.
+    Cost per case: one lint run and one stub start, as LintResumesPassedJobs counts them (unmeasured)."""
+
+    lint_at = LintResumesPassedJobs.lint_at  # one lint run with the merge commit's dates set: LintResumesPassedJobs's
+    ran = LintResumesPassedJobs.ran  # how many times the stub ci-job ran the lint: LintResumesPassedJobs's
+    cached = staticmethod(LintResumesPassedJobs.cached)  # the lines that say a job's PASS was reused: LintResumesPassedJobs's
+    DATE = LintResumesPassedJobs.DATE_A  # the merge commit's dates for each run here: LintResumesPassedJobs's
+    CARRIED = [("PASS (carried)", "suite check"), ("PASS", "record slugs")]  # one step that a carry held, one fresh step
+
+    def verdict(self, text):
+        """The one PASS verdict line of a lint run's output."""
+        found = [line for line in text.splitlines() if line.startswith("PASS: lint of ")]
+        self.assertEqual(len(found), 1, "expected one PASS verdict line, got %r\n%s" % (found, text))
+        return found[0]
+
+    def test_the_verdict_line_names_the_one_step_a_carry_held(self):
+        self.use_ci_job(self.CARRIED, 0)
+        rc, text = self.lint_at(self.DATE, at_head=True)
+        self.assertEqual(rc, 0, text)
+        self.assertRegex(self.verdict(text), r"\b1\b[^;]*carried|carried[^;]*\b1\b",
+                         "the PASS verdict line does not name the one step a carry held: " + text)
+
+    def test_a_run_with_no_carried_step_names_none(self):  # control: green on the old code, which names no carry at all
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.lint_at(self.DATE, at_head=True)
+        self.assertEqual(rc, 0, text)
+        self.assertNotIn("carried", self.verdict(text), "a run that carried no step names one in its PASS verdict line: " + text)
+
+    def test_a_carried_pass_posts_its_head_and_saves_the_job_pass(self):  # control: green on the old code, where a carried pass is a PASS
+        self.use_ci_job(self.CARRIED, 0)
+        head = self.head("feat")
+        rc, text = self.lint_at(self.DATE, at_head=True)
+        self.assertEqual(rc, 0, text)
+        self.assertTrue(self.host.posted, "the carried PASS posted no lane-lint comment: " + text)
+        body = self.host.posted[-1][1].splitlines()
+        self.assertIn("Head: %s" % head, body, "the comment does not name the head of the carried PASS:\n" + "\n".join(body))
+        self.assertIn("Result: PASS", body, "the comment of the carried PASS does not read PASS:\n" + "\n".join(body))
+        ran = self.ran()
+        rc, text = self.lint_at(self.DATE, at_head=True)
+        self.assertEqual(self.ran(), ran, "the rerun at the same head ran the job again: the carried PASS was not saved: " + text)
+        self.assertTrue(self.cached(text), "the rerun at the same head printed no PASS (cached) for the job: " + text)
+
+    COUNTED = r"\b1\b[^;]*carried|carried[^;]*\b1\b"  # the verdict line's count of the carried step, and its word
+
+    def test_a_rerun_at_the_same_head_keeps_the_carried_count_in_the_verdict_line(self):  # control: green on the old code
+        self.use_ci_job(self.CARRIED, 0)
+        rc, text = self.lint_at(self.DATE, at_head=True)
+        self.assertEqual(rc, 0, text)
+        self.assertRegex(self.verdict(text), self.COUNTED, "scope: the first PASS verdict line does not name the carry: " + text)
+        rc, text = self.lint_at(self.DATE, at_head=True)  # the rerun the saved PASS answers
+        self.assertEqual(rc, 0, text)
+        self.assertRegex(self.verdict(text), self.COUNTED, "the rerun the saved PASS answers lost the carried count: " + text)
+        self.forget_saved_passes()  # the rerun runs the job again, and its carried step prints PASS (carried) again
+        self.use_ci_job(self.CARRIED, 0)
+        rc, text = self.lint_at(self.DATE, at_head=True)
+        self.assertEqual(rc, 0, text)
+        self.assertRegex(self.verdict(text), self.COUNTED, "the rerun that runs the job lost the carried count: " + text)
+
+
 class CiJobHeadCopy(LaneFixture):
     """The lane lint runs the head's own bin/ci-job as well, when the lane changes the tool. The base is the lane-merge repo: origin/main holds bin/ci-job
     and merge/merge.py (make_main_the_lane_merge_repo). The tool copy is the stub of CiJobStub, at self.stub. A head copy is the bin/ci-job of the lint
