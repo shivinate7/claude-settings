@@ -2942,12 +2942,12 @@ class ModTestStep(unittest.TestCase):
         copies = [c for c in run_commands(self.text) if INLINE_COPY.search(c)]
         self.assertEqual(copies, [])
 
-    def test_main_stamp_requires_no_check_and_mods_adds_no_name(self):
-        """Ruling own-merge-on-lint-pass: main's stamp pins merge.requiredChecks "none". The mod step adds no name
-        to that pin, so a name added there would show as a list."""
+    def test_main_config_requires_first_proof_and_mods_adds_no_name(self):
+        """Ruling own-merge-on-lint-pass: main's stamp pins merge.requiredChecks "first-proof", so a local confirm needs a proof of the head
+        (decision merge-needs-current-base). The mod step adds no name to that pin, so a name added there would show as a list."""
         with open(STAMP, encoding="utf-8") as f:
             required = json.load(f)["merge"]["requiredChecks"]
-        self.assertEqual(required, "none", 'main\'s stamp must pin requiredChecks "none" (ruling own-merge-on-lint-pass)')
+        self.assertEqual(required, "first-proof", 'main\'s stamp must pin requiredChecks "first-proof" (decision merge-needs-current-base)')
 
 
 @unittest.skipUnless(shutil.which("bash") and shutil.which("node") and shutil.which("find"), "needs bash, node and find on PATH")

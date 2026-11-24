@@ -85,6 +85,8 @@ GHRUNPEND = os.path.join(ROOT, "ghrunpend")  # every check passed, one workflow 
 GHBROKEN = os.path.join(ROOT, "ghbroken")  # answers every call with text that is not JSON
 GHNEED = os.path.join(ROOT, "ghneed")      # green, but only for a call that names pull request 12 and y/x
 GHEMPTY = os.path.join(ROOT, "ghempty")    # no check and no workflow run reported yet
+GHROLL = os.path.join(ROOT, "ghroll")      # one check: the all-jobs-passed rollup, green (what a repo with CI on its base needs under first-proof)
+GHPASSCHK = os.path.join(ROOT, "ghpasschk")  # one check named checks, green, and no all-jobs-passed rollup
 GHCWD = os.path.join(ROOT, "ghcwd")        # green, but only for a call run inside the folder `ctxrepo`
 WFREPO = os.path.join(ROOT, "wfrepo")      # a folder that holds one workflow file
 GHSLOW = os.path.join(ROOT, "ghslow")      # green, but every call takes longer than the guard waits
@@ -1213,6 +1215,8 @@ def build_fixtures():
     write(PATHSPEC_LIST, "f.txt\n")
     make_fake_gh(GHPEND, "main", checks=[{"name": "checks", "bucket": "pending", "link": ""}])
     make_fake_gh(GHRED, "main", checks=[{"name": "checks", "bucket": "fail", "link": ""}])
+    make_fake_gh(GHROLL, "main", checks=[{"name": "all-jobs-passed", "bucket": "pass", "link": ""}])
+    make_fake_gh(GHPASSCHK, "main", checks=[{"name": "checks", "bucket": "pass", "link": ""}])
     make_fake_gh(GHRUNPEND, "main",
                  runs=[{"status": "in_progress", "conclusion": "", "name": "checks"}])
     make_fake_gh(GHBROKEN, "main", broken=True)
