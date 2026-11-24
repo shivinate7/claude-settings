@@ -29,10 +29,11 @@
                           runs the full idle-lanes report (the roadmap build's record-branch and main reads, unmeasured). The owed path instead reads the merge's log (a second log for the range since the base's tip), then the step
                           records in three git ls-tree, one git cat-file and one git log of the default branch for the Step trailers, and one open-pulls read only for a lane no earlier test skipped. No file, timer or new process beyond those
                           reads (merge/test_merge.py ConfirmIdleLanes pins that each git call is a read and that no file is made).
-                          On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it. Under merge.requiredChecks "none" (no check
-                          gates the merge) --confirm heals it itself (page item 926 a, 14:32 CST): it merges the base in when the base gained a record, pushes one page commit, waits on no
-                          check, and merges that head in the one run. A base that moves after the push refuses and keeps the commit. A relayed yes binds across the heal's page and base-merge commits.
-                          A PR GitHub reads BLOCKED under "none" refuses and names the branch protection and requiredChecks, since the tool read no protection.
+                          On a ready PR a stale records page with no claim to make or resume is healed by --confirm itself, on the default base (page item 926 a, 14:32 CST, for "none"): it merges the base in when the base gained a record, pushes one page commit, waits on no
+                          check, and merges that head in the one run. Under merge.requiredChecks "none" no check gates the merge. Under a list or "protection" the proof is the green rollup of the proven head (proven_head): the head
+                          under this tool's own page and clean base-merge commits, and the heal commit merges on that proof. A red or pending proven head refuses and names its own state; a lane commit or an edited merge above it is not carried.
+                          A base that moves after the push refuses and keeps the commit. A relayed yes binds across the heal's page and base-merge commits.
+                          A PR GitHub reads BLOCKED under "none" refuses and names the branch protection and requiredChecks, since the tool read no protection. Under a list it refuses and says the green head is blocked for another cause.
                           A head whose own run is still pending merges when a lane-lint PASS names its exact sha (a PASS carried over claim commits counts); main's run after
                           the merge is the check. A finished red run and a PASS for another head still refuse, and while main is red no PASS lifts a pending run. GitHub reads a pending required check as BLOCKED,
                           so the PUT goes on past that one read and GitHub refuses it or not; BEHIND still refuses.
@@ -4942,6 +4943,10 @@ def red_base(root, host, base, red_ok=""):
         + f"if the unknown read has a known cause, run again with the reason flag {RED_FLAG} \"<reason>\"."
     raise Liftable(f"{what}\nNo batch merges onto a red {base} while a run of it reads UNKNOWN, or sits unread beside a red that a merged revert lifts (ruling Q5 v lets a PR merge onto a known red only). {way[0].upper() + way[1:]} {RED_CITE}")
 
+def checks_read_of(proof, head):
+    """Whose checks a confirm read: the live head's own, or the proven head's under this tool's own commits (proven_head)."""
+    return "the head's own checks" if proof == head else f"the checks of the proven head {proof[:9]}"
+
 def head_not_green(state):
     """-> why `state`, the one read of a head's own checks (Host.head_state), is not green; None when it is green. The read never waits:
     rule M3 merges only a head that is already green, so a pending head is refused unless a lane-lint PASS names it (confirm lifts that), and the lane runs --confirm again when its run ends."""
@@ -5057,6 +5062,13 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
             if records != "current" and not (info["draft"] or trailer or resumed):  # confirm refuses a page with no claim to ride, so a ready PR never gets a page-only push
                 if cfg.get("merge", {}).get("requiredChecks") == "none" and not head_claim(wt):  # no check gates the merge: confirm heals the page itself
                     records += ". --confirm heals it: it pushes a page commit (the base merged in first when the base gained a record), waits on no check, and merges that head in the one run"
+                elif not head_claim(wt):  # a list or "protection": confirm heals on a green proven head (proven_head carries its proof to the heal commits) and refuses a red, pending or unread one
+                    proof = proven_head(wt, info["head"], base, lambda: True)
+                    state = host.head_state(n, proof)
+                    if state == "green":
+                        records += ". --confirm heals it: it pushes a page commit (the base merged in first when the base gained a record), carries the checks of the green head under it as the proof, and merges that head once its checks are green"
+                    else:
+                        records += f". --confirm refuses it: {checks_read_of(proof, info['head'])} are not green ({state}), so nothing is healed. " + stale_page_remedy(n)
                 else:
                     records += ". --confirm refuses it. " + stale_page_remedy(n, head_claim(wt))
             elif info["draft"] and records != "current" and not (trailer or resumed or stale):  # a claim commits at confirm anyway, so the draft step would save no run; it refuses a stale head
@@ -5497,7 +5509,7 @@ def extend_lock(lock, wait):
         extend(wait)
 
 def base_merge_commit(root, sha, base):
-    """True when `sha` is a merge of the base into the branch, as merge_base_in makes it (the commit a requiredChecks "none" heal pushes): two parents, the second
+    """True when `sha` is a merge of the base into the branch, as merge_base_in makes it (the commit a heal pushes): two parents, the second
     on origin/<base>, and a tree that is exactly git's clean merge of the two. An edited merge is a change the yes did not see. A read that fails is False."""
     c, row = git(root, "rev-list", "--parents", "-n", "1", sha)
     parts = row.split()
@@ -5511,19 +5523,48 @@ def base_merge_commit(root, sha, base):
     return state == "clean" and not c and merged == tree.strip()
 
 def heals_stale_page(root, base, path):
-    """True when `base` is the default branch and its config sets merge.requiredChecks "none": a confirm heals a stale records page itself there. A quiet read of the
-    config on origin; a config that cannot be read is False, so the relayed yes keeps the narrow form."""
+    """True when `base` is the default branch: a confirm heals a stale records page itself there, under any merge.requiredChecks (a list, "protection" or "none"), and the commits
+    it pushes are this tool's own (proven_head). A quiet read of the config on origin; a config that cannot be read is False, so the relayed yes keeps the narrow form."""
     with contextlib.redirect_stdout(io.StringIO()):
         try:
             cfg = load_config(root, base, path, " " + RECORDS_CITE)
         except Stop:
             return False
-    return cfg["merge"].get("requiredChecks") == "none" and base == cfg["defaultBranch"]
+    return base == cfg["defaultBranch"]
+
+def proven_head(root, live, base, merges=None, claims=False, until=None):
+    """The one reader of which head a PR's checks prove. Walk first parents down from `live` over this tool's own commits only, and return the commit under them, or
+    `live` when none sits on top: a page-only commit (page_only), and, where `merges()` is true, a merge of `base` that is git's clean merge of its parents
+    (base_merge_commit). A heal pushes exactly those two: the base merged in, then the page rebuilt on it. `claims`: a Record-claim commit and its revert count too, for a relayed
+    yes (relayed_head_holds), which binds to a head and needs no run; the checks of a claim commit are its own, so confirm leaves `claims` off. Any other commit ends the walk: a lane commit,
+    an edited merge, a merge of a commit the base never got. `until`: stop at that sha (the relayed head). `merges` is called at each merge commit, and
+    the base is fetched at the first, once. Stacked clean merges of the base all carry, so a busy base never forces a second full run (decision merge-needs-current-base, rule d).
+    A read that fails ends the walk at that commit, so the head counts as unproven, never as carried."""
+    base_read = []  # the one fetch of the base, made when a merge commit needs it
+
+    def base_merge(sha):
+        if not (base and merges and merges()):
+            return False
+        if not base_read:
+            base_read.append(not git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")[0])
+        if base_read[0] and base_merge_commit(root, sha, base):
+            return True
+        return False
+    sha = live
+    while sha != until:
+        c, row = git(root, "log", "-1", "--format=%P%x09%s%x09%(trailers:key=Record-claim,valueonly,separator=%x2C)", sha)
+        parents, subject, ids = (row.split("\t") + ["", ""])[:3]
+        parents = parents.split()
+        if c or not parents:
+            return sha
+        if not ((claims and (ids.strip() or subject.startswith('Revert "Claim record numbers"'))) or page_only(root, sha) or (len(parents) == 2 and base_merge(sha))):
+            return sha
+        sha = parents[0]
+    return sha
 
 def relayed_head_holds(root, branch, relayed, live, base=None, heals=None):
-    """True when the live head is the head a relayed yes named, or sits on it with only this tool's own commits between: a Record-claim
-    commit (head_claim's trailer), its revert (claim_under_head's subject), a page-only commit (page_only), or, where `heals()` is true, a clean merge of `base`
-    (base_merge_commit): the commits a requiredChecks "none" heal pushes (heals_stale_page). Under any other setting a merge of the base moves the head. The walk follows
+    """True when the live head is the head a relayed yes named, or sits on it with only this tool's own commits between (proven_head, with claims): a Record-claim
+    commit, its revert, a page-only commit, or, where `heals()` is true, a clean merge of `base`: the commits a heal pushes (heals_stale_page). Under any other setting a merge of the base moves the head. The walk follows
     first parents, so the base's own commits behind a merge are not read. The branch is fetched for the commits; the base only when a merge commit is met.
     A fetch or a log that fails, or a live head the fetch did not read, counts as a head that moved: the yes needs no more than a refusal."""
     if live == relayed:
@@ -5531,22 +5572,7 @@ def relayed_head_holds(root, branch, relayed, live, base=None, heals=None):
     c, out = git(root, "fetch", "-q", "origin", f"refs/heads/{branch}")
     if c or git(root, "rev-parse", "FETCH_HEAD")[1].strip() != live:
         return False
-    base_read = []  # the one fetch of the base, made when a commit needs it
-
-    def base_merge(sha):
-        if not (base and heals and heals()):
-            return False
-        if not base_read:
-            base_read.append(not git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")[0])
-        return base_read[0] and base_merge_commit(root, sha, base)
-    c, out = git(root, "log", "--first-parent", "--format=%H%x09%s%x09%(trailers:key=Record-claim,valueonly,separator=%x2C)", f"{relayed}..{live}")
-    if c or not out.strip():
-        return False
-    for line in out.splitlines():
-        sha, subject, ids = (line.split("\t") + ["", ""])[:3]
-        if not (ids.strip() or subject.startswith('Revert "Claim record numbers"') or page_only(root, sha) or base_merge(sha)):
-            return False
-    return True
+    return proven_head(root, live, base, heals, claims=True, until=relayed) == relayed
 
 CLAIM_STEP_CITE = "(a claim is a commit, and the merge call reads only a head whose own checks are green, decision records-index-at-merge)"
 
@@ -5588,6 +5614,8 @@ def heal_page(wt, base, branch, base_ref, rebuilt, stands):
 
 HEAL_BLOCKED = ("merge.requiredChecks is \"none\", so this tool reads no branch protection, and GitHub reads the pull request BLOCKED: the base's branch protection "
                 "requires a check this head does not report. Name that check in merge.requiredChecks, or change the branch protection, and run again. " + RECORDS_CITE)
+HEAL_BLOCKED_LIST = ("the head's checks are green, and GitHub still reads the pull request BLOCKED: the base's rules require something else of this head (a review, or a check "
+                     "outside merge.requiredChecks), which a heal commit would not meet either. Meet it, or change the branch protection, and run again. " + RECORDS_CITE)
 
 def wait_healed_head(host, n, sha, branch):
     """Wait, bounded, for GitHub to show the head `sha` this run pushed, so the merge call names a head GitHub holds. No check is waited on."""
@@ -5620,7 +5648,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
     host.before_wait = getattr(lock, "extend_for", None)  # a rate wait extends the lock first (standing-merge-grant), so the fixed TTL need not cover it
     tmp = wt = claim_sha = heal_sha = None  # heal_sha: the page commit a requiredChecks "none" run pushed and then merges. Never claim_sha: a failed run reverts a claim, never a heal
     no_ci = m.get("requiredChecks") == "none"  # a repo with "none" runs no CI, so confirm reads no run of the head (Host.base_state reads none of the base) (decision private-repos-no-ci)
-    heal = no_ci and base == cfg["defaultBranch"]  # no check gates the merge, so a stale records page heals in this run (page item 926 a, 14:32 CST; decision records-index-at-merge)
+    heal = base == cfg["defaultBranch"]  # a stale records page heals in this run: under "none" no check gates the merge (page item 926 a, 14:32 CST), under a list the proven head's green rollup does (proven_head; decision merge-needs-current-base, rule d); decision records-index-at-merge
+    lint_lifted = False  # a lane-lint PASS lifted a pending run of the head: that is no proof a heal commit may ride on
     judge = None  # the prose judge's plan, built under the lock and run after it is released
     where_else = None  # the where-else judge's plan, built and run the same way
     try:
@@ -5661,17 +5690,28 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         pushed = False  # true once this run pushed a commit: the run stops there, and the next confirm reads that commit's checks
         with timed_phase("head-checks"):
             say("merge: checking the head's checks and runs ...")  # before the read, which can block
-            state = "green" if no_ci else host.head_state(n, info["head"])  # a resumed claim is the head: the claim commit's own checks are read, never the head under it. Under none no run is read, whatever host answers
+            proof = info["head"] if no_ci or not heal else proven_head(wt, info["head"], base, lambda: heal)  # only this tool's own page and base-merge commits carry the proof of the head under them; a resumed claim is not one: the claim commit's own checks are read, never the head under it
+            if proof != info["head"]:
+                say(f"merge: {info['head'][:9]} is only this tool's own page and base-merge commits on {proof[:9]}, so the checks of {proof[:9]} are the proof.")
+                host.pending_lifted = True  # the commits above the proof have no run of their own: GitHub reads a required check on them pending (BLOCKED), and that one cause goes on to the PUT, as for a lint PASS
+            state = "green" if no_ci else host.head_state(n, proof)  # under none no run is read, whatever host answers
             not_green = head_not_green(state)
             if not_green and state.startswith("pending: ") and not getattr(host, "on_red_base", False) and lint_proof and lint_proof(info):  # a red base keeps its pending head waiting: the PASS rests on a green base
                 say(f"merge: the head's run is still pending ({state[len('pending: '):]}), and a lane-lint PASS names {info['head'][:9]}, so the run does not hold the merge "
                     f"(owner, 2026-11-15 18:21 CST: {base}'s run after the merge is the check, and a red {base} reverts it).")
                 host.pending_lifted = True
+                lint_lifted = True
                 not_green = None
             if not_green and state.startswith("unknown ("):  # a read that could not run, a network fault included, is not a verdict on the head
                 raise Stop(f"{not_green}. Nothing was claimed or pushed. {GREEN_CITE}")
             if not_green:
-                raise Stop(f"the head's own checks are not green, so nothing was claimed or pushed {GREEN_CITE}: {not_green}.")
+                raise Stop(f"{checks_read_of(proof, info['head'])} are not green, so nothing was claimed or pushed {GREEN_CITE}: {not_green}.")
+            if proof != info["head"] and not not_green:  # the carried proof covers a run that has not finished, never one that failed or that this tool could not read, a lane-lint PASS on the pending proof included (decision merge-needs-current-base)
+                own = host.head_state(n, info["head"])  # one more read, the live head's own state
+                if head_check_red(own):
+                    raise Stop(f"the own run of {info['head'][:9]} is red, so the green proof of {proof[:9]} under it does not cover it, and nothing was claimed or pushed {GREEN_CITE}: {head_not_green(own)}.")
+                if own.startswith("unknown ("):
+                    raise Stop(f"{head_not_green(own)}, the own run of {info['head'][:9]} above the proven {proof[:9]}. Nothing was claimed or pushed. {GREEN_CITE}")
         if base != cfg["defaultBranch"]:
             if head_claim(wt):  # an old claim would put real ids into a branch that is not the default
                 raise Stop(f"{info['head'][:7]} on {branch} holds a Record-claim, and {base} is not the default branch {STAMP_CITE}. Revert that commit and run again.")
@@ -5683,16 +5723,18 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 claim_sha = info["head"]
                 say(f"merge: resumed. {branch} already holds the claim {resumed}.")
             rebuilt = rebuild_records(wt)  # after the claim, whatever the stamp config holds. A page with no claim to ride heals only in the draft step: a page-only push on a ready PR restarts its CI. Under requiredChecks "none" no run is restarted, so it heals here
-            if heal and not (trailer or resumed) and not head_claim(wt):  # a head holding a claim this base does not resume keeps the refusal: a page commit on it would hide the claim
+            if heal and (no_ci or not lint_lifted) and not (trailer or resumed) and not head_claim(wt):  # a head holding a claim this base does not resume keeps the refusal: a page commit on it would hide the claim. Under a list only a green proof heals: a run a lint PASS lifted is no proof
                 if heal_page(wt, base, branch, base_ref, rebuilt, bool(stands)):
                     heal_sha = git(wt, "rev-parse", "HEAD")[1]
-                    if info["merge_state"] == "BLOCKED":  # before the push: a head GitHub will not merge gets no commit
-                        raise Stop(f"#{n} reads BLOCKED. Nothing was pushed. {HEAL_BLOCKED}")
+                    if info["merge_state"] == "BLOCKED" and (no_ci or proof == info["head"]):  # before the push: a head GitHub will not merge gets no commit. Above a carried proof BLOCKED is the commits' own pending check
+                        raise Stop(f"#{n} reads BLOCKED. Nothing was pushed. {HEAL_BLOCKED if no_ci else HEAL_BLOCKED_LIST}")
                     if merged_page_stale(root, wt, base, base_ref):  # before the push: the base moved again, so a second heal is the next run's
                         raise Stop(stale_merge_text(n, base_ref, pushed=False) + f" {RECORDS_CITE}")
                     push_branch(wt, branch, cite=RECORDS_CITE)
                     say(f"merge: the records page healed and pushed to {branch} at {heal_sha[:9]}. No check is waited on.")
                     wait_healed_head(host, n, heal_sha, branch)
+                    if not no_ci:
+                        host.pending_lifted = True  # the heal commit has no run of its own, and GitHub reads its required check pending (BLOCKED): the proof is the green head under it
                 rebuilt = False  # healed, or nothing to heal: no claim commit follows
             if rebuilt and not (trailer or resumed):  # before any wait, commit or push: confirm's finally frees the lock and drops the worktree
                 raise Stop(f"the records page on the ready #{n} is stale, and there is no claim to make or resume, so a page-only push would restart its CI. "
