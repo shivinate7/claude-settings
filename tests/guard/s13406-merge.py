@@ -285,6 +285,62 @@ add("merge-checks: the host auto-merge tool denies on a failed head", "deny", "m
 add("merge-checks: the host auto-merge tool allows a green head, as the merge tool does", "allow",
     silent=True, tool=AUTO_MERGE_TOOL, cwd=NOGIT, pullNumber=12, repo="x", owner="y",
     env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
+# The desktop app's auto-merge switch (`mcp__ccd_pr__set_auto_merge`) arms the same merge, so it is judged on the same
+# head read. Its pull request comes from the url, not from a number. Turning it off merges nothing, so that is allowed on
+# a red head. GHNEED is green only for pull request 12 in y/x, so a green allow proves the url named that pull request.
+APP_AUTO_MERGE_TOOL = "mcp__ccd_pr__set_auto_merge"
+APP_PR_URL = "https://github.com/y/x/pull/12"
+add("merge-checks: the app's auto-merge switch on a pending head denies", "deny", "merge-checks",
+    carries="pending", tool=APP_AUTO_MERGE_TOOL, cwd=NOGIT, url=APP_PR_URL, enabled=True, method="squash",
+    env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+add("merge-checks: the app's auto-merge switch on a failed head denies", "deny", "merge-checks",
+    carries="settled: red", tool=APP_AUTO_MERGE_TOOL, cwd=NOGIT, url=APP_PR_URL, enabled=True, method="squash",
+    env_path=GHRED + os.pathsep + PY_PATH, config=MERGECFG)
+add("merge-checks: the app's auto-merge switch on a green head allows", "allow",
+    silent=True, tool=APP_AUTO_MERGE_TOOL, cwd=NOGIT, url=APP_PR_URL, enabled=True, method="squash",
+    env_path=GHNEED + os.pathsep + PY_PATH, config=MERGECFG)
+add("merge-checks: the app's auto-merge switch turned off on a failed head allows, as it merges nothing", "allow",
+    silent=True, tool=APP_AUTO_MERGE_TOOL, cwd=NOGIT, url=APP_PR_URL, enabled=False, method="squash",
+    env_path=GHRED + os.pathsep + PY_PATH, config=MERGECFG)
+add("merge-checks: the app's auto-merge switch with no enabled flag is judged, and denies a pending head", "deny",
+    "merge-checks", carries="pending", tool=APP_AUTO_MERGE_TOOL, cwd=NOGIT, url=APP_PR_URL, method="squash",
+    env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+# A url that names no github.com pull request gives no number and no repo, so the read falls to the checkout. The
+# checkout here is no repository, so the read cannot run and the switch is denied. GHNEED would answer green for the
+# number and repo the url would wrongly name if it were read: the deny proves the url was not read.
+for _name, _url in (
+    ("a url that is not one", "not a url"),
+    ("a github url with no pull request", "https://github.com/y/x"),
+    ("a pull request url on another host", "https://gitlab.com/y/x/pull/12"),
+):
+    add("merge-checks: the app's auto-merge switch with %s is denied, as the checkout cannot be read" % _name, "deny",
+        "merge-checks", carries="could not run", tool=APP_AUTO_MERGE_TOOL, cwd=NOGIT, url=_url, enabled=True,
+        method="squash", env_path=GHNEED + os.pathsep + PY_PATH, config=MERGECFG)
+# The number and the repo come from the url: a green pull request 12 in y/x is the one that allows, and any other
+# number or repo in the url is read as that pull request, which GHNEED does not answer green.
+add("merge-checks: the app's auto-merge switch reads the number its url names, pull request 13 is denied", "deny",
+    "merge-checks", carries="could not run", tool=APP_AUTO_MERGE_TOOL, cwd=NOGIT, url="https://github.com/y/x/pull/13",
+    enabled=True, method="squash", env_path=GHNEED + os.pathsep + PY_PATH, config=MERGECFG)
+add("merge-checks: the app's auto-merge switch reads the repo its url names, z/w is denied", "deny",
+    "merge-checks", carries="could not run", tool=APP_AUTO_MERGE_TOOL, cwd=NOGIT, url="https://github.com/z/w/pull/12",
+    enabled=True, method="squash", env_path=GHNEED + os.pathsep + PY_PATH, config=MERGECFG)
+add("merge-checks: the app's auto-merge switch takes pull/12/files as pull request 12, and allows", "allow",
+    silent=True, tool=APP_AUTO_MERGE_TOOL, cwd=NOGIT, url="https://github.com/y/x/pull/12/files", enabled=True,
+    method="squash", env_path=GHNEED + os.pathsep + PY_PATH, config=MERGECFG)
+# A url that does not parse gives no number and no repo, so the read falls to the checkout's own branch pull request.
+# CURREPO is a real checkout on `feat`, and GHMAIN's pull request on it is green. An unparsed url that names another pull
+# request would then allow it. The parsed url is the control: it names pull request 12 and is read as that one.
+for _name, _url in (
+    ("a scheme-less github url", "github.com/y/x/pull/12"),
+    ("a github pulls url", "https://github.com/y/x/pulls/12"),
+    ("a pull request url on another host", "https://gitlab.com/y/x/pull/12"),
+):
+    add("merge-checks: the app's auto-merge switch with %s is denied in a checkout whose branch pull request is green"
+        % _name, "deny", "merge-checks", tool=APP_AUTO_MERGE_TOOL, cwd=CURREPO, url=_url, enabled=True,
+        method="squash", env_path=GHMAIN + os.pathsep + PY_PATH + os.pathsep + GIT_PATH)
+add("merge-checks: the app's auto-merge switch with a parsed url is read as its pull request in a green checkout, and allows",
+    "allow", silent=True, tool=APP_AUTO_MERGE_TOOL, cwd=CURREPO, url=APP_PR_URL, enabled=True, method="squash",
+    env_path=GHMAIN + os.pathsep + PY_PATH + os.pathsep + GIT_PATH)
 # Another ready pull request on the base, with a required check pending, refuses a merge, by `gh pr merge` and by the
 # host's merge tool. The merged pull request is 1, the other is 2 (its head is pr-two-head).
 BATCH_ON = GHBATCH + os.pathsep + PY_PATH

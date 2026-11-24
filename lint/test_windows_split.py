@@ -618,6 +618,16 @@ def keep_running_off(raw):
     return "${{ %s }}" % rest
 
 
+# The only if: a checks-job step may carry is the keep-running guard alone, which never skips the step on a normal run. Any other if: can
+# skip it, and a skipped step then reads as passing. The CiWiring pins of the fixture suites read this one home.
+KEEP_RUNNING_IF = "${{ %s }}" % KEEP_RUNNING
+
+
+def only_keep_running_if(step):
+    """True when a checks-job step has no if:, or exactly the keep-running condition. Any other if: fails the pin."""
+    return "if" not in step or step["if"] == KEEP_RUNNING_IF
+
+
 def step_if(st):
     """A step's `if:` expression with the records-only condition taken off, or None when the step has none. The pins read a step's
     own condition this way, and condition_problems pins the condition."""
@@ -2140,7 +2150,7 @@ def _pair_closes_at_end(e):
 
 def top_level_conjuncts(expr):
     """The `&&` parts of an `if:` at the top level: outside quotes and parentheses. A status function inside a quoted string or
-    under an `||` is not one of them."""
+    under an `||` is not one of them. A top-level `||` binds loosest: the whole expression is one part."""
     e = unwrap(expr) or ""
     while e.startswith("(") and e.endswith(")") and _pair_closes_at_end(e):  # one pair around all of the expression
         e = e[1:-1].strip()
@@ -2154,6 +2164,8 @@ def top_level_conjuncts(expr):
                 depth += 1
             elif ch == ")":
                 depth -= 1
+            elif depth == 0 and e.startswith("||", i):
+                return [e.strip()]
             elif depth == 0 and e.startswith("&&", i):
                 parts.append(e[start:i].strip())
                 start = i + 2

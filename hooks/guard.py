@@ -392,7 +392,7 @@ Other tools, in `judge` order:
                        `.git`, a target outside the clone, reads and non-writing shell pass. A git
                        `clean` counts only with a force flag. An
                        override lifts it. It adds no git spawn beyond what the call already spends.
-  scratchpad-owner     ask (deny for an `rm` or `mv` of a folder holding such a file). A call with a valid `agent_id` that runs a file in this session's scratchpad, or
+  scratchpad-owner     refuse a run of, a write over, or an `rm` or `mv` of another agent's file or folder. A call with a valid `agent_id` that runs a file in this session's scratchpad, or
                        writes over one, that another agent wrote. Each such write records its agent in a
                        sidecar `<scratchpad>/.writers/<hash>`. A run is an interpreter or the path as the
                        command word; a write is a Write-family target or a shell write target. A first
@@ -759,7 +759,7 @@ while True:
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CD_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, OCTOPUS_PUSH_STALE, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, LANE_READY_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
-            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
+            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, merge_tool_merges, merge_tool_target, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit, lane_ready_hit, lane_mcp_ready_hit, self_role_child_hit, self_role_hit,
             DEFAULT_RECORD_BRANCH, record_reason, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, PRIOR_WORK_REASON, prior_work_lane_hit, prior_work_named, header_time_hit, step_dup_hit, step_pr_hit, target_roster_hit, trust_card_hit, written_time_hit,
             BRIEF_ID_REASON, BRIEF_TOPIC_REASON, STEP_DUP_REASON,
@@ -4811,6 +4811,7 @@ from shared_names import REPO_TAG, repo_tag_names  # noqa: E402  the one home of
 EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")  # the rounds of ROLE_ROUND_FALLBACK's reviewer rows, one home for the default
 ROLE_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL"
+ROLE_WORKFLOW_MODEL_ENV = "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL"  # the model a no-model Workflow agent() call is served
 ROLE_MODEL_REASON = (
     "Rule (configuration): this spawn names a model above the one its role runs on. Remedy: drop the model "
     "field, or name the role's model%s. (decision agent-model-cap)"
@@ -4832,6 +4833,14 @@ ROLE_NO_MODEL_REASON = (
     "Rule (configuration): this spawn names no model, its role has no model of its own, and no default "
     "model is set, so it would run on its parent's model. Remedy: name the role's model%s. "
     "(decision agent-model-cap)"
+)
+# A Workflow agent() call that names a role with a row and no model: the agent file's pin does not reach it, so it runs
+# the Workflow default model. It is refused when that default is unset or not the row's model. Its remedy names no model
+# for a Haiku row, as the reason above.
+ROLE_WORKFLOW_NO_MODEL_REASON = (
+    "Rule (configuration): this Workflow agent() call names a role that has a row in the role table, but no `model`, "
+    "and the Workflow default model is unset or is not that row's model, so it would not run on its role's model. "
+    "Remedy: add `model` to the call's options, and name the role's model%s. (decision agent-model-cap)"
 )
 
 
@@ -5169,6 +5178,7 @@ def role_name(table, subagent_type) -> str:
 # A Workflow spawn whose brief the scan could not read carries BRIEF_UNREAD; its refusal adds BRIEF_LITERAL_REMEDY.
 # The remedy stays lowercase mid-sentence, so both refusals carry the same words.
 BRIEF_UNREAD = "brief_unread"
+WORKFLOW_NO_MODEL = "workflow_no_model"   # set on a spawn_inputs yield for a Workflow call with a literal agentType and no model key
 BRIEF_LITERAL_REMEDY = "write the brief as a literal string so the marker is readable"
 
 
@@ -5176,11 +5186,12 @@ def spawn_inputs(tool: str, tool_input):
     """Yield each spawn a call makes, shaped as an Agent input (`subagent_type`, `model`, `prompt`). An Agent or Task
     call is one spawn. A Workflow script yields one per agent() call that names a model, with agentType as the role
     and the model read from the script, so the role and Opus checks judge it as they judge an Agent spawn
-    (decision agent-model-cap). A brief the scan cannot read (a variable, or a prompt key beside a spread) carries no
+    (decision agent-model-cap). A call with a literal agentType, no `model` key and no spread yields too, with
+    WORKFLOW_NO_MODEL set and an empty model: role_model_one refuses it when the role has a row and the Workflow default (ROLE_WORKFLOW_MODEL_ENV) is unset or not that row's model. A brief the scan cannot read (a variable, or a prompt key beside a spread) carries no
     marker and grants nothing, so the spawn is judged with an empty brief and BRIEF_UNREAD set, and its refusal names
     BRIEF_LITERAL_REMEDY, so the author can make the marker readable. A
-    call whose model or agentType the scan cannot read, or that names no model, is skipped: a static read never
-    guesses a role or a model. A shorthand or a spread with no literal agentType may set the role, so it is unread;
+    call whose model or agentType the scan cannot read is skipped, and so is one with no model and no literal
+    agentType, or with a spread that may hold the model: a static read never guesses a role or a model. A shorthand or a spread with no literal agentType may set the role, so it is unread;
     a literal agentType beside a spread is read. step_up_hit still skips an unread brief, as a marker it cannot read
     has no round to check. Other tools yield nothing."""
     if tool in SPAWN_TOOLS:
@@ -5191,7 +5202,12 @@ def spawn_inputs(tool: str, tool_input):
             for k, u, _ in bodies:
                 keys.update(k)
                 unseen |= u
-            if unseen & {"model", "agentType"} or not keys.get("model"):
+            if unseen & {"model", "agentType"}:
+                continue
+            if not keys.get("model"):
+                if "model" not in keys and "..." not in unseen and keys.get("agentType"):
+                    yield {"subagent_type": keys["agentType"], "model": "", "prompt": prompt or "",
+                           BRIEF_UNREAD: prompt is None, WORKFLOW_NO_MODEL: True}
                 continue
             if "..." in unseen and "agentType" not in keys:
                 continue
@@ -5299,6 +5315,14 @@ def role_model_one(tool_input):
                 extra += ROLE_TEST_AUTHOR_NOTE if "1" in free else ROLE_REVIEWER_FIRST_ROUND_NOTE
             return ROLE_MODEL_REASON % extra, model, False
         return "", "", False
+    if tool_input.get(WORKFLOW_NO_MODEL):
+        if role not in table:
+            return "", "", False
+        served = role_model_rank(os.environ.get(ROLE_WORKFLOW_MODEL_ENV, ""))
+        if served is not None and served == role_model_rank(table[role]):
+            return "", "", False  # the Workflow default is the role's own row
+        return (ROLE_WORKFLOW_NO_MODEL_REASON % ("" if table[role] == ROLE_MODEL_RANK[0] else " (%s)" % table[role]),
+                ROLE_NO_MODEL_MATCH + role, False)
     if os.environ.get(ROLE_MODEL_ENV, "").strip():
         return "", "", False
     pinned = role_has_model_pin(pointer, role)
@@ -7555,20 +7579,22 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # Rule scratchpad-owner (decision scratchpad-owner). Every agent of a session shares the session's
 # scratchpad, so one agent can run a script another agent left there. A call from an agent that writes a
 # file in the scratchpad records the agent as its writer (`scratchpad_record_writer`); a shell call from an
-# agent that runs a scratchpad file another agent recorded asks, and so does a write over such a file; a folder removal is refused. A call
+# agent that runs a scratchpad file another agent recorded is refused; so are a write over such a file and a folder removal. A call
 # with no `agent_id`, a file with no record, an agent's own file and a read pass. The text gate (`SCRATCHPAD_WORD`) keeps a call that names no scratchpad from
 # touching the disk: a path that reaches the scratchpad by a symlink is the ceiling, and passes.
 SCRATCHPAD_WORD = "scratchpad"
 SCRATCHPAD_OWNER_REASON = (
     "Rule (scratchpad-owner): this script was written by another agent of this session, and running it "
-    "runs code you have not read. "
+    "runs code this agent did not write. "
     "Remedy: read the file, write your own copy of the script under a fresh file name, and run that copy. "
+    "If this refusal looks wrong for your task, comply anyway and say so in your report. "
     "(decision scratchpad-owner, an agent runs only its own read copy of a scratchpad file, and never overwrites another agent's)"
 )
 SCRATCHPAD_OVERWRITE_REASON = (
-    "Rule (scratchpad-owner): this file was written by another agent of this session, and writing over it "
+    "Rule (scratchpad-owner): this file was written by another agent of this session, and removing, moving or writing over it "
     "destroys work that agent may still need. "
-    "Remedy: write your own file under a fresh file name of your own. "
+    "Remedy: write your own file under a fresh file name in the scratchpad. "
+    "If this refusal looks wrong for your task, comply anyway and say so in your report. "
     "(decision scratchpad-owner, an agent runs only its own read copy of a scratchpad file, and never overwrites another agent's)"
 )
 SCRATCHPAD_FOLDER_REASON = (
@@ -7703,7 +7729,7 @@ def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
     return agent, session, files, removed, moved
 
 
-def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> None:
+def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str, record: bool = True) -> None:
     """Rule scratchpad-owner, the write form. A call with no `agent_id` clears the record of each scratchpad
     file it writes: the file is its own now. An agent's call records the agent as the writer of each file it
     writes, and is refused when a file's record named another agent. A refused write moves no record; an owner
@@ -7711,7 +7737,8 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
     `rm` names is judged but not recorded. A `cp` destination is the caller's file; an `mv` destination carries
     the record of its source, or the caller's when the source lies outside the scratchpad. A first write, a
     rewrite of its own file and a file that no longer exists pass (`scratchpad_writer_of`). Run once the call's
-    other rules passed."""
+    other rules passed. `record=False` judges only: the run rule calls it so an overwrite is refused as an overwrite,
+    and the refused run records nothing."""
     agent, session, files, removed, moved = scratchpad_writes(payload, tool, tool_input, cwd)
     after = {}   # the writer each recorded file gets, read before any record changes
 
@@ -7728,6 +7755,8 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
     for full in files:
         after[full] = writer_after(full)
     if not agent:
+        if not record:
+            return
         for full in files:
             if full in moved and under_session_scratchpad(moved[full], session):
                 scratchpad_record_writer(full, session, after[full])
@@ -7742,8 +7771,8 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
                 taken = "agent %s writes over a scratchpad file agent %s wrote: %s" % (agent, writer, full)
         elif full in removed:
             # An `rm` or `mv` that names a folder, the scratchpad itself or a glob removes each file under it, and
-            # only a file has a record: read the files (`scratchpad_folder_writer`). A folder is a deny and a file
-            # an ask, so the folder wins whatever its place in the call: a file listed first must not hide it.
+            # only a file has a record: read the files (`scratchpad_folder_writer`). A folder and a file are both
+            # refused, each with its own reason, so the folder wins whatever its place in the call: a file listed first must not hide it.
             held = scratchpad_folder_writer(full, session, agent)
             if held:
                 taken = "agent %s removes a scratchpad folder holding a file agent %s wrote: %s" % (agent, held[1], held[0])
@@ -7757,16 +7786,17 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
 
     if taken:
         # A refused write lands nothing, so the record stays with the first writer; an override that lifts it moves it.
-        refuse(tool, "deny" if reason is SCRATCHPAD_FOLDER_REASON else "ask", "scratchpad-owner", reason, taken,
+        refuse(tool, "deny", "scratchpad-owner", reason, taken,
                on_lift=record_writers)
-    record_writers()
+    if record:
+        record_writers()
 
 
 def scratchpad_folder_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     """Rule scratchpad-owner, the folder form: the log detail when an agent's call removes or moves a folder, the
     scratchpad itself or a glob that holds a file another agent wrote, else ''. A removed file that is itself
-    another agent's is an overwrite ask (`scratchpad_owner_write`), not a folder, so it is skipped here. The shell
-    path reads this before the run ask: a folder removal is a deny, and the run ask must not hide it."""
+    another agent's is an overwrite refusal (`scratchpad_owner_write`), not a folder, so it is skipped here. The shell
+    path reads this before the run refusal: a folder removal is its own refusal, and the run refusal must not hide it."""
     agent, session, files, removed, _moved = scratchpad_writes(payload, tool, tool_input, cwd)
     if not agent:
         return ""
@@ -7899,6 +7929,31 @@ def scratchpad_verb_run(name, args):
     return at if at < len(args) else None
 
 
+# The shells whose `-n` (or `--noexec`) reads a script and runs none. `node --check` is the same for node.
+SCRATCHPAD_SYNTAX_SHELLS = ("bash", "sh", "zsh", "dash", "ksh")
+
+
+def scratchpad_syntax_only(name, args, at):
+    """True when interpreter `name` with `args` only checks the syntax of its script and runs nothing: a shell
+    with `-n` or `--noexec` among its own flags (a combined `-nv` too), or `node --check`. `at` is the script
+    index `workflow_script_index` found, so a `-n` after the script is the script's own argument. Any `-c`,
+    alone or in a cluster, anywhere in `args` is a command string that may run the file, so it is never a check.
+    A value flag before the script (`node -r F --check G`) is a preload that runs, so it is no check either."""
+    flags = args if at is None else args[:at]
+    if "--" in flags:
+        flags = flags[:flags.index("--")]
+    if any(arg.startswith("-") and not arg.startswith("--") and "c" in arg for arg in args):
+        return False
+    if any(arg in WORKFLOW_VALUE_FLAGS for arg in flags):
+        return False
+    if name == "node":
+        return "--check" in flags
+    if name not in SCRATCHPAD_SYNTAX_SHELLS:
+        return False
+    return any(arg == "--noexec" or (arg.startswith("-") and not arg.startswith("--") and "n" in arg)
+               for arg in flags)
+
+
 def scratchpad_script(word, args):
     """([the files the command `word args` runs], the file it reads its script from stdin, whether it reads its
     script from stdin). A run is an interpreter or runner word (`SCRATCHPAD_RUNNER`) with the file as its first
@@ -7928,6 +7983,8 @@ def scratchpad_script(word, args):
             files += inner[0] + ([inner[1]] if inner[1] else [])
         return files, "", False
     at = workflow_script_index(args, name)   # past the interpreter's flags and their values
+    if scratchpad_syntax_only(name, args, at):
+        return [], "", False
     # A lone `-` before the script position reads the script from stdin, so no scratchpad file runs.
     script = args[at] if at is not None and "-" not in args[:at] else ""
     if script and SCRATCHPAD_RUNNER(basename(script)) and name in WORKFLOW_RUNNER_VERBS:
@@ -8533,10 +8590,11 @@ def judge(payload) -> None:
         refuse(tool, "deny", "brief-destructive-git", BRIEF_DESTRUCTIVE_REASON, ordered[:120])
 
     # A merge through the MCP tool is judged by the same merge guard as `gh pr merge`.
-    if tool in MERGE_TOOLS:
-        owner, name, number = (tool_input.get(k) for k in ("owner", "repo", "pullNumber"))
-        repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
-        verdict, detail = merge_check("" if number is None else str(number), repo, cwd)
+    if tool in MERGE_TOOLS and merge_tool_merges(tool, tool_input):
+        target = merge_tool_target(tool, tool_input)
+        number, repo = target or ("", "")
+        verdict, detail = ("unknown", "the url names no github.com pull request") if target is None \
+            else merge_check(number, repo, cwd)
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
                    "merge tool " + verdict)
@@ -8697,13 +8755,14 @@ def judge(payload) -> None:
             if names:
                 sim_boot_refusal(tool, names, remedies)
             # After the denies above: the shell call runs another agent's scratchpad script. A folder removal in the
-            # same call is still a deny, so it is judged before the run ask.
+            # same call is a deny too, so it is judged before the run refusal.
             owned = scratchpad_owner_hit(payload, tool, tool_input, cwd)
             if owned:
                 folder = scratchpad_folder_hit(payload, tool, tool_input, cwd)
                 if folder:
                     refuse(tool, "deny", "scratchpad-owner", SCRATCHPAD_FOLDER_REASON, folder)
-                refuse(tool, "ask", "scratchpad-owner", SCRATCHPAD_OWNER_REASON, owned)
+                scratchpad_owner_write(payload, tool, tool_input, cwd, record=False)   # an overwrite, `rm` or `mv` of another agent's file is a refusal too: judged before the run refusal
+                refuse(tool, "deny", "scratchpad-owner", SCRATCHPAD_OWNER_REASON, owned)
             scratchpad_owner_write(payload, tool, tool_input, cwd)   # the call passed: refuse an overwrite, else record the writer
         return
     if tool == SIM_MCP:
