@@ -37,6 +37,9 @@ RerunCache: a rerun at the same key runs no passing step and prints PASS (cached
 ScopeLint: --lint with a base reads each needs.scope.outputs flag from the repo's .github/scripts/ci-scope.sh, the script CI's scope
   job runs, on the diff to the base. A step gated on a false flag is skipped. A flag the script does not give, or a script that
   fails, leaves its step to run, and the log says UNKNOWN scope.
+  ScopeLint also covers a suite step lint cannot select (`sh hooks/test_*.sh`, `python3 skills/**/test_*.py`): when its flag is on
+  for the change, --lint runs it or reads unknown on a line that names it, never a PASS over it (also in another job); a flag that
+  is off, and a picked `hooks/test_*.py` suite, keep their old reads.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -2455,12 +2458,12 @@ class Shallow(Job):
         self.assertEqual((rc, self.verdicts(lines), self.shallow()), (0, ["PASS"], "true"), out)
 
 
-def checks_step(name):
-    """The checks job's step of this name, as text, so a pin is read from the workflow, never copied."""
+def checks_step(name, job="checks"):
+    """The step of this name in `job` of checks.yml (the checks job by default), as text, so a pin is read from the workflow, never copied."""
     sys.path.insert(0, HERE)
     from workflow_steps import job_block, step_blocks, step_key
     with open(CHECKS, encoding="utf-8") as f:
-        return next(st for st in step_blocks(job_block(f.read(), "checks")) if step_key(st, "name") == name) + "\n"
+        return next(st for st in step_blocks(job_block(f.read(), job)) if step_key(st, "name") == name) + "\n"
 
 
 NO_PIPX = {"PATH": os.pathsep.join(d for d in os.environ.get("PATH", "").split(os.pathsep)
@@ -4746,6 +4749,91 @@ class ScopeLint(Job):
         self.assertTrue(os.path.exists(os.path.join(self.root, "scope-stub-ran.txt")),
                         "scope: ci-job did not run .github/scripts/ci-scope.sh of the repo under test\n" + out)
         self.assertEqual(by_step(lines).get("flag code"), "skipped", out)
+
+    # A suite step lane lint cannot select (`sh hooks/test_*.sh`, `python3 skills/**/test_*.py`) runs under --lint, or reads unknown
+    # with a line that names it, when its scope flag is on. Each suite leaves one marker when it runs (ran(marker)).
+    INSTALL_SUITE = ("hooks/test_install_src.sh", "touch ran-install-src.txt\n")
+    STALE_SUITE = ("skills/waiting-page/test_stale_pages.py", "open('ran-stale-pages.txt', 'w').close()\n")
+    INSTALL_STEP = checks_step("install.sh checkout-detection suite (shard 1 of 3)", job="checks-install-checkout")  # gated on code
+    STALE_STEP = checks_step("Waiting page staleness fixture suite", job="checks-rest")  # gated on code and records_only_skip
+    PICKED_SUITE = ("skills/waiting-page/test_picked.py",  # opens hooks/bridge.py by a path constant, so the selector picks it for that change
+                    "import os\nHERE = os.path.dirname(os.path.abspath(__file__))\n"
+                    "with open(os.path.join(HERE, '..', '..', 'hooks', 'bridge.py'), encoding='utf-8') as f:\n    f.read()\n"
+                    "open('ran-picked.txt', 'w').close()\n")
+    PICKED_STEP = step("Picked skills suite", "python3 skills/waiting-page/test_picked.py", **{"if": "${{ needs.scope.outputs.code == 'true' }}"})
+
+    def base_with_suites(self, extra=None):
+        """main holds the real scope script, the passing lint step's file, both suites and `extra` (path -> text)."""
+        self.write({SuiteSteps.LINT_FILE[0]: SuiteSteps.LINT_FILE[1], self.INSTALL_SUITE[0]: self.INSTALL_SUITE[1],
+                    self.STALE_SUITE[0]: self.STALE_SUITE[1], **(extra or {})})
+        self.commit_base(self.real_script())
+
+    def assert_runs_or_unknown(self, rc, lines, marker, suite, out):
+        """The suite ran and --lint exits 0, or --lint exits 2 on an unknown line that names the suite. A pass that
+        never ran the suite is the defect: lane lint passed over a suite it could not run."""
+        if self.ran(marker):
+            self.assertEqual(rc, 0, "--lint ran %s and it passed, so --lint must exit 0\n%s" % (suite, out))
+            return
+        named = [ln for ln in lines if ln.startswith("unknown") and suite in ln]
+        self.assertTrue(named, "--lint passed over %s, which never ran, and no unknown line names it (exit %d)\n%s" % (suite, rc, out))
+        self.assertEqual(rc, 2, "--lint named %s on an unknown line but exited %d, not 2\n%s" % (suite, rc, out))
+
+    def test_a_hooks_change_that_turns_on_the_install_suite_never_passes_over_it(self):
+        self.base_with_suites()
+        self.lane({"hooks/guard.py": "x = 1\n"})
+        self.assertEqual(self.flags_of_script()["code"], "true", "scope: the script sets code false for a hooks/guard.py change")
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, self.INSTALL_STEP)
+        self.assert_runs_or_unknown(rc, lines, "install-src", "test_install_src.sh", out)
+
+    def test_a_hooks_change_that_turns_on_the_skills_suite_never_passes_over_it(self):
+        self.base_with_suites()
+        self.lane({"hooks/guard.py": "x = 1\n"})
+        flags = self.flags_of_script()
+        self.assertEqual((flags["code"], flags.get("records_only_skip")), ("true", "false"),
+                         "scope: the script does not turn the skills step's flags on for a hooks/guard.py change")
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, self.STALE_STEP)
+        self.assert_runs_or_unknown(rc, lines, "stale-pages", "test_stale_pages.py", out)
+
+    def test_a_skills_suite_the_selector_picks_for_the_change_never_passes_over_it(self):  # the selector picks it, and no lint line names it
+        self.base_with_suites({"hooks/bridge.py": "V = 1\n", self.PICKED_SUITE[0]: self.PICKED_SUITE[1]})
+        self.lane({"hooks/bridge.py": "V = 2\n"})
+        self.assertEqual(self.flags_of_script()["code"], "true", "scope: the script sets code false for a hooks/bridge.py change")
+        picked = subprocess.run([sys.executable, SuiteSteps.MUTATE_GUARD, "--lint-suites", "main"], cwd=self.root,
+                                capture_output=True, text=True, env=ENV)
+        self.assertIn(self.PICKED_SUITE[0], picked.stdout.split(), "scope: the selector does not pick the skills suite for the change\n"
+                      + picked.stdout + picked.stderr)
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, self.PICKED_STEP)
+        self.assert_runs_or_unknown(rc, lines, "picked", "test_picked.py", out)
+
+    def test_an_empty_change_that_sets_every_flag_on_never_passes_over_the_install_suite(self):
+        self.base_with_suites()
+        self.lane({})
+        self.assertEqual(self.flags_of_script()["code"], "true", "scope: the script sets code false for an empty diff")
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, self.INSTALL_STEP)
+        self.assert_runs_or_unknown(rc, lines, "install-src", "test_install_src.sh", out)
+
+    def test_a_suite_in_another_job_that_the_change_reaches_never_passes_over_it(self):
+        self.base_with_suites()
+        self.lane({"hooks/guard.py": "x = 1\n"})
+        self.assertEqual(self.flags_of_script()["code"], "true", "scope: the script sets code false for a hooks/guard.py change")
+        rc, lines, out = self.run_job(SuiteSteps.LINT_STEP, args=("--lint", "--base", "main"), other=[self.INSTALL_STEP])
+        self.assert_runs_or_unknown(rc, lines, "install-src", "test_install_src.sh", out)
+
+    def test_a_docs_change_leaves_the_install_and_skills_suites_not_run_with_no_unknown(self):  # the control: no flag on, no suite reached
+        self.base_with_suites()
+        self.lane({"docs/notes/x.md": "a note\n"})
+        self.assertEqual(self.flags_of_script()["code"], "false", "scope: the script sets code true for a docs-only diff")
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, self.INSTALL_STEP, self.STALE_STEP)
+        self.assertEqual((rc, by_step(lines).get("Python lint")), (0, "PASS"), out)
+        self.assertEqual([ln for ln in lines if ln.startswith("unknown")], [], "a docs-only diff reaches no suite: no unknown line\n" + out)
+        self.assertFalse(self.ran("install-src") or self.ran("stale-pages"), "scope: a suite ran for a docs-only diff\n" + out)
+
+    def test_a_hooks_suite_that_the_selector_picks_still_runs_and_passes(self):  # the control: the picked-suite path is unchanged
+        self.base_with_suites({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",))})
+        self.lane({"hooks/bridge.py": "V = 2\n"})
+        self.assertEqual(self.flags_of_script()["code"], "true", "scope: the script sets code false for a hooks/bridge.py change")
+        rc, lines, out = self.lint(SuiteSteps.WIRING, SuiteSteps.LINT_STEP)
+        self.assertEqual((rc, by_step(lines)), (0, {"Wiring suite": "PASS", "Python lint": "PASS"}), out)
 
 
 if __name__ == "__main__":
