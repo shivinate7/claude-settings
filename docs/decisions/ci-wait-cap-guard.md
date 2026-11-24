@@ -16,7 +16,7 @@ Measured: the 1-hour cap, a fact fetched from the prompt-caching docs (`source` 
 
 Known false alarms: a message that holds one of these wordings in a sense that does not wait on CI, and waits long, is refused. Kinds seen: `checks` or `CI` for another reason, workflow runs of a fan-out ("The Workflow run for the fan-out finished"), and a data pipeline ("The data pipeline is slow"). A refused session has two remedies: `send_later` with `delay_minutes` of the cap or less, or drop the CI wording from the message. The owner's override lifts it (decision `guard-guards-mistakes-only`, guards stop Claude's mistakes). Known gap: the guard reads the cap, not the cache in force. Under the 5-minute cache (overage, API key, cloud provider, agent) a wait at the cap still misses the cache (decision `ci-wait-reads-run-status`, the fallback).
 
-Known gaps: whether `send_later` accepts an `at` with no offset is unmeasured. The guard sees only the limit, not that a check-in was set or that each is wider apart (rule `git-ci-wait-checks-in`).
+Known gaps: whether `send_later` accepts an `at` with no offset is unmeasured. The guard sees only the limit, not that a check-in was set (rule `git-ci-wait-checks-in`).
 
 Cost: no new process. The check reads the message once, in the guard run that already starts for each `send_later` call (unmeasured). A CI message with a wait also reads one data file and, for an `at`, the clock (unmeasured).
 

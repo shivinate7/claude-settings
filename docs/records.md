@@ -47,9 +47,9 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `shared-trees-delete-names-absolute-path` | A delete names its target as an absolute or quoted-variable path, never after a cd. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-main-only-by-pr` | Move main only by pull request, merged only when I name the act, or under a repo grant. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-never-merge-failing-ci` | Never merge a PR whose own run is red. | [`CLAUDE.md`](../CLAUDE.md) |
-| `gh-write-cloud` | In a cloud session, a `gh` pr, issue or `gh api` write is refused: write through the GitHub MCP tools or the merge tool. | [`CLAUDE.md`](../CLAUDE.md) |
+| `gh-write-cloud` | In a cloud session, a `gh` pr, issue or `gh api` write is refused (read hooks/guard.py): write through the GitHub MCP tools or the merge tool. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-red-main-reverts` | A PR may merge onto a red main (ruling Q5 v, 10:42 CST Nov 20, 2026; decision `no-merge-onto-red-main`). | [`CLAUDE.md`](../CLAUDE.md) |
-| `git-ci-wait-checks-in` | A session that waits on CI sets a one-time check-in when it starts to wait, and again after each red job, each wider apart, never past 55 minutes. | [`CLAUDE.md`](../CLAUDE.md) |
+| `git-ci-wait-checks-in` | The watcher wakes a session on red or green (read hooks/ci_wake.py). | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-ci-done-comment-wakes` | A run with a red job posts a PR comment for each red job as it fails, and one at the run end for any job not yet announced. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-never-discard-output` | Keep git write output. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-remedy-never-names-target` | A refusal's printed remedy never names the forbidden target. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -403,7 +403,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ci-job-writes-pip-cache` | A full run of `lint/test_ci_job.py` rewrites an entry in `~/.cache/pip/http-v2`. | [`docs/debts/ci-job-writes-pip-cache.md`](../docs/debts/ci-job-writes-pip-cache.md) |
 | `ci-wake-cloud-unproven` | No live cloud run shows the CI-done wake firing after an MCP ready call. | [`docs/debts/ci-wake-cloud-unproven.md`](../docs/debts/ci-wake-cloud-unproven.md) |
 | `ci-wake-gh-host-bare-repo` | For a github.com PR, ci_wake passes a bare -R owner/repo. | [`docs/debts/ci-wake-gh-host-bare-repo.md`](../docs/debts/ci-wake-gh-host-bare-repo.md) |
-| `ci-wake-lists-runs-once` | `ci_wake.wait_for` lists the head's CI runs once more, at once, after the first judged run, and judges any run that shows there. | [`docs/debts/ci-wake-lists-runs-once.md`](../docs/debts/ci-wake-lists-runs-once.md) |
+| `ci-wake-lists-runs-once` | `ci_wake.wait_for` lists the head's CI runs once more, at once, after the first settled run, and judges any run that shows there. | [`docs/debts/ci-wake-lists-runs-once.md`](../docs/debts/ci-wake-lists-runs-once.md) |
 | `classic-readers-miss-rulesets` | Three prose and audit readers look only at classic branch protection. | [`docs/debts/classic-readers-miss-rulesets.md`](../docs/debts/classic-readers-miss-rulesets.md) |
 | `clause-adverb-exp-backtrack` | On PR #2058 (branch cannot-claim-follow-up-4; main does not have this code yet), `ADVERB_PATTERN` in `lint/_clause.py` lists adverbs ending in -ly (really, simply, actually, currently, directly, unfortunately), and `[a-z]{3,}ly` in the same alternation matches them too. | [`docs/debts/clause-adverb-exp-backtrack.md`](../docs/debts/clause-adverb-exp-backtrack.md) |
 | `close-replaced-test-pins-nothing` | The hand-closed case in `ReplacedAtHandIn` closes the dropped lane's pull request #3302 by hand, with no pointer, but never seeds the issue-comment list. | [`docs/debts/close-replaced-test-pins-nothing.md`](../docs/debts/close-replaced-test-pins-nothing.md) |
