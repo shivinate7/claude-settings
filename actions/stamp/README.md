@@ -329,7 +329,7 @@ meets each item below. What the tool does when it runs is written in `confirm` i
    `merge/merge.py`.
 2. `merge.method` is `merge`, `squash` or `rebase`. Read it from the repo's own merge history
    before you set it. `merge.deadlineMinutes` is the longest that one wait for checks may last.
-3. `merge.requiredChecks` is `"protection"` (the default), `"none"` (a repo with no required check, which reads neither ruleset nor protection), or a list of check names.
+3. `merge.requiredChecks` is `"protection"` (the default), `"none"` (a repo with no required check, which reads neither ruleset nor protection), `"first-proof"` (a repo whose CI runs on its base: confirm needs a proof of the head, the green all-jobs-passed rollup or a lane-lint PASS), or a list of check names.
    `"protection"` reads the branch protection of the pull request's base. If the list is
    empty or cannot be read, the command stops before the claim push. A repo with no branch
    protection on a base, such as an integration branch, must write the list.
@@ -390,8 +390,8 @@ repo has numbered records, or needs a non-default method, deadline, required che
 2. Add the `merge` block. Read `method` from the repo's merge history. Set
    `deadlineMinutes` to at least the largest job cap in any workflow file plus 5. The merge
    tool waits that long anyway and names the fix.
-3. Set `requiredChecks`. For a branch with protection, use `"protection"`. Otherwise name the
-   checks in a list.
+3. Set `requiredChecks`. For a branch with protection, use `"protection"`. For a repo whose base runs CI with
+   no protection, use `"first-proof"`. Otherwise name the checks in a list.
 4. Add each command that must run after the merge to `afterMerge`, such as a sync of a
    primary checkout. Each exits 0 on a run with nothing to do.
 5. Set `regenerate` in the config, not in the workflow input. The claim runs it in the
