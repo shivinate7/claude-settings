@@ -4624,6 +4624,28 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assertEqual(self.host.readies, [], "every listed step unrunnable marked the draft ready: " + out)
         self.assertNotIn("pass on ", out, "every listed step unrunnable printed a pass line: " + out)
 
+    def test_the_line_bin_ci_job_prints_for_a_listed_action_step_is_the_one_merge_reads(self):
+        """The real bin/ci-job, run on a one-step fixture workflow, prints for the listed action step the detail that merge.py reads (ACTION_NOT_RUN_DETAIL),
+        and that detail is the text the stub's ACTION_NOT_RUN carries for its own action."""
+        step, uses = "Upload the report", "actions/upload-artifact@v4"
+        fixture = os.path.join(self.t, "action-tie")
+        os.makedirs(os.path.join(fixture, ".github", "workflows"))
+        with open(os.path.join(fixture, ".github", "workflows", "checks.yml"), "w", encoding="utf-8") as f:
+            f.write("name: checks\non: pull_request\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
+                    "      - name: %s\n        uses: %s\n" % (step, uses))
+        tm.sh(fixture, "git", "init", "-q")
+        tm.sh(fixture, "git", "add", "-A")
+        tm.sh(fixture, "git", "-c", "user.name=tie", "-c", "user.email=tie@example.com", "commit", "-qm", "fixture")
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_", "CI_JOB_")) and k not in ("VERDICT_LOG", "PR_BODY", "GITHUB_BASE_REF")}
+        run = subprocess.run([sys.executable, os.path.join(REPO, "bin", "ci-job"), "checks", "--plan", "--step", step, "--base", "HEAD"],
+                             cwd=fixture, capture_output=True, text=True, env=env, timeout=120)
+        line = re.search(r"^unknown\s+%s: (.*)$" % re.escape(step), run.stdout, re.M)
+        self.assertIsNotNone(line, "bin/ci-job printed no unknown line for the listed action step: " + run.stdout + run.stderr)
+        detail = line.group(1)
+        self.assertIsNotNone(merge.ACTION_NOT_RUN_DETAIL.fullmatch(detail),
+                             "the line bin/ci-job prints for a listed action step does not match merge.ACTION_NOT_RUN_DETAIL, so the ready run would refuse it: " + detail)
+        self.assertEqual(detail.replace(uses, "$/actions/claude-md-cites"), ACTION_NOT_RUN,
+                         "the stub's ACTION_NOT_RUN is not the text bin/ci-job prints for an action step: " + detail)
 
     def unpushed_pr(self, n, files, body):
         """PR n as a draft whose head commit is never pushed: the second clone holds it, origin does not, so the lane's clone cannot read
