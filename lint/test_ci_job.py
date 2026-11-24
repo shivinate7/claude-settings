@@ -3997,8 +3997,8 @@ class SuiteCarry(unittest.TestCase):
     to ci-scope.sh or to the stamp list; a delta that sets the step's own scope flag (its `if:` reads it: the guard flag here); a dirty tree;
     a moved base; a pass saved on another branch (A is not an ancestor of B); a step that did not pass at A; a pass saved under another step
     name or another command; a change of an ambient variable the exact key reads (CLAUDE_CONFIG_DIR), with or without a commit.
-    Cost per carry check: at most two git diffs that name the saved pair (the two trees, and the selector's diff of the saved head to HEAD),
-    and no gh start. Each case runs bin/ci-job in a fresh repo under RUN_FOLDER; the suite is hooks/test_s.py, beside hooks/s.py."""
+    Cost per carry check: at most three git diffs that name the saved pair (the two trees, the added files of the range that ci-scope.sh
+    reads in SCOPE_FILES mode, and the selector's diff of the saved head to HEAD), and no gh start. Each case runs bin/ci-job in a fresh repo under RUN_FOLDER; the suite is hooks/test_s.py, beside hooks/s.py."""
 
     fixture = RerunCache.fixture  # a fresh repo with its probe folder: RerunCache's
     commit = RerunCache.commit  # one commit of the working tree: RerunCache's
@@ -4322,7 +4322,7 @@ class SuiteCarry(unittest.TestCase):
             scope = f.read()
         self.fail_safe_runs_again({".github/scripts/ci-scope.sh": scope + "\n# edit\n"}, "the script that sets every scope flag changed")
 
-    def test_the_carry_check_starts_no_gh_and_at_most_two_git_diffs_of_the_saved_pair(self):
+    def test_the_carry_check_starts_no_gh_and_at_most_three_git_diffs_of_the_saved_pair(self):
         self.suite_repo()
         shim = os.path.join(self.sandbox, "shim")
         os.makedirs(shim)
@@ -4350,10 +4350,11 @@ class SuiteCarry(unittest.TestCase):
         if os.path.exists(starts):
             with open(starts, encoding="utf-8") as f:
                 calls = f.read().splitlines()
-        # The carry's two diffs name the saved pair: the saved tree against the new one, and the selector's diff from the saved head to HEAD.
+        # The carry's diffs that name the saved pair: the saved tree against the new one, the added files of the range (the landed-dir read),
+        # and the selector's diff from the saved head to HEAD.
         pair = [c for c in calls if c.startswith("git diff ") and (head in c or saved_tree in c)]
         self.assertTrue(pair, "scope: the carry check started no git diff of the saved pair\n%s" % "\n".join(calls))
-        self.assertLessEqual(len(pair), 2, "the carry check started %d git diffs of the saved pair, not at most two (the trees, and the selector):\n%s" % (
+        self.assertLessEqual(len(pair), 3, "the carry check started %d git diffs of the saved pair, not at most three (the trees, the added files of the range, and the selector):\n%s" % (
             len(pair), "\n".join(pair)))
         self.assertEqual([c for c in calls if c.startswith("gh ")], [], "the carry check started gh, a GitHub read:\n%s" % "\n".join(calls))
 
