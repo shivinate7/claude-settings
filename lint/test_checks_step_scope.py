@@ -1396,7 +1396,7 @@ class KeepRunningTopLevelOr(unittest.TestCase):
 
 
 class SuiteStepsTakeTheRecordsOnlySkip(unittest.TestCase):
-    """ci-scope.sh sets records_only_skip on a comment-only or record-folder delta too, so a job that starts on such a run (checks
+    """ci-scope.sh sets records_only_skip on a comment-only delta too, so a job that starts on such a run (checks
     does, for its comment lints) reads each suite step's own if:. A suite step without the skip clause runs its suite on that run.
     Each suite step of the three lint jobs must read the clause; a step that runs a suite and reads no clause is named."""
 
