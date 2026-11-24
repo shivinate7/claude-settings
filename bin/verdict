@@ -147,9 +147,11 @@ def prune(folder, own):
                         if ours: os.remove(e.path)
                 except OSError: pass
     except OSError: pass
-def hang_seconds():  # N from $VERDICT_HANG_SECONDS, or 0 (off): unset, not a whole number above 0, or Windows (no CPU read there)
-    try: n = int(os.environ.get("VERDICT_HANG_SECONDS") or 0)
-    except ValueError: return 0
+def hang_seconds():  # N from $VERDICT_HANG_SECONDS, or 0 (off): unset, not a whole number above 0, or Windows (no CPU read there). A set value that is no whole number says so once on stderr
+    raw = os.environ.get("VERDICT_HANG_SECONDS")
+    try: n = int(raw or 0)
+    except ValueError:
+        print(f"verdict: hang stop is off: VERDICT_HANG_SECONDS={raw!r} is not a whole number of seconds", file=sys.stderr); return 0
     return n if n > 0 and os.name != "nt" else 0
 def hang_sample(proc):  # (the child's process-table rows, {pid: CPU seconds} for the child and every process under it), or None when ps gave no table or the child is gone
     table = _nowindow.proc_table()
@@ -160,7 +162,8 @@ def hang_check(proc, f, w, n, now):  # one wake with the child still running: th
     if size != w["seen"]: w["seen"], w["quiet"], w["base"] = size, None, None; return None
     if w["quiet"] is not None and now - w["quiet"] < n: return None
     sample = hang_sample(proc)  # the first silent wake takes the baseline; a later one, at least N after silence began, compares to it
-    stop = sample is not None and w["base"] is not None and not _nowindow.cpu_advanced(w["base"], sample[1])
+    # a pid not in the baseline is work too: ps time leaves out reaped children (macOS), so a step that works through short children shows only as new pids
+    stop = sample is not None and w["base"] is not None and not _nowindow.cpu_advanced(w["base"], sample[1]) and set(sample[1]) <= set(w["base"])
     w["quiet"], w["base"] = now, sample[1] if sample else None  # CPU that advanced starts the count again
     return sample if stop else None
 def hang_stop(proc, f, start, sample):  # print the child's tree and the log tail, then end the tree: TERM, then KILL. -> the ended tree's pids
@@ -209,13 +212,13 @@ def main(argv):
             say, beat_file = True, os.environ.get("STALL_WATCH_BEAT")
             hang = hang_seconds()
             tick = min(beat, max(1.0, hang / 4)) if hang else beat
-            next_beat, watch = time.time() + beat, {"seen": os.fstat(f.fileno()).st_size, "quiet": None, "base": None}
+            next_beat, watch = time.monotonic() + beat, {"seen": os.fstat(f.fileno()).st_size, "quiet": None, "base": None}
             try:
               with _nowindow.forward_signals(proc):
                 while True:
                     try: rc = proc.wait(timeout=tick); break
                     except subprocess.TimeoutExpired:
-                        now = time.time()
+                        now = time.monotonic()  # silence and the beat run on a clock a wall-clock jump cannot move
                         if hang:
                             tree = hang_check(proc, f, watch, hang, now)
                             if tree is not None:
