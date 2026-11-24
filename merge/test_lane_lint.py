@@ -4234,6 +4234,14 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         rc, out, err = self.run_args("7", "--ready")
         return rc, out + err
 
+    def runs_split(self, base):
+        """-> (head runs, base reads) of the stub's calls. A failing check is read once more in a copy checked out at origin/`base`, so the stub
+        logs that commit as the run's head; a head run logs the tree the ready check would push, and the lane head is never that commit here."""
+        base_sha = self.head(base)
+        self.assertNotEqual(self.head("feat"), base_sha, "premise: the lane head is the base commit, so the head and base runs cannot be told apart")
+        calls = self.lint_calls()
+        return [c for c in calls if c["head"] != base_sha], [c for c in calls if c["head"] == base_sha]
+
     def fault_merge_read(self, sha):
         """Every git merge-tree that names commit `sha` exits 128, a read git cannot answer (merge_tree reads that as unknown). Every other git call runs for real."""
         real_sh = merge.sh
@@ -4293,7 +4301,10 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.use_ci_job([("FAIL", "check invariants")], 1)
         refs_before = self.refs()
         rc, out = self.draft_confirm()
-        self.assertEqual(len(self.lint_calls()), 1, "the ready check did not run the declared step once: " + out)
+        runs, base_reads = self.runs_split("main")
+        self.assertEqual(len(runs), 1, "the ready check did not run the declared step once on the head: " + out)
+        self.assertEqual(len(base_reads), 1, "the failing step was not read once on the base: " + out)
+        self.assertEqual(step_names(base_reads[0]["argv"]), ["check invariants"], "the base read did not run the failing step alone: " + out)
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.refs(), refs_before, "a page was pushed on a red ready check")
         self.assertEqual(self.host.readies, [], "the pull request went ready on a red ready check")
@@ -4350,8 +4361,11 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assertFalse(self.contains(self.head("feat"), self.head("integ")), "precondition: the head holds the base's tip, so the merge is the head and the case probes nothing")
         self.use_ci_job([("FAIL", "check invariants")], 1)
         rc, out = self.draft_confirm()
-        runs = self.lint_calls()
+        runs, base_reads = self.runs_split("integ")
         self.assertEqual(len(runs), 1, "the ready check did not run on a non-default base: " + out)
+        self.assertEqual(len(base_reads), 1, "the failing step was not read once on the non-default base: " + out)
+        self.assertIn("--base", base_reads[0]["argv"], out)
+        self.assertEqual(base_reads[0]["argv"][base_reads[0]["argv"].index("--base") + 1], "origin/integ", "the base read did not name origin/integ: " + out)
         self.assertIn("--base", runs[0]["argv"], out)
         self.assertEqual(runs[0]["argv"][runs[0]["argv"].index("--base") + 1], "origin/integ", out)
         parents = tm.sh(self.co, "git", "rev-list", "--parents", "-n", "1", runs[0]["head"]).split()[1:]
@@ -4367,7 +4381,9 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.use_ci_job([("FAIL", "check invariants")], 1)
         refs_before = self.refs()
         rc, out = self.draft_confirm()
-        self.assertEqual(len(self.lint_calls()), 1, "the Record-claim head's ready check did not run: " + out)
+        runs, base_reads = self.runs_split("main")
+        self.assertEqual(len(runs), 1, "the Record-claim head's ready check did not run: " + out)
+        self.assertEqual(len(base_reads), 1, "the failing step was not read once on the base: " + out)
         self.assertNotIn("ready by hand", out)
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.refs(), refs_before, "a push on a red ready check")
@@ -4459,7 +4475,9 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.use_ci_job(steps_for(), 0, file_fails={"STE lint": "break-by-base.txt"})  # the step FAILs only on a tree that holds the base's file
         refs_before = self.refs()
         rc, out = self.pre_ready()
-        self.assertEqual(len(self.lint_calls()), 1, "the pre-ready run ran ci-job %d times, want once: %s" % (len(self.lint_calls()), out))
+        runs, base_reads = self.runs_split("integ")
+        self.assertEqual(len(runs), 1, "the pre-ready run ran ci-job %d times on the merge, want once: %s" % (len(runs), out))
+        self.assertEqual(len(base_reads), 1, "the failing STE lint was not read once on integ: %s" % out)
         self.assertTrue(verdict_line(out, "fail", "STE lint"), "the pre-ready run checked the head, not its merge with integ: no `fail STE lint` line: " + out)
         self.assertEqual(rc, 1, "a break that only the merge with integ shows did not refuse the pre-ready run: " + out)
         self.assertEqual(self.host.readies, [], out)
@@ -4533,7 +4551,11 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.use_ci_job({"checks": [("PASS", "check invariants")], "checks-rest": [("FAIL", SCAFFOLD_STEP)]}, {"checks": 0, "checks-rest": 1})
         refs_before = self.refs()
         rc, out = self.pre_ready()
-        self.assertEqual(len(self.lint_calls()), 2, "the pre-ready run did not run ci-job once per job: " + out)
+        runs, base_reads = self.runs_split("main")
+        self.assertEqual(len(runs), 2, "the pre-ready run did not run ci-job once per job on the head: " + out)
+        self.assertEqual(len(base_reads), 1, "the failing second job's step was not read once on the base: " + out)
+        self.assertEqual([run["argv"][0] for run in base_reads], ["checks-rest"], "the base read did not run the failing step's own job: " + out)
+        self.assertEqual(step_names(base_reads[0]["argv"]), [SCAFFOLD_STEP], "the base read did not run the failing step alone: " + out)
         self.assertTrue(verdict_line(out, "pass", "check invariants"), "the first job's PASS line did not read pass beside the second job's FAIL: " + out)
         self.assertTrue(verdict_line(out, "fail", SCAFFOLD_READY), "the second job's FAIL line did not read fail: " + out)
         self.assertEqual(rc, 1, "a FAIL in the second job did not refuse the pre-ready run: " + out)
@@ -4546,7 +4568,10 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.use_ci_job({"checks": [("PASS", "STE lint")], "checks-rest": [("FAIL", "STE lint")]}, {"checks": 0, "checks-rest": 1})
         refs_before = self.refs()
         rc, out = self.pre_ready()
-        self.assertEqual(len(self.lint_calls()), 2, "the pre-ready run did not run ci-job once per job: " + out)
+        runs, base_reads = self.runs_split("main")
+        self.assertEqual(len(runs), 2, "the pre-ready run did not run ci-job once per job on the head: " + out)
+        self.assertEqual(len(base_reads), 1, "the failing checks-rest STE lint was not read once on the base: " + out)
+        self.assertEqual([run["argv"][0] for run in base_reads], ["checks-rest"], "the base read ran the checks job's STE lint, not the failing one: " + out)
         self.assertTrue(verdict_line(out, "pass", "STE lint"), "the checks job's own PASS line for STE lint did not read pass: " + out)
         self.assertTrue(verdict_line(out, "fail", "checks-rest:STE lint"),
                         "the checks-rest group did not read its own FAIL line, or read the checks job's PASS line for the same step name: " + out)
@@ -4573,7 +4598,10 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.use_ci_job({"checks": [("unknown", "check invariants")], "checks-rest": [("FAIL", SCAFFOLD_STEP)]}, {"checks": 2, "checks-rest": 1})
         refs_before = self.refs()
         rc, out = self.pre_ready()
-        self.assertEqual(len(self.lint_calls()), 2, "the pre-ready run did not run ci-job once per job: " + out)
+        runs, base_reads = self.runs_split("main")
+        self.assertEqual(len(runs), 2, "the pre-ready run did not run ci-job once per job on the head: " + out)
+        self.assertEqual(len(base_reads), 1, "the failing checks-rest step was not read once on the base: " + out)
+        self.assertEqual([run["argv"][0] for run in base_reads], ["checks-rest"], "the base read ran the unknown job, not the failing one: " + out)
         self.assertTrue(verdict_line(out, "unknown", "check invariants"), "the checks job's unknown line did not read unknown: " + out)
         self.assertTrue(verdict_line(out, "fail", SCAFFOLD_READY), "the checks-rest job's FAIL line did not read fail: " + out)
         self.assertIn("against main FAIL", out, "an unknown job beside a FAIL job did not combine to FAIL: " + out)
@@ -5369,6 +5397,29 @@ class PreReadyBaseRun(CiJobStub, unittest.TestCase):
         self.assertEqual(self.git("status", "--porcelain"), status, "the base read changed the checkout's working tree")
         self.assertEqual(self.git("ls-files", "--stage"), index, "the base read changed the checkout's index")
         self.assertTrue(os.path.isfile(os.path.join(self.wt, "BROKEN")), "the base read removed the checkout's BROKEN")
+
+    def assert_base_copy_dropped(self, branches_before, out):
+        """After the read: the copy is gone from the disk and from the checkout's `git worktree list`, and no branch was added to the checkout's repo."""
+        copies = [c["cwd"] for c in self.calls_from(False)]
+        self.assertEqual(len(copies), 1, "premise: the base copy was not read once, so nothing shows the copy was removed: %s" % out)
+        self.assertFalse(os.path.exists(copies[0]), "the base copy is still on disk after the read: %s" % copies[0])
+        listed = [os.path.realpath(line[len("worktree "):]) for line in self.git("worktree", "list", "--porcelain").splitlines() if line.startswith("worktree ")]
+        self.assertEqual(listed, [os.path.realpath(self.wt)], "the base read left a worktree in the checkout's repo: %s" % listed)
+        self.assertEqual(self.git("branch", "--format=%(refname)"), branches_before, "the base read left a branch in the checkout's repo")
+
+    def test_a_base_read_removes_its_copy_and_leaves_no_worktree_or_branch(self):
+        self.make_repo(["base.txt"], ["BROKEN"])
+        branches = self.git("branch", "--format=%(refname)")
+        self.use_ci_job([("PASS", "Breaks on change")], 0, file_fails={"Breaks on change": "BROKEN"})
+        rows, state, out = self.pre_ready(["Breaks on change"])
+        self.assert_base_copy_dropped(branches, out)
+
+    def test_a_base_copy_that_crashes_is_removed_too(self):
+        self.make_repo(["base.txt", "CRASH"], ["BROKEN"], remove=["CRASH"])
+        branches = self.git("branch", "--format=%(refname)")
+        self.use_ci_job([("PASS", "Breaks on change")], 0, file_fails={"Breaks on change": "BROKEN"}, crash_where={"CRASH": 2})
+        rows, state, out = self.pre_ready(["Breaks on change"])
+        self.assert_base_copy_dropped(branches, out)
 
 
 class RunFolderSweep(unittest.TestCase):
