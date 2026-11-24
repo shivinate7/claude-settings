@@ -69,6 +69,7 @@ a hook that does nothing. The Read spelling cases and the twin use the same live
 """
 import ast
 import collections
+import importlib.util
 import json
 import os
 import re
@@ -82,7 +83,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from test_precompact_handoff import (  # noqa: E402
-    HANDOFF_WITH_PREMISES, RUN_FOLDER, ids_in, put, transcript_line, write_transcript)
+    HANDOFF_WITH_PREMISES, RUN_FOLDER, ids_in, put, put_bytes, transcript_line, write_transcript)
 
 PRECOMPACT = os.environ.get("PRECOMPACT_HANDOFF_UNDER_TEST") or os.path.join(
     HERE, "precompact_handoff.py")
@@ -1163,10 +1164,11 @@ def write_call(c):
     return {"file_path": os.path.join(c.proj, "notes.md"), "content": "x"}
 
 
-def guard_call(c, sid, tool, tool_input, agent_id=None, home=None):
+def guard_call(c, sid, tool, tool_input, agent_id=None, home=None, extra_env=None, src=None):
     """One PreToolUse payload through hooks/guard.py, as Claude Code sends it: (decision, reason).
     An empty stdout is an allow. `agent_id` is set on a call made from inside an agent. `home` is the
-    audit marker the home holds for this call (see ROOMY_DISK_SRC); None leaves the home as it is."""
+    audit marker the home holds for this call (see ROOMY_DISK_SRC); None leaves the home as it is.
+    `extra_env` adds variables to the guard's environment; `src` replaces the launcher (ROOMY_DISK_SRC)."""
     body = {"hook_event_name": "PreToolUse", "session_id": sid, "tool_name": tool,
             "tool_input": tool_input, "cwd": c.proj}
     if agent_id:
@@ -1177,7 +1179,8 @@ def guard_call(c, sid, tool, tool_input, agent_id=None, home=None):
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
     if home is not None:
         env[HOME_MARKER_ENV] = home
-    proc = subprocess.run([sys.executable, "-c", ROOMY_DISK_SRC, GUARD], input=json.dumps(body),
+    env.update(extra_env or {})
+    proc = subprocess.run([sys.executable, "-c", src or ROOMY_DISK_SRC, GUARD], input=json.dumps(body),
                           capture_output=True, text=True, env=env, cwd=c.proj, timeout=120)
     out = (proc.stdout or "").strip()
     if proc.returncode != 0:
@@ -1916,6 +1919,650 @@ def case_unkeyed_legacy_flag_owes_nothing():
         c.cleanup()
 
 
+# --------------------------------------------------------------------------- part 6
+# A Read clears the reread flag only when the Reads so far cover the whole handoff (decision
+# precompact-handoff, item 9). Each case puts the handoff on disk, sets the flag with PostCompact, then Reads.
+
+LINES50 = "".join("line %02d\n" % i for i in range(1, 51))   # 50 lines of 8 bytes each
+
+
+def flag_set(c, sid):
+    return os.path.isfile(c.state("%s.reread" % sid))
+
+
+def read_range(c, sid, path, offset=None, limit=None):
+    """One PreToolUse Read of `path`. offset and limit are sent only when given, as Claude Code sends them."""
+    tool_input = {"file_path": path}
+    if offset is not None:
+        tool_input["offset"] = offset
+    if limit is not None:
+        tool_input["limit"] = limit
+    return c.run(READ_CHECK, "--pre-read", {
+        "session_id": sid, "hook_event_name": "PreToolUse", "tool_name": "Read",
+        "tool_input": tool_input, "cwd": c.proj})
+
+
+def compact_with(c, sid, text):
+    """The handoff on disk holds `text` byte for byte, and PostCompact sets the flag. Returns the PostCompact run."""
+    put_bytes(c.handoff(sid), text.encode("utf-8"))
+    return c.post_compact(sid)
+
+
+def case_partial_read_keeps_flag():
+    """A Read of lines 1-10 of a 50-line handoff keeps the flag set. The next Bash call is refused by
+    handoff-unread, and the refusal names the unread lines 11-50."""
+    c = Case("partial-read")
+    try:
+        if not step("PostCompact exits 0", exit_why(compact_with(c, SID, LINES50))):
+            return
+        rd = read_range(c, SID, c.handoff(SID), offset=1, limit=10)
+        if not step("the Read of lines 1-10 exits 0", exit_why(rd)):
+            return
+        step("a Read of lines 1-10 keeps the reread flag set",
+             "" if flag_set(c, SID) else "the Read of lines 1-10 cleared the reread flag")
+        got = guard_call(c, SID, "Bash", BASH)
+        if step("the Bash call is refused by handoff-unread after the partial Read",
+                refused_by(got, HANDOFF_RULE)):
+            step("the refusal names the unread lines 11-50",
+                 "" if "11-50" in got[1] else "the refusal does not name 11-50: %r" % got[1][:120])
+    finally:
+        c.cleanup()
+
+
+def case_pages_clear_flag_when_covered():
+    """Lines 1-25, then lines 26-50, of a 50-line handoff. The flag stays set after the first page and is
+    cleared by the second."""
+    c = Case("pages")
+    try:
+        if not step("PostCompact exits 0", exit_why(compact_with(c, SID, LINES50))):
+            return
+        first = read_range(c, SID, c.handoff(SID), offset=1, limit=25)
+        if not step("the Read of lines 1-25 exits 0", exit_why(first)):
+            return
+        step("after lines 1-25 the reread flag is still set",
+             "" if flag_set(c, SID) else "the Read of lines 1-25 cleared the reread flag")
+        second = read_range(c, SID, c.handoff(SID), offset=26, limit=25)
+        if not step("the Read of lines 26-50 exits 0", exit_why(second)):
+            return
+        step("after lines 26-50 the reread flag is cleared",
+             "" if not flag_set(c, SID) else "the reread flag is still set after lines 26-50")
+    finally:
+        c.cleanup()
+
+
+def case_out_of_order_pages_clear_flag():
+    """Lines 26-50, then lines 1-25. The flag stays set after the first page and is cleared by the second."""
+    c = Case("out-of-order")
+    try:
+        if not step("PostCompact exits 0", exit_why(compact_with(c, SID, LINES50))):
+            return
+        first = read_range(c, SID, c.handoff(SID), offset=26, limit=25)
+        if not step("the Read of lines 26-50 exits 0", exit_why(first)):
+            return
+        step("after lines 26-50 the reread flag is still set",
+             "" if flag_set(c, SID) else "the Read of lines 26-50 cleared the reread flag")
+        second = read_range(c, SID, c.handoff(SID), offset=1, limit=25)
+        if not step("the Read of lines 1-25 exits 0", exit_why(second)):
+            return
+        step("after lines 1-25 the reread flag is cleared",
+             "" if not flag_set(c, SID) else "the reread flag is still set after both pages")
+    finally:
+        c.cleanup()
+
+
+def case_overlapping_pages_clear_flag():
+    """Lines 1-30, then lines 20-50. The two overlap and together cover the handoff, so the flag is cleared by
+    the second Read. The first Read alone leaves it set."""
+    c = Case("overlap")
+    try:
+        if not step("PostCompact exits 0", exit_why(compact_with(c, SID, LINES50))):
+            return
+        first = read_range(c, SID, c.handoff(SID), offset=1, limit=30)
+        if not step("the Read of lines 1-30 exits 0", exit_why(first)):
+            return
+        step("after lines 1-30 the reread flag is still set",
+             "" if flag_set(c, SID) else "the Read of lines 1-30 cleared the reread flag")
+        second = read_range(c, SID, c.handoff(SID), offset=20, limit=31)
+        if not step("the Read of lines 20-50 exits 0", exit_why(second)):
+            return
+        step("after lines 20-50 the reread flag is cleared",
+             "" if not flag_set(c, SID) else "the reread flag is still set after the overlapping Read")
+    finally:
+        c.cleanup()
+
+
+def case_plain_read_of_small_handoff_clears_flag():
+    """A plain Read (no offset, no limit) of a handoff under the size limit clears the flag. Green on the
+    old code: a regression pin for the one Read that clears it whole."""
+    c = Case("plain-read")
+    try:
+        if not step("PostCompact exits 0", exit_why(compact_with(c, SID, LINES50))):
+            return
+        rd = read_range(c, SID, c.handoff(SID))
+        if not step("the plain Read exits 0", exit_why(rd)):
+            return
+        step("a plain Read of the handoff clears the reread flag",
+             "" if not flag_set(c, SID) else "the plain Read did not clear the reread flag")
+    finally:
+        c.cleanup()
+
+
+def case_limit5_read_keeps_flag():
+    """A Read with limit 5 of a 50-line handoff keeps the flag set. A real session made this Read and the
+    flag cleared, so the rule was too loose."""
+    c = Case("limit5")
+    try:
+        if not step("PostCompact exits 0", exit_why(compact_with(c, SID, LINES50))):
+            return
+        rd = read_range(c, SID, c.handoff(SID), limit=5)
+        if not step("the Read with limit 5 exits 0", exit_why(rd)):
+            return
+        step("a Read with limit 5 keeps the reread flag set",
+             "" if flag_set(c, SID) else "the Read with limit 5 cleared the reread flag")
+    finally:
+        c.cleanup()
+
+
+# --------------------------------------------------------------------------- part 7
+# The size limit on a session handoff (decision precompact-handoff). A token is ceil(UTF-8 bytes / 3.5), and
+# HANDOFF_MAX_TOKENS is 10000 in hooks/reread_check.py: 35000 bytes is the most that passes (10000 tokens),
+# and 35001 bytes is 10001 tokens. Every handoff a case writes has the six required sections, so the
+# handoff-sections rule never refuses it first.
+
+SIZE_RULE = "handoff-too-big"
+SIZE_LIMIT = 10000
+BASE_SECTIONS = ("# Handoff\n\n## Goal\nFix the handoff.\n\n## Working premises\nNone yet.\n\n"
+                 "## Where things stand\nThe reread check is in review.\n\n## Work in flight\nNothing.\n\n"
+                 "## Next steps\n- Go on.\n\n## Files and commands\nhooks/reread_check.py\n")
+FILLER_LINE = "Filler: \n"   # 9 bytes: the filler's label and its newline
+CUT_LINE = "Cut: " + "k" * 500 + "\n"   # 506 bytes, one line of the handoff that a case shrinks or grows
+
+
+def token_estimate(n):
+    """ceil(n / 3.5) for a byte count n, in whole numbers."""
+    return (2 * n + 6) // 7
+
+
+def handoff_text(total, middle=""):
+    """A handoff of exactly `total` UTF-8 bytes: the six sections, then `middle`, then a filler line of w's."""
+    head = BASE_SECTIONS + middle
+    pad = total - len(head.encode("utf-8")) - len(FILLER_LINE)
+    if pad < 0:
+        raise ValueError("handoff_text: %d bytes is too small for the sections" % total)
+    return head + "Filler: " + "w" * pad + "\n"
+
+
+def handoff_multibyte(min_bytes):
+    """A handoff of at least `min_bytes` UTF-8 bytes and fewer characters: its filler is e-acute, two bytes each."""
+    head = BASE_SECTIONS
+    pairs = (min_bytes - len(head.encode("utf-8")) - len(FILLER_LINE) + 1) // 2
+    return head + "Filler: " + "é" * pairs + "\n"
+
+
+def write_handoff(c, text, sid=SID, agent_id=None):
+    return guard_call(c, sid, "Write", {"file_path": c.handoff(sid), "content": text}, agent_id=agent_id)
+
+
+def edit_handoff(c, old, new, replace_all=False, sid=SID, agent_id=None):
+    return guard_call(c, sid, "Edit", {"file_path": c.handoff(sid), "old_string": old, "new_string": new,
+                                       "replace_all": replace_all}, agent_id=agent_id)
+
+
+def size_refusal(got, tokens):
+    """'' when the guard refused the call under handoff-too-big and its reason gives the estimate, the limit
+    and the remedy words (history, review rounds, CI). Else the first thing that is missing."""
+    why = refused_by(got, SIZE_RULE)
+    if why:
+        return why
+    reason = got[1]
+    missing = [w for w in (str(tokens), str(SIZE_LIMIT), "history", "review rounds") if w not in reason.lower()]
+    if not re.search(r"\bCI\b", reason):
+        missing.append("CI")
+    return "" if not missing else "the refusal lacks %s: %r" % (", ".join(missing), reason[:160])
+
+
+def read_check_module():
+    """hooks/reread_check.py imported in this process, or None when the import fails."""
+    try:
+        spec = importlib.util.spec_from_file_location("reread_check_under_test", READ_CHECK)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:
+        return None
+
+
+def case_size_limit_constant_is_10000_tokens():
+    """hooks/reread_check.py holds HANDOFF_MAX_TOKENS = 10000."""
+    mod = read_check_module()
+    value = getattr(mod, "HANDOFF_MAX_TOKENS", None) if mod is not None else None
+    check("reread_check: HANDOFF_MAX_TOKENS is 10000", value == SIZE_LIMIT,
+          "HANDOFF_MAX_TOKENS is %r" % (value,))
+
+
+def case_write_over_limit_is_refused():
+    """A main-session Write of 35001 bytes (10001 tokens) to the handoff is refused by handoff-too-big. The reason
+    gives the estimate, the limit and the remedy words."""
+    c = Case("too-big-write")
+    try:
+        step("a Write of 35001 bytes (10001 tokens) to the handoff is refused by handoff-too-big",
+             size_refusal(write_handoff(c, handoff_text(35001)), token_estimate(35001)))
+    finally:
+        c.cleanup()
+
+
+def case_write_at_limit_passes():
+    """A main-session Write of exactly 35000 bytes (10000 tokens) passes. Green on the old code: the boundary pin
+    that the refusal above must not move."""
+    c = Case("at-limit")
+    try:
+        step("a Write of exactly 35000 bytes (10000 tokens) to the handoff passes",
+             allowed_why(write_handoff(c, handoff_text(35000))))
+    finally:
+        c.cleanup()
+
+
+def case_write_counts_utf8_bytes_not_characters():
+    """A Write with fewer characters than the limit and more UTF-8 bytes is refused: the estimate counts bytes."""
+    c = Case("utf8-bytes")
+    try:
+        text = handoff_multibyte(35001)
+        size = len(text.encode("utf-8"))
+        chars = len(text)
+        if not step("the fixture is over the limit in bytes and under it in characters",
+                    "" if size > 35000 and chars < 35000 else "bytes %d, characters %d" % (size, chars)):
+            return
+        step("a Write over the limit in UTF-8 bytes is refused, though its characters are under it",
+             size_refusal(write_handoff(c, text), token_estimate(size)))
+    finally:
+        c.cleanup()
+
+
+def case_write_over_limit_to_other_path_passes():
+    """A Write of 40000 bytes to a file that is not the session handoff passes."""
+    c = Case("other-path")
+    try:
+        other = os.path.join(c.proj, "notes.md")
+        step("a Write of 40000 bytes to another file passes",
+             allowed_why(guard_call(c, SID, "Write", {"file_path": other, "content": "w" * 40000})))
+    finally:
+        c.cleanup()
+
+
+def case_agent_write_over_limit_is_refused():
+    """An agent's Write of 35001 bytes to the session's handoff is refused by handoff-too-big, as a main-session
+    Write is."""
+    c = Case("agent-too-big")
+    try:
+        step("an agent's Write of 35001 bytes to the handoff is refused by handoff-too-big",
+             size_refusal(write_handoff(c, handoff_text(35001), agent_id=AGENT_ID), token_estimate(35001)))
+    finally:
+        c.cleanup()
+
+
+def case_edit_over_limit_is_refused():
+    """An Edit whose result is 36001 bytes (10286 tokens) is refused. The file on disk is 30000 bytes, under the
+    limit, so the Edit is what takes it over. An Edit to 31000 bytes passes."""
+    c = Case("edit-grow")
+    try:
+        before = handoff_text(30000)
+        put_bytes(c.handoff(SID), before.encode("utf-8"))
+        big = "- Go on. " + "z" * 6000
+        after = before.replace("- Go on.", big, 1)
+        step("an Edit to 36001 bytes (over the limit) is refused by handoff-too-big",
+             size_refusal(edit_handoff(c, "- Go on.", big), token_estimate(len(after.encode("utf-8")))))
+        small = "- Go on. " + "z" * 1000
+        step("an Edit to 31000 bytes (under the limit) passes",
+             allowed_why(edit_handoff(c, "- Go on.", small)))
+    finally:
+        c.cleanup()
+
+
+def case_edit_replace_all_counts_every_occurrence():
+    """Three occurrences of `Mark ZZ` in a 30000-byte handoff. With replace_all false the Edit replaces the first
+    one, which is under the limit, and passes. With replace_all true it replaces all three, which is over the
+    limit, and is refused."""
+    c = Case("replace-all")
+    try:
+        before = handoff_text(30000, "Mark ZZ one\nMark ZZ two\nMark ZZ three\n")
+        put_bytes(c.handoff(SID), before.encode("utf-8"))
+        new = "Mark " + "y" * 2000
+        first_only = before.replace("Mark ZZ", new, 1)
+        every = before.replace("Mark ZZ", new)
+        step("the fixture: one replacement is under the limit and all three are over it",
+             "" if (token_estimate(len(first_only.encode("utf-8"))) <= SIZE_LIMIT
+                   and token_estimate(len(every.encode("utf-8"))) > SIZE_LIMIT)
+             else "one replacement %d bytes, all %d bytes" % (len(first_only.encode("utf-8")),
+                                                            len(every.encode("utf-8"))))
+        step("an Edit with replace_all false (one replacement, under the limit) passes",
+             allowed_why(edit_handoff(c, "Mark ZZ", new, replace_all=False)))
+        step("an Edit with replace_all true (three replacements, over the limit) is refused by handoff-too-big",
+             size_refusal(edit_handoff(c, "Mark ZZ", new, replace_all=True),
+                          token_estimate(len(every.encode("utf-8")))))
+    finally:
+        c.cleanup()
+
+
+def case_over_limit_file_write_shrink_passes_grow_refused():
+    """The handoff on disk is 36000 bytes (10286 tokens), over the limit. A Write that makes it smaller passes
+    even though the result is still over the limit. A Write of the same size, or larger, is refused."""
+    c = Case("shrink-write")
+    try:
+        before = handoff_text(36000, CUT_LINE)
+        put_bytes(c.handoff(SID), before.encode("utf-8"))
+        step("the handoff on disk is over the limit before the Write",
+             "" if token_estimate(len(before.encode("utf-8"))) > SIZE_LIMIT else "the fixture is under the limit")
+        smaller = handoff_text(35500)
+        step("a Write of 35500 bytes (still over the limit, smaller than the file) passes",
+             allowed_why(write_handoff(c, smaller)))
+        step("a Write of 36000 bytes (the same size as the file) is refused by handoff-too-big",
+             size_refusal(write_handoff(c, handoff_text(36000)), token_estimate(36000)))
+        step("a Write of 36500 bytes (larger than the file) is refused by handoff-too-big",
+             size_refusal(write_handoff(c, handoff_text(36500)), token_estimate(36500)))
+    finally:
+        c.cleanup()
+
+
+def case_over_limit_file_edit_shrink_passes_grow_refused():
+    """The handoff on disk is 36000 bytes, over the limit. An Edit that cuts 506 bytes passes: the result is still
+    over the limit but smaller. An Edit that keeps the size, or grows it, is refused."""
+    c = Case("shrink-edit")
+    try:
+        before = handoff_text(36000, CUT_LINE)
+        put_bytes(c.handoff(SID), before.encode("utf-8"))
+        step("an Edit that removes the cut line (35494 bytes, smaller, still over the limit) passes",
+             allowed_why(edit_handoff(c, CUT_LINE, "")))
+        same = "Cut: " + "j" * 500 + "\n"
+        same_after = before.replace(CUT_LINE, same, 1)
+        step("an Edit that keeps the file the same size is refused by handoff-too-big",
+             size_refusal(edit_handoff(c, CUT_LINE, same), token_estimate(len(same_after.encode("utf-8")))))
+        grow = "Cut: " + "k" * 600 + "\n"
+        grow_after = before.replace(CUT_LINE, grow, 1)
+        step("an Edit that grows the file is refused by handoff-too-big",
+             size_refusal(edit_handoff(c, CUT_LINE, grow), token_estimate(len(grow_after.encode("utf-8")))))
+    finally:
+        c.cleanup()
+
+
+# --------------------------------------------------------------------------- part 8
+# A Read clears the reread flag only when its range counts: at most READ_CAP_TOKENS = 25000 tokens and at most
+# 2000 lines (the Read default when no limit is given). The hook cannot see what a Read returned, so a range over
+# the cap counts nothing. An agent's rewrite of the handoff sets the same flag (decision precompact-handoff, item 9).
+
+READ_CAP_TOKENS = 25000
+
+
+def long_lines(count, width):
+    """`count` lines of exactly `width` bytes each, newline included."""
+    out = []
+    for i in range(1, count + 1):
+        head = "line %03d " % i
+        out.append(head + "x" * (width - len(head) - 1) + "\n")
+    return "".join(out)
+
+
+ONE_HUNDRED_LONG = long_lines(100, 900)   # 90000 bytes, 25715 tokens: over READ_CAP_TOKENS in one range
+SHORT_2500 = "".join("l%04d\n" % i for i in range(1, 2501))   # 2500 lines of 6 bytes: 15000 bytes, 4286 tokens
+
+
+def case_plain_read_over_cap_keeps_flag():
+    """A plain Read (no offset, no limit) of a 100-line handoff of 90000 bytes (25715 tokens) keeps the flag set:
+    its one range is over READ_CAP_TOKENS, so it counts nothing."""
+    c = Case("read-over-cap")
+    try:
+        if not step("PostCompact exits 0", exit_why(compact_with(c, SID, ONE_HUNDRED_LONG))):
+            return
+        rd = read_range(c, SID, c.handoff(SID))
+        if not step("the plain Read exits 0", exit_why(rd)):
+            return
+        step("a plain Read of a 25715-token handoff keeps the reread flag set",
+             "" if flag_set(c, SID) else "the plain Read cleared the reread flag")
+    finally:
+        c.cleanup()
+
+
+def case_range_over_cap_counts_nothing():
+    """Lines 1-100 of the same 90000-byte handoff, asked for with limit 100: the range is over the cap, so the flag
+    stays set."""
+    c = Case("range-over-cap")
+    try:
+        if not step("PostCompact exits 0", exit_why(compact_with(c, SID, ONE_HUNDRED_LONG))):
+            return
+        rd = read_range(c, SID, c.handoff(SID), offset=1, limit=100)
+        if not step("the Read of lines 1-100 exits 0", exit_why(rd)):
+            return
+        step("a Read of lines 1-100 (25715 tokens) keeps the reread flag set",
+             "" if flag_set(c, SID) else "the Read of lines 1-100 cleared the reread flag")
+    finally:
+        c.cleanup()
+
+
+def case_pages_under_cap_clear_flag():
+    """Lines 1-50, then lines 51-100, of the 90000-byte handoff. Each page is 12858 tokens, under the cap, and
+    together they cover the handoff: the flag is cleared by the second page."""
+    c = Case("pages-under-cap")
+    try:
+        if not step("PostCompact exits 0", exit_why(compact_with(c, SID, ONE_HUNDRED_LONG))):
+            return
+        first = read_range(c, SID, c.handoff(SID), offset=1, limit=50)
+        if not step("the Read of lines 1-50 exits 0", exit_why(first)):
+            return
+        step("after lines 1-50 the reread flag is still set",
+             "" if flag_set(c, SID) else "the Read of lines 1-50 cleared the reread flag")
+        second = read_range(c, SID, c.handoff(SID), offset=51, limit=50)
+        if not step("the Read of lines 51-100 exits 0", exit_why(second)):
+            return
+        step("after lines 51-100 the reread flag is cleared",
+             "" if not flag_set(c, SID) else "the reread flag is still set after lines 51-100")
+    finally:
+        c.cleanup()
+
+
+def case_plain_read_past_2000_lines_keeps_flag():
+    """A plain Read of a 2500-line handoff covers only lines 1-2000, the Read default. The flag stays set."""
+    c = Case("plain-2000")
+    try:
+        if not step("PostCompact exits 0", exit_why(compact_with(c, SID, SHORT_2500))):
+            return
+        rd = read_range(c, SID, c.handoff(SID))
+        if not step("the plain Read exits 0", exit_why(rd)):
+            return
+        step("a plain Read of a 2500-line handoff keeps the reread flag set",
+             "" if flag_set(c, SID) else "the plain Read cleared the reread flag")
+    finally:
+        c.cleanup()
+
+
+def case_range_over_2000_lines_counts_nothing():
+    """Lines 1-2500 of a 2500-line handoff, asked for with limit 2500: over 2000 lines, so the range counts nothing
+    and the flag stays set."""
+    c = Case("range-over-2000")
+    try:
+        if not step("PostCompact exits 0", exit_why(compact_with(c, SID, SHORT_2500))):
+            return
+        rd = read_range(c, SID, c.handoff(SID), offset=1, limit=2500)
+        if not step("the Read of lines 1-2500 exits 0", exit_why(rd)):
+            return
+        step("a Read of lines 1-2500 keeps the reread flag set",
+             "" if flag_set(c, SID) else "the Read of lines 1-2500 cleared the reread flag")
+    finally:
+        c.cleanup()
+
+
+def case_agent_write_sets_read_flag():
+    """An agent's Write of the session's handoff sets the reread flag. The main session's next Bash call is refused
+    by handoff-unread, and the refusal says an agent rewrote the handoff. The agent's write sets no audit flag."""
+    c = Case("agent-write-flag")
+    try:
+        put_bytes(c.handoff(SID), handoff_text(600).encode("utf-8"))
+        step("no reread flag before the agent writes",
+             "" if not flag_set(c, SID) else "the reread flag is set before any agent write")
+        rewritten = handoff_text(700)
+        if not step("the agent's Write is allowed", allowed_why(write_handoff(c, rewritten, agent_id=AGENT_ID))):
+            return
+        put_bytes(c.handoff(SID), rewritten.encode("utf-8"))
+        got = guard_call(c, SID, "Bash", BASH)
+        if not step("the main session's Bash call is refused by handoff-unread after the agent's write",
+                    refused_by(got, HANDOFF_RULE)):
+            return
+        step("the refusal says an agent rewrote the handoff",
+             "" if "agent" in got[1].lower() and "rewrote" in got[1].lower()
+             else "the refusal does not say an agent rewrote it: %r" % got[1][:120])
+        step("the agent's write sets no audit flag",
+             "" if not os.path.isfile(audit_flag(c, SID)) else "the audit flag is set after the agent's write")
+    finally:
+        c.cleanup()
+
+
+def case_agent_edit_sets_read_flag():
+    """An agent's Edit of the session's handoff sets the reread flag, as its Write does: the main session's next
+    Bash call is refused by handoff-unread, and the refusal says an agent rewrote the handoff."""
+    c = Case("agent-edit-flag")
+    try:
+        put_bytes(c.handoff(SID), handoff_text(600).encode("utf-8"))
+        step("no reread flag before the agent edits",
+             "" if not flag_set(c, SID) else "the reread flag is set before any agent edit")
+        old, new = "- Go on.", "- Go on, then check the premises."
+        if not step("the agent's Edit is allowed", allowed_why(edit_handoff(c, old, new, agent_id=AGENT_ID))):
+            return
+        put_bytes(c.handoff(SID), handoff_text(600).replace(old, new, 1).encode("utf-8"))
+        got = guard_call(c, SID, "Bash", BASH)
+        if not step("the main session's Bash call is refused by handoff-unread after the agent's edit",
+                    refused_by(got, HANDOFF_RULE)):
+            return
+        step("the refusal says an agent rewrote the handoff",
+             "" if "agent" in got[1].lower() and "rewrote" in got[1].lower()
+             else "the refusal does not say an agent rewrote it: %r" % got[1][:120])
+    finally:
+        c.cleanup()
+
+
+def case_main_write_sets_no_flag():
+    """The main session's own Write of the handoff sets no reread flag and no audit flag, and its next Bash call is
+    allowed. Green on the old code: the control for the agent cases above."""
+    c = Case("main-write-flag")
+    try:
+        rewritten = handoff_text(700)
+        if not step("the main session's Write is allowed", allowed_why(write_handoff(c, rewritten))):
+            return
+        put_bytes(c.handoff(SID), rewritten.encode("utf-8"))
+        step("the main session's Write sets no reread flag",
+             "" if not flag_set(c, SID) else "the main session's Write set the reread flag")
+        step("the main session's Write sets no audit flag",
+             "" if not os.path.isfile(audit_flag(c, SID)) else "the main session's Write set the audit flag")
+        step("the main session's Bash call is allowed after its own Write",
+             allowed_why(guard_call(c, SID, "Bash", BASH)))
+    finally:
+        c.cleanup()
+
+
+def case_agent_rewrite_partial_read_keeps_flag_whole_read_clears():
+    """After an agent's rewrite sets the flag, a partial Read (lines 1-10 of 20) keeps it set, and a whole Read
+    (no offset, no limit) clears it. The same range rule as a compaction's flag."""
+    c = Case("agent-partial-whole")
+    try:
+        put_bytes(c.handoff(SID), handoff_text(600).encode("utf-8"))
+        rewritten = handoff_text(700)
+        if not step("the agent's Write is allowed", allowed_why(write_handoff(c, rewritten, agent_id=AGENT_ID))):
+            return
+        put_bytes(c.handoff(SID), rewritten.encode("utf-8"))
+        if not step("the agent's rewrite sets the reread flag",
+                    "" if flag_set(c, SID) else "the agent's rewrite did not set the reread flag"):
+            return
+        partial = read_range(c, SID, c.handoff(SID), offset=1, limit=10)
+        if not step("the partial Read exits 0", exit_why(partial)):
+            return
+        step("after the partial Read (lines 1-10 of 20) the reread flag is still set",
+             "" if flag_set(c, SID) else "the partial Read cleared the reread flag")
+        whole = read_range(c, SID, c.handoff(SID))
+        if not step("the whole Read exits 0", exit_why(whole)):
+            return
+        step("after the whole Read the reread flag is cleared",
+             "" if not flag_set(c, SID) else "the whole Read did not clear the reread flag")
+        step("the main session's Bash call is allowed after the whole Read",
+             allowed_why(guard_call(c, SID, "Bash", BASH)))
+    finally:
+        c.cleanup()
+
+
+# --------------------------------------------------------------------------- part 9
+# The cost of the handoff check on an allowed call (decision precompact-handoff, item 9). The reread flag is checked
+# first, so a session with no flag never opens its handoff file. The probe is a launcher that logs each open and
+# stat of a handoff file in the guard's own process. Its positive twin, a flagged session, must show the probe at
+# work, or the no-flag case proves nothing.
+
+COST_LOG_ENV = "WAVE2_COST_LOG"
+COST_PREAMBLE = "\n".join([
+    "import builtins, os",
+    "_log = os.environ.get(%r)" % COST_LOG_ENV,
+    "_real_open = builtins.open",
+    "_real_stat = os.stat",
+    "def _note(p):",
+    "    if _log and isinstance(p, (str, bytes)):",
+    "        s = os.fsdecode(p)",
+    "        if 'handoffs' in s and os.path.basename(s).endswith('.md'):",
+    "            with _real_open(_log, 'a', encoding='utf-8') as f:",
+    "                f.write(s + chr(10))",
+    "def _open(p, *a, **k):",
+    "    _note(p)",
+    "    return _real_open(p, *a, **k)",
+    "def _stat(p, *a, **k):",
+    "    _note(p)",
+    "    return _real_stat(p, *a, **k)",
+    "builtins.open = _open",
+    "os.stat = _stat",
+    "",
+])
+COST_SRC = COST_PREAMBLE + "\n" + ROOMY_DISK_SRC
+
+
+def probed_bash(c, sid, log):
+    """One Bash call through the guard with the probe on: (decision, reason)."""
+    return guard_call(c, sid, "Bash", BASH, extra_env={COST_LOG_ENV: log}, src=COST_SRC)
+
+
+def handoff_probe_hits(log, sid):
+    """The probe log's lines that name this session's handoff file. [] when nothing was logged."""
+    if not os.path.isfile(log):
+        return []
+    with open(log, encoding="utf-8") as f:
+        lines = [line.strip() for line in f]
+    return [s for s in lines if os.path.basename(s) == "%s.md" % sid]
+
+
+def case_no_flag_call_opens_no_handoff():
+    """A Bash call from a session with no flag is allowed, and the guard opens or stats its handoff file 0 times."""
+    c = Case("cost-no-flag")
+    try:
+        c.seed_handoff(SID)
+        log = os.path.join(c.root, "probe.log")
+        if not step("the Bash call is allowed", allowed_why(probed_bash(c, SID, log))):
+            return
+        hits = handoff_probe_hits(log, SID)
+        step("a Bash call from a session with no flag opens or stats its handoff file 0 times",
+             "" if not hits else "the guard touched the handoff %d time(s): %r" % (len(hits), hits[:2]))
+    finally:
+        c.cleanup()
+
+
+def case_flagged_call_opens_the_handoff():
+    """The positive twin: with the flag set, the same Bash call reads the handoff (the probe logs it) and is refused
+    by handoff-unread."""
+    c = Case("cost-flagged")
+    try:
+        c.seed_handoff(SID)
+        if not step("PostCompact exits 0", exit_why(c.post_compact(SID))):
+            return
+        log = os.path.join(c.root, "probe.log")
+        got = probed_bash(c, SID, log)
+        if not step("the probe logs the flagged call's open or stat of the handoff",
+                    "" if handoff_probe_hits(log, SID) else "no handoff open or stat was logged"):
+            return
+        step("the flagged Bash call is refused by handoff-unread", refused_by(got, HANDOFF_RULE))
+    finally:
+        c.cleanup()
+
+
 def main() -> int:
     print("Part 1: SessionEnd pointer, SessionStart reorient (hooks/precompact_handoff.py)")
     case_session_end_clear_writes_pointer()
@@ -1984,6 +2631,41 @@ def main() -> int:
     case_agent_compaction_owes_nothing()
     case_agent_transcript_compaction_owes_nothing()
     case_unkeyed_legacy_flag_owes_nothing()
+
+    print("Part 6: a Read clears the reread flag only when its ranges cover the handoff (hooks/reread_check.py)")
+    case_partial_read_keeps_flag()
+    case_pages_clear_flag_when_covered()
+    case_out_of_order_pages_clear_flag()
+    case_overlapping_pages_clear_flag()
+    case_plain_read_of_small_handoff_clears_flag()
+    case_limit5_read_keeps_flag()
+
+    print("Part 7: the handoff size limit, HANDOFF_MAX_TOKENS = 10000 (hooks/reread_check.py, hooks/guard.py rule handoff-too-big)")
+    case_size_limit_constant_is_10000_tokens()
+    case_write_over_limit_is_refused()
+    case_write_at_limit_passes()
+    case_write_counts_utf8_bytes_not_characters()
+    case_write_over_limit_to_other_path_passes()
+    case_agent_write_over_limit_is_refused()
+    case_edit_over_limit_is_refused()
+    case_edit_replace_all_counts_every_occurrence()
+    case_over_limit_file_write_shrink_passes_grow_refused()
+    case_over_limit_file_edit_shrink_passes_grow_refused()
+
+    print("Part 8: an agent's rewrite sets the reread flag, and a Read counts only within the cap (hooks/reread_check.py)")
+    case_plain_read_over_cap_keeps_flag()
+    case_range_over_cap_counts_nothing()
+    case_pages_under_cap_clear_flag()
+    case_plain_read_past_2000_lines_keeps_flag()
+    case_range_over_2000_lines_counts_nothing()
+    case_agent_write_sets_read_flag()
+    case_agent_edit_sets_read_flag()
+    case_main_write_sets_no_flag()
+    case_agent_rewrite_partial_read_keeps_flag_whole_read_clears()
+
+    print("Part 9: the handoff check costs no open of the handoff on a call with no flag (hooks/guard.py, hooks/reread_check.py)")
+    case_no_flag_call_opens_no_handoff()
+    case_flagged_call_opens_the_handoff()
 
     if FAILED:
         print()
