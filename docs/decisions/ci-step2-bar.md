@@ -4,7 +4,7 @@
 
 Owner, 2026-10-28 13:40 CDT (waiting page item 34, pick b), roadmap step c95, step 2: count the real Windows or Mac bugs that reach main, and weigh that count against what step 2 saves. Take step 2 in a repo only when the money and waiting it saves is worth more than the cost of fixing those bugs. The count is per repo.
 
-- Not the count of every failure that only the full set catches. Flaky timing failures outnumber real bugs about 4 to 1, so that count mostly measures noise (item 34, option a, not picked).
+- Not the count of every failure that only the full set catches. Flaky timing failures may outnumber real bugs; that ratio is unmeasured (note ci-step2-bar-ratio-unmeasured), so that count may mostly measure noise (item 34, option a, not picked).
 - Not a judgment by green runs on main. The owner rejected it on Oct 28 at 02:36 CDT.
 - Price here: no GitHub Actions minutes are billed to claude-settings (owner, 2026-10-28 13:23 CDT, waiting page item 38, pick a). So step 2 stays off in claude-settings. A repo that pays for minutes may turn it on.
 
