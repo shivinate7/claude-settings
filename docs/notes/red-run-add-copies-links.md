@@ -1,0 +1,1 @@
+- red-run-add-copies-links: `bin/red-run` (:105-106) copies an added directory with `shutil.copytree`, which follows links by default, so a link under `.bin` lands as a copy of its target. Seen: 2026-11-24 x1

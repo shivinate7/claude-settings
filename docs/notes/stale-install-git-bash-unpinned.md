@@ -1,0 +1,1 @@
+- stale-install-git-bash-unpinned: the Windows refusal `not run (Git Bash not found)` in `hooks/stale_install.py` (:285-287) has no test. No file in `tests/`, `hooks/` or `lint/` names that text. Decision: stale-install-cost. Seen: 2026-11-24 x1

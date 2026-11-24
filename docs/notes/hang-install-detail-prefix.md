@@ -1,0 +1,1 @@
+- hang-install-detail-prefix: for a hang in the install step, `bin/ci-job` (:1104-1107) reads unknown with the detail prefix "install failed, so each lint step after it is unknown". Decision: hang-stop. Seen: 2026-11-24 x1

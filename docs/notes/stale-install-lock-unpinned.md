@@ -1,0 +1,1 @@
+- stale-install-lock-unpinned: the `own_pid` branch of `lock_held_by_other` in `hooks/stale_install.py` (:340-351) has no test. No file in `tests/`, `hooks/` or `lint/` names the function. Decision: stale-install-cost. Seen: 2026-11-24 x1

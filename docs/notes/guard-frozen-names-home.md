@@ -1,0 +1,1 @@
+- guard-frozen-names-home: `install.sh` (:158-159) and `tests/guard/s21893-hook-bypass.py` (:27-29) name `hooks/guard_frozen.py` as the home of `LIVE_PIN_SUFFIX`. The home is `hooks/shared_names.py`, as the comment at `hooks/stale_install.py` :70 says. Seen: 2026-11-24 x1
