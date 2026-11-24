@@ -1570,10 +1570,10 @@ class MutationReport(unittest.TestCase):
         self.assertEqual(push["mutation_report"], "true", f"a push: {push}")
 
 
-# The guard-inputs gate. The three Windows guard shards (checks-windows-guard, -2, -3) run only when a diff touches a guard input:
+# The guard-inputs gate. The Windows guard shards (checks-windows-guard and its -2 to -n copies) run only when a diff touches a guard input:
 # windows_guard in ci-scope.sh, read from .github/guard-inputs.txt. The gate is read from checks.yml's own step condition, so each
 # case states what the workflow does with the scope outputs, not the value of one output. Cost: parses checks.yml once per call.
-GUARD_SHARDS = ("checks-windows-guard", "checks-windows-guard-2", "checks-windows-guard-3")
+GUARD_SHARDS = split.WINDOWS_GUARD_JOBS  # the family's count, one home: SHARD_COUNTS in lint/test_windows_split.py
 # Flags the old script sets true for SNAPSHOT_DIFFS, each run() with its default arguments. windows_guard is left out of the
 # comparison: it is the one output the gate adds. Recorded on the script before the gate existed.
 SNAPSHOT_DIFFS = [

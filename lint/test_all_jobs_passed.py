@@ -637,6 +637,7 @@ class ShardsRunWithTheirFlagFalse(unittest.TestCase):
         jobs = all_jobs(self.text)
         for name, flag in SUITE_FLAG.items():
             with self.subTest(job=name):
+                self.assertIn(name, jobs, f"{name} is not a job in checks.yml")
                 expr = jobs[name]["if"]
                 self.assertIsNotNone(expr, f"{name} has no job-level if")
                 self.assertTrue(eval_with(expr, "pull_request", {flag: "false", "records_only_skip": "false"}, default="true"),
@@ -649,6 +650,7 @@ class ShardsRunWithTheirFlagFalse(unittest.TestCase):
     def test_a_failed_shard_fails_the_rollup(self):
         for name in SUITE_FLAG:
             with self.subTest(shard=name):
+                self.assertIn(name, self.needed, f"{ALL_JOBS_PASSED_JOB} does not need {name}, so its failure is no verdict")
                 code, out = check_sh(self.needs_json(failed=name))
                 self.assertNotEqual(code, 0, f"a failed {name} passes the rollup: {out}")
 
