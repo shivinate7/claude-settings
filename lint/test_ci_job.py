@@ -532,7 +532,7 @@ class HangStopDefault(Job):
 
 class HangLineFromVerdict(Job):
     """A real bin/verdict hang stop (no stub) prints a line that ci-job reads as its hang line. The stub cases print the words
-    themselves, so only a real verdict shows that the two copies of the fixed words agree (facts note N1, PR 3852)."""
+    themselves, so only a real verdict shows that the two copies of the fixed words agree."""
 
     def test_a_real_hang_stop_reads_as_a_hang_in_the_step_line(self):
         rc, lines, out = self.run_job(step("hang-real", "sleep 60", env={"VERDICT_HANG_SECONDS": "2"}))  # the 2 s stop ends it long before its 60 s
@@ -543,8 +543,8 @@ class HangLineFromVerdict(Job):
 
 
 class HangExitsOne(Job):
-    """A verdict-form HANG line with exit 1 reads FAIL (facts note N2, PR 3852). verdict's own hang line only comes with exit 124, so a step
-    that prints the words and exits 1 failed."""
+    """A verdict-form HANG line with exit 1 reads FAIL. verdict's own hang line only comes with exit 124, so a step that prints
+    the words and exits 1 failed."""
 
     def test_a_verdict_form_hang_line_with_exit_1_reads_fail(self):
         hang = "HANG hang-exit1 rc=124 no output or CPU for 60s, stopped (61.2s) log=hang-verdict.log"
