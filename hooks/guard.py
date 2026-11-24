@@ -828,6 +828,12 @@ while True:
             raise ImportError("reread_check could not use precompact_handoff")
         if not callable(getattr(reread_check, "unread_handoff", None)):
             raise ImportError("reread_check has no unread_handoff")
+        # The rest of what judge() and main() take from it: a stale copy that lacks one would raise mid-judge, and main()
+        # fails open on a raise, so the refusal it was loaded for would turn into an allow.
+        _missing = [_name for _name in ("unread_note", "too_big_estimate", "agent_rewrite") if not callable(getattr(reread_check, _name, None))]
+        _missing += [_name for _name in ("HANDOFF_MAX_TOKENS", "READ_CAP_TOKENS", "READ_MAX_LINES") if not isinstance(getattr(reread_check, _name, None), int)]
+        if _missing:
+            raise ImportError("reread_check lacks %s" % ", ".join(_missing))
 
         _loading = "install-id"
         if _install_ids_differ():
