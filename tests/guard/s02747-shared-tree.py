@@ -524,6 +524,10 @@ sh("worktree: a leading cd into the shared checkout's own root, then a -C reset 
 sh("worktree data: a reset named in a JSON payload piped to python, inside a worktree, allows",
    "printf '%s' '" + json.dumps({"tool_input": {"command": VCS + " reset --hard"}})
    + "' | python hooks/guard.py", "allow", cwd=GITWT)
+# A DRY RUN NAMES NOTHING TO DISCARD, BUT IT DOES NOT END THE SEGMENT. A single `&` keeps two git calls in one
+# segment, so a `worktree prune -n` placed first must not hide the reset after it from the shared-tree rule.
+sh("worktree prune: a dry run joined by & to a reset in the shared checkout still denies the reset",
+   VCS + " worktree prune -n & " + VCS + " reset --hard", "deny", "shared-tree", cwd=GITMAIN)
 
 # THE PER-FILE CARVE-OUT (owner ruling 2026-10-11, "Allow per-file"; decision
 # agent-worktree-discard-is-noted). In a linked worktree, a checkout or restore that names only FILES writes the
