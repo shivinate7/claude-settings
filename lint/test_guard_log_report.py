@@ -1345,41 +1345,41 @@ OUTCOME_START = "2026-11-20T00:00:00-06:00"
 OUTCOME_END = "2026-11-24T00:00:00-06:00"
 
 
-def stamp_on(day, minute):
+def when_on(day, minute):
     return "2026-11-%02dT10:%02d:00-06:00" % (day, minute)
 
 
-def outcome_line(stamp, rule, claim, why="", session=SID):
+def outcome_line(when, rule, claim, why="", session=SID):
     matched = claim + (" " + why if why else "")
-    return "\t".join([stamp, "", "outcome", rule, matched, session])
+    return "\t".join([when, "", "outcome", rule, matched, session])
 
 
-def refusal_line(stamp, decision, rule, session=SID):
-    return "\t".join([stamp, "Bash", decision, rule, "git stash", session])
+def refusal_line(when, decision, rule, session=SID):
+    return "\t".join([when, "Bash", decision, rule, "git stash", session])
 
 
 def outcome_fixture():
-    """Lines inside the window 2026-11-20 .. 2026-11-24, one line outside it, and two unreadable lines."""
+    """Lines inside the window, one line outside it, and two unreadable lines."""
     return [
-        refusal_line(stamp_on(21, 0), "deny", "load-brake"),
-        refusal_line(stamp_on(21, 1), "deny", "load-brake"),
-        refusal_line(stamp_on(21, 2), "deny", "load-brake"),
-        refusal_line(stamp_on(21, 3), "deny", "load-brake"),
-        refusal_line(stamp_on(21, 4), "noted", "load-brake"),
-        outcome_line(stamp_on(21, 5), "load-brake", "false-alarm", "disk check"),
-        outcome_line(stamp_on(21, 6), "load-brake", "false-alarm"),
-        outcome_line(stamp_on(21, 7), "load-brake", "false-alarm", "pace read"),
-        outcome_line(stamp_on(21, 8), "load-brake", "right"),
-        refusal_line(stamp_on(21, 10), "deny", "shared-tree"),
-        outcome_line(stamp_on(21, 11), "shared-tree", "right", "stash"),
-        outcome_line(stamp_on(22, 0), "shared-tree", "right"),
-        refusal_line(stamp_on(21, 12), "ask", "merge-main"),
-        refusal_line(stamp_on(21, 13), "ask", "merge-main"),
-        refusal_line(stamp_on(21, 14), "deny", "merge-main"),
-        refusal_line(stamp_on(21, 15), "deny", "merge-main"),
-        outcome_line(stamp_on(22, 1), "merge-main", "false-alarm", "gh merge"),
-        outcome_line(stamp_on(22, 2), "quiet-rule", "false-alarm", "never refused"),
-        outcome_line(stamp_on(22, 3), "quiet-rule", "false-alarm"),
+        refusal_line(when_on(21, 0), "deny", "load-brake"),
+        refusal_line(when_on(21, 1), "deny", "load-brake"),
+        refusal_line(when_on(21, 2), "deny", "load-brake"),
+        refusal_line(when_on(21, 3), "deny", "load-brake"),
+        refusal_line(when_on(21, 4), "noted", "load-brake"),
+        outcome_line(when_on(21, 5), "load-brake", "false-alarm", "disk check"),
+        outcome_line(when_on(21, 6), "load-brake", "false-alarm"),
+        outcome_line(when_on(21, 7), "load-brake", "false-alarm", "pace read"),
+        outcome_line(when_on(21, 8), "load-brake", "right"),
+        refusal_line(when_on(21, 10), "deny", "shared-tree"),
+        outcome_line(when_on(21, 11), "shared-tree", "right", "stash"),
+        outcome_line(when_on(22, 0), "shared-tree", "right"),
+        refusal_line(when_on(21, 12), "ask", "merge-main"),
+        refusal_line(when_on(21, 13), "ask", "merge-main"),
+        refusal_line(when_on(21, 14), "deny", "merge-main"),
+        refusal_line(when_on(21, 15), "deny", "merge-main"),
+        outcome_line(when_on(22, 1), "merge-main", "false-alarm", "gh merge"),
+        outcome_line(when_on(22, 2), "quiet-rule", "false-alarm", "never refused"),
+        outcome_line(when_on(22, 3), "quiet-rule", "false-alarm"),
         refusal_line("2026-11-10T10:00:00-06:00", "deny", "merge-main"),
         outcome_line("2026-11-10T10:01:00-06:00", "merge-main", "false-alarm", "old"),
         "garbage line with no tabs",
@@ -1456,7 +1456,7 @@ class OutcomeReaderTests(unittest.TestCase):
     def test_an_empty_log_has_no_rule_rows(self):
         self.assertEqual(outcome_rows(self.report([])), [], "an empty log must list no rule")
 
-    def test_outcome_lines_leave_the_deny_ask_noted_counts_unchanged(self):
+    def test_outcome_lines_leave_the_refuse_ask_noted_counts_unchanged(self):
         with_claims = outcome_fixture()
         refusals_only = [line for line in with_claims if "\toutcome\t" not in line]
         self.assertEqual(self.default_counts(with_claims), self.default_counts(refusals_only),

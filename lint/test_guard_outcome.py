@@ -2,7 +2,7 @@
 """Cases for bin/guard-outcome, the command that writes one outcome line to guard.log.
 
 A session that judges a refusal writes one claim: the refusal was a false alarm, or it was right.
-The claim is the refused session's own word, not a fact (owner ruling, 2026-11-23 23:02 CST). The
+The claim is the refused session's own word, not a fact. The
 reader is `lint/guard_log_report.py --outcomes`; its cases live in lint/test_guard_log_report.py.
 
 Pinned line format: six tab-separated fields, as a guard.log line has.
