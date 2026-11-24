@@ -3532,7 +3532,10 @@ MUTATIONS = [
      '        _loading = "reread_check"\n        import reread_check\n',
      '        _loading = "reread_check"\n        try:\n            import reread_check\n'
      '        except ImportError:\n'
-     '            reread_check = type("R", (), {"ph": 1, "unread_handoff": staticmethod(lambda payload: "")})\n',
+     '            reread_check = type("R", (), {"ph": 1, "unread_handoff": staticmethod(lambda payload: ""),\n'
+     '                "unread_note": staticmethod(lambda payload: ""), "too_big_estimate": staticmethod(lambda result, path: 0),\n'
+     '                "agent_rewrite": staticmethod(lambda payload: None),\n'
+     '                "HANDOFF_MAX_TOKENS": 10000, "READ_CAP_TOKENS": 25000, "READ_MAX_LINES": 2000})\n',
      "guard", "a guard copy without reread_check.py refuses as guard-crash"),
     ("handoff-unread: a reread_check without its precompact_handoff sibling is let load again",
      '        if reread_check.ph is None:',
