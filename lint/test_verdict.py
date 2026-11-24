@@ -109,6 +109,18 @@ class T(unittest.TestCase):
         self.assertEqual(len(body), 30)
         self.assertEqual(body[-1], "l99")
 
+    def test_fail_excerpt_keeps_every_failing_case_name(self):
+        # A CI step shows only this excerpt, so a FAIL must name each failing case. Twelve failing unittest cases make 36 hot lines,
+        # and the 30-line excerpt cut the first cases' names (decision hang-stop: a wrapped step's log is the excerpt).
+        lines = []
+        for i in range(12):
+            lines += [f"print('FAIL: test_case_{i:02d} (m.T.test_case_{i:02d})')", "print('Traceback (most recent call last):')",
+                      f"print('AssertionError: {i} != -1')"]
+        r = run("\n".join(lines) + "\nprint('FAILED (failures=12)')\nraise SystemExit(1)\n")
+        self.assertEqual(r.returncode, 1)
+        missing = [f"test_case_{i:02d}" for i in range(12) if f"test_case_{i:02d}" not in r.stdout]
+        self.assertEqual(missing, [], "the FAIL excerpt drops the names of these failing cases")
+
     def test_reused_log_is_not_truncated(self):
         with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
             log = os.path.join(d, "v.log")
