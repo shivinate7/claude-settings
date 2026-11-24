@@ -5041,6 +5041,7 @@ READY_CHECKS_CITE = "(decision lanes-run-no-full-ci-job, the ready checks: a dra
 # The stdout lines of the draft step that a ready run's reader (hooks/guard_merge.py ready_mark_hit) reads from a session transcript to learn which head the run stood
 # for. One home: the step says them from these templates and the guard builds its patterns from the same templates (ready_line_pattern).
 READY_PASS_FMT = "merge: the ready checks ({checks}) pass on {sha}."
+READY_PASS_SKIPPED_FMT = "merge: the ready checks ({checks}) pass on {sha}, {skipped} skipped."  # a pass beside listed action steps this tool cannot run (step_skip); the guard reads it as a pass line too
 READY_NO_CHECKS_LINE = "merge: this repo declares no ready checks (merge.readyChecks), so the draft step runs none."
 READY_DRY_FMT = "merge: the dry merge of {head} into {base} is {dry}."  # a pass on {dry} stands for {head}: the dry merge has the head as its first parent
 READY_UNCHECKED_FMT = "merge: the draft step ran no checks on #{n} at {sha}. Nothing was pushed."  # a base other than the default with no ready checks: no worktree, so no other line names the head
@@ -5048,7 +5049,7 @@ READY_RECORDS_CURRENT_FMT = "merge: the records page on {branch} at {sha} is cur
 READY_RECORDS_PUSHED_FMT = "merge: the records page pushed to {branch} at {sha}."
 READY_MERGED_FMT = "merge: {base} is merged into {branch} at {sha}, here only. Nothing is pushed yet."
 READY_CLAIM_STOP_FMT = "{sha} on {branch} holds a Record-claim ({claim}), so the draft step adds no page commit on top of it."  # the head of a Record-claim stop; the stop prints it first, after "merge: "
-READY_LINE_FIELDS = {"sha": r"[0-9a-f]{7,40}", "head": r"[0-9a-f]{7,40}", "dry": r"[0-9a-f]{7,40}", "n": r"\d+", "checks": r"[^)\n]*", "base": r"\S+", "branch": r"\S+", "claim": r"[^)\n]*"}
+READY_LINE_FIELDS = {"sha": r"[0-9a-f]{7,40}", "head": r"[0-9a-f]{7,40}", "dry": r"[0-9a-f]{7,40}", "n": r"\d+", "checks": r"[^)\n]*", "skipped": r"\d+", "base": r"\S+", "branch": r"\S+", "claim": r"[^)\n]*"}
 
 def ready_line_pattern(fmt):
     """The compiled pattern of one READY_*_FMT template: each {name} field is a named group, the rest is literal."""
@@ -5057,6 +5058,16 @@ def ready_line_pattern(fmt):
 
 RECORDS_STEP = "Rules and records move together"  # the checks.yml step that uses $/actions/claude-md-cites; it reads the PR body, so a run with no body skips it (bin/cheap-lints)
 READY_JOB_PREFIX = re.compile(r"^([a-z][a-z0-9_-]*):(.+)$")  # a `<job>:<step>` ready check; a step name that does not open this way is a step of job `checks`
+
+# The detail bin/ci-job prints for a listed (--step) step it cannot run because it is an action (its `uses:` key): bin/ci-job plan() says `an action (uses: X); CI runs it`
+# and its --step branch wraps it as `--step named it, but it did not run (<state>): <detail>`. The copy here is of that text; bin/ci-job is a script with no import, so the two files cannot share a constant.
+ACTION_NOT_RUN_DETAIL = re.compile(r"--step named it, but it did not run \(not run locally\): (an action \(uses: .+\); CI runs it)")
+
+def step_skip(detail):
+    """-> the skip text (`an action (uses: X); CI runs it`) when the first line of an unknown row's `detail` is ci-job's detail for a listed action step it cannot run, else None.
+    Every other unknown (an absent name, a timeout, a crash, a scope skip, a run step missing a tool) reads None, so it still refuses."""
+    m = ACTION_NOT_RUN_DETAIL.fullmatch((detail.splitlines() or [""])[0])
+    return m.group(1) if m else None
 
 STEP_LINE = re.compile(r"^(PASS \(cached\)|PASS|FAIL|SKIP|skipped|unknown|not run)\s+(.*)$")  # PASS (cached): a pass that ci-job's rerun cache answered
 
@@ -5130,21 +5141,30 @@ def ready_job_groups(checks):
 
 def pre_ready_rows(wt, n, base, checks, pre, body=None):
     """The pre-ready run: one ci-job run per job of `merge.readyChecks` `checks` in the tree `wt` (ready_job_groups), then, when `pre` is (root, host, info), the debt-close lint
-    and the open-PR clash of the PR's head info["head"] (the lint reads it through `wt`'s git), each once. Prints one verdict line per check, `pass NAME`, `fail NAME: why` or `unknown NAME: why`, all before any
+    and the open-PR clash of the PR's head info["head"] (the lint reads it through `wt`'s git), each once. Prints one verdict line per check, `pass NAME`, `skip NAME: why` (a listed action step this tool cannot run, step_skip; counted only when another listed step passes), `fail NAME: why` or `unknown NAME: why`, all before any
     refusal; NAME is the declared entry.
     -> (rows, (state, lines, log)): rows of (verdict, name, detail), and the jobs' ci_job_run answers combined: state fail over unknown over pass, lines and log joined.
     Each job's steps are read from that job's own lines, so a step name two jobs hold reads only its own job.
     Each job's run gets the PR body (info["body"], else `body`, which a run with no `pre` passes) as PR_BODY, which the records-and-rules step (actions/claude-md-cites, a ready check by name) reads; with no body it reads unknown when it finds a gap.
     Cost: one ci-job run per job (a ready check that names a local action adds no run of its own: its three probe steps are three bin/verdict starts and shells inside that run, a git diff, and one live GitHub read per Facts claim, which reads unknown when it fails), one debt-close lint (a scratch worktree and one Retire test run per closed debt), one cross_measure; no file but ci-job's log and the temporary worktrees."""
-    rows, states, lines, log = [], [], [], []
+    rows, states, lines, log, held = [], [], [], [], []  # held: each job's ci-job state and rows before a skip is read
     for job, group in ready_job_groups(checks).items():
         raw = []
         args = [job, "--pinned", *[a for _, bare in group for a in ("--step", bare)], "--base", f"origin/{base}"]
         state, job_lines, job_log, _ = ci_job_run(wt, *args, raw=raw, pr_body=pre[2].get("body") if pre else body)  # the records-and-rules check reads the body; a body that is None is unread, and its probe reads unknown
+        job_rows = [(v, declared, d) for (v, _, d), (declared, _) in zip(step_verdicts(raw, [bare for _, bare in group], state), group)]
+        skips = [i for i, (v, _, d) in enumerate(job_rows) if v == "unknown" and step_skip(d)]
+        # An unknown job whose every unknown line is a listed action step the tool cannot run, and whose other rows all pass, reads as a pass with those steps skipped.
+        skippable = state == "unknown" and skips and len([l for l in raw if l.startswith("unknown")]) == len(skips) and all(v in ("pass", "unknown") for v, _, _ in job_rows)
+        held.append((state, job_rows))
+        if skippable:
+            state, job_rows = "pass", [("skip", n_, step_skip(d)) if i in skips else (v, n_, d) for i, (v, n_, d) in enumerate(job_rows)]
         states.append(state)
         lines += job_lines
         log += job_log
-        rows += [(v, declared, d) for (v, _, d), (declared, _) in zip(step_verdicts(raw, [bare for _, bare in group], state), group)]
+        rows += job_rows
+    if any(v == "skip" for v, _, _ in rows) and not any(v == "pass" for v, _, _ in rows):  # every listed step is unrunnable: nothing ran, so nothing passed
+        states, rows = [s_ for s_, _ in held], [r for _, job_rows in held for r in job_rows]
     state = "fail" if "fail" in states else "unknown" if "unknown" in states else "pass"
     if pre:
         root, host, info = pre
@@ -5156,6 +5176,7 @@ def run_ready_checks(wt, n, base, checks, remedy="Fix it on the branch, push, an
     """The ready checks of the draft step: run the repo's `merge.readyChecks` through ci-job in the tree `wt`, which holds what the step
     would push (the merge of the head with the base, for a PR whose base is not the default branch: open_merge_worktree). One ci-job run per job.
     Returns on a pass; a FAIL or an unknown raises Stop, and no flag lifts it. `checks` is a non-empty list.
+    A listed action step this tool cannot run (step_skip) is skipped, with one `skip` line and a count on the pass line (READY_PASS_SKIPPED_FMT), when another listed step passes.
     `remedy` is the route the refusal names: the draft step's by default.
     A FAIL is a LintFail, with the step lines and the log; an unknown is a plain Stop.
     `pre` is (root, host, info) for the pre-ready run: it also reads the debt-close lint and the open-PR clash (pre_ready_rows), and any of them
@@ -5166,13 +5187,14 @@ def run_ready_checks(wt, n, base, checks, remedy="Fix it on the branch, push, an
         message = "\n".join([f"the ready checks of {short} against {base} {'FAIL' if state == 'fail' else 'are unknown, not a pass'}:", *lines, *log,
                              f"#{n} stays a draft and nothing was pushed. {remedy} {READY_CHECKS_CITE}"])
         raise LintFail(message, lines, log) if state == "fail" else Stop(message)
-    bad = [r for r in rows if r[0] != "pass"]
+    bad = [r for r in rows if r[0] not in ("pass", "skip")]
     if bad:
         failed = any(v == "fail" for v, _, _ in bad)
         message = "\n".join([f"the pre-ready run of {short} against {base} {'FAILs' if failed else 'is unknown, not a pass'}: " + ", ".join(f"{v} {name}" for v, name, _ in bad) + ".",
                              f"#{n} stays a draft and nothing was pushed. {remedy} {READY_CHECKS_CITE}"])
         raise LintFail(message, [f"{v} {name}: {d}" for v, name, d in bad], []) if failed else Stop(message)
-    say(READY_PASS_FMT.format(checks=", ".join(checks), sha=short))
+    skipped = sum(v == "skip" for v, _, _ in rows)
+    say(READY_PASS_SKIPPED_FMT.format(checks=", ".join(checks), sha=short, skipped=skipped) if skipped else READY_PASS_FMT.format(checks=", ".join(checks), sha=short))
 
 def open_named(host, info, n):
     """-> the pull requests that the body of `n` (`info`) names as replaced and that are open now (replaced_names, then one read of the open list).
