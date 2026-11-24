@@ -982,7 +982,6 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
             dest = cur if merge == cur or (not merge and auto.lower() in ("true", "yes", "on", "1")) else None
         elif mode == "current":
             dest = cur
-            implied = True
         elif mode in ("upstream", "tracking"):
             dest = merge or None
         else:
@@ -1012,7 +1011,7 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
                 # A local origin makes main() empty; the other refspecs are still read for agent.
                 if main():
                     to_main = True
-            elif source in ("HEAD", "@") or (current() is not None and source == current()):
+            elif source in ("HEAD", "@"):
                 implied = True
                 agent = agent or bool(current() and AGENT_BRANCH.fullmatch(current()))
             else:

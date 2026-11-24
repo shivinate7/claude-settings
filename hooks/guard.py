@@ -158,10 +158,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        agent-named destination in the same push is push-agent-branch's, which refuses.
                        A remote the shell has not expanded counts as one. The remote's HEAD is not
                        read. A dry run passes.
-  push-stray-branch    ask. An implied push (bare, `HEAD`, `@`, or a colon-less refspec naming the
-                       current branch) that writes a name other than the branch's upstream. It is silent
-                       when the clone holds `refs/remotes/<remote>/<name>`. It asks only with an
-                       upstream on the pushed remote that is not main or master.
+  push-stray-branch    allow. An implied push (bare, `HEAD`, `@`) that writes a name other than the
+                       branch's upstream is harmless and reversible, so it passes. Another rule may still
+                       refuse the push (main, an agent branch name, a ready pull request's branch).
   push-agent-branch    deny. A non-forced push whose destination branch name is an agent-worktree name
                        (agent-<hex>, claude/agent-<hex>, worktree-agent-<hex>, 8+ hex), with or without
                        -u. No upstream is needed. It holds when `main` comes first in the same push
