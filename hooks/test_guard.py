@@ -86,6 +86,25 @@ VCS = "g" + "it"
 # this suite inherits that. A case that tests the unset or empty default names its own `env`.
 os.environ["CLAUDE_CODE_SUBAGENT_MODEL"] = "sonnet"
 
+
+def _guard_constant(name):
+    """The string value of the module-level constant `name` in GUARD, read with the ast: the guard is not imported
+    here, so this runs before any section loads. A constant that is not there stops the run, so a rename cannot
+    leave the harness clearing nothing."""
+    with open(GUARD, encoding="utf-8") as f:
+        tree = ast.parse(f.read(), filename=GUARD)
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                return node.value.value
+    sys.exit("fixture setup failed: %s has no string constant %s, the name the harness clears" % (GUARD, name))
+
+
+# The Workflow default is the model a no-model Workflow agent() call is served. The shell may export it (settings.json
+# does), so the harness clears it here, under the name the guard reads. A case that needs it sets it through its own
+# `env`, so no verdict depends on the shell that starts the run.
+os.environ.pop(_guard_constant("ROLE_WORKFLOW_MODEL_ENV"), None)
+
 CASES = []
 
 # GUARD_TESTS=windows-slice keeps only the cases tagged "windows": the ones that reach Windows-only
@@ -134,6 +153,7 @@ FAMILIES = {
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "records-page-ready": "a ready pull request whose head holds a stale records page is refused, on the MCP draft:false call and on gh pr ready in each form; a current, non-default, claim-holding, behind-the-base, empty, undo, draft, title-only or non-merge-tool call is allowed; a read that cannot run, or an ancestry unknown in a shallow clone, is refused unknown, and the unknown reason names no --confirm",
     "ready-mcp-mark-guard": "a ready mark by the MCP update tool (draft false) or by the shell gh pr ready (Bash or PowerShell; a number, branch or URL selector) is refused unless the merge tool's ready checks passed on the pull request's current head, read from the session transcript; a shell mark chained after the ready run in one call is refused; a draft true call, a body-only update, gh pr ready --undo, the ready run itself and a gh pr ready in a comment, quoted string or heredoc are allowed",
+    "ready-pr-push": "a git push whose branch has an open pull request that is ready (not a draft) is refused while that run is running, green or not yet reported, naming why a push cancels it and the way out; a red job, a draft, no pull request for the branch, another branch, an archive name, the merge tool's own call and a push written in a string or heredoc are allowed; a pull request read that cannot run is allowed, with one stderr line that names the read; a push reads GitHub once when no ready pull request holds its branch and twice when one does, and a call that is no push reads it not at all",
     "pr-create-session-link": "an MCP create_pull_request call in a merge-tool repo, from a cloud session with a known id, is refused unless its body holds this session's Session link; a draft false create still gets the draft-pr refusal first; a local session, a repo with no merge tool and the update tool pass; an override lifts the refusal once",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "octopus-push": "a git push whose range adds a merge commit of more than two parents is refused, with a two-parent remedy; a push that writes main keeps its push-main ask",

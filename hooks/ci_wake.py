@@ -6,20 +6,30 @@ registered with `asyncRewake: true`. Two calls start a watch: `gh pr ready <N>`,
 with `draft` false (the cloud's ready route, since `gh pr ready` gets 403 in cloud; route pr-ready-gh-cli-cloud;
 decision ci-wait-reads-run-status, The CI wake-up). The MCP call names its PR by `owner`, `repo` and `pullNumber` in tool_input.
 A call with `draft` absent or true starts none. Each `gh pr ready` in a command gets its own watch, in this one
-process. A push starts none. Per PR it reads the head once. It lists that head's runs until a run that
-ran shows (a skipped draft run is no run), waits on it, lists once more at once for a late run, and prints one line:
+process. A push starts none. Per PR it reads the head once. It lists that head's runs until a run settles the
+wait (`settled`), waits on it, lists once more at once for a late run, and prints one line. The checkout the hook runs
+in decides what settles: when its .github/workflows files define the rollup job (`all-jobs-passed`, merge.py ROLLUP_JOB;
+a local file read, no GitHub call), a run settles the wait when it is red, still going, or completed with that job
+passed. A skipped draft run, a run whose rollup job is skipped or absent (a draft-era run, or a ready run that lacks
+it), and a green run of another workflow settle nothing, so green never comes from them. When the checkout defines no
+such job, or has no workflows folder, any run that ran settles the wait and the verdict reads from the run conclusions:
 
     CI <green|red|cancelled> on <sha7>: <failing job names>
     CI unknown on <sha7 or PR>: <reason>        (also "still running" at the deadline)
 
+A job of the run that has failed ends the wait at the poll that shows it, while the run goes on: the line is then red,
+and names the failed jobs known so far. A red line is followed by up to MAX_DETAIL lines: the failing lines of the
+first failed job's log (merge.py `failing_log_lines`, each cut to DETAIL_WIDTH characters, timestamp and colour codes
+removed), or one `log unread: <reason>` line when that log could not be read or holds no failing line.
 Then it exits 2 once, which wakes the session. A repo with no active workflow, whose PR adds no
 .github/workflows file, has no CI to wait for, so it wakes with `CI none on <sha7>: no active workflow`. The
 Stop check closes its CI wait on that line and reads only the transcript (stall_watch `open_ci_wait`). A workflow
 list with stderr output reads unknown, and the watch runs. It prints nothing and exits 0 when no watch starts, for a
 draft or when another watcher already holds every PR it would watch. Any error exits 2 with an unknown
-line, never 1. It lists runs, and reads a run's status, 30 s apart for the first 4 minutes, then at
+line, never 1. It lists runs, and reads a run's status and jobs (one `gh` child per poll; API requests per poll unmeasured), 30 s apart for the first 4 minutes, then at
 gaps that grow to 120 s (`pauses`). One extra list comes at once after the first judged run, to catch a
-run that shows late (debt ci-wake-lists-runs-once). It never loops on a red run.
+run that shows late (debt ci-wake-lists-runs-once). It never loops on a red run. Cost: no more status reads than that
+schedule, plus one job-log read per watch, made only for a red wake (the first failed job's log).
 
 Seams: CI_WAKE_DEADLINE, the watch budget in seconds (default DEFAULT_DEADLINE, under the hook
 timeout in settings.json). CI_WAKE_LOCK_DIR, the folder of the per-PR lock files.
@@ -48,6 +58,10 @@ STATUS_PAUSE = 30         # seconds between two reads in the first BACKOFF_FLAT 
 BACKOFF_FLAT = 240        # seconds the gap stays STATUS_PAUSE
 BACKOFF_CAP = 120         # seconds, the longest gap
 READ_TIMEOUT = 60         # seconds for each gh read
+POLL_FIELDS = "status,jobs"   # one poll: the status, and the jobs that show a failure while the run goes on
+MAX_DETAIL = 12           # failing lines after a red line
+DETAIL_WIDTH = 200        # characters of one failing line
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
 RUN_FIELDS = "databaseId,name,status,conclusion,workflowName,headSha,event"
 GOOD = ("success", "skipped", "neutral")
 REPO_FLAGS = ("-R", "--repo")
@@ -72,7 +86,8 @@ def emit(lines):
     if not lines:
         return 0
     try:
-        sys.stderr.buffer.write("".join(" ".join(x.split())[:300] + "\n" for x in lines).encode("utf-8", "replace"))
+        # A line may hold line breaks (a red wake and its failing lines): each part is one output line.
+        sys.stderr.buffer.write("".join(" ".join(part.split())[:300] + "\n" for x in lines for part in x.split("\n")).encode("utf-8", "replace"))
         sys.stderr.buffer.flush()
     except Exception:
         pass
@@ -127,11 +142,12 @@ def pauses():
 
 
 def watch_run(run_id, cwd, deadline, repo=""):
-    """Read `gh run view <id> --json status` until the status is `completed` or the deadline
-    passes. Reads follow `pauses`, and the last pause ends at the deadline. No `gh run watch` (decision ci-wait-reads-run-status). A failed or non-JSON read
+    """Read `gh run view <id> --json status,jobs` until the status is `completed`, a job has failed, or the deadline
+    passes. -> True when a job failed while the run still goes (the wake need not wait for the run's end), else None.
+    Reads follow `pauses`, and the last pause ends at the deadline. No `gh run watch` (decision ci-wait-reads-run-status). A failed or non-JSON read
     gets one retry after the pause (never past the deadline); a second failure raises Unknown."""
     def read():
-        args = ["run", "view", str(run_id), *(["-R", repo] if repo else []), "--json", "status"]
+        args = ["run", "view", str(run_id), *(["-R", repo] if repo else []), "--json", POLL_FIELDS]
         try:
             return gh_json(args, cwd)
         except Unknown:
@@ -141,8 +157,11 @@ def watch_run(run_id, cwd, deadline, repo=""):
             return gh_json(args, cwd)
     gaps = pauses()
     while deadline - time.monotonic() > 0:  # at or past the deadline: no read, no pause
-        if read().get("status") == "completed":
+        got = read()
+        if got.get("status") == "completed":
             return
+        if any(j.get("conclusion") == "failure" for j in got.get("jobs") or []):
+            return True
         left = deadline - time.monotonic()
         gap = next(gaps)
         if left <= gap:  # the last pause is clamped to the deadline, and the wait ends there
@@ -261,7 +280,116 @@ def judged_red(runs):
     """True when judge_runs finds a red run among `runs`. An unloadable merge tool judges nothing red."""
     from guard_merge import merge_module
     merge = merge_module()
-    return merge is not None and bool(merge.Host.judge_runs(runs)[0])
+    return merge is not None and bool(judge(merge, runs)[0])
+
+
+def early_red(run):
+    """True for a run that goes on (not completed) with a job that has failed: red already."""
+    return run.get("status") != "completed" and any(j.get("conclusion") == "failure" for j in run.get("jobs") or [])
+
+
+def judge(merge, runs):
+    """-> (red, pending) as judge_runs gives them, with a run that goes on and has a failed job judged red, not pending."""
+    red, pending = merge.Host.judge_runs([dict(r, status="completed", conclusion="failure") if early_red(r) else r for r in runs])
+    for r in runs:
+        # judge_runs keeps one run per name, the newest. A failed run that a newer run of its name hides (one still going)
+        # must stay red: a green line would claim the failed job passed.
+        newest = next(x for x in runs if x["name"] == r["name"])
+        if early_red(r) and newest.get("status") != "completed" \
+                and not any(t.startswith("workflow %s: " % r["name"]) for t in red):
+            red.append("workflow %s: failure" % r["name"])
+    return red, pending
+
+
+def checkout_root(cwd):
+    """The nearest folder at or above `cwd` that holds `.git` (a folder, or the file of a worktree), or `cwd` itself when no
+    folder above it does. The walk stops at that folder: a parent checkout above it is never read. File reads only."""
+    start = os.path.abspath(cwd or os.getcwd())
+    here = start
+    while True:
+        if os.path.exists(os.path.join(here, ".git")):
+            return here
+        parent = os.path.dirname(here)
+        if parent == here:
+            return start
+        here = parent
+
+
+def defines_job(cwd, name):
+    """True when a workflow file under the checkout root of `cwd` (checkout_root) in .github/workflows defines a job called `name` (its key under `jobs:`, or its
+    `name:` property), or when that cannot be told (an unreadable folder or file): the stricter rule then holds. False
+    for a checkout with no such folder, or with files that define no such job. A local read, no GitHub call. A line
+    scan, stdlib only: lint/workflow_steps.py is the repo's step parser, but a hook imports nothing from lint/. A key
+    counts only at the job indent under a column-0 `jobs:` line, so a comment, a string or a script body holding the
+    name matches nothing."""
+    folder = os.path.join(checkout_root(cwd), ".github", "workflows")
+    try:
+        names = sorted(n for n in os.listdir(folder) if n.endswith((".yml", ".yaml")))
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    for n in names:
+        try:
+            with open(os.path.join(folder, n), encoding="utf-8") as f:
+                text = f.read()
+        except (OSError, UnicodeError):
+            return True
+        if job_named(text, name):
+            return True
+    return False
+
+
+def job_named(text, name):
+    """True when the workflow `text` has a job keyed `name`, or a job with a `name: <name>` property (see defines_job)."""
+    text = text.lstrip("\ufeff")   # a UTF-8 BOM would hide the first column-0 key
+    in_jobs, job_indent, body_indent = False, None, None
+    key = re.compile(r"""^(\s+)(["']?)%s\2\s*:\s*(#.*)?$""" % re.escape(name))
+    prop = re.compile(r"""^\s+name\s*:\s*(["']?)%s\1\s*(#.*)?$""" % re.escape(name))
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if indent == 0:
+            in_jobs = bool(re.match(r"jobs\s*:\s*(#.*)?$", line))
+            job_indent = body_indent = None
+            continue
+        if not in_jobs:
+            continue
+        if job_indent is None:
+            job_indent = indent
+        if indent == job_indent:
+            body_indent = None
+            if key.match(line):
+                return True
+        elif indent > job_indent:
+            if body_indent is None:
+                body_indent = indent
+            if indent == body_indent and prop.match(line):
+                return True
+    return False
+
+
+def settled(runs, cwd=None):
+    """True when `runs` may end the wait: a run is red (a failed job included), a run is still going (an unknown line, never
+    green), or a completed run has its rollup job (merge.py ROLLUP_JOB, the one home of the name) passed. A head whose runs
+    are all draft-era (a checks run whose rollup job is skipped or absent, a green run of another workflow) is none of these:
+    the real run is still to come, so the wait keeps listing. That holds only when the checkout at `cwd` defines the rollup
+    job (defines_job): a checkout with no such job, or no workflows folder, settles on any run that ran, and verdict reads the
+    run conclusions. An unloadable merge tool settles at once: verdict raises Unknown."""
+    from guard_merge import merge_module
+    merge = merge_module()
+    if merge is None:
+        return True
+    from required_check import REQUIRED_CHECK   # a sibling loads inside the function, as guard_merge does
+    rollup = getattr(merge, "ROLLUP_JOB", None)
+    if not defines_job(cwd, rollup or REQUIRED_CHECK):
+        return bool(runs)
+    red, pending = judge(merge, runs)
+    return bool(red or pending) or any(
+        r.get("status") == "completed" and any(j.get("name") == rollup and j.get("conclusion") == "success" for j in r.get("jobs") or [])
+        for r in runs)
 
 
 def wait_for(sha, cwd, deadline, repo=""):
@@ -274,11 +402,14 @@ def wait_for(sha, cwd, deadline, repo=""):
     newest first, as judge_runs reads them: the re-list's runs go ahead of the runs read before,
     so a newer run of a name outranks the older one. A refused re-list list or view returns the runs already
     judged only when they judge red: a red run stays red. Otherwise it raises Unknown, as a refused first
-    list does, since the unread list could hold a red or a running run (rule verification-report-unknown-reads). A run that first shows after the re-list is not judged (debt ci-wake-lists-runs-once)."""
+    list does, since the unread list could hold a red or a running run (rule verification-report-unknown-reads). A run that first shows after the re-list is not judged (debt ci-wake-lists-runs-once).
+    Runs that `settled` does not accept (draft-era runs only) end no wait and start no at-once re-list: the lists follow `pauses`,
+    each run is viewed once, and the deadline ends in Unknown. The rollup job's name is merge.py ROLLUP_JOB, read from the runs' own jobs; whether the
+    checkout defines it is read from its workflow files (`defines_job`): no GitHub read."""
     extra = ["-R", repo] if repo else []
     list_args = ["run", "list", "--commit", sha, "--limit", "100", *extra, "--json", RUN_FIELDS]
     gaps = pauses()
-    seen, viewed, relisted = set(), [], False
+    seen, viewed, relisted, failed_early = set(), [], False, False
     while True:
         try:
             listed = gh_json(list_args, cwd)
@@ -291,7 +422,9 @@ def wait_for(sha, cwd, deadline, repo=""):
         fresh = [r for r in runs if r["databaseId"] not in seen
                  and not (r["conclusion"] == "cancelled" and r["name"] in live)]   # a cancelled twin: judge_runs reads the run that ran
         for r in fresh:
-            watch_run(r["databaseId"], cwd, deadline, repo)
+            if failed_early:
+                break   # a job failed in a run that goes on: no other run is waited on, each is only read once below
+            failed_early = bool(watch_run(r["databaseId"], cwd, deadline, repo))
         try:
             got = [gh_json(["run", "view", str(r["databaseId"]), *extra, "--json", "databaseId,name,status,conclusion,jobs"], cwd)
                    for r in fresh]
@@ -302,14 +435,14 @@ def wait_for(sha, cwd, deadline, repo=""):
         seen.update(r["databaseId"] for r in fresh)
         ran = [r for r in got if r.get("conclusion") != "skipped"]   # it ended skipped: no run
         viewed = ran + viewed   # newest first: gh lists newest first, and a later list shows newer runs
-        if ran and not relisted:
+        if ran and not relisted and settled(viewed, cwd):
             relisted = True
-            continue   # the first judged run: list once more at once for a later one, even at the deadline
-        if viewed:
+            continue   # the first settled run: list once more at once for a later one, even at the deadline
+        if viewed and settled(viewed, cwd):
             return viewed
         left = deadline - time.monotonic()
         if left <= 0:
-            raise Unknown("no run yet")
+            raise Unknown("no run with a passed rollup job yet" if viewed else "no run yet")   # a viewed run left unsettled only on a defining checkout
         time.sleep(min(next(gaps), left))
 
 
@@ -318,22 +451,76 @@ def verdict(sha, runs):
     merge = merge_module()
     if merge is None:
         raise Unknown("the merge tool (judge_runs) could not be loaded")
-    red, pending = merge.Host.judge_runs(runs)
-    if pending:
+    early = any(early_red(r) for r in runs)
+    red, pending = judge(merge, runs)
+    if pending and not early:   # a red run stays red, whatever else still runs
         raise Unknown("still running: " + ", ".join(pending))
     if not red:
         return "CI green on %s: no failing jobs" % sha[:7]
     names, cancelled = [], True
     for text in red:
-        run = next((r for r in runs if text.startswith("workflow %s: " % r["name"])), None)
+        run = next((r for r in sorted(runs, key=lambda x: not early_red(x)) if text.startswith("workflow %s: " % r["name"])), None)   # a failed run before the newer run of its name that hides it
         if run is None:
             names.append(text)
             cancelled = False
             continue
         cancelled = cancelled and run["conclusion"] == "cancelled"
-        jobs = [j["name"] for j in run.get("jobs") or [] if j.get("conclusion") not in GOOD]
+        failed_now = early_red(run)   # its other jobs still run: only the failed ones are red so far
+        jobs = [j["name"] for j in run.get("jobs") or []
+                if (j.get("conclusion") == "failure" if failed_now else j.get("conclusion") not in GOOD)]
         names.extend(jobs or ["workflow " + run["name"]])
     return "CI %s on %s: %s" % ("cancelled" if cancelled else "red", sha[:7], ", ".join(dict.fromkeys(names)))
+
+
+def first_failed_job(runs, rollup=None):
+    """-> (name, job id) of the first failed job of the runs, newest run first, else None. The rollup job (merge.py
+    ROLLUP_JOB, passed as `rollup`) is skipped: it logs only its own verdict."""
+    for run in runs:
+        for j in run.get("jobs") or []:
+            if j.get("conclusion") == "failure" and j.get("name") != rollup:
+                return j.get("name") or "?", j.get("databaseId") or j.get("id")
+    return None
+
+
+def unlogged_cause(runs, rollup=None):
+    """-> the `log unread` line for a red run with no failed job: the first job that ended badly (timed_out and the like) with
+    its conclusion, else the first red run's own conclusion (startup_failure), else a plain no-failed-job line."""
+    for run in runs:
+        for j in run.get("jobs") or []:
+            if j.get("conclusion") not in GOOD + (None, "failure", "cancelled") and j.get("name") != rollup:
+                return "log unread: job %s concluded %s" % (j.get("name") or "?", j["conclusion"])
+    for run in runs:
+        if run.get("status") == "completed" and run.get("conclusion") not in GOOD:
+            return "log unread: workflow %s concluded %s, with no failed job" % (run.get("name") or "?", run.get("conclusion"))
+    return "log unread: no failed job in the run"
+
+
+def detail_lines(runs, cwd, repo):
+    """-> the lines after a red line: the failing lines of the first failed job's log, else one `log unread: <reason>`
+    line. This is the watch's one log read. A refused or empty read is unknown, never clear. The lines come from
+    merge.py `failing_log_lines`, the one home of the log reader, with timestamp and colour codes removed."""
+    from guard_merge import merge_module
+    merge = merge_module()
+    rollup = getattr(merge, "ROLLUP_JOB", None) if merge is not None else None
+    job = first_failed_job(runs, rollup)
+    if job is None:
+        return [unlogged_cause(runs, rollup)]
+    name, job_id = job
+    slug, tail = repo_route(repo)
+    try:
+        rc, out, err = gh(["api", "-X", "GET", "repos/%s/actions/jobs/%s/logs" % (slug, job_id), *tail], cwd)
+        if rc != 0:
+            return ["log unread: reading the log of job %s failed: %s" % (name, (err or out).strip() or "gh exited %d" % rc)]
+        if merge is None:
+            return ["log unread: the merge tool (failing_log_lines) could not be loaded"]
+        lines = []
+        for raw, _parsed in merge.failing_log_lines(out, detail=True):
+            text = ANSI.sub("", merge.LOG_PREFIX.sub("", raw, count=1)).strip()
+            if text:
+                lines.append(text[:DETAIL_WIDTH])
+    except Unknown as e:
+        return ["log unread: %s" % e]
+    return lines[:MAX_DETAIL] or ["log unread: the log of job %s has no failing line" % name]
 
 
 def no_workflows(cwd, repo):
@@ -348,14 +535,19 @@ def no_workflows(cwd, repo):
         return False
 
 
+def repo_route(repo):
+    """-> (slug, gh api tail) for a repo of the form [HOST/]OWNER/REPO, else gh fills {owner}/{repo} from the folder."""
+    parts = repo.split("/") if repo else []
+    host, slug = (parts[0], "/".join(parts[1:])) if len(parts) == 3 else ("", repo or "{owner}/{repo}")
+    return slug, (["--hostname", host] if host else [])
+
+
 def adds_workflow(pr, repo, cwd):
     """True when the PR's own files touch .github/workflows, or the file list cannot be read in full: the PR's head
     has CI that the default branch's workflow list does not show. One page of 100 files; a full page may hide it."""
-    parts = repo.split("/") if repo else []
-    host, slug = (parts[0], "/".join(parts[1:])) if len(parts) == 3 else ("", repo or "{owner}/{repo}")
+    slug, tail = repo_route(repo)
     try:
-        files = gh_json(["api", "--method", "GET", "repos/%s/pulls/%s/files" % (slug, pr["number"]), "-F", "per_page=100",
-                         *(["--hostname", host] if host else [])], cwd)
+        files = gh_json(["api", "--method", "GET", "repos/%s/pulls/%s/files" % (slug, pr["number"]), "-F", "per_page=100", *tail], cwd)
     except (Unknown, NoPR):
         return True
     return not isinstance(files, list) or len(files) >= 100 or any(
@@ -396,9 +588,7 @@ def read_pr(selector, repo, cwd):
     m = PR_URL.match(selector)
     if m:
         repo, selector = repo_of_url(selector), m.group(3)
-    parts = repo.split("/") if repo else []
-    host, slug = (parts[0], "/".join(parts[1:])) if len(parts) == 3 else ("", repo or "{owner}/{repo}")
-    tail = ["--hostname", host] if host else []
+    slug, tail = repo_route(repo)
     base = "repos/%s/pulls" % slug
     if selector[:1] == "#" and selector[1:].isdigit():
         selector = selector[1:]   # `gh pr ready "#12"` names PR 12, as gh reads it
@@ -434,7 +624,11 @@ def watch_pr(selector, repo, cwd, deadline, lock_dir):
             return None
         if no_workflows(cwd, repo) and not adds_workflow(pr, repo, cwd):
             return NO_CI_LINE % ident   # no CI to wait for; the line closes the Stop's CI wait
-        return verdict(pr["headRefOid"], wait_for(pr["headRefOid"], cwd, deadline, repo))
+        runs = wait_for(pr["headRefOid"], cwd, deadline, repo)
+        line = verdict(pr["headRefOid"], runs)
+        if line.startswith("CI red "):
+            line = "\n".join([line, *detail_lines(runs, cwd, repo)])
+        return line
     except NoPR:
         return None
     except Unknown as e:

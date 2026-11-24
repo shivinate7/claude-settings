@@ -19,6 +19,11 @@ EXPLORE_MARKER = "Audit:"
 UNSET_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": None}
 EMPTY_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": ""}
 SONNET_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"}
+# The Workflow default is the model a no-model Workflow agent() call is served (settings.json sets it to sonnet). The
+# Agent default above is another variable, so each Workflow case strips it and the Workflow variable alone sets the model.
+WORKFLOW_UNSET = {"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL": None, "CLAUDE_CODE_SUBAGENT_MODEL": None}
+WORKFLOW_SONNET = {"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL": "sonnet", "CLAUDE_CODE_SUBAGENT_MODEL": None}
+WORKFLOW_HAIKU = {"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL": "haiku", "CLAUDE_CODE_SUBAGENT_MODEL": None}
 
 ROLE_TABLE_HEAD = "# Agent model cap\n\n| Point | Model | Effort |\n|---|---|---|\n"
 ROLE_TABLE_TEST_AUTHOR_HAIKU = ROLE_TABLE_HEAD + "| test-author | haiku | xhigh |\n"
@@ -271,13 +276,66 @@ for _near in (REFUTER + "s", REFUTER.title()):
 # Opus ceiling (agent-model-cap) and the role row (agent-role-model). The Audit: marker counts on the brief's first line
 # only. Failure classes: a false allow (an above-row agent() call in a script passes); a false deny (a comment, a string
 # or a template literal hides the brief or the model, or the marker is read past line 1).
-def workflow_refuse(name, script, rule="agent-model-cap", carries=(), lacks=()):
-    """A Workflow script whose agent() call is above its role's row: denied under `rule`."""
-    add(name, "deny", rule, tool="Workflow", config=ROLE_REAL_CFG, carries=carries, lacks=lacks, script=script)
+def workflow_refuse(name, script, rule="agent-model-cap", carries=(), lacks=(), env=None):
+    """A Workflow script whose agent() call is above its role's row: denied under `rule`. `env` is the environment
+    the guard run gets, for a case that must hold under a set or an unset default."""
+    add(name, "deny", rule, tool="Workflow", config=ROLE_REAL_CFG, carries=carries, lacks=lacks, env=env,
+        script=script)
 
 
-def workflow_allow(name, script):
-    add(name, "allow", tool="Workflow", config=ROLE_REAL_CFG, script=script)
+def workflow_allow(name, script, env=None):
+    add(name, "allow", tool="Workflow", config=ROLE_REAL_CFG, env=env, script=script)
+
+
+# The served model is the Workflow default, not the parent's model. A no-model Workflow agent() call
+# refuses under agent-role-model when its literal role's row differs from that default. A builder or general-purpose
+# call on a sonnet default runs sonnet, which is its row, so it allows. The row is read through the pointer checkout, so
+# each case runs under ROLE_REAL_CFG; with no pointer the rule stands down. A model in a variable, a shorthand, a spread
+# or a ternary agentType stays allowed in the rule 9 step-up cases, since the static read cannot see the model or the role.
+# Failure class: a false alarm (a no-model builder or general-purpose call is refused on a sonnet default); a false allow
+# (a no-model Explore, reviewer, test-author or record-writer call on a sonnet default runs above its row).
+for _name, _script in (
+        ("reviewer Round 1", _step_flow("'Round 1 of 3. Check the diff.'", "agentType: 'reviewer'")),
+        ("reviewer with the prompt in a variable", _step_flow("brief", "agentType: 'reviewer'")),
+        ("reviewer with a concatenated prompt", _step_flow("'Round 2 of 3. ' + rest", "agentType: 'reviewer'")),
+        ("reviewer whose marker is only interpolated", _step_flow("`${'Round 2 of 3.'} Re-check.`", "agentType: 'reviewer'")),
+        ("reviewer whose round number is interpolated", _step_flow("`Round ${n} of 3. Re-check.`", "agentType: 'reviewer'")),
+        ("reviewer whose marker is split by an interpolation", _step_flow("`Round 2${x} of 3. Re-check.`", "agentType: 'reviewer'")),
+        ("reviewer Round 1 in an interpolated template", _step_flow("`Round 1 of 3. Branch ${b}`", "agentType: 'reviewer'")),
+        ("prose round 2 only", _step_flow("'The round 2 of 3 notes are in the record.'", "agentType: 'reviewer'")),
+        ("reviewer with a fix verifier in a variable brief",
+         "const brief = '%s. Re-check the diff.';\n" % FIX_VERIFIER + _step_flow("brief", "agentType: 'reviewer'"))):
+    workflow_refuse("floor step-up: Workflow %s, with no model, is denied under a sonnet default" % _name, _script,
+                    rule="agent-role-model", env=WORKFLOW_SONNET)
+workflow_allow("floor step-up: Workflow builder Round 3, with no model, is allowed under a sonnet default",
+               _step_flow("'Round 3 of 3. Finish the fix.'", "agentType: 'builder'"), env=WORKFLOW_SONNET)
+# The sonnet default: builder and general-purpose serve their own row (allow); a row below sonnet refuses (deny).
+for _role in ("builder", "general-purpose"):
+    workflow_allow("role-model: Workflow %s, with no model, is allowed under a sonnet default" % _role,
+                   _step_flow("'Do the task.'", "agentType: '%s'" % _role), env=WORKFLOW_SONNET)
+for _role in ("Explore", "reviewer", "test-author", "record-writer"):
+    workflow_refuse("role-model: Workflow %s, with no model, is denied under a sonnet default" % _role,
+                    _step_flow("'Do the task.'", "agentType: '%s'" % _role), rule="agent-role-model",
+                    env=WORKFLOW_SONNET)
+# The unset default: the served model is unknown, so every row role refuses with no model.
+for _role in ("builder", "Explore", "reviewer", "test-author", "record-writer"):
+    workflow_refuse("role-model: Workflow %s, with no model, is denied when the Workflow default is unset (served model unknown)"
+                    % _role, _step_flow("'Do the task.'", "agentType: '%s'" % _role), rule="agent-role-model",
+                    env=WORKFLOW_UNSET)
+# The haiku default: a row equal to the default allows (Explore); a row that differs from it refuses (builder).
+workflow_allow("role-model: Workflow Explore, with no model, is allowed under a haiku default",
+               _step_flow("'Find where X is defined.'", "agentType: 'Explore'"), env=WORKFLOW_HAIKU)
+workflow_refuse("role-model: Workflow builder, with no model, is denied under a haiku default",
+                _step_flow("'Do the task.'", "agentType: 'builder'"), rule="agent-role-model", env=WORKFLOW_HAIKU)
+# Scanner traps on the no-model path (finding F7): a comment opener in a string, a lone quote, a multi-line template.
+workflow_refuse("role-model: Workflow Explore, with no model and a comment opener inside its prompt, is denied under a sonnet default",
+                _step_flow("'Find where the /* opener is set.'", "agentType: 'Explore'"), rule="agent-role-model",
+                env=WORKFLOW_SONNET)
+workflow_refuse("role-model: Workflow Explore, with no model and a lone quote in its prompt, is denied under a sonnet default",
+                _step_flow("\"Find the owner's file.\"", "agentType: 'Explore'"), rule="agent-role-model", env=WORKFLOW_SONNET)
+workflow_refuse("role-model: Workflow Explore, with no model and a multi-line template prompt, is denied under a sonnet default",
+                _step_flow("`Find where X\nis defined in the repo.`", "agentType: 'Explore'"), rule="agent-role-model",
+                env=WORKFLOW_SONNET)
 
 
 workflow_refuse("role-model: Workflow builder on opus with no round line is denied under agent-model-cap",
@@ -355,6 +413,42 @@ workflow_allow("role-model: Workflow opus agent() with a spread and no literal a
 workflow_refuse("role-model: Workflow builder on opus after a spread of base with a literal agentType is denied",
                 "const base = {};\n"
                 "await agent(`Fix the failing case.`, {...base, agentType: 'builder', model: 'opus'});")
+
+# ---- H5: a Workflow agent() call that names NO model is refused when its literal agentType has a row in the role table
+# (decision agent-model-cap, the row `teammates, Workflow agent()`). With no model the call runs the parent's model: the
+# a run of 13 Explore agents went to sonnet at xhigh this way. Each deny runs under a set default and under an unset
+# one, so neither the default nor the agent file's pin lets the call through. The static read skips a call
+# whose agentType it cannot read, and a call with no agentType has no row, so those are allowed.
+# Failure classes: a false allow (a no-model call with a row runs the parent's model); a false deny (a call with no
+# agentType, or an agentType the scan cannot read, is refused).
+_FORBIDDEN_FRAGMENTS = tuple(fragment for fragment in FORBIDDEN_IN_A_REASON if fragment)
+for _label, _env in (("default sonnet", SONNET_DEFAULT), ("default unset", UNSET_DEFAULT)):
+    for _role in ("Explore", "reviewer", "test-author", "builder"):
+        workflow_refuse("role-model: Workflow %s agent() with no model is denied under agent-role-model (%s)"
+                        % (_role, _label),
+                        _step_flow("'Do the task.'", "agentType: '%s'" % _role), rule=ROLE_MODEL_RULE,
+                        lacks=ROLE_LACKS, env=_env)
+# The remedy names the role's model from the table (the builder row is sonnet), and no FORBIDDEN_IN_A_REASON fragment.
+# The haiku rows (Explore, reviewer, test-author) have no such case: their remedy would name haiku, which the forbidden
+# list holds, so that wording is an open question for the orchestrator.
+workflow_refuse("role-model: Workflow builder agent() with no model names the role's model (sonnet) as the remedy",
+                _step_flow("'Fix the failing case.'", "agentType: 'builder'"), rule=ROLE_MODEL_RULE,
+                carries=(ROLE_DEFAULT_REMEDY,), lacks=ROLE_LACKS + _FORBIDDEN_FRAGMENTS, env=UNSET_DEFAULT)
+# Controls: a call on its own row, and a call with no agentType, are allowed with no default set.
+workflow_allow("role-model: Workflow Explore agent() on haiku is allowed, its own row",
+               _step_flow("'Find where X is defined.'", "agentType: 'Explore', model: 'haiku'"), env=UNSET_DEFAULT)
+workflow_allow("role-model: Workflow builder agent() on sonnet is allowed, its own row",
+               _step_flow("'Fix the failing case.'", "agentType: 'builder', model: 'sonnet'"), env=UNSET_DEFAULT)
+workflow_allow("role-model: Workflow call with no agentType and no options object is allowed",
+               "await agent('Find the file.');", env=UNSET_DEFAULT)
+workflow_allow("role-model: Workflow call with no agentType and an empty options object is allowed",
+               "await agent('Find the file.', {});", env=UNSET_DEFAULT)
+workflow_allow("role-model: Workflow prompt-key call with no agentType and no model is allowed",
+               "await agent({prompt: 'Find the file.'});", env=UNSET_DEFAULT)
+# An agentType held in a variable is unread, so the static read skips the call and it is allowed. A build that reads
+# the variable changes this case.
+workflow_allow("role-model: Workflow agent() whose agentType is a variable and names no model is allowed (pinned to main)",
+               "const t = 'builder';\nawait agent('Fix the failing case.', {agentType: t});", env=UNSET_DEFAULT)
 
 
 def workflow_opus_override_check():
