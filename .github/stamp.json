@@ -8,6 +8,7 @@
     "afterMerge": ["bash merge/install_from_main.sh"],
     "deleteBranch": true,
     "readyChecks": ["STE lint", "Comment narration check", "Record slug length", "Glossary homes and avoided names", "Windows split guard", "Cost line pins", "Mutant anchor census", "Rules and records move together", "Hook catalog check", "Retired names, one word per meaning", "Silent undo check", "Ruling kind check", "Skill model rows fixture suite", "Project-ops roles fixture suite", "checks-rest:project-ops skill scaffold suite"],
+    "lintSuites": ["Opt-in CI template fixture suites", "checks-rest:Scanner trap lint", "checks-rest:Record stamp engine fixture suite", "checks-rest:Record stamp action fixture suite", "shell-macos:Shell syntax check, install.sh"],
     "keepBranches": ["batch-map", "map-format-version", "map-skill-move", "claude-p-fetch-key", "stable"]
   }
 }

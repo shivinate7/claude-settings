@@ -40,6 +40,15 @@
 # under the exact key marked carried, so a rerun at the head prints PASS (carried). Cost: per such step, one ancestor read and a git diff of the two saved trees;
 # per delta, when it holds more than the records file, also one ci-scope.sh run, one git diff of the added files of the range, and one selector run with its own
 # git diff of the range (three git diffs in all).
+# A repo may list suite steps in .github/stamp.json merge.lintSuites, in the form merge.readyChecks uses (`<job>:<step>`, a bare name is a step of
+# job `checks`; merge.ready_job_groups reads it, loaded from merge/merge.py beside bin/ only when a list is declared). Under --lint a listed step is run
+# here, whatever its language, when the change reaches it (reached_suites over each file its run: names in command position, suite_files any_file), its own
+# `if:` does not read false, and this machine can stand in for its job's runner (ubuntu-*: any machine; macos-* and windows-*: that OS only); the job's own
+# `if:` is not read. Its verdict is the step's: PASS, FAIL, or unknown when a tool is missing (the line names the tools the step runs when the shell
+# gave only exit 127). A listed step the change does not reach, or that cannot run on this OS, reads as an unlisted one does; a listed name that the workflow
+# lacks is one FAIL line naming it. --plan prints `would run`. A list that is no list of names is one unknown line. No list, or an empty one, changes nothing.
+# Cost: one read of .github/stamp.json per lint run; with a list, one load of merge/merge.py (about 0.25 s), plus the listed steps the change reaches (each
+# a bin/verdict and a shell, run serially, after the lint pool's steps are queued, and cached as any step is).
 # An install CI step is a run: whose every line is one install command (INSTALL_CMD: a lockfile install, or type
 # generation such as `npx astro sync`), since a lint step that reads generated files fails on a bare checkout. --lint
 # runs it, in order, only when a later lint step will run, or a later local action passes local_ready (its uses: step and
@@ -149,7 +158,7 @@
 # it misses 7 days after the save. Cost: per step that may be cached, one set of git processes (a temp index, add, write-tree, rev-parse); per run, one
 # read of those trees; per pass, one file of under 1 KB in $XDG_CACHE_HOME (else ~/.cache) /claude-settings/ci-job-pass. A save prunes files saved
 # over 7 days ago, and the store holds at most 300 files. No timer, no lasting process. CI_JOB_NO_CACHE=1 turns the cache off.
-import ast, concurrent.futures, hashlib, json, os, posixpath, re, shlex, shutil, subprocess, sys, tempfile, threading, time
+import ast, concurrent.futures, hashlib, importlib.util, json, os, posixpath, re, shlex, shutil, subprocess, sys, tempfile, threading, time
 BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
@@ -1245,18 +1254,24 @@ def shell_commands(script, folder=""):
     return out + [(ln.split(), folder) for ln in pending.splitlines()]
 
 
+def is_file_word(word):
+    """True when `word` is one word that ends in a file extension: the file a command names, whatever its name."""
+    return not re.search(r"\s", word) and bool(re.search(r"\.\w+$", posixpath.basename(word)))
+
+
 def is_test_name(word):
     """True when `word` is one word that names a test file of any language (TEST_FILE)."""
     return not re.search(r"\s", word) and bool(TEST_FILE.fullmatch(posixpath.basename(word)))
 
 
-def suite_files(step):
+def suite_files(step, any_file=False):
     """The test files a CI step runs, in any language, each as a repo-relative path (repo_path) or, when the path cannot be read, as written. A file counts
     only in command position: an operand of a runner (SUITE_RUNNERS) or the command word itself, after any `bin/verdict`, env word, `if` or `env`; so a
     word in an `echo`, in a comment or in a heredoc is no suite. [] for a lint, install or `uses:` step and for a mutation script, none of which is a suite
-    this runner reads."""
+    this runner reads. any_file: each file the step runs in command position, whatever its name (a listed step's reach, lint_suites; `bash -n install.sh` names install.sh)."""
     if uses(step) or is_lint(step) or is_install(step):
         return []
+    named = is_file_word if any_file else is_test_name
     start = step_key(step, "working-directory") or ""
     start = None if "${{" in start else "" if posixpath.normpath(start) == "." else posixpath.normpath(start)
     found = []
@@ -1269,7 +1284,7 @@ def suite_files(step):
             operands = [w for w in argv[1:] if not w.startswith("-")]
         else:
             operands = argv[:1]
-        found += [repo_path(w, folder) or w for w in operands if is_test_name(w)]
+        found += [repo_path(w, folder) or w for w in operands if named(w)]
     return list(dict.fromkeys(found))
 
 
@@ -1341,6 +1356,89 @@ def tell_owed(label, step, owed, top, base, tally, runner=None):
         print("%-15s %s: --lint did not run suite %s: it runs in CI%s%s; the change touches neither it nor a file it tests" % (
             "not run", label, ", ".join(rest), " on %s" % runner if runner else "", on))  # the tail is exact: the change does not touch the suite or a path its text names, and the selector's import reach is no part of it
     return bool(rest)
+
+
+def job_runner(block):
+    """The `runs-on:` runner of a job block, or "?" when it names none."""
+    m = re.search(r"^    runs-on:\s*(\S+)", block or "", re.M)
+    return m.group(1).strip("'\"") if m else "?"
+
+
+MERGE_TOOL = os.path.join(os.path.dirname(BIN), "merge", "merge.py")  # the home of the list's naming form (ready_job_groups)
+LIVE = set()  # (job, step index) of each listed step this --lint run runs itself (listed_live); every other read of a job skips them
+
+
+def lint_suites(top):
+    """([names], why): merge.lintSuites of the repo's .github/stamp.json, the CI steps lane lint runs when the change reaches them, whatever their
+    language. why is a line for a list this run cannot read (not a list of non-blank names, or its form cannot be resolved), else None. No file, no key
+    or an empty list gives ([], None): nothing is listed. Names read as merge.readyChecks reads them (merge.ready_job_groups), by the one resolver."""
+    try:
+        with open(os.path.join(top, ".github", "stamp.json"), encoding="utf-8") as f:
+            cfg = json.load(f)
+    except (OSError, ValueError):
+        return [], None
+    block = cfg.get("merge") if isinstance(cfg, dict) else None
+    listed = block.get("lintSuites") if isinstance(block, dict) else None
+    if listed is None:
+        return [], None
+    if not isinstance(listed, list) or not all(isinstance(n, str) and n.strip() for n in listed):
+        return [], "merge.lintSuites in .github/stamp.json is not a list of step names"
+    return listed, None
+
+
+def listed_groups(names):
+    """{job: [(declared name, bare step name)]} of the listed `names`, by merge.ready_job_groups, read from merge/merge.py beside bin/ (loaded
+    only when a list is declared)."""
+    spec = importlib.util.spec_from_file_location("merge_tool", MERGE_TOOL)
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    return tool.ready_job_groups(names)
+
+
+def runs_here(runner):
+    """True when this machine can run a step of a job on `runner`: lint reads the Linux runner everywhere, and a macOS or Windows runner only on that OS."""
+    return runner.startswith("ubuntu") or (runner.startswith("macos") and sys.platform == "darwin") or (runner.startswith("windows") and os.name == "nt")
+
+
+def listed_live(top, base, step, runner):
+    """True when this run runs a listed `step` of a job on `runner`: a plain run: step (no action, lint or install command, nor a python suite the
+    selector governs) whose own `if:` does not read false for a pull request, on a runner this machine can stand in for, and that the change reaches
+    (reached_suites over each file its run: names in command position). The job's own `if:` is not read: shell-macos runs off pull requests only. Any
+    other listed step reads as an unlisted one does."""
+    if uses(step) or is_lint(step) or is_install(step) or suite_paths(step) or not runs_here(runner) or condition(step_key(step, "if"), True) is False:
+        return False
+    files = suite_files(step, any_file=True)
+    return bool(files) and bool(reached_suites(top, base, files))
+
+
+def unmarked(state, first):
+    """(state, line) of a step's run_step answer with a cached or carried mark turned into its state."""
+    if first.startswith(CACHE_MARK):
+        return "PASS (cached)", first[len(CACHE_MARK):]
+    if first.startswith(CARRY_MARK):
+        return CARRY_STATE, first[len(CARRY_MARK):]
+    return state, first
+
+
+def run_listed(label, step, ctx, log, dry, tally):
+    """Run one listed step as CI runs it (its if:, env:, shell) and print its one line. A missing tool is unknown and names the tools the step runs:
+    a tool the step's shell cannot find exits 127 without saying which. True when it ran (--plan: would run)."""
+    top, base, values, pinned = ctx
+    state, detail, shell, env, cwd = plan(step, True, values, top, True)
+    if state != "run":
+        tally["unknown"] += state == "unknown"
+        print("%-15s %s: %s" % (state, label, detail))
+        return False
+    if dry:
+        print("%-15s %s" % ("would run", label))
+        return True
+    state, first = run_step(label, step, False, detail, shell, env, cwd, ctx, log)
+    tally["FAIL" if state == "FAIL" else "unknown"] += state not in ("PASS", "SKIP")
+    state, first = unmarked(state, first)
+    if state == "unknown" and first.startswith("tool missing (exit 127)"):
+        first = first.replace("exit 127", "exit 127, the step runs %s" % ", ".join(sorted(set(commands(run_body(step) or "")))), 1)
+    print("%-15s %s: %s" % (state, label, first))
+    return True
 
 
 def job_reached(block):
@@ -1505,6 +1603,30 @@ def main(argv, sibling=False, ran_suites=None):
                 elsewhere[other] = found
             if job_reached(job_block(text, other)) and any(owed_suites(st) for st in step_blocks(job_block(text, other))):
                 reaching.add(other)
+    if not sibling:  # the repo's listed suites (merge.lintSuites): each name must be a step of the workflow, and each one the change reaches runs here
+        LIVE.clear()
+        listed, bad = lint_suites(top) if lint else ([], None)
+        groups = {}
+        if bad:
+            tally["unknown"] += 1
+            print("%-15s %s" % ("unknown", bad))
+        elif listed:
+            try:
+                groups = listed_groups(listed)
+            except Exception as e:  # merge.py missing or broken: the list is unread, never a pass over it
+                tally["unknown"] += 1
+                print("%-15s merge.lintSuites: cannot read its names with %s: %s" % ("unknown", MERGE_TOOL, " ".join(f"{type(e).__name__}: {e}".split())))
+        for listed_job, entries in groups.items():
+            listed_block = job_block(text, listed_job)
+            listed_steps = step_blocks(listed_block) if listed_block else []
+            listed_names = [step_key(st, "name") for st in listed_steps]
+            for declared, bare in entries:
+                if bare not in listed_names:
+                    tally["FAIL"] += 1
+                    print("%-15s merge.lintSuites: %s names no step of %s in %s" % ("FAIL", declared, "job %s" % listed_job if listed_block else "a job this workflow lacks", os.path.basename(workflow)))
+                elif base:
+                    LIVE.update((listed_job, i) for i, st in enumerate(listed_steps)
+                                if listed_names[i] == bare and listed_live(top, base, st, job_runner(listed_block)))
     picked, why = None, "no base to read a diff"
     if base and (top, base) in SELECTED:  # a sibling pass reads the pick the first pass made
         picked, why = SELECTED[(top, base)]
@@ -1535,6 +1657,17 @@ def main(argv, sibling=False, ran_suites=None):
         for n, step in enumerate(steps, 1):
             name = names[n - 1]
             if wanted and name not in wanted:
+                continue
+            if (job, n - 1) in LIVE:  # a listed step the change reaches runs here, whatever its language (lint_suites); a sibling pass leaves it to the first
+                if sibling:
+                    continue
+                if blocker:
+                    tally["unknown"] += 1
+                    print("%-15s %s: --lint did not run it: install step %s did not finish" % ("unknown", name, blocker))
+                    continue
+                started = run_listed(name, step, ctx, log, dry, tally)
+                ran += started
+                ran_lint += started
                 continue
             if suites[n - 1] and base and picked is None:  # the selector could not run: never a pass with no suite run
                 tally["unknown"] += 1
@@ -1612,10 +1745,7 @@ def main(argv, sibling=False, ran_suites=None):
                                         carry_suites(step) if kind[n - 1] == "suite" else ())
             tally["FAIL" if state == "FAIL" else "unknown"] += state not in ("PASS", "SKIP")
             blocker = blocker or (name if install and state == "unknown" else None)
-            if first.startswith(CACHE_MARK):  # a cached pass: the state reads PASS (cached), and counts as PASS above
-                state, first = "PASS (cached)", first[len(CACHE_MARK):]
-            elif first.startswith(CARRY_MARK):  # a carried pass: the line says so, and it counts as PASS above
-                state, first = CARRY_STATE, first[len(CARRY_MARK):]
+            state, first = unmarked(state, first)  # a cached or carried pass reads PASS (cached) or PASS (carried), and counts as PASS above
             print("%-15s %s: %s" % (state, name, first))
     finally:
         if pool:
@@ -1633,8 +1763,7 @@ def main(argv, sibling=False, ran_suites=None):
         print("summary: %s %d of %d steps" % ("would run" if dry else "ran", ran, len(steps)))
         for other in (j for j in jobs if j in elsewhere or j in reaching):  # the second pass: each other job that holds a picked suite, or a suite CI runs for this diff, run as CI's own list of jobs names it
             hit = picked.intersection(elsewhere.get(other, ())) if picked is not None else set()
-            runner = re.search(r"^    runs-on:\s*(\S+)", job_block(text, other) or "", re.M)
-            runner = runner.group(1).strip("'\"") if runner else "?"
+            runner = job_runner(job_block(text, other))
             if hit and not runner.startswith("ubuntu"):
                 print("%-15s job %s: picked %s; it runs on %s, which this Linux lint does not run" % ("not run", other, ", ".join(sorted(hit)), runner))
             elif hit and hit <= ran_suites:
@@ -1645,10 +1774,14 @@ def main(argv, sibling=False, ran_suites=None):
                 code = 1 if 1 in (code, sub) else 2 if 2 in (code, sub) else 0
                 continue
             if other in reaching:  # no pass runs this job's steps here: each suite step CI runs for the diff prints its line, a job on another runner too
-                for st in step_blocks(job_block(text, other)):
-                    owed = owed_suites(st)
+                for i, st in enumerate(step_blocks(job_block(text, other))):
+                    owed = owed_suites(st) if (other, i) not in LIVE else []  # a listed step the change reaches runs below
                     if owed:
                         tell_owed("job %s: %s" % (other, step_key(st, "name") or "a step"), st, owed, top, base, tally, None if runner.startswith("ubuntu") else runner)
+        for other, i in sorted(k for k in LIVE if k[0] != job and not sibling):  # each listed step of another job that the change reaches, on this machine's own OS
+            st = step_blocks(job_block(text, other))[i]
+            run_listed("job %s: %s" % (other, step_key(st, "name") or "a step"), st, ctx, log, dry, tally)
+        code = 1 if tally["FAIL"] else code
         code = code or 2 * bool(tally["unknown"])  # a reached suite of a job no pass ran reads unknown
     if not dry:
         print("log=%s" % log)
