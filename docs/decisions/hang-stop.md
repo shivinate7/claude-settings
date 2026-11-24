@@ -14,10 +14,11 @@ Ruling: only on a hang. A hang is no new output byte and no CPU advance in any p
 - A step that has finished is never a hang: `exited` is checked, and `hang_stop` checks again before it stops.
 - Silence is measured on the monotonic clock, so a sleep or a clock change is not silence.
 - N: 600 s for Linux push steps, the first value. It is 2 x the longest silent gap that does not end on a dot row (291.1 s, measured on the merge tool git-half fixture suite), rounded up. N is at least 300 s. CPU half unmeasured: logs cannot show CPU advance.
-- One home: the wait loop of `bin/verdict`. Off unless the env var `VERDICT_HANG_SECONDS` is set. Nothing sets it yet: the five-step wrap is a later change. A value that is not a whole number turns the stop off and prints one line.
+- One home: the wait loop of `bin/verdict`. Off unless the env var `VERDICT_HANG_SECONDS` is set. The five steps in Scope set it to 600. A value that is not a whole number turns the stop off and prints one line.
 - Before a stop, it prints the process tree and the log tail. Then it ends the tree and prints one `HANG` line. In lane lint, a HANG reads unknown.
+- Consultant's pick (08:38 CST Nov 24, 2026; the owner may reverse it): on a FAIL, `bin/verdict` keeps the last 30 hot lines and also every earlier line that starts FAIL, FAILED or ERROR (at most 300, each cut to 300 characters). Why: a wrapped CI step shows only this excerpt in the CI log, so every failing name must be in it.
 - Exception, the consultant's pick (02:50 CST Nov 24, 2026; the owner may reverse it): a step whose log holds an `::error` line and then hangs reads FAIL in `bin/ci-job`, instead of unknown.
-- Scope of the first build: lane lint steps, and the five long CI step caps (30 and 45 minutes): the three install checkout-detection shards (30 min), and two 45-minute steps in the `checks` workflow, the install.sh checkout-detection suite and the macOS guard fixture slice. Other CI steps keep their job cap. Six short step caps (3 or 5 min) sit outside the first scope and stay in force: the code-check tool install, the Windows PowerShell 5.1 bin EOL test, the record stamp engine suite (macOS), the Windows session-start freshness cases, the guard progress beat suite, and the record stamp engine suite in the second rest job.
+- Scope: lane lint steps, and five long CI steps, each run through `bin/verdict` with `VERDICT_HANG_SECONDS` 600 and no step cap: the three install checkout-detection shards (`checks-install-checkout` to `-3`), the install.sh checkout-detection suite in `shell-macos`, and the macOS guard fixture slice in `checks-macos`. Their job cap stays as the net. Other CI steps keep their job cap. Six short step caps (3 or 5 min) sit outside the scope and stay in force: the code-check tool install, the Windows PowerShell 5.1 bin EOL test, the record stamp engine suite (macOS), the Windows session-start freshness cases, the guard progress beat suite, and the record stamp engine suite in the second rest job.
 - Consultant's reading of the 10:49 words: once the hang stop covers a step, that step's own time cap is removed in the same change; until then the cap stays. The owner has not ruled on this point in so many words.
 - No stop on Windows until it has a CPU read. No stop on mutation steps yet.
 - Job caps stay as the last net for a busy-loop hang, Windows and action steps. A net sits well above the measured run. It is never tightened to turn a slow healthy run red (owner, 2026-11-10, quoted at `ci-job-caps.md:7`). The consultant reads the 2026-11-23 words the same way; that reading is the consultant's, not the owner's words. Decision `ci-job-caps` (the CI job caps) holds the caps.
@@ -26,7 +27,7 @@ Ruling: only on a hang. A hang is no new output byte and no CPU advance in any p
   - CI: the rerun of failed jobs that the merge tool already names.
   - Mutation verdicts: cached across run attempts. Not built.
 
-State: decided. Built: the stop in `bin/verdict` (lane `verdict-hang-stop`), off unless `VERDICT_HANG_SECONDS` is set. Not built: lane `ci-job-hang-stop` (the CI steps), lane `mutate-verdicts-cached-ci` (the mutation verdict cache), and the five-step wrap.
+State: decided. Built: the stop in `bin/verdict` (lane `verdict-hang-stop`), off unless `VERDICT_HANG_SECONDS` is set; lane `ci-job-hang-stop` (`bin/ci-job` reads a `HANG` line; pull request 3843, merged); and the five-step wrap (Scope above). Not built: lane `mutate-verdicts-cached-ci` (the mutation verdict cache), `code-caps-hang-stop`, and `hang-stop-poll-loop` (open, note `docs/notes/hang-stop-poll-loop.md`).
 
 Measure, 2026-11-23: in the 50 newest push runs of `checks` on main, 4 jobs ended at the 30-minute step cap with no red test, and 0 at a job cap.
 
@@ -40,3 +41,4 @@ Cost (rule `outcomes-mechanize-rules`; the log-size read is unmeasured):
 
 Kind: process
 Home: bin/verdict
+Check: `lint/test_checks_step_scope.py` class `HangStopWrap`, `lint/test_verdict.py`
