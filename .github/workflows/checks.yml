@@ -865,8 +865,8 @@ jobs:
           python-version: "3.11"
 
       # A step below that has a scope condition and reads no .md file skips a docs-only pull request (`code` is false,
-      # ci-scope.sh) and a records-only push. A step that reads a .md file also runs when its doc groups change, and on a
-      # records-only push, because the records page is a .md file.
+      # ci-scope.sh). A step that reads a .md file also runs when its doc groups change. Every suite step reads the records-only
+      # skip too, so a records-only, record-folder or comment-only delta from a green head runs none of them.
       - name: Config watch fixture suite
         if: ${{ (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_config_watch.py
