@@ -31,15 +31,16 @@ WALL_JUMP = ("import runpy, sys, time\n"  # the launcher: verdict runs in this p
 _VERDICT_MODULE = {}
 
 def load_verdict_module():
-    """bin/verdict loaded into this process, so a case can call its functions with fabricated samples. Its last line calls
-    main() and exits, so that line is cut from the source before it runs; the cut must find the line (scope). No .pyc is written."""
+    """bin/verdict loaded into this process, so a case can call its functions with fabricated samples. Its entry line calls
+    main() and exits, so that line is swapped for `pass` before it runs: a `pass` still loads when the entry line sits under an
+    `if __name__` guard. The swap must find the line (scope). No .pyc is written."""
     if "mod" not in _VERDICT_MODULE:
         with open(V, encoding="utf-8") as h: src = h.read()
         entry = "sys.exit(main(sys.argv[1:]))"
-        if entry not in src: raise RuntimeError("bin/verdict's entry line moved, so the in-process load cannot cut it")
+        if entry not in src: raise RuntimeError("bin/verdict's entry line moved, so the in-process load cannot swap it")
         mod = types.ModuleType("verdict_in_process")
         mod.__file__ = V
-        exec(compile(src.replace(entry, "", 1), V, "exec"), mod.__dict__)
+        exec(compile(src.replace(entry, "pass", 1), V, "exec"), mod.__dict__)
         _VERDICT_MODULE["mod"] = mod
     return _VERDICT_MODULE["mod"]
 
