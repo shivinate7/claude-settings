@@ -8,7 +8,8 @@ path, so the push-skip job is a visible success and scope reads its output.
 base is the proven base of a scoped push (proven_base): the head of the newest completed, successful push run of the calling workflow
 on main whose suites ran, among the runs with an id below this run's GITHUB_RUN_ID (a newer run is never a base and never a stop, and
 this run's own record never counts). Empty means every flag stays on. A run not yet completed (queued, in progress, waiting, requested,
-pending) is passed over with no read. A run that push-skip skipped whole is passed over. A completed run that is not a success (red,
+pending) on its first attempt is passed over with no read. A run not completed on attempt 2 or later (a re-run in flight, whose first
+attempt completed) gives none, and the printed line names that run. A run that push-skip skipped whole is passed over. A completed run that is not a success (red,
 cancelled, timed out) gives none, and the printed line names that run and its conclusion. Any read error, malformed reply, or full page
 with no usable run gives none and says "unknown". A skip=true push, and any event but a push, writes an empty base: scope does not run
 on a skip, and a schedule or dispatch run never scopes.
@@ -315,8 +316,9 @@ def proven_base(env):
     """The full sha a scoped push diffs from, or "" for none: the head of the newest completed, successful push run of the calling
     workflow on main whose suites ran. Candidates are push runs of the calling workflow on main with an id below this run's
     GITHUB_RUN_ID (with it unset, every run): a newer run is never a base and never a stop, and this run's own record never counts.
-    Walking newest to oldest, a run that is not completed (queued, in_progress, waiting, requested, pending, a re-run in flight) is
-    passed over with no read. A completed run that is not a success (red, cancelled, timed out) gives no base, because main is then
+    Walking newest to oldest, a run that is not completed (queued, in_progress, waiting, requested, pending) on its first attempt is
+    passed over with no read. A run not completed on attempt 2 or later is a re-run in flight: its first attempt completed, and the
+    walk cannot read that as green, so it gives no base. A missing run_attempt reads as attempt 1. A completed run that is not a success (red, cancelled, timed out) gives no base, because main is then
     not known green. A completed success with no suite job succeeded was skipped whole by push-skip, so it is passed over. Raises
     Unknown on a read that cannot be judged, a malformed reply, a head that is no full sha, a GITHUB_RUN_ID or run id that cannot be
     compared, and a full page that held no usable run (an older one may exist); the caller then writes an empty base."""
@@ -337,6 +339,10 @@ def proven_base(env):
     newest_first = sorted(mine, key=lambda r: (str(r.get("created_at") or ""), r.get("id") if isinstance(r.get("id"), int) else 0), reverse=True)
     for run in newest_first:
         if run.get("status") != "completed":
+            if (run.get("run_attempt") or 1) > 1:
+                print("push-skip: push run %s is a re-run in flight (attempt %s), and its first attempt completed, so main is not known green and the push has no base"
+                      % (run.get("id"), run.get("run_attempt")))
+                return ""
             continue
         if run.get("conclusion") != "success":
             print("push-skip: push run %s concluded %s, so main is not known green and the push has no base" % (run.get("id"), run.get("conclusion")))
