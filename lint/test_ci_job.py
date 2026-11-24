@@ -4020,13 +4020,22 @@ class SuiteCarry(unittest.TestCase):
         """The suite step gated on the guard flag, as checks.yml gates hooks/test_guard.py's step. Its flag is on when the lane's diff holds hooks/."""
         return step("check-s", "python3 hooks/test_s.py check-s", **{"if": self.GUARD_IF})
 
-    def scope_of(self, files):
-        """The flags the repo's ci-scope.sh gives for `files`, read from its SCOPE_FILES input: name -> value. One run; no git range is read."""
+    SCOPE_INPUTS = ("SCOPE_FILES", "EVENT", "BASE_SHA", "HEAD_REF", "GREEN_HEAD", "PR_HEAD", "GITHUB_OUTPUT")  # the script's inputs a case sets itself
+
+    def scope_of(self, files=None, base=None):
+        """The flags the repo's ci-scope.sh gives, name -> value. With `base` (a sha): CI's own read, EVENT=pull_request and BASE_SHA=base
+        over the diff to HEAD, with no SCOPE_FILES (`files` is not read). Without it: SCOPE_FILES reads `files`, the form ci-job's carry
+        uses, with no git range. One run either way."""
         out = os.path.join(self.sandbox, "scope-out.txt")
         if os.path.exists(out):
             os.remove(out)
-        subprocess.run(["bash", ".github/scripts/ci-scope.sh"], cwd=self.root, check=True, capture_output=True, text=True,
-                       env={**ENV, "SCOPE_FILES": "\n".join(files), "GITHUB_OUTPUT": out}, timeout=120)
+        env = {k: v for k, v in ENV.items() if k not in self.SCOPE_INPUTS}
+        env["GITHUB_OUTPUT"] = out
+        if base is None:
+            env["SCOPE_FILES"] = "\n".join(files)
+        else:
+            env.update(EVENT="pull_request", BASE_SHA=base)
+        subprocess.run(["bash", ".github/scripts/ci-scope.sh"], cwd=self.root, check=True, capture_output=True, text=True, env=env, timeout=120)
         with open(out, encoding="utf-8") as f:
             return dict(line.split("=", 1) for line in f.read().splitlines() if "=" in line)
 
@@ -4044,12 +4053,15 @@ class SuiteCarry(unittest.TestCase):
         return self.rev("HEAD")
 
     def suite_repo(self):
-        """The base commit: the fixture, the real ci-scope.sh (the script of the unmapped-file fail-safe), docs/records.md, and a branch
-        `side` at it. Then lane commit A, which holds the suite's file hooks/s.py and the suite. The lint's base is `side`."""
+        """The base commit: the fixture, the real ci-scope.sh (the script of the unmapped-file fail-safe), the repo's landed-dirs.txt (CI's
+        scope read marks every flag on without it), docs/records.md, and a branch `side` at it. Then lane commit A, which holds the suite's
+        file hooks/s.py and the suite. The lint's base is `side`."""
         self.fixture()
         with open(os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh"), encoding="utf-8", newline="") as f:
             scope = f.read()
-        self.write({".github/scripts/ci-scope.sh": scope, "docs/records.md": "records\n"})
+        with open(os.path.join(HERE, "..", "landed-dirs.txt"), encoding="utf-8", newline="") as f:
+            landed = f.read()
+        self.write({".github/scripts/ci-scope.sh": scope, "landed-dirs.txt": landed, "docs/records.md": "records\n"})
         self.commit("base")
         subprocess.run(["git", "branch", "side"], cwd=self.root, check=True, env=ENV)
         self.lane_commit({"hooks/s.py": "V = 1\n", self.SUITE: self.SOURCE}, "lane A")
@@ -4206,10 +4218,29 @@ class SuiteCarry(unittest.TestCase):
         self.assertEqual(flag, "false", "precondition: the guard flag is on for a markdown note, so the case probes nothing: %r" % flag)
         self.assert_carried(rc, lines, ran, out)
 
-    def guard_flag_case(self, files):
-        """A guard-gated step saves its PASS from head A. Then commit B changes only `files`, which the selector picks no suite for.
-        -> (the delta's guard flag, the rerun's (exit code, verdict lines, probe runs, output)). Only the step's own flag can stop the carry."""
+    def test_an_added_file_under_a_landed_dir_runs_a_guard_step_whose_flag_is_on(self):
+        for rel in ("agents/newagent.md", "skills/newx/SKILL.md"):
+            with self.subTest(added=rel):
+                flag, (rc, lines, ran, out) = self.guard_flag_case({rel: "# new\n"})
+                self.assertEqual(flag, "true", "precondition: CI's own scope read does not set the guard flag for %s, a new file under a "
+                                 "landed dir: %r" % (rel, flag))
+                self.assertIn("check-s", ran, "check-s carried its saved pass across the commit that adds %s: CI's read sets the guard flag its "
+                              "if: reads for that file, but the carry reads the delta with SCOPE_FILES, which skips the landed-dir rule\n%s"
+                              % (rel, out))
+
+    def test_a_modified_md_under_a_landed_dir_still_carries_a_guard_step_whose_flag_is_off(self):  # control: green on the old code
+        flag, (rc, lines, ran, out) = self.guard_flag_case({"agents/old.md": "old, edited\n"}, saved={"agents/old.md": "old\n"})
+        self.assertEqual(flag, "false", "precondition: CI's own scope read sets the guard flag for an edit to an existing agents/*.md, so the "
+                         "case probes nothing: %r" % flag)
+        self.assert_carried(rc, lines, ran, out)
+
+    def guard_flag_case(self, files, saved=None):
+        """A guard-gated step saves its PASS from head A, which holds `saved` (path -> text) when given. Then commit B adds or changes `files`,
+        which the selector picks no suite for. -> (the delta's guard flag from CI's own scope read, the rerun's (exit code, verdict lines,
+        probe runs, output)). Only the step's own flag can stop the carry."""
         self.suite_repo()
+        if saved:
+            self.lane_commit(saved, "lane A2")
         guard = self.guard_step()
         head = self.rev("HEAD")
         rc, lines, ran, out = self.lane_run(guard, args=self.LINT)
@@ -4217,7 +4248,7 @@ class SuiteCarry(unittest.TestCase):
         self.assertEqual((rc, state_of(lines, "check-s")), (0, "PASS"), out)
         self.lane_commit(files, "lane B")
         self.assertEqual(self.picked_since(head), [], "precondition: the selector picks a suite for %s, so the flag is not the only reason" % sorted(files))
-        flag = self.scope_of(sorted(files)).get("guard")
+        flag = self.scope_of(base=head).get("guard")
         return flag, self.lane_run(guard, args=self.LINT)
 
     def test_a_dirty_tree_runs_the_step_again(self):
