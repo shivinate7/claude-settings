@@ -6298,6 +6298,7 @@ class NoneRequiredChecks(ScopedRepo, Env):
     """merge.requiredChecks "none": the base names no required check, so the head reads from the checks and runs it has. Each case
     runs through the fake gh, as GhHalf does. Borrows GhHalf's helpers, as SilentWait does, so GhHalf's tests do not run twice."""
     set, calls, gh_host, go = GhHalf.set, GhHalf.calls, GhHalf.gh_host, GhHalf.go
+    proven_parent = GhHalf.proven_parent
 
     def setUp(self):  # the fake-gh setup of GhHalf.setUp, without its tests
         Env.setUp(self)
@@ -6365,6 +6366,7 @@ class NoneRequiredChecks(ScopedRepo, Env):
     def test_a_red_main_run_does_not_refuse_the_merge_under_a_listed_check(self):
         """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): a PR may merge onto a red main. It was a refusal under a listed check."""
         push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})
+        self.proven_parent()  # the head is a clean merge of main: its proof is read on the parent the fake gh must know
         self.set(base_runs=[main_run(901, "failure")], base_jobs={"901": [main_job("scope", "success"), main_job("checks", "failure", 20)]})
         rc, out = self.go(required=["checks"])
         self.assertEqual(rc, 0, out)
