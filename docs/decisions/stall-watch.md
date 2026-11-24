@@ -8,6 +8,8 @@ stale cache lock, and the report names the lock file. A stop on a timer would ki
 and lose the state that explains the stall. A polling timer in the session is refused by the `waiter`
 guard rule, so the watcher does the waiting and the session is told once.
 
+The session stall watch reports and never stops; a stop on a hang in CI and lane lint is decision `hang-stop`, which protects a healthy job by the output-and-CPU rule and keeps the evidence by printing the tree and tail first.
+
 `hooks/stall_watch.py` does it.
 
 - The hook (`--hook`, a PreToolUse hook on Bash) returns `updatedInput` only for a call with

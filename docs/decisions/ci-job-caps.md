@@ -22,8 +22,10 @@ The stopgap, CI and local, still ends with roadmap step `time-pinned-tests-go` (
 Owner, 2026-10-27, roadmap step c95 (the cap rule):
 
 - A full CI run is red only when something is broken, never because a job ran out of time.
+- A run is stopped only on a hang, never on time. The hang stop is decision `hang-stop`. Job caps stay as the last net for a busy-loop hang, Windows and action steps.
+- A net sits well above the measured run. It is never tightened to turn a slow healthy run red (owner, 2026-11-10 and 2026-11-23).
 - The target is a slowest run under 80% of the cap.
-- A job that ends at its cap with no red test step is re-capped or split, never left (skill `ci-hygiene`, step 5).
+- Until `hang-stop` is built, a job that ends at its cap with no red test step is re-capped or split, never left (skill `ci-hygiene`, step 5).
 - A cap rises only with a measured figure in the comment beside it. This item is suspended while the stopgap holds, and comes back when roadmap step `time-pinned-tests-go` (time-pinned tests are gone) closes (owner, 2026-11-01 18:44 CST, above).
 
 ## The table

@@ -1,0 +1,34 @@
+# A CI or lane lint step stops only on a hang
+
+Question: when may CI or lane lint stop a running step?
+
+## The ruling
+
+Owner ruling R2 (no arbitrary time limits in CI or lint), 2026-11-23 10:49 CST, typed in the consultant's chat: a run is stopped only when it hangs.
+
+Owner, 2026-11-23 21:21 CST: "R2 can get worked on now." The consultant reads this as covering the hang stop, a standard way to resume, and cap sizing. That reading is the consultant's, not the owner's words.
+
+Ruling: only on a hang. A hang is no new output byte and no CPU advance in any process under the step, for N seconds. This is the rule that decision `stall-watch` (the session stall watch) uses to report.
+
+- N: 2 x the longest healthy silent gap, at least 300 s. N: unmeasured until the first measure lands.
+- One home: the wait loop of `bin/verdict`. It acts only when the env var `VERDICT_HANG_SECONDS` is set. Unset, nothing is stopped.
+- Before a stop, it prints the process tree and the log tail. Then it ends the tree and prints one `HANG` line. In lane lint, a HANG reads unknown.
+- Scope of the first build: lane lint steps, and the five CI steps that carry a step cap today. Those are the three install checkout-detection shards and the two 45-minute steps in the `checks` workflow. Other CI steps keep only the job cap. The five step caps stay until the build lands.
+- No stop on Windows until it has a CPU read.
+- Job caps stay as the last net for a busy-loop hang, Windows and action steps. A net sits well above the measured run. It is never tightened to turn a slow healthy run red (owner, 2026-11-10 and 2026-11-23). Decision `ci-job-caps` (the CI job caps) holds the caps.
+- Resume after a stop:
+  - Lane lint: its pass cache keeps passed steps.
+  - CI: the rerun of failed jobs that the merge tool already names.
+  - Mutation verdicts: cached across run attempts. Not built.
+
+State: decided, not built. Not built: lane `verdict-hang-stop` (the stop in `bin/verdict`), lane `ci-job-hang-stop` (the CI steps), lane `mutate-verdicts-cached-ci` (the mutation verdict cache), and the five-step wrap.
+
+Measure, 2026-11-23: in the 50 newest push runs of `checks` on main, 4 jobs ended at the 30-minute step cap with no red test, and 0 at a job cap.
+
+Cost (each unmeasured until its test lands; rule `outcomes-mechanize-rules`):
+- New long-lived process: none.
+- Log-size read: one per 120 s wake.
+- Process-table read: only while the step is silent.
+
+Kind: process
+Home: bin/verdict
