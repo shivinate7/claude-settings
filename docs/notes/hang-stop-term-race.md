@@ -1,0 +1,1 @@
+- hang-stop-term-race: `bin/verdict` `hang_stop`: a child that exits between the last `poll()` and the TERM still prints `HANG` with rc 124. Inherent: no check closes that gap. Lane lint reads HANG as unknown. Decision: hang-stop. Seen: 2026-11-23 x1
