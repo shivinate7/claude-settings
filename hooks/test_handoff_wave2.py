@@ -2135,6 +2135,10 @@ def edit_handoff(c, old, new, replace_all=False, sid=SID, agent_id=None):
                                        "replace_all": replace_all}, agent_id=agent_id)
 
 
+def multi_edit_handoff(c, edits, sid=SID, agent_id=None):
+    return guard_call(c, sid, "MultiEdit", {"file_path": c.handoff(sid), "edits": edits}, agent_id=agent_id)
+
+
 def size_refusal(got, tokens):
     """'' when the guard refused the call under handoff-too-big and its reason gives the estimate, the limit
     and the remedy words (history, review rounds, CI). Else the first thing that is missing."""
@@ -2464,6 +2468,31 @@ def case_agent_edit_sets_read_flag():
         c.cleanup()
 
 
+def case_agent_multiedit_sets_read_flag():
+    """An agent's MultiEdit of the session's handoff sets the reread flag, as its Edit does: the main session's next
+    Bash call is refused by handoff-unread, and the refusal says an agent rewrote the handoff."""
+    c = Case("agent-multiedit-flag")
+    try:
+        put_bytes(c.handoff(SID), handoff_text(600).encode("utf-8"))
+        step("no reread flag before the agent's MultiEdit",
+             "" if not flag_set(c, SID) else "the reread flag is set before any agent MultiEdit")
+        old, new = "- Go on.", "- Go on, then check the premises."
+        edits = [{"old_string": old, "new_string": new, "replace_all": False}]
+        if not step("the agent's MultiEdit is allowed",
+                    allowed_why(multi_edit_handoff(c, edits, agent_id=AGENT_ID))):
+            return
+        put_bytes(c.handoff(SID), handoff_text(600).replace(old, new, 1).encode("utf-8"))
+        got = guard_call(c, SID, "Bash", BASH)
+        if not step("the main session's Bash call is refused by handoff-unread after the agent's MultiEdit",
+                    refused_by(got, HANDOFF_RULE)):
+            return
+        step("the refusal says an agent rewrote the handoff",
+             "" if "agent" in got[1].lower() and "rewrote" in got[1].lower()
+             else "the refusal does not say an agent rewrote it: %r" % got[1][:120])
+    finally:
+        c.cleanup()
+
+
 def case_main_write_sets_no_flag():
     """The main session's own Write of the handoff sets no reread flag and no audit flag, and its next Bash call is
     allowed. Green on the old code: the control for the agent cases above."""
@@ -2688,6 +2717,7 @@ def main() -> int:
     case_range_over_2000_lines_counts_nothing()
     case_agent_write_sets_read_flag()
     case_agent_edit_sets_read_flag()
+    case_agent_multiedit_sets_read_flag()
     case_main_write_sets_no_flag()
     case_agent_rewrite_partial_read_keeps_flag_whole_read_clears()
 
