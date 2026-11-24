@@ -408,15 +408,26 @@ class Unknowns(Job):
         self.assertEqual(rc, 0, "a PASS after a beat line with HANG in its text does not exit 0: " + out)
 
 
+def checks_hooks_ifs():
+    """The `if:` text of each step of the checks-hooks job, read from checks.yml: the one read the samplers below share."""
+    with open(CHECKS, encoding="utf-8") as f:
+        steps = step_blocks(job_block(f.read(), "checks-hooks"))
+    return [step_key(st, "if") or "" for st in steps]
+
+
 def checks_hooks_condition():
     """The `if:` of the first checks-hooks step that holds both `records_only_skip != 'true'` and `needs.scope.outputs.code == 'true'`,
     read from checks.yml so the case runs the form CI writes, never a copy of it. A Linux suite step obeys its scope flag on
     every event, so this form has no `||` with the event."""
-    with open(CHECKS, encoding="utf-8") as f:
-        steps = step_blocks(job_block(f.read(), "checks-hooks"))
-    conds = [c for c in (step_key(st, "if") or "" for st in steps)
-             if "records_only_skip != 'true'" in c and "needs.scope.outputs.code == 'true'" in c]
+    conds = [c for c in checks_hooks_ifs() if "records_only_skip != 'true'" in c and "needs.scope.outputs.code == 'true'" in c]
     assert conds, "scope: checks-hooks has no step whose if: holds both records_only_skip != 'true' and needs.scope.outputs.code == 'true'"
+    return conds[0]
+
+
+def checks_hooks_or_condition():
+    """The `if:` of the first checks-hooks step that holds `||` and names no github.event_name, read from checks.yml the same way."""
+    conds = [c for c in checks_hooks_ifs() if "||" in c and "github.event_name" not in c]
+    assert conds, "scope: checks-hooks has no step whose if: holds || and no github.event_name"
     return conds[0]
 
 
@@ -481,6 +492,43 @@ class Conditions(Job):
                                       args=("--base", "origin/main"))
         self.assertEqual(self.verdicts(lines), ["skipped"], out)
         self.assertNotIn("pass --base", lines[0])
+
+    def scope_lint(self, script, *steps):
+        """--lint with --base main, on a fixture whose main holds `script` as the repo's scope script and the probe a lint step runs.
+        Each flag a step reads takes the value `script` writes, as CI's scope job gives it."""
+        ScopeLint.write(self, {ScopeLint.SCOPE: script, ScopeLint.PROBE: ScopeLint.PROBE_SRC})
+        self.git("add", "-A")
+        self.git("commit", "-qm", "base")
+        return self.run_job(*steps, args=("--lint", "--base", "main"))
+
+    def test_an_or_step_runs_when_only_its_first_arm_holds(self):  # !cancelled() holds in a plain run, failure() does not
+        rc, lines, out = self.run_job(step("or", "true", **{"if": "${{ !cancelled() || failure() }}"}))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "an || whose first arm holds does not run its step: " + out)
+
+    def test_an_or_step_runs_when_only_its_second_arm_holds(self):  # failure() does not hold in a plain run, !cancelled() does
+        rc, lines, out = self.run_job(step("or", "true", **{"if": "${{ failure() || !cancelled() }}"}))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "an || whose second arm holds does not run its step: " + out)
+
+    def test_an_or_step_is_skipped_when_both_arms_are_false(self):  # the control: and and or both read false here
+        rc, lines, out = self.run_job(step("or", "true", **{"if": "${{ cancelled() || failure() }}"}))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["skipped"]), "an || whose arms both fail does not skip its step: " + out)
+
+    def test_an_and_over_an_or_runs_when_only_the_or_second_arm_holds(self):  # A && (B || C) with B false and C true
+        rc, lines, out = self.run_job(step("mixed", "true", **{"if": "${{ !cancelled() && (failure() || !cancelled()) }}"}))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "A && (B || C) with only C holding does not run its step: " + out)
+
+    def test_a_checks_hooks_or_step_runs_when_only_its_second_arm_holds(self):  # the real if: of a checks-hooks step with ||
+        cond = checks_hooks_or_condition()
+        names = re.findall(r"needs\.scope\.outputs\.([\w-]+) == 'true'", cond)
+        self.assertTrue(len(names) >= 2 and cond.count("needs.scope.outputs.") == len(names),
+                        "scope: the sampled checks-hooks if: is not an || of scope flags == 'true': " + cond)
+        flags = {name: "false" for name in names}
+        flags[names[-1]] = "true"  # only the last arm holds: the scope script gives every flag the sampled if: reads
+        script = "".join('echo "%s=%s" >> "$GITHUB_OUTPUT"\n' % kv for kv in flags.items())
+        rc, lines, out = self.scope_lint(script, step("hooks gate", "python3 %s sample" % ScopeLint.PROBE, **{"if": cond}))
+        self.assertNotIn("UNKNOWN scope", out, "scope: the scope script gave no value for a flag the sampled if: reads\n" + out)
+        self.assertEqual(by_step(lines).get("hooks gate"), "PASS",
+                         "--lint did not run the checks-hooks || step (%s) with only its second arm true\n%s" % (cond, out))
 
 
 class Usage(Job):
