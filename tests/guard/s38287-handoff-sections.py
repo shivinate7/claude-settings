@@ -147,7 +147,7 @@ add("handoff-sections: a Write that keeps all six sections passes, silently",
     "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
     file_path=HS_HANDOFF, content=hs_text())
 # A full-size handoff under the size limit: 34895 UTF-8 bytes, 9970 estimated tokens, against the 10000-token limit
-# (decision precompact-handoff, the owner's ruling of 19:07 CST Nov 23, 2026). Above the limit, handoff-too-big refuses it.
+# (decision precompact-handoff, limit set 19:07 CST Nov 23, 2026). Above the limit, handoff-too-big refuses it.
 add("handoff-sections: a full-size handoff that keeps all six sections passes, silently",
     "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
     file_path=HS_HANDOFF,
