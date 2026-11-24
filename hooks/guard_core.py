@@ -2324,14 +2324,15 @@ def lift_notice() -> str:
 
 
 def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None, on_lift=None,
-           continue_on_lift: bool = False):
+           continue_on_lift: bool = False, closing: str = ""):
     """Print a deny or an ask and exit, unless an owner override lifts it (decision
     owner-override). A lifted act prints one context line and no decision, so the normal permission flow runs. The
     veto runs before the override is taken, so a call that also holds a never-lifted act spends no override.
     spawn_role is set only on the Opus spawn refusal, the one refusal an Opus override may lift.
     on_lift, when set, runs once when an override lifts the act, so a rule may keep state only for an act that lands.
     continue_on_lift makes a lifted act return True instead of exiting, so the caller can judge the next rule of a
-    group (the lane start's rules); any other outcome exits as before."""
+    group (the lane start's rules); any other outcome exits as before.
+    closing is a last sentence a rule wants read after the override line (rule ready-pr-push); empty for every other rule."""
     vetoed = _vetoed()
     if not vetoed:
         try:  # an import or read failure is no override: the refusal stands
@@ -2364,6 +2365,8 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
         reason = reason.rstrip() + " " + line
     except Exception:
         pass
+    if closing:
+        reason = reason.rstrip() + " " + closing
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
