@@ -500,6 +500,23 @@ class T(unittest.TestCase):
                 self.assertIn("END-MARK", full, "the silent child was stopped before its end")
                 self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
 
+    def test_hang_stop_bad_env_value_says_off_and_the_step_runs(self):
+        """A VERDICT_HANG_SECONDS that is no whole number (10m, 1.5) turns the hang stop off and says so once on stderr. The
+        step still runs: verdict exits 0 and reads PASS, and no HANG line prints. Control: with the variable unset, the
+        stop-off line does not print (decision hang-stop)."""
+        code = "print('END-MARK', flush=True)"
+        for value in ("10m", "1.5"):
+            with self.subTest(VERDICT_HANG_SECONDS=value), tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+                r = self.run_bounded(code, os.path.join(d, "v.log"), {"VERDICT_HANG_SECONDS": value})
+                self.assertEqual(r.returncode, 0, "the step ran to its end, so verdict exits 0: " + r.stdout + r.stderr)
+                self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
+                self.assertFalse(any(l.startswith("HANG ") for l in r.stdout.splitlines()), r.stdout)
+                self.assertEqual(r.stderr.count("hang stop is off"), 1, "want one stop-off line on stderr: " + r.stderr)
+        with self.subTest(VERDICT_HANG_SECONDS="unset"), tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            r = self.run_bounded(code, os.path.join(d, "v.log"))
+            self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
+            self.assertNotIn("hang stop is off", r.stdout + r.stderr, "the stop-off line printed with the variable unset")
+
     def test_test_failed_marker_on_exit0_is_fail(self):
         r = run("print('Test Suite All tests')\nprint('** TEST FAILED **')")
         self.assertEqual(r.returncode, 1, r.stdout)
