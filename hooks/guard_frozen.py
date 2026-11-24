@@ -93,17 +93,13 @@ CONFIG_FROZEN_SKILLS = (
 )
 # THE LIVE PINNED CHECKOUT IS FROZEN (decision merge-reinstalls-from-main, ruling 1: no work runs in
 # the pinned checkout). The links in the config directory load
-# from it, so a write there changes what every session runs. The pin is `<clone>-live`, and each
-# move leaves a stamped worktree `<clone>-live-<12 hex>`. This suffix is the one copy in Python.
-# merge/install_from_main.sh builds the same name (`pin="$clone-live"`) and must stay equal to it.
+# from it, so a write there changes what every session runs. The pin's names (LIVE_PIN_SUFFIX, PIN_TREE, PIN_SCRIPT)
+# are in hooks/shared_names.py, the one home, which the stale-install hook reads too.
 # A folder counts as a pin only when the clone beside it holds the install script that makes the
 # pin, so an unrelated `something-live` folder stays editable.
 # A stamped worktree is frozen only while the pin link resolves to it: the install tells a person
 # to move an older one aside, and prunes them, so those stay writable.
-LIVE_PIN_SUFFIX = "-live"
-_LIVE_PIN = re.compile(r"(?P<clone>.+)" + re.escape(LIVE_PIN_SUFFIX) + r"(?P<stamp>-[0-9a-f]{12})?")
-_CLONE_MARKER = os.path.join("merge", "install_from_main.sh")
-from shared_names import PROJECT_FROZEN_FILES  # noqa: E402  the one home, shared with the config watch
+from shared_names import LIVE_PIN_SUFFIX, PIN_SCRIPT, PIN_TREE, PROJECT_FROZEN_FILES  # noqa: E402  the one home, shared with the config watch and the stale-install hook
 PROJECT_FROZEN_DIR = "/.claude/hooks/"
 # THE MAIN MIRROR IS FROZEN TOO. A cloud install whose session checkout is on a branch takes its files from a mirror of
 # main at `$HOME/claude-settings-main`, and the CLAUDE.md pointer names it, so a write there changes what every session
@@ -148,10 +144,10 @@ def _in_live_pin(target: str) -> bool:
     the pin link points at now."""
     while True:
         parent, name = os.path.split(target)
-        found = _LIVE_PIN.fullmatch(name)
+        found = PIN_TREE.fullmatch(name)
         if found:
             clone = os.path.join(parent, found["clone"])
-            if os.path.isfile(os.path.join(clone, _CLONE_MARKER)):
+            if os.path.isfile(os.path.join(clone, PIN_SCRIPT)):
                 if not found["stamp"]:
                     return True
                 pin = os.path.realpath(clone + LIVE_PIN_SUFFIX)
