@@ -567,23 +567,28 @@ def unwrap(raw):
 
 
 # The records-only skip (ci-scope.sh's records_only_skip output, read as needs.scope.outputs.records_only_skip) turns off some
-# run steps. A step that takes the condition ends in it: `(E) && RECORDS_ONLY_CONDITION`, or `success() && RECORDS_ONLY_CONDITION` when it has no if:. Which steps take it:
-#   CONDITIONED_JOBS: every run step. A static trace found the Windows guard suite reads no records page.
-#   SPLIT_CONDITIONED_JOBS: only the run steps named by scope_named_steps(), each with the scope condition as its if:. Its doc steps take none.
-#   UNCONDITIONED_JOBS: no run step.
+# run steps. A step that takes the condition ends in it: `(E) && RECORDS_ONLY_CONDITION`, `success() && RECORDS_ONLY_CONDITION` when it has
+# no if:, or RECORDS_ONLY_CONDITION alone when it reads no scope flag. Which steps take it:
+#   CONDITIONED_JOBS: every run step.
+#   SUITE_CONDITIONED_JOBS: each run step that runs a test suite (suite_names), and no other run step. A step that runs no suite,
+#   such as a doc step or a lint check, takes none. Every suite step of the three lint jobs reads the skip (SuiteStepsTakeTheRecordsOnlySkip).
 RECORDS_ONLY_CONDITION = "needs.scope.outputs.records_only_skip != 'true'"
 CONDITIONED_JOBS = WINDOWS_GUARD_JOBS + WINDOWS_MERGE_JOBS + ("checks-windows-rest", "checks-windows-rest-2")
-SPLIT_CONDITIONED_JOBS = ("checks-hooks", "checks-rest")
-UNCONDITIONED_JOBS = ("checks",)
-SPEC_JOBS = CONDITIONED_JOBS + SPLIT_CONDITIONED_JOBS + UNCONDITIONED_JOBS
+SUITE_CONDITIONED_JOBS = ("checks", "checks-hooks", "checks-rest")
+SPEC_JOBS = CONDITIONED_JOBS + SUITE_CONDITIONED_JOBS
 
 
-def scope_named_steps():
-    """The step names that take the condition in SPLIT_CONDITIONED_JOBS: NO_MD and NAMES_ONLY of lint/test_checks_step_scope.py, the
-    one home of those lists. Imported here, not at the top, because that module imports this one. A doc step is not named:
-    a records-only push still runs the steps that read a .md file (decision records-index-at-merge)."""
-    from test_checks_step_scope import NAMES_ONLY, NO_MD
-    return set(NO_MD) | set(NAMES_ONLY)
+def suite_names(text, job):
+    """The names of the steps of `job` that run a test suite (test_ci_scope.suite_steps, the one home of that reading, imported here
+    because that module imports this one). A step with no name stands as None."""
+    from test_ci_scope import suite_steps
+    return {name for name, _ in suite_steps(text, job)}
+
+
+def spec_conditioned(name, st, suites):
+    """True when the spec gives run step `st` of job `name` the records-only condition: every run step of CONDITIONED_JOBS, and a run
+    step of SUITE_CONDITIONED_JOBS whose name is in `suites`, the names of job `name`'s suite steps (suite_names)."""
+    return name in CONDITIONED_JOBS or (name in SUITE_CONDITIONED_JOBS and st.get("name") in suites)
 
 
 def drop_condition(expr):
@@ -628,8 +633,19 @@ KEEP_RUNNING_IF = "${{ %s }}" % KEEP_RUNNING
 
 
 def only_keep_running_if(step):
-    """True when a checks-job step has no if:, or exactly the keep-running condition. Any other if: fails the pin."""
-    return "if" not in step or step["if"] == KEEP_RUNNING_IF
+    """True when a checks-job step has no if:, the keep-running condition alone, or the keep-running condition with a scope condition
+    of scope flags and then the records-only skip (`!cancelled() && (E) && RECORDS`), or with the skip alone (a step that reads no
+    scope flag). Any other if: fails the pin. A scope condition that reads a job, a status function or github.event is another if:."""
+    if "if" not in step or step["if"] == KEEP_RUNNING_IF:
+        return True
+    off = keep_running_off(step["if"])
+    if off == step["if"]:
+        return False  # no keep-running condition at all
+    expr = unwrap(off)
+    if expr == RECORDS_ONLY_CONDITION:
+        return True
+    scope = drop_condition(expr)
+    return scope != expr and "github." not in scope and not re.search(r"\b(?:success|failure|always|cancelled)\(\)|needs\.(?!scope\.outputs\.)", scope)
 
 
 def step_if(st):
@@ -648,28 +664,36 @@ def job_if_without_records(raw):
     return drop_condition(e)
 
 
+def delta_off(name, raw):
+    """`raw` (a job-level `if:`, with its `${{ }}`) with job `name`'s delta clauses taken off (all_jobs_passed_rules.delta_clauses_off, the
+    one home of the delta forms). Imported here, not at the top, because that module imports this one."""
+    from all_jobs_passed_rules import delta_clauses_off
+    return delta_clauses_off(name, raw)
+
+
 def condition_problem(name, st):
-    """None when run step `st` of job `name` ends in the condition, `(E) && RECORDS_ONLY_CONDITION` or `success() && RECORDS_ONLY_CONDITION`; else the problem, named."""
-    raw = unwrap(st.get("if"))
-    if raw == f"success() && {RECORDS_ONLY_CONDITION}" or re.fullmatch(rf"\(.+\) && {re.escape(RECORDS_ONLY_CONDITION)}", raw or ""):
+    """None when run step `st` of job `name` ends in the condition: `(E) && RECORDS_ONLY_CONDITION`, `success() && RECORDS_ONLY_CONDITION`
+    (no if:), or RECORDS_ONLY_CONDITION alone (a step that reads no scope flag). checks' keep-running guard comes off first
+    (keep_running_off), since a checks step carries it. Else the problem, named."""
+    raw = unwrap(keep_running_off(st.get("if")) if name == CHECKS_JOB else st.get("if"))
+    if raw in (RECORDS_ONLY_CONDITION, f"success() && {RECORDS_ONLY_CONDITION}") or re.fullmatch(rf"\(.+\) && {re.escape(RECORDS_ONLY_CONDITION)}", raw or ""):
         return None
-    return f"{name} / {st.get('name') or st.get('run')}: the if: is not `(E) && {RECORDS_ONLY_CONDITION}` (or `success() && {RECORDS_ONLY_CONDITION}` with no if:): {raw!r}"
+    return f"{name} / {st.get('name') or st.get('run')}: the if: does not end in the records-only condition: {raw!r}"
 
 
-def condition_spec_problem(name, st):
+def condition_spec_problem(name, st, suites=()):
     """None when run step `st` of job `name` has the condition the spec gives it, else the problem, named. A step the spec does not
-    condition has no condition. A step it conditions has condition_problem's form."""
-    label = st.get("name") or st.get("run")
-    if name in UNCONDITIONED_JOBS or (name in SPLIT_CONDITIONED_JOBS and label not in scope_named_steps()):
+    condition carries no condition. A step it conditions has condition_problem's form. `suites` is suite_names of the job."""
+    if not spec_conditioned(name, st, suites):
         if RECORDS_ONLY_CONDITION in (st.get("if") or ""):
-            return f"{name} / {label}: the if: carries the records-only condition, which the spec does not give this step: {unwrap(st.get('if'))!r}"
+            return f"{name} / {st.get('name') or st.get('run')}: the if: carries the records-only condition, which the spec does not give this step: {unwrap(st.get('if'))!r}"
         return None
     return condition_problem(name, st)
 
 
 def condition_problems(text, jobs=SPEC_JOBS):
     """condition_spec_problem for each run step of each job in `jobs`. Also one problem for each named job the workflow lacks, for a
-    job with no run step, and for a split job with no run step named by scope_named_steps(), so a check never passes on nothing."""
+    job with no run step, and for a suite job with no run step that runs a suite, so a check never passes on nothing."""
     found = all_jobs(text)
     problems = []
     for name in jobs:
@@ -680,9 +704,10 @@ def condition_problems(text, jobs=SPEC_JOBS):
         if not runs:
             problems.append(f"{name}: no run step, so the condition has nothing to check")
             continue
-        if name in SPLIT_CONDITIONED_JOBS and not any(st.get("name") in scope_named_steps() for st in runs):
-            problems.append(f"{name}: no run step is named by scope_named_steps(), so the condition has nothing to check")
-        problems += [p for p in (condition_spec_problem(name, st) for st in runs) if p]
+        suites = suite_names(text, name) if name in SUITE_CONDITIONED_JOBS else ()
+        if name in SUITE_CONDITIONED_JOBS and not suites:
+            problems.append(f"{name}: no run step runs a suite, so the condition has nothing to check")
+        problems += [p for p in (condition_spec_problem(name, st, suites) for st in runs) if p]
     return problems
 
 
@@ -905,7 +930,7 @@ def job_check_problems(name, job, flag=None):
     if not re.fullmatch(r"\[?\s*scope\s*\]?", job["needs"] or ""):
         problems.append(f"{name}: needs is {job['needs']}, want scope")
     expr = job["if"]
-    rest = job_if_without_records(expr)
+    rest = job_if_without_records(delta_off(name, expr))  # the delta clauses come off first (delta_off)
     if shard_base(name):
         return problems + ([] if rest == unwrap(SHARD_JOB_IF) or (name in PUSH_OFF_JOBS and push_off_job_if(name, rest)) else [f"{name}: shard job if is {expr}, want {SHARD_JOB_IF}"])
     if name in LINT_JOBS:  # they run on every PR: no scope condition, and a job-level if only when it is the draft guard
@@ -1143,7 +1168,7 @@ def pin_problems(name, st, cmd, want_if, want_shell, want_env=None, keep_running
     """A suite's step keeps the `if:` and `shell:` pinned for it, and its env: none, or the shard value (want_env). With keep_running,
     the step is a checks-job step: its keep-running guard comes off before the pin reads it (keep_running_off)."""
     raw_if = keep_running_off(step_key(st, "if")) if keep_running else step_key(st, "if")
-    got_if, got_env = drop_condition(unwrap(raw_if)), step_env(st)
+    got_if, got_env = job_if_without_records(raw_if), step_env(st)  # the records-only skip comes off, bare or after the scope condition
     if VERDICT_RUN + cmd in run_lines(st):
         got_env = {k: v for k, v in got_env.items() if k not in WRAP_ENV_VARS}  # the wrap's two added keys; every other key stays pinned
     problems = []
@@ -1401,7 +1426,7 @@ class WindowsSplit(unittest.TestCase):
         if_raw = unwrap(job_if_of(self.text, CHECKS_JOB))
         self.assertTrue(if_raw and if_raw.startswith("!cancelled() && "), f"checks: its if does not begin with !cancelled(): {if_raw}")
         # checks runs iff scope succeeded and the records-only skip is not set, whatever the guard shards did (checks_if_problems).
-        self.assertEqual(checks_if_problems(job_needs_of(self.text, CHECKS_JOB), job_if_of(self.text, CHECKS_JOB)), [])
+        self.assertEqual(checks_run_problems(self.text), [])
         self.assertEqual(condition_problems(self.text), [], "a run step does not carry the records-only condition the spec gives it")
         # The guard and mutate jobs skip on the
         # guard flag. Named failure: a cut job runs or never runs on push, schedule and dispatch.
@@ -1777,13 +1802,18 @@ class SplitJobs(unittest.TestCase):
         # Named failure: the guard outcome suite has no LINUX_SUITES row, so the `if:` of its checks.yml step is not pinned.
         self.assertTrue("python3 lint/test_guard_outcome.py" in LINUX_SUITES,
                         "the guard outcome suite has no LINUX_SUITES row, so its if: in checks.yml is not pinned")
+        scope = f"(needs.scope.outputs.code == 'true') && {RECORDS_ONLY_CONDITION}"  # the scope condition, then the records-only skip
         step = ("      - name: Guard outcome claims fixture suite\n"
-                "        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}\n"
+                f"        if: ${{{{ !cancelled() && {scope} }}}}\n"
                 "        run: python3 lint/test_guard_outcome.py\n")
         self.assertIn(step, self.text, "the fixture: checks.yml runs the guard outcome suite with this if:")
-        drifted = self.text.replace(step, step.replace(" && needs.scope.outputs.code == 'true'", "", 1), 1)
+        drifted = self.text.replace(step, step.replace(f" && {scope}", f" && {RECORDS_ONLY_CONDITION}", 1), 1)
         self.assertTrue([p for p in linux_split_problems(drifted) if "lint/test_guard_outcome.py" in p],
                         "an if: that drops the code scope from the guard outcome suite is not flagged (%s)" % PUSH_RULING)
+        no_skip = self.text.replace(step, step.replace(f" && {RECORDS_ONLY_CONDITION}", "", 1), 1)
+        self.assertTrue([p for p in linux_split_problems(no_skip) + condition_problems(no_skip, [CHECKS_JOB])
+                         if "lint/test_guard_outcome.py" in p or "Guard outcome claims" in p],
+                        "an if: that drops the records-only skip from the guard outcome suite is not flagged (%s)" % PUSH_RULING)
 
     def test_every_lint_form_step_stays_in_the_checks_job(self):
         """`merge --lane-lint` runs the `checks` job by name (bin/ci-job checks --lint), so a lint step moved into another Linux
@@ -4029,6 +4059,12 @@ def checks_if_problems(needs, expr):
     return []
 
 
+def checks_run_problems(text):
+    """checks_if_problems of checks.yml's own run condition, with its delta clauses taken off first (delta_off): the delta clauses start
+    checks on a comment-only delta, which the records-only reading does not model."""
+    return checks_if_problems(job_needs_of(text, CHECKS_JOB), delta_off(CHECKS_JOB, job_if_of(text, CHECKS_JOB)))
+
+
 def proof_wrong(expr):
     """The cases where the Debt retire proof `expr` reads other than the proof rule: the guard path only when every Linux guard
     shard succeeded, the scope flag is 'true' and the merge commit's tree equals the PR head's; '' in every other case."""
@@ -4199,7 +4235,7 @@ class ChecksShardCases(unittest.TestCase):
         self.assertEqual(checks_needs_problems(job_needs_of(self.text, CHECKS_JOB)), [])
 
     def test_g2_checks_runs_iff_scope_succeeded_and_records_only_is_not_set(self):
-        self.assertEqual(checks_if_problems(job_needs_of(self.text, CHECKS_JOB), job_if_of(self.text, CHECKS_JOB)), [])
+        self.assertEqual(checks_run_problems(self.text), [])
 
     def test_g3_the_debt_step_sets_the_proof_only_when_every_shard_scope_flag_and_trees_hold(self):
         wrong = proof_wrong(self.proof_raw())
@@ -4220,6 +4256,19 @@ class ChecksShardCases(unittest.TestCase):
         with self.subTest(defect="the form the design uses is accepted"):
             self.assertEqual(checks_if_problems(needs, "${{ !cancelled() && needs.scope.result == 'success' && "
                                                         "needs.scope.outputs.records_only_skip != 'true' }}"), [])
+        from all_jobs_passed_rules import COMMENT_DELTA_CLAUSE  # the one home of the delta clauses
+        with self.subTest(defect="the form with the comment clause is accepted once it comes off"):
+            delta_form = (f"${{{{ !cancelled() && needs.scope.result == 'success' && "
+                          f"({RECORDS_ONLY_CONDITION} || {COMMENT_DELTA_CLAUSE}) }}}}")
+            self.assertEqual(checks_if_problems(needs, delta_off(CHECKS_JOB, delta_form)), [],
+                             "checks' comment-only delta form is refused: the delta clauses checks names are not only the comment clause")
+        with self.subTest(defect="the record-folder clause is refused, since checks takes no such clause"):
+            # The literal is the refused form: the rules module no longer names the record-folder clause, so the test cannot import it.
+            # The form is the one checks.yml named before, so delta_off strips it on a head that still names the clause.
+            record_form = (f"${{{{ !cancelled() && needs.scope.result == 'success' && ({RECORDS_ONLY_CONDITION} || "
+                           f"{COMMENT_DELTA_CLAUSE} || needs.scope.outputs.skip_record_delta == 'true') }}}}")
+            self.assertTrue(checks_if_problems(needs, delta_off(CHECKS_JOB, record_form)),
+                            "checks accepts the record-folder clause, so a decision, notes or debts file starts it on the skip")
 
     def test_g5_a_tree_step_in_checks_runs_before_the_debt_step_and_reads_the_pr_head(self):
         steps = checks_steps(self.text)

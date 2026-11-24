@@ -32,7 +32,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies the script under test into a scratch tree; rm_tree removes the run folder
-from workflow_steps import job_block, job_workflow, step_blocks, step_key  # noqa: E402  the one home of the step parser
+from workflow_steps import job_block, job_workflow, run_body, step_blocks, step_key  # noqa: E402  the one home of the step parser
 import test_windows_split as split  # noqa: E402  the one home of the checks.yml reader and the `if:` evaluator (eval_with)
 SCRIPT = os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
 JOB_FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows"]
@@ -65,8 +65,8 @@ REAL_GUARD_INPUTS = "real"  # run()'s guard_inputs default: the repo's own list 
 
 
 def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref="", green=None,
-        green_sibling=False, green_head=None, contents=None, facts=None, merged=None, moves=None, guard_inputs=REAL_GUARD_INPUTS,
-        scope_files=None, proven=False):
+        green_sibling=False, green_head=None, contents=None, green_contents=None, facts=None, merged=None, moves=None,
+        guard_inputs=REAL_GUARD_INPUTS, scope_files=None, proven=False, modes=()):
     """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit. `scope_files` (a list of paths), when
     given, is SCOPE_FILES: the script reads those paths in place of the diff, with the same BASE_SHA range as the other cases. `head_ref` is HEAD_REF,
     empty when not given, so no HEAD_REF of the caller's environment reaches the script. `base` is BASE_SHA: "auto" is the base
@@ -76,18 +76,21 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
     unless `proven` is set: that is the push base a proven run hands over, and with none a push runs every flag (decision
     push-skip-on-proven-tree). `moves` maps an old path to its new one, or to None for a delete: the old path is in the base, and a
     move keeps the content, so git sees a rename.
+    `modes` (a list of paths) sets each one's executable bit in the head commit, so a mode-only change keeps the text.
     `guard_inputs` is the text of .github/guard-inputs.txt in the base: the repo's own list by default (none when the repo has
     no list yet), a text in its place, or None for no list at all (the gate's unreadable case).
     `green` (a list of paths) is the pull request's earlier head, committed before the head commit, so the whole diff against
     the base holds it too. `green_sibling` puts that earlier head on a branch off the base instead: a commit HEAD does not
     descend from. GREEN_HEAD is the earlier head's sha (empty when there is none) unless `green_head` gives another value.
-    `contents` maps a path to its text, in place of "changed". `merged` (a list of paths) is a base change the pull request did
+    `contents` maps a path to its text, in place of "changed". `green_contents` maps a path to its text in the earlier head, in
+    place of its `contents` text, so a delta can change one file between the two heads. `merged` (a list of paths) is a base change the pull request did
     not make: a commit off the base that adds them, merged into the head with --no-ff, so HEAD is a merge commit as in CI.
     BASE_SHA is then that base commit, and PR_HEAD is the head commit's sha. Without `merged`, PR_HEAD is unset, whatever the
     caller's environment holds. `facts`, a dict, is filled with the earlier head's `green` sha, the `delta` and `delta_head`
     (git diff --name-only --no-renames GREEN_HEAD HEAD), `delta_pr_head` (the same to the head commit) and `ancestor`
     (GREEN_HEAD is an ancestor of HEAD)."""
     contents = contents or {}
+    green_texts = {**contents, **(green_contents or {})}  # the earlier head's text: its own, else the head's
     moves = moves or {}
     with tempfile.TemporaryDirectory(dir=RUN_DIR) as d:
         git(d, "init", "-q")
@@ -128,30 +131,32 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
             if new is not None:
                 os.makedirs(os.path.dirname(os.path.join(d, new)), exist_ok=True)
                 open(os.path.join(d, new), "w").write("old\n")
-        def write(names):
+        def write(names, texts=contents):
             for p in names:
                 full = os.path.join(d, p)
                 os.makedirs(os.path.dirname(full), exist_ok=True)
-                open(full, "w").write(contents.get(p, "changed\n"))
+                open(full, "w").write(texts.get(p, "changed\n"))
         green_sha = ""
         if green is not None and green_sibling:
             git(d, "checkout", "-q", "-b", "side")
-            write(green)
+            write(green, green_texts)
             git(d, "add", "-A")
             git(d, "commit", "-qm", "earlier head")
             green_sha = git(d, "rev-parse", "HEAD")
             git(d, "checkout", "-q", "-")
             # HEAD's line gets the same paths in a commit of its own, so the two trees differ by `paths` alone.
-            write(green)
+            write(green, green_texts)
             git(d, "add", "-A")
             git(d, "commit", "-qm", "pr code")
         elif green is not None:
-            write(green)
+            write(green, green_texts)
             git(d, "add", "-A")
             git(d, "commit", "-qm", "earlier head", "--allow-empty")
             green_sha = git(d, "rev-parse", "HEAD")
         write(paths)
         git(d, "add", "-A")
+        for m in modes:  # `modes`: the paths whose executable bit the head commit sets (a mode-only change, with the text unchanged)
+            git(d, "update-index", "--chmod=+x", m)
         git(d, "commit", "-qm", "head", "--allow-empty")
         head_sha = git(d, "rev-parse", "HEAD")
         base_sha = sha if base == "auto" else {"head": head_sha, "sibling": side_sha, "green": green_sha, "pre": sha}.get(base, base)
@@ -976,6 +981,339 @@ class RecordsOnlyPush(unittest.TestCase):
         self.assertEqual(differing(got, whole, DOC_FLAGS), [], f"the records-only skip moved a doc flag off the whole PR diff: {got}")
 
 
+# A delta from a fully green head that changes only comments in a .py or .sh file skips the code suites, as a records-only
+# delta does. A docstring is code: the suites read its text, so a change to it keeps them on. The lint flags keep their
+# values: the narration lint and the red-run lint read the changed text.
+PY_PATH = "lib/tidy.py"
+SH_PATH = "lib/tidy.sh"
+COMMENT_EDIT = ("def tidy(x):\n    return x + 1  # old note\n", "def tidy(x):\n    return x + 1  # new note\n")  # (green, head)
+# The flags a comment-only delta turns off: the 14 the records-only skip turns off, and mutation_report.
+SKIP_FLAGS = JOB_FLAGS + STEP_FLAGS + DERIVED_FLAGS + ["windows_guard", "mutation_report"]
+
+
+def edit_run(green, head, event, facts, path=PY_PATH):
+    """-> the flags of a run whose earlier head holds `path` as the text `green` and whose HEAD holds it as `head`. Fills `facts`."""
+    return run([path], green=[path], green_contents={path: green}, contents={path: head}, event=event, facts=facts)
+
+
+def mode_run(green, head, event, facts, path=SH_PATH):
+    """-> the flags of a run whose HEAD sets `path`'s executable bit and holds it as `head`, its earlier head as `green`. Fills `facts`."""
+    return run([path], green=[path], green_contents={path: green}, contents={path: head}, event=event, facts=facts, modes=[path])
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class CommentOnlyDelta(unittest.TestCase):
+    """A delta that changes only comments skips the code suites. A docstring change, a token change, a shebang change, a
+    continuation-line change, a file that does not parse, or a code file beside the change keeps them on, and so does a change
+    to a file the judge reads. The red cases name a skip; the rest are controls."""
+    EVENTS = ("push", "pull_request")
+
+    def assertSuitesOff(self, got, label):
+        for n in SKIP_FLAGS:
+            self.assertEqual(got.get(n), "false", f"{n} stays on after {label}: {got}")
+
+    def assertLintsOn(self, got, label):
+        for n in ("lint_red_run", "lint_comment_narration"):
+            self.assertEqual(got.get(n), "true", f"{n} is off after {label}, so the lint that reads the text does not run: {got}")
+
+    def assertCodeOn(self, got, label):
+        self.assertEqual(got.get("code"), "true", f"code is off after {label}, so the code suites do not run: {got}")
+
+    # Named failure: a comment-only .py delta runs the code suites. The second case is a file that holds only comments.
+    def test_python_comment_only_delta_sets_no_code_flag(self):
+        cases = [
+            ("a comment changed and one added", "def tidy(x):\n    return x + 1  # old note\n",
+             "# Added above the function.\ndef tidy(x):\n    return x + 1  # new note\n"),
+            ("a file of comments only", "# old note\n", "# new note\n"),
+        ]
+        for label, green, head in cases:
+            for event in self.EVENTS:
+                with self.subTest(case=label, event=event):
+                    facts = {}
+                    got = edit_run(green, head, event, facts)
+                    self.assertEqual(facts.get("delta"), [PY_PATH], f"scope: the delta from GREEN_HEAD is not the one .py file: {facts}")
+                    self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+                    self.assertSuitesOff(got, f"a comment-only .py delta ({label}) on a {event} run")
+                    self.assertLintsOn(got, f"a comment-only .py delta ({label}) on a {event} run")
+
+    # Named failure: a comment-only .sh delta runs the code suites.
+    def test_shell_comment_only_delta_sets_no_code_flag(self):
+        green = "#!/usr/bin/env bash\n# Old note.\necho hi  # old\n"
+        head = "#!/usr/bin/env bash\n# New note, with a second line.\necho hi  # new\n"
+        for event in self.EVENTS:
+            with self.subTest(event=event):
+                facts = {}
+                got = edit_run(green, head, event, facts, path=SH_PATH)
+                self.assertEqual(facts.get("delta"), [SH_PATH], f"scope: the delta from GREEN_HEAD is not the one .sh file: {facts}")
+                self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+                self.assertSuitesOff(got, f"a comment-only .sh delta on a {event} run")
+                self.assertLintsOn(got, f"a comment-only .sh delta on a {event} run")
+
+    # Named failure: a mode-only change to a .sh file reads as comment-only, since its text is the same in both heads, so the code
+    # suites go off. The executable bit is code: the suites stay on. The second case also changes a comment, and stays on too.
+    def test_a_mode_change_to_a_shell_file_keeps_the_code_suites_on(self):
+        body = "#!/usr/bin/env bash\necho hi  # same\n"
+        cases = [
+            ("the mode alone", body, body),
+            ("a comment and the mode", "#!/usr/bin/env bash\necho hi  # old\n", "#!/usr/bin/env bash\necho hi  # new\n"),
+        ]
+        for label, green, head in cases:
+            for event in self.EVENTS:
+                with self.subTest(case=label, event=event):
+                    facts = {}
+                    got = mode_run(green, head, event, facts)
+                    self.assertEqual(facts.get("delta"), [SH_PATH], f"scope: the delta from GREEN_HEAD is not the one .sh file: {facts}")
+                    self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+                    self.assertCodeOn(got, f"a .sh delta with {label} on a {event} run")
+
+    # Named failure: a '#' inside a string is read as a comment start, so the comment change beside it runs the suites.
+    def test_a_hash_inside_a_string_does_not_hide_a_comment_only_change(self):
+        cases = [
+            (PY_PATH, 'TAG = "#one"  # old note\n', 'TAG = "#one"  # new note\n'),
+            (SH_PATH, 'echo "#one"  # old note\n', 'echo "#one"  # new note\n'),
+        ]
+        for path, green, head in cases:
+            for event in self.EVENTS:
+                with self.subTest(path=path, event=event):
+                    facts = {}
+                    got = edit_run(green, head, event, facts, path=path)
+                    self.assertEqual(facts.get("delta"), [path], f"scope: the delta from GREEN_HEAD is not the one file: {facts}")
+                    self.assertSuitesOff(got, f"a comment-only {path} delta that holds a '#' in a string, on a {event} run")
+
+    # Named failure: a lone quote in a comment reads as an open string, so the comment change beside it runs the suites.
+    def test_a_lone_quote_in_a_comment_does_not_hide_a_comment_only_change(self):
+        cases = [
+            (PY_PATH, "X = 1  # old\n", "X = 1  # don't keep this\n"),
+            (SH_PATH, "echo hi  # old\n", "echo hi  # it's new\n"),
+        ]
+        for path, green, head in cases:
+            for event in self.EVENTS:
+                with self.subTest(path=path, event=event):
+                    facts = {}
+                    got = edit_run(green, head, event, facts, path=path)
+                    self.assertEqual(facts.get("delta"), [path], f"scope: the delta from GREEN_HEAD is not the one file: {facts}")
+                    self.assertSuitesOff(got, f"a comment-only {path} delta with a lone quote, on a {event} run")
+
+    # Named failure: a docstring change skips the code suites. A docstring is code, since the suites read its text (the hook
+    # catalog, the reinstall and session-role suites), so a change to a module, class or function docstring keeps them on.
+    def test_a_docstring_change_keeps_the_code_suites_on(self):
+        cases = [
+            ('def tidy(x):\n    """Old summary."""\n    return x + 1\n',
+             'def tidy(x):\n    """New summary.\n\n    Longer text here.\n    """\n    return x + 1\n'),
+            ('"""Old module."""\nX = 1\n', '"""New module."""\nX = 1\n'),
+            ('class Tidy:\n    """Old class."""\n    X = 1\n', 'class Tidy:\n    """New class."""\n    X = 1\n'),
+        ]
+        for green, head in cases:
+            for event in self.EVENTS:
+                with self.subTest(green=green, event=event):
+                    facts = {}
+                    got = edit_run(green, head, event, facts)
+                    self.assertEqual(facts.get("delta"), [PY_PATH], f"scope: the delta from GREEN_HEAD is not the one .py file: {facts}")
+                    self.assertCodeOn(got, f"a docstring change in a .py file on a {event} run")
+
+    # Named failure: a string on a docstring's closing row is read as docstring text, so its change skips the code suites.
+    # The string is code: `; v = "old"` follows the docstring on the same row.
+    def test_a_string_on_a_docstring_closing_row_keeps_the_code_suites_on(self):
+        green = 'def tidy(x):\n    """Doc\n    """; v = "old"\n    return v\n'
+        head = 'def tidy(x):\n    """Doc\n    """; v = "new"\n    return v\n'
+        for event in self.EVENTS:
+            with self.subTest(event=event):
+                facts = {}
+                got = edit_run(green, head, event, facts)
+                self.assertEqual(facts.get("delta"), [PY_PATH], f"scope: the delta from GREEN_HEAD is not the one .py file: {facts}")
+                self.assertCodeOn(got, f"a string on a docstring's closing row changed on a {event} run")
+
+    # Named failure: a comment line added or removed after a `\` continuation skips the code suites. The comment ends the
+    # command, so the line after it runs as a new command: `echo one \` then `# note` then `two` runs `echo one`, then `two`.
+    def test_a_shell_comment_after_a_continuation_keeps_the_code_suites_on(self):
+        cases = [
+            ("a comment line added", "echo one \\\n  two\n", "echo one \\\n# note\n  two\n"),
+            ("a comment line removed", "echo one \\\n# note\n  two\n", "echo one \\\n  two\n"),
+        ]
+        for label, green, head in cases:
+            for event in self.EVENTS:
+                with self.subTest(case=label, event=event):
+                    facts = {}
+                    got = edit_run(green, head, event, facts, path=SH_PATH)
+                    self.assertEqual(facts.get("delta"), [SH_PATH], f"scope: the delta from GREEN_HEAD is not the one .sh file: {facts}")
+                    self.assertCodeOn(got, f"{label} after a continuation in a .sh file on a {event} run")
+
+    # Named failure: a comment line after a plain line, with no `\` continuation before it, is comment-only, so its change skips the code suites.
+    def test_a_shell_comment_after_a_plain_line_stays_comment_only(self):
+        green, head = "echo one\necho two\n", "echo one\n# note\necho two\n"
+        for event in self.EVENTS:
+            with self.subTest(event=event):
+                facts = {}
+                got = edit_run(green, head, event, facts, path=SH_PATH)
+                self.assertEqual(facts.get("delta"), [SH_PATH], f"scope: the delta from GREEN_HEAD is not the one .sh file: {facts}")
+                self.assertSuitesOff(got, f"a comment line added after a plain line in a .sh file on a {event} run")
+
+    # Named failure: a change to a file the judge reads (lint/comment_only.py, lint/check_comment_narration.py, hooks/_nowindow.py)
+    # is never comment-only, so a comment change to one keeps the code suites on. The judge would otherwise vouch for its own change.
+    def test_a_comment_change_to_a_file_the_judge_reads_keeps_the_code_suites_on(self):
+        for path in ("lint/comment_only.py", "lint/check_comment_narration.py", "hooks/_nowindow.py"):
+            for event in self.EVENTS:
+                with self.subTest(path=path, event=event):
+                    facts = {}
+                    got = edit_run("X = 1  # old\n", "X = 1  # new\n", event, facts, path=path)
+                    self.assertEqual(facts.get("delta"), [path], f"scope: the delta from GREEN_HEAD is not the one file: {facts}")
+                    self.assertCodeOn(got, f"a comment change to {path}, which the judge reads, on a {event} run")
+
+    # Control: a shebang is a COMMENT token to the tokenizer, but it picks the interpreter, so a shebang change keeps the suites on.
+    def test_a_shebang_change_keeps_the_code_suites_on(self):
+        cases = [
+            (PY_PATH, "#!/usr/bin/env python3\nX = 1\n", "#!/usr/bin/env python3.12\nX = 1\n"),
+            (SH_PATH, "#!/usr/bin/env bash\necho hi\n", "#!/bin/sh\necho hi\n"),
+        ]
+        for path, green, head in cases:
+            for event in self.EVENTS:
+                with self.subTest(path=path, event=event):
+                    facts = {}
+                    got = edit_run(green, head, event, facts, path=path)
+                    self.assertEqual(facts.get("delta"), [path], f"scope: the delta from GREEN_HEAD is not the one file: {facts}")
+                    self.assertCodeOn(got, f"a shebang change in {path} on a {event} run")
+
+    # Control: a code token change beside a comment change keeps the code suites on.
+    def test_a_code_change_beside_a_comment_change_keeps_the_code_suites_on(self):
+        cases = [
+            (PY_PATH, "def tidy(x):\n    return x + 1  # old\n", "def tidy(x):\n    return x + 2  # new\n"),
+            (SH_PATH, "echo hi  # old\n", "echo ho  # new\n"),
+        ]
+        for path, green, head in cases:
+            for event in self.EVENTS:
+                with self.subTest(path=path, event=event):
+                    facts = {}
+                    got = edit_run(green, head, event, facts, path=path)
+                    self.assertEqual(facts.get("delta"), [path], f"scope: the delta from GREEN_HEAD is not the one file: {facts}")
+                    self.assertCodeOn(got, f"a code change beside a comment change in {path} on a {event} run")
+
+    # Control: a '#' that is code, inside a string or a parameter expansion, is not a comment, so its change keeps the suites on.
+    def test_a_hash_that_is_code_keeps_the_code_suites_on(self):
+        cases = [
+            (PY_PATH, 'NAME = "a#b"  # note\n', 'NAME = "a#c"  # note\n'),
+            (SH_PATH, 'echo "${#arr[@]}"  # note\n', 'echo "${#arr[*]}"  # note\n'),
+        ]
+        for path, green, head in cases:
+            for event in self.EVENTS:
+                with self.subTest(path=path, event=event):
+                    facts = {}
+                    got = edit_run(green, head, event, facts, path=path)
+                    self.assertEqual(facts.get("delta"), [path], f"scope: the delta from GREEN_HEAD is not the one file: {facts}")
+                    self.assertCodeOn(got, f"a change to code that holds a '#' in {path} on a {event} run")
+
+    # Control: a line that starts with '#' inside a multi-line string or a heredoc is data, so its change keeps the suites on.
+    def test_a_hash_line_inside_a_multi_line_string_keeps_the_code_suites_on(self):
+        cases = [
+            (PY_PATH, 'TEXT = """\n# one\n"""\n', 'TEXT = """\n# two\n"""\n'),
+            (SH_PATH, "cat <<EOF\n# one\nEOF\n", "cat <<EOF\n# two\nEOF\n"),
+        ]
+        for path, green, head in cases:
+            for event in self.EVENTS:
+                with self.subTest(path=path, event=event):
+                    facts = {}
+                    got = edit_run(green, head, event, facts, path=path)
+                    self.assertEqual(facts.get("delta"), [path], f"scope: the delta from GREEN_HEAD is not the one file: {facts}")
+                    self.assertCodeOn(got, f"a change to a multi-line string in {path} on a {event} run")
+
+    # Control: a .py file that does not parse cannot be shown comment-only, so its change keeps the suites on.
+    def test_a_python_file_that_does_not_parse_keeps_the_code_suites_on(self):
+        green, head = "def tidy(:\n    # old\n", "def tidy(:\n    # new\n"
+        for event in self.EVENTS:
+            with self.subTest(event=event):
+                facts = {}
+                got = edit_run(green, head, event, facts)
+                self.assertEqual(facts.get("delta"), [PY_PATH], f"scope: the delta from GREEN_HEAD is not the one .py file: {facts}")
+                self.assertCodeOn(got, f"a .py file that does not parse, changed in a comment, on a {event} run")
+
+    # Control: a comment-only file beside a code file is not a comment-only delta, so the code suites stay on.
+    def test_a_comment_only_file_beside_a_code_file_keeps_the_code_suites_on(self):
+        other = "lib/other.py"
+        for event in self.EVENTS:
+            with self.subTest(event=event):
+                facts = {}
+                got = run([PY_PATH, other], green=[PY_PATH], green_contents={PY_PATH: COMMENT_EDIT[0]},
+                          contents={PY_PATH: COMMENT_EDIT[1], other: "VALUE = 2\n"}, event=event, facts=facts)
+                self.assertEqual(facts.get("delta"), sorted([PY_PATH, other]), f"scope: the delta is not the two files: {facts}")
+                self.assertCodeOn(got, f"a comment-only .py file beside a code file, on a {event} run")
+
+    # Control: a code change in a test file runs the code suites.
+    def test_a_test_file_code_change_keeps_the_code_suites_on(self):
+        path = "hooks/test_tidy.py"
+        green = 'import unittest\n\n\nclass T(unittest.TestCase):\n    def test_it(self):\n        self.assertEqual(1, 1)\n'
+        head = green.replace("assertEqual(1, 1)", "assertEqual(1, 2)")
+        for event in self.EVENTS:
+            with self.subTest(event=event):
+                facts = {}
+                got = edit_run(green, head, event, facts, path=path)
+                self.assertEqual(facts.get("delta"), [path], f"scope: the delta from GREEN_HEAD is not the test file: {facts}")
+                self.assertCodeOn(got, f"a code change in the test file {path} on a {event} run")
+
+    # Named failure: a SCOPE_FILES run reads no earlier head (scope_files gives the paths, bin/ci-job's carry), so a comment-only file in it
+    # keeps the code suites on even when GREEN_HEAD is set. The delta skip is for the range read only.
+    def test_a_scope_files_run_with_a_green_head_keeps_the_code_suites_on(self):
+        green, head = "# old note\n", "# new note\n"
+        for event in self.EVENTS:
+            with self.subTest(event=event):
+                got = run([PY_PATH], green=[PY_PATH], green_contents={PY_PATH: green}, contents={PY_PATH: head}, event=event,
+                          scope_files=[PY_PATH])
+                self.assertCodeOn(got, f"a comment-only .py file in a SCOPE_FILES run with a green head on a {event} run")
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class RecordsFolderDelta(unittest.TestCase):
+    """A delta of record files in a record folder (docs/decisions, docs/notes, docs/debts) keeps the code suites on, as a delta of
+    any other .md file does. Only the records file alone skips (ruling own-830-c), and no ruling widens that skip to the folders. A
+    decision file is read by code: the session-start suite reads the session-tiers decision."""
+    CODE = ["hooks/guard.py"]  # the earlier head holds a code file, so the whole PR diff turns the jobs on
+    FOLDERS = ("docs/decisions/x.md", "docs/notes/x.md", "docs/debts/x.md")
+    EVENTS = ("push", "pull_request")
+
+    # Named failure: a record-folder delta after a green head skips the code suites. The mixed case also holds docs/records.md, and
+    # a second path of any kind keeps the suites on. The reference is the same paths with no earlier head.
+    def test_a_records_folder_delta_after_green_head_keeps_the_suites_on(self):
+        cases = [[folder] for folder in self.FOLDERS] + [["docs/records.md", self.FOLDERS[0]]]
+        for paths in cases:
+            for event in self.EVENTS:
+                with self.subTest(paths=paths, event=event):
+                    facts = {}
+                    got = run(paths, green=self.CODE, event=event, facts=facts)
+                    self.assertEqual(facts.get("delta"), sorted(paths), f"scope: the delta from GREEN_HEAD is not {sorted(paths)}: {facts}")
+                    self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+                    self.assertEqual(got.get("records_only_skip"), "false",
+                                     f"records_only_skip is on for the {event} delta {paths}, so the code suites are skipped: {got}")
+                    whole = run(self.CODE + paths, event=event)
+                    self.assertEqual(differing(got, whole), [], f"a flag moved off the whole PR diff for the {event} delta {paths}: {got}")
+
+    # Named failure: a record-folder file beside a comment-only .py edit skips the code suites, because the record arm and the comment
+    # arm each read their own part of the delta. The delta is asserted before the flags.
+    def test_a_records_folder_file_beside_a_comment_only_edit_keeps_the_suites_on(self):
+        for folder in self.FOLDERS:
+            for event in self.EVENTS:
+                with self.subTest(folder=folder, event=event):
+                    facts = {}
+                    got = run([folder, PY_PATH], green=[*self.CODE, PY_PATH], green_contents={PY_PATH: "# old note\n"},
+                              contents={PY_PATH: "# new note\n"}, event=event, facts=facts)
+                    self.assertEqual(facts.get("delta"), sorted([folder, PY_PATH]), f"scope: the delta from GREEN_HEAD is not the two paths: {facts}")
+                    self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+                    self.assertEqual(got.get("records_only_skip"), "false",
+                                     f"records_only_skip is on for the {event} delta {folder} beside a comment edit: {got}")
+                    whole = run(self.CODE + [folder, PY_PATH], event=event, contents={PY_PATH: "# new note\n"})
+                    self.assertEqual(differing(got, whole), [], f"a flag moved off the whole PR diff for {folder} beside a comment edit: {got}")
+
+    # Control: a record-folder file beside a path that is not a record runs the whole PR diff, as before.
+    def test_a_records_folder_delta_beside_another_path_runs_as_before(self):
+        for other in ("README.md", "hooks/extra.py"):
+            for folder in self.FOLDERS:
+                with self.subTest(folder=folder, other=other):
+                    paths = [folder, other]
+                    whole = run(self.CODE + paths)
+                    facts = {}
+                    got = run(paths, green=self.CODE, facts=facts)
+                    self.assertEqual(facts.get("delta"), sorted(paths), f"scope: the delta is not the two paths: {facts}")
+                    self.assertEqual(got.get("records_only_skip"), "false", f"a record file beside {other} reads as records-only: {got}")
+                    self.assertEqual(differing(got, whole), [], f"a record file beside {other} moved a flag off the whole PR diff: {got}")
+
+
 # The job-level half of the wider skip. A job that holds its steps back with a step-level if still starts a runner, so the skip
 # is read where a job starts: its job-level if, evaluated on the outputs the scope job wrote for the run. _IfParser reads the
 # forms checks.yml's job-level ifs use (names, string literals, ==, !=, !, &&, ||, parentheses, always(), cancelled(),
@@ -1099,6 +1437,14 @@ def job_runs(expr, outs, event, results=None):
     return True if expr is None else _IfParser(expr, if_env(outs, event, results)).parse()
 
 
+def step_runs(raw, outs, event):
+    """True when a step whose if: is `raw` (with its ${{ }}) runs on this run. A step with no if: runs, as success() is its default."""
+    if raw is None:
+        return True
+    wrapped = re.fullmatch(r"\$\{\{(.*)\}\}", raw.strip())
+    return _IfParser((wrapped.group(1) if wrapped else raw).strip(), if_env(outs, event)).parse()
+
+
 def running_jobs(text, outs, event):
     """The jobs of checks.yml that start on this run, sorted."""
     return sorted(job for job in job_names(text) if job_runs(job_if(text, job), outs, event))
@@ -1108,6 +1454,24 @@ def rollup_needs(text):
     """The jobs all-jobs-passed lists under needs:, in file order."""
     m = re.search(r"^    needs:\n((?:      - [\w-]+\n)+)", job_block(text, "all-jobs-passed") or "", re.M)
     return re.findall(r"^      - ([\w-]+)$", m.group(1), re.M) if m else []
+
+
+# A suite step runs a test file with python, node or bash: `python3 <path>/test_<name>.py`, `node <path>/test_<name>.mjs`,
+# `node --test <path>/<name>.test.mjs` or `bash <path>/test_<name>.sh`. A lint (check_*.py, map-check.sh), a mod runner
+# (mod-tests.sh) and a mutation script (mutate_sweep.py) are no suite, so they may run on any delta.
+SUITE_CMD = re.compile(r"\b(?:python3?|node|bash)\s+(?:--test\s+)?(?:\S*/)?(?:test_[\w.-]*|[\w.-]+\.test)\.(?:py|mjs|sh)\b")
+
+
+def runs_suite(step):
+    """True when a step runs a test suite: one of its command lines matches SUITE_CMD. A comment line is no command. A block
+    scalar's body is read through run_body, so a suite named in a multi-line run still counts. The one home of that reading."""
+    commands = [line for line in (run_body(step) or "").split("\n") if line.strip() and not line.lstrip().startswith("#")]
+    return any(SUITE_CMD.search(line) for line in commands)
+
+
+def suite_steps(text, job):
+    """(name, if) of each step of `job` that runs a test suite (runs_suite), in file order."""
+    return [(step_key(step, "name"), step_key(step, "if")) for step in step_blocks(job_block(text, job)) if runs_suite(step)]
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")
@@ -1121,6 +1485,8 @@ class RecordsOnlyEveryJob(unittest.TestCase):
     EVENTS = ("pull_request", "push")
     # Decide the skip (scope), or read it on every run (the two skip jobs). The rollup joins them on a pull request only.
     DECISION_JOBS = ("scope", "nightly-skip", "push-skip")
+    # The rollups. Their own ifs read the skip and the event, and no suite result, so the suite-off cases leave them out.
+    ROLLUP_JOBS = ("all-jobs-passed", "ci-done")
     # A records change beside one of these must start every job the file alone starts.
     CONTROL_EXTRAS = (
         ("a code file", "hooks/extra.py"),
@@ -1219,6 +1585,157 @@ class RecordsOnlyEveryJob(unittest.TestCase):
                 if extra == ".github/workflows/checks.yml":
                     missing = sorted(set(rollup_needs(text)) - set(together))
                     self.assertEqual(missing, [], f"a workflow change beside records leaves rollup jobs off: {missing}")
+
+    # The jobs whose steps read one of the scope outputs `flags`, other than the decision jobs. A step reads its flag in its own
+    # if:, so a job that holds such a step must start on a run that sets the flag, or the step never runs.
+    def readers_of(self, text, flags):
+        return sorted(job for job in job_names(text) if job not in self.DECISION_JOBS and
+                      any(f"outputs.{flag}" in (job_block(text, job) or "") for flag in flags))
+
+    # Named failure: a suite job starts on a comment-only run. The jobs that read the two lints that read changed text are
+    # left out here, and the case below checks that they start.
+    def test_a_comment_only_run_starts_no_suite_job(self):
+        text = self.workflow()
+        readers = self.readers_of(text, ("lint_comment_narration", "lint_red_run"))
+        skip = {*self.DECISION_JOBS, *self.ROLLUP_JOBS, *readers}
+        for event in self.EVENTS:
+            with self.subTest(event=event):
+                facts = {}
+                got = edit_run(*COMMENT_EDIT, event, facts)
+                self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+                self.assertEqual(facts.get("delta"), [PY_PATH], f"scope: the delta from GREEN_HEAD is not the one .py file: {facts}")
+                for job in job_names(text):
+                    if job in skip:
+                        continue
+                    with self.subTest(job=job):
+                        expr = job_if(text, job)
+                        self.assertFalse(job_runs(expr, got, event),
+                                         f"{job} starts on a comment-only {event} run; its job-level if is {expr or 'absent'}")
+
+    # Control: the jobs that read the comment lints start on a comment-only run. The lint steps live in checks, so a skip that
+    # reuses the records-only output would stop them.
+    def test_a_comment_only_run_starts_the_jobs_that_read_the_comment_lints(self):
+        text = self.workflow()
+        readers = self.readers_of(text, ("lint_comment_narration", "lint_red_run"))
+        self.assertIn("checks", readers, f"the comment lints are read by no checks job: {readers}")
+        for event in self.EVENTS:
+            with self.subTest(event=event):
+                facts = {}
+                got = edit_run(*COMMENT_EDIT, event, facts)
+                self.assertEqual(facts.get("delta"), [PY_PATH], f"scope: the delta from GREEN_HEAD is not the one .py file: {facts}")
+                for job in readers:
+                    with self.subTest(job=job):
+                        expr = job_if(text, job)
+                        self.assertTrue(job_runs(expr, got, event),
+                                        f"{job} does not start on a comment-only {event} run, so its lint steps do not run; its job-level if is {expr}")
+
+    # The three lint jobs. A comment-only run starts `checks` (its lint steps read the text); the cases below check every suite step
+    # in all three.
+    SUITE_JOBS = ("checks", "checks-hooks", "checks-rest")
+
+    # Control: the pattern reads each runner form the lint jobs use, and no lint, mod or mutation step.
+    def test_the_suite_pattern_reads_each_runner_form_and_no_lint_mod_or_mutation_step(self):
+        for line in ("python3 janitor/test_sweep.py", "node actions/stamp/test_stamp.mjs", "node lint/test_scanner_traps.mjs",
+                     "bash actions/stamp/test_action.sh", "/bin/bash lint/test_ios_ship.sh",
+                     "node --test testing/skip-locally-fail-in-ci.test.mjs"):
+            with self.subTest(line=line):
+                self.assertIsNotNone(SUITE_CMD.search(line), f"the pattern misses a suite command: {line}")
+        for line in ("python3 lint/check_red_run.py", "bash .github/scripts/map-check.sh", "bash .github/scripts/mod-tests.sh",
+                     "python3 janitor/mutate_sweep.py", "npm ci --ignore-scripts --no-audit --no-fund"):
+            with self.subTest(line=line):
+                self.assertIsNone(SUITE_CMD.search(line), f"the pattern reads a non-suite command as a suite: {line}")
+
+    # Named failure: a suite step runs on a comment-only run. The check is per step, because `checks` starts on this run
+    # and its lint steps must still run. Scope first: the delta is asserted before any step is judged. lib/tidy.py matches no
+    # case arm of ci-scope.sh, so the fail-safe arm sets every doc flag on it; hooks/tidy.py sets none. Both are checked, since
+    # the rule covers any comment-only delta.
+    def test_a_comment_only_run_runs_no_suite_step_in_the_lint_jobs(self):
+        text = self.workflow()
+        for path in ("hooks/tidy.py", PY_PATH):
+            for event in self.EVENTS:
+                with self.subTest(path=path, event=event):
+                    facts = {}
+                    got = edit_run(*COMMENT_EDIT, event, facts, path=path)
+                    self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+                    self.assertEqual(facts.get("delta"), [path], f"scope: the delta from GREEN_HEAD is not the one .py file: {facts}")
+                    for job in self.SUITE_JOBS:
+                        with self.subTest(job=job):
+                            steps = suite_steps(text, job)
+                            self.assertTrue(steps, f"the fixture: {job} holds no suite step")
+                            expr = job_if(text, job)
+                            for name, cond in steps:
+                                with self.subTest(step=name):
+                                    runs = job_runs(expr, got, event) and step_runs(cond, got, event)
+                                    self.assertFalse(runs, f"{job} / {name} runs a suite on a comment-only {event} run of {path}; "
+                                                           f"its job if is {expr or 'absent'}, its step if is {cond or 'absent'}")
+
+    # Named failure: a decision-only delta after a green head skips the suite that reads the decision. hooks/test_session_start.py
+    # reads docs/decisions/session-tiers.md, and its step runs on a decisions-only run through doc_decisions (checks-hooks). The
+    # earlier head is empty (green=[]), so the PR diff is the one file, and the reference is that same PR with no earlier head.
+    def test_a_decisions_only_delta_keeps_each_suite_step_its_pr_diff_runs(self):
+        text = self.workflow()
+        for path in ("docs/decisions/session-tiers.md", "docs/notes/x.md", "docs/debts/x.md"):
+            for event in self.EVENTS:
+                with self.subTest(path=path, event=event):
+                    facts = {}
+                    got = run([path], green=[], event=event, facts=facts)
+                    self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+                    self.assertEqual(facts.get("delta"), [path], f"scope: the delta from GREEN_HEAD is not {path} alone: {facts}")
+                    self.assertEqual(got.get("records_only_skip"), "false",
+                                     f"records_only_skip is on for the {event} delta {path}, so its suite steps do not run: {got}")
+                    ref = run([path], event=event)
+                    if path == "docs/decisions/session-tiers.md":
+                        cond = dict(suite_steps(text, "checks-hooks")).get("Session start notice suite")
+                        self.assertTrue(step_runs(cond, ref, event), f"the reference PR diff does not run the session start suite: {cond}")
+                    for job in self.SUITE_JOBS:
+                        with self.subTest(job=job):
+                            expr = job_if(text, job)
+                            self.assertEqual(job_runs(expr, got, event), job_runs(expr, ref, event),
+                                             f"{job} starts differently on the {event} delta of {path} than on its PR diff; "
+                                             f"its job if is {expr or 'absent'}")
+                            steps = suite_steps(text, job)
+                            self.assertTrue(steps, f"the fixture: {job} holds no suite step")
+                            for name, cond in steps:
+                                with self.subTest(step=name):
+                                    self.assertEqual(step_runs(cond, got, event), step_runs(cond, ref, event),
+                                                     f"{job} / {name} runs differently on the {event} delta of {path} than on its PR diff; "
+                                                     f"its step if is {cond or 'absent'}")
+
+    # Named failure: a decision-only delta after a green head starts a different set of jobs from the same PR with no earlier head.
+    # Every job is judged, the decision jobs and the rollup included, so the set is the whole workflow's.
+    def test_a_decisions_only_delta_starts_the_jobs_its_pr_diff_starts(self):
+        text = self.workflow()
+        for event in self.EVENTS:
+            with self.subTest(event=event):
+                facts = {}
+                got = run(["docs/decisions/x.md"], green=[], event=event, facts=facts)
+                self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+                self.assertEqual(facts.get("delta"), ["docs/decisions/x.md"], f"scope: the delta is not the one decision file: {facts}")
+                ref = run(["docs/decisions/x.md"], event=event)
+                for job in job_names(text):
+                    with self.subTest(job=job):
+                        expr = job_if(text, job)
+                        self.assertEqual(job_runs(expr, got, event), job_runs(expr, ref, event),
+                                         f"{job} starts differently on a decisions-only {event} delta than on its PR diff; "
+                                         f"its job-level if is {expr or 'absent'}")
+
+    # Control: the jobs that read the decision steps and the Ruling kind lint start on a docs/decisions-only run.
+    def test_a_decisions_only_run_starts_the_jobs_that_read_the_decision_steps(self):
+        text = self.workflow()
+        readers = self.readers_of(text, ("doc_decisions", "lint_ruling_kind"))
+        self.assertIn("checks", readers, f"the Ruling kind lint is read by no checks job: {readers}")
+        for event in self.EVENTS:
+            with self.subTest(event=event):
+                facts = {}
+                got = run(["docs/decisions/x.md"], green=self.CODE, event=event, facts=facts)
+                self.assertEqual(facts.get("delta"), ["docs/decisions/x.md"], f"scope: the delta is not the one decision file: {facts}")
+                for job in readers:
+                    with self.subTest(job=job):
+                        expr = job_if(text, job)
+                        self.assertTrue(job_runs(expr, got, event),
+                                        f"{job} does not start on a docs/decisions-only {event} run, so its decision steps do not run; its job-level if is {expr}")
+
+
 
 
 # The mod phase must run each mods check script (mods/**/check.mjs), not only *.test.mjs. The script cds to its own

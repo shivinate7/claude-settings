@@ -139,6 +139,7 @@ jobs:
       mutation_report: ${{ steps.scope.outputs.mutation_report }}
       windows_guard: ${{ steps.scope.outputs.windows_guard }}
       records_only_skip: ${{ steps.scope.outputs.records_only_skip }}
+      skip_comment_delta: ${{ steps.scope.outputs.skip_comment_delta }}
       lint_red_run: ${{ steps.scope.outputs.lint_red_run }}
       lint_plan_refuter: ${{ steps.scope.outputs.lint_plan_refuter }}
       lint_ruling_kind: ${{ steps.scope.outputs.lint_ruling_kind }}
@@ -158,7 +159,7 @@ jobs:
           persist-credentials: false
 
       # The pull request's newest earlier fully green head, or an empty line (.github/scripts/green-head.sh). It lets ci-scope.sh skip the
-      # jobs for a push that changes docs/records.md alone. A failed read prints an empty line: unknown never skips. Two reads per pull_request run (unmeasured).
+      # jobs for a delta that changes only records or comments (docs/records.md, a comment-only .py or .sh file). A failed read prints an empty line: unknown never skips. Two reads per pull_request run (unmeasured).
       - name: Find the newest earlier green head
         id: green
         if: ${{ github.event_name == 'pull_request' }}
@@ -195,7 +196,9 @@ jobs:
     # Waits for every guard shard so the Debt retire step can read their results. A shard that fails must not skip this job's lint suites, so the job
     # runs on the scope result alone; a scope that did not succeed skips it, since a job whose steps all skip reads success.
     needs: [scope, checks-guard, checks-guard-2, checks-guard-3, checks-guard-4]
-    if: ${{ !cancelled() && needs.scope.result == 'success' && needs.scope.outputs.records_only_skip != 'true' }}
+    # A comment-only delta (.github/scripts/ci-scope.sh) sets records_only_skip, and every suite step below reads it. The job still
+    # starts on such a run, since its lint steps read the changed text.
+    if: ${{ !cancelled() && needs.scope.result == 'success' && (needs.scope.outputs.records_only_skip != 'true' || needs.scope.outputs.skip_comment_delta == 'true') }}
     # Cap 75 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps: slowest 22.8 min
     # is 30% of it (range 15.5-22.8, median 19.8, n 27 green runs, runs 42074654512 to 42263498384,
     # 2026-11-05 17:26 to 2026-11-06 17:38 UTC), after the merge and install suites moved to checks-merge-install.
@@ -240,145 +243,145 @@ jobs:
           base: ${{ github.event.pull_request.base.sha || github.event.before }}
 
       - name: Action metadata loads
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 actions/test_action_metadata.py
 
       - name: Code-check action
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: |
           for spec in $(python3 actions/code-check/code_check.py --pins); do pipx install "$spec"; done
           python3 actions/code-check/test_action.py
 
       - name: Ruling-kind records-dir input
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 actions/test_ruling_kind_records_dir.py
 
       - name: Refusal settle fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard_refusal.py
 
       - name: Stop-hook guard fixture suite
-        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard.py
 
       - name: Stop-hook triage hold suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard_stalled.py
 
       - name: Stop-hook question route suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard_route.py
 
       - name: Stop-hook placeholder suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard_placeholder.py
 
       - name: Stop-hook page writer suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard_page_writer.py
 
       - name: Stop-hook stamped copy suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard_stamped.py
 
       - name: Stop-hook route row falsifier suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard_falsifier.py
 
       - name: Stop-hook hand-off cite suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard_handoff.py
 
       - name: Clause parser suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_clause.py
 
       - name: Stop-hook cannot-claim suite
-        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_rules == 'true') }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_rules == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard_cannot.py
 
       - name: Stop-hook landing fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard_landing.py
 
       - name: Stop-hook owner-safe reason suite
-        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true') }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard_remedy.py
 
       - name: Stop-hook correction tail suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard_correction.py
 
       - name: Stop-hook review-record fixture suite
-        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_rules == 'true') }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_rules == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard_review.py
 
       - name: STE auto-fix fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_ste_autofix.py
 
       - name: Ruling census fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_ruling_census.py
 
       - name: Rule audit fixture suite
-        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_rules == 'true') }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_rules == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_rule_audit.py
 
       - name: Stale prose check fixture suite
-        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_stale_cites.py
 
       - name: Ruled store fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_ruled_store.py
 
       - name: Route judge measure fixture suite
-        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_rules == 'true' || needs.scope.outputs.doc_other == 'true') }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_rules == 'true' || needs.scope.outputs.doc_other == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_prove_route_judge.py
 
       - name: Guard log report fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_guard_log_report.py
 
       - name: Guard outcome claims fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_guard_outcome.py
 
       - name: Verdict runner fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_verdict.py
 
       - name: Wait-pid helper fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_wait_pid.py
 
       - name: Wait-until helper fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_wait_until.py
 
       - name: Now-central helper fixture suite
-        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_now_central.py
 
       - name: sim-lease fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_sim_lease.py
 
       - name: Fixture copy helper suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_tracked_tree.py
 
       - name: Test-run signing opt-out fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_test_git.py
 
       - name: Debt notes union merge fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_notes_union_merge.py
 
       - name: Job runner fixture suite (bin/ci-job)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_ci_job.py
 
       - name: Rule mechanization audit
@@ -386,127 +389,127 @@ jobs:
         run: python3 lint/rule_audit.py
 
       - name: Windows split guard
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_windows_split.py
 
       - name: all-jobs-passed needs every pull-request job
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_all_jobs_passed.py
 
       - name: Cancel-on-close workflow and script fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_cancel_on_close.py
 
       - name: Scope detector fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_ci_scope.py
 
       - name: install.sh shard pins
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_install_src_shards.py
 
       - name: Green head reader fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_green_head.py
 
       - name: Checks step scope suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_checks_step_scope.py
 
       - name: Guard inputs list fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_guard_inputs.py
 
       - name: Touched-test selector fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_touched_tests.py
 
       - name: Nightly skip fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_nightly_skip.py
 
       - name: Daily schedule fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_no_nightly_schedule.py
 
       - name: Windows rest split fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_windows_rest_split.py
 
       - name: Push skip fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_push_skip.py
 
       - name: Stable workflow move job suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_stable_workflow.py
 
       - name: Lane checkout depth fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_lane_touched_fetch.py
 
       - name: rm shim fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_rm_shim.py
 
       - name: Landed-directory check fixture suite
-        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_skills == 'true') }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_skills == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_landed_dirs.py
 
       - name: Settings matcher fixture suite
-        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true') }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_settings_matcher.py
 
       - name: Start check wiring suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_start_check_wiring.py
 
       - name: Hook platform exit fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_hook_platform_exit.py
 
       - name: Hook stub fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_hook_stubs.py
 
       - name: Hook dup-name fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_hook_dup_names.py
 
       - name: Record slug fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_record_slugs.py
 
       - name: Cost line pin fixture suite
-        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_cost_pins.py
 
       - name: Red-run trailer fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_red_run.py
 
       - name: Red-run command fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_red_run.py
 
       - name: Plan refuter fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_plan_refuter.py
 
       - name: Copy finder fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_find_copies.py
 
       - name: Time-pinned finder fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_find_time_pinned.py
 
       - name: Mod version fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_mod_versions.py
 
       - name: Hook catalog fixture suite
-        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_hook_catalog.py
 
       - name: Hook catalog check
@@ -539,7 +542,7 @@ jobs:
         run: python3 lint/check_mutant_anchors.py
 
       - name: Mutant anchor census fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_mutant_anchors.py
 
       # Pull requests only: the range is base..HEAD, and a push has no base. The checkout is full-depth (fetch-depth 0).
@@ -563,23 +566,23 @@ jobs:
       # No `if:`: ci-scope.sh turns no flag on for a docs/map/*.md path, and a map page changed alone must still be read.
       # The script says why it runs `npm ci` first.
       - name: Layout fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_layout.py
 
       - name: Label once fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_label_once.py
 
       - name: Repo colour fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_repo_colour.py
 
       - name: Retired repo fixture suite
-        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_retired_repos.py
 
       - name: Artifact cite fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_artifact_cites.py
 
       - name: Artifact cite check
@@ -591,7 +594,7 @@ jobs:
         run: python3 lint/check_layout.py
 
       - name: Shared resource declaration fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_shared_resources.py
 
       - name: Shared resource declaration check
@@ -599,15 +602,15 @@ jobs:
         run: python3 lint/check_shared_resources.py
 
       - name: iPhone mockup check fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_ios_mockup.py
 
       - name: Compliance probes fixture suite
-        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_compliance_probes.py
 
       - name: CLAUDE.md size fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_claude_md_size.py
 
       - name: CLAUDE.md size (warns, never fails)
@@ -615,7 +618,7 @@ jobs:
         run: python3 lint/check_claude_md_size.py
 
       - name: Glossary fixture suite
-        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_glossary.py
 
       - name: Glossary homes and avoided names
@@ -623,7 +626,7 @@ jobs:
         run: python3 lint/check_glossary.py
 
       - name: Retired names, one word per meaning
-        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_retired_names.py
       # No scope condition: the suite reads the skill's .md templates, and a .md-only change must run it too.
       - name: Mod version bump
@@ -631,7 +634,7 @@ jobs:
         run: python3 lint/check_mod_versions.py
 
       - name: Ruling kind fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_ruling_kind.py
 
       - name: Ruling kind check
@@ -648,11 +651,11 @@ jobs:
         uses: $/actions/claude-md-cites
 
       - name: Silent undo fixture suite
-        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_silent_undo.py
 
       - name: Debt retire fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_debt_retire.py
 
       - name: Silent undo check
@@ -697,7 +700,7 @@ jobs:
           (cd "$scratch" && python3 lint/check_debt_retire.py --repo "$OLDPWD" --upstream "origin/$BASE_REF" --head "$HEAD_SHA")
 
       - name: Comment narration fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_comment_narration.py
 
       - name: Comment narration check
@@ -707,11 +710,11 @@ jobs:
         run: python3 lint/check_comment_narration.py --base "origin/$BASE_REF"
 
       - name: Cheap-lints fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_cheap_lints.py
 
       - name: Unknown-read contract fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_unknown_reads_contract.py
 
       - name: Unknown-read contract (guard + session_start)
@@ -719,7 +722,7 @@ jobs:
         run: python3 lint/check_unknown_reads_contract.py
 
       - name: Guard-set list fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_guardset_lists.py
 
       - name: Guard-set lists (guardset4, guardset7, guardset8)
@@ -735,11 +738,11 @@ jobs:
         run: python3 lint/check_agent_models.py
 
       - name: Agent and skill model floor fixture suite
-        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_agent_models.py
 
       - name: Agent push form fixture suite
-        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_agent_push_form.py
 
       - name: Skill model rows check
@@ -747,7 +750,7 @@ jobs:
         run: python3 lint/check_skill_model_rows.py
 
       - name: Skill model rows fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_skill_model_rows.py
 
       - name: Project-ops roles check
@@ -755,7 +758,7 @@ jobs:
         run: python3 lint/check_project_ops_roles.py
 
       - name: Project-ops roles fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_project_ops_roles.py
 
       - name: Python 3.9 floor check
@@ -763,11 +766,11 @@ jobs:
         run: python3 lint/check_python_floor.py
 
       - name: Python 3.9 floor fixture suite
-        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_python_floor.py
 
       - name: No-window spawn check
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_no_window_spawn.py
 
       - name: STE lint
@@ -778,18 +781,18 @@ jobs:
           fail: ${{ !inputs.full_ste_audit }}
 
       - name: STE lint action fixture suite
-        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 actions/ste-lint/test_action.py
 
       - name: Playwright setup action suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 actions/playwright-setup/test_action.py
 
       # The suite's own watchdog (actions/stamp/suite_watchdog.mjs) ends it at 180 s. A hang reads red,
       # with the hung test named and its process tree killed. A process the suite started and left
       # running reads red too, killed and named; so does a sweep that could not read.
       - name: Opt-in CI template fixture suites
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         shell: bash
         run: |
           bash actions/all-jobs-passed/test_action.sh
@@ -808,19 +811,19 @@ jobs:
           bash actions/push-skip/test_action.sh
 
       - name: Claude role launcher suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_claude_role.py
 
       - name: Lane start helper and template suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_lane_start.py
 
       - name: Refusal route suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_refusal_route.py
 
       - name: guard_merge import suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_guard_merge_imports.py
 
       # Last step, so a red test here skips none of the steps above, and a red step above does not hide
@@ -861,8 +864,8 @@ jobs:
           python-version: "3.11"
 
       # A step below that has a scope condition and reads no .md file skips a docs-only pull request (`code` is false,
-      # ci-scope.sh) and a records-only push. A step that reads a .md file also runs when its doc groups change, and on a
-      # records-only push, because the records page is a .md file.
+      # ci-scope.sh). A step that reads a .md file also runs when its doc groups change. Every suite step reads the records-only
+      # skip too, so a records-only or comment-only delta from a green head runs none of them.
       - name: Config watch fixture suite
         if: ${{ (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_config_watch.py
@@ -872,15 +875,19 @@ jobs:
         run: python3 hooks/test_config_watch_fast_exit.py
 
       - name: Stale install suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_reinstall_stale.py
 
       - name: Cloud whole refresh suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_refresh_whole.py
 
       - name: Shared names suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_shared_names.py
 
       - name: Precompact handoff fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_precompact_handoff.py
 
       - name: Claude Code compaction check fixture suite
@@ -888,12 +895,15 @@ jobs:
         run: python3 hooks/test_cc_version_check.py
 
       - name: CI-wait cap fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_ci_wait_cap.py
 
       - name: Answered-claim fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_answered_claims.py
 
       - name: Handoff wave-2 fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_handoff_wave2.py
 
       - name: Decision watch fixture suite
@@ -901,6 +911,7 @@ jobs:
         run: python3 hooks/test_decision_watch.py
 
       - name: Reply judge fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_reply_judge.py
 
       - name: Prose judge fixture suite
@@ -908,7 +919,7 @@ jobs:
         run: python3 hooks/test_prose_judge.py
 
       - name: SendMessage state fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' }}
+        if: ${{ (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_sendmessage_state.py
 
       - name: Refusal note fixture suite
@@ -928,7 +939,7 @@ jobs:
         run: python3 hooks/test_call_judge.py
 
       - name: Question form fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' }}
+        if: ${{ (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_question_form.py
 
       - name: Question form option-key gap suite
@@ -952,11 +963,11 @@ jobs:
         run: python3 hooks/test_rm_prompt_answer.py
 
       - name: Agent brief fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_agents == 'true' }}
+        if: ${{ (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_agents == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_agent_brief.py
 
       - name: Blind brief fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true' || needs.scope.outputs.doc_agents == 'true' }}
+        if: ${{ (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true' || needs.scope.outputs.doc_agents == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_blind_brief.py
 
       - name: Local time line fixture suite
@@ -964,6 +975,7 @@ jobs:
         run: python3 hooks/test_local_time.py
 
       - name: Guard probe helper fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_probe.py
 
       - name: CI wake-up fixture suite
@@ -983,6 +995,7 @@ jobs:
         run: python3 hooks/test_page_link_check.py
 
       - name: Daily note fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_daily_note.py
 
       - name: Git mailbox suite
@@ -990,7 +1003,7 @@ jobs:
         run: python3 hooks/test_mail.py
 
       - name: Git mailbox wait suite
-        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_skills == 'true' }}
+        if: ${{ (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_skills == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_mail_wait.py
 
       - name: No-window helper fixture suite
@@ -1015,6 +1028,7 @@ jobs:
         run: python3 hooks/test_stall_watch_stop.py
 
       - name: Proc env read suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_proc_env.py
 
       - name: Simulator boot-record fixture suite
@@ -1022,14 +1036,16 @@ jobs:
         run: python3 hooks/test_sim_boot_record.py
 
       - name: Guard wrappers fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_wrappers.py
 
       # Fuzzes every deny check that judge_shell and judge reach, with each tool judge branches on. Linux only, like the other guard-module suites here.
       - name: Deny checks never raise suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_checks_never_raise.py
 
       - name: Session start notice suite
-        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' }}
+        if: ${{ (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_session_start.py
 
       - name: Start check suite
@@ -1037,6 +1053,7 @@ jobs:
         run: python3 hooks/test_start_check.py
 
       - name: Session role file suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_session_role.py
 
       - name: Directory before a segment suite
@@ -1048,6 +1065,7 @@ jobs:
         run: python3 hooks/test_ruling_home.py
 
       - name: Scratchpad owner fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_scratchpad_owner.py
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
@@ -1083,7 +1101,7 @@ jobs:
           python-version: "3.11"
 
       - name: Janitor sweep fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' && needs.scope.outputs.sweep == 'true' }}
+        if: ${{ (needs.scope.outputs.code == 'true' && needs.scope.outputs.sweep == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 janitor/test_sweep.py
 
       - name: Janitor sweep mutation test
@@ -1091,10 +1109,11 @@ jobs:
         run: python3 janitor/mutate_sweep.py
 
       - name: Reap proof Git Bash one-home suite
-        if: ${{ needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 janitor/test_prove_agent_end_reap.py
 
       - name: Mutation verdict fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_mutate_shared.py
 
       - name: Mutation report-mode fixture suite
@@ -1103,16 +1122,19 @@ jobs:
 
       # The engine parses with typescript, which a bare checkout lacks. The guard is the one map-check.sh uses.
       - name: Mutation JS engine fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: |
           [ -d node_modules/typescript ] || npm ci --ignore-scripts --no-audit --no-fund
           python3 hooks/test_mutate_js.py
 
       - name: Mutation replay fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: |
           [ -d node_modules/typescript ] || npm ci --ignore-scripts --no-audit --no-fund
           python3 hooks/test_mutate_replay.py
 
       - name: Mutation CI report fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: |
           [ -d node_modules/typescript ] || npm ci --ignore-scripts --no-audit --no-fund
           python3 hooks/test_mutate_ci.py
@@ -1142,7 +1164,7 @@ jobs:
         if: ${{ (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/waiting-page/test_question_source.py
       - name: Waiting page park relay prose suite
-        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true' || needs.scope.outputs.doc_other == 'true' }}
+        if: ${{ (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true' || needs.scope.outputs.doc_other == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/waiting-page/test_skill_park_relay.py
 
       - name: Roadmap builder fixture suite
@@ -1150,20 +1172,23 @@ jobs:
         run: python3 skills/roadmap/test_build.py
 
       - name: Roadmap derived status fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/roadmap/test_derived_status.py
 
       - name: project-ops skill scaffold suite
-        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true' }}
+        if: ${{ (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/project-ops/tests/test_scaffold.py
 
       - name: project-ops brief tool suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/project-ops/tests/test_brief_from_step.py
 
       - name: project-ops runner state suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/project-ops/tests/test_runner_state.py
 
       - name: ios-apps skill starter suite
-        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true' }}
+        if: ${{ (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/ios-apps/tests/test_new_app.py
 
       - name: PowerShell syntax check, install.ps1
@@ -1179,12 +1204,15 @@ jobs:
         run: pwsh -NoProfile -File install.test.ps1
 
       - name: Record stamp engine fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: node actions/stamp/test_stamp.mjs
 
       - name: Scanner trap lint
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: node lint/test_scanner_traps.mjs
 
       - name: Record stamp action fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         shell: bash
         run: bash actions/stamp/test_action.sh
 
@@ -2535,9 +2563,10 @@ jobs:
   # shard 1 here, the rest in checks-windows-guard-<i> (the shard switch in hooks/test_guard.py; lint/test_windows_split.py proves each
   # case runs once). A ready pull_request runs every step of the Windows guard jobs (the draft test stands in for scope there, which skips on a draft),
   # and a merge or rest suite step only with its job's own scope flag set (checks_windows_merge, checks_windows_rest, checks_windows_rest_2). The records-only skip (records_only_skip, from .github/scripts/ci-scope.sh) is a change to
-  # docs/records.md alone after a fully green head, on a pull request or a push. Every job but scope, nightly-skip, push-skip and
-  # all-jobs-passed starts nothing then: each job-level `if` reads it (lint/all_jobs_passed_rules.py allows that condition and no wider
-  # one on a needed job), and all-jobs-passed passes the skips (actions/all-jobs-passed/check.sh). The macOS jobs never start on a pull
+  # docs/records.md or a comment-only .py or .sh file alone after a fully green head, on a pull request or a push. Every job but
+  # scope, nightly-skip, push-skip and all-jobs-passed starts nothing then, except the checks job on a comment-only delta, which its lints read (it ends its
+  # job-level `if` in the delta clause, and every suite step reads the skip): each job-level `if` reads it
+  # (lint/all_jobs_passed_rules.py allows that condition and no wider one on a needed job, but the checks job's named delta clause), and all-jobs-passed passes the skips (actions/all-jobs-passed/check.sh). The macOS jobs never start on a pull
   # request or a push. A step-level `if` still starts a runner, so the skip sits on the job. R62 ("each suite runs once per batch, on
   # the batch PR"; "Part 3 keeps the full shards once per batch") puts the full suites on every ready pull_request; own-830-c, widened by
   # owner item 857 pick b (19:48 CST Nov 15), narrows that: the green head's run already proved what a records-only change moves.
