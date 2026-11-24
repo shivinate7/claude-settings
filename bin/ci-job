@@ -1422,14 +1422,11 @@ def main(argv, sibling=False, ran_suites=None):
                     tally["unknown"] += 1
                     print("%-15s %s: --lint cannot run suite %s, and the change touches it or a file it tests (scope flags on: %s)" % (
                         "unknown", name, ", ".join(sorted(reach)), flags))
-                for suite in owed:
-                    if suite not in reach:
-                        told = True
-                        if ("runs in CI", suite) in ran_suites:  # a suite that two steps or two jobs hold prints once per run
-                            continue
-                        ran_suites.add(("runs in CI", suite))
-                        print("%-15s %s: --lint did not run suite %s: it runs in CI (scope flags on: %s); the change touches neither it nor a file it tests" % (
-                            "not run", name, suite, flags))
+                rest = [s for s in owed if s not in reach]
+                if rest:  # one line per step, naming its suites, so a step is never passed over silently
+                    told = True
+                    print("%-15s %s: --lint did not run suite %s: it runs in CI (scope flags on: %s); the change touches neither it nor a file it tests" % (
+                        "not run", name, ", ".join(rest), flags))
                 continue
             if sibling and not kind[n - 1]:
                 continue
