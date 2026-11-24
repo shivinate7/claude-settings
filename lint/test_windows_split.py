@@ -763,17 +763,29 @@ def top_level_or(expr):
 
 
 ALWAYS_LEAD = "always() && "
+# The one step that may carry always(): the cache save after a failed shard step, its uses pinned to a 40-hex sha (a trailing
+# `# vN` comment allowed). Every other step takes the scope rules with no always() term.
+CACHE_SAVE_PIN = re.compile(r"actions/cache/save@[0-9a-f]{40}(?:\s|$)")
 
 
-def scope_condition_rest(expr, scope_condition):
-    """What a step's `if` adds to the scope condition: "" for the bare scope condition, "always()" for `always() && G` or
-    `always() && (G)` (a save step, which runs after a failed shard step), E for `(scope condition) && E`, None when the step lacks
-    the scope condition or E has a `||` outside parentheses, since that lets the step run outside the scope condition."""
+def is_cache_save(st):
+    """True when the step's uses: is the cache save action pinned to a 40-hex sha (CACHE_SAVE_PIN)."""
+    return bool(CACHE_SAVE_PIN.match(st.get("uses") or ""))
+
+
+def scope_condition_rest(expr, scope_condition, save=False):
+    """What a step's `if` adds to the scope condition: "" for the bare scope condition, E for `(scope condition) && E`, None when the
+    step lacks the scope condition or E has a `||` outside parentheses, since that lets the step run outside the scope condition.
+    Only a cache save step (save, is_cache_save) may instead be `always() && (G)`, or `always() && G` when G has no top-level `||`;
+    both return "always()", since the save runs after a failed shard step. Every other always() form is None: always() alone, always()
+    beside another term, always() || G, and a top-level `||` past the form."""
     if scope_condition is None or expr is None:
         return None
     if expr == scope_condition:
         return ""
-    if expr in (ALWAYS_LEAD + scope_condition, ALWAYS_LEAD + f"({scope_condition})"):
+    if save and expr == ALWAYS_LEAD + f"({scope_condition})":
+        return "always()"
+    if save and expr == ALWAYS_LEAD + scope_condition and not top_level_or(scope_condition):
         return "always()"
     lead = f"({scope_condition}) && "
     rest = expr[len(lead):] if expr.startswith(lead) else ""
@@ -782,9 +794,10 @@ def scope_condition_rest(expr, scope_condition):
     return rest
 
 
-def scope_candidate(expr):
-    """The scope condition one step's `if` names: X from `always() && X` (X bare or in parentheses), X from `(X) && E`, else the whole if."""
-    if expr.startswith(ALWAYS_LEAD):
+def scope_candidate(expr, save=False):
+    """The scope condition one step's `if` names: X from `always() && X` (X bare or in parentheses) on a cache save step, X from
+    `(X) && E`, else the whole if. Any other step reads only the `(X) && E` prefix, as before always() was taken."""
+    if save and expr.startswith(ALWAYS_LEAD):
         rest = expr[len(ALWAYS_LEAD):]
         return paren_inner(rest) or rest
     return paren_prefix(expr) or expr
@@ -793,14 +806,14 @@ def scope_candidate(expr):
 def read_scope_condition(job):
     """G, the scope condition a scoped job's steps carry. Each step with an `if` gives a candidate (scope_candidate). None when no
     step carries an `if`, or when the candidates differ."""
-    cands = {scope_candidate(expr) for expr in map(step_if, job["steps"]) if expr is not None}
+    cands = {scope_candidate(step_if(st), is_cache_save(st)) for st in job["steps"] if step_if(st) is not None}
     return cands.pop() if len(cands) == 1 else None
 
 
 def step_rest(st, scope_condition):
     """A step's own condition E: what the scope condition leaves of the step's if. "" for the bare scope condition, None when
-    the step lacks the scope condition. Every scoped step carries it, a shard's included (R62)."""
-    return scope_condition_rest(step_if(st), scope_condition)
+    the step lacks the scope condition. Every scoped step carries it, a shard's included (R62). Only a cache save takes always()."""
+    return scope_condition_rest(step_if(st), scope_condition, is_cache_save(st))
 
 
 LINUX_RULE_EVENTS = ("push", "schedule", "workflow_dispatch", "pull_request")
@@ -854,7 +867,7 @@ def scope_condition_property_problems(name, scope_condition, job, flag=None):
 def scope_condition_step_problems(name, job, scope_condition):
     """Every step of a scoped job carries the scope condition: bare, or as `(scope condition) && E`."""
     return [f"{name}: step {st.get('name') or st.get('uses') or st.get('run')} lacks the scope condition: {step_if(st)}"
-            for st in job["steps"] if scope_condition_rest(step_if(st), scope_condition) is None]
+            for st in job["steps"] if step_rest(st, scope_condition) is None]
 
 
 def draft_guard_only(expr):
@@ -1485,9 +1498,12 @@ class WindowsSplit(unittest.TestCase):
             return {"needs": needs, "if": job_if, "steps": steps}
 
         self.assertEqual(job_check_problems("checks-macos", job()), [])
-        # The save step after a failed shard step: always() beside the scope condition, parenthesised, passes (scope_condition_rest).
-        self.assertEqual(job_check_problems("checks-macos", job(steps=[{"if": f"${{{{ {scope_condition} }}}}"},
-                                                                       {"if": f"${{{{ always() && ({scope_condition}) }}}}"}])), [])
+        # The cache save after a failed shard step passes with always() beside the scope condition, on the scoped path (step_rest).
+        # checks-macos is a sweep job, where no suite step takes always() (the bad entry below), so this control runs on checks-macos-b.
+        save_pinned = "actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0"
+        self.assertEqual(job_check_problems("checks-macos-b", job(steps=[{"if": f"${{{{ {scope_condition} }}}}"},
+                                                                        {"uses": save_pinned, "if": f"${{{{ always() && ({scope_condition}) }}}}"}]),
+                         "checks_macos"), [])
         self.assertEqual(job_check_problems("checks", {"needs": "scope", "if": None, "steps": []}), [])
         self.assertTrue(job_check_problems("checks", {"needs": None, "if": None, "steps": []}))
         # ci-hygiene steps 11 and 19: a job-level if that holds only the draft guard is allowed on a lint job and a scoped job.
@@ -1523,35 +1539,77 @@ class WindowsSplit(unittest.TestCase):
             "always() with no scope condition, beside the scope": job([{"if": f"${{{{ {scope_condition} }}}}"}, {"if": "${{ always() }}"}]),
             "always() || scope, beside the scope": job([{"if": f"${{{{ {scope_condition} }}}}"},
                                                         {"if": f"${{{{ always() || {scope_condition} }}}}"}]),
+            # A suite step (no uses) takes no always() form, even parenthesised: sweep_job_problems reads the rule before always().
+            "always() && (scope) on a suite step": job([{"if": f"${{{{ {scope_condition} }}}}"},
+                                                        {"if": f"${{{{ always() && ({scope_condition}) }}}}"}]),
         }
         for label, j in bad.items():
             with self.subTest(defect=label):
                 self.assertTrue(job_check_problems("checks-macos", j), label)
 
-    def test_always_beside_the_scope_condition_is_the_only_term_a_step_adds(self):
-        # Controls: the bare scope condition; always() with the scope bare or parenthesised; (scope) && E. Named failures: always()
-        # alone, always() beside another term, and always() || scope, each of which lets a step run outside the scope condition.
+    def test_always_beside_the_scope_condition_is_only_a_cache_save_term(self):
+        # Forms that pass: the bare scope condition; (scope) && E on any step; on a cache save (save=True), always() with the scope
+        # parenthesised, or bare when the scope has no top-level ||. Named failures on a save: always() alone, always() beside another
+        # term, always() || scope, a top-level || past the form, and bare always() over a scope with a top-level ||. On any other
+        # step (save=False) both always() forms fail, so the rule is the one before always() was taken.
         g = "needs.scope.outputs.guard == 'true'"
-        ok = {"bare scope": (g, ""),
-              "always() && scope": (f"always() && {g}", "always()"),
-              "always() && (scope)": (f"always() && ({g})", "always()"),
-              "(scope) && !cancelled()": (f"({g}) && !cancelled()", "!cancelled()")}
-        for label, (expr, want) in ok.items():
+        g2 = "needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request'"
+        ok = {"bare scope": (g, g, False, ""),
+              "(scope) && !cancelled()": (f"({g}) && !cancelled()", g, False, "!cancelled()"),
+              "always() && (scope), on a save": (f"always() && ({g})", g, True, "always()"),
+              "always() && scope, on a save": (f"always() && {g}", g, True, "always()"),
+              "always() && (scope with ||), on a save": (f"always() && ({g2})", g2, True, "always()")}
+        for label, (expr, scope, save, want) in ok.items():
             with self.subTest(form=label):
-                self.assertEqual(scope_condition_rest(expr, g), want, label)
-        refused = {"always() alone": "always()",
-                   "always() beside another term": "always() && !cancelled()",
-                   "always() || scope": f"always() || {g}",
-                   "always() && scope, then a top-level ||": f"always() && {g} || github.event_name == 'push'"}
-        for label, expr in refused.items():
+                self.assertEqual(scope_condition_rest(expr, scope, save), want, label)
+        refused = {"always() alone, on a save": ("always()", g, True),
+                   "always() beside another term, on a save": ("always() && !cancelled()", g, True),
+                   "always() || scope, on a save": (f"always() || {g}", g, True),
+                   "always() && scope, then a top-level ||, on a save": (f"always() && {g} || github.event_name == 'push'", g, True),
+                   "bare always() over a scope with a top-level ||, on a save": (f"always() && {g2}", g2, True),
+                   "always() && (scope), on a step that is not a save": (f"always() && ({g})", g, False),
+                   "always() && scope, on a step that is not a save": (f"always() && {g}", g, False)}
+        for label, (expr, scope, save) in refused.items():
             with self.subTest(defect=label):
-                self.assertIsNone(scope_condition_rest(expr, g), label)
-        # scope_candidate reads the scope out of each form, and paren_inner keeps a quoted parenthesis as text.
-        self.assertEqual(scope_candidate(f"always() && ({g})"), g)
-        self.assertEqual(scope_candidate(f"always() && {g}"), g)
+                self.assertIsNone(scope_condition_rest(expr, scope, save), label)
+        # scope_candidate reads the scope out of a save's always() form only; any other step reads its (X) && E prefix alone.
+        self.assertEqual(scope_candidate(f"always() && ({g})", True), g)
+        self.assertEqual(scope_candidate(f"always() && {g}", True), g)
+        self.assertEqual(scope_candidate(f"always() && {g}"), f"always() && {g}")
         self.assertEqual(scope_candidate(f"({g}) && !cancelled()"), g)
+        # paren_inner keeps a quoted parenthesis as text.
         self.assertEqual(paren_inner("(a == ')')"), "a == ')'")
         self.assertIsNone(paren_inner("(a) && (b)"))
+
+    def test_the_cache_save_is_the_only_step_that_takes_always(self):
+        # Controls: the save pinned to a 40-hex sha takes always() beside the scope condition, parenthesised, on a scoped job; a
+        # full-suite checkout takes the draft guard bare. Named failures, each on a scoped job's second step: a restore, a save pinned
+        # to a tag or to 39 hex digits, a checkout, bare always(), and a top-level || past the save's form. A full-suite checkout with
+        # always() fails too (full_suite_problems: the draft guard, bare or as (draft guard) && E).
+        scope_condition = "needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request'"
+        save_pinned = "actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0"
+        always_form = f"always() && ({scope_condition})"
+
+        def scoped(uses, if_):
+            return {"needs": "scope", "if": None,
+                    "steps": [{"if": f"${{{{ {scope_condition} }}}}"}, {"uses": uses, "if": f"${{{{ {if_} }}}}"}]}
+
+        self.assertEqual(job_check_problems("checks-macos-b", scoped(save_pinned, always_form), "checks_macos"), [])
+        bad = {"a cache restore takes always()": scoped("actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0", always_form),
+               "a save pinned to a tag takes always()": scoped("actions/cache/save@v6", always_form),
+               "a save pinned to 39 hex digits takes always()": scoped("actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a # v6.1.0",
+                                                                       always_form),
+               "a checkout takes always()": scoped("actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0", always_form),
+               "the save takes bare always()": scoped(save_pinned, "always()"),
+               "the save has a top-level || past the form": scoped(save_pinned, f"{always_form} || true")}
+        for label, j in bad.items():
+            with self.subTest(defect=label):
+                self.assertTrue(job_check_problems("checks-macos-b", j, "checks_macos"), label)
+        draft = "github.event_name != 'pull_request' || !github.event.pull_request.draft"
+        checkout = "actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0"
+        self.assertEqual(full_suite_problems("checks-windows-merge", {"steps": [{"uses": checkout, "if": f"${{{{ {draft} }}}}"}]}), [])
+        self.assertTrue(full_suite_problems("checks-windows-merge",
+                                            {"steps": [{"uses": checkout, "if": f"${{{{ always() && ({draft}) }}}}"}]}))
 
     def test_a_records_only_job_if_is_allowed_alone_or_after_the_draft_guard_and_no_wider(self):
         # Controls: the records-only condition alone on a scoped job, and `(draft guard) && records-only` on a shard, pass the job-level
