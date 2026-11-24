@@ -1,0 +1,1 @@
+- ci-job-code-check-base-only: bin/ci-job about :597 passes `--base` only to code_check.py, so each Code check pass prints `code-check: list shrink check unknown: no main ref given` and the main list-shrink check never runs. The action passes `--main` (actions/code-check/action.yml), so CI is not affected.

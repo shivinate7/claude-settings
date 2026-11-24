@@ -1,9 +1,9 @@
-# A failed tool install reads FAIL, when it should read unknown
+# A cold install that cannot start still refuses the ready mark
 
-**What.** With pipx present and a tool not cached, a failed install (no network) reads the code check FAIL with 33 problems, "the tool could not install", where it should read unknown. Only a missing pipx or npx reads unknown today. So a ready run, or `bin/cheap-lints` on a machine with no cached tools and no route to the index (a cloud session's first run with a blocked index), reports a red tree where the environment is at fault.
+**What.** A pinned tool that cannot start, such as a pipx or npx install with no route to the index, reads unknown. A ready run still refuses an unknown: `run_ready_checks` stops on any state but pass, and no flag lifts it. So a session with no registry access cannot mark a draft ready until the registry answers.
 
-**Where.** `actions/code-check/code_check.py`, `execute()`, writes "could not start" only when the command is missing. `could_not_start()` in the CI job runner `bin/ci-job` turns only those lines into unknown.
+**Where.** `merge/merge.py`, `run_ready_checks()` (about :5388-5400), the stop on a state other than pass ("are unknown, not a pass").
 
-**Decision.** `lanes-run-no-full-ci-job`. The lane lint and the ready checks run this check through `bin/ci-job`, and a run that cannot start reads unknown.
+**Decision.** `lanes-run-no-full-ci-job` (the ready checks; a run that cannot start reads unknown). The owner has not ruled whether a ready mark may pass on that unknown.
 
-**Retire.** `lint/test_ci_job.py` gets a red case: a code check whose install fails with no route to the index reads unknown, and names the tool. The fix PR deletes this file.
+**Retire.** `lint/test_cheap_lints.py` gets a red case: a ready run whose pinned tool cannot start, with no route to the index, leaves a session with no registry access a route to ready, as the owner rules.
