@@ -16,7 +16,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from guard_core import (
-    SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, GIT_WRITES, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
+    COMPLY_TAIL, SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, GIT_WRITES, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
     REPLAY_MARKS, command_indexes, dir_before_segment, heredoc_heads, inline_script, inner_commands, own_heredoc_bodies, resolve_command, resolve_default_base, segment_tokens, split_segments,
     is_cloud, lint_dir, shell_abs, strip_heredoc_bodies, strip_redirections,
 )
@@ -314,10 +314,11 @@ def ignored_checks(module, where: str):
 
 
 BARE_MERGE_REASON = (
-    "Rule (Git): this repo merges with the merge tool, and a bare `gh pr merge` skips its claim and "
-    "leaves the local main behind origin. "
-    "Remedy: run the merge tool, `merge <pr> --confirm`. If the tool is broken, confirm this call. "
-    "(decision bare-merge-asks, a bare merge in a merge-tool repo asks the owner)"
+    "Rule (Git): this repo merges with the merge tool, and a bare merge skips its claim and "
+    "leaves the local main behind origin "
+    "(decision bare-merge-asks, decision guard-remedy-not-to-owner). "
+    "Remedy: run the merge tool, `merge <pr> --confirm`. "
+    + COMPLY_TAIL
 )
 
 
@@ -561,9 +562,9 @@ READY_PUSH_REASON = (
     "A push cancels that run, and the merge needs the run to finish on this head. "
     "Remedy: wait for the run to finish. To push before then, return the pull request to draft with `gh pr ready --undo %s`, "
     "push, and mark it ready again with the merge tool. When the run has a red job, a push may go ahead and fix it. "
-    "(decision standing-merge-grant, a ready pull request takes no push; owner ruling 13:05 CST Nov 23, 2026)"
+    "(decision standing-merge-grant, a ready pull request takes no push; owner ruling 13:05 CST Nov 23, 2026) "
+    + COMPLY_TAIL
 )
-READY_PUSH_CLOSING = "If this refusal looks wrong for your task, comply anyway and say so in your report."  # read last, after the override line
 READY_PUSH_WARNING = "ready-pr-push: the pull request list read failed (%s), so the push is allowed unchecked (decision standing-merge-grant)"
 
 

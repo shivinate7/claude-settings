@@ -187,9 +187,10 @@ def base_copies_read_cost_case():
 FIXTURELESS_CHECKS.add(base_copies_read_cost_case)  # builds only the base-copy trees it reads
 
 # `git worktree prune`. This deletes NO FILES, only an administrative record, so the worst case
-# is an ASK, never a deny, whatever the run location.
-sh("worktree prune: a stale record asks, never denies",
-   VCS + " worktree prune", "ask", "shared-tree", cwd=WTPRUNE)
+# is an ALLOW, never a deny or an ask, whatever the run location (decision `guard-remedy-not-to-owner`:
+# harmless and read-only forms are allowed).
+sh("worktree prune: a stale record allows, never denies or asks",
+   VCS + " worktree prune", "allow", cwd=WTPRUNE)
 sh("worktree prune: nothing to prune passes", VCS + " worktree prune", "allow", cwd=WTMAIN)
 sh("worktree prune: -n itself is a read, not a discard, so it passes unconditionally",
    VCS + " worktree prune -n", "allow", cwd=WTPRUNE)

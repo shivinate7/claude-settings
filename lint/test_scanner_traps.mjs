@@ -245,9 +245,9 @@ test("decision-watch codeNouns: a lone quote in a comment does not hide the code
 test("decision-watch codeNouns: a called $.fs.write and a called $.model.complete are not bare reads", () => {
   same(codeNouns("await $.fs.write(file, text); await $.model.complete({ model });"), [], "called methods");
 });
-test("guard shell quote reading: a deny text inside echo's quotes is data, and bash -c runs the same text and asks", () => {
+test("guard shell quote reading: a deny text inside echo's quotes is data, and bash -c runs the same text and refuses", () => {
   same(shellDecision("echo 'git push -f origin main'"), "allow", "quoted data in echo");
-  same(shellDecision("bash -c 'git push -f origin main'"), "ask", "bash -c runs the quoted text");
+  same(shellDecision("bash -c 'git push -f origin main'"), "deny", "bash -c runs the quoted text");
 });
 // ---- run. Only when this file is the entry point: the decision-watch mod test imports two scanners from it.
 if (isMain) {

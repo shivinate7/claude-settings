@@ -1,19 +1,19 @@
-# A plain push asks for main or a stray branch, and is refused for an agent branch or an every-branch push that would update main or send an agent branch
+# A plain push is refused for main, an agent branch or an every-branch push that would update main or send an agent branch, and allowed for a stray branch
 
 ## The ruling
 
-Two kinds of push that are not forced ask. Approving a prompt lets one push through; it is not a grant. Two more are refused, with their remedy. One is a push that writes an agent-worktree branch. The other is a push of every branch that would update main or master, or would send a local agent-worktree branch. Every-branch pushes never ask. The owner's typed override lets each ask or refusal through (`owner-override`).
+No plain push asks. A push to main or master is refused. So is a push that writes an agent-worktree branch, and a push of every branch that would update main or master, or would send a local agent-worktree branch. A stray-branch push is allowed. Each refusal gives its remedy. Each refusal that replaced an ask also ends with the comply-anyway line (decision `guards-never-ask`): the push-to-main refusals (`PUSH_MAIN_REASON`, `PUSH_MAIN_BRANCH_REASON`) and the forced-push refusals that may reach main or cannot read the target (`PUSH_ASK_REASON`, `PUSH_ASK_BRANCH_REASON`). The owner's typed override lets each refusal through (`owner-override`).
 
 Sources:
-- Asks: owner rulings, Cockpit, 2026-11-03 22:23 CST.
+- Refusals and the stray-branch allow: owner rulings, 2026-11-23 10:49 CST and 11:07 CST (decision `guards-never-ask`).
 - Agent-branch refusal: see its bullet below.
 - Every-branch refusal: owner ruling, page item 502, 2026-11-10 16:08 CST: "I either want it approved or declined whichever is correct. I know for a fact I dont want to be asked."
 - Every-branch refusal, agent-branch part, and the source-side reading of a glob: owner delegated 2026-11-11 09:12 CST; coordinator pick A, relayed 09:14 CST. Goal: never asked, no conflicts, no lost work.
 
 | Push | Outcome | Rule id |
 |---|---|---|
-| A destination named `main` or `master` (`main`, `HEAD:main`, `x:refs/heads/main`, a bare push that resolves there), on a network remote | ask | `push-main` |
-| An implied destination (bare push, `HEAD`, `@`, or the current branch's own name) that differs from the branch's upstream, on the upstream's remote, and does not yet exist there | ask | `push-stray-branch` |
+| A destination named `main` or `master` (`main`, `HEAD:main`, `x:refs/heads/main`, a bare push that resolves there), on a network remote | refuse, remedy `git push origin HEAD:<lane-branch>` (no merge tool: `HEAD:<branch>`, named in the report) | `push-main` |
+| An implied destination (bare push, `HEAD`, `@`, or the current branch's own name) that differs from the branch's upstream, on the upstream's remote | allow | `push-stray-branch` |
 | A destination (implied, a colon-less refspec, or after the colon) named like an agent-worktree branch (`agent-<hex>`, `claude/agent-<hex>`, `worktree-agent-<hex>`), with or without an upstream | refuse, remedy `git push origin HEAD:<lane-branch>` | `push-agent-branch` |
 | A push that names `main` and an agent-worktree branch together (`git push origin main HEAD:agent-<hex>`, `git push origin main agent-<hex>`) | refuse, remedy `git push origin HEAD:<lane-branch>` | `push-agent-branch` |
 | `--all` or `--branches` from a checkout on an agent-worktree branch, to a network remote, whether or not it would update main | refuse, remedy `git push origin HEAD:<lane-branch>` | `push-agent-branch` |
@@ -21,34 +21,27 @@ Sources:
 | Any other plain push | allow | |
 
 - Item 207 a, `push-main`: main moves only by pull request (`git-main-only-by-pr`). The names are
-  literal, `main` and `master`. The remote's HEAD is not read. It asks only for a network remote
+  literal, `main` and `master`. The remote's HEAD is not read. It refuses only for a network remote
   (https, http, ssh, git, or `host:path`). A remote with no URL, or a local path or `file://`
   URL, is silent: git refuses the first, and the second is a test fixture, not GitHub. A remote
   the shell has not yet expanded, such as `"$REMOTE"` or `$(...)`, counts as a network remote. A double-quoted one with a space inside is blanked
   first, so it stays silent (note push-main-quoted-substitution). Source:
-  page item 410 pick a, relayed by the coordinator 2026-11-08 10:03 CST, after a push-main ask on a fixture repo.
-- Item 206 a, `push-stray-branch`: `git push origin HEAD` writes the local branch's name, not its
+  page item 410 pick a, relayed by the coordinator 2026-11-08 10:03 CST, after a push-main ask on a fixture repo (refused since 2026-11-23 11:07 CST).
+- `push-stray-branch` (allowed since 2026-11-23 11:07 CST; item 206 a first asked): `git push origin HEAD` writes the local branch's name, not its
   upstream. Measured 2026-11-03: local `mylocal` tracking `origin/lane/x` made a new remote branch
   `mylocal`.
-- Item 432 a, `push-stray-branch` narrowed: owner, 2026-11-08 11:49 CST, pick a, "skip existing
-  branches". A destination that already exists on the pushed remote (read from the local
-  `refs/remotes/<remote>/<name>`) is silent: that push lands on a branch that is already there,
-  such as the lane's own PR branch, and makes no stray one. A failed read keeps the ask. The
-  owner's note, "shouldn't it stay quiet regardless?", is not this ruling: quiet regardless would
-  drop the ask for a push that makes a new branch. The ask's remedy names `HEAD:<branch>`.
 - `push-agent-branch`: a push that writes an agent-worktree name puts a stray branch on the remote. Bare
   and `-u` count, and so does a bare push under `push.autoSetupRemote`. It refuses and names its
   remedy, `git push origin HEAD:<lane-branch>`. The refusal text
-  goes to the session, not the owner (the principle of `guard-remedy-not-to-owner`, which records it
-  for Stop refusals). Source, kind process: owner ruling, 2026-11-02, that a `worktree-agent-*`
+  goes to the session, not the owner (decision `guards-never-ask`). Source, kind process: owner ruling, 2026-11-02, that a `worktree-agent-*`
   branch never reaches origin (32 sat on origin that day, pushed because the agent files said to
   push the worktree's own branch); the coordinator's pick (a), 2026-11-09 13:21 CST, step
   `agent-branch-push-refuses`, extends it to the `agent-<hex>` and `claude/agent-<hex>` forms (the
   2026-11-02 ruling names `worktree-agent-*` only). A test-author or builder pushing a lane-named branch
   unasked is not read here; roadmap step `push-ask-reads-brief` holds it.
 - Combined push, owner ruling, chat, 2026-11-10 14:59 CST, question "Combined push", answer "Refuse it".
-  A push that names `main` and an agent-worktree branch is refused as `push-agent-branch`, not asked as
-  `push-main`. Controls unchanged: `main` alone asks `push-main`; `main` with a lane-named branch asks
+  A push that names `main` and an agent-worktree branch is refused as `push-agent-branch`, not as
+  `push-main`. Controls unchanged: `main` alone is refused as `push-main`; `main` with a lane-named branch is refused as
   `push-main`; a lane branch, `HEAD:<lane-branch>`, `archive/*` and deletes are allowed.
 - Every-branch push, `push-all-main`: a plain push of every branch never asks. On a network remote it is
   refused when one of the checks below holds. Otherwise it is allowed.
@@ -75,7 +68,7 @@ Sources:
     checkout is refused whatever its target: the checkout's own `worktree-agent-<hex>` branch is a local
     agent branch, and the glob's source matches it.
   - Silent: a dry run, a local-path remote, and a deletion. A forced form, such as `--all --force` or
-    `--force origin refs/heads/*:refs/heads/*`, asks under `force-push`.
+    `--force origin refs/heads/*:refs/heads/*`, is refused under `force-push`.
 - Silent:
   - a push to the branch's own upstream, unless that name is an agent-worktree name;
   - a first push with no upstream, unless its destination is an agent-worktree name;
@@ -88,11 +81,7 @@ Sources:
   - `--dry-run`, which writes nothing;
   - `push.default=matching`, whose destination is not read;
   - a plain push whose destination cannot be resolved.
-- A push asks only alone, or with a harmless lead or tail such as `2>&1 | tail -1`. In a longer
-  chain the `ask-alone` refusal denies it: run the push on its own.
-- Silent, by this lane's reading: an upstream of `main` or `master`. A branch made from
-  `origin/main` tracks main (git's autoSetupMerge), so its first `git push -u origin HEAD` would
-  otherwise ask on every lane.
+- A push is judged the same alone or chained. A refusal prints its own reason, and `ask-alone` does not apply to a push (decision `ask-commands-run-alone`).
 - Silent: a bare push under `push.default=simple` with a mismatched upstream. Git refuses it
   itself.
 

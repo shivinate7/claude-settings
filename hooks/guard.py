@@ -13,7 +13,7 @@ JSON object on stdin and answers on stdout.
 
   stdin  : {"tool_name": str, "tool_input": {...}, "cwd": str}
   allow  : print nothing, exit 0
-  refuse : print one hookSpecificOutput object with "deny" or "ask", exit 0; when the owner
+  refuse : print one hookSpecificOutput object with "deny" ("ask" only for the agent-model cap write), exit 0; when the owner
            override lifts the refusal, print nothing, exit 0 (the allow output)
 
 Fail open. Unreadable input, a payload that is not an object, or a missing key
@@ -158,10 +158,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        agent-named destination in the same push is push-agent-branch's, which refuses.
                        A remote the shell has not expanded counts as one. The remote's HEAD is not
                        read. A dry run passes.
-  push-stray-branch    ask. An implied push (bare, `HEAD`, `@`, or a colon-less refspec naming the
-                       current branch) that writes a name other than the branch's upstream. It is silent
-                       when the clone holds `refs/remotes/<remote>/<name>`. It asks only with an
-                       upstream on the pushed remote that is not main or master.
+  push-stray-branch    allow. An implied push (bare, `HEAD`, `@`) that writes a name other than the
+                       branch's upstream is harmless and reversible, so it passes. Another rule may still
+                       refuse the push (main, an agent branch name, a ready pull request's branch).
   push-agent-branch    deny. A non-forced push whose destination branch name is an agent-worktree name
                        (agent-<hex>, claude/agent-<hex>, worktree-agent-<hex>, 8+ hex), with or without
                        -u. No upstream is needed. It holds when `main` comes first in the same push
@@ -348,7 +347,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        design-reviewer, refuter, a builder's third-round marker or an Explore's `Audit:` marker
                        covers it. The owner's model name lifts agent-model-floor only (owner_names_model), never this ceiling. The general override, `opus [role] <time>` or a step grant lifts the
                        spawn refusal; none lifts the settings-write ask.
-  ask-alone            deny. An ask command chained with other commands. (ask-commands-run-alone)
+  ask-alone            deny. The one remaining ask (the agent-model cap write) chained with other commands. (ask-commands-run-alone)
   guard-crash          crash. The guard itself raised. The call is allowed and the log shows it.
 
 Other tools, in `judge` order:
@@ -618,7 +617,7 @@ Every refusal names its rule and says what to do instead. The remedy never names
 command or path, because Claude would copy it as the way round (`git-remedy-never-names-target`).
 The matched text goes to the log, so a person can still see what fired.
 
-An "ask" decision puts the answer in the owner's hands. The one lift is the owner override
+Only the agent-model cap write still asks: that decision puts the answer in the owner's hands. The one lift is the owner override
 (decision owner-override): the owner types `override` as a whole prompt, and refuse() lets the
 next refused act through, or every refused act for a time. The narrower Opus override (`opus 2h`) lifts
 only the Opus spawn refusal, and so does a step grant on the lane's roadmap step (decision agent-model-cap).
@@ -736,13 +735,13 @@ while True:
         )
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
-            BRANCH_DELETE_DENY_REASON, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
+            BRANCH_DELETE_DENY_REASON, WORKTREE_REMOVE_DENY_REASON,  # glossary-ok: the pinned names of existing reasons
             worktree_remove_forced,
         )
         from guard_branch_worktree import TWO_WORKTREES_REFUSE_REASON, two_worktrees_hit
         _loading = "guard_shared_tree"
         from guard_shared_tree import (
-            PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
+            PUSH_DENY_REASON, STACK_DENY_REASON, TREE_DENY_REASON, TREE_WORKTREE_REFUSE_REASON,  # glossary-ok: the pinned names of existing reasons
             checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
             SESSION_ID_RE, STASH_READ_ACTIONS, in_any_session_scratchpad, stash_action, stash_takes_the_stack, subject_state, under_session_scratchpad,
             scratchpad_clear_writer, scratchpad_folder_writer, scratchpad_record_writer, scratchpad_writer_of,
@@ -754,8 +753,9 @@ while True:
         )
         _loading = "guard_push_delete"
         from guard_push_delete import (
-            DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
-            PUSH_AGENT_REASON, PUSH_ALL_AGENT_REASON, PUSH_ALL_REASON, PUSH_REASON, PUSH_STRAY_REASON,
+            DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_BRANCH_REASON, PUSH_ASK_REASON,
+            PUSH_MAIN_BRANCH_REASON, PUSH_MAIN_REASON,
+            PUSH_AGENT_REASON, PUSH_ALL_AGENT_REASON, PUSH_ALL_REASON, PUSH_REASON,
             ARCHIVE_GUARD_REASON, archive_guard_hits,
             cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_ask_hit, push_verdict,
             rm_delete_hit, SUBST_OPEN, _in_group,
@@ -768,7 +768,7 @@ while True:
             records_page_hit, repo_proof_hit, role_proof_hit, lane_ready_hit, lane_mcp_ready_hit, self_role_child_hit, self_role_hit,
             DEFAULT_RECORD_BRANCH, record_reason, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, PRIOR_WORK_REASON, prior_work_lane_hit, prior_work_named, header_time_hit, step_dup_hit, step_pr_hit, target_roster_hit, trust_card_hit, written_time_hit,
             BRIEF_ID_REASON, BRIEF_TOPIC_REASON, STEP_DUP_REASON,
-            undrafted_pr_create, uses_merge_tool, ready_page_hit, ready_mark_hit, ready_push_hit, READY_PUSH_CLOSING, create_pr_link_hit,
+            undrafted_pr_create, uses_merge_tool, ready_page_hit, ready_mark_hit, ready_push_hit, create_pr_link_hit,
         )
         _loading = "guard_review_log"
         from guard_review_log import review_log_hit
@@ -5718,15 +5718,19 @@ def opus_without_grant(tool_input) -> bool:
 # harmless lead or tail (harmless_commands, below). The deny
 # names the command by its kind, never its text. Only the first ask command is held: it is the one that
 # printed before.
-PENDING_ASK = []   # [(rule, reason, matched, command)], at most one
+PENDING_ASK = []   # [(rule, reason, matched, command, verdict)], at most one
 ASK_ALONE_REASON = ("this shell call chains a command that needs the owner's answer (%s) with "
                     "other commands. Run that command alone, in its own call, or drop it. "
                     "(decision ask-commands-run-alone, a command that asks the owner runs alone)")
 
 
-def ask_command(rule: str, reason: str, matched: str, command: str) -> None:
+def ask_command(rule: str, reason: str, matched: str, command: str, verdict: str = "ask") -> None:
+    """Hold one refusal until the other rules have run, so a deny anywhere still wins. `verdict` is what it
+    prints at the end: "ask" only for the cap write (rule agent-model-cap), "deny" for the rules that once asked
+    (decision guard-remedy-not-to-owner). A held deny prints its own reason, chained or not; only the held ask
+    turns into the run-alone deny when the call chains other commands (settle_ask)."""
     if not PENDING_ASK:
-        PENDING_ASK.append((rule, reason, matched, rule + ", " + command))
+        PENDING_ASK.append((rule, reason, matched, rule + ", " + command, verdict))
 
 
 def background_commands(segment: str) -> int:
@@ -5829,14 +5833,14 @@ def harmless_commands(text: str) -> int:
 def settle_ask(tool: str, raw: str) -> None:
     if not PENDING_ASK:
         return
-    rule, reason, matched, command = PENDING_ASK[0]
+    rule, reason, matched, command, verdict = PENDING_ASK[0]
     # An interpreter heredoc (python, node, perl, ruby) is one command: its body is not counted line by line.
     # Strip the RAW command once. A second strip of stripped text reads a stray delimiter line as a new body.
     text = strip_heredoc_bodies(raw, shells_only=True)
     if count_commands(text) > 1:
-        if count_commands(text) - harmless_commands(text) > 1:
+        if verdict == "ask" and count_commands(text) - harmless_commands(text) > 1:
             refuse(tool, "deny", "ask-alone", ASK_ALONE_REASON % command, matched)
-    refuse(tool, "ask", rule, reason, matched)
+    refuse(tool, verdict, rule, reason, matched)
 
 
 def refuse_ready_page(tool: str, tool_input: dict, command: str, where: str) -> None:
@@ -5941,7 +5945,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if subcommand == "worktree-remove":
             refuse(tool, "deny", "shared-tree", WORKTREE_REMOVE_DENY_REASON, matched)
         if subcommand == "worktree-prune":
-            ask_command("shared-tree", WORKTREE_PRUNE_ASK_REASON, matched, "worktree prune")
+            # Prune drops only the record of a worktree whose directory is gone and deletes no file: allowed.
             continue
         if subcommand == "stash" and stash_takes_the_stack(args):
             refuse(tool, "deny", "shared-tree", STACK_DENY_REASON, matched)
@@ -5963,7 +5967,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             # only write this lane's own change to those files, so no ask.
             if names_only_files(subcommand, args, root, segment) and one_place(stripped):
                 continue
-            ask_command("shared-tree", TREE_ASK_REASON, matched, "worktree discard")
+            ask_command("shared-tree", TREE_WORKTREE_REFUSE_REASON, matched, "worktree discard", "deny")
             continue
         refuse(tool, "deny", "shared-tree", TREE_DENY_REASON, matched)
 
@@ -6187,7 +6191,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if hits:
             refuse(tool, "deny", "archive-push-gates-delete", ARCHIVE_GUARD_REASON, "; ".join(hits))  # glossary-ok: the pinned rule id, the step slug
 
-    # 4. A wide delete refuses, and a force push asks.
+    # 4. A wide delete refuses, and a force push is held to the end and then refuses (settle_ask).
     # Split before backslashes turn to slashes, so `it\'s` opens no quote that hides a delete.
     delete_texts = [[delete_text(piece) for segment in split_segments(text)
                      for piece, _ in amp_pieces(segment)] for text in texts]
@@ -6212,29 +6216,29 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     for segment in (part for text in texts for part in split_segments(text)):
         for args, where, overrides in _push_calls(segment, stripped, cwd):
             verdict = push_verdict(args, where, overrides)
-            if verdict == "ask":
-                ask_command("force-push", PUSH_ASK_REASON, "git push " + " ".join(args), "forced push")
+            if verdict == "ask":   # push_verdict's word for a forced push that may reach the default branch: denied
+                ask_command("force-push", PUSH_ASK_REASON if uses_merge_tool(where) else PUSH_ASK_BRANCH_REASON,
+                            "git push " + " ".join(args), "forced push", "deny")
             elif verdict:
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
             elif not read_verb("push", args):
                 # A non-forced push of every branch that may update main or master, or sends a local agent-named
                 # branch (rule push-all-main, refuses), one
-                # that writes main or master by name (rule push-main, asks), an agent-worktree
-                # branch name (rule push-agent-branch, refuses), or an implied destination off the branch's
-                # upstream (rule push-stray-branch, asks). A dry run writes nothing.
+                # that writes main or master by name (rule push-main, refuses), or an agent-worktree
+                # branch name (rule push-agent-branch, refuses). An implied destination off the branch's
+                # upstream (rule push-stray-branch) is allowed. A dry run writes nothing.
                 kind = push_ask_hit(args, where, overrides)
                 if kind == "main":
-                    ask_command("push-main", PUSH_MAIN_REASON, "git push " + " ".join(args),
-                                "push to the default branch")
+                    ask_command("push-main", PUSH_MAIN_REASON if uses_merge_tool(where) else PUSH_MAIN_BRANCH_REASON,
+                                "git push " + " ".join(args),
+                                "push to the default branch", "deny")
                 elif kind == "all":
                     refuse(tool, "deny", "push-all-main", PUSH_ALL_REASON, "git push " + " ".join(args))
                 elif kind == "all-agent":
                     refuse(tool, "deny", "push-all-main", PUSH_ALL_AGENT_REASON, "git push " + " ".join(args))
                 elif kind == "agent":
                     refuse(tool, "deny", "push-agent-branch", PUSH_AGENT_REASON, "git push " + " ".join(args))
-                elif kind == "stray":
-                    ask_command("push-stray-branch", PUSH_STRAY_REASON, "git push " + " ".join(args),
-                                "push to a stray branch")
+                # kind == "stray" (rule push-stray-branch) is allowed: a stray branch is harmless and reversible.
 
     # 5. The environment file. This layer reads the command BEFORE normalization.
     refusal, logged = env_refusal(strip_heredoc_bodies(raw, per_body=True))   # a data body drops, a script body stays
@@ -6269,9 +6273,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
                    "gh pr merge " + merging[0] + " " + verdict)
-        # A green bare merge in a repo that uses the merge tool asks; a deny above still wins.
+        # A green bare merge in a repo that uses the merge tool is denied, held to the end like an ask (settle_ask).
         if cite_where and uses_merge_tool(cite_where):
-            ask_command("bare-merge", BARE_MERGE_REASON, "gh pr merge " + merging[0], "bare merge")
+            ask_command("bare-merge", BARE_MERGE_REASON, "gh pr merge " + merging[0], "bare merge", "deny")
 
     # 6a. A merge-tool call with a role flag its own get_session record does not prove (rule merge-role-proof).
     matched = role_proof_hit(stripped, transcript)
@@ -6328,7 +6332,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # request holds the branch); every other call starts nothing (guard_merge states it).
     pushed = ready_push_hit(stripped, cwd, read_verb)
     if pushed and pushed[0] == "deny":
-        refuse(tool, "deny", "ready-pr-push", pushed[1], pushed[2], closing=READY_PUSH_CLOSING)
+        refuse(tool, "deny", "ready-pr-push", pushed[1], pushed[2])
     elif pushed:
         print(pushed[1], file=sys.stderr)
 
@@ -6345,7 +6349,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         red_reason, red_shown = red_run_reason(matched, kind == "red-run-commit")
         refuse(tool, "deny", "red-run", red_reason, red_shown)
     elif matched and kind == "cd" and PENDING_ASK and PENDING_ASK[0][0] == "force-push":
-        # A forced push after a failed cd already asks (its folder is unknown), and the ask names the push. Let
+        # A forced push after a failed cd is already held (its folder is unknown), and settle_ask names the push. Let
         # settle_ask report that, so a forced push is named first (it also denies when chained: rule ask-alone).
         pass
     elif matched:

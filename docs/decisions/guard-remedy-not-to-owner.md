@@ -7,7 +7,7 @@ Question: where does a Stop refusal's remedy live when the owner sees the refusa
 - Each refusal from `lint/report_guard.py` (the Stop hook that checks each reply) opens with one owner line, except a notes fix (R14; not built; step `notes-fix-no-owner-line`): one plain sentence that names the check and cites this record, `guard-remedy-not-to-owner`.
 - The steps live under that check's heading in `## Steps per check`.
 - No verdict changes. Only the text moves.
-- Scope: Stop refusals only. `hooks/question_form.py` keeps its own text, `DEPARTS_REASON` included. A Stop refusal shows only the miss that `departs_hit` names.
+- Scope: Stop refusals only. Hook-guard verdicts are in decision `guards-never-ask`. `hooks/question_form.py` keeps its own text, `DEPARTS_REASON` included. A Stop refusal shows only the miss that `departs_hit` names.
 - R14, the owner's ruling on notes fixes (2026-11-10 16:22 CST, "fixed my notes question: yes"): a Stop refusal about a session's own notes (feedback log, handoff) is fixed with no line to the owner, since the reply did not change. guard.log still records it. Not built yet. Step `notes-fix-no-owner-line` builds it. Its builder first confirms that a Stop can end with no text.
 
 ## Incident, risk and cost

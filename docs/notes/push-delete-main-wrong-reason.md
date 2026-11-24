@@ -1,0 +1,1 @@
+- push-delete-main-wrong-reason: `git push origin :main` (a delete) is denied under id force-push, with a reason about a forced push overwriting history (hooks/guard_push_delete.py PUSH_ASK_REASON, dispatched from hooks/guard.py judge_shell). Right verdict, wrong words. Main had the same fault. Seen: 2026-11-23 x1

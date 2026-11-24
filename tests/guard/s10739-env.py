@@ -1701,11 +1701,11 @@ sh("env: heredoc-prose-allow: a docker exec timeout 5 node - body with a // comm
 # read in the body, a force push in the body, or a force push in a substitution of an unquoted body.
 sh("env: heredoc-r2: a data body with bash <<EOF and an env read, then sh of that file, denies",
    "cat > /tmp/x.txt <<'OUT'\nbash <<EOF\ncat " + ENV + "\nEOF\nOUT\nsh /tmp/x.txt", "deny", "env-file", cwd=NOGIT)
-chained_ask("env: heredoc-r2: a data body with bash <<EOF and a force push, then sh of that file, denies",
-            "cat > /tmp/x.txt <<'OUT'\nbash <<EOF\ngit push --force origin main\nEOF\nOUT\nsh /tmp/x.txt",
-            cwd=NOGIT)
-chained_ask("env: heredoc-r2: an unquoted cat write with bash <<X and a force push in a substitution, denies",
-            "cat > x.md <<EOF\nbash <<X\n$(git push --force origin main)\nEOF", cwd=NOGIT)
+sh("env: heredoc-r2: a data body with bash <<EOF and a force push, then sh of that file, denies",
+   "cat > /tmp/x.txt <<'OUT'\nbash <<EOF\ngit push --force origin main\nEOF\nOUT\nsh /tmp/x.txt",
+   "deny", "force-push", cwd=NOGIT)
+sh("env: heredoc-r2: an unquoted cat write with bash <<X and a force push in a substitution, denies",
+   "cat > x.md <<EOF\nbash <<X\n$(git push --force origin main)\nEOF", "deny", "force-push", cwd=NOGIT)
 sh("env: heredoc-r2: a python body that runs cat of an env file through subprocess, denies",
    "python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['cat', '" + ENV + "'])\nEOF", "deny", "env-file",
    cwd=NOGIT)

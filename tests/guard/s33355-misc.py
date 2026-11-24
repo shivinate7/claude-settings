@@ -77,7 +77,7 @@ LOG_CHECKS = (
      worktree_home_cross_checkout_override_case),
     ("worktree-home: the cross-checkout read costs one git spawn per write call and none otherwise",
      worktree_home_cross_checkout_cost_case),
-    ("roadmap-one-writer: a push starts one rev-parse, one more for a stray push, symbolic-ref for a refspec, "
+    ("roadmap-one-writer: a push starts one rev-parse, symbolic-ref for a refspec, "
      "HEAD and bare, push.default for bare only, one config read of the remote for a literal main destination, "
      "no read for HEAD:<branch>, a --all or glob push reads the remote's URL and its tracking refs, "
      "one rev-list for each pushed ref not to main or master, "

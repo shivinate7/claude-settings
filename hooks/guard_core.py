@@ -1432,7 +1432,7 @@ def pathspec_from_file_flag(arg: str) -> bool:
 # ------------------------------------------------------------------ which tree the command runs in
 #
 # THE COMMAND IS JUDGED WHERE IT RUNS, NOT WHERE THE HOOK LIVES. A lane is built in a worktree and a
-# discard there loses only that lane's own work, so a worktree earns an "ask". The shared checkout is
+# discard there loses only that lane's own work, so a worktree earns a refusal that tells it to commit on its own branch. The shared checkout is
 # the owner's editor and every other session, so a discard there earns a "deny".
 #
 # The directory is the last `cd <path>` in the command, or a `git -C <path>`, or the shell's own cwd.
@@ -2323,16 +2323,21 @@ def lift_notice() -> str:
     return "override lifted: " + ", ".join(_lifted_rules)
 
 
+# The last words of a refusal that took the place of an ask (decision guard-remedy-not-to-owner): the guard never
+# asks the owner, so a refusal that may be wrong is complied with and reported. One home, read by each family.
+COMPLY_TAIL = "If this refusal looks wrong for your task, comply anyway and say so in your report."
+
+
 def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None, on_lift=None,
-           continue_on_lift: bool = False, closing: str = ""):
-    """Print a deny or an ask and exit, unless an owner override lifts it (decision
+           continue_on_lift: bool = False):
+    """Print a deny (an ask only for the agent-model cap write) and exit, unless an owner override lifts it (decision
     owner-override). A lifted act prints one context line and no decision, so the normal permission flow runs. The
     veto runs before the override is taken, so a call that also holds a never-lifted act spends no override.
     spawn_role is set only on the Opus spawn refusal, the one refusal an Opus override may lift.
     on_lift, when set, runs once when an override lifts the act, so a rule may keep state only for an act that lands.
     continue_on_lift makes a lifted act return True instead of exiting, so the caller can judge the next rule of a
     group (the lane start's rules); any other outcome exits as before.
-    closing is a last sentence a rule wants read after the override line (rule ready-pr-push); empty for every other rule."""
+    A reason that ends with COMPLY_TAIL has it read last, after the override line."""
     vetoed = _vetoed()
     if not vetoed:
         try:  # an import or read failure is no override: the refusal stands
@@ -2357,6 +2362,10 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
                                  separators=(",", ":")))
                 sys.exit(0)
     record(tool, decision, rule, matched)
+    # A reason that ends with COMPLY_TAIL keeps it last: the notice and the override line go before it.
+    comply = COMPLY_TAIL if reason.rstrip().endswith(COMPLY_TAIL) else ""
+    if comply:
+        reason = reason.rstrip()[:-len(comply)]
     if _lifted_rules:  # an earlier rule of this call was lifted: say so inside the refusal, never as a second object
         reason = reason.rstrip() + " (" + lift_notice() + ")"
     try:  # the line the owner types to lift this refusal, or the words that none does; last in the reason
@@ -2365,8 +2374,8 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
         reason = reason.rstrip() + " " + line
     except Exception:
         pass
-    if closing:
-        reason = reason.rstrip() + " " + closing
+    if comply:
+        reason = reason.rstrip() + " " + comply
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",

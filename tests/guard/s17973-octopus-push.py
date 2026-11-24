@@ -187,10 +187,11 @@ oct_allow("a push of a range with no merge", VCS + " push", OCT_PLAIN)
 oct_allow("a push of a clean commit, with a three-parent merge already on the remote", VCS + " push", OCT_REMOTE)
 oct_allow("a push with nothing unpushed, its three-parent merge already on the remote", VCS + " push", OCT_EMPTY)
 
-# Main is out of scope. The push-main ask is queued, not raised, so a deny from this rule would win over it:
-# this case fails if a builder's rule forgets the main exemption.
-sh("octopus-push: a push of main with a three-parent merge keeps its push-main ask",
-   VCS + " push origin main", "ask", PUSH_MAIN_RULE, cwd=OCT_MAIN)
+# Main is out of scope. The push-main refusal is its own rule's, so this rule's deny must not replace it:
+# this case fails if a builder's rule forgets the main exemption. (Decision `guard-remedy-not-to-owner`:
+# a push to main is denied, not asked.)
+sh("octopus-push: a push of main with a three-parent merge is denied by push-main",
+   VCS + " push origin main", "deny", PUSH_MAIN_RULE, cwd=OCT_MAIN)
 
 # A false alarm: the range is what the push adds to the remote. An octopus already on a remote ref is not sent,
 # so a merge that brings it in, or a new branch cut from it, passes. A new octopus above those is still refused.
