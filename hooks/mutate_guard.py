@@ -3525,7 +3525,7 @@ MUTATIONS = [
     # ---- handoff-unread (decision precompact-handoff, item 9): one mutant per arm. The anchors sit in
     # guard.py and in reread_check.py; a "guard" mutant lands in whichever module holds the anchor.
     ("handoff-unread: the refusal is never printed",
-     '        refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % unread, unread)',
+     '        refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % handoff_unread_fields(unread, payload), unread)',
      '        pass',
      "guard", "handoff-unread: after compaction, Bash is refused while the handoff is unread"),
     ("handoff-unread: a failed import of reread_check fails open again",
