@@ -31,6 +31,7 @@ import test_build as roadmap  # noqa: E402  the roadmap fixture: STEP, session_r
 import fnmatch  # noqa: E402  the temp-file cases match merge-live names
 from datetime import datetime as _datetime, timedelta as _timedelta, timezone as _timezone  # noqa: E402  the live file's readAt against the merge commit's time
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
+import test_compliance_probes as aligned  # noqa: E402  the aligned group's record and citing-unit fixture text, one home (lint/test_compliance_probes.py)
 import stale_cites  # noqa: E402  the guard's rule dirs, one home (lint/stale_cites.py)
 import layout  # noqa: E402  where each kind of record lives, one home (lint/layout.py)
 import ruled_store  # noqa: E402  the one reader of the ruling store (lint/ruled_store.py)
@@ -7968,6 +7969,141 @@ class ReadyChecksRun(unittest.TestCase):
         self.assertEqual(len(calls), 1, calls)
         argv = [a for a in calls[0][2:] if a != "--pinned"]
         self.assertEqual(argv, ["checks", "--step", "check invariants", "--step", "records page", "--base", "origin/main"], calls[0])
+
+class ReadyRecordCites(Env):
+    """`merge <pr> --ready` runs the records-and-rules check before the ready mark: the cites action's checks.yml step, named in the base's
+    merge.readyChecks, run by ci-job on the head's tree with the PR's base and body. A PR that changes a record a rule sentence cites, leaves
+    that sentence as it was, and has no `Rules checked:` body line is refused here, so no full CI rerun (about 42 minutes) is spent on it.
+    The fixture runs the real action.yml, read from this repo, and the real probe through a
+    launcher that runs lint/compliance_probes.py in place: nothing from this repo is committed into the fixture. The shared aligned fixture
+    text is lint/test_compliance_probes.py's. A refusal names the probe's own line for the record and the fix. Each case reads the
+    ready mark on the FakeHost (`readies`) and the run's output."""
+
+    CITES_STEP = "Rules and records move together"  # the checks.yml step that uses $/actions/claude-md-cites
+    OTHER_STEP = "Other check"  # a passing step of the same job, for the control that names no cites step
+    RECORD = aligned.ALIGNED_RECORD
+    SLUG = aligned.ALIGNED_ROUND
+    REAL_ACTION = os.path.join(os.path.dirname(HERE), "actions", "claude-md-cites", "action.yml")
+    REAL_PROBES = os.path.join(os.path.dirname(HERE), "lint", "compliance_probes.py")
+    REAL_MERGE_CONFIG = os.path.join(os.path.dirname(HERE), ".github", "stamp.json")
+    REAL_CHECKS = os.path.join(os.path.dirname(HERE), ".github", "workflows", "checks.yml")
+    WORKFLOW = ("name: checks\non: pull_request\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
+                "      - name: %s\n        if: ${{ github.event_name == 'pull_request' }}\n        uses: $/actions/claude-md-cites\n"
+                "      - name: %s\n        run: python3 -c 'pass'\n") % (CITES_STEP, OTHER_STEP)
+    LAUNCHER = ("import os, runpy, sys\nREAL = %r\nsys.path.insert(0, os.path.dirname(REAL))\nrunpy.run_path(REAL, run_name='__main__')\n"
+                % REAL_PROBES)  # the probe's own folder first, so its sibling modules import; the probe file itself is not copied
+
+    def setUp(self):
+        super().setUp()
+        with open(self.REAL_ACTION, encoding="utf-8") as f:
+            action = f.read()  # the action as this repo ships it, so the fixture runs the real steps
+        unit, _line = aligned.unit_file(aligned.ALIGNED_CITE)
+        self.main_moves({".github/stamp.json": complete_config(readyChecks=[self.CITES_STEP]), ".github/workflows/checks.yml": self.WORKFLOW,
+                         "actions/claude-md-cites/action.yml": action, "lint/compliance_probes.py": self.LAUNCHER, "CLAUDE.md": unit,
+                         self.RECORD: aligned.aligned_record(aligned.ALIGNED_LINE38)})
+
+    def main_moves(self, files):
+        """Commit `files` to main and push it, then merge main into feat, so the PR's diff holds only what a case's feat_moves adds."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        for path, text in files.items():
+            put(os.path.join(o, path), text)
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "main moves"); sh(o, "git", "push", "-q", "origin", "main")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
+
+    def feat_moves(self, files):
+        """Commit `files` to the PR's branch and push it: the PR's own change."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        for path, text in files.items():
+            put(os.path.join(o, path), text)
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat moves"); sh(o, "git", "push", "-q", "origin", "feat")
+
+    def ready(self, body=""):
+        """`merge 7 --ready` on this PR, a draft whose body is `body` (None: the body cannot be read). -> (rc, stdout and stderr together)."""
+        self.host.draft = True
+        self.host.body = body
+        return self.run_merge("7", "--ready")
+
+    def changed_record(self):
+        return {self.RECORD: aligned.aligned_record(aligned.ALIGNED_LINE38_NEW)}  # the record's line 38 moves; its citing sentence does not
+
+    def assert_scope(self, record):
+        """Scope before the subject: the PR changes the cited record when `record` is True, and no cited record otherwise; the citing
+        sentence's file (CLAUDE.md) is never changed. Read from the checkout's refs, the diff the probe reads."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        paths = set(sh(self.co, "git", "diff", "--name-only", "origin/main", "origin/feat").split())
+        self.assertEqual(("CLAUDE.md" in paths, self.RECORD in paths), (False, record), "scope: the PR changes %s" % sorted(paths))
+
+    def test_a_cited_record_changed_without_the_rules_line_is_refused_before_the_ready_mark(self):
+        self.feat_moves(self.changed_record())
+        self.assert_scope(record=True)
+        rc, out = self.ready()
+        gaps = [ln for ln in out.splitlines() if "the record changed and this sentence did not" in ln]
+        self.assertTrue(any(self.SLUG in ln for ln in gaps), "the refusal does not name the cited record %s:\n%s" % (self.SLUG, out))
+        self.assertIn("Rules checked:", out, "the refusal does not name the Rules checked fix:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.host.readies, [], "the ready mark went ahead with a cited record changed and no Rules checked line:\n" + out)
+
+    def test_the_same_pr_passes_the_check_once_its_body_carries_the_rules_checked_line(self):
+        self.feat_moves(self.changed_record())
+        self.assert_scope(record=True)
+        rc, out = self.ready(body=aligned.ALIGNED_RULES_CHECKED)
+        self.assertIn("pass %s" % self.CITES_STEP, out, "the records-and-rules check did not pass with its Rules checked line:\n" + out)
+        self.assertEqual((rc, self.host.readies), (0, [7]), "the PR with its Rules checked line was not marked ready:\n" + out)
+
+    def test_a_pr_that_changes_no_cited_record_passes_the_check_and_is_marked_ready(self):
+        self.feat_moves({"README.md": "a change that cites no record\n"})
+        self.assert_scope(record=False)
+        rc, out = self.ready()
+        self.assertIn("pass %s" % self.CITES_STEP, out, "the records-and-rules check did not pass on a PR that cites no changed record:\n" + out)
+        self.assertEqual((rc, self.host.readies), (0, [7]), "a PR that changes no cited record was not marked ready:\n" + out)
+
+    def test_the_cites_step_adds_no_ci_job_start_of_its_own(self):  # the cost pin: its probe runs inside its job's one ci-job start (AlignedCost pins the probe's starts)
+        self.main_moves({".github/stamp.json": complete_config(readyChecks=[self.CITES_STEP, self.OTHER_STEP])})
+        self.feat_moves({"README.md": "a change that cites no record\n"})
+        starts, real = [], merge.sh
+        def counted(args, *a, **k):
+            if args[1:2] == [merge.CI_JOB]:
+                starts.append(list(args))
+            return real(args, *a, **k)
+        with unittest.mock.patch.object(merge, "sh", counted):
+            _rc, out = self.ready()
+        self.assertEqual(len(starts), 1, "the ready run started ci-job %d times for one job of two steps, the cites step included:\n%s\n%s" % (len(starts), starts, out))
+
+    def test_an_unreadable_body_is_unknown_naming_the_body_and_refuses_the_ready_mark(self):
+        self.feat_moves(self.changed_record())
+        self.assert_scope(record=True)
+        rc, out = self.ready(body=None)
+        self.assertIn("the pull request body cannot be read", out, "the refusal does not name the unreadable body:\n" + out)
+        self.assertIn("unknown %s" % self.CITES_STEP, out, "the records-and-rules check did not read as unknown:\n" + out)
+        self.assertNotEqual(rc, 0, out)
+        self.assertEqual(self.host.readies, [], "the ready mark went ahead with an unreadable body:\n" + out)
+
+    def test_the_merge_config_names_the_cites_step_as_checks_yml_writes_it(self):
+        import workflow_steps  # the one workflow reader (lint/workflow_steps.py), as ci-job reads the file
+        with open(self.REAL_CHECKS, encoding="utf-8") as f:
+            text = f.read()
+        found = []
+        for job in re.findall(r"^  ([\w-]+):\s*$", text.split("\njobs:", 1)[-1], re.M):
+            for step in workflow_steps.step_blocks(workflow_steps.job_block(text, job)):
+                if (workflow_steps.step_key(step, "uses") or "").split(" #")[0] == "$/actions/claude-md-cites":
+                    found.append((job, workflow_steps.step_key(step, "name")))
+        self.assertEqual(len(found), 1, "checks.yml does not hold one step that uses the cites action: %r" % found)
+        job, name = found[0]
+        want = name if job == "checks" else "%s:%s" % (job, name)  # ready_job_groups: an entry names its job only when it is not `checks`
+        with open(self.REAL_MERGE_CONFIG, encoding="utf-8") as f:
+            ready = json.load(f)["merge"].get("readyChecks") or []
+        self.assertIn(want, ready, "the merge config's readyChecks does not name the cites step %r: %r" % (want, ready))
+
+    def test_a_ready_list_that_does_not_name_the_cites_step_marks_ready_as_before(self):  # the control: today's behaviour without the entry
+        self.main_moves({".github/stamp.json": complete_config(readyChecks=[self.OTHER_STEP])})
+        self.feat_moves(self.changed_record())
+        self.assert_scope(record=True)
+        rc, out = self.ready()
+        self.assertIn("pass %s" % self.OTHER_STEP, out, "the other ready check did not pass:\n" + out)
+        self.assertEqual((rc, self.host.readies), (0, [7]), "a ready list without the cites step refused a PR the cites probe would refuse:\n" + out)
+
 
 class ClaimSkipped(Env):
     """A base with no stamp kinds: the claim and the numbering check are skipped, and stamp.mjs never runs."""

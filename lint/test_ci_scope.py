@@ -1368,13 +1368,14 @@ class LintStepWorkflow(unittest.TestCase):
         self.scope = job_block(self.text, "scope")
 
     def step_if(self, name):
-        """The `if:` of the `checks` job's step named `name`. A missing step, or a step with no if:, fails by name."""
+        """The `if:` of the `checks` job's step named `name`, without its keep-running guard (split.keep_running_off). A missing step,
+        or a step with no if:, fails by name."""
         self.assertIsNotNone(self.checks, "checks.yml has no checks job")
         for s in step_blocks(self.checks):
             if step_key(s, "name") == name:
                 raw = step_key(s, "if")
                 self.assertIsNotNone(raw, f"the step {name!r} has no if:")
-                return raw
+                return split.keep_running_off(raw)
         self.fail(f"the checks job has no step named {name!r}")
 
     def test_each_lint_step_names_its_flag_and_the_pull_request_condition(self):
@@ -1569,10 +1570,10 @@ class MutationReport(unittest.TestCase):
         self.assertEqual(push["mutation_report"], "true", f"a push: {push}")
 
 
-# The guard-inputs gate. The three Windows guard shards (checks-windows-guard, -2, -3) run only when a diff touches a guard input:
+# The guard-inputs gate. The Windows guard shards (checks-windows-guard and its -2 to -n copies) run only when a diff touches a guard input:
 # windows_guard in ci-scope.sh, read from .github/guard-inputs.txt. The gate is read from checks.yml's own step condition, so each
 # case states what the workflow does with the scope outputs, not the value of one output. Cost: parses checks.yml once per call.
-GUARD_SHARDS = ("checks-windows-guard", "checks-windows-guard-2", "checks-windows-guard-3")
+GUARD_SHARDS = split.WINDOWS_GUARD_JOBS  # the family's count, one home: SHARD_COUNTS in lint/test_windows_split.py
 # Flags the old script sets true for SNAPSHOT_DIFFS, each run() with its default arguments. windows_guard is left out of the
 # comparison: it is the one output the gate adds. Recorded on the script before the gate existed.
 SNAPSHOT_DIFFS = [
@@ -1717,6 +1718,85 @@ class WindowsGuardShards(unittest.TestCase):
                 got = run(paths, **kw)
                 have = sorted(n for n, v in got.items() if v == "true" and n != "windows_guard")
                 self.assertEqual(have, sorted(want), f"a flag changed for {paths}: {got}")
+
+
+# The merge and rest shards read the flags below. Each named path sets the merge or the rest flag, the one whose shard runs the suite
+# that path loads, and a docs-only diff sets neither. Controls: green on the old script.
+class WindowsMergeAndRestFlags(unittest.TestCase):
+    NAMED_PATHS = ("merge/merge.py", "hooks/guard.py", "bin/merge", ".github/workflows/checks.yml", ".github/scripts/ci-scope.sh")
+
+    def test_a_docs_only_diff_sets_neither_the_merge_nor_the_rest_flag(self):
+        for paths in (["docs/notes/n.md"], ["README.md", "docs/map/x.md"]):
+            with self.subTest(paths=paths):
+                got = run(paths)
+                for flag in ("checks_windows_merge", "checks_windows_rest"):
+                    self.assertEqual(got[flag], "false", f"{flag} is {got[flag]} for {paths}: {got}")
+
+    def test_each_named_path_sets_the_merge_or_the_rest_flag(self):
+        for path in self.NAMED_PATHS:
+            with self.subTest(path=path):
+                got = run([path])
+                self.assertTrue("true" in (got["checks_windows_merge"], got["checks_windows_rest"]), f"{path} sets neither flag: {got}")
+
+
+ROOT = os.path.normpath(os.path.join(HERE, ".."))
+SHARD_FLAGS = ("checks_windows_merge", "checks_windows_rest", "checks_windows_rest_2")
+_SHARD_FLAGS = {}  # path -> run()'s output for a diff that touches that path alone, so each path runs once
+
+
+def shard_flags_of(path):
+    """run()'s output for a diff that touches `path` alone, cached: a named case and the closure share the one run."""
+    if path not in _SHARD_FLAGS:
+        _SHARD_FLAGS[path] = run([path])
+    return _SHARD_FLAGS[path]
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class WindowsShardFailSafe(unittest.TestCase):
+    """The narrow rule's fail-safe: a path no arm names sets every shard flag, so a file the table misses still runs the shards."""
+
+    def test_a_path_no_arm_names_sets_every_shard_flag(self):
+        # Control: the default arm of ci-scope.sh sets every flag for a path no arm names.
+        got = shard_flags_of("zz-unnamed/never-a-real-path.xyz")
+        self.assertEqual([f for f in SHARD_FLAGS if got[f] != "true"], [], f"a path no arm names leaves a shard flag off: {got}")
+
+
+# The net under the narrow pull-request rule. A scheduled run (the daily, checks.yml's cron) and a manual dispatch set every Windows
+# flag whatever the diff, so a Windows break that a narrowed pull request left out still runs there.
+WINDOWS_FLAGS = ("checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_windows_rest_2", "checks_windows_sweep",
+                 "pointer_windows", "windows_guard")
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class WindowsFlagsOnScheduleAndDispatch(unittest.TestCase):
+    """Each case runs with a real base sha and with an empty one: CI gives a scheduled run no pull-request base, so BASE_SHA is empty."""
+
+    def assert_pull_request_is_narrow(self, paths):
+        # Scope first: the same diff on a pull request leaves the merge and rest shards off, so the flags checked below are the net.
+        narrow = run(paths)
+        for flag in ("checks_windows_merge", "checks_windows_rest"):
+            self.assertEqual(narrow[flag], "false", f"a pull request of {paths} sets {flag}, so it is not the narrow case: {narrow}")
+
+    def assert_every_windows_flag_on(self, event, paths):
+        for base in ("auto", ""):
+            with self.subTest(event=event, base=base):
+                got = run(paths, event=event, base=base)
+                absent = [f for f in WINDOWS_FLAGS if f not in got]
+                self.assertEqual(absent, [], f"a {event} run of {paths} writes no output for {absent}, so no shard reads it: {got}")
+                off = [f for f in WINDOWS_FLAGS if got[f] != "true"]
+                self.assertEqual(off, [], f"a {event} run of {paths} leaves a Windows flag off, so that shard is skipped: {got}")
+
+    def test_a_scheduled_or_dispatched_run_sets_every_windows_flag_for_an_empty_diff(self):
+        for event in ("schedule", "workflow_dispatch"):
+            self.assert_every_windows_flag_on(event, [])
+
+    def test_a_scheduled_run_sets_every_windows_flag_for_a_docs_only_diff(self):
+        self.assert_pull_request_is_narrow(["docs/notes/n.md"])
+        self.assert_every_windows_flag_on("schedule", ["docs/notes/n.md"])
+
+    def test_a_dispatched_run_sets_every_windows_flag_for_a_docs_only_diff(self):
+        self.assert_pull_request_is_narrow(["docs/notes/n.md"])
+        self.assert_every_windows_flag_on("workflow_dispatch", ["docs/notes/n.md"])
 
 
 if __name__ == "__main__":

@@ -952,8 +952,9 @@ PR_NUMBER = re.compile(r"[0-9]+\Z")
 PR_URL = re.compile(r"/pull/([0-9]+)")
 CI_VALUE_FLAGS = frozenset(("-R", "--repo", "--hostname", "-C", "--session", "-b", "--body", "-F", "--body-file",
                             "-t", "--subject", "-A", "--author-email", "--match-head-commit", "-c", "--comment"))
-CI_REMEDY = ("Set a one-time send_later check-in for this wait (rule git-ci-wait-checks-in), then stop. "
-             "Set the next one after each red CI verdict, wider apart.")
+CI_REMEDY = ("The CI watcher wakes this session on red or green. As the fallback, set one one-time send_later check-in "
+             "at the run's expected end (rule git-ci-wait-checks-in), then stop. Set the next one after each red CI "
+             "verdict, never past 55 minutes.")
 
 
 def unquoted(command):

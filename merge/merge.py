@@ -263,7 +263,7 @@
   merge --role TIER       cloud only: record this session's merge role (batch-runner, lane with `--step SLUG`, the cs-step slug of the session's own
                           record, or standing: a coordinator, triage or the consultant merges only its own pull request, see standing_refusal). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role). A lane's confirm needs --head and runs only on its own ready pull request: a head ref of that step
-                          (lane_own_pr_refusal). A lane marks its own draft ready once, with --role, --step and --ready in one call, on a pull request whose head is that step's lane branch. A local session reads the role the launcher
+                          (lane_own_pr_refusal). A lane marks its own draft ready after its review, and again after any return to draft, with --role, --step and --ready in one call, on a pull request whose head is that step's lane branch. A local session reads the role the launcher
                           (bin/claude-role) recorded in its role file instead: a session with its own role file runs `--confirm` only when
                           that file names batch-runner, and one the launcher started (CS_SESSION_ROLE set) with no matching own file is refused.
                           A session with neither is as it was, whatever other sessions' files are on disk.
@@ -450,6 +450,19 @@ def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False, ra
 
 def git(cwd, *a, input=None):
     return sh(["git", "-C", cwd, *a], input=input)
+
+def merge_dates(wt, *shas):
+    """The environment for a commit made of `shas`: author and committer dates both the latest committer date among them, so a rerun of one head and one
+    tip builds the same commit whatever date the environment holds. None when a date cannot be read: the commit then takes the clock."""
+    c, out = git(wt, "show", "-s", "--format=%ct", *shas)
+    try:
+        when = max(int(x) for x in out.split())
+    except ValueError:
+        return None
+    if c:
+        return None
+    date = f"@{when} +0000"
+    return {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
 
 def ancestor(cwd, tip, base):
     """True when `tip` is reachable from `base`, False when it is not, None when git could not tell. A shallow clone
@@ -1391,8 +1404,7 @@ class Host:
             c, out = self.api(f"actions/jobs/{job['id']}/logs")
             if c:
                 raise Stop(f"reading the log of job {job['id']} of run {run_id} failed: {out} " + UNKNOWN_CITE)
-            found = [(t, failing_line(t)) for t in out.splitlines()]
-            found = [(t, p) for t, p in found if p is not None]
+            found = failing_log_lines(out)
             if not any(file or case for _t, (file, case) in found):
                 unread.append(f"{name} failure, its log gave no case or file")
             elif any(not (file or case) and not UNITTEST_SUMMARY.fullmatch(LOG_PREFIX.sub("", t, count=1).rstrip()) for t, (file, case) in found):
@@ -3800,19 +3812,21 @@ MUTATE_SKIPPED = "mutation test run skipped here: it runs at the lane's hand-off
 
 def mutate_report_counts(out):
     """-> (killed, survived, unknown, unread, tally, wrong) of a mutation test run's stdout, or None when it holds no report. Two forms: the per-file
-    table of hooks/mutate_shared.format_report (columns file mutants killed crashed survived rate silent; unknown is the crashed column), and the tally
-    line that run_mutants prints, which the job's own command ends with (`K of N mutations killed (S survived, W wrong cause, X skipped, U unknown)`;
-    `, U unknown` prints only when U is not 0, and `tally` is True). The tally's counts are read by their labels, not by the whole line, so this
+    table of hooks/mutate_shared.format_report (columns file mutants killed crashed timeout survived rate silent; unknown is crashed + timeout: a
+    timed-out mutant is no kill and no survivor, so it still fails the lint), and the tally line that run_mutants prints, which the job's own command
+    ends with (`K of N mutations killed (S survived, W wrong cause, X skipped, U unknown, T timeout)`; `, U unknown` and `, T timeout` print only when
+    not 0, and `tally` is True). A table with four count columns does not match, so it reads as no report and fails the lint: the run's own stdout is the only input,
+    and a resumed leg reuses saved per-mutant verdicts, never a saved report. The tally's counts are read by their labels, not by the whole line, so this
     parser holds no copy of the format that hooks/mutate_shared.run_mutants prints (that module's edit is refused to a builder: a debt of one
     shared home). `wrong` is the tally's wrong-cause count, 0 for a table. `unread` counts the table's `UNKNOWN (reason)` rows: a file that read no mutant."""
-    rows = re.findall(r"^\S+[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+\d+%", out, re.M)
+    rows = re.findall(r"^\S+[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+\d+%", out, re.M)  # mutants killed crashed timeout survived
     unread = len(re.findall(r"^\S+[ \t]+UNKNOWN \(", out, re.M))
     if rows:
-        return sum(int(r[1]) for r in rows), sum(int(r[3]) for r in rows), sum(int(r[2]) for r in rows), unread, False, 0
+        return sum(int(r[1]) for r in rows), sum(int(r[4]) for r in rows), sum(int(r[2]) + int(r[3]) for r in rows), unread, False, 0
     line = re.search(r"^(\d+) of \d+ mutations killed \((.*)\)\s*$", out, re.M)
     if line:
-        by_label = {label: int(n) for n, label in re.findall(r"(\d+) (survived|wrong cause|skipped|unknown)", line.group(2))}
-        return int(line.group(1)), by_label.get("survived", 0), by_label.get("unknown", 0), unread, True, by_label.get("wrong cause", 0)
+        by_label = {label: int(n) for n, label in re.findall(r"(\d+) (survived|wrong cause|skipped|unknown|timeout)", line.group(2))}
+        return int(line.group(1)), by_label.get("survived", 0), by_label.get("unknown", 0) + by_label.get("timeout", 0), unread, True, by_label.get("wrong cause", 0)
     return (0, 0, 0, unread, False, 0) if unread else None
 
 MUTATE_LOAD_MAX_FACTOR = 4.0  # most a shard's cap grows under load: a stuck run still ends in bounded time (unmeasured; a first value)
@@ -3942,7 +3956,7 @@ def mutate_run_check(wt):
             tail = out.splitlines()[-TOUCHED_TAIL_LINES:]  # the cause is the last stdout lines (mutate_guard prints `ERROR ...`); the whole stdout would bury it
             failures.append("\n".join([f"the mutation test run exited {'at its timeout' if c is None else c} and printed no report that can be read"
                                        + ("; last stdout lines:" if tail else "; it printed no stdout"), *tail]))
-        # A table is judged on its counts at any exit code. A tally is the command's own verdict, so CI is red on its nonzero exit, and run_mutants exits 1 on any survivor, wrong cause or unknown.
+        # A table is judged on its counts at any exit code. A tally is the command's own verdict, so CI is red on its nonzero exit, and run_mutants exits 1 on any survivor, wrong cause, unknown or timeout.
         if tally and c:
             failures.append(f"the mutation test run exited {c} on a tally of killed {killed}, survived {survived}, wrong cause {wrong}, unknown {unknown}, and CI fails the job on that exit")
         if survived:
@@ -4256,14 +4270,16 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
                     elif base != default:
                         main_in_skip = "base is not the default branch"
         if lacks_tip and not main_in_skip:
-            c, made = git(wt, *identity(wt), "commit-tree", merged[0], "-p", head, "-p", merged[1], "-m", base_merge_message(base, info["branch"]))
+            c, made = sh(["git", "-C", wt, *identity(wt), "commit-tree", merged[0], "-p", head, "-p", merged[1], "-m", base_merge_message(base, info["branch"])],
+                         env=merge_dates(wt, head, merged[1]))  # dated by the head and the tip, so a rerun builds the same M and the job's key holds
             if c:
                 raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the merge of the head with {base} could not be made: {made} {LANE_LINT_CITE}")
             pushed_merge = made.strip()
         # The lint tree is a merge commit of the base (first parent) and the head (second; M when pushed), so every file is the merged copy and HEAD is clean: a step
         # that diffs the base against HEAD or the work tree reads only the lane's own changes, and the history steps see the lane's commits under one merge commit.
         c, made = sh(["git", "-C", wt, "-c", "user.name=merge-lane-lint", "-c", "user.email=merge-lane-lint@invalid", "commit-tree", merged[0],
-                      "-p", merged[1], "-p", pushed_merge or head, "-m", f"lane-lint merge of {head[:9]} into {base}"])
+                      "-p", merged[1], "-p", pushed_merge or head, "-m", f"lane-lint merge of {head[:9]} into {base}"],
+                     env=merge_dates(wt, head, merged[1]))
         merge_commit = made.strip()
         c2, out = (c, made) if c else git(wt, "checkout", "-q", "--detach", merge_commit)
         if c2:
@@ -5081,6 +5097,7 @@ def ready_line_pattern(fmt):
     parts = re.split(r"\{(\w+)\}", fmt)
     return re.compile("".join(re.escape(part) if i % 2 == 0 else f"(?P<{part}>{READY_LINE_FIELDS[part]})" for i, part in enumerate(parts)))
 
+RECORDS_STEP = "Rules and records move together"  # the checks.yml step that uses $/actions/claude-md-cites; it reads the PR body, so a run with no body skips it (bin/cheap-lints)
 READY_JOB_PREFIX = re.compile(r"^([a-z][a-z0-9_-]*):(.+)$")  # a `<job>:<step>` ready check; a step name that does not open this way is a step of job `checks`
 
 STEP_LINE = re.compile(r"^(PASS \(cached\)|PASS|FAIL|SKIP|skipped|unknown|not run)\s+(.*)$")  # PASS (cached): a pass that ci-job's rerun cache answered
@@ -5093,9 +5110,13 @@ def step_verdicts(raw, checks, state):
     step broke. The caller (run_ready_checks) refuses on any state other than "pass", whatever the lines read."""
     rows = []
     for name in checks:
-        hit = next((m for m in (STEP_LINE.match(l.rstrip()) for l in raw) if m and (m.group(2) == name or m.group(2).startswith(name + ":"))), None)
+        at = next((i for i, m in enumerate(STEP_LINE.match(l.rstrip()) for l in raw) if m and (m.group(2) == name or m.group(2).startswith(name + ":"))), None)
+        hit = STEP_LINE.match(raw[at].rstrip()) if at is not None else None
         word = hit.group(1) if hit else None
         detail = hit.group(2)[len(name):].lstrip(": ") if hit else f"ci-job printed no line for this check (ci-job: {state})"
+        if hit:  # the indented lines under it: a local action's own output, which ci-job prints under a step that is not a pass (bin/ci-job local_action)
+            under = [l.rstrip() for l in raw[at + 1:]]
+            detail = "\n".join([detail, *under[:next((i for i, l in enumerate(under) if not l.startswith("  ")), len(under))]])
         if word in ("PASS", "PASS (cached)"):
             rows.append(("pass", name, detail))
         elif word == "SKIP":
@@ -5149,18 +5170,19 @@ def ready_job_groups(checks):
         groups.setdefault(m.group(1) if m else "checks", []).append((entry, m.group(2) if m else entry))
     return groups
 
-def pre_ready_rows(wt, n, base, checks, pre):
+def pre_ready_rows(wt, n, base, checks, pre, body=None):
     """The pre-ready run: one ci-job run per job of `merge.readyChecks` `checks` in the tree `wt` (ready_job_groups), then, when `pre` is (root, host, info), the debt-close lint
     and the open-PR clash of the PR's head info["head"] (the lint reads it through `wt`'s git), each once. Prints one verdict line per check, `pass NAME`, `fail NAME: why` or `unknown NAME: why`, all before any
     refusal; NAME is the declared entry.
     -> (rows, (state, lines, log)): rows of (verdict, name, detail), and the jobs' ci_job_run answers combined: state fail over unknown over pass, lines and log joined.
     Each job's steps are read from that job's own lines, so a step name two jobs hold reads only its own job.
-    Cost: one ci-job run per job, one debt-close lint (a scratch worktree and one Retire test run per closed debt), one cross_measure; no file but ci-job's log and the temporary worktrees."""
+    Each job's run gets the PR body (info["body"], else `body`, which a run with no `pre` passes) as PR_BODY, which the records-and-rules step (actions/claude-md-cites, a ready check by name) reads; with no body it reads unknown when it finds a gap.
+    Cost: one ci-job run per job (a ready check that names a local action adds no run of its own: its three probe steps are three bin/verdict starts and shells inside that run, a git diff, and one live GitHub read per Facts claim, which reads unknown when it fails), one debt-close lint (a scratch worktree and one Retire test run per closed debt), one cross_measure; no file but ci-job's log and the temporary worktrees."""
     rows, states, lines, log = [], [], [], []
     for job, group in ready_job_groups(checks).items():
         raw = []
         args = [job, "--pinned", *[a for _, bare in group for a in ("--step", bare)], "--base", f"origin/{base}"]
-        state, job_lines, job_log, _ = ci_job_run(wt, *args, raw=raw)
+        state, job_lines, job_log, _ = ci_job_run(wt, *args, raw=raw, pr_body=pre[2].get("body") if pre else body)  # the records-and-rules check reads the body; a body that is None is unread, and its probe reads unknown
         states.append(state)
         lines += job_lines
         log += job_log
@@ -7138,6 +7160,21 @@ def failing_line(text):
         return None, GUARD_NOTE.sub("", rest.split("]", 1)[1].strip()).strip() or None
     return None, None
 
+LOG_DETAIL = re.compile(r"##\[error\]|AssertionError")  # a line that names a failure but starts with no FAIL or ERROR: the runner's error annotation, a pytest assertion
+
+def failing_log_lines(text, detail=False):
+    """-> [(line, parsed)] for each failing line of the job log TEXT, in log order: `line` as the log gives it, `parsed` as failing_line gives it. Host.failed_lines
+    reads a log through this, and so does hooks/ci_wake.py (the one home of the log reader). `detail` also keeps a line that LOG_DETAIL finds (parsed (None, None)),
+    for a wake that shows the lines to a reader rather than parsing a case from them."""
+    found = []
+    for t in text.splitlines():
+        p = failing_line(t)
+        if p is None and detail and LOG_DETAIL.search(LOG_PREFIX.sub("", t, count=1)):
+            p = (None, None)
+        if p is not None:
+            found.append((t, p))
+    return found
+
 def touches_lines(h, run, cases, files):
     """-> (lines, unknown): the lines of `merge --touches` and why it is unknown, or None. A line per open pull request that touches a named file or
     holds a named case in a `+` line of its patch (a case a run's failing lines name also matches a context line), ascending by number; the one no-match line when there is none and nothing is unknown. Paths are
@@ -7909,7 +7946,7 @@ def build_parser():
     p.add_argument("--touched-tests", action="store_true", help="with --lane-lint: after the lint passes, run the test files the diff touches in the lint worktree; a failing test refuses, a timeout is unknown (lifted by --lint-unknown-ok)")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner, lane with --step, or standing)")  # glossary-ok: existing name
     p.add_argument("--step", metavar="SLUG", help="with --role lane: the cs-step slug of this session's own record; the lane's confirm runs only on a pull request whose head is that step's lane branch")
-    p.add_argument("--ready", action="store_true", help="mark a lane's draft pull request ready, once: on the default branch a merge of origin/<base> into a head that lacks its tip, the records step and the repo's ready checks, then close each open pull request the body names as replaced, then the host's mark; a ready pull request is left as it is; merges no pull request, takes no lock")
+    p.add_argument("--ready", action="store_true", help="mark a lane's draft pull request ready (after its review, and again after any return to draft): on the default branch a merge of origin/<base> into a head that lacks its tip, the records step and the repo's ready checks, then close each open pull request the body names as replaced, then the host's mark; a ready pull request is left as it is; merges no pull request, takes no lock")
     p.add_argument("--fast-checks", action="store_true", help="the pre-ready run on a dry merge of the pull request onto its base, read-only: one pass, fail or unknown line per check; takes no lock, pushes nothing, marks nothing ready, posts nothing")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
@@ -8279,7 +8316,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 raise Stop(why + " Nothing was claimed or pushed. " + ROLE_CITE)
         if a.fast_checks:  # before any lock: it reads a dry merge and writes nothing
             return fast_checks(root, cfg, a.pr, h, info)
-        if a.ready:  # before any lock: a lane marks its own draft ready once, and a ready pull request is left as it is
+        if a.ready:  # before any lock: a lane marks its own draft ready after its review and again after any return to draft, and a ready pull request is left as it is
             if os.environ.get("CLAUDE_CODE_REMOTE") == "true" and read_merge_role() == STANDING_ROLE:  # the session --confirm reads the link for (standing_refusal)
                 note = session_link_note(info)
                 if note:
