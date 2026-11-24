@@ -41,6 +41,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 from workflow_steps import CHECKS_SUITE_JOBS, gating_text, job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
 from test_install_src_shards import list_cases  # noqa: E402  the one home of the install suite's case selection (--list)
+import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
 CHECKS = os.environ.get("CHECKS_YML") or os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
 MIN_JOBS = 3
 
@@ -499,24 +500,47 @@ FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "check
          "code", "guard", "sweep", "shoot"]
 
 
-def eval_if(expr, event, flag_value, draft=False, nightly_skip="", push_skip=""):
-    """Evaluate an `if:` (a job's, a step's or a scope condition) for an event with every scope output set to flag_value and
-    github.event.pull_request.draft set to draft. Reads only !cancelled(), success(), always(), &&, ||, !, parentheses,
-    == and != on github.event_name, github.event.pull_request.draft, needs.scope.outputs.*, and the skip output of the two
-    skip jobs (nightly_skip and push_skip: the value given, '' when unset, as GitHub reads an output no step set)."""
+def eval_value(expr, event, flag_value, draft=False, nightly_skip="", push_skip="", results=None, needs=(), steps=None, values=None,
+               outputs=None):
+    """The value of an `${{ }}` expression, as eval_if reads it. Every scope output reads flag_value, except the outputs named in
+    `values` ({output: value}). With `results` None every status function reads True, as eval_if always has. With `results`
+    ({job: result}), needs.<job>.result reads that job's result, and the status functions read the jobs in `needs`: success() is
+    all of them succeeded, failure() any failed, cancelled() False (the run is not cancelled), always() True. With `steps`
+    ({step id: {output: value}}), steps.<id>.outputs.<name> reads that output. With `outputs` ({job: {output: value}}),
+    needs.<job>.outputs.<name> reads that job's output. Any other reference raises, so a case never reads
+    a value it did not set. Reads only !cancelled(), success(), always(), &&, ||, !, parentheses, == and != on github.event_name,
+    github.event.pull_request.draft, needs.scope.outputs.*, and the skip output of the two skip jobs (nightly_skip and push_skip:
+    the value given, '' when unset, as GitHub reads an output no step set)."""
     e = expr.strip()
     if e.startswith("${{") and e.endswith("}}"):
         e = e[3:-2]
     e = e.replace("github.event.pull_request.draft", repr(draft))
-    e = e.replace("!cancelled()", "True").replace("success()", "True").replace("always()", "True")
+    if results is None:
+        e = e.replace("!cancelled()", "True").replace("success()", "True").replace("always()", "True")
+    else:
+        e = e.replace("!cancelled()", "True").replace("cancelled()", "False").replace("always()", "True")
+        e = e.replace("success()", repr(all(results[j] == "success" for j in needs)))
+        e = e.replace("failure()", repr(any(results[j] == "failure" for j in needs)))
     e = e.replace("&&", " and ").replace("||", " or ")
     e = e.replace("github.event_name", repr(event))
-    e = re.sub(r"needs\.scope\.outputs\.\w+", repr(flag_value), e)
+    e = re.sub(r"needs\.scope\.outputs\.(\w+)", lambda m: repr((values or {}).get(m.group(1), flag_value)), e)
     # Only the two skip jobs' skip outputs are read. Any other job's output stays unread, so the reader raises on it, as before.
     e = re.sub(rf"needs\.{re.escape(NIGHTLY_SKIP_JOB)}\.outputs\.skip\b", repr(nightly_skip), e)
     e = re.sub(rf"needs\.{re.escape(PUSH_SKIP_JOB)}\.outputs\.skip\b", repr(push_skip), e)
+    if results is not None:
+        e = re.sub(r"needs\.([\w-]+)\.result", lambda m: repr(results[m.group(1)]), e)
+    if outputs is not None:
+        e = re.sub(r"needs\.([\w-]+)\.outputs\.([\w-]+)", lambda m: repr(outputs[m.group(1)][m.group(2)]), e)
+    if steps is not None:
+        e = re.sub(r"steps\.([\w-]+)\.outputs\.([\w-]+)", lambda m: repr(steps[m.group(1)][m.group(2)]), e)
     e = re.sub(r"!(?!=)", " not ", e)
-    return bool(eval(e, {"__builtins__": {}}))
+    return eval(e, {"__builtins__": {}})
+
+
+def eval_if(expr, event, flag_value, draft=False, nightly_skip="", push_skip=""):
+    """Evaluate an `if:` (a job's, a step's or a scope condition) for an event with every scope output set to flag_value and
+    github.event.pull_request.draft set to draft. Reads what eval_value reads, with no results and no steps."""
+    return bool(eval_value(expr, event, flag_value, draft, nightly_skip, push_skip))
 
 
 def yaml_scalar(raw):
@@ -889,7 +913,8 @@ def scope_needs_of(text):
 
 def scope_problems(text):
     """A `scope` job on ubuntu with every flag as a job output; every other job passes job_check_problems
-    (the lint jobs in LINT_JOBS need scope but run always)."""
+    (the lint jobs in LINT_JOBS need scope but run always). checks has its own needs and if rules (checks_needs_problems,
+    checks_if_problems), so it is skipped here."""
     jobs = all_jobs(text)
     problems = []
     sc = jobs.get("scope")
@@ -907,7 +932,7 @@ def scope_problems(text):
     for name, job in jobs.items():
         # ci-done is the fan-in that comments when a run ends red: it needs every job, not scope
         # alone (actions/ci-done-comment/test_comment.py checks its needs and if). The two skip jobs have their own checks.
-        if name not in ("scope", "ci-done", ALL_JOBS_PASSED_JOB, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB):
+        if name not in ("scope", "ci-done", ALL_JOBS_PASSED_JOB, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB, CHECKS_JOB):
             problems += job_check_problems(name, job, FLAG_OF.get(name))
     return problems
 
@@ -1325,6 +1350,16 @@ class WindowsSplit(unittest.TestCase):
 
     def test_scope_job_checks_every_other_job(self):
         self.assertEqual(scope_problems(self.text), [])
+        # checks has its own home (CHECKS_JOB): assert the job exists first, so a missing job names only that cause.
+        self.assertIsNotNone(job_block(self.text, CHECKS_JOB), "checks.yml has no checks job")
+        # checks needs scope and every Linux guard shard, the shard names derived from SHARD_COUNTS (checks_needs_problems).
+        self.assertEqual(checks_needs_problems(job_needs_of(self.text, CHECKS_JOB)), [])
+        # checks' if begins with !cancelled(), so a failed guard shard cannot skip checks and hide its own lint failures. checks_if_problems
+        # reads always() as the same run, so the first term is pinned on its own.
+        if_raw = unwrap(job_if_of(self.text, CHECKS_JOB))
+        self.assertTrue(if_raw and if_raw.startswith("!cancelled() && "), f"checks: its if does not begin with !cancelled(): {if_raw}")
+        # checks runs iff scope succeeded and the records-only skip is not set, whatever the guard shards did (checks_if_problems).
+        self.assertEqual(checks_if_problems(job_needs_of(self.text, CHECKS_JOB), job_if_of(self.text, CHECKS_JOB)), [])
         self.assertEqual(condition_problems(self.text), [], "a run step does not carry the records-only condition the spec gives it")
         # The guard and mutate jobs skip on the
         # guard flag. Named failure: a cut job runs or never runs on push, schedule and dispatch.
@@ -2410,8 +2445,7 @@ def runs_with_condition(job, st, event, flag_value, draft, skip_value):
 
 def eval_with(expr, event, values, default="false", draft=False):
     """eval_if with one value per scope flag: `values` maps a flag to its value, and every other flag reads `default`."""
-    rewritten = re.sub(r"needs\.scope\.outputs\.(\w+)", lambda m: repr(values.get(m.group(1), default)), expr)
-    return eval_if(rewritten, event, default, draft=draft)
+    return bool(eval_value(expr, event, default, draft=draft, values=values))
 
 
 def runs_with_values(job, st, event, values, draft=False):
@@ -3789,6 +3823,403 @@ class ShardControls(unittest.TestCase):
             self.assertEqual(code, 0, f"shard {i}/{count} of the install suite exits {code}: {err}")
             picked += names
         self.assertEqual(sorted(picked), sorted(all_names), f"the {count} shards do not select each case once")
+
+
+# ---- The Debt retire check takes the Linux guard suite's proof from the guard shards (decision ci-cut-in-steps). checks waits for every guard shard in LINUX_GUARD_JOBS, the family
+# SHARD_COUNTS sets, so a count change moves the proof's shard list with it and no shard list is written here. A skip that trusts half the shards
+# proves half the suite.
+CHECKS_JOB = "checks"
+CHECKS_NEEDS = {"scope", *LINUX_GUARD_JOBS}
+JOB_RESULTS = ("success", "failure", "skipped", "cancelled")
+EVENT_NAMES = ("pull_request", "push", "schedule")
+# The env name the Debt retire check step sets and lint/check_debt_retire.py reads. test_check_debt_retire.py repeats the literal,
+# since its red copy cannot import this file's names.
+DEBT_PROOF_VAR = "DEBT_RETIRE_SHARD_PROVEN"
+GUARD_PATH = "hooks/test_guard.py"  # the suite the guard shards run (LINUX_GUARD)
+RETIRE_RUN = re.compile(r"(?:^|\s)lint/check_debt_retire\.py(?:\s|$)", re.M)
+TREE_STEP = "debt_proof_tree"  # the step id whose `equal` output says the merge commit and the PR head hold one tree
+SHARD_TREE_OUT = "tree"  # the job output of each Linux guard shard, read from a step of that job; the same name is the step's output
+
+
+def job_needs_of(text, name):
+    """The job names job `name` lists under `needs:`, as a block list or an inline list. [] when it needs none."""
+    block = job_block(text, name) or ""
+    m = re.search(r"^    needs:[ \t]*\n((?:      - [\w-]+[ \t]*\n)+)", block, re.M)
+    if m:
+        return re.findall(r"^      - ([\w-]+)[ \t]*$", m.group(1), re.M)
+    m = re.search(r"^    needs:[ \t]*(\S.*?)[ \t]*$", block, re.M)
+    return re.findall(r"[\w-]+", m.group(1)) if m else []
+
+
+def job_if_of(text, name):
+    """The job-level `if:` of job `name` as written, or None when it has none."""
+    m = re.search(r"^    if:[ \t]*(\S.*?)[ \t]*$", job_block(text, name) or "", re.M)
+    return m.group(1) if m else None
+
+
+def condition_of(expr):
+    """An `if:` as GitHub reads it. With no status function in it, GitHub implies success() over the needs, so the job runs only
+    when they all succeeded. Returns `${{ success() && (...) }}` for such an `if:`, and the `if:` as written otherwise."""
+    body = expr.strip()
+    inner = body[3:-2].strip() if body.startswith("${{") and body.endswith("}}") else body
+    if re.search(r"\b(?:success|failure|cancelled|always)\(\)", inner):
+        return body
+    return "${{ success() && (%s) }}" % inner
+
+
+def checks_needs_problems(needs):
+    """checks needs scope and every Linux guard shard, so it can read their results. One problem per name it lacks or adds."""
+    return ([f"{CHECKS_JOB}: needs no {name}, so it cannot read that shard's result" for name in sorted(CHECKS_NEEDS - set(needs))]
+            + [f"{CHECKS_JOB}: needs {name}, which is neither scope nor a guard shard" for name in sorted(set(needs) - CHECKS_NEEDS)])
+
+
+def checks_if_problems(needs, expr):
+    """checks runs iff scope succeeded and the records-only skip is not set, whatever the guard shards did, on each event. The run
+    is not cancelled. A shard that fails must not skip checks, or its lint suite is lost. A scope that did not succeed must skip
+    checks: its steps skip on a pull request when the flags are empty, and a job whose steps all skip reads success (a silent pass).
+    `needs` is the job's needs as written; `expr` is its job-level if: as written, None for no if:."""
+    names = sorted(set(needs) | {"scope"})
+    cond = condition_of(expr if expr is not None else "${{ success() }}")
+    bad = []
+    for combo, records, event in itertools.product(itertools.product(JOB_RESULTS, repeat=len(names)), ("false", "true"), EVENT_NAMES):
+        results = dict(zip(names, combo))
+        try:
+            ran = bool(eval_value(cond, event, "true", results=results, needs=names, values={"records_only_skip": records}))
+        except (KeyError, NameError, SyntaxError, TypeError) as e:
+            return [f"{CHECKS_JOB}: its if does not read as a condition over its needs: {e!r}"]
+        if ran != (results["scope"] == "success" and records != "true"):
+            bad.append(f"{results}, records-only {records}, {event}: ran={ran}")
+    if bad:
+        return [f"{CHECKS_JOB}: wrong run condition in {len(bad)} cases, first: {bad[0]}"]
+    return []
+
+
+def proof_wrong(expr):
+    """The cases where the Debt retire proof `expr` reads other than the proof rule: the guard path only when every Linux guard
+    shard succeeded, the scope flag is 'true' and the merge commit's tree equals the PR head's; '' in every other case."""
+    needs = ("scope", *LINUX_GUARD_JOBS)
+    wrong = []
+    for shards, flag, equal in itertools.product(itertools.product(JOB_RESULTS, repeat=len(LINUX_GUARD_JOBS)), ("true", "false", ""), ("true", "false")):
+        results = {"scope": "success", **dict(zip(LINUX_GUARD_JOBS, shards))}
+        want = GUARD_PATH if all(r == "success" for r in shards) and flag == "true" and equal == "true" else ""
+        try:
+            got = eval_value(expr, "pull_request", flag, results=results, needs=needs,
+                             steps={TREE_STEP: {"equal": equal, "tree": "t1"}},
+                             outputs={job: {SHARD_TREE_OUT: "t1"} for job in LINUX_GUARD_JOBS})
+        except (KeyError, NameError, SyntaxError) as e:
+            return ["%s reads %r, which no step or job of checks sets" % (DEBT_PROOF_VAR, e)]
+        if (got or "") != want:
+            wrong.append("shards %s, scope flag %r, trees equal %s: %s=%r" % (dict(zip(LINUX_GUARD_JOBS, shards)), flag, equal, DEBT_PROOF_VAR, got))
+    return wrong
+
+
+def checks_steps(text):
+    """The step blocks of checks, in order."""
+    return step_blocks(job_block(text, CHECKS_JOB) or "")
+
+
+def tree_repo(folder, merge_of):
+    """A scratch repo in `folder`. The PR head H adds b.txt to the base. HEAD is a merge commit whose parent is H and whose tree
+    is H's when merge_of is "head", else the base's. Returns H's sha."""
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
+
+    def git(*args):
+        return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *args],
+                              cwd=folder, capture_output=True, text=True, env=env, check=True).stdout.strip()
+
+    git("init", "-q", "-b", "main")
+    with open(os.path.join(folder, "a.txt"), "w", encoding="utf-8") as f:
+        f.write("base\n")
+    git("add", "-A")
+    git("commit", "-q", "-m", "base")
+    base = git("rev-parse", "HEAD")
+    with open(os.path.join(folder, "b.txt"), "w", encoding="utf-8") as f:
+        f.write("head\n")
+    git("add", "-A")
+    git("commit", "-q", "-m", "head")
+    head = git("rev-parse", "HEAD")
+    tree = git("rev-parse", "HEAD^{tree}" if merge_of == "head" else base + "^{tree}")
+    git("checkout", "-q", "--detach", git("commit-tree", tree, "-p", head, "-m", "merge"))
+    return head
+
+
+def run_step_script(script, folder, head_sha):
+    """The step's script run as its runner runs it (bash -e, in `folder`) with the env the step gives it. Returns (the outputs
+    the script wrote, the process)."""
+    out = os.path.join(folder, "github-output.txt")
+    env = {**os.environ, "HEAD_SHA": head_sha, "GITHUB_OUTPUT": out, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
+    got = subprocess.run(["bash", "-e", "-c", script], cwd=folder, capture_output=True, text=True, env=env)
+    if not os.path.exists(out):
+        return {}, got
+    with open(out, encoding="utf-8") as f:
+        return dict(line.split("=", 1) for line in f.read().splitlines() if "=" in line), got
+
+
+ALL_SHARDS_OK = {job: "success" for job in LINUX_GUARD_JOBS}
+
+
+def same_tree(tree):
+    """Every Linux guard shard's tree output set to `tree`."""
+    return {job: tree for job in LINUX_GUARD_JOBS}
+
+
+def tree_of(folder, rev="HEAD"):
+    """The tree of `rev` in the scratch repo `folder`."""
+    return subprocess.run(["git", "rev-parse", rev + "^{tree}"], cwd=folder, capture_output=True, text=True, check=True).stdout.strip()
+
+
+def job_outputs_of(text, name):
+    """The job-level `outputs:` of job `name` as {key: value text}, {} when it has none."""
+    m = re.search(r"^    outputs:[ \t]*\n((?:      \S.*\n?)+)", job_block(text, name) or "", re.M)
+    return dict(re.findall(r"^      ([\w-]+):[ \t]*(.*?)[ \t]*$", m.group(1), re.M)) if m else {}
+
+
+def shard_tree_step(text, name):
+    """The step of shard job `name` that writes the tree its checkout holds: the step whose id its job output SHARD_TREE_OUT
+    reads. None when the job has no such output, or no step of that id."""
+    pattern = r"\$\{\{\s*steps\.([\w-]+)\.outputs\." + re.escape(SHARD_TREE_OUT) + r"\s*\}\}"
+    m = re.fullmatch(pattern, job_outputs_of(text, name).get(SHARD_TREE_OUT, ""))
+    if not m:
+        return None
+    for st in step_blocks(job_block(text, name) or ""):
+        if step_key(st, "id") == m.group(1):
+            return st
+    return None
+
+
+def shard_tree_problems(text):
+    """One problem per Linux guard shard job that exposes no tree: its job output must read a step of that job."""
+    return [f"{name}: no job output {SHARD_TREE_OUT} reads a step of this job, so the proof cannot read the tree it tested"
+            for name in LINUX_GUARD_JOBS if shard_tree_step(text, name) is None]
+
+
+def shard_tree_value(expr, shards, flag, equal, trees, debt):
+    """The value the Debt retire proof `expr` reads in one case: each Linux guard shard's result (`shards`), the scope flag, the
+    merge commit's tree equal to the PR head's (`equal`), each shard's tree output (`trees`), and the debt check's tree (`debt`,
+    the tree output of TREE_STEP)."""
+    return eval_value(expr, "pull_request", flag, results={"scope": "success", **shards}, needs=("scope", *LINUX_GUARD_JOBS),
+                      steps={TREE_STEP: {"equal": equal, "tree": debt}},
+                      outputs={job: {SHARD_TREE_OUT: trees[job]} for job in LINUX_GUARD_JOBS})
+
+
+def shard_tree_cases():
+    """Every case of the tree rule, as (shard results, scope flag, merge tree equal, shard trees, debt tree). First each result
+    of the shards and each flag and equal value, with every tree the same; then each tree set with every shard succeeded."""
+    same = same_tree("t1")
+    for shards, flag, equal in itertools.product(itertools.product(JOB_RESULTS, repeat=len(LINUX_GUARD_JOBS)), ("true", "false", ""),
+                                                 ("true", "false")):
+        yield dict(zip(LINUX_GUARD_JOBS, shards)), flag, equal, same, "t1"
+    for trees, debt in itertools.product(itertools.product(("t1", "t2", ""), repeat=len(LINUX_GUARD_JOBS)), ("t1", "t2", "")):
+        yield ALL_SHARDS_OK, "true", "true", dict(zip(LINUX_GUARD_JOBS, trees)), debt
+
+
+def reference_proof():
+    """A proof that reads every tree the rule names, built from the job names: the green control of the tree rule, so the cases
+    above can all go green. It is a fixture of these cases, not the product's proof."""
+    results = " && ".join(f"needs.{job}.result == 'success'" for job in LINUX_GUARD_JOBS)
+    trees = " && ".join(f"needs.{job}.outputs.{SHARD_TREE_OUT} == steps.{TREE_STEP}.outputs.{SHARD_TREE_OUT}" for job in LINUX_GUARD_JOBS)
+    return ("${{ " + results + " && needs.scope.outputs.checks_guard == 'true' && steps." + TREE_STEP + ".outputs.equal == 'true'"
+            " && steps." + TREE_STEP + ".outputs." + SHARD_TREE_OUT + " != '' && " + trees + " && '" + GUARD_PATH + "' || '' }}")
+
+
+def shard_tree_proof_wrong(expr):
+    """The cases where the Debt retire proof `expr` reads other than the tree rule: the guard path only when every Linux guard
+    shard succeeded, the scope flag is 'true', the merge commit's tree equals the PR head's, the debt check's tree is set, and
+    every shard's tree equals it. '' in every other case."""
+    wrong = []
+    for shards, flag, equal, trees, debt in shard_tree_cases():
+        want = GUARD_PATH if (all(r == "success" for r in shards.values()) and flag == "true" and equal == "true" and debt
+                              and all(trees[job] == debt for job in LINUX_GUARD_JOBS)) else ""
+        try:
+            got = shard_tree_value(expr, shards, flag, equal, trees, debt)
+        except (KeyError, NameError, SyntaxError, TypeError) as e:
+            return ["%s reads %r, which no job or step of checks sets for this case" % (DEBT_PROOF_VAR, e)]
+        if (got or "") != want:
+            wrong.append("shards %s, scope flag %r, merge tree equal %s, shard trees %s, debt tree %r: %s=%r"
+                         % (shards, flag, equal, trees, debt, DEBT_PROOF_VAR, got))
+    return wrong
+
+
+class ChecksShardCases(unittest.TestCase):
+    """checks waits for every Linux guard shard, and the Debt retire check takes its proof from them. A shard job's result alone is
+    no proof: a job whose steps all skip reads success. So the var is set only when every shard succeeded and the scope flag says
+    the shards ran, and the merge commit they checked out holds the PR head's tree (TREE_STEP)."""
+
+    def setUp(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            self.text = f.read()
+        self.assertIsNotNone(job_block(self.text, CHECKS_JOB), "scope: checks.yml has no checks job")
+
+    def debt_step(self):
+        steps = [st for st in step_blocks(job_block(self.text, CHECKS_JOB)) if RETIRE_RUN.search(run_body(st) or "")]
+        self.assertEqual(len(steps), 1, "scope: checks.yml has %d steps in checks that run the Debt retire check, want 1" % len(steps))
+        return steps[0]
+
+    def proof_raw(self):
+        env = step_env(self.debt_step())
+        self.assertIn(DEBT_PROOF_VAR, env, "checks.yml: the Debt retire check sets no %s, so the guard shards' proof never reaches it" % DEBT_PROOF_VAR)
+        return env[DEBT_PROOF_VAR]
+
+    def test_g1_checks_needs_scope_and_every_guard_shard(self):
+        self.assertEqual(checks_needs_problems(job_needs_of(self.text, CHECKS_JOB)), [])
+
+    def test_g2_checks_runs_iff_scope_succeeded_and_records_only_is_not_set(self):
+        self.assertEqual(checks_if_problems(job_needs_of(self.text, CHECKS_JOB), job_if_of(self.text, CHECKS_JOB)), [])
+
+    def test_g3_the_debt_step_sets_the_proof_only_when_every_shard_scope_flag_and_trees_hold(self):
+        wrong = proof_wrong(self.proof_raw())
+        self.assertFalse(wrong, "%s is set wrongly in %d cases, first: %s" % (DEBT_PROOF_VAR, len(wrong), wrong[:1]))
+
+    def test_g4_the_run_condition_check_refuses_each_wrong_if(self):
+        """g2 is a real check: each wrong run condition for checks fails it, and the form the design uses passes."""
+        needs = sorted(CHECKS_NEEDS)
+        for label, expr in (
+            ("always() runs checks when scope is skipped or failed", "${{ always() }}"),
+            ("!cancelled() alone runs checks when scope is skipped or failed", "${{ !cancelled() }}"),
+            ("the scope result alone skips checks when a shard fails", "${{ needs.scope.result == 'success' }}"),
+            ("no if: GitHub's success() over every need skips checks when a shard fails", None),
+            ("the records-only skip is not read, so checks runs when it is set", "${{ !cancelled() && needs.scope.result == 'success' }}"),
+        ):
+            with self.subTest(defect=label):
+                self.assertTrue(checks_if_problems(needs, expr), label)
+        with self.subTest(defect="the form the design uses is accepted"):
+            self.assertEqual(checks_if_problems(needs, "${{ !cancelled() && needs.scope.result == 'success' && "
+                                                        "needs.scope.outputs.records_only_skip != 'true' }}"), [])
+
+    def test_g5_a_tree_step_in_checks_runs_before_the_debt_step_and_reads_the_pr_head(self):
+        steps = checks_steps(self.text)
+        ids = [step_key(st, "id") for st in steps]
+        self.assertTrue(TREE_STEP in ids, "checks.yml: no step in checks has id %s (ids present: %s), so nothing compares the merge commit's tree with the PR head's"
+                        % (TREE_STEP, [i for i in ids if i]))
+        tree = steps[ids.index(TREE_STEP)]
+        debt = [i for i, st in enumerate(steps) if RETIRE_RUN.search(run_body(st) or "")]
+        self.assertTrue(debt, "scope: checks has no Debt retire step")
+        self.assertLess(ids.index(TREE_STEP), debt[0], "the tree step runs after the Debt retire step, so the debt step's var reads no result")
+        self.assertIn("HEAD_SHA", step_env(tree), "the tree step has no HEAD_SHA, so it cannot read the PR head's tree")
+
+    def test_g6_the_tree_step_reads_equal_only_when_the_merge_commit_and_the_pr_head_hold_one_tree(self):
+        steps = checks_steps(self.text)
+        ids = [step_key(st, "id") for st in steps]
+        self.assertTrue(TREE_STEP in ids, "checks.yml: no step in checks has id %s (ids present: %s)" % (TREE_STEP, [i for i in ids if i]))
+        script = run_body(steps[ids.index(TREE_STEP)])
+        self.assertTrue(script, "checks.yml: the tree step has no run script")
+        for label, merge_of, head_is_readable, want_equal in (
+            ("the merge commit and the PR head hold one tree", "head", True, True),
+            ("the merge commit's tree differs from the PR head's", "base", True, False),
+            ("the PR head's sha cannot be read", "head", False, False),
+        ):
+            with self.subTest(case=label):
+                folder = tempfile.mkdtemp(prefix="tree-", dir=_test_temp.run_folder())
+                self.addCleanup(shutil.rmtree, folder, True)
+                head = tree_repo(folder, merge_of)
+                outs, got = run_step_script(script, folder, head if head_is_readable else "0" * 40)
+                equal = outs.get("equal", "")
+                if want_equal:
+                    self.assertEqual(equal, "true", "the tree step did not report the equal trees: %s" % got.stderr[-300:])
+                else:
+                    self.assertNotEqual(equal, "true", "the tree step reported equal trees for: %s" % label)
+
+    def test_g7_the_proof_names_every_linux_guard_shard_and_one_it_omits_is_refused(self):
+        raw = self.proof_raw()
+        named = set(re.findall(r"needs\.([\w-]+)\.result", raw))
+        self.assertEqual(sorted(set(LINUX_GUARD_JOBS) - named), [],
+                         "checks.yml: the Debt retire proof reads no result of these guard shards, so one can fail and still skip the suite")
+        for shard in LINUX_GUARD_JOBS:
+            with self.subTest(omits=shard):
+                cut = raw.replace("needs.%s.result" % shard, "'success'")
+                self.assertNotEqual(cut, raw, "the fixture: the proof reads no result of %s" % shard)
+                self.assertTrue(proof_wrong(cut), "a proof that reads %s as success passes the suite when %s fails" % (shard, shard))
+
+    def test_g8_one_shard_that_did_not_succeed_leaves_the_proof_unset(self):
+        raw = self.proof_raw()
+        for shard in LINUX_GUARD_JOBS:
+            for result in ("failure", "skipped", "cancelled"):
+                with self.subTest(shard=shard, result=result):
+                    got = shard_tree_value(raw, {**ALL_SHARDS_OK, shard: result}, "true", "true", same_tree("t1"), "t1")
+                    self.assertFalse(got, "%s is %r with %s %s, so the guard suite is skipped on a shard that did not pass"
+                                     % (DEBT_PROOF_VAR, got, shard, result))
+
+    def test_g9_each_linux_guard_shard_exposes_the_tree_it_tested_as_a_job_output(self):
+        self.assertEqual(shard_tree_problems(self.text), [],
+                         "checks.yml: a Linux guard shard exposes no tree from a step of its own, so the Debt retire proof cannot read the tree it tested")
+
+    def test_g10_the_structure_check_names_the_shard_that_lacks_the_output(self):
+        """g9 is a real check: a shard with its output step passes it, and a shard without one is named."""
+        synthetic = (
+            "  checks-guard:\n"
+            "    outputs:\n"
+            "      tree: ${{ steps.shard_tree.outputs.tree }}\n"
+            "    steps:\n"
+            "      - name: Record the tree\n"
+            "        id: shard_tree\n"
+            "        run: echo \"tree=$(git rev-parse 'HEAD^{tree}')\" >> \"$GITHUB_OUTPUT\"\n"
+            "  checks-guard-2:\n"
+            "    steps:\n"
+            "      - name: Guard fixture suite (shard 2 of 4)\n"
+            "        run: python3 hooks/test_guard.py\n"
+        )
+        named = [p.split(":", 1)[0] for p in shard_tree_problems(synthetic)]
+        self.assertIn("checks-guard-2", named, "the structure check does not name a shard with no tree output: %r" % named)
+        self.assertNotIn("checks-guard", named, "the structure check names a shard that has its tree output and step: %r" % named)
+
+    def test_g11_each_shard_tree_step_writes_the_tree_of_its_checked_out_head(self):
+        for shard in LINUX_GUARD_JOBS:
+            with self.subTest(shard=shard):
+                step = shard_tree_step(self.text, shard)
+                self.assertIsNotNone(step, "checks.yml: %s exposes no tree output from a step of its own, so it records no tree" % shard)
+                folder = tempfile.mkdtemp(prefix="shard-tree-", dir=_test_temp.run_folder())
+                self.addCleanup(shutil.rmtree, folder, True)
+                head = tree_repo(folder, "base")  # the checkout's HEAD tree is the base's, not the PR head's
+                outs, got = run_step_script(run_body(step), folder, head)
+                self.assertEqual(outs.get(SHARD_TREE_OUT), tree_of(folder),
+                                 "%s writes tree %r, not the tree of its checked-out HEAD: %s" % (shard, outs.get(SHARD_TREE_OUT), got.stderr[-300:]))
+
+    def test_g12_the_debt_check_tree_step_writes_the_tree_of_its_checkout(self):
+        steps = checks_steps(self.text)
+        ids = [step_key(st, "id") for st in steps]
+        self.assertTrue(TREE_STEP in ids, "checks.yml: no step in checks has id %s, so the Debt retire proof has no tree to compare" % TREE_STEP)
+        folder = tempfile.mkdtemp(prefix="debt-tree-", dir=_test_temp.run_folder())
+        self.addCleanup(shutil.rmtree, folder, True)
+        head = tree_repo(folder, "base")
+        outs, got = run_step_script(run_body(steps[ids.index(TREE_STEP)]), folder, head)
+        self.assertEqual(outs.get(SHARD_TREE_OUT), tree_of(folder),
+                         "%s writes tree %r, not the tree the Debt retire check runs on: %s" % (TREE_STEP, outs.get(SHARD_TREE_OUT), got.stderr[-300:]))
+
+    def test_g13_the_proof_is_set_when_every_shard_tree_equals_the_debt_check_tree(self):
+        got = shard_tree_value(self.proof_raw(), ALL_SHARDS_OK, "true", "true", same_tree("t1"), "t1")
+        self.assertEqual(got, GUARD_PATH, "%s is %r when every shard and the debt check hold one tree, want %r" % (DEBT_PROOF_VAR, got, GUARD_PATH))
+
+    def test_g14_one_shard_tree_that_differs_from_the_debt_tree_leaves_the_proof_unset(self):
+        raw = self.proof_raw()
+        for shard in LINUX_GUARD_JOBS:
+            with self.subTest(differs=shard):
+                trees = same_tree("t1")
+                trees[shard] = "t2"
+                got = shard_tree_value(raw, ALL_SHARDS_OK, "true", "true", trees, "t1")
+                self.assertFalse(got, "%s is %r though %s tested a tree other than the debt check's" % (DEBT_PROOF_VAR, got, shard))
+
+    def test_g15_one_shard_with_an_empty_tree_output_leaves_the_proof_unset(self):
+        raw = self.proof_raw()
+        for shard in LINUX_GUARD_JOBS:
+            with self.subTest(empty=shard):
+                trees = same_tree("t1")
+                trees[shard] = ""
+                got = shard_tree_value(raw, ALL_SHARDS_OK, "true", "true", trees, "t1")
+                self.assertFalse(got, "%s is %r though %s wrote no tree output" % (DEBT_PROOF_VAR, got, shard))
+        with self.subTest(empty="every shard and the debt check"):
+            got = shard_tree_value(raw, ALL_SHARDS_OK, "true", "true", same_tree(""), "")
+            self.assertFalse(got, "%s is %r though no tree was recorded anywhere" % (DEBT_PROOF_VAR, got))
+
+    def test_g16_the_proof_reads_the_tree_rule_in_every_case(self):
+        wrong = shard_tree_proof_wrong(self.proof_raw())
+        self.assertFalse(wrong, "%s is set wrongly in %d cases, first: %s" % (DEBT_PROOF_VAR, len(wrong), wrong[:1]))
+
+    def test_g17_a_proof_that_reads_every_tree_passes_the_tree_rule(self):
+        """The green control of the tree rule: a proof that reads each shard's tree and the debt check's tree passes the sweeps
+        above and the older proof sweep, so g8, g13 to g16 can all go green."""
+        ref = reference_proof()
+        self.assertEqual(shard_tree_proof_wrong(ref), [], "the tree rule refuses a proof that reads every tree it names")
+        self.assertEqual(proof_wrong(ref), [], "the older proof sweep refuses a proof that reads every tree it names")
 
 
 if __name__ == "__main__":
