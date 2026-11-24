@@ -75,7 +75,7 @@ jobs:
   # every suite job succeeded; a step scope skipped is no gap (the shared action actions/push-skip, ruling own-769-a-narrowed-pr-push).
   # Scope waits on it, so a skip reaches every job through needs and the run is a completed success: nothing is cancelled, since a
   # cancelled run reads UNKNOWN and blocks merges. A failed read says skip=false: unknown runs everything. A suite a narrowed PR run
-  # left out is not run on main until a later change touches it. The job starts on every event and its steps run on a push only, so it stays on all-jobs-passed's needs like nightly-skip. Reads per push: the PR list, per head its commit, and per matching head its runs (unmeasured).
+  # left out is not run on main until a later change touches it. The job starts on every event and its steps run on a push only, so it stays on all-jobs-passed's needs like nightly-skip. Reads per push: the PR list, per head its commit, and per matching head its runs; a push that does not skip adds the base search, one push runs read and a jobs read per green run walked past (unmeasured). The base output feeds scope's BASE_SHA on a push.
   push-skip:
     runs-on: ubuntu-latest
     # Cap 5 min, unmeasured: the job makes a handful of reads.
@@ -87,6 +87,7 @@ jobs:
       actions: read
     outputs:
       skip: ${{ steps.decide.outputs.skip }}
+      base: ${{ steps.decide.outputs.base }}
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ github.event_name == 'push' }}
@@ -174,7 +175,9 @@ jobs:
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # A pull request keeps its own base. A push takes the proven base push-skip found (empty when it found none, or when that job
+          # was skipped or failed, so every flag stays on; ci-scope.sh checks it is a full sha and an ancestor of HEAD).
+          BASE_SHA: ${{ github.event.pull_request.base.sha || (github.event_name == 'push' && needs.push-skip.outputs.base) || '' }}
           HEAD_REF: ${{ github.head_ref }}
           GREEN_HEAD: ${{ steps.green.outputs.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}

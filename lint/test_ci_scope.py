@@ -66,11 +66,16 @@ REAL_GUARD_INPUTS = "real"  # run()'s guard_inputs default: the repo's own list 
 
 def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref="", green=None,
         green_sibling=False, green_head=None, contents=None, facts=None, merged=None, moves=None, guard_inputs=REAL_GUARD_INPUTS,
-        scope_files=None):
+        scope_files=None, proven=False):
     """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit. `scope_files` (a list of paths), when
     given, is SCOPE_FILES: the script reads those paths in place of the diff, with the same BASE_SHA range as the other cases. `head_ref` is HEAD_REF,
-    empty when not given, so no HEAD_REF of the caller's environment reaches the script. `moves` maps an old path to its new
-    one, or to None for a delete: the old path is in the base, and a move keeps the content, so git sees a rename.
+    empty when not given, so no HEAD_REF of the caller's environment reaches the script. `base` is BASE_SHA: "auto" is the base
+    commit (the pull request's base), and "head" (HEAD itself), "green" (the `green` commit) and "sibling" (a commit off the base
+    that HEAD does not descend from) name those commits; "pre" is the base commit itself, the commit `merged` branches off, which is the
+    proven base of a push whose merge commit brings that branch in; any other value is BASE_SHA as given. A push gets no BASE_SHA under "auto"
+    unless `proven` is set: that is the push base a proven run hands over, and with none a push runs every flag (decision
+    push-skip-on-proven-tree). `moves` maps an old path to its new one, or to None for a delete: the old path is in the base, and a
+    move keeps the content, so git sees a rename.
     `guard_inputs` is the text of .github/guard-inputs.txt in the base: the repo's own list by default (none when the repo has
     no list yet), a text in its place, or None for no list at all (the gate's unreadable case).
     `green` (a list of paths) is the pull request's earlier head, committed before the head commit, so the whole diff against
@@ -110,6 +115,14 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
         git(d, "add", "-A")
         git(d, "commit", "-qm", "base")
         sha = git(d, "rev-parse", "HEAD")
+        side_sha = ""
+        if base == "sibling":  # a commit off the base line that HEAD does not descend from
+            git(d, "checkout", "-q", "-b", "side-base")
+            open(os.path.join(d, "side.txt"), "w").write("side\n")
+            git(d, "add", "-A")
+            git(d, "commit", "-qm", "side base")
+            side_sha = git(d, "rev-parse", "HEAD")
+            git(d, "checkout", "-q", "-")
         for old, new in moves.items():
             os.remove(os.path.join(d, old))
             if new is not None:
@@ -141,7 +154,7 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
         git(d, "add", "-A")
         git(d, "commit", "-qm", "head", "--allow-empty")
         head_sha = git(d, "rev-parse", "HEAD")
-        base_sha = sha if base == "auto" else base
+        base_sha = sha if base == "auto" else {"head": head_sha, "sibling": side_sha, "green": green_sha, "pre": sha}.get(base, base)
         if merged is not None:
             git(d, "checkout", "-q", "-b", "base-moved", sha)
             write(merged)
@@ -151,6 +164,8 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
                 base_sha = git(d, "rev-parse", "HEAD")
             git(d, "checkout", "-q", "-")
             git(d, "merge", "-q", "--no-ff", "--no-edit", "base-moved")
+        if event == "push" and base == "auto" and not proven:
+            base_sha = ""  # no proven base for this push: the ruling runs every flag, as before the proven base existed
         out = os.path.join(d, "..", f"out-{os.getpid()}.txt")
         env = dict(os.environ, EVENT=event, GITHUB_OUTPUT=out, HEAD_REF=head_ref,
                    BASE_SHA=base_sha, GREEN_HEAD=green_sha if green_head is None else green_head)
@@ -257,8 +272,9 @@ def export_suite_files():
     return sorted(found | set(EXPORT_SUITE_FILES))
 
 
-@unittest.skipUnless(BASH, "bash not on PATH")
-class Scope(unittest.TestCase):
+class FlagAsserts:
+    """assertFlags: the one home of the job and suite flag check. A case mixes it in beside unittest.TestCase."""
+
     def assertFlags(self, got, want_true=(), want_false=()):
         for n in ALL:
             self.assertIn(n, got, f"output {n} missing: {got}")
@@ -267,6 +283,9 @@ class Scope(unittest.TestCase):
         for n in want_false:
             self.assertEqual(got[n], "false", f"{n}: {got}")
 
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class Scope(FlagAsserts, unittest.TestCase):
     def test_docs_only_pr_turns_every_job_off(self):
         got = run(["README.md", "decisions/some-record.md"])
         self.assertFlags(got, want_false=ALL)
@@ -307,8 +326,12 @@ class Scope(unittest.TestCase):
         self.assertFlags(run(["README.md"], base=""), want_true=ALL)
 
     def test_push_schedule_and_dispatch_run_everything_even_for_docs(self):
-        for ev in ("push", "schedule", "workflow_dispatch"):
-            self.assertFlags(run(["README.md"], event=ev), want_true=ALL)
+        # Decision push-skip-on-proven-tree: a push with no proven base runs every flag, even for a docs-only diff. A schedule or
+        # a dispatch never scopes, even when CI hands it a base commit.
+        self.assertFlags(run(["README.md"], event="push", base=""), want_true=ALL)
+        for ev in ("schedule", "workflow_dispatch"):
+            with self.subTest(event=ev):
+                self.assertFlags(run(["README.md"], event=ev), want_true=ALL)
 
     # Map gaps found in review: each path is read by a suite in another job.
     def test_merge_tool_change_turns_on_the_suites_that_load_it(self):
@@ -1831,6 +1854,70 @@ class WindowsFlagsOnScheduleAndDispatch(unittest.TestCase):
     def test_a_dispatched_run_sets_every_windows_flag_for_a_docs_only_diff(self):
         self.assert_pull_request_is_narrow(["docs/notes/n.md"])
         self.assert_every_windows_flag_on("workflow_dispatch", ["docs/notes/n.md"])
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class PushDiffFromProvenBase(FlagAsserts, unittest.TestCase):
+    """A push with a proven base (push-skip's base output: the head of the newest green push run of main whose suites ran) scopes its
+    flags from base..HEAD. A base that is not a full sha, not an ancestor of HEAD, or HEAD itself turns every flag on, and so does no
+    base. The base is never the records-only green head, so it never sets records_only_skip. A pull request's diff is unchanged.
+    Named failure: a push scopes from the whole history, or from a base that push-skip did not prove."""
+
+    DOCS = ["docs/notes/a-note.md"]  # a docs path: no job flag, no code, the doc_other and doc_any flags
+    CODE = ["merge/merge.py"]  # a merge path: checks_windows, checks_windows_merge, checks_macos, code, guard, no other suite flag
+    RECORDS = ["docs/records.md"]
+
+    def test_a_docs_only_diff_from_a_proven_base_turns_code_off_and_the_doc_flags_on(self):
+        got = run(self.DOCS, event="push", proven=True)
+        self.assertFlags(got, want_false=ALL)
+        self.assertEqual(got.get("doc_other"), "true", f"a docs/ path sets doc_other: {got}")
+        self.assertEqual(got.get("doc_any"), "true", f"a .md path sets doc_any: {got}")
+
+    def test_a_code_diff_from_a_proven_base_turns_its_mapped_suites_on_and_the_rest_off(self):
+        got = run(self.CODE, event="push", proven=True)
+        self.assertFlags(got, want_true=["checks_windows", "checks_windows_merge", "checks_macos", "code", "guard"],
+                         want_false=["checks_windows_rest", "pointer_windows", "shell_macos", "sweep", "mods", "shoot"])
+
+    def test_the_diff_runs_from_the_proven_base_so_a_code_change_below_it_does_not_count(self):
+        got = run(self.DOCS, green=self.CODE, green_head="", event="push", base="green", proven=True)
+        self.assertFlags(got, want_false=ALL)
+        self.assertEqual(got.get("doc_other"), "true", f"the docs path above the base sets doc_other: {got}")
+
+    def test_a_base_that_is_not_an_ancestor_of_head_turns_every_flag_on(self):
+        self.assertFlags(run(self.DOCS, event="push", base="sibling"), want_true=ALL)
+
+    def test_a_base_that_is_not_a_full_sha_turns_every_flag_on(self):
+        for base in ("HEAD~1", "1234567", "g" * 40):
+            with self.subTest(base=base):
+                self.assertFlags(run(self.DOCS, event="push", base=base), want_true=ALL)
+
+    def test_an_empty_base_turns_every_flag_on(self):
+        self.assertFlags(run(self.DOCS, event="push", base=""), want_true=ALL)
+
+    def test_a_base_equal_to_head_turns_every_flag_on(self):
+        self.assertFlags(run(self.DOCS, event="push", base="head"), want_true=ALL)
+
+    def test_a_proven_base_never_sets_the_records_only_skip(self):
+        got = run(self.RECORDS, event="push", proven=True)
+        self.assertEqual(got.get("records_only_skip"), "false", f"a push base was taken for the green head of a records-only skip: {got}")
+
+    def test_a_records_only_push_from_a_proven_base_turns_every_flag_off_but_the_doc_flags(self):
+        got = run(self.RECORDS, event="push", proven=True)
+        self.assertFlags(got, want_false=ALL)
+        self.assertEqual(got.get("doc_other"), "true", f"a docs/ path sets doc_other: {got}")
+
+    def test_a_merge_commit_whose_side_branch_changed_a_code_file_flags_that_files_suites_from_a_proven_base(self):
+        # HEAD is a merge commit: the side branch changed merge/merge.py and the head changed docs only. The proven base is the commit
+        # the side branch leaves from, so base..HEAD holds the side's code file. Without the side's change the same push is docs-only.
+        got = run(self.RECORDS, merged=self.CODE, base="pre", event="push")
+        self.assertFlags(got, want_true=["checks_windows", "checks_windows_merge", "checks_macos", "code", "guard"],
+                         want_false=["checks_windows_rest", "pointer_windows", "shell_macos", "sweep", "mods", "shoot"])
+        twin = run(self.RECORDS, base="pre", event="push")
+        self.assertFlags(twin, want_false=ALL)
+
+    def test_a_pull_request_diff_is_unchanged_by_a_proven_base(self):
+        self.assertFlags(run(self.DOCS, event="pull_request", proven=True), want_false=ALL)
+        self.assertFlags(run(self.CODE, event="pull_request", proven=True), want_true=["checks_windows_merge", "code"])
 
 
 if __name__ == "__main__":
