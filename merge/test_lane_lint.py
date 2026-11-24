@@ -5429,11 +5429,15 @@ class LintCheckJoin(tm.CloudSession):
         with self.cloud():
             return run("7", "--confirm", "--head", ran_on, host=tm.GhHalf.gh_host(self))
 
-    def claim_steps(self, linted, claimed, kind="a claim-only commit"):
+    def claim_steps(self, linted, claimed, kind="a claim-only commit", page=None):
         """Two joins of a claim-only head, with a record still pending, so the first join pushes its own claim (two-step confirm). The lane-lint
         PASS carries across the claim commits: the first join does not refuse for lane lint, and it stops at its claim without reading that
         claim's check runs. Those are read at the second join, on the claim head, which merges once its checks answer green. `kind` names the
-        commits above the linted head in a failure."""
+        commits above the linted head in a failure. `page`: the records-page commit the case pushed on the head, or None for a claim-only head.
+        The lint's proof of that page is read on its first parent, which the fake gh answers only once it is shown (a claim-only head has no
+        page, so nothing is shown for it)."""
+        if page:
+            tm.GhHalf.set(self, shown=[tm.sh(self.co, "git", "rev-parse", f"{page}^1")])
         rc, out = self.join([lint_comment(2, linted)], once=True)
         self.assertNotIn("merge --lane-lint 7", out, f"the lane lint refused {kind} on the linted head:\n" + out)
         self.assertEqual(rc, 0, "the first join refused instead of stopping at the claim it pushes:\n" + out)
@@ -5746,7 +5750,7 @@ class LintCheckJoin(tm.CloudSession):
         page = tm.RecordsEnv.tool_page(self, linted)
         tm.RecordsEnv.assert_page_scope(self, page, linted)
         tm.sh(self.co, "git", "push", "-q", "origin", f"{page}:refs/heads/feat")
-        self.claim_steps(linted, self.head("feat"), "a records-page commit")
+        self.claim_steps(linted, self.head("feat"), "a records-page commit", page=page)
 
     def test_a_pass_under_a_claim_commit_and_a_records_page_commit_lets_the_join_go_ahead(self):
         linted = self.head("feat")
@@ -5756,7 +5760,7 @@ class LintCheckJoin(tm.CloudSession):
         page = tm.RecordsEnv.tool_page(self, claim)
         tm.RecordsEnv.assert_page_scope(self, page, claim)
         tm.sh(self.co, "git", "push", "-q", "origin", f"{page}:refs/heads/feat")
-        self.claim_steps(linted, self.head("feat"), "a claim commit and a records-page commit")
+        self.claim_steps(linted, self.head("feat"), "a claim commit and a records-page commit", page=page)
 
     def test_a_hand_page_under_the_page_subject_does_not_let_the_join_go_ahead(self):  # control: the generator's bytes, not the subject, make the carry
         linted = self.head("feat")
