@@ -145,9 +145,9 @@ def read_range(tool_input, lines):
         offset, limit = tool_input.get("offset"), tool_input.get("limit")
         if isinstance(offset, bool) or isinstance(limit, bool):
             return None
-        first = 1 if offset is None else int(offset)
+        first = 1 if offset is None else max(int(offset), 1)   # the Read tool starts offset 0 at line 1
         count = READ_MAX_LINES if limit is None else int(limit)
-        if first < 1 or count < 1:
+        if int(offset or 0) < 0 or count < 1:
             return None
         last = min(first + count - 1, len(lines))
         if last < first or last - first + 1 > READ_MAX_LINES:
