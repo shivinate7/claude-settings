@@ -4758,7 +4758,7 @@ BIN_CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
 UNMAPPED_FLAGS = {**{n: "true" for n in ("checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos",
                                          "pointer_windows", "code", "guard", "sweep", "mods", "shoot", "checks_windows_sweep",
                                          "checks_guard", "windows_guard", "mutation_report")},
-                  "records_only_skip": "false", "skip_comment_delta": "false", "skip_record_delta": "false"}
+                  "records_only_skip": "false", "skip_comment_delta": "false"}
 # The same delta when the script maps it: only `code` is on, and every other flag and skip output is off.
 MAPPED_FLAGS = {**{n: "false" for n in UNMAPPED_FLAGS}, "code": "true"}
 
@@ -4791,8 +4791,8 @@ def git_repo_with_a_change(root):
 
 
 class CarryUnmappedDelta(unittest.TestCase):
-    """carry_delta_read reads a delta whose every suite flag is on as unmapped, so no suite is carried. ci-scope.sh writes the two skip
-    outputs (skip_comment_delta, skip_record_delta) as false on such a delta, so they must sit in SCOPE_APART with the other outputs an
+    """carry_delta_read reads a delta whose every suite flag is on as unmapped, so no suite is carried. ci-scope.sh writes the skip
+    output (skip_comment_delta) as false on such a delta, so it must sit in SCOPE_APART with the other outputs an
     unmapped path does not set. Left out, they read as a flag off, and the suites the selector picks are carried for the unmapped path."""
 
     def carried(self, flags):
