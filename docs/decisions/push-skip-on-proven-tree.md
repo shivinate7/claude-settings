@@ -4,6 +4,8 @@
 
 Owner, 2026-11-23 19:02 CST, picked option b of a consultant question: main's run per merge covers only the suites that the commits not already proven by a passing run could reach. The daily full run is the net.
 
+Owner, 2026-11-24 10:10 CST (question QG, option a): the root rule `roles-each-layer-proves-once` now says this: main's run after a merge runs the suites the unproven commits reach when none did.
+
 Owner, item 729 a (relayed by the coordinator, 2026-11-13 12:29 CST), extended by ruling `own-769-a-narrowed-pr-push` (owner, 16:03 CST, "main skips the whole run after a passing PR run"): the `push-skip` job skips a push to main in one case. The pushed commit's tree equals the head tree of a merged PR that the commit belongs to, and that PR's run passed. The PR is a `batch-*` integration PR or a single lane PR. In a passing run, `all-jobs-passed` and every suite job succeeded. A suite step that scope skipped (a narrowed run) does not stop the skip. A records-only run also passes (owner item 857 b, 19:48 CST Nov 15): `scope` and `all-jobs-passed` succeeded and every suite job was skipped. The rollup passes an all-skipped run only when scope's `records_only_skip` is true, and the REST jobs read has no job outputs, so the rollup is the readable proof.
 
 - The decision's one home is the shared action `actions/push-skip` (`push-skip.py` beside its `action.yml`). `checks.yml` calls it, and child repos pin it by SHA. The suite jobs are read from the calling repo's own workflow (the jobs its `all-jobs-passed` needs, minus the jobs `nightly-skip`, `push-skip` and `scope`), through `lint/all_jobs_passed_rules.py` from the action's own checkout. A pin carries its readers.
