@@ -202,7 +202,7 @@ def planned_nightly_skip(text):
 
 
 # checks-hooks' header and its job-level if in checks.yml. A case swaps that if line for its own, so the subject is the job's one if.
-# The if is the records-only skip alone: a docs/records.md delta skips it, and no other delta changes it (ruling own-830-c).
+# The if is the records-only skip alone: only the records file's own delta skips it (ruling own-830-c).
 HOOKS_HEAD = "  checks-hooks:\n\n    runs-on: ubuntu-latest\n    needs: scope\n"
 HOOKS_IF = "    if: ${{ " + RECORDS_ONLY_CONDITION + " }}\n"
 

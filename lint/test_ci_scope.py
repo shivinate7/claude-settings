@@ -1262,8 +1262,8 @@ class CommentOnlyDelta(unittest.TestCase):
 @unittest.skipUnless(BASH, "bash not on PATH")
 class RecordsFolderDelta(unittest.TestCase):
     """A delta of record files in a record folder (docs/decisions, docs/notes, docs/debts) keeps the code suites on, as a delta of
-    any other .md file does. Only docs/records.md alone skips (ruling own-830-c), and no ruling widens that skip to the folders. A
-    decision file is read by code: hooks/test_session_start.py reads docs/decisions/session-tiers.md."""
+    any other .md file does. Only the records file alone skips (ruling own-830-c), and no ruling widens that skip to the folders. A
+    decision file is read by code: the session-start suite reads the session-tiers decision."""
     CODE = ["hooks/guard.py"]  # the earlier head holds a code file, so the whole PR diff turns the jobs on
     FOLDERS = ("docs/decisions/x.md", "docs/notes/x.md", "docs/debts/x.md")
     EVENTS = ("push", "pull_request")
