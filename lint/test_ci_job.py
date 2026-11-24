@@ -155,12 +155,26 @@ class Job(unittest.TestCase):
     VERDICT_CUT = ("import os, signal, sys\n"
                    "print('verdict: still running, 120s, log=verdict.log', file=sys.stderr, flush=True)\n"
                    "os.kill(os.getpid(), signal.SIGKILL)\n")  # a verdict killed after its heartbeat, before any verdict line
-    VERDICT_HANG = ("import sys\n"
-                    "print('HANG hang-probe rc=124 no output or CPU for 60s, stopped (61.2s) log=hang-verdict.log')\n"
-                    "sys.exit(124)\n")  # a verdict its hang stop ended: the HANG line bin/verdict prints, then exit 124
+    HANG_LINE = "HANG hang-probe rc=124 no output or CPU for 60s, stopped (61.2s) log=hang-verdict.log"  # the line bin/verdict prints for its hang stop
+    VERDICT_HANG = "import sys\nprint(%r)\nsys.exit(124)\n" % HANG_LINE  # a verdict its hang stop ended: the HANG line, then exit 124
     VERDICT_BEAT = ("import sys\n"
                     "print('verdict: still running, 120s, log=HANG-beat.log', flush=True)\n"
                     "print('PASS beat: no hang here')\n")  # a beat line with HANG in its text, then a PASS
+    ERROR_LINE = "::error title=other::boom"  # a failure signal a hung step may have logged before it hung
+
+    @classmethod
+    def hung_verdict(cls, after=(), before=(), error=None):
+        """A verdict stub its hang stop ended: the HANG line, then exit 124. `after` lines print after the HANG line, each at
+        column 0: the order and form of bin/verdict's full-log output (hang-stop-five-step-wrap, decision hang-stop), where the
+        verdict line comes first and the whole log follows unindented. `before` lines print ahead of the HANG line, a form no
+        bin/verdict prints today. `error` is one line the stub writes to $VERDICT_LOG first, as a hung step's ::error line."""
+        body = "import os, sys\n"
+        if error:
+            body += "with open(os.environ['VERDICT_LOG'], 'a', encoding='utf-8') as log:\n    log.write(%r)\n" % (error + "\n")
+        body += "".join("print(%r)\n" % ln for ln in before)
+        body += "print(%r)\n" % cls.HANG_LINE
+        body += "".join("print(%r)\n" % ln for ln in after)
+        return body + "sys.exit(124)\n"
 
     def verdict_stub(self, body):
         """The `launch` of a run whose bin/verdict is a stub that runs `body`: ci-job starts the stub where it would start
@@ -396,7 +410,7 @@ class Unknowns(Job):
     def test_a_hang_stop_puts_its_hang_line_in_the_step_line(self):  # the step line must carry the HANG line, or a hang reads as a bare "no verdict line"
         rc, lines, out = self.run_job(step("hang-probe", "true"), launch=self.verdict_stub(self.VERDICT_HANG))
         self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
-        line = next((ln for ln in lines if ln.partition(": ")[0].split()[-1:] == ["hang-probe"]), "")
+        line = step_line(lines, "hang-probe")
         missing = [words for words in ("HANG hang-probe", "no output or CPU for 60s", "log=hang-verdict.log") if words not in line]
         self.assertFalse(missing, "the step line %r drops the HANG line's words %s, so the reader cannot tell a hang from a kill\n%s"
                          % (line, missing, out))
@@ -406,6 +420,59 @@ class Unknowns(Job):
         self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
         self.assertEqual(by_step(lines), {"beat": "PASS"}, "a PASS after a beat line with HANG in its text reads otherwise: " + out)
         self.assertEqual(rc, 0, "a PASS after a beat line with HANG in its text does not exit 0: " + out)
+
+    def hung_step_reads_the_hang(self, stub, why):
+        """One hung step under the stub verdict reads unknown, exits 2, and its step line carries the HANG line. `why` says what
+        the stub prints, for the failure message."""
+        rc, lines, out = self.run_job(step("hang-probe", "true"), launch=self.verdict_stub(stub))
+        self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
+        self.assertEqual(by_step(lines), {"hang-probe": "unknown"}, "%s: the hung step does not read unknown\n%s" % (why, out))
+        self.assertIn("HANG hang-probe", step_line(lines, "hang-probe"), "%s: the step line does not carry the HANG line\n%s" % (why, out))
+        self.assertEqual(rc, 2, "%s: a hung step with no ::error line does not exit 2\n%s" % (why, out))
+
+    def test_a_hang_line_is_the_verdict_line_beside_a_fail_log_line_after_it(self):  # the defect: the log's FAIL line read as the verdict
+        self.hung_step_reads_the_hang(self.hung_verdict(after=("FAIL - case name",)), "a FAIL log line after the HANG line")
+
+    def test_a_hang_line_is_the_verdict_line_beside_a_pass_log_line_after_it(self):
+        self.hung_step_reads_the_hang(self.hung_verdict(after=("PASS something",)), "a PASS log line after the HANG line")
+
+    def test_a_hang_line_is_the_verdict_line_beside_a_fail_log_line_before_it(self):
+        self.hung_step_reads_the_hang(self.hung_verdict(before=("FAIL - case name",)), "a FAIL log line ahead of the HANG line")
+
+    def test_a_hang_after_an_error_line_reads_fail_with_the_hang_line_as_its_text(self):  # the ::error exception stays; its text is the HANG line
+        rc, lines, out = self.run_job(step("hang-probe", "true"),
+                                      launch=self.verdict_stub(self.hung_verdict(after=("FAIL - case name",), error=self.ERROR_LINE)))
+        self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
+        self.assertEqual(by_step(lines), {"hang-probe": "FAIL"}, "a hang after a printed ::error line does not read FAIL: " + out)
+        self.assertIn("HANG hang-probe", step_line(lines, "hang-probe"),
+                      "a hang after a printed ::error line reads its FAIL with a log line as the text, not the HANG line\n" + out)
+
+    def test_a_fail_run_with_hang_mid_line_in_a_log_line_is_no_hang(self):  # the control against a loose match on HANG
+        rc, lines, out = self.run_job(step("bad", "true"), launch=self.verdict_stub(
+            "import sys\nprint('log: the case says HANG mid-line')\nprint('FAIL - case name')\nsys.exit(1)\n"))
+        self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "a FAIL run with HANG mid-line in a log line reads otherwise: " + out)
+        self.assertIn("FAIL - case name", step_line(lines, "bad"), "a FAIL run with HANG mid-line reads another line as its verdict: " + out)
+
+    def test_a_pass_run_with_hang_mid_line_in_a_log_line_is_no_hang(self):  # the control against a loose match on HANG
+        rc, lines, out = self.run_job(step("good", "true"), launch=self.verdict_stub(
+            "import sys\nprint('log: the case says HANG mid-line')\nprint('PASS all cases')\nsys.exit(0)\n"))
+        self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "a PASS run with HANG mid-line in a log line reads otherwise: " + out)
+
+    def test_a_hang_shaped_line_in_a_fail_run_is_no_hang(self):  # the control on rc 124: only a hang stop's exit makes its HANG line the verdict
+        rc, lines, out = self.run_job(step("bad", "true"), launch=self.verdict_stub(
+            "import sys\nprint('HANG case-x printed by the step')\nprint('FAIL - case name')\nsys.exit(1)\n"))
+        self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "a FAIL run with a HANG-shaped line reads it as a hang: " + out)
+        self.assertIn("FAIL - case name", step_line(lines, "bad"), "a FAIL run with a HANG-shaped line reads that line as its verdict: " + out)
+
+    def test_a_timeout_exit_with_its_own_fail_line_reads_that_fail(self):  # the control: no HANG line, so verdict's own FAIL line is the verdict
+        rc, lines, out = self.run_job(step("slow", "true"), launch=self.verdict_stub(
+            "import sys\nprint('FAIL - timed out after 300s')\nsys.exit(124)\n"))
+        self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "a timeout exit with its own FAIL line does not read that FAIL: " + out)
+        self.assertIn("FAIL - timed out after 300s", step_line(lines, "slow"), "a timeout exit reads another line as its verdict: " + out)
 
 
 def checks_hooks_ifs():
@@ -1200,6 +1267,11 @@ def by_step(lines):
         if word and not SUMMARY_ANY.match(ln):
             found[ln[len(word):].strip().split(": ", 1)[0]] = word
     return found
+
+
+def step_line(lines, name):
+    """The line that names the step `name` ('' when none does): its verdict word, the name, then ': detail'."""
+    return next((ln for ln in lines if ln.partition(": ")[0].split()[-1:] == [name]), "")
 
 
 def would_run(lines):
