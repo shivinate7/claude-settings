@@ -19,11 +19,12 @@
 # list of jobs and their suites is the workflow's own, read from the same file as the linted job. A step of a sibling job whose
 # `if:` or `env:` this runner cannot read prints unknown, as any step's does. Cost: one selector process per
 # lane lint (one git diff, one git ls-files, one parse of each tracked test_*.py and of each module they reach, once for
-# A suite step that reaches the diff is run or unknown, never passed over: a picked suite is any `python3 <folder>/test_*.py` line (pick_line; `python3 lint|actions/...`
-# lines are lint steps). A CI step with no `python3 hooks|merge/test_*.py` line whose `if:` names a scope flag that reads true for the diff and whose run: lines name a test file
-# the selector did not pick (flag_suite: a python suite it passed over, or an sh, bash, node or pwsh suite it cannot read) prints `unknown`, names the suite and the flags, and exits 2:
-# running such a suite is unbounded here (a skills suite alone takes minutes; an sh suite may need CI's own Linux). The same read runs over every other ubuntu job
-# (the sibling pass), so a job with such a step runs its suite steps, which print unknown. A step whose `if:` names no scope flag, and a step whose flag reads false, stay `not run`.
+# A suite step is never passed over quietly. A picked suite is any `python3 <folder>/test_*.py` line (pick_line; `python3 lint|actions/...` lines are lint steps): the selector
+# picks it for the changed files or when the change touches the suite's own file, and it runs under lint's own time bound. A CI step with no `python3 hooks|merge/test_*.py` line
+# whose `if:` names a scope flag that reads true for the diff and whose run: lines name a test file the selector did not pick (flag_suite: a python suite it passed over, or an sh,
+# bash, node or pwsh suite it cannot read) is not run here (an sh suite may need CI's own Linux). It prints `unknown` and exits 2 only when the change reaches the suite itself: it
+# touches the suite's file or a path its `_UNDER_TEST:-` lines name (reached_suites). Any other such suite prints one `not run` line that names it and says it runs in CI, and exits 0.
+# The same read runs over every other ubuntu job (the sibling pass). A step whose `if:` names no scope flag, and a step whose flag reads false, stay `not run`.
 # the whole diff; each sibling pass reads that pick, not a new selector), plus one process per picked CI step in any ubuntu job, and one
 # read of the scope script, one unshallow check and one log file per sibling job that runs. A mutation script (a name with "mutate")
 # and every other command (bash, unpinned pipx, other uses:) is left out with one `not run` line naming the step and why, except a `uses:` of
@@ -1166,11 +1167,39 @@ def suite_files(step):
 def flag_suite(step):
     """The test files of a CI step that a scope flag turns on for this diff and that the selector does not govern, else []: the step's `if:` names a
     needs.scope.outputs flag and reads true (or unreadable), and no run: line is a `python3 hooks|merge/test_*.py` suite line, whose reach is the
-    selector's alone (decision lanes-run-no-full-ci-job). Such a suite is one --lint must run or read unknown, never pass over."""
+    selector's alone (decision lanes-run-no-full-ci-job). Such a suite is one --lint does not run: it reads unknown when the change reaches it
+    (reached_suites), else prints one `not run` line, never a silent pass."""
     cond = step_key(step, "if") or ""
     if not SCOPE_TERM.search(cond) or any(SUITE_LINE.fullmatch(ln) for ln in run_lines(step)):
         return []
     return suite_files(step) if condition(cond, True) is not False else []
+
+
+SUBJECT_REF = re.compile(r"\$REPO_ROOT/([\w./-]+)\}")  # a path a suite's `*_UNDER_TEST:-` default line names as the file it tests
+
+
+def suite_subjects(top, suite):
+    """The repo paths a suite tests, as its own text names them: each `$REPO_ROOT/<path>}` on a line holding `_UNDER_TEST:-`. [] when the
+    suite names none or its file cannot be read, so such a suite is reached by its own file only."""
+    try:
+        with open(os.path.join(top, *suite.split("/")), encoding="utf-8", errors="replace") as f:
+            return [m.group(1) for ln in f if "_UNDER_TEST:-" in ln for m in SUBJECT_REF.finditer(ln)]
+    except OSError:
+        return []
+
+
+def changed_files(top, base):
+    """The paths of `git diff base...HEAD`, or None when the diff cannot be read."""
+    out = git("diff", "--name-only", "--no-renames", "-z", base + "...HEAD", cwd=top)
+    return None if out is None else {p for p in out.split("\0") if p}
+
+
+def reached_suites(top, base, owed):
+    """The suites of `owed` the change reaches itself: it touches the suite's own file or a path the suite names as its subject. A diff that
+    cannot be read reaches every suite, so it reads unknown, never a quiet pass. A file of the same name elsewhere reaches nothing."""
+    changed = changed_files(top, base)
+    norm = lambda p: os.path.normpath(p).replace(os.sep, "/")
+    return {s for s in owed if changed is None or norm(s) in changed or changed.intersection(norm(p) for p in suite_subjects(top, s))}
 
 
 def job_reached(block):
@@ -1359,6 +1388,7 @@ def main(argv, sibling=False, ran_suites=None):
     logdir = tempfile.mkdtemp(prefix="ci-job-lint-%d-" % os.getpid()) if pool else None  # each parallel step's own log, until it is added to the run's
     kept_logs = False
     futures, logs = {}, {}  # by step index: the queued run, and its log
+    noted = set()  # the suites a `runs in CI` line named in this pass, so a suite that two steps hold prints once
     try:
         for n, step in enumerate(steps, 1):
             name = names[n - 1]
@@ -1385,11 +1415,18 @@ def main(argv, sibling=False, ran_suites=None):
                 continue
             owed = owing[n - 1]
             if owed:  # a suite CI's scope flags turn on for this diff that the selector did not pick: never a pass over it
-                tally["unknown"] += 1
-                why = "the selector did not pick it" if suites[n - 1] else "the selector picks python test files only"
-                print("%-15s %s: --lint did not run suite %s: a scope flag turns it on for this diff (%s) and %s" % (
-                    "unknown", name, ", ".join(owed), ", ".join(sorted(set(m.group(1) for m in SCOPE_TERM.finditer(step_key(step, "if") or "")
-                                                                         if (SCOPE["flags"] or {}).get(m.group(1)) != "false"))), why))
+                flags = ", ".join(sorted(set(m.group(1) for m in SCOPE_TERM.finditer(step_key(step, "if") or "")
+                                             if (SCOPE["flags"] or {}).get(m.group(1)) != "false")))
+                reach = reached_suites(top, base, owed)  # only a suite the change touches, or a file it tests, reads unknown
+                if reach:
+                    tally["unknown"] += 1
+                    print("%-15s %s: --lint cannot run suite %s, and the change touches it or a file it tests (scope flags on: %s)" % (
+                        "unknown", name, ", ".join(sorted(reach)), flags))
+                for suite in owed:
+                    if suite not in reach and suite not in noted:
+                        noted.add(suite)
+                        print("%-15s %s: --lint did not run suite %s: it runs in CI (scope flags on: %s); the change touches neither it nor a file it tests" % (
+                            "not run", name, suite, flags))
                 continue
             if sibling and not kind[n - 1]:
                 continue
