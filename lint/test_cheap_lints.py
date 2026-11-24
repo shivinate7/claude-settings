@@ -447,7 +447,7 @@ class BaseRun(unittest.TestCase):
         self.assertEqual(rc, 1, "exit %d with the check failing on the checkout, want 1" % rc)
 
     def test_behind_the_base_tip_reads_the_merge_base_and_says_also_fails(self):
-        """A lane cut before the base's tip removes BROKEN. The check fails at the merge base and at HEAD, and passes at the tip the checkout
+        """A lane cut before the base's tip removes BROKEN. The check fails at the merge base and on the checkout, and passes at the tip the checkout
         is behind. The row names the merge base as also failing, so it blames this change for nothing the base lacks."""
         case = new_case()
         repo, base = make_change(case, ["Pass one", "Breaks on change"], breaking=False, base_files=["BROKEN"], tip=(["BROKEN"], ["tip.txt"]))
@@ -470,7 +470,7 @@ class BaseRun(unittest.TestCase):
         self.assertEqual(rc, 1, "exit %d when the merge base fails too, want 1" % rc)
 
     def test_behind_the_base_tip_reads_the_merge_base_and_says_this_change_broke_it(self):
-        """The change adds BROKEN. The check passes at the merge base and fails at HEAD and at the tip the checkout is behind. The row names the
+        """The change adds BROKEN. The check passes at the merge base and fails on the checkout and at the tip the checkout is behind. The row names the
         merge base, where the check passed, and not the tip, where it fails."""
         case = new_case()
         repo, base = make_change(case, ["Pass one", "Breaks on change"], tip=([], ["BROKEN", "tip.txt"]))

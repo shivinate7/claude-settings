@@ -5451,7 +5451,7 @@ class PreReadyBaseRun(CiJobStub, unittest.TestCase):
         self.assertEqual(state, "fail", "a base pass turned the check's fail into %s: %s" % (state, out))
 
     def test_behind_the_base_tip_reads_the_merge_base_and_says_also_fails(self):
-        """A lane cut before the base's tip removes BROKEN. The check fails at the merge base and at HEAD, and passes at the tip the checkout is
+        """A lane cut before the base's tip removes BROKEN. The check fails at the merge base and on the checkout, and passes at the tip the checkout is
         behind. The base copy is the merge base, and the row names it as also failing, so it blames this change for nothing the base lacks."""
         self.make_repo(["base.txt", "BROKEN"], ["note.txt"], tip=(["BROKEN"], ["tip.txt"]))
         checks = ["Pass one", "Breaks on change"]
@@ -5476,7 +5476,7 @@ class PreReadyBaseRun(CiJobStub, unittest.TestCase):
         self.assert_still_refuses(checks)
 
     def test_behind_the_base_tip_reads_the_merge_base_and_says_this_change_broke_it(self):
-        """The change adds BROKEN. The check passes at the merge base and fails at HEAD and at the tip the checkout is behind. The row names the
+        """The change adds BROKEN. The check passes at the merge base and fails on the checkout and at the tip the checkout is behind. The row names the
         merge base, where the check passed, and not the tip, where it fails too."""
         self.make_repo(["base.txt"], ["BROKEN"], tip=([], ["BROKEN", "tip.txt"]))
         checks = ["Pass one", "Breaks on change"]
