@@ -492,6 +492,55 @@ def copy_repos(t):
             shutil.rmtree(os.path.join(t, name), True)
         return False
 
+class RepoTemplate(unittest.TestCase):
+    """copy_repos gives each test a copy of the template build_repos makes once per process. A copy must hold what a fresh build holds: the
+    same refs and trees in origin and in each clone, and each clone's url at its own origin. A copy is private to its test, its origin included."""
+
+    def copies(self):
+        """-> (fresh, copied): one folder of this run built by build_repos, one filled by copy_repos."""
+        root = os.path.realpath(tempfile.mkdtemp(prefix="repo-template-", dir=run_folder()))
+        fresh, copied = os.path.join(root, "fresh"), os.path.join(root, "copied")
+        os.makedirs(fresh)
+        os.makedirs(copied)
+        build_repos(fresh)
+        self.assertTrue(copy_repos(copied), "copy_repos could not copy the template")
+        return fresh, copied
+
+    def new_copy(self, root, name):
+        """-> root/name, filled by copy_repos: one more copy of the template, made the way copies() makes its copy."""
+        folder = os.path.join(root, name)
+        os.makedirs(folder)
+        self.assertTrue(copy_repos(folder), f"copy_repos could not copy the template for the copy {name}")
+        return folder
+
+    def refs_and_trees(self, folder):
+        """-> each repo's refs, one line per ref with the tree that ref names: origin.git, co and other. Commit ids differ between builds, trees do not."""
+        return {name: sh(os.path.join(folder, name), "git", "for-each-ref", "--format=%(refname) %(tree)") for name in ("origin.git", "co", "other")}
+
+    def test_a_copy_matches_a_fresh_build_and_is_private_to_its_test(self):
+        fresh, copied = self.copies()
+        self.assertEqual(self.refs_and_trees(copied), self.refs_and_trees(fresh),
+                         "a copy's refs or trees differ from a fresh build's")
+        norm = lambda p: os.path.normcase(os.path.realpath(p))
+        for name in ("co", "other"):
+            url = sh(os.path.join(copied, name), "git", "config", "--get", "remote.origin.url")
+            self.assertEqual(norm(url), norm(os.path.join(copied, "origin.git")), f"the copied clone {name} does not point at its own origin: {url}")
+        second = self.new_copy(os.path.dirname(copied), "second")
+        put(os.path.join(copied, "co", "only-here.txt"), "one test's edit\n")
+        self.assertFalse(os.path.exists(os.path.join(second, "co", "only-here.txt")), "an edit in one copy reached another copy")
+
+    def test_a_push_into_one_copys_origin_is_absent_from_the_origin_of_every_other_copy(self):
+        fresh, copied = self.copies()
+        root, ref = os.path.dirname(copied), "refs/heads/only-in-copied"
+        before = self.new_copy(root, "before")  # made before the write
+        sh(os.path.join(copied, "co"), "git", "push", "-q", "origin", "HEAD:" + ref)  # the write: a push from a clone to its own origin
+        after = self.new_copy(root, "after")  # made after the write: a write that reached the template shows here
+        def refs_of(folder):
+            return sh(os.path.join(folder, "origin.git"), "git", "for-each-ref", "--format=%(refname)", ref)
+        self.assertEqual(refs_of(copied), ref, "the push did not land in the origin of the copy it was pushed from")  # the scope first
+        for when, folder in (("before the write", before), ("after the write", after)):
+            self.assertEqual(refs_of(folder), "", f"a push into one copy's origin reached the origin of the copy made {when}")
+
 class Env(unittest.TestCase):
     def setUp(self):
         self.new_repos()
@@ -1802,7 +1851,8 @@ class ShallowMain(unittest.TestCase):
 
     def setUp(self):
         self.t = tempfile.mkdtemp(dir=self.run_dir)
-        build_repos(self.t)  # origin.git, and the clones seed, co and other: main holds the seed commit
+        if not copy_repos(self.t):  # origin.git and the clones co and other, with main at the seed commit
+            build_repos(self.t)
         bare, other = os.path.join(self.t, "origin.git"), os.path.join(self.t, "other")
         put(os.path.join(other, "old.txt"), "old\n")
         sh(other, "git", "add", "-A"); sh(other, "git", "commit", "-q", "-m", "old"); sh(other, "git", "push", "-q", "origin", "main")
@@ -19609,9 +19659,13 @@ class ReviewEnv(Env):
 
         if tree is None:
             git_in("git", "read-tree", parent)
-            for path, text in changes.items():
-                blob = git_in("git", "hash-object", "-w", "--stdin", text=text)
-                git_in("git", "update-index", "--add", "--cacheinfo", f"100644,{blob},{path}")
+            if changes:  # one hash-object and one update-index for all the changes: five git processes a commit, whatever its change count
+                names = [os.path.join(self.t, "fixture.blob.%d" % i) for i in range(len(changes))]
+                for name, text in zip(names, changes.values()):
+                    put(name, text)
+                blobs = git_in("git", "hash-object", "-w", "--no-filters", *names).split()
+                git_in("git", "update-index", *(arg for blob, path in zip(blobs, changes)
+                                                for arg in ("--add", "--cacheinfo", f"100644,{blob},{path}")))
             tree = git_in("git", "write-tree")
         parents = [arg for p in (parent, *more_parents) for arg in ("-p", p)]
         return git_in("git", "commit-tree", tree, *parents, "-m", message)
