@@ -321,19 +321,34 @@ def no_pipx_dir(case):
     return shim
 
 
-def ready_run(case, repo, tools):
+# A pipx body (ready_run's `pipx`) that exits 1 on stderr alone, as pipx does when no route to the index lets it fetch nothing.
+FETCH_FAILS = 'echo "Could not fetch index" >&2\nexit 1'
+# A pipx body that runs the stand-in ruff with the call's arguments: the tool started, and its findings are its own.
+RUFF_RUNS = 'exec "%(ruff)s" "$@"'
+
+
+def ready_run(case, repo, tools, pipx=None):
     """Runs bin/cheap-lints main in the fixture repo. With `tools`, the stand-in ruff comes first on PATH and CODE_CHECK_TOOLS=path, the
-    switch code_check.py reads for tools already on PATH; without, PATH has no pipx. -> (exit code, output lines)."""
+    switch code_check.py reads for tools already on PATH; without, PATH has no pipx. `pipx` (a sh body; %(ruff)s is the stand-in ruff's
+    path) is a pipx stand-in on PATH instead, which logs each call to case/pipx-calls.txt. -> (exit code, output lines)."""
     env = git_env(case)
     env.pop("CODE_CHECK_TOOLS", None)
     env["PR_BODY"] = "a pull request body"  # the records stub runs only with a body; cheap-lints drops it without one
-    if tools:
+    if tools or pipx is not None:
         bin_dir = os.path.join(case, "ruff-bin")
         os.makedirs(bin_dir)
         write_file(bin_dir, "ruff", FAKE_RUFF)
         os.chmod(os.path.join(bin_dir, "ruff"), 0o755)
+    if tools:
         env["PATH"] = os.pathsep.join([bin_dir, env.get("PATH", "")])
         env["CODE_CHECK_TOOLS"] = "path"
+    elif pipx is not None:
+        shim = os.path.join(case, "pipx-bin")
+        os.makedirs(shim)
+        calls = os.path.join(case, "pipx-calls.txt")
+        write_file(shim, "pipx", '#!/bin/sh\necho "$*" >> "%s"\n%s\n' % (calls, pipx % {"ruff": os.path.join(bin_dir, "ruff")}))
+        os.chmod(os.path.join(shim, "pipx"), 0o755)
+        env["PATH"] = os.pathsep.join([shim, env.get("PATH", "")])
     else:
         env["PATH"] = no_pipx_dir(case)
     done = subprocess.run([sys.executable, CHEAP, "main"], cwd=repo, env=env, stdout=subprocess.PIPE,
@@ -341,10 +356,19 @@ def ready_run(case, repo, tools):
     return done.returncode, done.stdout.splitlines()
 
 
+def pipx_calls(path):
+    """The pipx stand-in's calls, one a line; empty when it was never called."""
+    if not os.path.exists(path):
+        return ""
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
 @unittest.skipUnless(os.name == "posix", "the stand-in ruff is a POSIX script that PATH reaches")
 class CodeCheckReady(unittest.TestCase):
     """The ready run reads the Code check step and runs it on the tree. The list is the repo's real readyChecks; ruff is FAKE_RUFF, so no
-    case installs a tool or uses the network, and the tool-miss case drops pipx from PATH."""
+    case installs a tool or uses the network, and the tool-miss case drops pipx from PATH. The fetch cases put a pipx stand-in on PATH
+    instead, which either fails as pipx does with no route to the index or runs FAKE_RUFF."""
 
     def run_on(self, lane_text, tools=True):
         case = new_case()
@@ -380,6 +404,34 @@ class CodeCheckReady(unittest.TestCase):
         self.assertTrue(row, "the ready run printed no `unknown Code check` line with pipx absent: %r" % lines)
         self.assertIn("pipx", row[0], "the unknown Code check line does not name the missing tool: %r" % row[0])
         self.assertEqual(rc, 2, "a ready run with an unknown check did not exit 2: %r" % lines)
+
+    def run_with_pipx(self, lane_text, body):
+        """A ready run whose pipx is the stand-in `body`, which makes the stand-in ruff run. -> (exit code, lines, the calls file)."""
+        case = new_case()
+        rc, lines = ready_run(case, code_case(case, lane_text), False, pipx=body)
+        return rc, lines, os.path.join(case, "pipx-calls.txt")
+
+    def test_a_ruff_that_cannot_be_fetched_is_unknown_not_fail(self):
+        rc, lines, calls = self.run_with_pipx(CODE_CLEAN, FETCH_FAILS)
+        self.assertIn("ruff==", pipx_calls(calls), "pipx was never asked for ruff, so the unknown is not the fetch: %r" % lines)
+        self.assertNotIn(("fail", CODE_CHECK), verdicts(lines),
+                         "a ruff that could not be fetched reads `fail Code check`, and the ready run blames the branch: %r" % lines)
+        row = [line for line in lines if line.startswith("unknown %s" % CODE_CHECK)]
+        self.assertTrue(row, "the ready run printed no `unknown Code check` line for a ruff that could not be fetched: %r" % lines)
+        self.assertIn("ruff", row[0], "the unknown Code check line does not name the tool that could not be fetched: %r" % row[0])
+        self.assertEqual(rc, 2, "a ready run with an unknown check did not exit 2: %r" % lines)
+
+    def test_a_ruff_finding_through_pipx_fails_the_ready_run(self):  # control: a ruff that started and found a duplicate still fails
+        rc, lines, calls = self.run_with_pipx(CODE_DUPLICATE, RUFF_RUNS)
+        self.assertIn("ruff==", pipx_calls(calls), "pipx was never asked for ruff, so the control proves nothing: %r" % lines)
+        self.assertIn(("fail", CODE_CHECK), verdicts(lines), "a ruff finding through pipx did not fail the ready run: %r" % lines)
+        self.assertEqual(rc, 1, "a ready run with a failing check did not exit 1: %r" % lines)
+
+    def test_a_clean_ruff_through_pipx_passes_the_ready_run(self):  # control
+        rc, lines, calls = self.run_with_pipx(CODE_CLEAN, RUFF_RUNS)
+        self.assertIn("ruff==", pipx_calls(calls), "pipx was never asked for ruff, so the control proves nothing: %r" % lines)
+        self.assertIn(("pass", CODE_CHECK), verdicts(lines), "a clean ruff through pipx did not pass the ready run: %r" % lines)
+        self.assertEqual(rc, 0, "a ready run whose checks all pass did not exit 0: %r" % lines)
 
 
 def tearDownModule():
