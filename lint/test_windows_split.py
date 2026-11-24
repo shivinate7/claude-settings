@@ -1581,18 +1581,22 @@ class WindowsSplit(unittest.TestCase):
         self.assertEqual(paren_inner("(a == ')')"), "a == ')'")
         self.assertIsNone(paren_inner("(a) && (b)"))
 
-    def test_the_cache_save_is_the_only_step_that_takes_always(self):
-        # Controls: the save pinned to a 40-hex sha takes always() beside the scope condition, parenthesised, on a scoped job; a
-        # full-suite checkout takes the draft guard bare. Named failures, each on a scoped job's second step: a restore, a save pinned
-        # to a tag or to 39 hex digits, a checkout, bare always(), and a top-level || past the save's form. A full-suite checkout with
-        # always() fails too (full_suite_problems: the draft guard, bare or as (draft guard) && E).
+    def test_the_always_first_form_passes_only_on_a_cache_save(self):
+        # Pins the always-first form, always() beside the scope condition: it passes only on a cache save step pinned to a 40-hex
+        # sha. This test does not pin `(G) && always()`, which the older `(G) && E` rule passes on any scoped step.
+        # Controls: the pinned save takes always() beside the scope condition, parenthesised, on a scoped job; a full-suite checkout
+        # takes the draft guard bare. Named failures, each on a scoped job's second step: a restore, a save pinned to a tag or to 39
+        # hex digits, a checkout, a run step (parenthesised or bare), bare always(), and a top-level || past the save's form. A
+        # full-suite checkout with always() fails too (full_suite_problems: the draft guard, bare or as (draft guard) && E).
         scope_condition = "needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request'"
         save_pinned = "actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0"
         always_form = f"always() && ({scope_condition})"
 
-        def scoped(uses, if_):
+        def scoped(uses, if_, run=None):
+            # A run step is built with no uses: key at all, the shape a real run step has.
+            second = {"run": run} if run is not None else {"uses": uses}
             return {"needs": "scope", "if": None,
-                    "steps": [{"if": f"${{{{ {scope_condition} }}}}"}, {"uses": uses, "if": f"${{{{ {if_} }}}}"}]}
+                    "steps": [{"if": f"${{{{ {scope_condition} }}}}"}, {**second, "if": f"${{{{ {if_} }}}}"}]}
 
         self.assertEqual(job_check_problems("checks-macos-b", scoped(save_pinned, always_form), "checks_macos"), [])
         bad = {"a cache restore takes always()": scoped("actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0", always_form),
@@ -1600,6 +1604,8 @@ class WindowsSplit(unittest.TestCase):
                "a save pinned to 39 hex digits takes always()": scoped("actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a # v6.1.0",
                                                                        always_form),
                "a checkout takes always()": scoped("actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0", always_form),
+               "a run step takes always(), parenthesised": scoped(None, always_form, run="echo save"),
+               "a run step takes always(), bare": scoped(None, f"always() && {scope_condition}", run="echo save"),
                "the save takes bare always()": scoped(save_pinned, "always()"),
                "the save has a top-level || past the form": scoped(save_pinned, f"{always_form} || true")}
         for label, j in bad.items():
