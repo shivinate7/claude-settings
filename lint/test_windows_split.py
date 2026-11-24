@@ -711,10 +711,8 @@ def condition_problems(text, jobs=SPEC_JOBS):
     return problems
 
 
-def paren_prefix(expr):
-    """X when expr reads `(X) && ...` with X closed by its own parenthesis, else None. A paren inside single quotes is text."""
-    if not expr or expr[0] != "(":
-        return None
+def paren_close(expr):
+    """The index of the parenthesis that closes expr's first `(`, or None. A paren inside single quotes is text."""
     depth, quoted = 0, False
     for i, ch in enumerate(expr):
         if ch == "'":
@@ -726,8 +724,24 @@ def paren_prefix(expr):
         elif ch == ")":
             depth -= 1
             if depth == 0:
-                return expr[1:i] if expr[i + 1:].startswith(" && ") else None
+                return i
     return None
+
+
+def paren_prefix(expr):
+    """X when expr reads `(X) && ...` with X closed by its own parenthesis, else None."""
+    if not expr or expr[0] != "(":
+        return None
+    i = paren_close(expr)
+    return expr[1:i] if i is not None and expr[i + 1:].startswith(" && ") else None
+
+
+def paren_inner(expr):
+    """X when expr is `(X)` and its first parenthesis closes at the end, else None."""
+    if not expr or expr[0] != "(":
+        return None
+    i = paren_close(expr)
+    return expr[1:i] if i == len(expr) - 1 else None
 
 
 def top_level_or(expr):
@@ -748,13 +762,19 @@ def top_level_or(expr):
     return quoted
 
 
+ALWAYS_LEAD = "always() && "
+
+
 def scope_condition_rest(expr, scope_condition):
-    """What a step's `if` adds to the scope condition: "" for the bare scope condition, E for `(scope condition) && E`, None when the step lacks the scope condition
-    or E has a `||` outside parentheses, since that lets the step run outside the scope condition."""
+    """What a step's `if` adds to the scope condition: "" for the bare scope condition, "always()" for `always() && G` or
+    `always() && (G)` (a save step, which runs after a failed shard step), E for `(scope condition) && E`, None when the step lacks
+    the scope condition or E has a `||` outside parentheses, since that lets the step run outside the scope condition."""
     if scope_condition is None or expr is None:
         return None
     if expr == scope_condition:
         return ""
+    if expr in (ALWAYS_LEAD + scope_condition, ALWAYS_LEAD + f"({scope_condition})"):
+        return "always()"
     lead = f"({scope_condition}) && "
     rest = expr[len(lead):] if expr.startswith(lead) else ""
     if not rest or top_level_or(rest):
@@ -762,10 +782,18 @@ def scope_condition_rest(expr, scope_condition):
     return rest
 
 
+def scope_candidate(expr):
+    """The scope condition one step's `if` names: X from `always() && X` (X bare or in parentheses), X from `(X) && E`, else the whole if."""
+    if expr.startswith(ALWAYS_LEAD):
+        rest = expr[len(ALWAYS_LEAD):]
+        return paren_inner(rest) or rest
+    return paren_prefix(expr) or expr
+
+
 def read_scope_condition(job):
-    """G, the scope condition a scoped job's steps carry. Each step with an `if` gives a candidate: its `(X)` prefix, else the whole
-    if. None when no step carries an `if`, or when the candidates differ."""
-    cands = {paren_prefix(expr) or expr for expr in map(step_if, job["steps"]) if expr is not None}
+    """G, the scope condition a scoped job's steps carry. Each step with an `if` gives a candidate (scope_candidate). None when no
+    step carries an `if`, or when the candidates differ."""
+    cands = {scope_candidate(expr) for expr in map(step_if, job["steps"]) if expr is not None}
     return cands.pop() if len(cands) == 1 else None
 
 
@@ -901,7 +929,7 @@ def sweep_job_problems(name, job, flag=None):
     problems = []
     suite = [st for st in job["steps"] if not st.get("uses") and key(st) not in SWEEP_STEP_CMDS]
     setup = [st for st in job["steps"] if st.get("uses")]
-    conds = {paren_prefix(e) or e for e in map(step_if, suite) if e is not None}
+    conds = {scope_candidate(e) for e in map(step_if, suite) if e is not None}
     if len(conds) != 1:
         return problems + [f"{name}: its suite steps carry no one scope condition (none carries one, or they disagree)"]
     scope_condition = conds.pop()
@@ -1457,6 +1485,9 @@ class WindowsSplit(unittest.TestCase):
             return {"needs": needs, "if": job_if, "steps": steps}
 
         self.assertEqual(job_check_problems("checks-macos", job()), [])
+        # The save step after a failed shard step: always() beside the scope condition, parenthesised, passes (scope_condition_rest).
+        self.assertEqual(job_check_problems("checks-macos", job(steps=[{"if": f"${{{{ {scope_condition} }}}}"},
+                                                                       {"if": f"${{{{ always() && ({scope_condition}) }}}}"}])), [])
         self.assertEqual(job_check_problems("checks", {"needs": "scope", "if": None, "steps": []}), [])
         self.assertTrue(job_check_problems("checks", {"needs": None, "if": None, "steps": []}))
         # ci-hygiene steps 11 and 19: a job-level if that holds only the draft guard is allowed on a lint job and a scoped job.
@@ -1488,10 +1519,39 @@ class WindowsSplit(unittest.TestCase):
             "top-level or past the scope condition": job([{"if": f"${{{{ ({scope_condition}) && !cancelled() || always() }}}}"}]),  # runs outside it
             "top-level or past the scope condition, event only": job([{"if": f"${{{{ ({scope_condition}) && !cancelled() || github.event_name == 'push' }}}}"}]),
             "wrong needs": job(needs="checks"),
+            # always() counts only beside the scope condition. Each of these pairs a scoped step with one defective step.
+            "always() with no scope condition, beside the scope": job([{"if": f"${{{{ {scope_condition} }}}}"}, {"if": "${{ always() }}"}]),
+            "always() || scope, beside the scope": job([{"if": f"${{{{ {scope_condition} }}}}"},
+                                                        {"if": f"${{{{ always() || {scope_condition} }}}}"}]),
         }
         for label, j in bad.items():
             with self.subTest(defect=label):
                 self.assertTrue(job_check_problems("checks-macos", j), label)
+
+    def test_always_beside_the_scope_condition_is_the_only_term_a_step_adds(self):
+        # Controls: the bare scope condition; always() with the scope bare or parenthesised; (scope) && E. Named failures: always()
+        # alone, always() beside another term, and always() || scope, each of which lets a step run outside the scope condition.
+        g = "needs.scope.outputs.guard == 'true'"
+        ok = {"bare scope": (g, ""),
+              "always() && scope": (f"always() && {g}", "always()"),
+              "always() && (scope)": (f"always() && ({g})", "always()"),
+              "(scope) && !cancelled()": (f"({g}) && !cancelled()", "!cancelled()")}
+        for label, (expr, want) in ok.items():
+            with self.subTest(form=label):
+                self.assertEqual(scope_condition_rest(expr, g), want, label)
+        refused = {"always() alone": "always()",
+                   "always() beside another term": "always() && !cancelled()",
+                   "always() || scope": f"always() || {g}",
+                   "always() && scope, then a top-level ||": f"always() && {g} || github.event_name == 'push'"}
+        for label, expr in refused.items():
+            with self.subTest(defect=label):
+                self.assertIsNone(scope_condition_rest(expr, g), label)
+        # scope_candidate reads the scope out of each form, and paren_inner keeps a quoted parenthesis as text.
+        self.assertEqual(scope_candidate(f"always() && ({g})"), g)
+        self.assertEqual(scope_candidate(f"always() && {g}"), g)
+        self.assertEqual(scope_candidate(f"({g}) && !cancelled()"), g)
+        self.assertEqual(paren_inner("(a == ')')"), "a == ')'")
+        self.assertIsNone(paren_inner("(a) && (b)"))
 
     def test_a_records_only_job_if_is_allowed_alone_or_after_the_draft_guard_and_no_wider(self):
         # Controls: the records-only condition alone on a scoped job, and `(draft guard) && records-only` on a shard, pass the job-level
