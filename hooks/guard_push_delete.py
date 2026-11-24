@@ -1011,7 +1011,7 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
                 # A local origin makes main() empty; the other refspecs are still read for agent.
                 if main():
                     to_main = True
-            elif source in ("HEAD", "@"):
+            elif source in ("HEAD", "@") or (current() is not None and source == current()):
                 implied = True
                 agent = agent or bool(current() and AGENT_BRANCH.fullmatch(current()))
             else:
