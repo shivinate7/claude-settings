@@ -1,0 +1,1 @@
+- idle-sweep-no-author-filter: The idle red sweep drafts fork, other-author and release-base PRs too (dependabot is the likely other-author case). The ruling names no exclusion, so the owner decides whether to exclude them. Seen: 2026-11-23 x1

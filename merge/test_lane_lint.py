@@ -48,6 +48,7 @@ sys.path.append(os.path.join(os.path.dirname(HERE), "hooks"))  # append: the pin
 sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import _test_temp  # noqa: E402  test-temp-standard: this run's folder (lint/_test_temp.py)
 import test_merge as tm  # noqa: E402  the git half's fixture and fakes; importing it runs none of its cases
+import test_idle_prs as idle  # noqa: E402  the idle-red fake host (IdleHost) and its runs (one home: test_idle_prs.py); importing it runs none of its cases
 from test_merge import LANE_LINT_MARKER, NOT_OWNER, lint_comment  # noqa: E402  the lint comment's one form, in test_merge.py (decision lanes-run-no-full-ci-job)
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import merge  # noqa: E402
@@ -4889,6 +4890,50 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assertEqual(rc, 1, "a failing %s step did not refuse the pre-ready run: %s" % (name, out))
         self.assertEqual(self.host.readies, [], "a failing %s step marked the draft ready: %s" % (name, out))
         self.assertEqual(self.refs(), refs_before, "the pre-ready run pushed beside a failing %s step: %s" % (name, out))
+
+    def idle_red_clash(self, age):
+        """The lane (PR 7, this session's draft) and PR 9 share shared.txt. PR 9 is a non-draft whose head is red, its newest run `age` seconds
+        old, on a host that reads each head's runs (test_idle_prs.IdleHost). -> PR 9's head."""
+        self.host = idle.IdleHost.adopt(self.host)
+        self.host.include_own = True
+        self.pre_ready_lane()
+        _head, other = self.clashing_pair(n=9, draft=False)
+        self.host.runs_by_sha[other] = [idle.red(age=age)]
+        self.use_ci_job(steps_for(), 0)
+        return other
+
+    def test_idle_red_clashing_pr_does_not_block_the_ready_check_and_is_drafted(self):
+        self.idle_red_clash(3 * idle.HOUR)
+        rc, out = self.pre_ready()
+        self.assertFalse(verdict_line(out, "fail", "open-PR clash"),
+                         "the idle red non-draft PR #9 still fails the ready check's open-PR clash: " + out)
+        self.assertEqual(rc, 0, "the ready check refused with an idle red clash in the way: " + out)
+        self.assertEqual(self.host.drafts, [9], "the idle red clashing PR #9 was not drafted locally: " + out)
+        self.assertEqual(self.host.readies, [7], "the lane PR #7 did not go ready: " + out)
+        self.assertEqual([n for n, _ in self.host.posted], [9], "PR #9 did not get one comment: " + out)
+        self.assertIn("merge 9 --ready", self.host.posted[0][1], "the comment on PR #9 does not say how to return: " + out)
+
+    def test_red_clash_one_second_short_of_idle_still_fails_the_ready_check(self):  # a green control: the old code fails it too
+        self.idle_red_clash(idle.IDLE_SECONDS - 1)
+        rc, out = self.pre_ready()
+        self.assertTrue(verdict_line(out, "fail", "open-PR clash"),
+                        "a red clash 1 h 59 min 59 s old no longer fails the open-PR clash: " + out)
+        self.assertNotEqual(rc, 0, "a red clash 1 h 59 min 59 s old did not refuse the ready check: " + out)
+        self.assertEqual(self.host.drafts, [], "a red clash not yet idle was drafted: " + out)
+        self.assertEqual(self.host.posted, [], "a red clash not yet idle was commented on: " + out)
+        self.assertEqual(self.host.readies, [], "the lane went ready past a clash that still counts: " + out)
+
+    def test_cloud_host_prints_the_return_route_for_an_idle_red_clash_and_still_counts_it(self):  # a cloud host cannot draft, so the clash counts PR #9 (owner's R6 ruling, 10:54 CST Nov 23; review ruling, 15:06 CST Nov 23)
+        self.idle_red_clash(3 * idle.HOUR)
+        self.host.draft_refuse = True
+        rc, out = self.pre_ready()
+        self.assertTrue(verdict_line(out, "fail", "open-PR clash"),
+                        "the idle red clashing PR #9 does not fail the ready check on a cloud host that cannot draft it: " + out)
+        self.assertNotEqual(rc, 0, "the cloud host let the ready check pass with PR #9 still counted as ready: " + out)
+        self.assertIn("update_pull_request draft=true", out, "the cloud host did not print the MCP route to draft PR #9: " + out)
+        self.assertEqual(self.host.drafts, [], "the cloud host drafted PR #9: " + out)
+        self.assertEqual(self.host.posted, [], "the cloud host commented on PR #9, though it did not draft it, so the comment would say it returned to draft: " + out)
+        self.assertEqual(self.host.readies, [], "the lane PR #7 went ready past a clash that still counts PR #9: " + out)
 
     def test_cheap_check_control_six_names_declared_by_the_fixture_pass_and_go_ready(self):
         """Green control, on head: the fixture declares the six step names itself, each passes, and the draft goes ready. The red cases differ

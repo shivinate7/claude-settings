@@ -275,7 +275,7 @@ A list read asks for each page by number (`Host.pages`), so no `gh` flag beyond 
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, ast, concurrent.futures, contextlib, datetime, fnmatch, functools, hashlib, importlib.util, inspect, io, json, math, os, pathlib, re, shlex, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, ast, calendar, concurrent.futures, contextlib, datetime, email.utils, fnmatch, functools, hashlib, importlib.util, inspect, io, json, math, os, pathlib, re, shlex, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -1241,6 +1241,7 @@ class Host:
         self.branches_fetched = {}  # branch -> (code, output) of its one fetch, which holds_head reads when `other` names a branch
         self.heads_fetched = {}  # sha -> (code, output) of the one fetch of a head the clone still lacked after the pull refs
         self.lost_work_fetch = None  # (code, output) of this run's one fetch of every branch into LOST_WORK_REFS (fetch_lost_work_refs); None before it
+        self.server_time = None  # GitHub's clock, epoch seconds, from the Date header of the newest reply that had a header block; None when unread (server_now)
         self.budget = {}  # remaining, limit, reset (epoch seconds) from the newest reply that had a header block; None for each one the reply lacks or garbles, so an unknown budget never refuses
         self.memo = {}  # (route, query, flags) -> the reply of this run's GET, kept until any write (api)
         self.route_counts = {}  # (method, route template) -> gh calls made, retries included (route_template)
@@ -1279,6 +1280,17 @@ class Host:
         or not a number is None, so refuse_bulk never reads it."""
         if headers:
             self.budget = {k: _seconds(headers.get("x-ratelimit-" + k)) for k in ("remaining", "limit", "reset")}
+            try:
+                # parsedate_tz keeps the offset (a `-0000` Date too), so timegm gives the UTC instant whatever the local zone
+                parsed = email.utils.parsedate_tz(headers["date"])
+                self.server_time = None if parsed is None else calendar.timegm(parsed[:9]) - (parsed[9] or 0)
+            except (KeyError, TypeError, ValueError, OverflowError):
+                self.server_time = None
+
+    def server_now(self):
+        """-> GitHub's clock in epoch seconds: the Date header of the newest GitHub reply this host read (no extra call), or None when none was read or its Date does not parse.
+        Never the local clock: the idle red rule judges a 2 h age on this one, and an unread clock leaves the PR ready."""
+        return self.server_time
 
     use_memo = True  # confirm turns it off: a merge under the lock reads every state fresh, and a rate wait or a rival can change it between two reads
     bulk_mode = False  # bulk_reads sets it: every GET of the block is a bulk read
@@ -1843,7 +1855,7 @@ class Host:
         key = ("runs", sha)
         if self.use_memo and key in self.memo:
             return list(self.memo[key])
-        c, out = self.gh(["run", "list", *self._repo_args(), "--commit", sha, "--limit", "100", "--json", "status,conclusion,name,workflowDatabaseId,databaseId"], self.cwd)
+        c, out = self.gh(["run", "list", *self._repo_args(), "--commit", sha, "--limit", "100", "--json", "status,conclusion,name,workflowDatabaseId,databaseId,createdAt,event"], self.cwd)  # createdAt and event: the idle red rule reads a head's age from this one call (idle_prs.py)
         try:
             runs = json.loads(out)
         except ValueError:
@@ -2220,6 +2232,14 @@ class Host:
         could send is unmeasured (route pr-ready-gh-api-cloud). The caller then says to mark it ready by the session's route."""
         return False, f"this tool sends no GraphQL and no unmeasured REST route. {READY_ROUTES}"
 
+    def to_draft(self, n):
+        """Return pull request n to draft. -> (ok, why). Locally `gh pr ready <n> --undo`. A cloud session gets HTTP 403 on that GraphQL call, so
+        it sends nothing and answers (False, DRAFT_ROUTES): the caller prints the route. A failed call is (False, its output)."""
+        if os.environ.get("CLAUDE_CODE_REMOTE") == "true":
+            return False, DRAFT_ROUTES
+        c, out = self.gh(["pr", "ready", str(n), "--undo", *self._repo_args()], self.cwd, idempotent=True)
+        return (False, out) if c else (True, "")
+
     def merge(self, n, method, sha):
         """`PUT pulls/<n>/merge` with `sha`, so GitHub refuses (409) a head that moved. `self.commit_message`, when set, is the merge commit's message. Never --admin, never --delete-branch (cut_branch does that).
         -> (merge commit oid or None, message). The reply is never trusted: after any reply the PR state is read.
@@ -2534,6 +2554,19 @@ READY_ROUTES = ("Mark ready in cloud by MCP update_pull_request draft=false; on 
                 "a GraphQL call a cloud session gets 403 on (route pr-ready-mcp-cloud, route pr-ready-gh-cli-cloud, route pr-ready-gh-cli-local)")
 DRAFT_ROUTES = ("Return to draft in cloud by MCP update_pull_request draft=true; on a computer by `gh pr ready --undo` "
                 "(route pr-draft-mcp-cloud, route pr-draft-gh-cli-local)")
+
+def idle_prs_module():
+    """-> merge/idle_prs.py, the one home of the idle red rule. Loaded here, not at the top: it imports nothing from this file, which may be the running script."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.append(here)
+    import idle_prs
+    return idle_prs
+
+def draft_idle(host):
+    """merge --draft-idle: draft each open non-draft pull request whose head is red and idle (idle_prs.sweep). -> the exit code. Reads the open list once, and writes only the draft calls and comments."""
+    return idle_prs_module().sweep(host, say, (Stop, OSError), DRAFT_ROUTES)
+
 DRAFT_SKIP_CHECK = REQUIRED_CHECK  # the one required check a draft run skips (actions/all-jobs-passed): its skip means the ready run is still to come, not green
 LINT_SECONDS = 3600  # Interim stopgap (owner 12:11 CST Nov 10, decision ci-job-caps; ends with step time-pinned-tests-go). The bound on the lint run of the merge result, and again on the suites it hits. Both run before the lock is taken, so neither extends it; confirm extends the lock only for a rate wait and before the debt and undo checks (LOCK_TTL_SECONDS)
 
@@ -3403,7 +3436,7 @@ def paths_meet(a, b):
         return {"/".join(p.split("/")[:i]) for p in paths for i in range(1, p.count("/") + 1)}
     return bool(a & b or a & dirs(b) or dirs(a) & b)
 
-def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean, integration=False, scope="lane"):
+def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean, integration=False, scope="lane", draft_idle=False):
     """Check `head` of PR `n` against each other open PR of its lane (a body with the same session URL) and each PR in `with_prs`, with
     `git merge-tree --write-tree`. One PR-list read; for each PR compared, one merge-tree of the two heads, and for a clash one of that PR's head into
     origin/<base> (merge_reason). A PR in a stack with this head (one head holds the other) is skipped before any merge-tree: its own base is not the question.
@@ -3419,6 +3452,8 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
     host's open_pulls, GitHub REST through the merge tool's own host, the route a lane or a runner has in a cloud session (no `gh` flag, no GraphQL).
     A failed list read is a Stop, which the pre-ready run reads as unknown, never a pass. In scope "all" or "ready" a PR whose changed paths (changed_paths) meet none of
     this head's (paths_meet) is skipped before any merge-tree: with hundreds open, only an overlap can clash. A diff git cannot read does not skip.
+    `draft_idle` (scope "ready" only; the pre-ready run sets it, the read-only fast-checks run does not): a counted clash with a non-draft PR whose head is red and idle on GitHub's clock (idle_prs.draft_one) returns that PR to draft with one comment, then reads as a report line, not a fail. Any other read of it (keep, unknown, a cloud route that cannot draft, an unread GitHub clock) leaves the clash counted.
+    Cost of that read per counted clash with a non-draft PR: head_state's 2 check page reads and 1 `gh run list`, plus the base's required names once a run (idle_prs.py); one draft call and one comment when it drafts.
     A PR whose `draft` field is not true or false is an unknown in scope "ready", never a pass. So is a draft whose changed files cannot be read (its head, or this one, not in the clone).
     Cost of scope "all" or "ready": one list read (a REST page per 100 PRs), one fetch of every branch head, then per other open PR on the base one `git diff`
     start (PROBE_WORKERS at once), and for an overlap with a counted PR one merge-tree of the two heads (PROBE_WORKERS at once) and, for a clash only, merge_reason's. No file or process is kept."""
@@ -3501,7 +3536,14 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
         elif integration:
             reports.append(f"{named}. Not counted: this PR is a batch integration PR, so #{m} rebases after the merge.")
         else:
-            conflicts.append(named)
+            printed = []
+            def say_kept(line):
+                printed.append(line)
+                say(line)
+            if scope == "ready" and draft_idle and idle_prs_module().draft_one(host, m, rows[m], host.server_now(), say_kept, (Stop, OSError), DRAFT_ROUTES) == "drafted":
+                reports.append(f"{named}. Not counted: #{m} is red and idle, so it went back to draft.")
+            else:  # a cloud host that cannot draft printed the route on an earlier line; the fail line carries it too
+                conflicts.append(named + (f"\n  #{m} is red and idle but this session cannot draft it. {DRAFT_ROUTES}" if any(DRAFT_ROUTES in line for line in printed) else ""))
     fails = []
     if conflicts:
         fails.append("\n".join(["its head conflicts with another PR's head (git merge-tree), file by file:", *conflicts,
@@ -5124,7 +5166,7 @@ def debt_verdict(wt, base, host, info):
         return "unknown", "debt retire", " ".join(str(e).split())
     return "pass", "debt retire", ""
 
-def clash_verdict(root, n, base, host, info):
+def clash_verdict(root, n, base, host, info, draft_idle=True):
     """-> (verdict, "open-PR clash", detail): the head of PR `n` against every other open PR on `base`, by cross_measure with scope PRE_READY_CLASH_SCOPE. A head that does not merge
     clean with the base, a failed list read, a fetch that failed and any pair git cannot read are unknown, never a pass."""
     name = "open-PR clash"
@@ -5133,7 +5175,7 @@ def clash_verdict(root, n, base, host, info):
         why = merge_reason(root, n, base, info["head"], fetched)
         if why is not None:  # a head that conflicts with its base: its clashes would come through the base, so the read proves nothing. unknown, never a pass
             return "unknown", name, (why if is_unknown_reason(why) else f"{why}: the head conflicts with {base}, so its clash with the other open PRs is not read. Merge {base} into the lane, push, and run again")
-        fails, reports, stop = cross_measure(root, info["head"], n, info.get("body", ""), host, (), base, fetched, True, scope=PRE_READY_CLASH_SCOPE)
+        fails, reports, stop = cross_measure(root, info["head"], n, info.get("body", ""), host, (), base, fetched, True, scope=PRE_READY_CLASH_SCOPE, draft_idle=draft_idle)
     except (Stop, subprocess.TimeoutExpired, OSError, ValueError) as e:  # ValueError: gh printed a reply that is not JSON
         return "unknown", name, " ".join(str(e).split())
     if fails:
@@ -5184,8 +5226,8 @@ def pre_ready_rows(wt, n, base, checks, pre, body=None):
         states, rows = [s_ for s_, _ in held], [r for _, job_rows in held for r in job_rows]
     state = "fail" if "fail" in states else "unknown" if "unknown" in states else "pass"
     if pre:
-        root, host, info = pre
-        rows += [debt_verdict(wt, base, host, info), clash_verdict(root, n, base, host, info)]
+        root, host, info, *act = pre  # a fourth item False is the read-only run (fast_checks): an idle red clash is read, never drafted
+        rows += [debt_verdict(wt, base, host, info), clash_verdict(root, n, base, host, info, draft_idle=act[0] if act else True)]
     say(*[f"{v} {name}" + (f": {d}" if d else "") for v, name, d in rows])
     return rows, (state, lines, log)
 
@@ -5350,7 +5392,7 @@ def fast_checks(root, cfg, n, host, info):
     tmp, wt = open_merge_worktree(root, info, base)
     try:
         try:
-            run_ready_checks(wt, n, base, checks, remedy="Fix it on the branch and push; nothing was changed by this run.", pre=(root, host, info))
+            run_ready_checks(wt, n, base, checks, remedy="Fix it on the branch and push; nothing was changed by this run.", pre=(root, host, info, False))
         except Stop as e:  # the verdict lines are printed: the refusal text follows on stderr, exit 1
             print("merge: " + "\n".join(str(e).splitlines()[:-1]), file=sys.stderr)  # without the draft step's "stays a draft" line
             return 1
@@ -7951,6 +7993,7 @@ def build_parser():
     p.add_argument("--session", default="", metavar="NAME", help="your session name; the lock shows it to waiting runs")
     p.add_argument("--config", default=DEFAULT_CONFIG)
     p.add_argument("--idle-lanes", action="store_true", help="list the lanes to archive from the roadmap's live file; takes no lock, merges and posts nothing")
+    p.add_argument("--draft-idle", action="store_true", help="return to draft each open non-draft pull request whose head is red and whose newest pull_request run is 2 hours old or more (owner, 2026-11-23 10:54 CST), with one comment that says why and how to return; the janitor's daily job runs it; takes no lock, merges nothing")
     p.add_argument("--live", default=None, metavar="FILE", help="the publisher's live-work file: with --idle-lanes its lanes to archive, with --reviewed the lost-work rows")
     p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
     p.add_argument("--json", action="store_true", help="with --reviewed: print {readAt, rows} as one JSON object, a row for each open pull request with its number, next act, owner, ageHours, red and blockedOn, in place of the lines")
@@ -8044,7 +8087,9 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error(f"argument pr: invalid int value: {a.pr!r}")
     if a.audit_prs and any(v != p.get_default(k) for k, v in vars(a).items() if k not in ("audit_prs", "repo_dir")):  # -C names the checkout to audit, not a second mode
         p.error("--audit-prs stands alone")
-    if a.idle_lanes or a.touches or a.release_check or a.audit_prs or a.review_tally:
+    if a.draft_idle and any(v != p.get_default(k) for k, v in vars(a).items() if k not in ("draft_idle", "repo_dir")):  # -C names the checkout, not a second mode
+        p.error("--draft-idle stands alone")
+    if a.idle_lanes or a.touches or a.release_check or a.audit_prs or a.review_tally or a.draft_idle:
         pass  # stands alone: checked above
     elif a.fast_checks:  # the read-only pre-ready run: no lock, no push, no ready mark
         if a.pr is None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record or a.lane_lint or a.ready:
@@ -8127,6 +8172,8 @@ def main(argv, host=None, lock=None, hosts=None):
             lines, counts = audit_prs(host or Host(cwd=a.repo_dir))
             say(*lines, "gh calls by route:", *(f"  {c}" for c in counts))
             return 0
+        if a.draft_idle:  # before the role check and any lock: it merges nothing; it drafts and comments, each once per idle red PR
+            return draft_idle(host or Host(cwd=a.repo_dir))
         if a.idle_lanes:
             return idle_lanes(a.live, a.repo_dir)  # before the role check and any lock: it reads, merges and posts nothing
         if a.lane_lint:

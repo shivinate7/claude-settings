@@ -10916,5 +10916,75 @@ class LeftoverTempFolderTests(unittest.TestCase):
                          % (probe.stdout.strip(), self.temp, probe.stderr.strip()[-400:]))
 
 
+# ----------------------------------------------------------- the idle red pull request step
+#
+# `janitor/sweep.py` draft_idle_pass runs the merge tool's `merge --draft-idle` once for each swept
+# repository whose origin is on github.com, and only on a --confirm run. A preview prints "WOULD run"
+# and starts nothing. The runner is a fake (sweep's `_nowindow`): no merge process starts, and each
+# start is recorded. The pass returns nothing, so the sweep's exit code, which main sets from its own
+# counts, cannot move with it.
+
+
+class _DraftRunner:
+    """Stands in for sweep's `_nowindow` runner. It records each start and answers as a finished merge tool."""
+
+    def __init__(self, returncode=0, stdout="drafted 0\n"):
+        self.returncode, self.stdout, self.calls = returncode, stdout, []
+
+    def run(self, args, **_kwargs):
+        self.calls.append(list(args))
+        return types.SimpleNamespace(returncode=self.returncode, stdout=self.stdout, stderr="")
+
+
+def draft_fixture(where, origin):
+    """A repository with one commit and its origin set to `origin`. -> its root."""
+    make_repo(where, {"README.md": "fixture\n"})
+    added = run_vcs(where, "remote", "add", "origin", origin)
+    require(added.returncode == 0, "remote add failed in %r: %s" % (where, added.stderr.strip()))
+    return where
+
+
+class DraftIdlePassTests(unittest.TestCase):
+    """The idle red pull request step as the janitor wires it. Each root is a real checkout, so the origin read is the real one."""
+
+    def setUp(self):
+        self.folder = _test_temp.run_folder()
+
+    def tearDown(self):
+        shutil.rmtree(self.folder, ignore_errors=True)
+
+    def test_the_idle_red_step_starts_the_merge_tool_only_for_a_github_root_on_a_confirmed_run(self):
+        github = draft_fixture(os.path.join(self.folder, "github"), "https://github.com/example/fixture.git")
+        other = draft_fixture(os.path.join(self.folder, "other"),
+                              "https://gitlab.example.invalid/example/fixture.git")
+        tool = os.path.join(REPO_ROOT, "merge", "merge.py")
+        start = [sys.executable, tool, "-C", github, "--draft-idle"]
+        results = [{"root": github}, {"root": other}]
+
+        confirmed = _DraftRunner()  # the control: a confirmed run starts the tool for the github root
+        with mock.patch.object(sweep, "_nowindow", confirmed), contextlib.redirect_stdout(io.StringIO()):
+            sweep.draft_idle_pass(results, True)
+        self.assertIn(start, confirmed.calls,
+                      "a confirmed run did not start `merge --draft-idle` in the github root: %s" % confirmed.calls)
+        self.assertEqual(len(confirmed.calls), 1,
+                         "a confirmed run also started the merge tool for a non-github origin: %s" % confirmed.calls)
+
+        failing = _DraftRunner(returncode=1, stdout="unknown: gh failed\n")
+        out = io.StringIO()
+        with mock.patch.object(sweep, "_nowindow", failing), contextlib.redirect_stdout(out):
+            returned = sweep.draft_idle_pass([{"root": github}], True)
+        self.assertIsNone(returned, "the pass returns a value a caller could fold into the exit code: %r" % (returned,))
+        self.assertIn("unknown, exit 1", out.getvalue(),
+                      "a failed merge run printed no unknown line: " + out.getvalue())
+
+        preview = _DraftRunner()
+        out = io.StringIO()
+        with mock.patch.object(sweep, "_nowindow", preview), contextlib.redirect_stdout(out):
+            sweep.draft_idle_pass([{"root": github}], False)
+        self.assertEqual(preview.calls, [], "a preview started the merge tool: %s" % preview.calls)
+        self.assertIn("WOULD run merge --draft-idle in %s" % github, out.getvalue(),
+                      "a preview did not print WOULD run for the github root: " + out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
