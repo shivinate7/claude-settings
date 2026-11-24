@@ -1,0 +1,1 @@
+- hang-stop-kill-after-term: `bin/verdict` `hang_stop` (:197) sends SIGKILL to the tree in its `finally`, even after the TERM at :194 that the wait at :195 saw end. Decision: hang-stop. Seen: 2026-11-24 x1

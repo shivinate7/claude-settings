@@ -1086,7 +1086,8 @@ def run_step_uncached(name, step, install, detail, shell, env, cwd, ctx, log, su
     finally:
         os.remove(script)
     line = next((ln.rstrip("\n") for ln in kept if ln.startswith(("PASS ", "SKIP ", "FAIL "))), None)
-    first = line or "(verdict printed no verdict line)"
+    hang = next((ln.rstrip("\n") for ln in kept if ln.startswith("HANG ")), None) if rc == 124 and line is None else None
+    first = line or hang or "(verdict printed no verdict line)"  # a hang stop's own line says why the step read unknown
     if known_action(step) == "code-check":
         first += " (code_check.py: %s)" % code_check(top, step, pinned)[0]
     if rc == 127 or gone:

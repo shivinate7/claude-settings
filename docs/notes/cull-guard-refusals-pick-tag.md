@@ -1,0 +1,1 @@
+- cull-guard-refusals-pick-tag: line 16 of decision cull-guard-wrong-refusals states a rule with no source tag. Its source is the consultant's pick, so the bullet should carry that tag. Decision: cull-guard-wrong-refusals. Seen: 2026-11-24 x1

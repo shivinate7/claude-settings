@@ -1,0 +1,1 @@
+- load-brake-no-cpu-read: the load brake reads memory and disk only, never the load average or CPU (decision machine-load-brake, line 23: "No brake reads it"). So pace number four, "brake refusals", cannot show CPU load. Decision: machine-load-brake. Seen: 2026-11-24 x1

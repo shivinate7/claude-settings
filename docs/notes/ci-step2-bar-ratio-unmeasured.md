@@ -1,0 +1,1 @@
+- ci-step2-bar-ratio-unmeasured: the ratio in decision ci-step2-bar, line 7 (flaky failures outnumber real bugs about 4 to 1), has no measure on main behind it. Unmeasured. Decision: ci-step2-bar. Seen: 2026-11-24 x1
