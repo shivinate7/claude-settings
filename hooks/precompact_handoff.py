@@ -811,6 +811,17 @@ def premise_note(path, everyone):
     return note
 
 
+def size_note():
+    """The reorient sentence on the handoff's size limit, "" when the limit cannot be read. The limit's one home is
+    reread_check.HANDOFF_MAX_TOKENS, which imports this module, so the import waits until a call."""
+    try:
+        from reread_check import HANDOFF_MAX_TOKENS
+        return (" The handoff holds at most %d estimated tokens; step 4 of that prompt says what to cut first."
+                % HANDOFF_MAX_TOKENS)
+    except Exception:
+        return ""
+
+
 def run_reorient(payload):
     try:
         return _run_reorient(payload)
@@ -841,15 +852,15 @@ def _run_reorient(payload):
         print("Context was compacted. Follow %s before anything else. Your handoff is "
               "%s. Rewrite it whole; never append. The digest is missing: use the "
               "compaction summary and the prior handoff instead. Confirm checkout and branch before any git write. Then "
-              "continue the last task.%s%s"
-              % (prompt, handoff, premise_note(handoff, False), inbox_note(session_id)))
+              "continue the last task.%s%s%s"
+              % (prompt, handoff, premise_note(handoff, False), inbox_note(session_id), size_note()))
         return 0
 
     print("Context was compacted. Follow %s before anything else. Your handoff is %s. "
           "Rewrite it whole; never append. Use the compaction summary, the digest at %s, and the prior handoff. Confirm "
-          "checkout and branch before any git write. Then continue the last task.%s%s"
+          "checkout and branch before any git write. Then continue the last task.%s%s%s"
           % (prompt, handoff, state.get("digest"), premise_note(handoff, False),
-             inbox_note(session_id)))
+             inbox_note(session_id), size_note()))
     return 0
 
 
