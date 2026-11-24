@@ -263,7 +263,7 @@ def main(argv):
                             tree = hang_check(proc, f, watch, hang, now)
                             if tree is not None:
                                 if not hang_stop(proc, f, start, tree, full_log()): continue  # it finished first: the next wait gives its real rc
-                                hung, rc = True, 124; break
+                                hung, rc = True, _nowindow.HANG_EXIT; break
                         if hang and now < next_beat: continue
                         next_beat = now + beat
                         line = f"verdict: still running, {time.time() - t:.0f}s, log={log}"
@@ -285,7 +285,7 @@ def main(argv):
     secs = f"{time.time() - t:.1f}s"
     if hung:
         shown = name if len(name) <= 80 else "..." + name[-77:]
-        print(f"HANG {shown} rc={rc} no output or CPU for {hang}s, stopped ({secs}) log={log}")
+        print(_nowindow.hang_line(shown, rc, hang, secs, log))
         if full_log():
             print("\n".join(tree_lines(tree)))
             print_log(log, first, end)

@@ -29,6 +29,18 @@ import threading
 
 CREATE_NO_WINDOW = 0x08000000  # subprocess has no such name on a non-Windows runner
 
+# The hang stop's one home (decision hang-stop): the words of bin/verdict's HANG line, the pattern that reads it, and the default stop time.
+# bin/verdict prints the line, bin/ci-job and merge/merge.py read it; none copies a word of it.
+HANG_SECONDS_DEFAULT = 600  # seconds of no output and no CPU before a CI or lane lint step is stopped; bin/ci-job gives it to each step that has no value of its own
+HANG_WORDS = "no output or CPU for"
+HANG_EXIT = 124  # the exit code of a step the hang stop ended
+HANG_LINE = re.compile(r"HANG .+ rc=%d %s \d+s, stopped \(\d+(?:\.\d+)?s\) log=" % (HANG_EXIT, re.escape(HANG_WORDS)))  # only verdict's own line: the fixed words after the step name
+
+
+def hang_line(shown, rc, seconds, took, log):
+    """The one HANG line bin/verdict prints when it stops a step. HANG_LINE reads it; `rc` is HANG_EXIT, `took` is the run's time as text, such as 61.2s."""
+    return f"HANG {shown} rc={rc} {HANG_WORDS} {seconds}s, stopped ({took}) log={log}"
+
 
 def _stdin_is_data():
     """True when this process's stdin is a pipe or a file: data a child may read, valid with no console."""
