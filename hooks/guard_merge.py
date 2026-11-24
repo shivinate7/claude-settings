@@ -310,12 +310,12 @@ def pinned_required(where: str):
 
 
 def waits_on_no_ci(where: str) -> bool:
-    """True when the repo pins a merge.requiredChecks string that waits on no check: "none", or what the merge tool's no_ci_stamp says of the other pinned string. A repo with "none" loads no tool here."""
+    """True when the repo pins a merge.requiredChecks string that waits on no check: "none", or what the merge tool's waits_on_no_check says of the other pinned string. A repo with "none" loads no tool here."""
     pinned = pinned_required(where)
     if pinned == "none":
         return True
     module = merge_module()
-    return isinstance(pinned, str) and module is not None and module.no_ci_stamp(pinned)
+    return isinstance(pinned, str) and module is not None and module.waits_on_no_check(pinned)
 
 
 def ignored_checks(module, where: str):

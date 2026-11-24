@@ -321,7 +321,7 @@ ROLLUP_JOB = REQUIRED_CHECK  # the all-jobs-passed rollup job (actions/all-jobs-
 FIRST_PROOF = "first-proof"  # merge.requiredChecks: CI is live on the base, so a confirm needs a proof of the head (decision merge-needs-current-base). The one home of the value
 PINNED_STRINGS = ("none", FIRST_PROOF)  # the string values the guard pins besides the default "protection"; the config validator and the guard's pinned_required read it
 
-def no_ci_stamp(value):
+def waits_on_no_check(value):
     """True for a stamp value that waits on no check: "none" and FIRST_PROOF. Every reader but the proof of the head asks this (decision private-repos-no-ci)."""
     return value in PINNED_STRINGS
 
@@ -1697,7 +1697,7 @@ class Host:
     def required_names(self):
         """The required check names. Never empty, except for merge.requiredChecks "none" and "first-proof", which names no check and reads neither the ruleset nor the protection:
         GitHub's own merge call refuses a check that is still required."""
-        if no_ci_stamp(self.required):
+        if waits_on_no_check(self.required):
             return []
         if isinstance(self.required, list):
             names = self.required
@@ -1934,7 +1934,7 @@ class Host:
         A red verdict also leaves `self.base_facts` for revert_proven, as data the prose cannot carry: `blamed` (the full head shas of the breaking merges), `red` (red runs judged),
         `others` (red entries without a run, cancelled runs and re-runs in flight beside the red), `head` (the head sha of the newest run read) and `red_heads` (the head sha of each red run judged), `red_ids` (the id of each red run judged) and `red_jobs` (per red run, the names of its red jobs; empty for a run that ended red with no red job). Every other verdict leaves it None."""
         self.base_facts = None  # a red verdict sets it below; any other verdict, and any stop, leaves it None
-        if no_ci_stamp(self.required):  # a repo with "none" runs no CI, so the base's runs are not read, whatever they hold (decision private-repos-no-ci); "first-proof" reads no run of the base either
+        if waits_on_no_check(self.required):  # a repo with "none" runs no CI, so the base's runs are not read, whatever they hold (decision private-repos-no-ci); "first-proof" reads no run of the base either
             return "green", ""
         try:
             if os.path.dirname(ALARM_EVENTS) not in sys.path:
@@ -2132,7 +2132,7 @@ class Host:
         A failed read, a network fault included, is "unknown (...)": the caller never reads it as green.
         Under merge.requiredChecks "none" or "first-proof" it reads no check and no run, and is green, unless `needs_proof`: a repo with "none" runs no CI (decision private-repos-no-ci).
         `needs_proof` (confirm, from needs_head_proof): the one required check is the ROLLUP_JOB rollup, and the read is made whatever the host holds."""
-        if no_ci_stamp(self.required) and not needs_proof:
+        if waits_on_no_check(self.required) and not needs_proof:
             return "green"
         try:
             sha = sha or self.pr(n)["head"]
@@ -2179,7 +2179,7 @@ class Host:
                 num = self.pr_number(n)  # a number: pr() of a number reads nothing more
                 info = self.pr(num)
                 first = needs_head_proof(self.required)
-                if (no_ci_stamp(self.required) and not first) or head_none_stamp(self.cwd or ".", info["head"], DEFAULT_CONFIG, base=info["base"]) is not None:
+                if (waits_on_no_check(self.required) and not first) or head_none_stamp(self.cwd or ".", info["head"], DEFAULT_CONFIG, base=info["base"]) is not None:
                     return "green", ""  # no CI run is read: the base's stamp says none, or a setup head's own stamp does (decision private-repos-no-ci)
                 got = self.checks(num, warn=False, sha=info["head"])
                 red, pending, _ = self.classify(got, [ROLLUP_JOB] if first else [], self.ignore, info["branch"])
@@ -2269,7 +2269,7 @@ class Host:
         state_now = p["merge_state"]
         if state_now == "BEHIND" or (state_now == "BLOCKED" and not self.pending_lifted):  # GitHub reads a pending required check as BLOCKED: that one cause goes on to the PUT, and GitHub refuses it or not
             return None, (f"#{n} reads {state_now}: its base rules are not met or its branch is behind the base {GRANT_CITE}. gh's merge refuses it the same way, so no merge call was sent."
-                          + (" " + HEAL_BLOCKED if state_now == "BLOCKED" and no_ci_stamp(self.required) else ""))  # under none the tool read no protection, so the text names the cause itself
+                          + (" " + HEAL_BLOCKED if state_now == "BLOCKED" and waits_on_no_check(self.required) else ""))  # under none the tool read no protection, so the text names the cause itself
         def merged_at_sha():  # a lost reply may still have merged: True when the PR reads merged at this run's head, False when it reads open, None when unread or merged elsewhere
             c4, v = self.api(f"pulls/{n}", memo=False)
             try:
@@ -4250,7 +4250,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
                 no_draft_run = True
             else:
                 with contextlib.redirect_stdout(io.StringIO()):  # load_config says its defaults; only requiredChecks is read here
-                    no_draft_run = no_ci_stamp(load_config(root, base, DEFAULT_CONFIG, " " + LANE_LINT_CITE, head=head)["merge"].get("requiredChecks"))
+                    no_draft_run = waits_on_no_check(load_config(root, base, DEFAULT_CONFIG, " " + LANE_LINT_CITE, head=head)["merge"].get("requiredChecks"))
             draft, draft_lines = ("pass", []) if no_draft_run else host.draft_run_state(head)
             if draft == "fail":
                 fails.append(f"its draft run of lane-touched-tests failed on {head[:9]}: " + "; ".join(draft_lines))
@@ -5213,13 +5213,13 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
                 resumed = own_claim(wt, sc, f"origin/{base}")
                 trailer = do_claim(wt, sc, f"origin/{base}")  # as confirm: a record still pending is claimed over a resumed claim too
             records = "rebuild docs/records.md" if rebuild_records(wt) else "current"  # after the claim, as confirm does
-            if records == "current" and stands and no_ci_stamp(cfg.get("merge", {}).get("requiredChecks")) and not (info["draft"] or trailer or resumed or head_claim(wt)):
+            if records == "current" and stands and waits_on_no_check(cfg.get("merge", {}).get("requiredChecks")) and not (info["draft"] or trailer or resumed or head_claim(wt)):
                 try:  # under none confirm merges the base in when the merged page would be stale: the line says so
                     records = "rebuild docs/records.md, after the base is merged in" if records_proof(wt, f"origin/{base}") == "stale" else records
                 except (Stop, Unread):
                     pass  # a read that could not run adds no claim to the line
             if records != "current" and not (info["draft"] or trailer or resumed):  # confirm refuses a page with no claim to ride, so a ready PR never gets a page-only push
-                if no_ci_stamp(cfg.get("merge", {}).get("requiredChecks")) and not head_claim(wt):  # no check gates the merge: confirm heals the page itself
+                if waits_on_no_check(cfg.get("merge", {}).get("requiredChecks")) and not head_claim(wt):  # no check gates the merge: confirm heals the page itself
                     records += ". --confirm heals it: it pushes a page commit (the base merged in first when the base gained a record), waits on no check, and merges that head in the one run"
                 elif not head_claim(wt):  # a list or "protection": confirm heals on a green proven head (proven_head carries its proof to the heal commits) and refuses a red, pending or unread one
                     proof = proven_head(wt, info["head"], base, lambda: True)
@@ -5834,7 +5834,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
     host.use_memo = False  # a merge under the lock reads each state fresh (Host.use_memo)
     host.before_wait = getattr(lock, "extend_for", None)  # a rate wait extends the lock first (standing-merge-grant), so the fixed TTL need not cover it
     tmp = wt = claim_sha = heal_sha = None  # heal_sha: the page commit a requiredChecks "none" run pushed and then merges. Never claim_sha: a failed run reverts a claim, never a heal
-    no_ci = no_ci_stamp(m.get("requiredChecks"))  # "none" and "first-proof" wait on no job, so a heal pushes and merges in one run and no run of main is read (Host.base_state) (decision private-repos-no-ci)
+    no_ci = waits_on_no_check(m.get("requiredChecks"))  # "none" and "first-proof" wait on no job, so a heal pushes and merges in one run and no run of main is read (Host.base_state) (decision private-repos-no-ci)
     needs_proof = needs_head_proof(m.get("requiredChecks"))  # "first-proof": CI is live on the base, so the head needs a proof as a list does, and "none" reads no run (decision merge-needs-current-base)
     heal = base == cfg["defaultBranch"]  # a stale records page heals in this run: under "none" no check gates the merge (page item 926 a, 14:32 CST), under a list the proven head's green rollup does (proven_head; decision merge-needs-current-base, rule d); decision records-index-at-merge
     lint_lifted = False  # a lane-lint PASS lifted a pending run of the head: that is no proof a heal commit may ride on
