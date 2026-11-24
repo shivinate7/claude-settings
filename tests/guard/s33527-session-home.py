@@ -840,6 +840,6 @@ LOG_CHECKS_EXTRA.append(("session-home: the record and the refusal add no git sp
 # exemption). Every agent of one session shares that session's scratchpad (note
 # scratchpad-shared-per-session), so an agent can run a script that another agent of the session left
 # there. At write time the guard records the agent_id that wrote each file under THIS session's
-# scratchpad. At run time it asks when an agent runs such a file that a different agent recorded. The
+# scratchpad. At run time it refuses when an agent runs such a file that a different agent recorded. The
 # writer, a top-level call, a file with no record and a read all pass. Each case makes its guard calls
 # in its own temp folder and its own session, so one case's record never reaches another case.

@@ -9,9 +9,14 @@ bin/cheap-lints runs the repo's merge.readyChecks (.github/stamp.json) through m
 - A `<job>:<step>` entry runs under its own job. A bare entry is a step of job `checks`.
 - A read that cannot run exits 2 with an `unknown cheap-lints:` line and no traceback: a bad call, a copy with no
   hooks/ beside it, and a run with no claude-settings checkout to find.
+- The records step (`Rules and records move together`) gets the PR body only from PR_BODY. With no PR_BODY it is
+  reported as not run, and it does not count against the exit. With PR_BODY set, its verdict counts, and an empty
+  body is still a body.
 
 Each case builds a fixture repo in its own folder of the run folder. The repo has a two-job workflow of one-line
-Python steps and a stamp.json that names the case's checks. No case reads the real checks.yml.
+Python steps and a stamp.json that names the case's checks. No case reads the real checks.yml. The checks job's
+records step is a stub: it exits 0 only when PR_BODY is non-empty, so the cases drive the no-body and body paths
+without the real action.
 """
 import json
 import os
@@ -46,6 +51,8 @@ jobs:
         run: python3 -c "print('two ok')"
       - name: Fail one
         run: python3 -c "import sys; print('one broke'); sys.exit(1)"
+      - name: Rules and records move together
+        run: python3 -c "import os, sys; sys.exit(0 if os.environ.get('PR_BODY') else 1)"
   other:
     runs-on: ubuntu-latest
     steps:
@@ -54,6 +61,7 @@ jobs:
 """
 # `pass NAME`, `fail NAME` or `unknown NAME`. The name ends at a `: ` or at the line's end, so `other:Other pass` reads whole.
 VERDICT = re.compile(r"^(pass|fail|unknown) (.+?)(?=: |$)")
+RECORDS_STEP = "Rules and records move together"  # the records step the ready checks name; the checks job's stub takes this name
 
 
 def verdicts(lines):
@@ -94,10 +102,14 @@ def new_case():
     return tempfile.mkdtemp(prefix="cheap_", dir=RUN_FOLDER)
 
 
-def run_in(case, text, script, args=()):
-    """Run `script` with `args` in a fixture repo under `case` whose stamp.json is `text`. -> (exit code, output lines, stderr merged in)."""
+def run_in(case, text, script, args=(), body=None):
+    """Run `script` with `args` in a fixture repo under `case` whose stamp.json is `text`. `body` is the PR_BODY the run gets;
+    None leaves PR_BODY unset. -> (exit code, output lines, stderr merged in)."""
     repo = make_fixture(case, text)
-    done = subprocess.run([sys.executable, script, *args], cwd=repo, env=git_env(case), stdout=subprocess.PIPE,
+    env = git_env(case)
+    if body is not None:
+        env["PR_BODY"] = body
+    done = subprocess.run([sys.executable, script, *args], cwd=repo, env=env, stdout=subprocess.PIPE,
                           stderr=subprocess.STDOUT, text=True, encoding="utf-8", timeout=120)
     return done.returncode, done.stdout.splitlines()
 
@@ -163,6 +175,24 @@ class CheapLints(unittest.TestCase):
         rc, lines = run_cheap(config_text(["Other pass"]))
         self.assertEqual(rc, 2, "exit %d for a bare entry that only job other holds, want 2: job checks has no such step" % rc)
         self.assertIn(("unknown", "Other pass"), verdicts(lines), "no `unknown Other pass` line: %r" % lines)
+
+    def test_records_step_without_a_pr_body_is_not_run_and_does_not_fail_the_run(self):
+        rc, lines = run_cheap(config_text(["Pass one", RECORDS_STEP]))
+        self.assertEqual(rc, 0, "exit %d with no PR body: the records step ran with no body and counted against the run" % rc)
+        self.assertFalse([v for v, name in verdicts(lines) if name == RECORDS_STEP and v in ("pass", "fail")],
+                         "the records step has a pass or fail line with no PR body, so it ran: %r" % lines)
+        self.assertTrue(any(RECORDS_STEP in line and "not run" in line and "PR body" in line for line in lines),
+                        "no line says the records step was not run for want of a PR body: %r" % lines)
+
+    def test_records_step_with_a_pr_body_runs_and_its_verdict_counts(self):
+        with self.subTest(body="a non-empty body"):
+            rc, lines = run_in(new_case(), config_text([RECORDS_STEP]), CHEAP, body="Rules checked: a-record - no change\n")
+            self.assertEqual(rc, 0, "exit %d with a PR body: the body did not reach the records step, so it failed for want of one" % rc)
+            self.assertIn(("pass", RECORDS_STEP), verdicts(lines), "no `pass` line for the records step with a PR body: %r" % lines)
+        with self.subTest(body="an empty body"):
+            rc, lines = run_in(new_case(), config_text([RECORDS_STEP]), CHEAP, body="")
+            self.assertEqual(rc, 1, "exit %d with an empty PR body, want 1: an empty body is a body, so the step runs and its FAIL counts" % rc)
+            self.assertIn(("fail", RECORDS_STEP), verdicts(lines), "no `fail` line for the records step with an empty PR body: %r" % lines)
 
     def test_extra_argument_exits_two_with_an_unknown_line(self):
         rc, lines = run_cheap(config_text(["Pass one"]), args=["main", "extra"])

@@ -43,7 +43,10 @@ TEMPLATE_REL = "skills/project-ops/templates/operating-model.md"
 TEMPLATE = os.path.join(ROOT, TEMPLATE_REL)
 RULE = "git-ci-wait-checks-in"
 FALLBACK_START = "- The fallback:"
-TEMPLATE_START = "- A session that waits on CI sets a one-time check-in"
+TEMPLATE_START = "- The watcher wakes a session on red or green."
+# The substance of the fallback check-in, as each copy states it: a one-time check-in, set at the run's expected end and
+# after each red job. A copy carries all four terms; the wording around them may change.
+FALLBACK_TERMS = ("one-time", "check-in", "expected end", "after each red job")
 CAP_PHRASE = re.compile(r"never\s+past\s+(\d+)\s+minutes")
 INT_FIELDS = ("cache_lifetime_seconds", "cap_minutes")
 
@@ -301,21 +304,25 @@ class TemplateTests(unittest.TestCase):
 
 
 class ControlTests(unittest.TestCase):
-    def test_template_copy_still_says_each_wider_apart(self):
+    def test_template_copy_states_the_fallback_check_in(self):
         copies = bullets_starting(read_template(self), TEMPLATE_START)
         self.assertEqual(len(copies), 1, "%s holds %d CI-wait bullets, not 1" % (TEMPLATE_REL, len(copies)))
         line, bullet = copies[0]
-        self.assertIn("each wider apart", bullet, "%s:%d no longer says 'each wider apart'" % (TEMPLATE_REL, line))
+        for term in FALLBACK_TERMS:
+            self.assertIn(term, bullet, "%s:%d lacks '%s': the copy of rule %s no longer states the fallback check-in"
+                          % (TEMPLATE_REL, line, term, RULE))
 
-    def test_rule_and_bullet_still_say_each_wider_apart(self):
+    def test_rule_and_bullet_state_the_fallback_check_in(self):
         prose = rule_prose(read_text(CLAUDE_MD), RULE)
         self.assertIsNotNone(prose, "CLAUDE.md: the %s anchor is not found once" % RULE)
-        self.assertTrue("each wider apart" in prose,
-                        "rule %s no longer says 'each wider apart', or the reader takes the wrong span" % RULE)
+        for term in FALLBACK_TERMS:
+            self.assertIn(term, prose, "rule %s lacks '%s': it no longer states the fallback check-in, or the reader "
+                          "takes the wrong span" % (RULE, term))
         bullets = fallback_bullets(read_text(DECISION))
         self.assertEqual(len(bullets), 1, "the CI-wait decision holds %d fallback bullets, not 1" % len(bullets))
-        self.assertTrue("each wider apart" in bullets[0],
-                        "the fallback bullet no longer says 'each wider apart'")
+        for term in FALLBACK_TERMS:
+            self.assertIn(term, bullets[0], "the fallback bullet lacks '%s': it no longer states the fallback check-in"
+                          % term)
 
 
 class ScannerTests(unittest.TestCase):
