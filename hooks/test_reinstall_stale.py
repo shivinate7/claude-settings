@@ -392,15 +392,16 @@ class Fixture:
         except (OSError, ValueError, AttributeError):
             return None
 
-    def run_hook(self, guard=HOOK_GUARD, no_posix=False, **options):
+    def run_hook(self, guard=HOOK_GUARD, no_posix=False, hook=HOOK, **options):
         """One hook run. The hook gets its own session and writes its output to files, so a stop at `guard`
         seconds ends the hook and everything it started, and the stop cannot hang on a pipe a child holds.
-        `no_posix` runs it with os.killpg and signal.SIGKILL absent, as on Windows."""
+        `no_posix` runs it with os.killpg and signal.SIGKILL absent, as on Windows. `hook` is the path it is run
+        from: the repo's file by default, or a link to one."""
         for path in (self.git_log, self.env_log):
             open(path, "w", encoding="utf-8").close()  # each run's calls start empty
         out_path = os.path.join(self.root, "hook-out.txt")
         err_path = os.path.join(self.root, "hook-err.txt")
-        argv = [sys.executable, "-c", NO_POSIX_SHIM, HOOK] if no_posix else [sys.executable, HOOK]
+        argv = [sys.executable, "-c", NO_POSIX_SHIM, hook] if no_posix else [sys.executable, hook]
         with open(out_path, "w", encoding="utf-8") as out, open(err_path, "w", encoding="utf-8") as err:
             proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=out, stderr=err,
                                     cwd=self.home, env=self.hook_env(**options), start_new_session=True, text=True)
@@ -540,6 +541,47 @@ def linked_pin(name, behind_by=0):
     for _ in range(behind_by):
         fx.advance({})
     return fx, old, pin
+
+
+def hook_copy(folder):
+    """Copies the hook under test and its helper into folder/hooks, as a checkout of this commit holds them. The copy
+    is the product code, so the link below has a real file to reach; no test file is copied."""
+    os.makedirs(os.path.join(folder, "hooks"), exist_ok=True)
+    for name in ("stale_install.py", "_nowindow.py"):
+        shutil.copyfile(os.path.join(HERE, name), os.path.join(folder, "hooks", name))
+
+
+def pin_clone(name):
+    """A fixture whose live pin is a plain clone of origin, detached at the base sha, in a folder named as a live pin
+    is: <clone>-live-<12 hex>. Its origin/stable ref is the pin's ref, and it holds the pin's refresh stub. No install
+    record is written. Returns (fixture, base sha, pin folder)."""
+    fx = Fixture(name, branches=("stable",))
+    old = fx.base
+    pin = os.path.join(fx.home, "claude-settings-live-" + old[:12])
+    fx.git("clone", "-q", fx.origin, pin)
+    fx.git("-C", pin, "checkout", "-q", "--detach", old)
+    fx.source = pin
+    install_refresh(fx)
+    hook_copy(pin)
+    return fx, old, pin
+
+
+def advance_stable(fx):
+    """Commits one empty commit on origin's stable and pushes it. The pin's local origin/stable moves only on a fetch."""
+    fx.git("-C", fx.seed, "branch", "stable", fx.base)
+    new = fx.advance({}, branch="stable")
+    fx.git("-C", fx.source, "fetch", "-q", "origin")
+    return new
+
+
+def symlink_hook(fx, pin):
+    """A link, made here in Python, from a folder outside the pin to the hook file in the pin. The hook is run through
+    it, as an installed hook is run through a link into the pin."""
+    folder = os.path.join(fx.home, "bin")
+    os.makedirs(folder)
+    link = os.path.join(folder, "stale_install.py")
+    os.symlink(os.path.join(pin, "hooks", "stale_install.py"), link)
+    return link
 
 
 def shared_behind(name, behind_by=0):
@@ -1217,7 +1259,8 @@ class LocalSession(unittest.TestCase):
     """The live pin's refresh in a session that is not a cloud session (CLAUDE_CODE_REMOTE unset): a Mac, or a Windows
     machine. The rules are the cloud rules. A trigger is a moved local ref, a prompt with no trigger reads nothing of
     origin, and a pin refreshes once per head. The fixtures are the pin's shapes: a detached checkout, and a linked
-    worktree behind a symlink. None of them runs install.sh --cloud."""
+    worktree behind a symlink. A hook run through a symlink from outside the pin finds the pin as a direct run does,
+    and a symlink whose target is in no pin finds none. None of them runs install.sh --cloud."""
 
     def test_local_trigger_refreshes_the_pin_once_and_prints_the_cloud_line(self):
         fx, old = detached(self._testMethodName, behind_by=1)
@@ -1325,6 +1368,71 @@ class LocalSession(unittest.TestCase):
                          "the refresh did not start from the pin's link: %r" % refresh_where(fx))
         self.assertEqual(run.lines, [PREFIX + "pin is 1 commit behind origin/main after the refresh"],
                          "want the one pin line through the link; stderr: %s" % run.tail())
+
+    def test_local_symlinked_hook_refreshes_the_pin_once_and_prints_the_pin_line(self):
+        fx, old, pin = pin_clone(self._testMethodName)
+        new = advance_stable(fx)
+        link = symlink_hook(fx, pin)
+        self.assertTrue(os.path.islink(link), "scope: the hook path is not a link")
+        self.assertFalse(os.path.exists(fx.record_path), "scope: an install record exists")
+        run = fx.run_hook(cloud=False, hook=link)
+        self.assertEqual(refresh_runs(fx), [new], "a hook run through a link ran the pin refresh %r, want once at %s"
+                         % (refresh_runs(fx), new[:SHORT]))
+        self.assertEqual(run.lines, [PREFIX + "pin is 1 commit behind origin/stable after the refresh"],
+                         "want the one pin line through the link; stderr: %s" % run.tail())
+
+    def test_local_symlinked_hook_current_pin_is_silent_and_makes_two_git_calls(self):
+        fx, old, pin = pin_clone(self._testMethodName)
+        link = symlink_hook(fx, pin)
+        self.assertTrue(os.path.islink(link), "scope: the hook path is not a link")
+        self.assertEqual(fx.origin_tip("stable"), old, "scope: origin's stable is not the pin's sha")
+        run = fx.run_hook(cloud=False, hook=link)
+        calls = fx.subcommands()
+        self.assertEqual(len(calls), 2, "a current pin made %d git calls through a link, want 2 (its HEAD and "
+                         "origin/stable): %r" % (len(calls), calls))
+        self.assertEqual(run.lines, [], "a current pin printed %r through a link; stderr: %s" % (run.lines, run.tail()))
+        self.assertEqual(refresh_runs(fx), [], "a current pin ran the pin refresh through a link")
+
+    def test_local_symlinked_hook_seen_head_stays_stale_and_makes_four_git_calls(self):
+        fx, old, pin = pin_clone(self._testMethodName)
+        new = advance_stable(fx)
+        fx.run_hook(cloud=False, hook=os.path.join(pin, "hooks", "stale_install.py"))  # the one refresh for this head
+        self.assertEqual(refresh_runs(fx), [new], "scope: the first prompt did not refresh once at %s: %r"
+                         % (new[:SHORT], refresh_runs(fx)))
+        link = symlink_hook(fx, pin)
+        self.assertTrue(os.path.islink(link), "scope: the hook path is not a link")
+        run = fx.run_hook(cloud=False, hook=link)
+        self.assertEqual(refresh_runs(fx), [new], "a seen head ran the pin refresh again through a link: %r"
+                         % refresh_runs(fx))
+        calls = fx.subcommands()
+        self.assertEqual(len(calls), 4, "a seen head made %d git calls through a link, want 4 (HEAD, origin/stable, "
+                         "the ancestry check, the detached-HEAD check): %r" % (len(calls), calls))
+        self.assertTrue(run.lines and run.lines[0].startswith(PREFIX + "install still stale"),
+                        "a seen head printed %r through a link, want the stale line" % run.lines)
+
+    def test_local_symlinked_hook_outside_every_pin_is_silent_and_makes_no_git_call(self):
+        fx = Fixture(self._testMethodName)
+        plain = os.path.join(fx.home, "plain")
+        hook_copy(plain)
+        link = symlink_hook(fx, plain)
+        self.assertTrue(os.path.islink(link), "scope: the hook path is not a link")
+        self.assertFalse(os.path.exists(os.path.join(plain, "merge", "install_from_main.sh")),
+                         "scope: the link's target folder is a pin")
+        run = fx.run_hook(cloud=False, hook=link)
+        self.assertEqual(fx.subcommands(), [], "a symlinked hook whose target is in no pin made git calls: %r"
+                         % fx.subcommands())
+        self.assertEqual(run.lines, [], "a symlinked hook whose target is in no pin printed %r; stderr: %s"
+                         % (run.lines, run.tail()))
+
+    def test_local_pin_hook_run_directly_refreshes_the_pin_once_with_no_record(self):
+        fx, old, pin = pin_clone(self._testMethodName)
+        new = advance_stable(fx)
+        self.assertFalse(os.path.exists(fx.record_path), "scope: an install record exists")
+        run = fx.run_hook(cloud=False, hook=os.path.join(pin, "hooks", "stale_install.py"))
+        self.assertEqual(refresh_runs(fx), [new], "a hook run from the pin ran the pin refresh %r, want once at %s"
+                         % (refresh_runs(fx), new[:SHORT]))
+        self.assertEqual(run.lines, [PREFIX + "pin is 1 commit behind origin/stable after the refresh"],
+                         "want the one pin line from the pin's own hook; stderr: %s" % run.tail())
 
 
 class PosixOnlyStop(unittest.TestCase):
