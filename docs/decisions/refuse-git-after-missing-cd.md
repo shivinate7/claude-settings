@@ -18,7 +18,7 @@ The guard change in PR 3594 builds the ruling. Until it merges, main does not re
 - Rule `conflict-markers` refuses every git write in `GIT_WRITES`: add, commit, push, merge, pull, rebase, cherry-pick, `--continue`, reset and the rest. A git read, such as status, passes. The list counts `stash list`, `tag -l` and `config --get` as writes, so those are refused too.
 - A folder that an earlier part of the same call makes counts as present: a `mkdir` (with its parent present, or with `-p`), a `git clone`, a `git init` or a `git worktree add`.
 - A failed `cd` then `|| exit` ends the shell, so nothing after it runs and the call passes. A failed `cd` then `|| return` does not: outside a function, bash reports an error and the next command runs, so the write is refused.
-- A forced push after such a `cd` gets force-push's own ask first. When chained, rule `ask-alone` denies it.
+- A forced push after such a `cd` is refused under force-push's own reason, chained or not.
 - The refusal also needs the folder the shell stays in to be a git checkout (`_repo_of` in `hooks/guard_merge.py`). So a `git clone` or `git init` from a folder that is not a checkout is not refused.
 - The build covers less than the ruling. Verbs outside `GIT_WRITES` are not refused, such as `branch`, `worktree`, `fetch`, `notes`, `submodule`, `remote`, `update-ref` and `gc`.
 - False alarm: a brace group after `||` is not read as an exit. `|| { echo no; exit 1; }` is refused, though the shell exits there and the write never runs.
