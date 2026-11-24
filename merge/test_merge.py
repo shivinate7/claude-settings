@@ -25994,8 +25994,6 @@ class ProseJudge(Env):
         self.assertGreater(unjudged, 0, "every line went into the calls, so none is counted past the cap")
         self.assert_unknown_count(out, unjudged, [(unjudged, "past the call cap")])
         self.assertEqual(rc, 0, out)
-        self.assert_unknown_count(out, 1, [(1, "past the call cap")])
-        self.assertEqual(rc, 0, out)
 
     def test_five_small_files_fit_in_one_model_call(self):
         # Five files of one cited line each are far under one call's budget, so one call judges them all. One call per file would make
@@ -26478,11 +26476,13 @@ class ProseJudge(Env):
         self.assertIn("release", events[:events.index("invoke")], "the model call ran with the merge lock held: events %s" % events)
 
     def test_a_timeout_on_a_long_doc_collapses_to_one_count_line(self):
-        # 400 timed-out lines are one UNKNOWN count line. UNKNOWNs take no finding slot, so no count of lines past a cap prints.
-        self.setup_range({PROSE: cited_lines(400)}, {BACKING: BACKING_TEXT})
-        stub, rc, out = self.judge(timed_out)
-        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
-        self.assert_unknown_count(out, 400, [(400, "timed out")])
+        # Packed: 400 long lines are more than three calls hold. The calls time out, so the lines they hold read timed out, and the lines
+        # past the three calls are one count. All of it is one UNKNOWN count line. UNKNOWNs take no finding slot.
+        self.setup_range({PROSE: tagged_doc(["cap-l%03d" % n for n in range(1, 401)])}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(timed_out, cap=None)
+        self.assertEqual(len(stub.prompts), merge.PROSE_JUDGE_MAX_CALLS, "model calls: %d, want the cap of %d (%s)" % (len(stub.prompts), merge.PROSE_JUDGE_MAX_CALLS, PACK_PICK))
+        timed = len([t for prompt in stub.prompts for t in tags_in(prompt)])
+        self.assert_unknown_count(out, 400, [(timed, "timed out"), (400 - timed, "past the call cap")])
         self.assertNotIn("more lines not shown", out, "a count of lines past a cap, but UNKNOWNs never take the finding cap\n" + out)
         self.assertEqual(rc, 0, out)
 
