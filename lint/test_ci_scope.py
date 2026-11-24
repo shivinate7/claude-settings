@@ -65,8 +65,10 @@ REAL_GUARD_INPUTS = "real"  # run()'s guard_inputs default: the repo's own list 
 
 
 def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref="", green=None,
-        green_sibling=False, green_head=None, contents=None, facts=None, merged=None, moves=None, guard_inputs=REAL_GUARD_INPUTS):
-    """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit. `head_ref` is HEAD_REF,
+        green_sibling=False, green_head=None, contents=None, facts=None, merged=None, moves=None, guard_inputs=REAL_GUARD_INPUTS,
+        scope_files=None):
+    """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit. `scope_files` (a list of paths), when
+    given, is SCOPE_FILES: the script reads those paths in place of the diff, with the same BASE_SHA range as the other cases. `head_ref` is HEAD_REF,
     empty when not given, so no HEAD_REF of the caller's environment reaches the script. `moves` maps an old path to its new
     one, or to None for a delete: the old path is in the base, and a move keeps the content, so git sees a rename.
     `guard_inputs` is the text of .github/guard-inputs.txt in the base: the repo's own list by default (none when the repo has
@@ -155,6 +157,9 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
         env.pop("PR_HEAD", None)  # a caller's value never reaches the script; only `merged` sets it
         if merged is not None:
             env["PR_HEAD"] = head_sha
+        env.pop("SCOPE_FILES", None)  # a caller's value never reaches the script; only `scope_files` sets it
+        if scope_files is not None:
+            env["SCOPE_FILES"] = "\n".join(scope_files)
         if facts is not None and green_sha:
             delta_head = git(d, "diff", "--name-only", "--no-renames", green_sha, "HEAD").split()
             facts.update(green=green_sha, delta=delta_head, delta_head=delta_head,
@@ -337,6 +342,18 @@ class Scope(unittest.TestCase):
 
     def test_a_modified_md_under_skills_turns_on_nothing(self):
         self.assertFlags(run(["skills/old/SKILL.md"], existing=["skills/old/SKILL.md"]), want_false=ALL)
+
+    def test_scope_files_mode_gives_the_ci_flags_for_a_file_added_under_a_landed_dir(self):
+        # bin/ci-job's carry reads a delta's flags with SCOPE_FILES; CI reads the same added file in range mode. Every flag but
+        # windows_guard must agree, because the carry reads the guard flag from the SCOPE_FILES run.
+        names = ALL + DERIVED_FLAGS + list(LINT_FLAGS) + DOC_FLAGS
+        for p in ("agents/newagent.md", "skills/newx/SKILL.md"):
+            with self.subTest(added=p):
+                ci = run([p])
+                scoped = run([p], scope_files=[p])
+                diff = {n: (ci.get(n), scoped.get(n)) for n in names if ci.get(n) != scoped.get(n)}
+                self.assertEqual(diff, {}, "SCOPE_FILES mode gives other flags than CI's range read for %s, a file added under a landed dir: "
+                                 "name -> (CI, SCOPE_FILES)" % p)
 
     def test_a_new_file_in_hooks_or_janitor_turns_on_the_install_suite(self):
         for p in ("hooks/new.py", "janitor/new.py"):
