@@ -189,15 +189,18 @@ def tree_lines(sample):  # the child's process table rows, one printed line each
 def full_log():  # True when $VERDICT_FULL_LOG is exactly 1
     return os.environ.get("VERDICT_FULL_LOG") == "1"
 def print_log(log, start, end):  # print log bytes start..end to stdout in chunks, never the whole file in memory; a byte that is no UTF-8 prints as U+FFFD, as the excerpt does
+    # Written to stdout's byte layer: the text layer turns each "\n" into "\r\n" on Windows, so a log line that ends "\r\n" would print "\r\r\n", one blank line more.
     dec = codecs.getincrementaldecoder("utf-8")(errors="replace")
     try:
+        sys.stdout.flush()  # what the text layer holds comes out first
+        out = sys.stdout.buffer
         with open(log, "rb") as g:
             g.seek(start); left = end - start
             while left > 0:
                 b = g.read(min(CHUNK, left))
                 if not b: break
-                left -= len(b); sys.stdout.write(dec.decode(b))
-        sys.stdout.write(dec.decode(b"", final=True)); sys.stdout.flush()
+                left -= len(b); out.write(dec.decode(b).encode("utf-8"))
+        out.write(dec.decode(b"", final=True).encode("utf-8")); out.flush()
     except OSError as e:
         try: print(f"\nverdict: full log unreadable: {e}")
         except OSError: pass
