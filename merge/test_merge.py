@@ -16054,12 +16054,12 @@ class MainRunVerdict(Env):
         jobs = {self.NOW: [main_job("scope", "success"), self.red_job("checks", 9102)]}
         self.judged(self.UNKNOWN, self.NEW_SHA, runs, jobs, job_logs={9102: self.NEW_LOG})
 
-    def test_a_green_run_with_no_earlier_run_to_compare_is_unknown_as_the_record_says(self):
-        """The record lists `no earlier run to compare` under unknown. The code reads a green run with no earlier run as green, so the code and the
-        record differ here. This case pins the record."""
+    def test_a_green_run_with_no_earlier_run_to_compare_reads_green(self):
+        """A green run is green whatever came before. The earlier run only tells a red run apart (carried, first red, new break), so a green
+        run with no earlier run on the page reads green. Ruling: consultant's pick, 14:11 CST Nov 24 2026."""
         runs = [main_run(self.NOW, "success", sha=self.NEW_SHA)]
         jobs = {self.NOW: [main_job("scope", "success"), main_job("checks", "success", 20)]}
-        self.judged(self.UNKNOWN, self.NEW_SHA, runs, jobs)
+        self.judged(self.GREEN, self.NEW_SHA, runs, jobs)
 
 
 class ProtectionHost(merge.Host):
