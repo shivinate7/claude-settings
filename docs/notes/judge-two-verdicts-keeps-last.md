@@ -1,0 +1,1 @@
+- judge-two-verdicts-keeps-last: `merge/merge.py` `prose_judge_run` keeps the last verdict when a reply gives two for one line, so a reply of "stale" then "holds" reads as holds. Two conflicting verdicts for one line should read as unreadable, so the line reads UNKNOWN. Seen: 2026-11-24 x1
