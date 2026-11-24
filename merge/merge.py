@@ -34,9 +34,8 @@
                           under this tool's own page and clean base-merge commits, and the heal commit merges on that proof. A red or pending proven head refuses and names its own state; a lane commit or an edited merge above it is not carried.
                           A base that moves after the push refuses and keeps the commit. A relayed yes binds across the heal's page and base-merge commits.
                           A PR GitHub reads BLOCKED under "none" refuses and names the branch protection and requiredChecks, since the tool read no protection. Under a list it refuses and says the green head is blocked for another cause.
-                          A head whose own run is still pending merges when a lane-lint PASS names its exact sha (a PASS carried over claim commits counts); main's run after
-                          the merge is the check. A finished red run and a PASS for another head still refuse, and while main is red no PASS lifts a pending run. GitHub reads a pending required check as BLOCKED,
-                          so the PUT goes on past that one read and GitHub refuses it or not; BEHIND still refuses.
+                          A head whose own run is pending, absent, red or unread refuses, whatever a lane-lint PASS says: the merge needs the head's own green run (a carried proof under this tool's own page and clean base-merge commits counts, proven_head).
+                          GitHub reads a required check on those carried commits as BLOCKED, so the PUT goes on past that one read and GitHub refuses it or not; BEHIND still refuses.
                           A confirm in the cloud needs a lane-lint PASS for the head's sha. Any pull request skips it, a lane PR included, when the all-jobs-passed rollup is green on that exact head:
                           then it skips the lint and prints one `merge: lane lint skipped ...` line naming the rollup and the head's first 9 characters.
   merge <pr> --confirm --express   go on to the merge only for a prose-only diff (main's ci-scope.sh turns on nothing) whose body has a `Ruling: <id>`
@@ -1232,7 +1231,7 @@ class Host:
         self.required, self.base, self.minute, self.now, self.pause = required, base, minute, now, pause
         self.repo = repo  # OWNER/NAME, or None for the repo of the working directory
         self.take_base = None  # confirm sets it to the base it read under the lock; merge compares the base it reads just before the PUT with it
-        self.pending_lifted = False  # confirm sets it when a lane-lint PASS on the live head lifted a pending run: merge then sends the PUT past a BLOCKED read, and GitHub refuses it or not
+        self.pending_lifted = False  # confirm sets it when the head's proof is a green run under this tool's own page or base-merge commits, or a heal commit: merge then sends the PUT past a BLOCKED read, and GitHub refuses it or not
         self.cwd = cwd    # where `gh` runs, so it names the repo of that directory
         self.ignore = ignore or {}  # check name -> reason, from ignore_checks()
         self.warned = set()  # (check name, link) already warned about, so a poll loop prints each line once
@@ -4922,7 +4921,6 @@ def red_base(root, host, base, red_ok=""):
     Once a revert of the breaking merge is merged with its tree proven, base_verdict reads the base green (revert_proven), so the red line stops, for later merges too, until a run on the
     revert or above it is red; a revert whose tree is not proven leaves the base red until its own run on the base is green."""
     verdict, detail = base_verdict(root, host, base)
-    host.on_red_base = verdict == "red"  # confirm reads it: a lane-lint PASS lifts no pending head on a red base
     if verdict == "green":
         return
     rerun = verdict == "unknown" and RERUN_IN_FLIGHT in detail
@@ -4949,7 +4947,7 @@ def checks_read_of(proof, head):
 
 def head_not_green(state):
     """-> why `state`, the one read of a head's own checks (Host.head_state), is not green; None when it is green. The read never waits:
-    rule M3 merges only a head that is already green, so a pending head is refused unless a lane-lint PASS names it (confirm lifts that), and the lane runs --confirm again when its run ends."""
+    rule M3 merges only a head that is already green, so a pending head is refused, and the lane runs --confirm again when its run ends."""
     if state == "green" or state.startswith("green ("):  # a trailing "(ignored: ...)" names the checks merge.ignoreChecks left out
         return None
     if state.startswith(("red: ", "pending: ")):
@@ -5652,10 +5650,7 @@ HEAD_MOVED = "the head of #{n} moved since the owner's yes was relayed, so that 
 
 BATCH_RUNNER_NEEDS_HEAD = "the merge needs the head the CI ran on, so pass it with the --head flag (decision auto-mode-owner-acts, a merge runs on the head its CI ran on). Nothing was claimed or pushed."
 
-def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok="", expected_head=None, linted_head=None, express=False, lint_proof=None):
-    """`lint_proof`: a callable(info) -> True when a lane-lint PASS holds for that live head (lint_proves_head), None for a host that reads no comments. It is asked
-    only when the head's own run is still pending: a PASS lifts a pending run, and main's run after the merge is the check
-    (a red main's revert or fix is the top lane, and a PR may merge onto it: decision no-merge-onto-red-main). A finished red run and a PASS for another head are never lifted, and no PASS lifts a pending head while main is red."""
+def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok="", expected_head=None, linted_head=None, express=False):
     m = cfg.get("merge", {})
     info = info or host.pr(n)  # main read it once already, and the config came from that base. A read; the head compare after the lock covers a head that moves before the lock is ours
     base = info["base"]  # the PR's own base; read again under the lock
@@ -5671,7 +5666,6 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
     tmp = wt = claim_sha = heal_sha = None  # heal_sha: the page commit a requiredChecks "none" run pushed and then merges. Never claim_sha: a failed run reverts a claim, never a heal
     no_ci = m.get("requiredChecks") == "none"  # a repo with "none" runs no CI, so confirm reads no run of the head (Host.base_state reads none of the base) (decision private-repos-no-ci)
     heal = base == cfg["defaultBranch"]  # a stale records page heals in this run: under "none" no check gates the merge (page item 926 a, 14:32 CST), under a list the proven head's green rollup does (proven_head; decision merge-needs-current-base, rule d); decision records-index-at-merge
-    lint_lifted = False  # a lane-lint PASS lifted a pending run of the head: that is no proof a heal commit may ride on
     judge = None  # the prose judge's plan, built under the lock and run after it is released
     where_else = None  # the where-else judge's plan, built and run the same way
     try:
@@ -5715,20 +5709,14 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             proof = info["head"] if no_ci or not heal else proven_head(wt, info["head"], base, lambda: heal)  # only this tool's own page and base-merge commits carry the proof of the head under them; a resumed claim is not one: the claim commit's own checks are read, never the head under it
             if proof != info["head"]:
                 say(f"merge: {info['head'][:9]} is only this tool's own page and base-merge commits on {proof[:9]}, so the checks of {proof[:9]} are the proof.")
-                host.pending_lifted = True  # the commits above the proof have no run of their own: GitHub reads a required check on them pending (BLOCKED), and that one cause goes on to the PUT, as for a lint PASS
+                host.pending_lifted = True  # the commits above the proof have no run of their own: GitHub reads a required check on them pending (BLOCKED), and that one cause goes on to the PUT
             state = "green" if no_ci else host.head_state(n, proof)  # under none no run is read, whatever host answers
             not_green = head_not_green(state)
-            if not_green and state.startswith("pending: ") and not getattr(host, "on_red_base", False) and lint_proof and lint_proof(info):  # a red base keeps its pending head waiting: the PASS rests on a green base
-                say(f"merge: the head's run is still pending ({state[len('pending: '):]}), and a lane-lint PASS names {info['head'][:9]}, so the run does not hold the merge "
-                    f"(owner, 2026-11-15 18:21 CST: {base}'s run after the merge is the check, and a red {base} reverts it).")
-                host.pending_lifted = True
-                lint_lifted = True
-                not_green = None
             if not_green and state.startswith("unknown ("):  # a read that could not run, a network fault included, is not a verdict on the head
                 raise Stop(f"{not_green}. Nothing was claimed or pushed. {GREEN_CITE}")
             if not_green:
                 raise Stop(f"{checks_read_of(proof, info['head'])} are not green, so nothing was claimed or pushed {GREEN_CITE}: {not_green}.")
-            if proof != info["head"] and not not_green:  # the carried proof covers a run that has not finished, never one that failed or that this tool could not read, a lane-lint PASS on the pending proof included (decision merge-needs-current-base)
+            if proof != info["head"] and not not_green:  # the carried proof covers a run that has not finished, never one that failed or that this tool could not read (decision merge-needs-current-base)
                 own = host.head_state(n, info["head"])  # one more read, the live head's own state
                 if head_check_red(own):
                     raise Stop(f"the own run of {info['head'][:9]} is red, so the green proof of {proof[:9]} under it does not cover it, and nothing was claimed or pushed {GREEN_CITE}: {head_not_green(own)}.")
@@ -5745,7 +5733,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 claim_sha = info["head"]
                 say(f"merge: resumed. {branch} already holds the claim {resumed}.")
             rebuilt = rebuild_records(wt)  # after the claim, whatever the stamp config holds. A page with no claim to ride heals only in the draft step: a page-only push on a ready PR restarts its CI. Under requiredChecks "none" no run is restarted, so it heals here
-            if heal and (no_ci or not lint_lifted) and not (trailer or resumed) and not head_claim(wt):  # a head holding a claim this base does not resume keeps the refusal: a page commit on it would hide the claim. Under a list only a green proof heals: a run a lint PASS lifted is no proof
+            if heal and not (trailer or resumed) and not head_claim(wt):  # a head holding a claim this base does not resume keeps the refusal: a page commit on it would hide the claim. Under a list only a green proof heals
                 if heal_page(wt, base, branch, base_ref, rebuilt, bool(stands)):
                     heal_sha = git(wt, "rev-parse", "HEAD")[1]
                     if info["merge_state"] == "BLOCKED" and (no_ci or proof == info["head"]):  # before the push: a head GitHub will not merge gets no commit. Above a carried proof BLOCKED is the commits' own pending check
@@ -6601,7 +6589,7 @@ def lint_check(h, n, info, root, cfgrel):
 
 def lint_verdict(h, n, info, root, cfgrel):
     """-> "pass", "fail", "unknown" or "none": the lane lint of the live head info["head"], read from the repo's comment list. "pass" also when a PASS for an earlier
-    head is carried to it (lint_carried). The one home of that read, for the join (lint_check) and the pending-run lift (lint_proves_head). It does not read the rollup.
+    head is carried to it (lint_carried). The one home of that read, for the join (lint_check) and lint_proves_head. It does not read the rollup.
     A failed comment read is a Stop that names `merge --lane-lint <n>`: `lane lint unknown`, never a pass."""
     try:
         lints = h.issue_comments(info.get("created") or "1970-01-01T00:00:00Z")[1]
@@ -6618,8 +6606,7 @@ def lint_verdict(h, n, info, root, cfgrel):
     return lint
 
 def lint_proves_head(h, n, info, root, cfgrel):
-    """True when a lane-lint PASS holds for the live head info["head"] (lint_verdict). Any other verdict, and a failed read, is False and never a Stop: confirm asks it only
-    when the head's own run is pending, in the cloud or on a computer, and a False leaves the pending run holding the merge."""
+    """True when a lane-lint PASS holds for the live head info["head"] (lint_verdict). Any other verdict, and a failed read, is False and never a Stop. confirm does not ask it: a PASS never stands in for a listed check."""
     try:
         return lint_verdict(h, n, info, root, cfgrel) == "pass"
     except Stop:
@@ -8412,8 +8399,7 @@ def main(argv, host=None, lock=None, hosts=None):
             checked = info["head"]
         if a.confirm:
             with release_on_signals():
-                proof = (lambda live: lint_proves_head(h, a.pr, live, root, a.config)) if hasattr(h, "issue_comments") else None  # read in the cloud and on a computer; a scripted host with no comment read reads no comments
-                return confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok, a.head, checked, a.express, proof) or 0
+                return confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok, a.head, checked, a.express) or 0
         return (preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
     except Stop as e:
         print(f"merge: {e}" + ("" if isinstance(e, (Liftable, Unproven)) else " No override lifts this refusal, because this tool runs after the guard."), file=sys.stderr)
