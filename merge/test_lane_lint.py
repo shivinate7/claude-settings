@@ -4071,6 +4071,9 @@ class LintTreeFileMain(LaneFixture):
 DECLARED_READY = ["STE lint", "Windows split guard", "Cost line pins"]  # the checks-job steps the pre-ready run runs by name
 SCAFFOLD_READY = "checks-rest:project-ops skill scaffold suite"  # the scaffold suite as a qualified ready check: its job checks-rest, its step below
 SCAFFOLD_STEP = "project-ops skill scaffold suite"  # the same step's bare name, as checks.yml names it
+ACTION_READY = "Rules and records move together"  # a listed action step of job checks (uses: $/actions/claude-md-cites): a tool that cannot run an action prints it as not run
+ACTION_NOT_RUN = "--step named it, but it did not run (not run locally): an action (uses: $/actions/claude-md-cites); CI runs it"  # bin/ci-job's detail for that step on a tool that cannot run it
+READY_WITH_ACTION = DECLARED_READY + [ACTION_READY]
 
 
 def steps_for(failing=()):
@@ -4533,6 +4536,86 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
 
     def test_a_fail_job_beats_an_unknown_job_listed_after_it_in_the_combined_state(self):
         self.assert_two_jobs_unknown_and_fail_read_fail([SCAFFOLD_READY, "check invariants"])  # checks-rest (FAIL) first
+
+    def action_run(self, declared, steps, rc, details=None):
+        """The pre-ready run of a draft that lists `declared`, with ci-job's stub printing `steps`, exiting `rc`, and the lane's own commit the only change. -> (rc, stdout and stderr)."""
+        self.pre_ready_lane(declared)
+        self.own_writes({"own.txt": "lane 7\n"})
+        self.use_ci_job(steps, rc, details=details)
+        return self.pre_ready()
+
+    def skip_lines(self, out, name):
+        """The lines of `out` that name step `name` and say CI runs it, and that no unknown or fail verdict opens: the skip line of a step the tool cannot run."""
+        return [line for line in out.splitlines() if name in line and "CI runs it" in line and not re.match(r"(unknown|fail) ", line)]
+
+    def test_a_listed_action_step_the_tool_cannot_run_is_skipped_and_the_ready_run_passes(self):
+        rc, out = self.action_run(READY_WITH_ACTION, steps_for() + [("unknown", ACTION_READY)], 2, details={ACTION_READY: ACTION_NOT_RUN})
+        self.assertEqual(len(self.lint_calls()), 1, "the ready run did not run ci-job once: " + out)
+        self.assertEqual(rc, 0, "the ready run refused a listed action step this tool cannot run, where every other step passes: " + out)
+        self.assertEqual(self.host.readies, [7], "the draft was not marked ready with its action step skipped: " + out)
+
+    def test_the_skipped_action_step_prints_one_line_that_names_it_and_says_ci_runs_it(self):
+        rc, out = self.action_run(READY_WITH_ACTION, steps_for() + [("unknown", ACTION_READY)], 2, details={ACTION_READY: ACTION_NOT_RUN})
+        self.assertEqual(len(self.skip_lines(out, ACTION_READY)), 1,
+                         "no one line names the skipped action step and says CI runs it, read as a skip (not unknown, not fail): " + out)
+
+    def test_the_pass_line_names_the_count_of_skipped_steps(self):
+        rc, out = self.action_run(READY_WITH_ACTION, steps_for() + [("unknown", ACTION_READY)], 2, details={ACTION_READY: ACTION_NOT_RUN})
+        short = self.head()[:9]
+        passes = [line for line in out.splitlines() if "pass on %s" % short in line]
+        self.assertEqual(len(passes), 1, "no `pass on %s` line for a ready run beside one skipped action step: %s" % (short, out))
+        self.assertIn("skipped", passes[0], "the pass line does not name the skipped steps: " + passes[0])
+        self.assertRegex(passes[0], r"(?<!\w)1(?!\w)", "the pass line does not name the count of skipped steps, 1: " + passes[0])
+
+    def test_control_a_listed_action_step_the_tool_can_run_still_refuses_when_it_fails(self):
+        rc, out = self.action_run(READY_WITH_ACTION, steps_for() + [("FAIL", ACTION_READY)], 1)
+        self.assertTrue(verdict_line(out, "fail", ACTION_READY), "the ready run printed no `fail` line for a runnable action step that FAILed: " + out)
+        self.assertEqual(rc, 1, "a runnable action step that FAILed did not refuse the ready run: " + out)
+        self.assertEqual(self.host.readies, [], "a runnable action step that FAILed marked the draft ready: " + out)
+        self.assertEqual(self.skip_lines(out, ACTION_READY), [], "a runnable action step that FAILed was skipped: " + out)
+
+    def test_control_a_run_step_that_failed_beside_a_skipped_action_step_refuses_as_fail(self):
+        rc, out = self.action_run(READY_WITH_ACTION, steps_for(failing=["STE lint"]) + [("unknown", ACTION_READY)], 1, details={ACTION_READY: ACTION_NOT_RUN})
+        self.assertTrue(verdict_line(out, "fail", "STE lint"), "the FAIL of STE lint did not print a `fail` line beside the skipped step: " + out)
+        self.assertEqual(rc, 1, "a FAIL beside a skipped action step did not refuse the ready run: " + out)
+        self.assertEqual(self.host.readies, [], "a FAIL beside a skipped action step marked the draft ready: " + out)
+
+    def test_control_a_listed_name_no_step_has_still_refuses_and_is_not_skipped(self):
+        rc, out = self.action_run(DECLARED_READY + ["no such step"], steps_for() + [("unknown", "no such step")], 2,
+                                  details={"no such step": "no step of job 'checks' has this name"})
+        self.assertEqual(rc, 1, "a listed name no step has did not refuse the ready run: " + out)
+        self.assertEqual(self.host.readies, [], "a listed name no step has marked the draft ready: " + out)
+        self.assertEqual(self.skip_lines(out, "no such step"), [], "a listed name no step has was skipped: " + out)
+
+    def test_control_a_listed_action_step_that_timed_out_still_refuses(self):
+        rc, out = self.action_run(READY_WITH_ACTION, steps_for() + [("unknown", ACTION_READY)], 2, details={ACTION_READY: "timed out after 600 s"})
+        self.assertEqual(rc, 1, "an action step that timed out did not refuse the ready run: " + out)
+        self.assertEqual(self.host.readies, [], "an action step that timed out marked the draft ready: " + out)
+        self.assertEqual(self.skip_lines(out, ACTION_READY), [], "an action step that timed out was skipped: " + out)
+
+    def test_control_a_listed_action_step_that_crashed_still_refuses(self):
+        rc, out = self.action_run(READY_WITH_ACTION, steps_for() + [("unknown", ACTION_READY)], 2, details={ACTION_READY: "crashed: exit 139, no verdict"})
+        self.assertEqual(rc, 1, "an action step that crashed did not refuse the ready run: " + out)
+        self.assertEqual(self.host.readies, [], "an action step that crashed marked the draft ready: " + out)
+        self.assertEqual(self.skip_lines(out, ACTION_READY), [], "an action step that crashed was skipped: " + out)
+
+    def test_control_a_listed_action_step_skipped_by_scope_still_refuses(self):
+        rc, out = self.action_run(READY_WITH_ACTION, steps_for() + [("skipped", ACTION_READY)], 0, details={ACTION_READY: "CI's scope job skips it for this diff"})
+        self.assertEqual(rc, 1, "an action step skipped by scope did not refuse the ready run: " + out)
+        self.assertEqual(self.host.readies, [], "an action step skipped by scope marked the draft ready: " + out)
+        self.assertEqual(self.skip_lines(out, ACTION_READY), [], "an action step skipped by scope read as the CI-runs skip: " + out)
+
+    def test_control_a_run_step_that_did_not_run_for_want_of_a_tool_still_refuses(self):  # the seam is the kind, not every not-run line
+        rc, out = self.action_run(DECLARED_READY + ["Tool step"], steps_for() + [("unknown", "Tool step")], 2,
+                                  details={"Tool step": "--step named it, but it did not run (tool missing: pipx)"})
+        self.assertEqual(rc, 1, "a run step that did not run for want of a tool was skipped: " + out)
+        self.assertEqual(self.host.readies, [], "a run step that did not run for want of a tool marked the draft ready: " + out)
+
+    def test_control_every_listed_step_unrunnable_refuses_and_no_pass_line_prints(self):  # nothing ran: not a pass
+        rc, out = self.action_run([ACTION_READY], [("unknown", ACTION_READY)], 2, details={ACTION_READY: ACTION_NOT_RUN})
+        self.assertEqual(rc, 1, "every listed step unrunnable, so nothing ran, but the ready run did not refuse: " + out)
+        self.assertEqual(self.host.readies, [], "every listed step unrunnable marked the draft ready: " + out)
+        self.assertNotIn("pass on ", out, "every listed step unrunnable printed a pass line: " + out)
 
 
     def unpushed_pr(self, n, files, body):
