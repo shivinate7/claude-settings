@@ -4061,7 +4061,7 @@ def checks_if_problems(needs, expr):
 
 def checks_run_problems(text):
     """checks_if_problems of checks.yml's own run condition, with its delta clauses taken off first (delta_off): the delta clauses start
-    checks on a comment-only or record-folder delta, which the records-only reading does not model."""
+    checks on a comment-only delta, which the records-only reading does not model."""
     return checks_if_problems(job_needs_of(text, CHECKS_JOB), delta_off(CHECKS_JOB, job_if_of(text, CHECKS_JOB)))
 
 
@@ -4256,11 +4256,19 @@ class ChecksShardCases(unittest.TestCase):
         with self.subTest(defect="the form the design uses is accepted"):
             self.assertEqual(checks_if_problems(needs, "${{ !cancelled() && needs.scope.result == 'success' && "
                                                         "needs.scope.outputs.records_only_skip != 'true' }}"), [])
-        from all_jobs_passed_rules import COMMENT_DELTA_CLAUSE, RECORD_DELTA_CLAUSE  # the one home of the delta clauses
-        with self.subTest(defect="the form with the delta clauses is accepted once they come off"):
+        from all_jobs_passed_rules import COMMENT_DELTA_CLAUSE  # the one home of the delta clauses
+        with self.subTest(defect="the form with the comment clause is accepted once it comes off"):
             delta_form = (f"${{{{ !cancelled() && needs.scope.result == 'success' && "
-                          f"({RECORDS_ONLY_CONDITION} || {COMMENT_DELTA_CLAUSE} || {RECORD_DELTA_CLAUSE}) }}}}")
-            self.assertEqual(checks_if_problems(needs, delta_off(CHECKS_JOB, delta_form)), [])
+                          f"({RECORDS_ONLY_CONDITION} || {COMMENT_DELTA_CLAUSE}) }}}}")
+            self.assertEqual(checks_if_problems(needs, delta_off(CHECKS_JOB, delta_form)), [],
+                             "checks' comment-only delta form is refused: the delta clauses checks names are not only the comment clause")
+        with self.subTest(defect="the record-folder clause is refused, since checks takes no such clause"):
+            # The literal is the refused form: the rules module no longer names the record-folder clause, so the test cannot import it.
+            # The form is the one checks.yml named before, so delta_off strips it on a head that still names the clause.
+            record_form = (f"${{{{ !cancelled() && needs.scope.result == 'success' && ({RECORDS_ONLY_CONDITION} || "
+                           f"{COMMENT_DELTA_CLAUSE} || needs.scope.outputs.skip_record_delta == 'true') }}}}")
+            self.assertTrue(checks_if_problems(needs, delta_off(CHECKS_JOB, record_form)),
+                            "checks accepts the record-folder clause, so a decision, notes or debts file starts it on the skip")
 
     def test_g5_a_tree_step_in_checks_runs_before_the_debt_step_and_reads_the_pr_head(self):
         steps = checks_steps(self.text)
