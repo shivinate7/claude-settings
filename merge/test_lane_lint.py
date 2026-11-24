@@ -8119,6 +8119,22 @@ class CarriedVerdictLine(LaneFixture):
         self.assertEqual(self.ran(), ran, "the rerun at the same head ran the job again: the carried PASS was not saved: " + text)
         self.assertTrue(self.cached(text), "the rerun at the same head printed no PASS (cached) for the job: " + text)
 
+    COUNTED = r"\b1\b[^;]*carried|carried[^;]*\b1\b"  # the verdict line's count of the carried step, and its word
+
+    def test_a_rerun_at_the_same_head_keeps_the_carried_count_in_the_verdict_line(self):  # control: green on the old code
+        self.use_ci_job(self.CARRIED, 0)
+        rc, text = self.lint_at(self.DATE, at_head=True)
+        self.assertEqual(rc, 0, text)
+        self.assertRegex(self.verdict(text), self.COUNTED, "scope: the first PASS verdict line does not name the carry: " + text)
+        rc, text = self.lint_at(self.DATE, at_head=True)  # the rerun the saved PASS answers
+        self.assertEqual(rc, 0, text)
+        self.assertRegex(self.verdict(text), self.COUNTED, "the rerun the saved PASS answers lost the carried count: " + text)
+        self.forget_saved_passes()  # the rerun runs the job again, and its carried step prints PASS (carried) again
+        self.use_ci_job(self.CARRIED, 0)
+        rc, text = self.lint_at(self.DATE, at_head=True)
+        self.assertEqual(rc, 0, text)
+        self.assertRegex(self.verdict(text), self.COUNTED, "the rerun that runs the job lost the carried count: " + text)
+
 
 class CiJobHeadCopy(LaneFixture):
     """The lane lint runs the head's own bin/ci-job as well, when the lane changes the tool. The base is the lane-merge repo: origin/main holds bin/ci-job

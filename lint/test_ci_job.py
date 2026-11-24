@@ -3993,10 +3993,12 @@ class SuiteCarry(unittest.TestCase):
     when no suite that the selector picks for the files changed from A to B is the step's own, so the step prints PASS (carried) and its
     command does not run. Each case runs the step at A, where it passes and is saved, then commits B. Before the carry run, each case checks
     the selector's pick for the commits since A: a carry case has an empty pick, and the records case has the step's suite as its pick.
-    A pass is never carried across a file the carry does not trust: an unmapped file, an edit to the selector, to bin/ci-job, to the workflow
-    or to the stamp list; a moved base; a pass saved on another branch (A is not an ancestor of B); a step that did not pass at A; a pass
-    saved under another step name. Cost per carry check: at most one git diff of two tree shas and no gh start (unmeasured: the selector
-    and ci-scope starts). Each case runs bin/ci-job in a fresh repo under RUN_FOLDER; the suite is hooks/test_s.py, beside hooks/s.py."""
+    A pass is never carried across a file the carry does not trust: an unmapped file, an edit to the selector, to bin/ci-job, to the workflow,
+    to ci-scope.sh or to the stamp list; a delta that sets the step's own scope flag (its `if:` reads it: the guard flag here); a dirty tree;
+    a moved base; a pass saved on another branch (A is not an ancestor of B); a step that did not pass at A; a pass saved under another step
+    name or another command; a change of an ambient variable the exact key reads (CLAUDE_CONFIG_DIR), with or without a commit.
+    Cost per carry check: at most two git diffs that name the saved pair (the two trees, and the selector's diff of the saved head to HEAD),
+    and no gh start. Each case runs bin/ci-job in a fresh repo under RUN_FOLDER; the suite is hooks/test_s.py, beside hooks/s.py."""
 
     fixture = RerunCache.fixture  # a fresh repo with its probe folder: RerunCache's
     commit = RerunCache.commit  # one commit of the working tree: RerunCache's
@@ -4012,6 +4014,21 @@ class SuiteCarry(unittest.TestCase):
                                   "TARGET = os.path.join(HERE, '..', 'docs', 'records.md')\nwith open(TARGET, encoding='utf-8') as f:\n"
                                   "    f.read()\n", 1)
     SHIM = '#!/bin/sh\necho "%s $*" >> "$STARTS_LOG"\n%s\n'  # a PATH stand-in that logs each start's argv, then runs or refuses it
+    GUARD_IF = "${{ needs.scope.outputs.guard == 'true' }}"  # the `if:` checks.yml gives a guard suite's step: its own scope flag is `guard`
+
+    def guard_step(self):
+        """The suite step gated on the guard flag, as checks.yml gates hooks/test_guard.py's step. Its flag is on when the lane's diff holds hooks/."""
+        return step("check-s", "python3 hooks/test_s.py check-s", **{"if": self.GUARD_IF})
+
+    def scope_of(self, files):
+        """The flags the repo's ci-scope.sh gives for `files`, read from its SCOPE_FILES input: name -> value. One run; no git range is read."""
+        out = os.path.join(self.sandbox, "scope-out.txt")
+        if os.path.exists(out):
+            os.remove(out)
+        subprocess.run(["bash", ".github/scripts/ci-scope.sh"], cwd=self.root, check=True, capture_output=True, text=True,
+                       env={**ENV, "SCOPE_FILES": "\n".join(files), "GITHUB_OUTPUT": out}, timeout=120)
+        with open(out, encoding="utf-8") as f:
+            return dict(line.split("=", 1) for line in f.read().splitlines() if "=" in line)
 
     def write(self, files):
         for rel, text in files.items():
@@ -4172,11 +4189,110 @@ class SuiteCarry(unittest.TestCase):
         self.assertEqual(ran, ["check-s"], "check-z was served from the pass saved under check-s: its key holds no step name\n%s" % out)
         self.assertEqual(state_of(lines, "check-z"), "PASS", "check-z printed a carried line\n%s" % out)
 
-    def test_the_carry_check_starts_no_gh_and_at_most_one_two_tree_git_diff(self):
+    def test_a_guard_fixture_delta_runs_a_step_whose_own_scope_flag_is_on(self):
+        flag, (rc, lines, ran, out) = self.guard_flag_case({"tests/guard/x.py": "x\n"})
+        self.assertEqual(flag, "true", "precondition: ci-scope.sh does not set the guard flag for a tests/guard fixture: %r" % flag)
+        self.assertIn("check-s", ran, "check-s carried its saved pass across a tests/guard fixture, though the guard flag its if: reads is on for "
+                      "that delta, so the step must run\n%s" % out)
+
+    def test_a_merge_py_delta_runs_a_step_whose_own_scope_flag_is_on(self):
+        flag, (rc, lines, ran, out) = self.guard_flag_case({"merge/merge.py": "# edit\n"})
+        self.assertEqual(flag, "true", "precondition: ci-scope.sh does not set the guard flag for merge/merge.py: %r" % flag)
+        self.assertIn("check-s", ran, "check-s carried its saved pass across an edit to merge/merge.py, though the guard flag its if: reads is "
+                      "on for that delta, so the step must run\n%s" % out)
+
+    def test_a_markdown_only_delta_still_carries_a_step_whose_own_scope_flag_is_off(self):  # control: green on the old code
+        flag, (rc, lines, ran, out) = self.guard_flag_case({"docs/notes-x.md": "x\n"})
+        self.assertEqual(flag, "false", "precondition: the guard flag is on for a markdown note, so the case probes nothing: %r" % flag)
+        self.assert_carried(rc, lines, ran, out)
+
+    def guard_flag_case(self, files):
+        """A guard-gated step saves its PASS from head A. Then commit B changes only `files`, which the selector picks no suite for.
+        -> (the delta's guard flag, the rerun's (exit code, verdict lines, probe runs, output)). Only the step's own flag can stop the carry."""
+        self.suite_repo()
+        guard = self.guard_step()
+        head = self.rev("HEAD")
+        rc, lines, ran, out = self.lane_run(guard, args=self.LINT)
+        self.assertEqual(ran, ["check-s"], "precondition: the first run at head A should run the guard step, got %r\n%s" % (ran, out))
+        self.assertEqual((rc, state_of(lines, "check-s")), (0, "PASS"), out)
+        self.lane_commit(files, "lane B")
+        self.assertEqual(self.picked_since(head), [], "precondition: the selector picks a suite for %s, so the flag is not the only reason" % sorted(files))
+        flag = self.scope_of(sorted(files)).get("guard")
+        return flag, self.lane_run(guard, args=self.LINT)
+
+    def test_a_dirty_tree_runs_the_step_again(self):
+        for label, dirty in (("an untracked file", {"janitor/y.py": "y\n"}), ("an edit to a committed file", {"janitor/x.py": "x, edited\n"})):
+            with self.subTest(dirty=label):
+                self.suite_repo()
+                head = self.first_pass()
+                self.lane_commit({"janitor/x.py": "x\n"}, "lane B")
+                self.write(dirty)
+                self.assertEqual(self.picked_since(head), [], "precondition: the selector picks a suite for the committed delta")
+                _, _, ran, out = self.rerun()
+                self.assertIn("check-s", ran, "check-s carried its saved pass across %s in the working tree, though the tree is dirty: a dirty "
+                              "tree never carries\n%s" % (label, out))
+
+    def test_an_ambient_change_with_no_commit_runs_the_step_again(self):
+        self.suite_repo()
+        head = self.rev("HEAD")
+        rc, lines, ran, out = self.lane_run(self.RUN, args=self.LINT, ambient={"CLAUDE_CONFIG_DIR": "/cfg/a"})
+        self.assertEqual(ran, ["check-s"], "precondition: the first run should run the step, got %r\n%s" % (ran, out))
+        self.assertEqual(self.rev("HEAD"), head, "precondition: the case makes no commit")
+        _, _, ran, out = self.lane_run(self.RUN, args=self.LINT, ambient={"CLAUDE_CONFIG_DIR": "/cfg/b"})
+        self.assertIn("check-s", ran, "check-s carried its pass across a change of CLAUDE_CONFIG_DIR with no commit: the carry key holds no "
+                      "ambient variable, which the exact key holds\n%s" % out)
+
+    def test_the_same_ambient_value_at_the_same_head_still_hits_the_saved_pass(self):  # control: green on the old code
+        self.suite_repo()
+        self.lane_run(self.RUN, args=self.LINT, ambient={"CLAUDE_CONFIG_DIR": "/cfg/a"})
+        rc, lines, ran, out = self.lane_run(self.RUN, args=self.LINT, ambient={"CLAUDE_CONFIG_DIR": "/cfg/a"})
+        self.assertEqual(ran, [], "scope: the rerun with the same CLAUDE_CONFIG_DIR ran %r, so the exact key missed\n%s" % (ran, out))
+        self.assertEqual(state_of(lines, "check-s"), "PASS (cached)", out)
+
+    def test_a_claude_config_dir_change_after_a_commit_runs_the_step_again(self):
+        self.suite_repo()
+        head = self.rev("HEAD")
+        self.lane_run(self.RUN, args=self.LINT, ambient={"CLAUDE_CONFIG_DIR": "/cfg/a"})
+        self.lane_commit({"janitor/x.py": "x\n"}, "lane B")
+        self.assertEqual(self.picked_since(head), [], "precondition: the selector picks a suite for the commit")
+        _, _, ran, out = self.lane_run(self.RUN, args=self.LINT, ambient={"CLAUDE_CONFIG_DIR": "/cfg/b"})
+        self.assertIn("check-s", ran, "check-s carried its pass from head A to B with CLAUDE_CONFIG_DIR changed, though the exact key holds that "
+                      "variable and the carry key does not\n%s" % out)
+
+    def test_a_commit_under_the_same_ambient_value_still_carries(self):  # control: green on the old code
+        self.suite_repo()
+        self.lane_run(self.RUN, args=self.LINT, ambient={"CLAUDE_CONFIG_DIR": "/cfg/a"})
+        self.lane_commit({"janitor/x.py": "x\n"}, "lane B")
+        rc, lines, ran, out = self.lane_run(self.RUN, args=self.LINT, ambient={"CLAUDE_CONFIG_DIR": "/cfg/a"})
+        self.assert_carried(rc, lines, ran, out)
+
+    def test_a_carried_step_still_reads_as_carried_when_rerun_at_the_same_head(self):
         self.suite_repo()
         head = self.first_pass()
         self.lane_commit({"janitor/x.py": "x\n"}, "lane B")
         self.assertEqual(self.picked_since(head), [], "precondition: the selector picks a suite for the commit")
+        self.assert_carried(*self.rerun())
+        rc, lines, ran, out = self.rerun()
+        self.assertNotIn("check-s", ran, "check-s ran on the rerun at head B, though its pass carried there\n%s" % out)
+        self.assertIn("carried", state_of(lines, "check-s") or "", "the rerun at head B printed %r for check-s, not a carried PASS, so the lane "
+                      "verdict loses the carried count\n%s" % (state_of(lines, "check-s"), out))
+
+    def test_a_commit_under_a_changed_command_of_the_same_name_runs_the_step_again(self):  # control: green on the old code
+        self.suite_repo()
+        head = self.first_pass()
+        self.lane_commit({"janitor/x.py": "x\n"}, "lane B")
+        self.assertEqual(self.picked_since(head), [], "precondition: the selector picks a suite for the commit")
+        other = step("check-s", "python3 hooks/test_s.py check-s --again")  # the same name, another command line
+        _, _, ran, out = self.lane_run(other, args=self.LINT)
+        self.assertIn("check-s", ran, "check-s was served from the pass saved under its old command line: the carry key holds the command\n%s" % out)
+
+    def test_an_edit_to_ci_scope_runs_the_step_again(self):  # control: the fail-safe that sets every flag
+        with open(os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh"), encoding="utf-8", newline="") as f:
+            scope = f.read()
+        self.fail_safe_runs_again({".github/scripts/ci-scope.sh": scope + "\n# edit\n"}, "the script that sets every scope flag changed")
+
+    def test_the_carry_check_starts_no_gh_and_at_most_two_git_diffs_of_the_saved_pair(self):
+        self.suite_repo()
         shim = os.path.join(self.sandbox, "shim")
         os.makedirs(shim)
         starts = os.path.join(self.sandbox, "starts.txt")
@@ -4185,18 +4301,29 @@ class SuiteCarry(unittest.TestCase):
             with open(path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(self.SHIM % (name, body))
             os.chmod(path, 0o755)
-        path = os.pathsep.join([shim, os.environ.get("PATH", "")])
-        # GH_REPO and GH_TOKEN are set empty, so a gh read would find no repository or login in the caller's environment.
-        ambient = {"PATH": path, "STARTS_LOG": starts, "GH_REPO": "", "GH_TOKEN": ""}
+        # The same ambient values at the save (head A) and at the carry (head B), so the key holds them both times: the shim's path and its
+        # log's path are fixed before the save. The log is emptied before the carry, so it holds the carry's starts only. GH_REPO and GH_TOKEN
+        # are set empty, so a gh read would find no repository or login in the caller's environment.
+        ambient = {"PATH": os.pathsep.join([shim, os.environ.get("PATH", "")]), "STARTS_LOG": starts, "GH_REPO": "", "GH_TOKEN": ""}
+        head = self.rev("HEAD")
+        saved_tree = self.rev("HEAD^{tree}")
+        rc, lines, ran, out = self.lane_run(self.RUN, args=self.LINT, ambient=ambient)
+        self.assertEqual(ran, ["check-s"], "precondition: the first run at head A should run the step, got %r\n%s" % (ran, out))
+        self.lane_commit({"janitor/x.py": "x\n"}, "lane B")
+        self.assertEqual(self.picked_since(head), [], "precondition: the selector picks a suite for the commit")
+        if os.path.exists(starts):
+            os.remove(starts)
         rc, lines, ran, out = self.lane_run(self.RUN, args=self.LINT, ambient=ambient)
         self.assertNotIn("check-s", ran, "scope: the carry did not happen, so the cost of the carry check is not read\n%s" % out)
         calls = []
         if os.path.exists(starts):
             with open(starts, encoding="utf-8") as f:
                 calls = f.read().splitlines()
-        two_trees = [c for c in calls if c.startswith("git ") and sum(bool(re.fullmatch(r"[0-9a-f]{40}", w)) for w in c.split()) >= 2]
-        self.assertLessEqual(len(two_trees), 1, "the carry check ran %d git diffs of two tree shas, not at most one:\n%s" % (
-            len(two_trees), "\n".join(two_trees)))
+        # The carry's two diffs name the saved pair: the saved tree against the new one, and the selector's diff from the saved head to HEAD.
+        pair = [c for c in calls if c.startswith("git diff ") and (head in c or saved_tree in c)]
+        self.assertTrue(pair, "scope: the carry check started no git diff of the saved pair\n%s" % "\n".join(calls))
+        self.assertLessEqual(len(pair), 2, "the carry check started %d git diffs of the saved pair, not at most two (the trees, and the selector):\n%s" % (
+            len(pair), "\n".join(pair)))
         self.assertEqual([c for c in calls if c.startswith("gh ")], [], "the carry check started gh, a GitHub read:\n%s" % "\n".join(calls))
 
 
