@@ -19,14 +19,16 @@
 # list of jobs and their suites is the workflow's own, read from the same file as the linted job. A step of a sibling job whose
 # `if:` or `env:` this runner cannot read prints unknown, as any step's does. Cost: one selector process per
 # lane lint (one git diff, one git ls-files, one parse of each tracked test_*.py and of each module they reach, once for
-# A suite step is never passed over quietly. A picked suite is any `python3 <folder>/test_*.py` line (pick_line; `python3 lint|actions/...` lines are lint steps): the selector
-# picks it for the changed files or when the change touches the suite's own file, and it runs under lint's own time bound. A CI step with no `python3 hooks|merge/test_*.py` line
-# whose `if:` names a scope flag that reads true for the diff and whose run: lines name a test file the selector did not pick (flag_suite: a python suite it passed over, or an sh,
-# bash, node or pwsh suite it cannot read) is not run here (an sh suite may need CI's own Linux). It prints `unknown` and exits 2 only when the change reaches the suite itself: it
-# touches the suite's file or a path its `_UNDER_TEST:-` lines name (reached_suites). Any other such suite prints one `not run` line that names it and says it runs in CI, and exits 0.
-# The same read runs over every other ubuntu job (the sibling pass). A step whose `if:` names no scope flag, and a step whose flag reads false, stay `not run`.
 # the whole diff; each sibling pass reads that pick, not a new selector), plus one process per picked CI step in any ubuntu job, and one
-# read of the scope script, one unshallow check and one log file per sibling job that runs. A mutation script (a name with "mutate")
+# read of the scope script, one unshallow check and one log file per sibling job that runs.
+# A suite step is never passed over quietly. A picked suite is any `[NAME=value ...] python3 <folder>/test_*.py` line (pick_line; `python3 lint|actions/...` lines are lint steps): the
+# selector picks it for the changed files or when the change touches the suite's own file, and it runs under lint's own time bound, with its env prefix as the shell reads it. A prefix
+# NODE_PATH that names a directory this checkout lacks reads unknown (missing_env_dirs). A CI step with no `python3 hooks|merge/test_*.py` line that CI runs for the diff
+# (owed_suites: its `if:` names a scope flag that reads true, or names none and the scope script sets code on) and whose run: lines name a test file the selector did not pick (a python suite it passed
+# over, or an sh, bash, node or pwsh suite it cannot read; a file counts only in command position, as shlex reads the script) is not run here (an sh suite may need CI's own Linux). It prints
+# `unknown` and exits 2 only when the change reaches the suite itself: it touches the suite's file, as the step's cd and `$REPO_ROOT` paths name it, or a path its `_UNDER_TEST:-` lines name
+# (reached_suites). Any other such suite prints one `not run` line that names it and says it runs in CI (on its runner, when that is not ubuntu), and exits 0. The same read runs over every other job
+# that CI runs for the diff, whatever its runner (tell_owed): a docs-only change sets code off and reads PASS. A mutation script (a name with "mutate")
 # and every other command (bash, unpinned pipx, other uses:) is left out with one `not run` line naming the step and why, except a `uses:` of
 # this repo's own action (`$/actions/<name>`, `./actions/<name>`), which runs only when the read of its action.yml below accepts it, else prints one unknown line. After the
 # last step, one line counts the steps run out of the job's total (--plan: "would run"). Neither it nor a `not run`
@@ -148,7 +150,7 @@
 # it misses 7 days after the save. Cost: per step that may be cached, one set of git processes (a temp index, add, write-tree, rev-parse); per run, one
 # read of those trees; per pass, one file of under 1 KB in $XDG_CACHE_HOME (else ~/.cache) /claude-settings/ci-job-pass. A save prunes files saved
 # over 7 days ago, and the store holds at most 300 files. No timer, no lasting process. CI_JOB_NO_CACHE=1 turns the cache off.
-import ast, concurrent.futures, hashlib, json, os, re, shutil, subprocess, sys, tempfile, threading, time
+import ast, concurrent.futures, hashlib, json, os, posixpath, re, shlex, shutil, subprocess, sys, tempfile, threading, time
 BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
@@ -167,7 +169,11 @@ PREAMBLE_MARK = "ci-job-preamble-done"
 VERDICT_HANG_LINE = re.compile(r"HANG .+ rc=124 no output or CPU for \d+s, stopped \(\d+(?:\.\d+)?s\) log=")
 PREAMBLE_DONE = "echo; echo " + PREAMBLE_MARK  # the line preamble_marked adds right before a CI step's first suite line; the bare echo ends a preamble line that has no newline, so the mark lands at line start
 SUITE_LINE = re.compile(r"python3 ((?:hooks|merge)/test_[\w.-]+\.py)(?: [^|&;`<>]*)?")  # a CI step's suite line, arguments allowed
-PICK_LINE = re.compile(r"python3 ((?:[\w.-]+/)+test_[\w.-]+\.py)(?: [^|&;`<>]*)?")  # any python suite line the selector can pick (a lint command is excluded by pick_line)
+PICK_PATH = re.compile(r"(?:[\w.-]+/)+test_[\w.-]+\.py")  # the path of any python suite the selector can pick (a lint command is excluded by pick_line)
+PUNCT = ";&|<>"  # the shell's command separators and redirects: shlex gives each run of them as its own token
+ENV_WORD = re.compile(r"[A-Za-z_]\w*=")  # the start of an `NAME=value` word in front of a command
+SUITE_RUNNERS = {"sh", "bash", "node", "pwsh", "powershell", "python3", "python"}  # a command word whose operand may be a suite file (suite_files)
+PATH_ENVS = ("NODE_PATH",)  # the env of a suite line that names directories of tools; a directory this checkout lacks reads unknown (missing_env_dirs)
 TEST_FILE = re.compile(r"test_[\w.-]+|[\w.-]+\.test\.\w+|[\w.-]+-tests?\.\w+")  # the basename of a test file in any language: what a suite step's run: line names
 USAGE = "usage: ci-job <job> [--workflow <file>] [--base <ref>] [--plan] [--lint] [--pinned] [--step NAME]..."
 EXPR = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
@@ -355,20 +361,29 @@ def expand(value, values):
     return None if any(v is None for v in read.values()) else EXPR.sub(lambda m: read[m.group(1)], value)
 
 
-def commands(script):
-    """The command word of each simple command in a shell script, for the tool-missing check."""
-    words, until = [], None
+def without_heredocs(script):
+    """The lines of a shell script, less the body of each heredoc: that text is data, not commands."""
+    until = None
     for line in script.splitlines():
-        if until is not None:  # a heredoc body is data, not commands
+        if until is not None:
             until = None if line.strip() == until else until
             continue
+        text = line.split(" #")[0].strip()
+        if text and not text.startswith("#"):
+            bare = re.sub(r"\$\(\(.*?\)\)|\"[^\"]*\"", "", text)  # arithmetic and double-quoted text hold no heredoc
+            doc = re.search(r"(?<!<)<<(?!<)-?\s*['\"]?([A-Za-z_]\w*)['\"]?", bare)
+            if doc:
+                until = doc.group(1)
+        yield line
+
+
+def commands(script):
+    """The command word of each simple command in a shell script, for the tool-missing check."""
+    words = []
+    for line in without_heredocs(script):
         line = line.split(" #")[0].strip()
         if not line or line.startswith("#"):
             continue
-        bare = re.sub(r"\$\(\(.*?\)\)|\"[^\"]*\"", "", line)  # arithmetic and double-quoted text hold no heredoc
-        doc = re.search(r"(?<!<)<<(?!<)-?\s*['\"]?([A-Za-z_]\w*)['\"]?", bare)
-        if doc:
-            until = doc.group(1)
         for part in re.split(r"\|\||&&|[|;]", line):
             tokens = [t for t in part.split() if not re.fullmatch(r"[A-Za-z_]\w*=\S*", t)]
             while tokens and tokens[0] in KEYWORDS:  # if nosuchtool ...: the tool is nosuchtool
@@ -635,6 +650,9 @@ def plan(step, pr, values, top, lint=False, pinned=False):
     gone = sorted({w for w in need if not shutil.which(w)})
     if gone:
         return "unknown", "tool missing: %s" % ", ".join(gone), None, None, None
+    absent = sorted({d for ln in run_lines(step) if pick_line(ln) for d in missing_env_dirs(simple_command(ln)[0], top, step_key(step, "working-directory"))})
+    if absent:  # a suite line's env prefix names tools this checkout lacks: the suite would fail for want of them, which is the tree's fault, not the change's
+        return "unknown", "tool missing: %s" % ", ".join("%s names %s, which this checkout lacks" % d for d in absent), None, None, None
     return "run", body, argv, env, step_key(step, "working-directory")
 
 
@@ -1142,37 +1160,134 @@ def append_log(src, dst, name):
     return False
 
 
+def shell_tokens(text):
+    """The words of one logical line of shell, and each run of separator or redirect characters (PUNCT) as a token of its own, as shlex (the
+    language's own tokenizer) reads it: quotes come off the words and a `#` comment is dropped. ValueError for a quote that never closes."""
+    lex = shlex.shlex(text, posix=True, punctuation_chars=PUNCT)
+    lex.whitespace_split = True
+    return list(lex)
+
+
+def is_punct(token):
+    return bool(token) and set(token) <= set(PUNCT)
+
+
+def simple_command(ln):
+    """({NAME: value} of the words in front, [the command word and its operands]) of a run: line that is one simple command; None for a line with
+    a pipe, a list, a redirect or a backtick, an empty line, or a quote that never closes (a line shlex cannot read is not read as a command)."""
+    try:
+        tokens = [] if "`" in ln else shell_tokens(ln)
+    except ValueError:
+        return None
+    if not tokens or any(is_punct(t) for t in tokens):
+        return None
+    env = {}
+    while tokens and ENV_WORD.match(tokens[0]):
+        name, _, value = tokens.pop(0).partition("=")
+        env[name] = value
+    return (env, tokens) if tokens else None
+
+
 def pick_line(ln):
-    """The match of a run: line that is `python3 <folder>/test_<name>.py`, arguments allowed, and no lint command (a `python3 lint/...` or
-    `python3 actions/...` line is a lint step's, which --lint always runs), else None."""
-    m = PICK_LINE.fullmatch(ln)
-    return m if m and not LINT_CMD.fullmatch(ln) else None
+    """The repo path of the suite a run: line runs when it is `[NAME=value ...] python3 <folder>/test_<name>.py`, arguments allowed, and no lint
+    command (a `python3 lint/...` or `python3 actions/...` line is a lint step's, which --lint always runs), else None."""
+    cmd = simple_command(ln)
+    if not cmd or len(cmd[1]) < 2 or cmd[1][0] != "python3" or not PICK_PATH.fullmatch(cmd[1][1]):
+        return None
+    return None if LINT_CMD.fullmatch(" ".join(cmd[1])) else cmd[1][1]
 
 
 def suite_paths(step):
     """The suites a CI step runs that the selector can pick: the path of each of its run: lines that is a python test file (pick_line). Any
     other line of the step stays in it, so a picked step runs whole, as CI runs it."""
-    return [m.group(1) for ln in run_lines(step) if (m := pick_line(ln))]
+    return [p for ln in run_lines(step) if (p := pick_line(ln))]
+
+
+def repo_path(word, folder):
+    """The repo-relative path `word` names for a shell in `folder` (repo-relative, "" for the top; None when a `cd` left it unreadable): a
+    variable that names the checkout (`$REPO_ROOT`, `$GITHUB_WORKSPACE`, `$PWD`) and `./` come off, and the rest is joined to the folder.
+    None when the path holds another variable, is absolute or leaves the checkout, so the caller keeps the word as written."""
+    m = re.match(r"\$\{?(REPO_ROOT|GITHUB_WORKSPACE|PWD)\}?(?:/|$)", word)
+    base, rest = (("" if m.group(1) != "PWD" else folder), word[m.end():]) if m else (folder, word)
+    if base is None or "$" in rest or rest.startswith("/"):
+        return None
+    path = posixpath.normpath(posixpath.join(base, rest))
+    return None if path.startswith("..") else "" if path == "." else path
+
+
+def shell_commands(script, folder=""):
+    """[(argv, folder)]: each simple command of a shell script as shlex reads it, with the repo-relative folder it runs in once each earlier `cd`
+    has run (None when a `cd` names a place this read cannot follow). A line that ends in a backslash, or opens a quote that a later line closes,
+    is one command; a heredoc body is not read (without_heredocs). A tail that never closes is not read as shell: each of its lines is split on spaces."""
+    out, pending = [], ""
+    for line in without_heredocs(script):
+        if line.rstrip().endswith("\\"):
+            pending += line.rstrip()[:-1] + " "
+            continue
+        pending += line + "\n"
+        try:
+            tokens = shell_tokens(pending)
+        except ValueError:
+            continue  # a quote that a later line closes
+        pending, command, redirect = "", [], False
+        for token in tokens + [PUNCT[0]]:
+            if not is_punct(token):
+                if redirect:
+                    redirect = False  # the word after a redirect is a file, not an operand
+                else:
+                    command.append(token)
+                continue
+            if command and command[0] == "cd":
+                folder = repo_path(command[1], folder) if len(command) == 2 and command[1] != "-" else None
+            elif command:
+                out.append((command, folder))
+            command, redirect = [], "<" in token or ">" in token
+    return out + [(ln.split(), folder) for ln in pending.splitlines()]
+
+
+def is_test_name(word):
+    """True when `word` is one word that names a test file of any language (TEST_FILE)."""
+    return not re.search(r"\s", word) and bool(TEST_FILE.fullmatch(posixpath.basename(word)))
 
 
 def suite_files(step):
-    """The test files a CI step's run: lines name, in any language (TEST_FILE), as the line writes them. [] for a lint, install or `uses:` step and for
-    a mutation script, none of which is a suite this runner reads."""
+    """The test files a CI step runs, in any language, each as a repo-relative path (repo_path) or, when the path cannot be read, as written. A file counts
+    only in command position: an operand of a runner (SUITE_RUNNERS) or the command word itself, after any `bin/verdict`, env word, `if` or `env`; so a
+    word in an `echo`, in a comment or in a heredoc is no suite. [] for a lint, install or `uses:` step and for a mutation script, none of which is a suite
+    this runner reads."""
     if uses(step) or is_lint(step) or is_install(step):
         return []
-    return [w for ln in run_lines(step) if "mutate" not in ln for w in (x.strip("\"'") for x in ln.split())
-            if TEST_FILE.fullmatch(os.path.basename(w))]
+    start = step_key(step, "working-directory") or ""
+    start = None if "${{" in start else "" if posixpath.normpath(start) == "." else posixpath.normpath(start)
+    found = []
+    for argv, folder in shell_commands(run_body(step) or "", start):
+        while argv and (argv[0] in KEYWORDS or argv[0] in RUNNERS or ENV_WORD.match(argv[0]) or posixpath.basename(argv[0]) == "verdict"):
+            argv = argv[1:]
+        if not argv or any("mutate" in w for w in argv):
+            continue
+        if posixpath.basename(argv[0]) in SUITE_RUNNERS:
+            operands = [w for w in argv[1:] if not w.startswith("-")]
+        else:
+            operands = argv[:1]
+        found += [repo_path(w, folder) or w for w in operands if is_test_name(w)]
+    return list(dict.fromkeys(found))
 
 
-def flag_suite(step):
-    """The test files of a CI step that a scope flag turns on for this diff and that the selector does not govern, else []: the step's `if:` names a
-    needs.scope.outputs flag and reads true (or unreadable), and no run: line is a `python3 hooks|merge/test_*.py` suite line, whose reach is the
-    selector's alone (decision lanes-run-no-full-ci-job). Such a suite is one --lint does not run: it reads unknown when the change reaches it
-    (reached_suites), else prints one `not run` line, never a silent pass."""
-    cond = step_key(step, "if") or ""
-    if not SCOPE_TERM.search(cond) or any(SUITE_LINE.fullmatch(ln) for ln in run_lines(step)):
+def owed_suites(step):
+    """The test files of a CI step that this --lint run does not run and that CI runs for this diff, else []: the selector governs a step with a
+    `python3 hooks|merge/test_*.py` line alone (decision lanes-run-no-full-ci-job). A step whose `if:` names a scope flag owes its suites when the
+    flag reads on (or unreadable). A step whose `if:` names none (sh and node suites only) owes them when the scope script was read and sets code on, so
+    a docs-only change reads PASS. Such a suite reads unknown when the change reaches it (reached_suites), else prints one `not run` line."""
+    files = suite_files(step)
+    paths = suite_paths(step)
+    if not files or any(p.startswith(("hooks/", "merge/")) for p in paths):
         return []
-    return suite_files(step) if condition(cond, True) is not False else []
+    cond = step_key(step, "if") or ""
+    if condition(cond, True) is False:
+        return []
+    if SCOPE_TERM.search(cond):
+        return files
+    return files if not paths and (SCOPE["flags"] or {}).get("code") == "true" else []
 
 
 SUBJECT_REF = re.compile(r"\$REPO_ROOT/([\w./-]+)\}")  # a path a suite's `*_UNDER_TEST:-` default line names as the file it tests
@@ -1188,18 +1303,59 @@ def suite_subjects(top, suite):
         return []
 
 
+CHANGED = {}  # (top, base) -> the paths of the diff, read once per run of main
+
+
 def changed_files(top, base):
     """The paths of `git diff base...HEAD`, or None when the diff cannot be read."""
-    out = git("diff", "--name-only", "--no-renames", "-z", base + "...HEAD", cwd=top)
-    return None if out is None else {p for p in out.split("\0") if p}
+    if (top, base) not in CHANGED:
+        out = git("diff", "--name-only", "--no-renames", "-z", base + "...HEAD", cwd=top)
+        CHANGED[(top, base)] = None if out is None else {p for p in out.split("\0") if p}
+    return CHANGED[(top, base)]
 
 
 def reached_suites(top, base, owed):
     """The suites of `owed` the change reaches itself: it touches the suite's own file or a path the suite names as its subject. A diff that
-    cannot be read reaches every suite, so it reads unknown, never a quiet pass. A file of the same name elsewhere reaches nothing."""
+    cannot be read reaches every suite, so it reads unknown, never a quiet pass. A suite whose path could not be read (it holds a variable, or is
+    absolute) is reached by any changed file of its name, so it never reads as not reached by mistake. A file of the same name elsewhere reaches nothing."""
     changed = changed_files(top, base)
+    if changed is None:
+        return set(owed)
+    names = {posixpath.basename(p) for p in changed}
     norm = lambda p: os.path.normpath(p).replace(os.sep, "/")
-    return {s for s in owed if changed is None or norm(s) in changed or changed.intersection(norm(p) for p in suite_subjects(top, s))}
+    return {s for s in owed if (posixpath.basename(s) in names if s.startswith(("/", "..")) or "$" in s else
+                                s in changed or changed.intersection(norm(p) for p in suite_subjects(top, s)))}
+
+
+def tell_owed(label, step, owed, top, base, tally, runner=None):
+    """Print what this --lint run says of a CI step whose suites it does not run: an `unknown` line for the suites the change reaches, and one `not run`
+    line for the rest that names them and says they run in CI (on `runner`, when it is not the Linux one this runs on). True when a `not run` line printed."""
+    flags = ", ".join(sorted({m.group(1) for m in SCOPE_TERM.finditer(step_key(step, "if") or "") if (SCOPE["flags"] or {}).get(m.group(1)) != "false"}))
+    on = " (scope flags on: %s)" % flags if flags else ""
+    reach = reached_suites(top, base, owed)
+    if reach:
+        tally["unknown"] += 1
+        print("%-15s %s: --lint cannot run suite %s, and the change touches it or a file it tests%s" % ("unknown", label, ", ".join(sorted(reach)), on))
+    rest = [s for s in owed if s not in reach]
+    if rest:
+        print("%-15s %s: --lint did not run suite %s: it runs in CI%s%s; the change touches neither it nor a file it tests" % (
+            "not run", label, ", ".join(rest), " on %s" % runner if runner else "", on))  # the tail is exact: the change does not touch the suite or a path its text names, and the selector's import reach is no part of it
+    return bool(rest)
+
+
+def missing_env_dirs(env, top, cwd=None):
+    """[(NAME, directory)] for each directory a path variable of a suite line's env prefix (PATH_ENVS) names that this checkout lacks, as the repo-relative
+    path. `$PWD` is the step's folder and `$REPO_ROOT` and `$GITHUB_WORKSPACE` are the checkout's top. A directory whose path holds another variable is not read."""
+    here = os.path.join(top, cwd) if cwd else top
+    out = []
+    for name in PATH_ENVS:
+        for entry in (env.get(name) or "").split(os.pathsep):
+            path = re.sub(r"\$\{?PWD\}?", here.replace("\\", "/"), entry)
+            path = re.sub(r"\$\{?(?:REPO_ROOT|GITHUB_WORKSPACE)\}?", top.replace("\\", "/"), path)
+            full = os.path.join(here, path)
+            if path and "$" not in path and not os.path.isdir(full):
+                out.append((name, os.path.relpath(full, top).replace(os.sep, "/")))
+    return out
 
 
 def job_reached(block):
@@ -1343,6 +1499,7 @@ def main(argv, sibling=False, ran_suites=None):
     tally = {"FAIL": 0, "unknown": int(no_base)}
     unshallow(block, top, dry, tally)
     SCOPE.update(flags=None, why=None, unknown=set())
+    CHANGED.clear()
     if lint and base:  # the flags CI's scope job gives this diff, so a step CI skips is skipped here
         SCOPE["flags"], SCOPE["why"] = scope_flags(top, base_sha, git("rev-parse", "--abbrev-ref", "HEAD", cwd=top) or "",
                                                    values["github.event.pull_request.head.sha"])
@@ -1352,7 +1509,7 @@ def main(argv, sibling=False, ran_suites=None):
         kind = ["" if k in ("lint", "local") else k for k in kind]
     suites = [suite_paths(st) if lint and not k else [] for st, k in zip(steps, kind)]  # each step's suite lines
     elsewhere = {}  # each other job: the suites of its CI steps, which this run does not run
-    reaching = set()  # each other job with a CI step that a scope flag turns on for this diff and that holds a suite the selector does not govern (flag_suite)
+    reaching = set()  # each other job with a CI step that CI runs for this diff and that holds a suite the selector does not govern (owed_suites)
     jobs = re.findall(r"^  ([\w-]+):\s*$", text.split("\njobs:", 1)[-1], re.M)
     if lint and base and not sibling:
         for other in jobs:
@@ -1361,7 +1518,7 @@ def main(argv, sibling=False, ran_suites=None):
             found = {path for st in step_blocks(job_block(text, other)) for path in suite_paths(st)}
             if found:
                 elsewhere[other] = found
-            if job_reached(job_block(text, other)) and any(flag_suite(st) for st in step_blocks(job_block(text, other))):
+            if job_reached(job_block(text, other)) and any(owed_suites(st) for st in step_blocks(job_block(text, other))):
                 reaching.add(other)
     picked, why = None, "no base to read a diff"
     if base and (top, base) in SELECTED:  # a sibling pass reads the pick the first pass made
@@ -1372,7 +1529,7 @@ def main(argv, sibling=False, ran_suites=None):
     for i, found in enumerate(suites):  # a step with a picked suite runs as a lint step does
         if picked is not None and picked.intersection(found):
             kind[i] = "suite"
-    owing = [flag_suite(st) if lint and base and not k and not (picked is None and found) else [] for st, k, found in zip(steps, kind, suites)]  # read here, so UNKNOWN scope below counts a flag this read finds absent
+    owing = [owed_suites(st) if lint and base and not k and not (picked is None and found) else [] for st, k, found in zip(steps, kind, suites)]  # read here, so UNKNOWN scope below counts a flag this read finds absent
     planned = [plan(st, bool(base), values, top, lint) if k not in ("", "local") else None for st, k in zip(steps, kind)]
     runs = [k == "lint" and p[0] == "run" for k, p in zip(kind, planned)]  # the lint steps the pool may queue
     ready = [local_ready(st, top, base) if k == "local" else (None, None) for st, k in zip(steps, kind)]
@@ -1414,19 +1571,8 @@ def main(argv, sibling=False, ran_suites=None):
                     tally[state] += 1
                 continue
             owed = owing[n - 1]
-            if owed:  # a suite CI's scope flags turn on for this diff that the selector did not pick: never a pass over it
-                flags = ", ".join(sorted(set(m.group(1) for m in SCOPE_TERM.finditer(step_key(step, "if") or "")
-                                             if (SCOPE["flags"] or {}).get(m.group(1)) != "false")))
-                reach = reached_suites(top, base, owed)  # only a suite the change touches, or a file it tests, reads unknown
-                if reach:
-                    tally["unknown"] += 1
-                    print("%-15s %s: --lint cannot run suite %s, and the change touches it or a file it tests (scope flags on: %s)" % (
-                        "unknown", name, ", ".join(sorted(reach)), flags))
-                rest = [s for s in owed if s not in reach]
-                if rest:  # one line per step, naming its suites, so a step is never passed over silently
-                    told = True
-                    print("%-15s %s: --lint did not run suite %s: it runs in CI (scope flags on: %s); the change touches neither it nor a file it tests" % (
-                        "not run", name, ", ".join(rest), flags))
+            if owed:  # a suite CI runs for this diff that the selector did not pick: never a pass over it
+                told = tell_owed(name, step, owed, top, base, tally) or told  # only a suite the change touches, or a file it tests, reads unknown
                 continue
             if sibling and not kind[n - 1]:
                 continue
@@ -1500,21 +1646,25 @@ def main(argv, sibling=False, ran_suites=None):
         if picked is None and elsewhere and not any(suites):
             print("%-15s suites of other jobs: --lint could not select them: %s" % ("not run", why))
         print("summary: %s %d of %d steps" % ("would run" if dry else "ran", ran, len(steps)))
-        for other in (j for j in jobs if j in elsewhere or j in reaching):  # the second pass: each other job that holds a picked suite, or a suite a scope flag turns on, run as CI's own list of jobs names it
+        for other in (j for j in jobs if j in elsewhere or j in reaching):  # the second pass: each other job that holds a picked suite, or a suite CI runs for this diff, run as CI's own list of jobs names it
             hit = picked.intersection(elsewhere.get(other, ())) if picked is not None else set()
-            if not hit and other not in reaching:
-                continue
             runner = re.search(r"^    runs-on:\s*(\S+)", job_block(text, other) or "", re.M)
             runner = runner.group(1).strip("'\"") if runner else "?"
-            if not runner.startswith("ubuntu"):
-                if hit:  # a flag-reached suite of a job on another runner prints nothing: reaching reads ubuntu jobs only
-                    print("%-15s job %s: picked %s; it runs on %s, which this Linux lint does not run" % ("not run", other, ", ".join(sorted(hit)), runner))
-            elif hit and hit <= ran_suites and other not in reaching:
+            if hit and not runner.startswith("ubuntu"):
+                print("%-15s job %s: picked %s; it runs on %s, which this Linux lint does not run" % ("not run", other, ", ".join(sorted(hit)), runner))
+            elif hit and hit <= ran_suites:
                 print("%-15s job %s: picked %s; each already ran above" % ("not run", other, ", ".join(sorted(hit))))
-            else:
-                print("job %s: %s; running its suite steps" % (other, "picked %s" % ", ".join(sorted(hit)) if hit else "a scope flag turns on a suite"))
+            elif hit:  # the sibling pass runs the job's picked steps, and tells each other suite step of it the same way
+                print("job %s: picked %s; running its suite steps" % (other, ", ".join(sorted(hit))))
                 sub = main([other, "--lint", "--base", base, "--workflow", workflow] + (["--plan"] if dry else []), True, ran_suites)
                 code = 1 if 1 in (code, sub) else 2 if 2 in (code, sub) else 0
+                continue
+            if other in reaching:  # no pass runs this job's steps here: each suite step CI runs for the diff prints its line, a job on another runner too
+                for st in step_blocks(job_block(text, other)):
+                    owed = owed_suites(st)
+                    if owed:
+                        tell_owed("job %s: %s" % (other, step_key(st, "name") or "a step"), st, owed, top, base, tally, None if runner.startswith("ubuntu") else runner)
+        code = code or 2 * bool(tally["unknown"])  # a reached suite of a job no pass ran reads unknown
     if not dry:
         print("log=%s" % log)
     return code
