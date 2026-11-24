@@ -210,10 +210,10 @@ def octopus_fetch_cost_case():
     # is the same on both rows, and the table pins each count, so a new read anywhere in the push shows here.
     problems = _push_cost_problems((
         ("an octopus-push hit", "push origin lane",
-         {"config": 1, "diff": 3, "fetch": 1, "log": 1, "rev-list": 2, "rev-parse": 3, "symbolic-ref": 2},
+         {"diff": 3, "fetch": 1, "log": 1, "rev-list": 2, "rev-parse": 3, "symbolic-ref": 2},
          OCT_NEWDEST_CTRL),
         ("a clean push", "push origin lane",
-         {"config": 1, "diff": 3, "log": 1, "rev-list": 1, "rev-parse": 3, "symbolic-ref": 2},
+         {"diff": 3, "log": 1, "rev-list": 1, "rev-parse": 3, "symbolic-ref": 2},
          OCT_NEWDEST),
     ), log, path)
     if problems:

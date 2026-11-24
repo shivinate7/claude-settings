@@ -255,10 +255,10 @@ chained_prune("ask-alone: r3-bd a prune after a lone apostrophe in a body commen
 chained_prune("ask-alone: r3-bd a prune inside a multi-line template literal in the body, denies",
               "cat <<'EOF-1' > x.sh\nconst s = `\nEOF\n" + PRUNE + "\n`;\nEOF-1\nsh x.sh")
 # The push-delete path reads the same walk. The verdict here does not turn on the run dir, so this pins the walk
-# through the body, not a `cd`: the body holds the cd and the push, and the push asks on main.
-chained_ask("ask-alone: r3-bd a body with a cd and a push delete of main, written then sh, denies",
-            "cat <<'EOF-1' > x.sh\nEOF\ncd " + slash(PUSHMAIN) + "\ngit push origin :main\nEOF-1\nsh x.sh",
-            cwd=PUSHFEAT)
+# through the body, not a `cd`: the body holds the cd and the push, and the push denies on main.
+sh("ask-alone: r3-bd a body with a cd and a push delete of main, written then sh, denies",
+   "cat <<'EOF-1' > x.sh\nEOF\ncd " + slash(PUSHMAIN) + "\ngit push origin :main\nEOF-1\nsh x.sh",
+   "deny", "force-push", cwd=PUSHFEAT)
 
 
 # =========================================================================== ordinary work
