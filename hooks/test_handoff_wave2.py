@@ -2063,6 +2063,33 @@ def case_limit5_read_keeps_flag():
         c.cleanup()
 
 
+def case_offset_zero_read_counts_as_line_one():
+    """A Read with offset 0 and limit 25 counts lines 1-25, the same as offset 1 and limit 25: the next Bash call is
+    refused naming lines 26-50, and a Read of lines 26-50 clears the flag. case_pages_clear_flag_when_covered is the
+    green control, the same pages asked for with offset 1 and 26."""
+    c = Case("offset-zero")
+    try:
+        if not step("PostCompact exits 0", exit_why(compact_with(c, SID, LINES50))):
+            return
+        first = read_range(c, SID, c.handoff(SID), offset=0, limit=25)
+        if not step("the Read with offset 0 and limit 25 exits 0", exit_why(first)):
+            return
+        step("after offset 0 and limit 25 the reread flag is still set",
+             "" if flag_set(c, SID) else "the Read with offset 0 and limit 25 cleared the reread flag")
+        got = guard_call(c, SID, "Bash", BASH)
+        if step("the Bash call is refused by handoff-unread after the offset 0 Read",
+                refused_by(got, HANDOFF_RULE)):
+            step("the refusal names the unread lines 26-50, so offset 0 counted lines 1-25",
+                 "" if "26-50" in got[1] else "the refusal does not name 26-50: %r" % got[1][:120])
+        second = read_range(c, SID, c.handoff(SID), offset=26, limit=25)
+        if not step("the Read of lines 26-50 exits 0", exit_why(second)):
+            return
+        step("after lines 26-50 the reread flag is cleared",
+             "" if not flag_set(c, SID) else "the reread flag is still set after lines 26-50")
+    finally:
+        c.cleanup()
+
+
 # --------------------------------------------------------------------------- part 7
 # The size limit on a session handoff (decision precompact-handoff). A token is ceil(UTF-8 bytes / 3.5), and
 # HANDOFF_MAX_TOKENS is 10000 in hooks/reread_check.py: 35000 bytes is the most that passes (10000 tokens),
@@ -2639,6 +2666,7 @@ def main() -> int:
     case_overlapping_pages_clear_flag()
     case_plain_read_of_small_handoff_clears_flag()
     case_limit5_read_keeps_flag()
+    case_offset_zero_read_counts_as_line_one()
 
     print("Part 7: the handoff size limit, HANDOFF_MAX_TOKENS = 10000 (hooks/reread_check.py, hooks/guard.py rule handoff-too-big)")
     case_size_limit_constant_is_10000_tokens()
