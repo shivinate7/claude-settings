@@ -7,7 +7,7 @@ path, so the push-skip job is a visible success and scope reads its output.
 
 base is the proven base of a scoped push (proven_base): the head of the newest completed, successful push run of the calling workflow
 on main whose suites ran. Empty means every flag stays on. A run that push-skip skipped whole is never a base, a completed red or
-cancelled run newer than the base gives none, a run still going is passed over, and this run's own record never counts. Any read
+cancelled run newer than the base gives none, a run not yet completed (queued, in progress, waiting, requested, pending) newer than the base is unread and gives none, and this run's own record never counts. Any read
 error, malformed reply, or full page with no usable run gives none and says "unknown". A skip=true push, and any event but a push,
 writes an empty base: scope does not run on a skip, and a schedule or dispatch run never scopes.
 
@@ -311,10 +311,11 @@ def decide(heads, push_tree):
 
 def proven_base(env):
     """The full sha a scoped push diffs from, or "" for none: the head of the newest completed, successful push run of the calling
-    workflow on main whose suites ran. Newest first: a run still going, this run's own record (GITHUB_RUN_ID) and a run of another
-    event, branch or workflow are passed over. A run with no suite job succeeded was skipped whole by push-skip, and its tree rests on
+    workflow on main whose suites ran. Newest first: this run's own record (GITHUB_RUN_ID) and a run of another event, branch or
+    workflow are passed over. A run with no suite job succeeded was skipped whole by push-skip, and its tree rests on
     a pull request run, so the search goes on to the next older run. Any other completed run that is not a success (red, cancelled)
-    is newer than every older base, so there is none. Raises Unknown on a read that cannot be judged, a malformed reply, a head that
+    is newer than every older base, so there is none. So is a run whose status is not completed (queued, in_progress, waiting, requested,
+    pending, or any other word): its suites are unread, so main is not known green. Raises Unknown on that unread run, on a read that cannot be judged, a malformed reply, a head that
     is no full sha, and a full page that held no usable run (an older one may exist); the caller then writes an empty base."""
     body = get("actions/runs", {"event": "push", "branch": MAIN, "per_page": str(PAGE)}, env)
     page = body.get("workflow_runs") if isinstance(body, dict) else None
@@ -327,7 +328,8 @@ def proven_base(env):
     newest_first = sorted(mine, key=lambda r: (str(r.get("created_at") or ""), r.get("id") if isinstance(r.get("id"), int) else 0), reverse=True)
     for run in newest_first:
         if run.get("status") != "completed":
-            continue  # still going: passed over, and the diff from an older base covers its commits
+            # Any status but completed is unread: a green older base could hide a failure this run is about to report.
+            raise Unknown("push run %s is %s, so its result is unread and main is not known green" % (run.get("id"), run.get("status")))
         if run.get("conclusion") != "success":
             print("push-skip: push run %s concluded %s, so main is not known green and the push has no base" % (run.get("id"), run.get("conclusion")))
             return ""
