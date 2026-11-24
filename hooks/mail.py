@@ -111,10 +111,7 @@ def _run_windows(command, env, data, timeout):
     try:
         out, err = child.communicate(data, timeout=timeout)
     except BaseException:
-        try:
-            _nowindow.run(["taskkill", "/F", "/T", "/PID", str(child.pid)], capture_output=True, timeout=5)
-        except (OSError, subprocess.SubprocessError):
-            pass  # best effort: the kill below still ends the child itself
+        _nowindow.taskkill_tree(child.pid, 5)  # best effort: the kill below still ends the child itself
         child.kill()
         try:
             child.wait(timeout=1)

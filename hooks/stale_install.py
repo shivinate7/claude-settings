@@ -19,8 +19,10 @@ installs nothing. Unknown is never reported as current.
   wait; it prints "reinstall failed (timed out after N s)".
 - source on a detached HEAD, the live pin, that holds merge/install_from_main.sh: runs it once per new head and prints
   one line that states how many commits the pin is behind the ref it read, counted from local objects.
-  A refresh runs once per head, whatever its outcome. A later prompt on a head the record still does not cover prints
-  "install still stale", and runs nothing.
+  A refresh runs once per head, whatever its outcome, and the head is marked once the refresh has ended. A later prompt
+  on a head the record still does not cover prints "install still stale", and runs nothing. While another install holds
+  the install lock (a fresh <config dir>/.claude-settings-install.lock), the pin refresh prints nothing, runs nothing and
+  leaves the head unseen: a later prompt checks again. A refresh that timed out behind that lock acts the same.
 - the clone the config dir's CLAUDE.md points at (an @path line), when its HEAD is behind its own local origin ref:
   one line that names the clone and its commits behind, once per new head.
 A local session (CLAUDE_CODE_REMOTE not "true": a Mac or a Windows machine) acts on the live pin only. install.sh
@@ -44,7 +46,7 @@ the install record, the config dir's CLAUDE.md, and local git reads in a clone: 
 a pin with no origin ref adds one rev-parse of local main). A local session with no record reads its pin: with no trigger it makes 2 git calls when the pin is current
 (HEAD and origin/stable) and 4 when the pin is behind a head already seen (the pin has no shared clone). A local session
 whose hook lives in no pin reads no git. A trigger adds one installer
-run (the installer fetches; this hook does not). Files written by this hook: the seen file, only when a reinstall, a
+run (the installer fetches; this hook does not) and, for a pin, one stat of the install lock (a read of it when fresh). Files written by this hook: the seen file, only when a reinstall, a
 pin refresh or a clone flag acts on a new head. No timer, no long-lived process.
 """
 import functools
@@ -54,6 +56,7 @@ import re
 import signal
 import subprocess
 import sys
+import time
 try:
     import _nowindow  # the one home of a no-window child start; a flat hooks/ file
 except ImportError:  # the helper lands a moment after the hook in an install; a hook never dies for it
@@ -85,9 +88,15 @@ RESTART_PATHS = ("CLAUDE.md", "output-styles/")
 RESTART_SETTINGS_KEYS = ("model", "effortLevel")
 PREFIX = "claude-settings: "
 PIN_SCRIPT = os.path.join("merge", "install_from_main.sh")
+# The install lock the two installers take, and the age (seconds) past which they remove it as a dead run's. Copies of
+# INSTALL_LOCK in install.sh and merge/install_from_main.sh (their `find -mmin +10`), their home: bash and Python share
+# no source. The hook only reads it, to leave a refresh to the install that holds it.
+LOCK_NAME = ".claude-settings-install.lock"
+LOCK_MAX_AGE = 600
 # The one branch the hook names: install_from_main.sh pins to local main when origin has no ref for the record's ref.
 PIN_FALLBACK_BRANCH = "main"
-# The branch a local session's pin follows: install_from_main.sh pins to origin/<this> (its default REF).
+# The branch a local session's pin follows. A copy of the default in merge/install_from_main.sh,
+# REF="${CLAUDE_SETTINGS_REF:-stable}", its home: shell and Python share no source, so a change there is made here too.
 PIN_REF = "stable"
 # <clone>-live is the pin's link; <clone>-live-<12 hex> is the worktree it links to.
 PIN_TREE = re.compile(r"(.+-live)(?:-[0-9a-f]{12})?")
@@ -239,14 +248,13 @@ def stop_group(proc):
 
 
 def stop_tree(proc):
-    """Ends the installer and its children where there are no process groups. taskkill /T /F ends the whole tree at
-    once; Windows has no TERM for a child with no console, so the EXIT trap does not run and the install lock stays
-    until its own age limit clears it. Without taskkill the leader gets terminate, then kill. No wait is unbounded:
+    """Ends the installer and its children where there are no process groups, with the tree kill in _nowindow
+    (taskkill /T /F). Windows has no TERM for a child with no console, so the EXIT trap does not run and the install lock
+    stays until its own age limit clears it. Without taskkill the leader gets terminate, then kill. No wait is unbounded:
     a leader that will not end is left, and the hook still prints its timeout line."""
-    try:
-        _nowindow.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=GIT_TIMEOUT)
-    except (OSError, subprocess.TimeoutExpired):
-        pass
+    taskkill_tree = getattr(_nowindow, "taskkill_tree", None)  # the stand-in module has none
+    if taskkill_tree is not None:
+        taskkill_tree(proc.pid, GIT_TIMEOUT)
     for stop in (proc.terminate, proc.kill):
         if proc.poll() is not None:
             return
@@ -260,6 +268,12 @@ def stop_tree(proc):
 def script_path(path):
     """A script path in the form Git Bash reads: forward slashes on Windows."""
     return path.replace("\\", "/") if os.name == "nt" else path
+
+
+class Failure(str):
+    """The failure text of run_script, which also says whether the run timed out and the pid it ran as."""
+    timed_out = False
+    pid = None
 
 
 def run_script(record, argv, what, cwd=None):
@@ -281,7 +295,9 @@ def run_script(record, argv, what, cwd=None):
         code = proc.wait(timeout=limit)
     except subprocess.TimeoutExpired:
         stop_group(proc)
-        return "%s failed (timed out after %g s)" % (what, limit)
+        failure = Failure("%s failed (timed out after %g s)" % (what, limit))
+        failure.timed_out, failure.pid = True, proc.pid
+        return failure
     return None if code == 0 else "%s failed (exit %d)" % (what, code)
 
 
@@ -322,16 +338,36 @@ def stale_line(record, target, name):
         % (record["sha"][:SHORT], name, target[:SHORT])
 
 
+def lock_held_by_other(own_pid=None):
+    """True when another install holds the install lock: the file exists, is under LOCK_MAX_AGE old, and was not written
+    by the run that had pid `own_pid` (its id ends with its pid). One stat, and a read when the file is fresh."""
+    path = os.path.join(config_dir(), LOCK_NAME)
+    try:
+        if time.time() - os.stat(path).st_mtime > LOCK_MAX_AGE:
+            return False
+        with open(path, encoding="utf-8") as handle:
+            holder = handle.readline().strip()
+    except OSError:
+        return False  # no lock, or it ended during the read
+    return not (own_pid is not None and holder.endswith(str(own_pid)))
+
+
 def pin_lines(record, head, seen, local_ref, where):
     """The one line for a pin refresh toward `head`, the tip of `local_ref` (shown as `where`). The pin's
     merge/install_from_main.sh runs once per head, and the line states the commits the pin was behind, counted from
-    local objects."""
+    local objects. The head is marked seen once the refresh has ended, so a hook that was cut short tries it again.
+    Another install holding the lock is no outcome of this refresh: the hook prints nothing and leaves the head unseen, so
+    a later prompt checks again. It also skips the run, which would only wait behind that lock."""
     source = record["source"]
+    if lock_held_by_other():
+        return []
     before = commits_behind(source, "HEAD", local_ref)
-    add_seen(seen, "pin:" + head)
     # install_from_main.sh finds its clone from the folder it runs in, and takes no argument; the head goes on its command
     # line only so a process listing shows which head the refresh is for.
     failure = run_script(record, [script_path(os.path.join(source, PIN_SCRIPT)), head], "pin refresh", cwd=source)
+    if getattr(failure, "timed_out", False) and lock_held_by_other(failure.pid):
+        return []  # the refresh waited behind another install's lock until the timeout
+    add_seen(seen, "pin:" + head)
     after = commits_behind(source, "HEAD", local_ref)
     if failure:
         return [PREFIX + failure]
