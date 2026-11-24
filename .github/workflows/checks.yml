@@ -338,6 +338,10 @@ jobs:
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') }}
         run: python3 lint/test_guard_log_report.py
 
+      - name: Guard outcome claims fixture suite
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') }}
+        run: python3 lint/test_guard_outcome.py
+
       - name: Verdict runner fixture suite
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') }}
         run: python3 lint/test_verdict.py
