@@ -140,7 +140,6 @@ jobs:
       windows_guard: ${{ steps.scope.outputs.windows_guard }}
       records_only_skip: ${{ steps.scope.outputs.records_only_skip }}
       skip_comment_delta: ${{ steps.scope.outputs.skip_comment_delta }}
-      skip_record_delta: ${{ steps.scope.outputs.skip_record_delta }}
       lint_red_run: ${{ steps.scope.outputs.lint_red_run }}
       lint_plan_refuter: ${{ steps.scope.outputs.lint_plan_refuter }}
       lint_ruling_kind: ${{ steps.scope.outputs.lint_ruling_kind }}
@@ -160,7 +159,7 @@ jobs:
           persist-credentials: false
 
       # The pull request's newest earlier fully green head, or an empty line (.github/scripts/green-head.sh). It lets ci-scope.sh skip the
-      # jobs for a delta that changes only records or comments (docs/records.md, a record folder, a comment-only .py or .sh file). A failed read prints an empty line: unknown never skips. Two reads per pull_request run (unmeasured).
+      # jobs for a delta that changes only records or comments (docs/records.md, a comment-only .py or .sh file). A failed read prints an empty line: unknown never skips. Two reads per pull_request run (unmeasured).
       - name: Find the newest earlier green head
         id: green
         if: ${{ github.event_name == 'pull_request' }}
@@ -197,9 +196,9 @@ jobs:
     # Waits for every guard shard so the Debt retire step can read their results. A shard that fails must not skip this job's lint suites, so the job
     # runs on the scope result alone; a scope that did not succeed skips it, since a job whose steps all skip reads success.
     needs: [scope, checks-guard, checks-guard-2, checks-guard-3, checks-guard-4]
-    # A comment-only or record-folder delta (.github/scripts/ci-scope.sh) sets records_only_skip, and every suite step below reads it. The job still
+    # A comment-only delta (.github/scripts/ci-scope.sh) sets records_only_skip, and every suite step below reads it. The job still
     # starts on such a run, since its lint steps read the changed text.
-    if: ${{ !cancelled() && needs.scope.result == 'success' && (needs.scope.outputs.records_only_skip != 'true' || needs.scope.outputs.skip_comment_delta == 'true' || needs.scope.outputs.skip_record_delta == 'true') }}
+    if: ${{ !cancelled() && needs.scope.result == 'success' && (needs.scope.outputs.records_only_skip != 'true' || needs.scope.outputs.skip_comment_delta == 'true') }}
     # Cap 75 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps: slowest 22.8 min
     # is 30% of it (range 15.5-22.8, median 19.8, n 27 green runs, runs 42074654512 to 42263498384,
     # 2026-11-05 17:26 to 2026-11-06 17:38 UTC), after the merge and install suites moved to checks-merge-install.
@@ -847,7 +846,7 @@ jobs:
 
     runs-on: ubuntu-latest
     needs: scope
-    if: ${{ needs.scope.outputs.records_only_skip != 'true' || needs.scope.outputs.skip_record_delta == 'true' }}
+    if: ${{ needs.scope.outputs.records_only_skip != 'true' }}
     # provisional 60 (decision ci-job-caps, rule 6) until 5 green runs, then re-cap from the measured slowest / 0.7.
     # These steps summed 542 s (9.0 min) inside the old `checks` job in run 43234925158; about 9.6 min with setup. Unmeasured as a job of its own.
     timeout-minutes: 60 # provisional
@@ -866,7 +865,7 @@ jobs:
 
       # A step below that has a scope condition and reads no .md file skips a docs-only pull request (`code` is false,
       # ci-scope.sh). A step that reads a .md file also runs when its doc groups change. Every suite step reads the records-only
-      # skip too, so a records-only, record-folder or comment-only delta from a green head runs none of them.
+      # skip too, so a records-only or comment-only delta from a green head runs none of them.
       - name: Config watch fixture suite
         if: ${{ (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_config_watch.py
@@ -1081,7 +1080,7 @@ jobs:
 
     runs-on: ubuntu-latest
     needs: scope
-    if: ${{ needs.scope.outputs.records_only_skip != 'true' || needs.scope.outputs.skip_record_delta == 'true' }}
+    if: ${{ needs.scope.outputs.records_only_skip != 'true' }}
     # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps; ends with step time-pinned-tests-go), above the 3600 s suite cap
     # that the janitor sweep mutation test runs under. That test runs here, as it did in `checks`.
     # These steps summed 520 s (8.7 min) inside the old `checks` job in run 43234925158 (the mutation test took 54 s there);
@@ -2564,10 +2563,10 @@ jobs:
   # shard 1 here, the rest in checks-windows-guard-<i> (the shard switch in hooks/test_guard.py; lint/test_windows_split.py proves each
   # case runs once). A ready pull_request runs every step of the Windows guard jobs (the draft test stands in for scope there, which skips on a draft),
   # and a merge or rest suite step only with its job's own scope flag set (checks_windows_merge, checks_windows_rest, checks_windows_rest_2). The records-only skip (records_only_skip, from .github/scripts/ci-scope.sh) is a change to
-  # docs/records.md, a record folder or a comment-only .py or .sh file alone after a fully green head, on a pull request or a push. Every job but
-  # scope, nightly-skip, push-skip and all-jobs-passed starts nothing then, except a lint job on a delta its lints read (checks, checks-hooks, checks-rest end their
-  # job-level `if` in the delta clauses, and every suite step reads the skip): each job-level `if` reads it
-  # (lint/all_jobs_passed_rules.py allows that condition and no wider one on a needed job, but a lint job's named delta clauses), and all-jobs-passed passes the skips (actions/all-jobs-passed/check.sh). The macOS jobs never start on a pull
+  # docs/records.md or a comment-only .py or .sh file alone after a fully green head, on a pull request or a push. Every job but
+  # scope, nightly-skip, push-skip and all-jobs-passed starts nothing then, except the checks job on a comment-only delta, which its lints read (it ends its
+  # job-level `if` in the delta clause, and every suite step reads the skip): each job-level `if` reads it
+  # (lint/all_jobs_passed_rules.py allows that condition and no wider one on a needed job, but the checks job's named delta clause), and all-jobs-passed passes the skips (actions/all-jobs-passed/check.sh). The macOS jobs never start on a pull
   # request or a push. A step-level `if` still starts a runner, so the skip sits on the job. R62 ("each suite runs once per batch, on
   # the batch PR"; "Part 3 keeps the full shards once per batch") puts the full suites on every ready pull_request; own-830-c, widened by
   # owner item 857 pick b (19:48 CST Nov 15), narrows that: the green head's run already proved what a records-only change moves.
