@@ -1,0 +1,1 @@
+- idle-red-reready-comments-twice: A PR a person readies again with no push, while it is red and idle, is drafted again on the next sweep and gets a second comment. No check stops it, since a read for an earlier comment would cost a call on every drafted PR. Seen: 2026-11-23 x1
