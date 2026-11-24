@@ -2485,6 +2485,84 @@ def case_agent_rewrite_partial_read_keeps_flag_whole_read_clears():
         c.cleanup()
 
 
+# --------------------------------------------------------------------------- part 9
+# The cost of the handoff check on an allowed call (decision precompact-handoff, item 9). The reread flag is checked
+# first, so a session with no flag never opens its handoff file. The probe is a launcher that logs each open and
+# stat of a handoff file in the guard's own process. Its positive twin, a flagged session, must show the probe at
+# work, or the no-flag case proves nothing.
+
+COST_LOG_ENV = "WAVE2_COST_LOG"
+COST_PREAMBLE = "\n".join([
+    "import builtins, os",
+    "_log = os.environ.get(%r)" % COST_LOG_ENV,
+    "_real_open = builtins.open",
+    "_real_stat = os.stat",
+    "def _note(p):",
+    "    if _log and isinstance(p, (str, bytes)):",
+    "        s = os.fsdecode(p)",
+    "        if 'handoffs' in s and os.path.basename(s).endswith('.md'):",
+    "            with _real_open(_log, 'a', encoding='utf-8') as f:",
+    "                f.write(s + chr(10))",
+    "def _open(p, *a, **k):",
+    "    _note(p)",
+    "    return _real_open(p, *a, **k)",
+    "def _stat(p, *a, **k):",
+    "    _note(p)",
+    "    return _real_stat(p, *a, **k)",
+    "builtins.open = _open",
+    "os.stat = _stat",
+    "",
+])
+COST_SRC = COST_PREAMBLE + "\n" + ROOMY_DISK_SRC
+
+
+def probed_bash(c, sid, log):
+    """One Bash call through the guard with the probe on: (decision, reason)."""
+    return guard_call(c, sid, "Bash", BASH, extra_env={COST_LOG_ENV: log}, src=COST_SRC)
+
+
+def handoff_probe_hits(log, sid):
+    """The probe log's lines that name this session's handoff file. [] when nothing was logged."""
+    if not os.path.isfile(log):
+        return []
+    with open(log, encoding="utf-8") as f:
+        lines = [line.strip() for line in f]
+    return [s for s in lines if os.path.basename(s) == "%s.md" % sid]
+
+
+def case_no_flag_call_opens_no_handoff():
+    """A Bash call from a session with no flag is allowed, and the guard opens or stats its handoff file 0 times."""
+    c = Case("cost-no-flag")
+    try:
+        c.seed_handoff(SID)
+        log = os.path.join(c.root, "probe.log")
+        if not step("the Bash call is allowed", allowed_why(probed_bash(c, SID, log))):
+            return
+        hits = handoff_probe_hits(log, SID)
+        step("a Bash call from a session with no flag opens or stats its handoff file 0 times",
+             "" if not hits else "the guard touched the handoff %d time(s): %r" % (len(hits), hits[:2]))
+    finally:
+        c.cleanup()
+
+
+def case_flagged_call_opens_the_handoff():
+    """The positive twin: with the flag set, the same Bash call reads the handoff (the probe logs it) and is refused
+    by handoff-unread."""
+    c = Case("cost-flagged")
+    try:
+        c.seed_handoff(SID)
+        if not step("PostCompact exits 0", exit_why(c.post_compact(SID))):
+            return
+        log = os.path.join(c.root, "probe.log")
+        got = probed_bash(c, SID, log)
+        if not step("the probe logs the flagged call's open or stat of the handoff",
+                    "" if handoff_probe_hits(log, SID) else "no handoff open or stat was logged"):
+            return
+        step("the flagged Bash call is refused by handoff-unread", refused_by(got, HANDOFF_RULE))
+    finally:
+        c.cleanup()
+
+
 def main() -> int:
     print("Part 1: SessionEnd pointer, SessionStart reorient (hooks/precompact_handoff.py)")
     case_session_end_clear_writes_pointer()
@@ -2584,6 +2662,10 @@ def main() -> int:
     case_agent_edit_sets_read_flag()
     case_main_write_sets_no_flag()
     case_agent_rewrite_partial_read_keeps_flag_whole_read_clears()
+
+    print("Part 9: the handoff check costs no open of the handoff on a call with no flag (hooks/guard.py, hooks/reread_check.py)")
+    case_no_flag_call_opens_no_handoff()
+    case_flagged_call_opens_the_handoff()
 
     if FAILED:
         print()
