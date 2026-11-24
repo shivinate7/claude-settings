@@ -28,8 +28,10 @@
 # A picked CI step whose every run: line is a suite line, and whose exact pass is not saved (the head or the tree is new), prints PASS (carried) and runs
 # nothing when its pass saved at an earlier head still serves (run_step, carry_served): that head is an ancestor of HEAD, the base commit is the same, and the
 # delta between the two saved trees picks none of the step's suites (carry_delta). A delta of docs/records.md alone carries; a delta that touches the selector,
-# bin/ci-job or .github/stamp.json, or that sets every ci-scope.sh flag (an unmapped path), does not. Any read that fails runs the step. Cost: per such step, one
-# ancestor read and one git diff of two trees; per run, one more ci-scope.sh run and one more selector run when the delta holds more than the records file.
+# bin/ci-job or .github/stamp.json, or that sets every ci-scope.sh flag (an unmapped path), does not. Nor does a dirty tree, a pass saved from one, or a delta
+# that turns on a scope flag the step's `if:` reads. The carry key holds the exact key's environment. Any read that fails runs the step. A carried pass is saved
+# under the exact key marked carried, so a rerun at the head prints PASS (carried). Cost: per such step, one ancestor read and two tree diffs (the selector's
+# included); per delta, one more ci-scope.sh run and one more selector run when the delta holds more than the records file.
 # An install CI step is a run: whose every line is one install command (INSTALL_CMD: a lockfile install, or type
 # generation such as `npx astro sync`), since a lint step that reads generated files fails on a bare checkout. --lint
 # runs it, in order, only when a later lint step will run, or a later local action passes local_ready (its uses: step and
@@ -753,7 +755,7 @@ CACHE_MARK = "(cached) "  # the start of a cached step's line: its caller prints
 CARRY_MARK, CARRY_STATE = "(carried) ", "PASS (carried)"  # a carried step's line starts with the mark; its state reads CARRY_STATE (merge.py CARRIED_STATE reads it)
 CARRY_BLOCKERS = ("hooks/mutate_guard.py", "bin/ci-job", ".github/stamp.json")  # a delta that touches one never carries: the selector, this runner, the ready-checks list; the workflow and ci-scope.sh set every scope flag, which carry_delta_read reads
 CARRY_RECORDS = "docs/records.md"  # a delta of this one file carries every suite step: its pass reads no other record (ci-scope.sh's records-only skip names it too)
-CARRY_MEMO = {}  # (top, saved head, saved tree, tree) -> the delta's picked suites, or None when it forbids any carry; one read per run
+CARRY_MEMO = {}  # (top, saved head, saved tree, tree) -> {picked: the delta's picked suites, None when it forbids any carry; changed: its paths; flags: its scope flags once read}; one read per run
 SCOPE_APART = {"windows_guard", "mutation_report", "records_only_skip"}  # ci-scope.sh outputs that an unmapped path does not set: carry_delta_read leaves them out of its read of every flag on
 CACHE_FILES, CACHE_DAYS = 300, 7
 VOLATILE_ENV = {"GITHUB_WORKSPACE", "VERDICT_LOG", "CI_JOB_LINT_WORKERS", "CI_JOB_NO_CACHE", "PWD", "OLDPWD", "SHLVL", "_", "COLUMNS", "LINES",
@@ -859,7 +861,7 @@ def child_env(env, base, values):
 def cache_key(name, install, detail, shell, env, cwd, ctx, suite):
     """(the file name of a step's saved pass, its carry facts), or (None, None) when the step is never saved or its tree is unreadable.
     The facts are what a suite step's carry reads and saves: the carry key (the step's name, command, shell, cwd, flags, base name, tool and
-    own env: no head, base sha, commit, tree or ambient variable), the pushed head, the tree, and the base sha."""
+    child_env, as the exact key reads it: no head, base sha, commit or tree), the pushed head, the tree, and the base sha."""
     top, base, values, pinned = ctx
     if install or os.environ.get("CI_JOB_NO_CACHE") or not detail:
         return None, None
@@ -873,16 +875,9 @@ def cache_key(name, install, detail, shell, env, cwd, ctx, suite):
     base_sha = values.get("github.event.pull_request.base.sha", "")
     envs = ["%s=%s" % kv for kv in sorted(child_env(env, base, values).items()) if kv[0] not in VOLATILE_ENV]
     parts = [name, detail, shell[0], cwd or "", str(bool(suite)), str(bool(pinned)), values.get("base", ""), base_sha, head, commit, tree, tool, *envs]
-    own = ["%s=%s" % kv for kv in sorted(env.items()) if kv[0] not in VOLATILE_ENV]  # the step's own env: the caller's environment is left out of a carry
-    carry = ["carry", name, detail, shell[0], cwd or "", str(bool(suite)), str(bool(pinned)), values.get("base", ""), tool, *own]
+    carry = ["carry", name, detail, shell[0], cwd or "", str(bool(suite)), str(bool(pinned)), values.get("base", ""), tool, *envs]  # the exact key's environment too: a changed ambient variable never carries
     return (hashlib.sha256("\0".join(parts).encode("utf-8", "replace")).hexdigest(),
             {"key": hashlib.sha256("\0".join(carry).encode("utf-8", "replace")).hexdigest(), "head": head, "tree": tree, "base": base_sha})
-
-
-def cache_load(key, name):
-    """The saved one-line verdict of a passed step, or None for a missing, empty, garbled or foreign file."""
-    saved = cache_read(key, name)
-    return saved["first"] if saved else None
 
 
 def cache_read(key, name):
@@ -938,19 +933,19 @@ def run_step(name, step, install, detail, shell, env, cwd, ctx, log, suite=False
     carry: the suites of a CI step that holds suite lines only (carry_suites). Such a step that misses its exact key is served from
     its pass saved at an earlier head when carry_served finds the delta holds nothing it runs: (PASS, CARRY_MARK + that line)."""
     key, facts = cache_key(name, install, detail, shell, env, cwd, ctx, suite)
-    saved = cache_load(key, name) if key else None
+    saved = cache_read(key, name) if key else None
     if saved:
         touch_log(log)
-        return "PASS", CACHE_MARK + saved
-    served = carry_served(name, carry, facts, ctx) if key and carry else None
+        return "PASS", (CARRY_MARK if saved.get("carried") is True else CACHE_MARK) + saved["first"]
+    served = carry_served(step, name, carry, facts, ctx) if key and carry else None
     if served:
-        cache_save(key, name, served)  # a rerun at this head reads the exact key
+        cache_save(key, name, served, {"carried": True})  # a rerun at this head reads the exact key, and still reads as carried
         touch_log(log)
         return "PASS", CARRY_MARK + served
     state, first = run_step_uncached(name, step, install, detail, shell, env, cwd, ctx, log, suite)
     if key and state == "PASS" and first.startswith("PASS "):
         cache_save(key, name, first)
-        if carry:
+        if carry and tree_clean(ctx[0], facts["tree"]):  # a pass of a dirty tree is no pass of any head, so it is no source of a carry
             cache_save(facts["key"], name, first, {"head": facts["head"], "tree": facts["tree"], "base": facts["base"], "suites": list(carry)})
     return state, first
 
@@ -959,50 +954,80 @@ def carry_delta(top, a_head, a_tree, b_tree):
     """The suites that a change from the saved tree `a_tree` (a pass at `a_head`) to `b_tree` picks, as a set; None when nothing may carry:
     `a_head` is no ancestor of HEAD, the trees cannot be diffed, the delta holds a CARRY_BLOCKERS file, ci-scope.sh sets every flag for it (an
     unmapped file, a change to the workflow or to ci-scope.sh) or cannot be read, or the selector cannot run. A delta of CARRY_RECORDS alone
-    picks none, whatever the selector would say. Read once per run. Cost: one ancestor read, one git diff of two trees, and, when the delta holds
-    more than the records file, one ci-scope.sh run and one selector run."""
+    picks none, whatever the selector would say. Read once per run. Cost: one ancestor read and two tree diffs, the selector's included (git diff
+    of the saved tree and this tree; git diff of the saved head to HEAD, inside the selector); when the delta holds more than the records file, also
+    one ci-scope.sh run and one selector run. carry_scope reads the delta's flags for a step whose `if:` names one: a ci-scope.sh run, once per
+    delta, and none when that run already happened here."""
     memo = (top, a_head, a_tree, b_tree)
     if memo not in CARRY_MEMO:
         CARRY_MEMO[memo] = carry_delta_read(top, a_head, a_tree, b_tree)
-    return CARRY_MEMO[memo]
+    return CARRY_MEMO[memo]["picked"]
 
 
 def carry_delta_read(top, a_head, a_tree, b_tree):
+    """The memo entry of one delta: its picked suites (None: nothing may carry), its changed paths, and its scope flags once they are read."""
+    entry = {"picked": None, "changed": None, "flags": None}
     kw = dict(cwd=top, capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL, timeout=120)
     try:
         if _nowindow.run(["git", "merge-base", "--is-ancestor", a_head, "HEAD"], **kw).returncode != 0:  # HEAD, not a sha: the ancestor read is no two-tree read
-            return None
+            return entry
         done = _nowindow.run(["git", "diff", "--name-only", "--no-renames", "-z", a_tree, b_tree], **kw)
     except (OSError, subprocess.SubprocessError):
-        return None
+        return entry
     if done.returncode != 0:
-        return None
+        return entry
     changed = {item for item in done.stdout.split("\0") if item}
     if changed.intersection(CARRY_BLOCKERS):
-        return None
+        return entry
+    entry["changed"] = sorted(changed)
     if changed <= {CARRY_RECORDS}:
-        return set()
-    flags, _ = scope_flags(top, a_head, git("rev-parse", "--abbrev-ref", "HEAD", cwd=top) or "", git("rev-parse", "HEAD", cwd=top) or "", sorted(changed))
-    flags = {k: v for k, v in (flags or {}).items() if k not in SCOPE_APART}
-    if not flags or all(v == "true" for v in flags.values()):  # every flag on is the script's fail safe: it reads the delta as unmapped
+        entry["picked"] = set()
+        return entry
+    flags = entry["flags"] = scope_flags(top, a_head, git("rev-parse", "--abbrev-ref", "HEAD", cwd=top) or "", git("rev-parse", "HEAD", cwd=top) or "",
+                                         entry["changed"])[0]
+    on = {k: v for k, v in (flags or {}).items() if k not in SCOPE_APART}
+    if not on or all(v == "true" for v in on.values()):  # every flag on is the script's fail safe: it reads the delta as unmapped
+        return entry
+    entry["picked"], _ = select_suites(top, a_head)
+    return entry
+
+
+def carry_scope(top, a_head, a_tree, b_tree):
+    """The scope flags (name -> "true" | "false") that ci-scope.sh gives the delta's changed paths, or None when they cannot be read. Read once per delta."""
+    entry = CARRY_MEMO.get((top, a_head, a_tree, b_tree))
+    if not entry or entry["changed"] is None:
         return None
-    picked, _ = select_suites(top, a_head)
-    return picked
+    if entry["flags"] is None:
+        entry["flags"] = scope_flags(top, a_head, git("rev-parse", "--abbrev-ref", "HEAD", cwd=top) or "", git("rev-parse", "HEAD", cwd=top) or "",
+                                     entry["changed"])[0]
+    return entry["flags"]
 
 
-def carry_served(name, carry, facts, ctx):
+def carry_served(step, name, carry, facts, ctx):
     """The saved one-line verdict of a suite step's pass at an earlier head, when it serves this head: the carry record of its key names a
     head that is an ancestor of this one, saved on the same base commit and from a tree whose delta to this tree picks none of the step's `carry`
-    suites (carry_delta). None otherwise: the step runs. A step that did not pass was never saved, so none carries."""
+    suites (carry_delta); this tree is clean (tree_clean); and each scope flag the step's `if:` reads is off for the delta (carry_scope: a flag
+    that is on, or that the script does not give, runs the step). None otherwise: the step runs. A step that did not pass was never saved, so
+    none carries."""
     top = ctx[0]
     saved = cache_read(facts["key"], name)
     if not saved or not all(isinstance(saved.get(k), str) and saved[k] for k in ("head", "tree", "base")) or saved["base"] != facts["base"] \
-            or saved.get("suites") != list(carry):
+            or saved.get("suites") != list(carry) or not tree_clean(top, facts["tree"]):
         return None
     picked = carry_delta(top, saved["head"], saved["tree"], facts["tree"])
     if picked is None or picked.intersection(carry):
         return None
+    read = [m.group(1) for m in SCOPE_TERM.finditer(step_key(step, "if") or "")]
+    if read:
+        flags = carry_scope(top, saved["head"], saved["tree"], facts["tree"])
+        if flags is None or any(flags.get(flag) != "false" for flag in read):
+            return None
     return saved["first"]
+
+
+def tree_clean(top, tree):
+    """True when `tree` (a tree_key read) is HEAD's own tree: no uncommitted edit, and no untracked file that .gitignore leaves visible."""
+    return bool(tree) and git("rev-parse", "HEAD^{tree}", cwd=top) == tree
 
 
 def run_step_uncached(name, step, install, detail, shell, env, cwd, ctx, log, suite=False):
