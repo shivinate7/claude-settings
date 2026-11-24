@@ -1,0 +1,1 @@
+- push-runs-query-unpinned: `actions/push-skip/push-skip.py` (line 320) sends the runs read with `event=push` and `branch=main`, and no assertion in `lint/test_push_skip.py` checks those filters; the test at line 1230 makes the fake ignore both. Seen: 2026-11-24 x1
