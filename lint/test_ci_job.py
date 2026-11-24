@@ -2552,6 +2552,21 @@ class LintTools(Job):
         self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
         self.assertIn("pipx", lines[0])
 
+    def test_a_code_check_whose_pipx_cannot_fetch_ruff_is_unknown_and_names_ruff(self):
+        self.lane({"a.py": 'print("fine")\n'})
+        calls = os.path.join(self.root, "pipx-calls.txt")
+        env = self.stub_path(pipx='echo "$*" >> "%s"\necho "Could not fetch index" >&2\nexit 1' % calls)
+        rc, lines, out = self.run_job(self.CODE, args=("--lint", "--base", "origin/main"), env=env)
+        self.assertTrue(os.path.exists(calls), "pipx was never called, so the unknown is not the fetch: " + out)
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
+        self.assertIn("ruff", lines[0], out)
+
+    def test_a_code_check_whose_pipx_runs_ruff_with_a_finding_still_fails(self):  # control
+        self.lane({"a.py": 'print("fine")\n'})
+        env = self.stub_path(pipx='case "$*" in *--version*) exit 0 ;; esac\necho "a.py:1:1: F401 unused"\nexit 1')
+        rc, lines, out = self.run_job(self.CODE, args=("--lint", "--base", "origin/main"), env=env)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
+
     def test_a_tool_free_failure_with_no_pipx_still_fails_the_code_check(self):
         self.lane({"a.py": 'print("fine")\n', "b.rb": "puts 1\n"})  # no ruby row: a failure that needs no tool
         rc, lines, out = self.run_job(self.CODE, args=("--lint", "--base", "origin/main"), env=NO_PIPX)
