@@ -67,6 +67,8 @@ except ImportError:  # same: a hook never dies for a helper that has not landed
     def find_git_bash():
         return None
 
+from shared_names import LIVE_PIN_SUFFIX, PIN_SCRIPT, PIN_TREE  # the one home of the pin's names (hooks/shared_names.py); not guard_frozen, which is costly to import
+
 RECORD_NAME = ".claude-settings-install.json"
 SEEN_NAME = ".claude-settings-refresh-seen"
 SEEN_KEEP = 20
@@ -87,7 +89,6 @@ INSTALL_HOOK_INPUT = '{"source":"stale-install"}'
 RESTART_PATHS = ("CLAUDE.md", "output-styles/")
 RESTART_SETTINGS_KEYS = ("model", "effortLevel")
 PREFIX = "claude-settings: "
-PIN_SCRIPT = os.path.join("merge", "install_from_main.sh")
 # The install lock the two installers take, and the age (seconds) past which they remove it as a dead run's. Copies of
 # INSTALL_LOCK in install.sh and merge/install_from_main.sh (their `find -mmin +10`), their home: bash and Python share
 # no source. The hook only reads it, to leave a refresh to the install that holds it.
@@ -98,8 +99,6 @@ PIN_FALLBACK_BRANCH = "main"
 # The branch a local session's pin follows. A copy of the default in merge/install_from_main.sh,
 # REF="${CLAUDE_SETTINGS_REF:-stable}", its home: shell and Python share no source, so a change there is made here too.
 PIN_REF = "stable"
-# <clone>-live is the pin's link; <clone>-live-<12 hex> is the worktree it links to.
-PIN_TREE = re.compile(r"(.+-live)(?:-[0-9a-f]{12})?")
 SHARED_LINE = re.compile(r"@(.+)/CLAUDE\.md")
 
 
@@ -428,7 +427,7 @@ def pin_record():
     found = PIN_TREE.fullmatch(here)
     if not found:
         return None
-    link = found.group(1)
+    link = found["clone"] + LIVE_PIN_SUFFIX
     # The link follows the pin as it moves; a plain <clone>-live directory is its own pin.
     source = link if os.path.isfile(os.path.join(link, PIN_SCRIPT)) else here
     if not os.path.isfile(os.path.join(source, PIN_SCRIPT)):
