@@ -9,7 +9,7 @@ slug: private-repos-no-ci
 
 Owner ruling, 11:20 CST, Nov 16, 2026, word for word: `"drop any and all private runner jobs that could cost money and merge without it - see that change through to the end and land it. mandatory."`
 
-The ruling drops the GitHub-hosted jobs of the private repos (q_max, degen, home, and likely ios-adblock and joyous) and keeps their self-hosted jobs. The workflows were disabled by REST on 2026-11-16, not by this PR. The merge tool must merge with no CI run.
+The ruling drops the GitHub-hosted jobs of the private repos (q_max, degen, home, and likely ios-adblock and joyous) and keeps their self-hosted jobs. The workflows were disabled by REST on 2026-11-16, not by this PR. The merge tool must merge with no CI run. Scope, the consultant's reading of rulings `own-merge-on-lint-pass` and the Lane draft PR grant (13:25 CST, Nov 24, 2026; the owner may reverse it): "no CI run" means no workflow on the base. A base with a workflow needs the proof of its head locally too (decision `merge-needs-current-base`).
 
 Ruling `own-all-jobs-passed-removed` (owner, 2026-11-15 19:08 CST) takes the required check off these repos. Decision `main-branch-protection` holds the rule for the repos that keep CI: their `main` requires no status check.
 
@@ -26,14 +26,14 @@ Ruling `own-all-jobs-passed-removed` (owner, 2026-11-15 19:08 CST) takes the req
 
 ## What still reads red
 
-Nothing. Under `"none"` the tool reads no CI run at all: no check row, no workflow run, finished, red or pending, on the head or on main. Owner ruling, 11:20 CST, Nov 16, 2026: a repo with `"none"` runs no CI.
+Nothing, when the base has no CI workflow. Under `"none"` the tool then reads no CI run at all: no check row, no workflow run, finished, red or pending, on the head or on main. Owner ruling, 11:20 CST, Nov 16, 2026: a repo with `"none"` runs no CI. With a workflow on the base, `confirm` reads the head's checks and runs (decision `merge-needs-current-base`); main's run is still not read.
 
-- `head_state` and `head_read` read no check and no run, and return green. `confirm` skips the head read too.
+- `head_read` reads no check and no run, and returns green. `head_state` does too, unless `confirm` passes `needs_proof` (a base with a workflow).
 - `base_state` reads no run of the base, so a red or pending run on main holds no merge.
 - A run left on the head from before the workflows were disabled holds nothing.
 - A pending required check on the base's branch protection is still GitHub's to refuse. The tool names that cause when GitHub reads the pull request BLOCKED.
 
-No check runs on a commit this tool pushes, so a claim under `"none"` merges in the same run, as a page heal does.
+No check runs on a commit this tool pushes, so a page heal under `"none"` merges in the same run. A claim under `"none"` does too when the base has no workflow; with one, the claim commit's own run is read (decision `merge-needs-current-base`).
 
 Kind: build
 Plan: docs/decisions/private-repos-no-ci.md#the-value (all)
