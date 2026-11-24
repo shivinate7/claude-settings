@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+# guard-outcome RULE CLAIM [--why TEXT] [--log PATH]: write one outcome line to guard.log, the claim a session
+# makes about a refusal it judged. CLAIM is `false-alarm` (the refusal stopped nothing wrong) or `right`.
+# A claim is the session's word, not a checked fact; `lint/guard_log_report.py --outcomes` reads it.
+# Written only when a session runs it: no hook, no timer, no process. Cost: one append to the log per call.
+# The line's format and the locked append are hooks/guard_core.py log_line and append_log_line, the one home.
+# Exit 0: the claim is written (one stdout line), or the log cannot be written (one stderr line; the session goes on).
+# Exit 2: CLAIM is neither word; nothing is written.
+import argparse, os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
+import guard_core  # noqa: E402  the log line's one home
+from shared_names import config_dir  # noqa: E402  the one home of the config dir
+
+CLAIMS = ("false-alarm", "right")
+WHY_MAX = 200  # characters of the why text; guard_core.log_cut folds it to one line and marks a cut
+
+
+def main(argv):
+    ap = argparse.ArgumentParser(description="Write one outcome claim about a refusal to guard.log.")
+    ap.add_argument("rule", help="the rule id the refusal named")
+    ap.add_argument("claim", choices=CLAIMS)
+    ap.add_argument("--why", default="", help="one line saying why; folded to one line, cut at %d characters" % WHY_MAX)
+    ap.add_argument("--log", default=None, help="the log to append to (default: $CLAUDE_CONFIG_DIR/guard.log)")
+    args = ap.parse_args(argv)  # a claim that is neither word exits 2 here, before any write
+    why = guard_core.log_cut(args.why, WHY_MAX)
+    matched = args.claim + (" " + why if why else "")
+    session = guard_core.session_log_field(os.environ.get("CLAUDE_CODE_SESSION_ID"))
+    path = args.log or os.path.join(config_dir(), "guard.log")
+    try:
+        # The limit holds the claim, one space and the whole why, so the 120-character cut for a command never shortens it.
+        line = guard_core.log_line("", "outcome", args.rule, matched, session, limit=len(args.claim) + 1 + WHY_MAX)
+        guard_core.append_log_line(path, line)
+    except OSError as err:
+        print("guard-outcome: claim not written (%s)" % type(err).__name__, file=sys.stderr)
+        return 0
+    print("guard-outcome: %s %s" % (args.rule, args.claim))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
