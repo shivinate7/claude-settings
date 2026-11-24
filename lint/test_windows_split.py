@@ -102,10 +102,13 @@ LINUX_CODE_SWEEP = f"{LINUX_CODE} && needs.scope.outputs.sweep == 'true'"
 LINUX_SWEEP = "needs.scope.outputs.sweep == 'true'"
 LINUX_MODS = "needs.scope.outputs.mods == 'true'"  # its keep-running guard comes off before the pin reads it (keep_running_off)
 # The scope condition on a step that reads no .md file, unwrapped as unwrap() reads an `if:`. lint/test_checks_step_scope.py pins which steps take it.
-NO_MD_SCOPE_CONDITION = "needs.scope.outputs.code == 'true' || github.event_name != 'pull_request'"
-# The scope condition of a step that reads the doc groups in `groups` (ci-scope.sh's doc_<group> flags): code, those flags, and a
-# non-pull_request event. No group gives NO_MD_SCOPE_CONDITION. The flags come in DOC_GROUPS order, so a group tuple in any order
-# builds one string. lint/test_checks_step_scope.py shares these constants.
+# No event fallback: a push runs a Linux suite step only when its flag is true, as a pull request does.
+NO_MD_SCOPE_CONDITION = "needs.scope.outputs.code == 'true'"
+# The failure messages of the flag-alone pins carry this text.
+PUSH_RULING = "owner ruling A, option b, 19:02 CST Nov 23 2026: a Linux suite step obeys its scope flag on every event"
+# The scope condition of a step that reads the doc groups in `groups` (ci-scope.sh's doc_<group> flags): code and those flags, with no
+# event fallback, as NO_MD_SCOPE_CONDITION has it. The flags come in DOC_GROUPS order, so a group tuple in any order builds one
+# string. lint/test_checks_step_scope.py shares these constants.
 DOC_GROUPS = ("decisions", "rules", "skills", "agents", "glossary", "map", "other", "any")
 
 
@@ -114,8 +117,7 @@ def doc_scope_condition(groups):
     unknown = [g for g in groups if g not in DOC_GROUPS]
     if unknown:
         raise ValueError("not a doc group: %s" % unknown)
-    flags = "".join("needs.scope.outputs.doc_%s == 'true' || " % g for g in DOC_GROUPS if g in groups)
-    return "needs.scope.outputs.code == 'true' || %sgithub.event_name != 'pull_request'" % flags
+    return " || ".join(["needs.scope.outputs.code == 'true'"] + ["needs.scope.outputs.doc_%s == 'true'" % g for g in DOC_GROUPS if g in groups])
 
 
 # One constant per distinct group set that a doc step reads (the set of lint/test_checks_step_scope.py DOC_STEPS).
@@ -412,7 +414,8 @@ SHOOT_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_s
 SHOOT_JOB = "checks-shoot"
 # The export suite runs in SHOOT_JOB too: its picture cases run check_designs.mjs in Playwright, and loadPlaywright reads NODE_PATH.
 EXPORT_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" python3 skills/waiting-page/test_export_page.py'
-EXPORT_IF = "needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request'"
+# The shoot job's Linux steps take the flag alone, with no event fallback.
+EXPORT_IF = "needs.scope.outputs.shoot == 'true'"
 # The waiting page suite has its own job, so SHOOT_JOB keeps its cap (decision ci-job-caps). ROADMAP_CMD stays in SHOOT_JOB.
 WAITING_PAGE_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs skills/waiting-page/tests/test_check_designs.mjs'
 WAITING_PAGE_JOB = "checks-waiting-page"
@@ -747,10 +750,32 @@ def step_rest(st, scope_condition):
     return scope_condition_rest(step_if(st), scope_condition)
 
 
-def scope_condition_property_problems(name, scope_condition, flag=None):
-    """G keeps the scope condition's rules: it reads the job's own scope flag, it is one disjunction (a `&&` in it means a step's E
-    was not parenthesised, so E runs inside the scope condition), it is true on push, schedule and dispatch with every flag false,
-    true on pull_request with every flag true, and false on pull_request with every flag false."""
+LINUX_RULE_EVENTS = ("push", "schedule", "workflow_dispatch", "pull_request")
+
+
+def is_linux(job):
+    """A Linux job: its runs-on starts with ubuntu, as scope_problems reads the scope job's own runner."""
+    return (job.get("os") or "").startswith("ubuntu")
+
+
+def linux_flag_problems(name, scope_condition):
+    """A Linux job's scope condition is true exactly when the flags say so: with every flag false it skips, with every flag true it
+    runs, on every event (PUSH_RULING)."""
+    problems = []
+    for ev in LINUX_RULE_EVENTS:
+        for flag_value in ("false", "true"):
+            got = eval_if(scope_condition, ev, flag_value)
+            if got != (flag_value == "true"):
+                verb = "runs" if got else "skips"
+                problems.append(f"{name}: scope condition {verb} on {ev} with every flag {flag_value}: {scope_condition} ({PUSH_RULING})")
+    return problems
+
+
+def scope_condition_property_problems(name, scope_condition, job, flag=None):
+    """G keeps the scope condition's rules: it reads the job's own scope flag, and it is one disjunction (a `&&` in it means a step's E
+    was not parenthesised, so E runs inside the scope condition). A Linux job's condition follows the flags exactly (linux_flag_problems).
+    Any other job's condition is true on push, schedule and dispatch with every flag false, true on pull_request with every flag true,
+    and false on pull_request with every flag false."""
     own = flag or name.replace("-", "_")
     problems = []
     if f"needs.scope.outputs.{own}" not in scope_condition:
@@ -758,13 +783,16 @@ def scope_condition_property_problems(name, scope_condition, flag=None):
     if "&&" in scope_condition:
         problems.append(f"{name}: scope condition has &&, so a step's condition is not parenthesised: {scope_condition}")
     try:
-        for ev in ("push", "schedule", "workflow_dispatch"):
-            if not eval_if(scope_condition, ev, "false"):
-                problems.append(f"{name}: scope condition skips on {ev}: {scope_condition}")
-        if not eval_if(scope_condition, "pull_request", "true"):
-            problems.append(f"{name}: scope condition skips on pull_request with every flag true: {scope_condition}")
-        if eval_if(scope_condition, "pull_request", "false"):
-            problems.append(f"{name}: scope condition runs on pull_request with every flag false: {scope_condition}")
+        if is_linux(job):
+            problems += linux_flag_problems(name, scope_condition)
+        else:
+            for ev in ("push", "schedule", "workflow_dispatch"):
+                if not eval_if(scope_condition, ev, "false"):
+                    problems.append(f"{name}: scope condition skips on {ev}: {scope_condition}")
+            if not eval_if(scope_condition, "pull_request", "true"):
+                problems.append(f"{name}: scope condition skips on pull_request with every flag true: {scope_condition}")
+            if eval_if(scope_condition, "pull_request", "false"):
+                problems.append(f"{name}: scope condition runs on pull_request with every flag false: {scope_condition}")
     except Exception as ex:
         problems.append(f"{name}: scope condition is not in the allowed form ({ex!r}): {scope_condition}")
     return problems
@@ -852,7 +880,7 @@ def sweep_job_problems(name, job, flag=None):
     if len(conds) != 1:
         return problems + [f"{name}: its suite steps carry no one scope condition (none carries one, or they disagree)"]
     scope_condition = conds.pop()
-    problems += scope_condition_property_problems(name, scope_condition, flag)
+    problems += scope_condition_property_problems(name, scope_condition, job, flag)
     for st in suite:
         if scope_condition_rest(step_if(st), scope_condition) is None:
             problems.append(f"{name}: step {st.get('name') or st.get('run')} lacks the scope condition: {step_if(st)}")
@@ -898,7 +926,7 @@ def job_check_problems(name, job, flag=None):
     scope_condition = read_scope_condition(job)
     if scope_condition is None:
         return problems + [f"{name}: its steps carry no one scope condition (none carries one, or they disagree)"]
-    return problems + scope_condition_property_problems(name, scope_condition, flag) + scope_condition_step_problems(name, job, scope_condition)
+    return problems + scope_condition_property_problems(name, scope_condition, job, flag) + scope_condition_step_problems(name, job, scope_condition)
 
 
 def scope_needs_of(text):
@@ -1187,7 +1215,7 @@ def macos_slice_problems(text):
     return problems
 
 
-SHOOT_SCOPE = "needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request'"
+SHOOT_SCOPE = "needs.scope.outputs.shoot == 'true'"
 SHOOT_IF = f"${{{{ {SHOOT_SCOPE} }}}}"
 
 
@@ -1221,7 +1249,8 @@ def shoot_doc(lint_run="ruff", install_if=SHOOT_IF, suite_if=SHOOT_IF, suite_run
 # pinned as the macOS guard shards are: the scope `if:`, no shell, and the suite's own env plus its shard value.
 LINUX_GUARD_SHARD = {name: f"{i}/{len(LINUX_GUARD_JOBS)}" for i, name in enumerate(LINUX_GUARD_JOBS, 1)}
 LINUX_GUARD = "python3 hooks/test_guard.py"
-LINUX_GUARD_IF = "needs.scope.outputs.checks_guard == 'true' || github.event_name != 'pull_request'"
+# The Linux guard shards' steps take the flag alone, with no event fallback.
+LINUX_GUARD_IF = "needs.scope.outputs.checks_guard == 'true'"
 LINUX_GUARD_ENV = {"NODE_PATH": "${{ github.workspace }}/.github/shoot/node_modules", "GUARD_CHROMIUM": '"1"'}
 PLAYWRIGHT_USES = "$/actions/playwright-setup"
 
@@ -1291,7 +1320,7 @@ class WindowsSplit(unittest.TestCase):
     def test_the_export_suite_is_pinned_in_the_shoot_job(self):
         # Named failure: the export suite runs in `checks` again, which installs no browser, or in SHOOT_JOB without the
         # NODE_PATH prefix, so its picture cases find no Playwright and go red.
-        self.assertEqual(export_suite_problems(self.text), [])
+        self.assertEqual(export_suite_problems(self.text), [], PUSH_RULING)
 
     def test_the_export_suite_checker_sees_its_defects(self):
         export = (f"      - name: export suite\n        if: ${{{{ {EXPORT_IF} }}}}\n"
@@ -1376,7 +1405,7 @@ class WindowsSplit(unittest.TestCase):
         self.assertEqual(self.text.count(job), 1, "the fixture: checks-guard-2's block appears once in checks.yml")
         self.assertEqual(job.count(LINUX_GUARD_IF), len(step_blocks(job)),
                          "the fixture: every step of checks-guard-2 carries LINUX_GUARD_IF")
-        swapped = job.replace(LINUX_GUARD_IF, "needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request'")
+        swapped = job.replace(LINUX_GUARD_IF, "needs.scope.outputs.checks_macos == 'true'")
         problems = [p for p in scope_problems(self.text.replace(job, swapped, 1)) if p.startswith("checks-guard-2:")]
         self.assertEqual(len(problems), 1, f"checks-guard-2 problems: {problems}")
         self.assertIn("does not read needs.scope.outputs.checks_guard", problems[0])
@@ -1726,7 +1755,7 @@ class SplitJobs(unittest.TestCase):
             self.text = f.read()
 
     def test_each_linux_suite_runs_once_in_its_split(self):
-        self.assertEqual(linux_split_problems(self.text), [])
+        self.assertEqual(linux_split_problems(self.text), [], PUSH_RULING)
         # The install suite runs once in each of its counted shard jobs, not once in the split (SHARD_COUNTS).
         self.assertEqual(install_shard_problems(self.text), [])
         linux_conditioned = [n for n in SPEC_JOBS if n in LINUX_SPLIT]
@@ -1737,12 +1766,12 @@ class SplitJobs(unittest.TestCase):
         self.assertTrue("python3 lint/test_guard_outcome.py" in LINUX_SUITES,
                         "the guard outcome suite has no LINUX_SUITES row, so its if: in checks.yml is not pinned")
         step = ("      - name: Guard outcome claims fixture suite\n"
-                "        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') }}\n"
+                "        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}\n"
                 "        run: python3 lint/test_guard_outcome.py\n")
         self.assertIn(step, self.text, "the fixture: checks.yml runs the guard outcome suite with this if:")
-        drifted = self.text.replace(step, step.replace("needs.scope.outputs.code == 'true' || ", "", 1), 1)
+        drifted = self.text.replace(step, step.replace(" && needs.scope.outputs.code == 'true'", "", 1), 1)
         self.assertTrue([p for p in linux_split_problems(drifted) if "lint/test_guard_outcome.py" in p],
-                        "an if: that drops the code scope from the guard outcome suite is not flagged")
+                        "an if: that drops the code scope from the guard outcome suite is not flagged (%s)" % PUSH_RULING)
 
     def test_every_lint_form_step_stays_in_the_checks_job(self):
         """`merge --lane-lint` runs the `checks` job by name (bin/ci-job checks --lint), so a lint step moved into another Linux
@@ -1872,11 +1901,11 @@ class SplitJobs(unittest.TestCase):
     def test_the_linux_guard_runs_in_its_counted_shard_jobs(self):
         # Named failure: the guard suite runs in one Linux job, or in more or fewer than LINUX_GUARD_JOBS, or in neither, so its cases
         # do not each run once.
-        self.assertEqual(linux_guard_split_problems(self.text), [])
+        self.assertEqual(linux_guard_split_problems(self.text), [], PUSH_RULING)
 
     def test_the_linux_guard_shards_install_playwright(self):
         # Named failure: a guard shard job has no Playwright install, so the guard's checker has no browser to render with.
-        self.assertEqual(linux_guard_install_problems(self.text), [])
+        self.assertEqual(linux_guard_install_problems(self.text), [], PUSH_RULING)
 
     def test_checker_sees_the_linux_guard_split_defects(self):
         self.assertEqual(linux_guard_split_problems(linux_guard_doc()), [])  # the control: the planned split passes
@@ -1905,14 +1934,14 @@ class SplitJobs(unittest.TestCase):
     def test_the_planned_linux_guard_split_passes_the_split_and_install_checks(self):
         # The full-size control: the planned split of the real file passes both checks, so each defect below is the only flag.
         planned = planned_linux_guard_split(self.text)
-        self.assertEqual(linux_guard_split_problems(planned), [])
+        self.assertEqual(linux_guard_split_problems(planned), [], PUSH_RULING)
         self.assertEqual(linux_guard_install_problems(planned), [])
 
     def test_checker_sees_the_planned_install_defects(self):
         planned = planned_linux_guard_split(self.text)
         job = job_block(planned, "checks-guard-2")
         install = f"        if: ${{{{ {LINUX_GUARD_IF} }}}}\n        uses: {PLAYWRIGHT_USES}\n"
-        self.assertIn(install, job, "the fixture: checks-guard-2's install step carries the scope if")
+        self.assertIn(install, job, "the fixture: checks-guard-2's install step carries the scope if (%s)" % PUSH_RULING)
         bad = {
             "the install step's if changed": planned.replace(job, job.replace(
                 install, install.replace(LINUX_GUARD_IF, "needs.scope.outputs.code == 'true'"), 1), 1),
@@ -2180,6 +2209,31 @@ def top_level_conjuncts(expr):
             elif depth == 0 and e.startswith("||", i):
                 return [e.strip()]
             elif depth == 0 and e.startswith("&&", i):
+                parts.append(e[start:i].strip())
+                start = i + 2
+                i += 2
+                continue
+        i += 1
+    return parts + [e[start:].strip()]
+
+
+def top_level_disjuncts(expr):
+    """The `||` parts of an `if:` at the top level: outside quotes and parentheses, read as top_level_conjuncts reads them. An `&&`
+    binds tighter, so `a && b || c` gives `a && b` and `c`. An expression with no top-level `||` is one part."""
+    e = unwrap(expr) or ""
+    while e.startswith("(") and e.endswith(")") and _pair_closes_at_end(e):  # one pair around all of the expression
+        e = e[1:-1].strip()
+    parts, depth, quoted, start, i = [], 0, False, 0, 0
+    while i < len(e):
+        ch = e[i]
+        if ch == "'":
+            quoted = not quoted
+        elif not quoted:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            elif depth == 0 and e.startswith("||", i):
                 parts.append(e[start:i].strip())
                 start = i + 2
                 i += 2
@@ -3698,7 +3752,7 @@ class KeepRunningOff(unittest.TestCase):
     """keep_running_off strips exactly `!cancelled() && ` from the start of a checks-job step's `if:`, and one pair of parentheses
     around a `||` condition. Each case is one `if:` as checks.yml writes it."""
 
-    OR_CONDITION = NO_MD_SCOPE_CONDITION
+    OR_CONDITION = "needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true'"  # an OR fixture, with no event fallback
 
     def test_the_guard_comes_off_a_plain_condition(self):
         self.assertEqual(keep_running_off("${{ !cancelled() && needs.scope.outputs.code == 'true' }}"),

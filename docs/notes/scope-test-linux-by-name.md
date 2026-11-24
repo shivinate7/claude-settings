@@ -1,0 +1,1 @@
+- scope-test-linux-by-name: lint/test_checks_step_scope.py:62 and :1278 pick the Linux suite steps from a name list, not from runs-on, so a new ubuntu job with the event fallback would be missed. Seen: 2026-11-24 x1

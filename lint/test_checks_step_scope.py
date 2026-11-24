@@ -1,8 +1,8 @@
 """Pins the scope condition on the `checks` job's steps (lane ci-skip-untouched-steps, slice 2).
 
 ci-scope.sh sets `code` false for a change that touches only .md files. A step that reads no .md file takes the scope condition
-`needs.scope.outputs.code == 'true' || github.event_name != 'pull_request'`, so a docs-only pull request skips it. A
-step that reads a .md file stays unscoped. The step lists are the audit of main's checks.yml when this was written, by step name.
+`needs.scope.outputs.code == 'true'`, with no event fallback, so a docs-only pull request skips it, and so does a push whose flag is
+false. A step that reads a .md file stays unscoped. The step lists are the audit of main's checks.yml when this was written, by step name.
 
 Pinned here:
   1. each NO-MD and NAMES-ONLY step carries the scope condition, exactly.
@@ -45,7 +45,7 @@ from test_windows_split import (  # noqa: E402  the one home of the `if:` evalua
     SCOPE_DOC_DECISIONS_RULES, SCOPE_DOC_DECISIONS_RULES_OTHER, SCOPE_DOC_RULES, SCOPE_DOC_SKILLS, SCOPE_DOC_SKILLS_AGENTS,
     SCOPE_DOC_SKILLS_DECISIONS, SCOPE_DOC_SKILLS_OTHER, doc_scope_condition, drop_condition, eval_if, keep_running_off, run_lines, unwrap,
     LINUX_SUITES)
-from test_windows_split import top_level_conjuncts, yaml_scalar  # noqa: E402  the one home of the conjunct splitter and the scalar reader
+from test_windows_split import PUSH_RULING, top_level_conjuncts, top_level_disjuncts, yaml_scalar  # noqa: E402  the one home of the splitters, the scalar reader and the ruling
 
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
 WORKFLOW = ".github/workflows/checks.yml"
@@ -57,6 +57,11 @@ PR_ONLY_IF = "${{ github.event_name == 'pull_request' }}"
 PR_ONLY_LINT_IF = re.compile(r"^\$\{\{ github\.event_name == 'pull_request' && needs\.scope\.outputs\.lint_\w+ == 'true' \}\}$")
 STE_LINT = "STE lint"
 DOC = "docs/decisions/x.md"
+# The Linux jobs whose steps a push run reads: the checks job and its split, and the guard and shoot jobs. The mutate-guard jobs and
+# mutation-report stay out: their job-level `if:` skips every push (`github.event_name != 'push'`), so no push run reads a step of theirs.
+LINUX_SUITE_JOBS = ("checks", "checks-hooks", "checks-rest", "checks-guard", "checks-guard-2", "checks-guard-3", "checks-guard-4",
+                    "checks-shoot", "checks-waiting-page")
+FALLBACK = "github.event_name != 'pull_request'"
 
 # The audit's NO-MD steps: each reads no .md file at run time, so each takes the scope condition.
 NO_MD = [
@@ -774,13 +779,12 @@ def describe_hits(hits):
 
 
 def scoped_steps(steps):
-    """(identity, step) for each step the entry guard covers: the audit's NO-MD and NAMES-ONLY steps, and any other step
-    that carries the scope condition. A named step missing from the job is left out here; the scope condition test reports it."""
+    """(identity, step) for each step the entry guard covers: the audit's NO-MD and NAMES-ONLY steps. A named step missing from the
+    job is left out here; the scope condition test reports it. An unlisted step is no audit step even when its `if:` is the bare
+    code flag: that form is also a flag-only step's, and the flag-only steps are not audited."""
     by_id = {identity(st): st for st in steps}
     names = NO_MD + NAMES_ONLY
-    found = [(n, by_id[n]) for n in names if n in by_id]
-    found += [(identity(st), st) for st in steps if if_of(st) == SCOPE_CONDITION and identity(st) not in names]
-    return found
+    return [(n, by_id[n]) for n in names if n in by_id]
 
 
 class ChecksStepBase(unittest.TestCase):
@@ -805,7 +809,8 @@ class ScopeConditionOnNoMdSteps(ChecksStepBase):
                 got = if_of(self.named(steps, name))
                 # Outside the checks job, the records-only condition may follow the scope condition: `${{ (SCOPE) && RECORDS_ONLY_CONDITION }}`.
                 conditioned_ok = name not in checks and drop_condition(unwrap(got)) == NO_MD_SCOPE_CONDITION
-                self.assertTrue(got == SCOPE_CONDITION or conditioned_ok, "step %r: if is %r, want the scope condition" % (name, got))
+                self.assertTrue(got == SCOPE_CONDITION or conditioned_ok,
+                                "step %r: if is %r, want the scope condition with no event fallback (%s)" % (name, got, PUSH_RULING))
 
 
 class UnscopedAndPrOnlySteps(ChecksStepBase):
@@ -1063,7 +1068,8 @@ class DocStepScopeConditions(ChecksStepBase):
         for name, groups in DOC_STEPS.items():
             with self.subTest(step=name):
                 got = if_of(self.named(steps, name))
-                self.assertEqual(got, expected_if(groups), "step %r: if is %r, want the scope condition of %s alone" % (name, got, groups))
+                self.assertEqual(got, expected_if(groups), "step %r: if is %r, want the scope condition of %s alone, with no event fallback (%s)"
+                                 % (name, got, groups, PUSH_RULING))
 
     def test_each_doc_step_group_set_has_one_constant_built_from_its_groups(self):
         for groups in sorted({tuple(g) for g in DOC_STEPS.values()}):
@@ -1117,7 +1123,7 @@ class DocStepsAgreeWithLinuxSplit(ChecksStepBase):
                     continue
                 with self.subTest(step=name, cmd=cmd):
                     want = doc_scope_condition(tuple(groups))
-                    self.assertEqual(LINUX_SUITES[cmd][0], want, "%r: row condition is %r, want %r" % (cmd, LINUX_SUITES[cmd][0], want))
+                    self.assertEqual(LINUX_SUITES[cmd][0], want, "%r: row condition is %r, want %r (%s)" % (cmd, LINUX_SUITES[cmd][0], want, PUSH_RULING))
 
 
 class DocsOnlyPullRequestSteps(ChecksStepBase):
@@ -1256,6 +1262,98 @@ class CodeCheckToolsKeepRunning(unittest.TestCase):
         loose = [n for n in KEEP_RUNNING_EXEMPT
                  if not (n.startswith("uses: actions/checkout") or n.startswith("uses: actions/setup-"))]
         self.assertEqual(loose, [], "these exempt steps are neither the checkout nor a setup step: %s" % loose)
+
+
+def fallback_steps(steps):
+    """The identities of the steps whose `if:` has the event fallback as a top-level `||` term beside a term that reads a scope output."""
+    found = []
+    for st in steps:
+        expr = if_of(st)
+        if expr is None:
+            continue
+        terms = top_level_disjuncts(drop_condition(unwrap(expr)))  # the records-only conjunct comes off: `(E) && RECORDS_ONLY` reads E
+        if FALLBACK in terms and any("needs.scope.outputs." in t for t in terms):
+            found.append(identity(st))
+    return found
+
+
+class LinuxSuiteStepsObeyTheirFlag(unittest.TestCase):
+    """The event fallback comes off each Linux suite step's `if:` (PUSH_RULING). A step whose flag is false is skipped on a push as on a
+    pull request. ci-scope.sh turns every flag on for a push, so no push run changes its verdict."""
+
+    def setUp(self):
+        self.text = read_repo(WORKFLOW)
+
+    def test_each_linux_suite_job_is_in_the_workflow_on_ubuntu(self):
+        for job in LINUX_SUITE_JOBS:
+            with self.subTest(job=job):
+                block = ws.job_block(self.text, job)
+                self.assertIsNotNone(block, "%s is not a job of %s, so the case reads none of its steps" % (job, WORKFLOW))
+                self.assertRegex(block, r"(?m)^    runs-on: ubuntu-latest$", "%s is not an ubuntu job; the Linux case reads it" % job)
+
+    def test_no_linux_suite_step_holds_the_event_fallback_beside_its_scope_flag(self):
+        for job in LINUX_SUITE_JOBS:
+            with self.subTest(job=job):
+                got = fallback_steps(ws.step_blocks(ws.job_block(self.text, job)))
+                self.assertEqual(got, [], "%s: these steps hold `%s` beside a scope flag, so a push runs them with the flag false (%s): %s"
+                                 % (job, FALLBACK, PUSH_RULING, got))
+
+    def test_a_step_whose_flag_is_false_is_skipped_on_a_push_as_on_a_pull_request(self):
+        for job in LINUX_SUITE_JOBS:
+            for st in ws.step_blocks(ws.job_block(self.text, job)):
+                expr = if_of(st)
+                if expr is None or "needs.scope.outputs." not in expr:
+                    continue
+                with self.subTest(job=job, step=identity(st)):
+                    self.assertFalse(eval_if(expr, "pull_request", "false"), "%s: step %r runs on a pull request with its flag false: %r"
+                                     % (job, identity(st), expr))
+                    self.assertFalse(eval_if(expr, "push", "false"), "%s: step %r runs on a push with its flag false (%s): %r"
+                                     % (job, identity(st), PUSH_RULING, expr))
+
+    def test_the_windows_steps_stay_outside_the_case_and_keep_the_fallback(self):
+        # Control: the case reads only the Linux suite jobs, and the Windows steps keep their fallback.
+        for job in ("checks-windows", "checks-windows-rest"):
+            with self.subTest(job=job):
+                self.assertNotIn(job, LINUX_SUITE_JOBS)
+                flagged = [st for st in ws.step_blocks(ws.job_block(self.text, job)) if "needs.scope.outputs." in (if_of(st) or "")]
+                self.assertTrue(any(eval_if(if_of(st), "push", "false") for st in flagged),
+                                "%s: no step runs on a push with its flag false, so the Windows fallback is gone; the ruling covers Linux only" % job)
+
+
+class FallbackStepShapes(unittest.TestCase):
+    """fallback_steps on one-job fixtures: the step shapes the case must tell apart. Each value is one `if:` as checks.yml writes it."""
+
+    def flagged(self, *values):
+        text = "".join("      - name: step %d\n        if: %s\n        run: echo %d\n" % (i, v, i) for i, v in enumerate(values))
+        return fallback_steps(ws.step_blocks(text))
+
+    def test_the_fallback_beside_a_flag_is_flagged(self):
+        self.assertEqual(self.flagged("${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}"), ["step 0"])
+
+    def test_the_fallback_inside_the_keep_running_pair_is_flagged(self):
+        self.assertEqual(self.flagged("${{ !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') }}"),
+                         ["step 0"])
+
+    def test_the_flag_alone_is_not_flagged(self):
+        self.assertEqual(self.flagged("${{ !cancelled() && needs.scope.outputs.code == 'true' }}"), [])
+
+    def test_a_fallback_with_no_scope_flag_is_not_flagged_here(self):
+        # A step with no scope flag is the existing rules' case (ScopeConditionOnNoMdSteps and the MAIN_STEPS pins), not this one.
+        self.assertEqual(self.flagged("${{ github.event_name != 'pull_request' }}"), [])
+
+    def test_a_flag_and_not_pull_request_is_no_fallback(self):
+        # On a push the flag decides this step, so it is no fallback.
+        self.assertEqual(self.flagged("${{ needs.scope.outputs.code == 'true' && github.event_name != 'pull_request' }}"), [])
+
+    def test_a_lone_quote_in_a_trailing_comment_does_not_hide_the_fallback(self):
+        self.assertEqual(self.flagged("${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }} # don't"), ["step 0"])
+
+    def test_an_empty_job_has_no_fallback_step(self):
+        self.assertEqual(fallback_steps(ws.step_blocks("")), [])
+
+    def test_every_step_of_a_full_job_is_named(self):
+        values = ["${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}"] * 40
+        self.assertEqual(self.flagged(*values), ["step %d" % i for i in range(40)])
 
 
 class KeepRunningTopLevelOr(unittest.TestCase):

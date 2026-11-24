@@ -1,0 +1,1 @@
+- scope-windows-control-any: lint/test_checks_step_scope.py:1317 asserts any() over the Windows steps, so a Windows job that drops the event fallback from some steps still passes. Seen: 2026-11-24 x1
