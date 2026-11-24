@@ -15929,9 +15929,11 @@ class MainRunVerdict(Env):
         return rc, text, word, line
 
     def judged(self, want, sha, runs, jobs, **reads):
-        """Judge `sha` and assert its outcome word is `want`; -> the verdict tuple of `verdict`."""
+        """Judge `sha`: its outcome word is `want`, and its exit code is 1 for unknown and 0 for every other outcome. -> the verdict tuple of `verdict`."""
         got = self.verdict(sha, runs, jobs, **reads)
         self.assertEqual(got[2], want, got[1])
+        exit_code = 1 if want == self.UNKNOWN else 0
+        self.assertEqual(got[0], exit_code, f"exit code {got[0]} for `{want}`, not {exit_code}:\n{got[1]}")
         return got
 
     def test_a_green_push_run_with_the_rollup_skipped_reads_green(self):
@@ -16026,6 +16028,38 @@ class MainRunVerdict(Env):
         runs = [main_run(self.NOW, "failure", sha=self.NEW_SHA), main_run(self.PREV, "success", sha=self.GREEN_SHA)]
         jobs = {self.NOW: [main_job("scope", "success"), self.red_job("checks", 9102)], self.PREV: [main_job("checks", "success", 20)]}
         self.judged(self.UNKNOWN, self.NEW_SHA, runs, jobs, jobs_fail_of={self.NOW: "HTTP 502 Bad Gateway"})
+
+    def test_a_cancelled_judged_run_is_unknown(self):
+        """A run cancelled before it finished has no verdict: unknown, never green, first red or carried."""
+        runs = [main_run(self.NOW, "cancelled", sha=self.NEW_SHA), main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.NOW: [main_job("scope", "success"), main_job("checks", "cancelled", 20)], self.PREV: [main_job("checks", "success", 20)]}
+        self.judged(self.UNKNOWN, self.NEW_SHA, runs, jobs)
+
+    def test_a_failed_runs_list_read_is_unknown(self):
+        """The one runs read that every verdict starts from fails: unknown, and no run of the commit is judged."""
+        runs = [main_run(self.NOW, "failure", sha=self.NEW_SHA), main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.NOW: [main_job("scope", "success"), self.red_job("checks", 9102)], self.PREV: [main_job("checks", "success", 20)]}
+        self.judged(self.UNKNOWN, self.NEW_SHA, runs, jobs, runs_fail="HTTP 502 Bad Gateway", job_logs={9102: self.NEW_LOG})
+
+    def test_a_failed_runs_list_read_is_unknown_even_when_its_body_parses(self):
+        """The runs read exits 1 but its body still parses as the page. The exit status decides, so the verdict is unknown, not the one the page gives."""
+        runs = [main_run(self.NOW, "failure", sha=self.NEW_SHA), main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.NOW: [main_job("scope", "success"), self.red_job("checks", 9102)], self.PREV: [main_job("checks", "success", 20)]}
+        page = json.dumps({"total_count": len(runs), "workflow_runs": runs})
+        self.judged(self.UNKNOWN, self.NEW_SHA, runs, jobs, runs_fail=page, job_logs={9102: self.NEW_LOG})
+
+    def test_a_red_run_with_no_earlier_run_to_compare_is_unknown(self):
+        """No earlier push run of this workflow is on the page, so a new red cannot be told from a carried one: unknown, never first red."""
+        runs = [main_run(self.NOW, "failure", sha=self.NEW_SHA)]
+        jobs = {self.NOW: [main_job("scope", "success"), self.red_job("checks", 9102)]}
+        self.judged(self.UNKNOWN, self.NEW_SHA, runs, jobs, job_logs={9102: self.NEW_LOG})
+
+    def test_a_green_run_with_no_earlier_run_to_compare_is_unknown_as_the_record_says(self):
+        """The record lists `no earlier run to compare` under unknown. The code reads a green run with no earlier run as green, so the code and the
+        record differ here. This case pins the record."""
+        runs = [main_run(self.NOW, "success", sha=self.NEW_SHA)]
+        jobs = {self.NOW: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        self.judged(self.UNKNOWN, self.NEW_SHA, runs, jobs)
 
 
 class ProtectionHost(merge.Host):
