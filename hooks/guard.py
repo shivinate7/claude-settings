@@ -568,7 +568,7 @@ Other tools, in `judge` order:
                        An override lifts it. Cost: reads on demand inside this call, one small read of the
                        prompt file and, for an edit, of the handoff; no new log, hook, file or process start.
                        (precompact-handoff, item 14)
-  handoff-too-big      deny. A Write, Edit or MultiEdit to a session handoff, from any writer, whose resulting text
+  handoff-too-big      deny. A Write, Edit or MultiEdit to a session handoff, from the session or an agent, whose resulting text
                        estimates over HANDOFF_MAX_TOKENS (reread_check.py; ceil(UTF-8 bytes / 3.5)), unless the result is
                        smaller than the file on disk. The reason gives the estimate, the limit and the cut order
                        (history, then past review rounds, then mid-run CI reads). An edit that cannot be applied allows.
