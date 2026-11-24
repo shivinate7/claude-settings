@@ -162,6 +162,46 @@ git checkout -q --detach "$1" || exit 1
 exit 1
 '''
 
+# The holder a lock written for another install carries: its first line, which the hook matches against its own pid.
+# Pid 1 is no installer's, so no run in these cases is the holder.
+LOCK_HOLDER = "1"
+# An mtime far past LOCK_MAX_AGE, so the lock is old whatever the clock reads. No elapsed time is waited for.
+LOCK_MTIME_OLD = 946684800
+
+# Stands in for a pin refresh that finds the install lock taken: it takes the lock as another install does, then waits.
+# The hook stops it at its timeout. `exec` makes the wait the run's own process, so the stop reaches it.
+LOCK_WAIT_REFRESH_STUB = r'''#!/bin/sh
+printf '%s\n' "$*" >> "$STUB_REFRESH_COUNTER"
+printf '%s\n' "@HOLDER@" > "$CLAUDE_CONFIG_DIR/.claude-settings-install.lock"
+exec sleep 60
+'''.replace("@HOLDER@", LOCK_HOLDER)
+
+# Stands in for a pin refresh that runs past its timeout. It writes its pid where a case can read it, then waits.
+REFRESH_HANG_STUB = r'''#!/bin/sh
+printf '%s\n' "$*" >> "$STUB_REFRESH_COUNTER"
+printf '%s\n' "$$" > "$STUB_REFRESH_COUNTER.pid"
+exec sleep 60
+'''
+
+# Stands in for a pin refresh that records, while it runs, whether the seen file exists, then exits 0. The fail variant
+# exits 1 after the record.
+REFRESH_PROBE_STUB = r'''#!/bin/sh
+printf '%s\n' "$*" >> "$STUB_REFRESH_COUNTER"
+if [ -e "$CLAUDE_CONFIG_DIR/.claude-settings-refresh-seen" ]; then
+  echo present >> "$STUB_REFRESH_COUNTER.seen"
+else
+  echo absent >> "$STUB_REFRESH_COUNTER.seen"
+fi
+'''
+REFRESH_PROBE_FAIL_STUB = REFRESH_PROBE_STUB + "exit 1\n"
+
+# Stands in for taskkill: it logs each call's argv (fields end in \037) and ends nothing.
+TASKKILL_SHIM = r'''#!/bin/sh
+printf '%s\037' "$@" >> "$TASKKILL_LOG"
+printf '\n' >> "$TASKKILL_LOG"
+exit 0
+'''
+
 # Runs the hook with os.killpg and signal.SIGKILL removed, as on Windows, where neither exists. The hook's own folder
 # goes first on sys.path, so its `import _nowindow` resolves as it does in a real run.
 NO_POSIX_SHIM = r'''import os, runpy, signal, sys
@@ -273,6 +313,7 @@ class Fixture:
         self.env_log = os.path.join(self.root, "installer-env.txt")
         self.marks = os.path.join(self.root, "installer-marks.txt")
         self.refresh_counter = os.path.join(self.root, "refresh-runs.txt")
+        self.taskkill_log = os.path.join(self.root, "taskkill-calls.txt")
         self.grand_path = os.path.join(self.root, "installer-child.pid")
         self.lock_path = os.path.join(self.config, ".claude-settings-install.lock")
         self.record_path = os.path.join(self.config, RECORD)
@@ -321,7 +362,7 @@ class Fixture:
                    GIT_CONFIG_GLOBAL=self.gitconfig, GIT_CONFIG_NOSYSTEM="1",
                    STUB_COUNTER=self.counter, STUB_REF=self.ref, STUB_WRITE_RECORD="1",
                    STUB_ENV_LOG=self.env_log, STUB_MARK=self.marks, STUB_GRAND=self.grand_path,
-                   STUB_REFRESH_COUNTER=self.refresh_counter)
+                   STUB_REFRESH_COUNTER=self.refresh_counter, TASKKILL_LOG=self.taskkill_log)
         if cloud:
             env["CLAUDE_CODE_REMOTE"] = "true"
         if ls_remote:
@@ -510,6 +551,14 @@ def install_refresh(fx, text=REFRESH_STUB):
     write_file(os.path.join(fx.source, "merge", "install_from_main.sh"), text, mode=0o755)
 
 
+def write_lock(fx, mtime=None):
+    """Takes the install lock as another install does: its first line names that run. `mtime` sets the lock's mtime;
+    None keeps the time it was written at, so the lock is fresh."""
+    write_file(fx.lock_path, LOCK_HOLDER + "\n")
+    if mtime is not None:
+        os.utime(fx.lock_path, (mtime, mtime))
+
+
 def detached(name, behind_by=0):
     """A cloud fixture whose record source is a clone detached at the recorded sha, as the live pin is kept.
     The source's origin is a plain clone's, so the read of it cannot fail for a layout reason. origin moves on
@@ -547,8 +596,11 @@ def hook_copy(folder):
     """Copies the hook under test and its helper into folder/hooks, as a checkout of this commit holds them. The copy
     is the product code, so the link below has a real file to reach; no test file is copied."""
     os.makedirs(os.path.join(folder, "hooks"), exist_ok=True)
-    for name in ("stale_install.py", "_nowindow.py"):
-        shutil.copyfile(os.path.join(HERE, name), os.path.join(folder, "hooks", name))
+    for name in ("stale_install.py", "_nowindow.py", "shared_names.py"):
+        source = os.path.join(HERE, name)
+        if name == "shared_names.py" and not os.path.exists(source):
+            continue  # the one home of the names the pin and the guard share; copied once it is in the tree
+        shutil.copyfile(source, os.path.join(folder, "hooks", name))
 
 
 def pin_clone(name):
@@ -1433,6 +1485,122 @@ class LocalSession(unittest.TestCase):
                          % (refresh_runs(fx), new[:SHORT]))
         self.assertEqual(run.lines, [PREFIX + "pin is 1 commit behind origin/stable after the refresh"],
                          "want the one pin line from the pin's own hook; stderr: %s" % run.tail())
+
+    def test_local_fresh_lock_held_by_another_install_stays_silent_and_unseen(self):
+        fx, old = detached(self._testMethodName, behind_by=1)
+        install_refresh(fx)
+        fx.git("-C", fx.source, "fetch", "-q", "origin")
+        new = fx.origin_tip("main")
+        write_lock(fx)
+        self.assertTrue(os.path.exists(fx.lock_path), "scope: the install lock was not taken")
+        self.assertEqual(fx.git("-C", fx.source, "rev-parse", "refs/remotes/origin/main").strip(), new,
+                         "scope: the local origin/main ref did not move")
+        run = fx.run_hook(cloud=False)
+        self.assertEqual(run.lines, [], "a fresh lock held by another install printed %r, want nothing; stderr: %s"
+                         % (run.lines, run.tail()))
+        self.assertEqual(refresh_runs(fx), [], "a fresh lock held by another install ran the pin refresh: %r"
+                         % refresh_runs(fx))
+        self.assertFalse(os.path.exists(fx.seen_path), "a fresh lock held by another install wrote the seen file")
+        os.remove(fx.lock_path)
+        run = fx.run_hook(cloud=False)
+        self.assertEqual(refresh_runs(fx), [new], "once the lock went, the next prompt ran the pin refresh %r, want "
+                         "once at %s" % (refresh_runs(fx), new[:SHORT]))
+        self.assertEqual(run.lines, [PREFIX + "pin is 1 commit behind origin/main after the refresh"],
+                         "want the pin line once the lock is gone; stderr: %s" % run.tail())
+        fx.run_hook(cloud=False)
+        self.assertEqual(refresh_runs(fx), [new], "a later prompt on the same head ran the pin refresh again: %r"
+                         % refresh_runs(fx))
+
+    def test_local_lock_older_than_the_age_limit_is_ignored_and_the_refresh_runs(self):
+        fx, old = detached(self._testMethodName, behind_by=1)
+        install_refresh(fx)
+        fx.git("-C", fx.source, "fetch", "-q", "origin")
+        new = fx.origin_tip("main")
+        write_lock(fx, mtime=LOCK_MTIME_OLD)
+        self.assertTrue(os.path.exists(fx.lock_path), "scope: the install lock was not taken")
+        self.assertEqual(os.stat(fx.lock_path).st_mtime, LOCK_MTIME_OLD, "scope: the lock's mtime is not the old one")
+        run = fx.run_hook(cloud=False)
+        self.assertEqual(refresh_runs(fx), [new], "a lock past the age limit blocked the pin refresh: ran %r, want "
+                         "once at %s" % (refresh_runs(fx), new[:SHORT]))
+        self.assertEqual(run.lines, [PREFIX + "pin is 1 commit behind origin/main after the refresh"],
+                         "want the pin line past an old lock; stderr: %s" % run.tail())
+
+    def test_local_seen_entry_is_written_only_after_the_refresh_ends(self):
+        fx, old = detached(self._testMethodName, behind_by=1)
+        install_refresh(fx, REFRESH_PROBE_STUB)
+        fx.git("-C", fx.source, "fetch", "-q", "origin")
+        new = fx.origin_tip("main")
+        self.assertFalse(os.path.exists(fx.seen_path), "scope: the seen file exists before the prompt")
+        run = fx.run_hook(cloud=False)
+        self.assertEqual(read_text(fx.refresh_counter + ".seen").split(), ["absent"],
+                         "the seen entry existed while the refresh ran: %r, want absent"
+                         % read_text(fx.refresh_counter + ".seen"))
+        self.assertEqual(read_text(fx.seen_path).split(), ["pin:" + new],
+                         "after the refresh ended the seen file holds %r, want the head's entry; stderr: %s"
+                         % (read_text(fx.seen_path), run.tail()))
+
+    def test_local_failed_refresh_marks_its_head_seen_only_after_it_ends_and_later_prompts_say_stale(self):
+        fx, old = detached(self._testMethodName, behind_by=1)
+        install_refresh(fx, REFRESH_PROBE_FAIL_STUB)
+        fx.git("-C", fx.source, "fetch", "-q", "origin")
+        new = fx.origin_tip("main")
+        run = fx.run_hook(cloud=False)
+        self.assertEqual(read_text(fx.refresh_counter + ".seen").split(), ["absent"],
+                         "the seen entry existed while the failing refresh ran: %r, want absent"
+                         % read_text(fx.refresh_counter + ".seen"))
+        self.assertEqual(read_text(fx.seen_path).split(), ["pin:" + new],
+                         "after the failed refresh ended the seen file holds %r, want the head's entry"
+                         % read_text(fx.seen_path))
+        self.assertEqual(run.lines, [PREFIX + "pin refresh failed (exit 1)"],
+                         "want one failure line for the failed pin refresh; stderr: %s" % run.tail())
+        later = fx.run_hook(cloud=False)
+        self.assertEqual(refresh_runs(fx), [new], "a later prompt on the failed head reran the refresh: %r"
+                         % refresh_runs(fx))
+        self.assertTrue(later.lines and later.lines[0].startswith(PREFIX + "install still stale"),
+                        "the later prompt printed %r, want the stale line" % later.lines)
+
+    def test_local_pin_refresh_timed_out_behind_another_install_prints_nothing_and_stays_unseen(self):
+        fx, old = detached(self._testMethodName, behind_by=1)
+        install_refresh(fx, LOCK_WAIT_REFRESH_STUB)
+        fx.git("-C", fx.source, "fetch", "-q", "origin")
+        new = fx.origin_tip("main")
+        self.assertFalse(os.path.exists(fx.lock_path), "scope: a lock was taken before the refresh ran")
+        run = fx.run_hook(cloud=False, reinstall_timeout="1")
+        self.assertIsNotNone(run.rc, "the hook ran past %d s; stderr: %s" % (HOOK_GUARD, run.tail()))
+        self.assertEqual(refresh_runs(fx), [new], "scope: the refresh did not run once at %s: %r"
+                         % (new[:SHORT], refresh_runs(fx)))
+        self.assertEqual(read_text(fx.lock_path).strip(), LOCK_HOLDER, "scope: the refresh did not take the lock")
+        self.assertEqual(run.lines, [], "a refresh that timed out behind another install's lock printed %r, want "
+                         "nothing; stderr: %s" % (run.lines, run.tail()))
+        self.assertFalse(os.path.exists(fx.seen_path), "a refresh that timed out behind another install's lock wrote "
+                         "the seen file")
+        os.remove(fx.lock_path)
+        install_refresh(fx)
+        later = fx.run_hook(cloud=False)
+        self.assertEqual(refresh_runs(fx), [new, new], "after the lock went, the next prompt did not check again: %r"
+                         % refresh_runs(fx))
+        self.assertEqual(later.lines, [PREFIX + "pin is 1 commit behind origin/main after the refresh"],
+                         "want the pin line on the check after the lock went; stderr: %s" % later.tail())
+
+    def test_local_windows_stop_of_a_timed_out_pin_refresh_uses_the_shared_taskkill_argv(self):
+        fx, old = detached(self._testMethodName, behind_by=1)
+        install_refresh(fx, REFRESH_HANG_STUB)
+        fx.git("-C", fx.source, "fetch", "-q", "origin")
+        new = fx.origin_tip("main")
+        write_file(os.path.join(fx.shim_dir, "taskkill"), TASKKILL_SHIM, mode=0o755)
+        run = fx.run_hook(cloud=False, reinstall_timeout="1", no_posix=True)
+        pid = read_pid(fx.refresh_counter + ".pid")
+        self.addCleanup(kill_if_alive, pid)
+        self.assertEqual(refresh_runs(fx), [new], "scope: the refresh did not run once at %s: %r; stderr: %s"
+                         % (new[:SHORT], refresh_runs(fx), run.tail()))
+        self.assertIsNotNone(pid, "scope: the refresh did not record its pid; stderr: %s" % run.tail())
+        self.assertIsNotNone(run.rc, "the hook ran past %d s; stderr: %s" % (HOOK_GUARD, run.tail()))
+        self.assertEqual(run.lines, [PREFIX + "pin refresh failed (timed out after 1 s)"],
+                         "want the timeout line on the Windows stop path; stderr: %s" % run.tail())
+        rows = [row.split("\x1f")[:-1] for row in read_text(fx.taskkill_log).split("\n")]
+        calls = [argv for argv in rows if argv]
+        self.assertEqual(calls, [["/F", "/T", "/PID", str(pid)]],
+                         "the Windows stop did not end the refresh's tree with the shared taskkill argv: %r" % calls)
 
 
 class PosixOnlyStop(unittest.TestCase):
