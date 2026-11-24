@@ -182,6 +182,7 @@ LINUX_SUITES = {
     "python3 lint/test_rule_audit.py": (SCOPE_DOC_DECISIONS_RULES, None),
     "python3 lint/test_stale_cites.py": (SCOPE_DOC_ANY, None),
     "python3 lint/test_guard_log_report.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 lint/test_guard_outcome.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_verdict.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_wait_pid.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_tracked_tree.py": (NO_MD_SCOPE_CONDITION, None),
