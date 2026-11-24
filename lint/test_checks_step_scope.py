@@ -39,12 +39,12 @@ sys.path.insert(0, HERE)
 
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import workflow_steps as ws  # noqa: E402  the one home of the step parser
-from test_ci_scope import DOC_CASES, DOC_FLAGS, doc_groups, run as scope_run  # noqa: E402  ci-scope.sh run in a temp repo, and the doc groups
+from test_ci_scope import DOC_CASES, DOC_FLAGS, doc_groups, suite_steps, run as scope_run  # noqa: E402  ci-scope.sh run in a temp repo, the doc groups, the suite-step reader
 from test_windows_split import (  # noqa: E402  the one home of the `if:` evaluator, the scope conditions and the doc condition builder
     NO_MD_SCOPE_CONDITION, SCOPE_DOC_AGENTS, SCOPE_DOC_ANY, SCOPE_DOC_DECISIONS, SCOPE_DOC_DECISIONS_MAP_OTHER, SCOPE_DOC_DECISIONS_OTHER,
     SCOPE_DOC_DECISIONS_RULES, SCOPE_DOC_DECISIONS_RULES_OTHER, SCOPE_DOC_RULES, SCOPE_DOC_SKILLS, SCOPE_DOC_SKILLS_AGENTS,
     SCOPE_DOC_SKILLS_DECISIONS, SCOPE_DOC_SKILLS_OTHER, doc_scope_condition, drop_condition, eval_if, keep_running_off, run_lines, unwrap,
-    LINUX_SUITES)
+    LINUX_SUITES, RECORDS_ONLY_CONDITION)
 from test_windows_split import PUSH_RULING, top_level_conjuncts, top_level_disjuncts, yaml_scalar  # noqa: E402  the one home of the splitters, the scalar reader and the ruling
 
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
@@ -1373,6 +1373,22 @@ class KeepRunningTopLevelOr(unittest.TestCase):
         for expr in ("${{ !cancelled() && (x || y) }}", "${{ !cancelled() && x && (y || z) }}"):
             with self.subTest(expr=expr):
                 self.assertTrue(keeps_running(expr), "keeps_running does not keep %r running, but its `||` is inside parentheses" % expr)
+
+
+class SuiteStepsTakeTheRecordsOnlySkip(unittest.TestCase):
+    """ci-scope.sh sets records_only_skip on a comment-only or record-folder delta too, so a job that starts on such a run (checks
+    does, for its comment lints) reads each suite step's own if:. A suite step without the skip clause runs its suite on that run.
+    Each suite step of the three lint jobs must read the clause; a step that runs a suite and reads no clause is named."""
+
+    def test_each_suite_step_in_the_three_lint_jobs_reads_the_records_only_skip(self):
+        text = read_repo(WORKFLOW)
+        for job in SPLIT_JOBS:
+            steps = suite_steps(text, job)
+            self.assertTrue(steps, "the fixture: %s holds no suite step" % job)
+            for name, cond in steps:
+                with self.subTest(job=job, step=name):
+                    self.assertIn(RECORDS_ONLY_CONDITION, cond or "",
+                                  "%s / %r runs a suite and its if: %r has no records-only skip" % (job, name, cond))
 
 
 if __name__ == "__main__":
