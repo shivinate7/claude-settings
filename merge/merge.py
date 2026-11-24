@@ -5105,11 +5105,14 @@ def main_run_verdict(host, sha, base=MAIN_RUN_BASE):
 
     def line(outcome, detail):
         return outcome, f"main run {sha9}: {outcome}. {detail}"
+
+    def unknown(why):  # a failed read is a verdict line, never a refusal: no Stop leaves this function
+        return line(RUN_UNKNOWN, f"{' '.join(str(why).split()) or type(why).__name__} {UNKNOWN_CITE}")
     try:
         clear_rule = load_clear_rule()
         c, out = host.api("actions/runs", fields={"branch": base, "per_page": MAIN_RUNS_READ})
         if c:
-            raise Stop(out)
+            return unknown(out or "Stop")
         runs = [r for r in json.loads(out)["workflow_runs"] if r["event"] in host.BASE_EVENTS and r["name"] not in host.ignore]
         at = next((i for i, r in enumerate(runs) if r["event"] == "push" and str(r.get("head_sha")).startswith(sha)), None)
         if at is None:
@@ -5185,7 +5188,7 @@ def main_run_verdict(host, sha, base=MAIN_RUN_BASE):
         return line(RUN_NEW_BREAK, f"run {now['id']}: {fresh}, red again on its re-run (attempt {attempt}). {BREAKING_MERGE} commit {sha9}, "
                     + (f"pull request #{number}" if number else "no pull request number in its message"))
     except (Stop, subprocess.TimeoutExpired, OSError, ValueError, KeyError, TypeError, AttributeError, ImportError) as e:
-        return line(RUN_UNKNOWN, f"{' '.join(str(e).split()) or type(e).__name__} {UNKNOWN_CITE}")
+        return unknown(e)
 
 def red_beside(root, host, base, verdict):
     """True when a red base reads unknown for the merge: a merged revert would lift the red but for a cancelled or running run beside it, and unknown never reads clear.
