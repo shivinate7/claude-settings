@@ -2,7 +2,7 @@
 
 ## Ruling
 
-A cloud prompt makes no network call (owner, 2026-11-17 09:34 CST; the event triggers, 09:30 CST). The install refreshes on two events: a session start or resume, and a move of the local `origin/<record ref>` ref that a prompt sees. The merge-notice trigger (an inbox message that says main moved) is dropped (consultant decision, 2026-11-17 09:57 CST): nothing sends it, and the mid-session reinstall (pull request 3487) already reinstalls when main's hooks move. No lookup of origin runs on any prompt, and no fallback timer asks origin on a clock.
+A cloud prompt makes no network call (owner, 2026-11-17 09:34 CST). The owner set the event triggers at 09:30 CST: the install refreshes on a session start or resume, and on a move of the local `origin/<record ref>` ref that a prompt sees. The merge-notice trigger (an inbox message that says main moved) is dropped (consultant decision, 2026-11-17 09:57 CST): nothing sends it, and the mid-session reinstall (pull request 3487) already reinstalls when main's hooks move. No lookup of origin runs on any prompt, and no fallback timer asks origin on a clock.
 
 Local sessions (owner, 2026-11-23 19:41-19:42 CST, consultant's chat): a local session refreshes its live pin as a cloud session refreshes its install, at a session start or resume and when the local `origin/stable` ref has moved. This holds on the Mac and on Windows. A prompt makes no network call in a local session either.
 
