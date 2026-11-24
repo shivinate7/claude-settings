@@ -5357,17 +5357,20 @@ def ready_job_groups(checks):
 
 def base_read_phrases(wt, base, failing, body=None):
     """-> {declared name: the base phrase of its failing row} for `failing`, a list of (declared name, job, bare step name) of ready checks that FAILed in the tree `wt`.
-    The one home of the base read: each check runs once, alone (`--step`), through ci_job_run in one detached worktree of origin/`base` (add_worktree), which is dropped
-    on every path. The worktree has the repo's history, so a check that reads git sees what it sees on the base. It never touches `wt`: no checkout, no index write.
-    The phrase is `passes on <sha9>: this change broke it`, `also fails on <sha9>`, or `base not read: <reason>`, the last for a base that is absent, a copy that cannot be made, and a run
-    that is unknown (a crash, a timeout, no line for the check). It never guesses: only a PASS or a FAIL line of the check itself names the base. The phrase lifts nothing; the caller keeps the row a fail.
-    ci-job's rerun cache serves a passing base (the same base commit in another tree hits); a fail is not saved, so it runs again.
-    Cost: a base with no failing check costs nothing. Otherwise one `git rev-parse`, one worktree add and remove, and one ci-job run per failing check."""
+    The one home of the base read: each check runs once, alone (`--step`), through ci_job_run in one detached worktree of the merge base of HEAD in `wt` and origin/`base`
+    (add_worktree), which is dropped on every path. The tip of the base is not read: a checkout behind it would blame the change for what the base gained since. The worktree has the repo's history, so a check that reads git sees what it sees on the base. It never touches `wt`: no checkout, no index write.
+    The phrase is `passes on <sha9>: this change broke it`, `also fails on <sha9>` (the sha9 of the merge base), or `base not read: <reason>`, the last for a base that is absent, a base
+    with no merge base (`git merge-base` empty or non-zero: no copy is made), a copy that cannot be made, and a run that is unknown (a crash, a timeout, no line for the check). It never guesses: only a PASS or a FAIL line of the check itself names the base. The phrase lifts nothing; the caller keeps the row a fail.
+    ci-job's rerun cache serves a passing base (the same merge base commit in another tree hits); a fail is not saved, so it runs again.
+    Cost: a base with no failing check costs nothing. Otherwise one `git rev-parse`, one `git merge-base`, one worktree add and remove, and one ci-job run per failing check."""
     if not failing:
         return {}
     c, sha = git(wt, "rev-parse", "--verify", "-q", f"origin/{base}^{{commit}}")
     if c or not sha:
         return {declared: f"base not read: origin/{base} is absent" for declared, _, _ in failing}
+    c, sha = git(wt, "merge-base", "HEAD", f"origin/{base}")
+    if c or not sha:
+        return {declared: f"base not read: HEAD and origin/{base} share no merge base" for declared, _, _ in failing}
     tmp = copy = None
     phrases = {}
     try:
