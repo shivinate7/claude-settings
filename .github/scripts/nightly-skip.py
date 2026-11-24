@@ -6,10 +6,9 @@ the daily is the net for a Windows break that an import caused. A push run the p
 Writes one line to $GITHUB_OUTPUT (stdout when unset): skip=true or skip=false. It exits 0 on every path, so the skip job is a
 visible success and scope reads its output. skip=true only when ALL of these hold:
   (a) the newest completed schedule run of checks.yml, other than this run, succeeded, and no other schedule run is still going;
-  (b) no push run of checks.yml on main was created after that daily: main has not moved since it (a push run after it gives
-      skip=false, proven by the push skip or not);
-  (c) the newest push run of checks.yml on main, if there is one, has this run's head sha, and that daily's own head sha is this
-      run's head sha (owner pick on item 893, relayed 14:14 CST Nov 15: a day main did not move skips).
+  (b) that daily ran at this run's head sha (main did not move since it);
+  (c) no push run of checks.yml on main was created after that daily, whatever it concluded, and the newest push run, if there is
+      one, is at this run's head sha (owner pick on item 893, relayed 14:14 CST Nov 15: a day main did not move skips).
 Any read failure, a missing page, a red, cancelled or running daily, and no prior daily write skip=false and say "unknown" or the
 reason. The push runs read must reach the green daily: a full page of push runs that ends newer than it hides the pushes after it.
 
