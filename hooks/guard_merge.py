@@ -290,17 +290,32 @@ def uses_merge_tool(where: str) -> bool:
 
 
 def pinned_required(where: str):
-    """The repo's pinned `merge.requiredChecks`: the string "none", or a non-empty list of names; else None,
+    """The repo's pinned `merge.requiredChecks`: the string "none", another of the merge tool's PINNED_STRINGS ("first-proof"), or a non-empty list of names; else None,
     and the batch read takes the names from the branch protection. "none" is the merge tool's value for a repo
-    that requires no check (decision private-repos-no-ci), so a head with no check and no run reads green here too."""
+    that requires no check (decision private-repos-no-ci), so a head with no check and no run reads green here too: it is read with no load of the tool.
+    "first-proof" is its value for a repo whose CI is live: the merge tool's own head_read then needs the rollup (decision merge-needs-current-base).
+    That string is the merge tool's constant, never a copy: with the tool unloadable it is not pinned, and merge_check reads that as unknown."""
     for config in _merge_configs(where) if where else ():
         merge = config["merge"]
         names = merge.get("requiredChecks") if isinstance(merge, dict) else None
         if names == "none":
             return names
+        if isinstance(names, str) and names != "protection":  # the default pins nothing and loads nothing
+            module = merge_module()
+            if module is not None and names in module.PINNED_STRINGS:
+                return names
         if isinstance(names, list) and names and all(isinstance(k, str) and k for k in names):
             return names
     return None
+
+
+def waits_on_no_ci(where: str) -> bool:
+    """True when the repo pins a merge.requiredChecks string that waits on no check: "none", or what the merge tool's no_ci_stamp says of the other pinned string. A repo with "none" loads no tool here."""
+    pinned = pinned_required(where)
+    if pinned == "none":
+        return True
+    module = merge_module()
+    return isinstance(pinned, str) and module is not None and module.no_ci_stamp(pinned)
 
 
 def ignored_checks(module, where: str):
@@ -589,7 +604,7 @@ def ready_push_hit(stripped: str, cwd: str, read_verb):
             if not where or read_verb("push", args) or not uses_merge_tool(where):
                 continue
             branches, archive_only = _ready_push_branches(args, where, overrides)
-            if archive_only or pinned_required(where) == "none":  # a repo that runs no CI has no run to cancel
+            if archive_only or waits_on_no_ci(where):  # a repo that runs no CI has no run to cancel
                 continue
             if where not in pulls:
                 pulls[where] = _ready_push_pulls(where)

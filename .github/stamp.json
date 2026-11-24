@@ -3,7 +3,7 @@
   "kinds": [],
   "merge": {
     "method": "merge",
-    "requiredChecks": "none",
+    "requiredChecks": "first-proof",
     "deadlineMinutes": 80,
     "afterMerge": ["bash merge/install_from_main.sh"],
     "deleteBranch": true,
