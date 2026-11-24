@@ -38,13 +38,14 @@ env:
 
 jobs:
   # The daily run's skip job (R61, owner pick b, Nov 12; owner page item 880, 11:53 CST Nov 15; decisions test-strategy-reset and
-  # push-skip-on-proven-tree). It says skip when the newest completed daily is green and every push run since it was proven by the push
-  # skip, the newest at this head (.github/scripts/nightly-skip.py). It prints the range the daily covers, to the log and the step
+  # push-skip-on-proven-tree). It says skip only on a day main did not move (owner, 13:44 CST Nov 23, answer a to Q5): the newest
+  # completed daily is green, no push run came after it, and it ran at this head. Any push run after the green daily, proven by the push
+  # skip or not, runs everything, since a push never runs the Windows shards (.github/scripts/nightly-skip.py). It prints the range the daily covers, to the log and the step
   # summary. Scope waits on it, so a skip reaches every job through needs and the run is a visible success: nothing is cancelled,
   # since a cancelled run reads UNKNOWN and blocks merges. A failed read, or another daily still going, says skip=false: unknown runs
   # everything. The job itself starts on every event and its steps run on a schedule only: a job-level `if` would leave it skipped,
   # and a skipped ancestor skips every job behind scope. Reads per daily: one schedule runs read, one push runs read per page of 100, up to 5 pages,
-  # one jobs read per push run since the green daily.
+  # one jobs read of the newest push run since the green daily, for the log only.
   nightly-skip:
     runs-on: ubuntu-latest
     # Cap 5 min, unmeasured: the job makes a handful of reads.
@@ -2419,11 +2420,40 @@ jobs:
         with:
           python-version: "3.11"
 
+      # The per-mutant verdicts stay across a rerun of this run (decision hang-stop: a stopped run resumes). The shard step writes one
+      # verdict file per mutant into this folder (hooks/mutate_shared.py reads MUTATE_VERDICT_DIR; a verdict from other code is ruled out
+      # by its digest, hooks/mutate_guard.py verdict_digest). The restore step finds the save of an earlier attempt of this run id by the
+      # restore-keys prefix, since a cache key matches only exactly; a new push has a new run id and restores nothing. The save step runs
+      # after a red or failed shard step too, so a rerun of the run reuses what that attempt judged. A save that cannot reserve its key
+      # or finds nothing to save warns and never fails the job.
+      - name: Make the mutation verdict folder
+        if: ${{ needs.scope.outputs.guard == 'true' }}
+        env:
+          MUTATE_VERDICT_DIR: ${{ runner.temp }}/mutate-verdicts
+        run: mkdir -p "$MUTATE_VERDICT_DIR"
+
+      - name: Restore the mutation verdicts of an earlier attempt
+        if: ${{ needs.scope.outputs.guard == 'true' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/mutate-verdicts
+          key: mutate-verdicts-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            mutate-verdicts-${{ github.job }}-${{ github.run_id }}-
+
       - name: Guard mutation test, shard 1/3
         if: ${{ needs.scope.outputs.guard == 'true' }}
         env:
           MUTATE_SHARD: 1/3
+          MUTATE_VERDICT_DIR: ${{ runner.temp }}/mutate-verdicts
         run: python3 hooks/mutate_guard.py
+
+      - name: Save the mutation verdicts
+        if: ${{ always() && needs.scope.outputs.guard == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/mutate-verdicts
+          key: mutate-verdicts-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       # The progress beat of hooks/test_guard.py (decision stall-watch). Runs in this job, not in the guard suite, which runs in the
       # sibling shards (checks-guard is split in four, decision ci-job-caps); this job is projected at about 16 min, 21% of its 75 min cap, and this step adds 101 s locally (16 tests, about 1.7 min,
@@ -2462,11 +2492,40 @@ jobs:
         with:
           python-version: "3.11"
 
+      # The per-mutant verdicts stay across a rerun of this run (decision hang-stop: a stopped run resumes). The shard step writes one
+      # verdict file per mutant into this folder (hooks/mutate_shared.py reads MUTATE_VERDICT_DIR; a verdict from other code is ruled out
+      # by its digest, hooks/mutate_guard.py verdict_digest). The restore step finds the save of an earlier attempt of this run id by the
+      # restore-keys prefix, since a cache key matches only exactly; a new push has a new run id and restores nothing. The save step runs
+      # after a red or failed shard step too, so a rerun of the run reuses what that attempt judged. A save that cannot reserve its key
+      # or finds nothing to save warns and never fails the job.
+      - name: Make the mutation verdict folder
+        if: ${{ needs.scope.outputs.guard == 'true' }}
+        env:
+          MUTATE_VERDICT_DIR: ${{ runner.temp }}/mutate-verdicts
+        run: mkdir -p "$MUTATE_VERDICT_DIR"
+
+      - name: Restore the mutation verdicts of an earlier attempt
+        if: ${{ needs.scope.outputs.guard == 'true' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/mutate-verdicts
+          key: mutate-verdicts-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            mutate-verdicts-${{ github.job }}-${{ github.run_id }}-
+
       - name: Guard mutation test, shard 2/3
         if: ${{ needs.scope.outputs.guard == 'true' }}
         env:
           MUTATE_SHARD: 2/3
+          MUTATE_VERDICT_DIR: ${{ runner.temp }}/mutate-verdicts
         run: python3 hooks/mutate_guard.py
+
+      - name: Save the mutation verdicts
+        if: ${{ always() && needs.scope.outputs.guard == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/mutate-verdicts
+          key: mutate-verdicts-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
@@ -2496,11 +2555,40 @@ jobs:
         with:
           python-version: "3.11"
 
+      # The per-mutant verdicts stay across a rerun of this run (decision hang-stop: a stopped run resumes). The shard step writes one
+      # verdict file per mutant into this folder (hooks/mutate_shared.py reads MUTATE_VERDICT_DIR; a verdict from other code is ruled out
+      # by its digest, hooks/mutate_guard.py verdict_digest). The restore step finds the save of an earlier attempt of this run id by the
+      # restore-keys prefix, since a cache key matches only exactly; a new push has a new run id and restores nothing. The save step runs
+      # after a red or failed shard step too, so a rerun of the run reuses what that attempt judged. A save that cannot reserve its key
+      # or finds nothing to save warns and never fails the job.
+      - name: Make the mutation verdict folder
+        if: ${{ needs.scope.outputs.guard == 'true' }}
+        env:
+          MUTATE_VERDICT_DIR: ${{ runner.temp }}/mutate-verdicts
+        run: mkdir -p "$MUTATE_VERDICT_DIR"
+
+      - name: Restore the mutation verdicts of an earlier attempt
+        if: ${{ needs.scope.outputs.guard == 'true' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/mutate-verdicts
+          key: mutate-verdicts-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            mutate-verdicts-${{ github.job }}-${{ github.run_id }}-
+
       - name: Guard mutation test, shard 3/3
         if: ${{ needs.scope.outputs.guard == 'true' }}
         env:
           MUTATE_SHARD: 3/3
+          MUTATE_VERDICT_DIR: ${{ runner.temp }}/mutate-verdicts
         run: python3 hooks/mutate_guard.py
+
+      - name: Save the mutation verdicts
+        if: ${{ always() && needs.scope.outputs.guard == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/mutate-verdicts
+          key: mutate-verdicts-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
