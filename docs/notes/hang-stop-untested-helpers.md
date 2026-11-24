@@ -1,0 +1,1 @@
+- hang-stop-untested-helpers: no test calls `hang_stop`, `alive` or `exited` in `bin/verdict` directly. Only the `hang_check` route is covered. Decision: hang-stop. Seen: 2026-11-23 x1

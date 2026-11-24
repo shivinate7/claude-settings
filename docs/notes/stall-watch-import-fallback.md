@@ -1,0 +1,1 @@
+- stall-watch-import-fallback: `hooks/stall_watch.py`: on ImportError the fallback reports ps as "did not answer". An old `hooks/_nowindow.py` beside a new `hooks/stall_watch.py` mid-install raises AttributeError on `PS_DOWN`. Decision: stall-watch. Seen: 2026-11-23 x1
