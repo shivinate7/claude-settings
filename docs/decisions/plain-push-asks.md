@@ -2,7 +2,7 @@
 
 ## The ruling
 
-No plain push asks. A push to main or master is refused. So is a push that writes an agent-worktree branch, and a push of every branch that would update main or master, or would send a local agent-worktree branch. A stray-branch push is allowed. Each refusal gives its remedy and ends with the comply-anyway line (decision `guards-never-ask`). The owner's typed override lets each refusal through (`owner-override`).
+No plain push asks. A push to main or master is refused. So is a push that writes an agent-worktree branch, and a push of every branch that would update main or master, or would send a local agent-worktree branch. A stray-branch push is allowed. Each refusal gives its remedy. Each refusal that replaced an ask also ends with the comply-anyway line (decision `guards-never-ask`): the push-to-main refusals (`PUSH_MAIN_REASON`, `PUSH_MAIN_BRANCH_REASON`) and the forced-push refusals that may reach main or cannot read the target (`PUSH_ASK_REASON`, `PUSH_ASK_BRANCH_REASON`). The owner's typed override lets each refusal through (`owner-override`).
 
 Sources:
 - Refusals and the stray-branch allow: owner rulings, 2026-11-23 10:49 CST and 11:07 CST (decision `guards-never-ask`).

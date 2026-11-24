@@ -10,7 +10,7 @@ Orchestrator call (lane bare-gh-merge-ask), changed by the owner's sort of 2026-
 - Quoted text, heredoc bodies and comments that name a merge are text, as in merge-checks.
 - The reason names `merge <pr> --confirm` (the merge tool), does not echo the repo path, and ends with the comply-anyway line.
 
-Why deny, not ask: every ask ends (owner, 2026-11-23 10:49 CST). The old ask kept a bare merge open for a broken merge tool. The deny closes that path, and no recovery route is named here. Why a rule at all: bare merges left the local main four commits behind origin.
+Why deny, not ask: every ask ends (owner, 2026-11-23 10:49 CST). The old ask kept a bare merge open for a broken merge tool. The deny closes that path. When the merge tool is broken, the owner's typed `override` lifts this refusal for that one act (decision `owner-override`), and that route does not depend on the merge tool. Why a rule at all: bare merges left the local main four commits behind origin.
 
 Kind: build
 Plan: docs/decisions/bare-merge-asks.md#the-ruling (all)
