@@ -1340,7 +1340,7 @@ jobs:
           job: checks-merge-install
 
   # The install.sh checkout-detection suite, split off checks-merge-install for wall time (step ci-merge-install-split):
-  # that job took 29.4 min and this suite 13.8 of them (retrospective CI audit 14:12 CST Nov 12, in the step's why). Same step, `if:` and own cap as before.
+  # that job took 29.4 min and this suite 13.8 of them (retrospective CI audit 14:12 CST Nov 12, in the step's why). Same step and `if:` as before; the hang stop (decision hang-stop) replaced its own cap.
   # The suite runs in 3 shards, shard 1 here and shards 2 and 3 in checks-install-checkout-2 and -3 (INSTALL_SRC_SHARD, hooks/test_install_src.sh).
   checks-install-checkout:
     runs-on: ubuntu-latest
@@ -1363,11 +1363,12 @@ jobs:
 
       - name: install.sh checkout-detection suite (shard 1 of 3)
         if: ${{ needs.scope.outputs.code == 'true' }}
-        # Own cap, 30 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Green max 12.6 min (754 s, run 43164094808 attempt 2). Run 43164094808 attempt 1 ran this step 888 s (14.8 min) and the old job cap cut it there, so 14.8 is a floor. 30 min is about twice that floor.
-        timeout-minutes: 30
+        # No step cap: bin/verdict stops the step only on a hang, 600 s with no output and no CPU (decision hang-stop); the job cap stays as the net (decision ci-job-caps).
         env:
           INSTALL_SRC_SHARD: 1/3
-        run: sh hooks/test_install_src.sh
+          VERDICT_HANG_SECONDS: 600
+          VERDICT_FULL_LOG: "1"
+        run: bin/verdict sh hooks/test_install_src.sh
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
@@ -1397,11 +1398,12 @@ jobs:
 
       - name: install.sh checkout-detection suite (shard 2 of 3)
         if: ${{ needs.scope.outputs.code == 'true' }}
-        # Own cap, 30 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Green max 12.6 min (754 s, run 43164094808 attempt 2). Run 43164094808 attempt 1 ran this step 888 s (14.8 min) and the old job cap cut it there, so 14.8 is a floor. 30 min is about twice that floor.
-        timeout-minutes: 30
+        # No step cap: bin/verdict stops the step only on a hang, 600 s with no output and no CPU (decision hang-stop); the job cap stays as the net (decision ci-job-caps).
         env:
           INSTALL_SRC_SHARD: 2/3
-        run: sh hooks/test_install_src.sh
+          VERDICT_HANG_SECONDS: 600
+          VERDICT_FULL_LOG: "1"
+        run: bin/verdict sh hooks/test_install_src.sh
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
@@ -1431,11 +1433,12 @@ jobs:
 
       - name: install.sh checkout-detection suite (shard 3 of 3)
         if: ${{ needs.scope.outputs.code == 'true' }}
-        # Own cap, 30 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Green max 12.6 min (754 s, run 43164094808 attempt 2). Run 43164094808 attempt 1 ran this step 888 s (14.8 min) and the old job cap cut it there, so 14.8 is a floor. 30 min is about twice that floor.
-        timeout-minutes: 30
+        # No step cap: bin/verdict stops the step only on a hang, 600 s with no output and no CPU (decision hang-stop); the job cap stays as the net (decision ci-job-caps).
         env:
           INSTALL_SRC_SHARD: 3/3
-        run: sh hooks/test_install_src.sh
+          VERDICT_HANG_SECONDS: 600
+          VERDICT_FULL_LOG: "1"
+        run: bin/verdict sh hooks/test_install_src.sh
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
@@ -1884,9 +1887,11 @@ jobs:
         run: bash -n install.sh
       - name: install.sh checkout-detection suite
         if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
-        # Own cap, 45 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The step ran 1293 s (21.6 min) in run 43184587111 and 1221 s in run 43164094808.
-        timeout-minutes: 45
-        run: sh hooks/test_install_src.sh
+        # No step cap: bin/verdict stops the step only on a hang (decision hang-stop); the job cap stays as the net (decision ci-job-caps). The step ran 1293 s (21.6 min) in run 43184587111 and 1221 s in run 43164094808.
+        env:
+          VERDICT_HANG_SECONDS: 600
+          VERDICT_FULL_LOG: "1"
+        run: bin/verdict sh hooks/test_install_src.sh
       - name: install_from_main suite
         if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
         run: sh merge/test_install_from_main.sh
@@ -1954,14 +1959,15 @@ jobs:
           python-version: "3.11"
 
       # The mac-tagged slice of the guard suite, on every event that runs macOS (R61, owner pick b, Nov 12): the full guard suite
-      # runs on Linux and Windows, and on macOS only this slice. Cap 45 stays; the slice runs far shorter than the shard
+      # runs on Linux and Windows, and on macOS only this slice. No step cap: bin/verdict stops the step only on a hang (decision hang-stop); the job cap stays as the net. The slice runs far shorter than the shard
       # it replaces (1106 s), unmeasured. hooks/test_guard.py holds the slice switch.
       - name: Guard fixture suite (macOS slice)
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
-        timeout-minutes: 45
         env:
           GUARD_TESTS: macos-slice
-        run: python3 hooks/test_guard.py
+          VERDICT_HANG_SECONDS: 600
+          VERDICT_FULL_LOG: "1"
+        run: bin/verdict python3 hooks/test_guard.py
 
       - name: Load reader against the OS tools
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}

@@ -1149,9 +1149,19 @@ def run_lines(st):
     return [ln.strip() for ln in (run_body(st) or "").split("\n") if ln.strip()]
 
 
+# The hang stop wraps a step's command in bin/verdict (decision hang-stop). A step that runs its command through it still runs it.
+# Its seconds and its full-log switch are the two env keys a wrapped step adds; HangStopWrap (lint/test_checks_step_scope.py) pins their
+# values, so no pin here reads them.
+VERDICT_RUN = "bin/verdict "
+VERDICT_HANG_VAR = "VERDICT_HANG_SECONDS"
+VERDICT_FULL_LOG_VAR = "VERDICT_FULL_LOG"
+WRAP_ENV_VARS = (VERDICT_HANG_VAR, VERDICT_FULL_LOG_VAR)  # the env keys a wrapped step adds, and no other
+
+
 def split_homes(text, jobs, cmd):
-    """(job, step) for each step of the named jobs that runs `cmd` on one of its lines."""
-    return [(job, st) for job in jobs for st in step_blocks(job_block(text, job)) if cmd in run_lines(st)]
+    """(job, step) for each step of the named jobs that runs `cmd` on one of its lines, bare or through VERDICT_RUN."""
+    return [(job, st) for job in jobs for st in step_blocks(job_block(text, job))
+            if cmd in run_lines(st) or VERDICT_RUN + cmd in run_lines(st)]
 
 
 def pin_problems(name, st, cmd, want_if, want_shell, want_env=None, keep_running=False):
@@ -1159,6 +1169,8 @@ def pin_problems(name, st, cmd, want_if, want_shell, want_env=None, keep_running
     the step is a checks-job step: its keep-running guard comes off before the pin reads it (keep_running_off)."""
     raw_if = keep_running_off(step_key(st, "if")) if keep_running else step_key(st, "if")
     got_if, got_env = job_if_without_records(raw_if), step_env(st)  # the records-only skip comes off, bare or after the scope condition
+    if VERDICT_RUN + cmd in run_lines(st):
+        got_env = {k: v for k, v in got_env.items() if k not in WRAP_ENV_VARS}  # the wrap's two added keys; every other key stays pinned
     problems = []
     if got_if != want_if:
         problems.append(f"{name}: {cmd!r} if is {got_if!r}, want {want_if!r}")
@@ -3841,12 +3853,13 @@ SHARD_SUITES = (
 
 
 def shard_env(text, cmd, var):
-    """{job: value} of each job with a step that runs `cmd` and sets `var` in its env. A job with no such step is absent."""
+    """{job: value} of each job with a step that runs `cmd`, bare or through bin/verdict, and sets `var` in its env. A job with no such
+    step is absent. A different command behind bin/verdict is no match."""
     found = {}
     for name, job in all_jobs(text).items():
         for st in job["steps"]:
             env = st.get("env") if isinstance(st.get("env"), dict) else {}
-            if key(st) == cmd and var in env:
+            if key(st) in (cmd, VERDICT_RUN + cmd) and var in env:
                 found[name] = env[var]
     return found
 
@@ -3920,6 +3933,61 @@ class ShardControls(unittest.TestCase):
             self.assertEqual(code, 0, f"shard {i}/{count} of the install suite exits {code}: {err}")
             picked += names
         self.assertEqual(sorted(picked), sorted(all_names), f"the {count} shards do not select each case once")
+
+
+class VerdictWrappedShards(unittest.TestCase):
+    """A shard step run through bin/verdict (decision hang-stop) is still found by its shard value. A different command behind
+    bin/verdict is not, and a wrapped step that loses its shard value still gets an env problem."""
+
+    @staticmethod
+    def workflow(run):
+        return ("jobs:\n  job-a:\n    runs-on: ubuntu-latest\n    steps:\n      - name: suite\n        env:\n"
+                "          INSTALL_SRC_SHARD: 1/3\n          VERDICT_HANG_SECONDS: 600\n" + f"        run: {run}\n")
+
+    def test_a_wrapped_shard_step_is_found_by_its_shard_value(self):
+        # Named failure: shard_env matches only the bare command, so a step wrapped in bin/verdict drops out of its shard family.
+        got = shard_env(self.workflow(VERDICT_RUN + INSTALL_CMD), INSTALL_CMD, INSTALL_VAR)
+        self.assertEqual(got, {"job-a": "1/3"}, f"the wrapped install step is not counted as a shard: {got}")
+
+    def test_a_different_command_behind_verdict_is_no_shard(self):
+        # Named failure: a pin that accepts any command behind bin/verdict counts a step that runs another suite as this suite's shard.
+        got = shard_env(self.workflow(VERDICT_RUN + "sh hooks/other_suite.sh"), INSTALL_CMD, INSTALL_VAR)
+        self.assertEqual(got, {}, f"a different command behind bin/verdict is counted as the install suite's shard: {got}")
+
+    def test_a_wrapped_step_that_loses_its_shard_value_is_still_a_problem(self):
+        # Named failure: the wrap's seconds are the one key left out of the env pin; a lost INSTALL_SRC_SHARD still goes red.
+        # Only the env problem is asserted here: the if: is not the subject of this case.
+        step = ("      - name: suite\n        if: ${{ needs.scope.outputs.code == 'true' }}\n        env:\n"
+                "          VERDICT_HANG_SECONDS: 600\n" + f"        run: {VERDICT_RUN + INSTALL_CMD}\n")
+        problems = pin_problems("job-a", step, INSTALL_CMD, "x", None, {INSTALL_VAR: "1/3"})
+        self.assertTrue(any("env is" in p for p in problems), f"a wrapped step with no shard value has no env problem: {problems}")
+
+    @staticmethod
+    def shard_step_with_env(run, env_lines):
+        """An install shard step (INSTALL_SRC_SHARD 1/3) that runs `run`, with the env lines env_lines added to its env."""
+        return ("      - name: suite\n        if: ${{ needs.scope.outputs.code == 'true' }}\n        env:\n"
+                "          INSTALL_SRC_SHARD: 1/3\n" + env_lines + f"        run: {run}\n")
+
+    @staticmethod
+    def shard_env_problems(step, cmd):
+        """The env problems the pin gives the step, with the shard value wanted. The if: is not the subject of these cases."""
+        return [p for p in pin_problems("job-a", step, cmd, "x", None, {INSTALL_VAR: "1/3"}) if "env is" in p]
+
+    def test_a_wrapped_step_with_the_full_log_switch_has_no_env_problem(self):
+        # Named failure: the pin reads the full-log switch as a stray env key, so the wrapped shard steps go red once they set it.
+        step = self.shard_step_with_env(VERDICT_RUN + INSTALL_CMD, "          VERDICT_HANG_SECONDS: 600\n          VERDICT_FULL_LOG: \"1\"\n")
+        self.assertEqual(self.shard_env_problems(step, INSTALL_CMD), [], "a wrapped step with the full-log switch has an env problem")
+
+    def test_an_unwrapped_step_with_the_full_log_switch_is_an_env_problem(self):
+        # Control, green on the old pin: the switch is a wrap key only on a step that runs through bin/verdict.
+        step = self.shard_step_with_env(INSTALL_CMD, "          VERDICT_FULL_LOG: \"1\"\n")
+        self.assertTrue(self.shard_env_problems(step, INSTALL_CMD), "an unwrapped step with the full-log switch passes the env pin")
+
+    def test_a_wrapped_step_with_another_verdict_key_is_still_an_env_problem(self):
+        # Control, green on the old pin: the pin lets in the two wrap keys and no other, so a wrapped step's VERDICT_HEARTBEAT still fails.
+        step = self.shard_step_with_env(VERDICT_RUN + INSTALL_CMD,
+                                        "          VERDICT_HANG_SECONDS: 600\n          VERDICT_FULL_LOG: \"1\"\n          VERDICT_HEARTBEAT: \"5\"\n")
+        self.assertTrue(self.shard_env_problems(step, INSTALL_CMD), "a wrapped step's other VERDICT_ key passes the env pin")
 
 
 # ---- The Debt retire check takes the Linux guard suite's proof from the guard shards (decision ci-cut-in-steps). checks waits for every guard shard in LINUX_GUARD_JOBS, the family

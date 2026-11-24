@@ -492,6 +492,55 @@ def copy_repos(t):
             shutil.rmtree(os.path.join(t, name), True)
         return False
 
+class RepoTemplate(unittest.TestCase):
+    """copy_repos gives each test a copy of the template build_repos makes once per process. A copy must hold what a fresh build holds: the
+    same refs and trees in origin and in each clone, and each clone's url at its own origin. A copy is private to its test, its origin included."""
+
+    def copies(self):
+        """-> (fresh, copied): one folder of this run built by build_repos, one filled by copy_repos."""
+        root = os.path.realpath(tempfile.mkdtemp(prefix="repo-template-", dir=run_folder()))
+        fresh, copied = os.path.join(root, "fresh"), os.path.join(root, "copied")
+        os.makedirs(fresh)
+        os.makedirs(copied)
+        build_repos(fresh)
+        self.assertTrue(copy_repos(copied), "copy_repos could not copy the template")
+        return fresh, copied
+
+    def new_copy(self, root, name):
+        """-> root/name, filled by copy_repos: one more copy of the template, made the way copies() makes its copy."""
+        folder = os.path.join(root, name)
+        os.makedirs(folder)
+        self.assertTrue(copy_repos(folder), f"copy_repos could not copy the template for the copy {name}")
+        return folder
+
+    def refs_and_trees(self, folder):
+        """-> each repo's refs, one line per ref with the tree that ref names: origin.git, co and other. Commit ids differ between builds, trees do not."""
+        return {name: sh(os.path.join(folder, name), "git", "for-each-ref", "--format=%(refname) %(tree)") for name in ("origin.git", "co", "other")}
+
+    def test_a_copy_matches_a_fresh_build_and_is_private_to_its_test(self):
+        fresh, copied = self.copies()
+        self.assertEqual(self.refs_and_trees(copied), self.refs_and_trees(fresh),
+                         "a copy's refs or trees differ from a fresh build's")
+        norm = lambda p: os.path.normcase(os.path.realpath(p))
+        for name in ("co", "other"):
+            url = sh(os.path.join(copied, name), "git", "config", "--get", "remote.origin.url")
+            self.assertEqual(norm(url), norm(os.path.join(copied, "origin.git")), f"the copied clone {name} does not point at its own origin: {url}")
+        second = self.new_copy(os.path.dirname(copied), "second")
+        put(os.path.join(copied, "co", "only-here.txt"), "one test's edit\n")
+        self.assertFalse(os.path.exists(os.path.join(second, "co", "only-here.txt")), "an edit in one copy reached another copy")
+
+    def test_a_push_into_one_copys_origin_is_absent_from_the_origin_of_every_other_copy(self):
+        fresh, copied = self.copies()
+        root, ref = os.path.dirname(copied), "refs/heads/only-in-copied"
+        before = self.new_copy(root, "before")  # made before the write
+        sh(os.path.join(copied, "co"), "git", "push", "-q", "origin", "HEAD:" + ref)  # the write: a push from a clone to its own origin
+        after = self.new_copy(root, "after")  # made after the write: a write that reached the template shows here
+        def refs_of(folder):
+            return sh(os.path.join(folder, "origin.git"), "git", "for-each-ref", "--format=%(refname)", ref)
+        self.assertEqual(refs_of(copied), ref, "the push did not land in the origin of the copy it was pushed from")  # the scope first
+        for when, folder in (("before the write", before), ("after the write", after)):
+            self.assertEqual(refs_of(folder), "", f"a push into one copy's origin reached the origin of the copy made {when}")
+
 class Env(unittest.TestCase):
     def setUp(self):
         self.new_repos()
@@ -1802,7 +1851,8 @@ class ShallowMain(unittest.TestCase):
 
     def setUp(self):
         self.t = tempfile.mkdtemp(dir=self.run_dir)
-        build_repos(self.t)  # origin.git, and the clones seed, co and other: main holds the seed commit
+        if not copy_repos(self.t):  # origin.git and the clones co and other, with main at the seed commit
+            build_repos(self.t)
         bare, other = os.path.join(self.t, "origin.git"), os.path.join(self.t, "other")
         put(os.path.join(other, "old.txt"), "old\n")
         sh(other, "git", "add", "-A"); sh(other, "git", "commit", "-q", "-m", "old"); sh(other, "git", "push", "-q", "origin", "main")
@@ -19609,9 +19659,13 @@ class ReviewEnv(Env):
 
         if tree is None:
             git_in("git", "read-tree", parent)
-            for path, text in changes.items():
-                blob = git_in("git", "hash-object", "-w", "--stdin", text=text)
-                git_in("git", "update-index", "--add", "--cacheinfo", f"100644,{blob},{path}")
+            if changes:  # one hash-object and one update-index for all the changes: five git processes a commit, whatever its change count
+                names = [os.path.join(self.t, "fixture.blob.%d" % i) for i in range(len(changes))]
+                for name, text in zip(names, changes.values()):
+                    put(name, text)
+                blobs = git_in("git", "hash-object", "-w", "--no-filters", *names).split()
+                git_in("git", "update-index", *(arg for blob, path in zip(blobs, changes)
+                                                for arg in ("--add", "--cacheinfo", f"100644,{blob},{path}")))
             tree = git_in("git", "write-tree")
         parents = [arg for p in (parent, *more_parents) for arg in ("-p", p)]
         return git_in("git", "commit-tree", tree, *parents, "-m", message)
@@ -25852,7 +25906,9 @@ def setUpModule():
     install_model_guard()
 
 
-class ProseJudge(Env):
+class ProseJudgeFixture(Env):
+    """The prose judge's fixtures: the merge run with a faked judge call, and the UNKNOWN count assertions. No test lives here: ProseJudge and
+    ProseJudgeVerdicts each take this one home."""
     def setup_range(self, main_files, feat_files, links=None, later=None, renames=None):
         """main gains `main_files` ({path: text}), so their lines are in no added line. Then feat removes the pending record
         (second.md, governed prose with no cite) and changes `feat_files`, and makes each `links` ({path: target}) a symlink to
@@ -25912,6 +25968,17 @@ class ProseJudge(Env):
         found = [(int(n), cause) for n, cause in re.findall(r"(\d+) (%s)\b" % "|".join(UNKNOWN_CAUSES), line)]
         self.assertEqual(found, causes, "causes in the UNKNOWN line: %r, want %r: %r" % (found, causes, line))
 
+    def assert_unknown_total(self, out, k):
+        """The merge's one prose-judge UNKNOWN line reads K lines not judged, and its buckets, each one of UNKNOWN_CAUSES, add up to K. The
+        wording between those parts is not pinned. A case that needs one named bucket uses assert_unknown_count."""
+        lines = prose_unknown_lines(out)
+        self.assertEqual(len(lines), 1, "prose-judge UNKNOWN lines: %d, want 1: one count line per merge\n%s" % (len(lines), out))
+        found_k = re.search(r"(\d+) lines not judged", lines[0])
+        self.assertIsNotNone(found_k, "the UNKNOWN line has no `<K> lines not judged`: %r" % lines[0])
+        self.assertEqual(int(found_k.group(1)), k, "lines not judged: %s, want %d: %r" % (found_k.group(1), k, lines[0]))
+        buckets = [int(n) for n, _ in re.findall(r"(\d+) (%s)\b" % "|".join(UNKNOWN_CAUSES), lines[0])]
+        self.assertEqual(sum(buckets), k, "the causes in the UNKNOWN line add to %d, want %d: %r" % (sum(buckets), k, lines[0]))
+
     def real_judge(self, reply=None, claude=None, isolation=None):
         """The merge through the real invoke_model and its parse. Each `claude` start is answered in this process: by `claude(args)` when
         given, a function that returns a result or raises, else by an envelope whose result text is `reply`. `isolation`, when given,
@@ -25963,6 +26030,7 @@ class ProseJudge(Env):
         self.assertNotIn("refs/heads/feat", self.refs(), "origin feat is still there: the interrupt came before cut_branch\n" + out)
         self.assertFalse(self.lock_ref(), "the merge lock is still held after the interrupt\n" + out)
 
+class ProseJudge(ProseJudgeFixture):
     def test_a_changed_backing_file_selects_the_line_that_cites_it(self):
         self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
         stub, rc, out = self.judge(verdict_for(3, "holds"))
@@ -27035,6 +27103,94 @@ class ProseJudge(Env):
         where = where_else_calls(stub)
         self.assertEqual(len(where), 1, "where-else calls: %d, want 1: the code counts the moved record's lines as changed\n%s" % (len(where), out))
         self.assertIn("renamed-first.md", where[0], "the where-else prompt does not carry the moved record")
+
+
+# A reply may repeat a line's verdict. Entries that agree count the line once; entries that conflict read the line as no readable verdict.
+STALE_ENTRY = ("stale", "the cited file says otherwise")
+HOLDS_ENTRY = ("holds", "the cited file agrees")
+UNBACKED_ENTRY = ("unbacked", "no cited file backs it")
+
+
+def answering_many(entries_of):
+    """Like answering: `entries_of(path, line)` gives the (verdict, why) entries the reply carries for that line, in reply order. Two or more
+    entries repeat the line. An empty list leaves the line out of the reply, so it reads skipped."""
+    def answer(prompt):
+        rows = []
+        for path, number in judged_pairs(prompt):
+            for verdict, why in entries_of(path, number):
+                rows.append({"path": path, "line": number, "verdict": verdict, "why": why})
+        return {"verdicts": rows}, None
+    return answer
+
+
+def findings_at(out, path, number):
+    """The prose-judge finding lines that name `path` at line `number`. A line the model holds prints none."""
+    return [line for line in finding_lines(out) if "%s:%d " % (path, number) in line]
+
+
+class ProseJudgeVerdicts(ProseJudgeFixture):
+    """merge.py prose_judge_run keeps the last entry a reply gives a line, so a repeat is read silently. Entries that agree count the line
+    once. Entries that conflict read the line as no readable verdict. A raise out of prose_judge_calls counts the lines it leaves unjudged.
+    Every case stays report-only: rc 0, and the merge lands."""
+
+    def test_agreeing_duplicate_verdicts_count_once(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(answering_many(lambda path, n: [STALE_ENTRY, STALE_ENTRY] if n == 3 else []))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertEqual(len(findings_at(out, PROSE, 3)), 1, "the report names %s:3 %d times, want once: the two entries agree\n%s" % (PROSE, len(findings_at(out, PROSE, 3)), out))
+        self.assertEqual(prose_unknown_lines(out), [], "agreeing entries read a line UNKNOWN\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_conflicting_duplicates_read_unknown_when_the_last_holds(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(answering_many(lambda path, n: [STALE_ENTRY, HOLDS_ENTRY] if n == 3 else []))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assert_unknown_count(out, 1, [(1, CAUSE_NO_VERDICT)])
+        self.assertEqual(findings_at(out, PROSE, 3), [], "the report names %s:3 from one of two conflicting verdicts\n%s" % (PROSE, out))
+        self.assertEqual(rc, 0, out)
+
+    def test_conflicting_duplicates_read_unknown_when_the_last_is_stale(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(answering_many(lambda path, n: [HOLDS_ENTRY, STALE_ENTRY] if n == 3 else []))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assert_unknown_count(out, 1, [(1, CAUSE_NO_VERDICT)])
+        self.assertEqual(findings_at(out, PROSE, 3), [], "the report names %s:3 from the last of two conflicting verdicts\n%s" % (PROSE, out))
+        self.assertEqual(rc, 0, out)
+
+    def test_agreeing_pair_then_a_different_verdict_reads_unknown(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(answering_many(lambda path, n: [STALE_ENTRY, STALE_ENTRY, HOLDS_ENTRY] if n == 3 else []))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assert_unknown_count(out, 1, [(1, CAUSE_NO_VERDICT)])
+        self.assertEqual(findings_at(out, PROSE, 3), [], "the report names %s:3 though its entries conflict\n%s" % (PROSE, out))
+        self.assertEqual(rc, 0, out)
+
+    def test_a_conflicting_line_leaves_the_other_lines_their_verdicts(self):
+        self.setup_range({PROSE: cited_lines(3)}, {BACKING: BACKING_TEXT})  # the cited lines are 3, 4 and 5
+        entries = {3: [STALE_ENTRY], 4: [STALE_ENTRY, HOLDS_ENTRY], 5: [UNBACKED_ENTRY]}
+        stub, rc, out = self.judge(answering_many(lambda path, n: entries.get(n, [])))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assert_unknown_count(out, 1, [(1, CAUSE_NO_VERDICT)])
+        self.assertEqual(len(findings_at(out, PROSE, 3)), 1, "the report does not name %s:3, which the reply gives one stale verdict\n%s" % (PROSE, out))
+        self.assertEqual(len(findings_at(out, PROSE, 5)), 1, "the report does not name %s:5, which the reply gives one unbacked verdict\n%s" % (PROSE, out))
+        self.assertEqual(findings_at(out, PROSE, 4), [], "the report names %s:4, whose two verdicts conflict\n%s" % (PROSE, out))
+        self.assertEqual(rc, 0, out)
+
+    def test_a_raise_out_of_the_judge_calls_counts_its_lines_unknown(self):
+        self.setup_range(three_call_files(), {BACKING: BACKING_TEXT})
+        planned = []
+
+        def calls_that_cannot_start(decision_watch_module, prompts):
+            planned.extend(prompts)
+            raise RuntimeError("the judge's thread pool could not start")
+
+        with unittest.mock.patch.object(merge, "prose_judge_calls", calls_that_cannot_start):
+            stub, rc, out = self.judge(holds_every_line, cap=None)
+        self.assertEqual(len(planned), 3, "planned calls: %d, want 3 (%s)" % (len(planned), PACK_PICK))
+        self.assertEqual(sum(len(judged_pairs(prompt)) for prompt in planned), 3 * CALL_LINES, "the planned calls do not hold every cited line (%s)" % PACK_PICK)
+        self.assert_unknown_total(out, 3 * CALL_LINES)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), "the merge did not land after the calls could not start\n" + out)
 
 
 # The where-else judge's fixtures. RULING_DOC is the claim-at-merge rule as CLAUDE.md states it, with its anchor line. SECTIONS is one

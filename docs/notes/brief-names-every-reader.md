@@ -1,0 +1,1 @@
+- brief-names-every-reader: a brief's done check names every test file that reads the changed file, and the whole file when it is small, never one class. A check that named one class missed a reader test (a miss on Nov 24 2026, 04:59 CST). Seen: 2026-11-24 x1

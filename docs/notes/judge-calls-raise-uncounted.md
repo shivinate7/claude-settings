@@ -1,1 +1,1 @@
-- judge-calls-raise-uncounted: if `prose_judge_calls` in `merge/merge.py` raises, `prose_judge_run` prints only the plan-level "it could not run" line and does not count the lines it did not judge, so no UNKNOWN count line reports them. Seen: 2026-11-24 x1
+- judge-calls-raise-uncounted: in `merge/merge.py` `prose_judge_run`, a raise outside the `prose_judge_calls` guard, such as the `import decision_watch` at its top, prints the plan-level "it could not run" line and counts no line after the raise, so no UNKNOWN count line reports them. Seen: 2026-11-24 x1

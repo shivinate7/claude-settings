@@ -18,6 +18,7 @@ HB_FORMAT = re.compile(r"^verdict: still running, [0-9][0-9.]*s?, log=")
 POSIX_SKIP = "the form runs through a POSIX shell (bash -c), which Windows does not have"
 HANG_SKIP = "the hang stop reads CPU through a POSIX ps and stops a process group, which Windows does not have"
 HANG_CAP = 30  # the hang cases' guard: a stop takes about 2 N s, so 30 s sits well above a run of 1-2 s
+HANG_EARLY = "print('EARLY-HANG-MARK', flush=True)\nfor i in range(40): print(f'filler {i}', flush=True)\n"  # a line 40 lines before the stop
 PS_SCOPE = "import os, subprocess\nsubprocess.run(['ps', '-p', str(os.getpid())], capture_output=True)\n"  # the child's own ps start: proves the counting shim is on its PATH
 WALL_JUMP = ("import runpy, sys, time\n"  # the launcher: verdict runs in this process with its wall clock patched; the child is a separate process
              "real, reads = time.time, [0]\n"
@@ -53,6 +54,7 @@ def run(code=None, log=None, extra=None, timeout=None, launcher=None, shell=None
     env.pop("VERDICT_HEARTBEAT", None)
     env.pop("STALL_WATCH_BEAT", None)  # an inherited beat file would take the beat lines of these runs
     env.pop("VERDICT_HANG_SECONDS", None)  # the hang stop is off unless a case sets it (decision hang-stop)
+    env.pop("VERDICT_FULL_LOG", None)  # the full log is off unless a case sets it (decision hang-stop)
     if log: env["VERDICT_LOG"] = log
     env.update(extra or {})
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
@@ -108,6 +110,18 @@ class T(unittest.TestCase):
         body = r.stdout.splitlines()[1:]
         self.assertEqual(len(body), 30)
         self.assertEqual(body[-1], "l99")
+
+    def test_fail_excerpt_keeps_every_failing_case_name(self):
+        # A CI step shows only this excerpt, so a FAIL must name each failing case. Twelve failing unittest cases make 36 hot lines,
+        # and the 30-line excerpt cut the first cases' names (decision hang-stop: a wrapped step's log is the excerpt).
+        lines = []
+        for i in range(12):
+            lines += [f"print('FAIL: test_case_{i:02d} (m.T.test_case_{i:02d})')", "print('Traceback (most recent call last):')",
+                      f"print('AssertionError: {i} != -1')"]
+        r = run("\n".join(lines) + "\nprint('FAILED (failures=12)')\nraise SystemExit(1)\n")
+        self.assertEqual(r.returncode, 1)
+        missing = [f"test_case_{i:02d}" for i in range(12) if f"test_case_{i:02d}" not in r.stdout]
+        self.assertEqual(missing, [], "the FAIL excerpt drops the names of these failing cases")
 
     def test_reused_log_is_not_truncated(self):
         with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
@@ -271,6 +285,7 @@ class T(unittest.TestCase):
         env.pop("VERDICT_HEARTBEAT", None)
         env.pop("STALL_WATCH_BEAT", None)
         env.pop("VERDICT_HANG_SECONDS", None)
+        env.pop("VERDICT_FULL_LOG", None)
         env.update(env_extra or {})
         env["VERDICT_LOG"] = os.path.join(d, "v.log")
         sink = output if output is not None else subprocess.DEVNULL
@@ -325,12 +340,14 @@ class T(unittest.TestCase):
             self.assertTrue(wait_gone(child, 30), "INT to verdict did not end its child %d, which runs after verdict returned" % child)
             self.assertTrue(wait_gone(grand, 30), "INT to verdict did not end the child's child %d, which runs after verdict returned" % grand)
 
-    def run_hang_case(self, d, seconds, before_sleep=""):
+    def run_hang_case(self, d, seconds, before_sleep="", extra_env=None):
         """Runs verdict over a child tree with VERDICT_HANG_SECONDS set and waits for verdict to return. A verdict that does not return
-        within HANG_CAP fails here. -> (verdict's rc, its output, child pid, grandchild pid, the time it returned)."""
+        within HANG_CAP fails here. extra_env adds verdict's other variables. -> (verdict's rc, its output, child pid, grandchild pid, the time it returned)."""
         out = os.path.join(d, "out.txt")
+        env = {"VERDICT_HANG_SECONDS": str(seconds)}
+        env.update(extra_env or {})
         with open(out, "wb") as fh:
-            proc, child, grand = self.start_child_tree(d, env_extra={"VERDICT_HANG_SECONDS": str(seconds)}, output=fh, before_sleep=before_sleep)
+            proc, child, grand = self.start_child_tree(d, env_extra=env, output=fh, before_sleep=before_sleep)
             self.assertTrue(alive(child) and alive(grand), "scope: the child and its child must run before the stop")
             try:
                 proc.wait(timeout=HANG_CAP)
@@ -453,6 +470,31 @@ class T(unittest.TestCase):
             self.assertIn("log=", hang[0], "the HANG line names no log")
             self.assertFalse(any(l.startswith(("FAIL ", "PASS ", "SKIP ")) for l in lines), "a second verdict word printed: " + out)
             self.assertNotEqual(rc, 0, "a hang exits zero")
+
+    @unittest.skipIf(os.name == "nt", HANG_SKIP)
+    def test_full_log_hang_prints_the_verdict_line_first(self):
+        """With VERDICT_FULL_LOG=1 the HANG line is the first printed line, then the log (decision hang-stop). Today the process tree
+        and the log tail print before it, so this fails on the old code."""
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            _, out, _, _, _ = self.run_hang_case(d, 1, before_sleep=HANG_EARLY, extra_env={"VERDICT_FULL_LOG": "1"})
+        first = out.splitlines()[:1]
+        self.assertTrue(first and first[0].startswith("HANG "), "the first line with VERDICT_FULL_LOG=1 is not the HANG line: %r" % first)
+
+    @unittest.skipIf(os.name == "nt", HANG_SKIP)
+    def test_full_log_hang_prints_a_line_more_than_30_before_the_stop(self):
+        """With VERDICT_FULL_LOG=1 the HANG output keeps a child's line 40 lines before the stop: the log tail is 30 lines."""
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            _, out, _, _, _ = self.run_hang_case(d, 1, before_sleep=HANG_EARLY, extra_env={"VERDICT_FULL_LOG": "1"})
+        self.assertEqual(sum(l.startswith("HANG ") for l in out.splitlines()), 1, "want one HANG line: " + out)
+        self.assertIn("EARLY-HANG-MARK", out.splitlines(), "the HANG output with VERDICT_FULL_LOG=1 drops a line 40 lines before the stop")
+
+    @unittest.skipIf(os.name == "nt", HANG_SKIP)
+    def test_hang_without_the_switch_keeps_the_excerpt(self):
+        """Control, green on the old code: with the switch unset the early line stays out, and the HANG line is still there."""
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            _, out, _, _, _ = self.run_hang_case(d, 1, before_sleep=HANG_EARLY)
+        self.assertTrue(any(l.startswith("HANG ") for l in out.splitlines()), out)
+        self.assertNotIn("EARLY-HANG-MARK", out.splitlines(), "the HANG excerpt with the switch unset carries a line 40 before the stop")
 
     def run_bounded(self, *args, **kwargs):
         """run() with HANG_CAP as its timeout: a verdict that does not return fails the case."""
@@ -802,6 +844,85 @@ class T(unittest.TestCase):
             self.assertTrue(m and os.path.exists(m.group(1)), first)
             self.assertEqual(os.path.normcase(m.group(1)), os.path.normcase(log))
             self.assertIn("FAIL boom", open(log).read())
+
+
+class FullLog(unittest.TestCase):
+    """VERDICT_FULL_LOG=1: a FAIL and a HANG print the verdict line first, then the whole log, every line unchanged and in order.
+    A wrapped CI step shows only verdict's output, and its full log stays on the runner (decision hang-stop). PASS and SKIP print
+    no log. Unset or any other value keeps the excerpt."""
+    EARLY_PLAIN ="print('EARLY-PLAIN-MARK')\nfor i in range(35): print(f'ValueError: later {i}')\nraise SystemExit(1)\n"  # no hot word on the first line
+
+    def run_logged(self, code, extra=None):
+        """Runs code under verdict with its log in this run's folder. -> (verdict's run, the log's lines)."""
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            log = os.path.join(d, "v.log")
+            r = run(code, log, extra)
+            with open(log, encoding="utf-8") as h: full = h.read().splitlines()
+        return r, full
+
+    def test_full_log_fail_prints_a_plain_line_more_than_30_before_the_end(self):
+        # The excerpt keeps the last 30 hot lines, so the plain first line, 35 hot lines before the end, is dropped without the switch.
+        r, _ = self.run_logged(self.EARLY_PLAIN, {"VERDICT_FULL_LOG": "1"})
+        self.assertTrue(r.stdout.startswith("FAIL "), r.stdout[:300])
+        self.assertIn("EARLY-PLAIN-MARK", r.stdout.splitlines(), "the FAIL output with VERDICT_FULL_LOG=1 drops a plain line 35 hot lines before the end")
+
+    def test_full_log_fail_prints_the_verdict_line_then_the_whole_log_in_order(self):
+        code = ("print('EARLY-PLAIN-MARK')\n"
+                "print('FAIL: test_one (m.T.test_one)')\n"
+                "print('Traceback (most recent call last):')\n"
+                "print('  File \"m.py\", line 5, in test_one')\n"
+                "for i in range(40): print(f'step {i} done')\n"
+                "print('AssertionError: 1 != 2')\n"
+                "raise SystemExit(1)\n")
+        r, full = self.run_logged(code, {"VERDICT_FULL_LOG": "1"})
+        lines = r.stdout.splitlines()
+        self.assertTrue(lines and lines[0].startswith("FAIL "), r.stdout[:300])
+        self.assertEqual(lines[1:], full, "the FAIL output is not the whole log after its verdict line: %d lines printed, %d in the log"
+                         % (len(lines) - 1, len(full)))
+
+    def test_full_log_fail_names_every_case_past_300(self):
+        # The excerpt keeps at most 300 names beside the last 30 hot lines, so 400 failing cases lose their first 70 names without the switch.
+        r, _ = self.run_logged("for i in range(400): print(f'FAIL: test_case_{i:03d} (m.T.test_case_{i:03d})')\nraise SystemExit(1)\n",
+                               {"VERDICT_FULL_LOG": "1"})
+        missing = [i for i in range(400) if f"(m.T.test_case_{i:03d})" not in r.stdout]
+        self.assertEqual(missing, [], "the FAIL output with VERDICT_FULL_LOG=1 drops %d of 400 failing case names" % len(missing))
+
+    def test_full_log_fail_prints_a_name_line_past_300_chars_unchanged(self):
+        # The excerpt cuts a name line at 300 chars. This name has 35 names after it, so it is outside the 30 hot lines that stay whole.
+        long_line = "FAIL: test_long_" + "x" * 400 + " LONG-END-MARK"
+        code = "print(%r)\nfor i in range(35): print(f'FAIL: test_after_{i:02d}')\nraise SystemExit(1)\n" % long_line
+        r, _ = self.run_logged(code, {"VERDICT_FULL_LOG": "1"})
+        self.assertIn(long_line, r.stdout.splitlines(), "the FAIL output with VERDICT_FULL_LOG=1 cuts a name line past 300 chars")
+
+    def test_full_log_fail_prints_an_early_line_from_the_first_mib_of_a_2_mib_log(self):
+        # The excerpt reads only the last 1 MiB of the run (TAIL), so a line at the start of a 2 MiB log is outside it without the switch.
+        code = "print('EARLY-FIRST-MIB-MARK')\nfor i in range(2200): print('x' * 1000)\nprint('FAIL boom')\nraise SystemExit(1)\n"
+        r, _ = self.run_logged(code, {"VERDICT_FULL_LOG": "1"})
+        self.assertIn("EARLY-FIRST-MIB-MARK", r.stdout.splitlines(), "the FAIL output with VERDICT_FULL_LOG=1 drops a line from the first MiB of a 2 MiB log")
+
+    def test_unset_or_other_switch_values_keep_the_excerpt(self):
+        # Control, green on the old code: only VERDICT_FULL_LOG=1 prints the log. Unset, empty, 0 and true keep today's excerpt.
+        for value in (None, "", "0", "true"):
+            with self.subTest(value=value):
+                r, _ = self.run_logged(self.EARLY_PLAIN, None if value is None else {"VERDICT_FULL_LOG": value})
+                self.assertNotIn("EARLY-PLAIN-MARK", r.stdout.splitlines(), "VERDICT_FULL_LOG=%r prints the whole log" % value)
+
+    def test_fail_with_no_output_still_leads_with_the_verdict_line(self):
+        # Control, green on the old code: the empty log. verdict exits 1 and its FAIL line comes first.
+        r, _ = self.run_logged("raise SystemExit(1)\n", {"VERDICT_FULL_LOG": "1"})
+        self.assertEqual(r.returncode, 1, r.stdout[:300])
+        self.assertTrue(r.stdout.startswith("FAIL "), r.stdout[:300])
+
+    def test_pass_and_skip_print_no_log_with_the_switch(self):
+        # Control, green on the old code: PASS and SKIP print one line each, with the switch on.
+        cases = (("PASS", "print('NOISY-PASS-MARK')\n"), ("SKIP", "print('NOISY-SKIP-MARK')\nprint('SKIP test_one_case')\n"))
+        for word, code in cases:
+            with self.subTest(verdict=word):
+                r, _ = self.run_logged(code, {"VERDICT_FULL_LOG": "1"})
+                self.assertEqual(r.returncode, 0, r.stdout[:300])
+                self.assertTrue(r.stdout.startswith(word + " "), r.stdout[:300])
+                self.assertEqual(len(r.stdout.splitlines()), 1, "%s prints more than its verdict line with VERDICT_FULL_LOG=1: %r" % (word, r.stdout[:300]))
+
 
 DAY = 86400
 
