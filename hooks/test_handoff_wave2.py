@@ -2063,6 +2063,227 @@ def case_limit5_read_keeps_flag():
         c.cleanup()
 
 
+# --------------------------------------------------------------------------- part 7
+# The size limit on a session handoff (decision precompact-handoff). A token is ceil(UTF-8 bytes / 3.5), and
+# HANDOFF_MAX_TOKENS is 10000 in hooks/reread_check.py: 35000 bytes is the most that passes (10000 tokens),
+# and 35001 bytes is 10001 tokens. Every handoff a case writes has the six required sections, so the
+# handoff-sections rule never refuses it first.
+
+SIZE_RULE = "handoff-too-big"
+SIZE_LIMIT = 10000
+BASE_SECTIONS = ("# Handoff\n\n## Goal\nFix the handoff.\n\n## Working premises\nNone yet.\n\n"
+                 "## Where things stand\nThe reread check is in review.\n\n## Work in flight\nNothing.\n\n"
+                 "## Next steps\n- Go on.\n\n## Files and commands\nhooks/reread_check.py\n")
+FILLER_LINE = "Filler: \n"   # 9 bytes: the filler's label and its newline
+CUT_LINE = "Cut: " + "k" * 500 + "\n"   # 506 bytes, one line of the handoff that a case shrinks or grows
+
+
+def token_estimate(n):
+    """ceil(n / 3.5) for a byte count n, in whole numbers."""
+    return (2 * n + 6) // 7
+
+
+def handoff_text(total, middle=""):
+    """A handoff of exactly `total` UTF-8 bytes: the six sections, then `middle`, then a filler line of w's."""
+    head = BASE_SECTIONS + middle
+    pad = total - len(head.encode("utf-8")) - len(FILLER_LINE)
+    if pad < 0:
+        raise ValueError("handoff_text: %d bytes is too small for the sections" % total)
+    return head + "Filler: " + "w" * pad + "\n"
+
+
+def handoff_multibyte(min_bytes):
+    """A handoff of at least `min_bytes` UTF-8 bytes and fewer characters: its filler is e-acute, two bytes each."""
+    head = BASE_SECTIONS
+    pairs = (min_bytes - len(head.encode("utf-8")) - len(FILLER_LINE) + 1) // 2
+    return head + "Filler: " + "é" * pairs + "\n"
+
+
+def write_handoff(c, text, sid=SID, agent_id=None):
+    return guard_call(c, sid, "Write", {"file_path": c.handoff(sid), "content": text}, agent_id=agent_id)
+
+
+def edit_handoff(c, old, new, replace_all=False, sid=SID, agent_id=None):
+    return guard_call(c, sid, "Edit", {"file_path": c.handoff(sid), "old_string": old, "new_string": new,
+                                       "replace_all": replace_all}, agent_id=agent_id)
+
+
+def size_refusal(got, tokens):
+    """'' when the guard refused the call under handoff-too-big and its reason gives the estimate, the limit
+    and the remedy words (history, review rounds, CI). Else the first thing that is missing."""
+    why = refused_by(got, SIZE_RULE)
+    if why:
+        return why
+    reason = got[1]
+    missing = [w for w in (str(tokens), str(SIZE_LIMIT), "history", "review rounds") if w not in reason.lower()]
+    if not re.search(r"\bCI\b", reason):
+        missing.append("CI")
+    return "" if not missing else "the refusal lacks %s: %r" % (", ".join(missing), reason[:160])
+
+
+def read_check_module():
+    """hooks/reread_check.py imported in this process, or None when the import fails."""
+    try:
+        spec = importlib.util.spec_from_file_location("reread_check_under_test", READ_CHECK)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:
+        return None
+
+
+def case_size_limit_constant_is_10000_tokens():
+    """hooks/reread_check.py holds HANDOFF_MAX_TOKENS = 10000."""
+    mod = read_check_module()
+    value = getattr(mod, "HANDOFF_MAX_TOKENS", None) if mod is not None else None
+    check("reread_check: HANDOFF_MAX_TOKENS is 10000", value == SIZE_LIMIT,
+          "HANDOFF_MAX_TOKENS is %r" % (value,))
+
+
+def case_write_over_limit_is_refused():
+    """A main-session Write of 35001 bytes (10001 tokens) to the handoff is refused by handoff-too-big. The reason
+    gives the estimate, the limit and the remedy words."""
+    c = Case("too-big-write")
+    try:
+        step("a Write of 35001 bytes (10001 tokens) to the handoff is refused by handoff-too-big",
+             size_refusal(write_handoff(c, handoff_text(35001)), token_estimate(35001)))
+    finally:
+        c.cleanup()
+
+
+def case_write_at_limit_passes():
+    """A main-session Write of exactly 35000 bytes (10000 tokens) passes. Green on the old code: the boundary pin
+    that the refusal above must not move."""
+    c = Case("at-limit")
+    try:
+        step("a Write of exactly 35000 bytes (10000 tokens) to the handoff passes",
+             allowed_why(write_handoff(c, handoff_text(35000))))
+    finally:
+        c.cleanup()
+
+
+def case_write_counts_utf8_bytes_not_characters():
+    """A Write with fewer characters than the limit and more UTF-8 bytes is refused: the estimate counts bytes."""
+    c = Case("utf8-bytes")
+    try:
+        text = handoff_multibyte(35001)
+        size = len(text.encode("utf-8"))
+        chars = len(text)
+        if not step("the fixture is over the limit in bytes and under it in characters",
+                    "" if size > 35000 and chars < 35000 else "bytes %d, characters %d" % (size, chars)):
+            return
+        step("a Write over the limit in UTF-8 bytes is refused, though its characters are under it",
+             size_refusal(write_handoff(c, text), token_estimate(size)))
+    finally:
+        c.cleanup()
+
+
+def case_write_over_limit_to_other_path_passes():
+    """A Write of 40000 bytes to a file that is not the session handoff passes."""
+    c = Case("other-path")
+    try:
+        other = os.path.join(c.proj, "notes.md")
+        step("a Write of 40000 bytes to another file passes",
+             allowed_why(guard_call(c, SID, "Write", {"file_path": other, "content": "w" * 40000})))
+    finally:
+        c.cleanup()
+
+
+def case_agent_write_over_limit_is_refused():
+    """An agent's Write of 35001 bytes to the session's handoff is refused by handoff-too-big, as a main-session
+    Write is."""
+    c = Case("agent-too-big")
+    try:
+        step("an agent's Write of 35001 bytes to the handoff is refused by handoff-too-big",
+             size_refusal(write_handoff(c, handoff_text(35001), agent_id=AGENT_ID), token_estimate(35001)))
+    finally:
+        c.cleanup()
+
+
+def case_edit_over_limit_is_refused():
+    """An Edit whose result is 36001 bytes (10286 tokens) is refused. The file on disk is 30000 bytes, under the
+    limit, so the Edit is what takes it over. An Edit to 31000 bytes passes."""
+    c = Case("edit-grow")
+    try:
+        before = handoff_text(30000)
+        put_bytes(c.handoff(SID), before.encode("utf-8"))
+        big = "- Go on. " + "z" * 6000
+        after = before.replace("- Go on.", big, 1)
+        step("an Edit to 36001 bytes (over the limit) is refused by handoff-too-big",
+             size_refusal(edit_handoff(c, "- Go on.", big), token_estimate(len(after.encode("utf-8")))))
+        small = "- Go on. " + "z" * 1000
+        step("an Edit to 31000 bytes (under the limit) passes",
+             allowed_why(edit_handoff(c, "- Go on.", small)))
+    finally:
+        c.cleanup()
+
+
+def case_edit_replace_all_counts_every_occurrence():
+    """Three occurrences of `Mark ZZ` in a 30000-byte handoff. With replace_all false the Edit replaces the first
+    one, which is under the limit, and passes. With replace_all true it replaces all three, which is over the
+    limit, and is refused."""
+    c = Case("replace-all")
+    try:
+        before = handoff_text(30000, "Mark ZZ one\nMark ZZ two\nMark ZZ three\n")
+        put_bytes(c.handoff(SID), before.encode("utf-8"))
+        new = "Mark " + "y" * 2000
+        first_only = before.replace("Mark ZZ", new, 1)
+        every = before.replace("Mark ZZ", new)
+        step("the fixture: one replacement is under the limit and all three are over it",
+             "" if (token_estimate(len(first_only.encode("utf-8"))) <= SIZE_LIMIT
+                   and token_estimate(len(every.encode("utf-8"))) > SIZE_LIMIT)
+             else "one replacement %d bytes, all %d bytes" % (len(first_only.encode("utf-8")),
+                                                            len(every.encode("utf-8"))))
+        step("an Edit with replace_all false (one replacement, under the limit) passes",
+             allowed_why(edit_handoff(c, "Mark ZZ", new, replace_all=False)))
+        step("an Edit with replace_all true (three replacements, over the limit) is refused by handoff-too-big",
+             size_refusal(edit_handoff(c, "Mark ZZ", new, replace_all=True),
+                          token_estimate(len(every.encode("utf-8")))))
+    finally:
+        c.cleanup()
+
+
+def case_over_limit_file_write_shrink_passes_grow_refused():
+    """The handoff on disk is 36000 bytes (10286 tokens), over the limit. A Write that makes it smaller passes
+    even though the result is still over the limit. A Write of the same size, or larger, is refused."""
+    c = Case("shrink-write")
+    try:
+        before = handoff_text(36000, CUT_LINE)
+        put_bytes(c.handoff(SID), before.encode("utf-8"))
+        step("the handoff on disk is over the limit before the Write",
+             "" if token_estimate(len(before.encode("utf-8"))) > SIZE_LIMIT else "the fixture is under the limit")
+        smaller = handoff_text(35500)
+        step("a Write of 35500 bytes (still over the limit, smaller than the file) passes",
+             allowed_why(write_handoff(c, smaller)))
+        step("a Write of 36000 bytes (the same size as the file) is refused by handoff-too-big",
+             size_refusal(write_handoff(c, handoff_text(36000)), token_estimate(36000)))
+        step("a Write of 36500 bytes (larger than the file) is refused by handoff-too-big",
+             size_refusal(write_handoff(c, handoff_text(36500)), token_estimate(36500)))
+    finally:
+        c.cleanup()
+
+
+def case_over_limit_file_edit_shrink_passes_grow_refused():
+    """The handoff on disk is 36000 bytes, over the limit. An Edit that cuts 506 bytes passes: the result is still
+    over the limit but smaller. An Edit that keeps the size, or grows it, is refused."""
+    c = Case("shrink-edit")
+    try:
+        before = handoff_text(36000, CUT_LINE)
+        put_bytes(c.handoff(SID), before.encode("utf-8"))
+        step("an Edit that removes the cut line (35494 bytes, smaller, still over the limit) passes",
+             allowed_why(edit_handoff(c, CUT_LINE, "")))
+        same = "Cut: " + "j" * 500 + "\n"
+        same_after = before.replace(CUT_LINE, same, 1)
+        step("an Edit that keeps the file the same size is refused by handoff-too-big",
+             size_refusal(edit_handoff(c, CUT_LINE, same), token_estimate(len(same_after.encode("utf-8")))))
+        grow = "Cut: " + "k" * 600 + "\n"
+        grow_after = before.replace(CUT_LINE, grow, 1)
+        step("an Edit that grows the file is refused by handoff-too-big",
+             size_refusal(edit_handoff(c, CUT_LINE, grow), token_estimate(len(grow_after.encode("utf-8")))))
+    finally:
+        c.cleanup()
+
+
 def main() -> int:
     print("Part 1: SessionEnd pointer, SessionStart reorient (hooks/precompact_handoff.py)")
     case_session_end_clear_writes_pointer()
@@ -2139,6 +2360,18 @@ def main() -> int:
     case_overlapping_pages_clear_flag()
     case_plain_read_of_small_handoff_clears_flag()
     case_limit5_read_keeps_flag()
+
+    print("Part 7: the handoff size limit, HANDOFF_MAX_TOKENS = 10000 (hooks/reread_check.py, hooks/guard.py rule handoff-too-big)")
+    case_size_limit_constant_is_10000_tokens()
+    case_write_over_limit_is_refused()
+    case_write_at_limit_passes()
+    case_write_counts_utf8_bytes_not_characters()
+    case_write_over_limit_to_other_path_passes()
+    case_agent_write_over_limit_is_refused()
+    case_edit_over_limit_is_refused()
+    case_edit_replace_all_counts_every_occurrence()
+    case_over_limit_file_write_shrink_passes_grow_refused()
+    case_over_limit_file_edit_shrink_passes_grow_refused()
 
     if FAILED:
         print()
