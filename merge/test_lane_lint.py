@@ -71,6 +71,7 @@ def setUpModule():
 PASSING = [("PASS", "record slugs"), ("PASS", "ste lint")]
 FAILING = [("PASS", "record slugs"), ("FAIL", "comment narration")]
 UNKNOWN = [("PASS", "record slugs"), ("unknown", "shellcheck")]
+HANG_TEXT = "HANG hang-probe rc=124 no output or CPU for 600s, stopped (601.2s) log=verdict.log"  # the line bin/verdict prints for its hang stop; the numbers are a stub's
 # The drift line bin/ste-changed prints under the pin note's variable: PIN_NOTE_MARKER, then this text.
 PIN_NOTE_DRIFT = ("CI pins ste-lint at abc1234 (2026-10-01, .github/workflows/checks.yml:5), older than this copy's lint. "
                   "A line can pass here and fail CI. Move the pin to claude-settings main, in a lane of its own.")
@@ -872,6 +873,29 @@ class LaneLint(LaneFixture):
         self.assertEqual(len(logged), 1, out)
         self.assertIn("unknown", logged[0].lower())
         self.assertEqual(pass_lines(out), [], "an unknown read was printed as a pass")
+
+    def test_a_hang_in_lane_lint_is_not_lifted_by_an_unknown_reason(self):  # decision hang-stop: a hang stops the lint, and no unknown reason lifts it
+        self.use_ci_job([("unknown", "hang-probe")], 2, details={"hang-probe": HANG_TEXT})
+        rc, out = self.lint_run("--lane-lint", "7", "--lint-unknown-ok", "shellcheck is not on this box")
+        self.assertEqual(rc, 1, "--lint-unknown-ok lifted a hang in lane lint: " + out)
+        self.assertEqual(pass_lines(out), [], "--lint-unknown-ok printed a PASS line beside a hang: " + out)
+        self.assertIn("HANG hang-probe", out, "the refusal does not name the hang: " + out)
+
+    def test_a_no_verdict_line_unknown_is_no_hang_so_an_unknown_reason_still_lifts_it(self):  # ci-job reads a step that exits 1 with no verdict line as unknown, with no HANG text
+        self.use_ci_job([("unknown", "hang-exit1")], 2, details={"hang-exit1": "(verdict printed no verdict line)"})
+        reason = "hang-exit1 printed no verdict line on this box"
+        rc, out = self.lint_run("--lane-lint", "7", "--lint-unknown-ok", reason)
+        self.assertEqual(rc, 0, "--lint-unknown-ok did not lift an unknown with no verdict line, which is no hang: " + out)
+        self.assertEqual(pass_lines(out), [], "--lint-unknown-ok printed a PASS line for an unknown with no verdict line: " + out)
+        self.assertIn(reason, out, "--lint-unknown-ok did not log its reason for an unknown with no verdict line: " + out)
+
+    def test_a_tool_missing_unknown_is_still_lifted_by_an_unknown_reason(self):  # the control: only a hang is refused the lift
+        self.use_ci_job([("unknown", "shellcheck")], 2, details={"shellcheck": "tool missing (shellcheck); exit 127"})
+        reason = "shellcheck is not on this box"
+        rc, out = self.lint_run("--lane-lint", "7", "--lint-unknown-ok", reason)
+        self.assertEqual(rc, 0, "--lint-unknown-ok did not lift a tool-missing unknown: " + out)
+        self.assertEqual(pass_lines(out), [], "--lint-unknown-ok printed a PASS line for an unknown: " + out)
+        self.assertIn(reason, out, "--lint-unknown-ok did not log its reason: " + out)
 
     def test_a_blank_unknown_reason_still_refuses(self):
         self.use_ci_job(UNKNOWN, 2)
@@ -8495,6 +8519,14 @@ class CiJobHeadCopy(LaneFixture):
         self.assertIn("head-only step", text, "the second lint does not name the head copy's FAIL: " + text)
         tool, copy = self.copies()
         self.assertEqual(len(copy), 2, "the second lint did not run the head copy: " + text)
+
+    def test_a_hang_in_the_head_copy_is_not_lifted_by_an_unknown_reason(self):  # the head's own bin/ci-job reads a hang: refused as the tool's copy is
+        head = self.push_lane({"bin/ci-job": self.stub_text([("unknown", "hang-probe")], 2, details={"hang-probe": HANG_TEXT})}, from_main=True)
+        self.assertIn("bin/ci-job", self.scope(head), "the lane does not change bin/ci-job, so the case probes no head copy")
+        rc, text = self.lint_run("--lane-lint", head, "--lint-unknown-ok", "shellcheck is not on this box", head=head, runs=2)  # the tool's copy, then the head's
+        self.assertNotEqual(rc, 0, "--lint-unknown-ok lifted a hang in the head's own bin/ci-job: " + text)
+        self.assertEqual(pass_lines(text), [], "the lint printed a PASS line beside the head copy's hang: " + text)
+        self.assertIn("HANG hang-probe", text, "the refusal does not name the head copy's hang: " + text)
 
     BASE_IMPORT = "git_reads"  # a hooks module the tool's bin/ci-job does not import (tool_ci_job_imports checks it); origin/main's bin/ci-job does
 

@@ -28,6 +28,9 @@ lines and each step's log lines in workflow order, and treats an install step as
 LocalActionUnderLint: --lint runs a local uses: action only when the read of its action.yml before any step runs accepts it; FAIL beats unknown, and each refusal
 names its file, line or value and runs no step. A plain run never runs one.
 OwnLogPrune: ci-job removes its own ci-job-* logs over one day old when it starts, and keeps the rest.
+HangStopDefault: a step with no VERDICT_HANG_SECONDS of its own runs with 600 (the caller's value and the step's own win); the
+  quiet mutation fixture suite gets none. HangLineFromVerdict: a real bin/verdict hang stop reads as ci-job's hang line.
+  HangExitsOne: a HANG-shaped line with exit 1 is no hang: with no verdict line the step reads unknown, with a FAIL line it reads FAIL.
 RerunCache: a rerun at the same key runs no passing step and prints PASS (cached); a failed, unknown, unrun, edited, renamed or
   corrupt step runs again. The control case is a first run, which runs every step and prints no cached line. A changed ambient
   variable, a changed tool file that ci-job runs, an edited action file a remote uses: step runs from the install or the pointer
@@ -78,6 +81,7 @@ ENV.pop("CI_JOB_LINT_WORKERS", None)
 ENV.pop("CI_JOB_HEAD_SHA", None)  # the lane lint's pushed head: a case sets it, and the unset case needs it absent
 ENV.pop("CI_JOB_NO_CACHE", None)  # the rerun cache's knob: a case sets it, and the cache cases need it absent
 ENV["XDG_CACHE_HOME"] = os.path.join(RUN_FOLDER, "xdg-cache")  # the rerun cache's store: no case writes the real ~/.cache
+ENV.pop("VERDICT_HANG_SECONDS", None)  # ci-job's 600 s default is what the hang-stop cases read: a caller's value, from a CI step, must not leak in
 
 
 def workflow(*steps, job="lane", other=None, other_runner="ubuntu-latest", extra=()):
@@ -494,6 +498,83 @@ class Unknowns(Job):
         self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
         self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "a timeout exit with its own FAIL line does not read that FAIL: " + out)
         self.assertIn("FAIL - timed out after 300s", step_line(lines, "slow"), "a timeout exit reads another line as its verdict: " + out)
+
+
+class HangStopDefault(Job):
+    """ci-job gives each step's verdict the hang stop's 600 s default (decision hang-stop, lane code-caps-hang-stop). The caller's value
+    and the step's own value win. The mutation fixture suite gets none: checks.yml's checks-rest step runs it, its quiet time is 462-615 s
+    in 10 of 10 runs (consultant facts: never wrap it at 600 s), and decision hang-stop's scope leaves mutation steps out."""
+
+    PROBE = 'echo "${VERDICT_HANG_SECONDS-unset}" > hang-env.txt'  # the value the step sees, written into the run's folder
+
+    def seen(self):
+        path = os.path.join(self.root, "hang-env.txt")
+        if not os.path.exists(path):
+            return "no file: the step did not run"
+        with open(path, encoding="utf-8") as f:
+            return f.read().strip()
+
+    def test_a_step_with_no_value_of_its_own_gets_the_600_second_default(self):
+        self.run_job(step("probe", self.PROBE))
+        self.assertEqual(self.seen(), "600", "a step with no VERDICT_HANG_SECONDS of its own ran with %r, not the 600 s default, so its hang stop is off" % self.seen())
+
+    def test_the_callers_value_is_kept_over_the_default(self):  # the control: the default only fills a gap
+        self.run_job(step("probe", self.PROBE), env={"VERDICT_HANG_SECONDS": "45"})
+        self.assertEqual(self.seen(), "45", "a caller's VERDICT_HANG_SECONDS did not reach the step, which ran with %r" % self.seen())
+
+    def test_a_step_that_sets_its_own_value_keeps_it(self):  # the control: a step's own value is never replaced
+        self.run_job(step("probe", self.PROBE, env={"VERDICT_HANG_SECONDS": "900"}))
+        self.assertEqual(self.seen(), "900", "a step's own VERDICT_HANG_SECONDS was replaced: it ran with %r" % self.seen())
+
+    def test_the_quiet_mutation_fixture_suite_gets_no_default(self):
+        os.makedirs(os.path.join(self.root, "hooks"))
+        with open(os.path.join(self.root, "hooks", "test_mutate_ci.py"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("import os\nwith open('hang-env.txt', 'w') as g:\n    g.write(os.environ.get('VERDICT_HANG_SECONDS', 'unset'))\n")
+        self.run_job(step("Mutation CI report fixture suite", "python3 hooks/test_mutate_ci.py"))
+        self.assertEqual(self.seen(), "unset", "the mutation fixture suite got the hang stop default %r; its quiet time is above 600 s, so it takes none" % self.seen())
+
+
+class HangLineFromVerdict(Job):
+    """A real bin/verdict hang stop (no stub) prints a line that ci-job reads as its hang line. The stub cases print the words
+    themselves, so only a real verdict shows that the two copies of the fixed words agree."""
+
+    def test_a_real_hang_stop_reads_as_a_hang_in_the_step_line(self):
+        rc, lines, out = self.run_job(step("hang-real", "sleep 60", env={"VERDICT_HANG_SECONDS": "2"}))  # the 2 s stop ends it long before its 60 s
+        self.assertEqual(by_step(lines), {"hang-real": "unknown"}, "a real hang stop does not read unknown: " + out)
+        self.assertEqual(rc, 2, "a real hang stop does not exit 2, the unknown code: " + out)
+        line = step_line(lines, "hang-real")
+        self.assertIn("rc=124 no output or CPU for", line, "the step line does not carry the real verdict's HANG line: %r\n%s" % (line, out))
+
+
+class HangExitsOne(Job):
+    """A HANG-shaped line is a hang only with verdict's own form and exit 124 (decision hang-stop). A step that exits 1 is read by
+    its own verdict line: with none it reads unknown and is no hang, so an unknown reason may lift it; with a FAIL line it reads FAIL."""
+
+    HANG_SHAPED = "HANG hang-exit1 rc=124 no output or CPU for 60s, stopped (61.2s) log=hang-verdict.log"  # verdict's form, printed with exit 1
+
+    def run_exit_1(self, *printed):
+        """One step whose stub verdict prints each line, then exits 1."""
+        body = "import sys\n" + "".join("print(%r)\n" % ln for ln in printed) + "sys.exit(1)\n"
+        rc, lines, out = self.run_job(step("hang-exit1", "true"), launch=self.verdict_stub(body))
+        self.assertTrue(self.stub_ran(), "the stub verdict did not run: " + out)
+        return rc, lines, out
+
+    def test_a_hang_shaped_line_with_exit_1_and_no_verdict_line_reads_unknown(self):
+        rc, lines, out = self.run_exit_1(self.HANG_SHAPED)
+        self.assertEqual(by_step(lines), {"hang-exit1": "unknown"}, "a HANG-shaped line with exit 1 and no verdict line does not read unknown: " + out)
+        self.assertEqual(rc, 2, "a HANG-shaped line with exit 1 and no verdict line does not exit 2, the unknown code: " + out)
+
+    def test_a_hang_shaped_line_with_exit_1_and_no_verdict_line_is_no_hang(self):  # the step line keeps its no-verdict note, not verdict's HANG line
+        rc, lines, out = self.run_exit_1(self.HANG_SHAPED)
+        line = step_line(lines, "hang-exit1")
+        self.assertIn("(verdict printed no verdict line)", line, "a HANG-shaped line with exit 1 lost the no-verdict note: " + out)
+        self.assertNotIn("HANG hang-exit1", line, "a HANG-shaped line with exit 1 is read as a hang: its line is the step's text\n" + out)
+
+    def test_a_hang_shaped_line_with_exit_1_and_a_fail_line_reads_that_fail(self):  # the control: verdict's own FAIL line is still the verdict
+        rc, lines, out = self.run_exit_1(self.HANG_SHAPED, "FAIL - case name")
+        self.assertEqual(by_step(lines), {"hang-exit1": "FAIL"}, "a HANG-shaped line with exit 1 beside a FAIL line does not read FAIL: " + out)
+        self.assertEqual(rc, 1, "a HANG-shaped line with exit 1 beside a FAIL line does not exit 1: " + out)
+        self.assertIn("FAIL - case name", step_line(lines, "hang-exit1"), "a HANG-shaped line with exit 1 reads another line as the verdict: " + out)
 
 
 def checks_hooks_ifs():
