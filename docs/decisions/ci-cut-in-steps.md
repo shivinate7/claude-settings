@@ -33,7 +33,7 @@ Owner, 2026-11-23 10:28 and 10:49 CST, option a.
 
 - On a pull request, the Windows merge, rest and rest-2 shard steps run only when their scope flag is set: `checks_windows_merge`, `checks_windows_rest`, `checks_windows_rest_2`. The narrow rule sets them, in the scope script `ci-scope.sh`.
 - Scheduled and dispatched runs set every Windows flag, so they run every Windows shard step. They are the net.
-- Known gap: the daily run can skip after a proven push that left a Windows shard out. Accepted under the push-skip decision, `push-skip-on-proven-tree`.
+- Known gap: none for the daily skip. A push after the green daily makes the daily run every Windows shard.
 - Measure (consultant, 13:26 CST, not a ruling): on the last 40 merged pull requests (3764 to 3813), the merge flag was set on 18 under the narrow rule, against 29 by imports.
 
 R4a is a process ruling.
