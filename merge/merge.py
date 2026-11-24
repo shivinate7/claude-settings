@@ -376,7 +376,9 @@ def load_clear_rule():
     import clear_rule
     return clear_rule
 
-REVERT_OF = re.compile(r"(?m)^This reverts commit ([0-9a-f]{40})(?![0-9a-f])")  # the one home of the line `git revert` writes into a revert's message; read_lanes, revert_proven and main_run_verdict all read it
+REVERT_OF_TEXT = r"This reverts commit ([0-9a-f]{40})"  # the one home of the text `git revert` writes into a revert's message; the two readers below build from it
+REVERT_OF_ANYWHERE = re.compile(REVERT_OF_TEXT)  # read_lanes: a revert line anywhere in the message (a subject, a bullet, an indented line), as it read before; a miss would let a dropped lane's files merge
+REVERT_OF_LINE = re.compile(r"(?m)^" + REVERT_OF_TEXT + r"(?![0-9a-f])")  # revert_proven and main_run_verdict: the line alone, so a revert line quoted mid-line never proves a revert
 DROP_CITE = "(decision silent-undo-check-design, a branch that silently undoes earlier work does not merge)"
 BATCH_CITE = "(decision main-branch-protection, the merge tool reads the required checks from the ruleset or the protection; decision private-repos-no-ci, merge.requiredChecks \"none\" merges a repo with no required check)"
 EXPRESS_CITE = "(decision owner-override, ruling R59 part 5 of 15:05 CST Nov 12, a ruled prose change skips the batch queue and runs only the checks that read its files)"
@@ -2788,7 +2790,7 @@ def read_lanes(wt, base_ref, sha):
         if len(parts) != 3:
             continue
         h, parents, body = parts
-        for r in REVERT_OF.findall(body):
+        for r in REVERT_OF_ANYWHERE.findall(body):
             undone[r] = h
         for t in parents.split()[1:]:
             took.setdefault(t, []).append(h)
@@ -4989,7 +4991,7 @@ def revert_proven(root, host, base, beside_ok=False):
             return False
 
         def reverting(s):  # the commits whose message says `This reverts commit <s>`; a longer hex (another sha that starts with s) is no match
-            return [x for x, _, text in said if s in REVERT_OF.findall(text)]
+            return [x for x, _, text in said if s in REVERT_OF_LINE.findall(text)]
         reverts = reverting(sha)
         if len(reverts) != 1:
             return False
@@ -5073,13 +5075,13 @@ def red_line(host):
 
 def main_run_verdict(host, sha, base=MAIN_RUN_BASE):
     """-> (outcome, line): the verdict on the push run of commit `sha` on `base`, judged against the push run before it. `line` is `main run <sha9>: <outcome>. <detail>`, and `outcome` is one of RUN_OUTCOMES.
-    It reads and writes nothing else: no merge, no re-run, no API write. The one home of that verdict (decision no-merge-onto-red-main, the red-main check); no git read, so it runs from any directory.
+    It reads and writes nothing else: no merge, no re-run, no API write. The one home of that verdict (decision no-merge-onto-red-main, the red-main check); no git read. Host.api reads the repo from the working directory, so run it inside the repo's checkout: elsewhere every read fails and the verdict is unknown.
     - green: the run ran a suite and every red job of the run before passed or never was red.
     - no verdict: a run that ran no suite (push-skip or scope skipped every check) says nothing about the base, so it is neither green nor carried. This reads emptiness alone, with no push-skip evidence (ruling own-812-a-judge-suite-runs; clear_rule.empty_without_evidence with an event that carries none).
     - carried: red with no red job and no failing test the run before did not have; or a run that skipped a job red before, which the line marks `not re-run`.
     - first red: a new red job or test on a first attempt, or a red job that names no test (a step timeout). The line names `gh run rerun <id> --failed`; nothing is blamed.
     - new break: a new name red again on the re-run (`blames`, the one home of when a merge is blamed). The line names this run's commit, never an earlier one.
-    - cleared or did not clear: the run is a revert (its commit message says `This reverts commit`, REVERT_OF) of a red base, and it is green with every red job re-run, or it is not.
+    - cleared or did not clear: the run is a revert (a line of its commit message says `This reverts commit`, REVERT_OF_LINE) of a red base, and it is green with every red job re-run, or it is not.
     - unknown: a failed read, the run or the run before still going, a cancelled run, no run of `sha` on the page, or no earlier run to tell new from carried. Unknown never reads green, first red or carried.
     Job rules: Host.red_jobs (what makes a job red) and clear_rule (what a suite is). Failing names: Host.failed_lines and failing_names, as red_line prints them.
     Cost: one runs read (one page) and one jobs read for the run; on a red run one log read per failed job. The run before costs one jobs read, and a run stepped over (cancelled, or with no suite) one more each; when it was red and the run is not a revert,
@@ -5138,7 +5140,7 @@ def main_run_verdict(host, sha, base=MAIN_RUN_BASE):
         if before_state == "unfinished":
             return line(RUN_UNKNOWN, f"the push run before it, run {before['id']}, is still {before['status']}, so a new red cannot be told from a carried one")
         message = (now.get("head_commit") or {}).get("message") or now.get("display_title") or ""
-        revert = before_state == "red" and bool(REVERT_OF.search(message))
+        revert = before_state == "red" and bool(REVERT_OF_LINE.search(message))
         before_names = host.red_jobs(jobs_of(before))[2] if before_state == "red" else []
         skipped = [n for n in before_names if not any(j["name"] == n and j.get("status") == "completed" and j.get("conclusion") not in ("skipped", "cancelled") for j in jobs)]
         not_re_run = f"; not re-run here, although red in run {before['id']}: {', '.join(skipped)}" if skipped else ""
