@@ -2284,6 +2284,207 @@ def case_over_limit_file_edit_shrink_passes_grow_refused():
         c.cleanup()
 
 
+# --------------------------------------------------------------------------- part 8
+# A Read clears the reread flag only when its range counts: at most READ_CAP_TOKENS = 25000 tokens and at most
+# 2000 lines (the Read default when no limit is given). The hook cannot see what a Read returned, so a range over
+# the cap counts nothing. An agent's rewrite of the handoff sets the same flag (decision precompact-handoff, item 9).
+
+READ_CAP_TOKENS = 25000
+
+
+def long_lines(count, width):
+    """`count` lines of exactly `width` bytes each, newline included."""
+    out = []
+    for i in range(1, count + 1):
+        head = "line %03d " % i
+        out.append(head + "x" * (width - len(head) - 1) + "\n")
+    return "".join(out)
+
+
+ONE_HUNDRED_LONG = long_lines(100, 900)   # 90000 bytes, 25715 tokens: over READ_CAP_TOKENS in one range
+SHORT_2500 = "".join("l%04d\n" % i for i in range(1, 2501))   # 2500 lines of 6 bytes: 15000 bytes, 4286 tokens
+
+
+def case_plain_read_over_cap_keeps_flag():
+    """A plain Read (no offset, no limit) of a 100-line handoff of 90000 bytes (25715 tokens) keeps the flag set:
+    its one range is over READ_CAP_TOKENS, so it counts nothing."""
+    c = Case("read-over-cap")
+    try:
+        if not step("PostCompact exits 0", exit_why(compact_with(c, SID, ONE_HUNDRED_LONG))):
+            return
+        rd = read_range(c, SID, c.handoff(SID))
+        if not step("the plain Read exits 0", exit_why(rd)):
+            return
+        step("a plain Read of a 25715-token handoff keeps the reread flag set",
+             "" if flag_set(c, SID) else "the plain Read cleared the reread flag")
+    finally:
+        c.cleanup()
+
+
+def case_range_over_cap_counts_nothing():
+    """Lines 1-100 of the same 90000-byte handoff, asked for with limit 100: the range is over the cap, so the flag
+    stays set."""
+    c = Case("range-over-cap")
+    try:
+        if not step("PostCompact exits 0", exit_why(compact_with(c, SID, ONE_HUNDRED_LONG))):
+            return
+        rd = read_range(c, SID, c.handoff(SID), offset=1, limit=100)
+        if not step("the Read of lines 1-100 exits 0", exit_why(rd)):
+            return
+        step("a Read of lines 1-100 (25715 tokens) keeps the reread flag set",
+             "" if flag_set(c, SID) else "the Read of lines 1-100 cleared the reread flag")
+    finally:
+        c.cleanup()
+
+
+def case_pages_under_cap_clear_flag():
+    """Lines 1-50, then lines 51-100, of the 90000-byte handoff. Each page is 12858 tokens, under the cap, and
+    together they cover the handoff: the flag is cleared by the second page."""
+    c = Case("pages-under-cap")
+    try:
+        if not step("PostCompact exits 0", exit_why(compact_with(c, SID, ONE_HUNDRED_LONG))):
+            return
+        first = read_range(c, SID, c.handoff(SID), offset=1, limit=50)
+        if not step("the Read of lines 1-50 exits 0", exit_why(first)):
+            return
+        step("after lines 1-50 the reread flag is still set",
+             "" if flag_set(c, SID) else "the Read of lines 1-50 cleared the reread flag")
+        second = read_range(c, SID, c.handoff(SID), offset=51, limit=50)
+        if not step("the Read of lines 51-100 exits 0", exit_why(second)):
+            return
+        step("after lines 51-100 the reread flag is cleared",
+             "" if not flag_set(c, SID) else "the reread flag is still set after lines 51-100")
+    finally:
+        c.cleanup()
+
+
+def case_plain_read_past_2000_lines_keeps_flag():
+    """A plain Read of a 2500-line handoff covers only lines 1-2000, the Read default. The flag stays set."""
+    c = Case("plain-2000")
+    try:
+        if not step("PostCompact exits 0", exit_why(compact_with(c, SID, SHORT_2500))):
+            return
+        rd = read_range(c, SID, c.handoff(SID))
+        if not step("the plain Read exits 0", exit_why(rd)):
+            return
+        step("a plain Read of a 2500-line handoff keeps the reread flag set",
+             "" if flag_set(c, SID) else "the plain Read cleared the reread flag")
+    finally:
+        c.cleanup()
+
+
+def case_range_over_2000_lines_counts_nothing():
+    """Lines 1-2500 of a 2500-line handoff, asked for with limit 2500: over 2000 lines, so the range counts nothing
+    and the flag stays set."""
+    c = Case("range-over-2000")
+    try:
+        if not step("PostCompact exits 0", exit_why(compact_with(c, SID, SHORT_2500))):
+            return
+        rd = read_range(c, SID, c.handoff(SID), offset=1, limit=2500)
+        if not step("the Read of lines 1-2500 exits 0", exit_why(rd)):
+            return
+        step("a Read of lines 1-2500 keeps the reread flag set",
+             "" if flag_set(c, SID) else "the Read of lines 1-2500 cleared the reread flag")
+    finally:
+        c.cleanup()
+
+
+def case_agent_write_sets_read_flag():
+    """An agent's Write of the session's handoff sets the reread flag. The main session's next Bash call is refused
+    by handoff-unread, and the refusal says an agent rewrote the handoff. The agent's write sets no audit flag."""
+    c = Case("agent-write-flag")
+    try:
+        put_bytes(c.handoff(SID), handoff_text(600).encode("utf-8"))
+        step("no reread flag before the agent writes",
+             "" if not flag_set(c, SID) else "the reread flag is set before any agent write")
+        rewritten = handoff_text(700)
+        if not step("the agent's Write is allowed", allowed_why(write_handoff(c, rewritten, agent_id=AGENT_ID))):
+            return
+        put_bytes(c.handoff(SID), rewritten.encode("utf-8"))
+        got = guard_call(c, SID, "Bash", BASH)
+        if not step("the main session's Bash call is refused by handoff-unread after the agent's write",
+                    refused_by(got, HANDOFF_RULE)):
+            return
+        step("the refusal says an agent rewrote the handoff",
+             "" if "agent" in got[1].lower() and "rewrote" in got[1].lower()
+             else "the refusal does not say an agent rewrote it: %r" % got[1][:120])
+        step("the agent's write sets no audit flag",
+             "" if not os.path.isfile(audit_flag(c, SID)) else "the audit flag is set after the agent's write")
+    finally:
+        c.cleanup()
+
+
+def case_agent_edit_sets_read_flag():
+    """An agent's Edit of the session's handoff sets the reread flag, as its Write does: the main session's next
+    Bash call is refused by handoff-unread, and the refusal says an agent rewrote the handoff."""
+    c = Case("agent-edit-flag")
+    try:
+        put_bytes(c.handoff(SID), handoff_text(600).encode("utf-8"))
+        step("no reread flag before the agent edits",
+             "" if not flag_set(c, SID) else "the reread flag is set before any agent edit")
+        old, new = "- Go on.", "- Go on, then check the premises."
+        if not step("the agent's Edit is allowed", allowed_why(edit_handoff(c, old, new, agent_id=AGENT_ID))):
+            return
+        put_bytes(c.handoff(SID), handoff_text(600).replace(old, new, 1).encode("utf-8"))
+        got = guard_call(c, SID, "Bash", BASH)
+        if not step("the main session's Bash call is refused by handoff-unread after the agent's edit",
+                    refused_by(got, HANDOFF_RULE)):
+            return
+        step("the refusal says an agent rewrote the handoff",
+             "" if "agent" in got[1].lower() and "rewrote" in got[1].lower()
+             else "the refusal does not say an agent rewrote it: %r" % got[1][:120])
+    finally:
+        c.cleanup()
+
+
+def case_main_write_sets_no_flag():
+    """The main session's own Write of the handoff sets no reread flag and no audit flag, and its next Bash call is
+    allowed. Green on the old code: the control for the agent cases above."""
+    c = Case("main-write-flag")
+    try:
+        rewritten = handoff_text(700)
+        if not step("the main session's Write is allowed", allowed_why(write_handoff(c, rewritten))):
+            return
+        put_bytes(c.handoff(SID), rewritten.encode("utf-8"))
+        step("the main session's Write sets no reread flag",
+             "" if not flag_set(c, SID) else "the main session's Write set the reread flag")
+        step("the main session's Write sets no audit flag",
+             "" if not os.path.isfile(audit_flag(c, SID)) else "the main session's Write set the audit flag")
+        step("the main session's Bash call is allowed after its own Write",
+             allowed_why(guard_call(c, SID, "Bash", BASH)))
+    finally:
+        c.cleanup()
+
+
+def case_agent_rewrite_partial_read_keeps_flag_whole_read_clears():
+    """After an agent's rewrite sets the flag, a partial Read (lines 1-10 of 20) keeps it set, and a whole Read
+    (no offset, no limit) clears it. The same range rule as a compaction's flag."""
+    c = Case("agent-partial-whole")
+    try:
+        put_bytes(c.handoff(SID), handoff_text(600).encode("utf-8"))
+        rewritten = handoff_text(700)
+        if not step("the agent's Write is allowed", allowed_why(write_handoff(c, rewritten, agent_id=AGENT_ID))):
+            return
+        put_bytes(c.handoff(SID), rewritten.encode("utf-8"))
+        if not step("the agent's rewrite sets the reread flag",
+                    "" if flag_set(c, SID) else "the agent's rewrite did not set the reread flag"):
+            return
+        partial = read_range(c, SID, c.handoff(SID), offset=1, limit=10)
+        if not step("the partial Read exits 0", exit_why(partial)):
+            return
+        step("after the partial Read (lines 1-10 of 20) the reread flag is still set",
+             "" if flag_set(c, SID) else "the partial Read cleared the reread flag")
+        whole = read_range(c, SID, c.handoff(SID))
+        if not step("the whole Read exits 0", exit_why(whole)):
+            return
+        step("after the whole Read the reread flag is cleared",
+             "" if not flag_set(c, SID) else "the whole Read did not clear the reread flag")
+        step("the main session's Bash call is allowed after the whole Read",
+             allowed_why(guard_call(c, SID, "Bash", BASH)))
+    finally:
+        c.cleanup()
+
+
 def main() -> int:
     print("Part 1: SessionEnd pointer, SessionStart reorient (hooks/precompact_handoff.py)")
     case_session_end_clear_writes_pointer()
@@ -2372,6 +2573,17 @@ def main() -> int:
     case_edit_replace_all_counts_every_occurrence()
     case_over_limit_file_write_shrink_passes_grow_refused()
     case_over_limit_file_edit_shrink_passes_grow_refused()
+
+    print("Part 8: an agent's rewrite sets the reread flag, and a Read counts only within the cap (hooks/reread_check.py)")
+    case_plain_read_over_cap_keeps_flag()
+    case_range_over_cap_counts_nothing()
+    case_pages_under_cap_clear_flag()
+    case_plain_read_past_2000_lines_keeps_flag()
+    case_range_over_2000_lines_counts_nothing()
+    case_agent_write_sets_read_flag()
+    case_agent_edit_sets_read_flag()
+    case_main_write_sets_no_flag()
+    case_agent_rewrite_partial_read_keeps_flag_whole_read_clears()
 
     if FAILED:
         print()
