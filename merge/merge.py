@@ -4404,8 +4404,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     raise Liftable("\n".join([head_line, *lines, *log,
                               'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
 
-PROSE_JUDGE_MAX_CALLS = 3  # model calls one merge makes. They run at once, after the lock is released, so the merge command waits about one call, at most PROSE_JUDGE_TIMEOUT s, whatever the count. A line that fits no call reads UNKNOWN
-PROSE_JUDGE_TIMEOUT = 300  # seconds one judge call may run: a full PROSE_JUDGE_CALL_BYTES call takes about 195 s, past MODEL_TIMEOUT. Only this judge passes it; every other invoke_model caller keeps MODEL_TIMEOUT
+PROSE_JUDGE_MAX_CALLS = 3  # model calls one merge makes. They run at once, after the lock is released, so the judge adds at most PROSE_JUDGE_TIMEOUT s to the merge command, whatever the count; the where-else read then runs after it. A line that fits no call reads UNKNOWN
+PROSE_JUDGE_TIMEOUT = 300  # seconds one judge call may run: one sample took 195 s for a 24 KB call, past MODEL_TIMEOUT; today's prompt is unmeasured. Only this judge passes it; every other invoke_model caller keeps MODEL_TIMEOUT
 PROSE_JUDGE_CALL_BYTES = 24000  # UTF-8 bytes one prose judge prompt may hold, excerpts included; the lines are packed into at most PROSE_JUDGE_MAX_CALLS calls by this budget
 PROSE_JUDGE_MAX_LINES = 20  # finding lines (stale, unbacked) one merge prints for the prose judge; the rest are one count line. UNKNOWN lines never count against it
 PROSE_JUDGE_CAUSES = ("timed out", "model error", "no readable verdict", "past the call cap", "skipped by the reply")  # the buckets of the one UNKNOWN count line, in print order; the count line carries no raw error text
@@ -6047,7 +6047,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         code = close_members_landed(host, n, info, commit) or code
     if base == cfg["defaultBranch"]:  # a merge onto an integration branch owes no pass
         idle_lanes_after_merge(root, commit, host, n, info.get("body", ""), plan_base)  # lock released: it fetches and reads; the merge has landed, so it never moves `code`
-    report = prose_judge_run(judge, n) + where_else_run(where_else, n)  # each model call waits up to MODEL_TIMEOUT, so it runs with the lock released
+    report = prose_judge_run(judge, n) + where_else_run(where_else, n)  # the prose judge's calls run at once, each up to PROSE_JUDGE_TIMEOUT; the where-else call then waits up to MODEL_TIMEOUT; both run with the lock released
     if report:
         say(*report)
     run_safe_sweep(root)  # last: the lint worktree and the lock are gone, so the sweep cannot take a tree this merge still reads. A failed sweep never changes the exit code
