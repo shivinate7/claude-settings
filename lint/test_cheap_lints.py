@@ -14,7 +14,7 @@ bin/cheap-lints runs the repo's merge.readyChecks (.github/stamp.json) through m
   body is still a body.
 - A check that FAILs on the checkout names its base read in its row: `passes on <sha9>: this change broke it`,
   `also fails on <sha9>`, or `base not read: <reason>`. The row stays `fail` and the run exits 1. A passing check reads no base.
-  Class BaseRun holds these cases; its base commit is origin/main of the case's own repo.
+  Class BaseRun holds these cases; its base is the merge base of HEAD and origin/main in the case's own repo, the commit the change started from.
 
 Each case builds a fixture repo in its own folder of the run folder. The repo has a two-job workflow of one-line
 Python steps and a stamp.json that names the case's checks. No case reads the real checks.yml. The checks job's
@@ -254,20 +254,41 @@ def fixture_git(repo, case, *args):
     return done.stdout.strip()
 
 
-def make_change(case, checks, breaking=True, origin=True):
-    """A repo at <case>/repo: a base commit holding PROBE_WORKFLOW and the stamp for `checks`, then a head commit on it. The head adds
-    BROKEN when `breaking`, else note.txt, so its tree differs from the base's. With `origin`, origin/main names the base commit: a ref of
-    this repo, with no remote. -> (repo, the base commit's full sha, recorded as the commit is made)."""
+def write_files(repo, names):
+    """Write each of `names` in the fixture repo `repo`, its text its own name."""
+    for name in names:
+        with open(os.path.join(repo, name), "w", encoding="utf-8") as f:
+            f.write(name + "\n")
+
+
+def make_change(case, checks, breaking=True, origin=True, base_files=(), tip=None):
+    """A repo at <case>/repo: a base commit holding PROBE_WORKFLOW, the stamp for `checks` and `base_files`, then a head commit on it. The head
+    adds BROKEN when `breaking`, else note.txt, so its tree differs from the base's. With `origin`, origin/main names the base commit: a ref of
+    this repo, with no remote. `tip` = (remove, add) makes origin/main name a commit T cut from the base instead: T removes and adds those
+    files, so the checkout is behind the tip and the merge base of HEAD and origin/main is the base commit.
+    -> (repo, the base commit's full sha, recorded as the commit is made)."""
     repo = make_fixture(case, config_text(checks), workflow=PROBE_WORKFLOW.replace("__PROBE__", os.path.join(case, "probe.log")))
+    write_files(repo, base_files)
     fixture_git(repo, case, "add", "-A")
     fixture_git(repo, case, "commit", "-q", "-m", "base")
     base = fixture_git(repo, case, "rev-parse", "HEAD")
-    if origin:
-        fixture_git(repo, case, "update-ref", "refs/remotes/origin/main", base)
+    target = base
+    if tip is not None:
+        remove, add = tip
+        fixture_git(repo, case, "switch", "-q", "-c", "tip-side")
+        for name in remove:
+            fixture_git(repo, case, "rm", "-q", name)
+        write_files(repo, add)
+        fixture_git(repo, case, "add", "-A")
+        fixture_git(repo, case, "commit", "-q", "-m", "tip")
+        target = fixture_git(repo, case, "rev-parse", "HEAD")
+        fixture_git(repo, case, "switch", "-q", "-")
     with open(os.path.join(repo, "BROKEN" if breaking else "note.txt"), "w", encoding="utf-8") as f:
         f.write("this change\n")
     fixture_git(repo, case, "add", "-A")
     fixture_git(repo, case, "commit", "-q", "-m", "change")
+    if origin:
+        fixture_git(repo, case, "update-ref", "refs/remotes/origin/main", target)
     return repo, base
 
 
@@ -305,7 +326,7 @@ BASE_NOT_READ = r"base not read: .+?\): .+"
 
 class BaseRun(unittest.TestCase):
     """The base read of a failing check (bin/cheap-lints through merge.pre_ready_rows). A check that FAILs on the checkout runs once in a copy of
-    origin/main. Its row then says `passes on <sha9>: this change broke it`, `also fails on <sha9>`, or `base not read: <reason>`. Every
+    the merge base of HEAD and origin/main. Its row then says `passes on <sha9>: this change broke it`, `also fails on <sha9>`, or `base not read: <reason>`. Every
     such row stays `fail`, and the run exits 1. A check that passes on the checkout runs no copy. Each case counts the probe's runs."""
 
     def test_passes_on_base_names_the_base_and_says_this_change_broke_it(self):
@@ -382,8 +403,11 @@ class BaseRun(unittest.TestCase):
         self.assertIsNotNone(re.match(PASSES_ON_BASE, rest), "the second run's row does not say `passes on <sha9>`: %r" % rest)
 
     def test_history_check_never_claims_a_base_result_it_did_not_read(self):
-        """The silent undo check reads history, which a copy with no .git cannot show. Its row names the base as passing, or says the base
-        was not read. It never names a base fail, since that would come from the copy's missing history."""
+        """The fixture's Silent undo check is a stand-in: it runs `git rev-parse HEAD` and reads BROKEN, so a base copy's row depends on BROKEN
+        alone. The real check (CI's step, `lint/check_silent_undo.py --upstream origin/<base> --head HEAD`) reads history. A base copy is a
+        linked worktree, so its .git is a file and git reads that history; the real check's range origin/<base>..HEAD is empty when the copy
+        is at origin/<base>, so it passes there. This case pins the row's shape: it names the base as passing or says it was not read. It
+        never names a base fail, because the stand-in fails only where BROKEN is, and the base has none."""
         case = new_case()
         repo, base = make_change(case, ["Silent undo check"])
         rc, lines = cheap_in(repo, case)
@@ -407,6 +431,84 @@ class BaseRun(unittest.TestCase):
         self.assertEqual(fixture_git(repo, case, "status", "--porcelain"), status, "the base run changed the checkout's working tree")
         self.assertEqual(fixture_git(repo, case, "ls-files", "--stage"), index, "the base run changed the checkout's index")
         self.assertTrue(os.path.isfile(os.path.join(repo, "BROKEN")), "the base run removed the checkout's BROKEN")
+
+    def test_level_checkout_names_the_base_commit_as_before(self):
+        """The control: the merge base of HEAD and origin/main is origin/main itself, so the base read is the one it always was."""
+        case = new_case()
+        repo, base = make_change(case, ["Pass one", "Breaks on change"])
+        self.assertEqual(fixture_git(repo, case, "merge-base", "HEAD", "origin/main"), base,
+                         "premise: the merge base is not origin/main, so the checkout is behind and this case is no control")
+        rc, lines = cheap_in(repo, case)
+        rest = phrase_after(lines, "fail", "Breaks on change")
+        self.assertIsNotNone(rest, "no `fail Breaks on change (` line, so the row names no base: %r" % lines)
+        match = re.match(PASSES_ON_BASE, rest)
+        self.assertIsNotNone(match, "the level checkout's row does not say `passes on <sha9>: this change broke it`: %r" % rest)
+        self.assertEqual(match.group(1), base[:9], "the row names %s as the base, not the base commit %s" % (match.group(1), base[:9]))
+        self.assertEqual(rc, 1, "exit %d with the check failing on the checkout, want 1" % rc)
+
+    def test_behind_the_base_tip_reads_the_merge_base_and_says_also_fails(self):
+        """A lane cut before the base's tip removes BROKEN. The check fails at the merge base and at HEAD, and passes at the tip the checkout
+        is behind. The row names the merge base as also failing, so it blames this change for nothing the base lacks."""
+        case = new_case()
+        repo, base = make_change(case, ["Pass one", "Breaks on change"], breaking=False, base_files=["BROKEN"], tip=(["BROKEN"], ["tip.txt"]))
+        tip = fixture_git(repo, case, "rev-parse", "refs/remotes/origin/main")
+        self.assertEqual(fixture_git(repo, case, "merge-base", "HEAD", "origin/main"), base,
+                         "premise: the merge base of HEAD and origin/main is not the commit the change started from")
+        self.assertNotEqual(base, tip, "premise: the merge base is the tip, so the checkout is level and this case is no behind case")
+        self.assertEqual(fixture_git(repo, case, "ls-tree", "--name-only", base, "BROKEN"), "BROKEN",
+                         "premise: the merge base holds BROKEN, so the check fails there")
+        self.assertEqual(fixture_git(repo, case, "ls-tree", "--name-only", tip, "BROKEN"), "",
+                         "premise: the tip lacks BROKEN, so the check passes there")
+        rc, lines = cheap_in(repo, case)
+        copies = base_runs(case, "Breaks on change", repo)
+        self.assertEqual(len(copies), 1, "the failing check ran in a copy of the base %d times, want once: %r" % (len(copies), lines))
+        rest = phrase_after(lines, "fail", "Breaks on change")
+        self.assertIsNotNone(rest, "no `fail Breaks on change (` line, so the row names no base: %r" % lines)
+        match = re.match(ALSO_FAILS_ON_BASE, rest)
+        self.assertIsNotNone(match, "the row does not say `also fails on <sha9>`: the base read did not run on the merge base: %r" % rest)
+        self.assertEqual(match.group(1), base[:9], "the row names %s as the base, not the merge base %s" % (match.group(1), base[:9]))
+        self.assertEqual(rc, 1, "exit %d when the merge base fails too, want 1" % rc)
+
+    def test_behind_the_base_tip_reads_the_merge_base_and_says_this_change_broke_it(self):
+        """The change adds BROKEN. The check passes at the merge base and fails at HEAD and at the tip the checkout is behind. The row names the
+        merge base, where the check passed, and not the tip, where it fails."""
+        case = new_case()
+        repo, base = make_change(case, ["Pass one", "Breaks on change"], tip=([], ["BROKEN", "tip.txt"]))
+        tip = fixture_git(repo, case, "rev-parse", "refs/remotes/origin/main")
+        self.assertEqual(fixture_git(repo, case, "merge-base", "HEAD", "origin/main"), base,
+                         "premise: the merge base of HEAD and origin/main is not the commit the change started from")
+        self.assertNotEqual(base, tip, "premise: the merge base is the tip, so the checkout is level and this case is no behind case")
+        self.assertEqual(fixture_git(repo, case, "ls-tree", "--name-only", base, "BROKEN"), "",
+                         "premise: the merge base lacks BROKEN, so the check passes there")
+        self.assertEqual(fixture_git(repo, case, "ls-tree", "--name-only", tip, "BROKEN"), "BROKEN",
+                         "premise: the tip holds BROKEN, so the check fails there too")
+        rc, lines = cheap_in(repo, case)
+        copies = base_runs(case, "Breaks on change", repo)
+        self.assertEqual(len(copies), 1, "the failing check ran in a copy of the base %d times, want once: %r" % (len(copies), lines))
+        rest = phrase_after(lines, "fail", "Breaks on change")
+        self.assertIsNotNone(rest, "no `fail Breaks on change (` line, so the row names no base: %r" % lines)
+        match = re.match(PASSES_ON_BASE, rest)
+        self.assertIsNotNone(match, "the row does not say `passes on <sha9>: this change broke it`: the base read did not run on the merge base: %r" % rest)
+        self.assertEqual(match.group(1), base[:9], "the row names %s as the base, not the merge base %s" % (match.group(1), base[:9]))
+        self.assertEqual(rc, 1, "exit %d with the check failing on the checkout, want 1" % rc)
+
+    def test_no_merge_base_reads_base_not_read(self):
+        """origin/main names an unrelated root commit holding the base's tree, so HEAD and origin/main share no commit. The row says base not
+        read, and no copy of that commit runs."""
+        case = new_case()
+        repo, base = make_change(case, ["Pass one", "Breaks on change"])
+        tree = fixture_git(repo, case, "rev-parse", base + "^{tree}")
+        unrelated = fixture_git(repo, case, "commit-tree", tree, "-m", "unrelated base")
+        fixture_git(repo, case, "update-ref", "refs/remotes/origin/main", unrelated)
+        done = subprocess.run(["git", "merge-base", "HEAD", "origin/main"], cwd=repo, env=git_env(case), capture_output=True, text=True)
+        self.assertEqual(done.returncode, 1, "premise: git found a merge base of HEAD and origin/main, so the case has one to read: %r" % done.stdout)
+        rc, lines = cheap_in(repo, case)
+        self.assertTrue(any(line.startswith("fail Breaks on change") for line in lines), "premise: the checkout's run did not FAIL the check: %r" % lines)
+        rest = phrase_after(lines, "fail", "Breaks on change")
+        self.assertIsNotNone(rest, "no `fail Breaks on change (` line, so the row names no base: %r" % lines)
+        self.assertRegex(rest, BASE_NOT_READ, "a check with no merge base names no reason the base was not read: %r" % rest)
+        self.assertEqual(base_runs(case, "Breaks on change", repo), [], "a check with no merge base ran in a copy of origin/main, the unrelated commit")
+        self.assertEqual(rc, 1, "exit %d with the check failing and no base read, want 1" % rc)
 
 
 def tearDownModule():
