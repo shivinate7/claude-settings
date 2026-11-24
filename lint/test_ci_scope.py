@@ -65,10 +65,17 @@ REAL_GUARD_INPUTS = "real"  # run()'s guard_inputs default: the repo's own list 
 
 
 def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref="", green=None,
-        green_sibling=False, green_head=None, contents=None, facts=None, merged=None, moves=None, guard_inputs=REAL_GUARD_INPUTS):
-    """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit. `head_ref` is HEAD_REF,
-    empty when not given, so no HEAD_REF of the caller's environment reaches the script. `moves` maps an old path to its new
-    one, or to None for a delete: the old path is in the base, and a move keeps the content, so git sees a rename.
+        green_sibling=False, green_head=None, contents=None, facts=None, merged=None, moves=None, guard_inputs=REAL_GUARD_INPUTS,
+        scope_files=None, proven=False):
+    """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit. `scope_files` (a list of paths), when
+    given, is SCOPE_FILES: the script reads those paths in place of the diff, with the same BASE_SHA range as the other cases. `head_ref` is HEAD_REF,
+    empty when not given, so no HEAD_REF of the caller's environment reaches the script. `base` is BASE_SHA: "auto" is the base
+    commit (the pull request's base), and "head" (HEAD itself), "green" (the `green` commit) and "sibling" (a commit off the base
+    that HEAD does not descend from) name those commits; "pre" is the base commit itself, the commit `merged` branches off, which is the
+    proven base of a push whose merge commit brings that branch in; any other value is BASE_SHA as given. A push gets no BASE_SHA under "auto"
+    unless `proven` is set: that is the push base a proven run hands over, and with none a push runs every flag (decision
+    push-skip-on-proven-tree). `moves` maps an old path to its new one, or to None for a delete: the old path is in the base, and a
+    move keeps the content, so git sees a rename.
     `guard_inputs` is the text of .github/guard-inputs.txt in the base: the repo's own list by default (none when the repo has
     no list yet), a text in its place, or None for no list at all (the gate's unreadable case).
     `green` (a list of paths) is the pull request's earlier head, committed before the head commit, so the whole diff against
@@ -108,6 +115,14 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
         git(d, "add", "-A")
         git(d, "commit", "-qm", "base")
         sha = git(d, "rev-parse", "HEAD")
+        side_sha = ""
+        if base == "sibling":  # a commit off the base line that HEAD does not descend from
+            git(d, "checkout", "-q", "-b", "side-base")
+            open(os.path.join(d, "side.txt"), "w").write("side\n")
+            git(d, "add", "-A")
+            git(d, "commit", "-qm", "side base")
+            side_sha = git(d, "rev-parse", "HEAD")
+            git(d, "checkout", "-q", "-")
         for old, new in moves.items():
             os.remove(os.path.join(d, old))
             if new is not None:
@@ -139,7 +154,7 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
         git(d, "add", "-A")
         git(d, "commit", "-qm", "head", "--allow-empty")
         head_sha = git(d, "rev-parse", "HEAD")
-        base_sha = sha if base == "auto" else base
+        base_sha = sha if base == "auto" else {"head": head_sha, "sibling": side_sha, "green": green_sha, "pre": sha}.get(base, base)
         if merged is not None:
             git(d, "checkout", "-q", "-b", "base-moved", sha)
             write(merged)
@@ -149,12 +164,17 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
                 base_sha = git(d, "rev-parse", "HEAD")
             git(d, "checkout", "-q", "-")
             git(d, "merge", "-q", "--no-ff", "--no-edit", "base-moved")
+        if event == "push" and base == "auto" and not proven:
+            base_sha = ""  # no proven base for this push: the ruling runs every flag, as before the proven base existed
         out = os.path.join(d, "..", f"out-{os.getpid()}.txt")
         env = dict(os.environ, EVENT=event, GITHUB_OUTPUT=out, HEAD_REF=head_ref,
                    BASE_SHA=base_sha, GREEN_HEAD=green_sha if green_head is None else green_head)
         env.pop("PR_HEAD", None)  # a caller's value never reaches the script; only `merged` sets it
         if merged is not None:
             env["PR_HEAD"] = head_sha
+        env.pop("SCOPE_FILES", None)  # a caller's value never reaches the script; only `scope_files` sets it
+        if scope_files is not None:
+            env["SCOPE_FILES"] = "\n".join(scope_files)
         if facts is not None and green_sha:
             delta_head = git(d, "diff", "--name-only", "--no-renames", green_sha, "HEAD").split()
             facts.update(green=green_sha, delta=delta_head, delta_head=delta_head,
@@ -252,8 +272,9 @@ def export_suite_files():
     return sorted(found | set(EXPORT_SUITE_FILES))
 
 
-@unittest.skipUnless(BASH, "bash not on PATH")
-class Scope(unittest.TestCase):
+class FlagAsserts:
+    """assertFlags: the one home of the job and suite flag check. A case mixes it in beside unittest.TestCase."""
+
     def assertFlags(self, got, want_true=(), want_false=()):
         for n in ALL:
             self.assertIn(n, got, f"output {n} missing: {got}")
@@ -262,6 +283,9 @@ class Scope(unittest.TestCase):
         for n in want_false:
             self.assertEqual(got[n], "false", f"{n}: {got}")
 
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class Scope(FlagAsserts, unittest.TestCase):
     def test_docs_only_pr_turns_every_job_off(self):
         got = run(["README.md", "decisions/some-record.md"])
         self.assertFlags(got, want_false=ALL)
@@ -302,8 +326,12 @@ class Scope(unittest.TestCase):
         self.assertFlags(run(["README.md"], base=""), want_true=ALL)
 
     def test_push_schedule_and_dispatch_run_everything_even_for_docs(self):
-        for ev in ("push", "schedule", "workflow_dispatch"):
-            self.assertFlags(run(["README.md"], event=ev), want_true=ALL)
+        # Decision push-skip-on-proven-tree: a push with no proven base runs every flag, even for a docs-only diff. A schedule or
+        # a dispatch never scopes, even when CI hands it a base commit.
+        self.assertFlags(run(["README.md"], event="push", base=""), want_true=ALL)
+        for ev in ("schedule", "workflow_dispatch"):
+            with self.subTest(event=ev):
+                self.assertFlags(run(["README.md"], event=ev), want_true=ALL)
 
     # Map gaps found in review: each path is read by a suite in another job.
     def test_merge_tool_change_turns_on_the_suites_that_load_it(self):
@@ -337,6 +365,18 @@ class Scope(unittest.TestCase):
 
     def test_a_modified_md_under_skills_turns_on_nothing(self):
         self.assertFlags(run(["skills/old/SKILL.md"], existing=["skills/old/SKILL.md"]), want_false=ALL)
+
+    def test_scope_files_mode_gives_the_ci_flags_for_a_file_added_under_a_landed_dir(self):
+        # bin/ci-job's carry reads a delta's flags with SCOPE_FILES; CI reads the same added file in range mode. Every flag but
+        # windows_guard must agree, because the carry reads the guard flag from the SCOPE_FILES run.
+        names = ALL + DERIVED_FLAGS + list(LINT_FLAGS) + DOC_FLAGS
+        for p in ("agents/newagent.md", "skills/newx/SKILL.md"):
+            with self.subTest(added=p):
+                ci = run([p])
+                scoped = run([p], scope_files=[p])
+                diff = {n: (ci.get(n), scoped.get(n)) for n in names if ci.get(n) != scoped.get(n)}
+                self.assertEqual(diff, {}, "SCOPE_FILES mode gives other flags than CI's range read for %s, a file added under a landed dir: "
+                                 "name -> (CI, SCOPE_FILES)" % p)
 
     def test_a_new_file_in_hooks_or_janitor_turns_on_the_install_suite(self):
         for p in ("hooks/new.py", "janitor/new.py"):
@@ -1030,10 +1070,12 @@ class _IfParser:
         return self.env.get(tok, "")
 
 
-def if_env(outs, event):
-    """The names an if: reads: the event, the pull request's draft flag, and each scope output of the run."""
+def if_env(outs, event, results=None):
+    """The names an if: reads: the event, the pull request's draft flag, each scope output of the run, and each job's result.
+    The scope job succeeded unless `results` says otherwise. A name the env does not hold reads as empty."""
     env = {"github.event_name": event, "github.event.pull_request.draft": False if event == "pull_request" else None}
     env.update({f"needs.scope.outputs.{name}": value for name, value in outs.items()})
+    env.update({f"needs.{job}.result": result for job, result in {"scope": "success", **(results or {})}.items()})
     return env
 
 
@@ -1052,9 +1094,9 @@ def job_if(text, job):
     return (wrapped.group(1) if wrapped else raw).strip()
 
 
-def job_runs(expr, outs, event):
-    """True when the job starts on this run: it has no job-level if, or its if: is true on the run's outputs."""
-    return True if expr is None else _IfParser(expr, if_env(outs, event)).parse()
+def job_runs(expr, outs, event, results=None):
+    """True when the job starts on this run: it has no job-level if, or its if: is true on the run's outputs and job results."""
+    return True if expr is None else _IfParser(expr, if_env(outs, event, results)).parse()
 
 
 def running_jobs(text, outs, event):
@@ -1132,6 +1174,21 @@ class RecordsOnlyEveryJob(unittest.TestCase):
                         expr = job_if(text, job)
                         self.assertTrue(job_runs(expr, got, event),
                                         f"{job} does not start on a records-only {event} run; its job-level if is {expr}")
+
+    # Control: checks starts on a code run, and its own if: turns it off for a records-only run and for a failed scope. So the
+    # records-only test above reads checks off for the skip, not because the scope result reads as empty.
+    def test_checks_starts_on_a_code_run_and_stays_off_on_a_records_only_run_or_a_failed_scope(self):
+        expr = job_if(self.workflow(), "checks")
+        self.assertIsNotNone(expr, "checks has no job-level if")
+        cases = (
+            ("a records-only run", {"records_only_skip": "true"}, {"scope": "success"}, False),
+            ("a code run", {"records_only_skip": "false"}, {"scope": "success"}, True),
+            ("a failed scope", {"records_only_skip": "false"}, {"scope": "failure"}, False),
+        )
+        for label, outs, results, want in cases:
+            with self.subTest(run=label):
+                got = job_runs(expr, outs, "pull_request", results)
+                self.assertEqual(got, want, f"checks {'starts' if got else 'stays off'} on {label}; its job-level if is {expr}")
 
     # Control: the reader reads the wider skip's form as off when records_only_skip is 'true' and on when it is
     # 'false', and refuses a form it does not know rather than reading it as true.
@@ -1368,13 +1425,14 @@ class LintStepWorkflow(unittest.TestCase):
         self.scope = job_block(self.text, "scope")
 
     def step_if(self, name):
-        """The `if:` of the `checks` job's step named `name`. A missing step, or a step with no if:, fails by name."""
+        """The `if:` of the `checks` job's step named `name`, without its keep-running guard (split.keep_running_off). A missing step,
+        or a step with no if:, fails by name."""
         self.assertIsNotNone(self.checks, "checks.yml has no checks job")
         for s in step_blocks(self.checks):
             if step_key(s, "name") == name:
                 raw = step_key(s, "if")
                 self.assertIsNotNone(raw, f"the step {name!r} has no if:")
-                return raw
+                return split.keep_running_off(raw)
         self.fail(f"the checks job has no step named {name!r}")
 
     def test_each_lint_step_names_its_flag_and_the_pull_request_condition(self):
@@ -1569,10 +1627,10 @@ class MutationReport(unittest.TestCase):
         self.assertEqual(push["mutation_report"], "true", f"a push: {push}")
 
 
-# The guard-inputs gate. The three Windows guard shards (checks-windows-guard, -2, -3) run only when a diff touches a guard input:
+# The guard-inputs gate. The Windows guard shards (checks-windows-guard and its -2 to -n copies) run only when a diff touches a guard input:
 # windows_guard in ci-scope.sh, read from .github/guard-inputs.txt. The gate is read from checks.yml's own step condition, so each
 # case states what the workflow does with the scope outputs, not the value of one output. Cost: parses checks.yml once per call.
-GUARD_SHARDS = ("checks-windows-guard", "checks-windows-guard-2", "checks-windows-guard-3")
+GUARD_SHARDS = split.WINDOWS_GUARD_JOBS  # the family's count, one home: SHARD_COUNTS in lint/test_windows_split.py
 # Flags the old script sets true for SNAPSHOT_DIFFS, each run() with its default arguments. windows_guard is left out of the
 # comparison: it is the one output the gate adds. Recorded on the script before the gate existed.
 SNAPSHOT_DIFFS = [
@@ -1717,6 +1775,149 @@ class WindowsGuardShards(unittest.TestCase):
                 got = run(paths, **kw)
                 have = sorted(n for n, v in got.items() if v == "true" and n != "windows_guard")
                 self.assertEqual(have, sorted(want), f"a flag changed for {paths}: {got}")
+
+
+# The merge and rest shards read the flags below. Each named path sets the merge or the rest flag, the one whose shard runs the suite
+# that path loads, and a docs-only diff sets neither. Controls: green on the old script.
+class WindowsMergeAndRestFlags(unittest.TestCase):
+    NAMED_PATHS = ("merge/merge.py", "hooks/guard.py", "bin/merge", ".github/workflows/checks.yml", ".github/scripts/ci-scope.sh")
+
+    def test_a_docs_only_diff_sets_neither_the_merge_nor_the_rest_flag(self):
+        for paths in (["docs/notes/n.md"], ["README.md", "docs/map/x.md"]):
+            with self.subTest(paths=paths):
+                got = run(paths)
+                for flag in ("checks_windows_merge", "checks_windows_rest"):
+                    self.assertEqual(got[flag], "false", f"{flag} is {got[flag]} for {paths}: {got}")
+
+    def test_each_named_path_sets_the_merge_or_the_rest_flag(self):
+        for path in self.NAMED_PATHS:
+            with self.subTest(path=path):
+                got = run([path])
+                self.assertTrue("true" in (got["checks_windows_merge"], got["checks_windows_rest"]), f"{path} sets neither flag: {got}")
+
+
+ROOT = os.path.normpath(os.path.join(HERE, ".."))
+SHARD_FLAGS = ("checks_windows_merge", "checks_windows_rest", "checks_windows_rest_2")
+_SHARD_FLAGS = {}  # path -> run()'s output for a diff that touches that path alone, so each path runs once
+
+
+def shard_flags_of(path):
+    """run()'s output for a diff that touches `path` alone, cached: a named case and the closure share the one run."""
+    if path not in _SHARD_FLAGS:
+        _SHARD_FLAGS[path] = run([path])
+    return _SHARD_FLAGS[path]
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class WindowsShardFailSafe(unittest.TestCase):
+    """The narrow rule's fail-safe: a path no arm names sets every shard flag, so a file the table misses still runs the shards."""
+
+    def test_a_path_no_arm_names_sets_every_shard_flag(self):
+        # Control: the default arm of ci-scope.sh sets every flag for a path no arm names.
+        got = shard_flags_of("zz-unnamed/never-a-real-path.xyz")
+        self.assertEqual([f for f in SHARD_FLAGS if got[f] != "true"], [], f"a path no arm names leaves a shard flag off: {got}")
+
+
+# The net under the narrow pull-request rule. A scheduled run (the daily, checks.yml's cron) and a manual dispatch set every Windows
+# flag whatever the diff, so a Windows break that a narrowed pull request left out still runs there.
+WINDOWS_FLAGS = ("checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_windows_rest_2", "checks_windows_sweep",
+                 "pointer_windows", "windows_guard")
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class WindowsFlagsOnScheduleAndDispatch(unittest.TestCase):
+    """Each case runs with a real base sha and with an empty one: CI gives a scheduled run no pull-request base, so BASE_SHA is empty."""
+
+    def assert_pull_request_is_narrow(self, paths):
+        # Scope first: the same diff on a pull request leaves the merge and rest shards off, so the flags checked below are the net.
+        narrow = run(paths)
+        for flag in ("checks_windows_merge", "checks_windows_rest"):
+            self.assertEqual(narrow[flag], "false", f"a pull request of {paths} sets {flag}, so it is not the narrow case: {narrow}")
+
+    def assert_every_windows_flag_on(self, event, paths):
+        for base in ("auto", ""):
+            with self.subTest(event=event, base=base):
+                got = run(paths, event=event, base=base)
+                absent = [f for f in WINDOWS_FLAGS if f not in got]
+                self.assertEqual(absent, [], f"a {event} run of {paths} writes no output for {absent}, so no shard reads it: {got}")
+                off = [f for f in WINDOWS_FLAGS if got[f] != "true"]
+                self.assertEqual(off, [], f"a {event} run of {paths} leaves a Windows flag off, so that shard is skipped: {got}")
+
+    def test_a_scheduled_or_dispatched_run_sets_every_windows_flag_for_an_empty_diff(self):
+        for event in ("schedule", "workflow_dispatch"):
+            self.assert_every_windows_flag_on(event, [])
+
+    def test_a_scheduled_run_sets_every_windows_flag_for_a_docs_only_diff(self):
+        self.assert_pull_request_is_narrow(["docs/notes/n.md"])
+        self.assert_every_windows_flag_on("schedule", ["docs/notes/n.md"])
+
+    def test_a_dispatched_run_sets_every_windows_flag_for_a_docs_only_diff(self):
+        self.assert_pull_request_is_narrow(["docs/notes/n.md"])
+        self.assert_every_windows_flag_on("workflow_dispatch", ["docs/notes/n.md"])
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class PushDiffFromProvenBase(FlagAsserts, unittest.TestCase):
+    """A push with a proven base (push-skip's base output: the head of the newest green push run of main whose suites ran) scopes its
+    flags from base..HEAD. A base that is not a full sha, not an ancestor of HEAD, or HEAD itself turns every flag on, and so does no
+    base. The base is never the records-only green head, so it never sets records_only_skip. A pull request's diff is unchanged.
+    Named failure: a push scopes from the whole history, or from a base that push-skip did not prove."""
+
+    DOCS = ["docs/notes/a-note.md"]  # a docs path: no job flag, no code, the doc_other and doc_any flags
+    CODE = ["merge/merge.py"]  # a merge path: checks_windows, checks_windows_merge, checks_macos, code, guard, no other suite flag
+    RECORDS = ["docs/records.md"]
+
+    def test_a_docs_only_diff_from_a_proven_base_turns_code_off_and_the_doc_flags_on(self):
+        got = run(self.DOCS, event="push", proven=True)
+        self.assertFlags(got, want_false=ALL)
+        self.assertEqual(got.get("doc_other"), "true", f"a docs/ path sets doc_other: {got}")
+        self.assertEqual(got.get("doc_any"), "true", f"a .md path sets doc_any: {got}")
+
+    def test_a_code_diff_from_a_proven_base_turns_its_mapped_suites_on_and_the_rest_off(self):
+        got = run(self.CODE, event="push", proven=True)
+        self.assertFlags(got, want_true=["checks_windows", "checks_windows_merge", "checks_macos", "code", "guard"],
+                         want_false=["checks_windows_rest", "pointer_windows", "shell_macos", "sweep", "mods", "shoot"])
+
+    def test_the_diff_runs_from_the_proven_base_so_a_code_change_below_it_does_not_count(self):
+        got = run(self.DOCS, green=self.CODE, green_head="", event="push", base="green", proven=True)
+        self.assertFlags(got, want_false=ALL)
+        self.assertEqual(got.get("doc_other"), "true", f"the docs path above the base sets doc_other: {got}")
+
+    def test_a_base_that_is_not_an_ancestor_of_head_turns_every_flag_on(self):
+        self.assertFlags(run(self.DOCS, event="push", base="sibling"), want_true=ALL)
+
+    def test_a_base_that_is_not_a_full_sha_turns_every_flag_on(self):
+        for base in ("HEAD~1", "1234567", "g" * 40):
+            with self.subTest(base=base):
+                self.assertFlags(run(self.DOCS, event="push", base=base), want_true=ALL)
+
+    def test_an_empty_base_turns_every_flag_on(self):
+        self.assertFlags(run(self.DOCS, event="push", base=""), want_true=ALL)
+
+    def test_a_base_equal_to_head_turns_every_flag_on(self):
+        self.assertFlags(run(self.DOCS, event="push", base="head"), want_true=ALL)
+
+    def test_a_proven_base_never_sets_the_records_only_skip(self):
+        got = run(self.RECORDS, event="push", proven=True)
+        self.assertEqual(got.get("records_only_skip"), "false", f"a push base was taken for the green head of a records-only skip: {got}")
+
+    def test_a_records_only_push_from_a_proven_base_turns_every_flag_off_but_the_doc_flags(self):
+        got = run(self.RECORDS, event="push", proven=True)
+        self.assertFlags(got, want_false=ALL)
+        self.assertEqual(got.get("doc_other"), "true", f"a docs/ path sets doc_other: {got}")
+
+    def test_a_merge_commit_whose_side_branch_changed_a_code_file_flags_that_files_suites_from_a_proven_base(self):
+        # HEAD is a merge commit: the side branch changed merge/merge.py and the head changed docs only. The proven base is the commit
+        # the side branch leaves from, so base..HEAD holds the side's code file. Without the side's change the same push is docs-only.
+        got = run(self.RECORDS, merged=self.CODE, base="pre", event="push")
+        self.assertFlags(got, want_true=["checks_windows", "checks_windows_merge", "checks_macos", "code", "guard"],
+                         want_false=["checks_windows_rest", "pointer_windows", "shell_macos", "sweep", "mods", "shoot"])
+        twin = run(self.RECORDS, base="pre", event="push")
+        self.assertFlags(twin, want_false=ALL)
+
+    def test_a_pull_request_diff_is_unchanged_by_a_proven_base(self):
+        self.assertFlags(run(self.DOCS, event="pull_request", proven=True), want_false=ALL)
+        self.assertFlags(run(self.CODE, event="pull_request", proven=True), want_true=["checks_windows_merge", "code"])
 
 
 if __name__ == "__main__":

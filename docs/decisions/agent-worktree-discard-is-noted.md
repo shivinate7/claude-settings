@@ -9,8 +9,10 @@ path, `guard-git-reset-path`, is in the background-tail lane, `bg-tail-loses-ver
 worktree discard ruling stands), 2026-11-08 07:50 CST (the shared-checkout unstage must be judged
 explicitly; the path reset section judges it allow, by measurement).
 
+Owner, 2026-11-23 11:07 CST: a discard in a hand-made worktree is denied, and prune is allowed (decision `guards-never-ask`).
+
 The shared-tree rule refuses a discarding git command in the shared checkout. In a hand-made
-worktree it asks for `git reset --hard`. It asks for `git checkout -- <path>` or `git restore` too,
+worktree it refuses `git reset --hard`, `git checkout -- <path>` and `git restore` too,
 except a named file. The shared checkout refuses named files.
 
 ### Agent-owned worktree
@@ -18,33 +20,33 @@ except a named file. The shared checkout refuses named files.
 Take a linked worktree whose real path sits under `<main repo root>/.claude/worktrees/`, never a
 "worktrees" segment in its spelling (`agent_owned_worktree(root)` in `hooks/guard.py`). Call that an
 agent-owned worktree. Inside it, a discard is ALLOWED. It is logged as a note, with no prompt. A linked
-worktree anywhere else keeps "ask", except a named-file discard (see Named files). The main checkout
-keeps "deny". Four things stay unchanged: branch-delete refusal, worktree-remove refusal, worktree-prune ask,
-and every stash refusal.
+worktree anywhere else is refused, except a named-file discard (see Named files). The main checkout
+keeps "deny". Three things stay unchanged: branch-delete refusal, worktree-remove refusal, and every stash
+refusal. Worktree prune is allowed: it drops only the record of a worktree whose folder is gone.
 
-Reason: the ask protects a person's own uncommitted work in a worktree they made by hand. The owner makes
+Reason: the refusal protects a person's own uncommitted work in a worktree they made by hand. The owner makes
 no worktree by hand (owner, 2026-10-17 11:40 CDT). Claude sessions make them, or the desktop app's
 worktree checkbox does. So the per-file allow outside `.claude/worktrees/` stands. Whole-tree discards
-there keep the ask. Inside an agent's own worktree, the agent's commits are the copy, on its own branch
+there are refused. Inside an agent's own worktree, the agent's commits are the copy, on its own branch
 and in its own reflog.
 
 ### Named files in a linked worktree
 
-In a linked worktree, `git checkout <file>` and `git restore <file>` that name only files run with no
-ask. Reason: the loss is the lane's own change to the files it named, which is what a lane means when it
+In a linked worktree, `git checkout <file>` and `git restore <file>` that name only files are allowed.
+Reason: the loss is the lane's own change to the files it named, which is what a lane means when it
 regenerates a fixture. The allow is an allow-list (`names_only_files` and `one_place` in
-`hooks/guard_shared_tree.py`). Any other flag or form keeps the ask, as does a command the tokenizer
+`hooks/guard_shared_tree.py`). Any other flag or form is refused, as is a command the tokenizer
 cannot read. A whole-tree discard (`reset --hard`, or a `checkout` or `restore` of `.`, a folder or a
-glob) keeps the worktree ask. A shared checkout still refuses all of them.
+glob) is refused in a linked worktree. A shared checkout still refuses all of them.
 
 The allow applies only when the whole command acts in one place (`one_place`). The command has no
 directory change and at most one distinct `git -C` target. Every other shape can hide the shared
-checkout behind the lane, so it keeps the ask. The ask reason names the allowed form:
-`git -C <lane> restore <file>`. The incident form, a `cd` into the worktree and then one file, asks.
-Setting `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE` is refused, not asked (`git-env-set-refused`,
+checkout behind the lane, so it is refused. The refusal names the allowed form:
+`git -C <lane> restore <file>`. The incident form, a `cd` into the worktree and then one file, is refused.
+Setting `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE` is refused (`git-env-set-refused`,
 setting git env vars is refused).
 
-These discard forms join the rule: refused in a shared checkout, ask in a linked worktree.
+These discard forms join the rule: refused in a shared checkout and in a linked worktree.
 
 - `git checkout -f <branch>` and `git checkout --force <branch>`. A forced switch discards local
   changes.
@@ -55,7 +57,7 @@ These discard forms join the rule: refused in a shared checkout, ask in a linked
   only to skip an empty name and one that starts with `-` or `:`. A name that is both a branch and a
   file stays a branch, as git reads it. A clean file and a branch keep their answers. In a hand-made
   worktree the named-file allow stays (`names_only_files` and `one_place`, "Named files in a linked
-  worktree" above), and the call asks only when it holds a `cd`. Incident: 2026-11-08 03:37
+  worktree" above), and the call is refused only when it holds a `cd`. Incident: 2026-11-08 03:37
   CST, with coordinator rulings at 04:38 and 05:16 CST. An agent-owned worktree keeps its named-file
   allow.
   - Cost: 0 git starts when no file of that name exists, 1 when it is a revision, 2 otherwise (unmeasured).
@@ -79,7 +81,7 @@ These discard forms join the rule: refused in a shared checkout, ask in a linked
 ## Path reset and work-tree discards
 
 Verdicts by tree: shared | hand-made | agent-owned. Pinned by the path reset ruling block in
-`tests/guard/` (family `shared-tree`, block titled THE PATH RESET AND DISCARD RULING). A `deny | ask | allow, noted` row
+`tests/guard/` (family `shared-tree`, block titled THE PATH RESET AND DISCARD RULING). A `deny | deny | allow, noted` row
 holds only over uncommitted work. A clean tree allows, as the rows
 `subject: a hard reset in a clean tree takes nothing` and
 `subject: restoring the whole clean tree changes nothing` show.
@@ -91,17 +93,17 @@ holds only over uncommitted work. A clean tree allows, as the rows
     lines, nothing is lost. If the work tree changed a line after it was staged, the staged version
     is in no ref, index or file after the unstage. It survives only as an unreachable blob until gc.
     The allow stays. Measured: after add, edit and unstage, the work tree keeps the newer
-    bytes, and `git fsck --lost-found` recovers the staged bytes. Asking on every unstage would be a
+    bytes, and `git fsck --lost-found` recovers the staged bytes. Refusing every unstage would be a
     false alarm, since any agent's `git add` or `git commit` already changes the shared index. The
     `MM` state also comes from add-then-edit.
 - `git restore --staged <path>` and `git restore --staged .`: allow | allow | allow. Each is an
   unstage, so the caveat above applies.
 - `git restore -- <path>`: deny | allow (named-file allow) | allow, noted.
-- `git reset --hard|--merge|--keep` with a path (`… -- <path>`): deny | ask | allow, noted. Git refuses
+- `git reset --hard|--merge|--keep` with a path (`… -- <path>`): deny | deny | allow, noted. Git refuses
   this form itself ("Cannot do <mode> reset with paths"), so these pinned verdicts cost nothing and
   guard nothing.
 - `git checkout -- .`, `git checkout -q -- .`, `git checkout HEAD -- .` and `git restore .`: deny |
-  ask | allow, noted. The agent-owned allow is the owner ruling of 2026-10-03, re-affirmed 2026-10-17
+  deny | allow, noted. The agent-owned allow is the owner ruling of 2026-10-03, re-affirmed 2026-10-17
   11:40 CDT. Second sighting: lane `findings-ride-in-lane`, 2026-11-08. A builder discarded its own
   edit in its own worktree. Nothing was lost, and the ruling allows it.
 

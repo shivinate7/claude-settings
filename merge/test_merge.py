@@ -31,6 +31,7 @@ import test_build as roadmap  # noqa: E402  the roadmap fixture: STEP, session_r
 import fnmatch  # noqa: E402  the temp-file cases match merge-live names
 from datetime import datetime as _datetime, timedelta as _timedelta, timezone as _timezone  # noqa: E402  the live file's readAt against the merge commit's time
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
+import test_compliance_probes as aligned  # noqa: E402  the aligned group's record and citing-unit fixture text, one home (lint/test_compliance_probes.py)
 import stale_cites  # noqa: E402  the guard's rule dirs, one home (lint/stale_cites.py)
 import layout  # noqa: E402  where each kind of record lives, one home (lint/layout.py)
 import ruled_store  # noqa: E402  the one reader of the ruling store (lint/ruled_store.py)
@@ -111,7 +112,7 @@ def tree_listed(cwd, path):
 
 def put(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write(text)
 
 def put_shim(path, text):
@@ -157,6 +158,9 @@ class FakeHost:
     def now(self):
         # A method, not an instance attribute: a subclass that moves its own clock (LagHost) overrides it.
         return FAKE_NOW  # Host.now: reviewed_read reads it, so an age is the same on every run
+
+    def server_now(self):
+        return FAKE_NOW  # Host.server_now: GitHub's clock in epoch seconds; the idle red rule reads a PR's age on it, never on now()
 
     def __init__(self, root, other, branch="feat"):
         self.root, self.other, self.branch = root, other, branch
@@ -4187,21 +4191,22 @@ def ref(name):
         pass
     return ""
 def feat_head(): return ref("refs/heads/" + S.get("head_ref", "feat"))  # the pull request's head branch: feat, or the case's head_ref (a batch integration PR's batch-x, whose claim commit moves it)
-RUN_FIELDS = ("databaseId", "name", "workflowName", "workflowDatabaseId", "status", "conclusion", "headSha", "headBranch", "event", "url")
+RUN_FIELDS = ("databaseId", "name", "workflowName", "workflowDatabaseId", "status", "conclusion", "headSha", "headBranch", "event", "createdAt", "url")
 def next_runs():
     """The next answer to a workflow-run read: runs_seq, one entry a read, the last one again. An entry is (name, status, conclusion[, databaseId[, workflowDatabaseId]]).
     Without an id a run gets 9000 plus its place; without a workflow id, one derived from its name, so runs of one name share one workflow."""
     seq = S.get("runs_seq") or [[]]; cur = seq.pop(0) if len(seq) > 1 else seq[0]; save()
     return [(r[0], r[1], r[2], r[3] if len(r) > 3 else 9000 + i, r[4] if len(r) > 4 else sum(map(ord, r[0]))) for i, r in enumerate(cur)]
 def run_list_json(runs, sha, argv):
-    """`gh run list --json F,...` as gh prints it: only the fields asked for. A field the fake does not know is gh's refusal. No createdAt: a newer run is a larger databaseId."""
+    """`gh run list --json F,...` as gh prints it: only the fields asked for. A field the fake does not know is gh's refusal. Every run's createdAt is one hour before FAKE_NOW (S runs_created sets it), the same for each run."""
     fields = argv[argv.index("--json") + 1].split(",") if "--json" in argv else list(RUN_FIELDS)
     bad = [f for f in fields if f not in RUN_FIELDS]
     if bad:
         print('Unknown JSON field: "%s"' % bad[0]); sys.exit(1)
+    created = S.get("runs_created", "2026-10-01T23:00:00Z")  # GitHub's ISO time, an hour before the fixture clock (FAKE_NOW) unless a case sets runs_created; this script runs in its own process and has no clock
     def obj(name, status, conclusion, rid, wf):
         full = {"databaseId": rid, "name": name, "workflowName": name, "workflowDatabaseId": wf, "status": status, "conclusion": conclusion,
-                "headSha": sha, "headBranch": "feat", "event": "pull_request", "url": "https://github.com/o/r/actions/runs/%d" % rid}
+                "headSha": sha, "headBranch": "feat", "event": "pull_request", "createdAt": created, "url": "https://github.com/o/r/actions/runs/%d" % rid}
         return {f: full[f] for f in fields}
     return json.dumps([obj(*r) for r in runs])
 def hold(kind):  # the first such call starts a helper that keeps this process's stdout open, as a detached git or gh helper can
@@ -4221,7 +4226,7 @@ def ratelimit_lines():
 def finish(text, code, include=False, link=None):
     if include and not (code and not re.search(r"\(HTTP \d{3}\)\s*$", text)):  # a transport error has no HTTP reply, so no header block
         got = int(re.search(r"\(HTTP (\d{3})\)\s*$", text).group(1)) if code else 200
-        sys.stdout.buffer.write(("HTTP/1.1 %d %s\r\nContent-Type: application/json\r\n%s%s\r\n" % (got, "Error" if code else "OK", ratelimit_lines(), "Link: %s\r\n" % link if link else "")).encode())
+        sys.stdout.buffer.write(("HTTP/1.1 %d %s\r\nContent-Type: application/json\r\n%s%s%s\r\n" % (got, "Error" if code else "OK", ratelimit_lines(), "Link: %s\r\n" % link if link else "", "Date: %s\r\n" % S["date"] if S.get("date") else "")).encode())  # S["date"]: GitHub's clock, as a case sets it; unset, the block has no Date line
     print(text)
     sys.exit(code)
 def graphql():
@@ -4419,7 +4424,7 @@ try:
         if raw:
             cur = raw[min(i, len(raw) - 1)]
         else:
-            seq = S["checks_seq"]; rows_now = seq[min(i, len(seq) - 1)]
+            seq = S["checks_seq"]; rows_now = (S.get("sha_checks") or {}).get(sha) or seq[min(i, len(seq) - 1)]  # sha_checks: the rows one sha answers, when a case's commits differ
             cur = {"check_runs": [check_run(r, k) for k, r in enumerate(rows_now) if len(r) < 4 or r[3] != "status"],
                    "statuses": [status_entry(r, k) for k, r in enumerate(rows_now) if len(r) >= 4 and r[3] == "status"]}
         if m_run:
@@ -4795,10 +4800,22 @@ class GhHalf(Env):
     def go(self, **kw):
         return self.run_merge("7", "--confirm", host=self.gh_host(**kw))
 
+    def proven_parent(self, rows=None):
+        """Teach the fake gh the commits a clean base merge's proof is read on: the PR head as it stands, and its first parent. A base merge the
+        tool makes in the run has the lane's head as its parent, and a merge already on the head has the commit it merged onto, so both are taught.
+        The fake gh answers a check read only for a sha a head read returned or the head ref, so the parent answers HTTP 422 until it is taught
+        here. `rows`: the check rows the parent answers, when they differ from the head's own (sha_checks). -> the parent's sha."""
+        sh(self.other, "git", "fetch", "-q", "origin")
+        head = sh(self.other, "git", "rev-parse", "origin/feat")
+        parent = sh(self.other, "git", "rev-parse", "origin/feat^1")
+        self.set(shown=[head, parent], sha_checks={parent: rows} if rows else {})
+        return parent
+
     def test_a_red_main_run_read_through_gh_merges_the_merge(self):
         """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): a PR may merge onto a red main, so the red run read through gh does not refuse it."""
         # the red-main check's REST reads through the real gh call: one page of main's runs, then the red run's jobs
         push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})  # only a workflow file on main is judged
+        self.proven_parent()  # the merge the tool makes on the head reads its proof on the lane's head, which the fake gh must know
         self.set(base_runs=[main_run(901, "failure")], base_jobs={"901": [main_job("scope", "success"), main_job("checks", "failure", 20)]})
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
@@ -4809,6 +4826,7 @@ class GhHalf(Env):
     def red_main_then_merge(self, *flags, unreadable=False):
         """Main's latest run is red, the flags go on the --confirm, and the merge call is the fake gh's. -> (rc, out, fields of each merge call)."""
         push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})
+        self.proven_parent()  # the merge the tool makes on the head reads its proof on the lane's head, which the fake gh must know
         self.set(base_runs=[main_run(901, "failure")], base_jobs={"901": [main_job("scope", "success"), main_job("checks", "failure", 20)]})
         with contextlib.ExitStack() as stack:
             if unreadable:
@@ -5960,6 +5978,7 @@ class GhHalf(Env):
     def test_a_pending_run_of_a_workflow_without_the_required_job_does_not_hold_the_wait(self):
         """A pending run of a workflow that does not define a required job does not hold the wait. Ruling: step merge-waits-required-only, wait only on the required check."""
         push_base(self, {".github/workflows/ci.yml": workflow_text("ci", "ci")})  # a readable folder whose one workflow has no required job
+        self.proven_parent()  # the head is a clean merge of main: its proof is read on the parent the fake gh must know
         self.set(runs_seq=[[("ci", "in_progress", "")], [("ci", "completed", "success")]])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
@@ -5969,6 +5988,7 @@ class GhHalf(Env):
         # The folder defines the required job `checks`, so its pending run makes the head pending: refused at once, the later complete run is never read.
         push_base(self, {".github/workflows/checks.yml": workflow_text("checks", "checks")})
         before = self.head()
+        self.proven_parent()  # the head is a clean merge of main: its proof is read on the parent the fake gh must know
         self.set(runs_seq=[[("checks", "in_progress", "")], [("checks", "completed", "success")]])
         rc, out = self.go()
         self.assertEqual(rc, 1, out)
@@ -5982,6 +6002,7 @@ class GhHalf(Env):
         """A pending run that no workflow file shows to be outside the required names makes the head pending: refused at once, with no pause,
         and nothing claimed or pushed. The required names pass, so only the run holds the head."""
         before = self.head()
+        self.proven_parent()  # the head is a clean merge of main (the tool's base merge): its proof is read on the parent
         self.set(checks_seq=[[(n, "pass", "") for n in required]], runs_seq=[[(runs_name, "in_progress", "")], [(runs_name, "completed", "success")]])
         rc, out = self.go(required=required)
         self.assertEqual(self.paused, [], f"the pending run {runs_name!r} waited before it refused")
@@ -6065,7 +6086,9 @@ class GhHalf(Env):
         self.assertIn("is not the default branch (trunk)", out)
 
     def test_no_config_merges_on_the_defaults_and_claims_nothing(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): the base merge the tool adds rides the proof of the commit under it, read green here.
         drop_config(self)
+        self.proven_parent()
         self.set(contexts=["checks"])
         self.host = None  # main builds the real Host from the defaults: requiredChecks "protection"
         rc, out = self.run_merge("7", "--confirm")
@@ -6080,15 +6103,28 @@ class GhHalf(Env):
         self.assertIn("default", named[0].lower())
 
     def test_no_config_pending_check_is_refused_before_the_claim(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): the proof of the clean main merge is the commit under it, read pending here.
         drop_config(self)
+        self.proven_parent()
         self.set(contexts=["checks"], checks_seq=[[("checks", "pending", "")]])
         rc, out = self.go(required="protection")
         self.assertEqual(rc, 1)
         self.assertIn("a check is pending: checks", out)
         self.assertNotIn(MERGE_CALL, self.calls())
 
+    def test_no_config_a_clean_main_merge_whose_proven_parent_is_red_refuses(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): the clean main merge rides the proof of its parent, so a red parent refuses it before any merge call.
+        drop_config(self)
+        self.proven_parent(rows=[("checks", "fail", "")])  # the parent's run is red
+        self.set(contexts=["checks"], checks_seq=[[("checks", "pass", "")]])  # the merge's own run reads green, so only the parent can refuse it
+        rc, out = self.go(required="protection")
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn(MERGE_CALL, self.calls(), "merged a clean main merge on a red proven parent:\n" + out)
+        self.assertIn("red: checks", out, "the refusal does not name the red check of the proven parent:\n" + out)
+
     def test_no_config_never_runs_stamp(self):
         drop_config(self)
+        self.proven_parent()  # the clean main merge's proof is read on its parent, which the fake gh must know
         mark = stamp_marker(self)
         self.set(contexts=["checks"])
         rc, out = self.go(required="protection")
@@ -6109,6 +6145,7 @@ class GhHalf(Env):
 
     def test_a_partial_merge_block_takes_the_defaults_for_the_missing_fields(self):
         put_base_config(self, json.dumps({"defaultBranch": "main", "merge": {"method": "squash"}}))
+        self.proven_parent()  # put_base_config merges main into the head, a clean base merge whose proof is read on its parent
         self.set(contexts=["checks"])
         self.host = None  # main builds the Host from the filled defaults: requiredChecks "protection"
         rc, out = self.run_merge("7", "--confirm")
@@ -6298,6 +6335,7 @@ class NoneRequiredChecks(ScopedRepo, Env):
     """merge.requiredChecks "none": the base names no required check, so the head reads from the checks and runs it has. Each case
     runs through the fake gh, as GhHalf does. Borrows GhHalf's helpers, as SilentWait does, so GhHalf's tests do not run twice."""
     set, calls, gh_host, go = GhHalf.set, GhHalf.calls, GhHalf.gh_host, GhHalf.go
+    proven_parent = GhHalf.proven_parent
 
     def setUp(self):  # the fake-gh setup of GhHalf.setUp, without its tests
         Env.setUp(self)
@@ -6365,6 +6403,7 @@ class NoneRequiredChecks(ScopedRepo, Env):
     def test_a_red_main_run_does_not_refuse_the_merge_under_a_listed_check(self):
         """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): a PR may merge onto a red main. It was a refusal under a listed check."""
         push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})
+        self.proven_parent()  # the head is a clean merge of main: its proof is read on the parent the fake gh must know
         self.set(base_runs=[main_run(901, "failure")], base_jobs={"901": [main_job("scope", "success"), main_job("checks", "failure", 20)]})
         rc, out = self.go(required=["checks"])
         self.assertEqual(rc, 0, out)
@@ -6847,8 +6886,8 @@ class SupersededRuns(Env):
         rest = [(r["id"], r["name"], r["status"], r["conclusion"], r["workflow_id"]) for r in json.loads(out2)["workflow_runs"]]
         self.assertEqual(rest, listed)
         self.assertEqual(listed[0], (NEW_RUN, "checks", "completed", "success", 7))
-        c3, out3 = host.gh(["run", "list", "--commit", sha, "--json", "createdAt"], self.co)
-        self.assertNotEqual(c3, 0, out3)  # no createdAt: a newer run is a larger run id
+        c3, out3 = host.gh(["run", "list", "--commit", sha, "--json", "noSuchField"], self.co)
+        self.assertNotEqual(c3, 0, out3)  # an unknown field is gh's refusal
         self.set(runs_fail="failed to get runs: HTTP 500")
         c4, _ = host.gh(["api", f"repos/{{owner}}/{{repo}}/actions/runs?head_sha={sha}", "-X", "GET"])
         self.assertNotEqual(c4, 0)
@@ -7997,6 +8036,141 @@ class ReadyChecksRun(unittest.TestCase):
         self.assertEqual(len(calls), 1, calls)
         argv = [a for a in calls[0][2:] if a != "--pinned"]
         self.assertEqual(argv, ["checks", "--step", "check invariants", "--step", "records page", "--base", "origin/main"], calls[0])
+
+class ReadyRecordCites(Env):
+    """`merge <pr> --ready` runs the records-and-rules check before the ready mark: the cites action's checks.yml step, named in the base's
+    merge.readyChecks, run by ci-job on the head's tree with the PR's base and body. A PR that changes a record a rule sentence cites, leaves
+    that sentence as it was, and has no `Rules checked:` body line is refused here, so no full CI rerun (about 42 minutes) is spent on it.
+    The fixture runs the real action.yml, read from this repo, and the real probe through a
+    launcher that runs lint/compliance_probes.py in place: nothing from this repo is committed into the fixture. The shared aligned fixture
+    text is lint/test_compliance_probes.py's. A refusal names the probe's own line for the record and the fix. Each case reads the
+    ready mark on the FakeHost (`readies`) and the run's output."""
+
+    CITES_STEP = "Rules and records move together"  # the checks.yml step that uses $/actions/claude-md-cites
+    OTHER_STEP = "Other check"  # a passing step of the same job, for the control that names no cites step
+    RECORD = aligned.ALIGNED_RECORD
+    SLUG = aligned.ALIGNED_ROUND
+    REAL_ACTION = os.path.join(os.path.dirname(HERE), "actions", "claude-md-cites", "action.yml")
+    REAL_PROBES = os.path.join(os.path.dirname(HERE), "lint", "compliance_probes.py")
+    REAL_MERGE_CONFIG = os.path.join(os.path.dirname(HERE), ".github", "stamp.json")
+    REAL_CHECKS = os.path.join(os.path.dirname(HERE), ".github", "workflows", "checks.yml")
+    WORKFLOW = ("name: checks\non: pull_request\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
+                "      - name: %s\n        if: ${{ github.event_name == 'pull_request' }}\n        uses: $/actions/claude-md-cites\n"
+                "      - name: %s\n        run: python3 -c 'pass'\n") % (CITES_STEP, OTHER_STEP)
+    LAUNCHER = ("import os, runpy, sys\nREAL = %r\nsys.path.insert(0, os.path.dirname(REAL))\nrunpy.run_path(REAL, run_name='__main__')\n"
+                % REAL_PROBES)  # the probe's own folder first, so its sibling modules import; the probe file itself is not copied
+
+    def setUp(self):
+        super().setUp()
+        with open(self.REAL_ACTION, encoding="utf-8") as f:
+            action = f.read()  # the action as this repo ships it, so the fixture runs the real steps
+        unit, _line = aligned.unit_file(aligned.ALIGNED_CITE)
+        self.main_moves({".github/stamp.json": complete_config(readyChecks=[self.CITES_STEP]), ".github/workflows/checks.yml": self.WORKFLOW,
+                         "actions/claude-md-cites/action.yml": action, "lint/compliance_probes.py": self.LAUNCHER, "CLAUDE.md": unit,
+                         self.RECORD: aligned.aligned_record(aligned.ALIGNED_LINE38)})
+
+    def main_moves(self, files):
+        """Commit `files` to main and push it, then merge main into feat, so the PR's diff holds only what a case's feat_moves adds."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        for path, text in files.items():
+            put(os.path.join(o, path), text)
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "main moves"); sh(o, "git", "push", "-q", "origin", "main")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
+
+    def feat_moves(self, files):
+        """Commit `files` to the PR's branch and push it: the PR's own change."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        for path, text in files.items():
+            put(os.path.join(o, path), text)
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat moves"); sh(o, "git", "push", "-q", "origin", "feat")
+
+    def ready(self, body=""):
+        """`merge 7 --ready` on this PR, a draft whose body is `body` (None: the body cannot be read). -> (rc, stdout and stderr together)."""
+        self.host.draft = True
+        self.host.body = body
+        return self.run_merge("7", "--ready")
+
+    def changed_record(self):
+        return {self.RECORD: aligned.aligned_record(aligned.ALIGNED_LINE38_NEW)}  # the record's line 38 moves; its citing sentence does not
+
+    def assert_scope(self, record):
+        """Scope before the subject: the PR changes the cited record when `record` is True, and no cited record otherwise; the citing
+        sentence's file (CLAUDE.md) is never changed. Read from the checkout's refs, the diff the probe reads."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        paths = set(sh(self.co, "git", "diff", "--name-only", "origin/main", "origin/feat").split())
+        self.assertEqual(("CLAUDE.md" in paths, self.RECORD in paths), (False, record), "scope: the PR changes %s" % sorted(paths))
+
+    def test_a_cited_record_changed_without_the_rules_line_is_refused_before_the_ready_mark(self):
+        self.feat_moves(self.changed_record())
+        self.assert_scope(record=True)
+        rc, out = self.ready()
+        gaps = [ln for ln in out.splitlines() if "the record changed and this sentence did not" in ln]
+        self.assertTrue(any(self.SLUG in ln for ln in gaps), "the refusal does not name the cited record %s:\n%s" % (self.SLUG, out))
+        self.assertIn("Rules checked:", out, "the refusal does not name the Rules checked fix:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.host.readies, [], "the ready mark went ahead with a cited record changed and no Rules checked line:\n" + out)
+
+    def test_the_same_pr_passes_the_check_once_its_body_carries_the_rules_checked_line(self):
+        self.feat_moves(self.changed_record())
+        self.assert_scope(record=True)
+        rc, out = self.ready(body=aligned.ALIGNED_RULES_CHECKED)
+        self.assertIn("pass %s" % self.CITES_STEP, out, "the records-and-rules check did not pass with its Rules checked line:\n" + out)
+        self.assertEqual((rc, self.host.readies), (0, [7]), "the PR with its Rules checked line was not marked ready:\n" + out)
+
+    def test_a_pr_that_changes_no_cited_record_passes_the_check_and_is_marked_ready(self):
+        self.feat_moves({"README.md": "a change that cites no record\n"})
+        self.assert_scope(record=False)
+        rc, out = self.ready()
+        self.assertIn("pass %s" % self.CITES_STEP, out, "the records-and-rules check did not pass on a PR that cites no changed record:\n" + out)
+        self.assertEqual((rc, self.host.readies), (0, [7]), "a PR that changes no cited record was not marked ready:\n" + out)
+
+    def test_the_cites_step_adds_no_ci_job_start_of_its_own(self):  # the cost pin: its probe runs inside its job's one ci-job start (AlignedCost pins the probe's starts)
+        self.main_moves({".github/stamp.json": complete_config(readyChecks=[self.CITES_STEP, self.OTHER_STEP])})
+        self.feat_moves({"README.md": "a change that cites no record\n"})
+        starts, real = [], merge.sh
+        def counted(args, *a, **k):
+            if args[1:2] == [merge.CI_JOB]:
+                starts.append(list(args))
+            return real(args, *a, **k)
+        with unittest.mock.patch.object(merge, "sh", counted):
+            _rc, out = self.ready()
+        self.assertEqual(len(starts), 1, "the ready run started ci-job %d times for one job of two steps, the cites step included:\n%s\n%s" % (len(starts), starts, out))
+
+    def test_an_unreadable_body_is_unknown_naming_the_body_and_refuses_the_ready_mark(self):
+        self.feat_moves(self.changed_record())
+        self.assert_scope(record=True)
+        rc, out = self.ready(body=None)
+        self.assertIn("the pull request body cannot be read", out, "the refusal does not name the unreadable body:\n" + out)
+        self.assertIn("unknown %s" % self.CITES_STEP, out, "the records-and-rules check did not read as unknown:\n" + out)
+        self.assertNotEqual(rc, 0, out)
+        self.assertEqual(self.host.readies, [], "the ready mark went ahead with an unreadable body:\n" + out)
+
+    def test_the_merge_config_names_the_cites_step_as_checks_yml_writes_it(self):
+        import workflow_steps  # the one workflow reader (lint/workflow_steps.py), as ci-job reads the file
+        with open(self.REAL_CHECKS, encoding="utf-8") as f:
+            text = f.read()
+        found = []
+        for job in re.findall(r"^  ([\w-]+):\s*$", text.split("\njobs:", 1)[-1], re.M):
+            for step in workflow_steps.step_blocks(workflow_steps.job_block(text, job)):
+                if (workflow_steps.step_key(step, "uses") or "").split(" #")[0] == "$/actions/claude-md-cites":
+                    found.append((job, workflow_steps.step_key(step, "name")))
+        self.assertEqual(len(found), 1, "checks.yml does not hold one step that uses the cites action: %r" % found)
+        job, name = found[0]
+        want = name if job == "checks" else "%s:%s" % (job, name)  # ready_job_groups: an entry names its job only when it is not `checks`
+        with open(self.REAL_MERGE_CONFIG, encoding="utf-8") as f:
+            ready = json.load(f)["merge"].get("readyChecks") or []
+        self.assertIn(want, ready, "the merge config's readyChecks does not name the cites step %r: %r" % (want, ready))
+
+    def test_a_ready_list_that_does_not_name_the_cites_step_marks_ready_as_before(self):  # the control: today's behaviour without the entry
+        self.main_moves({".github/stamp.json": complete_config(readyChecks=[self.OTHER_STEP])})
+        self.feat_moves(self.changed_record())
+        self.assert_scope(record=True)
+        rc, out = self.ready()
+        self.assertIn("pass %s" % self.OTHER_STEP, out, "the other ready check did not pass:\n" + out)
+        self.assertEqual((rc, self.host.readies), (0, [7]), "a ready list without the cites step refused a PR the cites probe would refuse:\n" + out)
+
 
 class ClaimSkipped(Env):
     """A base with no stamp kinds: the claim and the numbering check are skipped, and stamp.mjs never runs."""
@@ -10628,7 +10802,12 @@ class RecordsRebuild(RecordsEnv):
       draft step pushed.
     - Under merge.requiredChecks "none" (decision private-repos-no-ci) a ready confirm heals the page itself, in one run and with no
       wait: a page-only commit on the head, or main merged in first when main gained a record, then the merge of that head. A base that
-      moves after the heal's push refuses and keeps the pushed commit. The refusals above stay for a named list and for "protection".
+      moves after the heal's push refuses and keeps the pushed commit.
+    - Under a named list, the proof of a head is its own green rollup (the required checks it reports). A commit a run never read
+      does not carry that proof, except a heal commit made of a clean merge of the base and a page-only commit on top of it. Such
+      a commit merges on the proof of the head it sits on, with no run read on it. A relayed yes names that head and holds across
+      the heal commit. A red or pending proof refuses. Ruling R1 (owner, 10:49 CST Nov 23, 2026): a stale page the tool rebuilds heals under a named list on a green proven head.
+      "protection" is not decided here.
 
     Ruling: records-index-at-merge (confirm on a draft is the records page step)
     """
@@ -10636,12 +10815,23 @@ class RecordsRebuild(RecordsEnv):
         super().setUp()
         self.use_fake_records()
 
-    def set_required(self, required):
+    def set_required(self, required, kinds=CONFIG["kinds"]):
         """Commit the base's config with merge.requiredChecks `required`, and give the fake host the same value: production sets the host's
-        value from this config (root_host), so a case states it once and both places read it."""
-        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=required))))
+        value from this config (root_host), so a case states it once and both places read it. A list is also the names the host reports.
+        `kinds`: the base's stamp kinds, CONFIG's unless a case takes them off (kinds=[])."""
+        put_base_config(self, json.dumps(dict(CONFIG, kinds=kinds, merge=dict(CONFIG["merge"], requiredChecks=required))))
         self.assertEqual(json.loads(self.show("main", ".github/stamp.json"))["merge"]["requiredChecks"], required, "fixture: the base does not name " + repr(required))
         self.host.required = required
+        if isinstance(required, list):
+            self.host.required_names = lambda: list(required)
+
+    def rollup_reads(self, head, state="green", states=None):
+        """The fake host reads `state` on `head` only, and pending on any other head: a head with no run of its own yet. A case that merges on a
+        proof names the head the proof is on, so a read of any other head is a pending read here. `states`: {sha: state} for the other heads a
+        case reads apart, such as a merge's own run above the green head it sits on."""
+        reads = dict(states or {})
+        reads[head] = state
+        self.host.head_state = lambda n, sha=None: reads.get(sha, f"pending: all-jobs-passed has no run on {(sha or '')[:9]}")
 
     def drop_pending_record(self):
         """The head holds no pending record, so a confirm claims no number and the page is its only change to make."""
@@ -10784,42 +10974,392 @@ class RecordsRebuild(RecordsEnv):
         self.assertIn("stale", out.lower())
         self.assert_page_scope(pushed, before)  # the page commit stays on the head: no revert commit sits on it
 
-    def test_a_named_required_list_still_refuses_a_stale_page_on_a_ready_pr(self):
-        # A control: under a named list the ready refusal holds, as today, before any push.
+    def test_a_named_required_list_heals_a_stale_page_on_a_green_proven_head(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): the page the tool rebuilds rides the proof of the head under it. The head reads green, so one
+        # confirm pushes the rebuilt page on it and merges, with no run read on the page commit.
         self.set_required(["checks"])
         self.drop_pending_record()
-        self.on("feat", {"docs/records.md": page("ghost")})
-        refs_before = self.refs()
+        self.on("feat", {"docs/records.md": page("ghost")})  # a page that names a debt nobody has
+        self.rollup_reads(self.head())
         rc, out = self.run_merge_once("7", "--confirm")
-        self.assert_refused_on_ready(rc, out, refs_before)
+        self.assertEqual(rc, 0, "under a named list a stale page on a green proven head did not heal and merge:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertNotIn("ghost", self.show("main", merge.RECORDS_PAGE), "the merge took the stale page, not the rebuilt one")
+        self.assertEqual(self.claims(), 0, "claimed a number for a page heal")
+        self.assertEqual(self.host.waits, [], "the one confirm waited on a check")
 
-    def test_a_named_required_list_still_refuses_a_base_that_gained_a_record(self):
-        # A control: under a named list a base that gained a record is refused before any push, as today. Nothing heals it.
-        self.set_required(["checks"])
+    def test_a_named_protection_heals_a_stale_page_on_a_green_proven_head(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): "protection" heals a stale page the tool rebuilds on a green proven head, as a named list does.
+        self.set_required("protection")
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page("ghost")})  # a page that names a debt nobody has
+        self.rollup_reads(self.head())
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "under protection a stale page on a green proven head did not heal and merge:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertNotIn("ghost", self.show("main", merge.RECORDS_PAGE), "the merge took the stale page, not the rebuilt one")
+        self.assertEqual(self.claims(), 0, "claimed a number for a page heal")
+        self.assertEqual(self.host.waits, [], "the one confirm waited on a check")
+
+    def test_heal_under_list_merges_on_proven_head(self):
+        # H's green rollup proves H. main gained a record, so H's page is stale for the merge result. One confirm pushes H' (main merged in,
+        # the page rebuilt on it) and merges H' on H's proof: no run is read on H'.
+        self.set_required(["all-jobs-passed"])
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})  # current for the head's own debts
+        before = self.head()
+        self.on("main", {"debts/gap-one.md": DEBT_TEXT}, "untooled push")
+        main_tip = self.head("main")
+        self.rollup_reads(before)
+        rc, out = self.run_merge_once("7", "--confirm")  # one run: the case pins the single confirm, as the heal cases under none do
+        self.assertEqual(rc, 0, "under a list a stale page did not heal and merge on the proven head in one confirm:\n" + out)
+        self.assert_healed_merge(out, main_tip, before)
+
+    def test_edited_merge_not_carried(self):
+        # The proof is H's. A merge of main on H whose tree is not git's clean merge is a commit no run read: the proof is not carried.
+        self.set_required(["all-jobs-passed"])
         self.drop_pending_record()
         self.on("feat", {"docs/records.md": page()})
-        self.on("main", {"debts/gap-one.md": DEBT_TEXT}, "untooled push")
-        refs_before = self.refs()
-        rc, out = self.run_merge_once("7", "--confirm")
-        self.assert_refused_untouched(rc, out, refs_before)
-        self.assertIn("stale", out.lower())
-
-    def test_a_named_list_refuses_a_relayed_yes_with_a_base_merge_on_top(self):
-        # Under a named list no heal runs, so a merge of main on the relayed head is not the tool's own commit: the yes does not cover it.
-        self.set_required(["checks"])
-        self.drop_pending_record()
-        self.on("feat", {"docs/records.md": page()})  # current for the head's own debts, so only the relayed yes can refuse the merge
-        relayed = self.head()
+        proven = self.head()
         self.main_moves()
         main_tip = self.head("main")
-        live = self.base_merge_pushed_on("origin/main")
-        self.assert_merge_shape(live, relayed, main_tip, clean=True)
+        live = self.base_merge_pushed_on("origin/main", edit={"edited.txt": "a line the proven head never had\n"})
+        self.assert_merge_shape(live, proven, main_tip, clean=False)
+        self.rollup_reads(proven)  # green on H, and pending on the edited merge
         refs_before = self.refs()
-        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
-        self.assertFalse(getattr(self.host, "merged", False), "a named list merged a relayed yes with a base merge on top:\n" + out)
-        self.assertIn("so that yes does not cover it", out, "a named list let a relayed yes cover a base merge on top:\n" + out)
-        self.assertEqual(self.refs(), refs_before, "a named list pushed on a relayed yes with a base merge on top")
+        rc, out = self.run_merge_once("7", "--confirm")
         self.assertEqual(rc, 1, out)
+        self.assertFalse(getattr(self.host, "merged", False), "merged an edited merge on the proven head:\n" + out)
+        self.assertEqual(self.refs(), refs_before, "pushed over an edited merge on the proven head:\n" + out)
+        self.assertIn("not green", out, "refused for another cause than the head's own run:\n" + out)
+
+    def test_lane_commit_not_carried(self):
+        # The proof is H's. An ordinary lane commit on top of H is a commit no run read: refused until its own run is green.
+        self.set_required(["all-jobs-passed"])
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})
+        proven = self.head()
+        self.rollup_reads(proven)
+        self.on("feat", {"lane-note.txt": "an ordinary lane commit on top of the proven head\n"}, "lane commit")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(len(sh(self.co, "git", "rev-list", f"{proven}..origin/feat").split()), 1, "fixture: the lane commit is not the only commit above the proven head")
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertFalse(getattr(self.host, "merged", False), "merged a lane commit on the proven head:\n" + out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a lane commit on the proven head:\n" + out)
+        self.assertIn("not green", out, "refused for another cause than the lane commit's own run:\n" + out)
+
+    def test_red_proven_head_refuses(self):
+        # H's rollup is red. A heal commit on top of H (main merged in, the page rebuilt) does not make the merge mergeable: the proof is H's.
+        self.set_required(["all-jobs-passed"])
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})
+        proven = self.head()
+        self.on("main", {"debts/gap-one.md": DEBT_TEXT}, "untooled push")
+        self.rollup_reads(proven, "red: all-jobs-passed: fail")  # red on H, and pending on the heal commit: no run reads it yet
+        self.merge_and_page_pushed_on()
+        self.assertNotEqual(self.head(), proven, "scope: the heal commit did not move the branch off the red head")
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertFalse(getattr(self.host, "merged", False), "merged a heal commit on a red proven head:\n" + out)
+        self.assertEqual(self.refs(), refs_before, "pushed on a red proven head:\n" + out)
+        self.assertIn("red: all-jobs-passed", out, "the refusal does not name the red rollup of the proven head:\n" + out)
+
+    def test_pending_proven_head_refuses(self):
+        # H's run is still in progress: there is no proof yet, so the merge is refused and nothing is pushed or waited on.
+        self.set_required(["all-jobs-passed"])
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})
+        self.rollup_reads(self.head(), "pending: all-jobs-passed")
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertFalse(getattr(self.host, "merged", False), "merged a pending proven head:\n" + out)
+        self.assertEqual(self.refs(), refs_before, "pushed on a pending proven head:\n" + out)
+        self.assertEqual(self.host.waits, [], "waited on the run instead of refusing:\n" + out)
+        self.assertIn("pending: all-jobs-passed", out, "the refusal does not name the pending run of the proven head:\n" + out)
+
+    def main_merged_in_above_green_head(self, merges=1):
+        """A green proven head with its page current, then main merged in as git's clean merge `merges` times. Each main change is a file with no
+        record, so the page stays current on every merge result, and each merge stacks on the one before it. -> (the proven head, the live head)."""
+        self.set_required(["all-jobs-passed"])
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})  # current on the head's own debts
+        proven = self.head()
+        below = proven
+        for k in range(merges):
+            self.on("main", {f"unrelated-{k}.txt": f"main change {k}, with no record\n"}, "untooled push")
+            self.base_merge_pushed_on("origin/main")
+            sh(self.co, "git", "fetch", "-q", "origin")
+            self.assert_merge_shape(self.head(), below, self.rev("origin/main"), clean=True)
+            below = self.head()
+        return proven, below
+
+    def page_only_heal_on_stale_head(self):
+        """A green proven head whose page is stale, and the tool's own page-only commit on it: the page rebuilt alone. -> (the proven head, the heal)."""
+        self.set_required(["all-jobs-passed"])
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page("ghost")})  # a page that names a debt nobody has
+        proven = self.head()
+        sh(self.co, "git", "fetch", "-q", "origin")
+        heal = self.tool_page(proven)
+        sh(self.co, "git", "push", "-q", "origin", f"{heal}:refs/heads/feat")
+        self.assert_page_scope(heal, proven)
+        return proven, heal
+
+    def test_a_clean_main_merge_above_a_green_head_refuses_on_its_own_red_run(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): the clean merge of main rides the proof of the head under it, and no second run is waited on.
+        # A run that finished red on the merge itself still refuses: the green parent does not cover it.
+        proven, live = self.main_merged_in_above_green_head()
+        self.rollup_reads(proven, states={live: "red: all-jobs-passed: fail"})
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a clean main merge whose own run finished red, on its parent's proof:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a clean main merge whose own run finished red:\n" + out)
+        self.assertIn("red: all-jobs-passed", out, "the refusal does not name the red own run of the clean merge:\n" + out)
+
+    def test_a_page_only_heal_above_a_green_head_refuses_on_its_own_red_run(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): the page-only heal rides the proof of the head under it. Its own run finished red, so the green parent does not cover it.
+        proven, heal = self.page_only_heal_on_stale_head()
+        self.rollup_reads(proven, states={heal: "red: all-jobs-passed: fail"})
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a page-only heal whose own run finished red, on its parent's proof:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a page-only heal whose own run finished red:\n" + out)
+        self.assertIn("red: all-jobs-passed", out, "the refusal does not name the red own run of the heal:\n" + out)
+
+    def test_a_pending_own_run_on_a_clean_main_merge_carries_the_green_parent(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): no second full run. A clean merge of main whose own run is still pending merges on its parent's proof.
+        proven, live = self.main_merged_in_above_green_head()
+        self.rollup_reads(proven, states={live: "pending: all-jobs-passed"})
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "a clean main merge with its own run pending did not merge on its parent's proof:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on the merge's own pending run:\n" + out)
+
+    def test_a_pending_own_run_on_a_page_only_heal_carries_the_green_parent(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): a page-only heal whose own run is still pending merges on the proof of the head under it.
+        proven, heal = self.page_only_heal_on_stale_head()
+        self.rollup_reads(proven, states={heal: "pending: all-jobs-passed"})
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "a page-only heal with its own run pending did not merge on its parent's proof:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on the heal's own pending run:\n" + out)
+
+    def test_a_page_only_heal_with_no_run_of_its_own_carries_the_green_parent(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): a page-only heal with no run of its own yet merges on the proof of the head under it.
+        proven, heal = self.page_only_heal_on_stale_head()
+        self.rollup_reads(proven)
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "a page-only heal with no run of its own did not merge on its parent's proof:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on a run the heal does not have:\n" + out)
+
+    def test_one_clean_main_merge_with_no_run_of_its_own_carries_the_green_parent(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): the one clean merge of main the ruling names carries the proof of its parent.
+        proven, live = self.main_merged_in_above_green_head(merges=1)
+        self.rollup_reads(proven)
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "one clean main merge above a green head did not merge on its parent's proof:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+
+    # Ruling (owner, 15:36 CST Nov 23, 2026, option a): no cap on stacked clean merges of main above a proven head, on either path. A busy main
+    # never forces a second full CI run: main's own run after the merge is the net. The live head's own run decides only when it is red or unread.
+
+    def test_two_clean_main_merges_stacked_above_a_green_head_carry_the_proof(self):
+        # The live head has no run of its own yet, so the green head under both stacked merges of main is the proof, and no run is waited on.
+        proven, live = self.main_merged_in_above_green_head(merges=2)
+        self.rollup_reads(proven)
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "two clean main merges stacked above a green head did not merge on the head's proof:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on a stacked merge's own run instead of merging on the head's proof:\n" + out)
+
+    def test_three_clean_main_merges_stacked_above_a_green_head_carry_the_proof(self):
+        proven, live = self.main_merged_in_above_green_head(merges=3)
+        self.rollup_reads(proven)
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "three clean main merges stacked above a green head did not merge on the head's proof:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on a stacked merge's own run instead of merging on the head's proof:\n" + out)
+
+    def test_a_relayed_yes_holds_over_two_stacked_clean_main_merges_with_the_live_run_pending(self):
+        # The relayed yes names the proven head. The stacked merges of main above it hold the yes, and the proof is the proven head's green run.
+        proven, live = self.main_merged_in_above_green_head(merges=2)
+        self.rollup_reads(proven)
+        rc, out = self.run_merge_once("7", "--confirm", "--head", proven)
+        self.assertEqual(rc, 0, "a relayed yes did not hold over two stacked clean main merges with the live run pending:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on a stacked merge's own run instead of merging on the relayed head's proof:\n" + out)
+
+    def test_a_relayed_yes_holds_over_three_stacked_clean_main_merges_with_the_live_run_pending(self):
+        proven, live = self.main_merged_in_above_green_head(merges=3)
+        self.rollup_reads(proven)
+        rc, out = self.run_merge_once("7", "--confirm", "--head", proven)
+        self.assertEqual(rc, 0, "a relayed yes did not hold over three stacked clean main merges with the live run pending:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on a stacked merge's own run instead of merging on the relayed head's proof:\n" + out)
+
+    def test_a_red_own_run_on_two_stacked_clean_main_merges_still_refuses(self):
+        # The merge under the live head reads green, so the refusal is the live head's own red run, as it is on one merge.
+        proven, live = self.main_merged_in_above_green_head(merges=2)
+        self.rollup_reads(proven, states={self.rev(f"{live}^"): "green", live: "red: all-jobs-passed: fail"})
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged two stacked clean main merges whose live run finished red, on the head's proof:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over two stacked clean main merges whose live run finished red:\n" + out)
+        self.assertIn("red: all-jobs-passed", out, "the refusal does not name the red own run of the live head:\n" + out)
+
+    def test_an_unread_own_run_on_two_stacked_clean_main_merges_refuses_as_unknown(self):
+        proven, live = self.main_merged_in_above_green_head(merges=2)
+        self.rollup_reads(proven, states={self.rev(f"{live}^"): "green", live: "unknown (the read of the merge's checks failed: HTTP 500)"})
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged two stacked clean main merges whose live run was unread, on the head's proof:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over two stacked clean main merges whose live run was unread:\n" + out)
+        self.assertIn("unknown", out, "the refusal does not name the unread own run of the live head:\n" + out)
+
+    def test_an_edited_main_merge_under_a_clean_one_does_not_carry_the_proof(self):
+        # The walk stops at a merge of main that is not git's clean merge, even with a clean merge stacked above it: that merge is a commit no run read.
+        self.set_required(["all-jobs-passed"])
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})
+        proven = self.head()
+        self.on("main", {"unrelated-0.txt": "main change 0, with no record\n"}, "untooled push")
+        self.base_merge_pushed_on("origin/main", edit={"edited.txt": "a line the proven head never had\n"})
+        edited = self.head()
+        self.assert_merge_shape(edited, proven, self.rev("origin/main"), clean=False)
+        self.on("main", {"unrelated-1.txt": "main change 1, with no record\n"}, "untooled push")
+        live = self.base_merge_pushed_on("origin/main")
+        self.assert_merge_shape(live, edited, self.rev("origin/main"), clean=True)
+        self.rollup_reads(proven)  # green on the proven head, pending on the edited merge and on the clean merge above it
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a clean main merge stacked above an edited one, on the proven head:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a clean main merge stacked above an edited one:\n" + out)
+        self.assertIn("not green", out, "refused for another cause than the edited merge's own run:\n" + out)
+
+    def test_a_lane_commit_above_a_clean_main_merge_does_not_carry_the_proof(self):
+        # The walk stops at a commit this tool did not make, however many clean merges of main sit below it.
+        proven, live = self.main_merged_in_above_green_head(merges=1)
+        self.rollup_reads(proven)
+        self.on("feat", {"lane-note.txt": "an ordinary lane commit above the clean merge of main\n"}, "lane commit")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(len(sh(self.co, "git", "rev-list", f"{live}..origin/feat").split()), 1, "fixture: the lane commit is not the only commit above the clean merge")
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a lane commit above a clean main merge on the proven head:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a lane commit above a clean main merge:\n" + out)
+        self.assertIn("not green", out, "refused for another cause than the lane commit's own run:\n" + out)
+
+    def test_an_unread_own_run_on_a_clean_main_merge_refuses_as_unknown(self):
+        # A merge's own run the tool could not read is unknown: the green parent does not stand in for it, and nothing is pushed or merged.
+        proven, live = self.main_merged_in_above_green_head()
+        self.rollup_reads(proven, states={live: "unknown (the read of the merge's checks failed: HTTP 500)"})
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a clean main merge whose own run was unread, on its parent's proof:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a clean main merge whose own run was unread:\n" + out)
+        self.assertIn("unknown", out, "the refusal does not name the unread own run:\n" + out)
+
+    def test_an_unread_own_run_on_a_page_only_heal_refuses_as_unknown(self):
+        # A page-only heal whose own run the tool could not read is unknown: the green parent does not stand in for it, and nothing is pushed or merged.
+        proven, heal = self.page_only_heal_on_stale_head()
+        self.rollup_reads(proven, states={heal: "unknown (the read of the heal's checks failed: HTTP 500)"})
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a page-only heal whose own run was unread, on its parent's proof:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a page-only heal whose own run was unread:\n" + out)
+        self.assertIn("unknown", out, "the refusal does not name the unread own run:\n" + out)
+
+    def lint_carried_head(self, kind, live_state):
+        """A proven head whose run reads pending, with the live head above it carried by `kind`: "merge" (one clean merge of main) or "heal"
+        (a page-only heal). The live head's own run reads `live_state`, and a lane-lint PASS names the live head. -> (the proven head, the live head)."""
+        proven, live = self.main_merged_in_above_green_head() if kind == "merge" else self.page_only_heal_on_stale_head()
+        self.host.issue_comments = lambda since: ({}, {7: [lint_body(live)]}, {}, {})  # the lane-lint PASS on the live head, as the comment read gives it
+        self.rollup_reads(proven, "pending: all-jobs-passed", states={live: live_state})
+        return proven, live
+
+    # A lane-lint PASS on the live head lifts the pending run of the proven head under it. The live head's own run is then never read, so a red
+    # or unread own run does not refuse a clean merge of main or a page-only heal. Decision merge-needs-current-base.
+
+    def test_a_lint_pass_over_a_pending_proof_refuses_a_clean_main_merge_on_its_own_red_run(self):
+        self.lint_carried_head("merge", "red: all-jobs-passed: fail")
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a clean main merge whose own run finished red, on a lane-lint PASS:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a clean main merge whose own run finished red:\n" + out)
+        self.assertIn("red: all-jobs-passed", out, "the refusal does not name the red own run of the clean merge:\n" + out)
+
+    def test_a_lint_pass_over_a_pending_proof_refuses_a_page_only_heal_on_its_own_red_run(self):
+        self.lint_carried_head("heal", "red: all-jobs-passed: fail")
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a page-only heal whose own run finished red, on a lane-lint PASS:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a page-only heal whose own run finished red:\n" + out)
+        self.assertIn("red: all-jobs-passed", out, "the refusal does not name the red own run of the heal:\n" + out)
+
+    def test_a_lint_pass_over_a_pending_proof_refuses_a_clean_main_merge_with_its_own_run_unread(self):
+        self.lint_carried_head("merge", "unknown (the read of the merge's checks failed: HTTP 500)")
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a clean main merge whose own run was unread, on a lane-lint PASS:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a clean main merge whose own run was unread:\n" + out)
+        self.assertIn("unknown", out, "the refusal does not name the unread own run of the clean merge:\n" + out)
+
+    def test_a_lint_pass_over_a_pending_proof_refuses_a_page_only_heal_with_its_own_run_unread(self):
+        self.lint_carried_head("heal", "unknown (the read of the heal's checks failed: HTTP 500)")
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a page-only heal whose own run was unread, on a lane-lint PASS:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a page-only heal whose own run was unread:\n" + out)
+        self.assertIn("unknown", out, "the refusal does not name the unread own run of the heal:\n" + out)
+
+    def test_a_lint_pass_over_a_pending_proof_merges_a_clean_main_merge_with_its_own_run_pending(self):
+        self.lint_carried_head("merge", "pending: all-jobs-passed")
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "a lane-lint PASS on the live head did not merge a clean main merge above a pending proof:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on the merge's own pending run instead of merging on the PASS:\n" + out)
+
+    def test_a_lint_pass_over_a_pending_proof_merges_a_page_only_heal_with_its_own_run_pending(self):
+        self.lint_carried_head("heal", "pending: all-jobs-passed")
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "a lane-lint PASS on the live head did not merge a page-only heal above a pending proof:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on the heal's own pending run instead of merging on the PASS:\n" + out)
+
+    def test_relayed_yes_holds_after_heal_under_list(self):
+        # The relayed yes names H, the proven head. H' is H with main merged in and the page rebuilt: a heal commit. Under a named list the yes
+        # still holds across H', and H's proof merges H'. Today only a requiredChecks "none" lets a base merge sit above the relayed head.
+        self.set_required(["all-jobs-passed"])
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})  # current for the head's own debts
+        relayed = self.head()
+        self.on("main", {"debts/gap-one.md": DEBT_TEXT}, "untooled push")
+        main_tip = self.head("main")
+        self.rollup_reads(relayed)
+        pushed = self.merge_and_page_pushed_on()
+        self.assertNotEqual(self.head(), relayed, "scope: the live head did not move off the relayed head")
+        self.assertEqual(self.show("feat", merge.RECORDS_PAGE), page("gap-one").strip(), "scope: the pushed page is not current")
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
+        self.assertEqual(rc, 0, "under a list a relayed yes did not hold across the heal commit:\n" + out)
+        self.assertEqual(self.rev("origin/main^2"), pushed, "the merge did not take the heal commit that was pushed")
+        self.assert_healed_merge(out, main_tip, relayed)
 
     def test_under_none_a_merge_of_a_commit_main_never_got_refuses_the_relayed_yes(self):
         # The tree is git's clean merge, so only the second parent tells this merge apart: a base merge's second parent is on main.
@@ -10889,25 +11429,36 @@ class RecordsRebuild(RecordsEnv):
         self.assertIn("docs/decisions/second.md", changed)
         self.assertEqual(self.log1("%(trailers:key=Record-claim,valueonly)", "origin/main^2").strip(), "D-002")
 
-    def test_pr_1009_ready_with_empty_stamp_kinds_refuses_a_stale_page_before_any_push(self):
-        # A ready PR on a base with kinds [] and a stale page: a page-only push restarts CI after green, so confirm refuses it.
+    def test_pr_1009_ready_on_a_base_with_no_kinds_heals_its_own_stale_page_on_a_green_head(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): a page-only commit the tool adds rides the proof of the head under it. Base kinds [] under a
+        # named list: on a green head the tool pushes the page alone and merges it. No stamp runs and no number is claimed.
         mark = stamp_marker(self)
         self.kinds_off()
+        self.set_required(["checks"], kinds=[])
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
-        refs_before = self.refs()
+        self.rollup_reads(self.head())
         rc, out = self.run_merge("7", "--confirm")
-        self.assert_refused_on_ready(rc, out, refs_before)
+        self.assertEqual(rc, 0, "a page-only heal on a green head did not merge:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
         self.assertFalse(os.path.exists(mark), "stamp.mjs ran")
-        self.assertEqual(self.claims(), 0, "claimed a number on a refusal")
-        self.assertNotIn("docs/records.md", self.tree_names("origin/main"))
+        self.assertEqual(self.claims(), 0, "claimed a number for a page heal")
+        self.assertEqual(self.show("main", merge.RECORDS_PAGE), page("gap-one").strip(), "main's page is not the rebuilt one")
+        self.assertEqual(self.host.waits, [], "the heal waited on a check")
 
-    def test_a_ready_pr_with_stamp_kinds_and_nothing_to_claim_refuses_a_stale_page(self):
-        # The refusal turns on the claim, not on the config: with kinds on and no pending record, the page has no claim to ride.
+    def test_a_ready_pr_with_kinds_and_nothing_to_claim_refuses_a_stale_page_on_a_red_or_pending_head(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): the heal rides a green proof only. With kinds on and nothing to claim, a stale page whose
+        # proven head reads red or pending refuses before any push or wait, and the refusal names that state.
+        self.set_required(["checks"])
         self.drop("feat", "docs/decisions/second.md", "drop the pending decision")
         self.on("feat", {"docs/records.md": page("ghost")})  # a page that names a debt nobody has
-        refs_before = self.refs()
-        rc, out = self.run_merge("7", "--confirm")
-        self.assert_refused_on_ready(rc, out, refs_before)
+        head = self.head()
+        for state in ("red: checks: fail", "pending: checks"):
+            with self.subTest(state=state):
+                self.rollup_reads(head, state)
+                refs_before = self.refs()
+                rc, out = self.run_merge("7", "--confirm")
+                self.assert_refused_untouched(rc, out, refs_before)
+                self.assertIn(state, out, "the refusal does not name the proven head's state " + state + ":\n" + out)
 
     def test_a_claim_head_on_a_base_with_no_stamp_kinds_refuses_a_stale_page_and_names_the_revert(self):
         # The base stamps nothing, so the head's Record-claim is not resumed. The draft step refuses a claim head, so the old
@@ -11002,18 +11553,42 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.refs(), before)
         self.assertEqual(self.worktrees(), 1)
 
-    def test_the_ready_preview_says_confirm_refuses_a_stale_page_with_no_claim(self):
+    def test_the_ready_preview_says_confirm_heals_a_stale_page_with_no_claim_under_a_named_list(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): under a named list confirm heals the tool's own page on a green proven head and merges that head,
+        # so the preview says so, and does not name the refusal and its remedy.
         self.kinds_off()
+        self.set_required(["checks"], kinds=[])
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
         before = self.refs()
         rc, out = self.run_merge("7")
         self.assertEqual(rc, 0, out)
         line = self.preview_line(out, "records")
         self.assertIn("rebuild", line)
-        self.assertIn("--confirm refuses it", line, out)
-        self.assert_remedy(line)
+        self.assertIn("--confirm heals it", line, out)
+        self.assertIn("merges that head once its checks are green", line, out)
+        self.assertNotIn("refuses it", line, out)
         self.assertEqual(self.refs(), before)
         self.assertEqual(self.worktrees(), 1)
+
+    def test_the_ready_preview_says_confirm_refuses_a_stale_page_on_a_red_or_pending_head_under_a_named_list(self):
+        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): a stale page heals under a named list only on a green proven head. The preview of a red or
+        # pending head says confirm refuses it, names that state, and never says confirm heals it.
+        self.kinds_off()
+        self.set_required(["checks"], kinds=[])
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        head = self.head()
+        for state in ("red: checks", "pending: checks"):
+            with self.subTest(state=state):
+                self.rollup_reads(head, state)
+                before = self.refs()
+                rc, out = self.run_merge("7")
+                self.assertEqual(rc, 0, out)
+                line = self.preview_line(out, "records")
+                self.assertIn("--confirm refuses it", line, out)
+                self.assertIn("(" + state + ")", line, "the preview does not name the head's state " + state + ":\n" + out)
+                self.assertNotIn("heals it", line, "the preview says confirm heals a page on a head that is " + state + ":\n" + out)
+                self.assertEqual(self.refs(), before)
+                self.assertEqual(self.worktrees(), 1)
 
     def test_the_ready_preview_names_the_revert_for_a_claim_head_on_a_base_with_no_stamp_kinds(self):
         self.kinds_off()
@@ -25134,9 +25709,103 @@ class JudgeStub:
         return self.answer(prompt)
 
 
+# The packed judge (the packing pick, 04:00 CST Nov 24 2026): the lines of every selected file pack into at most PROSE_JUDGE_MAX_CALLS
+# calls, each of at most CALL_BYTES UTF-8 bytes. A packed line is labelled `<path>:<N>`, and each verdict names its path and line.
+PACK_PICK = "the packing pick, 04:00 CST Nov 24 2026"  # cited in the failure message of each case the pick changed
+CALL_BYTES = 24000  # UTF-8 bytes one judge prompt may hold, excerpts included
+JUDGE_TIMEOUT = 300  # seconds one judge call runs under. The judge passes it to invoke_model; no other caller does
+RENDEZVOUS_WAIT = 10  # seconds a judge call waits for its peers: a deadlock guard, never a timing assert. The run it guards takes milliseconds
+TAGGED_FILLER = "and the reason is written out in full so that a reader can check it. " * 3  # about 360 bytes of a tagged line in a prompt
+JUDGED_LABEL = re.compile(r"^(\S+?):(\d+)[: ]", re.M)  # `<path>:<N>` at a row's start: one judged line of a packed prompt
+CALL_LINES = 50  # cited lines in each file of three_call_files: about 60 lines of that size fit one call, so three such files make three calls
+CALL_VERDICTS = {7: ("stale", "the cited file says otherwise"), 14: ("unbacked", "no cited file backs it"),
+                 35: ("stale", "the cited file says otherwise"), 42: ("unbacked", "no cited file backs it"),
+                 49: ("stale", "the cited file says otherwise")}  # the verdicts three_call_files' lines get, by line number; every other line holds
+
+
+def tagged_doc(tags):
+    """A Markdown file of a heading and one cited line per tag. Each line opens with its tag, so a case counts the lines a call holds by tag:
+    a line number repeats across files, a tag does not."""
+    rows = ["%s: cloud sessions cannot push to main. %s(read src/widget.py:4)." % (tag, TAGGED_FILLER) for tag in tags]
+    return "# Cloud notes\n\n" + "\n".join(rows) + "\n"
+
+
+def tags_in(prompt):
+    """The tag each tagged line of a judge prompt opens with, in order, whatever the row's label."""
+    return re.findall(r"(\S+): cloud sessions cannot push to main\.", prompt)
+
+
+def judged_pairs(prompt):
+    """(path, line) for each line a judge prompt asks about, in order: the `<path>:<N>` label of each line of a packed prompt, else the
+    `File:` path and the `Line N:` rows of a one-file prompt."""
+    labelled = JUDGED_LABEL.findall(prompt)
+    if labelled:
+        return [(path, int(number)) for path, number in labelled]
+    head = re.search(r"^File: (.+)$", prompt, re.M)
+    if head is None:
+        return []
+    return [(head.group(1), int(number)) for number in re.findall(r"^Line (\d+): ", prompt, re.M)]
+
+
+def answering(verdict_of):
+    """The one stub answer. `verdict_of(path, line)` gives (verdict, why) for a line the prompt asks about, or None to leave it out of the reply.
+    Each entry names its path and line, so two files' line 3 read apart."""
+    def answer(prompt):
+        rows = []
+        for path, number in judged_pairs(prompt):
+            got = verdict_of(path, number)
+            if got is not None:
+                rows.append({"path": path, "line": number, "verdict": got[0], "why": got[1]})
+        return {"verdicts": rows}, None
+    return answer
+
+
 def verdict_for(line, verdict, why="the cited file says otherwise"):
-    """An answer that judges one line of the prose file, in the JSON shape the judge asks for."""
-    return lambda prompt: ({"verdicts": [{"line": line, "verdict": verdict, "why": why}]}, None)
+    """An answer that judges line `line` of each file the prompt asks about. Every other line is left out of the reply, so it reads skipped."""
+    return answering(lambda path, number: (verdict, why) if number == line else None)
+
+
+holds_every_line = answering(lambda path, number: ("holds", "the cited file agrees"))
+
+
+def three_call_files():
+    """Three governed files of CALL_LINES cited lines each, on lines 3 to 52. They pack into three calls, the last one short."""
+    return {p: tagged_doc(["%s-l%03d" % (x, n) for n in range(1, CALL_LINES + 1)]) for p, x in zip((LANE_A, LANE_B, LANE_C), "abc")}
+
+
+def call_verdict(path, number):
+    """The verdict of one line of three_call_files: its CALL_VERDICTS entry, else holds."""
+    return CALL_VERDICTS.get(number, ("holds", "the cited file agrees"))
+
+
+def finding_lines(out):
+    """The printed finding lines of the prose judge, in print order."""
+    return [line for line in out.splitlines() if line.startswith("merge: #7 prose judge, ")]
+
+
+def expected_findings(skip=()):
+    """The finding lines three_call_files prints, in file order, with the (path, line) rows in `skip` left out."""
+    return ["merge: #7 prose judge, %s:%d %s: %s" % (p, n, CALL_VERDICTS[n][0], CALL_VERDICTS[n][1])
+            for p in (LANE_A, LANE_B, LANE_C) for n in sorted(CALL_VERDICTS) if (p, n) not in skip]
+
+
+def rendezvous(barrier, answer):
+    """An answer that waits at `barrier` for its peer calls, then gives `answer`'s reply. A call that waits alone breaks the barrier."""
+    def waited(prompt):
+        barrier.wait()
+        return answer(prompt)
+    return waited
+
+
+def failing_job(failure):
+    """An answer that gives `failure` to the call holding the last line of LANE_C, and the three_call_files verdicts to the other calls."""
+    judged = answering(call_verdict)
+
+    def answer(prompt):
+        if (LANE_C, CALL_LINES + 2) in judged_pairs(prompt):
+            return failure(prompt)
+        return judged(prompt)
+    return answer
 
 
 def raises(exc):
@@ -25165,23 +25834,6 @@ def prose_unknown_lines(out):
     return [line for line in out.splitlines() if "prose judge" in line and "UNKNOWN" in line]
 
 
-def per_file(answers):
-    """An answer routed by the file the prompt judges: `answers` maps a path to a function of the prompt. A prompt for a path that is not
-    in `answers` reads as a model error."""
-    def answer(prompt):
-        for path, reply in answers.items():
-            if "File: %s\n" % path in prompt:
-                return reply(prompt)
-        return None, "the test has no answer for this file"
-    return answer
-
-
-def stale_every_line(prompt):
-    """An answer that calls every line the prompt numbers `stale`, read from its `Line N:` rows."""
-    numbers = [int(n) for n in re.findall(r"^Line (\d+): ", prompt, re.M)]
-    return {"verdicts": [{"line": n, "verdict": "stale", "why": "the cited file says otherwise"} for n in numbers]}, None
-
-
 def timed_out(prompt):
     return None, "model subprocess timed out"
 
@@ -25193,6 +25845,19 @@ def cited_lines(n):
 
 REAL_INVOKE_MODEL = decision_watch.invoke_model  # captured at import, before the test base swaps in its stub
 REAL_RUN = decision_watch._nowindow.run  # captured at import, before the test base wraps it
+
+
+class TimeoutSpy(JudgeStub):
+    """A JudgeStub that also records the timeout each call runs under: the one the caller passed, else invoke_model's own default."""
+    def __init__(self, answer):
+        super().__init__(answer)
+        self.timeouts = []
+
+    def __call__(self, prompt, *args, **kwargs):
+        bound = inspect.signature(REAL_INVOKE_MODEL).bind(prompt, *args, **kwargs)
+        bound.apply_defaults()
+        self.timeouts.append(bound.arguments["timeout"])
+        return super().__call__(prompt, *args, **kwargs)
 
 
 def base_model_stub(prompt, *args, **kwargs):
@@ -25344,23 +26009,242 @@ class ProseJudge(Env):
         self.assertIn("read %s:4" % BACKING, stub.prompts[0], "the call does not carry what the line cites")
 
     def test_one_model_call_per_selected_file(self):
+        # Re-pointed by the packing pick (PACK_PICK): the selected files' lines share calls, so two files make one call.
         names = ("docs/notes/a.md", "docs/notes/b.md")
         plain = "docs/notes/plain.md"  # no cite: never selected
         self.setup_range({names[0]: CITE_DOC, names[1]: CITE_DOC, plain: PLAIN_DOC}, {BACKING: BACKING_TEXT})
-        stub, rc, out = self.judge(verdict_for(3, "holds"))
-        self.assertEqual(len(stub.prompts), 2, "model calls: %d, want 2: two prose files are selected" % len(stub.prompts))
+        stub, rc, out = self.judge(verdict_for(3, "holds"), cap=None)
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: two prose files pack into one call (%s)" % (len(stub.prompts), PACK_PICK))
         sent = {p for p in names + (plain,) if any(p in prompt for prompt in stub.prompts)}
         self.assertEqual(sent, set(names), "the calls name %s, want the two selected files only" % sorted(sent))
 
     def test_past_the_cap_the_rest_read_unknown(self):
+        # Re-pointed by the packing pick (PACK_PICK): three files of 100 cited lines under a cap of two calls. Both calls are made, one holds
+        # lines of two files, and every line the two calls do not hold is counted on the past-cap line.
         names = ("docs/notes/a.md", "docs/notes/b.md", "docs/notes/c.md")
-        self.setup_range({p: CITE_DOC for p in names}, {BACKING: BACKING_TEXT})
-        stub, rc, out = self.judge(verdict_for(3, "holds"))
-        self.assertEqual(len(stub.prompts), PROSE_CAP, "model calls: %d for 3 selected files, want the cap %d" % (len(stub.prompts), PROSE_CAP))
-        sent = {p for p in names if any(p in prompt for prompt in stub.prompts)}
-        unjudged = set(names) - sent
-        self.assertEqual(len(unjudged), 1, "files not sent: %s, want one past the cap" % sorted(unjudged))
-        self.assert_unknown_count(out, 1, [(1, "past the call cap")])
+        self.setup_range({p: tagged_doc(["%s-l%03d" % (x, n) for n in range(1, 101)]) for p, x in zip(names, "abc")}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(holds_every_line)
+        self.assertEqual(len(stub.prompts), PROSE_CAP, "model calls: %d, want the cap %d (%s)" % (len(stub.prompts), PROSE_CAP, PACK_PICK))
+        self.assertTrue(any(len({p for p, _ in judged_pairs(prompt)}) > 1 for prompt in stub.prompts),
+                        "no call holds lines of two files: the calls are per file (%s)" % PACK_PICK)
+        unjudged = 300 - len([t for prompt in stub.prompts for t in tags_in(prompt)])
+        self.assertGreater(unjudged, 0, "every line went into the calls, so none is counted past the cap")
+        self.assert_unknown_count(out, unjudged, [(unjudged, "past the call cap")])
+        self.assertEqual(rc, 0, out)
+
+    def test_five_small_files_fit_in_one_model_call(self):
+        # Five files of one cited line each are far under one call's budget, so one call judges them all. One call per file would make
+        # three calls at the default cap and count the other two files past it.
+        tags = ["%s-l1" % x for x in "abcde"]
+        self.setup_range({"docs/notes/%s.md" % x: tagged_doc([tag]) for x, tag in zip("abcde", tags)}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(holds_every_line, cap=None)
+        self.assertTrue(stub.prompts, "no model call: the five files were not selected")
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d for five small files, want 1: they pack into one call (%s)" % (len(stub.prompts), PACK_PICK))
+        self.assertEqual(sorted(t for p in stub.prompts for t in tags_in(p)), sorted(tags), "the one call does not hold each file's line once")
+        self.assertEqual(prose_unknown_lines(out), [], "a line of the five files is not judged\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_two_files_with_the_same_line_number_each_get_their_own_verdict(self):
+        # Packed: line 3 of LANE_A and line 3 of LANE_B share one call. Each verdict reads for its own file: A's line 3 is stale, B's is unbacked.
+        self.setup_range({"docs/notes/base.md": PLAIN_DOC}, {LANE_A: CITE_DOC, LANE_B: CITE_DOC, BACKING: BACKING_TEXT})
+        by_file = {LANE_A: ("stale", "the cited file says otherwise"), LANE_B: ("unbacked", "no cited file backs it")}
+        stub, rc, out = self.judge(answering(lambda path, number: by_file[path] if number == 3 else None), cap=None)
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: the two files share one call (%s)" % (len(stub.prompts), PACK_PICK))
+        lines = out.splitlines()
+        self.assertIn("merge: #7 prose judge, %s:3 stale: the cited file says otherwise" % LANE_A, lines, "A's line 3 does not carry its own verdict\n" + out)
+        self.assertIn("merge: #7 prose judge, %s:3 unbacked: no cited file backs it" % LANE_B, lines, "B's line 3 does not carry its own verdict\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_file_past_one_call_budget_splits_across_two_calls_with_each_line_once(self):
+        # 92 lines of about 360 bytes are more than one call's budget. The file splits at a line boundary: two calls, each line in one.
+        tags = ["big-l%02d" % n for n in range(1, 93)]
+        self.setup_range({PROSE: tagged_doc(tags)}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(holds_every_line, cap=None)
+        self.assertTrue(stub.prompts, "no model call: the file was not selected")
+        self.assertEqual(len(stub.prompts), 2, "model calls: %d for one file of 92 long lines, want 2: the file splits at a line boundary (%s)" % (len(stub.prompts), PACK_PICK))
+        self.assertEqual(sorted(t for p in stub.prompts for t in tags_in(p)), sorted(tags), "the calls do not hold each line of the file exactly once")
+        self.assertEqual(prose_unknown_lines(out), [], "a line of the file is not judged\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_lines_no_call_holds_are_counted_on_the_past_cap_line(self):
+        # 400 lines of about 360 bytes are more than three calls hold. A line that fits no call is counted on the past-cap line, never dropped.
+        tags = ["cap-l%03d" % n for n in range(1, 401)]
+        self.setup_range({PROSE: tagged_doc(tags)}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(holds_every_line, cap=None)
+        self.assertTrue(stub.prompts, "no model call: the file was not selected")
+        judged = [t for p in stub.prompts for t in tags_in(p)]
+        self.assertEqual(len(set(judged)), len(judged), "a line is in two calls")
+        self.assertLess(len(judged), len(tags), "all 400 lines went into calls, so none is counted on the past-cap line: the calls are not bounded (%s)" % PACK_PICK)
+        unjudged = len(tags) - len(judged)
+        self.assert_unknown_count(out, unjudged, [(unjudged, "past the call cap")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_batch_55_shaped_merge_judges_every_line_within_the_cap(self):
+        # Three small files sort before one 92-line file. Judged one call per file, the big file sits past the cap. Packed, every line is judged.
+        small = {"docs/notes/%s-small.md" % x: tagged_doc(["%s-l1" % x, "%s-l2" % x]) for x in "abc"}
+        big = {"docs/notes/z-big.md": tagged_doc(["big-l%02d" % n for n in range(1, 93)])}
+        expected = sorted(["%s-l%d" % (x, n) for x in "abc" for n in (1, 2)] + ["big-l%02d" % n for n in range(1, 93)])
+        self.setup_range({**small, **big}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(holds_every_line, cap=None)
+        self.assertTrue(stub.prompts, "no model call: the files were not selected")
+        self.assertLessEqual(len(stub.prompts), merge.PROSE_JUDGE_MAX_CALLS, "model calls: %d, want at most the cap of %d" % (len(stub.prompts), merge.PROSE_JUDGE_MAX_CALLS))
+        judged = sorted(t for p in stub.prompts for t in tags_in(p))
+        self.assertEqual(judged, expected, "lines judged: %d of %d, want all: the big file sits past the call cap (%s)" % (len(judged), len(expected), PACK_PICK))
+        self.assertEqual(prose_unknown_lines(out), [], "a line is not judged\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_line_alone_over_one_call_budget_is_cut_into_a_call_within_the_budget(self):
+        # One line of about 100 KB is over any one call's budget. Its rows are cut with the cut marker, so its call stays within the
+        # budget, and every line, the 100 KB one included, is judged once.
+        huge = "huge-l1: cloud sessions cannot push to main. " + "the reason is written out in full, " * 3000 + "(read src/widget.py:4)."
+        small = ["small-l%d" % n for n in (1, 2, 3)]
+        doc = "# Cloud notes\n\n" + huge + "\n" + "\n".join("%s: cloud sessions cannot push to main. (read src/widget.py:4)." % t for t in small) + "\n"
+        self.setup_range({PROSE: doc}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(holds_every_line, cap=None)
+        self.assertTrue(stub.prompts, "no model call: the file was not selected")
+        for prompt in stub.prompts:
+            size = len(prompt.encode("utf-8"))
+            self.assertLessEqual(size, CALL_BYTES, "a call of %d bytes, want at most the budget of %d bytes: a line over one budget is cut, never sent whole (%s)" % (size, CALL_BYTES, PACK_PICK))
+        holding = [p for p in stub.prompts if "huge-l1" in tags_in(p)]
+        self.assertEqual(len(holding), 1, "calls holding the 100 KB line: %d, want 1" % len(holding))
+        self.assertIn("row cut at", holding[0], "the call holding the 100 KB line has no cut marker: its rows were not cut")
+        self.assertEqual(sorted(t for p in stub.prompts for t in tags_in(p)), sorted(["huge-l1"] + small), "a line is not in exactly one call")
+        self.assertEqual(prose_unknown_lines(out), [], "a line is not judged\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_no_built_prompt_goes_over_the_call_byte_budget_even_for_a_lone_line(self):
+        # Packed: one line of about 100 KB, then 30 lines of about 360 bytes. Each built prompt holds at most CALL_BYTES UTF-8 bytes,
+        # a line over the budget alone included.
+        huge = "huge-l1: cloud sessions cannot push to main. " + "the reason is written out in full, " * 3000 + "(read src/widget.py:4)."
+        tags = ["small-l%02d" % n for n in range(1, 31)]
+        rows = [huge] + ["%s: cloud sessions cannot push to main. %s(read src/widget.py:4)." % (tag, TAGGED_FILLER) for tag in tags]
+        self.setup_range({PROSE: "# Cloud notes\n\n" + "\n".join(rows) + "\n"}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(holds_every_line, cap=None)
+        self.assertTrue(stub.prompts, "no model call: the file was not selected")
+        for prompt in stub.prompts:
+            size = len(prompt.encode("utf-8"))
+            self.assertLessEqual(size, CALL_BYTES, "a call of %d bytes, want at most the budget of %d bytes (%s)" % (size, CALL_BYTES, PACK_PICK))
+        self.assertEqual(sorted(t for p in stub.prompts for t in tags_in(p)), sorted(["huge-l1"] + tags), "a line is not in exactly one call")
+        self.assertEqual(prose_unknown_lines(out), [], "a line is not judged\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_non_ASCII_line_over_the_call_budget_is_cut_within_the_budget(self):
+        # One line of 13,000 e-acute characters is 26,000 UTF-8 bytes, over one call's budget on its own. Its call stays within the budget,
+        # the cut keeps whole characters, and each line is judged once.
+        accents = "accent-l1: cloud sessions cannot push to main. " + "é" * 13000 + " (read src/widget.py:4)."
+        doc = "# Cloud notes\n\n" + accents + "\nsmall-l1: cloud sessions cannot push to main. (read src/widget.py:4).\n"
+        self.setup_range({PROSE: doc}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(holds_every_line, cap=None)
+        self.assertTrue(stub.prompts, "no model call: the file was not selected")
+        for prompt in stub.prompts:
+            size = len(prompt.encode("utf-8"))
+            self.assertLessEqual(size, CALL_BYTES, "a call of %d bytes, want at most the budget of %d bytes (%s)" % (size, CALL_BYTES, PACK_PICK))
+            self.assertNotIn("�", prompt, "a call holds a replacement character: the cut split a character")
+        self.assertEqual(sorted(t for p in stub.prompts for t in tags_in(p)), ["accent-l1", "small-l1"], "a line is not in exactly one call")
+        self.assertEqual(prose_unknown_lines(out), [], "a line is not judged\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_the_packed_budget_is_the_named_24000_bytes(self):
+        # Every budget case above holds each call to CALL_BYTES, the pick's 24000 UTF-8 bytes. The merge names that budget.
+        self.assertEqual(getattr(merge, "PROSE_JUDGE_CALL_BYTES", None), CALL_BYTES, "merge.PROSE_JUDGE_CALL_BYTES is not the named %d-byte budget (%s)" % (CALL_BYTES, PACK_PICK))
+
+    def test_the_three_judge_calls_run_at_once(self):
+        # Three files pack into three calls, and each call waits at one barrier of three. The barrier passes only when all three calls are in flight at once.
+        self.setup_range(three_call_files(), {BACKING: BACKING_TEXT})
+        barrier = threading.Barrier(3, timeout=RENDEZVOUS_WAIT)
+        stub, rc, out = self.judge(rendezvous(barrier, answering(call_verdict)), cap=None)
+        self.assertEqual(len(stub.prompts), 3, "model calls: %d, want 3: three files of %d lines make three calls (%s)" % (len(stub.prompts), CALL_LINES, PACK_PICK))
+        self.assertFalse(barrier.broken, "the three judge calls did not overlap: one waited alone until the barrier broke\n" + out)
+        self.assertEqual(prose_unknown_lines(out), [], "a call read UNKNOWN: it did not reach the barrier with its peers\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_each_judge_call_runs_under_a_300_second_timeout(self):
+        # A full call takes about 195 s, past MODEL_TIMEOUT (120 s), so each judge call passes 300 s to invoke_model. The caller with no
+        # timeout keeps MODEL_TIMEOUT (test_a_caller_with_no_timeout_keeps_model_timeout).
+        self.setup_range(three_call_files(), {BACKING: BACKING_TEXT})
+        spy = TimeoutSpy(answering(call_verdict))
+        with unittest.mock.patch.object(decision_watch, "invoke_model", spy):
+            rc, out = self.run_capped(cap=None)
+        self.assertEqual(len(spy.prompts), 3, "model calls: %d, want 3 (%s)" % (len(spy.prompts), PACK_PICK))
+        self.assertEqual(spy.timeouts, [JUDGE_TIMEOUT] * 3, "invoke_model ran the judge's calls under %s s, want 300 s each (%s)" % (spy.timeouts, PACK_PICK))
+        self.assertEqual(rc, 0, out)
+
+    def test_the_report_reads_in_file_order_whatever_order_the_calls_finish(self):
+        # The first file's call finishes last, the middle one next, the last file's call first. Each waits for the call that finishes before it.
+        # The findings still print in file order, the same lines the sequential run prints.
+        self.setup_range(three_call_files(), {BACKING: BACKING_TEXT})
+        done, last_done, middle_done = [], threading.Event(), threading.Event()
+
+        def finish_in_reverse(prompt):
+            rows = judged_pairs(prompt)
+            if (LANE_A, 3) in rows:
+                name, waits_for, sets = "first", middle_done, None
+            elif (LANE_C, CALL_LINES + 2) in rows:
+                name, waits_for, sets = "last", None, last_done
+            else:
+                name, waits_for, sets = "middle", last_done, middle_done
+            if waits_for is not None and not waits_for.wait(RENDEZVOUS_WAIT):
+                raise RuntimeError("the call that should finish before this one did not finish")
+            done.append(name)
+            if sets is not None:
+                sets.set()
+            return answering(call_verdict)(prompt)
+
+        stub, rc, out = self.judge(finish_in_reverse, cap=None)
+        self.assertEqual(len(stub.prompts), 3, "model calls: %d, want 3" % len(stub.prompts))
+        self.assertEqual(done, ["last", "middle", "first"], "the calls finished as %s, want last, middle, first: the calls did not overlap, so the finish order was not forced" % done)
+        self.assertEqual(prose_unknown_lines(out), [], "a call read UNKNOWN\n" + out)
+        self.assertEqual(finding_lines(out), expected_findings(), "the findings do not read in file order as the sequential run does\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def assert_one_call_unknown(self, stub, out, cause):
+        # The call that holds the last line of LANE_C reads its lines UNKNOWN under `cause`, as one count line. The other calls' verdicts stand.
+        self.assertEqual(len(stub.prompts), 3, "model calls: %d, want 3 (%s)" % (len(stub.prompts), PACK_PICK))
+        self.assertTrue(any(len({p for p, _ in judged_pairs(prompt)}) > 1 for prompt in stub.prompts),
+                        "no call holds lines of two files: the calls are per file (%s)" % PACK_PICK)
+        failed = [p for p in stub.prompts if (LANE_C, CALL_LINES + 2) in judged_pairs(p)]
+        self.assertEqual(len(failed), 1, "calls holding the failing line: %d, want 1" % len(failed))
+        rows = set(judged_pairs(failed[0]))
+        self.assert_unknown_count(out, len(rows), [(len(rows), cause)])
+        self.assertEqual(finding_lines(out), expected_findings(skip=rows), "the other calls' verdicts did not stand: the findings differ from the fixture outside the failed call\n" + out)
+
+    def test_a_call_that_raises_turns_only_its_own_lines_unknown(self):
+        self.setup_range(three_call_files(), {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(failing_job(raises(RuntimeError("the model fell over"))), cap=None)
+        self.assert_one_call_unknown(stub, out, "model error")
+        self.assertEqual(rc, 0, out)
+
+    def test_a_call_that_times_out_turns_only_its_own_lines_unknown(self):
+        self.setup_range(three_call_files(), {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(failing_job(lambda prompt: (None, decision_watch.MODEL_TIMEOUT_ERROR)), cap=None)
+        self.assert_one_call_unknown(stub, out, "timed out")
+        self.assertEqual(rc, 0, out)
+
+    def test_a_caller_with_no_timeout_keeps_model_timeout(self):
+        # decision_watch.run calls `model_call(prompt)` with no timeout, so invoke_model's default applies: MODEL_TIMEOUT, 120 s.
+        # The judge's 300 s never reaches that caller.
+        seen, scratch = [], tempfile.mkdtemp(dir=self.t)
+
+        def run(args, **kwargs):
+            if args and args[0] == "claude":
+                seen.append(kwargs.get("timeout"))
+                return types.SimpleNamespace(returncode=0, stdout=json.dumps({"result": '{"verdict": "ALLOW"}'}), stderr="")
+            return REAL_RUN(args, **kwargs)
+        with unittest.mock.patch.object(decision_watch._nowindow, "run", run), \
+                unittest.mock.patch.object(decision_watch, "_judge_isolation", lambda: (scratch, {})):
+            REAL_INVOKE_MODEL("probe")
+        self.assertEqual(decision_watch.MODEL_TIMEOUT, 120, "decision_watch.MODEL_TIMEOUT is not 120 s")
+        self.assertEqual(seen, [120], "the caller with no timeout ran claude under %s s, want MODEL_TIMEOUT 120 s" % seen)
+
+    def test_two_lines_that_name_the_same_window_show_it_once_in_one_call(self):
+        # Two lines of PROSE name run_all in NAMED, the same window of that file. One call holds both lines, and the window's row xs012
+        # is in that call once: lines that name one window share one copy of it.
+        same = "The runner is `%s` `run_all` and returns 3.\n" % NAMED
+        self.setup_range({SIDE_PROSE: PLAIN_DOC}, {PROSE: "# Named notes\n\n" + same + same, NAMED: numbered_source("xs", 30, named={12})})
+        stub, rc, out = self.judge(holds_every_line, cap=None)
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: the two lines of one file are one call (%s)" % (len(stub.prompts), PACK_PICK))
+        shown = stub.prompts[0].count("xs012")
+        self.assertEqual(shown, 1, "the window's row xs012 is in the call %d times, want 1: lines that name one window share one copy (%s)" % (shown, PACK_PICK))
         self.assertEqual(rc, 0, out)
 
     def test_a_stale_verdict_names_the_file_and_line(self):
@@ -25414,7 +26298,7 @@ class ProseJudge(Env):
         # The stub above stops at invoke_model. This case runs the real invoke_model and its parse: `claude` is answered in
         # this process, and every other program goes to the real runner, so git still runs. The child-process seams in
         # hooks/test_reply_judge.py and hooks/test_call_judge.py cannot reach the merge's own process.
-        reply = json.dumps({"verdicts": [{"line": 3, "verdict": "stale", "why": "the cited file says otherwise"}]})
+        reply = json.dumps({"verdicts": [{"path": PROSE, "line": 3, "verdict": "stale", "why": "the cited file says otherwise"}]})  # a verdict names its path and line
         self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
         claude_calls, rc, out = self.real_judge(reply)
         self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
@@ -25554,7 +26438,7 @@ class ProseJudge(Env):
         self.setup_range({PROSE: old}, {}, later={PROSE: old + "\nCloud sessions run in a container.\n"})
         stub, rc, out = self.judge(verdict_for(5, "unbacked", "no cited file backs the line"))
         self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: the range adds one prose line with no cite" % len(stub.prompts))
-        self.assertIn("File: %s" % PROSE, stub.prompts[0], "the call does not name %s" % PROSE)
+        self.assertIn(PROSE, stub.prompts[0], "the call does not name %s" % PROSE)
         self.assertIn("Line 5: Cloud sessions run in a container.", stub.prompts[0], "the call does not carry the line the range adds, at line 5")
         self.assertNotIn("An old line on main", stub.prompts[0], "the call carries a line that main holds, not one the range adds")
         self.assertTrue(judge_lines(out, "%s:5" % PROSE, "unbacked"), "the report names no unbacked line at %s:5" % PROSE)
@@ -25629,11 +26513,13 @@ class ProseJudge(Env):
         self.assertIn("release", events[:events.index("invoke")], "the model call ran with the merge lock held: events %s" % events)
 
     def test_a_timeout_on_a_long_doc_collapses_to_one_count_line(self):
-        # 400 timed-out lines are one UNKNOWN count line. UNKNOWNs take no finding slot, so no count of lines past a cap prints.
-        self.setup_range({PROSE: cited_lines(400)}, {BACKING: BACKING_TEXT})
-        stub, rc, out = self.judge(timed_out)
-        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
-        self.assert_unknown_count(out, 400, [(400, "timed out")])
+        # Packed: 400 long lines are more than three calls hold. The calls time out, so the lines they hold read timed out, and the lines
+        # past the three calls are one count. All of it is one UNKNOWN count line. UNKNOWNs take no finding slot.
+        self.setup_range({PROSE: tagged_doc(["cap-l%03d" % n for n in range(1, 401)])}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(timed_out, cap=None)
+        self.assertEqual(len(stub.prompts), merge.PROSE_JUDGE_MAX_CALLS, "model calls: %d, want the cap of %d (%s)" % (len(stub.prompts), merge.PROSE_JUDGE_MAX_CALLS, PACK_PICK))
+        timed = len([t for prompt in stub.prompts for t in tags_in(prompt)])
+        self.assert_unknown_count(out, 400, [(timed, "timed out"), (400 - timed, "past the call cap")])
         self.assertNotIn("more lines not shown", out, "a count of lines past a cap, but UNKNOWNs never take the finding cap\n" + out)
         self.assertEqual(rc, 0, out)
 
@@ -25649,22 +26535,21 @@ class ProseJudge(Env):
         self.assertNotIn("more lines not shown", out, "a count of 1 line past the cap of 20: the UNKNOWN lines took the cap\n" + out)
 
     def malformed_reply(self, bad):
-        """The merge with PROSE's reply replaced by `bad`, and OTHER_PROSE answered stale at line 3. -> (rc, out)."""
+        """The merge with `bad` as every call's reply, over PROSE (two cited lines) and OTHER_PROSE (one). -> (calls, rc, out)."""
         self.setup_range({PROSE: TWO_CITE_DOC, OTHER_PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
-        stale = {"verdicts": [{"line": 3, "verdict": "stale", "why": "the cited file says otherwise"}]}
-        stub = JudgeStub(lambda prompt: (bad, None) if ("File: %s" % PROSE) in prompt else (stale, None))
+        stub = JudgeStub(lambda prompt: (bad, None))
         with unittest.mock.patch.object(decision_watch, "invoke_model", stub):
-            rc, out = self.run_capped()
-        return rc, out
+            rc, out = self.run_capped(cap=None)
+        return len(stub.prompts), rc, out
 
     def assert_malformed_reads_unknown(self, bad):
-        # The merge reads what invoke_model hands it. A reply it cannot read is UNKNOWN for its file, every selected line, and
-        # no verdict prints for that file. The other file's verdict still prints.
-        rc, out = self.malformed_reply(bad)
-        self.assert_unknown_count(out, 2, [(2, "no readable verdict")])
-        self.assertFalse([line for line in out.splitlines() if "prose judge" in line and PROSE in line and "UNKNOWN" not in line],
-                         "a verdict printed for %s from a malformed reply" % PROSE)
-        self.assertTrue(judge_lines(out, "%s:3" % OTHER_PROSE, "stale"), "the other file's stale line did not print after the malformed reply")
+        # Re-pointed by the packing pick (PACK_PICK): the three selected lines of both files share one call, so a reply the merge cannot read is
+        # UNKNOWN for every line in that call, and no verdict prints for either file.
+        calls, rc, out = self.malformed_reply(bad)
+        self.assertEqual(calls, 1, "model calls: %d for two files, want 1: the files share one call (%s)" % (calls, PACK_PICK))
+        self.assert_unknown_count(out, 3, [(3, "no readable verdict")])
+        self.assertFalse([line for line in out.splitlines() if "prose judge" in line and "UNKNOWN" not in line],
+                         "a verdict printed from a malformed reply\n" + out)
         self.assertEqual(rc, 0, out)
 
     def test_a_reply_whose_verdicts_are_not_a_list_reads_unknown(self):
@@ -25722,14 +26607,18 @@ class ProseJudge(Env):
         self.assertEqual(merge.PROSE_JUDGE_MAX_CALLS, 3, "the default cap on model calls per merge is not 3")
 
     def test_the_default_cap_sends_three_files_and_reads_the_fourth_unknown(self):
-        # Four selected files under the default cap make three calls. The fourth file must read UNKNOWN, not pass silently. The test reads the real default, not a patched one.
+        # Re-pointed by the packing pick (PACK_PICK): four files of 100 cited lines under the default cap make three calls, one holds lines
+        # of two files, and every line the three calls do not hold is counted on the past-cap line. A fourth file's lines cannot go unjudged
+        # in silence: the count must match them exactly. The test reads the real default, not a patched one.
         names = ("docs/notes/a.md", "docs/notes/b.md", "docs/notes/c.md", "docs/notes/d.md")
-        self.setup_range({p: CITE_DOC for p in names}, {BACKING: BACKING_TEXT})
-        stub, rc, out = self.judge(verdict_for(3, "holds"), cap=None)
-        self.assertEqual(len(stub.prompts), 3, "model calls: %d for 4 selected files, want the default cap of 3" % len(stub.prompts))
-        sent = {p for p in names if any(p in prompt for prompt in stub.prompts)}
-        self.assertEqual(len(sent), 3, "files sent: %d, want 3 under the default cap" % len(sent))
-        self.assert_unknown_count(out, 1, [(1, "past the call cap")])
+        self.setup_range({p: tagged_doc(["%s-l%03d" % (x, n) for n in range(1, 101)]) for p, x in zip(names, "abcd")}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(holds_every_line, cap=None)
+        self.assertEqual(len(stub.prompts), 3, "model calls: %d for 4 selected files, want the default cap of 3 (%s)" % (len(stub.prompts), PACK_PICK))
+        self.assertTrue(any(len({p for p, _ in judged_pairs(prompt)}) > 1 for prompt in stub.prompts),
+                        "no call holds lines of two files: the calls are per file (%s)" % PACK_PICK)
+        unjudged = 400 - len([t for prompt in stub.prompts for t in tags_in(prompt)])
+        self.assertGreater(unjudged, 0, "every line went into the calls, so none is counted past the cap")
+        self.assert_unknown_count(out, unjudged, [(unjudged, "past the call cap")])
         self.assertEqual(rc, 0, out)
 
     def test_a_selected_line_the_model_skips_reads_unknown(self):
@@ -25742,56 +26631,71 @@ class ProseJudge(Env):
         self.assertEqual(rc, 0, out)
 
     def test_five_prose_files_collapse_their_unknowns_into_one_count_line(self):
-        # UNKNOWNs collapse to one count line with their causes, and findings print in full.
-        # Five governed files come in the range. The default cap of 3 sends a, b and c, so d and e are past it.
-        files = {LANE_A: THREE_CITE_DOC, LANE_B: THREE_CITE_DOC, LANE_C: TWO_CITE_DOC, LANE_D: TWO_CITE_DOC, LANE_E: TWO_CITE_DOC}
-        self.setup_range({"docs/notes/base.md": PLAIN_DOC}, {**files, BACKING: BACKING_TEXT})
-        answer = per_file({
-            # Line 7 is missing from the reply, so it is skipped.
-            LANE_A: lambda prompt: ({"verdicts": [{"line": 3, "verdict": "unbacked", "why": "no cited file backs it"},
-                                                   {"line": 5, "verdict": "stale", "why": "the cited file says otherwise"}]}, None),
-            LANE_B: timed_out,
-            LANE_C: lambda prompt: ({"ok": True, "findings": [{"line": 3, "verdict": "stale", "why": "x"}]}, None),  # a wrong shape
-        })
-        stub, rc, out = self.judge(answer, cap=None)
-        sent = {p for p in files if any("File: %s\n" % p in prompt for prompt in stub.prompts)}
-        self.assertEqual(sent, {LANE_A, LANE_B, LANE_C}, "the calls name %s, want a, b and c: the default cap sends three files" % sorted(sent))
-        self.assertEqual(len(stub.prompts), 3, "model calls: %d, want 3" % len(stub.prompts))
+        # Re-pointed by the packing pick (PACK_PICK): UNKNOWNs collapse to one count line with their causes, and findings print in full.
+        # The five small files (12 lines) share the first call with the head of a 300-line file. The two calls after it hold the rest of
+        # the big file and time out, and the lines past the three calls are one count. One line of LANE_A is left out of the reply.
+        big = "docs/notes/z-big.md"
+        small = {LANE_A: THREE_CITE_DOC, LANE_B: THREE_CITE_DOC, LANE_C: TWO_CITE_DOC, LANE_D: TWO_CITE_DOC, LANE_E: TWO_CITE_DOC}
+        self.setup_range({"docs/notes/base.md": PLAIN_DOC},
+                         {**small, big: tagged_doc(["big-l%03d" % n for n in range(1, 301)]), BACKING: BACKING_TEXT})
+        verdicts = {(LANE_A, 3): ("unbacked", "no cited file backs it"), (LANE_A, 5): ("stale", "the cited file says otherwise")}
+
+        def reply(path, number):
+            if (path, number) == (LANE_A, 7):
+                return None
+            return verdicts.get((path, number), ("holds", "the cited file agrees"))
+
+        def small_call_or_timeout(prompt):
+            if any(path in small for path, _ in judged_pairs(prompt)):
+                return answering(reply)(prompt)
+            return timed_out(prompt)
+        stub, rc, out = self.judge(small_call_or_timeout, cap=None)
+        self.assertEqual(len(stub.prompts), 3, "model calls: %d, want 3: the default cap (%s)" % (len(stub.prompts), PACK_PICK))
+        groups = [judged_pairs(prompt) for prompt in stub.prompts]
+        small_groups = [g for g in groups if any(path in small for path, _ in g)]
+        self.assertEqual(len(small_groups), 1, "calls holding the five small files: %d, want 1: they pack into one call (%s)" % (len(small_groups), PACK_PICK))
+        self.assertTrue(set(small) <= {path for path, _ in small_groups[0]}, "the first call does not hold all five small files (%s)" % PACK_PICK)
+        timed = sum(len(g) for g in groups if not any(path in small for path, _ in g))
+        past = 12 + 300 - sum(len(g) for g in groups)
         lines = out.splitlines()
         findings = ["merge: #7 prose judge, %s:3 unbacked: no cited file backs it" % LANE_A,
                     "merge: #7 prose judge, %s:5 stale: the cited file says otherwise" % LANE_A]
         for finding in findings:
             self.assertIn(finding, lines, "the finding is not printed in full: %r\n%s" % (finding, out))
-        self.assert_unknown_count(out, 10, [(3, "timed out"), (2, "no readable verdict"), (4, "past the call cap"), (1, "skipped by the reply")])
+        self.assert_unknown_count(out, timed + past + 1, [(timed, "timed out"), (past, "past the call cap"), (1, "skipped by the reply")])
         self.assertLess(max(lines.index(f) for f in findings), lines.index(prose_unknown_lines(out)[0]), "a finding prints after the UNKNOWN line\n" + out)
         self.assertEqual(rc, 0, out)
         self.assertTrue(getattr(self.host, "merged", False), "the merge did not land")
 
     def test_21_findings_print_20_and_a_count_of_one_then_the_unknown_line(self):
-        # UNKNOWNs do not take the finding cap: 21 findings print 20 and one count line, and the timed-out file adds one UNKNOWN line.
+        # Re-pointed by the packing pick (PACK_PICK): UNKNOWNs do not take the finding cap. 21 stale lines of LANE_A and one line of LANE_B
+        # share one call; LANE_B's line is left out of the reply, so it reads skipped. 21 findings print 20 and one count line, then the UNKNOWN line.
         self.setup_range({"docs/notes/base.md": PLAIN_DOC}, {LANE_A: cited_lines(21), LANE_B: CITE_DOC, BACKING: BACKING_TEXT})
-        stub, rc, out = self.judge(per_file({LANE_A: stale_every_line, LANE_B: timed_out}), cap=None)
-        self.assertEqual(len(stub.prompts), 2, "model calls: %d, want 2: two files are selected" % len(stub.prompts))
+        answer = answering(lambda path, number: ("stale", "the cited file says otherwise") if path == LANE_A else None)
+        stub, rc, out = self.judge(answer, cap=None)
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: the two files pack into one call (%s)" % (len(stub.prompts), PACK_PICK))
         lines = out.splitlines()
         findings = [line for line in lines if line.startswith("merge: #7 prose judge, %s:" % LANE_A)]
         self.assertEqual(len(findings), 20, "finding lines: %d, want 20: the finding cap\n%s" % (len(findings), out))
         counts = [line for line in lines if re.match(r"^merge: #7 prose judge: \d+ more lines not shown$", line)]
         self.assertEqual(counts, ["merge: #7 prose judge: 1 more lines not shown"], "the count line for the findings past the cap is not 1\n" + out)
-        self.assert_unknown_count(out, 1, [(1, "timed out")])
+        self.assert_unknown_count(out, 1, [(1, "skipped by the reply")])
         unknown = prose_unknown_lines(out)[0]
         self.assertLess(lines.index(findings[-1]), lines.index(counts[0]), "the count line does not follow the last finding\n" + out)
         self.assertLess(lines.index(counts[0]), lines.index(unknown), "the count line does not come before the UNKNOWN line\n" + out)
         self.assertEqual(rc, 0, out)
 
     def test_unknown_lines_never_take_a_finding_slot(self):
-        # 20 findings and one timed-out file: all 20 findings print, no count line for findings appears, and the UNKNOWN line prints.
+        # Re-pointed by the packing pick (PACK_PICK): 20 stale lines of LANE_A and one line of LANE_B share one call, and LANE_B's line is left
+        # out of the reply. All 20 findings print, no count line for findings appears, and the UNKNOWN line prints.
         self.setup_range({"docs/notes/base.md": PLAIN_DOC}, {LANE_A: cited_lines(20), LANE_B: CITE_DOC, BACKING: BACKING_TEXT})
-        stub, rc, out = self.judge(per_file({LANE_A: stale_every_line, LANE_B: timed_out}), cap=None)
-        self.assertEqual(len(stub.prompts), 2, "model calls: %d, want 2: two files are selected" % len(stub.prompts))
+        answer = answering(lambda path, number: ("stale", "the cited file says otherwise") if path == LANE_A else None)
+        stub, rc, out = self.judge(answer, cap=None)
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: the two files pack into one call (%s)" % (len(stub.prompts), PACK_PICK))
         findings = [line for line in out.splitlines() if line.startswith("merge: #7 prose judge, %s:" % LANE_A)]
         self.assertEqual(len(findings), 20, "finding lines: %d, want all 20: the UNKNOWN line took a finding slot\n%s" % (len(findings), out))
         self.assertNotIn("more lines not shown", out, "a count line for findings that all fit: the UNKNOWN line took a slot\n" + out)
-        self.assert_unknown_count(out, 1, [(1, "timed out")])
+        self.assert_unknown_count(out, 1, [(1, "skipped by the reply")])
         self.assertEqual(rc, 0, out)
 
     def test_the_unknown_line_names_a_cause_never_the_raw_error_text(self):
@@ -25812,10 +26716,12 @@ class ProseJudge(Env):
         self.assertEqual(rc, 0, out)
 
     def test_a_merge_with_every_line_judged_prints_no_unknown_line(self):
-        # The empty state: each selected line gets a verdict, so no UNKNOWN line prints and the stale finding prints in full.
+        # The empty state, re-pointed by the packing pick (PACK_PICK): each selected line gets a verdict, so no UNKNOWN line prints and the
+        # stale finding prints in full. The two files share one call.
         self.setup_range({"docs/notes/base.md": PLAIN_DOC}, {LANE_A: CITE_DOC, LANE_B: CITE_DOC, BACKING: BACKING_TEXT})
-        stub, rc, out = self.judge(per_file({LANE_A: verdict_for(3, "stale"), LANE_B: verdict_for(3, "holds")}), cap=None)
-        self.assertEqual(len(stub.prompts), 2, "model calls: %d, want 2: two files are selected" % len(stub.prompts))
+        answer = answering(lambda path, number: ("stale", "the cited file says otherwise") if path == LANE_A else ("holds", "the cited file agrees"))
+        stub, rc, out = self.judge(answer, cap=None)
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: the two files pack into one call (%s)" % (len(stub.prompts), PACK_PICK))
         self.assertIn("merge: #7 prose judge, %s:3 stale: the cited file says otherwise" % LANE_A, out.splitlines(),
                       "the stale finding is not printed in full\n" + out)
         self.assertEqual(prose_unknown_lines(out), [], "every line was judged, yet an UNKNOWN line printed\n" + out)
@@ -25855,7 +26761,7 @@ class ProseJudge(Env):
         for path, tag in files.items():
             feat[path] = numbered_source(tag, 100, named={50}, width=2000)
         self.setup_range({SIDE_PROSE: PLAIN_DOC}, feat)
-        holds = lambda prompt: ({"verdicts": [{"line": n, "verdict": "holds", "why": "w"} for n in (3, 5, 7)]}, None)
+        holds = answering(lambda path, number: ("holds", "w") if number in (3, 5, 7) else None)
         stub, rc, out = self.judge(holds)
         self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: one prose file is one call" % len(stub.prompts))
         prompt = stub.prompts[0]

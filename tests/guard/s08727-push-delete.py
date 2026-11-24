@@ -10,9 +10,12 @@ def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent
     """One `git push` case. An ask names `rule` when one is given (rulings 206 a and 207 a), else
     force-push. `silent` marks an allow that must print nothing. `word` is the command word the call
     names: the plain `git`, or a form of it that the shell reads as git."""
-    sh("push: " + name, word + " push " + tail, expected,
-       rule or ("force-push" if expected != "allow" else None), cwd=cwd, tool=tool,
-       carries=REMEDY if expected == "deny" else (), silent=silent, lacks=lacks)
+    # `refuse-main` is a refusal of a push that may reach the default branch (decision `guard-remedy-not-to-owner`). It is a deny whose reason carries no lease retry: a retry would force main again.
+    verdict = "deny" if expected == "refuse-main" else expected
+    sh("push: " + name, word + " push " + tail, verdict,
+       rule or ("force-push" if verdict != "allow" else None), cwd=cwd, tool=tool,
+       carries=REMEDY if expected == "deny" else (),
+       silent=silent, lacks=tuple(lacks) + ((REMEDY,) if expected == "refuse-main" else ()))
 
 
 # ALLOW: a lease that cannot overwrite newer work, off the default branch.
@@ -49,14 +52,14 @@ push_case("includes alone is not a force, so a plain push allows", "--force-if-i
 push_case("a force while the default branch is trunk, main is ordinary there",
           "--force origin HEAD:main", "deny", cwd=PUSHTRUNK)
 push_case("a push option value is not the remote", "--force-with-lease --force-if-includes -o x origin HEAD:trunk",
-          "ask", cwd=PUSHTRUNK)
+          "refuse-main", cwd=PUSHTRUNK)
 push_case("a push option value with --push-option is not the remote",
-          "--force-with-lease --force-if-includes --push-option x origin HEAD:trunk", "ask",
+          "--force-with-lease --force-if-includes --push-option x origin HEAD:trunk", "refuse-main",
           cwd=PUSHTRUNK)
 push_case("a force with no default branch ref, to a feature branch", "--force origin feat", "deny",
           cwd=PUSHNOHEAD)
 
-# ASK: any forced push that reaches the default branch, or whose destination cannot be read.
+# DENY: any forced push that reaches the default branch, or whose destination cannot be read.
 for form, tail in (
         ("bare, on main", "--force"),
         ("lease with includes, bare, on main", "--force-with-lease --force-if-includes"),
@@ -74,78 +77,78 @@ for form, tail in (
         ("--branches with a lease", "--branches" + LEASE),
         ("a glob refspec", "--force origin refs/heads/*:refs/heads/*"),
         ("the short flag", "-f origin HEAD:main")):
-    push_case("forced to the default branch asks: " + form, tail, "ask",
+    push_case("forced to the default branch denies: " + form, tail, "refuse-main",
               cwd=PUSHMAIN if "on main" in form or form == "HEAD" else PUSHFEAT)
-push_case("forced to the default branch from a feature branch asks", "--force origin HEAD:main", "ask")
+push_case("forced to the default branch from a feature branch denies", "--force origin HEAD:main", "refuse-main")
 push_case("forced to the default branch named by origin/HEAD, not by name", "--force origin HEAD:trunk",
-          "ask", cwd=PUSHTRUNK)
+          "refuse-main", cwd=PUSHTRUNK)
 # A local branch named origin/trunk must not hide the name origin/HEAD holds: the second case is the
 # same push where that branch is absent.
-push_case("forced to the default branch named by origin/HEAD asks", "--force origin trunk", "ask",
+push_case("forced to the default branch named by origin/HEAD denies", "--force origin trunk", "refuse-main",
           cwd=PUSHTRUNK)
-push_case("forced to the default branch asks when a local branch is named origin/trunk",
-          "--force origin trunk", "ask", cwd=PUSHTRUNKLOCAL)
-push_case("forced to master when no origin/HEAD is read asks (fallback)", "--force origin HEAD:master",
-          "ask", cwd=PUSHNOHEAD)
-push_case("forced to main when no origin/HEAD is read asks (fallback)", "--force origin HEAD:main",
-          "ask", cwd=PUSHNOHEAD)
+push_case("forced to the default branch denies when a local branch is named origin/trunk",
+          "--force origin trunk", "refuse-main", cwd=PUSHTRUNKLOCAL)
+push_case("forced to master when no origin/HEAD is read denies (fallback)", "--force origin HEAD:master",
+          "refuse-main", cwd=PUSHNOHEAD)
+push_case("forced to main when no origin/HEAD is read denies (fallback)", "--force origin HEAD:main",
+          "refuse-main", cwd=PUSHNOHEAD)
 # A tag named main makes the short read of HEAD print `heads/main`. The guard must still read main.
-push_case("a tag named like the branch, a lease push of HEAD on main asks",
-          LEASE.strip() + " origin HEAD", "ask", cwd=PUSHSAMETAG)
-push_case("a tag named like the branch, a bare lease push on main asks", LEASE.strip(), "ask",
+push_case("a tag named like the branch, a lease push of HEAD on main denies",
+          LEASE.strip() + " origin HEAD", "refuse-main", cwd=PUSHSAMETAG)
+push_case("a tag named like the branch, a bare lease push on main denies", LEASE.strip(), "refuse-main",
           cwd=PUSHSAMETAG)
-push_case("forced from a detached HEAD, no current branch to resolve, asks",
-          "--force-with-lease --force-if-includes", "ask", cwd=PUSHDETACHED)
-push_case("forced where git cannot be read asks",
-          "--force-with-lease --force-if-includes origin HEAD:feat", "ask",
+push_case("forced from a detached HEAD, no current branch to resolve, denies",
+          "--force-with-lease --force-if-includes", "refuse-main", cwd=PUSHDETACHED)
+push_case("forced where git cannot be read denies",
+          "--force-with-lease --force-if-includes origin HEAD:feat", "refuse-main",
           cwd=NOGIT)
-push_case("forced with a plus where git cannot be read asks", "origin +HEAD:feat", "ask", cwd=NOGIT)
+push_case("forced with a plus where git cannot be read denies", "origin +HEAD:feat", "refuse-main", cwd=NOGIT)
 
 LE = "--force-with-lease --force-if-includes "
-push_case("a quoted refspec to the default branch asks", LE + 'origin "HEAD:main"', "ask")
-push_case("a single-quoted plus refspec to the default branch asks", "origin '+main'", "ask")
-push_case("a quoted remote is unquoted", LE + '"origin" HEAD:main', "ask")
+push_case("a quoted refspec to the default branch denies", LE + 'origin "HEAD:main"', "refuse-main")
+push_case("a single-quoted plus refspec to the default branch denies", "origin '+main'", "refuse-main")
+push_case("a quoted remote is unquoted", LE + '"origin" HEAD:main', "refuse-main")
 # The text between two quoted words is live shell, so a forced flag there still forces the push.
-push_case("quoted remote and branch around --force asks, as the bare form does", "'origin' --force 'main'", "ask")
-push_case("lease with --repo=, refspec to the default branch asks", "--repo=origin " + LE + "HEAD:main",
-          "ask")
-push_case("lease with --repo and its value, refspec to the default branch asks",
-          "--repo origin " + LE + "HEAD:main", "ask")
+push_case("quoted remote and branch around --force denies, as the bare form does", "'origin' --force 'main'", "refuse-main")
+push_case("lease with --repo=, refspec to the default branch denies", "--repo=origin " + LE + "HEAD:main",
+          "refuse-main")
+push_case("lease with --repo and its value, refspec to the default branch denies",
+          "--repo origin " + LE + "HEAD:main", "refuse-main")
 push_case("lease with --repo off the default branch", "--repo=origin " + LE + "HEAD:feat", "allow")
-push_case("a delete refspec at the default branch asks", "origin :main", "ask")
-push_case("a delete refspec at a full default ref asks", "origin :refs/heads/main", "ask")
-push_case("deleting with --delete at the default branch asks", "--delete origin main", "ask")
-push_case("deleting with -d at the default branch asks", "-d origin main", "ask")
+push_case("a delete refspec at the default branch denies", "origin :main", "refuse-main")
+push_case("a delete refspec at a full default ref denies", "origin :refs/heads/main", "refuse-main")
+push_case("deleting with --delete at the default branch denies", "--delete origin main", "refuse-main")
+push_case("deleting with -d at the default branch denies", "-d origin main", "refuse-main")
 # A dangling origin/HEAD does not hide the default branch (owner's read order 2026-10-16). The three
 # forms below reach main and ask, exactly as they do where origin/HEAD resolves.
-push_case("a dangling origin/HEAD, a forced push to main asks",
-          "--force-with-lease --force-if-includes origin main", "ask", cwd=PUSHDANGLING)
-push_case("a dangling origin/HEAD, a delete refspec at main asks", "origin :main", "ask",
+push_case("a dangling origin/HEAD, a forced push to main denies",
+          "--force-with-lease --force-if-includes origin main", "refuse-main", cwd=PUSHDANGLING)
+push_case("a dangling origin/HEAD, a delete refspec at main denies", "origin :main", "refuse-main",
           cwd=PUSHDANGLING)
-push_case("a dangling origin/HEAD, --delete after the remote at main asks", "origin --delete main", "ask",
+push_case("a dangling origin/HEAD, --delete after the remote at main denies", "origin --delete main", "refuse-main",
           cwd=PUSHDANGLING)
 # Where origin/HEAD does not name the branch (dangling, or unset), main AND master stay protected:
 # the read order finds origin/main, but a repository that has origin/main may still hold master.
 for why, fixture in (("a dangling origin/HEAD", PUSHDANGLING),
                    ("no origin/HEAD, origin/main present", PUSHNOHEADMAIN)):
-    push_case(why + ", a forced push to master asks",
-              "--force-with-lease --force-if-includes origin master", "ask", cwd=fixture)
-    push_case(why + ", a delete refspec at master asks", "origin :master", "ask", cwd=fixture)
-    push_case(why + ", --delete at master asks", "origin --delete master", "ask", cwd=fixture)
+    push_case(why + ", a forced push to master denies",
+              "--force-with-lease --force-if-includes origin master", "refuse-main", cwd=fixture)
+    push_case(why + ", a delete refspec at master denies", "origin :master", "refuse-main", cwd=fixture)
+    push_case(why + ", --delete at master denies", "origin --delete master", "refuse-main", cwd=fixture)
     push_case(why + ", a delete off the default names allows", "origin :feat", "allow", cwd=fixture)
-push_case("no origin/HEAD, only origin/master present, a delete refspec at main asks", "origin :main",
-          "ask", cwd=PUSHONLYMASTER)
+push_case("no origin/HEAD, only origin/master present, a delete refspec at main denies", "origin :main",
+          "refuse-main", cwd=PUSHONLYMASTER)
 push_case("no origin/HEAD, only origin/master present, a delete off the default names allows",
           "origin :feat", "allow", cwd=PUSHONLYMASTER)
 # A push reads the PUSHED remote's default branch (upstream/HEAD -> main), never origin's (develop).
-push_case("another remote, --delete at its default branch asks", "--delete upstream main", "ask",
+push_case("another remote, --delete at its default branch denies", "--delete upstream main", "refuse-main",
           cwd=PUSHUPSTREAM)
 push_case("another remote, --delete at the branch origin names as default allows, it is ordinary there",
           "--delete upstream develop", "allow", cwd=PUSHUPSTREAM)
-push_case("another remote, a bare lease follows branch.feat.remote to its default branch asks",
-          LEASE.strip(), "ask", cwd=PUSHUPSTREAM)
-push_case("origin with its own origin/HEAD, --delete at its default branch asks", "--delete origin develop",
-          "ask", cwd=PUSHUPSTREAM)
+push_case("another remote, a bare lease follows branch.feat.remote to its default branch denies",
+          LEASE.strip(), "refuse-main", cwd=PUSHUPSTREAM)
+push_case("origin with its own origin/HEAD, --delete at its default branch denies", "--delete origin develop",
+          "refuse-main", cwd=PUSHUPSTREAM)
 push_case("a deletion off the default branch, refspec", "origin :feat", "allow")
 push_case("a deletion off the default branch, --delete", "--delete origin feat", "allow")
 push_case("--no-force-if-includes cancels --force-if-includes",
@@ -155,12 +158,12 @@ push_case("--no-force-with-lease cancels the lease, so nothing is forced",
 push_case("a glued push option is not -f", "-ofoo origin feat", "allow")
 push_case("a push option with its value is not -f", "-o foo origin feat", "allow")
 push_case("a bare lease with push.default upstream follows the upstream to the default branch",
-          LE.strip(), "ask", cwd=PUSHUP)
+          LE.strip(), "refuse-main", cwd=PUSHUP)
 push_case("a bare lease with push.default upstream follows an upstream off the default branch",
           LE.strip(), "allow", cwd=PUSHUPSELF)
-push_case("a bare lease with push.default upstream and no upstream asks", LE.strip(), "ask",
+push_case("a bare lease with push.default upstream and no upstream denies", LE.strip(), "refuse-main",
           cwd=PUSHNOUP)
-push_case("a bare lease with push.default matching asks", LE.strip(), "ask", cwd=PUSHMATCH)
+push_case("a bare lease with push.default matching denies", LE.strip(), "refuse-main", cwd=PUSHMATCH)
 push_case("a bare lease with an abbreviated force-with-lease and includes allows",
           "--force-with --force-if-inc", "allow")
 
@@ -171,32 +174,32 @@ push_case("a push option with its value then force denies", "-o foo --force orig
 
 # THE TARGET DIRECTORY. Config and the default branch are read where the push runs: a `git -C`,
 # a `cd` before it, a `-c` override on the call. The session's cwd here is never the answer.
-sh("push: lease with git -C naming the default branch's checkout asks",
-   VCS + " -C " + slash(PUSHMAIN) + " push " + LE.strip(), "ask", "force-push", cwd=PUSHFEAT)
+sh("push: lease with git -C naming the default branch's checkout denies",
+   VCS + " -C " + slash(PUSHMAIN) + " push " + LE.strip(), "deny", "force-push", cwd=PUSHFEAT)
 sh("push: lease with git -C naming a feature checkout allows from the main checkout",
    VCS + " -C " + slash(PUSHFEAT) + " push " + LE.strip(), "allow", cwd=PUSHMAIN)
 sh("push: a git -C on another call is not the push's directory",
    VCS + " -C " + slash(PUSHMAIN) + " status && " + VCS + " push " + LE.strip(), "allow",
    cwd=PUSHFEAT)
 # A quoted -C folder with a space holds one word. The guard must read that whole word, or the `push` after it is
-# taken as the folder and its force push is never seen. The folder is no checkout, so the force push asks.
-sh("push: a force push through a -C folder with a space asks, not read as blank text",
-   VCS + ' -C "' + slash(os.path.join(ROOT, "no such dir")) + '" push -f origin HEAD:main', "ask", "force-push",
+# taken as the folder and its force push is never seen. The folder is no checkout, so the force push denies.
+sh("push: a force push through a -C folder with a space denies, not read as blank text",
+   VCS + ' -C "' + slash(os.path.join(ROOT, "no such dir")) + '" push -f origin HEAD:main', "deny", "force-push",
    cwd=NOGIT)
-sh("push: lease after cd into the default branch's checkout asks, the leading cd is no second command",
-   "cd " + slash(PUSHMAIN) + " && " + VCS + " push " + LE.strip(), "ask", "force-push",
+sh("push: lease after cd into the default branch's checkout denies, the leading cd is no second command",
+   "cd " + slash(PUSHMAIN) + " && " + VCS + " push " + LE.strip(), "deny", "force-push",
    cwd=PUSHFEAT, lacks=(CHAIN_ASK,))
 sh("push: lease after cd into a feature checkout allows from the main checkout",
    "cd " + slash(PUSHFEAT) + " && " + VCS + " push " + LE.strip(), "allow", cwd=PUSHMAIN)
-sh("push: lease with git -C naming a directory that is not there asks",
-   VCS + " -C " + slash(os.path.join(ROOT, "nowhere")) + " push " + LE.strip(), "ask", "force-push",
+sh("push: lease with git -C naming a directory that is not there denies",
+   VCS + " -C " + slash(os.path.join(ROOT, "nowhere")) + " push " + LE.strip(), "deny", "force-push",
    cwd=PUSHFEAT)
 sh("push: lease with -c push.default=upstream follows the upstream to the default branch",
-   VCS + " -c push.default=upstream push " + LE.strip(), "ask", "force-push", cwd=PUSHUP)
+   VCS + " -c push.default=upstream push " + LE.strip(), "deny", "force-push", cwd=PUSHUP)
 sh("push: lease with -c push.default=current ignores the repository's upstream",
    VCS + " -c push.default=current push " + LE.strip(), "allow", cwd=PUSHUP)
-sh("push: lease with -c push.default=matching asks",
-   VCS + " -c push.default=matching push " + LE.strip(), "ask", "force-push", cwd=PUSHFEAT)
+sh("push: lease with -c push.default=matching denies",
+   VCS + " -c push.default=matching push " + LE.strip(), "deny", "force-push", cwd=PUSHFEAT)
 
 # THE COMMAND WORD SPLIT OR QUOTED INTO PIECES. The guard reads such a word as `git`, as the shell does.
 # A shlex reader does that for the shell forms below, which already ask: green locks that keep it so.
@@ -207,8 +210,8 @@ SPLIT_PUSH_MAIN = "origin HEAD:main"
 SPLIT_ANSI_WORDS = ["$'g'it", "g$'i't", "$'\\147it'"]
 SPLIT_SHELL_WORDS = ["g'i't", 'gi""t', '"g"it', "\\git", 'g""it', "gi\\t", "env g'i't", "command g'i't"]
 for _word in SPLIT_ANSI_WORDS + SPLIT_SHELL_WORDS:
-    push_case("split word " + _word + " force-pushes main, asks", SPLIT_FORCE, "ask", word=_word)
-    push_case("split word " + _word + " pushes to main, asks", SPLIT_PUSH_MAIN, "ask",
+    push_case("split word " + _word + " force-pushes main, denies", SPLIT_FORCE, "refuse-main", word=_word)
+    push_case("split word " + _word + " pushes to main, denies", SPLIT_PUSH_MAIN, "refuse-main",
               rule=PUSH_MAIN_RULE, word=_word)
 # Controls: a plain word that only contains git is text, so it stays allowed.
 sh("split word control: digit, a word with git inside, allows", "digit", "allow")
@@ -216,8 +219,8 @@ sh("split word control: gitk-free, a word with git inside, allows", "gitk-free",
 sh("split word control: echo git, git as text, allows", "echo git", "allow")
 
 # FALSE ALARMS: a guard that cries wolf is spent.
-# Re-pointed from allow by ruling 207 a: a non-forced push of main asks.
-push_case("a non-forced push of main asks, on main", "origin main", "ask", cwd=PUSHMAIN, rule=PUSH_MAIN_RULE)
+# Re-pointed from allow by ruling 207 a: a non-forced push of main denies.
+push_case("a non-forced push of main denies, on main", "origin main", "refuse-main", cwd=PUSHMAIN, rule=PUSH_MAIN_RULE)
 # PUSHMAIN has no upstream, so git refuses a bare push itself ("has no upstream branch"): no ask is needed.
 push_case("a bare push on main with no upstream is git's refusal, allows", "", "allow", cwd=PUSHMAIN)
 push_case("a non-forced push with -u of the current branch", "-u origin HEAD", "allow")
@@ -248,7 +251,7 @@ sh("python -c escaped forced push still denies (control)",
    cwd=PUSHFEAT, carries=REMEDY)
 # PRINTED, NOT RUN. A forced push quoted inside a print or an echo is text the interpreter shows, so each
 # allows. The nested reader splits on the escaped quotes and takes the printed text as a command. The
-# control pins a forced push to main that bash -c runs: it asks on the head and on main.
+# control pins a forced push to main that bash -c runs: it denies on the head and on main.
 # MUTATE_ONLY="nested quote" runs these cases alone.
 sh("push: nested quote, python -c prints a forced push, allows",
    r'python3 -c "print(\"' + VCS + r' push -f\")"', "allow", cwd=PUSHFEAT)
@@ -256,8 +259,8 @@ sh("push: nested quote, echo quotes a forced push in a sentence, allows",
    r'echo "run \"' + VCS + r' push --force\" later"', "allow", cwd=PUSHFEAT)
 sh("push: nested quote, python -c prints a sentence naming a forced push, allows",
    r'python3 -c "print(\"use ' + VCS + r' push --force\")"', "allow", cwd=PUSHFEAT)
-sh("push: nested quote control, bash -c runs a forced push to main, still asks",
-   'bash -c "' + VCS + ' push -f origin main"', "ask", "force-push", cwd=PUSHFEAT)
+sh("push: nested quote control, bash -c runs a forced push to main, still denies",
+   'bash -c "' + VCS + ' push -f origin main"', "deny", "force-push", cwd=PUSHFEAT)
 # RUN, NOT PRINTED. An escaped-quote pair that a call runs is a command, whatever the call is named: a
 # module alias, a from-import, a shlex.split argument, a variable. Each denies on a forced push.
 sh("push: nested quote, subprocess.run takes a shlex.split of a forced push, denies",
@@ -767,7 +770,7 @@ sh("push: a force push inside a loop's do-block still counts",
 # SUBSTITUTION, push. A forced push inside `$( )` or double quotes runs, so it takes the verdict and the
 # rule of the plain forced push to the same destination from the same checkout (PUSH_SUBST_PLAIN below).
 PUSH_SUBST_FORCE = VCS + " push --force origin main"
-PUSH_SUBST_VERDICT = "ask"   # the plain forced push's verdict, pinned by the control case below
+PUSH_SUBST_VERDICT = "deny"   # the plain forced push's verdict, pinned by the control case below
 sh("substitution: push, the plain forced push to main from a feature branch", PUSH_SUBST_FORCE,
    PUSH_SUBST_VERDICT, "force-push", cwd=PUSHFEAT)
 sh("substitution: push, an assignment from a dollar paren with a forced push",
@@ -820,30 +823,27 @@ sh("ask-step-hidden: a force push in a sh -c double-quoted substitution denies",
 sh("ask-step-hidden: control, a heredoc body naming a force push inside bash -c allows",
    "bash -c 'cat <<EOF\n" + HIDDEN_PUSH + "\nEOF'", "allow", cwd=PUSHFEAT)
 
-# ASK, owner rulings 206 a and 432 a. An implied destination (a bare push, HEAD, @, or a colon-less refspec
-# naming the current branch) that lands off the branch's upstream asks while the destination is not yet on
-# origin, that is, no refs/remotes/origin/<name> (ruling 432 a). A push with -u that names the local branch is
-# silent (the silent cases below). PUSHSTRAY is `mylocal`, whose upstream is origin/lane/x, and origin/mylocal
-# is absent, so its rows ask.
-push_case("stray branch, HEAD asks", "origin HEAD", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
-push_case("stray branch, @ asks", "origin @", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
-push_case("stray branch, the current branch named by its colon-less refspec asks", "origin mylocal", "ask",
-          cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
-# The same pushes without -u still ask: -u is what makes a new upstream on purpose.
-push_case("stacked lane, HEAD without -u asks", "origin HEAD", "ask", cwd=PUSHSTACK, rule=PUSH_STRAY_RULE)
-push_case("stacked lane, the local name without -u asks", "origin lane/fix", "ask", cwd=PUSHSTACK,
-          rule=PUSH_STRAY_RULE)
-push_case("stray branch, HEAD with an output tail is one clean ask", "origin HEAD 2>&1 | tail -1", "ask",
-          cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE, lacks=(CHAIN_ASK,))
-# Two refspecs: the explicit one is fine, the second is implied, so the call still asks.
-push_case("stray branch, a second refspec that names the current branch asks",
-          "origin HEAD:push-guard-asks mylocal", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
-sh("push: stray branch, a bare push under push.default current asks",
-   VCS + " -c push.default=current push", "ask", PUSH_STRAY_RULE, cwd=PUSHSTRAY)
-# The remedy names the explicit form with a placeholder only (ruling 432 a). The real branch names of PUSHSTRAY
-# never appear in it.
-sh("push: stray branch, the ask names the explicit form HEAD:<branch>", VCS + " push origin HEAD", "ask",
-   PUSH_STRAY_RULE, cwd=PUSHSTRAY, carries=("HEAD:<branch>",), lacks=("HEAD:mylocal", "HEAD:lane/x"))
+# ALLOW, decision `guard-remedy-not-to-owner` (push-stray-branch: a stray branch is harmless and reversible). An
+# implied destination (a bare push, HEAD, @, or a colon-less refspec naming the current branch) that lands off
+# the branch's upstream is allowed while the destination is not yet on origin, that is, no
+# refs/remotes/origin/<name>. A push with -u that names the local branch is silent (the silent cases below).
+# PUSHSTRAY is `mylocal`, whose upstream is origin/lane/x, and origin/mylocal is absent, so its rows allow.
+push_case("stray branch, HEAD allows", "origin HEAD", "allow", cwd=PUSHSTRAY)
+push_case("stray branch, @ allows", "origin @", "allow", cwd=PUSHSTRAY)
+push_case("stray branch, the current branch named by its colon-less refspec allows", "origin mylocal", "allow",
+          cwd=PUSHSTRAY)
+# The same pushes without -u allow too.
+push_case("stacked lane, HEAD without -u allows", "origin HEAD", "allow", cwd=PUSHSTACK)
+push_case("stacked lane, the local name without -u allows", "origin lane/fix", "allow", cwd=PUSHSTACK)
+push_case("stray branch, HEAD with an output tail allows", "origin HEAD 2>&1 | tail -1", "allow",
+          cwd=PUSHSTRAY, lacks=(CHAIN_ASK,))
+# Two refspecs: the explicit one is fine, the second is implied; the call allows.
+push_case("stray branch, a second refspec that names the current branch allows",
+          "origin HEAD:push-guard-asks mylocal", "allow", cwd=PUSHSTRAY)
+sh("push: stray branch, a bare push under push.default current allows",
+   VCS + " -c push.default=current push", "allow", cwd=PUSHSTRAY)
+sh("push: stray branch, an explicit HEAD:<branch> push allows", VCS + " push origin HEAD", "allow",
+   cwd=PUSHSTRAY)
 
 
 # DENY, rule push-agent-branch. A non-forced push whose destination is an agent-worktree name is refused, with or
@@ -974,9 +974,9 @@ def agent_refusal_opens_with_rule_case():
     return True, "a deny whose reason opens with %r" % want
 
 
-# A side effect pin: under push.autoSetupRemote, a bare push from main with no upstream writes main, so push-main asks.
-sh("push: main with no upstream, a bare push under autoSetupRemote asks push-main",
-   VCS + " -c push.autoSetupRemote=true push", "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN)
+# A side effect pin: under push.autoSetupRemote, a bare push from main with no upstream writes main, so push-main denies.
+sh("push: main with no upstream, a bare push under autoSetupRemote denies push-main",
+   VCS + " -c push.autoSetupRemote=true push", "deny", PUSH_MAIN_RULE, cwd=PUSHMAIN)
 
 # SILENT, rule push-agent-branch. Each is an allow that prints nothing. The lane and feature branch controls
 # are the no-upstream rows above (PUSHFEAT, `feat`): their -u and HEAD pushes stay silent under this rule too.
@@ -1018,13 +1018,13 @@ sh("push: agent checkout, HEAD to lane/x is silent", VCS + " push origin HEAD:la
 sh("push: agent checkout, HEAD to archive/ of the agent's own branch is silent",
    VCS + " push origin HEAD:archive/claude/agent-a22bb0ed47825117b", "allow", cwd=PUSHAGENT, silent=True)
 
-# ASK, owner rulings 207 a. A non-forced push whose destination is the literal
-# name main or master asks. The name is literal: origin/HEAD does not decide it.
-push_case("main, HEAD:main from a feature branch asks", "origin HEAD:main", "ask", rule=PUSH_MAIN_RULE)
-push_case("main, a push of main from a feature branch asks", "origin main", "ask", rule=PUSH_MAIN_RULE)
-push_case("main, a full ref to refs/heads/main asks", "origin x:refs/heads/main", "ask", rule=PUSH_MAIN_RULE)
-push_case("master, a push to master asks", "origin master", "ask", rule=PUSH_MAIN_RULE)
-push_case("main, a second refspec that reaches main asks", "origin HEAD:push-guard-asks HEAD:main", "ask",
+# DENY, owner rulings 207 a. A non-forced push whose destination is the literal
+# name main or master denies. The name is literal: origin/HEAD does not decide it.
+push_case("main, HEAD:main from a feature branch denies", "origin HEAD:main", "refuse-main", rule=PUSH_MAIN_RULE)
+push_case("main, a push of main from a feature branch denies", "origin main", "refuse-main", rule=PUSH_MAIN_RULE)
+push_case("main, a full ref to refs/heads/main denies", "origin x:refs/heads/main", "refuse-main", rule=PUSH_MAIN_RULE)
+push_case("master, a push to master denies", "origin master", "refuse-main", rule=PUSH_MAIN_RULE)
+push_case("main, a second refspec that reaches main denies", "origin HEAD:push-guard-asks HEAD:main", "refuse-main",
           rule=PUSH_MAIN_RULE)
 # On a lane checkout with local main equal to origin/main, --all and --branches are silent: neither push writes main.
 # The refusal and allow rows are in the section below.
@@ -1032,27 +1032,27 @@ all_allowed("lane checkout, --all with local main equal to origin/main is silent
 all_allowed("lane checkout, --branches with local main equal to origin/main is silent", "--branches origin",
             cwd=PUSHFEAT)
 # A -u push of the local name writes main when the checkout is main, and -u does not hide a second refspec to main.
-push_case("main, -u HEAD on main asks", "-u origin HEAD", "ask", cwd=PUSHMAIN, rule=PUSH_MAIN_RULE)
-push_case("stacked lane, -u HEAD with a second refspec to main asks", "-u origin HEAD main", "ask",
+push_case("main, -u HEAD on main denies", "-u origin HEAD", "refuse-main", cwd=PUSHMAIN, rule=PUSH_MAIN_RULE)
+push_case("stacked lane, -u HEAD with a second refspec to main denies", "-u origin HEAD main", "refuse-main",
           cwd=PUSHSTACK, rule=PUSH_MAIN_RULE)
-push_case("main, HEAD:main asks where origin/HEAD names trunk", "origin HEAD:main", "ask", cwd=PUSHTRUNK,
+push_case("main, HEAD:main denies where origin/HEAD names trunk", "origin HEAD:main", "refuse-main", cwd=PUSHTRUNK,
           rule=PUSH_MAIN_RULE)
 # A branch that tracks main writes main on a bare push. The upstream is main, so 206 a stays silent here.
-push_case("main tracking origin/main, a bare push asks", "", "ask", cwd=PUSHMAINUP, rule=PUSH_MAIN_RULE)
-push_case("main tracking origin/main, HEAD asks", "origin HEAD", "ask", cwd=PUSHMAINUP, rule=PUSH_MAIN_RULE)
-sh("push: main, a bare push under push.default current on main asks",
-   VCS + " -c push.default=current push", "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN)
-sh("push: main, a bare push under push.default upstream from a branch tracking main asks",
-   VCS + " push", "ask", PUSH_MAIN_RULE, cwd=PUSHUP)
+push_case("main tracking origin/main, a bare push denies", "", "refuse-main", cwd=PUSHMAINUP, rule=PUSH_MAIN_RULE)
+push_case("main tracking origin/main, HEAD denies", "origin HEAD", "refuse-main", cwd=PUSHMAINUP, rule=PUSH_MAIN_RULE)
+sh("push: main, a bare push under push.default current on main denies",
+   VCS + " -c push.default=current push", "deny", PUSH_MAIN_RULE, cwd=PUSHMAIN)
+sh("push: main, a bare push under push.default upstream from a branch tracking main denies",
+   VCS + " push", "deny", PUSH_MAIN_RULE, cwd=PUSHUP)
 
-# ASK, rule push-main, judged on the remote the push names. A network remote still asks: an scp-form origin, a
+# DENY, rule push-main, judged on the remote the push names. A network remote still denies: an scp-form origin, a
 # network URL named on the command line, and a `-C` into a repo whose origin is a network URL. The https
 # origin rows above (PUSHFEAT) and the bare push resolving to main on PUSHUP are the other controls.
-push_case("main, an scp-form origin asks", "origin main", "ask", cwd=PUSHSSH, rule=PUSH_MAIN_RULE)
-push_case("main, a network URL named as the remote asks, from a repo with no remote",
-          "https://example.invalid/r.git main", "ask", cwd=PUSHNOREMOTE, rule=PUSH_MAIN_RULE)
-sh("main, git -C into a repo with a network origin asks, from a repo with no remote",
-   VCS + " -C " + slash(PUSHFEAT) + " push origin main", "ask", PUSH_MAIN_RULE, cwd=PUSHNOREMOTE)
+push_case("main, an scp-form origin denies", "origin main", "refuse-main", cwd=PUSHSSH, rule=PUSH_MAIN_RULE)
+push_case("main, a network URL named as the remote denies, from a repo with no remote",
+          "https://example.invalid/r.git main", "refuse-main", cwd=PUSHNOREMOTE, rule=PUSH_MAIN_RULE)
+sh("main, git -C into a repo with a network origin denies, from a repo with no remote",
+   VCS + " -C " + slash(PUSHFEAT) + " push origin main", "deny", PUSH_MAIN_RULE, cwd=PUSHNOREMOTE)
 
 # SILENT, rule push-main. The remote the push names is a local path (absolute, relative or file://), or the
 # repo has no remote of that name, so no network remote is written. Each is an allow that prints nothing.
@@ -1072,25 +1072,25 @@ push_case("main, no remote in the repo is silent", "origin main", "allow", cwd=P
 sh("main, git -C into a repo with no remote is silent, from a repo with a network origin",
    VCS + " -C " + slash(PUSHNOREMOTE) + " push origin main", "allow", cwd=PUSHFEAT, silent=True)
 
-# ASK, rules push-stray-branch and push-main, and DENY, rule push-agent-branch, on a local-path origin. A main
+# DENY, rules push-stray-branch and push-main, and DENY, rule push-agent-branch, on a local-path origin. A main
 # refspec there is silent, and the refspec after it still decides. The controls decide with no main refspec ahead:
 # HEAD on PUSHLOCALSTRAY (its branch tracks origin/other) is stray, and the agent name on PUSHLOCAL is refused.
-push_case("local origin, main then HEAD on a branch tracking another name asks stray", "origin main HEAD", "ask",
-          cwd=PUSHLOCALSTRAY, rule=PUSH_STRAY_RULE)
+push_case("local origin, main then HEAD on a branch tracking another name allows stray", "origin main HEAD", "allow",
+          cwd=PUSHLOCALSTRAY)
 
 agent_refused("push: local origin, main then the agent name asks the agent rule",
               VCS + " push origin main claude/agent-deadbeef01", cwd=PUSHLOCAL)
-push_case("local origin, HEAD on a branch tracking another name asks stray (control)", "origin HEAD", "ask",
-          cwd=PUSHLOCALSTRAY, rule=PUSH_STRAY_RULE)
+push_case("local origin, HEAD on a branch tracking another name allows stray (control)", "origin HEAD", "allow",
+          cwd=PUSHLOCALSTRAY)
 
 agent_refused("push: local origin, the agent name alone asks the agent rule (control)",
               VCS + " push origin claude/agent-deadbeef01", cwd=PUSHLOCAL)
 # On a network origin, a main refspec before an agent name is refused by the agent rule, not asked as push-main.
 # One click on the push-main ask would otherwise carry the agent branch to origin as well. The agent name is in the
-# push, so the refusal holds from any checkout. A main refspec before a lane name still asks push-main, and so does
+# push, so the refusal holds from any checkout. A main refspec before a lane name still denies push-main, and so does
 # `origin main HEAD`.
-push_case("network origin, main then HEAD asks push-main", "origin main HEAD", "ask", rule=PUSH_MAIN_RULE)
-push_case("network origin, main then a lane name asks push-main", "origin main HEAD:lane-x", "ask",
+push_case("network origin, main then HEAD denies push-main", "origin main HEAD", "refuse-main", rule=PUSH_MAIN_RULE)
+push_case("network origin, main then a lane name denies push-main", "origin main HEAD:lane-x", "refuse-main",
           rule=PUSH_MAIN_RULE)
 sh("push: network origin, main then the agent name asks the agent rule",
    VCS + " push origin main claude/agent-deadbeef01", "deny", PUSH_AGENT_RULE,
@@ -1101,22 +1101,22 @@ sh("push: network origin, main then HEAD:agent-<hex> asks the agent rule",
 # A combined push from an agent checkout: --all sends main and the agent's own branch, so the agent rule refuses it.
 agent_refused("push: agent checkout, --all with main asks the agent rule", VCS + " push --all origin", cwd=PUSHAGENT)
 # A `git -c remote.origin.url=` override names the remote's URL for the read, so the local origin is a network one.
-sh("main, a local origin made a network remote by git -c remote.origin.url asks push-main",
-   VCS + " -c remote.origin.url=https://example.invalid/r.git push origin main", "ask", PUSH_MAIN_RULE,
+sh("main, a local origin made a network remote by git -c remote.origin.url denies push-main",
+   VCS + " -c remote.origin.url=https://example.invalid/r.git push origin main", "deny", PUSH_MAIN_RULE,
    cwd=PUSHLOCAL)
 
-# ASK, rule push-main, on a remote the shell has not expanded. The token holds `$`, a backtick or `$(`. It names no
-# remote in the repo, yet the shell may expand it to a network remote, so the push asks. PUSHFEAT's origin is https,
+# DENY, rule push-main, on a remote the shell has not expanded. The token holds `$`, a backtick or `$(`. It names no
+# remote in the repo, yet the shell may expand it to a network remote, so the push denies. PUSHFEAT's origin is https,
 # so only the token decides the ask here.
-push_case("main, a double-quoted shell variable as the remote asks push-main", '"$REMOTE" main', "ask",
+push_case("main, a double-quoted shell variable as the remote denies push-main", '"$REMOTE" main', "refuse-main",
           rule=PUSH_MAIN_RULE)
-push_case("main, an unquoted shell variable as the remote asks push-main", "$REMOTE HEAD:main", "ask",
+push_case("main, an unquoted shell variable as the remote denies push-main", "$REMOTE HEAD:main", "refuse-main",
           rule=PUSH_MAIN_RULE)
-push_case("main, a backtick as the remote asks push-main", "`printf origin` main", "ask", rule=PUSH_MAIN_RULE)
-push_case("main, a command substitution as the remote asks push-main", "$(printf origin) main", "ask",
+push_case("main, a backtick as the remote denies push-main", "`printf origin` main", "refuse-main", rule=PUSH_MAIN_RULE)
+push_case("main, a command substitution as the remote denies push-main", "$(printf origin) main", "refuse-main",
           rule=PUSH_MAIN_RULE)
-sh("main, a bare push with a shell variable as the remote asks push-main under push.default current",
-   VCS + ' -c push.default=current push "$REMOTE"', "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN)
+sh("main, a bare push with a shell variable as the remote denies push-main under push.default current",
+   VCS + ' -c push.default=current push "$REMOTE"', "deny", PUSH_MAIN_RULE, cwd=PUSHMAIN)
 
 # SILENT, rule push-main, the controls of that ask. A shell-variable remote on a feature destination writes no main.
 # A `$` in the source of a push to main stays in the refspec: the remote is the local origin, so the push is silent.
@@ -1126,14 +1126,14 @@ push_case("a shell variable in the source of a push to main on a local origin is
           "allow", cwd=PUSHLOCALMAIN, silent=True)
 
 # Local origin on main (PUSHLOCALMAIN, tracking origin/main) and its network twin on the same branch and upstream
-# (PUSHMAINUP). Each form that writes main is silent on the local path and asks on the network remote.
+# (PUSHMAINUP). Each form that writes main is silent on the local path and denies on the network remote.
 sh("main tracking origin/main, local origin, a bare push under push.default simple is silent",
    VCS + " -c push.default=simple push", "allow", cwd=PUSHLOCALMAIN, silent=True)
-sh("main tracking origin/main, network origin, a bare push under push.default simple asks push-main",
-   VCS + " -c push.default=simple push", "ask", PUSH_MAIN_RULE, cwd=PUSHMAINUP)
+sh("main tracking origin/main, network origin, a bare push under push.default simple denies push-main",
+   VCS + " -c push.default=simple push", "deny", PUSH_MAIN_RULE, cwd=PUSHMAINUP)
 push_case("main tracking origin/main, local origin, HEAD is silent", "origin HEAD", "allow", cwd=PUSHLOCALMAIN,
           silent=True)
-push_case("main tracking origin/main, network origin, HEAD asks push-main", "origin HEAD", "ask", cwd=PUSHMAINUP,
+push_case("main tracking origin/main, network origin, HEAD denies push-main", "origin HEAD", "refuse-main", cwd=PUSHMAINUP,
           rule=PUSH_MAIN_RULE)
 push_case("main tracking origin/main, local origin, --all is silent", "origin --all", "allow", cwd=PUSHLOCALMAIN,
           silent=True)
@@ -1141,10 +1141,10 @@ push_case("main tracking origin/main, local origin, --all is silent", "origin --
 all_allowed("main tracking origin/main, network origin, --all is silent, local main equal", "origin --all",
             cwd=PUSHMAINUP)
 
-# ASK, rule push-main. A folder that does not exist cannot be read, and an unreadable config is unknown, which asks.
+# DENY, rule push-main. A folder that does not exist cannot be read, and an unreadable config is unknown, which denies.
 # The session's own folder is the local origin, so only the missing folder the push runs in can make it a network one.
-sh("main, cd into a folder that does not exist, then origin main, asks push-main",
-   "cd " + slash(os.path.join(ROOT, "pushmissing")) + " && " + VCS + " push origin main", "ask", PUSH_MAIN_RULE,
+sh("main, cd into a folder that does not exist, then origin main, denies push-main",
+   "cd " + slash(os.path.join(ROOT, "pushmissing")) + " && " + VCS + " push origin main", "deny", PUSH_MAIN_RULE,
    cwd=PUSHLOCALMAIN)
 
 # --all and --branches never ask. A plain push of every branch is refused when it would update main or master on the
@@ -1382,13 +1382,20 @@ sh("push: text, a heredoc body naming a push to main, is silent",
 sh("push: text, a multi-line quoted string naming a push to main, is silent",
    'echo "one line\n' + VCS + ' push origin main"', "allow", cwd=PUSHFEAT, silent=True)
 # A comment opener inside a string does not hide the real push after it, and a lone quote in a message
-# does not either (building-scanner-respects-strings). The push is a second command, so it denies alone.
-chained_ask("push: a comment opener inside a string does not hide a push to main that follows it",
-            'echo "#" && ' + VCS + " push origin main", cwd=PUSHMAIN)
-chained_ask("push: a lone quote in a commit message does not hide a push to main that follows it",
-            VCS + ' commit -m "don\'t" && ' + VCS + " push origin main", cwd=PUSHFEAT)
-chained_ask("push: a lone quote in a commit message does not hide a stray push that follows it",
-            VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", cwd=PUSHSTRAY)
+# does not either (building-scanner-respects-strings). The push to main is refused by its own rule, push-main,
+# and no run-alone ask is chained with it (decision guard-remedy-not-to-owner).
+sh("push: a comment opener inside a string does not hide a push to main that follows it",
+   'echo "#" && ' + VCS + " push origin main", "deny", PUSH_MAIN_RULE, cwd=PUSHMAIN,
+   lacks=(CHAIN_ASK, REMEDY))
+sh("push: a lone quote in a commit message does not hide a push to main that follows it",
+   VCS + ' commit -m "don\'t" && ' + VCS + " push origin main", "deny", PUSH_MAIN_RULE, cwd=PUSHFEAT,
+   lacks=(CHAIN_ASK, REMEDY))
+sh("push: a lone quote in a commit message does not hide a force push that follows it",
+   VCS + ' commit -m "don\'t" && ' + VCS + " push --force origin HEAD", "deny", "force-push",
+   cwd=PUSHFEAT, lacks=(CHAIN_ASK,))
+# A stray-branch push is allowed (decision guard-remedy-not-to-owner), so the chain with it allows too.
+sh("push: a lone quote in a commit message, then a stray push, allows: a stray push is no ask",
+   VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", "allow", cwd=PUSHSTRAY, lacks=(CHAIN_ASK,))
 # The agent push is refused on its own, by its rule, not by the ask-alone chain: no ask is chained with it.
 agent_refused("push: agent branch, a lone quote in a commit message does not hide a push to an agent name",
               VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", cwd=PUSHAGENT)

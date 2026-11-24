@@ -1,0 +1,1 @@
+- stale-install-pin-import: `hooks/stale_install.py` :70 imports `LIVE_PIN_SUFFIX`, `PIN_SCRIPT` and `PIN_TREE` from `shared_names` with no `ImportError` fallback. The helper import above it (:66-68) has one. Decision: stale-install-cost. Seen: 2026-11-24 x1

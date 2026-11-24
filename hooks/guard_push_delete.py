@@ -706,7 +706,8 @@ def push_refspecs(args):
 
 
 def push_verdict(args, cwd: str, overrides=None) -> str:
-    """'' for an allowed push, else 'ask' or 'deny', for the `git push` arguments `args`.
+    """'' for an allowed push, else 'ask' or 'deny', for the `git push` arguments `args`. 'ask' is the word for a
+    push that may reach the default branch; the caller refuses it with PUSH_ASK_REASON (the guard never asks).
 
     Not forced: ''. Forced or deleting at the default branch, or at a destination this cannot
     resolve: 'ask'. Forced by `--force`, `-f`, a `--fo...` prefix or a `+refspec`: 'deny'. Forced
@@ -904,7 +905,7 @@ def _push_updates_default(cwd: str, remote: str, reach) -> bool:
 
 
 def push_ask_hit(args, cwd: str, overrides=None) -> str:
-    """'main', 'all', 'all-agent', 'agent', 'stray' or '' for the `git push` arguments `args`, a push `push_verdict`
+    """'main', 'all', 'all-agent', 'agent' or '' for the `git push` arguments `args`, a push `push_verdict`
     let through.
 
     'all' (rule push-all-main, which refuses and never asks): `--all`, `--branches`, or a glob refspec that sends
@@ -920,7 +921,7 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
     `refs/heads/`, once the tracking-ref read has found no update. A failed read of it is 'all'.
 
     'agent' (rule push-agent-branch, which refuses where the other two kinds ask): a push whose destination name is an agent-worktree branch name
-    (`AGENT_BRANCH`), with or without `-u`, checked before 'stray'. An implied destination is the current
+    (`AGENT_BRANCH`), with or without `-u`. An implied destination is the current
     branch (a bare push with no upstream too, under push.autoSetupRemote); an explicit one is the part
     after `:`, `refs/heads/` stripped; a colon-less refspec is its own name. A destination after `:` adds
     no read. A colon-less refspec other than `main` or `master` reads the current branch once
@@ -928,18 +929,9 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
 
     'main' (rule push-main): a non-forced push whose destination is literally `main` or `master`
     to a network remote (`_push_goes_to_network`): a push to a path, a `file://` URL or a remote
-    with no URL is silent. The remote's HEAD is never read. 'stray' (rule push-stray-branch): a push with an implied
-    destination (a bare push, `HEAD`, `@`, or a colon-less refspec naming the current branch) that writes a
-    name other than the branch's upstream. It needs an upstream, the pushed remote equal to
-    branch.<cur>.remote, and an upstream that is not main or master. A `-u` push is silent here: its
-    implied destination is the local name, which becomes the new upstream. A bare push under push.default
-    simple writes the current branch only when the upstream carries its name, else git refuses it. A
-    deletion, a forced push, a mirror, and a push of tags alone are never judged here. A destination that
-    cannot be read is allowed. A 'stray' is silent when the implied destination already exists as
-    `refs/remotes/<pushed remote>/<name>`: that push updates the branch's own ref. A failed ref read keeps
-    the ask. Reads: none for a destination after `:`; one `symbolic-ref` for the current
-    branch for a bare push or a colon-less refspec; one `git config --get-regexp` when the upstream is
-    needed; one `git rev-parse --verify -q` of the destination's remote-tracking ref, on the stray path only;
+    with no URL is silent. The remote's HEAD is never read. A push of a stray branch (rule push-stray-branch) is allowed and
+    returns ''. A deletion, a forced push, a mirror, and a push of tags alone are never judged here. Reads: none for
+    a destination after `:`; one `symbolic-ref` for the current branch for a bare push or a colon-less refspec;
     one more `git config --get-regexp` on the main path only, for the remote's URL (none when the
     remote argument is itself a URL or path).
     """
@@ -990,7 +982,6 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
             dest = cur if merge == cur or (not merge and auto.lower() in ("true", "yes", "on", "1")) else None
         elif mode == "current":
             dest = cur
-            implied = True
         elif mode in ("upstream", "tracking"):
             dest = merge or None
         else:
@@ -1017,7 +1008,7 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
                     to_main = True
                 agent = agent or bool(AGENT_BRANCH.fullmatch(target.removeprefix("refs/heads/")))
             elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:
-                # A local origin makes main() empty; the other refspecs are still read for agent and stray.
+                # A local origin makes main() empty; the other refspecs are still read for agent.
                 if main():
                     to_main = True
             elif source in ("HEAD", "@") or (current() is not None and source == current()):
@@ -1038,21 +1029,7 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
                     return "all-agent"
         if not agent and (to_main or (implied and current() in DEFAULT_BRANCH_FALLBACK and main())):
             return "main"
-    if agent:
-        return "agent"
-    if not implied or current() is None:
-        return ""
-    remote_cfg, merge = config()[:2]
-    pushed = remote or remote_cfg
-    if not merge or not remote_cfg or pushed != remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:
-        return ""
-    # A -u push of the local name sets that name as the new upstream on purpose (a lane stacked on a lane).
-    if merge == current() or upstream:
-        return ""
-    # A destination already on the pushed remote is that branch's own ref, so the push is no stray. A read that
-    # fails (git unavailable, an error other than "no such ref") keeps the ask.
-    seen = guard_core._git(cwd, "rev-parse", "--verify", "-q", "refs/remotes/" + pushed + "/" + current())
-    return "" if seen is not None and seen.returncode == 0 else "stray"
+    return "agent" if agent else ""
 
 
 # ------------------------------------------------------------------ a rewrite and a wide delete
@@ -1719,13 +1696,17 @@ PUSH_REASON = (
 )
 PUSH_MAIN_REASON = (
     "Rule (Git): this push writes the default branch, main or master. Main moves only by pull request "
-    "(rule git-main-only-by-pr, decision plain-push-asks). Approving the prompt lets this one push through; it is not a grant."
+    "(rule git-main-only-by-pr, decision guard-remedy-not-to-owner). "
+    "Remedy: push the lane's own branch by name, `git push origin HEAD:<lane-branch>`, and merge it by "
+    "pull request with the merge tool. "
+    + guard_core.COMPLY_TAIL
 )
-PUSH_STRAY_REASON = (
-    "Rule (Git): this push writes a branch name other than the one this branch tracks (its upstream), "
-    "so it may land on a stray branch, and no such branch exists on the remote yet (rule push-stray-branch, "
-    "decision plain-push-asks). Name the destination: `git push origin HEAD:<branch>`. "
-    "Approving the prompt lets this one push through; it is not a grant."
+# The same refusal in a repo that does not use the merge tool: it has no pull request flow, so the remedy is a branch.
+PUSH_MAIN_BRANCH_REASON = (
+    "Rule (Git): this push writes the default branch, main or master "
+    "(decision guard-remedy-not-to-owner, a guard never asks the owner). "
+    "Remedy: push the commit to your own branch, `git push origin HEAD:<branch>`, and name that branch in your report. "
+    + guard_core.COMPLY_TAIL
 )
 PUSH_ALL_REASON = (
     "Rule (Git): this push sends every branch, and it may update the default branch on the remote: the "
@@ -1742,9 +1723,22 @@ PUSH_AGENT_REASON = (
     "claude/agent-<hex> or worktree-agent-<hex>), not a lane branch (decision plain-push-asks). "
     "Remedy: push the lane's own branch by name: `git push origin HEAD:<lane-branch>`."
 )
+# The reason of a forced push that may rewrite the default branch, or whose target git cannot read. The name
+# keeps "ASK" because hooks/mutate_guard.py anchors its mutants on it.
 PUSH_ASK_REASON = (
-    "Rule (Git): this forced push may rewrite the default branch, or its target is unreadable. "
-    "The click in this prompt is the grant."
+    "Rule (Git): this forced push may overwrite the history of the default branch, or its target is "
+    "unreadable. A retry would force the same branch again. "
+    "Remedy: push the lane's own branch by name, `git push origin HEAD:<lane-branch>`, and open a pull request "
+    "(decision guard-remedy-not-to-owner, a guard never asks the owner). "
+    + guard_core.COMPLY_TAIL
+)
+# The same refusal in a repo that does not use the merge tool: the branch is named in the report.
+PUSH_ASK_BRANCH_REASON = (
+    "Rule (Git): this forced push may overwrite the history of the default branch, or its target is "
+    "unreadable. A retry would force the same branch again "
+    "(decision guard-remedy-not-to-owner, a guard never asks the owner). "
+    "Remedy: push the commit to your own branch, `git push origin HEAD:<branch>`, and name that branch in your report. "
+    + guard_core.COMPLY_TAIL
 )
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the

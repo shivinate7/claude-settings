@@ -13,7 +13,7 @@ JSON object on stdin and answers on stdout.
 
   stdin  : {"tool_name": str, "tool_input": {...}, "cwd": str}
   allow  : print nothing, exit 0
-  refuse : print one hookSpecificOutput object with "deny" or "ask", exit 0; when the owner
+  refuse : print one hookSpecificOutput object with "deny" ("ask" only for the agent-model cap write), exit 0; when the owner
            override lifts the refusal, print nothing, exit 0 (the allow output)
 
 Fail open. Unreadable input, a payload that is not an object, or a missing key
@@ -29,7 +29,9 @@ rule is the constant it emits. Its limits are in its decision, or in the comment
 Every tool the guard judges, first of the refusals (`judge`, after the Read and Grep exit,
 set_override_veto and session_home_keep):
   handoff-unread       deny. After compaction, a call from the main session while its handoff is
-                       unread. The reason names the handoff and says to Read it. A payload with
+                       unread, or an agent rewrote it (the main session's own write sets nothing; main() sets the flag
+                       through reread_check.agent_rewrite once judge() lets an agent's write through). The reason
+                       names the handoff, the lines still unread, and says to Read it in pages. A payload with
                        `agent_id` passes. An override lifts it. A failed import of reread_check, or of its sibling precompact_handoff, refuses as guard-crash at load.
                        (precompact-handoff, item 9)
   compaction-audit     deny. After compaction, once the handoff is read, a call from the main session
@@ -158,10 +160,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        agent-named destination in the same push is push-agent-branch's, which refuses.
                        A remote the shell has not expanded counts as one. The remote's HEAD is not
                        read. A dry run passes.
-  push-stray-branch    ask. An implied push (bare, `HEAD`, `@`, or a colon-less refspec naming the
-                       current branch) that writes a name other than the branch's upstream. It is silent
-                       when the clone holds `refs/remotes/<remote>/<name>`. It asks only with an
-                       upstream on the pushed remote that is not main or master.
+  push-stray-branch    allow. An implied push (bare, `HEAD`, `@`) that writes a name other than the
+                       branch's upstream is harmless and reversible, so it passes. Another rule may still
+                       refuse the push (main, an agent branch name, a ready pull request's branch).
   push-agent-branch    deny. A non-forced push whose destination branch name is an agent-worktree name
                        (agent-<hex>, claude/agent-<hex>, worktree-agent-<hex>, 8+ hex), with or without
                        -u. No upstream is needed. It holds when `main` comes first in the same push
@@ -280,6 +281,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        `gh pr ready` without --undo) while its head's records page is stale, or when that read cannot run, in
                        a repo that uses the merge tool. A base that is not the default branch, a head holding a
                        Record-claim, a head behind the base, and a current page pass. (records-index-at-merge)
+  ready-pr-push        deny. A `git push` to the branch of an open ready pull request while its CI run is running, queued or
+                       green, in a repo that uses the merge tool: a push cancels that run. A draft, a branch with no pull
+                       request, a run with a red job, another branch, an archive push, a repo with no CI and the merge tool
+                       pass. A failed pull request read passes with one stderr line. GitHub reads only on a push: a list read, and
+                       a check-runs read when a ready pull request holds the branch.
   ready-mcp-mark-guard deny. Marking a pull request ready by MCP update_pull_request with draft false, or by the
                        shell `gh pr ready` without --undo, when this session's transcript shows no `merge <pr> --ready` run that passed its ready checks on the
                        pull request's current head, in a repo that uses the merge tool. A draft true or body-only
@@ -343,7 +349,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        design-reviewer, refuter, a builder's third-round marker or an Explore's `Audit:` marker
                        covers it. The owner's model name lifts agent-model-floor only (owner_names_model), never this ceiling. The general override, `opus [role] <time>` or a step grant lifts the
                        spawn refusal; none lifts the settings-write ask.
-  ask-alone            deny. An ask command chained with other commands. (ask-commands-run-alone)
+  ask-alone            deny. The one remaining ask (the agent-model cap write) chained with other commands. (ask-commands-run-alone)
   guard-crash          crash. The guard itself raised. The call is allowed and the log shows it.
 
 Other tools, in `judge` order:
@@ -392,7 +398,7 @@ Other tools, in `judge` order:
                        `.git`, a target outside the clone, reads and non-writing shell pass. A git
                        `clean` counts only with a force flag. An
                        override lifts it. It adds no git spawn beyond what the call already spends.
-  scratchpad-owner     ask (deny for an `rm` or `mv` of a folder holding such a file). A call with a valid `agent_id` that runs a file in this session's scratchpad, or
+  scratchpad-owner     refuse a run of, a write over, or an `rm` or `mv` of another agent's file or folder. A call with a valid `agent_id` that runs a file in this session's scratchpad, or
                        writes over one, that another agent wrote. Each such write records its agent in a
                        sidecar `<scratchpad>/.writers/<hash>`. A run is an interpreter or the path as the
                        command word; a write is a Write-family target or a shell write target. A first
@@ -566,6 +572,13 @@ Other tools, in `judge` order:
                        An override lifts it. Cost: reads on demand inside this call, one small read of the
                        prompt file and, for an edit, of the handoff; no new log, hook, file or process start.
                        (precompact-handoff, item 14)
+  handoff-too-big      deny. A Write, Edit or MultiEdit to a session handoff, from the session or an agent, whose resulting text
+                       estimates over HANDOFF_MAX_TOKENS (reread_check.py; ceil(UTF-8 bytes / 3.5)), unless the result is
+                       smaller than the file on disk. The reason gives the estimate, the limit and the cut order
+                       (history, then past review rounds, then mid-run CI reads). An edit that cannot be applied allows.
+                       An override lifts it. Cost: a path compare for any other file; the handoff on disk is read for an
+                       Edit (as handoff-sections does) and statted for a Write whose text is over the limit.
+                       (precompact-handoff, "Every handoff and compaction check", rule 1)
   handoff-checked-stamp
                        deny. A Write, Edit or MultiEdit to a session handoff (as handoff-sections judges it)
                        that changes a premise's stamp (the line's text from its last `Checked` or `Re-checked`
@@ -613,7 +626,7 @@ Every refusal names its rule and says what to do instead. The remedy never names
 command or path, because Claude would copy it as the way round (`git-remedy-never-names-target`).
 The matched text goes to the log, so a person can still see what fired.
 
-An "ask" decision puts the answer in the owner's hands. The one lift is the owner override
+Only the agent-model cap write still asks: that decision puts the answer in the owner's hands. The one lift is the owner override
 (decision owner-override): the owner types `override` as a whole prompt, and refuse() lets the
 next refused act through, or every refused act for a time. The narrower Opus override (`opus 2h`) lifts
 only the Opus spawn refusal, and so does a step grant on the lane's roadmap step (decision agent-model-cap).
@@ -731,13 +744,13 @@ while True:
         )
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
-            BRANCH_DELETE_DENY_REASON, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
+            BRANCH_DELETE_DENY_REASON, WORKTREE_REMOVE_DENY_REASON,  # glossary-ok: the pinned names of existing reasons
             worktree_remove_forced,
         )
         from guard_branch_worktree import TWO_WORKTREES_REFUSE_REASON, two_worktrees_hit
         _loading = "guard_shared_tree"
         from guard_shared_tree import (
-            PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
+            PUSH_DENY_REASON, STACK_DENY_REASON, TREE_DENY_REASON, TREE_WORKTREE_REFUSE_REASON,  # glossary-ok: the pinned names of existing reasons
             checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
             SESSION_ID_RE, STASH_READ_ACTIONS, in_any_session_scratchpad, stash_action, stash_takes_the_stack, subject_state, under_session_scratchpad,
             scratchpad_clear_writer, scratchpad_folder_writer, scratchpad_record_writer, scratchpad_writer_of,
@@ -749,8 +762,9 @@ while True:
         )
         _loading = "guard_push_delete"
         from guard_push_delete import (
-            DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
-            PUSH_AGENT_REASON, PUSH_ALL_AGENT_REASON, PUSH_ALL_REASON, PUSH_REASON, PUSH_STRAY_REASON,
+            DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_BRANCH_REASON, PUSH_ASK_REASON,
+            PUSH_MAIN_BRANCH_REASON, PUSH_MAIN_REASON,
+            PUSH_AGENT_REASON, PUSH_ALL_AGENT_REASON, PUSH_ALL_REASON, PUSH_REASON,
             ARCHIVE_GUARD_REASON, archive_guard_hits,
             cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_ask_hit, push_verdict,
             rm_delete_hit, SUBST_OPEN, _in_group,
@@ -759,11 +773,11 @@ while True:
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CD_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, OCTOPUS_PUSH_STALE, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, LANE_READY_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
-            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
+            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, merge_tool_merges, merge_tool_target, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit, lane_ready_hit, lane_mcp_ready_hit, self_role_child_hit, self_role_hit,
             DEFAULT_RECORD_BRANCH, record_reason, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, PRIOR_WORK_REASON, prior_work_lane_hit, prior_work_named, header_time_hit, step_dup_hit, step_pr_hit, target_roster_hit, trust_card_hit, written_time_hit,
             BRIEF_ID_REASON, BRIEF_TOPIC_REASON, STEP_DUP_REASON,
-            undrafted_pr_create, uses_merge_tool, ready_page_hit, ready_mark_hit, create_pr_link_hit,
+            undrafted_pr_create, uses_merge_tool, ready_page_hit, ready_mark_hit, ready_push_hit, create_pr_link_hit,
         )
         _loading = "guard_review_log"
         from guard_review_log import review_log_hit
@@ -819,6 +833,12 @@ while True:
             raise ImportError("reread_check could not use precompact_handoff")
         if not callable(getattr(reread_check, "unread_handoff", None)):
             raise ImportError("reread_check has no unread_handoff")
+        # The rest of what judge() and main() take from it: a stale copy that lacks one would raise mid-judge, and main()
+        # fails open on a raise, so the refusal it was loaded for would turn into an allow.
+        _missing = [_name for _name in ("unread_note", "too_big_estimate", "agent_rewrite") if not callable(getattr(reread_check, _name, None))]
+        _missing += [_name for _name in ("HANDOFF_MAX_TOKENS", "READ_CAP_TOKENS", "READ_MAX_LINES") if not isinstance(getattr(reread_check, _name, None), int)]
+        if _missing:
+            raise ImportError("reread_check lacks %s" % ", ".join(_missing))
 
         _loading = "install-id"
         if _install_ids_differ():
@@ -1552,9 +1572,31 @@ WORKTREE_HOME_REASON = (
 )
 
 HANDOFF_UNREAD_REASON = (
-    "Rule (handoff unread): context was compacted and this session has not read its handoff. "
-    "Remedy: Read %s now. The Read clears this check. Then repeat the call."
+    "Rule (handoff unread): %(why)s "
+    "Remedy: Read %(path)s now%(span)s. The Reads clear this check once together they cover every line. "
+    "A Read of more than %(lines)d lines or %(cap)d estimated tokens covers nothing, so read it in pages. "
+    "Then repeat the call."
 )
+HANDOFF_UNREAD_WHY = "context was compacted and this session has not read its handoff."
+HANDOFF_UNREAD_WHY_AGENT = "an agent rewrote this session's handoff and this session has not read the rewrite."
+
+HANDOFF_TOO_BIG_REASON = (
+    "Rule (handoff-too-big): this write leaves the session handoff at an estimated %d tokens, over the limit of %d "
+    "(ceil(UTF-8 bytes / 3.5)). "
+    "Remedy: summarize more and write it again. Cut history first, then past review rounds, then mid-run CI reads, "
+    "as step 4 of the installed precompact_handoff_prompt.md says. Keep every ruling and every open id. "
+    "A write that leaves the file smaller than it is now passes, so trim in steps. "
+    "(decision precompact-handoff, the handoff size limit)"
+)
+
+
+def handoff_unread_fields(path, payload):
+    """The fields of HANDOFF_UNREAD_REASON: the cause (compaction, or an agent's rewrite), the handoff path, and the
+    lines still unread. reread_check holds the flag and the counts."""
+    agent, unread = reread_check.unread_note(payload)
+    return {"why": HANDOFF_UNREAD_WHY_AGENT if agent else HANDOFF_UNREAD_WHY, "path": path,
+            "span": " (lines still unread: %s)" % unread if unread else "",
+            "lines": reread_check.READ_MAX_LINES, "cap": reread_check.READ_CAP_TOKENS}
 
 from shared_names import EXPLORE_AUDIT_MARKER as _AUDIT_MARKER  # noqa: E402  the one home of the marker the remedy names; reread_check.audit_reason reads it too
 
@@ -1614,6 +1656,12 @@ def handoff_sections_result(tool, tool_input, target, cwd):
     return before, text
 
 
+def handoff_target_path(target, cwd):
+    """A write target as a path: `~` expanded, a relative path joined to the call's cwd."""
+    path = os.path.expanduser(target)
+    return path if os.path.isabs(path) else os.path.join(cwd or "", path)
+
+
 def handoff_sections_hit(tool, tool_input, target, cwd, result=False):
     """The required handoff sections a write to a session handoff would drop, as one text, else "". The
     list is the prompt's marker, read by precompact_handoff.missing_sections, which fails open: an unread
@@ -1663,8 +1711,7 @@ def handoff_stamp_hit(tool, tool_input, target, cwd, transcript, result):
         if not name:
             return None
         before, after = result
-        path = os.path.expanduser(target)
-        path = path if os.path.isabs(path) else os.path.join(cwd or "", path)
+        path = handoff_target_path(target, cwd)
         if before is None:
             try:
                 with open(path, "r", encoding="utf-8") as handle:
@@ -4811,6 +4858,7 @@ from shared_names import REPO_TAG, repo_tag_names  # noqa: E402  the one home of
 EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")  # the rounds of ROLE_ROUND_FALLBACK's reviewer rows, one home for the default
 ROLE_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL"
+ROLE_WORKFLOW_MODEL_ENV = "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL"  # the model a no-model Workflow agent() call is served
 ROLE_MODEL_REASON = (
     "Rule (configuration): this spawn names a model above the one its role runs on. Remedy: drop the model "
     "field, or name the role's model%s. (decision agent-model-cap)"
@@ -4832,6 +4880,14 @@ ROLE_NO_MODEL_REASON = (
     "Rule (configuration): this spawn names no model, its role has no model of its own, and no default "
     "model is set, so it would run on its parent's model. Remedy: name the role's model%s. "
     "(decision agent-model-cap)"
+)
+# A Workflow agent() call that names a role with a row and no model: the agent file's pin does not reach it, so it runs
+# the Workflow default model. It is refused when that default is unset or not the row's model. Its remedy names no model
+# for a Haiku row, as the reason above.
+ROLE_WORKFLOW_NO_MODEL_REASON = (
+    "Rule (configuration): this Workflow agent() call names a role that has a row in the role table, but no `model`, "
+    "and the Workflow default model is unset or is not that row's model, so it would not run on its role's model. "
+    "Remedy: add `model` to the call's options, and name the role's model%s. (decision agent-model-cap)"
 )
 
 
@@ -5169,6 +5225,7 @@ def role_name(table, subagent_type) -> str:
 # A Workflow spawn whose brief the scan could not read carries BRIEF_UNREAD; its refusal adds BRIEF_LITERAL_REMEDY.
 # The remedy stays lowercase mid-sentence, so both refusals carry the same words.
 BRIEF_UNREAD = "brief_unread"
+WORKFLOW_NO_MODEL = "workflow_no_model"   # set on a spawn_inputs yield for a Workflow call with a literal agentType and no model key
 BRIEF_LITERAL_REMEDY = "write the brief as a literal string so the marker is readable"
 
 
@@ -5176,11 +5233,12 @@ def spawn_inputs(tool: str, tool_input):
     """Yield each spawn a call makes, shaped as an Agent input (`subagent_type`, `model`, `prompt`). An Agent or Task
     call is one spawn. A Workflow script yields one per agent() call that names a model, with agentType as the role
     and the model read from the script, so the role and Opus checks judge it as they judge an Agent spawn
-    (decision agent-model-cap). A brief the scan cannot read (a variable, or a prompt key beside a spread) carries no
+    (decision agent-model-cap). A call with a literal agentType, no `model` key and no spread yields too, with
+    WORKFLOW_NO_MODEL set and an empty model: role_model_one refuses it when the role has a row and the Workflow default (ROLE_WORKFLOW_MODEL_ENV) is unset or not that row's model. A brief the scan cannot read (a variable, or a prompt key beside a spread) carries no
     marker and grants nothing, so the spawn is judged with an empty brief and BRIEF_UNREAD set, and its refusal names
     BRIEF_LITERAL_REMEDY, so the author can make the marker readable. A
-    call whose model or agentType the scan cannot read, or that names no model, is skipped: a static read never
-    guesses a role or a model. A shorthand or a spread with no literal agentType may set the role, so it is unread;
+    call whose model or agentType the scan cannot read is skipped, and so is one with no model and no literal
+    agentType, or with a spread that may hold the model: a static read never guesses a role or a model. A shorthand or a spread with no literal agentType may set the role, so it is unread;
     a literal agentType beside a spread is read. step_up_hit still skips an unread brief, as a marker it cannot read
     has no round to check. Other tools yield nothing."""
     if tool in SPAWN_TOOLS:
@@ -5191,7 +5249,12 @@ def spawn_inputs(tool: str, tool_input):
             for k, u, _ in bodies:
                 keys.update(k)
                 unseen |= u
-            if unseen & {"model", "agentType"} or not keys.get("model"):
+            if unseen & {"model", "agentType"}:
+                continue
+            if not keys.get("model"):
+                if "model" not in keys and "..." not in unseen and keys.get("agentType"):
+                    yield {"subagent_type": keys["agentType"], "model": "", "prompt": prompt or "",
+                           BRIEF_UNREAD: prompt is None, WORKFLOW_NO_MODEL: True}
                 continue
             if "..." in unseen and "agentType" not in keys:
                 continue
@@ -5299,6 +5362,14 @@ def role_model_one(tool_input):
                 extra += ROLE_TEST_AUTHOR_NOTE if "1" in free else ROLE_REVIEWER_FIRST_ROUND_NOTE
             return ROLE_MODEL_REASON % extra, model, False
         return "", "", False
+    if tool_input.get(WORKFLOW_NO_MODEL):
+        if role not in table:
+            return "", "", False
+        served = role_model_rank(os.environ.get(ROLE_WORKFLOW_MODEL_ENV, ""))
+        if served is not None and served == role_model_rank(table[role]):
+            return "", "", False  # the Workflow default is the role's own row
+        return (ROLE_WORKFLOW_NO_MODEL_REASON % ("" if table[role] == ROLE_MODEL_RANK[0] else " (%s)" % table[role]),
+                ROLE_NO_MODEL_MATCH + role, False)
     if os.environ.get(ROLE_MODEL_ENV, "").strip():
         return "", "", False
     pinned = role_has_model_pin(pointer, role)
@@ -5689,15 +5760,19 @@ def opus_without_grant(tool_input) -> bool:
 # harmless lead or tail (harmless_commands, below). The deny
 # names the command by its kind, never its text. Only the first ask command is held: it is the one that
 # printed before.
-PENDING_ASK = []   # [(rule, reason, matched, command)], at most one
+PENDING_ASK = []   # [(rule, reason, matched, command, verdict)], at most one
 ASK_ALONE_REASON = ("this shell call chains a command that needs the owner's answer (%s) with "
                     "other commands. Run that command alone, in its own call, or drop it. "
                     "(decision ask-commands-run-alone, a command that asks the owner runs alone)")
 
 
-def ask_command(rule: str, reason: str, matched: str, command: str) -> None:
+def ask_command(rule: str, reason: str, matched: str, command: str, verdict: str = "ask") -> None:
+    """Hold one refusal until the other rules have run, so a deny anywhere still wins. `verdict` is what it
+    prints at the end: "ask" only for the cap write (rule agent-model-cap), "deny" for the rules that once asked
+    (decision guard-remedy-not-to-owner). A held deny prints its own reason, chained or not; only the held ask
+    turns into the run-alone deny when the call chains other commands (settle_ask)."""
     if not PENDING_ASK:
-        PENDING_ASK.append((rule, reason, matched, rule + ", " + command))
+        PENDING_ASK.append((rule, reason, matched, rule + ", " + command, verdict))
 
 
 def background_commands(segment: str) -> int:
@@ -5800,14 +5875,14 @@ def harmless_commands(text: str) -> int:
 def settle_ask(tool: str, raw: str) -> None:
     if not PENDING_ASK:
         return
-    rule, reason, matched, command = PENDING_ASK[0]
+    rule, reason, matched, command, verdict = PENDING_ASK[0]
     # An interpreter heredoc (python, node, perl, ruby) is one command: its body is not counted line by line.
     # Strip the RAW command once. A second strip of stripped text reads a stray delimiter line as a new body.
     text = strip_heredoc_bodies(raw, shells_only=True)
     if count_commands(text) > 1:
-        if count_commands(text) - harmless_commands(text) > 1:
+        if verdict == "ask" and count_commands(text) - harmless_commands(text) > 1:
             refuse(tool, "deny", "ask-alone", ASK_ALONE_REASON % command, matched)
-    refuse(tool, "ask", rule, reason, matched)
+    refuse(tool, verdict, rule, reason, matched)
 
 
 def refuse_ready_page(tool: str, tool_input: dict, command: str, where: str) -> None:
@@ -5912,7 +5987,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if subcommand == "worktree-remove":
             refuse(tool, "deny", "shared-tree", WORKTREE_REMOVE_DENY_REASON, matched)
         if subcommand == "worktree-prune":
-            ask_command("shared-tree", WORKTREE_PRUNE_ASK_REASON, matched, "worktree prune")
+            # Prune drops only the record of a worktree whose directory is gone and deletes no file: allowed.
             continue
         if subcommand == "stash" and stash_takes_the_stack(args):
             refuse(tool, "deny", "shared-tree", STACK_DENY_REASON, matched)
@@ -5934,7 +6009,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             # only write this lane's own change to those files, so no ask.
             if names_only_files(subcommand, args, root, segment) and one_place(stripped):
                 continue
-            ask_command("shared-tree", TREE_ASK_REASON, matched, "worktree discard")
+            ask_command("shared-tree", TREE_WORKTREE_REFUSE_REASON, matched, "worktree discard", "deny")
             continue
         refuse(tool, "deny", "shared-tree", TREE_DENY_REASON, matched)
 
@@ -6158,7 +6233,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if hits:
             refuse(tool, "deny", "archive-push-gates-delete", ARCHIVE_GUARD_REASON, "; ".join(hits))  # glossary-ok: the pinned rule id, the step slug
 
-    # 4. A wide delete refuses, and a force push asks.
+    # 4. A wide delete refuses, and a force push is held to the end and then refuses (settle_ask).
     # Split before backslashes turn to slashes, so `it\'s` opens no quote that hides a delete.
     delete_texts = [[delete_text(piece) for segment in split_segments(text)
                      for piece, _ in amp_pieces(segment)] for text in texts]
@@ -6183,29 +6258,29 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     for segment in (part for text in texts for part in split_segments(text)):
         for args, where, overrides in _push_calls(segment, stripped, cwd):
             verdict = push_verdict(args, where, overrides)
-            if verdict == "ask":
-                ask_command("force-push", PUSH_ASK_REASON, "git push " + " ".join(args), "forced push")
+            if verdict == "ask":   # push_verdict's word for a forced push that may reach the default branch: denied
+                ask_command("force-push", PUSH_ASK_REASON if uses_merge_tool(where) else PUSH_ASK_BRANCH_REASON,
+                            "git push " + " ".join(args), "forced push", "deny")
             elif verdict:
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
             elif not read_verb("push", args):
                 # A non-forced push of every branch that may update main or master, or sends a local agent-named
                 # branch (rule push-all-main, refuses), one
-                # that writes main or master by name (rule push-main, asks), an agent-worktree
-                # branch name (rule push-agent-branch, refuses), or an implied destination off the branch's
-                # upstream (rule push-stray-branch, asks). A dry run writes nothing.
+                # that writes main or master by name (rule push-main, refuses), or an agent-worktree
+                # branch name (rule push-agent-branch, refuses). An implied destination off the branch's
+                # upstream (rule push-stray-branch) is allowed. A dry run writes nothing.
                 kind = push_ask_hit(args, where, overrides)
                 if kind == "main":
-                    ask_command("push-main", PUSH_MAIN_REASON, "git push " + " ".join(args),
-                                "push to the default branch")
+                    ask_command("push-main", PUSH_MAIN_REASON if uses_merge_tool(where) else PUSH_MAIN_BRANCH_REASON,
+                                "git push " + " ".join(args),
+                                "push to the default branch", "deny")
                 elif kind == "all":
                     refuse(tool, "deny", "push-all-main", PUSH_ALL_REASON, "git push " + " ".join(args))
                 elif kind == "all-agent":
                     refuse(tool, "deny", "push-all-main", PUSH_ALL_AGENT_REASON, "git push " + " ".join(args))
                 elif kind == "agent":
                     refuse(tool, "deny", "push-agent-branch", PUSH_AGENT_REASON, "git push " + " ".join(args))
-                elif kind == "stray":
-                    ask_command("push-stray-branch", PUSH_STRAY_REASON, "git push " + " ".join(args),
-                                "push to a stray branch")
+                # kind == "stray" (rule push-stray-branch) is allowed: a stray branch is harmless and reversible.
 
     # 5. The environment file. This layer reads the command BEFORE normalization.
     refusal, logged = env_refusal(strip_heredoc_bodies(raw, per_body=True))   # a data body drops, a script body stays
@@ -6240,9 +6315,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
                    "gh pr merge " + merging[0] + " " + verdict)
-        # A green bare merge in a repo that uses the merge tool asks; a deny above still wins.
+        # A green bare merge in a repo that uses the merge tool is denied, held to the end like an ask (settle_ask).
         if cite_where and uses_merge_tool(cite_where):
-            ask_command("bare-merge", BARE_MERGE_REASON, "gh pr merge " + merging[0], "bare merge")
+            ask_command("bare-merge", BARE_MERGE_REASON, "gh pr merge " + merging[0], "bare merge", "deny")
 
     # 6a. A merge-tool call with a role flag its own get_session record does not prove (rule merge-role-proof).
     matched = role_proof_hit(stripped, transcript)
@@ -6294,6 +6369,15 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if unproved:
         refuse(tool, "deny", "ready-mcp-mark-guard", unproved[0], unproved[1])
 
+    # 6c1b. A push to the branch of a ready pull request whose CI run is running, queued or green (rule ready-pr-push). Cost: GitHub
+    # reads only for a call that holds a `git push` in a merge-tool repo (one list read, plus one check-runs read when a ready pull
+    # request holds the branch); every other call starts nothing (guard_merge states it).
+    pushed = ready_push_hit(stripped, cwd, read_verb)
+    if pushed and pushed[0] == "deny":
+        refuse(tool, "deny", "ready-pr-push", pushed[1], pushed[2])
+    elif pushed:
+        print(pushed[1], file=sys.stderr)
+
     # 6c2. A commit or push that would carry all three conflict markers in one file (rule conflict-markers).
     # Cost: per judged commit, one `git rev-parse --show-toplevel --verify -q HEAD` (one more for an add in
     # another folder) and one `git diff --check`; none for an add alone, or a command with no commit or push.
@@ -6307,7 +6391,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         red_reason, red_shown = red_run_reason(matched, kind == "red-run-commit")
         refuse(tool, "deny", "red-run", red_reason, red_shown)
     elif matched and kind == "cd" and PENDING_ASK and PENDING_ASK[0][0] == "force-push":
-        # A forced push after a failed cd already asks (its folder is unknown), and the ask names the push. Let
+        # A forced push after a failed cd is already held (its folder is unknown), and settle_ask names the push. Let
         # settle_ask report that, so a forced push is named first (it also denies when chained: rule ask-alone).
         pass
     elif matched:
@@ -7555,20 +7639,22 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # Rule scratchpad-owner (decision scratchpad-owner). Every agent of a session shares the session's
 # scratchpad, so one agent can run a script another agent left there. A call from an agent that writes a
 # file in the scratchpad records the agent as its writer (`scratchpad_record_writer`); a shell call from an
-# agent that runs a scratchpad file another agent recorded asks, and so does a write over such a file; a folder removal is refused. A call
+# agent that runs a scratchpad file another agent recorded is refused; so are a write over such a file and a folder removal. A call
 # with no `agent_id`, a file with no record, an agent's own file and a read pass. The text gate (`SCRATCHPAD_WORD`) keeps a call that names no scratchpad from
 # touching the disk: a path that reaches the scratchpad by a symlink is the ceiling, and passes.
 SCRATCHPAD_WORD = "scratchpad"
 SCRATCHPAD_OWNER_REASON = (
     "Rule (scratchpad-owner): this script was written by another agent of this session, and running it "
-    "runs code you have not read. "
+    "runs code this agent did not write. "
     "Remedy: read the file, write your own copy of the script under a fresh file name, and run that copy. "
+    "If this refusal looks wrong for your task, comply anyway and say so in your report. "
     "(decision scratchpad-owner, an agent runs only its own read copy of a scratchpad file, and never overwrites another agent's)"
 )
 SCRATCHPAD_OVERWRITE_REASON = (
-    "Rule (scratchpad-owner): this file was written by another agent of this session, and writing over it "
+    "Rule (scratchpad-owner): this file was written by another agent of this session, and removing, moving or writing over it "
     "destroys work that agent may still need. "
-    "Remedy: write your own file under a fresh file name of your own. "
+    "Remedy: write your own file under a fresh file name in the scratchpad. "
+    "If this refusal looks wrong for your task, comply anyway and say so in your report. "
     "(decision scratchpad-owner, an agent runs only its own read copy of a scratchpad file, and never overwrites another agent's)"
 )
 SCRATCHPAD_FOLDER_REASON = (
@@ -7703,7 +7789,7 @@ def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
     return agent, session, files, removed, moved
 
 
-def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> None:
+def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str, record: bool = True) -> None:
     """Rule scratchpad-owner, the write form. A call with no `agent_id` clears the record of each scratchpad
     file it writes: the file is its own now. An agent's call records the agent as the writer of each file it
     writes, and is refused when a file's record named another agent. A refused write moves no record; an owner
@@ -7711,7 +7797,8 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
     `rm` names is judged but not recorded. A `cp` destination is the caller's file; an `mv` destination carries
     the record of its source, or the caller's when the source lies outside the scratchpad. A first write, a
     rewrite of its own file and a file that no longer exists pass (`scratchpad_writer_of`). Run once the call's
-    other rules passed."""
+    other rules passed. `record=False` judges only: the run rule calls it so an overwrite is refused as an overwrite,
+    and the refused run records nothing."""
     agent, session, files, removed, moved = scratchpad_writes(payload, tool, tool_input, cwd)
     after = {}   # the writer each recorded file gets, read before any record changes
 
@@ -7728,6 +7815,8 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
     for full in files:
         after[full] = writer_after(full)
     if not agent:
+        if not record:
+            return
         for full in files:
             if full in moved and under_session_scratchpad(moved[full], session):
                 scratchpad_record_writer(full, session, after[full])
@@ -7742,8 +7831,8 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
                 taken = "agent %s writes over a scratchpad file agent %s wrote: %s" % (agent, writer, full)
         elif full in removed:
             # An `rm` or `mv` that names a folder, the scratchpad itself or a glob removes each file under it, and
-            # only a file has a record: read the files (`scratchpad_folder_writer`). A folder is a deny and a file
-            # an ask, so the folder wins whatever its place in the call: a file listed first must not hide it.
+            # only a file has a record: read the files (`scratchpad_folder_writer`). A folder and a file are both
+            # refused, each with its own reason, so the folder wins whatever its place in the call: a file listed first must not hide it.
             held = scratchpad_folder_writer(full, session, agent)
             if held:
                 taken = "agent %s removes a scratchpad folder holding a file agent %s wrote: %s" % (agent, held[1], held[0])
@@ -7757,16 +7846,17 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
 
     if taken:
         # A refused write lands nothing, so the record stays with the first writer; an override that lifts it moves it.
-        refuse(tool, "deny" if reason is SCRATCHPAD_FOLDER_REASON else "ask", "scratchpad-owner", reason, taken,
+        refuse(tool, "deny", "scratchpad-owner", reason, taken,
                on_lift=record_writers)
-    record_writers()
+    if record:
+        record_writers()
 
 
 def scratchpad_folder_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     """Rule scratchpad-owner, the folder form: the log detail when an agent's call removes or moves a folder, the
     scratchpad itself or a glob that holds a file another agent wrote, else ''. A removed file that is itself
-    another agent's is an overwrite ask (`scratchpad_owner_write`), not a folder, so it is skipped here. The shell
-    path reads this before the run ask: a folder removal is a deny, and the run ask must not hide it."""
+    another agent's is an overwrite refusal (`scratchpad_owner_write`), not a folder, so it is skipped here. The shell
+    path reads this before the run refusal: a folder removal is its own refusal, and the run refusal must not hide it."""
     agent, session, files, removed, _moved = scratchpad_writes(payload, tool, tool_input, cwd)
     if not agent:
         return ""
@@ -7899,6 +7989,31 @@ def scratchpad_verb_run(name, args):
     return at if at < len(args) else None
 
 
+# The shells whose `-n` (or `--noexec`) reads a script and runs none. `node --check` is the same for node.
+SCRATCHPAD_SYNTAX_SHELLS = ("bash", "sh", "zsh", "dash", "ksh")
+
+
+def scratchpad_syntax_only(name, args, at):
+    """True when interpreter `name` with `args` only checks the syntax of its script and runs nothing: a shell
+    with `-n` or `--noexec` among its own flags (a combined `-nv` too), or `node --check`. `at` is the script
+    index `workflow_script_index` found, so a `-n` after the script is the script's own argument. Any `-c`,
+    alone or in a cluster, anywhere in `args` is a command string that may run the file, so it is never a check.
+    A value flag before the script (`node -r F --check G`) is a preload that runs, so it is no check either."""
+    flags = args if at is None else args[:at]
+    if "--" in flags:
+        flags = flags[:flags.index("--")]
+    if any(arg.startswith("-") and not arg.startswith("--") and "c" in arg for arg in args):
+        return False
+    if any(arg in WORKFLOW_VALUE_FLAGS for arg in flags):
+        return False
+    if name == "node":
+        return "--check" in flags
+    if name not in SCRATCHPAD_SYNTAX_SHELLS:
+        return False
+    return any(arg == "--noexec" or (arg.startswith("-") and not arg.startswith("--") and "n" in arg)
+               for arg in flags)
+
+
 def scratchpad_script(word, args):
     """([the files the command `word args` runs], the file it reads its script from stdin, whether it reads its
     script from stdin). A run is an interpreter or runner word (`SCRATCHPAD_RUNNER`) with the file as its first
@@ -7928,6 +8043,8 @@ def scratchpad_script(word, args):
             files += inner[0] + ([inner[1]] if inner[1] else [])
         return files, "", False
     at = workflow_script_index(args, name)   # past the interpreter's flags and their values
+    if scratchpad_syntax_only(name, args, at):
+        return [], "", False
     # A lone `-` before the script position reads the script from stdin, so no scratchpad file runs.
     script = args[at] if at is not None and "-" not in args[:at] else ""
     if script and SCRATCHPAD_RUNNER(basename(script)) and name in WORKFLOW_RUNNER_VERBS:
@@ -8367,7 +8484,7 @@ def judge(payload) -> None:
     # Not in never_lifted: the owner may mean the call. A failed import of reread_check refuses as guard-crash at load.
     unread = reread_check.unread_handoff(payload)
     if unread:
-        refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % unread, unread)
+        refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % handoff_unread_fields(unread, payload), unread)
     # 0, compaction-audit. Once the handoff is read, no call runs from the main session until it sends the audit
     # step 3 of the handoff prompt asks for: a spawn whose brief opens with `Audit:`. The spawn passes this rule
     # and is marked in AUDIT_SPAWN_PASSED. main() clears the flag when judge() returns, or when a later rule crashes
@@ -8533,10 +8650,11 @@ def judge(payload) -> None:
         refuse(tool, "deny", "brief-destructive-git", BRIEF_DESTRUCTIVE_REASON, ordered[:120])
 
     # A merge through the MCP tool is judged by the same merge guard as `gh pr merge`.
-    if tool in MERGE_TOOLS:
-        owner, name, number = (tool_input.get(k) for k in ("owner", "repo", "pullNumber"))
-        repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
-        verdict, detail = merge_check("" if number is None else str(number), repo, cwd)
+    if tool in MERGE_TOOLS and merge_tool_merges(tool, tool_input):
+        target = merge_tool_target(tool, tool_input)
+        number, repo = target or ("", "")
+        verdict, detail = ("unknown", "the url names no github.com pull request") if target is None \
+            else merge_check(number, repo, cwd)
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
                    "merge tool " + verdict)
@@ -8697,13 +8815,14 @@ def judge(payload) -> None:
             if names:
                 sim_boot_refusal(tool, names, remedies)
             # After the denies above: the shell call runs another agent's scratchpad script. A folder removal in the
-            # same call is still a deny, so it is judged before the run ask.
+            # same call is a deny too, so it is judged before the run refusal.
             owned = scratchpad_owner_hit(payload, tool, tool_input, cwd)
             if owned:
                 folder = scratchpad_folder_hit(payload, tool, tool_input, cwd)
                 if folder:
                     refuse(tool, "deny", "scratchpad-owner", SCRATCHPAD_FOLDER_REASON, folder)
-                refuse(tool, "ask", "scratchpad-owner", SCRATCHPAD_OWNER_REASON, owned)
+                scratchpad_owner_write(payload, tool, tool_input, cwd, record=False)   # an overwrite, `rm` or `mv` of another agent's file is a refusal too: judged before the run refusal
+                refuse(tool, "deny", "scratchpad-owner", SCRATCHPAD_OWNER_REASON, owned)
             scratchpad_owner_write(payload, tool, tool_input, cwd)   # the call passed: refuse an overwrite, else record the writer
         return
     if tool == SIM_MCP:
@@ -8752,6 +8871,13 @@ def judge(payload) -> None:
         dropped = handoff_sections_hit(tool, tool_input, target, cwd, handoff_result)
         if dropped:
             refuse(tool, "deny", "handoff-sections", HANDOFF_SECTIONS_REASON % dropped, dropped)
+        # 7a''. A write that leaves a session handoff over the size limit (rule handoff-too-big), from any writer.
+        # Not in never_lifted: the owner may mean the write. Cost: a path compare for any other file; the stat of the
+        # handoff on disk only for a Write whose text is over the limit.
+        oversize = reread_check.too_big_estimate(handoff_result, handoff_target_path(target, cwd)) if handoff_result else 0
+        if oversize:
+            refuse(tool, "deny", "handoff-too-big", HANDOFF_TOO_BIG_REASON % (oversize, reread_check.HANDOFF_MAX_TOKENS),
+                   "%d estimated tokens" % oversize)
         # 7a'. A write that restamps a premise's Checked value with no evidence (rule handoff-checked-stamp).
         stamped = handoff_stamp_hit(tool, tool_input, target, cwd, payload.get("transcript_path"), handoff_result)
         if stamped:
@@ -8829,6 +8955,7 @@ def main() -> None:
     try:
         judge(payload)
         audit_flag_clear_after_allow(payload)
+        reread_check.agent_rewrite(payload)
     except SystemExit:
         raise
     except Exception as exc:
@@ -8836,6 +8963,7 @@ def main() -> None:
         record(str(payload.get("tool_name", "")), "crash", "guard-crash",
                cap_safe(type(exc).__name__ + ": " + str(exc), 200))
         audit_flag_clear_after_allow(payload)  # the failed-open spawn runs, so the audit it owed is sent
+        reread_check.agent_rewrite(payload)  # the failed-open write runs, so the main session owes a read of it
         sys.exit(0)  # fail open on a guard defect
     sys.exit(0)
 

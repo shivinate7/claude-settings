@@ -35,11 +35,12 @@ holds ruling own-830-c again in full: a records-only change skips every suite jo
 and the all-jobs-passed rollup passes. The `scope`, `nightly-skip` and `push-skip` jobs still run to decide it.
 The job and suite flags cover the macOS, Windows, pointer, guard, shoot, mutation and sweep work. CI scope also turns
 off the mutation report. The merge
-tool heals a ready PR's stale page itself under merge.requiredChecks "none" (page item 926 a, 14:32 CST, 2026-11-16;
-ruling own-merge-on-lint-pass, 2026-11-15 18:21 CST): one `--confirm` merges the base in when the base gained a record,
-pushes one page commit, waits only for GitHub to show the pushed head, and merges that sha. A base that moves after the
-push refuses and keeps the commit. Under a named list or "protection" it still refuses a ready PR with a stale page,
-and the records push before ready stays. A current page makes no
+tool heals a ready PR's stale page itself, on the default base, under any merge.requiredChecks (page item 926 a, 14:32
+CST, 2026-11-16 for "none"; ruling own-merge-on-lint-pass, 2026-11-15 18:21 CST): one `--confirm` merges the base in when
+the base gained a record, pushes one page commit, and merges that sha. Under "none" it waits only for GitHub to show the
+pushed head. Under a list or "protection" it reads the green checks of the proven head under those commits and waits on
+none (decision `merge-needs-current-base`). A base that moves after the push refuses and keeps the commit. A stale page
+with no green proof refuses, and the records push before ready stays. A current page makes no
 commit. A claim stays at confirm under the lock, so its numbers are free on the base tip, as before. The
 claim commit carries the rebuilt page, so the claim and the page share one commit.
 One full `checks` run after the records step took 44 min (run 43583006785, PR 3349 head 3128df369, 09:58:07Z to

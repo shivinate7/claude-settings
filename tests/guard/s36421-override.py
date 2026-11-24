@@ -168,14 +168,12 @@ OV_ACTS = (
      OV_KILL, NOGIT, "deny", "machine-wide-kill", None),
     ("kill-foreign", "a kill of a pid this session did not start",
      "kill %d" % FOREIGN, NOGIT, "deny", "machine-wide-kill", None),
-    ("ask-linked-discard", "a hard reset in a linked worktree, which asks",
-     VCS + " reset --hard", GITWT, "ask", "shared-tree", None),
-    # The asks of rulings 206 a and 207 a are lifted by an owner override like any ask. The refusal of rule
-    # push-agent-branch is lifted the same way, as any refusal is.
-    ("push-stray", "a non-forced push that lands on a stray branch",
-     VCS + " push origin HEAD", PUSHSTRAY, "ask", PUSH_STRAY_RULE, None),
+    ("ask-linked-discard", "a hard reset in a linked worktree, which denies",
+     VCS + " reset --hard", GITWT, "deny", "shared-tree", None),
+    # The push-main refusal of ruling 207 a is lifted by an owner override like any refusal. The refusal of
+    # rule push-agent-branch is lifted the same way. A stray-branch push is allowed (decision `guard-remedy-not-to-owner`), so it has no refusal for an override to lift, and its row is gone from this list.
     ("push-main", "a non-forced push of main",
-     VCS + " push origin main", PUSHMAIN, "ask", PUSH_MAIN_RULE, None),
+     VCS + " push origin main", PUSHMAIN, "deny", PUSH_MAIN_RULE, None),
     ("push-agent", "a non-forced push of an agent-worktree branch name",
      VCS + " push origin HEAD", PUSHAGENT, "deny", PUSH_AGENT_RULE, None),
     # The owner's refused wait for a clock time, from the main session (no agent id, so a once override reaches it).
@@ -537,7 +535,7 @@ def op_other_acts(config, session):
         ("a kill of a pgrep list", OV_KILL, NOGIT, "deny", "machine-wide-kill"),
         ("a branch delete of a branch whose only copy is local", VCS + " branch -D unmerged-work",
          BRANCHREPO, "deny", "shared-tree"),
-        ("a hard reset in a linked worktree", VCS + " reset --hard", GITWT, "ask", "shared-tree"),
+        ("a hard reset in a linked worktree", VCS + " reset --hard", GITWT, "deny", "shared-tree"),
     ))
     return lifted_by_override + ov_role_acts(config, session) + ov_frozen_acts(config, session) + (
         ("a Write of the Opus override file", "Write",

@@ -8,6 +8,8 @@ stale cache lock, and the report names the lock file. A stop on a timer would ki
 and lose the state that explains the stall. A polling timer in the session is refused by the `waiter`
 guard rule, so the watcher does the waiting and the session is told once.
 
+The session stall watch reports and never stops; a stop on a hang in CI and lane lint is decision `hang-stop`, which protects a healthy job by the output-and-CPU rule and keeps the evidence by printing the tree and tail first.
+
 `hooks/stall_watch.py` does it.
 
 - The hook (`--hook`, a PreToolUse hook on Bash) returns `updatedInput` only for a call with
@@ -98,8 +100,8 @@ guard rule, so the watcher does the waiting and the session is told once.
   CPU time is life too (coordinator ruling, 2026-11-08 05:02 CST): a child with no output, such as
   `cmd | tail -1`, is working while its CPU time advances. Any process under the job's shell counts;
   the shell's own time does not.
-  Each process also carries the CPU time of the children it has already waited for (`reaped_seconds`:
-  cutime and cstime in `/proc/PID/stat`, Linux only). `ps` shows whole seconds and only live
+  Each process also carries the CPU time of the children it has already waited for (`reaped_seconds`, home `hooks/_nowindow.py`:
+  cutime and cstime in `/proc/PID/stat`, Linux only; `hooks/stall_watch.py` keeps thin wrappers). `ps` shows whole seconds and only live
   processes, so a silent parent that runs short children one after another (batch 139 build 4) drew a
   false STALL until this time counted. The job shell's own time stays out, its reaped children's time is in.
   Cost: no new process, timer or file. The once-a-second `ps` that reads the job's state reads the
@@ -169,7 +171,7 @@ those that hold its output file as stdout or stderr. Two `ps` reads 1.5 s apart 
 Stop-side unresolved-log rule: a listed job whose named log has an unknown directory says that log is
 not watched, as the watcher's report does. The job is still listed when quiet. Limit: a spinning child is
 never reported (the watcher counts CPU as life). A builtin spin in the job's shell is reported by the
-watcher only: in a hook-wrapped job `tree_cpu` counts the job subshell, so Stop does not list it. Limit: a job
+watcher only: in a hook-wrapped job `tree_cpu` (home `hooks/_nowindow.py`) counts the job subshell, so Stop does not list it. Limit: a job
 dropped as busy at its crossing Stop has used up its one listing, so a job busy and then hung is never listed by
 Stop (the watcher still catches a hook-wrapped one). Limit (partial fix): one 1.5 s sample at whole-second `ps` resolution
 reliably spares only CPU-bound jobs; a job at about 25% CPU can still be listed as quiet. Time bound: one

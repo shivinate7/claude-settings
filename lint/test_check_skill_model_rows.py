@@ -43,7 +43,7 @@ CHECK_STEP = "Skill model rows check"
 FIXTURE_STEP = "Skill model rows fixture suite"
 
 sys.path.insert(0, HERE)
-from test_windows_split import all_jobs  # noqa: E402  one home for the checks.yml step parser
+from test_windows_split import all_jobs, only_keep_running_if  # noqa: E402  one home for the checks.yml step parser and its if: pin
 from check_skill_model_rows import skill_names  # noqa: E402
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
@@ -447,12 +447,17 @@ class CiWiring(unittest.TestCase):
     def test_checks_job_runs_the_check(self):
         step = self.step(CHECK_STEP)
         self.assertEqual(step.get("run"), "python3 lint/check_skill_model_rows.py")
-        self.assertNotIn("if", step, "an if: condition lets a skipped check read as passing")
+        self.assertTrue(only_keep_running_if(step), "an if: condition lets a skipped check read as passing")
 
     def test_checks_job_runs_the_fixture_suite(self):
         step = self.step(FIXTURE_STEP)
         self.assertEqual(step.get("run"), "python3 lint/test_check_skill_model_rows.py")
-        self.assertNotIn("if", step, "an if: condition lets a skipped suite read as passing")
+        self.assertTrue(only_keep_running_if(step), "an if: condition lets a skipped suite read as passing")
+
+    def test_checks_job_refuses_another_if_on_the_suite(self):
+        # Control: the real suite step passes above. A different condition can skip the suite, so the pin must refuse it.
+        step = dict(self.step(FIXTURE_STEP), **{"if": "${{ github.event_name == 'push' }}"})
+        self.assertFalse(only_keep_running_if(step), "a checks-job suite with another if: passed the pin")
 
 
 if __name__ == "__main__":

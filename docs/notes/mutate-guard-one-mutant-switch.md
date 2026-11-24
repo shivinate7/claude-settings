@@ -1,0 +1,1 @@
+- mutate-guard-one-mutant-switch: `hooks/mutate_guard.py` has no switch to run one mutant by name. Its modes are `--report`, `--replay` and `--changed`. `--only` filters targets by path, not mutants (:4049). Seen: 2026-11-24 x1

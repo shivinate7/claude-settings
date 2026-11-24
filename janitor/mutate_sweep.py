@@ -56,8 +56,10 @@ import functools
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
@@ -1566,10 +1568,15 @@ def run_suite(suite_path: str, config_dir: str, only=None):
     next line. `mutate_shared.staged_suite` reads them to know whether stage 1 ran the required case."""
     env = dict(os.environ)
     env["CLAUDE_CONFIG_DIR"] = config_dir
-    result = _nowindow.run(
-        # text=True keeps the default decoding: the child inherits env, so both sides share one encoding.
-        [sys.executable, suite_path] + (["-k", only] if only else []), capture_output=True, text=True, env=env, timeout=3600,  # interim stopgap, owner 12:11 CST Nov 10, decision ci-job-caps, ends with step time-pinned-tests-go
-    )
+    started = time.monotonic()
+    try:
+        result = _nowindow.run(
+            # text=True keeps the default decoding: the child inherits env, so both sides share one encoding.
+            [sys.executable, suite_path] + (["-k", only] if only else []), capture_output=True, text=True, env=env, timeout=3600,  # interim stopgap, owner 12:11 CST Nov 10, decision ci-job-caps, ends with step time-pinned-tests-go
+        )
+    except subprocess.TimeoutExpired:
+        # A suite past its cap is its mutant's verdict, a timeout: the caller scores it and runs on.
+        return mutate_shared.timed_out_run(time.monotonic() - started)
     lines = (result.stdout + result.stderr).splitlines()
     red = [line for line in lines if "FAIL" in line]
     ran = [line for line in lines if CASE_LINE.match(line)]

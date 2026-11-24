@@ -86,6 +86,25 @@ VCS = "g" + "it"
 # this suite inherits that. A case that tests the unset or empty default names its own `env`.
 os.environ["CLAUDE_CODE_SUBAGENT_MODEL"] = "sonnet"
 
+
+def _guard_constant(name):
+    """The string value of the module-level constant `name` in GUARD, read with the ast: the guard is not imported
+    here, so this runs before any section loads. A constant that is not there stops the run, so a rename cannot
+    leave the harness clearing nothing."""
+    with open(GUARD, encoding="utf-8") as f:
+        tree = ast.parse(f.read(), filename=GUARD)
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                return node.value.value
+    sys.exit("fixture setup failed: %s has no string constant %s, the name the harness clears" % (GUARD, name))
+
+
+# The Workflow default is the model a no-model Workflow agent() call is served. The shell may export it (settings.json
+# does), so the harness clears it here, under the name the guard reads. A case that needs it sets it through its own
+# `env`, so no verdict depends on the shell that starts the run.
+os.environ.pop(_guard_constant("ROLE_WORKFLOW_MODEL_ENV"), None)
+
 CASES = []
 
 # GUARD_TESTS=windows-slice keeps only the cases tagged "windows": the ones that reach Windows-only
@@ -134,9 +153,10 @@ FAMILIES = {
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "records-page-ready": "a ready pull request whose head holds a stale records page is refused, on the MCP draft:false call and on gh pr ready in each form; a current, non-default, claim-holding, behind-the-base, empty, undo, draft, title-only or non-merge-tool call is allowed; a read that cannot run, or an ancestry unknown in a shallow clone, is refused unknown, and the unknown reason names no --confirm",
     "ready-mcp-mark-guard": "a ready mark by the MCP update tool (draft false) or by the shell gh pr ready (Bash or PowerShell; a number, branch or URL selector) is refused unless the merge tool's ready checks passed on the pull request's current head, read from the session transcript; a shell mark chained after the ready run in one call is refused; a draft true call, a body-only update, gh pr ready --undo, the ready run itself and a gh pr ready in a comment, quoted string or heredoc are allowed",
+    "ready-pr-push": "a git push whose branch has an open pull request that is ready (not a draft) is refused while that run is running, green or not yet reported, naming why a push cancels it and the way out; a red job, a draft, no pull request for the branch, another branch, an archive name, the merge tool's own call and a push written in a string or heredoc are allowed; a pull request read that cannot run is allowed, with one stderr line that names the read; a push reads GitHub once when no ready pull request holds its branch and twice when one does, and a call that is no push reads it not at all",
     "pr-create-session-link": "an MCP create_pull_request call in a merge-tool repo, from a cloud session with a known id, is refused unless its body holds this session's Session link; a draft false create still gets the draft-pr refusal first; a local session, a repo with no merge tool and the update tool pass; an override lifts the refusal once",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
-    "octopus-push": "a git push whose range adds a merge commit of more than two parents is refused, with a two-parent remedy; a push that writes main keeps its push-main ask",
+    "octopus-push": "a git push whose range adds a merge commit of more than two parents is refused, with a two-parent remedy; a push that writes main is denied by push-main",
     "red-run": "a git push judged on the test commits it sends: a test commit with no valid Red-run trailer (missing, malformed, or a none trailer with no colon) is refused; a valid red-run or none trailer, a push of docs only, a merge or rebase onto main, an empty push and an unreadable range pass; the refusal names only commit and push, and the check runs one git log and no diff per push",
     "cite": "cite by id",
     "scratchpad-message": "a git commit whose -F message file sits in a session scratchpad: an agent's call is refused in every flag form, through a link into the scratchpad, and an orchestrator's call, a heredoc, -m and a gh body file pass",
@@ -172,6 +192,7 @@ FAMILIES = {
     "handoff-unread": "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the copies without reread_check.py or precompact_handoff.py (refused, never allowed), and the override",
     "handoff-sections": "a write that leaves a session's handoff without a section the prompt's marker names is refused, naming the sections; the marker is the one list; the fail-open copies; and the cost",
     "handoff-checked-stamp": "a write to a session handoff that restamps a premise's Checked value is refused without evidence in the session's transcript after its last compact boundary: the incident, the evidence forms, the boundary, the agent and handoff reads, the fail-open copies, the non-handoff files, and the cost",
+    "handoff-too-big": "a write that leaves a session handoff over HANDOFF_MAX_TOKENS (10000 estimated tokens, ceil(bytes / 3.5)) is refused, naming the estimate and the limit: a Write one byte over, a Write of an over-limit handoff's size, and a Write, Edit or MultiEdit that grows an over-limit handoff on disk; a Write at the limit, and a Write or Edit that shrinks an over-limit handoff on disk, pass",
     "compaction-audit": "after compaction, an Audit: spawn that the guard allows clears the audit flag, also when a later rule crashes and fails open; a refused spawn and a spawn with no Audit: first line clear nothing",
     "layout-reach": "lint/layout.py is reached from the install's guard.d set (the installed guard's own path to guard_core), from the hooks folder, and from agent_brief; an installed guard's Audit: spawn clears the flag through that path",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
@@ -394,6 +415,10 @@ MACOS_REACH = {
     # hooks/test_precompact_handoff.py proves that line. The row names the handoff family, the nearest
     # reach in the same module, so the arm check passes.
     ("hooks/precompact_handoff.py", "_lint_targets"): lambda family, session: family == "handoff-sections",
+    # No guard case reaches this arm. bin/verdict's hang stop and the stall watch's wrappers call it, and
+    # lint/test_verdict.py and hooks/test_stall_watch.py prove them. The row names the kill family, the nearest
+    # reach in the same module (descendants above), so the arm check passes.
+    ("hooks/_nowindow.py", "proc_table"): lambda family, session: family == "kill",
 }
 
 

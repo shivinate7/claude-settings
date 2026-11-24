@@ -2,22 +2,29 @@
 """The push skip decision: it decides whether a push to main can skip the checks its tree already passed (decision push-skip-on-proven-tree).
 
 This is the shared action's script (actions/push-skip/action.yml). Child repos pin the action, and this repo's checks.yml calls it.
-Writes one line to $GITHUB_OUTPUT (stdout when unset): skip=true or skip=false. It exits 0 on every path, so the push-skip job
-is a visible success and scope reads its output.
+Writes two lines to $GITHUB_OUTPUT (stdout when unset): skip=true or skip=false, then base=<40-hex sha or empty>. It exits 0 on every
+path, so the push-skip job is a visible success and scope reads its output.
+
+base is the proven base of a scoped push (proven_base): the head of the newest completed, successful push run of the calling workflow
+on main whose suites ran. Empty means every flag stays on. A run that push-skip skipped whole is never a base, a completed red or
+cancelled run newer than the base gives none, a run not yet completed (queued, in progress, waiting, requested, pending) newer than the base is unread and gives none, and this run's own record never counts. Any read
+error, malformed reply, or full page with no usable run gives none and says "unknown". A skip=true push, and any event but a push,
+writes an empty base: scope does not run on a skip, and a schedule or dispatch run never scopes.
 
 skip=true only when the push commit's tree equals the head tree of a pull request the push commit belongs to, and that pull request's
 run passed, narrowed or full, in one of two forms. Main then runs none of its suites for that merge:
   1. a batch-* head (an integration pull request): its all-jobs-passed check run concluded success and so did every suite job.
-  2. any other merged pull request head (a lone lane): its newest checks run is a completed, successful pull request run in which
-     all-jobs-passed and every suite job succeeded. A suite step that scope skipped (a narrowed run) does not stop the skip: the
+  2. any other merged pull request head (a lone lane): its newest checks run is a completed pull request run, concluded success or cancelled (the
+     cancel-on-close workflow cancels the whole run after a merge), in which all-jobs-passed and every suite job succeeded. A suite step that scope skipped (a narrowed run) does not stop the skip: the
      suites the diff left out are not re-run on main until a later change touches them.
 A suite job that the run skipped (conclusion skipped) is proven, never a gap, only when all three hold: its name is a key of the
 calling workflow's all-jobs-passed scope-skips input, the same run's scope job succeeded, and the same run's all-jobs-passed
 succeeded. The map is read from the caller's workflow file with the rules reader (scope_skips_map), never from testing/, since a
 pinned copy of this action has no testing/. Any other skipped job is not proven.
-Anything else runs everything: a direct push, an admin merge with no green run, a tree mismatch, a red, draft, cancelled or
-in-progress run, a run of another head or workflow. A schedule or workflow_dispatch run (EVENT) never skips. Any error from the read,
-of any type, writes skip=false and says "unknown": an unknown state runs everything, never skips.
+Anything else runs everything: a direct push, an admin merge with no green run, a tree mismatch, a red, draft or
+in-progress run, a cancelled run whose jobs did not all pass, a run of another head or workflow, gives skip=false (the push then runs
+its scoped suites: scope diffs from base when there is one, else every flag is on). A schedule or workflow_dispatch run (EVENT) never skips. Any error from the read,
+of any type, writes skip=false and says "unknown": an unknown state never skips, and an unknown base gives every flag on.
 
 The suite jobs are the jobs all-jobs-passed needs in the CALLING repo's workflow ($GITHUB_WORKSPACE/$WORKFLOW), minus the bookkeeping
 jobs. lint/all_jobs_passed_rules.py reads them (split_jobs, the one reader), loaded from this action's own checkout, so a child repo
@@ -31,16 +38,21 @@ GITHUB_WORKSPACE (the calling checkout; unset reads this repo), WORKFLOW (the ca
 .github/workflows/checks.yml). PRS_JSON is a stand-in for the read: a JSON list of integration PR heads, each {"head_branch",
 "tree", "status", "conclusion"} (lint/test_push_skip.py). Cost per push: one pull request list read; per batch head its commit and
 one page of its check runs; per merged lone-lane head its commit, and, only when its tree is the push's tree, one runs read and one
-jobs read; plus one read of the workflow file (the suite jobs and the scope-skips map come from the same text). No file written, no process kept.
+jobs read; plus one read of the workflow file (the suite jobs and the scope-skips map come from the same text). A push that does not
+skip adds the base search: one push runs read, then one jobs read per completed green push run it walks past (a run skipped whole is
+walked past) until it finds one whose suites ran. No file written, no process kept.
 """
 import functools
 import importlib.util
 import json
 import os
 import sys
+import re
 import urllib.parse
 
 BATCH_PREFIX = "batch-"
+MAIN = "main"
+FULL_SHA = re.compile(r"[0-9a-f]{40}")
 ROLLUP = "all-jobs-passed"
 DEFAULT_WORKFLOW = ".github/workflows/checks.yml"
 PAGE = 100
@@ -182,7 +194,8 @@ def pull_request_run_gap(env, sha):
     """None when the newest checks run of the pull request head `sha` is a green pull request run. Else the reason it proves
     nothing. Raises Unknown on a read that cannot be judged. Green: the run, all-jobs-passed and every suite job succeeded. A step
     that scope skipped inside a succeeded job is no gap (a narrowed run). So is a records-only run: scope and all-jobs-passed
-    succeeded and every suite job was skipped."""
+    succeeded and every suite job was skipped. A newest run that concluded cancelled counts too when those job checks pass: the
+    cancel-on-close workflow cancels the whole run after a merge, which leaves the run cancelled and its jobs green."""
     body = get("actions/runs", {"head_sha": sha, "event": "pull_request", "per_page": str(PAGE)}, env)
     page = body.get("workflow_runs") if isinstance(body, dict) else None
     if not isinstance(page, list):
@@ -194,7 +207,7 @@ def pull_request_run_gap(env, sha):
     if not mine:
         return "no %s pull request run on the head" % workflow
     newest = max(mine, key=lambda r: (str(r.get("run_started_at") or r.get("created_at") or ""), r.get("id") or 0))
-    if (newest.get("status"), newest.get("conclusion")) != ("completed", "success"):
+    if (newest.get("status"), newest.get("conclusion")) not in (("completed", "success"), ("completed", "cancelled")):
         return "its newest run is %s/%s" % (newest.get("status"), newest.get("conclusion"))
     jobs_body = get("actions/runs/%s/jobs" % newest.get("id"), {"per_page": str(PAGE)}, env)
     jobs = jobs_body.get("jobs") if isinstance(jobs_body, dict) else None
@@ -252,6 +265,7 @@ def read_heads(env):
         branch = head.get("ref") or ""
         batch = branch.startswith(BATCH_PREFIX)
         if not batch and not pr.get("merged_at"):
+            print("push-skip: pull request #%s (%s) is not merged, so it proves nothing for main" % (pr.get("number"), branch))
             continue  # a lone lane's pull request that was not merged is no proof for main, and its head is not read
         commit = get("git/commits/%s" % head["sha"], None, env)
         tree = (commit.get("tree") or {}).get("sha") if isinstance(commit, dict) else None
@@ -259,6 +273,8 @@ def read_heads(env):
             raise Unknown("the commit read of a pull request head has no tree")
         if not batch:
             if tree != env.get("PUSH_TREE"):
+                print("push-skip: pull request #%s (%s) head tree %s is not the push tree %s, so no run proved the push tree"
+                      % (pr.get("number"), branch, tree[:7], str(env.get("PUSH_TREE"))[:7]))
                 continue  # another tree covers nothing, so its run is not read
             gap = pull_request_run_gap(env, head["sha"])
             if gap:
@@ -266,6 +282,9 @@ def read_heads(env):
             else:
                 heads.append({"head_branch": branch, "tree": tree, "status": "completed", "conclusion": "success", "full_run": True})
             continue
+        if tree != env.get("PUSH_TREE"):
+            print("push-skip: batch head %s tree %s is not the push tree %s, so it covers nothing"
+                  % (branch, tree[:7], str(env.get("PUSH_TREE"))[:7]))
         runs = check_runs(env, head["sha"])
         status, conclusion = rollup_result(env, head["sha"], runs)
         if (status, conclusion) == ("completed", "success"):
@@ -274,6 +293,8 @@ def read_heads(env):
             if missing:
                 conclusion = "suite jobs not success: " + ", ".join(missing)
                 print("push-skip: batch head %s is not covered, %s" % (branch, conclusion))
+        else:
+            print("push-skip: batch head %s is not covered, all-jobs-passed is %s" % (branch, conclusion if status == "completed" else status))
         heads.append({"head_branch": branch, "tree": tree, "status": status, "conclusion": conclusion})
     return heads
 
@@ -288,20 +309,73 @@ def decide(heads, push_tree):
                and h.get("status") == "completed" and h.get("conclusion") == "success" for h in heads)
 
 
+def proven_base(env):
+    """The full sha a scoped push diffs from, or "" for none: the head of the newest completed, successful push run of the calling
+    workflow on main whose suites ran. Newest first: this run's own record (GITHUB_RUN_ID) and a run of another event, branch or
+    workflow are passed over. A run with no suite job succeeded was skipped whole by push-skip, and its tree rests on
+    a pull request run, so the search goes on to the next older run. Any other completed run that is not a success (red, cancelled)
+    is newer than every older base, so there is none. So is a run whose status is not completed (queued, in_progress, waiting, requested,
+    pending, or any other word): its suites are unread, so main is not known green. Raises Unknown on that unread run, on a read that cannot be judged, a malformed reply, a head that
+    is no full sha, and a full page that held no usable run (an older one may exist); the caller then writes an empty base."""
+    body = get("actions/runs", {"event": "push", "branch": MAIN, "per_page": str(PAGE)}, env)
+    page = body.get("workflow_runs") if isinstance(body, dict) else None
+    if not isinstance(page, list) or not all(isinstance(r, dict) for r in page):
+        raise Unknown("the push runs read has no list of runs")
+    workflow = workflow_path(env)
+    own = str(env.get("GITHUB_RUN_ID") or "")
+    mine = [r for r in page if r.get("event") == "push" and r.get("head_branch") == MAIN
+            and str(r.get("path") or "").split("@")[0] == workflow and not (own and str(r.get("id")) == own)]
+    newest_first = sorted(mine, key=lambda r: (str(r.get("created_at") or ""), r.get("id") if isinstance(r.get("id"), int) else 0), reverse=True)
+    for run in newest_first:
+        if run.get("status") != "completed":
+            # Any status but completed is unread: a green older base could hide a failure this run is about to report.
+            raise Unknown("push run %s is %s, so its result is unread and main is not known green" % (run.get("id"), run.get("status")))
+        if run.get("conclusion") != "success":
+            print("push-skip: push run %s concluded %s, so main is not known green and the push has no base" % (run.get("id"), run.get("conclusion")))
+            return ""
+        jobs_body = get("actions/runs/%s/jobs" % run.get("id"), {"per_page": str(PAGE)}, env)
+        jobs = jobs_body.get("jobs") if isinstance(jobs_body, dict) else None
+        if not isinstance(jobs, list) or not all(isinstance(j, dict) for j in jobs):
+            raise Unknown("the jobs read of push run %s has no jobs list" % run.get("id"))
+        if len(jobs) >= PAGE:
+            raise Unknown("the jobs read of push run %s is a full page, so a job may be missing" % run.get("id"))
+        suites = set(suite_jobs(env))
+        if not any(j.get("name") in suites and (j.get("status"), j.get("conclusion")) == ("completed", "success") for j in jobs):
+            continue
+        sha = run.get("head_sha")
+        if not isinstance(sha, str) or not FULL_SHA.fullmatch(sha):
+            raise Unknown("push run %s has a head_sha that is no full 40-hex sha (%r)" % (run.get("id"), sha))
+        print("push-skip: base %s, the head of push run %s" % (sha[:7], run.get("id")))
+        return sha
+    if len(page) >= PAGE:
+        raise Unknown("the push runs read is a full page with no usable run, so an older base may exist")
+    print("push-skip: no completed, successful push run of %s ran its suites, so the push has no base" % workflow)
+    return ""
+
+
 def main(env=None):
     env = os.environ if env is None else env
+    event = env.get("EVENT") or "push"
     try:
-        event = env.get("EVENT") or "push"
         if event != "push":
             skip = False  # only a push skips: a schedule or manual run is the check on what a pull request run scoped out
             print("push-skip: a %s run never skips" % event)
         else:
-            skip = decide(read_heads(env), env.get("PUSH_TREE"))
+            heads = read_heads(env)
+            skip = decide(heads, env.get("PUSH_TREE"))
+            if not skip and not heads:
+                print("push-skip: no pull request covers the push tree %s" % str(env.get("PUSH_TREE"))[:7])
             print("push-skip: skip=%s" % str(skip).lower())
     except Exception as ex:  # Unknown, or a record shape the reads did not expect: either way the push runs everything and the job stays green
         skip = False
         print("push-skip: unknown (%s), so the push runs everything" % ex)
-    line = "skip=%s\n" % str(skip).lower()
+    base = ""
+    if event == "push" and not skip:
+        try:
+            base = proven_base(env)
+        except Exception as ex:  # any read error or odd record: no base, so scope turns every flag on
+            print("push-skip: unknown (%s), so the push has no base" % ex)
+    line = "skip=%s\nbase=%s\n" % (str(skip).lower(), base)
     out = env.get("GITHUB_OUTPUT")
     if out:
         with open(out, "a", encoding="utf-8") as f:

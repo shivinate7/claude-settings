@@ -11,6 +11,15 @@ from typing import Any, Optional
 # The project's own settings files, with the leading slash the guard matches a path suffix on.
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
 
+# THE LIVE PIN'S NAMES (decision merge-reinstalls-from-main). The pin is `<clone>-live`, and each move leaves a stamped
+# worktree `<clone>-live-<12 hex>`. merge/install_from_main.sh builds the same name (`pin="$clone-live"`) and must stay
+# equal to LIVE_PIN_SUFFIX; the guard (guard_frozen.py) and the stale-install hook (stale_install.py) read these.
+LIVE_PIN_SUFFIX = "-live"
+# Group `clone` is the clone's name, group `stamp` the worktree's `-<12 hex>` or None for the pin link itself.
+PIN_TREE = re.compile(r"(?P<clone>.+)" + re.escape(LIVE_PIN_SUFFIX) + r"(?P<stamp>-[0-9a-f]{12})?")
+# The script a clone holds that makes the pin. A folder counts as a pin only when the clone beside it holds this file.
+PIN_SCRIPT = os.path.join("merge", "install_from_main.sh")
+
 # The one home of the claude-code-remote server name (rule agent-no-remote-tools). The guard imports it by name;
 # lint/check_agent_models.py reads it from the guard.
 REMOTE_SERVER = "mcp__claude-code-remote"

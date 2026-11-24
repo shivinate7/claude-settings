@@ -61,6 +61,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 
 import mutate_shared
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -175,9 +176,11 @@ MUTATIONS = [
     ("shared-tree: drop the git clean arm",
      '        if subcommand == "clean" and clean_deletes_files(args):',
      '        if False and clean_deletes_files(args):', "guard", 'clean: -fd deletes untracked files'),
+    # The required case is the per-file deny in the shared checkout: on this branch a hard reset is denied in every tree,
+    # so it cannot tell a shared checkout from a worktree. A per-file form is the one that reads the worktree flag.
     ("shared-tree: call every tree a worktree",
      '    return own != common',
-     '    return True', "guard", 'worktree: a hard reset in the shared checkout denies'),
+     '    return True', "guard", 'per-file deny: restore of one file in the shared checkout'),
     ("shared-tree: an agent's own worktree never counts as agent-owned",
      '            if agent_owned_worktree(root) is True:',
      '            if False:', "guard",
@@ -268,20 +271,14 @@ MUTATIONS = [
      '        return None\n    return diff >= -SESSION_LIVE_TOLERANCE_MS',
      '    return True', "guard", 'does not deny'),
 
-    ("worktree-prune: reads only stdout, missing git's own stderr message",
-     '    return not (answer.stdout.strip() or answer.stderr.strip())',
-     '    return not answer.stdout.strip()', "guard",
-     'worktree prune: a stale record asks, never denies'),
-    ("worktree-prune: never asks, so a dropped record is silent",
-     '        if subcommand == "worktree-prune":\n'
-     '            ask_command("shared-tree", WORKTREE_PRUNE_ASK_REASON, matched, "worktree prune")',
-     '        if False:\n'
-     '            ask_command("shared-tree", WORKTREE_PRUNE_ASK_REASON, matched, "worktree prune")', "guard",
-     'worktree prune: a stale record asks, never denies'),
+    ("worktree-prune: refused again, so a harmless prune denies",
+     '            # Prune drops only the record of a worktree whose directory is gone and deletes no file: allowed.',
+     '            refuse(tool, "deny", "shared-tree", WORKTREE_REMOVE_DENY_REASON, matched)', "guard",
+     'worktree prune: a stale record allows, never denies or asks'),
     ("ask-alone: a chained ask command asks instead of denying",
      '    if count_commands(text) > 1:',
      '    if False:', "guard",
-     'ask-alone: the incident, prune then worktree add then grep, denies and names the prune'),
+     "ask-alone: the incident's chain, a cap write then worktree add then grep, denies"),
     ("ask-alone: background_commands reads no quotes, so a & inside a quoted value splits",
      '            quote = char\n        elif char == "&"',
      '            quote = ""\n        elif char == "&"', "guard",
@@ -295,7 +292,7 @@ MUTATIONS = [
      '                    continue  # the call\'s own dry run is a read, never a discard',
      '                if False:\n'
      '                    continue  # the call\'s own dry run is a read, never a discard', "guard",
-     'worktree prune: -n itself is a read, not a discard, so it passes unconditionally'),
+     'worktree prune: a dry run joined by & to a reset in the shared checkout still denies the reset'),
     ("env-file: read only the bare environment basename",
      '    return name.startswith(ENV_PREFIX) and name != ENV_ALLOWED',
      '    return name == ENV_PREFIX', "guard", 'env: a path token wherever the path puts it, cat .env.local'),
@@ -351,16 +348,16 @@ MUTATIONS = [
      'unpinned = unpinned or not value', "guard", 'push: a lease naming a ref, without includes'),
     ("force-push: the default branch no longer asks",
      '    if reaches:\n        return "ask"',
-     '    if False:\n        return "ask"', "guard", 'forced to the default branch asks: HEAD:main'),
+     '    if False:\n        return "ask"', "guard", 'forced to the default branch denies: HEAD:main'),
     ("force-push: unreadable git no longer asks",
      '    reaches = mirror or every or defaults is None',
-     '    reaches = mirror or every', "guard", 'push: forced where git cannot be read asks'),
+     '    reaches = mirror or every', "guard", 'push: forced where git cannot be read denies'),
     ("force-push: mirror and all no longer ask",
      '    reaches = mirror or every or defaults is None',
-     '    reaches = defaults is None', "guard", 'forced to the default branch asks: --mirror'),
+     '    reaches = defaults is None', "guard", 'forced to the default branch denies: --mirror'),
     ("force-push: a non-repository reads as a repository",
      '    if repo is None or repo.returncode != 0:\n        return None',
-     '    if False:\n        return None', "guard", 'push: forced with a plus where git cannot be read asks'),
+     '    if False:\n        return None', "guard", 'push: forced with a plus where git cannot be read denies'),
     ("force-push: origin/HEAD is ignored for the fallback names",
      '        return named',
      '        return DEFAULT_BRANCH_FALLBACK', "guard", 'named by origin/HEAD, not by name'),
@@ -372,10 +369,10 @@ MUTATIONS = [
      '    if target in ("@",):', "guard", 'lease with includes, HEAD, on main'),
     ("force-push: refs/heads/ is not stripped",
      'target.removeprefix("refs/heads/") in (defaults or ())',
-     'target in (defaults or ())', "guard", 'forced to the default branch asks: a full ref'),
+     'target in (defaults or ())', "guard", 'forced to the default branch denies: a full ref'),
     ("force-push: a glob destination no longer asks",
      'if target is None or "*" in target:',
-     'if target is None:', "guard", 'forced to the default branch asks: a glob refspec'),
+     'if target is None:', "guard", 'forced to the default branch denies: a glob refspec'),
     ("force-push: a push option value is read as the remote",
      '        elif arg in PUSH_VALUE_OPTS:\n            skip = True',
      '        elif False:\n            skip = True', "guard", 'push option value'),
@@ -383,7 +380,7 @@ MUTATIONS = [
      """        arg = arg.replace('"', "").replace("'", "")""", "        arg = arg", "guard",
      'a quoted refspec'),
     ("quoted-text: a quoted -C folder with a space is blanked like text",
-     'and not folder else span)', 'else span)', "guard", "a force push through a -C folder with a space asks"),
+     'and not folder else span)', 'else span)', "guard", "a force push through a -C folder with a space denies"),
     ("force-push: --repo is not read as the remote",
      '                remote, repo_next = value, not value',
      '                remote, repo_next = "", False', "guard", 'with --repo'),
@@ -433,14 +430,14 @@ MUTATIONS = [
      "guard", 'the long force flag'),
     # push-main and push-stray-branch (owner rulings 207 a and 206 a).
     ("push-main: a colon-less main is not a destination",
-     '            elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:\n                # A local origin makes main() empty; the other refspecs are still read for agent and stray.\n                if main():\n                    to_main = True',
-     '            elif False:\n                if main():\n                    to_main = True', "guard", 'a push of main from a feature branch asks'),
+     '            elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:\n                # A local origin makes main() empty; the other refspecs are still read for agent.\n                if main():\n                    to_main = True',
+     '            elif False:\n                if main():\n                    to_main = True', "guard", 'a push of main from a feature branch denies'),
     ("push-main: a refspec target of main is not a destination",
      '                if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK and main():\n                    to_main = True',
-     '                if False:\n                    to_main = True', "guard", 'HEAD:main from a feature branch asks'),
+     '                if False:\n                    to_main = True', "guard", 'HEAD:main from a feature branch denies'),
     ("push-main: a main refspec ends the read on a local origin",
      '                if main():\n                    to_main = True\n            elif source in ("HEAD", "@")',
-     '                return main()\n            elif source in ("HEAD", "@")', "guard", 'local origin, main then HEAD on a branch tracking another name asks stray'),
+     '                return main()\n            elif source in ("HEAD", "@")', "guard", 'push: local origin, main then the agent name asks the agent rule'),
     ("push-main: a main refspec before an agent name asks push-main",
      'if not agent and (to_main or',
      'if (to_main or', "guard", 'network origin, main then the agent name asks the agent rule'),
@@ -499,13 +496,13 @@ MUTATIONS = [
      '--all from a main checkout, local main ahead of origin/main, refuses'),
     ("push-main: a bare push that writes main no longer asks",
      '        if dest in DEFAULT_BRANCH_FALLBACK:\n            return main()',
-     '        if False:\n            return main()', "guard", 'main tracking origin/main, a bare push asks'),
+     '        if False:\n            return main()', "guard", 'main tracking origin/main, a bare push denies'),
     ("push-main: HEAD on main no longer asks",
      '(to_main or (implied and current() in DEFAULT_BRANCH_FALLBACK and main())):',
-     '(to_main or False):', "guard", 'main tracking origin/main, HEAD asks'),
+     '(to_main or False):', "guard", 'main tracking origin/main, HEAD denies'),
     ("push-main: push.default upstream is not read for a bare push",
      '            dest = merge or None',
-     '            dest = None', "guard", 'a branch tracking main asks'),
+     '            dest = None', "guard", 'a branch tracking main denies'),
     ("push-main: a bare push under simple ignores git's own refusal",
      '            dest = cur if merge == cur or (not merge and auto.lower() in ("true", "yes", "on", "1")) else None',
      '            dest = cur', "guard", 'a bare push on main with no upstream is git'),
@@ -519,38 +516,17 @@ MUTATIONS = [
     ("push-main: a remote the shell has not expanded reads as no remote, so it no longer asks",
      '    if _PUSH_SHELL_EXPANSION.search(remote):\n        return True',
      '    if False:\n        return True', "guard",
-     'main, a double-quoted shell variable as the remote asks push-main'),
+     'main, a double-quoted shell variable as the remote denies push-main'),
     ("push-main: an scp-like remote no longer asks",
      'return bool(_PUSH_URL_SCHEME.match(url) or _PUSH_URL_SCP.match(url))',
-     'return bool(_PUSH_URL_SCHEME.match(url))', "guard", 'main, an scp-form origin asks'),
-    ("push-stray-branch: a stray destination no longer asks",
-     '    return "" if seen is not None and seen.returncode == 0 else "stray"',
-     '    return ""', "guard", 'stray branch, HEAD asks'),
-    ("push-stray-branch: an existing destination ref no longer stays silent",
-     '    return "" if seen is not None and seen.returncode == 0 else "stray"',
-     '    return "stray"', "guard", 'own ref on origin, HEAD is silent'),
-    ("push-stray-branch: @ is not an implied destination",
+     'return bool(_PUSH_URL_SCHEME.match(url))', "guard", 'main, an scp-form origin denies'),
+    ("push-agent-branch: @ is not an implied destination",
      '            elif source in ("HEAD", "@") or',
-     '            elif source in ("HEAD",) or', "guard", 'stray branch, @ asks'),
-    ("push-stray-branch: a colon-less current branch is not implied",
-     ' or (current() is not None and source == current()):',
-     ' or False:', "guard", 'colon-less refspec asks'),
-    ("push-stray-branch: a bare push under current is not implied",
-     '            dest = cur\n            implied = True',
-     '            dest = cur', "guard", 'a bare push under push.default current asks'),
-    ("push-stray-branch: an upstream of main no longer stays silent",
-     'or pushed != remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:',
-     'or pushed != remote_cfg:', "guard", 'lane from main, HEAD is silent'),
-    ("push-stray-branch: another remote than the upstream's is judged",
-     'or not remote_cfg or pushed != remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:',
-     'or not remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:', "guard", "another remote than the upstream's"),
+     '            elif source in ("HEAD",) or', "guard", 'push: agent branch, @ asks'),
     ("push-all-main: --branches is not read as --all",
      '            elif name in ("--all", "--branches"):',
      '            elif name == "--all":', "guard",
      '--branches from a lane checkout, no origin/main tracking ref, refuses'),
-    ("push-stray-branch: a -u push of the local name still asks",
-     'if merge == current() or upstream:',
-     'if merge == current():', "guard", 'stacked lane, -u HEAD is silent'),
     ("push-agent-branch: the agent name shape no longer matches",
      'AGENT_BRANCH = re.compile(r"(?:claude/|worktree-)?agent-[0-9a-f]{8,}")',
      'AGENT_BRANCH = re.compile(r"(?!)")', "guard", 'agent branch, HEAD asks'),
@@ -578,7 +554,7 @@ MUTATIONS = [
      '                pass', "guard", 'agent branch, HEAD asks'),
     ("push-agent-branch: a bare push under current is not judged",
      '        agent = bool(dest and AGENT_BRANCH.fullmatch(dest))',
-     '        agent = False', "guard", 'a bare push under push.default current asks'),
+     '        agent = False', "guard", 'push: agent branch, a bare push under push.default current asks'),
     ("push-agent-branch: autoSetupRemote is not read as the current name",
      '            dest = cur if merge == cur or (not merge and auto.lower() in ("true", "yes", "on", "1")) else None',
      '            dest = cur if merge == cur else None', "guard",
@@ -849,8 +825,8 @@ MUTATIONS = [
      '    return any(os.path.isdir(os.path.join(path, name)) for name in REBASE_STATE_DIRS)',
      '    return True', "guard", "checkout: the same call with no conflict in progress keeps today's decision"),
     ("log: stop logging refusals",
-     '                handle.write(line + "\\n")',
-     '                pass', "guard", 'log: one line per refusal and none for an allow'),
+     '            handle.write(line + "\\n")',
+     '            pass', "guard", 'log: one line per refusal and none for an allow'),
     ("shared-tree: keep heredoc bodies in every rule",
      '    return "\\n".join(line for at, line in enumerate(cmd.split("\\n")) if at in show)',
      '    return cmd', "guard", 'heredoc: prose naming the stash with no interpreter'),
@@ -1093,10 +1069,10 @@ MUTATIONS = [
      '    tokens = None\n', "guard", 'per-file deny: a double-quoted path in the shared checkout'),
     ("per-file carve-out: allow a worktree discard of any pathspec",
      '        if spec in (".", "") or spec[0] == ":" or any(c in spec for c in "*?["):\n            return False',
-     '        if False:\n            return False', "guard", 'per-file ask: restore of a glob in a worktree still asks'),
+     '        if False:\n            return False', "guard", 'per-file deny: restore of a glob in a worktree still denies'),
     ("per-file carve-out: allow a restore flag outside the allow-list",
      '        if any(f not in RESTORE_PER_FILE_FLAGS for f in flags):\n            return False',
-     '        if False:\n            return False', "guard", 'per-file ask: restore -p of one file in a worktree still asks'),
+     '        if False:\n            return False', "guard", 'per-file deny: restore -p of one file in a worktree still denies'),
     ("per-file: a second -C replaces the first, never joins onto it",
      '    return os.path.join(base, value) if base and value else (value or base)',
      '    return value or base', "guard",
@@ -1108,19 +1084,19 @@ MUTATIONS = [
     ("per-file carve-out: a restore operand before -- is not read in a worktree",
      '        specs = [a for a in head if not a.startswith("-")] + [a for a in specs if dashed or not a.startswith("-")]',
      '        specs = [a for a in specs if dashed or not a.startswith("-")]', "guard",
-     'per-file ask: restore . -- keep.txt in a worktree: a dot before -- is a whole tree'),
+     'per-file deny: restore . -- keep.txt in a worktree: a dot before -- is a whole tree'),
     ("per-file carve-out: an unreadable pathspec is a path",
      '        if any(c in spec for c in "$`{}"):  # unreadable: a discard of unknown size\n            return False',
      '        if False:\n            return False', "guard",
-     'per-file ask: restore "$F" -- keep.txt in a worktree still asks, unreadable before --'),
+     'per-file deny: restore "$F" -- keep.txt in a worktree still denies, unreadable before --'),
     ("per-file: the allow ignores a cd, pushd or popd in the command",
      '    if _MOVES_SHELL.search(cmd):\n        return False',
      '    if False:\n        return False', "guard",
-     'per-file ask: cd lane && restore f.txt with no heredoc asks'),
+     'per-file deny: cd lane && restore f.txt with no heredoc denies'),
     ("per-file: the allow ignores a second distinct -C target in the command",
      '    return len(targets) <= 1',
      '    return True', "guard",
-     'per-file ask: two -C targets in one checkout'),
+     'per-file deny: two -C targets in one checkout'),
     ("config-edit: stop noting project config edits, shell tool",
      '    matched = project_config_shell_hit(stripped, cwd)\n'
      '    if matched:\n'
@@ -1414,15 +1390,15 @@ MUTATIONS = [
      'if builder_third_round(brief):', "guard",
      "ceiling: Agent reviewer on opus with the brief 'Try 3 of 3. Finish the f' is denied"),
     ("ceiling: the Workflow scan yields no spawn, so a workflow builder on opus passes unrefused",
-     'if unseen & {"model", "agentType"} or not keys.get("model"):',
+     'if unseen & {"model", "agentType"}:',
      'if True:', "guard", 'role-model: Workflow builder on opus with no round line is denied under agent-model-cap'),
     ("ceiling: the Workflow scan skips a call whose brief it cannot read, so a variable-brief builder on opus passes",
-     'if unseen & {"model", "agentType"} or not keys.get("model"):',
-     'if prompt is None or unseen & {"model", "agentType"} or not keys.get("model"):', "guard",
+     'if unseen & {"model", "agentType"}:',
+     'if prompt is None or unseen & {"model", "agentType"}:', "guard",
      'role-model: Workflow builder on opus with a variable brief holding a Round 3 marker is denied'),
     ("ceiling: the Workflow scan skips a call with a spread in its options, so a spread-first builder on opus passes",
-     'if unseen & {"model", "agentType"} or not keys.get("model"):',
-     'if unseen & {"model", "agentType", "..."} or not keys.get("model"):', "guard",
+     'if unseen & {"model", "agentType"}:',
+     'if unseen & {"model", "agentType", "..."}:', "guard",
      'role-model: Workflow builder on opus with a spread before its literal keys is denied'),
     ("ceiling: the Workflow scan judges a shorthand agentType as general-purpose, so a designer loop on opus is refused",
      'if "..." in unseen and "agentType" not in keys:',
@@ -2319,7 +2295,7 @@ MUTATIONS = [
      'merge-checks: a gh slower than the guard waits is unknown'),
     ("bare-merge: a stamp with a merge block reads as not using the merge tool",
      '"merge" in config', 'False', "guard",
-     'bare-merge: gh pr merge in a repo with a merge block asks'),
+     'bare-merge: gh pr merge in a repo with a merge block denies'),
     ("cite-by-id: the debts folder is no record folder",
      '"|".join(map(re.escape, names))', 're.escape(names[0])', "guard",
      'cite-by-id: a -am cluster denies'),
@@ -3524,14 +3500,17 @@ MUTATIONS = [
     # ---- handoff-unread (decision precompact-handoff, item 9): one mutant per arm. The anchors sit in
     # guard.py and in reread_check.py; a "guard" mutant lands in whichever module holds the anchor.
     ("handoff-unread: the refusal is never printed",
-     '        refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % unread, unread)',
+     '        refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % handoff_unread_fields(unread, payload), unread)',
      '        pass',
      "guard", "handoff-unread: after compaction, Bash is refused while the handoff is unread"),
     ("handoff-unread: a failed import of reread_check fails open again",
      '        _loading = "reread_check"\n        import reread_check\n',
      '        _loading = "reread_check"\n        try:\n            import reread_check\n'
      '        except ImportError:\n'
-     '            reread_check = type("R", (), {"ph": 1, "unread_handoff": staticmethod(lambda payload: "")})\n',
+     '            reread_check = type("R", (), {"ph": 1, "unread_handoff": staticmethod(lambda payload: ""),\n'
+     '                "unread_note": staticmethod(lambda payload: ""), "too_big_estimate": staticmethod(lambda result, path: 0),\n'
+     '                "agent_rewrite": staticmethod(lambda payload: None),\n'
+     '                "HANDOFF_MAX_TOKENS": 10000, "READ_CAP_TOKENS": 25000, "READ_MAX_LINES": 2000})\n',
      "guard", "a guard copy without reread_check.py refuses as guard-crash"),
     ("handoff-unread: a reread_check without its precompact_handoff sibling is let load again",
      '        if reread_check.ph is None:',
@@ -3606,6 +3585,12 @@ MUTATIONS = [
      'session, run install.sh from the claude-settings checkout (Windows: install.ps1), ',
      'session, ',
      "guard", "handoff-unread: install-hooks-whole: a missing reread_check's refusal names install.sh as the fix"),
+    # ---- handoff-too-big (decision precompact-handoff, the size limit): the refuse arm of the handoff size check.
+    # Its cases are tests/guard/s43731-handoff-too-big.py, a section of test_guard.py.
+    ("handoff-too-big: the refuse arm is dropped, so a handoff one byte over the limit is allowed",
+     "        if oversize:",
+     "        if False:",
+     "guard", "handoff-too-big: a Write one byte over the limit is refused"),
     ("mockup-home: the refuse arm is dropped, so a design whose file sits under the machine home is allowed",
      "            if unhomed:",
      "            if False:",
@@ -4902,11 +4887,16 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
     # stderr (spawn_live_parent), and run() waits for a pipe's EOF. Measured: every mutant took 306 s.
     # A file has no EOF to wait for. It is read after the run, only for unittest's ERROR blocks.
     with tempfile.TemporaryFile() as errors:
-        result = _nowindow.run(
-            # text=True keeps the default decoding: the child inherits env, so both sides share one encoding.
-            [sys.executable, suite], stdout=subprocess.PIPE, stderr=errors, text=True,
-            env=env, timeout=3600,  # interim stopgap, owner 12:11 CST Nov 10, decision ci-job-caps, ends with step time-pinned-tests-go
-        )
+        started = time.monotonic()
+        try:
+            result = _nowindow.run(
+                # text=True keeps the default decoding: the child inherits env, so both sides share one encoding.
+                [sys.executable, suite], stdout=subprocess.PIPE, stderr=errors, text=True,
+                env=env, timeout=3600,  # interim stopgap, owner 12:11 CST Nov 10, decision ci-job-caps, ends with step time-pinned-tests-go
+            )
+        except subprocess.TimeoutExpired:
+            # A suite past its cap is its mutant's verdict, a timeout: the caller scores it and runs on.
+            return mutate_shared.timed_out_run(time.monotonic() - started)
         errors.seek(0)
         error_text = errors.read().decode("utf-8", "replace")
     lines = result.stdout.splitlines()
@@ -5095,7 +5085,8 @@ def run_mutant(sources, work: str, entry):
     `required` is the case name (or a distinctive fragment of it) the caller must find among the
     FAIL lines before trusting this mutant's death: see `mutate_shared.report_verdict`. `skip`,
     when not None, is why this mutant did not run on this platform at all: the caller reports it
-    and counts it as neither killed, survived, nor wrong cause. This verdict is not yet trusted: `run_mutants`
+    and counts it as neither killed, survived, nor wrong cause. A suite past its time cap gives `mutate_shared.TIMED_OUT`
+    as the code: a verdict of its own, which `run_mutants` counts apart. This verdict is not yet trusted: `run_mutants`
     judges it against its target's clean-layout control (`run_controls`).
     """
     label, old, new, target, required, only_on = mutation_parts(entry)

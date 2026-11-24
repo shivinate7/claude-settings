@@ -146,11 +146,13 @@ add("handoff-sections: a Write that drops Work in flight, Next steps and Files a
 add("handoff-sections: a Write that keeps all six sections passes, silently",
     "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
     file_path=HS_HANDOFF, content=hs_text())
+# A full-size handoff under the size limit: 34895 UTF-8 bytes, 9970 estimated tokens, against the 10000-token limit
+# (decision precompact-handoff, limit set 19:07 CST Nov 23, 2026). Above the limit, handoff-too-big refuses it.
 add("handoff-sections: a full-size handoff that keeps all six sections passes, silently",
     "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
     file_path=HS_HANDOFF,
     content=HS_FULL.replace(HS_BODIES["Where things stand"],
-                            "Branch hsk-tests at 2ac382cc6.\n" + "A line of state, kept.\n" * 6000))
+                            "Branch hsk-tests at 2ac382cc6.\n" + "A line of state, kept.\n" * 1500))
 add("handoff-sections: a Write that empties the handoff is refused, naming all six sections",
     "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG,
     carries=HS_SECTIONS, file_path=HS_HANDOFF, content="")

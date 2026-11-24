@@ -1,0 +1,1 @@
+- guard-outcome-claims-unchecked: a hand-graded sample of refusals is the next measurement, and none exists. guard.log holds no automatic outcome, and a refusal no session judged with `bin/guard-outcome` is not counted. Decision: guard-log-read-weekly Fix: none — owner decides. Until: 2026-11-25 Seen: 2026-11-24 x1

@@ -1,0 +1,1 @@
+- colon-less-push-extra-git-read: the clause `or (current() is not None and source == current())` in hooks/guard_push_delete.py changes no verdict and costs one git read (symbolic-ref) per colon-less push. The push cost table in tests/guard/s13406-merge.py pins that read. Seen: 2026-11-23 x1

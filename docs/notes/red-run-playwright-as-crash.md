@@ -1,0 +1,1 @@
+- red-run-playwright-as-crash: `bin/red-run` (:125) always classifies with `CLASSIFIERS["fail_line"]`, which reads a red with no `^FAIL` line as crash. The `playwright` classifier (`hooks/mutate_shared.py` :1080) is never used there, so Playwright output with no `^FAIL` line reads crash. Seen: 2026-11-24 x1

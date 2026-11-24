@@ -136,6 +136,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
@@ -143,7 +144,10 @@ import own_session  # the one home of the agent transcript folder
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
 except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
-    _nowindow = subprocess
+    _nowindow = types.SimpleNamespace(run=subprocess.run, run_text=lambda args, timeout=5: "(%s did not answer: ImportError)\n" % args[0],
+                                      cpu_seconds=lambda text: 0.0, reaped_seconds=lambda pid: 0.0, cpu_advanced=lambda seen, cpu: False,
+                                      proc_table=lambda timeout=5, runner=None: ({}, {}, "(ps did not answer: ImportError)"),
+                                      tree_cpu=lambda table, pid, own=False, reaped=None: {}, PS_DOWN="(ps did not answer")
 try:
     from proc_env import AGENT_TAG_NAME  # the one home of the agent marker's name
 except ImportError:  # without it the hook cannot mark an agent call: it leaves the call unmarked
@@ -378,11 +382,7 @@ def log_marks(paths, base=None):
 
 
 def _run(args, timeout=TOOL_TIMEOUT):
-    try:
-        return _nowindow.run(args, capture_output=True, text=True, errors="replace",
-                              timeout=timeout).stdout
-    except Exception as exc:
-        return "(%s did not answer: %s)\n" % (args[0], type(exc).__name__)
+    return _nowindow.run_text(args, timeout)
 
 
 class JobState(str):
@@ -391,67 +391,23 @@ class JobState(str):
     cpu = None
 
 
-CPU_TIME = re.compile(r"(?:(?:(\d+)-)?(\d+):)?(\d+):(\d+(?:\.\d+)?)$")
-
-
-def cpu_seconds(text):
-    """Seconds in a ps `time` field, [[dd-]hh:]mm:ss[.cc]; 0 when it does not read."""
-    m = CPU_TIME.match(text)
-    if not m:
-        return 0.0
-    days, hours, mins, secs = m.groups()
-    return int(days or 0) * 86400 + int(hours or 0) * 3600 + int(mins) * 60 + float(secs)
-
-
-PS_DOWN = "(ps did not answer"
+# The CPU read lives in hooks/_nowindow.py (bin/verdict reads it too); the names stay here, so a patch of this module's _run or reaped_seconds still lands.
+PS_DOWN = _nowindow.PS_DOWN
+cpu_seconds = _nowindow.cpu_seconds
+reaped_seconds = _nowindow.reaped_seconds
+cpu_advanced = _nowindow.cpu_advanced
 
 
 def proc_table(timeout=TOOL_TIMEOUT):
-    """(rows, kids, note) from one ps call: rows is {pid: [pid, ppid, stat, time]}, kids {ppid: [pid]}.
-    note is the text of a ps that gave no answer, else ''."""
-    out = _run(["ps", "-axo", "pid=,ppid=,stat=,time="], timeout)
-    if out.startswith(PS_DOWN):
-        return {}, {}, out.strip()
-    rows, kids = {}, {}
-    for line in out.splitlines():
-        p = line.split()
-        if len(p) >= 4:
-            rows[p[0]] = p
-            kids.setdefault(p[1], []).append(p[0])
-    return rows, kids, ""
-
-
-def reaped_seconds(pid):
-    """CPU seconds of the children that process pid has already waited for (cutime + cstime in /proc/PID/stat). It catches a
-    chain of short children that ps never shows alive at a sample. 0 where /proc is absent or the read fails."""
-    try:
-        with open("/proc/%s/stat" % pid) as f:
-            text = f.read()
-        fields = text[text.rindex(")") + 2:].split()
-        return (int(fields[13]) + int(fields[14])) / os.sysconf("SC_CLK_TCK")
-    except (OSError, ValueError, IndexError, AttributeError):
-        return 0.0
+    """(rows, kids, note) from one ps call, read through this module's _run."""
+    return _nowindow.proc_table(timeout, _run)
 
 
 def tree_cpu(table, pid):
-    """{pid: CPU seconds} for every process under pid in a proc_table, each with the time of the children it has reaped
-    (reaped_seconds). pid's own time is left out, its reaped children's time is in: a builtin loop in the job shell, with no child,
-    is no sign of work, a child that ended is. At Stop the root is the job's
-    shell; in a hook-wrapped job its subshell is under it and counts, so a builtin spin reads busy and Stop
-    does not list the job; the watcher reports it. Cost: one /proc read for each process under pid and one for pid, no process."""
-    rows, kids, _ = table
-    cpu, stack = {str(pid): reaped_seconds(pid)}, list(kids.get(str(pid), []))
-    while stack:
-        cur = stack.pop()
-        if cur not in cpu:
-            cpu[cur] = cpu_seconds(rows[cur][3]) + reaped_seconds(cur)
-            stack.extend(kids.get(cur, []))
-    return cpu
-
-
-def cpu_advanced(seen, cpu):
-    """True when a process in cpu has more CPU seconds than in seen (a new one counts from 0)."""
-    return any(secs > seen.get(p, 0.0) for p, secs in cpu.items())
+    """{pid: CPU seconds} for every process under pid in a proc_table, pid's own time left out (see _nowindow.tree_cpu):
+    at Stop the root is the job's shell; in a hook-wrapped job its subshell is under it and counts, so a builtin spin reads busy and Stop
+    does not list the job; the watcher reports it. Reads reaped time through this module's reaped_seconds."""
+    return _nowindow.tree_cpu(table, pid, reaped=lambda p: reaped_seconds(p))
 
 
 def job_state(pid):
@@ -952,8 +908,9 @@ PR_NUMBER = re.compile(r"[0-9]+\Z")
 PR_URL = re.compile(r"/pull/([0-9]+)")
 CI_VALUE_FLAGS = frozenset(("-R", "--repo", "--hostname", "-C", "--session", "-b", "--body", "-F", "--body-file",
                             "-t", "--subject", "-A", "--author-email", "--match-head-commit", "-c", "--comment"))
-CI_REMEDY = ("Set a one-time send_later check-in for this wait (rule git-ci-wait-checks-in), then stop. "
-             "Set the next one after each red CI verdict, wider apart.")
+CI_REMEDY = ("The CI watcher wakes this session on red or green. As the fallback, set one one-time send_later check-in "
+             "at the run's expected end (rule git-ci-wait-checks-in), then stop. Set the next one after each red CI "
+             "verdict, never past 55 minutes.")
 
 
 def unquoted(command):

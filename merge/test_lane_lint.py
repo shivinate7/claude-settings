@@ -48,6 +48,7 @@ sys.path.append(os.path.join(os.path.dirname(HERE), "hooks"))  # append: the pin
 sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import _test_temp  # noqa: E402  test-temp-standard: this run's folder (lint/_test_temp.py)
 import test_merge as tm  # noqa: E402  the git half's fixture and fakes; importing it runs none of its cases
+import test_idle_prs as idle  # noqa: E402  the idle-red fake host (IdleHost) and its runs (one home: test_idle_prs.py); importing it runs none of its cases
 from test_merge import LANE_LINT_MARKER, NOT_OWNER, lint_comment  # noqa: E402  the lint comment's one form, in test_merge.py (decision lanes-run-no-full-ci-job)
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import merge  # noqa: E402
@@ -307,17 +308,17 @@ def mutate_script(log, out="", err="", rc=0, shards=None, sleeps=None):
             .replace("__RC__", repr(rc)).replace("__SHARDS__", repr(shards or {})).replace("__SLEEPS__", repr(sleeps or {})))
 
 
-def mutate_report(made, killed, crashed, survived):
+def mutate_report(made, killed, crashed, survived, timeout=0):
     """The per-file table a mutation test run prints, from hooks/mutate_shared.py's format_report (the one home of that format). Its crashed
-    column counts the mutants a run could not read (a crash or a timeout); the lint calls those unknown."""
+    column counts the mutants a run could not read; a timed-out mutant has its own timeout column."""
     row = {"file": "hooks/guard.py", "status": "OK", "reason": "", "made": made, "killed": killed, "crashed": crashed,
-           "survived": survived, "rate": killed / made, "silent": [], "unusable": {}, "unloaded": []}
+           "timeout": timeout, "survived": survived, "rate": killed / made, "silent": [], "unusable": {}, "unloaded": []}
     return mutate_shared.format_report([row]) + "\n"
 
 
 def real_tally(killed, survived=0, wrong=0, unknown=0):
     """The output a mutation test run prints, from mutate_shared.run_mutants itself (the one home of the tally's format): one stub mutant per
-    verdict, so the tally line and the verdict lines are the job's own. `unknown` mutants read UNKNOWN, as a crashed or timed-out mutant does."""
+    verdict, so the tally line and the verdict lines are the job's own. `unknown` mutants read UNKNOWN, as a mutant that could not be read does."""
     entries = (["kill-%d" % i for i in range(killed)] + ["survive-%d" % i for i in range(survived)]
                + ["wrong-%d" % i for i in range(wrong)] + ["unknown-%d" % i for i in range(unknown)])
 
@@ -2119,6 +2120,19 @@ def lane_lint_usage():
         return None
     end = next((i for i in range(starts[0] + 1, len(lines)) if lines[i].startswith("  merge ")), len(lines))
     return "\n".join(lines[starts[0]:end])
+
+
+class MutateReportReader(unittest.TestCase):
+    """merge.mutate_report_counts reads the per-file table that format_report prints. Its columns are file, mutants, killed,
+    crashed, timeout, survived, rate and silent suites, so the reader takes its counts by column, not by position of a four-count row."""
+
+    def test_the_reader_takes_killed_survived_and_unknown_from_a_table_with_a_timeout_column(self):
+        out = mutate_report(12, 6, 1, 3, timeout=2)
+        counts = merge.mutate_report_counts(out)
+        self.assertIsNotNone(counts, "the reader finds no report in a table with a timeout column, so the lint reads the run as unread:\n" + out)
+        # unknown is the crashed count plus the timeout count: a timed-out mutant is one the lint could not read, so it still fails the lint.
+        self.assertEqual(counts[:3], (6, 3, 3),
+                         "the reader takes the wrong columns of the table (want killed 6, survived 3, unknown 1 crashed + 2 timeout):\n" + out)
 
 
 class MutateLoadCap(unittest.TestCase):
@@ -4058,6 +4072,26 @@ class LintTreeFileMain(LaneFixture):
 DECLARED_READY = ["STE lint", "Windows split guard", "Cost line pins"]  # the checks-job steps the pre-ready run runs by name
 SCAFFOLD_READY = "checks-rest:project-ops skill scaffold suite"  # the scaffold suite as a qualified ready check: its job checks-rest, its step below
 SCAFFOLD_STEP = "project-ops skill scaffold suite"  # the same step's bare name, as checks.yml names it
+ACTION_READY = "Rules and records move together"  # a listed action step of job checks (uses: $/actions/claude-md-cites): a tool that cannot run an action prints it as not run
+ACTION_NOT_RUN = "--step named it, but it did not run (not run locally): an action (uses: $/actions/claude-md-cites); CI runs it"  # bin/ci-job's detail for that step on a tool that cannot run it
+READY_WITH_ACTION = DECLARED_READY + [ACTION_READY]
+REAL_MERGE_CONFIG = os.path.join(os.path.dirname(HERE), ".github", "stamp.json")  # merge.readyChecks lives here
+# The six CI-only checks a draft's ready run must read, so no CI rerun is paid to a cheap check. Each is one step of job checks, found by the script its run: line calls.
+CHEAP_CHECK_SCRIPTS = ("lint/hook_catalog.py", "lint/test_retired_names.py", "lint/check_silent_undo.py",
+                       "lint/check_ruling_kind.py", "lint/test_check_skill_model_rows.py", "lint/test_check_project_ops_roles.py")
+
+
+def cheap_check_steps(script):
+    """The names of job checks' steps whose run: calls `script`, read from checks.yml. The one home of the six's names: the stamp test and the ready cases read it."""
+    with open(CHECKS_YML, encoding="utf-8") as f:
+        block = job_block(f.read(), "checks")
+    return [step_key(st, "name") for st in step_blocks(block) if re.search(r"(?m)^\s*python3 %s(\s|$)" % re.escape(script), run_body(st) or "")]
+
+
+def real_ready_checks():
+    """merge.readyChecks in the repo's own .github/stamp.json: the list the pre-ready run reads on this checkout."""
+    with open(REAL_MERGE_CONFIG, encoding="utf-8") as f:
+        return json.load(f).get("merge", {}).get("readyChecks") or []
 
 
 def steps_for(failing=()):
@@ -4521,6 +4555,115 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
     def test_a_fail_job_beats_an_unknown_job_listed_after_it_in_the_combined_state(self):
         self.assert_two_jobs_unknown_and_fail_read_fail([SCAFFOLD_READY, "check invariants"])  # checks-rest (FAIL) first
 
+    def action_run(self, declared, steps, rc, details=None):
+        """The pre-ready run of a draft that lists `declared`, with ci-job's stub printing `steps`, exiting `rc`, and the lane's own commit the only change. -> (rc, stdout and stderr)."""
+        self.pre_ready_lane(declared)
+        self.own_writes({"own.txt": "lane 7\n"})
+        self.use_ci_job(steps, rc, details=details)
+        return self.pre_ready()
+
+    def skip_lines(self, out, name):
+        """The lines of `out` that name step `name` and say CI runs it, and that no unknown or fail verdict opens: the skip line of a step the tool cannot run."""
+        return [line for line in out.splitlines() if name in line and "CI runs it" in line and not re.match(r"(unknown|fail) ", line)]
+
+    def test_a_listed_action_step_the_tool_cannot_run_is_skipped_and_the_ready_run_passes(self):
+        rc, out = self.action_run(READY_WITH_ACTION, steps_for() + [("unknown", ACTION_READY)], 2, details={ACTION_READY: ACTION_NOT_RUN})
+        self.assertEqual(len(self.lint_calls()), 1, "the ready run did not run ci-job once: " + out)
+        self.assertEqual(rc, 0, "the ready run refused a listed action step this tool cannot run, where every other step passes: " + out)
+        self.assertEqual(self.host.readies, [7], "the draft was not marked ready with its action step skipped: " + out)
+
+    def test_the_skipped_action_step_prints_one_line_that_names_it_and_says_ci_runs_it(self):
+        rc, out = self.action_run(READY_WITH_ACTION, steps_for() + [("unknown", ACTION_READY)], 2, details={ACTION_READY: ACTION_NOT_RUN})
+        self.assertEqual(len(self.skip_lines(out, ACTION_READY)), 1,
+                         "no one line names the skipped action step and says CI runs it, read as a skip (not unknown, not fail): " + out)
+
+    def test_the_pass_line_names_the_count_of_skipped_steps(self):
+        rc, out = self.action_run(READY_WITH_ACTION, steps_for() + [("unknown", ACTION_READY)], 2, details={ACTION_READY: ACTION_NOT_RUN})
+        short = self.head()[:9]
+        passes = [line for line in out.splitlines() if "pass on %s" % short in line]
+        self.assertEqual(len(passes), 1, "no `pass on %s` line for a ready run beside one skipped action step: %s" % (short, out))
+        self.assertIn("skipped", passes[0], "the pass line does not name the skipped steps: " + passes[0])
+        self.assertRegex(passes[0], r"(?<!\w)1(?!\w)", "the pass line does not name the count of skipped steps, 1: " + passes[0])
+
+    def test_control_a_listed_action_step_the_tool_can_run_still_refuses_when_it_fails(self):
+        rc, out = self.action_run(READY_WITH_ACTION, steps_for() + [("FAIL", ACTION_READY)], 1)
+        self.assertTrue(verdict_line(out, "fail", ACTION_READY), "the ready run printed no `fail` line for a runnable action step that FAILed: " + out)
+        self.assertEqual(rc, 1, "a runnable action step that FAILed did not refuse the ready run: " + out)
+        self.assertEqual(self.host.readies, [], "a runnable action step that FAILed marked the draft ready: " + out)
+        self.assertEqual(self.skip_lines(out, ACTION_READY), [], "a runnable action step that FAILed was skipped: " + out)
+
+    def test_control_a_run_step_that_failed_beside_a_skipped_action_step_refuses_as_fail(self):
+        rc, out = self.action_run(READY_WITH_ACTION, steps_for(failing=["STE lint"]) + [("unknown", ACTION_READY)], 1, details={ACTION_READY: ACTION_NOT_RUN})
+        self.assertTrue(verdict_line(out, "fail", "STE lint"), "the FAIL of STE lint did not print a `fail` line beside the skipped step: " + out)
+        self.assertEqual(rc, 1, "a FAIL beside a skipped action step did not refuse the ready run: " + out)
+        self.assertEqual(self.host.readies, [], "a FAIL beside a skipped action step marked the draft ready: " + out)
+
+    def test_control_a_listed_name_no_step_has_still_refuses_and_is_not_skipped(self):
+        rc, out = self.action_run(DECLARED_READY + ["no such step"], steps_for() + [("unknown", "no such step")], 2,
+                                  details={"no such step": "no step of job 'checks' has this name"})
+        self.assertEqual(rc, 1, "a listed name no step has did not refuse the ready run: " + out)
+        self.assertEqual(self.host.readies, [], "a listed name no step has marked the draft ready: " + out)
+        self.assertEqual(self.skip_lines(out, "no such step"), [], "a listed name no step has was skipped: " + out)
+
+    def test_control_a_listed_action_step_that_timed_out_still_refuses(self):
+        rc, out = self.action_run(READY_WITH_ACTION, steps_for() + [("unknown", ACTION_READY)], 2, details={ACTION_READY: "timed out after 600 s"})
+        self.assertEqual(rc, 1, "an action step that timed out did not refuse the ready run: " + out)
+        self.assertEqual(self.host.readies, [], "an action step that timed out marked the draft ready: " + out)
+        self.assertEqual(self.skip_lines(out, ACTION_READY), [], "an action step that timed out was skipped: " + out)
+
+    def test_control_a_listed_action_step_that_crashed_still_refuses(self):
+        rc, out = self.action_run(READY_WITH_ACTION, steps_for() + [("unknown", ACTION_READY)], 2, details={ACTION_READY: "crashed: exit 139, no verdict"})
+        self.assertEqual(rc, 1, "an action step that crashed did not refuse the ready run: " + out)
+        self.assertEqual(self.host.readies, [], "an action step that crashed marked the draft ready: " + out)
+        self.assertEqual(self.skip_lines(out, ACTION_READY), [], "an action step that crashed was skipped: " + out)
+
+    def test_control_a_listed_action_step_skipped_by_scope_still_refuses(self):
+        rc, out = self.action_run(READY_WITH_ACTION, steps_for() + [("skipped", ACTION_READY)], 0, details={ACTION_READY: "CI's scope job skips it for this diff"})
+        self.assertEqual(rc, 1, "an action step skipped by scope did not refuse the ready run: " + out)
+        self.assertEqual(self.host.readies, [], "an action step skipped by scope marked the draft ready: " + out)
+        self.assertEqual(self.skip_lines(out, ACTION_READY), [], "an action step skipped by scope read as the CI-runs skip: " + out)
+
+    def test_control_a_run_step_that_did_not_run_for_want_of_a_tool_still_refuses(self):  # the seam is the kind, not every not-run line
+        rc, out = self.action_run(DECLARED_READY + ["Tool step"], steps_for() + [("unknown", "Tool step")], 2,
+                                  details={"Tool step": "tool missing: pipx"})  # bin/ci-job prints this unwrapped: a tool-missing step is unknown already
+        self.assertEqual(rc, 1, "a run step that did not run for want of a tool was skipped: " + out)
+        self.assertEqual(self.host.readies, [], "a run step that did not run for want of a tool marked the draft ready: " + out)
+
+    def test_control_a_listed_run_step_skipped_by_its_if_still_refuses(self):  # bin/ci-job wraps a skipped listed step's detail in the --step line
+        rc, out = self.action_run(DECLARED_READY + ["Base step"], steps_for() + [("unknown", "Base step")], 2,
+                                  details={"Base step": "--step named it, but it did not run (skipped): a step that runs only off a pull request"})
+        self.assertEqual(rc, 1, "a listed run step skipped by its if: did not refuse the ready run: " + out)
+        self.assertEqual(self.host.readies, [], "a listed run step skipped by its if marked the draft ready: " + out)
+        self.assertFalse(verdict_line(out, "skip", "Base step"), "a listed run step skipped by its if read as the CI-runs skip: " + out)
+
+    def test_control_every_listed_step_unrunnable_refuses_and_no_pass_line_prints(self):  # nothing ran: not a pass
+        rc, out = self.action_run([ACTION_READY], [("unknown", ACTION_READY)], 2, details={ACTION_READY: ACTION_NOT_RUN})
+        self.assertEqual(rc, 1, "every listed step unrunnable, so nothing ran, but the ready run did not refuse: " + out)
+        self.assertEqual(self.host.readies, [], "every listed step unrunnable marked the draft ready: " + out)
+        self.assertNotIn("pass on ", out, "every listed step unrunnable printed a pass line: " + out)
+
+    def test_the_line_bin_ci_job_prints_for_a_listed_action_step_is_the_one_merge_reads(self):
+        """The real bin/ci-job, run on a one-step fixture workflow, prints for the listed action step the detail that merge.py reads (ACTION_NOT_RUN_DETAIL),
+        and that detail is the text the stub's ACTION_NOT_RUN carries for its own action."""
+        step, uses = "Upload the report", "actions/upload-artifact@v4"
+        fixture = os.path.join(self.t, "action-tie")
+        os.makedirs(os.path.join(fixture, ".github", "workflows"))
+        with open(os.path.join(fixture, ".github", "workflows", "checks.yml"), "w", encoding="utf-8") as f:
+            f.write("name: checks\non: pull_request\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
+                    "      - name: %s\n        uses: %s\n" % (step, uses))
+        tm.sh(fixture, "git", "init", "-q")
+        tm.sh(fixture, "git", "add", "-A")
+        tm.sh(fixture, "git", "-c", "user.name=tie", "-c", "user.email=tie@example.com", "commit", "-qm", "fixture")
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_", "CI_JOB_")) and k not in ("VERDICT_LOG", "PR_BODY", "GITHUB_BASE_REF")}
+        run = subprocess.run([sys.executable, os.path.join(REPO, "bin", "ci-job"), "checks", "--plan", "--step", step, "--base", "HEAD"],
+                             cwd=fixture, capture_output=True, text=True, env=env, timeout=120)
+        line = re.search(r"^unknown\s+%s: (.*)$" % re.escape(step), run.stdout, re.M)
+        self.assertIsNotNone(line, "bin/ci-job printed no unknown line for the listed action step: " + run.stdout + run.stderr)
+        detail = line.group(1)
+        self.assertIsNotNone(merge.ACTION_NOT_RUN_DETAIL.fullmatch(detail),
+                             "the line bin/ci-job prints for a listed action step does not match merge.ACTION_NOT_RUN_DETAIL, so the ready run would refuse it: " + detail)
+        self.assertEqual(detail.replace(uses, "$/actions/claude-md-cites"), ACTION_NOT_RUN,
+                         "the stub's ACTION_NOT_RUN is not the text bin/ci-job prints for an action step: " + detail)
 
     def unpushed_pr(self, n, files, body):
         """PR n as a draft whose head commit is never pushed: the second clone holds it, origin does not, so the lane's clone cannot read
@@ -4730,8 +4873,145 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assertEqual(merge_trees, [], "git merge-tree ran on draft PR #9's head, so the draft was not read from shared paths alone: %s" % merge_trees)
         self.assertEqual(self.host.readies, [7], "a clash with draft PR #9 kept the draft from going ready: " + out)
 
+    def assert_cheap_check_refuses_the_draft(self, script, fault):
+        """The pre-ready run of the repo's real stamp list refuses a draft when the step that runs `script` FAILs. `fault` is a path the PR's
+        head holds: the stub run of that step FAILs on it, standing for the check's own fault (each case names the case in its suite).
+        Scope first: the real list must name the step, or the ready run never runs it."""
+        names = cheap_check_steps(script)
+        self.assertEqual(len(names), 1, "checks.yml job checks holds %d steps that run %s, want one: %r" % (len(names), script, names))
+        name, declared = names[0], real_ready_checks()
+        self.assertIn(name, declared, "merge.readyChecks does not name %r, the step that runs %s, so the ready run never runs that check" % (name, script))
+        self.on("feat", {fault: "the fault this check reports\n"})
+        self.pre_ready_lane(declared=declared)
+        self.use_ci_job([("PASS", job_and_step(entry)[1]) for entry in declared], 0, file_fails={name: fault})
+        refs_before = self.refs()
+        rc, out = self.pre_ready()
+        self.assertTrue(verdict_line(out, "fail", name), "the pre-ready run printed no `fail %s` line for the fault at %s: %s" % (name, fault, out))
+        self.assertEqual(rc, 1, "a failing %s step did not refuse the pre-ready run: %s" % (name, out))
+        self.assertEqual(self.host.readies, [], "a failing %s step marked the draft ready: %s" % (name, out))
+        self.assertEqual(self.refs(), refs_before, "the pre-ready run pushed beside a failing %s step: %s" % (name, out))
 
-MUTATE_SKIPPED = "mutation test run skipped here: it runs at the lane's hand-off lint"  # the pre-join lint prints this where the run would start, verbatim
+    def idle_red_clash(self, age):
+        """The lane (PR 7, this session's draft) and PR 9 share shared.txt. PR 9 is a non-draft whose head is red, its newest run `age` seconds
+        old, on a host that reads each head's runs (test_idle_prs.IdleHost). -> PR 9's head."""
+        self.host = idle.IdleHost.adopt(self.host)
+        self.host.include_own = True
+        self.pre_ready_lane()
+        _head, other = self.clashing_pair(n=9, draft=False)
+        self.host.runs_by_sha[other] = [idle.red(age=age)]
+        self.use_ci_job(steps_for(), 0)
+        return other
+
+    def test_idle_red_clashing_pr_does_not_block_the_ready_check_and_is_drafted(self):
+        self.idle_red_clash(3 * idle.HOUR)
+        rc, out = self.pre_ready()
+        self.assertFalse(verdict_line(out, "fail", "open-PR clash"),
+                         "the idle red non-draft PR #9 still fails the ready check's open-PR clash: " + out)
+        self.assertEqual(rc, 0, "the ready check refused with an idle red clash in the way: " + out)
+        self.assertEqual(self.host.drafts, [9], "the idle red clashing PR #9 was not drafted locally: " + out)
+        self.assertEqual(self.host.readies, [7], "the lane PR #7 did not go ready: " + out)
+        self.assertEqual([n for n, _ in self.host.posted], [9], "PR #9 did not get one comment: " + out)
+        self.assertIn("merge 9 --ready", self.host.posted[0][1], "the comment on PR #9 does not say how to return: " + out)
+
+    def test_red_clash_one_second_short_of_idle_still_fails_the_ready_check(self):  # a green control: the old code fails it too
+        self.idle_red_clash(idle.IDLE_SECONDS - 1)
+        rc, out = self.pre_ready()
+        self.assertTrue(verdict_line(out, "fail", "open-PR clash"),
+                        "a red clash 1 h 59 min 59 s old no longer fails the open-PR clash: " + out)
+        self.assertNotEqual(rc, 0, "a red clash 1 h 59 min 59 s old did not refuse the ready check: " + out)
+        self.assertEqual(self.host.drafts, [], "a red clash not yet idle was drafted: " + out)
+        self.assertEqual(self.host.posted, [], "a red clash not yet idle was commented on: " + out)
+        self.assertEqual(self.host.readies, [], "the lane went ready past a clash that still counts: " + out)
+
+    def test_cloud_host_prints_the_return_route_for_an_idle_red_clash_and_still_counts_it(self):  # a cloud host cannot draft, so the clash counts PR #9 (owner's R6 ruling, 10:54 CST Nov 23; review ruling, 15:06 CST Nov 23)
+        self.idle_red_clash(3 * idle.HOUR)
+        self.host.draft_refuse = True
+        rc, out = self.pre_ready()
+        self.assertTrue(verdict_line(out, "fail", "open-PR clash"),
+                        "the idle red clashing PR #9 does not fail the ready check on a cloud host that cannot draft it: " + out)
+        self.assertNotEqual(rc, 0, "the cloud host let the ready check pass with PR #9 still counted as ready: " + out)
+        self.assertIn("update_pull_request draft=true", out, "the cloud host did not print the MCP route to draft PR #9: " + out)
+        self.assertEqual(self.host.drafts, [], "the cloud host drafted PR #9: " + out)
+        self.assertEqual(self.host.posted, [], "the cloud host commented on PR #9, though it did not draft it, so the comment would say it returned to draft: " + out)
+        self.assertEqual(self.host.readies, [], "the lane PR #7 went ready past a clash that still counts PR #9: " + out)
+
+    def test_cheap_check_control_six_names_declared_by_the_fixture_pass_and_go_ready(self):
+        """Green control, on head: the fixture declares the six step names itself, each passes, and the draft goes ready. The red cases differ
+        only in whether the real stamp list names the steps, so a red here would mean the harness, not the list, is wrong."""
+        names = [name for script in CHEAP_CHECK_SCRIPTS for name in cheap_check_steps(script)]
+        self.pre_ready_lane(declared=names)
+        self.use_ci_job([("PASS", name) for name in names], 0)
+        rc, out = self.pre_ready()
+        for name in names:
+            self.assertTrue(verdict_line(out, "pass", name), "no `pass %s` line for a fixture-declared passing step: %s" % (name, out))
+        self.assertEqual((rc, self.host.readies), (0, [7]), "the fixture's six passing steps did not mark the draft ready: " + out)
+
+    def test_cheap_check_hook_catalog_failing_refuses_the_draft(self):
+        """Hook catalog check, a stale docs/catalog.md. Its suite: lint/test_hook_catalog.py test_f18_stale_page_fails."""
+        self.assert_cheap_check_refuses_the_draft("lint/hook_catalog.py", "faults/stale-catalog-page")
+
+    def test_cheap_check_retired_names_failing_refuses_the_draft(self):
+        """Retired names, one word per meaning: a retired word in a tracked file. Its suite: lint/test_retired_names.py test_no_retired_name."""
+        self.assert_cheap_check_refuses_the_draft("lint/test_retired_names.py", "faults/retired-word-in-tracked-file")
+
+    def test_cheap_check_silent_undo_failing_refuses_the_draft(self):
+        """Silent undo check, a reversed hunk. Its suite: lint/test_check_silent_undo.py test_reversal_widened_by_an_adjacent_edit."""
+        self.assert_cheap_check_refuses_the_draft("lint/check_silent_undo.py", "faults/reversed-hunk")
+
+    def test_cheap_check_ruling_kind_failing_refuses_the_draft(self):
+        """Ruling kind check, a record with two Kind lines. Its suite: lint/test_check_ruling_kind.py test_pr_record_with_two_kind_lines_fails."""
+        self.assert_cheap_check_refuses_the_draft("lint/check_ruling_kind.py", "faults/record-with-two-kind-lines")
+
+    def test_cheap_check_skill_model_rows_failing_refuses_the_draft(self):
+        """Skill model rows fixture suite, a broken skill model row. Its suite: lint/test_check_skill_model_rows.py test_stale_row_fails_and_is_named."""
+        self.assert_cheap_check_refuses_the_draft("lint/test_check_skill_model_rows.py", "faults/broken-skill-model-row")
+
+    def test_cheap_check_project_ops_roles_failing_refuses_the_draft(self):
+        """Project-ops roles fixture suite, a broken project-ops role. Its suite: lint/test_check_project_ops_roles.py test_a_role_without_text_fails_alone."""
+        self.assert_cheap_check_refuses_the_draft("lint/test_check_project_ops_roles.py", "faults/broken-project-ops-role")
+
+    def test_cheap_check_hook_catalog_on_a_record_only_branch_is_not_refused(self):
+        """A branch that only adds a record leaves docs/records.md stale. The merge tool rebuilds that page, and the catalog check waives a stale
+        records page on a pull-request run (lint/hook_catalog.py pull_request_run, which reads GITHUB_BASE_REF: ci-job sets it from --base). A
+        stale docs/catalog.md still fails (lint/test_hook_catalog.py test_b10_the_catalog_page_stays_strict_on_a_pull_request). Wanted: the step
+        passes here and the draft goes ready."""
+        names = cheap_check_steps("lint/hook_catalog.py")
+        self.assertEqual(len(names), 1, "checks.yml job checks holds %d steps that run the catalog check, want one: %r" % (len(names), names))
+        name, declared = names[0], real_ready_checks()
+        self.assertIn(name, declared, "merge.readyChecks does not name %r, so the ready run never runs the catalog check on this branch" % name)
+        self.on("feat", {"docs/decisions/cheap-check-note.md": "Owner ruling, 2026-11-23. Process only.\n\nKind: process\n"})
+        self.pre_ready_lane(declared=declared)
+        self.use_ci_job([("PASS", job_and_step(entry)[1]) for entry in declared], 0)
+        rc, out = self.pre_ready()
+        self.assertTrue(verdict_line(out, "pass", name), "the catalog check did not pass on a branch that only adds a record: " + out)
+        self.assertEqual(rc, 0, "a branch that only adds a record was refused by the ready run: " + out)
+        self.assertEqual(self.host.readies, [7], "a branch that only adds a record did not go ready: " + out)
+
+    def test_six_cheap_checks_share_one_ci_job_start_and_read_no_github(self):
+        """Cost: the six checks run inside the checks job's one ci-job start, which the stub logs as one lint run. Each step's own shell and python
+        start sit inside that run (bin/ci-job). No check reads GitHub: the ready run starts no `gh` call."""
+        declared = real_ready_checks()
+        names = [name for script in CHEAP_CHECK_SCRIPTS for name in cheap_check_steps(script)]
+        for name in names:
+            self.assertIn(name, declared, "merge.readyChecks does not name %r, so the checks job's one ready start does not carry it" % name)
+        self.pre_ready_lane(declared=declared)
+        self.use_ci_job([("PASS", job_and_step(entry)[1]) for entry in declared], 0)
+        real_sh, gh_calls = merge.sh, []
+
+        def counting(args, *rest, **kwargs):
+            if args[:1] == ["gh"]:
+                gh_calls.append(list(args))
+            return real_sh(args, *rest, **kwargs)
+        with unittest.mock.patch.object(merge, "sh", counting):
+            rc, out = self.pre_ready()
+        starts = [c for c in self.lint_calls() if c["argv"][:1] == ["checks"]]
+        self.assertEqual(len(starts), 1, "the ready run started the checks job %d times, want one for all six: %s" % (len(starts), out))
+        for name in names:
+            self.assertIn(name, step_names(starts[0]["argv"]), "the checks job's one start does not run %r: %s" % (name, starts[0]["argv"]))
+        self.assertEqual(gh_calls, [], "the ready run called gh for the cheap checks: %s" % gh_calls)
+
+
+MUTATE_SKIPPED ="mutation test run skipped here: it runs at the lane's hand-off lint"  # the pre-join lint prints this where the run would start, verbatim
 
 
 class BatchHeadMutation(LaneFixture):
@@ -4873,8 +5153,7 @@ class PreReadyDeclared(unittest.TestCase):
     root = os.path.dirname(HERE)
 
     def declared(self):
-        with open(os.path.join(self.root, ".github", "stamp.json"), encoding="utf-8") as f:
-            return json.load(f).get("merge", {}).get("readyChecks") or []
+        return real_ready_checks()
 
     def assert_ci_job_reads(self, entry):
         job, step = job_and_step(entry)
@@ -4894,6 +5173,16 @@ class PreReadyDeclared(unittest.TestCase):
     def test_pre_ready_the_declared_list_names_the_scaffold_suite_under_checks_rest(self):
         self.assertIn(SCAFFOLD_READY, self.declared(), "merge.readyChecks does not name the scaffold suite as %r, so the pre-ready run does not read it" % SCAFFOLD_READY)
         self.assert_ci_job_reads(SCAFFOLD_READY)
+
+    def test_pre_ready_the_declared_list_names_the_six_cheap_checks_by_their_workflow_step(self):
+        """Each of the six CI-only checks is named in merge.readyChecks under the step name checks.yml gives the step that runs its script, and bin/ci-job reads that name."""
+        declared = self.declared()
+        for script in CHEAP_CHECK_SCRIPTS:
+            with self.subTest(script=script):
+                names = cheap_check_steps(script)
+                self.assertEqual(len(names), 1, "checks.yml job checks holds %d steps that run %s, want one: %r" % (len(names), script, names))
+                self.assertIn(names[0], declared, "merge.readyChecks does not name %r, the step that runs %s, so the draft's ready run never reads it" % (names[0], script))
+                self.assert_ci_job_reads(names[0])
 
 
 class RunFolderSweep(unittest.TestCase):
@@ -5416,11 +5705,15 @@ class LintCheckJoin(tm.CloudSession):
         with self.cloud():
             return run("7", "--confirm", "--head", ran_on, host=tm.GhHalf.gh_host(self))
 
-    def claim_steps(self, linted, claimed, kind="a claim-only commit"):
+    def claim_steps(self, linted, claimed, kind="a claim-only commit", page=None):
         """Two joins of a claim-only head, with a record still pending, so the first join pushes its own claim (two-step confirm). The lane-lint
         PASS carries across the claim commits: the first join does not refuse for lane lint, and it stops at its claim without reading that
         claim's check runs. Those are read at the second join, on the claim head, which merges once its checks answer green. `kind` names the
-        commits above the linted head in a failure."""
+        commits above the linted head in a failure. `page`: the records-page commit the case pushed on the head, or None for a claim-only head.
+        The lint's proof of that page is read on its first parent, which the fake gh answers only once it is shown (a claim-only head has no
+        page, so nothing is shown for it)."""
+        if page:
+            tm.GhHalf.set(self, shown=[tm.sh(self.co, "git", "rev-parse", f"{page}^1")])
         rc, out = self.join([lint_comment(2, linted)], once=True)
         self.assertNotIn("merge --lane-lint 7", out, f"the lane lint refused {kind} on the linted head:\n" + out)
         self.assertEqual(rc, 0, "the first join refused instead of stopping at the claim it pushes:\n" + out)
@@ -5733,7 +6026,7 @@ class LintCheckJoin(tm.CloudSession):
         page = tm.RecordsEnv.tool_page(self, linted)
         tm.RecordsEnv.assert_page_scope(self, page, linted)
         tm.sh(self.co, "git", "push", "-q", "origin", f"{page}:refs/heads/feat")
-        self.claim_steps(linted, self.head("feat"), "a records-page commit")
+        self.claim_steps(linted, self.head("feat"), "a records-page commit", page=page)
 
     def test_a_pass_under_a_claim_commit_and_a_records_page_commit_lets_the_join_go_ahead(self):
         linted = self.head("feat")
@@ -5743,7 +6036,7 @@ class LintCheckJoin(tm.CloudSession):
         page = tm.RecordsEnv.tool_page(self, claim)
         tm.RecordsEnv.assert_page_scope(self, page, claim)
         tm.sh(self.co, "git", "push", "-q", "origin", f"{page}:refs/heads/feat")
-        self.claim_steps(linted, self.head("feat"), "a claim commit and a records-page commit")
+        self.claim_steps(linted, self.head("feat"), "a claim commit and a records-page commit", page=page)
 
     def test_a_hand_page_under_the_page_subject_does_not_let_the_join_go_ahead(self):  # control: the generator's bytes, not the subject, make the carry
         linted = self.head("feat")
@@ -7395,12 +7688,13 @@ class LintResumesPassedJobs(LaneFixture):
     EDIT = b"\n# an edit the tool's key must see\n"  # appended to a copy of a file the tool reads
     STALE = 1600000000  # a fixed, old mtime for a planted .part file
 
-    def lint_at(self, when, *extra, module=None):
+    def lint_at(self, when, *extra, module=None, at_head=False):
         """One `--lane-lint 7` run with the merge commit's dates set to `when`. `module` runs a loaded copy of merge.py instead of this process's.
+        `at_head`: the checkout is first detached at the pull request head, as a lane's own lint runs it (a head behind main pushes its merge then).
         -> (rc, stdout and stderr together)."""
         with unittest.mock.patch.dict(os.environ, {"GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}):
             if module is None:
-                return self.run_lane("--lane-lint", "7", *extra, at_head=False)
+                return self.run_lane("--lane-lint", "7", *extra, at_head=at_head)
             return self.run_copy(module, "--lane-lint", "7", *extra)
 
     def run_copy(self, module, *argv):
@@ -7952,6 +8246,174 @@ class LintResumesPassedJobs(LaneFixture):
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.ran(), ran + 1, "scope: the next save did not run its job: " + out)
         self.assertFalse(os.path.exists(stale), "the next save left the .part file of a killed run: " + stale)
+
+
+class LintResumesPushedMerge(LaneFixture):
+    """A rerun of a lint that pushes its merged commit M builds the same M when the head and the tip are unchanged, so the job's saved PASS serves
+    it (the job's key holds M). M's author and committer dates are the later of the head's and the tip's committer dates, whatever GIT_AUTHOR_DATE
+    and GIT_COMMITTER_DATE hold. A new main tip makes a new M and a miss: the control, green on the old code, where the tip is in the key. Each
+    rerun case first lints a head behind main, which pushes M to the pull request branch; the rerun puts the branch back at the head
+    (put_pr_head_back), so both lints read the same head. Cost per case: two lint runs and at most two stub starts, and one fixture pair (unmeasured)."""
+
+    DATE_A = LintResumesPassedJobs.DATE_A  # the two dates LintResumesPassedJobs reruns under
+    DATE_B = LintResumesPassedJobs.DATE_B
+    HEAD_WHEN = "@1700000100 +0000"  # a commit date in the dates cases: the earlier of the two
+    TIP_WHEN = "@1700000900 +0000"  # the other commit date: the later of the two
+    EARLY = "@1700000000 +0000"  # an inherited date before both commits: the merged commit must not take it
+    LATE = "@1800000000 +0000"  # an inherited date after both commits: the merged commit must not take it either
+
+    behind_main = MergedLintTree.behind_main  # the head behind main, and main's new tip: MergedLintTree's
+    main_edits = MergedLintTree.main_edits  # main moves a file after the head branched: MergedLintTree's
+    own_writes = CrossMeasure.own_writes  # the head gains a commit: CrossMeasure's
+    commit_on = CrossMeasure.commit_on  # a pushed commit on a branch: CrossMeasure's
+    clash = CrossMeasure.clash  # the merge-tree precondition: CrossMeasure's
+    contains = LaneLint.contains  # the ancestor read: LaneLint's
+    lint_at = LintResumesPassedJobs.lint_at  # one lint run with the merge commit's dates set: LintResumesPassedJobs's
+    ran = LintResumesPassedJobs.ran  # how many times the stub ci-job ran the lint: LintResumesPassedJobs's
+    cached = staticmethod(LintResumesPassedJobs.cached)  # the lines that say a job's PASS was reused: LintResumesPassedJobs's
+
+    @staticmethod
+    def dated(when):
+        """Every commit made inside the `with` block has author and committer dates `when`, a git date such as "@1700000100 +0000"."""
+        return unittest.mock.patch.dict(os.environ, {"GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when})
+
+    def put_pr_head_back(self, sha):
+        """The pull request branch goes back to `sha`. A pushing lint moves the branch to its merged commit, so a rerun of the same head puts it back first."""
+        tm.sh(self.other, "git", "push", "-q", "-f", "origin", sha + ":refs/heads/feat")
+
+    def dates_of(self, sha):
+        """-> (author date, committer date) of commit `sha` in unix seconds, read in the lane checkout after a fetch."""
+        tm.sh(self.co, "git", "fetch", "-q", "origin")
+        at, ct = tm.sh(self.co, "git", "log", "-1", "--format=%at %ct", sha).split()
+        return int(at), int(ct)
+
+    def first_pushing_lint(self, when):
+        """A head behind main lints once at the dates `when`, and pushes its merged commit: the precondition of each rerun case.
+        -> (the head, the merged commit the lint pushed, main's tip that the lint merged)."""
+        old, tip = self.behind_main()
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.lint_at(when, at_head=True)
+        self.assertEqual(rc, 0, "precondition: the first pushing lint did not pass: " + text)
+        pushed = self.head("feat")
+        self.assertNotEqual(pushed, old, "precondition: the first lint pushed nothing, so the case probes nothing: " + text)
+        return old, pushed, tip
+
+    def test_a_rerun_of_the_same_head_and_tip_builds_the_same_merged_commit_and_hits_the_saved_pass(self):
+        old, pushed, _ = self.first_pushing_lint(self.DATE_A)
+        self.put_pr_head_back(old)
+        ran = self.ran()
+        rc, text = self.lint_at(self.DATE_B, at_head=True)
+        rerun = self.head("feat")
+        self.assertEqual(rerun, pushed, "the rerun of the same head and tip built merged commit %s, not %s: the merge's dates come from the "
+                         "environment, so the step and job keys miss: %s" % (rerun[:9], pushed[:9], text))
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(self.ran(), ran, "the rerun ran the job again, though its merged commit is the first run's: " + text)
+        self.assertTrue(self.cached(text), "the rerun printed no PASS (cached) for the job: " + text)
+
+    def test_a_new_main_tip_builds_a_new_merged_commit_and_misses_the_saved_pass(self):  # control: green on the old code, where the tip is in the key
+        old, pushed, tip = self.first_pushing_lint(self.DATE_A)
+        self.put_pr_head_back(old)
+        self.main_edits("later.txt", "main moved again\n")
+        self.assertNotEqual(self.head("main"), tip, "precondition: main did not move, so the case probes nothing")
+        ran = self.ran()
+        rc, text = self.lint_at(self.DATE_A, at_head=True)
+        self.assertNotEqual(self.head("feat"), pushed, "a new main tip built the same merged commit, so the key does not see the tip: " + text)
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(self.ran(), ran + 1, "a new main tip was served by the saved pass, so the job did not run: " + text)
+        self.assertFalse(self.cached(text), "a new main tip printed PASS (cached): " + text)
+
+    def dated_head_and_tip(self, head_when, tip_when):
+        """A lane commit dated `head_when` and a main commit dated `tip_when`, which the head lacks, so a lint of the head pushes its merge.
+        -> (the head, main's tip, the later committer date of the two)."""
+        with self.dated(head_when):
+            old = self.own_writes({"lane-dated.txt": "lane\n"})
+        with self.dated(tip_when):
+            tip = self.commit_on("main", {"elsewhere.txt": "main moved past the head\n"}, "origin/main")
+        self.assertFalse(self.contains(old, tip), "precondition: the head holds origin/main's new tip, so the case probes nothing")
+        head_ct, tip_ct = self.dates_of(old)[1], self.dates_of(tip)[1]
+        self.assertNotEqual(head_ct, tip_ct, "precondition: the head and the tip have one committer date, so the case cannot tell them apart")
+        return old, tip, max(head_ct, tip_ct)
+
+    def check_merged_dates(self, head_when, tip_when, inherited):
+        """The merged commit of a head dated `head_when` and a tip dated `tip_when`, linted with `inherited` as the environment's dates. Its author
+        and committer dates are the later committer date of the head and the tip."""
+        old, _, later = self.dated_head_and_tip(head_when, tip_when)
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.lint_at(inherited, at_head=True)
+        self.assertEqual(rc, 0, text)
+        pushed = self.head("feat")
+        self.assertNotEqual(pushed, old, "precondition: the lint pushed nothing, so the case probes nothing: " + text)
+        at, ct = self.dates_of(pushed)
+        self.assertEqual(ct, later, "the merged commit's committer date is %d, not the later of the head's and the tip's, %d: %s" % (ct, later, text))
+        self.assertEqual(at, later, "the merged commit's author date is %d, not the later of the head's and the tip's, %d: %s" % (at, later, text))
+
+    def test_the_merged_commit_takes_the_later_date_when_the_tip_is_later_whatever_the_environment_holds(self):
+        self.check_merged_dates(self.HEAD_WHEN, self.TIP_WHEN, self.EARLY)
+
+    def test_the_merged_commit_takes_the_later_date_when_the_head_is_later_whatever_the_environment_holds(self):
+        self.check_merged_dates(self.TIP_WHEN, self.HEAD_WHEN, self.LATE)
+
+
+class CarriedVerdictLine(LaneFixture):
+    """The lane lint's PASS verdict line says how many CI steps a carry held. A step whose saved pass carried from an earlier head prints
+    `PASS (carried)`, so a reader can tell a carried PASS from a fresh one. A run with no carried step names none. Whatever the carry, the
+    posted comment keeps its marker, PR, Head and Result lines, and the job's PASS for that head is saved, so a rerun of the head reads it.
+    Cost per case: one lint run and one stub start, as LintResumesPassedJobs counts them (unmeasured)."""
+
+    lint_at = LintResumesPassedJobs.lint_at  # one lint run with the merge commit's dates set: LintResumesPassedJobs's
+    ran = LintResumesPassedJobs.ran  # how many times the stub ci-job ran the lint: LintResumesPassedJobs's
+    cached = staticmethod(LintResumesPassedJobs.cached)  # the lines that say a job's PASS was reused: LintResumesPassedJobs's
+    DATE = LintResumesPassedJobs.DATE_A  # the merge commit's dates for each run here: LintResumesPassedJobs's
+    CARRIED = [("PASS (carried)", "suite check"), ("PASS", "record slugs")]  # one step that a carry held, one fresh step
+
+    def verdict(self, text):
+        """The one PASS verdict line of a lint run's output."""
+        found = [line for line in text.splitlines() if line.startswith("PASS: lint of ")]
+        self.assertEqual(len(found), 1, "expected one PASS verdict line, got %r\n%s" % (found, text))
+        return found[0]
+
+    def test_the_verdict_line_names_the_one_step_a_carry_held(self):
+        self.use_ci_job(self.CARRIED, 0)
+        rc, text = self.lint_at(self.DATE, at_head=True)
+        self.assertEqual(rc, 0, text)
+        self.assertRegex(self.verdict(text), r"\b1\b[^;]*carried|carried[^;]*\b1\b",
+                         "the PASS verdict line does not name the one step a carry held: " + text)
+
+    def test_a_run_with_no_carried_step_names_none(self):  # control: green on the old code, which names no carry at all
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.lint_at(self.DATE, at_head=True)
+        self.assertEqual(rc, 0, text)
+        self.assertNotIn("carried", self.verdict(text), "a run that carried no step names one in its PASS verdict line: " + text)
+
+    def test_a_carried_pass_posts_its_head_and_saves_the_job_pass(self):  # control: green on the old code, where a carried pass is a PASS
+        self.use_ci_job(self.CARRIED, 0)
+        head = self.head("feat")
+        rc, text = self.lint_at(self.DATE, at_head=True)
+        self.assertEqual(rc, 0, text)
+        self.assertTrue(self.host.posted, "the carried PASS posted no lane-lint comment: " + text)
+        body = self.host.posted[-1][1].splitlines()
+        self.assertIn("Head: %s" % head, body, "the comment does not name the head of the carried PASS:\n" + "\n".join(body))
+        self.assertIn("Result: PASS", body, "the comment of the carried PASS does not read PASS:\n" + "\n".join(body))
+        ran = self.ran()
+        rc, text = self.lint_at(self.DATE, at_head=True)
+        self.assertEqual(self.ran(), ran, "the rerun at the same head ran the job again: the carried PASS was not saved: " + text)
+        self.assertTrue(self.cached(text), "the rerun at the same head printed no PASS (cached) for the job: " + text)
+
+    COUNTED = r"\b1\b[^;]*carried|carried[^;]*\b1\b"  # the verdict line's count of the carried step, and its word
+
+    def test_a_rerun_at_the_same_head_keeps_the_carried_count_in_the_verdict_line(self):  # control: green on the old code
+        self.use_ci_job(self.CARRIED, 0)
+        rc, text = self.lint_at(self.DATE, at_head=True)
+        self.assertEqual(rc, 0, text)
+        self.assertRegex(self.verdict(text), self.COUNTED, "scope: the first PASS verdict line does not name the carry: " + text)
+        rc, text = self.lint_at(self.DATE, at_head=True)  # the rerun the saved PASS answers
+        self.assertEqual(rc, 0, text)
+        self.assertRegex(self.verdict(text), self.COUNTED, "the rerun the saved PASS answers lost the carried count: " + text)
+        self.forget_saved_passes()  # the rerun runs the job again, and its carried step prints PASS (carried) again
+        self.use_ci_job(self.CARRIED, 0)
+        rc, text = self.lint_at(self.DATE, at_head=True)
+        self.assertEqual(rc, 0, text)
+        self.assertRegex(self.verdict(text), self.COUNTED, "the rerun that runs the job lost the carried count: " + text)
 
 
 class CiJobHeadCopy(LaneFixture):

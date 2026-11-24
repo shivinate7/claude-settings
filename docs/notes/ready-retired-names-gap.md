@@ -1,0 +1,1 @@
+- ready-retired-names-gap: the ready check `Retired names, one word per meaning` runs `lint/test_retired_names.py` (`.github/workflows/checks.yml` :618-620). `RepoRetiredNamesTests` (`lint/test_check_glossary.py` :1168) runs only in the `Glossary fixture suite` step (:610-612), which is not a ready check. A head can pass ready and fail CI on it. Seen: 2026-11-24 x1

@@ -1,0 +1,1 @@
+- shared-tree-prune-no-verdict: the prune arm in `hooks/guard_shared_tree.py` (:279-284) and `worktree_prune_subject` in `hooks/guard_core.py` (:2054-2066) decide no verdict. The judge in `hooks/guard.py` (:5989-5991) passes `worktree-prune` with `continue`. Cleanup for a later builder. Decision: guards-never-ask. Seen: 2026-11-24 x1

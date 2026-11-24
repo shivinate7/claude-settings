@@ -25,6 +25,14 @@
 # this repo's own action (`$/actions/<name>`, `./actions/<name>`), which runs only when the read of its action.yml below accepts it, else prints one unknown line. After the
 # last step, one line counts the steps run out of the job's total (--plan: "would run"). Neither it nor a `not run`
 # line starts with FAIL or unknown or moves the exit code: merge.py's lane lint reads those two words.
+# A picked CI step whose every run: line is a suite line, and whose exact pass is not saved (the head or the tree is new), prints PASS (carried) and runs
+# nothing when its pass saved at an earlier head still serves (run_step, carry_served): that head is an ancestor of HEAD, the base commit is the same, and the
+# delta between the two saved trees picks none of the step's suites (carry_delta). A delta of docs/records.md alone carries; a delta that touches the selector,
+# bin/ci-job or .github/stamp.json, or that sets every ci-scope.sh flag (an unmapped path), does not. Nor does a dirty tree, a pass saved from one, or a delta
+# that turns on a scope flag the step's `if:` reads. The carry key holds the exact key's environment. Any read that fails runs the step. A carried pass is saved
+# under the exact key marked carried, so a rerun at the head prints PASS (carried). Cost: per such step, one ancestor read and a git diff of the two saved trees;
+# per delta, when it holds more than the records file, also one ci-scope.sh run, one git diff of the added files of the range, and one selector run with its own
+# git diff of the range (three git diffs in all).
 # An install CI step is a run: whose every line is one install command (INSTALL_CMD: a lockfile install, or type
 # generation such as `npx astro sync`), since a lint step that reads generated files fails on a bare checkout. --lint
 # runs it, in order, only when a later lint step will run, or a later local action passes local_ready (its uses: step and
@@ -41,7 +49,7 @@
 # unknown and names the paths it looked at. The code-check step's line names
 # the code_check.py that ran. When every failure code_check.py reports is a pinned tool that could not start, the
 # step is unknown; any other failure makes it FAIL, its reason naming the tools that could not start.
-# A local `uses:` that is none of those three runs only under --lint, from the tree under test's own actions/<name>/action.yml. The
+# A local `uses:` that is none of those three runs only under --lint, or when --step names it, from the tree under test's own actions/<name>/action.yml. The
 # `uses:` step's own if: and continue-on-error: read as a run: step's do (a false if: is skipped, an unreadable one or a continue-on-error is
 # unknown), and after a failed install the action reads unknown naming it. A uses: step with its own env: is unknown naming the env, since
 # CI hands that env to the action's steps and this runner does not. A read of action.yml before any step runs refuses the action unless:
@@ -49,12 +57,11 @@
 # `${{ github.action_path }}`, read as the relative folder actions/<name> (the quotes around that one token drop); and every run: line is
 # a lint command, as above. A refusal runs no step, and its one unknown line names the file, the line or the expression. Each step then
 # runs as a workflow step does (its if:, env:, shell), with GITHUB_WORKSPACE set to the top level, and the first FAIL ends the action, as
-# in CI. The action prints one line: FAIL when a step fails (a probe's exit 1 and exit 2 both read FAIL, since CI is red on both), else
+# in CI. The action prints one line: FAIL when a step fails (under --lint a probe's exit 1 and exit 2 both read FAIL, since CI is red on both; under --step exit 2 reads unknown, and the step's output prints under the line), else
 # unknown when a step is unknown, else PASS. A step whose env needs the PR body (github.event.pull_request.body) is unknown, since this
 # runner has no PR body: an action with such a step reads unknown after its other steps ran, and a FAIL of those still wins. The real
-# two-step actions/claude-md-cites reads unknown for another reason: its second step's run: holds
-# `HEAD_SHA="$(git ...)"` and `export HEAD_SHA`, which are not lint commands, so the read refuses the whole action, names that first line,
-# and runs none of its steps. Cost: one bin/verdict and one shell per step, in order on the main thread, never in the worker pool; one
+# actions/claude-md-cites runs its three steps here (restates, aligned, facts), each a probe command; its aligned step reads the PR body from
+# the PR_BODY env, which the caller sets. Cost: one bin/verdict and one shell per step, in order on the main thread, never in the worker pool; one
 # `git rev-parse` of the base per run with a base.
 # --lint with no --base takes origin/main as CI does and says so
 # in one line, because a run that skipped the pull-request steps read as a pass. With no origin/main, one unknown
@@ -84,8 +91,9 @@
 # --step NAME (repeatable) runs only the steps with those names, of any kind, each as a plain run (never with --lint, which
 # picks steps by kind: that pair is a usage error, exit 2). Every other step is left out and prints nothing. A name no step
 # of the job has prints one `unknown` line, and when any name is missing no step runs: exit 2. A named step that does not
-# run (an action, a false if:) is also one `unknown` line, never a pass. The merge's ready checks run its declared
-# merge.readyChecks this way. Exit codes as below.
+# run (a false if:, a remote action) is also one `unknown` line, never a pass. A named local `uses:` action ($/actions/<name>)
+# runs as it does under --lint (its one line, its steps in place, PR_BODY and the base read as there). The merge's ready checks
+# run its declared merge.readyChecks this way. Exit codes as below.
 # --pinned is for merge's ready check: a step whose uses: is a remote `<owner>/claude-settings/actions/<code-check|zizmor>
 # @<40-hex sha>` runs that harness from a tree exported at the sha, so the child is judged by the code it pins, not the local
 # copy. The tree is `git archive <sha>` of the whole repo, from the clone beside this file, else the pointer checkout
@@ -183,6 +191,17 @@ def slashed(path):
     return path.replace("\\", "/")
 
 
+def under(top, path):
+    """`path` as the step's command names it: relative to `top` when it lies inside the checkout (the step runs with cwd `top`), so two worktrees of
+    one tree make one cache key; else the absolute path, slashed."""
+    try:
+        if os.path.commonpath([os.path.abspath(top), os.path.abspath(path)]) == os.path.abspath(top):
+            return slashed(os.path.relpath(path, top))
+    except ValueError:  # another drive on Windows
+        pass
+    return slashed(path)
+
+
 def no_shell(name, nt=None):
     """The detail of a step whose shell is missing."""
     if os.name == "nt" if nt is None else nt:
@@ -220,6 +239,20 @@ SCOPE_SCRIPT = ".github/scripts/ci-scope.sh"  # the one home of the scope flags:
 SCOPE = {"flags": None, "why": None, "unknown": set()}  # flags: {name: "true"|"false"} from the script; None with a base: it did not run, why says so; unknown: the flags read as true
 
 
+def select_suites(top, base):
+    """(the set of suites the one selector, `hooks/mutate_guard.py --lint-suites <base>`, picks for the diff base...HEAD, None) or (None, why it could not run)."""
+    try:
+        done = _nowindow.run([sys.executable, os.path.join(os.path.dirname(BIN), "hooks", "mutate_guard.py"), "--lint-suites", base], cwd=top,
+                             capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL, timeout=SELECTOR_LIMIT)
+        if done.returncode == 0:
+            return set(done.stdout.split()), None
+        return None, ((done.stdout + done.stderr).strip().splitlines() or ["exit %d with no message" % done.returncode])[-1]
+    except subprocess.TimeoutExpired:
+        return None, "the selector ran past %d s and was stopped" % SELECTOR_LIMIT
+    except OSError as e:
+        return None, str(e)
+
+
 def scope_term(m):
     """T or F for one `needs.scope.outputs.X == 'true'`, `!= 'true'` or `!= 'false'` term. Without flags, or for a flag the script did not give,
     it reads T (the step runs); the second case is listed in SCOPE["unknown"], which main() reports as UNKNOWN scope."""
@@ -236,9 +269,10 @@ def scope_term(m):
     return " T " if on == (m.group(2).startswith("==") or m.group(2).endswith("'false'")) else " F "
 
 
-def scope_flags(top, base_sha, head_ref, head_sha):
+def scope_flags(top, base_sha, head_ref, head_sha, files=None):
     """(flags, why): the name=value lines the repo's ci-scope.sh writes for this diff, run as CI's scope job runs it on a pull
-    request. (None, why) when the script is missing or fails: no flag is known, and each scope-gated step runs."""
+    request. (None, why) when the script is missing or fails: no flag is known, and each scope-gated step runs.
+    files: the paths to read in place of the diff (the script's SCOPE_FILES), which leaves out the guard-inputs pass; the landed-dir rule reads the range's added files."""
     script = os.path.join(top, *SCOPE_SCRIPT.split("/"))
     if not os.path.isfile(script):
         return None, "no %s" % SCOPE_SCRIPT
@@ -249,8 +283,10 @@ def scope_flags(top, base_sha, head_ref, head_sha):
         return None, "the base does not resolve to a commit"
     fd, out = tempfile.mkstemp(prefix="ci-job-scope-", suffix=".out")
     os.close(fd)
-    env = {k: v for k, v in os.environ.items() if k not in ("EVENT", "BASE_SHA", "HEAD_REF", "GREEN_HEAD", "PR_HEAD", "GITHUB_OUTPUT")}
+    env = {k: v for k, v in os.environ.items() if k not in ("EVENT", "BASE_SHA", "HEAD_REF", "GREEN_HEAD", "PR_HEAD", "GITHUB_OUTPUT", "SCOPE_FILES")}
     env.update(EVENT="pull_request", BASE_SHA=base_sha, HEAD_REF=head_ref, PR_HEAD=head_sha, GITHUB_OUTPUT=out)  # no GREEN_HEAD: unknown never skips
+    if files:
+        env["SCOPE_FILES"] = "\n".join(files)
     try:
         done = _nowindow.run(argv + [slashed(script)], cwd=top, env=env, capture_output=True, text=True, encoding="utf-8",
                              stdin=subprocess.DEVNULL, timeout=SELECTOR_LIMIT)
@@ -286,10 +322,26 @@ def condition(text, pr):
     return bool(eval(expr.replace("T", "True").replace("F", "False"), {"__builtins__": {}}))  # only T, F, and, or, not, ()
 
 
+LITERAL = re.compile(r"('[^']*')")
+OTHER_JOB_REF = re.compile(r"\b(?:needs|steps)\.[\w-]+(?:\.[\w-]+)*")
+
+
+def other_job_value(expr):
+    """'' for an expression whose only reads are other jobs' results and outputs and earlier steps' outputs, or None for any other
+    term. This runner runs one job alone, so none of those reads has a value and the whole expression reads as no value: the
+    expression is never evaluated, because a test of a missing read (`!= 'success'`, `== ''`) would come out true and read as a proof.
+    The terms it accepts around the reads are string literals, ==, !=, &&, ||, ! and parentheses."""
+    bare = LITERAL.sub("", expr)
+    if not OTHER_JOB_REF.search(bare):
+        return None
+    return "" if not re.sub(r"==|!=|&&|\|\||!|[\s()]", "", OTHER_JOB_REF.sub("", bare)) else None
+
+
 def expand(value, values):
-    """value with each known ${{ }} replaced, or None when one is unknown."""
-    missing = [m.group(1) for m in EXPR.finditer(value) if m.group(1) not in values]
-    return None if missing else EXPR.sub(lambda m: values[m.group(1)], value)
+    """value with each known ${{ }} replaced, or None when one is unknown. A ${{ }} that reads only other jobs' results
+    and outputs reads as other_job_value says."""
+    read = {m.group(1): values[m.group(1)] if m.group(1) in values else other_job_value(m.group(1)) for m in EXPR.finditer(value)}
+    return None if any(v is None for v in read.values()) else EXPR.sub(lambda m: read[m.group(1)], value)
 
 
 def commands(script):
@@ -526,7 +578,7 @@ def plan(step, pr, values, top, lint=False, pinned=False):
             if env["ZIZMOR_PATHS"] is None:
                 return "unknown", "with: paths needs an expression this runner cannot read: %s" % step_with(step)["paths"], None, None, None
         # A missing run.sh of a local uses: must FAIL, as in CI; bash alone would exit 127 and read as a missing tool.
-        path = slashed(path)  # $BASH: the bash running this script, never a PATH lookup that may find the WSL launcher
+        path = under(top, path)  # $BASH: the bash running this script, never a PATH lookup that may find the WSL launcher. Inside the checkout the path is relative, so the key holds no worktree folder
         return "run", 'test -f "%s" || { echo "no run.sh at %s" >&2; exit 1; }\n"$BASH" "%s"\n' % (path, path, path), shell_argv(None), env, None
     if action:
         if not pr:
@@ -539,7 +591,7 @@ def plan(step, pr, values, top, lint=False, pinned=False):
             path, looked = code_check(top, step, pinned)
             if not path:
                 return "unknown", looked if pinned and SHA_PIN.fullmatch(uses(step)) else "no code_check.py: looked for %s" % looked, None, None, None
-            return "run", 'python3 "%s" --base "%s"' % (slashed(path), values["base"]), shell_argv(None), {}, None
+            return "run", 'python3 "%s" --base "%s"' % (under(top, path), values["base"]), shell_argv(None), {}, None
         # Always the local bin/ste-changed, even under --pinned: only a checkout with .git can see pin drift. A --lint run passes with a
         # stale pin and says so (decision action-pins-follow-sessions); a --step or plain run still exits 3.
         return "run", '"%s" "%s"' % (slashed(os.path.join(BIN, "ste-changed")), values["base"]), shell_argv(None), {PIN_NOTE_ENV: "1"} if lint else {}, None
@@ -661,14 +713,16 @@ def local_ready(step, top, base):
     return (steps, None) if steps is not None else (None, ("unknown", why))
 
 
-def local_action(name, step, ctx, log, dry, ready):
-    """(state, the action's one line, True when a step ran or would run). ready: local_ready()'s result for the step.
-    state: FAIL, unknown, PASS, skipped, or would run (--plan). FAIL beats unknown, and the first FAIL ends the action, as in CI."""
+def local_action(name, step, ctx, log, dry, ready, named=False):
+    """(state, the action's line, True when a step ran or would run). ready: local_ready()'s result for the step.
+    state: FAIL, unknown, PASS, skipped, or would run (--plan). FAIL beats unknown, and the first FAIL ends the action, as in CI.
+    named: a --step run (merge's ready checks), not --lint. A probe that exits 2 reads unknown there, since a probe's exit 2 is a read that could not run (lint/compliance_probes.py),
+    and each step that is not a pass adds its own output to the line, one indented line each, so the caller names the gap and its fix without opening the log."""
     top, base, values, _ = ctx
     steps, held = ready
     if held:
         return held[0], held[1], False
-    parts, states, started = [], [], False
+    parts, states, started, shown = [], [], False, []
     for sname, st in steps:
         state, detail, shell, env, cwd = plan(st, bool(base), values, top, True)
         if state == "skipped" and not base and condition(step_key(st, "if"), True) is not False:
@@ -678,7 +732,12 @@ def local_action(name, step, ctx, log, dry, ready):
             if dry:
                 state = "would run"
             else:
+                start = os.path.getsize(log) if os.path.exists(log) else 0
                 state, detail = run_step(sname, st, False, detail, shell, {**env, "GITHUB_WORKSPACE": top}, cwd, ctx, log)
+                if named and state == "FAIL" and re.search(r"\brc=2\b", detail):
+                    state = "unknown"
+                if named and state in ("FAIL", "unknown"):
+                    shown.extend("  " + ln.rstrip() for ln in log_text(log, start).splitlines() if ln.strip() and not ln.startswith("=== verdict run"))
                 cached = detail.startswith(CACHE_MARK)  # still counts as started; its part of the line says so
                 detail = detail[len(CACHE_MARK):] if cached else detail
                 # verdict names a run's shell and its temp script, which differ on every run: name the step's own lines instead
@@ -692,7 +751,7 @@ def local_action(name, step, ctx, log, dry, ready):
             break
     final = ("FAIL" if "FAIL" in states else "unknown" if "unknown" in states else
              ("would run" if dry else "PASS") if started else "skipped")
-    return final, "; ".join(parts), started
+    return final, "\n".join(["; ".join(parts), *shown]), started
 
 
 ERR_LOCK = threading.Lock()  # a parallel run writes stderr from several threads: one whole line at a time
@@ -717,6 +776,11 @@ def lint_workers():
 
 
 CACHE_MARK = "(cached) "  # the start of a cached step's line: its caller prints PASS (cached) and drops the mark
+CARRY_MARK, CARRY_STATE = "(carried) ", "PASS (carried)"  # a carried step's line starts with the mark; its state reads CARRY_STATE (merge.py CARRIED_STATE reads it)
+CARRY_BLOCKERS = ("hooks/mutate_guard.py", "bin/ci-job", ".github/stamp.json")  # a delta that touches one never carries: the selector, this runner, the ready-checks list; the workflow and ci-scope.sh set every scope flag, which carry_delta_read reads
+CARRY_RECORDS = "docs/records.md"  # a delta of this one file carries every suite step: its pass reads no other record (ci-scope.sh's records-only skip names it too)
+CARRY_MEMO = {}  # (top, saved head, saved tree, tree) -> {picked: the delta's picked suites, None when it forbids any carry; changed: its paths; flags: its scope flags once read}; one read per run
+SCOPE_APART = {"windows_guard", "mutation_report", "records_only_skip"}  # ci-scope.sh outputs that an unmapped path does not set: carry_delta_read leaves them out of its read of every flag on
 CACHE_FILES, CACHE_DAYS = 300, 7
 VOLATILE_ENV = {"GITHUB_WORKSPACE", "VERDICT_LOG", "CI_JOB_LINT_WORKERS", "CI_JOB_NO_CACHE", "PWD", "OLDPWD", "SHLVL", "_", "COLUMNS", "LINES",
                "CLAUDE_CODE_SESSION_ID", "CLAUDE_PID", "TRACEPARENT", "CCR_SPAWN_TIMESTAMP_MS"}  # a variable that differs between runs and changes no step's result; GITHUB_WORKSPACE repeats the repo path, which the key holds once
@@ -819,25 +883,29 @@ def child_env(env, base, values):
 
 
 def cache_key(name, install, detail, shell, env, cwd, ctx, suite):
-    """The file name of a step's saved pass, or None when the step is never saved or its tree is unreadable."""
+    """(the file name of a step's saved pass, its carry facts), or (None, None) when the step is never saved or its tree is unreadable.
+    The facts are what a suite step's carry reads and saves: the carry key (the step's name, command, shell, cwd, flags, base name, tool and
+    child_env, as the exact key reads it: no head, base sha, commit or tree), the pushed head, the tree, and the base sha."""
     top, base, values, pinned = ctx
     if install or os.environ.get("CI_JOB_NO_CACHE") or not detail:
-        return None
+        return None, None
     # The commit, as the pushed head plus HEAD's parents and message, never HEAD's own sha: the lane lint makes a new merge commit of one
     # pushed head on each run, and its sha would never repeat. A step may read the message, which an amend changes under one tree, and HEAD's committer date
     # (lint/check_hook_stubs.py ends its window there); the key holds the message and not the date, because a new lint merge of one pushed head has a new date.
     tree, tool, commit = tree_key(top), tool_key(), git("show", "-s", "--format=%P%n%B", "HEAD", cwd=top)
     head = values.get("github.event.pull_request.head.sha", "")
     if tree is None or tool is None or not commit or not head:
-        return None
-    parts = [name, detail, shell[0], cwd or "", str(bool(suite)), str(bool(pinned)), values.get("base", ""),
-             values.get("github.event.pull_request.base.sha", ""), head, commit, tree, tool,
-             *("%s=%s" % kv for kv in sorted(child_env(env, base, values).items()) if kv[0] not in VOLATILE_ENV)]
-    return hashlib.sha256("\0".join(parts).encode("utf-8", "replace")).hexdigest()
+        return None, None
+    base_sha = values.get("github.event.pull_request.base.sha", "")
+    envs = ["%s=%s" % kv for kv in sorted(child_env(env, base, values).items()) if kv[0] not in VOLATILE_ENV]
+    parts = [name, detail, shell[0], cwd or "", str(bool(suite)), str(bool(pinned)), values.get("base", ""), base_sha, head, commit, tree, tool, *envs]
+    carry = ["carry", name, detail, shell[0], cwd or "", str(bool(suite)), str(bool(pinned)), values.get("base", ""), tool, *envs]  # the exact key's environment too: a changed ambient variable never carries
+    return (hashlib.sha256("\0".join(parts).encode("utf-8", "replace")).hexdigest(),
+            {"key": hashlib.sha256("\0".join(carry).encode("utf-8", "replace")).hexdigest(), "head": head, "tree": tree, "base": base_sha})
 
 
-def cache_load(key, name):
-    """The saved one-line verdict of a passed step, or None for a missing, empty, garbled or foreign file."""
+def cache_read(key, name):
+    """The saved record of a passed step (a dict holding its one-line verdict as `first`), or None for a missing, empty, garbled, foreign or old file."""
     path = os.path.join(cache_folder(), key)
     try:
         with open(path, "rb") as f:
@@ -846,20 +914,21 @@ def cache_load(key, name):
                 and isinstance(saved.get("first"), str) and saved["first"].startswith("PASS "):
             if time.time() - os.path.getmtime(path) > CACHE_DAYS * 86400:  # the age runs from the save: a hit never refreshes it
                 return None
-            return saved["first"]
+            return saved
     except (OSError, ValueError):
         pass
     return None
 
 
-def cache_save(key, name, first):
-    """Save a pass: one small file, written whole then renamed. Then prune the store. A failed write loses only the speed-up."""
+def cache_save(key, name, first, extra=None):
+    """Save a pass: one small file, written whole then renamed. Then prune the store. A failed write loses only the speed-up.
+    `extra` holds more fields of the record (a suite step's carry record)."""
     folder = cache_folder()
     try:
         os.makedirs(folder, exist_ok=True)
         fd, tmp = tempfile.mkstemp(prefix=".new-", dir=folder)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump({"key": key, "name": name, "first": first}, f)
+            json.dump({**(extra or {}), "key": key, "name": name, "first": first}, f)
         os.replace(tmp, os.path.join(folder, key))
         with os.scandir(folder) as it:
             files = sorted(((e.stat(follow_symlinks=False).st_mtime, e.path) for e in it if e.is_file(follow_symlinks=False)), reverse=True)
@@ -874,21 +943,115 @@ def cache_save(key, name, first):
         pass
 
 
-def run_step(name, step, install, detail, shell, env, cwd, ctx, log, suite=False):
+def touch_log(log):
+    """A step that does not run still makes its log file, since a parallel caller appends it."""
+    try:
+        open(log, "ab").close()
+    except OSError:
+        pass
+
+
+def run_step(name, step, install, detail, shell, env, cwd, ctx, log, suite=False, carry=()):
     """run_step_uncached behind the rerun cache: a step that passed at the same key returns (PASS, CACHE_MARK + its saved line) and runs
-    nothing; any other step runs and, when it passed, is saved. A hit makes the log file, since a parallel caller appends it."""
-    key = cache_key(name, install, detail, shell, env, cwd, ctx, suite)
-    saved = cache_load(key, name) if key else None
+    nothing; any other step runs and, when it passed, is saved. A hit makes the log file, since a parallel caller appends it.
+    carry: the suites of a CI step that holds suite lines only (carry_suites). Such a step that misses its exact key is served from
+    its pass saved at an earlier head when carry_served finds the delta holds nothing it runs: (PASS, CARRY_MARK + that line)."""
+    key, facts = cache_key(name, install, detail, shell, env, cwd, ctx, suite)
+    saved = cache_read(key, name) if key else None
     if saved:
-        try:
-            open(log, "ab").close()
-        except OSError:
-            pass
-        return "PASS", CACHE_MARK + saved
+        touch_log(log)
+        return "PASS", (CARRY_MARK if saved.get("carried") is True else CACHE_MARK) + saved["first"]
+    served = carry_served(step, name, carry, facts, ctx) if key and carry else None
+    if served:
+        cache_save(key, name, served, {"carried": True})  # a rerun at this head reads the exact key, and still reads as carried
+        touch_log(log)
+        return "PASS", CARRY_MARK + served
     state, first = run_step_uncached(name, step, install, detail, shell, env, cwd, ctx, log, suite)
     if key and state == "PASS" and first.startswith("PASS "):
         cache_save(key, name, first)
+        if carry and tree_clean(ctx[0], facts["tree"]):  # a pass of a dirty tree is no pass of any head, so it is no source of a carry
+            cache_save(facts["key"], name, first, {"head": facts["head"], "tree": facts["tree"], "base": facts["base"], "suites": list(carry)})
     return state, first
+
+
+def carry_delta(top, a_head, a_tree, b_tree):
+    """The suites that a change from the saved tree `a_tree` (a pass at `a_head`) to `b_tree` picks, as a set; None when nothing may carry:
+    `a_head` is no ancestor of HEAD, the trees cannot be diffed, the delta holds a CARRY_BLOCKERS file, ci-scope.sh sets every flag for it (an
+    unmapped file, a change to the workflow or to ci-scope.sh) or cannot be read, or the selector cannot run. A delta of CARRY_RECORDS alone
+    picks none, whatever the selector would say. Read once per run. Cost: one ancestor read and one git diff of the saved tree and this tree; when the delta
+    holds more than the records file, also one ci-scope.sh run, which starts one git diff of the added files of a_head...HEAD in SCOPE_FILES mode (the
+    landed-dir read), and one selector run, which starts one git diff of the saved head to HEAD; three git diffs in all. carry_scope reads the delta's flags for a step whose `if:` names one: a ci-scope.sh run, once per
+    delta, and none when that run already happened here."""
+    memo = (top, a_head, a_tree, b_tree)
+    if memo not in CARRY_MEMO:
+        CARRY_MEMO[memo] = carry_delta_read(top, a_head, a_tree, b_tree)
+    return CARRY_MEMO[memo]["picked"]
+
+
+def carry_delta_read(top, a_head, a_tree, b_tree):
+    """The memo entry of one delta: its picked suites (None: nothing may carry), its changed paths, and its scope flags once they are read."""
+    entry = {"picked": None, "changed": None, "flags": None}
+    kw = dict(cwd=top, capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL, timeout=120)
+    try:
+        if _nowindow.run(["git", "merge-base", "--is-ancestor", a_head, "HEAD"], **kw).returncode != 0:  # HEAD, not a sha: the ancestor read is no two-tree read
+            return entry
+        done = _nowindow.run(["git", "diff", "--name-only", "--no-renames", "-z", a_tree, b_tree], **kw)
+    except (OSError, subprocess.SubprocessError):
+        return entry
+    if done.returncode != 0:
+        return entry
+    changed = {item for item in done.stdout.split("\0") if item}
+    if changed.intersection(CARRY_BLOCKERS):
+        return entry
+    entry["changed"] = sorted(changed)
+    if changed <= {CARRY_RECORDS}:
+        entry["picked"] = set()
+        return entry
+    flags = entry["flags"] = scope_flags(top, a_head, git("rev-parse", "--abbrev-ref", "HEAD", cwd=top) or "", git("rev-parse", "HEAD", cwd=top) or "",
+                                         entry["changed"])[0]
+    on = {k: v for k, v in (flags or {}).items() if k not in SCOPE_APART}
+    if not on or all(v == "true" for v in on.values()):  # every flag on is the script's fail safe: it reads the delta as unmapped
+        return entry
+    entry["picked"], _ = select_suites(top, a_head)
+    return entry
+
+
+def carry_scope(top, a_head, a_tree, b_tree):
+    """The scope flags (name -> "true" | "false") that ci-scope.sh gives the delta's changed paths, or None when they cannot be read. Read once per delta."""
+    entry = CARRY_MEMO.get((top, a_head, a_tree, b_tree))
+    if not entry or entry["changed"] is None:
+        return None
+    if entry["flags"] is None:
+        entry["flags"] = scope_flags(top, a_head, git("rev-parse", "--abbrev-ref", "HEAD", cwd=top) or "", git("rev-parse", "HEAD", cwd=top) or "",
+                                     entry["changed"])[0]
+    return entry["flags"]
+
+
+def carry_served(step, name, carry, facts, ctx):
+    """The saved one-line verdict of a suite step's pass at an earlier head, when it serves this head: the carry record of its key names a
+    head that is an ancestor of this one, saved on the same base commit and from a tree whose delta to this tree picks none of the step's `carry`
+    suites (carry_delta); this tree is clean (tree_clean); and each scope flag the step's `if:` reads is off for the delta (carry_scope: a flag
+    that is on, or that the script does not give, runs the step). None otherwise: the step runs. A step that did not pass was never saved, so
+    none carries."""
+    top = ctx[0]
+    saved = cache_read(facts["key"], name)
+    if not saved or not all(isinstance(saved.get(k), str) and saved[k] for k in ("head", "tree", "base")) or saved["base"] != facts["base"] \
+            or saved.get("suites") != list(carry) or not tree_clean(top, facts["tree"]):
+        return None
+    picked = carry_delta(top, saved["head"], saved["tree"], facts["tree"])
+    if picked is None or picked.intersection(carry):
+        return None
+    read = [m.group(1) for m in SCOPE_TERM.finditer(step_key(step, "if") or "")]
+    if read:
+        flags = carry_scope(top, saved["head"], saved["tree"], facts["tree"])
+        if flags is None or any(flags.get(flag) != "false" for flag in read):
+            return None
+    return saved["first"]
+
+
+def tree_clean(top, tree):
+    """True when `tree` (a tree_key read) is HEAD's own tree: no uncommitted edit, and no untracked file that .gitignore leaves visible."""
+    return bool(tree) and git("rev-parse", "HEAD^{tree}", cwd=top) == tree
 
 
 def run_step_uncached(name, step, install, detail, shell, env, cwd, ctx, log, suite=False):
@@ -923,7 +1086,8 @@ def run_step_uncached(name, step, install, detail, shell, env, cwd, ctx, log, su
     finally:
         os.remove(script)
     line = next((ln.rstrip("\n") for ln in kept if ln.startswith(("PASS ", "SKIP ", "FAIL "))), None)
-    first = line or "(verdict printed no verdict line)"
+    hang = next((ln.rstrip("\n") for ln in kept if ln.startswith("HANG ")), None) if rc == 124 and line is None else None
+    first = line or hang or "(verdict printed no verdict line)"  # a hang stop's own line says why the step read unknown
     if known_action(step) == "code-check":
         first += " (code_check.py: %s)" % code_check(top, step, pinned)[0]
     if rc == 127 or gone:
@@ -970,6 +1134,13 @@ def suite_paths(step):
     """The suites a CI step runs: the path of each of its run: lines that is `python3 hooks|merge/test_<name>.py`, with
     arguments allowed. Any other line of the step stays in it, so a picked step runs whole, as CI runs it."""
     return [m.group(1) for ln in run_lines(step) if (m := SUITE_LINE.fullmatch(ln))]
+
+
+def carry_suites(step):
+    """The suites of a CI step whose every run: line is a suite line: the steps that may carry a saved pass. () for any other step, since a line
+    that is not a suite line may read git history or the pull request's diff."""
+    lines = run_lines(step)
+    return suite_paths(step) if lines and all(SUITE_LINE.fullmatch(ln) for ln in lines) else []
 
 
 def log_text(log, start):
@@ -1104,7 +1275,7 @@ def main(argv, sibling=False, ran_suites=None):
         SCOPE["flags"], SCOPE["why"] = scope_flags(top, base_sha, git("rev-parse", "--abbrev-ref", "HEAD", cwd=top) or "",
                                                    values["github.event.pull_request.head.sha"])
     kind = ["lint" if is_lint(st) else "install" if is_install(st) else "local" if LOCAL_ACTION.fullmatch(uses(st)) else ""
-            for st in steps] if lint else [""] * len(steps)
+            for st in steps] if lint else ["local" if nm in wanted and not known_action(st) and LOCAL_ACTION.fullmatch(uses(st)) else "" for nm, st in zip(names, steps)]  # a --step run still runs a local action it names, as a lint run does
     if sibling:  # only the picked suite steps of this job: its own lint steps are CI's, not part of the lane lint
         kind = ["" if k in ("lint", "local") else k for k in kind]
     suites = [suite_paths(st) if lint and not k else [] for st, k in zip(steps, kind)]  # each step's suite lines
@@ -1118,19 +1289,7 @@ def main(argv, sibling=False, ran_suites=None):
     if base and (top, base) in SELECTED:  # a sibling pass reads the pick the first pass made
         picked, why = SELECTED[(top, base)]
     elif base and (any(suites) or elsewhere):  # one selector process for the CI steps with a suite in every job
-        why = "the selector did not run"
-        try:
-            done = _nowindow.run([sys.executable, os.path.join(os.path.dirname(BIN), "hooks", "mutate_guard.py"),
-                                  "--lint-suites", base], cwd=top, capture_output=True, text=True, encoding="utf-8",
-                                 stdin=subprocess.DEVNULL, timeout=SELECTOR_LIMIT)
-            if done.returncode == 0:
-                picked = set(done.stdout.split())
-            else:
-                why = ((done.stdout + done.stderr).strip().splitlines() or ["exit %d with no message" % done.returncode])[-1]
-        except subprocess.TimeoutExpired:
-            why = "the selector ran past %d s and was stopped" % SELECTOR_LIMIT
-        except OSError as e:
-            why = str(e)
+        picked, why = select_suites(top, base)
         SELECTED[(top, base)] = (picked, why)
     for i, found in enumerate(suites):  # a step with a picked suite runs as a lint step does
         if picked is not None and picked.intersection(found):
@@ -1167,7 +1326,7 @@ def main(argv, sibling=False, ran_suites=None):
                     tally["unknown"] += 1
                     print("%-15s %s: --lint did not run it: install step %s did not finish" % ("unknown", name, blocker))
                     continue
-                state, line, started = local_action(name, step, ctx, log, dry, ready[n - 1])
+                state, line, started = local_action(name, step, ctx, log, dry, ready[n - 1], bool(wanted) and not lint)
                 ran += started
                 ran_lint += started
                 print("%-15s %s" % (state, name) if state == "would run" else "%-15s %s: %s" % (state, name, line))
@@ -1223,11 +1382,14 @@ def main(argv, sibling=False, ran_suites=None):
                     kept_logs = True
                 first = first.replace(own, log)  # the verdict line names the log that stays
             else:
-                state, first = run_step(name, step, install, detail, shell, env, cwd, ctx, log, kind[n - 1] == "suite")
+                state, first = run_step(name, step, install, detail, shell, env, cwd, ctx, log, kind[n - 1] == "suite",
+                                        carry_suites(step) if kind[n - 1] == "suite" else ())
             tally["FAIL" if state == "FAIL" else "unknown"] += state not in ("PASS", "SKIP")
             blocker = blocker or (name if install and state == "unknown" else None)
             if first.startswith(CACHE_MARK):  # a cached pass: the state reads PASS (cached), and counts as PASS above
                 state, first = "PASS (cached)", first[len(CACHE_MARK):]
+            elif first.startswith(CARRY_MARK):  # a carried pass: the line says so, and it counts as PASS above
+                state, first = CARRY_STATE, first[len(CARRY_MARK):]
             print("%-15s %s: %s" % (state, name, first))
     finally:
         if pool:
@@ -1263,6 +1425,7 @@ def main(argv, sibling=False, ran_suites=None):
 
 
 if __name__ == "__main__":
+    for stream in (sys.stdout, sys.stderr): stream.reconfigure(encoding="utf-8", errors="replace")  # a cp1252 pipe (Windows) cannot print a FAIL line that holds a step's non-ASCII output, and merge reads this stdout as utf-8
     _nowindow.end_on_signals()  # TERM and HUP end the run through the `finally` below, so the log folder, the pin trees and the work folder go
     try:
         sys.exit(main(sys.argv[1:]))

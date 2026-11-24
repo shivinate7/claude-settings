@@ -2940,6 +2940,13 @@ class CitedExcerptTests(unittest.TestCase):
         shown = self.stale.cited_excerpt("read the top of the file", self.TEXT)
         self.assertIsNone(shown, "a read cite with no backing path gives %r, want None" % (shown,))
 
+    def test_a_cited_row_is_whole_when_no_row_limit_is_given(self):
+        # Control: a row limit is opt-in, so a caller that names none still gets each cited row whole. The judge's cut of one over-budget
+        # line passes its own limit (the packing pick, 04:00 CST Nov 24 2026) and changes no other caller.
+        long_row = "a = " + "1" * 500
+        shown = self.stale.cited_excerpt("read src/widget.py:1", long_row + "\n")
+        self.assertEqual(shown, "1: " + long_row, "a cited row of %d characters is not whole with no row limit given" % len(long_row))
+
 
 CONFIG = "hooks/config.py"  # the Python file the value cites name
 LIMIT_BASE = "LIMIT = 4\n\n\ndef keep():\n    return 1\n"

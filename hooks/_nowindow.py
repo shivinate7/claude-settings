@@ -20,6 +20,7 @@ carries a `# nowindow: <reason>` marker and calls `subprocess` itself.
 """
 import contextlib
 import os
+import re
 import signal
 import stat
 import subprocess
@@ -99,6 +100,82 @@ def descendants(pid):
     return found
 
 
+TOOL_TIMEOUT = 5  # seconds for one ps call, so a read cannot hang its caller
+CPU_TIME = re.compile(r"(?:(?:(\d+)-)?(\d+):)?(\d+):(\d+(?:\.\d+)?)$")
+PS_DOWN = "(ps did not answer"
+
+
+def run_text(args, timeout=TOOL_TIMEOUT):
+    """The stdout of one run of `args`, or "(<program> did not answer: <error>)" when it could not run."""
+    try:
+        return run(args, capture_output=True, text=True, errors="replace", timeout=timeout).stdout
+    except Exception as exc:
+        return "(%s did not answer: %s)\n" % (args[0], type(exc).__name__)
+
+
+def cpu_seconds(text):
+    """Seconds in a ps `time` field, [[dd-]hh:]mm:ss[.cc]; 0 when it does not read."""
+    m = CPU_TIME.match(text)
+    if not m:
+        return 0.0
+    days, hours, mins, secs = m.groups()
+    return int(days or 0) * 86400 + int(hours or 0) * 3600 + int(mins) * 60 + float(secs)
+
+
+def proc_table(timeout=TOOL_TIMEOUT, runner=None):
+    """(rows, kids, note) from one ps call: rows is {pid: [pid, ppid, stat, time]}, kids {ppid: [pid]}.
+    note is the text of a ps that gave no answer, else ''. `runner(args, timeout)` stands in for run_text (a caller's own seam)."""
+    out = (runner or run_text)(["ps", "-axo", "pid=,ppid=,stat=,time="], timeout)
+    if out.startswith(PS_DOWN):
+        return {}, {}, out.strip()
+    rows, kids = {}, {}
+    for line in out.splitlines():
+        p = line.split()
+        if len(p) >= 4:
+            rows[p[0]] = p
+            kids.setdefault(p[1], []).append(p[0])
+    return rows, kids, ""
+
+
+def reaped_seconds(pid):
+    """CPU seconds of the children that process pid has already waited for (cutime + cstime in /proc/PID/stat). It catches a
+    chain of short children that ps never shows alive at a sample. 0 where /proc is absent or the read fails."""
+    try:
+        with open("/proc/%s/stat" % pid) as f:
+            text = f.read()
+        fields = text[text.rindex(")") + 2:].split()
+        return (int(fields[13]) + int(fields[14])) / os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError, IndexError, AttributeError):
+        return 0.0
+
+
+def reaped_readable():
+    """True where reaped_seconds can read (the /proc stat file exists), so a tree's CPU counts the short children it has waited for."""
+    return os.path.exists("/proc/self/stat")
+
+
+def tree_cpu(table, pid, own=False, reaped=None):
+    """{pid: CPU seconds} for every process under pid in a proc_table, each with the time of the children it has reaped
+    (reaped_seconds; `reaped(pid)` stands in for it, a caller's own seam). pid's own time is left out unless `own`, its reaped
+    children's time is in: a builtin loop in the stall watch's job shell, with no child, is no sign of work, a child that ended is.
+    Verdict passes own=True: its child's own time is the work. Cost: one /proc read for each process under pid and one for pid, no process."""
+    rows, kids, _ = table
+    reaped = reaped or reaped_seconds
+    root = str(pid)
+    cpu, stack = {root: reaped(pid) + (cpu_seconds(rows[root][3]) if own and root in rows else 0.0)}, list(kids.get(root, []))
+    while stack:
+        cur = stack.pop()
+        if cur not in cpu:
+            cpu[cur] = cpu_seconds(rows[cur][3]) + reaped(cur)
+            stack.extend(kids.get(cur, []))
+    return cpu
+
+
+def cpu_advanced(seen, cpu):
+    """True when a process in cpu has more CPU seconds than in seen (a new one counts from 0)."""
+    return any(secs > seen.get(p, 0.0) for p, secs in cpu.items())
+
+
 def kill_tree(proc, sig, known=()):
     """Send `sig` to `proc` and to every process below it, and to each pid in `known`. -> the pids it reached, to pass as `known` to a later
     call, because a child that has exited leaves its own children with no parent to find them by. The caller leaves the child in the caller's
@@ -115,6 +192,16 @@ def kill_tree(proc, sig, known=()):
         except OSError:
             pass
     return pids
+
+
+def taskkill_tree(pid, timeout=5):
+    """Ends `pid` and its children with `taskkill /F /T /PID`, best effort, through run() so the console stays hidden. The one home of the
+    Windows tree kill: Popen.kill ends only the child, and a grandchild (ssh, a nested install) would keep running. Nothing is raised:
+    a missing taskkill, or one past `timeout` seconds, leaves the caller to end the leader itself. Windows only; elsewhere there is no taskkill."""
+    try:
+        run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 def end_on_signals():

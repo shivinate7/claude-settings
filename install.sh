@@ -995,12 +995,12 @@ stage_file() {
 }
 
 # stage_guard_set SRC_HOOKS STAGE_HOOKS: the guard set goes in the generation's hooks/guard.d/<id>/: every guard
-# file, stamped, and shared_names.py, git_reads.py, question_form.py, own_session.py, precompact_handoff.py, merge_options.py, override.py, _nowindow.py, proc_env.py, reread_check.py, call_judge.py, decision_watch.py, feedback_guard.py, local_time.py, ruling_home.py, route_match.py, reply_judge.py, stall_watch.py, agent_brief.py, mail.py, ci_wait_cap.py, ci_wake.py, session_role.py, ci_wait_cap.json, route_rows.json precompact_handoff_prompt.md and wait_common.py,
+# file, stamped, and shared_names.py, git_reads.py, question_form.py, own_session.py, precompact_handoff.py, merge_options.py, override.py, _nowindow.py, proc_env.py, reread_check.py, call_judge.py, decision_watch.py, feedback_guard.py, local_time.py, ruling_home.py, route_match.py, reply_judge.py, stall_watch.py, agent_brief.py, mail.py, ci_wait_cap.py, ci_wake.py, required_check.py, session_role.py, ci_wait_cap.json, route_rows.json precompact_handoff_prompt.md and wait_common.py,
 # which the guard imports or reads beside itself. hooks/guard.py finds it by its own real path, so it is the set of its generation.
 stage_guard_set() {
   sg_dir="$2/guard.d/$INSTALL_ID_VALUE"
   mkdir -p "$sg_dir" || return 1
-  for gf in "$1"/guard.py "$1"/guard_*.py "$1"/shared_names.py "$1"/git_reads.py "$1"/question_form.py "$1"/own_session.py "$1"/precompact_handoff.py "$1"/merge_options.py "$1"/override.py "$1"/_nowindow.py "$1"/proc_env.py "$1"/reread_check.py "$1"/call_judge.py "$1"/decision_watch.py "$1"/feedback_guard.py "$1"/local_time.py "$1"/ruling_home.py "$1"/route_match.py "$1"/reply_judge.py "$1"/stall_watch.py "$1"/agent_brief.py "$1"/mail.py "$1"/ci_wait_cap.py "$1"/ci_wake.py "$1"/session_role.py "$1"/answered_claims.py "$1"/ci_wait_cap.json "$1"/route_rows.json "$1"/precompact_handoff_prompt.md "$1"/wait_common.py; do
+  for gf in "$1"/guard.py "$1"/guard_*.py "$1"/shared_names.py "$1"/git_reads.py "$1"/question_form.py "$1"/own_session.py "$1"/precompact_handoff.py "$1"/merge_options.py "$1"/override.py "$1"/_nowindow.py "$1"/proc_env.py "$1"/reread_check.py "$1"/call_judge.py "$1"/decision_watch.py "$1"/feedback_guard.py "$1"/local_time.py "$1"/ruling_home.py "$1"/route_match.py "$1"/reply_judge.py "$1"/stall_watch.py "$1"/agent_brief.py "$1"/mail.py "$1"/ci_wait_cap.py "$1"/ci_wake.py "$1"/required_check.py "$1"/session_role.py "$1"/answered_claims.py "$1"/ci_wait_cap.json "$1"/route_rows.json "$1"/precompact_handoff_prompt.md "$1"/wait_common.py; do
     [ -f "$gf" ] || continue
     stage_file "$gf" "$sg_dir/$(basename "$gf")" || return 1
   done
@@ -1047,12 +1047,37 @@ stage_skills_dir() {
   done
 }
 
+# link_over_flag: the mv flag that renames a link over a link to a folder (the no-target-directory form): -T on
+# GNU, -h on BSD and macOS. It is found once by trying each flag on scratch links. Trying a flag on the real rename
+# would make a failed mv and then a second one, two renames over the live name where the switch must be one.
+# Prints nothing when neither flag works.
+LINK_OVER_FLAG=""
+link_over_flag() {
+  [ -z "$LINK_OVER_FLAG" ] || { printf '%s' "$LINK_OVER_FLAG"; return 0; }
+  lf_dir="$CLAUDE_DIR/.cs-mvprobe.$$"
+  rm -rf "$lf_dir"
+  if mkdir -p "$lf_dir/d" && ln -s d "$lf_dir/a"; then
+    for lf in -fT -fh; do
+      rm -f "$lf_dir/b" "$lf_dir/d/b"
+      ln -s d "$lf_dir/b" || break
+      if mv "$lf" "$lf_dir/b" "$lf_dir/a" 2>/dev/null && [ ! -e "$lf_dir/d/b" ] && [ ! -L "$lf_dir/b" ]; then
+        LINK_OVER_FLAG=$lf; break
+      fi
+    done
+  fi
+  rm -rf "$lf_dir"
+  printf '%s' "$LINK_OVER_FLAG"
+}
+
 # link_over TMP DEST: rename the link TMP over DEST in one step. DEST that is a link to a folder needs mv's
-# no-target-directory form, or mv puts TMP inside that folder: -T on GNU, -h on BSD and macOS. The idiom of
+# no-target-directory form (link_over_flag), or mv puts TMP inside that folder. The idiom of
 # point_at in merge/install_from_main.sh. Never ln -sfn: GNU ln -f removes DEST before it makes the link.
 link_over() {
   if [ -L "$2" ]; then
-    mv -fT "$1" "$2" 2>/dev/null || mv -fh "$1" "$2" || return 1
+    lo_flag=$(link_over_flag)
+    [ -n "$lo_flag" ] || return 1
+    LINK_OVER_FLAG=$lo_flag
+    mv "$lo_flag" "$1" "$2" || return 1
   else
     mv -f "$1" "$2" || return 1
   fi
@@ -1133,7 +1158,7 @@ gen_switch() {
   rm -f "$gs_tmp"
   ln -s "$gs_to" "$gs_tmp" || return 1
   if [ -L "$GEN_CUR" ]; then
-    mv -fT "$gs_tmp" "$GEN_CUR" 2>/dev/null || mv -fh "$gs_tmp" "$GEN_CUR" || { rm -f "$gs_tmp"; return 1; }
+    link_over "$gs_tmp" "$GEN_CUR" || { rm -f "$gs_tmp"; return 1; }
   elif [ -e "$GEN_CUR" ]; then
     rm -f "$gs_tmp"; return 1
   else

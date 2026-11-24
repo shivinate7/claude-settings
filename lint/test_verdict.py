@@ -1,17 +1,48 @@
 #!/usr/bin/env python3
 """Fixture test for bin/verdict. Run: python lint/test_verdict.py -v"""
-import os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest
+import os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, types, unittest
+from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
-from proc_fixture import alive, default_sigint, kill_all, stop_group, wait_for, wait_gone  # noqa: E402  the one home of the signal-test helpers (testing/proc_fixture.py)
+from proc_fixture import alive, default_sigint, kill_all, stop_group, wait_for, wait_gone, zombie  # noqa: E402  the one home of the signal-test helpers (testing/proc_fixture.py)
+import _nowindow  # noqa: E402  the module bin/verdict imports too; its reaped_readable() is the seam the hang-stop cases patch
 RUN_FOLDER = _test_temp.run_folder()  # its sweep is proved in test_find_copies.py
 V = os.environ.get("VERDICT_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "verdict")
 # The Windows launcher. It always runs its sibling bin/verdict, so VERDICT_UNDER_TEST does not reach it.
 CMD = [os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "verdict.cmd")]
 UTF8 = {"PYTHONIOENCODING": "utf-8"}  # the child prints the real \u2714/\u2718 marks; a cp1252 stdout cannot
 HB_FORMAT = re.compile(r"^verdict: still running, [0-9][0-9.]*s?, log=")
+POSIX_SKIP = "the form runs through a POSIX shell (bash -c), which Windows does not have"
+HANG_SKIP = "the hang stop reads CPU through a POSIX ps and stops a process group, which Windows does not have"
+HANG_CAP = 30  # the hang cases' guard: a stop takes about 2 N s, so 30 s sits well above a run of 1-2 s
+PS_SCOPE = "import os, subprocess\nsubprocess.run(['ps', '-p', str(os.getpid())], capture_output=True)\n"  # the child's own ps start: proves the counting shim is on its PATH
+WALL_JUMP = ("import runpy, sys, time\n"  # the launcher: verdict runs in this process with its wall clock patched; the child is a separate process
+             "real, reads = time.time, [0]\n"
+             "def jumped():\n"  # each wall read lands an hour further on than the one before, so any two reads are 3600 s or more apart
+             "    reads[0] += 1\n"
+             "    return real() + 3600.0 * reads[0]\n"
+             "time.time = jumped\n"  # time.monotonic is left as it is
+             "sys.argv = sys.argv[1:]\n"
+             "runpy.run_path(sys.argv[0], run_name='__main__')\n")
+
+_VERDICT_MODULE = {}
+
+def load_verdict_module():
+    """bin/verdict loaded into this process, so a case can call its functions with fabricated samples. Its entry line calls
+    main() and exits, so that line is swapped for `pass` before it runs: a `pass` still loads when the entry line sits under an
+    `if __name__` guard. The swap must find the line (scope). No .pyc is written."""
+    if "mod" not in _VERDICT_MODULE:
+        with open(V, encoding="utf-8") as h: src = h.read()
+        entry = "sys.exit(main(sys.argv[1:]))"
+        if entry not in src: raise RuntimeError("bin/verdict's entry line moved, so the in-process load cannot swap it")
+        mod = types.ModuleType("verdict_in_process")
+        mod.__file__ = V
+        exec(compile(src.replace(entry, "pass", 1), V, "exec"), mod.__dict__)
+        _VERDICT_MODULE["mod"] = mod
+    return _VERDICT_MODULE["mod"]
 
 def run(code=None, log=None, extra=None, timeout=None, launcher=None, shell=None, argv=None, shim=None, cwd=None):
     """`shell` is an sh -c line in which {cmd} stands for the verdict command, e.g. a pipe or a redirect.
@@ -21,6 +52,7 @@ def run(code=None, log=None, extra=None, timeout=None, launcher=None, shell=None
     env.pop("VERDICT_LOG", None)
     env.pop("VERDICT_HEARTBEAT", None)
     env.pop("STALL_WATCH_BEAT", None)  # an inherited beat file would take the beat lines of these runs
+    env.pop("VERDICT_HANG_SECONDS", None)  # the hang stop is off unless a case sets it (decision hang-stop)
     if log: env["VERDICT_LOG"] = log
     env.update(extra or {})
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
@@ -216,9 +248,11 @@ class T(unittest.TestCase):
             with self.subTest(signal=sig.name):
                 self.assert_signal_ends_child_tree(sig)
 
-    def start_child_tree(self, d, preexec=None):
+    def start_child_tree(self, d, preexec=None, env_extra=None, output=None, before_sleep=""):
         """Starts verdict in its own group, running a child that starts a grandchild. -> (the verdict Popen, child pid, grandchild pid).
-        The pids are read from a marker the child writes once both run. A red run's pids are killed at cleanup."""
+        The pids are read from a marker the child writes once both run. A red run's pids are killed at cleanup.
+        env_extra sets verdict's environment. output (an open file) takes verdict's stdout and stderr; else both go to nowhere.
+        before_sleep is Python source the child runs after the marker, before it sleeps 300 s."""
         ready = os.path.join(d, "ready.txt")
         script = os.path.join(d, "fx.py")
         # The child starts a grandchild, then writes both pids. The marker is renamed into place, so a reader sees it whole.
@@ -227,6 +261,7 @@ class T(unittest.TestCase):
                 "tmp = READY + '.tmp'\n"
                 "open(tmp, 'w').write('%d %d' % (os.getpid(), grand.pid))\n"
                 "os.replace(tmp, READY)\n"
+                + before_sleep +
                 "time.sleep(300)\n").replace("READY", repr(ready))
         with open(script, "w", encoding="utf-8") as handle:
             handle.write(body)
@@ -235,9 +270,12 @@ class T(unittest.TestCase):
         env = dict(os.environ)
         env.pop("VERDICT_HEARTBEAT", None)
         env.pop("STALL_WATCH_BEAT", None)
+        env.pop("VERDICT_HANG_SECONDS", None)
+        env.update(env_extra or {})
         env["VERDICT_LOG"] = os.path.join(d, "v.log")
+        sink = output if output is not None else subprocess.DEVNULL
         proc = subprocess.Popen([sys.executable, V, sys.executable, script], env=env, start_new_session=True,
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, preexec_fn=preexec)
+                                stdout=sink, stderr=subprocess.STDOUT if output is not None else subprocess.DEVNULL, preexec_fn=preexec)
         self.addCleanup(stop_group, proc)
         self.assertTrue(wait_for(ready, 60, proc), "fixture: verdict's child never wrote its pids")
         child, grand = (int(x) for x in open(ready, encoding="utf-8").read().split())
@@ -286,6 +324,293 @@ class T(unittest.TestCase):
                 self.fail("verdict did not exit within 60 s of INT")
             self.assertTrue(wait_gone(child, 30), "INT to verdict did not end its child %d, which runs after verdict returned" % child)
             self.assertTrue(wait_gone(grand, 30), "INT to verdict did not end the child's child %d, which runs after verdict returned" % grand)
+
+    def run_hang_case(self, d, seconds, before_sleep=""):
+        """Runs verdict over a child tree with VERDICT_HANG_SECONDS set and waits for verdict to return. A verdict that does not return
+        within HANG_CAP fails here. -> (verdict's rc, its output, child pid, grandchild pid, the time it returned)."""
+        out = os.path.join(d, "out.txt")
+        with open(out, "wb") as fh:
+            proc, child, grand = self.start_child_tree(d, env_extra={"VERDICT_HANG_SECONDS": str(seconds)}, output=fh, before_sleep=before_sleep)
+            self.assertTrue(alive(child) and alive(grand), "scope: the child and its child must run before the stop")
+            try:
+                proc.wait(timeout=HANG_CAP)
+            except subprocess.TimeoutExpired:
+                self.fail("verdict did not stop a hang within %d s with VERDICT_HANG_SECONDS=%d" % (HANG_CAP, seconds))
+            returned = time.time()
+        with open(out, encoding="utf-8", errors="replace") as fh:
+            return proc.returncode, fh.read(), child, grand, returned
+
+    def count_ps_starts(self, code, seconds):
+        """Runs verdict over code with VERDICT_HANG_SECONDS set and a counting `ps` first on PATH. -> (the number of ps starts, the run).
+        Each start writes one line to the counter file, so every ps call verdict or the child makes is counted."""
+        real = shutil.which("ps")
+        if real is None: raise unittest.SkipTest("no ps on PATH to count")
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            counter = os.path.join(d, "ps-starts.txt")
+            body = "#!/bin/sh\necho start >> %s\nexec %s \"$@\"\n" % (shlex.quote(counter), shlex.quote(real))
+            r = run(code, os.path.join(d, "v.log"), {"VERDICT_HANG_SECONDS": str(seconds)}, timeout=60, shim=("ps", body))
+            starts = 0
+            if os.path.exists(counter):
+                with open(counter, encoding="utf-8") as h: starts = h.read().count("start")
+        return starts, r
+
+    @unittest.skipIf(os.name == "nt", HANG_SKIP)
+    def test_hang_stop_idle_silent_child_is_stopped_with_its_tree(self):
+        """An idle child that printed one line, then went silent, is stopped at N = 1 s. The output holds one HANG line,
+        the process tree (both pids) and the log tail, and the child and its child are gone (decision hang-stop)."""
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            rc, out, child, grand, _ = self.run_hang_case(d, 1, before_sleep="print('LAST-LINE-BEFORE-SILENCE', flush=True)\n")
+            self.assertNotEqual(rc, 0, out)
+            self.assertTrue(any(l.startswith("HANG ") for l in out.splitlines()), "verdict printed no HANG line: " + out)
+            self.assertIn(str(child), out, "the HANG output names no child pid: the process tree was not printed")
+            self.assertIn(str(grand), out, "the HANG output names no grandchild pid: the process tree was not printed")
+            self.assertIn("LAST-LINE-BEFORE-SILENCE", out, "the HANG output has no log tail")
+            self.assertTrue(wait_gone(child, 30), "the stop left the child %d running" % child)
+            self.assertTrue(wait_gone(grand, 30), "the stop left the child's child %d running" % grand)
+
+    def test_hang_stop_busy_silent_child_is_not_stopped(self):
+        """Control. A child that burns CPU for 4 s with no output advances its CPU, so at N = 2 s it is not stopped.
+        It runs to its end and reads PASS."""
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            log = os.path.join(d, "v.log")
+            r = run("import time\nend = time.time() + 4\nwhile time.time() < end: pass\nprint('END-MARK')", log,
+                    {"VERDICT_HANG_SECONDS": "2"}, timeout=60)
+            self.assertFalse(any(l.startswith("HANG ") for l in r.stdout.splitlines()), r.stdout)
+            with open(log, encoding="utf-8") as h: full = h.read()
+            self.assertIn("END-MARK", full, "the busy child was stopped before its end")
+            self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
+
+    def test_hang_stop_child_printing_a_byte_each_window_is_not_stopped(self):
+        """Control. A child that prints a byte every 0.5 s for 4 s is never silent for N = 2 s, so it is not stopped."""
+        code = "import time\nfor _ in range(8):\n    print('.', flush=True)\n    time.sleep(0.5)\nprint('END-MARK')"
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            log = os.path.join(d, "v.log")
+            r = run(code, log, {"VERDICT_HANG_SECONDS": "2"}, timeout=60)
+            self.assertFalse(any(l.startswith("HANG ") for l in r.stdout.splitlines()), r.stdout)
+            with open(log, encoding="utf-8") as h: full = h.read()
+            self.assertIn("END-MARK", full, "the printing child was stopped before its end")
+            self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
+
+    def test_hang_stop_is_off_without_the_env_var(self):
+        """Control. With VERDICT_HANG_SECONDS unset, an idle silent child is never stopped: it runs its 3 s and reads
+        PASS. Session use never stops (decision hang-stop)."""
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            log = os.path.join(d, "v.log")
+            r = run("import time\ntime.sleep(3)\nprint('END-MARK')", log, timeout=60)  # run() strips the variable from the caller's environment
+            self.assertFalse(any(l.startswith("HANG ") for l in r.stdout.splitlines()), r.stdout)
+            with open(log, encoding="utf-8") as h: full = h.read()
+            self.assertIn("END-MARK", full, "the idle child was stopped with the env var unset")
+            self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
+
+    @unittest.skipIf(os.name == "nt", HANG_SKIP)
+    def test_hang_stop_waits_for_cpu_to_go_still_too(self):
+        """The child prints once, burns CPU silently for 3 s, then sits idle. At N = 2 s the stop needs the CPU still for
+        N s as well as the output, so verdict returns no earlier than the busy run's end plus N - 1 s (ps counts whole seconds).
+        A stop that reads output alone would land inside the busy run and never write its end marker."""
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            busy = os.path.join(d, "busy-end.txt")
+            before = ("print('FIRST-BYTE', flush=True)\n"
+                      "end = time.time() + 3\n"
+                      "while time.time() < end: pass\n"
+                      "with open(%r, 'w') as mark: mark.write(repr(time.time()))\n" % busy)
+            rc, out, child, grand, returned = self.run_hang_case(d, 2, before_sleep=before)
+            self.assertTrue(os.path.exists(busy), "the child was stopped during its busy run: it never wrote its busy end")
+            with open(busy, encoding="utf-8") as h: busy_end = float(h.read())
+            self.assertTrue(any(l.startswith("HANG ") for l in out.splitlines()), "verdict printed no HANG line: " + out)
+            self.assertGreaterEqual(returned, busy_end + 2 - 1.0,
+                                    "verdict returned %.1f s after the busy run's end, before the CPU had been still for N s" % (returned - busy_end))
+
+    @unittest.skipIf(os.name == "nt", HANG_SKIP)
+    def test_hang_stop_printing_child_makes_no_process_table_read(self):
+        """Control. While the child prints a byte every 0.1 s, verdict starts no ps: a process-table read happens only on
+        a silent wake (decision hang-stop). The child's own ps start first proves the counting shim is on the child's PATH."""
+        code = PS_SCOPE + "import time\nfor _ in range(30):\n    print('.', flush=True)\n    time.sleep(0.1)\nprint('END-MARK')"
+        starts, r = self.count_ps_starts(code, 2)
+        self.assertGreaterEqual(starts, 1, "scope: the child's own ps start never reached the counting shim")
+        self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
+        self.assertEqual(starts, 1, "verdict started a process-table read while the child was printing")
+
+    @unittest.skipIf(os.name == "nt", HANG_SKIP)
+    def test_hang_stop_silent_child_makes_a_process_table_read(self):
+        """While the child sits silent for 4 s at N = 1 s, verdict reads the process table on a silent wake. Main reads
+        none, so the count stays at the child's one ps start."""
+        code = PS_SCOPE + "import time\ntime.sleep(4)\nprint('END-MARK')"
+        starts, r = self.count_ps_starts(code, 1)
+        self.assertGreaterEqual(starts, 1, "scope: the child's own ps start never reached the counting shim")
+        self.assertGreater(starts, 1, "verdict read no process table during 4 s of silence")
+
+    @unittest.skipIf(os.name == "nt", HANG_SKIP)
+    def test_hang_stop_verdict_line_is_one_bounded_hang_line(self):
+        """A hang's verdict line is one HANG line, bounded in length, that names the command and its log. No other verdict
+        word prints, and verdict exits non-zero."""
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            rc, out, child, grand, _ = self.run_hang_case(d, 1)
+            lines = out.splitlines()
+            hang = [l for l in lines if l.startswith("HANG ")]
+            self.assertEqual(len(hang), 1, "want one HANG line, got %d: %s" % (len(hang), out))
+            self.assertLessEqual(len(hang[0]), 300, "the HANG line is not bounded: %d chars" % len(hang[0]))
+            self.assertIn("fx.py", hang[0], "the HANG line does not name the command")
+            self.assertIn("log=", hang[0], "the HANG line names no log")
+            self.assertFalse(any(l.startswith(("FAIL ", "PASS ", "SKIP ")) for l in lines), "a second verdict word printed: " + out)
+            self.assertNotEqual(rc, 0, "a hang exits zero")
+
+    def run_bounded(self, *args, **kwargs):
+        """run() with HANG_CAP as its timeout: a verdict that does not return fails the case."""
+        try: return run(*args, timeout=HANG_CAP, **kwargs)
+        except subprocess.TimeoutExpired: self.fail("verdict did not return within %d s" % HANG_CAP)
+
+    @unittest.skipIf(os.name == "nt", HANG_SKIP)
+    def test_hang_stop_wall_clock_jump_does_not_stop_a_quiet_child(self):
+        """Silence is measured on a clock a wall-clock jump cannot move. The launcher's wall clock jumps an hour between reads,
+        and verdict's wakes are 1 s apart, so the wall gap from the baseline to the next wake is an hour while N = 4 s of real
+        time has not passed. The child prints once, sits idle for 4 s, then prints END-MARK: it runs to that end and reads PASS.
+        N is 4, not 2: a wake is at least 1 s, so with N = 2 the child would have to end inside a 1 s window the wakes do not fix."""
+        code = "import time\nprint('LAST-LINE-BEFORE-SILENCE', flush=True)\ntime.sleep(4)\nprint('END-MARK')"
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            log = os.path.join(d, "v.log")
+            r = self.run_bounded(code, log, {"VERDICT_HANG_SECONDS": "4"}, launcher=[sys.executable, "-c", WALL_JUMP, V])
+            self.assertFalse(any(l.startswith("HANG ") for l in r.stdout.splitlines()),
+                             "a wall-clock jump stopped a child that had not been silent for N s of real time: " + r.stdout)
+            with open(log, encoding="utf-8") as h: full = h.read()
+            self.assertIn("END-MARK", full, "the child was stopped before its end")
+            self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
+
+    @unittest.skipIf(os.name == "nt", HANG_SKIP)
+    def test_hang_stop_reaped_children_are_work(self):
+        """A step that prints nothing, and each second starts a short CPU-burning child that exits and is reaped, is working.
+        At N = 2 s verdict runs it to END-MARK and reads PASS: the CPU of a child reaped between two samples still counts (decision hang-stop)."""
+        burst = "%s -c 'for i in range(6000000): pass'" % shlex.quote(sys.executable)
+        script = "for i in 1 2 3 4 5 6 7 8; do %s; sleep 1; done; echo END-MARK" % burst
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            log = os.path.join(d, "v.log")
+            r = self.run_bounded(None, log, {"VERDICT_HANG_SECONDS": "2"}, argv=["bash", "-c", script])
+            self.assertFalse(any(l.startswith("HANG ") for l in r.stdout.splitlines()),
+                             "a step whose reaped children burn CPU was stopped as a hang: " + r.stdout)
+            with open(log, encoding="utf-8") as h: full = h.read()
+            self.assertIn("END-MARK", full, "the step was stopped before its end")
+            self.assertEqual(r.returncode, 0, r.stdout)
+            self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
+
+    def hang_check_on_new_idle_pid(self, readable):
+        """hang_check at N = 2 s over fabricated samples, with reaped_readable() patched to `readable`. The first silent wake takes
+        the baseline: pid 100 at 1.5 s of CPU. At 2 s of silence pid 100 is still at 1.5 s and a fresh idle pid 101 (0 s) has joined.
+        -> hang_check's answer on that second wake. Patching the seam with create=True keeps a missing seam a failed assert."""
+        verdict = load_verdict_module()
+        samples = iter([({}, {"100": 1.5}), ({}, {"100": 1.5, "101": 0.0})])
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d, open(os.path.join(d, "log.txt"), "ab") as f:
+            f.write(b"LAST-LINE-BEFORE-SILENCE\n")
+            f.flush()
+            watch = {"seen": os.fstat(f.fileno()).st_size, "quiet": None, "base": None}
+            proc = types.SimpleNamespace(pid=1)
+            with mock.patch.object(verdict, "hang_sample", lambda p: next(samples)), \
+                 mock.patch.object(_nowindow, "reaped_readable", lambda: readable, create=True):
+                first = verdict.hang_check(proc, f, watch, 2, 0.0)
+                second = verdict.hang_check(proc, f, watch, 2, 2.0)
+        self.assertIsNone(first, "scope: the first silent wake takes the baseline and must stop nothing")
+        return second
+
+    def test_hang_stop_new_idle_pid_is_stopped_where_reaped_cpu_reads(self):
+        """P2, the red half. Where reaped CPU can be read, a new pid with no CPU is no work: at 2 s of silence with the child's CPU
+        still, hang_check returns the sample to stop on. Under the new-pid clause it returns None (decision hang-stop)."""
+        stop = self.hang_check_on_new_idle_pid(True)
+        self.assertIsNotNone(stop, "a fresh idle pid with no CPU counted as work where reaped CPU reads: no stop at 2 s of silence")
+
+    def test_hang_stop_new_idle_pid_is_work_where_reaped_cpu_cannot_read(self):
+        """P2, the green control. Where reaped CPU cannot be read, a new pid is the only sign of work, so hang_check does not stop (decision hang-stop)."""
+        stop = self.hang_check_on_new_idle_pid(False)
+        self.assertIsNone(stop, "a fresh idle pid was not counted as work where reaped CPU cannot be read: a stop at 2 s of silence")
+
+    def hang_check_from_quiet_mark(self, verdict, proc, f):
+        """hang_check at N = 2 s: quiet since 0 s, with the baseline read from the process table now, checked at 10 s with no output
+        since. The baseline is a real sample, so the case reads what ps shows for the child (decision hang-stop)."""
+        watch = {"seen": os.fstat(f.fileno()).st_size, "quiet": 0.0, "base": None}
+        sample = verdict.hang_sample(proc)
+        self.assertIsNotNone(sample, "scope: the process table gives no row for child %d, so there is no baseline to compare" % proc.pid)
+        watch["base"] = sample[1]
+        return verdict.hang_check(proc, f, watch, 2, 10.0)
+
+    def wait_until(self, cond, what):
+        """Polls cond() until it holds, at most HANG_CAP s. A poll on the child's state, never a fixed sleep."""
+        end = time.monotonic() + HANG_CAP
+        while not cond():
+            if time.monotonic() > end: self.fail("fixture: %s did not happen within %d s" % (what, HANG_CAP))
+            time.sleep(0.02)
+
+    @unittest.skipIf(os.name == "nt", HANG_SKIP)
+    def test_hang_stop_finished_child_not_yet_reaped_is_not_a_hang(self):
+        """P2, the red half. A child that has exited 0 but is not reaped keeps a zombie row in ps, with its CPU frozen. At 10 s of
+        silence after a quiet mark at 0 s, hang_check stopped it, so verdict would print HANG and exit 124 for a step that
+        finished. A finished step is never a hang: hang_check returns None (decision hang-stop)."""
+        verdict = load_verdict_module()
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d, open(os.path.join(d, "log.txt"), "ab") as f:
+            proc = subprocess.Popen(["bash", "-c", "echo END-MARK; exit 0"], stdout=f, stderr=subprocess.DEVNULL)
+            try:
+                self.wait_until(lambda: zombie(proc.pid), "the child exits without being reaped")
+                stop = self.hang_check_from_quiet_mark(verdict, proc, f)
+            finally:
+                proc.wait()  # reaps the child here, so the case leaves no zombie behind
+        self.assertTrue(stop is None, "hang_check stopped a child that had exited 0 and was not yet reaped: a finished step read as a hang")
+
+    @unittest.skipIf(os.name == "nt", HANG_SKIP)
+    def test_hang_stop_live_silent_child_is_stopped_from_the_same_quiet_mark(self):
+        """Control, green. A live child that prints once and then sleeps is silent and idle. Under the same quiet mark hang_check returns
+        the stop, so the finished-child case cannot pass by never stopping (decision hang-stop)."""
+        verdict = load_verdict_module()
+        code = "import time\nprint('LAST-LINE-BEFORE-SILENCE', flush=True)\ntime.sleep(60)\n"
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d, open(os.path.join(d, "log.txt"), "ab") as f:
+            proc = subprocess.Popen([sys.executable, "-c", code], stdout=f, stderr=subprocess.DEVNULL)
+            try:
+                self.wait_until(lambda: os.fstat(f.fileno()).st_size > 0, "the child prints its last line")
+                stop = self.hang_check_from_quiet_mark(verdict, proc, f)
+            finally:
+                proc.kill()
+                proc.wait()
+        self.assertTrue(stop is not None, "hang_check did not stop a live silent idle child under the same quiet mark: the finished-child case would pass by never stopping")
+
+    @unittest.skipIf(os.name == "nt", HANG_SKIP)
+    def test_hang_stop_ps_down_is_no_stop(self):
+        """Control. When the process-table read fails, verdict has no table to judge CPU by, so a silent child is not stopped:
+        at the baseline and after N = 1 s of silence it runs its 5 s and reads PASS. Two ways for ps to fail: a ps that exits
+        non-zero (an empty table, no note), and a ps that cannot start (the PS_DOWN note). Only the second reaches the mutant at bin/verdict:156."""
+        code = "import time\nprint('LAST-LINE-BEFORE-SILENCE', flush=True)\ntime.sleep(5)\nprint('END-MARK')"
+        for label in ("exits non-zero", "cannot start"):
+            with self.subTest(ps=label), tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+                log = os.path.join(d, "v.log")
+                if label == "exits non-zero":
+                    counter = os.path.join(d, "ps-starts.txt")
+                    body = "#!/bin/sh\necho start >> %s\nexit 1\n" % shlex.quote(counter)
+                    r = self.run_bounded(code, log, {"VERDICT_HANG_SECONDS": "1"}, shim=("ps", body))
+                    starts = 0
+                    if os.path.exists(counter):
+                        with open(counter, encoding="utf-8") as h: starts = h.read().count("start")
+                    self.assertGreaterEqual(starts, 2, "scope: verdict read no process table at the baseline and after silence")
+                else:
+                    no_ps = os.path.join(d, "no-ps")
+                    os.mkdir(no_ps)
+                    self.assertIsNone(shutil.which("ps", path=no_ps), "scope: the PATH with no ps still finds a ps")
+                    r = self.run_bounded(code, log, {"VERDICT_HANG_SECONDS": "1", "PATH": no_ps})
+                self.assertFalse(any(l.startswith("HANG ") for l in r.stdout.splitlines()),
+                                 "a ps with no process table stopped a silent child: " + r.stdout)
+                with open(log, encoding="utf-8") as h: full = h.read()
+                self.assertIn("END-MARK", full, "the silent child was stopped before its end")
+                self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
+
+    def test_hang_stop_bad_env_value_says_off_and_the_step_runs(self):
+        """A VERDICT_HANG_SECONDS that is no whole number (10m, 1.5) turns the hang stop off and says so once on stderr. The
+        step still runs: verdict exits 0 and reads PASS, and no HANG line prints. Control: with the variable unset, the
+        stop-off line does not print (decision hang-stop)."""
+        code = "print('END-MARK', flush=True)"
+        for value in ("10m", "1.5"):
+            with self.subTest(VERDICT_HANG_SECONDS=value), tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+                r = self.run_bounded(code, os.path.join(d, "v.log"), {"VERDICT_HANG_SECONDS": value})
+                self.assertEqual(r.returncode, 0, "the step ran to its end, so verdict exits 0: " + r.stdout + r.stderr)
+                self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
+                self.assertFalse(any(l.startswith("HANG ") for l in r.stdout.splitlines()), r.stdout)
+                self.assertEqual(r.stderr.count("hang stop is off"), 1, "want one stop-off line on stderr: " + r.stderr)
+        with self.subTest(VERDICT_HANG_SECONDS="unset"), tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            r = self.run_bounded(code, os.path.join(d, "v.log"))
+            self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
+            self.assertNotIn("hang stop is off", r.stdout + r.stderr, "the stop-off line printed with the variable unset")
 
     def test_test_failed_marker_on_exit0_is_fail(self):
         r = run("print('Test Suite All tests')\nprint('** TEST FAILED **')")
@@ -1095,7 +1420,6 @@ QQ_SUB_FULL = ("." * 70 + " [ 50%]\n") * 14000 + QQ_SUB  # over one chunk, endin
 QQ_SUB_CUT = "..u" + " " * 70 + "[ 30%]\n"  # the subtest line cut at 30 percent
 QQ_CO = "test_plain.py: 3\n\n"  # pytest 9.2's -qq --co for a three-test module, captured: per-file counts, no progress, no summary line
 QQ_CO_FULL = "".join("test_%05d.py: 1\n" % i for i in range(65000))  # over one chunk, one count line per file
-POSIX_SKIP = "the form runs through a POSIX shell (bash -c), which Windows does not have"
 HANG_GUARD = 20  # seconds before a verdict counts as hung; a linear scan of one 1 MiB line finishes far below it
 
 
