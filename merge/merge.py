@@ -5055,6 +5055,7 @@ def ready_line_pattern(fmt):
     parts = re.split(r"\{(\w+)\}", fmt)
     return re.compile("".join(re.escape(part) if i % 2 == 0 else f"(?P<{part}>{READY_LINE_FIELDS[part]})" for i, part in enumerate(parts)))
 
+RECORDS_STEP = "Rules and records move together"  # the checks.yml step that uses $/actions/claude-md-cites; it reads the PR body, so a run with no body skips it (bin/cheap-lints)
 READY_JOB_PREFIX = re.compile(r"^([a-z][a-z0-9_-]*):(.+)$")  # a `<job>:<step>` ready check; a step name that does not open this way is a step of job `checks`
 
 STEP_LINE = re.compile(r"^(PASS \(cached\)|PASS|FAIL|SKIP|skipped|unknown|not run)\s+(.*)$")  # PASS (cached): a pass that ci-job's rerun cache answered
@@ -5067,9 +5068,13 @@ def step_verdicts(raw, checks, state):
     step broke. The caller (run_ready_checks) refuses on any state other than "pass", whatever the lines read."""
     rows = []
     for name in checks:
-        hit = next((m for m in (STEP_LINE.match(l.rstrip()) for l in raw) if m and (m.group(2) == name or m.group(2).startswith(name + ":"))), None)
+        at = next((i for i, m in enumerate(STEP_LINE.match(l.rstrip()) for l in raw) if m and (m.group(2) == name or m.group(2).startswith(name + ":"))), None)
+        hit = STEP_LINE.match(raw[at].rstrip()) if at is not None else None
         word = hit.group(1) if hit else None
         detail = hit.group(2)[len(name):].lstrip(": ") if hit else f"ci-job printed no line for this check (ci-job: {state})"
+        if hit:  # the indented lines under it: a local action's own output, which ci-job prints under a step that is not a pass (bin/ci-job local_action)
+            under = [l.rstrip() for l in raw[at + 1:]]
+            detail = "\n".join([detail, *under[:next((i for i, l in enumerate(under) if not l.startswith("  ")), len(under))]])
         if word in ("PASS", "PASS (cached)"):
             rows.append(("pass", name, detail))
         elif word == "SKIP":
@@ -5123,18 +5128,19 @@ def ready_job_groups(checks):
         groups.setdefault(m.group(1) if m else "checks", []).append((entry, m.group(2) if m else entry))
     return groups
 
-def pre_ready_rows(wt, n, base, checks, pre):
+def pre_ready_rows(wt, n, base, checks, pre, body=None):
     """The pre-ready run: one ci-job run per job of `merge.readyChecks` `checks` in the tree `wt` (ready_job_groups), then, when `pre` is (root, host, info), the debt-close lint
     and the open-PR clash of the PR's head info["head"] (the lint reads it through `wt`'s git), each once. Prints one verdict line per check, `pass NAME`, `fail NAME: why` or `unknown NAME: why`, all before any
     refusal; NAME is the declared entry.
     -> (rows, (state, lines, log)): rows of (verdict, name, detail), and the jobs' ci_job_run answers combined: state fail over unknown over pass, lines and log joined.
     Each job's steps are read from that job's own lines, so a step name two jobs hold reads only its own job.
-    Cost: one ci-job run per job, one debt-close lint (a scratch worktree and one Retire test run per closed debt), one cross_measure; no file but ci-job's log and the temporary worktrees."""
+    Each job's run gets the PR body (info["body"], else `body`, which a run with no `pre` passes) as PR_BODY, which the records-and-rules step (actions/claude-md-cites, a ready check by name) reads; with no body it reads unknown when it finds a gap.
+    Cost: one ci-job run per job (a ready check that names a local action adds no run of its own: its three probe steps are three bin/verdict starts and shells inside that run, a git diff, and one live GitHub read per Facts claim, which reads unknown when it fails), one debt-close lint (a scratch worktree and one Retire test run per closed debt), one cross_measure; no file but ci-job's log and the temporary worktrees."""
     rows, states, lines, log = [], [], [], []
     for job, group in ready_job_groups(checks).items():
         raw = []
         args = [job, "--pinned", *[a for _, bare in group for a in ("--step", bare)], "--base", f"origin/{base}"]
-        state, job_lines, job_log, _ = ci_job_run(wt, *args, raw=raw)
+        state, job_lines, job_log, _ = ci_job_run(wt, *args, raw=raw, pr_body=pre[2].get("body") if pre else body)  # the records-and-rules check reads the body; a body that is None is unread, and its probe reads unknown
         states.append(state)
         lines += job_lines
         log += job_log

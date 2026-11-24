@@ -190,7 +190,7 @@ parent, or miss a message while busy.
   `pr-review-record`). That push makes the record stale, so the lane posts a new review log for the
   new head. When the repo holds a standing merge grant, the batch runner merges under it. The owner is
   not asked.
-- A session that waits on CI sets a one-time check-in when it starts to wait, and again after each red job, each wider apart, never past 55 minutes.
+- The watcher wakes a session on red or green. Fallback: one-time check-in at the run's expected end and after each red job, never past 55 minutes.
 - Stall check: at each wake, a standing session asks whether any lane, PR or batch moved since its last
   turn. When none moved and work is ready, it finds why and acts, or tells the owner what blocks it.
   A turn that ends waiting on a named event sets a one-time check-in for that event. It sets the next one only when a new named event arrives, such as a red job, never on a wake from anything else.

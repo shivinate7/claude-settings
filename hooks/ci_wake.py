@@ -6,8 +6,13 @@ registered with `asyncRewake: true`. Two calls start a watch: `gh pr ready <N>`,
 with `draft` false (the cloud's ready route, since `gh pr ready` gets 403 in cloud; route pr-ready-gh-cli-cloud;
 decision ci-wait-reads-run-status, The CI wake-up). The MCP call names its PR by `owner`, `repo` and `pullNumber` in tool_input.
 A call with `draft` absent or true starts none. Each `gh pr ready` in a command gets its own watch, in this one
-process. A push starts none. Per PR it reads the head once. It lists that head's runs until a run that
-ran shows (a skipped draft run is no run), waits on it, lists once more at once for a late run, and prints one line:
+process. A push starts none. Per PR it reads the head once. It lists that head's runs until a run settles the
+wait (`settled`), waits on it, lists once more at once for a late run, and prints one line. The checkout the hook runs
+in decides what settles: when its .github/workflows files define the rollup job (`all-jobs-passed`, merge.py ROLLUP_JOB;
+a local file read, no GitHub call), a run settles the wait when it is red, still going, or completed with that job
+passed. A skipped draft run, a run whose rollup job is skipped or absent (a draft-era run, or a ready run that lacks
+it), and a green run of another workflow settle nothing, so green never comes from them. When the checkout defines no
+such job, or has no workflows folder, any run that ran settles the wait and the verdict reads from the run conclusions:
 
     CI <green|red|cancelled> on <sha7>: <failing job names>
     CI unknown on <sha7 or PR>: <reason>        (also "still running" at the deadline)
@@ -296,6 +301,97 @@ def judge(merge, runs):
     return red, pending
 
 
+def checkout_root(cwd):
+    """The nearest folder at or above `cwd` that holds `.git` (a folder, or the file of a worktree), or `cwd` itself when no
+    folder above it does. The walk stops at that folder: a parent checkout above it is never read. File reads only."""
+    start = os.path.abspath(cwd or os.getcwd())
+    here = start
+    while True:
+        if os.path.exists(os.path.join(here, ".git")):
+            return here
+        parent = os.path.dirname(here)
+        if parent == here:
+            return start
+        here = parent
+
+
+def defines_job(cwd, name):
+    """True when a workflow file under the checkout root of `cwd` (checkout_root) in .github/workflows defines a job called `name` (its key under `jobs:`, or its
+    `name:` property), or when that cannot be told (an unreadable folder or file): the stricter rule then holds. False
+    for a checkout with no such folder, or with files that define no such job. A local read, no GitHub call. A line
+    scan, stdlib only: lint/workflow_steps.py is the repo's step parser, but a hook imports nothing from lint/. A key
+    counts only at the job indent under a column-0 `jobs:` line, so a comment, a string or a script body holding the
+    name matches nothing."""
+    folder = os.path.join(checkout_root(cwd), ".github", "workflows")
+    try:
+        names = sorted(n for n in os.listdir(folder) if n.endswith((".yml", ".yaml")))
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    for n in names:
+        try:
+            with open(os.path.join(folder, n), encoding="utf-8") as f:
+                text = f.read()
+        except (OSError, UnicodeError):
+            return True
+        if job_named(text, name):
+            return True
+    return False
+
+
+def job_named(text, name):
+    """True when the workflow `text` has a job keyed `name`, or a job with a `name: <name>` property (see defines_job)."""
+    text = text.lstrip("\ufeff")   # a UTF-8 BOM would hide the first column-0 key
+    in_jobs, job_indent, body_indent = False, None, None
+    key = re.compile(r"""^(\s+)(["']?)%s\2\s*:\s*(#.*)?$""" % re.escape(name))
+    prop = re.compile(r"""^\s+name\s*:\s*(["']?)%s\1\s*(#.*)?$""" % re.escape(name))
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if indent == 0:
+            in_jobs = bool(re.match(r"jobs\s*:\s*(#.*)?$", line))
+            job_indent = body_indent = None
+            continue
+        if not in_jobs:
+            continue
+        if job_indent is None:
+            job_indent = indent
+        if indent == job_indent:
+            body_indent = None
+            if key.match(line):
+                return True
+        elif indent > job_indent:
+            if body_indent is None:
+                body_indent = indent
+            if indent == body_indent and prop.match(line):
+                return True
+    return False
+
+
+def settled(runs, cwd=None):
+    """True when `runs` may end the wait: a run is red (a failed job included), a run is still going (an unknown line, never
+    green), or a completed run has its rollup job (merge.py ROLLUP_JOB, the one home of the name) passed. A head whose runs
+    are all draft-era (a checks run whose rollup job is skipped or absent, a green run of another workflow) is none of these:
+    the real run is still to come, so the wait keeps listing. That holds only when the checkout at `cwd` defines the rollup
+    job (defines_job): a checkout with no such job, or no workflows folder, settles on any run that ran, and verdict reads the
+    run conclusions. An unloadable merge tool settles at once: verdict raises Unknown."""
+    from guard_merge import merge_module
+    merge = merge_module()
+    if merge is None:
+        return True
+    from required_check import REQUIRED_CHECK   # a sibling loads inside the function, as guard_merge does
+    rollup = getattr(merge, "ROLLUP_JOB", None)
+    if not defines_job(cwd, rollup or REQUIRED_CHECK):
+        return bool(runs)
+    red, pending = judge(merge, runs)
+    return bool(red or pending) or any(
+        r.get("status") == "completed" and any(j.get("name") == rollup and j.get("conclusion") == "success" for j in r.get("jobs") or [])
+        for r in runs)
+
+
 def wait_for(sha, cwd, deadline, repo=""):
     """List the head's runs, watch each one (not a cancelled twin), then read each with its jobs.
     A run that ends skipped is no run: the draft PR's run skips, and the run of `gh pr ready`
@@ -306,7 +402,10 @@ def wait_for(sha, cwd, deadline, repo=""):
     newest first, as judge_runs reads them: the re-list's runs go ahead of the runs read before,
     so a newer run of a name outranks the older one. A refused re-list list or view returns the runs already
     judged only when they judge red: a red run stays red. Otherwise it raises Unknown, as a refused first
-    list does, since the unread list could hold a red or a running run (rule verification-report-unknown-reads). A run that first shows after the re-list is not judged (debt ci-wake-lists-runs-once)."""
+    list does, since the unread list could hold a red or a running run (rule verification-report-unknown-reads). A run that first shows after the re-list is not judged (debt ci-wake-lists-runs-once).
+    Runs that `settled` does not accept (draft-era runs only) end no wait and start no at-once re-list: the lists follow `pauses`,
+    each run is viewed once, and the deadline ends in Unknown. The rollup job's name is merge.py ROLLUP_JOB, read from the runs' own jobs; whether the
+    checkout defines it is read from its workflow files (`defines_job`): no GitHub read."""
     extra = ["-R", repo] if repo else []
     list_args = ["run", "list", "--commit", sha, "--limit", "100", *extra, "--json", RUN_FIELDS]
     gaps = pauses()
@@ -336,14 +435,14 @@ def wait_for(sha, cwd, deadline, repo=""):
         seen.update(r["databaseId"] for r in fresh)
         ran = [r for r in got if r.get("conclusion") != "skipped"]   # it ended skipped: no run
         viewed = ran + viewed   # newest first: gh lists newest first, and a later list shows newer runs
-        if ran and not relisted:
+        if ran and not relisted and settled(viewed, cwd):
             relisted = True
-            continue   # the first judged run: list once more at once for a later one, even at the deadline
-        if viewed:
+            continue   # the first settled run: list once more at once for a later one, even at the deadline
+        if viewed and settled(viewed, cwd):
             return viewed
         left = deadline - time.monotonic()
         if left <= 0:
-            raise Unknown("no run yet")
+            raise Unknown("no run with a passed rollup job yet" if viewed else "no run yet")   # a viewed run left unsettled only on a defining checkout
         time.sleep(min(next(gaps), left))
 
 

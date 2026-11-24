@@ -10,9 +10,9 @@ import sys
 
 # The Linux jobs that hold the suites of the one old `checks` job, split for wall time: the lint family (`checks`), the hooks/
 # suites (checks-hooks), the other suites (checks-rest), the merge and install suites (checks-merge-install), the install.sh
-# checkout-detection suite (checks-install-checkout) and the merge tool git-half suite (checks-merge-git).
+# checkout-detection suite (checks-install-checkout, in 3 shard jobs) and the merge tool git-half suite (checks-merge-git).
 # lint/test_windows_split.py checks that each suite runs in one of them.
-CHECKS_SUITE_JOBS = ("checks", "checks-hooks", "checks-rest", "checks-merge-install", "checks-install-checkout", "checks-merge-git")
+CHECKS_SUITE_JOBS = ("checks", "checks-hooks", "checks-rest", "checks-merge-install", "checks-install-checkout", "checks-install-checkout-2", "checks-install-checkout-3", "checks-merge-git")
 
 
 def job_re(name):
