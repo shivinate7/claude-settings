@@ -22,8 +22,9 @@ The contract these cases pin. A change to any of it changes these cases first.
 - base=<sha> on every push, written even when empty: the head of the newest completed, successful checks.yml run of main whose
   suites ran (a run with every suite job skipped is no base). Candidates are this workflow's push runs on main with an id below
   GITHUB_RUN_ID: a newer run is never a base and never a stop, and this run's own record never counts. Walking newest to oldest,
-  a run not yet completed is passed over with no read, and a completed red or cancelled run gives empty (consultant's pick,
-  10:55 CST Nov 24 2026, under decision push-skip-on-proven-tree; the owner may reverse it). The output is a full 40-hex
+  a run not yet completed is passed over with no read, unless it is a re-run (run_attempt above 1), which gives empty because its
+  earlier attempt completed. A completed red or cancelled run gives empty (consultant's pick, 11:17 CST Nov 24 2026, under decision
+  push-skip-on-proven-tree; the owner may reverse it). The output is a full 40-hex
   sha or empty. A read error, a malformed reply or a full page with no usable run gives empty and says "unknown" (class ProvenBase).
 - Any read error, unknown state or unreadable record writes skip=false and says "unknown".
 - Every other skip=false path prints its reason on one line that names what refused it: the pull request number or the head branch,
@@ -1125,7 +1126,8 @@ class ProvenBase(LiveHead):
     that is completed, successful and ran its suites, walking newest to oldest (consultant's pick, 10:55 CST Nov 24 2026; the owner
     may reverse it). A candidate is a push run of checks.yml on main with an id below GITHUB_RUN_ID, so a newer run is never a base
     and never a stop, and this run's own record never counts. With GITHUB_RUN_ID unset every run is a candidate. A run not yet
-    completed (queued, in progress, waiting, a re-run in flight) is passed over with no read. A completed run that is not success
+    completed (queued, in progress, waiting) is passed over with no read, unless it is a re-run (run_attempt above 1): its earlier
+    attempt completed, so it gives no base. A completed run that is not success
     (red, cancelled, timed out) gives no base, because main is then not known green. A completed success whose suite jobs were all
     skipped (push-skip skipped it whole) is passed over. Each case reads the base output through main(), the entry point the job
     runs, and each failure names the claim that did not hold. The output must be written on every path: empty is a value."""
@@ -1382,21 +1384,45 @@ class ProvenBase(LiveHead):
                 got, _ = self.base_on(runs, jobs=jobs, extra_env={"GITHUB_RUN_ID": "4"})
                 self.assert_base(got, control, "the control: with run 3 below this run 4, a %s run 3 is a candidate, so it sets the base" % label)
 
-    def test_a_rerun_in_flight_is_passed_over(self):
-        # Run 2 is a re-run whose second attempt is still going, so its conclusion is not yet known. It is older than this run (3), so the
-        # walk passes it over with no read, and the green run below it is the base. The control is the same re-run completed green.
+    def test_a_rerun_in_flight_gives_no_base(self):
+        # Run 2 is on attempt 2 and still going. Its first attempt completed, and the walk cannot read that as green, so the push has no
+        # base: the green run below it is not taken. Run 2 is older than this run (3), and the walk reads none of its jobs. The controls:
+        # the same run still on attempt 1 is passed over with no read, so the green run below is the base; the re-run completed green is the base.
         rerun = push_run(2, NEWER, conclusion=None, status="in_progress", created_at=LATE)
         rerun["run_attempt"] = 2
         runs = [rerun, push_run(1, OLDER, created_at=EARLY)]
         fake = FakeGitHub(pulls=[], workflow_runs=runs, jobs={1: full_run_jobs(), 2: full_run_jobs()})
         base, _ = self.base_on(fake=fake, extra_env={"GITHUB_RUN_ID": "3"})
-        self.assert_base(base, OLDER, "a re-run still in flight is not completed, so it is passed over and the green run below it is the base")
-        self.assertNotIn("actions/runs/2/jobs", fake.reads, "a re-run in flight is passed over with no read, so its jobs are never read")
+        self.assert_base(base, "", "push run 2 is on attempt 2 and still going, and its first attempt completed, so the push has no base")
+        self.assertNotIn("actions/runs/2/jobs", fake.reads, "push run 2 gives no base, so the walk never reads its jobs")
+        first = push_run(2, NEWER, conclusion=None, status="in_progress", created_at=LATE)
+        first_base, _ = self.base_on([first, push_run(1, OLDER, created_at=EARLY)], jobs={1: full_run_jobs()},
+                                     extra_env={"GITHUB_RUN_ID": "3"})
+        self.assert_base(first_base, OLDER, "the control: push run 2 on attempt 1 and still going is passed over, so the green run below is the base")
         done = push_run(2, NEWER, created_at=LATE)
         done["run_attempt"] = 2
         twin, _ = self.base_on([done, push_run(1, OLDER, created_at=EARLY)], jobs={1: full_run_jobs(), 2: full_run_jobs()},
                                extra_env={"GITHUB_RUN_ID": "3"})
-        self.assert_base(twin, NEWER, "the control: the same re-run completed green is the base")
+        self.assert_base(twin, NEWER, "the control: push run 2 on attempt 2, completed green, is the base")
+
+    def test_a_github_run_id_that_is_no_digit_or_a_candidate_with_no_integer_id_gives_no_base(self):
+        # The walk sets aside every run with an id above this run's id, so an id it cannot compare gives no base, and the walk reads no job.
+        # A pin: the script already refuses both on the head. The control is the same runs with integer ids and an integer GITHUB_RUN_ID.
+        jobs = {1: full_run_jobs(), 2: full_run_jobs()}
+        for own in ("abc", "3x"):
+            with self.subTest(GITHUB_RUN_ID=own):
+                runs = [push_run(2, NEWER, created_at=LATE), push_run(1, OLDER, created_at=EARLY)]
+                base, _ = self.base_on(runs, jobs=jobs, extra_env={"GITHUB_RUN_ID": own})
+                self.assert_base(base, "", "GITHUB_RUN_ID %r is no run id, so the runs newer than this one cannot be set aside and the push has no base" % own)
+        for bad_id in ("2", None):
+            with self.subTest(candidate_id=bad_id):
+                bad = push_run(2, NEWER, created_at=LATE)
+                bad["id"] = bad_id
+                base, _ = self.base_on([bad, push_run(1, OLDER, created_at=EARLY)], jobs=jobs, extra_env={"GITHUB_RUN_ID": "3"})
+                self.assert_base(base, "", "a candidate push run whose id is %r is no integer, so the runs newer than this one cannot be set aside and the push has no base" % (bad_id,))
+        got, _ = self.base_on([push_run(2, NEWER, created_at=LATE), push_run(1, OLDER, created_at=EARLY)], jobs=jobs,
+                              extra_env={"GITHUB_RUN_ID": "3"})
+        self.assert_base(got, NEWER, "the control: with an integer GITHUB_RUN_ID and integer ids, run 2 is below run 3 and is the base")
 
     def test_skipped_whole_runs_below_an_unfinished_run_are_walked_past(self):
         # Run 3 is still going, so it is passed over. Run 2 is green, but push-skip skipped its suites whole, so the walk goes on past it
