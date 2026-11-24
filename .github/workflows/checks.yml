@@ -1311,7 +1311,7 @@ jobs:
           job: checks-merge-install
 
   # The install.sh checkout-detection suite, split off checks-merge-install for wall time (step ci-merge-install-split):
-  # that job took 29.4 min and this suite 13.8 of them (retrospective CI audit 14:12 CST Nov 12, in the step's why). Same step, `if:` and own cap as before.
+  # that job took 29.4 min and this suite 13.8 of them (retrospective CI audit 14:12 CST Nov 12, in the step's why). Same step and `if:` as before; the hang stop (decision hang-stop) replaced its own cap.
   # The suite runs in 3 shards, shard 1 here and shards 2 and 3 in checks-install-checkout-2 and -3 (INSTALL_SRC_SHARD, hooks/test_install_src.sh).
   checks-install-checkout:
     runs-on: ubuntu-latest
