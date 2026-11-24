@@ -7,6 +7,7 @@
 # N is the larger of two counts: the sum of the runner summaries in the run (`skipped=N`, `N skipped`, node's `# skipped N` and `ℹ skipped N`), and the lines that start `SKIP `, `SKIPPED` or `SKIP:`. A summary line `SKIP: N check` is not one of them, so it never counts on top of its cases. XCTest `Executed N tests, with M tests skipped` lines nest (class, bundle, All tests), so their max is one term of the sum. Colour codes (SGR) are ignored. A count of 10 or more digits reads as 10**9. A count of 0 is PASS. Why: a test that always skips must not read as a pass.
 # Exit 0 is also FAIL (`cut`) for a pytest argv (`pytest`, `py.test`, `python -m pytest`, also through `env`, `uv run`, `uvx` and `bash -c`) with `-q` or a line-start session header, and no line-start summary: the run stopped early. A `-qq` run (no summary line) is complete when a line of progress chars ends `[100%]` (any padding, colour codes ignored), or, with `--co`, when it prints a `<file>: <count>` line. A `bash -c` script is read by its own scanner: a newline, `;`, `&`, `|` or `do`/`then`/`else`/`{`/`!` starts a command, a `#` starts a comment only at a word start, and heredoc text is no command.
 # A run with no $VERDICT_LOG deletes verdict-*.log files older than 1 day from the temp folder: regular files whose first line is our own header only; errors skipped.
+# $VERDICT_HANG_SECONDS=N (off when unset, and on Windows): a child with no new output byte and no CPU advance in any process under it for N s is stopped: print its process tree and the log tail, end the tree (TERM, then KILL), print one `HANG ...` line, exit 124. It reads the process table (hooks/_nowindow.py) only on a silent wake, never while the child prints (decision hang-stop).
 # Killed by signal N: exit 128+N. Ctrl-C: exit 130. Windows: bin/verdict.cmd.
 import os, re, shutil, signal, subprocess, sys, tempfile, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
@@ -146,6 +147,38 @@ def prune(folder, own):
                         if ours: os.remove(e.path)
                 except OSError: pass
     except OSError: pass
+def hang_seconds():  # N from $VERDICT_HANG_SECONDS, or 0 (off): unset, not a whole number above 0, or Windows (no CPU read there)
+    try: n = int(os.environ.get("VERDICT_HANG_SECONDS") or 0)
+    except ValueError: return 0
+    return n if n > 0 and os.name != "nt" else 0
+def hang_sample(proc):  # (the child's process-table rows, {pid: CPU seconds} for the child and every process under it), or None when ps gave no table or the child is gone
+    table = _nowindow.proc_table()
+    if table[2] or str(proc.pid) not in table[0]: return None
+    return table[0], _nowindow.tree_cpu(table, proc.pid, own=True)
+def hang_check(proc, f, w, n, now):  # one wake with the child still running: the sample of a hang to stop on, else None. No read of the process table while output grows
+    size = os.fstat(f.fileno()).st_size
+    if size != w["seen"]: w["seen"], w["quiet"], w["base"] = size, None, None; return None
+    if w["quiet"] is not None and now - w["quiet"] < n: return None
+    sample = hang_sample(proc)  # the first silent wake takes the baseline; a later one, at least N after silence began, compares to it
+    stop = sample is not None and w["base"] is not None and not _nowindow.cpu_advanced(w["base"], sample[1])
+    w["quiet"], w["base"] = now, sample[1] if sample else None  # CPU that advanced starts the count again
+    return sample if stop else None
+def hang_stop(proc, f, start, sample):  # print the child's tree and the log tail, then end the tree: TERM, then KILL. -> the ended tree's pids
+    rows, cpu = sample
+    print("process tree (pid ppid stat cpu):")
+    for pid in sorted(cpu, key=int): print(f"  {pid} {rows[pid][1] if pid in rows else '?'} {rows[pid][2] if pid in rows else '?'} {cpu[pid]:.1f}s")
+    f.flush()
+    with open(f.name, "rb") as g:
+        g.seek(max(start, os.fstat(g.fileno()).st_size - TAIL)); tail = g.read().decode("utf-8", errors="replace").splitlines()
+    print("log tail:")
+    for l in tail[-CAP:]: print("  " + l)
+    reached = []
+    try:
+        reached = _nowindow.kill_tree(proc, signal.SIGTERM)
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired: pass
+    finally: _nowindow.kill_tree(proc, getattr(signal, "SIGKILL", signal.SIGTERM), reached); proc.kill(); proc.wait()
+    return True
 def main(argv):
 
     for s in (sys.stdout, sys.stderr): s.reconfigure(encoding="utf-8", errors="replace")  # a cp1252 pipe cannot print the excerpt
@@ -160,7 +193,7 @@ def main(argv):
     if not log:
         fd, log = tempfile.mkstemp(prefix="verdict-", suffix=".log"); os.close(fd)
     t = time.time()
-    note = ""
+    note, hung = "", False
     if not os.environ.get("VERDICT_LOG"): prune(os.path.dirname(os.path.abspath(log)), os.path.normcase(os.path.abspath(log)))
     try: f = open(log, "ab")
     except OSError as e: print(f"FAIL {name} rc=1 cannot open log: {e} ({time.time() - t:.1f}s) log={log}"); return 1
@@ -174,11 +207,22 @@ def main(argv):
         except OSError as e: proc = None; f.write(f"verdict: cannot run {argv[0]}: {e}\n".encode()); rc = 127
         if proc:
             say, beat_file = True, os.environ.get("STALL_WATCH_BEAT")
+            hang = hang_seconds()
+            tick = min(beat, max(1.0, hang / 4)) if hang else beat
+            next_beat, watch = time.time() + beat, {"seen": os.fstat(f.fileno()).st_size, "quiet": None, "base": None}
             try:
               with _nowindow.forward_signals(proc):
                 while True:
-                    try: rc = proc.wait(timeout=beat); break
+                    try: rc = proc.wait(timeout=tick); break
                     except subprocess.TimeoutExpired:
+                        now = time.time()
+                        if hang:
+                            tree = hang_check(proc, f, watch, hang, now)
+                            if tree is not None:
+                                hung = hang_stop(proc, f, start, tree)
+                                rc = 124; break
+                        if hang and now < next_beat: continue
+                        next_beat = now + beat
                         line = f"verdict: still running, {time.time() - t:.0f}s, log={log}"
                         if say:
                             try: print(line, file=sys.stderr, flush=True)
@@ -196,6 +240,10 @@ def main(argv):
                 finally: _nowindow.kill_tree(proc, getattr(signal, "SIGKILL", signal.SIGTERM), reached); proc.kill(); proc.wait()
         f.flush(); end = f.tell()
     secs = f"{time.time() - t:.1f}s"
+    if hung:
+        shown = name if len(name) <= 80 else "..." + name[-77:]
+        print(f"HANG {shown} rc={rc} no output or CPU for {hang}s, stopped ({secs}) log={log}")
+        return rc
     if rc < 0: note, rc = f" killed by signal {-rc}", 128 - rc
     fail = zero = ran = marked = started = summed = done = False; lines = []
     summaries, xct, marks, ut = {}, {}, {}, {}  # absolute byte offset of a match -> its count; a match in the chunk overlap is read twice, counted once
