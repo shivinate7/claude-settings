@@ -1125,9 +1125,11 @@ def run_lines(st):
 
 
 # The hang stop wraps a step's command in bin/verdict (decision hang-stop). A step that runs its command through it still runs it.
-# Its seconds are the one env key a wrapped step adds; HangStopWrap (lint/test_checks_step_scope.py) pins them, so no pin here reads them.
+# Its seconds and its full-log switch are the two env keys a wrapped step adds; HangStopWrap (lint/test_checks_step_scope.py) pins their
+# values, so no pin here reads them.
 VERDICT_RUN = "bin/verdict "
 VERDICT_HANG_VAR = "VERDICT_HANG_SECONDS"
+VERDICT_FULL_LOG_VAR = "VERDICT_FULL_LOG"
 
 
 def split_homes(text, jobs, cmd):
@@ -3928,6 +3930,33 @@ class VerdictWrappedShards(unittest.TestCase):
                 "          VERDICT_HANG_SECONDS: 600\n" + f"        run: {VERDICT_RUN + INSTALL_CMD}\n")
         problems = pin_problems("job-a", step, INSTALL_CMD, "x", None, {INSTALL_VAR: "1/3"})
         self.assertTrue(any("env is" in p for p in problems), f"a wrapped step with no shard value has no env problem: {problems}")
+
+    @staticmethod
+    def shard_step_with_env(run, env_lines):
+        """An install shard step (INSTALL_SRC_SHARD 1/3) that runs `run`, with the env lines env_lines added to its env."""
+        return ("      - name: suite\n        if: ${{ needs.scope.outputs.code == 'true' }}\n        env:\n"
+                "          INSTALL_SRC_SHARD: 1/3\n" + env_lines + f"        run: {run}\n")
+
+    @staticmethod
+    def shard_env_problems(step, cmd):
+        """The env problems the pin gives the step, with the shard value wanted. The if: is not the subject of these cases."""
+        return [p for p in pin_problems("job-a", step, cmd, "x", None, {INSTALL_VAR: "1/3"}) if "env is" in p]
+
+    def test_a_wrapped_step_with_the_full_log_switch_has_no_env_problem(self):
+        # Named failure: the pin reads the full-log switch as a stray env key, so the wrapped shard steps go red once they set it.
+        step = self.shard_step_with_env(VERDICT_RUN + INSTALL_CMD, "          VERDICT_HANG_SECONDS: 600\n          VERDICT_FULL_LOG: \"1\"\n")
+        self.assertEqual(self.shard_env_problems(step, INSTALL_CMD), [], "a wrapped step with the full-log switch has an env problem")
+
+    def test_an_unwrapped_step_with_the_full_log_switch_is_an_env_problem(self):
+        # Control, green on the old pin: the switch is a wrap key only on a step that runs through bin/verdict.
+        step = self.shard_step_with_env(INSTALL_CMD, "          VERDICT_FULL_LOG: \"1\"\n")
+        self.assertTrue(self.shard_env_problems(step, INSTALL_CMD), "an unwrapped step with the full-log switch passes the env pin")
+
+    def test_a_wrapped_step_with_another_verdict_key_is_still_an_env_problem(self):
+        # Control, green on the old pin: the pin lets in the two wrap keys and no other, so a wrapped step's VERDICT_HEARTBEAT still fails.
+        step = self.shard_step_with_env(VERDICT_RUN + INSTALL_CMD,
+                                        "          VERDICT_HANG_SECONDS: 600\n          VERDICT_FULL_LOG: \"1\"\n          VERDICT_HEARTBEAT: \"5\"\n")
+        self.assertTrue(self.shard_env_problems(step, INSTALL_CMD), "a wrapped step's other VERDICT_ key passes the env pin")
 
 
 # ---- The Debt retire check takes the Linux guard suite's proof from the guard shards (decision ci-cut-in-steps). checks waits for every guard shard in LINUX_GUARD_JOBS, the family
