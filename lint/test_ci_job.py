@@ -40,6 +40,8 @@ ScopeLint: --lint with a base reads each needs.scope.outputs flag from the repo'
 Run: python3 lint/test_ci_job.py
 """
 import functools
+import importlib.machinery
+import importlib.util
 import json
 import os
 import re
@@ -4657,6 +4659,66 @@ class ScopeLint(Job):
         self.assertTrue(os.path.exists(os.path.join(self.root, "scope-stub-ran.txt")),
                         "scope: ci-job did not run .github/scripts/ci-scope.sh of the repo under test\n" + out)
         self.assertEqual(by_step(lines).get("flag code"), "skipped", out)
+
+
+BIN_CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
+# The scope flags ci-scope.sh writes for a delta of one path no case arm names: every suite flag on, and the skip outputs false.
+UNMAPPED_FLAGS = {**{n: "true" for n in ("checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos",
+                                         "pointer_windows", "code", "guard", "sweep", "mods", "shoot", "checks_windows_sweep",
+                                         "checks_guard", "windows_guard", "mutation_report")},
+                  "records_only_skip": "false", "skip_comment_delta": "false", "skip_record_delta": "false"}
+# The same delta when the script maps it: only `code` is on, and every other flag and skip output is off.
+MAPPED_FLAGS = {**{n: "false" for n in UNMAPPED_FLAGS}, "code": "true"}
+
+
+def load_ci_job():
+    """bin/ci-job as a module. Its file has no .py suffix, so the loader is named; its entry point is __main__-guarded, so the import runs no step."""
+    loader = importlib.machinery.SourceFileLoader("ci_job_under_test", BIN_CI_JOB)
+    mod = importlib.util.module_from_spec(importlib.util.spec_from_loader("ci_job_under_test", loader))
+    loader.exec_module(mod)
+    return mod
+
+
+def git_repo_with_a_change(root):
+    """A repo of two commits: (its first head, its tree, the second head's tree). The second commit adds lib/tidy.py."""
+    def g(*args):
+        return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+    g("init", "-q")
+    g("config", "user.email", "t@t")
+    g("config", "user.name", "t")
+    g("config", "commit.gpgsign", "false")
+    open(os.path.join(root, "seed.txt"), "w").write("seed\n")
+    g("add", "-A")
+    g("commit", "-qm", "base")
+    a_head = g("rev-parse", "HEAD")
+    os.makedirs(os.path.join(root, "lib"), exist_ok=True)
+    open(os.path.join(root, "lib", "tidy.py"), "w").write("X = 1\n")
+    g("add", "-A")
+    g("commit", "-qm", "change")
+    return a_head, g("rev-parse", f"{a_head}^{{tree}}"), g("rev-parse", "HEAD^{tree}")
+
+
+class CarryUnmappedDelta(unittest.TestCase):
+    """carry_delta_read reads a delta whose every suite flag is on as unmapped, so no suite is carried. ci-scope.sh writes the two skip
+    outputs (skip_comment_delta, skip_record_delta) as false on such a delta, so they must sit in SCOPE_APART with the other outputs an
+    unmapped path does not set. Left out, they read as a flag off, and the suites the selector picks are carried for the unmapped path."""
+
+    def carried(self, flags):
+        mod = load_ci_job()
+        root = tempfile.mkdtemp(prefix="carry-", dir=RUN_FOLDER)
+        a_head, a_tree, b_tree = git_repo_with_a_change(root)
+        mod.scope_flags = lambda *args, **kwargs: (dict(flags), None)  # the script's answer for this delta, as ci-scope.sh gives it
+        mod.select_suites = lambda *args, **kwargs: ({"hooks/test_tidy.py"}, None)  # the selector would pick one suite
+        return mod.carry_delta_read(root, a_head, a_tree, b_tree)["picked"]
+
+    # Named failure: an unmapped delta carries the selector's suite, because the two skip outputs read as flags off.
+    def test_an_unmapped_delta_with_the_skip_outputs_set_carries_no_suite(self):
+        picked = self.carried(UNMAPPED_FLAGS)
+        self.assertIsNone(picked, f"an unmapped delta carries {sorted(picked or ())}: the skip outputs are not in SCOPE_APART")
+
+    # Control: a delta the script maps picks the selector's suite, as before.
+    def test_a_mapped_delta_still_carries_the_selector_suite(self):
+        self.assertEqual(self.carried(MAPPED_FLAGS), {"hooks/test_tidy.py"}, "a mapped delta no longer carries the selector's suite")
 
 
 if __name__ == "__main__":
