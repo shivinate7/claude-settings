@@ -23,6 +23,11 @@ Pinned contract:
   (`STE007,STE008`) credits each code, and so does one the guard's logger cut at its field limit
   (`STE001,STE003 [cut]`). AllRulesTests checks the ids against the source.
 - --days all reads the whole log. Any other word is refused. AllRulesTests checks it.
+- --outcomes prints one row per rule: refusals (deny and ask lines), claimed false alarms, claimed
+  right, and the false-alarm share of refusals (whole percent). Rules sort by claimed false alarms,
+  most first, under a line that says the claims are unchecked. An outcome line (decision `outcome`)
+  is a claim, never a refusal: the pace read (--between --rule load-brake) and the deny, ask and
+  noted counts ignore it. OutcomeReaderTests checks it.
 
 Run with:
 
@@ -1328,6 +1333,143 @@ class AllRulesTests(unittest.TestCase):
         out = self.report([stamped(1, "deny", "shared-tree")], "--days", "7")
         self.assertIn("| shared-tree | 1 | 0 | 0 |", out)
         self.assertNotIn("git-env-set", out)
+
+
+# ----------------------------------------------------------- outcome lines (bin/guard-outcome)
+#
+# An outcome line is a claim by the refused session, never a refusal. Its decision is `outcome`, its
+# matched text starts with the claim (`false-alarm` or `right`), and it is neither a deny, an ask nor
+# a note. The pace read (--between --rule load-brake) counts refusals only.
+
+OUTCOME_START = "2026-11-20T00:00:00-06:00"
+OUTCOME_END = "2026-11-24T00:00:00-06:00"
+
+
+def stamp_on(day, minute):
+    return "2026-11-%02dT10:%02d:00-06:00" % (day, minute)
+
+
+def outcome_line(stamp, rule, claim, why="", session=SID):
+    matched = claim + (" " + why if why else "")
+    return "\t".join([stamp, "", "outcome", rule, matched, session])
+
+
+def refusal_line(stamp, decision, rule, session=SID):
+    return "\t".join([stamp, "Bash", decision, rule, "git stash", session])
+
+
+def outcome_fixture():
+    """Lines inside the window 2026-11-20 .. 2026-11-24, one line outside it, and two unreadable lines."""
+    return [
+        refusal_line(stamp_on(21, 0), "deny", "load-brake"),
+        refusal_line(stamp_on(21, 1), "deny", "load-brake"),
+        refusal_line(stamp_on(21, 2), "deny", "load-brake"),
+        refusal_line(stamp_on(21, 3), "deny", "load-brake"),
+        refusal_line(stamp_on(21, 4), "noted", "load-brake"),
+        outcome_line(stamp_on(21, 5), "load-brake", "false-alarm", "disk check"),
+        outcome_line(stamp_on(21, 6), "load-brake", "false-alarm"),
+        outcome_line(stamp_on(21, 7), "load-brake", "false-alarm", "pace read"),
+        outcome_line(stamp_on(21, 8), "load-brake", "right"),
+        refusal_line(stamp_on(21, 10), "deny", "shared-tree"),
+        outcome_line(stamp_on(21, 11), "shared-tree", "right", "stash"),
+        outcome_line(stamp_on(22, 0), "shared-tree", "right"),
+        refusal_line(stamp_on(21, 12), "ask", "merge-main"),
+        refusal_line(stamp_on(21, 13), "ask", "merge-main"),
+        refusal_line(stamp_on(21, 14), "deny", "merge-main"),
+        refusal_line(stamp_on(21, 15), "deny", "merge-main"),
+        outcome_line(stamp_on(22, 1), "merge-main", "false-alarm", "gh merge"),
+        outcome_line(stamp_on(22, 2), "quiet-rule", "false-alarm", "never refused"),
+        outcome_line(stamp_on(22, 3), "quiet-rule", "false-alarm"),
+        refusal_line("2026-11-10T10:00:00-06:00", "deny", "merge-main"),
+        outcome_line("2026-11-10T10:01:00-06:00", "merge-main", "false-alarm", "old"),
+        "garbage line with no tabs",
+        "not-a-date\tBash\tdeny\tbad-ts\tm",
+    ]
+
+
+def outcome_rows(out):
+    """The --outcomes table as [(rule, refusals, false alarms, right, share)], in report order. [] when no table."""
+    lines = out.splitlines()
+    head = next((i for i, line in enumerate(lines) if line.startswith("| rule |")), None)
+    if head is None:
+        return []
+    rows = []
+    for line in lines[head + 2:]:
+        if not line.startswith("|"):
+            break
+        cells = _cells(line)
+        rows.append((cells[0], int(cells[1]), int(cells[2]), int(cells[3]), cells[4]))
+    return rows
+
+
+class OutcomeReaderTests(unittest.TestCase):
+    def report(self, lines):
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as folder:
+            path = write_log(os.path.join(folder, "guard.log"), lines)
+            rc, out, err = run_cli(["--log", path, "--outcomes", "--between", OUTCOME_START, OUTCOME_END])
+        self.assertEqual(rc, 0, "--outcomes refused its flags: %s" % err)
+        return out
+
+    def pace(self, lines):
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as folder:
+            path = write_log(os.path.join(folder, "guard.log"), lines)
+            rc, out, err = run_cli(["--log", path, "--between", OUTCOME_START, OUTCOME_END, "--rule", "load-brake"])
+        self.assertEqual(rc, 0, "the pace read refused its flags: %s" % err)
+        return out
+
+    def default_counts(self, lines):
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as folder:
+            path = write_log(os.path.join(folder, "guard.log"), lines)
+            rc, out, err = run_cli(["--log", path, "--days", "all"])
+        self.assertEqual(rc, 0, "the report refused --days all: %s" % err)
+        return rule_table(out)
+
+    def test_each_row_holds_refusals_claims_and_share(self):
+        rows = {row[0]: row[1:] for row in outcome_rows(self.report(outcome_fixture()))}
+        self.assertIn("load-brake", rows, "no row for load-brake")
+        self.assertEqual(rows["load-brake"], (4, 3, 1, "75%"),
+                         "refusals are deny and ask lines, so the noted line is not one")
+        self.assertIn("merge-main", rows, "no row for merge-main")
+        self.assertEqual(rows["merge-main"], (4, 1, 0, "25%"), "two asks and two denies are four refusals")
+        self.assertIn("shared-tree", rows, "no row for shared-tree")
+        self.assertEqual(rows["shared-tree"], (1, 0, 2, "0%"), "two right claims show as right, 0% false alarms")
+        self.assertIn("quiet-rule", rows, "a rule with claims and no refusal still gets a row")
+        self.assertEqual(rows["quiet-rule"][:3], (0, 2, 0), "no refusals, two false alarms, no right")
+
+    def test_rows_are_sorted_by_claimed_false_alarms_most_first(self):
+        names = [row[0] for row in outcome_rows(self.report(outcome_fixture()))]
+        self.assertEqual(names, ["load-brake", "quiet-rule", "merge-main", "shared-tree"],
+                         "rows must sort by claimed false alarms, most first")
+
+    def test_a_line_above_the_table_says_the_claims_are_unchecked(self):
+        out = self.report(outcome_fixture())
+        self.assertIn("| rule |", out, "no table in the report")
+        self.assertIn("unchecked", out.split("| rule |", 1)[0].lower(),
+                      "the report must say the claims are not checked, above the table")
+
+    def test_a_line_outside_the_window_counts_nowhere(self):
+        out = self.report([refusal_line("2026-11-10T10:00:00-06:00", "deny", "merge-main"),
+                           outcome_line("2026-11-10T10:01:00-06:00", "merge-main", "false-alarm")])
+        self.assertNotIn("merge-main", [row[0] for row in outcome_rows(out)],
+                         "a refusal and a claim outside the window must make no row")
+
+    def test_an_empty_log_has_no_rule_rows(self):
+        self.assertEqual(outcome_rows(self.report([])), [], "an empty log must list no rule")
+
+    def test_outcome_lines_leave_the_deny_ask_noted_counts_unchanged(self):
+        with_claims = outcome_fixture()
+        refusals_only = [line for line in with_claims if "\toutcome\t" not in line]
+        self.assertEqual(self.default_counts(with_claims), self.default_counts(refusals_only),
+                         "an outcome line must not change the deny, ask or noted counts")
+
+    def test_the_pace_read_prints_the_same_rows_with_or_without_a_claim(self):
+        refusal = refusal_line("2026-11-21T10:00:00-06:00", "deny", "load-brake")
+        claim = outcome_line("2026-11-21T10:05:00-06:00", "load-brake", "false-alarm", "disk check")
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_REMOTE": ""}):  # a cloud session reads n/a, not rows
+            plain = self.pace([refusal])
+            with_claim = self.pace([refusal, claim])
+        self.assertIn(refusal, plain, "the pace read must print the refusal")
+        self.assertEqual(with_claim, plain, "an outcome line must not add a row to the pace read")
 
 
 def tearDownModule():
