@@ -32,7 +32,11 @@ HTB_NEW_HANDOFF = hs_handoff(HTB_CFG, HTB_NEW)       # no file on disk
 
 def _build_htb():
     hs_install(HTB_CFG, hs_prompt_text())
-    write(HTB_HANDOFF, htb_text(HTB_DISK))
+    # Bytes, not text mode: Windows text mode writes CRLF, which grows the file past HTB_DISK, so a same-size
+    # Write would read as a shrink and pass.
+    os.makedirs(os.path.dirname(HTB_HANDOFF), exist_ok=True)
+    with open(HTB_HANDOFF, "wb") as handle:
+        handle.write(htb_text(HTB_DISK).encode("utf-8"))
 
 
 lazy_fixture([HTB_CFG], _build_htb)
