@@ -3054,10 +3054,14 @@ class CutLanes(Env):
         """The batch's newest merge commit for `lane`, on the other clone's feat."""
         return sh(self.other, "git", "log", "-1", "--merges", "--format=%H", f"--grep=origin/{lane}' into", "feat")
 
-    def revert_on_batch(self, sha, merge=True):
-        """Revert `sha` on the batch (-m 1 for a merge commit) and push. -> the revert commit."""
+    def revert_on_batch(self, sha, merge=True, message=None):
+        """Revert `sha` on the batch (-m 1 for a merge commit) and push. `message`, when given, replaces git's own revert message. -> the revert commit."""
         o = self.other
-        sh(o, "git", "revert", *(["-m", "1"] if merge else []), "--no-edit", sha)
+        if message is None:
+            sh(o, "git", "revert", *(["-m", "1"] if merge else []), "--no-edit", sha)
+        else:
+            sh(o, "git", "revert", "--no-commit", *(["-m", "1"] if merge else []), sha)
+            sh(o, "git", "commit", "-q", "-m", message)
         sh(o, "git", "push", "-q", "origin", "feat")
         return sh(o, "git", "rev-parse", "HEAD")
 
@@ -3075,6 +3079,39 @@ class CutLanes(Env):
     def test_a_batch_that_drops_a_lane_by_a_revert_is_refused(self):
         lane_batch(self, "lane1", "lane2")
         feat = self.revert_on_batch(self.merge_of("lane1"))
+        rc, out = self.go()
+        self.assert_refused_drop(rc, out, feat)
+
+    def test_a_revert_naming_its_merge_mid_line_still_drops_the_lane(self):
+        """The revert line does not start its line: `Revert lane1. This reverts commit <sha>.`. A revert of a merge counts wherever the line sits,
+        as the batch's dropped-lane read has always counted it, so the lane is dropped and the batch is refused."""
+        lane_batch(self, "lane1", "lane2")
+        sha = self.merge_of("lane1")
+        feat = self.revert_on_batch(sha, message=f"Revert lane1. This reverts commit {sha}.")
+        rc, out = self.go()
+        self.assert_refused_drop(rc, out, feat)
+
+    def test_a_revert_naming_its_merge_in_a_bullet_still_drops_the_lane(self):
+        """The revert line is a bullet: `* This reverts commit <sha>.`. The lane is dropped, as it is for git's own line-start form."""
+        lane_batch(self, "lane1", "lane2")
+        sha = self.merge_of("lane1")
+        feat = self.revert_on_batch(sha, message=f"Revert lane1\n\n* This reverts commit {sha}.\n")
+        rc, out = self.go()
+        self.assert_refused_drop(rc, out, feat)
+
+    def test_a_revert_naming_its_merge_on_an_indented_line_still_drops_the_lane(self):
+        """The revert line is indented: `    This reverts commit <sha>.`. The lane is dropped, as it is for git's own line-start form."""
+        lane_batch(self, "lane1", "lane2")
+        sha = self.merge_of("lane1")
+        feat = self.revert_on_batch(sha, message=f"Revert lane1\n\n    This reverts commit {sha}.\n")
+        rc, out = self.go()
+        self.assert_refused_drop(rc, out, feat)
+
+    def test_a_revert_naming_its_merge_at_a_line_start_drops_the_lane(self):
+        """Control: git's own line-start form, written through the same message argument. Green on the old and the new code."""
+        lane_batch(self, "lane1", "lane2")
+        sha = self.merge_of("lane1")
+        feat = self.revert_on_batch(sha, message=f"Revert lane1\n\nThis reverts commit {sha}.\n")
         rc, out = self.go()
         self.assert_refused_drop(rc, out, feat)
 
