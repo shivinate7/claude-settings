@@ -15,14 +15,29 @@ def _module_literal(text, name):
     return None
 
 
-def mirror_name_problems(install_sh, install_from_main, guard_frozen):
+def _imports_name(text, module, name):
+    """True when a top-level `from <module> import ...` in the text brings in `name`."""
+    return any(isinstance(node, ast.ImportFrom) and node.module == module
+               and any(alias.name == name for alias in node.names) for node in ast.parse(text).body)
+
+
+def _pin_suffix(guard_frozen, shared_names):
+    """LIVE_PIN_SUFFIX as guard_frozen.py gives it: its own literal, or, when guard_frozen.py imports the name from
+    hooks/shared_names.py (the one home), that file's literal. None when neither defines it."""
+    own = _module_literal(guard_frozen, "LIVE_PIN_SUFFIX")
+    if own is not None or not _imports_name(guard_frozen, "shared_names", "LIVE_PIN_SUFFIX"):
+        return own
+    return _module_literal(shared_names, "LIVE_PIN_SUFFIX")
+
+
+def mirror_name_problems(install_sh, install_from_main, guard_frozen, shared_names=""):
     """One line per copy that differs from its shell literal, or [] when every copy agrees. Each argument is
-    the text of one file."""
+    the text of one file; shared_names is hooks/shared_names.py, or "" where it is absent."""
     problems = []
     mirror = _MIRROR_SHELL.findall(install_sh)
     pin = _PIN_SHELL.findall(install_from_main)
     name = _module_literal(guard_frozen, "MAIN_MIRROR_NAME")
-    suffix = _module_literal(guard_frozen, "LIVE_PIN_SUFFIX")
+    suffix = _pin_suffix(guard_frozen, shared_names)
     if len(mirror) != 1:
         problems.append("install.sh does not set MAIN_MIRROR to $HOME/<name> exactly once")
     elif name != mirror[0]:
@@ -35,13 +50,15 @@ def mirror_name_problems(install_sh, install_from_main, guard_frozen):
 
 
 def _mirror_names_tie():
-    """MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX in guard_frozen.py equal the shell names they copy."""
+    """MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX in guard_frozen.py equal the shell names they copy. LIVE_PIN_SUFFIX may be
+    defined in hooks/shared_names.py instead, when guard_frozen.py imports it from there."""
     def read(*parts):
         with open(os.path.join(REPO, *parts), encoding="utf-8") as handle:
             return handle.read()
 
+    shared = read("hooks", "shared_names.py") if os.path.isfile(os.path.join(REPO, "hooks", "shared_names.py")) else ""
     problems = mirror_name_problems(read("install.sh"), read("merge", "install_from_main.sh"),
-                                    read("hooks", "guard_frozen.py"))
+                                    read("hooks", "guard_frozen.py"), shared)
     if problems:
         return False, "; ".join(problems)
     return True, "MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX equal install.sh MAIN_MIRROR and the install_from_main.sh pin"
