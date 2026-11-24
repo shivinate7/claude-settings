@@ -2179,7 +2179,7 @@ class Host:
                 num = self.pr_number(n)  # a number: pr() of a number reads nothing more
                 info = self.pr(num)
                 first = needs_head_proof(self.required)
-                if (waits_on_no_check(self.required) and not first) or head_none_stamp(self.cwd or ".", info["head"], DEFAULT_CONFIG, base=info["base"]) is not None:
+                if self.required == "none" or head_none_stamp(self.cwd or ".", info["head"], DEFAULT_CONFIG, base=info["base"]) is not None:
                     return "green", ""  # no CI run is read: the base's stamp says none, or a setup head's own stamp does (decision private-repos-no-ci)
                 got = self.checks(num, warn=False, sha=info["head"])
                 red, pending, _ = self.classify(got, [ROLLUP_JOB] if first else [], self.ignore, info["branch"])
