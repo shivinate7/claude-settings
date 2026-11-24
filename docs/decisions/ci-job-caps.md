@@ -22,11 +22,17 @@ The stopgap, CI and local, still ends with roadmap step `time-pinned-tests-go` (
 Owner, 2026-10-27, roadmap step c95 (the cap rule):
 
 - A full CI run is red only when something is broken, never because a job ran out of time.
-- A run is stopped only on a hang, never on time. The hang stop is decision `hang-stop`. Job caps stay as the last net for a busy-loop hang, Windows and action steps.
-- A net sits well above the measured run. It is never tightened to turn a slow healthy run red (owner, 2026-11-10 and 2026-11-23).
 - The target is a slowest run under 80% of the cap.
-- Until `hang-stop` is built, a job that ends at its cap with no red test step is re-capped or split, never left (skill `ci-hygiene`, step 5).
+- A job that ends at its cap with no red test step is re-capped or split, never left (skill `ci-hygiene`, step 5).
 - A cap rises only with a measured figure in the comment beside it. This item is suspended while the stopgap holds, and comes back when roadmap step `time-pinned-tests-go` (time-pinned tests are gone) closes (owner, 2026-11-01 18:44 CST, above).
+
+## The hang stop (decided, not built)
+
+Decision `hang-stop` (the hang stop) holds the rule the consultant reads into the owner's 2026-11-23 ruling R2: a run is stopped only on a hang, never on time. Job caps stay as the last net for a busy-loop hang, Windows and action steps.
+
+Decided, not built: today a run is still stopped by its time cap. Until `hang-stop` is built, the 2026-10-27 bullet above applies: a job that ends at its cap with no red test step is re-capped or split, never left.
+
+A net is never tightened to turn a slow healthy run red. Backing: the owner's 2026-11-10 ruling, quoted at `ci-job-caps.md:7`. The consultant reads the owner's 2026-11-23 words the same way; that reading is the consultant's, not the owner's words.
 
 ## The table
 

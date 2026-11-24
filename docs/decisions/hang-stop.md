@@ -4,18 +4,19 @@ Question: when may CI or lane lint stop a running step?
 
 ## The ruling
 
-Owner ruling R2 (no arbitrary time limits in CI or lint), 2026-11-23 10:49 CST, typed in the consultant's chat: a run is stopped only when it hangs.
+Owner ruling R2, 2026-11-23 10:49 CST, typed in the consultant's chat, as the consultant recorded it: "no arbitrary time limits, only hangs". "In CI or lint" is the consultant's gloss of the item it answered (item R2 of "CI, lint and merging"). The consultant reads the ruling as: a run is stopped only when it hangs.
 
-Owner, 2026-11-23 21:21 CST: "R2 can get worked on now." The consultant reads this as covering the hang stop, a standard way to resume, and cap sizing. That reading is the consultant's, not the owner's words.
+Owner, 2026-11-23 21:21 CST: "Yeah R2 can get worked on now we've built a good amount since then that i trust you to tackle it". The consultant reads this as covering the hang stop, a standard way to resume, and cap sizing. That reading is the consultant's, not the owner's words.
 
 Ruling: only on a hang. A hang is no new output byte and no CPU advance in any process under the step, for N seconds. This is the rule that decision `stall-watch` (the session stall watch) uses to report.
 
 - N: 600 s for Linux push steps, the first value. It is 2 x the longest silent gap that does not end on a dot row (291.1 s, measured on the merge tool git-half fixture suite), rounded up. N is at least 300 s. CPU half unmeasured: logs cannot show CPU advance.
 - One home: the wait loop of `bin/verdict`. It acts only when the env var `VERDICT_HANG_SECONDS` is set. Unset, nothing is stopped.
 - Before a stop, it prints the process tree and the log tail. Then it ends the tree and prints one `HANG` line. In lane lint, a HANG reads unknown.
-- Scope of the first build: lane lint steps, and the five CI steps that carry a step cap today. Those are the three install checkout-detection shards and the two 45-minute steps in the `checks` workflow. Other CI steps keep only the job cap. The five step caps stay until the build lands.
+- Scope of the first build: lane lint steps, and the five long CI step caps (30 and 45 minutes): the three install checkout-detection shards (30 min), and two 45-minute steps in the `checks` workflow, the install.sh checkout-detection suite and the macOS guard fixture slice. Other CI steps keep their job cap. Six short step caps (3 or 5 min) sit outside the first scope and stay in force: the code-check tool install, the Windows PowerShell 5.1 bin EOL test, the record stamp engine suite (macOS), the Windows session-start freshness cases, the guard progress beat suite, and the record stamp engine suite in the second rest job.
+- Consultant's reading of the 10:49 words: once the hang stop covers a step, that step's own time cap is removed in the same change; until then the cap stays. The owner has not ruled on this point in so many words.
 - No stop on Windows until it has a CPU read. No stop on mutation steps yet.
-- Job caps stay as the last net for a busy-loop hang, Windows and action steps. A net sits well above the measured run. It is never tightened to turn a slow healthy run red (owner, 2026-11-10 and 2026-11-23). Decision `ci-job-caps` (the CI job caps) holds the caps.
+- Job caps stay as the last net for a busy-loop hang, Windows and action steps. A net sits well above the measured run. It is never tightened to turn a slow healthy run red (owner, 2026-11-10, quoted at `ci-job-caps.md:7`). The consultant reads the 2026-11-23 words the same way; that reading is the consultant's, not the owner's words. Decision `ci-job-caps` (the CI job caps) holds the caps.
 - Resume after a stop:
   - Lane lint: its pass cache keeps passed steps.
   - CI: the rerun of failed jobs that the merge tool already names.
