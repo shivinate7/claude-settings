@@ -156,6 +156,9 @@ from workflow_steps import job_block, job_workflow, run_body, step_blocks, step_
 SELECTOR_LIMIT = 60  # seconds the --lint-suites selector may run (about 10 s on this repo's 123 suites) before it reads unknown
 SELECTED = {}  # (top, base) -> (picked suites, why not): the one selector run of this process; the sibling passes read it
 PREAMBLE_MARK = "ci-job-preamble-done"
+# bin/verdict's hang line (its `print(f"HANG {shown} rc={rc} no output or CPU for {hang}s, stopped ({secs}) log={log}")`): the fixed words
+# after the name, so only that line is the hang line. Copied: bin/verdict is a script with no shared constant to import (the lane code-caps-hang-stop moves it).
+VERDICT_HANG_LINE = re.compile(r"HANG .+ rc=124 no output or CPU for \d+s, stopped \(\d+(?:\.\d+)?s\) log=")
 PREAMBLE_DONE = "echo; echo " + PREAMBLE_MARK  # the line preamble_marked adds right before a CI step's first suite line; the bare echo ends a preamble line that has no newline, so the mark lands at line start
 SUITE_LINE = re.compile(r"python3 ((?:hooks|merge)/test_[\w.-]+\.py)(?: [^|&;`<>]*)?")  # a CI step's suite line, arguments allowed
 USAGE = "usage: ci-job <job> [--workflow <file>] [--base <ref>] [--plan] [--lint] [--pinned] [--step NAME]..."
@@ -1085,8 +1088,8 @@ def run_step_uncached(name, step, install, detail, shell, env, cwd, ctx, log, su
             unstarted, only = [], False
     finally:
         os.remove(script)
-    hang = next((ln.rstrip("\n") for ln in kept if ln.startswith("HANG ")), None) if rc == 124 else None
-    # verdict's hang stop ends with exit 124 and a HANG line; a PASS, SKIP or FAIL line the step logged around it is not the verdict
+    hang = next((ln.rstrip("\n") for ln in kept if VERDICT_HANG_LINE.match(ln)), None) if rc == 124 else None
+    # verdict's hang stop ends with exit 124 and its own HANG line; a PASS, SKIP, FAIL or HANG-shaped line the step logged is not the verdict
     line = None if hang else next((ln.rstrip("\n") for ln in kept if ln.startswith(("PASS ", "SKIP ", "FAIL "))), None)
     first = line or hang or "(verdict printed no verdict line)"  # a hang stop's own line says why the step read unknown
     if known_action(step) == "code-check":
