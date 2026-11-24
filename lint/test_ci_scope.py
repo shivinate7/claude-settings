@@ -71,7 +71,8 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
     given, is SCOPE_FILES: the script reads those paths in place of the diff, with the same BASE_SHA range as the other cases. `head_ref` is HEAD_REF,
     empty when not given, so no HEAD_REF of the caller's environment reaches the script. `base` is BASE_SHA: "auto" is the base
     commit (the pull request's base), and "head" (HEAD itself), "green" (the `green` commit) and "sibling" (a commit off the base
-    that HEAD does not descend from) name those commits; any other value is BASE_SHA as given. A push gets no BASE_SHA under "auto"
+    that HEAD does not descend from) name those commits; "pre" is the base commit itself, the commit `merged` branches off, which is the
+    proven base of a push whose merge commit brings that branch in; any other value is BASE_SHA as given. A push gets no BASE_SHA under "auto"
     unless `proven` is set: that is the push base a proven run hands over, and with none a push runs every flag (decision
     push-skip-on-proven-tree). `moves` maps an old path to its new one, or to None for a delete: the old path is in the base, and a
     move keeps the content, so git sees a rename.
@@ -153,7 +154,7 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
         git(d, "add", "-A")
         git(d, "commit", "-qm", "head", "--allow-empty")
         head_sha = git(d, "rev-parse", "HEAD")
-        base_sha = sha if base == "auto" else {"head": head_sha, "sibling": side_sha, "green": green_sha}.get(base, base)
+        base_sha = sha if base == "auto" else {"head": head_sha, "sibling": side_sha, "green": green_sha, "pre": sha}.get(base, base)
         if merged is not None:
             git(d, "checkout", "-q", "-b", "base-moved", sha)
             write(merged)
@@ -1904,6 +1905,15 @@ class PushDiffFromProvenBase(FlagAsserts, unittest.TestCase):
         got = run(self.RECORDS, event="push", proven=True)
         self.assertFlags(got, want_false=ALL)
         self.assertEqual(got.get("doc_other"), "true", f"a docs/ path sets doc_other: {got}")
+
+    def test_a_merge_commit_whose_side_branch_changed_a_code_file_flags_that_files_suites_from_a_proven_base(self):
+        # HEAD is a merge commit: the side branch changed merge/merge.py and the head changed docs only. The proven base is the commit
+        # the side branch leaves from, so base..HEAD holds the side's code file. Without the side's change the same push is docs-only.
+        got = run(self.RECORDS, merged=self.CODE, base="pre", event="push")
+        self.assertFlags(got, want_true=["checks_windows", "checks_windows_merge", "checks_macos", "code", "guard"],
+                         want_false=["checks_windows_rest", "pointer_windows", "shell_macos", "sweep", "mods", "shoot"])
+        twin = run(self.RECORDS, base="pre", event="push")
+        self.assertFlags(twin, want_false=ALL)
 
     def test_a_pull_request_diff_is_unchanged_by_a_proven_base(self):
         self.assertFlags(run(self.DOCS, event="pull_request", proven=True), want_false=ALL)
