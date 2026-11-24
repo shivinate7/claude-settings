@@ -25,8 +25,8 @@
 # ancestor of PR_HEAD and the delta from it to PR_HEAD is docs/records.md alone; the lint flags keep their whole-PR values and mutation_report is false. Any unreadable read: no skip.
 # The last output line, records_only_skip=true|false, is true exactly in that case.
 # SCOPE_FILES (optional, newline-separated paths): read these paths in place of the pull request diff, through the same case table. bin/ci-job gives the
-# paths that differ between two lint trees, to see whether a delta sets every flag (an unmapped path does). It gives no windows_guard flag and no landed-dir
-# flag, since those two reads need a git range and the added files; a records-only skip never applies.
+# paths that differ between two lint trees, to see whether a delta sets every flag (an unmapped path does). It reads the landed-dir rule (and the windows_guard
+# flag it sets) from the added files of the BASE_SHA range, not the guard-inputs.txt pass; a records-only skip never applies.
 set -u
 JOBS="checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos pointer_windows"
 LINTS="lint_red_run lint_plan_refuter lint_ruling_kind lint_comment_narration"
@@ -179,7 +179,7 @@ if [ -n "$files" ]; then
         esac ;;
     esac
   done <<< "$files"
-  # SCOPE_FILES (the header) skips the two reads below: each needs a git range or the added files.
+  # SCOPE_FILES (the header) skips the guard-inputs pass below, which reads every changed path of the range, and keeps the landed-dir read.
   if [ -z "${SCOPE_FILES:-}" ]; then
   # windows_guard has its own pass: the case table above skips a .md path, and an input such as agents/builder.md is one. The list is
   # .github/guard-inputs.txt (the one list); an unreadable or empty list turns the flag on.
@@ -200,13 +200,23 @@ if [ -n "$files" ]; then
     done < <(git diff --name-only --no-renames -z "$range" 2>/dev/null)
     [ "$n" -gt 0 ] || on="$on windows_guard "
   fi
+  fi
   # A new file under a landed dir (landed-dirs.txt, the one list) changes what test_install_src and
-  # the guard suite see. An unreadable or empty list turns everything on.
+  # the guard suite see. An unreadable or empty list turns everything on. In SCOPE_FILES mode the added names come from the same range read
+  # (the delta's commits: bin/ci-job passes EVENT and BASE_SHA); a range that does not read turns everything on, and whole_read stays 0,
+  # since the records-only skip never applies there.
   dirs=$(sed 's/#.*//; s/[[:space:]]//g; s#/$##' landed-dirs.txt 2>/dev/null | grep -v '^$' | paste -sd'|' -)
   if [ -z "$dirs" ]; then
     on="$on $ALL windows_guard "
   else
-    if added=$(git diff --name-only --diff-filter=A --no-renames "$range" 2>/dev/null); then
+    if [ -n "${SCOPE_FILES:-}" ]; then
+      # One NUL-separated read serves both flags, so the carry adds one git start, not two.
+      if added=$(set -o pipefail; git diff --name-only --diff-filter=A --no-renames -z "$range" 2>/dev/null | tr '\0' '\n'); then
+        grep -Eq "^($dirs)/" <<< "$added" && on="$on $W $S code guard windows_guard "
+      else
+        on="$on $ALL windows_guard "
+      fi
+    elif added=$(git diff --name-only --diff-filter=A --no-renames "$range" 2>/dev/null); then
       whole_read=1
       grep -Eq "^($dirs)/" <<< "$added" && on="$on $W $S code guard windows_guard "
       # windows_guard alone reads the added names NUL-separated: the newline form quotes a non-ASCII name, which matches no
@@ -219,7 +229,6 @@ if [ -n "$files" ]; then
     else
       on="$on $ALL windows_guard "
     fi
-  fi
   fi
 else
   on=" $ALL windows_guard "

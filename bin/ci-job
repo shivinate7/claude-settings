@@ -271,7 +271,7 @@ def scope_term(m):
 def scope_flags(top, base_sha, head_ref, head_sha, files=None):
     """(flags, why): the name=value lines the repo's ci-scope.sh writes for this diff, run as CI's scope job runs it on a pull
     request. (None, why) when the script is missing or fails: no flag is known, and each scope-gated step runs.
-    files: the paths to read in place of the diff (the script's SCOPE_FILES), which leaves out windows_guard and the landed-dir rule."""
+    files: the paths to read in place of the diff (the script's SCOPE_FILES), which leaves out the guard-inputs pass; the landed-dir rule reads the range's added files."""
     script = os.path.join(top, *SCOPE_SCRIPT.split("/"))
     if not os.path.isfile(script):
         return None, "no %s" % SCOPE_SCRIPT
@@ -956,7 +956,7 @@ def carry_delta(top, a_head, a_tree, b_tree):
     unmapped file, a change to the workflow or to ci-scope.sh) or cannot be read, or the selector cannot run. A delta of CARRY_RECORDS alone
     picks none, whatever the selector would say. Read once per run. Cost: one ancestor read and two tree diffs, the selector's included (git diff
     of the saved tree and this tree; git diff of the saved head to HEAD, inside the selector); when the delta holds more than the records file, also
-    one ci-scope.sh run and one selector run. carry_scope reads the delta's flags for a step whose `if:` names one: a ci-scope.sh run, once per
+    one ci-scope.sh run and one selector run; each ci-scope.sh run in SCOPE_FILES mode also starts one git diff of the added files of a_head...HEAD (the landed-dir read). carry_scope reads the delta's flags for a step whose `if:` names one: a ci-scope.sh run, once per
     delta, and none when that run already happened here."""
     memo = (top, a_head, a_tree, b_tree)
     if memo not in CARRY_MEMO:
