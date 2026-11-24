@@ -409,12 +409,14 @@ class Unknowns(Job):
 
 
 def checks_hooks_condition():
-    """The `if:` of the first checks-hooks step that joins a scope flag and the event with `||`, read from checks.yml so the
-    case runs the form CI writes, never a copy of it."""
+    """The `if:` of the first checks-hooks step that holds both `records_only_skip != 'true'` and `needs.scope.outputs.code == 'true'`,
+    read from checks.yml so the case runs the form CI writes, never a copy of it. A Linux suite step obeys its scope flag on
+    every event, so this form has no `||` with the event."""
     with open(CHECKS, encoding="utf-8") as f:
         steps = step_blocks(job_block(f.read(), "checks-hooks"))
-    conds = [step_key(st, "if") for st in steps if "||" in (step_key(st, "if") or "")]
-    assert conds and "records_only_skip != 'true'" in conds[0], "scope: checks-hooks has no `||` step gated on records_only_skip != 'true'"
+    conds = [c for c in (step_key(st, "if") or "" for st in steps)
+             if "records_only_skip != 'true'" in c and "needs.scope.outputs.code == 'true'" in c]
+    assert conds, "scope: checks-hooks has no step whose if: holds both records_only_skip != 'true' and needs.scope.outputs.code == 'true'"
     return conds[0]
 
 
