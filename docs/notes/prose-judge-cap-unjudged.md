@@ -1,1 +1,0 @@
-- prose-judge-cap-unjudged: `PROSE_JUDGE_MAX_CALLS` in `merge/merge.py` (:4407) caps the prose judge at 3 model calls. A file past the cap reads UNKNOWN. PR 3840 merged with 58 lines unjudged past it. Decision: claims-carry-backing. Seen: 2026-11-24 x1
