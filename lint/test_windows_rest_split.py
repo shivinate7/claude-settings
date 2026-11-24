@@ -13,8 +13,8 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from test_windows_split import (CHECKS, RECORDS_ONLY_CONDITION, CONDITIONED_JOBS, SPLIT_CONDITIONED_JOBS, UNCONDITIONED_JOBS, all_jobs, eval_if,  # noqa: E402  the one home of the checks.yml reader
-                                condition_problem, job_if_without_records, scope_named_steps)
+from test_windows_split import (CHECKS, RECORDS_ONLY_CONDITION, CONDITIONED_JOBS, SPEC_JOBS, SUITE_CONDITIONED_JOBS, all_jobs, eval_if,  # noqa: E402  the one home of the checks.yml reader
+                                condition_problem, job_if_without_records, spec_conditioned, suite_names)
 from all_jobs_passed_rules import needs_of  # noqa: E402  the one home of the needs reader
 from test_windows_split import SUITE_FLAG, WINDOWS_GUARD_JOBS, WINDOWS_MERGE_JOBS, eval_with  # noqa: E402  the one home of the merge and rest flags, the shard families and the flag evaluator
 from workflow_steps import job_block  # noqa: E402  the one home of the job parser
@@ -102,21 +102,23 @@ class RecordsOnlySkipCondition(unittest.TestCase):
         return runs
 
     def conditioned_steps(self):
-        """(job, step) for each run step the spec conditions: every run step of CONDITIONED_JOBS, and each run step of SPLIT_CONDITIONED_JOBS that
-        scope_named_steps() names. A split job that names no run step fails here, by name."""
-        named = scope_named_steps()
-        for name in SPLIT_CONDITIONED_JOBS:
-            self.assertTrue(any(st.get("name") in named for st in self.run_steps(name)),
-                            f"{name} names no run step of scope_named_steps(), so the condition has nothing to check")
-        return [(name, st) for name in CONDITIONED_JOBS + SPLIT_CONDITIONED_JOBS for st in self.run_steps(name)
-                if name in CONDITIONED_JOBS or st.get("name") in named]
+        """(job, step) for each run step the spec conditions (spec_conditioned): every run step of CONDITIONED_JOBS, and each run step of
+        SUITE_CONDITIONED_JOBS that runs a suite. A suite job that runs no suite fails here, by name."""
+        out = []
+        for name in SPEC_JOBS:
+            suites = suite_names(self.text, name)
+            if name in SUITE_CONDITIONED_JOBS:
+                self.assertTrue(suites, f"{name} runs no suite, so the condition has nothing to check")
+            out += [(name, st) for st in self.run_steps(name) if spec_conditioned(name, st, suites)]
+        return out
 
     def unconditioned_steps(self):
-        """(job, step) for each run step the spec does not condition: every run step of UNCONDITIONED_JOBS, and each other run step of
-        SPLIT_CONDITIONED_JOBS."""
-        named = scope_named_steps()
-        return [(name, st) for name in UNCONDITIONED_JOBS + SPLIT_CONDITIONED_JOBS for st in self.run_steps(name)
-                if name in UNCONDITIONED_JOBS or st.get("name") not in named]
+        """(job, step) for each run step the spec does not condition: each run step of SUITE_CONDITIONED_JOBS that runs no suite."""
+        out = []
+        for name in SUITE_CONDITIONED_JOBS:
+            suites = suite_names(self.text, name)
+            out += [(name, st) for st in self.run_steps(name) if not spec_conditioned(name, st, suites)]
+        return out
 
     def test_the_scope_job_declares_the_records_only_skip_output(self):
         block = job_block(self.text, "scope")

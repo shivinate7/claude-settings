@@ -60,7 +60,7 @@ import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from 
 sys.path.append(os.path.join(HERE, "..", "testing"))  # append: the signal-test helpers (testing/proc_fixture.py)
 import proc_fixture  # noqa: E402  the one home of the signal-test helpers; this module's wait_for is the rendezvous helper, so call proc_fixture's qualified
 from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
-from test_windows_split import LINUX_GUARD_JOBS  # noqa: E402  the one home of the guard shards (SHARD_COUNTS)
+from test_windows_split import LINUX_GUARD_JOBS, RECORDS_ONLY_CONDITION, drop_condition, unwrap  # noqa: E402  the one home of the guard shards (SHARD_COUNTS) and of the records-only skip's form
 sys.path.append(os.path.join(HERE, "..", "hooks"))  # append: the pin note's names (hooks/pin_note.py)
 from pin_note import ENV as PIN_NOTE_ENV  # noqa: E402  the one home of the pin note's variable (hooks/pin_note.py)
 RUN_FOLDER = _test_temp.run_folder()
@@ -427,10 +427,13 @@ def checks_hooks_condition():
 
 
 def checks_hooks_or_condition():
-    """The `if:` of the first checks-hooks step that holds `||` and names no github.event_name, read from checks.yml the same way."""
+    """The `if:` of the first checks-hooks step that holds `||` and names no github.event_name, read from checks.yml the same way, with
+    its records-only skip taken off: the case samples the scope disjunction the step gates on. The skip must be there to come off."""
     conds = [c for c in checks_hooks_ifs() if "||" in c and "github.event_name" not in c]
     assert conds, "scope: checks-hooks has no step whose if: holds || and no github.event_name"
-    return conds[0]
+    expr = unwrap(conds[0])
+    assert RECORDS_ONLY_CONDITION in expr and drop_condition(expr) != expr, "scope: the sampled checks-hooks || step has no records-only skip: " + expr
+    return "${{ %s }}" % drop_condition(expr)
 
 
 class Conditions(Job):

@@ -1223,6 +1223,16 @@ class CommentOnlyDelta(unittest.TestCase):
                 self.assertEqual(facts.get("delta"), [path], f"scope: the delta from GREEN_HEAD is not the test file: {facts}")
                 self.assertCodeOn(got, f"a code change in the test file {path} on a {event} run")
 
+    # Named failure: a SCOPE_FILES run reads no earlier head (scope_files gives the paths, bin/ci-job's carry), so a comment-only file in it
+    # keeps the code suites on even when GREEN_HEAD is set. The delta skip is for the range read only.
+    def test_a_scope_files_run_with_a_green_head_keeps_the_code_suites_on(self):
+        green, head = "# old note\n", "# new note\n"
+        for event in self.EVENTS:
+            with self.subTest(event=event):
+                got = run([PY_PATH], green=[PY_PATH], green_contents={PY_PATH: green}, contents={PY_PATH: head}, event=event,
+                          scope_files=[PY_PATH])
+                self.assertCodeOn(got, f"a comment-only .py file in a SCOPE_FILES run with a green head on a {event} run")
+
 
 @unittest.skipUnless(BASH, "bash not on PATH")
 class RecordsFolderDelta(unittest.TestCase):
@@ -1415,15 +1425,16 @@ def rollup_needs(text):
 SUITE_CMD = re.compile(r"\b(?:python3?|node|bash)\s+(?:--test\s+)?(?:\S*/)?(?:test_[\w.-]*|[\w.-]+\.test)\.(?:py|mjs|sh)\b")
 
 
+def runs_suite(step):
+    """True when a step runs a test suite: one of its command lines matches SUITE_CMD. A comment line is no command. A block
+    scalar's body is read through run_body, so a suite named in a multi-line run still counts. The one home of that reading."""
+    commands = [line for line in (run_body(step) or "").split("\n") if line.strip() and not line.lstrip().startswith("#")]
+    return any(SUITE_CMD.search(line) for line in commands)
+
+
 def suite_steps(text, job):
-    """(name, if) of each step of `job` that runs a test suite, in file order. A comment line is no command. A block
-    scalar's body is read through run_body, so a suite named in a multi-line run still counts."""
-    found = []
-    for step in step_blocks(job_block(text, job)):
-        commands = [line for line in (run_body(step) or "").split("\n") if line.strip() and not line.lstrip().startswith("#")]
-        if any(SUITE_CMD.search(line) for line in commands):
-            found.append((step_key(step, "name"), step_key(step, "if")))
-    return found
+    """(name, if) of each step of `job` that runs a test suite (runs_suite), in file order."""
+    return [(step_key(step, "name"), step_key(step, "if")) for step in step_blocks(job_block(text, job)) if runs_suite(step)]
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")

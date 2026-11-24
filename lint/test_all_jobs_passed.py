@@ -23,10 +23,10 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from test_windows_split import CHECKS, LINUX_GUARD_JOBS, MACOS_JOBS, all_jobs, eval_with, yaml_scalar  # noqa: E402  the one home of the checks.yml path and the guard shards
-from test_windows_split import ALL_JOBS_PASSED_JOB, RECORDS_ONLY_CONDITION, SUITE_FLAG  # noqa: E402  the one home of the rollup job name, the records-only skip and the suite flags
-from all_jobs_passed_rules import (ALL_JOBS_PASSED_USES, all_problems, child_problems, ci_done_problems, needs_of,  # noqa: E402  the one home of the rules
-                                   needs_problems, off_problems, scope_if_problems, scope_skips_problems, shape_problems, split_jobs, step_with,
-                                   steps_problems, steps_part)
+from test_windows_split import ALL_JOBS_PASSED_JOB, RECORDS_ONLY_CONDITION, SUITE_FLAG, unwrap  # noqa: E402  the one home of the rollup job name, the records-only skip and the suite flags
+from all_jobs_passed_rules import (ALL_JOBS_PASSED_USES, COMMENT_DELTA_CLAUSE, DELTA_CLAUSES, RECORD_DELTA_CLAUSE, all_problems,  # noqa: E402  the one home of the rules
+                                   child_problems, ci_done_problems, needs_of, needs_problems, off_problems, scope_if_problems,
+                                   scope_skips_problems, shape_problems, split_jobs, step_with, steps_problems, steps_part)
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the job parser
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
@@ -203,15 +203,15 @@ def planned_nightly_skip(text):
 
 # checks-hooks' header and its job-level if in checks.yml. A case swaps that if line for its own, so the subject is the job's one if.
 HOOKS_HEAD = "  checks-hooks:\n\n    runs-on: ubuntu-latest\n    needs: scope\n"
-HOOKS_IF = "    if: ${{ needs.scope.outputs.records_only_skip != 'true' }}\n"
+HOOKS_IF = "    if: ${{ " + RECORDS_ONLY_CONDITION + " || " + RECORD_DELTA_CLAUSE + " }}\n"
 
 
 # The delta clauses a job-level if may join after the records-only skip. skip_comment_delta is read by checks (its lint steps read the
-# changed text); skip_record_delta by all three lint jobs. A job that names neither clause is refused. The forms are written out here,
-# so this module needs no rules constant that a later change would have to add first.
-COMMENT_DELTA = "needs.scope.outputs.skip_comment_delta == 'true'"
-RECORD_DELTA = "needs.scope.outputs.skip_record_delta == 'true'"
-DELTA_FORMS = {"checks": (COMMENT_DELTA, RECORD_DELTA), "checks-hooks": (RECORD_DELTA,), "checks-rest": (RECORD_DELTA,)}
+# changed text); skip_record_delta by all three lint jobs. A job that names neither clause is refused. The clauses are the rules
+# module's constants, the one home of the delta forms (all_jobs_passed_rules.DELTA_CLAUSES).
+COMMENT_DELTA = COMMENT_DELTA_CLAUSE
+RECORD_DELTA = RECORD_DELTA_CLAUSE
+DELTA_FORMS = {name: clauses for name, clauses in DELTA_CLAUSES.items()}
 WRONG_DELTA_FORMS = (("checks", " || ".join((RECORDS_ONLY_CONDITION, RECORD_DELTA))),
                      ("checks-hooks", " || ".join((RECORDS_ONLY_CONDITION, COMMENT_DELTA))),
                      ("checks-rest", " || ".join((RECORDS_ONLY_CONDITION, COMMENT_DELTA))))
@@ -260,6 +260,20 @@ class PushOffRollup(unittest.TestCase):
     def test_a_needed_job_with_no_job_level_if_passes_the_rollup_rules(self):
         # Control, green on the old rules: a job with no job-level if is needed and passes.
         self.assertEqual(off_problems(self.rollup_text(None)), [])
+
+
+class DeltaClausesOnTheRealWorkflow(unittest.TestCase):
+    """Each lint job's job-level if on checks.yml names its delta clauses (DELTA_CLAUSES, the one home of the forms), so a comment-only or
+    record-folder delta starts that job. The rules above read synthetic files; this reads the real one."""
+
+    def test_each_lint_job_level_if_names_its_delta_clauses(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            jobs = all_jobs(f.read())
+        for name, clauses in DELTA_CLAUSES.items():
+            with self.subTest(job=name):
+                self.assertIn(name, jobs, f"{name} is not a job of checks.yml")
+                form = " || ".join((RECORDS_ONLY_CONDITION, *clauses))
+                self.assertIn(form, unwrap(jobs[name]["if"]) or "", f"{name}'s job-level if does not name its delta clauses: {jobs[name]['if']}")
 
 
 class MacOnceByBatchRollup(unittest.TestCase):
