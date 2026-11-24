@@ -1,0 +1,1 @@
+- windows-split-quotes-ruling: `lint/test_windows_split.py` line 108 (`PUSH_RULING`) quotes "owner ruling A, option b, 19:02 CST Nov 23 2026: a Linux suite step obeys its scope flag on every event" as the owner's words. That sentence describes the built state. Decision `push-skip-on-proven-tree` does not hold it, and it holds the ruling. Seen: 2026-11-24 x1
