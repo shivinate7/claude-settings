@@ -30,7 +30,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `roles-each-layer-proves-once` | Each layer proves a change once. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-review-cap-three` | A change gets at most three review rounds. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-findings-are-debts-or-notes` | A known gap is a debt only if Claude is likely to hit it in normal work. | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-third-round-steps-up` | Third try: Sonnet, high effort (owner item 893); an Opus third try stays allowed. | [`CLAUDE.md`](../CLAUDE.md) |
+| `roles-third-round-steps-up` | Third try: Sonnet, high effort (owner item 893). | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-resume-by-name` | Resume a dead agent by name, never fresh. | [`CLAUDE.md`](../CLAUDE.md) |
 | `parallelism-each-own-checkout` | Fan tasks out to agents now, each in its own checkout. | [`CLAUDE.md`](../CLAUDE.md) |
 | `parallelism-own-lane-orchestrator` | A read-only workflow agent shares the caller's checkout. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -619,6 +619,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `windows-merge-dead-pid-trees` | On Windows the merge tool keeps a dead run's merge checkout, so it is never removed. | [`docs/debts/windows-merge-dead-pid-trees.md`](../docs/debts/windows-merge-dead-pid-trees.md) |
 | `windows-shards-outgrow-caps` | The Windows guard suite runs in 5 shards, each at the 75 min stopgap cap: shard 1 in job `checks-windows-guard`, which a ready pull request runs as its Windows slice, and shards 2 to 5 on a daily schedule and a manual dispatch only (decision `windows-prs-run-marked-tests`). | [`docs/debts/windows-shards-outgrow-caps.md`](../docs/debts/windows-shards-outgrow-caps.md) |
 | `windows-slice-marks-incomplete` | A ready pull request runs only the marked Windows tests in the guard and merge slices. | [`docs/debts/windows-slice-marks-incomplete.md`](../docs/debts/windows-slice-marks-incomplete.md) |
+| `workflow-variable-model-unjudged` | `spawn_inputs` in `hooks/guard.py` drops a Workflow `agent()` call whose `model` or `agentType` the scan cannot read, such as a variable or a constant that holds the model. | [`docs/debts/workflow-variable-model-unjudged.md`](../docs/debts/workflow-variable-model-unjudged.md) |
 | `wp-batch-reads-installed-copy` | `stale_pages.py` batch mode (no `--page`) compares each live page with the `page.html` installed at session start, not with claude-settings main. | [`docs/debts/wp-batch-reads-installed-copy.md`](../docs/debts/wp-batch-reads-installed-copy.md) |
 
 ## Plans
