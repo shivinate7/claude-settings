@@ -154,6 +154,78 @@ FROM_UNITTEST_IMPORT_MAIN = (
 )
 
 
+BARE_RUN_CASES = (
+    "from case_runner_test import run_cases\n"
+    "\n"
+    "\n"
+    "def case_one():\n"
+    "    return None\n"
+    "\n"
+    "\n"
+    'if __name__ == "__main__":\n'
+    "    run_cases([case_one])\n"
+)
+RUN_CASES_IN_SYS_EXIT = (
+    "import sys\n"
+    "from case_runner_test import run_cases\n"
+    "\n"
+    "\n"
+    "def case_one():\n"
+    "    return None\n"
+    "\n"
+    "\n"
+    'if __name__ == "__main__":\n'
+    "    sys.exit(run_cases([case_one]))\n"
+)
+RUN_CASES_ASSIGNED = (
+    "import sys\n"
+    "from case_runner_test import run_cases\n"
+    "\n"
+    "\n"
+    "def case_one():\n"
+    "    return None\n"
+    "\n"
+    "\n"
+    'if __name__ == "__main__":\n'
+    "    rc = run_cases([case_one])\n"
+    "    sys.exit(rc)\n"
+)
+RUN_CASES_OR_ASSIGNED = (
+    "import sys\n"
+    "from case_runner_test import run_cases\n"
+    "\n"
+    "\n"
+    "def case_one():\n"
+    "    return None\n"
+    "\n"
+    "\n"
+    "def main():\n"
+    "    failed = 0\n"
+    "    failed |= run_cases([case_one])\n"
+    "    return failed\n"
+    "\n"
+    "\n"
+    'if __name__ == "__main__":\n'
+    "    sys.exit(main())\n"
+)
+RUN_CASES_RETURNED = (
+    "import sys\n"
+    "from case_runner_test import run_cases\n"
+    "\n"
+    "\n"
+    "def case_one():\n"
+    "    return None\n"
+    "\n"
+    "\n"
+    "def main():\n"
+    "    return run_cases([case_one])\n"
+    "\n"
+    "\n"
+    'if __name__ == "__main__":\n'
+    "    sys.exit(main())\n"
+)
+
+
 def tree(name, files):
     """A fresh folder in the run folder holding the given test files, each at its relative path (posix form)."""
     root = os.path.join(RUN, name)
@@ -256,6 +328,27 @@ class FixtureCases(unittest.TestCase):
     def test_unittest_main_imported_by_name_is_a_runner(self):
         found = checker().problems(fixture("from_unittest_import_main", FROM_UNITTEST_IMPORT_MAIN))
         self.assertEqual(found, [], "a `main` imported from unittest, called under the __main__ block, is reported: %r" % found)
+
+    def test_bare_run_cases_call_is_reported(self):
+        found = checker().problems(fixture("bare_run_cases", BARE_RUN_CASES))
+        named = [p for p in found if "run_cases" in p and "return value" in p]
+        self.assertTrue(named, "a suite whose __main__ path calls run_cases as a bare statement is not reported with 'run_cases' and 'return value': %r" % found)
+
+    def test_run_cases_inside_sys_exit_is_clean(self):
+        found = checker().problems(fixture("run_cases_in_sys_exit", RUN_CASES_IN_SYS_EXIT))
+        self.assertEqual(found, [], "sys.exit(run_cases(...)) is reported: %r" % found)
+
+    def test_run_cases_assigned_then_exited_is_clean(self):
+        found = checker().problems(fixture("run_cases_assigned", RUN_CASES_ASSIGNED))
+        self.assertEqual(found, [], "rc = run_cases(...) then sys.exit(rc) is reported: %r" % found)
+
+    def test_run_cases_or_assigned_is_clean(self):
+        found = checker().problems(fixture("run_cases_or_assigned", RUN_CASES_OR_ASSIGNED))
+        self.assertEqual(found, [], "failed |= run_cases(...) is reported: %r" % found)
+
+    def test_run_cases_returned_is_clean(self):
+        found = checker().problems(fixture("run_cases_returned", RUN_CASES_RETURNED))
+        self.assertEqual(found, [], "return run_cases(...) is reported: %r" % found)
 
 
 class RunClassCases(unittest.TestCase):
