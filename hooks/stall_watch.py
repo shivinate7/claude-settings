@@ -968,7 +968,8 @@ def stopped_ids(content):
 # "finished" is the word actions/ci-done-comment/comment.sh puts in its red line; test CI94 runs that script, so the pattern follows it.
 CI_VERDICT = re.compile(r"^CI (?:finished )?(green|red|cancelled|unknown|none) on \S", re.M)
 CI_KEYS = (b"ready", b"pull_request", b"merge", b"send_later", b"create_trigger", b"CronCreate",
-           b"ScheduleWakeup", b"CI ", b"close", b'"is_error":true', b'"is_error": true')
+           b"ScheduleWakeup", b"CI ", b"close", b'"is_error":true', b'"is_error": true',
+           b"CronDelete", b"nextFireAt", b"scheduledFor")  # the last three mark the cancel line's reads
 CI_CHECKIN_TOOLS = ("send_later", "create_trigger", "CronCreate", "ScheduleWakeup")
 # The bytes that mark a line as a possible check-in call or an error result, for scan_jobs's keep_waiting read.
 CHECKIN_KEYS = tuple(t.encode() for t in CI_CHECKIN_TOOLS) + (b'"is_error":true', b'"is_error": true')
@@ -1073,12 +1074,16 @@ def refused_result(block):
 
 def ci_events(rec):
     """The CI-wait events one transcript record holds, in order: ('ready', pr, call id), ('checkin', call id, input text),
-    ('failed', call id, refused), ('merge', pr), ('mergeany',), ('verdict', word). A user or queued message holds a
+    ('failed', call id, refused), ('merge', pr, call id, merged), ('mergeany', None, call id, merged),
+    ('undo', pr, call id, True), ('placed', check-in call id, returned id, fire time in epoch ms), ('delete', call id,
+    the id it cancels), ('verdict', word). The check-in event also carries its tool name. merged is false for a
+    bin/merge call with no --confirm, a dry run that merged nothing. A user or queued message holds a
     verdict line; only an assistant call holds the rest. A tool result is no message, so a verdict it prints
     is not one, but its error flag voids the check-in it answers. refused is true when the error text is a
     PreToolUse hook refusal (HOOK_REFUSAL): the call never ran. ('merge', pr) is a merge or close that names
-    pr (pr_ref); ('mergeany',) is a gh pr merge or close that names no PR at all, only flags, which aims at
-    the current branch's PR."""
+    pr (pr_ref); ('mergeany', ...) is a gh pr merge or close that names no PR at all, only flags, which aims at
+    the current branch's PR. A check-in's result carries its returned id and fire time only in the record's
+    toolUseResult (CronCreate: id and nextFireAt; ScheduleWakeup: scheduledFor, no id)."""
     kind = rec.get("type")
     if kind == "attachment":
         att = rec.get("attachment")
@@ -1089,6 +1094,11 @@ def ci_events(rec):
         failed = [("failed", b.get("tool_use_id"), refused_result(b)) for b in (content if isinstance(content, list) else ())
                   if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error") is True]
         if failed or "toolUseResult" in rec:
+            res = rec.get("toolUseResult")
+            if not failed and isinstance(res, dict) and ("nextFireAt" in res or "scheduledFor" in res):
+                return [("placed", b.get("tool_use_id"), res.get("id"), res.get("nextFireAt") or res.get("scheduledFor"))
+                        for b in (content if isinstance(content, list) else ())
+                        if isinstance(b, dict) and b.get("type") == "tool_result"][:1]
             return failed
         if isinstance(content, list):
             content = "\n".join(b["text"] for b in content if isinstance(b, dict) and b.get("type") == "text"
@@ -1101,33 +1111,52 @@ def ci_events(rec):
         name, inp = str(b.get("name")), b["input"]
         tool = name.rsplit("__", 1)[-1]
         if tool in CI_CHECKIN_TOOLS:
-            events.append(("checkin", b.get("id"), json.dumps(inp, ensure_ascii=False)))
+            events.append(("checkin", b.get("id"), json.dumps(inp, ensure_ascii=False), tool))
+        elif tool == "CronDelete":
+            if inp.get("id"):
+                events.append(("delete", b.get("id"), str(inp["id"])))
         elif tool == "merge_pull_request":
             if inp.get("pullNumber"):
-                events.append(("merge", str(inp["pullNumber"])))
+                events.append(("merge", str(inp["pullNumber"]), b.get("id"), True))
         elif tool == "update_pull_request" and inp.get("draft") is False:
             events.append(("ready", str(inp.get("pullNumber") or ""), b.get("id")))
         elif tool == "update_pull_request" and inp.get("draft") is True:
-            events.append(("undo", str(inp.get("pullNumber") or "")))
+            events.append(("undo", str(inp.get("pullNumber") or ""), b.get("id"), True))
         elif isinstance(inp.get("command"), str) and name in ("Bash", "PowerShell"):
             for words in shell_calls(inp["command"]):
                 gh = gh_pr_call(words)
                 if gh and gh[0] == "ready":
-                    events.append(("undo", pr_ref(gh[1])) if "--undo" in gh[1] else ("ready", pr_ref(gh[1]), b.get("id")))
+                    events.append(("undo", pr_ref(gh[1]), b.get("id"), True) if "--undo" in gh[1] else ("ready", pr_ref(gh[1]), b.get("id")))
                 elif gh:
                     # --auto only queues the merge and --disable-auto drops it: neither has merged anything
                     if not {"--auto", "--disable-auto"} & set(gh[1]):
                         pr = pr_ref(gh[1])
-                        events.append(("merge", pr) if pr else ("mergeany",))
+                        events.append(("merge", pr, b.get("id"), True) if pr else ("mergeany", None, b.get("id"), True))
                 elif words[0] == "merge" or words[0].replace("\\", "/").endswith("bin/merge"):
                     pr = pr_ref(words[1:])
                     if pr:
-                        events.append(("merge", pr))
+                        events.append(("merge", pr, b.get("id"), "--confirm" in words))
     return events
 
 
+def starts_turn(rec):
+    """True when a transcript record opens a turn: a user message that is no tool result and no meta message."""
+    if rec.get("type") != "user" or rec.get("isMeta") is True:
+        return False
+    content = rec.get("message", {}).get("content")
+    if isinstance(content, list):
+        return not any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content)
+    return isinstance(content, str)
+
+
 def open_ci_wait(transcript):
-    """The PR of a CI wait that is open with no check-in, as a string ('' when the call named none), or
+    """The PR of a CI wait that is open with no check-in (see scan_ci_wait), or None."""
+    return scan_ci_wait(transcript)[0]
+
+
+def scan_ci_wait(transcript):
+    """(open_ci_wait's answer, cancels): cancels is the check-ins to delete, as (PR, tool, returned id, fire time in
+    epoch ms) tuples. The PR of a CI wait that is open with no check-in, as a string ('' when the call named none), or
     None. The newest ready call opens a wait. A green, cancelled or none verdict closes it; an unknown verdict
     leaves it open. A merge or close closes a numbered wait only when it names that PR, or is a gh pr merge
     or close that names no PR at all; it closes a wait whose ready call named no number (bare, a branch or
@@ -1135,18 +1164,42 @@ def open_ci_wait(transcript):
     its PR the same way. A
     red verdict keeps it open and voids the check-ins before it. A check-in after the anchor
     covers it, unless its result was an error. A ready call that a PreToolUse hook refused
-    never marked anything: it opens no wait and leaves the wait it found. One streamed read, records in file order."""
+    never marked anything: it opens no wait and leaves the wait it found. One streamed read, records in file order.
+
+    A merge, close or return to draft that closed a wait in the current turn (since the last user prompt), did not
+    fail (an error or a refused call) and was no bin/merge dry run hands the check-ins that wait held to cancels, when
+    their result gave a fire time, minus those a CronDelete cancelled. The caller drops the fired ones: it holds the clock."""
     wait = None  # [pr, ids of the check-ins since the anchor]
     marks = []  # [call id, the wait before that ready call] for each ready call not yet answered
+    kinds = {}  # check-in call id -> its tool
+    placed = {}  # check-in call id -> (id its tool returned, fire time in epoch ms), from its result
+    deleted = {}  # CronDelete call id -> the id it cancels
+    pending = []  # [merge call id, PR, check-in call id] for each close of a wait in this turn
     with open(transcript, "rb") as f:
         for line in f:
-            if not any(k in line for k in CI_KEYS):
+            ci = any(k in line for k in CI_KEYS)
+            # A prompt line holds no CI word. A tool result is never a prompt, so its bytes rule it out before any parse.
+            if not ci and not (b'"user"' in line and b"tool_result" not in line and b"toolUseResult" not in line):
                 continue
             try:
-                events = ci_events(json.loads(line))
+                rec = json.loads(line)
+                if starts_turn(rec):
+                    pending = []
+                events = ci_events(rec) if ci else []
             except Exception:  # a bad or half-written line is skipped
                 continue
             for ev in events:
+                if ev[0] == "placed":
+                    placed[ev[1]] = (ev[2], ev[3])
+                    continue
+                if ev[0] == "delete":
+                    deleted[ev[1]] = ev[2]
+                    continue
+                if ev[0] == "checkin":
+                    kinds[ev[1]] = ev[3]
+                if ev[0] == "failed":  # the call did nothing: no merge happened and no cancel took effect
+                    deleted.pop(ev[1], None)
+                    pending = [c for c in pending if c[0] != ev[1]]
                 if ev[0] == "ready":
                     marks.append([ev[2], wait and [wait[0], set(wait[1])]])
                     wait = [ev[1], set()]
@@ -1169,13 +1222,33 @@ def open_ci_wait(transcript):
                 elif ev[0] == "failed":
                     wait[1].discard(ev[1])
                 elif ev[0] == "mergeany" or (ev[0] in ("merge", "undo") and (not wait[0].isdigit() or wait[0] == ev[1])):
+                    if ev[3]:
+                        pending += [[ev[2], ev[1] or wait[0], c] for c in placed if c in wait[1]]
                     wait = None  # a wait that names no number (bare, a branch, a $var) closes on any PR
                 elif ev[0] == "verdict":
                     if ev[1] == "red":
                         wait[1].clear()
                     elif ev[1] != "unknown":
                         wait = None
-    return wait[0] if wait and not wait[1] else None
+    gone = set(deleted.values())
+    cancels = [(pr or "(this branch)", kinds.get(c), placed[c][0], placed[c][1]) for _, pr, c in pending
+               if placed[c][0] not in gone]
+    return (wait[0] if wait and not wait[1] else None), cancels
+
+
+def cancel_line(cancels, now):
+    """The one line that tells the session to delete the check-ins a merge or close left behind, or '' when each has
+    fired (fire time, epoch ms, at or before now). A ScheduleWakeup returns no id, so its line says so."""
+    parts = []
+    for pr, tool, rid, fire in cancels:
+        if isinstance(fire, (int, float)) and fire / 1000 <= now:
+            continue
+        if rid:
+            parts.append("PR %s: delete the %s check-in %s%s" % (pr, tool, rid, " with CronDelete" if tool == "CronCreate" else ""))
+        else:
+            parts.append("PR %s: the %s check-in cannot be deleted by id; when it wakes this session, say the PR is done and stop"
+                         % (pr, tool))
+    return ("The CI wait of this turn is closed. " + "; ".join(parts) + ".") if parts else ""
 
 
 TRANSCRIPT_AGENT_ID = re.compile(r"[\w-]+\Z")  # an id safe to put in a transcript file name
@@ -1297,10 +1370,14 @@ def stop():
         return 0
     out = {}
     try:
-        pr = open_ci_wait(call["transcript_path"])
+        pr, cancels = scan_ci_wait(call["transcript_path"])
         if pr is not None:
             out["decision"] = "block"
             out["reason"] = "PR %s is marked ready and no check-in is set (decision ci-wait-reads-run-status). %s" % (pr or "(this branch)", CI_REMEDY)
+        # additionalContext reaches the model; a top-level systemMessage is shown to the owner only (hooks docs)
+        line = cancel_line(cancels, float(os.environ.get("STALL_WATCH_NOW") or time.time()))
+        if line:
+            out["hookSpecificOutput"] = {"hookEventName": "Stop", "additionalContext": line}
     except Exception:
         pass
     try:
