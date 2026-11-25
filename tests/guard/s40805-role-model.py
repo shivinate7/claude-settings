@@ -438,8 +438,9 @@ for _label, _env in (("default sonnet", SONNET_DEFAULT), ("default unset", UNSET
                         _step_flow("'Do the task.'", "agentType: '%s'" % _role), rule=ROLE_MODEL_RULE,
                         lacks=ROLE_LACKS, env=_env)
 # The remedy names the role's model from the table (the builder row is sonnet), and no FORBIDDEN_IN_A_REASON fragment.
-# The haiku rows (Explore, reviewer, test-author) have no such case: their remedy would name haiku, which the forbidden
-# list holds, so that wording is an open question for the orchestrator.
+# The haiku rows (Explore, reviewer, test-author) have no such case: their remedy names haiku, which this case's lacks list
+# holds. REASON_MAY_NAME (s30130-rule9.py) lets the agent-role-model reason name haiku, so a haiku-row case needs a lacks
+# list without it.
 workflow_refuse("role-model: Workflow builder agent() with no model names the role's model (sonnet) as the remedy",
                 _step_flow("'Fix the failing case.'", "agentType: 'builder'"), rule=ROLE_MODEL_RULE,
                 carries=(ROLE_DEFAULT_REMEDY,), lacks=ROLE_LACKS + _FORBIDDEN_FRAGMENTS, env=UNSET_DEFAULT)
