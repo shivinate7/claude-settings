@@ -212,6 +212,9 @@ GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
 if GUARD_FAMILY and GUARD_FAMILY not in FAMILIES:
     sys.exit("GUARD_FAMILY=%r is not a family. Want one of: %s"
              % (GUARD_FAMILY, ", ".join(sorted(FAMILIES))))
+# An opt-in family runs only when GUARD_FAMILY names it. An unfiltered run and every shard skip it, with one SKIP row
+# that gives the command which runs it, so its minutes of checks are never paid by a run that did not ask for them.
+OPT_IN = {"fixtureless": "GUARD_FAMILY=fixtureless python3 hooks/test_guard.py"}
 
 
 # The progress beat (decision stall-watch: a quiet tool owes a line at least every 120 s). The quiet clock
@@ -866,7 +869,7 @@ def run_cases():
             if (not mode or (tag == "windows" and check in WINDOWS_CHECKERS)
                 or (tag == "macos" and check not in WINDOWS_CHECKERS
                     and macos_reached(LOG_FAMILY.get(label), None)))
-            and (not fam or LOG_FAMILY.get(label) == fam)]
+            and (LOG_FAMILY.get(label) == fam if fam else LOG_FAMILY.get(label) not in OPT_IN)]
     total = len(cases) + len(logs)
     if mode and not total:
         say("GUARD_TESTS=%s: no case is tagged. Nothing ran." % mode)
@@ -884,6 +887,11 @@ def run_cases():
     failed = 0
     ran = 0
     skipped = 0
+    if not fam:  # one row per opt-in family that has checks here, shard or not, so no run drops it silently
+        for name in sorted(OPT_IN):
+            if any(LOG_FAMILY.get(label) == name for label, _ in LOG_CHECKS):
+                skipped += 1
+                say("SKIP  %s  (opt-in family, not run unless named: %s)" % (name, OPT_IN[name]))
     # MUTATE_ONLY: set by hooks/mutate_shared.py's first stage, run only the named cases.
     only = os.environ.get("MUTATE_ONLY")
     for case in cases:
