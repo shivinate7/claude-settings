@@ -1123,7 +1123,7 @@ def spawn_models(records):
             if b.get("name") not in SPAWN_TOOLS or b.get("id") in failed:
                 continue
             inp = b.get("input") or {}
-            role = str(inp.get("subagent_type") or "").lower()
+            role = str(inp.get("subagent_type") or "").lower().rsplit(":", 1)[-1].strip()  # "cs-build:builder" is a builder
             if role not in NAMED_ROLES:
                 continue
             model = model_family(inp.get("model")) or model_family(agent_pin(role)) or \
@@ -1135,12 +1135,29 @@ def spawn_models(records):
     return found
 
 
-def done_models_problem(text, spawned, every=None):
+def records_since_report(records, text):
+    """The records after the session's previous report, else all of them. `text` is the reply being judged:
+    its own record is not a previous report. A report is the module's own shape test, `report_shape_ok`."""
+    texts = [(i, _reply_text(rec)) for i, rec in enumerate(records)]
+    texts = [(i, reply) for i, reply in texts if reply is not None]
+    if texts and block_text(texts[-1][1]) == block_text(text):
+        texts.pop()
+    start = 0
+    for i, reply in texts:
+        if report_shape_ok(reply):
+            start = i + 1
+    return records[start:]
+
+
+def done_models_problem(text, spawned, window=None):
     """Name what Done gets wrong about the spawned roles' models, else ''.
 
-    `spawned` is the turn's spawns and sets which roles Done must name. `every` is the whole
-    transcript's spawns: Done also reports a spawn that ran before the turn's window.
-    Only the models an earlier spawn resolved count; its unknown '' must not hide a window mismatch.
+    `spawned` is the turn's spawns and sets which roles Done must name. `window` is the spawns made since the
+    session's previous report (the whole transcript with none): a model Done names for a role must be one a
+    same-role spawn in it ran. An older spawn's model does not count, and a spawn whose model is unknown ''
+    does not switch the check off while another same-role spawn in the window resolves.
+    A role named in Done with no spawn of that role in the window passes, and the missing-role check
+    keeps the turn's window (both on purpose).
     """
     if not spawned:
         return ""
@@ -1153,8 +1170,8 @@ def done_models_problem(text, spawned, every=None):
     if missing:
         return "no model named for " + ", ".join(missing)
     for role, model in sorted(named):
-        ran = set(spawned.get(role, ())) | {m for m in (every or {}).get(role, ()) if m}
-        if ran and "" not in ran and model not in ran:
+        ran = {m for m in (spawned if window is None else window).get(role, ()) if m}
+        if ran and model not in ran:
             return f"'{role} {model}' matches no {role} spawn, which ran " + ", ".join(sorted(ran))
     return ""
 
@@ -3277,7 +3294,7 @@ def rewrite_problems(hook):
         text = last_reply(hook)
         spawned = spawn_models(records[idx + 1:])
         reasons = []
-        models = done_models_problem(text, spawned, spawn_models(records))
+        models = done_models_problem(text, spawned, spawn_models(records_since_report(records, text)))
         if models:
             reasons.append(MODELS_REASON % models)
         if unstarted_problem(text, spawned):
@@ -3847,7 +3864,7 @@ def main():
             "a Done line does not say BUILT, RECORDED or OTHER, or says BUILT or RECORDED with no PR or commit: "
             + repr(item)))
     spawned = spawn_models(after)
-    models = done_models_problem(text, spawned, spawn_models(records)) if shape_ok else ""
+    models = done_models_problem(text, spawned, spawn_models(records_since_report(records, text))) if shape_ok else ""
     if models:
         reasons.append(MODELS_REASON % models)
     if shape_ok and unstarted_problem(text, spawned):
