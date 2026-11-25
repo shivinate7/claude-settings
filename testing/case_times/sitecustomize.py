@@ -37,7 +37,7 @@ class _UnittestHook(object):
             if fullname == "unittest.result":
                 os.environ.pop("CASE_TIMES", None)  # the children this process starts stay unarmed
                 case_times.patch_result(module.TestResult)
-                case_times.patch_case()  # guards its own reads: a Python without TestCase._callSetUp runs unwrapped
+                case_times.patch_case()  # a call the Python lacks: one stderr line, and the other call is still wrapped
                 return
             try:  # a broken async patch must never break the import: the module loads unpatched
                 case_times.patch_async_case(module)

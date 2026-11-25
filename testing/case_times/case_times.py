@@ -55,6 +55,9 @@ def record(suite, group, case, s, fixture_s, outcome):
 
 
 def _flush():
+    left = [_case_of(frame["test"]) for frame in _LEFT + _OPEN]  # a frame that never stopped is named here too
+    if left:
+        sys.stderr.write("case_times: left open and dropped, no row kept: %s\n" % ", ".join(left))
     if not _ROWS:
         return
     path = _LATCH["path"]
@@ -114,6 +117,8 @@ def _tally(result):
 
 
 _OPEN = []  # a frame per case started and not yet stopped in this process, innermost last
+_LEFT = []  # frames a case dropped when it stopped above them: the flush names them
+_FIXTURE_CALLS = ("_callSetUp", "_callTearDown")
 
 
 def _close(test, result):
@@ -132,31 +137,32 @@ def patch_result(cls):
     """Wrap a unittest TestResult so each test method gets one row, from its start to its stop. The outcome
     reads the result's own lists: a failure, an error or an unexpected success is fail, a skip is skip.
 
-    A case that starts while another case is open in this process, on its own result or the same one, keeps no
-    row: its time is inside the outer case's row, which holds the whole span. A frame left open by a case that
-    never stopped is dropped when the case it sits under stops, and one stderr line names it."""
+    A case that starts inside another case keeps no row once the outer case stops: the outer row holds its time. So
+    each stop drops the rows kept since its own start, before it keeps its own row. A frame that a case never stops
+    keeps no row, and the rows around it are kept. A frame still open at exit, or dropped by a case that stopped
+    above it, is named in one stderr line at flush."""
     if getattr(cls, "_case_times_patched", False):
         return
     real_start, real_stop = cls.startTest, cls.stopTest
 
     def startTest(self, test):
-        frame = {"test": test, "result": self, "base": _tally(self), "t0": time.perf_counter(), "fixture": 0.0}
+        frame = {"test": test, "result": self, "base": _tally(self), "t0": time.perf_counter(), "fixture": 0.0,
+                 "mark": len(_ROWS)}
         real_start(self, test)
         _OPEN.append(frame)
 
     def stopTest(self, test):
         frame, left_open = _close(test, self)
+        _LEFT.extend(left_open)
         try:
-            if left_open:
-                sys.stderr.write("case_times: left open and dropped, no row kept: %s\n"
-                                 % ", ".join(_case_of(opened["test"]) for opened in left_open))
-            if frame is not None and not _OPEN:  # nested inside an open case: the outer row holds this time
+            if frame is not None:
                 took = time.perf_counter() - frame["t0"]
                 failed, skipped = _tally(frame["result"])
                 base_failed, base_skipped = frame["base"]
                 outcome = "fail" if failed > base_failed else "skip" if skipped > base_skipped else "pass"
                 fixture = frame["fixture"]
                 record(_suite_of(test), _suite_of(test), _case_of(test), took - fixture, fixture, outcome)
+                del _ROWS[frame["mark"]:-1]  # record put this row last: the rows kept since its start are inside it
         except Exception as error:  # a row that cannot be kept must never abort the run or the result
             sys.stderr.write("case_times: no row for %s: %s\n" % (test.id(), error))
         return real_stop(self, test)
@@ -187,18 +193,24 @@ def _timed(real):
 
 
 def _wrap_fixture_calls(cls):
-    """Wrap the fixture calls cls defines itself, once per class. A class that only inherits a call is wrapped where
-    its base defines it. A Python that renamed one of them gets one stderr line, and the class runs unwrapped."""
+    """Wrap each fixture call cls defines itself, once per class, and leave the other one as it is. A class that only
+    inherits a call is wrapped where its base defines it. A call that no class in the MRO defines (a Python that
+    renamed it), or that is defined but cannot be read, writes one stderr line naming it. The call that exists is
+    still wrapped."""
     if cls.__dict__.get("_case_times_fixture_patched"):
         return
     cls._case_times_fixture_patched = True
-    names = [name for name in ("_callSetUp", "_callTearDown") if name in cls.__dict__]
-    try:
-        reals = [getattr(cls, name) for name in names]  # both are read before either is set
-    except AttributeError as error:
-        sys.stderr.write("case_times: fixture time not kept for %s: %s\n" % (cls.__name__, error))
-        return
-    for name, real in zip(names, reals):
+    for name in _FIXTURE_CALLS:
+        if not any(name in klass.__dict__ for klass in cls.__mro__):
+            sys.stderr.write("case_times: fixture time not kept for %s: %s is not defined\n" % (cls.__name__, name))
+            continue
+        if name not in cls.__dict__:
+            continue  # inherited: the base that defines it wraps it
+        try:
+            real = getattr(cls, name)
+        except AttributeError as error:
+            sys.stderr.write("case_times: fixture time not kept for %s: %s\n" % (cls.__name__, error))
+            continue
         setattr(cls, name, _timed(real))
 
 

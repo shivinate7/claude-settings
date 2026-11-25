@@ -46,7 +46,7 @@ import time
 site = sys.modules.get("sitecustomize")
 site_file = getattr(site, "__file__", None) if site is not None else None
 print("SITE_FILE", os.path.realpath(site_file) if site_file else "none")
-if "absent" in sys.argv[2:] or "deleted" in sys.argv[2:]:  # TestCase._callSetUp unreadable ("absent") or gone ("deleted"), as a Python that renamed it would have it
+if "absent" in sys.argv[2:] or "deleted" in sys.argv[2:]:  # TestCase._callSetUp unreadable or gone (renamed Python)
     import importlib.machinery
 
     class Absent(object):
