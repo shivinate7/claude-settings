@@ -29832,6 +29832,7 @@ class StaleMergeTrees(unittest.TestCase):
         processes = unittest.mock.patch.object(sweep, "processes_in", return_value=([], []))
         self.fake_processes_in = processes.start()
         self.addCleanup(processes.stop)
+        self.dropped_by_case = set()  # the folders a case dropped or removed itself: make_tree's cleanup drops those a second time
 
     def read_real_processes(self):
         """Put the real process reader back for this case."""
@@ -29865,7 +29866,7 @@ class StaleMergeTrees(unittest.TestCase):
         wt = os.path.join(tmp, "tree")
         os.makedirs(tmp)
         sh(self.repo, "git", "worktree", "add", "-q", "--detach", "--lock", "--reason", reason, wt, self.head)
-        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        self.addCleanup(self.drop_at_exit, tmp, wt)
         return tmp, wt
 
     def locked_trees(self):
@@ -30080,15 +30081,25 @@ class StaleMergeTrees(unittest.TestCase):
         with open(os.path.join(stuck, "held.txt"), "w", encoding="utf-8") as handle:
             handle.write("held\n")
         os.chmod(stuck, 0o500)
-        self.addCleanup(os.chmod, stuck, 0o700)  # registered after make_tree's drop, so it runs first: the drop can empty the folder
+        self.addCleanup(os.chmod, stuck, 0o700)  # registered after make_tree's cleanup, so it runs first: the drop can empty the folder
         return tmp, wt, stuck
 
     def drop_printed(self, tmp, wt):
         """drop_worktree of one tree, with what it prints on either stream. -> (its return value, the non-blank lines it printed)."""
+        self.dropped_by_case.add(tmp)
         out = io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
             ret = merge.drop_worktree(self.repo, tmp, wt)
         return ret, [line for line in out.getvalue().splitlines() if line.strip()]
+
+    def drop_at_exit(self, tmp, wt):
+        """make_tree's cleanup. A folder the case already dropped or removed gets a second drop here, and that drop's output is no claim
+        of the case, so it stays off the run's output. Any other folder's drop prints as usual."""
+        if tmp not in self.dropped_by_case:
+            merge.drop_worktree(self.repo, tmp, wt)
+            return
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            merge.drop_worktree(self.repo, tmp, wt)
 
     def refused_removal(self, name):
         """A blocked tree, and a twin in the same state. The twin's removal runs through git alone, so the expected exit code and first
@@ -30097,6 +30108,7 @@ class StaleMergeTrees(unittest.TestCase):
         twin_tmp, twin_wt, _ = self.blocked_tree(name + "-twin")
         merge.git(self.repo, "worktree", "unlock", twin_wt)
         code, out = merge.git(self.repo, "worktree", "remove", "--force", twin_wt)
+        self.dropped_by_case.add(twin_tmp)  # the case ran the twin's removal itself, so the twin's cleanup is a second drop
         first = out.splitlines()[0] if out.strip() else ""
         return tmp, wt, code, first.replace(twin_wt, wt)
 
