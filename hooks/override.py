@@ -776,9 +776,10 @@ def _take_opus(session_id, spawn_role, at):
     return OPUS_LIFTED
 
 
-def remote_session_id():
-    """The session record id (session_<x>) the env names as cse_<x>, or None when the env is unset or of another shape."""
-    remote = os.environ.get(LANE_ENV) or ""
+def remote_session_id(env=None):
+    """The session record id (session_<x>) the env names as cse_<x>, or None when the env is unset or of another shape.
+    `env` is a mapping to read instead of os.environ."""
+    remote = (os.environ if env is None else env).get(LANE_ENV) or ""
     rest = remote[len(LANE_ENV_PREFIX):] if remote.startswith(LANE_ENV_PREFIX) else ""
     return LANE_PREFIX + rest if rest else None
 

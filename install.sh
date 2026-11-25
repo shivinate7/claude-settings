@@ -996,7 +996,7 @@ stage_file() {
 
 # stage_guard_set SRC_HOOKS STAGE_HOOKS: the guard set goes in the generation's hooks/guard.d/<id>/: every guard
 # file, stamped, and shared_names.py, git_reads.py, question_form.py, own_session.py, precompact_handoff.py, merge_options.py, override.py, _nowindow.py, proc_env.py, reread_check.py, call_judge.py, decision_watch.py, feedback_guard.py, local_time.py, ruling_home.py, route_match.py, reply_judge.py, stall_watch.py, agent_brief.py, mail.py, ci_wait_cap.py, ci_wake.py, required_check.py, session_role.py, ci_wait_cap.json, route_rows.json precompact_handoff_prompt.md and wait_common.py,
-# which the guard imports or reads beside itself. hooks/guard.py finds it by its own real path, so it is the set of its generation.
+# which the guard imports or reads beside itself, and the tools a launcher in bin runs (lease.py). hooks/guard.py finds it by its own real path, so it is the set of its generation.
 stage_guard_set() {
   sg_dir="$2/guard.d/$INSTALL_ID_VALUE"
   mkdir -p "$sg_dir" || return 1
