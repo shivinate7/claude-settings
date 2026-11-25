@@ -11,7 +11,9 @@ Modes:
   fired inside an agent) changes nothing: only the session's own Read counts.
 - --stop: At Stop, while the session's flag that its handoff is not read is set and the
   handoff exists, refuses once per turn and names the handoff path. With that flag cleared
-  and the audit flag still set, it refuses once per turn and names the Audit: remedy.
+  and the audit flag still set, it refuses once per turn and names the Audit: remedy. With the audit
+  flag cleared and the rewrite flag set, it runs the rewrite check: the rewritten handoff must still hold
+  the ids it held at PreCompact, the audit's MISSING items and each running job or agent.
 
 Spec: docs/decisions/precompact-handoff.md, items 9 and 16. Three flag files per session,
 <config dir>/state/handoff/<session_id>.reread, <session_id>.audit and <session_id>.rewrite. Three modes, JSON on stdin:

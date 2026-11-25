@@ -80,7 +80,7 @@ the desktop app has none.
   newest pointer for the same project dir (none when that session has no handoff); with no
   pointer, the newest handoff whose PreCompact state `repo` is that dir; with none, says
   "no handoff". It also names the new session's own handoff. Every reorient then sweeps
-  unusable pointers and stale .dir, .reread and .audit records (sweep()).
+  unusable pointers and stale .dir, .reread, .audit and .rewrite records (sweep()).
   Spec: docs/decisions/precompact-handoff.md, item 8.
 
 Compaction check (no mode; hooks/daily_note.py calls it at SessionStart): cc_version_check()
@@ -117,7 +117,7 @@ DIGEST_CAP = 60_000
 DIGEST_SINCE_CAP = 200_000
 REFUSED_MAX_LINES = 50
 REFUSED_MAX_CHARS = 200
-# A .dir, .reread or .audit record this old has no live session: Claude Code deletes a transcript after
+# A .dir, .reread, .audit or .rewrite record this old has no live session: Claude Code deletes a transcript after
 # cleanupPeriodDays (default 30), so no session that old can resume. The record sets no value.
 STALE_AGE = 30 * 86400
 NUDGE_FLOOR = 200_000
@@ -449,7 +449,7 @@ def audit_flag_path(session_id):
 
 def rewrite_flag_path(session_id):
     """The flag reread_check sets when the audit spawn passes: the rewritten handoff is still to be judged at Stop.
-    Defined here so SessionEnd can drop it."""
+    Defined here so SessionEnd and sweep can drop it."""
     return os.path.join(config_dir(), "state", "handoff", "%s.rewrite" % session_id)
 
 
@@ -613,7 +613,7 @@ def pointers():
 
 def sweep(cwd):
     """Drop records no session can use: a malformed pointer, a pointer for this dir whose
-    session has no handoff, and a .dir, .reread or .audit record older than STALE_AGE. Another dir's
+    session has no handoff, and a .dir, .reread, .audit or .rewrite record older than STALE_AGE. Another dir's
     pointer stays: that dir can be mid-/clear. Each failed delete is logged."""
     for path, (sid, pcwd) in pointers().items():
         if sid is None or (same_dir(pcwd, cwd) and not os.path.isfile(handoff_path(sid))):
@@ -623,7 +623,7 @@ def sweep(cwd):
     for name in os.listdir(sdir) if os.path.isdir(sdir) else []:
         base, ext = os.path.splitext(name)
         path = os.path.join(sdir, name)
-        if ext in (".dir", ".reread", ".audit") and "." not in base and os.path.isfile(path):
+        if ext in (".dir", ".reread", ".audit", ".rewrite") and "." not in base and os.path.isfile(path):
             try:
                 old = now - os.path.getmtime(path) > STALE_AGE
             except OSError:
