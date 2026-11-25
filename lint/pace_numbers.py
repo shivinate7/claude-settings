@@ -9,10 +9,12 @@ and guard.log hold no agent spans; the transcript does, so this reader is their 
     agents run: N, most at once: M[ (P still running)]
     minutes with no agent running: K
 
-An agent's span opens at its Agent (or Task) tool_use and closes at the first task-notification for its
-task-id with an ending status. A SendMessage to the agent after the close opens a new span. Spans are
-clipped to the window. A file it cannot read, an empty file, or a window holding no record prints one
-`unknown: <reason>` line and exits 0.
+An agent's span opens at its Agent (or Task) tool_use. A background agent's span closes at the first
+task-notification for its task-id with an ending status; a foreground agent's closes at its tool_result. One
+stop is logged in up to three carriers (queue, user record, attachment): the earliest copy counts. A later
+stop with no SendMessage since the first moves the close to the later stop. A SendMessage to the agent after
+the close opens a new span. Spans are clipped to the window. A file it cannot read or decode, an empty file,
+or a window holding no record prints one `unknown: <reason>` line and exits 0.
 
 The covered span runs from the transcript's first to its last timestamped record. Window minutes outside it are
 not idle: the idle line then ends with a note that says how many minutes were left out. A window with no
@@ -30,6 +32,12 @@ import _transcript  # noqa: E402  the shared readers: one home
 SPAWN_TOOLS = ("Agent", "Task")
 # A task that ended its work, whatever the cause. The notice carries no other ending status.
 ENDING_STATUSES = ("completed", "failed", "killed")
+# The record kinds that carry a notice as their own message. A tool_result block, a blob copy and a
+# compaction summary only quote one.
+QUEUE_KIND = "queue-operation"
+USER_KIND = "user"
+ATTACHMENT_KIND = "attachment"
+QUEUED_ATTACHMENT = "queued_command"
 NOTICE = re.compile(r"<task-notification>(.*?)</task-notification>", re.S)
 TASK_ID = re.compile(r"<task-id>\s*([^<\s]+)\s*</task-id>")
 STATUS = re.compile(r"<status>\s*([^<\s]+)\s*</status>")
@@ -41,14 +49,16 @@ def record_time(rec):
 
 
 def notice_texts(rec):
-    """The task-notification texts a record carries as its own message: a queue-operation's content, or text
-    in a user record's content. A tool_result block, a blob copy and an attachment carry none: a notice quoted
-    there is somebody's text about a notice, not a notice."""
+    """The task-notification texts a record carries as its own message: a queue-operation's content, text in
+    a user record's content, or a queued_command attachment's prompt. A tool_result block, a blob copy and a
+    compaction summary carry none: a notice quoted there is somebody's text about a notice, not a notice."""
     kind = rec.get("type")
-    if kind == "queue-operation":
+    if kind == QUEUE_KIND:
         content = rec.get("content")
-    elif kind == "user":
+    elif kind == USER_KIND and rec.get("isCompactSummary") is not True:
         content = (rec.get("message") or {}).get("content")
+    elif kind == ATTACHMENT_KIND and (rec.get("attachment") or {}).get("type") == QUEUED_ATTACHMENT:
+        content = rec["attachment"].get("prompt")
     else:
         return []
     if isinstance(content, list):
@@ -58,8 +68,10 @@ def notice_texts(rec):
 
 
 def launches(records):
-    """(spawn time by tool_use id, agent id by tool_use id). A refused spawn has no agent id, so it has no span."""
-    spawned, agent_of = {}, {}
+    """(spawn time by tool_use id, agent id by tool_use id, result time by foreground agent id). A refused spawn
+    has no agent id, so it has no span. A background launch's result says isAsync; a foreground agent's result
+    is its end."""
+    spawned, agent_of, returned = {}, {}, {}
     for rec in records:
         when = record_time(rec)
         if when is None:
@@ -73,13 +85,20 @@ def launches(records):
             for block in _transcript.tool_results(rec):
                 if block.get("is_error") is not True and isinstance(block.get("tool_use_id"), str):
                     agent_of[block["tool_use_id"]] = agent
-    return spawned, agent_of
+                    if result.get("isAsync") is not True:
+                        returned.setdefault(agent, when)
+    return spawned, agent_of, returned
 
 
-def agent_events(records, starts):
-    """Per agent id, its time-ordered events after its start: ("send", t) and ("end", t)."""
+def agent_events(records, starts, returned):
+    """Per agent id, its events after its start: ("send", t) and ("end", t). A foreground agent's result is an
+    end. One stop's copies share their text, so each distinct notice text gives one end, at its earliest copy."""
     failed = _transcript.failed_tool_use_ids(records)
     events = {agent: [] for agent in starts}
+    for agent, when in returned.items():
+        if agent in events:
+            events[agent].append((when, "end"))
+    stops = {}
     for rec in records:
         when = record_time(rec)
         if when is None:
@@ -93,16 +112,19 @@ def agent_events(records, starts):
         for text in notice_texts(rec):
             task, status = TASK_ID.search(text), STATUS.search(text)
             if task and task.group(1) in events and status and status.group(1) in ENDING_STATUSES:
-                events[task.group(1)].append((when, "end"))
+                key = (task.group(1), text)
+                stops[key] = min(when, stops.get(key, when))
+    for (agent, _), when in stops.items():
+        events[agent].append((when, "end"))
     return events
 
 
 def spans_of(start, events):
-    """The agent's [open, close] pairs; close is None while it runs. A send while open changes nothing, and an
-    end while closed (the notice is logged twice) changes nothing."""
+    """The agent's [open, close] pairs; close is None while it runs. A send while open changes nothing. An end
+    while closed, with no send since the last, is a later stop: it moves the close to it."""
     spans = [[start, None]]
     for when, kind in sorted((e for e in events if e[0] >= start), key=lambda e: e[0]):
-        if kind == "end" and spans[-1][1] is None:
+        if kind == "end":
             spans[-1][1] = when
         elif kind == "send" and spans[-1][1] is not None:
             spans.append([when, None])
@@ -110,12 +132,12 @@ def spans_of(start, events):
 
 
 def numbers(records, begin, finish):
-    spawned, agent_of = launches(records)
+    spawned, agent_of, returned = launches(records)
     starts = {}
     for use_id, agent in agent_of.items():
         if use_id in spawned:
             starts.setdefault(agent, spawned[use_id])
-    events = agent_events(records, starts)
+    events = agent_events(records, starts, returned)
     clipped, counted, still = [], set(), set()
     for agent, start in starts.items():
         for opened, closed in spans_of(start, events[agent]):
@@ -173,6 +195,9 @@ def main(argv):
     except OSError as err:
         print("unknown: cannot read the transcript (%s)" % err.strerror)
         return 0
+    except UnicodeDecodeError:
+        print("unknown: the transcript is not valid UTF-8")
+        return 0
     if not records:
         print("unknown: the transcript holds no record")
         return 0
@@ -186,10 +211,10 @@ def main(argv):
         print("unknown: the window has no minute inside the transcript's span")
         return 0
     notes = []
-    if begin < cover_from:
+    if cover_from - begin >= 60:
         notes.append("transcript covers from %s on; %d min before it not counted"
                      % (edge_text(cover_from, first.tzinfo), (cover_from - begin) // 60))
-    if finish > cover_to:
+    if finish - cover_to >= 60:
         notes.append("transcript covers until %s; %d min after it not counted"
                      % (edge_text(cover_to, first.tzinfo), (finish - cover_to) // 60))
     agents, most, still, idle = numbers(records, lo, hi)
