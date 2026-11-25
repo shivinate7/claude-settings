@@ -373,9 +373,9 @@ add("owner-model-word: control, an Agent spawn on haiku is allowed when a local 
 # ---- THE NAMED MODEL IS A CEILING FOR THE ROLES HE NAMED. A judged hold
 # for haiku, sonnet or opus caps each spawn of a role he names at his model, and of every role when he names none. The hold
 # replaces that role's row as the ceiling. With no role named, the exempt rows stay (an Audit: Explore, a fix check, a
-# reviewer past round 1, the refuter, Plan). A role he does name is followed, exempt or not. Each case's clock is fixed: the
-# hold is set at 2026-11-25 17:05 UTC, 11:05 CST, and the reason may print that time in either zone.
-OMW_WORD_AT = 3279900              # seconds after OV_T0: 2026-11-25 17:05 UTC
+# reviewer on a later pass, the refuter, Plan). A role he does name is followed, exempt or not. Each case's clock is fixed:
+# the hold is set at 17:05 UTC (11:05 CST), and the reason may print that time in either zone.
+OMW_WORD_AT = 3279900              # seconds after OV_T0, which is 17:05 UTC (11:05 CST)
 OMW_WORD_CALL = OMW_WORD_AT + 60   # one minute later, while the hold is on
 OMW_WORD_NOW = {"LOCAL_TIME_NOW": ov_clock(OMW_WORD_CALL)}
 OMW_WORD_TIME = ("11:05", "17:05")  # the time of his word, in CST or in UTC (any-of)
@@ -427,7 +427,7 @@ add("owner-model-word: control, the refuter on opus is allowed under the owner's
     tool="Agent", config=omw_word_hold("haiku-refuter", "haiku"), session="omw-haiku-refuter", transcript=OMW_PLAIN,
     env=OMW_WORD_NOW, **role_input(REFUTER, "opus", "Try to refute the plan."))
 
-# 5. A haiku hold that names reviewer: a round-2 reviewer on sonnet is refused, because a role he names is followed past round 1.
+# 5. A haiku hold that names reviewer: a reviewer on sonnet is refused on a later pass, because a role he names is followed.
 add("owner-model-word: a round-2 reviewer spawn on sonnet is refused under agent-role-model when the owner's haiku hold names "
     "reviewer", "deny", ROLE_MODEL_RULE, tool="Agent", config=omw_word_hold("haiku-reviewer", "haiku", role="reviewer"),
     session="omw-haiku-reviewer", transcript=OMW_PLAIN, env=OMW_WORD_NOW, carries=omw_word_carries("haiku"), lacks=ROLE_LACKS,
