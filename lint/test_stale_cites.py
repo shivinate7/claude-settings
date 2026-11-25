@@ -3257,6 +3257,51 @@ class CitedExcerptTests(unittest.TestCase):
                          "a capital article `The` does not make `guard` prose: the excerpt starts at %r, not the file top"
                          % shown.split("\n")[0])
 
+    # A determiner or a possessive before a bare word makes it prose, as an article does. Red now: the article check reads only
+    # a, an and the, so each of these words leads its path. A builder extends that check to every, its, both, this, that, each,
+    # and to a word after a possessive (`guard's`).
+    def test_a_bare_word_after_every_gives_the_file_top_not_a_name(self):
+        shown = self.stale.cited_excerpt("read every guard in hooks/config_watch.py", self.PAST_40)
+        self.assertEqual(shown.split("\n")[0], "1: x0 = 0",
+                         "a bare word after `every` is taken as a name: the excerpt starts at %r, not the file top"
+                         % shown.split("\n")[0])
+
+    def test_a_bare_word_after_its_gives_the_file_top_not_a_name(self):
+        shown = self.stale.cited_excerpt("read its main in hooks/config_watch.py", self.PAST_40)
+        self.assertEqual(shown.split("\n")[0], "1: x0 = 0",
+                         "a bare word after `its` is taken as a name: the excerpt starts at %r, not the file top"
+                         % shown.split("\n")[0])
+
+    def test_a_bare_word_after_both_gives_the_file_top_not_a_name(self):
+        shown = self.stale.cited_excerpt("read both checks in hooks/config_watch.py", self.PAST_40)
+        self.assertEqual(shown.split("\n")[0], "1: x0 = 0",
+                         "a bare word after `both` is taken as a name: the excerpt starts at %r, not the file top"
+                         % shown.split("\n")[0])
+
+    def test_a_bare_word_after_this_gives_the_file_top_not_a_name(self):
+        shown = self.stale.cited_excerpt("read this guard in hooks/config_watch.py", self.PAST_40)
+        self.assertEqual(shown.split("\n")[0], "1: x0 = 0",
+                         "a bare word after `this` is taken as a name: the excerpt starts at %r, not the file top"
+                         % shown.split("\n")[0])
+
+    def test_a_bare_word_after_that_gives_the_file_top_not_a_name(self):
+        shown = self.stale.cited_excerpt("read that guard in hooks/config_watch.py", self.PAST_40)
+        self.assertEqual(shown.split("\n")[0], "1: x0 = 0",
+                         "a bare word after `that` is taken as a name: the excerpt starts at %r, not the file top"
+                         % shown.split("\n")[0])
+
+    def test_a_bare_word_after_each_gives_the_file_top_not_a_name(self):
+        shown = self.stale.cited_excerpt("read each guard in hooks/config_watch.py", self.PAST_40)
+        self.assertEqual(shown.split("\n")[0], "1: x0 = 0",
+                         "a bare word after `each` is taken as a name: the excerpt starts at %r, not the file top"
+                         % shown.split("\n")[0])
+
+    def test_a_bare_word_after_a_possessive_gives_the_file_top_not_a_name(self):
+        shown = self.stale.cited_excerpt("read the guard's main in hooks/config_watch.py", self.PAST_40)
+        self.assertEqual(shown.split("\n")[0], "1: x0 = 0",
+                         "a bare word after the possessive `guard's` is taken as a name: the excerpt starts at %r, not the file top"
+                         % shown.split("\n")[0])
+
     def test_a_backticked_name_before_its_path_starts_at_its_def(self):
         # Control, green now and after. The judge passes `paren_cites` output, which drops the backticks, and the name leads its path.
         [cite] = self.stale.paren_cites("- the rule holds (read `deep` in lint/widget.py)")
