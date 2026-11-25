@@ -4808,20 +4808,19 @@ def CI126_dry_run_merge_does_not_close_the_wait():
 
 
 @case
-def CI127_bare_ready_wait_is_not_closed_by_a_merge_of_another_pr():
-    """CI127. a bare gh pr ready opens a wait on this branch's PR, which the transcript does not name, and its
-    check-in is set. A merge of another PR prints no line for that check-in, and the wait stays open: a red verdict
-    after the merge voids the check-in, so the Stop blocks and names no PR. Control: the bare wait with its check-in
-    prints nothing, and a red verdict blocks it with no PR number"""
+def CI127_bare_ready_wait_closed_by_another_pr_names_no_other_pr():
+    """CI127. a bare gh pr ready opens a wait, and its check-in is set. The check-in's own text names the PR it
+    waits on, not the merged one. A merge of another PR closes that wait, as a merge of any PR does, but the line it
+    prints names no PR number other than the check-in's own. Control: the bare wait with its check-in prints nothing,
+    and the same wait closed by a merge of the check-in's own PR prints the line"""
     recs, _ = cron_set(RET_A)
     bare = [ready(command="gh pr ready")] + recs
-    merged_other = gh_merge(CI_OTHER_PR)
-    problems = ["merge of PR %s: " % CI_OTHER_PR + p for p in expect_silent(bare + [merged_other])]
-    problems += ["after that merge, red verdict: " + p
-                 for p in expect_block(bare + [merged_other, queued(RED)], pr=None, not_named=[CI_OTHER_PR])]
+    rc_problems, out = ci_run(bare + [gh_merge(CI_OTHER_PR)])
+    problems = rc_problems + expect(re.search(r"\b%s\b" % CI_OTHER_PR, out) is None,
+                                    f"the line for the check-in names PR {CI_OTHER_PR}, which is not its PR: {out[:200]!r}")
     return problems + ["control, no merge: " + p for p in expect_silent(bare)] \
-        + ["control, red verdict: " + p
-           for p in expect_block(bare + [queued(RED)], pr=None, not_named=[CI_OTHER_PR])]
+        + ["control, merge of the check-in's own PR: " + p
+           for p in cancel_line(bare + [gh_merge(CI_PR)], CI_PR, ids=[RET_A], tool="CronCreate", says=["delete"])]
 
 
 @case
