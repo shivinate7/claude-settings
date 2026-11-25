@@ -27,8 +27,12 @@ Cost: holds() and read() start git for `ls-remote`, one `fetch` of the ref (once
 seen before in this process; a sha seen before costs the `ls-remote` alone. A commit never changes, so the sha-to-record cache is safe. The
 ref's own sha is never cached. The fetch stores the tip in the repo's own ref refs/lease-read/NAME and writes no remote-tracking ref, and the
 `log` reads the record from that ref, so a record is always the tip the fetch got, never an older sha the `ls-remote` saw. A take, give back
-or lift starts git for `remote get-url`, `mktree`, `commit-tree` and `push` (a take also for `config`); the push goes to the remote's URL, and a second remote of the same URL rides on
-the push command (`-c`, never written to config), so git cannot pair the URL with one configured remote and writes no remote-tracking ref. No timer, no process left running, no other file written.
+or lift starts git for `remote get-url`, `mktree`, `commit-tree`, `push` and two `for-each-ref` reads of refs/remotes/*/lease/NAME, one before and one
+after the push (a take also for `config`). The push goes to the remote's URL, and a second remote of the same URL rides on the push command (`-c`,
+never written to config). The lease tool writes no remote-tracking ref in the caller's clone. Newer git is reported, unverified, to pair a bare push
+URL with the one configured remote of that URL and update its tracking ref; the second remote makes that pairing not unique. As the backstop, a
+tracking ref that the second `for-each-ref` shows and the first did not is deleted, by its full name and its new value (one `update-ref -d`, started
+only then); a ref that was there before the push is left alone. A snapshot that fails skips the clean-up. No timer, no process left running, no other file written.
 """
 import argparse
 import os
@@ -159,10 +163,11 @@ def _push_record(repo, remote, name, expected, message):
     deadline = time.monotonic() + PUSH_TIMEOUT_S
     code, url, _ = _git(repo, ["remote", "get-url", "--push", remote], PUSH_TIMEOUT_S)
     target = url if code == 0 and url else remote
-    # A push to a bare URL still updates the remote-tracking ref of the one configured remote with that URL (git 2.56, remote.c
-    # repo_remote_for_push_tracking). A second remote with the same URL makes the match not unique, so git updates nothing. The remote lives in
-    # this command's -c only; older git never pairs a URL with a remote, so it is inert there.
-    shadow = ["-c", "%s.url=%s" % (NO_TRACK_REMOTE, url)] if target == url else []
+    # Newer git is reported, unverified, to pair a bare push URL with the one configured remote of that URL and update its tracking ref. A second
+    # remote of the same URL, on this command's -c only, makes that pairing not unique; older git never pairs a URL, so it is inert there. The
+    # target is the URL, or the caller's own string when it is no remote name (`--remote <url>`, or a get-url that failed): the same second remote.
+    shadow = ["-c", "%s.url=%s" % (NO_TRACK_REMOTE, target)]
+    before = _tracking_refs(repo, name)
     code, tree, err = _git(repo, ["mktree"], PUSH_TIMEOUT_S, input="")
     if code:
         raise Unknown("cannot make the lease tree: " + err)
@@ -171,7 +176,38 @@ def _push_record(repo, remote, name, expected, message):
         raise Unknown("cannot make the lease commit: " + err)
     code, out, err = _git(repo, [*shadow, "push", "-q", "--force-with-lease=%s:%s" % (ref, expected), target, "%s:%s" % (sha, ref)],
                           deadline - time.monotonic())
+    _drop_new_tracking_refs(repo, name, before)
     return code, (out + "\n" + err).strip(), sha
+
+
+def _tracking_refs(repo, name):
+    """{full ref name: sha} of every remote-tracking ref for the lease branch in `repo`, or None when the read failed (a failed read skips the clean-up)."""
+    try:
+        code, out, _ = _git(repo, ["for-each-ref", "--format=%(refname) %(objectname)", "refs/remotes/*/lease/" + name], PUSH_TIMEOUT_S)
+    except Unknown:
+        return None
+    if code:
+        return None
+    found = {}
+    for line in out.splitlines():
+        ref, _, sha = line.partition(" ")
+        if ref.startswith("refs/remotes/") and ref.endswith("/lease/" + name):
+            found[ref] = sha
+    return found
+
+
+def _drop_new_tracking_refs(repo, name, before):
+    """The backstop: delete each remote-tracking ref for the lease that the push wrote and `before` (the snapshot taken ahead of it) did not hold.
+    A ref that was there before is left alone. Each delete names the ref in full and the sha it now holds, so nothing else can go. Never raises: the push's result stands."""
+    if before is None:
+        return
+    after = _tracking_refs(repo, name)
+    for ref, sha in (after or {}).items():
+        if ref not in before:
+            try:
+                _git(repo, ["update-ref", "-d", ref, sha], PUSH_TIMEOUT_S)
+            except Unknown:
+                pass
 
 
 def _released_message(name, how):
