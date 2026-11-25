@@ -36,7 +36,7 @@
 - It protects only once this change is on the stable branch.
 - An unreadable diff, a deleted file or an unreadable file is not judged, and the base's stamp decides.
 - A run from the pull request's own tree passes by construction, so the check protects only a run of an older tool.
-- It does not retire debt `old-merge-tool-refuses-stamp`, which is about machines whose installed tool is older than this change.
+- It does not retire the older-tool debt, titled "An older merge tool refuses the stamp", which is about machines whose installed tool is older than this change.
 
 ## Cost
 
