@@ -21,7 +21,7 @@ except Exception as e:  # fail open, as the docstring says: READ_ONLY and SCOPE 
 # Each line carries a flag: True = every type, False = only types that commit and push.
 COMMON = [
     (True, "Standing rules for this agent:"),
-    (True, "- Never run git stash, git reset, git checkout <path>, or git restore."),
+    (True, "- Never run git stash, git checkout <path>, or git restore."),
     (False, "- Push only with: git push origin HEAD:<branch>."),
     (True, "- Make no gh call unless your brief names it."),
     (True, "- {scope}"),
