@@ -280,11 +280,14 @@ def omw_at(record, when):
 
 def omw_hold(name, session, model, end="report", at=0, until=2 * 3600, role=None):
     """A config folder with the role table pointer (role_config) and the session's hold file for `model`. Returns the
-    folder, for a case's `config`. The file is built when a case names the folder."""
+    folder, for a case's `config`. The file is built when a case names the folder. A `model` of None writes the keyword
+    form (`opus 2h`, `opus builders 2h`): the keys a keyword grant writes, with no `model`, `at` or `end`."""
     config = role_config("omw-" + name, REPO)
-    body = {"kind": "opus", "until": ov_clock(until), "role": role, "model": model, "at": ov_clock(at)}
-    if end:
-        body["end"] = end
+    body = {"kind": "opus", "until": ov_clock(until), "role": role}
+    if model is not None:
+        body.update(model=model, at=ov_clock(at))
+        if end:
+            body["end"] = end
     path = os.path.join(config, "state", "override", "opus", session + ".json")
     lazy_fixture([config], lambda: write(path, json.dumps(body)))
     return config
@@ -311,8 +314,8 @@ def omw_lets_through(name, tool_input, config, session, seconds, rule, transcrip
 
 
 # ---- The role row takes the judged hold, not a typed word. A record-writer on sonnet (its row is haiku) and a builder on fable
-# (fable is not ranked, so the row fails closed) pass only while the owner's hold for that model is on. Each allow has a
-# control with no hold, refused as today.
+# (fable ranks above opus in MODEL_FAMILIES, so no row holds it) pass only while the owner's hold for that model is on. Each
+# allow has a control with no hold, refused as today.
 omw_lets_through("a record-writer spawn on sonnet is allowed while the owner's sonnet hold is on",
                  role_input("record-writer", "sonnet", "Write the record."), omw_hold("sonnet-held", "omw-sonnet-held", "sonnet"),
                  "omw-sonnet-held", 60, ROLE_MODEL_RULE)
@@ -325,6 +328,34 @@ omw_lets_through("a builder spawn on fable is allowed while the owner's fable ho
 add("owner-model-word: control, a builder spawn on fable is refused under agent-role-model when no hold is on", "deny",
     ROLE_MODEL_RULE, tool="Agent", config=ROLE_REAL_CFG, transcript=OMW_PLAIN, carries=(ROLE_REMEDY,),
     lacks=ROLE_LACKS, **role_input("builder", "fable", "Fix the failing case."))
+
+# ---- A keyword Opus override (`opus 2h`, or `opus builders 2h` for one role) writes no model, and the guard reads its file as an
+# Opus hold. It lifts the Opus ceiling only, as on main, so it must not lift the role row of a spawn on sonnet. `opus 2h` names
+# no role: each spawn below is refused as on main. `opus builders 2h` names one role, so the same spawns stay refused under it
+# on the old code too; those are controls. The Haiku Explore and the Opus builder are controls under `opus 2h`.
+OMW_KW_SPAWNS = (
+    ("an Explore on sonnet with no Audit: line", "Explore", "sonnet", "Find where the model list lives."),
+    ("a test-author on sonnet", "test-author", "sonnet", "Write the failing cases."),
+    ("a record-writer on sonnet", "record-writer", "sonnet", "Write the record."),
+    ("a round-1 reviewer on sonnet", "reviewer", "sonnet", "Review the diff."),
+)
+for _label, _role, _model, _prompt in OMW_KW_SPAWNS:
+    add("owner-model-word: a keyword Opus override (opus 2h) refuses %s under agent-role-model, as on main" % _label, "deny",
+        ROLE_MODEL_RULE, tool="Agent", config=omw_hold("kw-any-" + _role, "omw-kw-any-" + _role, None, end=None),
+        session="omw-kw-any-" + _role, transcript=OMW_PLAIN, env=OMW_NOW_ENV, carries=(ROLE_REMEDY,), lacks=ROLE_LACKS,
+        **role_input(_role, _model, _prompt))
+for _label, _role, _model, _prompt in OMW_KW_SPAWNS:
+    add("owner-model-word: control, a keyword Opus override for builders (opus builders 2h) still refuses %s under agent-role-model"
+        % _label, "deny", ROLE_MODEL_RULE, tool="Agent",
+        config=omw_hold("kw-builders-" + _role, "omw-kw-builders-" + _role, None, end=None, role="builder"),
+        session="omw-kw-builders-" + _role, transcript=OMW_PLAIN, env=OMW_NOW_ENV, carries=(ROLE_REMEDY,), lacks=ROLE_LACKS,
+        **role_input(_role, _model, _prompt))
+add("owner-model-word: control, a keyword Opus override (opus 2h) lets a Haiku Explore through, as its row does", "allow",
+    tool="Agent", config=omw_hold("kw-haiku-explore", "omw-kw-haiku-explore", None, end=None), session="omw-kw-haiku-explore",
+    transcript=OMW_PLAIN, env=OMW_NOW_ENV, **role_input("Explore", "haiku", "Find where the model list lives."))
+omw_lets_through("control, an Opus builder spawn is allowed under a keyword Opus override (opus 2h), through the Opus ceiling",
+                 role_input("builder", "opus", "Fix the failing case."),
+                 omw_hold("kw-opus-builder", "omw-kw-opus-builder", None, end=None), "omw-kw-opus-builder", 60, CEILING)
 
 # ---- The floor takes the judged haiku hold as well as the text match. A haiku hold lifts the floor on a transcript that names no
 # model. Haiku keeps the plain text match: a judge error writes no hold, and the owner's typed haiku word still lifts the floor.
@@ -446,3 +477,12 @@ add("owner-model-word: a Workflow agent with no model is refused under agent-rol
     "deny", ROLE_MODEL_RULE, tool="Workflow", script='await agent("do it")', config=omw_word_hold("haiku-workflow", "haiku"),
     session="omw-haiku-workflow", transcript=OMW_PLAIN, env={**WORKFLOW_SONNET, **OMW_WORD_NOW},
     carries=omw_word_carries("haiku"), lacks=ROLE_LACKS)
+
+# 8. A judged sonnet hold that names no role. A Haiku Explore is under the ceiling and passes; an Opus builder is refused, since
+# only an Opus hold lifts the Opus ceiling.
+add("owner-model-word: control, a Haiku Explore spawn is allowed under the owner's sonnet hold, which names no role", "allow",
+    tool="Agent", config=omw_word_hold("sonnet-any-explore", "sonnet"), session="omw-sonnet-any-explore",
+    transcript=OMW_PLAIN, env=OMW_WORD_NOW, **role_input("Explore", "haiku", "Find where the model list lives."))
+add("owner-model-word: control, an Opus builder spawn is refused under the owner's sonnet hold, since only an Opus hold lifts the "
+    "Opus ceiling", "deny", CEILING, tool="Agent", config=omw_word_hold("sonnet-any-opus", "sonnet"),
+    session="omw-sonnet-any-opus", transcript=OMW_PLAIN, env=OMW_WORD_NOW, **role_input("builder", "opus", "Fix the failing case."))
