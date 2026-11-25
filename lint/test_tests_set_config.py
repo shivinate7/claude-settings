@@ -14,6 +14,7 @@ runs use them. Unset, the cases run against lint/check_tests_set_config.py.
 
 Run: python3 -m unittest discover -s lint -p test_tests_set_config.py
 """
+import ast
 import atexit
 import importlib.util
 import os
@@ -21,6 +22,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import _test_temp
 
@@ -61,6 +63,43 @@ SET_IN_HELPER_AT_IMPORT = ("import os\n\nos.environ.pop('CLAUDE_CONFIG_DIR', Non
                            "    os.environ['CLAUDE_CONFIG_DIR'] = '/tmp/config'\n\n\n_set_config()\n\n\ndef test_a():\n    assert True\n")
 ANNOTATED_SET = ("import os\n\nos.environ.pop('CLAUDE_CONFIG_DIR', None)\nos.environ['CLAUDE_CONFIG_DIR']: str = '/tmp/config'\n\n\n"
                  "def test_a():\n    assert True\n")
+ENTER_CONTEXT_AT_IMPORT = ("import os\nfrom contextlib import ExitStack\nfrom _test_temp import isolated_config\n\nRUN = 'run'\nSTACK = ExitStack()\n"
+                           "os.environ.pop('CLAUDE_CONFIG_DIR', None)\nSTACK.enter_context(isolated_config(RUN))\n\n\n"
+                           "def test_a():\n    assert True\n")
+ENTER_CONTEXT_IN_SETUP_MODULE = ("import os\nfrom contextlib import ExitStack\nfrom _test_temp import isolated_config\n\nSTACK = ExitStack()\n"
+                                 "os.environ.pop('CLAUDE_CONFIG_DIR', None)\n\n\ndef setUpModule():\n"
+                                 "    STACK.enter_context(isolated_config('run'))\n\n\ndef test_a():\n    assert True\n")
+UPDATE_NAMED_DICT = ("import os\n\nENV = {'CLAUDE_CONFIG_DIR': '/tmp/config'}\nos.environ.pop('CLAUDE_CONFIG_DIR', None)\n"
+                     "os.environ.update(ENV)\n\n\ndef test_a():\n    assert True\n")
+UPDATE_DICT_CALL = ("import os\n\nos.environ.pop('CLAUDE_CONFIG_DIR', None)\nos.environ.update(dict(CLAUDE_CONFIG_DIR='/tmp/config'))\n\n\n"
+                    "def test_a():\n    assert True\n")
+OR_ASSIGN_SET = ("import os\n\nos.environ.pop('CLAUDE_CONFIG_DIR', None)\nos.environ |= {'CLAUDE_CONFIG_DIR': '/tmp/config'}\n\n\n"
+                 "def test_a():\n    assert True\n")
+UPDATE_STAR_DICT = ("import os\n\nos.environ.pop('CLAUDE_CONFIG_DIR', None)\nos.environ.update(**{'CLAUDE_CONFIG_DIR': '/tmp/config'})\n\n\n"
+                    "def test_a():\n    assert True\n")
+PATCH_DICT_START_AT_IMPORT = ("import os\nfrom unittest.mock import patch\n\nos.environ.pop('CLAUDE_CONFIG_DIR', None)\n"
+                              "patch.dict(os.environ, {'CLAUDE_CONFIG_DIR': '/tmp/config'}).start()\n\n\n"
+                              "def test_a():\n    assert True\n")
+HELPER_CALLS_LATER_HELPER = ("import os\n\nos.environ.pop('CLAUDE_CONFIG_DIR', None)\n\n\ndef _outer():\n    _inner()\n\n\n"
+                             "def _inner():\n    os.environ['CLAUDE_CONFIG_DIR'] = '/tmp/config'\n\n\n_outer()\n\n\n"
+                             "def test_a():\n    assert True\n")
+OTHER_IMPORTED_SETTER = ("import os\nfrom elsewhere_config import make_config\n\nos.environ.pop('CLAUDE_CONFIG_DIR', None)\nmake_config()\n\n\n"
+                         "def test_a():\n    assert True\n")
+MAIN_GUARD_SET = ("import os\n\nos.environ.pop('CLAUDE_CONFIG_DIR', None)\n\nif __name__ == '__main__':\n"
+                  "    os.environ['CLAUDE_CONFIG_DIR'] = '/tmp/config'\n\n\ndef test_a():\n    assert True\n")
+ANNOTATED_NAME_POP = ("import os\n\nVAR: str = 'CLAUDE_CONFIG_DIR'\nos.environ.pop(VAR, None)\n\n\n"
+                      "def test_a():\n    assert True\n")
+SHARED_NAME_POP = ("import os\n\nfrom shared_names import CONFIG_VAR\n\nos.environ.pop(CONFIG_VAR, None)\n\n\n"
+                   "def test_a():\n    assert True\n")
+
+
+def tree_of(files):
+    """A fresh folder under the run folder, holding each file of `files`: a dict of file name to source."""
+    folder = tempfile.mkdtemp(prefix="tree-", dir=RUN)
+    for name, source in files.items():
+        with open(os.path.join(folder, name), "w", encoding="utf-8") as handle:
+            handle.write(source)
+    return folder
 
 
 def checker():
@@ -74,10 +113,7 @@ def checker():
 
 def problems_of(source):
     """problems() over a fresh folder under the run folder that holds one test file, test_case.py, with `source`."""
-    folder = tempfile.mkdtemp(prefix="tree-", dir=RUN)
-    with open(os.path.join(folder, "test_case.py"), "w", encoding="utf-8") as handle:
-        handle.write(source)
-    return checker().problems(folder)
+    return checker().problems(tree_of({"test_case.py": source}))
 
 
 class TestsSetConfig(unittest.TestCase):
@@ -165,6 +201,70 @@ class TestsSetConfig(unittest.TestCase):
     def test_annotated_set_is_clean(self):
         self.assertEqual(problems_of(ANNOTATED_SET), [],
                          "an annotated set of CLAUDE_CONFIG_DIR after the pop is not counted, so the pop is named as a problem")
+
+    def test_enter_context_of_isolated_config_at_import_is_clean(self):
+        self.assertEqual(problems_of(ENTER_CONTEXT_AT_IMPORT), [],
+                         "a pop that an import-time STACK.enter_context(isolated_config(RUN)) follows is named as a problem")
+
+    def test_enter_context_of_isolated_config_in_setup_module_is_clean(self):
+        self.assertEqual(problems_of(ENTER_CONTEXT_IN_SETUP_MODULE), [],
+                         "a pop that setUpModule() follows with STACK.enter_context(isolated_config(...)) is named as a problem")
+
+    def test_update_of_a_named_dict_that_holds_the_var_is_clean(self):
+        self.assertEqual(problems_of(UPDATE_NAMED_DICT), [],
+                         "a pop that os.environ.update(ENV) follows, with ENV = {CLAUDE_CONFIG_DIR: ...}, is named as a problem")
+
+    def test_update_of_dict_call_with_the_var_as_keyword_is_clean(self):
+        self.assertEqual(problems_of(UPDATE_DICT_CALL), [],
+                         "a pop that os.environ.update(dict(CLAUDE_CONFIG_DIR=...)) follows is named as a problem")
+
+    def test_ior_of_environ_that_holds_the_var_is_clean(self):
+        self.assertEqual(problems_of(OR_ASSIGN_SET), [],
+                         "a pop that os.environ |= {CLAUDE_CONFIG_DIR: ...} follows is named as a problem")
+
+    def test_update_of_star_star_dict_that_holds_the_var_is_clean(self):
+        self.assertEqual(problems_of(UPDATE_STAR_DICT), [],
+                         "a pop that os.environ.update(**{CLAUDE_CONFIG_DIR: ...}) follows is named as a problem")
+
+    def test_patch_dict_started_at_import_is_clean(self):
+        self.assertEqual(problems_of(PATCH_DICT_START_AT_IMPORT), [],
+                         "a pop that a patch.dict(os.environ, ...).start() at import follows is named as a problem")
+
+    def test_helper_calling_a_later_defined_setter_at_import_is_clean(self):
+        self.assertEqual(problems_of(HELPER_CALLS_LATER_HELPER), [],
+                         "a pop that an import-time call to a helper, which calls a later-defined helper that sets the var, follows is named")
+
+    def test_import_time_call_to_other_imported_function_stays_a_problem(self):
+        found = problems_of(OTHER_IMPORTED_SETTER)
+        self.assertTrue(len(found) == 1 and found[0].startswith("test_case.py:"),
+                        "a pop that an import-time call to an unread imported function follows is cleared, though only isolated_config clears: %r" % found)
+
+    def test_set_under_main_guard_does_not_clear_the_pop(self):
+        found = problems_of(MAIN_GUARD_SET)
+        self.assertTrue(len(found) == 1 and found[0].startswith("test_case.py:"),
+                        "a set under `if __name__ == '__main__':` clears a module-level pop, though the tests never run that block: %r" % found)
+
+    def test_annotated_name_holding_the_var_is_a_pop_target(self):
+        found = problems_of(ANNOTATED_NAME_POP)
+        self.assertTrue(len(found) == 1 and found[0].startswith("test_case.py:"),
+                        "a pop of a name bound with an annotation to CLAUDE_CONFIG_DIR is not one problem: %r" % found)
+
+    def test_shared_module_is_parsed_once_per_run(self):
+        run_checker = checker()
+        folder = tree_of({"shared_names.py": "CONFIG_VAR = 'CLAUDE_CONFIG_DIR'\n", "test_one.py": SHARED_NAME_POP,
+                          "test_two.py": SHARED_NAME_POP, "test_three.py": SHARED_NAME_POP})
+        real_parse = ast.parse
+        parsed = []
+
+        def counting_parse(source, *args, **kwargs):
+            parsed.append(os.path.basename(kwargs.get("filename", "")))
+            return real_parse(source, *args, **kwargs)
+
+        with mock.patch.object(ast, "parse", side_effect=counting_parse):
+            found = run_checker.problems(folder)
+        self.assertEqual(len(found), 3, "the three test files do not each read as one problem: %r" % found)
+        times = parsed.count("shared_names.py")
+        self.assertLessEqual(times, 1, "shared_names.py is parsed %d times in one run, where one parse per module would do" % times)
 
     def test_repo_names_the_incident_file(self):
         found = checker().problems(ROOT)
