@@ -5237,7 +5237,7 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         with open(self.record, encoding="utf-8") as f:
             return [json.loads(line) for line in f if line.strip()]
 
-    def stop(self, repo, reply=None, answer=None, model_fail=False, records=None, to_writer=False):
+    def stop(self, repo, reply=None, answer=None, model_fail=False, records=None, to_writer=False, config=None):
         if records is None:
             # A question reaches the page writer in its own turn, so `to_writer` adds that send before the reply.
             sent = [*self.writer_read(self.WRITER), *self.send(session_id=self.WRITER)] if to_writer else []
@@ -5247,6 +5247,8 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         overrides = {"CJ_ANSWER": answer or tcj.ALLOW}
         if model_fail:
             overrides["CJ_MODEL_FAIL"] = "1"
+        if config is not None:  # a case's own config folder, so its guard.log is read from a temp path
+            overrides["CLAUDE_CONFIG_DIR"] = config
         with mock.patch.dict(os.environ, overrides):
             run = run_guard(REPORT_GUARD, hook)
         self.assertEqual(run.returncode, 0, run.stderr)
@@ -5407,6 +5409,108 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         out, _ = self.stop(self.decided, records=records)
         self.assertNotIn("question-keys", self.reason(out), out)
 
+    # The named ruling and the refusal text (owner, 10:36 and 10:42 CST 2026-11-24). A Based on (ruling) line that names a
+    # listed ruling passes by code, whatever the judge answers. A refusal gives the listed id, the ruling's date from its
+    # listed line, one sentence of what the ruling decides, and the remedy line. It never says "settles" and never carries
+    # an order to the session. The judge's answers are the stub's, so no model runs.
+    NAMED_REPLY = ("> **Input Needed** Should the GitHub apps keep their access to claude-settings?\n"
+                   "Based on (ruling): github-apps-keep-access says revisit only if the apps get bloated.")
+    NO_DATE_REASON = ("decisions/github-apps-keep-access: the ruling keeps the apps' access to claude-settings as is, "
+                      "because calling into a repo is straightforward.")
+    SETTLES_REASON = ("decisions/github-apps-keep-access settles this: the ruling keeps the apps' access to "
+                      "claude-settings as is.")
+    ORDER_REASON = NO_DATE_REASON + " Take a pick and drop this question."
+    DECIDES = ("the ruling keeps the apps' access to claude-settings as is, because calling into a repo is "
+               "straightforward")
+    ID_AND_DATE = "decisions/github-apps-keep-access (2026-10-28)"
+    TWO_QUESTIONS = "Should the GitHub apps keep their access to claude-settings?\nDo you want the CI cap raised?"
+
+    def judged(self, reason):
+        return json.dumps({"ok": False, "reason": reason})
+
+    def verdict(self, reply, reason, repo=None, config=None):
+        """The past-ruling refusal of `reply` when the stub judge refuses with `reason`. The verdict is asserted first, so a
+        text assert reads the verdict itself. The reply goes to the page writer first, which keeps the question check quiet."""
+        out, _ = self.stop(repo or self.decided, reply, answer=self.judged(reason), to_writer=True, config=config)
+        self.assertEqual(out.get("decision"), "block", "the past-ruling refusal did not fire: %r" % out)
+        self.assertIn("past-ruling", self.reason(out), "the refusal is not the past-ruling verdict: %r" % out)
+        return self.reason(out)
+
+    def test_named_ruling_line_passes_when_the_judge_refuses(self):
+        out, _ = self.stop(self.decided, self.NAMED_REPLY, answer=self.judged(self.NO_DATE_REASON), to_writer=True)
+        self.assertEqual(out, {}, "a question whose Based on (ruling) line names the listed ruling was refused: %r" % out)
+
+    def test_refusal_gives_the_listed_id_and_the_date_of_its_ruling(self):
+        reason = self.verdict(RELAY, self.NO_DATE_REASON)
+        self.assertIn(self.ID_AND_DATE, reason, "the refusal lacks the listed id with its ruling date: %r" % reason)
+
+    def test_refusal_says_the_ruling_may_be_stale(self):
+        reason = self.verdict(RELAY, self.NO_DATE_REASON)
+        self.assertIn("may be stale", reason, "the refusal does not say the ruling may be stale: %r" % reason)
+
+    def test_refusal_holds_the_remedy_line(self):
+        reason = self.verdict(RELAY, self.NO_DATE_REASON)
+        self.assertIn("Based on (ruling): %s, may be stale:" % self.ID_AND_DATE, reason,
+                      "the refusal holds no remedy line: %r" % reason)
+
+    def test_refusal_never_says_settles(self):
+        reason = self.verdict(RELAY, self.SETTLES_REASON)
+        self.assertIsNone(re.search("settles", reason, re.I), "the refusal says settles: %r" % reason)
+
+    def test_refusal_drops_the_judge_order(self):
+        reason = self.verdict(RELAY, self.ORDER_REASON)
+        self.assertNotIn("take a pick", reason.lower(), "the judge's order reached the refusal: %r" % reason)
+        self.assertNotIn("drop this question", reason.lower(), "the judge's order reached the refusal: %r" % reason)
+
+    def test_refusal_keeps_the_one_sentence_of_the_judge_reason(self):
+        reason = self.verdict(RELAY, self.ORDER_REASON)
+        self.assertIn(self.DECIDES, reason, "the sentence of what the ruling decides is lost: %r" % reason)
+
+    def test_two_questions_refusal_names_one_of_them(self):
+        reason = self.verdict(self.TWO_QUESTIONS, self.NO_DATE_REASON)
+        self.assertIn("one of the questions", reason, "the refusal of two questions names neither: %r" % reason)
+
+    def test_undated_ruling_says_time_unknown(self):
+        repo = tcj.make_repo("relay-undated", decisions={"github-apps-undated": "Owner: the ruling keeps the apps' access."})
+        reason = self.verdict(RELAY, "decisions/github-apps-undated: the ruling keeps the apps' access.", repo=repo)
+        self.assertIn("time unknown", reason, "a ruling with no date does not say time unknown: %r" % reason)
+
+    def test_refusal_appends_one_guard_log_line(self):
+        config = tempfile.mkdtemp(dir=_ISOLATION["dir"])
+        self.verdict(RELAY, self.NO_DATE_REASON, config=config)
+        path = os.path.join(config, "guard.log")
+        lines = []
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                lines = [line for line in f.read().splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1, "the refusal wrote %d guard.log lines, not one" % len(lines))
+        self.assertEqual(lines[0].split("\t")[2:4], ["deny", "past-ruling"],
+                         "the guard.log line is not a deny of past-ruling: %r" % lines[0])
+
+    def test_remedy_line_from_the_refusal_passes_the_question_once_added(self):
+        reason = self.verdict(RELAY, self.NO_DATE_REASON)
+        start = reason.find("Based on (ruling):")
+        self.assertGreaterEqual(start, 0, "the refusal holds no Based on (ruling) remedy line: %r" % reason)
+        end = reason.find("may be stale:", start)
+        self.assertGreater(end, start, "the remedy line has no may be stale part: %r" % reason[start:])
+        line = reason[start:end + len("may be stale:")] + " the apps were not revisited since."
+        out, _ = self.stop(self.decided, RELAY + "\n" + line, answer=self.judged(self.NO_DATE_REASON), to_writer=True)
+        self.assertEqual(out, {}, "the question with the remedy line added is still refused: %r" % out)
+
+    def test_unnamed_covered_question_is_refused(self):
+        # Control: a covered question that no Based on (ruling) line names is refused, as before.
+        self.verdict(RELAY, self.NO_DATE_REASON)
+
+    def test_id_outside_a_based_on_line_is_refused(self):
+        # Control: the id in the question's own prose is no Based on (ruling) line, so the question is refused.
+        reply = "> **Input Needed** Should the GitHub apps keep their access, as decisions/github-apps-keep-access says?"
+        self.verdict(reply, self.NO_DATE_REASON)
+
+    def test_allowed_stop_writes_no_guard_log_line(self):
+        # Control: a Stop with nothing to refuse writes no guard.log line.
+        config = tempfile.mkdtemp(dir=_ISOLATION["dir"])
+        self.stop(self.ci, DONE_ONLY, config=config)
+        self.assertFalse(os.path.exists(os.path.join(config, "guard.log")), "a Stop with nothing to refuse wrote guard.log")
 
 
 class AnsweredNeedsSourceTests(unittest.TestCase):
