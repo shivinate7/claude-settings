@@ -607,7 +607,7 @@ class ContinueOnErrorAbsent(unittest.TestCase):
         step = named_run_step(text, WINDOWS_STEP)
         job = job_block(text, "run")
         on_step = mutate_block(text, step, "        shell: bash\n", "        shell: bash\n        continue-on-error: true\n")
-        on_job = mutate_block(text, job, "    runs-on: ${{ matrix.os }}\n", "    runs-on: ${{ matrix.os }}\n    continue-on-error: true\n")
+        on_job = mutate_block(text, job, "    strategy:\n", "    continue-on-error: true\n    strategy:\n")
         for where, mutated in (("on a run step", on_step), ("on the run job", on_job)):
             with self.subTest(where=where):
                 self.assertIsNotNone(continue_on_error_problem(mutated), f"the check passed continue-on-error: true {where}")
