@@ -1990,7 +1990,8 @@ class SkippedDaily(unittest.TestCase):
         self.assertEqual(started, want, f"a skipped daily starts {sorted(set(started) - set(want))} beyond the tool-pins set, "
                                         f"and misses {sorted(set(want) - set(started))}")
 
-    # Control: a plain daily starts the two macOS jobs, so the case above reads them as jobs the skip turns off, not as jobs that never start.
+    # Control: a plain daily starts the two macOS jobs, so the case above reads them as jobs the skip turns off,
+    # not as jobs that never start.
     def test_control_a_plain_daily_starts_the_two_macos_jobs_the_skip_turns_off(self):
         text = self.workflow()
         outs = run([], event="schedule", nightly_skip="false")
@@ -2005,7 +2006,8 @@ class SkippedDaily(unittest.TestCase):
         text = self.workflow()
         got = [step_env(st).get("NIGHTLY_SKIP") for st in step_blocks(job_block(text, "scope")) if step_key(st, "id") == "scope"]
         self.assertEqual(got, ["${{ needs.nightly-skip.outputs.skip }}"],
-                         f"the scope step's env does not carry NIGHTLY_SKIP from the nightly-skip output, so ci-scope.sh reads no skip: {got}")
+                         f"the scope step's env does not carry NIGHTLY_SKIP from the nightly-skip output, "
+                         f"so ci-scope.sh reads no skip: {got}")
 
     # Named failure: a job runs a test step on a skipped daily, so the suites the green daily proved run again. One subtest per job.
     def test_no_job_runs_a_test_step_on_a_skipped_daily(self):
