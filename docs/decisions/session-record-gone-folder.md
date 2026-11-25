@@ -35,7 +35,7 @@ These callers stay on the default. A session record whose folder is gone still k
 ## Unknown reads, as built
 
 - Sweep: an unknown record read keeps the tree (`unreadable-subject`, the sweep's keep reason). This comes before any process read.
-- Guard: an unknown read with no process confirmed in the tree is a noted allow (`subject-unread`) on a forced `git worktree remove` only. An unforced one passes with no note, because git itself refuses a dirty or locked tree (owner ruling `agent-worktree-discard-is-noted`: a note protects nothing on an unforced remove).
+- Guard: a failed process read refuses the remove, with the shared-tree deny. An unknown session-record read is a noted allow (`subject-unread`) on a forced `git worktree remove` only, and only when the process read confirmed no process in the tree. An unforced remove with an unknown record read passes with no note, because git itself refuses a dirty or locked tree (owner ruling `agent-worktree-discard-is-noted`: a note protects nothing on an unforced remove).
 
 ## Known effect
 
