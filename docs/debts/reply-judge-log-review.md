@@ -10,6 +10,12 @@ python3 ~/.claude/lint/guard_log_report.py --between 2026-11-25T12:11:00-06:00 2
 python3 ~/.claude/lint/guard_log_report.py --between 2026-11-25T12:11:00-06:00 2026-11-27T23:59:59-06:00 --rule reply-judge
 ```
 
+A reason that names an older and a newer rule id is keyed under the older id, so the commands above miss it. This grep finds every line that names a newer id:
+
+```
+grep -E 'roles-findings-are-debts-or-notes|parallelism-keep-going' ~/.claude/guard.log
+```
+
 **Decision.** `reply-judge-samples-never-refuses`, the reply judge that never refuses. A refusal ruling rewrites it in place.
 
 **Retire.** When the owner rules on each rule's lines. No runnable test file closes it, so its close needs a `Retire-run:` cite in the PR body (decision `debt-close-runs-retire`).
