@@ -1594,6 +1594,56 @@ class RecordSlugsTests(unittest.TestCase):
                          "fence, so the lines from it on were not read as prose:\n" + out)
         self.assertEqual(rc, 1, out)
 
+    # Green controls on the real code. Each one is a mutant killer: the mutant named in its comment goes red on it.
+
+    def test_prose_sentence_stop_in_code_span_is_no_end(self):
+        # Mutant: sentence_count's CODE_SPAN hide line replaced by `hidden = text`. The stop in `lint. Then` splits.
+        line = line_of(240, "Run `make lint. Then check` now, and the lane reads the record once and then it reads ", ".")
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + [line, SENT]})
+        self.assert_only_sentinel(rc, out, hits, 6, "a stop inside a code span split a line of one sentence in two")
+
+    def test_prose_sentence_question_mark_in_code_span_is_no_end(self):
+        # Mutant: the hide's class `[.!?]` cut to `[.]`. The question mark in `ls? Then` splits.
+        line = line_of(240, "Run `ls? Then check` now, and the lane reads the record once and then it reads ", ".")
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + [line, SENT]})
+        self.assert_only_sentinel(rc, out, hits, 6, "a question mark inside a code span split a line of one sentence in two")
+
+    def test_prose_sentence_month_before_a_word_is_an_end(self):
+        # Mutant: MONTH_DOT's lookahead `(?= \d)` cut to `(?= )`, so "Nov." hides before a word too.
+        line = line_of(240, "The lane stopped in Nov. The owner ruled on it, and the lane read the record once, and then it reads ", ".")
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + [line, SENT]})
+        self.assertEqual(hits, [(REC, 5), (REC, 6)], "Nov. before a capital word ends a sentence, so the line of two "
+                         "sentences was not refused:\n" + out)
+        self.assertEqual(rc, 1, out)
+
+    def test_prose_fence_mark_mismatched_close_does_not_close(self):
+        # Mutants: fenced's `m.group(1)[0] == mark[0]` dropped, so a ~~~ line closes a ``` fence. The line inside stays fenced.
+        lines = ["", "```text", "~~~", sentences(240, 2), "```"]  # the sentinel first: a scope probe the fence cannot swallow
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + [SENT] + lines})
+        self.assert_only_sentinel(rc, out, hits, 5, "a ~~~ line closed a ``` fence, so a line inside it was read as prose")
+
+    def test_prose_fence_mark_shorter_close_does_not_close(self):
+        # Mutants: fenced's length test `len(...) >= len(mark)` made `True`, or cut to `>`. A ``` line does not close ````.
+        lines = ["", "````", "```", sentences(240, 2), "````", SENT]  # the sentinel at 5 is the scope probe
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + [SENT] + lines})
+        self.assertIn((REC, 5), hits, "the sentinel at line 5 was not refused, so the check read nothing of the record:\n" + out)
+        self.assertEqual(hits, [(REC, 5), (REC, 11)], "a fence of four backticks closes on its four-backtick line and on "
+                         "no shorter line, and the line after it is read as prose:\n" + out)
+
+    def test_prose_fence_mark_info_string_does_not_close(self):
+        # Mutant: fenced's `and not line[m.end():].strip()` dropped. A closing fence has nothing after its mark.
+        lines = ["", "```", "```js", sentences(240, 2), "```", SENT]  # the sentinel at 5 is the scope probe
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + [SENT] + lines})
+        self.assertIn((REC, 5), hits, "the sentinel at line 5 was not refused, so the check read nothing of the record:\n" + out)
+        self.assertEqual(hits, [(REC, 5), (REC, 11)], "a closing fence has nothing after its mark, so a ```js line "
+                         "inside a fence did not close it and the line after the fence is read as prose:\n" + out)
+
+    def test_prose_fence_mark_long_opener_is_fenced(self):
+        # Mutant: fenced's `flags.append(bool(m))` on the opener made `False`. A fence opener is a fence line, so it is exempt.
+        lines = ["``` " + sentences(240, 2), "```"]
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + lines + [SENT]})
+        self.assert_only_sentinel(rc, out, hits, 7, "a long fence opener that holds two sentences was read as prose")
+
 
 READY_STEP = "Record slug length"  # the step that reads the section folder; also its name in .github/workflows/checks.yml
 # The text hooks/test_guard.py looks for when a duplicate number stops its run: `section number <n> is on <k> section files`.
