@@ -1215,7 +1215,10 @@ UNDOABLE_ASK = (
     "Done: built the waiting page.\n"
     "Input Needed: link the waiting page now with a folder move, or later? Later changes nothing.\n"
 )
-UNDOABLE_FINDING = {"ok": False, "reason": ASK_RULE + ": the pick can be undone; take it and name it under Done."}
+UNDOABLE_FINDING = {"ok": False, "reason": ASK_RULE + ": the pick can be undone; ask the consultant when one is "
+                                          "reachable, else a refuter, before you take it; name it under Done."}
+# The phrases that would send a pick to the owner. The rule id itself holds "owner", so a case reads the phrases.
+ASK_TO_OWNER_PHRASES = ("ask the owner", "ask the user", "ask me", "ask you", "to the owner", "to me")
 
 
 def case_undoable_pick_question_is_judged_off_sample():
@@ -1230,8 +1233,14 @@ def case_prompt_notes_an_undoable_pick():
           run.prompt()[:300])
     check("prompt: a sentence flags an Input Needed pick that can be undone",
           has_pin(sentences, ("input needed",), ("undo",), ("flag",)), sentences)
-    check("prompt: a sentence says the session takes the pick and names it under Done",
-          has_pin(sentences, ("take",), ("done",)), sentences)
+    check("prompt: a sentence has the session ask the consultant when one is reachable, else a refuter",
+          has_pin(sentences, (ASK_RULE,), ("consult",), ("reachable",), ("refuter",)), sentences)
+    check("prompt: that sentence has the consultant asked before the session takes the pick",
+          has_pin(sentences, (ASK_RULE,), ("consult",), ("before",), ("take",)), sentences)
+    check("prompt: that sentence says the session names the pick under Done",
+          has_pin(sentences, (ASK_RULE,), ("name",), ("done",)), sentences)
+    check("prompt: that sentence never tells the session to ask the owner or the user",
+          not any(ASK_RULE in s and any(p in s for p in ASK_TO_OWNER_PHRASES) for s in sentences), sentences)
 
 
 def case_prompt_spares_irreversible_and_goal_picks():
