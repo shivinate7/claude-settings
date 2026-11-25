@@ -10,7 +10,7 @@ Owner, 2026-11-25 10:19 CST, typed in the consultant's chat:
 
 "i didnt say that at all? i said this concept of pins aligning between whats tested and whats worked on needs to be done for all repos, not that all repos need python 3.15 pinned forcefully... and remember i'm just trying to voice the conceptual here"
 
-Owner, 2026-11-25 10:19 CST, on question QAF (git versions on the Mac and Windows machines), option a ("install the pinned git on your Mac with Homebrew and upgrade Git for Windows"): "this". The grant covers that act.
+Owner, 2026-11-25 10:19 CST, on question QAF (git versions on the Mac and Windows machines), replied to option a: "this". The grant covers that act. Option a, as the consultant wrote it (not the owner's words): install the pinned git on your Mac with Homebrew and upgrade Git for Windows.
 
 ## What it means
 
@@ -24,14 +24,14 @@ The consultant reads the rulings this way; the owner's words are quoted above.
 
 - CI carries its Python pin as 40 literal copies: 38 in `.github/workflows/checks.yml`, 2 in `.github/workflows/lane-touched-tests.yml`. All 40 say 3.15.
 - Nothing moves the pin. Each bump is a hand edit of 40 lines.
-- The owner's Mac runs Python 3.15. On macOS, `os.waitid` is missing before Python 3.13 (`lint/test_verdict.py:48`), so a pin below 3.13 runs that check without it.
+- The owner's Mac runs Python 3.15. The comment on `OsNoWaitid` in `lint/test_verdict.py` says `os.waitid` is missing on macOS before Python 3.13. This record did not probe 3.13. Per that comment, a pin below 3.13 runs that check without it.
 
 ## State
 
 - Main pins 3.15 on all 40 lines. Nothing moves the pin yet.
-- Lane `ci-python-pin-follows-newest` gives the pin one home. The daily run tries the next Python and says when it passes (no new timer). Other repos take the same concept, with their own values.
+- Planned, not built: lane `ci-python-pin-follows-newest` would give the pin one home. The daily run would try the next Python and say when it passes (no new timer). Other repos would take the same concept, with their own values.
 - The lane waits on the open PRs that hold `.github/workflows/checks.yml`. Any fallback reason is written here.
-- Git: Homebrew's git is 2.56.1 on Nov 25; Apple's was 2.54.0.
+- Git: Homebrew's git is 2.56.1 on Nov 25; Apple's is 2.54.0.
 - The floor for product code stays 3.9, checked by `lint/check_python_floor.py`.
 - Unknown: the Python on the owner's Windows machine and in cloud sessions.
 
