@@ -2646,17 +2646,17 @@ jobs:
         with:
           job: mutation-report
 
-  # The guard fixture suite on Windows, split off checks-windows by cut F. Every run, a ready pull_request included (R62, owner
-  # 15:55 CST Nov 12: the integration PR run carries the full guard so the push to main can skip it), runs the full suite in shards:
+  # The guard fixture suite on Windows, split off checks-windows by cut F. A schedule and a dispatch run the full suite in shards; a ready
+  # pull_request runs only the Windows-marked cases, one slice step here (owner, 21:19 CST Nov 24 2026, over R62's full shards on a ready PR):
   # shard 1 here, the rest in checks-windows-guard-<i> (the shard switch in hooks/test_guard.py; lint/test_windows_split.py proves each
-  # case runs once). A ready pull_request runs every step of the Windows guard jobs (the draft test stands in for scope there, which skips on a draft),
+  # case runs once). A ready pull_request runs every step of these two base jobs (the draft test stands in for scope there, which skips on a draft),
   # and a merge or rest suite step only with its job's own scope flag set (checks_windows_merge, checks_windows_rest, checks_windows_rest_2). The records-only skip (records_only_skip, from .github/scripts/ci-scope.sh) is a change to
   # docs/records.md or a comment-only .py or .sh file alone after a fully green head, on a pull request or a push. Every job but
   # scope, nightly-skip, push-skip and all-jobs-passed starts nothing then, except the checks job on a comment-only delta, which its lints read (it ends its
   # job-level `if` in the delta clause, and every suite step reads the skip): each job-level `if` reads it
   # (lint/all_jobs_passed_rules.py allows that condition and no wider one on a needed job, but the checks job's named delta clause), and all-jobs-passed passes the skips (actions/all-jobs-passed/check.sh). The macOS jobs never start on a pull
   # request or a push. A step-level `if` still starts a runner, so the skip sits on the job. R62 ("each suite runs once per batch, on
-  # the batch PR"; "Part 3 keeps the full shards once per batch") puts the full suites on every ready pull_request; own-830-c, widened by
+  # the batch PR"; "Part 3 keeps the full shards once per batch") put the full suites on a ready pull_request until the Nov 24 cut above; own-830-c, widened by
   # owner item 857 pick b (19:48 CST Nov 15), narrows that: the green head's run already proved what a records-only change moves.
   # A schedule and a dispatch run them whole. The five guard shards also read windows_guard (ci-scope.sh, .github/guard-inputs.txt): a pull
   # request whose diff touches no file the guard suite reads runs no guard shard, since the suite cannot change its verdict on such a diff.
@@ -2664,7 +2664,7 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ (github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
-    # Full guard suite in 5 shards, on a ready pull_request too since R62 (the figures below are push runs, measured under the 3-shard split). A 2-shard split ran 19:31 and past 20:00 (cancelled) under the old
+    # Full guard suite in 5 shards, on a schedule and a dispatch only since the Nov 24 cut (the figures below are push runs, measured under the 3-shard split). A 2-shard split ran 19:31 and past 20:00 (cancelled) under the old
     # 20 min cap (runs 42406480975, 42408558620), so each of 5 shards takes a fifth of the cases. Under that cap, 11 main push
     # runs from 42700538152 to 43038567637 (Nov 9 to Nov 11) cut a shard at 20.05 to 20.08 min with no red test; green shards took
     # 15.27 to 19.98 min. Stopgap cap 75 min (owner 12:11 CST Nov 10, decision ci-job-caps).
@@ -2685,9 +2685,15 @@ jobs:
           python-version: "3.11"
 
       - name: Guard fixture suite (shard 1 of 5)
-        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && needs.scope.outputs.windows_guard == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && github.event_name != 'pull_request' && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && needs.scope.outputs.windows_guard == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         env:
           GUARD_SHARD: 1/5
+        run: python hooks/test_guard.py
+
+      - name: Guard fixture suite (Windows slice)
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && github.event_name == 'pull_request' && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && needs.scope.outputs.windows_guard == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        env:
+          GUARD_TESTS: windows-slice
         run: python hooks/test_guard.py
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
@@ -2700,7 +2706,7 @@ jobs:
   checks-windows-guard-2:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-guard: its figures and cap are there.
     timeout-minutes: 75
     permissions:
@@ -2734,7 +2740,7 @@ jobs:
   checks-windows-guard-3:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-guard: its figures and cap are there.
     timeout-minutes: 75
     permissions:
@@ -2768,7 +2774,7 @@ jobs:
   checks-windows-guard-4:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-guard: its figures and cap are there.
     timeout-minutes: 75
     permissions:
@@ -2802,7 +2808,7 @@ jobs:
   checks-windows-guard-5:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-guard: its figures and cap are there.
     timeout-minutes: 75
     permissions:
@@ -2834,12 +2840,12 @@ jobs:
           job: checks-windows-guard-5
 
   # The merge suites on Windows. The full git-half suite runs in shards, shard 1 here and the rest in checks-windows-merge-<i> (the shard
-  # switch in merge/test_merge.py). A ready pull_request runs a step only when checks_windows_merge is set; the scheduled and dispatched runs run them all (a push skips every Windows shard).
+  # switch in merge/test_merge.py). A ready pull_request runs a step only when checks_windows_merge is set, and runs the Windows slice here in place of the full shard 1; the scheduled and dispatched runs run every shard (a push or a pull_request skips shards 2 to 10).
   checks-windows-merge:
     runs-on: windows-latest
     needs: scope
     if: ${{ (github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
-    # Push figures; a ready PR run carries the full suite when checks_windows_merge is set, unmeasured. 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The newest 29 completed push runs on main, latest attempt of each (run 42522167511 to run 43206612905):
+    # Push figures; a ready PR run carries the Windows slice when checks_windows_merge is set, unmeasured. 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The newest 29 completed push runs on main, latest attempt of each (run 42522167511 to run 43206612905):
     # 29 green, median 17.6, slowest 21.2 min (run 43155288101), measured under the 5-shard split. All 10 merge shards share cap 75. The stopgap ends with roadmap step time-pinned-tests-go.
     timeout-minutes: 75
     permissions:
@@ -2863,9 +2869,15 @@ jobs:
         run: python merge/test_launch.py
 
       - name: Merge tool git-half fixture suite (shard 1 of 10)
-        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && github.event_name != 'pull_request' && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
         env:
           MERGE_SHARD: 1/10
+        run: python merge/test_merge.py
+
+      - name: Merge tool git-half fixture suite (Windows slice)
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && github.event_name == 'pull_request' && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
+        env:
+          MERGE_TESTS: windows-slice
         run: python merge/test_merge.py
 
       - name: Merge launcher fixture suite (merge.cmd)
@@ -2882,7 +2894,7 @@ jobs:
   checks-windows-merge-2:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-merge, with the same cap.
     # Cap 75 is shared by the 10 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
     timeout-minutes: 75
@@ -2917,7 +2929,7 @@ jobs:
   checks-windows-merge-3:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-merge, with the same cap.
     # Cap 75 is shared by the 10 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
     timeout-minutes: 75
@@ -2952,7 +2964,7 @@ jobs:
   checks-windows-merge-4:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-merge, with the same cap.
     # Cap 75 is shared by the 10 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
     timeout-minutes: 75
@@ -2987,7 +2999,7 @@ jobs:
   checks-windows-merge-5:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-merge, with the same cap.
     # Cap 75 is shared by the 10 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
     timeout-minutes: 75
@@ -3022,7 +3034,7 @@ jobs:
   checks-windows-merge-6:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-merge, with the same cap.
     # Cap 75 is shared by the 10 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
     timeout-minutes: 75
@@ -3057,7 +3069,7 @@ jobs:
   checks-windows-merge-7:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-merge, with the same cap.
     # Cap 75 is shared by the 10 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
     timeout-minutes: 75
@@ -3092,7 +3104,7 @@ jobs:
   checks-windows-merge-8:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-merge, with the same cap.
     # Cap 75 is shared by the 10 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
     timeout-minutes: 75
@@ -3127,7 +3139,7 @@ jobs:
   checks-windows-merge-9:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-merge, with the same cap.
     # Cap 75 is shared by the 10 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
     timeout-minutes: 75
@@ -3162,7 +3174,7 @@ jobs:
   checks-windows-merge-10:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-merge, with the same cap.
     # Cap 75 is shared by the 10 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
     timeout-minutes: 75
@@ -3516,9 +3528,10 @@ jobs:
           job: checks-windows-rest-2
 
   # The rollup check. Main requires no check (merge.requiredChecks "none"); a repo set up with protect.py requires this one. It fails on a needed job that failed, was cancelled or was
-  # skipped, so every needed job runs on a ready PR and puts its scope condition on its steps, never on the job. There are two
+  # skipped, so every needed job runs on a ready PR and puts its scope condition on its steps, never on the job. There are three
   # exceptions. The three macOS jobs start on a dispatch and a daily that runs only (owner, 01:33 CST Nov 16), so a PR skips
-  # them and this job does not need them. The second is the job-level `if: needs.scope.outputs.records_only_skip != 'true'` on the
+  # them and this job does not need them. The 13 Windows shard jobs (guard 2 to 5, merge 2 to 10) are the same: they start on a
+  # schedule and a dispatch only (Nov 24 cut), so ci-done needs them and this job does not. The third is the job-level `if: needs.scope.outputs.records_only_skip != 'true'` on the
   # suite jobs: a records-only run skips them, and the rollup reads that all-skipped run as green only when scope's
   # records_only_skip output is true.
   # It runs on a ready pull_request only: on a push or a schedule it would read green over a red shard job it does not need.
@@ -3549,20 +3562,7 @@ jobs:
       - checks-mutate-guard-c
       - mutation-report
       - checks-windows-guard
-      - checks-windows-guard-2
-      - checks-windows-guard-3
-      - checks-windows-guard-4
-      - checks-windows-guard-5
       - checks-windows-merge
-      - checks-windows-merge-2
-      - checks-windows-merge-3
-      - checks-windows-merge-4
-      - checks-windows-merge-5
-      - checks-windows-merge-6
-      - checks-windows-merge-7
-      - checks-windows-merge-8
-      - checks-windows-merge-9
-      - checks-windows-merge-10
       - checks-windows-rest
       - checks-windows-rest-2
       - checks-windows-sweep
