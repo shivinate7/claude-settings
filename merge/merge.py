@@ -3017,15 +3017,18 @@ RUN_FOLDER = re.compile(r"(?:ci-job-lint-(\d+)-|ci-job-pin-(\d+)-[0-9a-f]{7}-|mu
 
 
 def _descends_from(sweep, pid, owner):
-    """True when OWNER is PID's parent or an ancestor, None when a parent cannot be read on the way up, else False. A holder is its folder's
-    owner's child (red-run's test command, a lint's subprocess), so this is how an unreadable pid is tied to one folder. A chain that
-    revisits a pid is a parent loop with no ancestor outside it, so no owner sits above: False."""
+    """True when OWNER is PID's parent or an ancestor, None when the chain cannot be settled, else False. A holder is its folder's
+    owner's child (red-run's test command, a lint's subprocess), so this is how an unreadable pid is tied to one folder. The chain cannot
+    be settled when a parent cannot be read, or when it revisits a pid: on Windows a parent number can be reused, so a loop is a stale
+    read and the owner may still sit above it."""
     seen = set()
     for _ in range(sweep.MAX_CLIMB):
         if pid == owner:
             return True
-        if pid <= 1 or pid in seen:
+        if pid <= 1:
             return False
+        if pid in seen:
+            return None
         seen.add(pid)
         pid = sweep._parent_pid(pid)
         if pid is None:
@@ -3226,10 +3229,20 @@ def combine_hint(root, host):
 
 
 def drop_worktree(root, tmp, wt):
+    """Remove the tree WT and its folder TMP. -> True when the folder is gone. False, after one line naming the tree, git's exit code and the first
+    line of its output, when git refused the removal of a tree that was there or the folder stays: a caller must not read that tree as swept."""
+    was_there = os.path.exists(wt)  # git refuses a tree that is already gone, and that is no failure
     git(root, "worktree", "unlock", wt)
-    git(root, "worktree", "remove", "--force", wt)
+    code, out = git(root, "worktree", "remove", "--force", wt)
     git(root, "worktree", "prune")
     shutil.rmtree(tmp, ignore_errors=True)
+    left = os.path.exists(tmp)
+    if (code and was_there) or left:
+        first = out.splitlines()[0] if out.strip() else "no output"
+        say(f"merge: could not remove the worktree {os.path.basename(tmp)}: git worktree remove exited {code}: {first}"
+            + (f". The folder {tmp} stays." if left else "."))
+        return False
+    return True
 
 REPLACED_CITE = "(decision session-tiers, a pull request closes as replaced when the pull request that replaces it opens)"
 REPLACED_MARKER = "<!-- replaced-pointer -->"  # the whole first line of each pointer the tool posts (close_replaced, reopen_dropped); issue_comments reads it back
