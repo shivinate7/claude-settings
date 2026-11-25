@@ -343,6 +343,10 @@ def playwright_remedy_case():
     return True, "refused, and the remedy names the stale __dirlock and pgrep -f playwright"
 
 
+# decide names no lazy fixture for this case, so it reads none: the result is the same with every fixture built.
+FIXTURELESS_CHECKS.add(playwright_remedy_case)
+
+
 def powershell_backslash_case():
     """Under PowerShell a backslash is a path separator, so tokenizing keeps it. Under Bash it is
     an escape, so it goes. The same text reads two ways, and the tool decides which."""
