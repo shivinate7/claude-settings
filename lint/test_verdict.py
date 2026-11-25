@@ -45,6 +45,12 @@ def load_verdict_module():
         _VERDICT_MODULE["mod"] = mod
     return _VERDICT_MODULE["mod"]
 
+class OsNoWaitid:  # bin/verdict's `os` where os.waitid is missing (macOS before Python 3.13): reading waitid raises AttributeError, every other name is the real os module's
+    def __init__(self, real): self.real = real
+    def __getattr__(self, name):
+        if name == "waitid": raise AttributeError("module 'os' has no attribute 'waitid'")
+        return getattr(self.real, name)
+
 def run(code=None, log=None, extra=None, timeout=None, launcher=None, shell=None, argv=None, shim=None, cwd=None):
     """`shell` is an sh -c line in which {cmd} stands for the verdict command, e.g. a pipe or a redirect.
     `argv` runs `verdict <argv...>` in place of the script. `shim` is (name, body): a fake executable `name`
@@ -593,6 +599,28 @@ class T(unittest.TestCase):
                 proc.wait()  # reaps the child here, so the case leaves no zombie behind
         self.assertTrue(stop is None, "hang_check stopped a child that had exited 0 and was not yet reaped: a finished step read as a hang")
 
+    def hang_check_from_quiet_mark_without_waitid(self, verdict, proc, f):
+        """hang_check_from_quiet_mark with bin/verdict's os missing os.waitid, as on macOS before Python 3.13: exited() then reads False.
+        The scope assert keeps a patch that did nothing from passing a case."""
+        with mock.patch.object(verdict, "os", OsNoWaitid(os)):
+            self.assertFalse(hasattr(verdict.os, "waitid"), "scope: bin/verdict's os still has waitid, so the case does not test the missing read")
+            return self.hang_check_from_quiet_mark(verdict, proc, f)
+
+    @unittest.skipIf(os.name == "nt", HANG_SKIP)
+    def test_hang_stop_finished_child_not_reaped_without_waitid_is_not_a_hang(self):
+        """P2, the red half, with os.waitid missing as on macOS before Python 3.13. The child is the one the case above makes: exited 0,
+        not reaped, a zombie row with its CPU frozen. exited() then answers False for it, so the zombie reads as a hang and hang_check
+        stops it. A finished step is never a hang: hang_check returns None (decision hang-stop)."""
+        verdict = load_verdict_module()
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d, open(os.path.join(d, "log.txt"), "ab") as f:
+            proc = subprocess.Popen(["bash", "-c", "echo END-MARK; exit 0"], stdout=f, stderr=subprocess.DEVNULL)
+            try:
+                self.wait_until(lambda: zombie(proc.pid), "the child exits without being reaped")
+                stop = self.hang_check_from_quiet_mark_without_waitid(verdict, proc, f)
+            finally:
+                proc.wait()  # reaps the child here, so the case leaves no zombie behind
+        self.assertTrue(stop is None, "hang_check stopped a child that had exited 0 and was not yet reaped, with os.waitid missing: a finished step read as a hang")
+
     @unittest.skipIf(os.name == "nt", HANG_SKIP)
     def test_hang_stop_live_silent_child_is_stopped_from_the_same_quiet_mark(self):
         """Control, green. A live child that prints once and then sleeps is silent and idle. Under the same quiet mark hang_check returns
@@ -608,6 +636,22 @@ class T(unittest.TestCase):
                 proc.kill()
                 proc.wait()
         self.assertTrue(stop is not None, "hang_check did not stop a live silent idle child under the same quiet mark: the finished-child case would pass by never stopping")
+
+    @unittest.skipIf(os.name == "nt", HANG_SKIP)
+    def test_hang_stop_live_silent_child_is_stopped_without_waitid(self):
+        """Control, green. With os.waitid missing, a live child that prints once and then sleeps is silent and idle, so hang_check still
+        returns the stop. The zombie case beside the live control cannot pass by never stopping (decision hang-stop)."""
+        verdict = load_verdict_module()
+        code = "import time\nprint('LAST-LINE-BEFORE-SILENCE', flush=True)\ntime.sleep(60)\n"
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d, open(os.path.join(d, "log.txt"), "ab") as f:
+            proc = subprocess.Popen([sys.executable, "-c", code], stdout=f, stderr=subprocess.DEVNULL)
+            try:
+                self.wait_until(lambda: os.fstat(f.fileno()).st_size > 0, "the child prints its last line")
+                stop = self.hang_check_from_quiet_mark_without_waitid(verdict, proc, f)
+            finally:
+                proc.kill()
+                proc.wait()
+        self.assertTrue(stop is not None, "hang_check did not stop a live silent idle child with os.waitid missing: the zombie case would pass by never stopping")
 
     @unittest.skipIf(os.name == "nt", HANG_SKIP)
     def test_hang_stop_ps_down_is_no_stop(self):
