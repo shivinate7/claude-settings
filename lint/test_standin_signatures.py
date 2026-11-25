@@ -828,6 +828,110 @@ class EmptyTests(unittest.TestCase):
         self.assertEqual(not_judged, 0, "want every generated stand-in judged, none counted as not judged")
 
 
+class UnjudgedFormTests(unittest.TestCase):
+    """A patch form the check cannot resolve is counted in not_judged, never skipped. Each stand-in here is a
+    MagicMock, which no check can judge, so these cases pin the count and never a judgement of the stand-in."""
+
+    def test_starred_target_tuple_is_counted_not_silent(self):
+        want = "patch.object(*target), with target a tuple built in a loop, is counted as not judged, not silent"
+        tests = '''import unittest
+import unittest.mock
+
+import merge
+
+
+class StarredTests(unittest.TestCase):
+    def test_loop(self):
+        for target in ((merge, "sh", unittest.mock.MagicMock()),):
+            with unittest.mock.patch.object(*target):
+                pass
+'''
+        findings, not_judged = judge(self, want, "starred", PRODUCT_KW, {"test_merge.py": tests})
+        self.assertEqual(where(findings), [], "want no finding for patch.object(*target): its stand-in is a MagicMock")
+        self.assertEqual(not_judged, 1, "want patch.object(*target) counted as 1 not judged; got %d, so the form is silent"
+                         % not_judged)
+
+    def test_string_target_naming_the_product_module_is_counted_not_silent(self):
+        want = 'patch("merge.sh", stand_in), a string target naming the product module, is counted, not silent'
+        tests = '''import unittest
+import unittest.mock
+
+import merge
+
+
+class StringTargetTests(unittest.TestCase):
+    def test_string(self):
+        with unittest.mock.patch("merge.sh", unittest.mock.MagicMock()):
+            pass
+'''
+        findings, not_judged = judge(self, want, "string", PRODUCT_KW, {"test_merge.py": tests})
+        self.assertEqual(where(findings), [], 'want no finding for patch("merge.sh", ...): its stand-in is a MagicMock')
+        self.assertEqual(not_judged, 1, 'want patch("merge.sh", ...) counted as 1 not judged; got %d, so the form is silent'
+                         % not_judged)
+
+    def test_patch_multiple_on_the_product_module_is_counted_not_silent(self):
+        want = "patch.multiple(merge, sh=stand_in) is counted as not judged, not silent"
+        tests = '''import unittest
+import unittest.mock
+
+import merge
+
+
+class MultipleTests(unittest.TestCase):
+    def test_multiple(self):
+        with unittest.mock.patch.multiple(merge, sh=unittest.mock.MagicMock()):
+            pass
+'''
+        findings, not_judged = judge(self, want, "multiple", PRODUCT_KW, {"test_merge.py": tests})
+        self.assertEqual(where(findings), [], "want no finding for patch.multiple(merge, sh=...): its stand-in is a MagicMock")
+        self.assertEqual(not_judged, 1, "want patch.multiple(merge, sh=...) counted as 1 not judged; got %d, so the form is silent"
+                         % not_judged)
+
+    def test_new_callable_on_the_product_module_is_counted_not_silent(self):
+        want = 'patch.object(merge, "sh", new_callable=...) is counted as not judged, not silent'
+        tests = '''import unittest
+import unittest.mock
+
+import merge
+
+
+class NewCallableTests(unittest.TestCase):
+    def test_new_callable(self):
+        with unittest.mock.patch.object(merge, "sh", new_callable=unittest.mock.MagicMock):
+            pass
+'''
+        findings, not_judged = judge(self, want, "newcallable", PRODUCT_KW, {"test_merge.py": tests})
+        self.assertEqual(where(findings), [], 'want no finding for patch.object(merge, "sh", new_callable=...)')
+        self.assertEqual(not_judged, 1, 'want patch.object(merge, "sh", new_callable=...) counted as 1 not judged; '
+                         "got %d, so the form is silent" % not_judged)
+
+    def test_a_patch_on_an_unrelated_module_adds_nothing(self):
+        want = "a patch.object on json, not the product module merge, adds no finding and no not-judged count"
+        tests = '''import json
+import unittest
+import unittest.mock
+
+import merge
+
+
+def fake_sh(args):
+    return 0, ""
+
+
+class UnrelatedTests(unittest.TestCase):
+    def test_broken_def(self):
+        with unittest.mock.patch.object(json, "sh", fake_sh):
+            pass
+
+    def test_mock(self):
+        with unittest.mock.patch.object(json, "sh", unittest.mock.MagicMock()):
+            pass
+'''
+        findings, not_judged = judge(self, want, "control", PRODUCT_KW, {"test_merge.py": tests})
+        self.assertEqual(where(findings), [], "want no finding for a patch on json: json is not the product module merge")
+        self.assertEqual(not_judged, 0, "want no not-judged count for a patch on json: json is not the product module merge")
+
+
 class FixtureTests(unittest.TestCase):
     def test_the_check_reads_with_ast_and_never_imports_the_files(self):
         want = "the check reads both files with ast: a module-level statement in either file never runs"
