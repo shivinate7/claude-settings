@@ -63,6 +63,8 @@ class Repo:
         self.root = tempfile.mkdtemp(prefix="probes-", dir=RUN_FOLDER)
         test.addCleanup(shutil.rmtree, self.root, True)
         subprocess.run(["git", "init", "-q", self.root], check=True)
+        # No background gc or maintenance: a commit here can start one, and its lock file then shows in a case's listing.
+        self.git("config", "gc.auto", "0").git("config", "maintenance.auto", "false")
         if origin:
             bare = tempfile.mkdtemp(prefix="origin-", dir=RUN_FOLDER)
             test.addCleanup(shutil.rmtree, bare, True)
