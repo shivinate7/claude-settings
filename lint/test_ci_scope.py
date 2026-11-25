@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -69,21 +70,69 @@ REAL_GUARD_INPUTS = "real"  # run()'s guard_inputs default: the repo's own list 
 MUTATE_GUARD = os.path.join(HERE, "..", "hooks", "mutate_guard.py")
 
 
+GUARD_READS = "GUARD_READ_FILES"
+
+
+def _is_guard_name(node):
+    return isinstance(node, ast.Name) and node.id == GUARD_READS
+
+
+def _guard_reads_binds(stmt):
+    """True when the top-level statement `stmt` is the one plain assignment of GUARD_READ_FILES."""
+    return isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and _is_guard_name(stmt.targets[0])
+
+
+def _guard_reads_change(stmt):
+    """-> how the top-level statement `stmt` rebinds or mutates GUARD_READ_FILES, or '' when it does neither. A def or class
+    body counts too: a later call can rebind the name through it."""
+    for node in ast.walk(stmt):
+        if isinstance(node, ast.AugAssign) and _is_guard_name(node.target):
+            return "changed by +="
+        if isinstance(node, ast.AnnAssign) and _is_guard_name(node.target):
+            return "annotated"
+        if _is_guard_name(node) and not isinstance(node.ctx, ast.Load):
+            return "rebound"
+        if isinstance(node, ast.Subscript) and not isinstance(node.ctx, ast.Load) and _is_guard_name(node.value):
+            return "changed by an item store"
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and _is_guard_name(node.func.value):
+            return "mutated by .%s()" % node.func.attr
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == GUARD_READS:
+            return "rebound by a def or class"
+        if isinstance(node, ast.alias) and (node.asname or node.name).split(".")[0] == GUARD_READS:
+            return "rebound by an import"
+    return ""
+
+
 def guard_read_files():
-    """-> the paths GUARD_READ_FILES names in hooks/mutate_guard.py, as git names them ('/' between parts). Each entry must be
-    os.path.join of string literals; any other shape is a failure that names it."""
+    """-> the paths GUARD_READ_FILES names in hooks/mutate_guard.py, as git names them ('/' between parts). The reader reads the
+    name whole or fails, and each failure names its line: one plain assignment of a non-empty tuple or list of os.path.join
+    calls on string literals, and no other top-level statement that rebinds or mutates the name."""
     with open(MUTATE_GUARD, encoding="utf-8") as f:
         tree = ast.parse(f.read(), filename=MUTATE_GUARD)
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "GUARD_READ_FILES" for t in node.targets):
-            paths = []
-            for elt in node.value.elts:
-                parts = [a.value for a in getattr(elt, "args", []) if isinstance(a, ast.Constant) and isinstance(a.value, str)]
-                if not (isinstance(elt, ast.Call) and parts and len(parts) == len(elt.args)):
-                    raise AssertionError(f"GUARD_READ_FILES entry is not os.path.join of string literals: {ast.dump(elt)}")
-                paths.append("/".join(parts))
-            return paths
-    return []
+    bound = None
+    for stmt in tree.body:
+        if _guard_reads_binds(stmt):
+            if bound is not None:
+                raise AssertionError(f"{MUTATE_GUARD} line {stmt.lineno}: GUARD_READ_FILES is assigned a second time, "
+                                     "so the reader cannot read it whole")
+            bound = stmt
+            continue
+        how = _guard_reads_change(stmt)
+        if how:
+            raise AssertionError(f"{MUTATE_GUARD} line {stmt.lineno}: GUARD_READ_FILES is {how}, "
+                                 "so the reader cannot read it whole")
+    if bound is None:
+        raise AssertionError(f"{MUTATE_GUARD}: no plain assignment of GUARD_READ_FILES")
+    if not isinstance(bound.value, (ast.Tuple, ast.List)) or not bound.value.elts:
+        raise AssertionError(f"{MUTATE_GUARD} line {bound.lineno}: GUARD_READ_FILES is not a non-empty tuple or list literal")
+    paths = []
+    for elt in bound.value.elts:
+        parts = [a.value for a in getattr(elt, "args", []) if isinstance(a, ast.Constant) and isinstance(a.value, str)]
+        if not (isinstance(elt, ast.Call) and parts and len(parts) == len(elt.args)):
+            raise AssertionError(f"{MUTATE_GUARD} line {elt.lineno}: GUARD_READ_FILES entry is not os.path.join of string "
+                                 f"literals: {ast.unparse(elt)}")
+        paths.append("/".join(parts))
+    return paths
 
 
 def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref="", green=None,
@@ -743,6 +792,61 @@ class Scope(FlagAsserts, unittest.TestCase):
         self.assertFlags(got, want_false=["code", "shoot"])
         self.assertIn("checks_guard", got, got)
         self.assertEqual(got["checks_guard"], "false", f"checks_guard: {got}")
+
+
+# guard_read_files reads GUARD_READ_FILES whole or fails. Each source is written to the run folder and read through
+# MUTATE_GUARD, the path the reader opens by default. A source passed as an argument would be a TypeError on a reader
+# that takes none: a crash, not the assert these cases name.
+class GuardReadsReader(unittest.TestCase):
+    OK = [
+        ("tuple", 'GUARD_READ_FILES = (os.path.join("bin", "sim-lease"),)\n', ["bin/sim-lease"]),
+        ("list", 'GUARD_READ_FILES = [os.path.join("merge", "merge.py")]\n', ["merge/merge.py"]),
+        ("four entries", "GUARD_READ_FILES = (\n"
+         '    os.path.join("bin", "sim-lease"),\n'
+         '    os.path.join("merge", "merge.py"),\n'
+         '    os.path.join("actions", "ci-alarm", "events.json"),\n'
+         '    os.path.join("actions", "ci-alarm", "clear_rule.py"),\n)\n',
+         ["bin/sim-lease", "merge/merge.py", "actions/ci-alarm/events.json", "actions/ci-alarm/clear_rule.py"]),
+    ]
+    # (form, source, the line the failure names or None). The reader cannot read each of these whole, so it must raise.
+    FAIL = [
+        ("augmented assignment", 'GUARD_READ_FILES = (os.path.join("bin", "sim-lease"),)\n'
+         'GUARD_READ_FILES += (os.path.join("janitor", "sweep.py"),)\n', 2),
+        ("second assignment", 'GUARD_READ_FILES = (os.path.join("bin", "sim-lease"),)\n'
+         'GUARD_READ_FILES = (os.path.join("janitor", "sweep.py"),)\n', 2),
+        ("annotated assignment", 'GUARD_READ_FILES: tuple = (os.path.join("bin", "sim-lease"),)\n', 1),
+        ("append call", 'GUARD_READ_FILES = [os.path.join("bin", "sim-lease")]\n'
+         'GUARD_READ_FILES.append(os.path.join("janitor", "sweep.py"))\n', 2),
+        ("extend call", 'GUARD_READ_FILES = [os.path.join("bin", "sim-lease")]\n'
+         'GUARD_READ_FILES.extend([os.path.join("janitor", "sweep.py")])\n', 2),
+        ("empty tuple", "GUARD_READ_FILES = ()\n", 1),
+        ("empty list", "GUARD_READ_FILES = []\n", 1),
+        ("no assignment", "OTHER = 1\n", None),
+    ]
+
+    def reads_of(self, form, text):
+        """-> guard_read_files() on `text`, which is written to the run folder and read through MUTATE_GUARD."""
+        path = os.path.join(RUN_DIR, form.replace(" ", "-") + ".py")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        with mock.patch.object(sys.modules[__name__], "MUTATE_GUARD", path):
+            return guard_read_files()
+
+    def test_a_tuple_or_list_reads_whole(self):
+        for form, text, want in self.OK:
+            with self.subTest(form=form):
+                self.assertEqual(self.reads_of(form, text), want)
+
+    def test_every_other_form_fails_and_names_its_line(self):
+        for form, text, line in self.FAIL:
+            with self.subTest(form=form):
+                try:
+                    got = self.reads_of(form, text)
+                except AssertionError as e:
+                    if line is not None:
+                        self.assertIn(" line %d: " % line, str(e))
+                else:
+                    self.fail("%s: the reader read %s and did not fail" % (form, got))
 
 
 # A records-only push after a fully green head. GREEN_HEAD names the
