@@ -3642,8 +3642,9 @@ def unresolved_log_is_named_as_not_watched():
 @case
 def CI48_check_reads_only_the_transcript():
     """CI48. cost: the CI check starts no process, opens no network and writes no file, and it reads no file but
-    the transcript. Scope first: the transcript was opened, and the check blocked, so the calls counted below
-    come from the check"""
+    the transcript. The PR-state read is stood in as open, so the calls counted are the check's own: CI131 pins
+    that read's one gh call. Scope first: the transcript was opened, and the check blocked, so the calls counted
+    below come from the check"""
     folder = new_dir()
     path = transcript([prompt("merge when green"), ready()], folder=folder)
     return cost_problems(path, folder, block_shown)
@@ -3658,12 +3659,18 @@ def block_shown(out):
     return problems
 
 
+def stood_in_pr_state(repo, number):
+    """The Stop check's PR-state read, stood in as an open PR: no gh call, so the check proper is what runs."""
+    return "open"
+
+
 def cost_problems(path, folder, shown):
     """The cost of the CI check on the transcript at path: it starts no process, opens no network and writes no
     file, and it reads no file but the transcript. shown(out) gives the problems with what the check printed, so
-    the calls counted come from a check that printed the thing the case is about (scope)."""
+    the calls counted come from a check that printed the thing the case is about (scope). The PR-state read is
+    stood in (stood_in_pr_state), so a process the read starts is not counted here."""
     spies = []
-    rc, out, stats, opens = stop_in_process(path, spies)
+    rc, out, stats, opens = stop_in_process(path, spies, patch={"pr_state": stood_in_pr_state})
     problems = expect(any(os.path.basename(p) == "session.jsonl" for p in opens),
                       f"scope: stop() did not open the session transcript: opens {opens}")
     problems += expect(rc == 0, f"exit {rc}, want 0")
