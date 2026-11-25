@@ -376,6 +376,7 @@ meets each item below. What the tool does when it runs is written in `confirm` i
    and runs one Retire test for each closed debt (`lint/check_debt_retire.py`).
    One fetch of every branch head, one `git diff` per other open PR on the base, a merge-tree per overlap, and two worktrees (the dry merge and the debt lint's scratch).
    The files written are ci-job's log and the temporary worktrees.
+9. `merge.lintSuites` is an optional list of step names, read as `merge.readyChecks` reads them: a bare name is a step of the repo's `checks` job, and `<job>:<step>` is a step of another job. Local lane lint (`merge --lane-lint`) runs each listed step the change reaches, whatever its language. It reads the list from the tree under test, not from the base that item 1 names. A listed name the workflow lacks is a FAIL. Absent or empty: nothing is listed (decision `lanes-run-no-full-ci-job`).
 
 ## Adoption checklist, the merge tool
 
