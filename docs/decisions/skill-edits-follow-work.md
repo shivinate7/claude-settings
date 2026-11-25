@@ -12,4 +12,4 @@ A held skill edit never holds up real work. Owner, 22:21 CST 2026-11-24, typed i
 - The skills revamp updates that text later.
 
 Kind: process
-Home: none (process, no code)
+Home: rule:parallelism-keep-going
