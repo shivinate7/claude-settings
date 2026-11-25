@@ -399,6 +399,12 @@ workflow_refuse("role-model: Workflow builder on opus with a variable brief is d
                 "const brief = 'Fix the failing case.';\n"
                 + _step_flow("brief", "agentType: 'builder', model: 'opus'"),
                 lacks=BRIEF_LITERAL_REMEDY)
+# The same refusal for a capitalised agentType. The guard reads `Builder` as the builder role, so it names no
+# literal-brief remedy, as the lower-case form does above.
+workflow_refuse("role-model: Workflow Builder on opus with a variable brief is denied and names no literal-brief remedy",
+                "const brief = 'Fix the failing case.';\n"
+                + _step_flow("brief", "agentType: 'Builder', model: 'opus'"),
+                lacks=BRIEF_LITERAL_REMEDY)
 workflow_refuse("role-model: Workflow Explore on sonnet with a variable brief is denied under agent-role-model and names the literal-brief remedy",
                 "const brief = 'Audit: check the glossary for meaning drift.';\n"
                 + _step_flow("brief", "agentType: 'Explore', model: 'sonnet'"),
