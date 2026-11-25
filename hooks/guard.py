@@ -4137,7 +4137,8 @@ MODEL_MENTION = re.compile(r"(?<![A-Za-z])%s(?![A-Za-z])" % FLOOR_WORD, re.I)  #
 def held_model(payload):
     """The session's live model hold (override.model_override: model, role, at, until, end, said), or None. It is read from
     the payload's session_id and transcript_path, on demand: one open of the session's pass file, and for a hold that ends
-    at the report, the replies since it. A read that raises is no hold."""
+    at the report, the replies since it. A read that raises is no hold, so the floor and the role row refuse as they do with
+    no word of his: the stricter side."""
     try:
         import override
         return override.model_override(payload.get("session_id"), payload.get("transcript_path"))
@@ -4848,7 +4849,7 @@ def step_up_reason(prompt: str, role, model, rounds=None) -> str:
 # for a spawn with no model, one read of the agent files. No process starts and no file is written, except the one
 # `agent-role-model-unread` log line when a read fails.
 from shared_names import MODEL_FAMILIES  # noqa: E402  the one home of the model list, shared with lint/report_guard.py
-ROLE_MODEL_RANK = MODEL_FAMILIES  # the family a model name holds ranks by its place here; fable sits beside opus, above sonnet
+ROLE_MODEL_RANK = MODEL_FAMILIES  # the family a model name holds ranks by its place here; fable ranks above opus
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")  # the words an effort cell or an `effort:` key can hold
 ROLE_TABLE_FILE = "agent-model-cap.md"   # inside the record folder that lint/layout.py names
 ROLE_TABLE_MAX = 256 * 1024
@@ -5377,13 +5378,16 @@ def hold_exempt(spawn, role, rounds) -> bool:
 
 def role_hold_verdict(hold, spawn, role, model, rounds):
     """The owner's model hold against one spawn: None to leave the spawn to its role's row, else (reason, matched, unread).
+    Only a judged hold (override._read_hold `judged`: the file names its model) is a ceiling. A keyword Opus override
+    (`opus 2h`) writes no model; it lifts the Opus spawn refusal alone and never the role row of a non-Opus spawn.
     The hold's model replaces the row of every role it covers as the ceiling (hold_covers_role; hold_exempt spawns stay on
     their rows when the hold names no role). A spawn above the ceiling is refused with the model and the time of his word;
     one at or below it passes, even where its row would refuse it. A spawn on Opus is left to opus_spawn_hit, which the
     hold lifts only when it holds Opus. A Workflow agent() with no `model` is served the Workflow default
     (ROLE_WORKFLOW_MODEL_ENV): it is judged on that model, and passes to its row when it is within the ceiling. An Agent
     spawn with no model is not judged here: its default is read nowhere in this call."""
-    if not hold_covers_role(hold, role) or (hold.get("role") is None and hold_exempt(spawn, role, rounds)):
+    if (not hold.get("judged") or not hold_covers_role(hold, role)
+            or (hold.get("role") is None and hold_exempt(spawn, role, rounds))):
         return None
     served = model or (os.environ.get(ROLE_WORKFLOW_MODEL_ENV, "").strip() if spawn.get(WORKFLOW_NO_MODEL) else "")
     if not served or "opus" in served.lower():

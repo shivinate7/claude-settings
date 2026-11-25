@@ -525,6 +525,14 @@ def _seed_record(transcript, found, prompt):
     return None
 
 
+def _seed_turn(found, prompt):
+    """True when the prompt's own record among `found` (_own_record) has a turnOrigin that is neither absent nor "human": a
+    session's seed brief (host_synthetic, sdk), in a local session as in a cloud one. No own record is no seed turn."""
+    at = _own_record(found, prompt)
+    rec = next((r for pos, r in found if pos == at), None) if at is not None else None
+    return isinstance(rec, dict) and rec.get("turnOrigin") not in (None, "human")
+
+
 def _system_prompt_last(found, prompt):
     """True when the last owner prompt record of `found` is the prompt itself with promptSource "system": a timed
     check-in or other harness turn."""
@@ -680,7 +688,8 @@ def grant_model_ask(session_id, prompt, at, judge=None, transcript=None, source=
     plain no, None for an error, a timeout or an odd answer. Returns ("model" or "opus", until, role, end, model) for a hold
     written, ("model-off", None, model) when an error ended a held model, else None.
     The words: a whole model word other than opus, outside pasted blocks, notices and reply quotes, from an owner prompt
-    that passes the gates of _owner_ask, with no whole word `override` outside code spans. A prompt that names only opus is
+    that passes the gates of _owner_ask and is no seed brief (_seed_turn, local or cloud), with no whole word `override`
+    outside code spans. A prompt that names only opus is
     the Opus ask's; one prompt reaches one judge. The roles named, the length and the end are the Opus ask's reading
     (_ask_scope; MODEL_ROLES for a model other than opus): a length he states is the hold's `until`; with none it ends at
     the next report or after DEFAULT_ASK_LENGTH.
@@ -696,7 +705,9 @@ def grant_model_ask(session_id, prompt, at, judge=None, transcript=None, source=
     gated = _owner_ask(prompt, source, transcript, _model_wanted, strip_quotes=True)
     if gated is None:
         return None
-    text = gated[0]
+    text, found = gated[0], gated[1]
+    if _seed_turn(found, prompt):
+        return None  # a seed brief is the session that started this one speaking, never the owner's choice of a model
     try:
         if judge is None:
             from call_judge import model_ask as judge
@@ -979,8 +990,9 @@ def _report_since(at, transcript, records=None, report_ok=None):
     """True when an assistant reply stamped after `at` is a report (`report_ok`, report_guard.report_shape_ok by default). The
     reads go backward from the end of the transcript at path `transcript` (_records_backward), or through the parsed
     `records` the caller already holds, and stop at the first record stamped at or before `at`, so the cost is the
-    replies since the hold. An agent's own record (isSidechain) is no report of the session. A read that cannot run, or
-    a shape test that cannot load, finds no report: the hold stays until `until`."""
+    replies since the hold. An agent's own record (isSidechain) is no report of the session. A transcript that cannot be
+    read finds no report: the hold stays until `until`. A shape test that cannot load or run counts the reply as a report,
+    so the hold ends."""
     for rec in reversed(records) if records is not None else _records_backward(transcript, ASSISTANT_LINE):
         if not isinstance(rec, dict):
             continue
@@ -997,7 +1009,7 @@ def _report_since(at, transcript, records=None, report_ok=None):
             if report_ok(text):
                 return True
         except Exception:
-            return False
+            return True  # an unreadable shape test ends the hold: with no hold the guard refuses, the stricter side
     return False
 
 

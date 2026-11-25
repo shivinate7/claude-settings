@@ -34,7 +34,7 @@ REMOTE_OUTWARD_TOOLS = tuple(REMOTE_SERVER + "__" + short for short in (
     "request_computer_folder"))
 
 # The one home of the model families, lowest to highest by the order roles run them (opus and fable sit above sonnet; the
-# guard ranks fable beside opus). The guard's role rank, the owner's model word (hooks/override.py), the turn-end model
+# guard ranks fable above opus). The guard's role rank, the owner's model word (hooks/override.py), the turn-end model
 # line and the agent self-model scan read this tuple, never a copy of it.
 MODEL_FAMILIES = ("haiku", "sonnet", "opus", "fable")
 
