@@ -18,11 +18,11 @@ The gap: git, GitHub and guard.log hold no agent start or end. So number three w
 ## What counts as a span
 
 - A span opens at the time of an Agent or Task tool_use. The launch result gives the agent id (`toolUseResult.agentId`). A spawn whose result is an error, or has no agent id, opens no span.
-- A span closes at the first task notice for that agent id with a status in the reader's status list (`ENDING_STATUSES`): completed, failed or killed.
+- A span closes at the first task notice for that agent id with status completed, failed or killed (`ENDING_STATUSES`). Failed and killed close it the same as completed.
 - A notice counts only in a queue-operation's content or a user record's text. A notice in a tool_result, a blob copy or an attachment does not count.
 - A notice whose task id matches no agent start is ignored. A background shell command is one case.
-- A SendMessage to the agent after its span closed opens a new span at the send's time. A send while the span is open changes nothing. A failed send changes nothing. A second end notice while the span is closed changes nothing.
-- Spans are clipped to the window. A span with no end notice runs to the window end and counts as still running.
+- A SendMessage to the agent after its span closed opens a new span at the send's time. A send while the span is open changes nothing. A send that failed (`is_error` true, or `toolUseResult.success` false) changes nothing. A second end notice while the span is closed changes nothing.
+- Spans are clipped to the window. A span with no end notice runs to the window end and counts as still running. An end notice after the window end clips the span to it and does not make it still running.
 
 ## What the lines mean
 
@@ -32,7 +32,7 @@ The gap: git, GitHub and guard.log hold no agent start or end. So number three w
 - K is the window length less the time that any span covers, floored to whole minutes.
 - A window with records and no agent prints `agents run: 0, most at once: 0`, and K is the whole window.
 - `unknown: <reason>` prints, and the exit code is 0, for an unreadable file, an empty file, or a window with no record in it.
-- A window time with no UTC offset is a usage error (argparse exit 2). It prints no `unknown:` line.
+- A window time with no UTC offset is an argument error (argparse exit 2). It prints no number and no `unknown:` line.
 
 ## Picks
 
@@ -44,7 +44,7 @@ These are the consultant session's picks. No owner ruling covers them.
 
 ## Cost
 
-Cost: one python start per merge report, on demand (unmeasured: no test counts starts). No file is written (unmeasured). Measured once on a builder run, Nov 25 2026: 0.18 s wall on a session transcript of about 14,000 records (not pinned: no test holds the figure). The named reader is the session's merge report. No test proves this cost yet (not pinned).
+Cost: one python start per merge report, on demand (unmeasured: no test counts starts). No file is written (unmeasured). Measured Nov 25 2026: 0.31 s wall, one run through `verdict`, on a session transcript of 16,061 records (`wc -l`) (not pinned: no test holds the figure). The named reader is the session's merge report. No test proves this cost yet (not pinned).
 
 ## Checks
 
@@ -63,6 +63,13 @@ Cost: one python start per merge report, on demand (unmeasured: no test counts s
 - test_empty_file_prints_one_unknown_line
 - test_window_with_no_record_in_it_prints_one_unknown_line
 - test_window_with_records_but_no_agent_prints_zero_agents_and_the_whole_window_idle
+- test_failed_notice_ends_a_span
+- test_killed_notice_ends_a_span
+- test_send_that_failed_with_is_error_does_not_reopen_a_span
+- test_send_that_failed_with_success_false_does_not_reopen_a_span
+- test_end_notice_after_end_clips_the_span_and_is_not_still_running
+- test_idle_minutes_are_floored_not_rounded_up
+- test_window_time_without_a_utc_offset_exits_with_an_argument_error
 - PaceNumbersFixtureControlTests.test_fixture_carriers_parse_through_the_shared_readers (the fixture control)
 
 ## Limits
@@ -71,6 +78,7 @@ Cost: one python start per merge report, on demand (unmeasured: no test counts s
 - The reader gives the idle minutes only. The reason for them is still written by the session.
 - The cloud path is not built. A cloud session's transcript is not read.
 - No CI step (`.github/workflows/checks.yml`) runs `lint/test_pace_numbers.py` yet.
+- No case proves that no file is written. That case is owed.
 
 Kind: process
 Home: lint/pace_numbers.py
