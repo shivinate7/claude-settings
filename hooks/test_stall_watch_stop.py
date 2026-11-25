@@ -332,17 +332,32 @@ def output_file(base, job_id, idle):
     return path
 
 
+GH_CLEARED = ("GH_REPO", "GH_TOKEN", "GITHUB_TOKEN", "GH_HOST", "STUB_GH_ANSWER")  # gh's own env, stripped from each child
+
+
+def gh_stubbed(env):
+    """env with the stub gh first on PATH and gh's own variables stripped. Every runner here gives its child this env,
+    so a gh call a case makes reaches the stub, and no real gh and no network. Returns env."""
+    for k in GH_CLEARED:
+        env.pop(k, None)
+    env["PATH"] = GH_STUB_DIR + os.pathsep + env.get("PATH", "")
+    return env
+
+
 def run_stop(transcript_path, base=None, stop_hook_active=False, quiet=None, stdin=None, nt=False,
-             module=None, now=None, path_first=None, long=None):
+             module=None, now=None, path_first=None, long=None, gh_answer=None):
     """Run the Stop mode the way the Stop hook does. Return (rc, stdout, stderr). module, when
     given, is the script run in place of MODULE. now, when given, is the clock of this Stop (epoch
     seconds), so a case can run an earlier Stop than the others. path_first, when given, is a folder put
     first on PATH, so a stub of lsof or ps in it runs in place of the tool. long, when given, is
-    STALL_WATCH_LONG: the age in seconds at which a background agent blocks the Stop."""
+    STALL_WATCH_LONG: the age in seconds at which a background agent blocks the Stop. gh_answer, when given,
+    is what the stub gh prints and exits 0 with; without it the stub exits 1, as a read that fails."""
     mod = module or MODULE
     if not os.path.isfile(mod):
         raise Fail(f"{mod} is missing")
-    env = {k: v for k, v in os.environ.items() if not k.startswith("STALL_WATCH_")}
+    env = gh_stubbed({k: v for k, v in os.environ.items() if not k.startswith("STALL_WATCH_")})
+    if gh_answer is not None:
+        env["STUB_GH_ANSWER"] = gh_answer
     if module is not None:
         env.pop("PYTHONPATH", None)  # a copy must not import its siblings from another checkout
     if path_first is not None:
@@ -1550,7 +1565,7 @@ def stop_in_process(transcript_path, spies=None, patch=None):
         return real_os_open(path, flags, *args, **kwargs)
 
     seams = [k for k in os.environ if k.startswith("STALL_WATCH_")] + ["STALL_WATCH_NOW"]  # every seam, as run_stop strips them
-    saved = {k: os.environ.get(k) for k in seams}
+    saved = {k: os.environ.get(k) for k in seams + list(GH_CLEARED) + ["PATH"]}  # restored in finally, as the seams are
     payload = {"session_id": "test-stall-watch-stop", "hook_event_name": "Stop", "cwd": SCRATCH,
                "transcript_path": transcript_path, "stop_hook_active": False}
     old_stdin = sys.stdin
@@ -1558,6 +1573,7 @@ def stop_in_process(transcript_path, spies=None, patch=None):
     try:
         for k in seams:
             os.environ.pop(k, None)
+        gh_stubbed(os.environ)  # a gh call of this check reaches the stub, as run_stop's child does
         os.environ["STALL_WATCH_NOW"] = str(NOW)
         sys.stdin = io.StringIO(json.dumps(payload))
         os.stat, os.open, builtins.open, io.open = counted_stat, counted_os_open, counted_open, counted_open
@@ -3547,6 +3563,15 @@ def stub_calls(log):
         return []
 
 
+# The stub gh that gh_stubbed puts first on PATH. It logs one word per call it answers, so a case counts the gh calls
+# that reached it. It answers STUB_GH_ANSWER with exit 0, and exits 1 when none is set, as a read that fails. Made once
+# per run, under the run folder. sh does not run it on Windows, so a case that counts its calls skips there.
+GH_STUB_DIR = os.path.join(SCRATCH, "gh-stub")
+GH_STUB_LOG = os.path.join(GH_STUB_DIR, "gh-calls.log")
+os.makedirs(GH_STUB_DIR, exist_ok=True)
+stub_tool(GH_STUB_DIR, "gh", 'if [ -n "$STUB_GH_ANSWER" ]; then echo "$STUB_GH_ANSWER"; exit 0; fi\nexit 1', GH_STUB_LOG)
+
+
 BUDGET_SLACK = 1.5  # seconds a Stop may run past BUSY_BUDGET: a python start and the transcript scan
 
 
@@ -4189,8 +4214,8 @@ def CI94_cloud_red_comment_voids_the_checkin():
     if os.name != "posix" or not shutil.which("bash") or not shutil.which("jq"):
         raise Skip("needs bash and jq to run the comment emitter")
     emitter = os.path.join(os.path.dirname(os.path.dirname(MODULE)), "actions", "ci-done-comment", "comment.sh")
-    env = dict(os.environ, CI_DONE_DRY="1", SHA=CI_SHA, RUN_URL="https://example.invalid/run/1",
-               NEEDS=json.dumps({"lint": {"result": "failure"}}))
+    env = gh_stubbed(dict(os.environ, CI_DONE_DRY="1", SHA=CI_SHA, RUN_URL="https://example.invalid/run/1",
+                          NEEDS=json.dumps({"lint": {"result": "failure"}})))
     proc = subprocess.run(["bash", emitter], env=env, capture_output=True, text=True, timeout=30)
     line = next((l for l in proc.stdout.splitlines() if l.startswith("CI ")), "")
     if not line:
@@ -4948,6 +4973,22 @@ def S30_leading_pause_is_quiet_time_at_stop():
         else:
             problems += expect(msg == "", f"{label}: listed as quiet, want no listing: {msg!r}")
     return problems
+
+
+@case
+def CI132_a_gh_call_of_the_check_reaches_the_stub():
+    """CI132. hygiene: a Stop that reads a numbered wait's PR state makes one gh call, and that call reaches the stub
+    on PATH, so the stub's log grows by one. A call that reached a real gh, or no binary, leaves the log as it was.
+    Scope first: the read is the one the Stop makes for a covered wait with its check-in set"""
+    if os.name != "posix":
+        raise Skip("needs sh for the gh stub, which this host lacks")
+    recs, _ = cron_set(RET_A)
+    before = len(stub_calls(GH_STUB_LOG))
+    rc, out, err = run_stop(transcript([ready()] + recs))
+    calls = len(stub_calls(GH_STUB_LOG)) - before
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    return problems + expect(calls == 1, f"the stub gh logged {calls} calls for one read, want 1: "
+                                         f"the read's gh call did not reach the stub")
 
 
 if __name__ == "__main__":
