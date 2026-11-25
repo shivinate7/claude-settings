@@ -45,8 +45,9 @@
 # here, whatever its language, when the change reaches it (reached_suites over each file its run: names in command position, suite_files any_file), its own
 # `if:` does not read false, and this machine can stand in for its job's runner (ubuntu-*: any machine; macos-* and windows-*: that OS only); the job's own
 # `if:` is not read. Its verdict is the step's: PASS, FAIL, or unknown when a tool is missing (the line names the tools the step runs when the shell
-# gave only exit 127). A listed step the change does not reach, or that cannot run on this OS, reads as an unlisted one does; a listed name that the workflow
-# lacks is one FAIL line naming it. --plan prints `would run`. A list that is no list of names is one unknown line. No list, or an empty one, changes nothing.
+# gave only exit 127). A listed step the change does not reach reads as an unlisted one does; one it reaches on a runner this OS cannot stand in for is one
+# unknown line naming the step and saying it is not run here; a listed name that the workflow lacks is one FAIL line naming it. --plan prints `would run`.
+# A list that is no list of names, or a .github/stamp.json that cannot be read as JSON, is one unknown line. No file, no list, or an empty one, changes nothing.
 # Cost: one read of .github/stamp.json per lint run; with a list, one load of merge/merge.py (about 0.25 s), plus the listed steps the change reaches (each
 # a bin/verdict and a shell, run serially, after the lint pool's steps are queued, and cached as any step is).
 # An install CI step is a run: whose every line is one install command (INSTALL_CMD: a lockfile install, or type
@@ -1366,17 +1367,21 @@ def job_runner(block):
 
 MERGE_TOOL = os.path.join(os.path.dirname(BIN), "merge", "merge.py")  # the home of the list's naming form (ready_job_groups)
 LIVE = set()  # (job, step index) of each listed step this --lint run runs itself (listed_live); every other read of a job skips them
+FOREIGN = set()  # (job, step index) of each listed step the change reaches on a runner this machine cannot stand in for (listed_foreign): one unknown line each
 
 
 def lint_suites(top):
     """([names], why): merge.lintSuites of the repo's .github/stamp.json, the CI steps lane lint runs when the change reaches them, whatever their
     language. why is a line for a list this run cannot read (not a list of non-blank names, or its form cannot be resolved), else None. No file, no key
-    or an empty list gives ([], None): nothing is listed. Names read as merge.readyChecks reads them (merge.ready_job_groups), by the one resolver."""
+    or an empty list gives ([], None): nothing is listed. A file that cannot be read or parsed gives a why. Names read as merge.readyChecks reads them (merge.ready_job_groups), by the one resolver."""
+    path = os.path.join(top, ".github", "stamp.json")
+    if not os.path.exists(path):
+        return [], None
     try:
-        with open(os.path.join(top, ".github", "stamp.json"), encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             cfg = json.load(f)
     except (OSError, ValueError):
-        return [], None
+        return [], "merge.lintSuites: .github/stamp.json cannot be read as JSON, so its list is unread"
     block = cfg.get("merge") if isinstance(cfg, dict) else None
     listed = block.get("lintSuites") if isinstance(block, dict) else None
     if listed is None:
@@ -1400,15 +1405,25 @@ def runs_here(runner):
     return runner.startswith("ubuntu") or (runner.startswith("macos") and sys.platform == "darwin") or (runner.startswith("windows") and os.name == "nt")
 
 
-def listed_live(top, base, step, runner):
-    """True when this run runs a listed `step` of a job on `runner`: a plain run: step (no action, lint or install command, nor a python suite the
-    selector governs) whose own `if:` does not read false for a pull request, on a runner this machine can stand in for, and that the change reaches
-    (reached_suites over each file its run: names in command position). The job's own `if:` is not read: shell-macos runs off pull requests only. Any
-    other listed step reads as an unlisted one does."""
-    if uses(step) or is_lint(step) or is_install(step) or suite_paths(step) or not runs_here(runner) or condition(step_key(step, "if"), True) is False:
+def listed_reached(top, base, step):
+    """True when a listed `step` is a plain run: step (no action, lint or install command, nor a python suite the selector governs) whose own `if:` does
+    not read false for a pull request, and the change reaches it (reached_suites over each file its run: names in command position). The job's own `if:` is
+    not read: shell-macos runs off pull requests only."""
+    if uses(step) or is_lint(step) or is_install(step) or suite_paths(step) or condition(step_key(step, "if"), True) is False:
         return False
     files = suite_files(step, any_file=True)
     return bool(files) and bool(reached_suites(top, base, files))
+
+
+def listed_live(top, base, step, runner):
+    """True when this run runs a listed `step` of a job on `runner`: the step is reached (listed_reached) on a runner this machine can stand in for.
+    Any other listed step reads as an unlisted one does, or as listed_foreign says."""
+    return runs_here(runner) and listed_reached(top, base, step)
+
+
+def listed_foreign(top, base, step, runner):
+    """True when a listed `step` is reached (listed_reached) but its job's `runner` is one this machine cannot stand in for, so it is not run here."""
+    return not runs_here(runner) and listed_reached(top, base, step)
 
 
 def unmarked(state, first):
@@ -1605,6 +1620,7 @@ def main(argv, sibling=False, ran_suites=None):
                 reaching.add(other)
     if not sibling:  # the repo's listed suites (merge.lintSuites): each name must be a step of the workflow, and each one the change reaches runs here
         LIVE.clear()
+        FOREIGN.clear()
         listed, bad = lint_suites(top) if lint else ([], None)
         groups = {}
         if bad:
@@ -1625,8 +1641,9 @@ def main(argv, sibling=False, ran_suites=None):
                     tally["FAIL"] += 1
                     print("%-15s merge.lintSuites: %s names no step of %s in %s" % ("FAIL", declared, "job %s" % listed_job if listed_block else "a job this workflow lacks", os.path.basename(workflow)))
                 elif base:
-                    LIVE.update((listed_job, i) for i, st in enumerate(listed_steps)
-                                if listed_names[i] == bare and listed_live(top, base, st, job_runner(listed_block)))
+                    for i, st in enumerate(listed_steps):
+                        if listed_names[i] == bare:
+                            (LIVE if listed_live(top, base, st, job_runner(listed_block)) else FOREIGN if listed_foreign(top, base, st, job_runner(listed_block)) else set()).add((listed_job, i))
     picked, why = None, "no base to read a diff"
     if base and (top, base) in SELECTED:  # a sibling pass reads the pick the first pass made
         picked, why = SELECTED[(top, base)]
@@ -1775,12 +1792,16 @@ def main(argv, sibling=False, ran_suites=None):
                 continue
             if other in reaching:  # no pass runs this job's steps here: each suite step CI runs for the diff prints its line, a job on another runner too
                 for i, st in enumerate(step_blocks(job_block(text, other))):
-                    owed = owed_suites(st) if (other, i) not in LIVE else []  # a listed step the change reaches runs below
+                    owed = owed_suites(st) if (other, i) not in LIVE | FOREIGN else []  # a listed step the change reaches runs or reads unknown below
                     if owed:
                         tell_owed("job %s: %s" % (other, step_key(st, "name") or "a step"), st, owed, top, base, tally, None if runner.startswith("ubuntu") else runner)
         for other, i in sorted(k for k in LIVE if k[0] != job and not sibling):  # each listed step of another job that the change reaches, on this machine's own OS
             st = step_blocks(job_block(text, other))[i]
             run_listed("job %s: %s" % (other, step_key(st, "name") or "a step"), st, ctx, log, dry, tally)
+        for other, i in sorted(k for k in FOREIGN if not sibling):  # a listed step the change reaches on a runner this machine is not: named, not run
+            tally["unknown"] += 1
+            print("%-15s job %s: %s: listed in merge.lintSuites, the change reaches it, and it is not run here: its job runs on %s, which this %s machine cannot stand in for" % (
+                "unknown", other, step_key(step_blocks(job_block(text, other))[i], "name") or "a step", job_runner(job_block(text, other)), sys.platform))
         code = 1 if tally["FAIL"] else code
         code = code or 2 * bool(tally["unknown"])  # a reached suite of a job no pass ran reads unknown
     if not dry:
