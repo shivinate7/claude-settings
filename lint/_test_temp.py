@@ -6,6 +6,7 @@ after a day. A folder that a live process holds stays, whatever its age: bin/red
 run folder, and its test command runs inside it. hooks/test_guard.py keeps the same root and name,
 so each sweep also cleans the other's crashed runs.
 """
+import contextlib
 import os
 import re
 import shutil
@@ -91,3 +92,23 @@ def run_folder(temp_root=TEMP_ROOT):
     os.makedirs(own)
     sweep(temp_root, own)
     return own
+
+
+CONFIG_VAR = "CLAUDE_CONFIG_DIR"
+
+
+@contextlib.contextmanager
+def isolated_config(run):
+    """Point CLAUDE_CONFIG_DIR at a fresh folder under the run folder `run`, so a case never reads the real ~/.claude. It yields the folder.
+    On exit, also when the block raises, the variable goes back to its old value, or is removed if it was unset. It sets neither HOME nor
+    USERPROFILE: the folder is removed with the run folder, not here."""
+    folder = tempfile.mkdtemp(prefix="config-", dir=run)
+    prior = os.environ.get(CONFIG_VAR)
+    os.environ[CONFIG_VAR] = folder
+    try:
+        yield folder
+    finally:
+        if prior is None:
+            os.environ.pop(CONFIG_VAR, None)
+        else:
+            os.environ[CONFIG_VAR] = prior
