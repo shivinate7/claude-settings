@@ -801,19 +801,15 @@ def _under_by_identity(cwd_resolved: str, target_identity):
 
 
 def _folder_is_gone(path: str) -> bool:
-    """True only when PATH is confirmed absent: `os.stat` says the folder, or a folder above it, is not
-    there (FileNotFoundError, NotADirectoryError), while PATH's own root or drive does exist. A missing
-    drive or mount reads as unknown, so does every other error (permission, a symlink loop, an I/O or
-    stale-handle fault): each leaves the question open, never "gone"."""
+    """True only when PATH is confirmed absent: `os.stat` says PATH is not there (FileNotFoundError,
+    NotADirectoryError) while its PARENT exists and is a folder. A missing parent reads as unknown, never
+    "gone": `os.stat` reports it the same way whether the folders were removed or a drive or mount is gone.
+    Every other error (permission, a symlink loop, an I/O or stale-handle fault) is unknown too."""
     try:
         os.stat(path)
     except (FileNotFoundError, NotADirectoryError):
-        anchor = os.path.splitdrive(path)[0] + os.sep
-        try:
-            os.stat(anchor)
-        except OSError:
-            return False
-        return True
+        parent = os.path.dirname(path)
+        return parent != path and os.path.isdir(parent)
     except Exception:
         return False
     return False

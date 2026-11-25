@@ -2014,6 +2014,24 @@ def worktree_remove_target(args, where: str) -> str:
     return ""
 
 
+def _process_stands_in(target: str):
+    """True when a live process has its cwd at or under TARGET, False when none does, None when the process
+    read failed. The one reader is the janitor's `sweep.processes_in`, imported lazily because sweep.py
+    imports git_reads and the guard only on a call that needs it (the same route as `sim_boot_refusal`).
+    A missing janitor beside this file or a failed enumeration is unknown: the caller keeps today's refusal."""
+    try:
+        janitor = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "janitor")
+        if janitor not in sys.path:
+            sys.path.insert(0, janitor)
+        import sweep
+        inside, _unreadable = sweep.processes_in(target)
+    except Exception:
+        return None
+    if inside is None:
+        return None
+    return bool(inside)
+
+
 def worktree_remove_subject(args, where: str):
     """The subject of `git worktree remove <path>` is PATH's own uncommitted and untracked work,
     widened by whether it is locked and whether a live session still stands in it."""
@@ -2042,7 +2060,11 @@ def worktree_remove_subject(args, where: str):
         return None
     if live:
         return False
-    return True
+    # A record that stands in no tree does not mean no process does: a session can outlive its folder.
+    standing = _process_stands_in(target)
+    if standing is None:
+        return None
+    return not standing
 
 
 # `git worktree prune` deletes no files at all: it drops the ADMINISTRATIVE RECORD of a worktree
