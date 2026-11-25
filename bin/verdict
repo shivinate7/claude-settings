@@ -10,6 +10,7 @@
 # Exit 0 is also FAIL (`cut`) for a pytest argv (`pytest`, `py.test`, `python -m pytest`, also through `env`, `uv run`, `uvx` and `bash -c`) with `-q` or a line-start session header, and no line-start summary: the run stopped early. A `-qq` run (no summary line) is complete when a line of progress chars ends `[100%]` (any padding, colour codes ignored), or, with `--co`, when it prints a `<file>: <count>` line. A `bash -c` script is read by its own scanner: a newline, `;`, `&`, `|` or `do`/`then`/`else`/`{`/`!` starts a command, a `#` starts a comment only at a word start, and heredoc text is no command.
 # A run with no $VERDICT_LOG deletes verdict-*.log files older than 1 day from the temp folder: regular files whose first line is our own header only; errors skipped.
 # $VERDICT_HANG_SECONDS=N (off when unset, and on Windows): a child with no new output byte and no CPU advance in any process under it for N s is stopped (where reaped children's CPU cannot be read, as on macOS, a process not seen at the first silent wake also counts as work, since a step that works through short children shows only as new pids): print its process tree and the log tail, end the tree (TERM, then KILL), print one `HANG ...` line, exit 124. It reads the process table (hooks/_nowindow.py) only on a silent wake, never while the child prints (decision hang-stop).
+# A PASS or SKIP also prints, after its line, each output line that starts with a READY_PASS_KEPT prefix, word for word, and no other log line: the merge guard reads the merge tool's ready-pass line from the transcript (hooks/guard_merge.py _ready_pass_shas). A FAIL and a HANG print as before.
 # Killed by signal N: exit 128+N. Ctrl-C: exit 130. Windows: bin/verdict.cmd.
 import codecs, os, re, shutil, signal, subprocess, sys, tempfile, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
@@ -19,6 +20,8 @@ CAP = 30
 NAMES = 300  # at most this many more lines, each a failing case's name line; with the last CAP hot lines the excerpt stays bounded
 NAME_WIDTH = 300
 CASE_NAME = re.compile(r"(?:\x1b\[[0-9;]*m)*(?:FAIL|FAILED|ERROR)\b")  # a line that starts a failing case's name: unittest `FAIL: test_x (m.T.test_x)` and `ERROR: ...`, pytest `FAILED path::test_x`, the shell suites' `FAIL - name`
+READY_PASS_KEPT = ("merge: the ready checks (",)  # the fixed prefix of merge/merge.py READY_PASS_FMT and READY_PASS_SKIPPED_FMT; lint/test_verdict.py checks it against both
+READY_LINE = re.compile(rb"^(?:" + b"|".join(re.escape(k.encode()) for k in READY_PASS_KEPT) + rb")[^\n]*", re.M)
 CHUNK, OVERLAP = 1 << 20, 256  # OVERLAP > longest marker
 KEEP = 86400
 HEADER = b"=== verdict run "
@@ -295,6 +298,7 @@ def main(argv):
         return rc
     if rc < 0: note, rc = f" killed by signal {-rc}", 128 - rc
     fail = zero = ran = marked = started = summed = done = False; lines = []
+    ready = {}  # absolute byte offset of a kept line -> the line
     summaries, xct, marks, ut = {}, {}, {}, {}  # absolute byte offset of a match -> its count; a match in the chunk overlap is read twice, counted once
     try:
         with open(log, "rb") as f:
@@ -314,6 +318,8 @@ def main(argv):
                         else: summaries[pos + m.start()] = count(m.group(2) or m.group(3) or m.group(4))
                 for m in SKIP_LINE.finditer(raw):
                     if pos == start or m.start(): marks[pos + m.start()] = 1
+                for m in READY_LINE.finditer(raw):
+                    if pos == start or m.start(): ready[pos + m.start()] = m.group().decode("utf-8", errors="replace").rstrip("\r")  # a later chunk overwrites a line cut at its edge
                 started = started or any(pos == start or m.start() for m in PY_START.finditer(raw))  # a later chunk's index 0 may be mid-line
                 summed = summed or any(pos == start or m.start() for m in PY_SUMMARY.finditer(raw))
                 done = done or (qlevel > 1 and (seen(PY_DONE, raw, pos, start) or (collect and seen(PY_COUNTS, raw, pos, start))))
@@ -337,6 +343,7 @@ def main(argv):
             skips = max(sum(summaries.values()) + max(xct.values(), default=0), len(marks))
             if skips: print(f"SKIP {name}, {skips} skipped ({secs})")
             else: print(f"PASS {name} ({secs})")
+            for k in sorted(ready): print(ready[k])
             return 0
     print(f"FAIL {name} rc={rc}{note} ({secs}) log={log}")
     if full_log():
