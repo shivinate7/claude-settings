@@ -486,3 +486,54 @@ add("owner-model-word: control, a Haiku Explore spawn is allowed under the owner
 add("owner-model-word: control, an Opus builder spawn is refused under the owner's sonnet hold, since only an Opus hold lifts the "
     "Opus ceiling", "deny", CEILING, tool="Agent", config=omw_word_hold("sonnet-any-opus", "sonnet"),
     session="omw-sonnet-any-opus", transcript=OMW_PLAIN, env=OMW_WORD_NOW, **role_input("builder", "opus", "Fix the failing case."))
+
+# ---- A later word that negates the held model ends the hold (decision `agent-model-cap`, The owner's model word: a later model
+# word ends the earlier one). The owner's latest typed turn says "Do not use haiku": the haiku hold is over, so the spawn is refused
+# as with no hold. The whole-prompt end word (`no haiku`) ends it too. The prompt hook deletes the hold file at that turn, so that
+# control has no hold file. A later turn that names haiku with no negation keeps the hold, and so does a turn that negates another
+# model (decision `agent-model-cap`: a named model is a wish to follow). An Explore on haiku is never floor-refused: Explore is a
+# Haiku role (HAIKU_ROLES, hooks/guard.py), with a hold or without one.
+OMW_AFTER_NOW = {"LOCAL_TIME_NOW": ov_clock(90)}  # a call 90 s after OV_T0, after the owner's second turn at 60 s
+F8_DONT_HAIKU = "Do not use haiku, it is too weak."
+
+
+def omw_turns(name, first, later):
+    """Two owner turns with Claude's reply between: `first` at -60 s, the reply at 30 s, `later` at 60 s."""
+    return omw_file(name, [omw_at(omw_user(first), ov_clock(-60)), omw_at(omw_asst("Running it."), ov_clock(30)),
+                           omw_at(omw_user(later), ov_clock(60))])
+
+
+add("owner-model-word: a builder spawn on haiku is refused under agent-model-floor when the owner's haiku hold is followed by "
+    "do not use haiku", "deny", "agent-model-floor", tool="Agent", config=omw_hold("f8-haiku-dont", "omw-f8-haiku-dont", "haiku"),
+    session="omw-f8-haiku-dont", transcript=omw_turns("f8-haiku-dont", OMW_HAIKU, F8_DONT_HAIKU), env=OMW_AFTER_NOW,
+    **role_input("builder", "haiku", "Fix the failing case."))
+add("owner-model-word: a record-writer spawn on sonnet is refused under agent-role-model when the owner's sonnet hold is followed "
+    "by don't use sonnet", "deny", ROLE_MODEL_RULE, tool="Agent", config=omw_hold("f8-sonnet-dont", "omw-f8-sonnet-dont", "sonnet"),
+    session="omw-f8-sonnet-dont", transcript=omw_turns("f8-sonnet-dont", "Use sonnet for the record.", "Don't use sonnet, it is too slow."),
+    env=OMW_AFTER_NOW, carries=(ROLE_REMEDY,), lacks=ROLE_LACKS, **role_input("record-writer", "sonnet", "Write the record."))
+add("owner-model-word: control, a builder spawn on haiku is refused after the whole-prompt end word no haiku, which deletes the hold",
+    "deny", "agent-model-floor", tool="Agent", transcript=omw_turns("f8-no-haiku", OMW_HAIKU, "no haiku"), env=OMW_AFTER_NOW,
+    **role_input("builder", "haiku", "Fix the failing case."))
+omw_lets_through("control, a builder spawn on haiku is allowed while the owner's haiku hold is on, when his latest turn keeps haiku "
+                 "with no negation",
+                 role_input("builder", "haiku", "Fix the failing case."), omw_hold("f8-haiku-keep", "omw-f8-haiku-keep", "haiku"),
+                 "omw-f8-haiku-keep", 90, "agent-model-floor",
+                 transcript=omw_turns("f8-haiku-keep", OMW_HAIKU, "Keep using haiku for the explorers."))
+omw_lets_through("control, a builder spawn on haiku is allowed while the owner's haiku hold is on, when his latest turn says "
+                 "don't use opus",
+                 role_input("builder", "haiku", "Fix the failing case."), omw_hold("f8-haiku-opus", "omw-f8-haiku-opus", "haiku"),
+                 "omw-f8-haiku-opus", 90, "agent-model-floor",
+                 transcript=omw_turns("f8-haiku-opus", OMW_HAIKU, "Don't use opus, it is too slow."))
+add("owner-model-word: control, an Explore spawn on haiku is allowed after the owner's haiku hold and do not use haiku, since "
+    "Explore is a Haiku role", "allow", tool="Agent", config=omw_hold("f8-haiku-explore", "omw-f8-haiku-explore", "haiku"),
+    session="omw-f8-haiku-explore", transcript=omw_turns("f8-haiku-explore", OMW_HAIKU, F8_DONT_HAIKU), env=OMW_AFTER_NOW,
+    **role_input("Explore", "haiku", "Find where the model list lives."))
+
+# ---- A haiku hold scoped to explorers lifts the floor for explorers only. The floor reads the held model, not the hold's role,
+# so a builder on haiku passes the floor on this hold. The control after it is the same builder under a hold that names no role.
+add("owner-model-word: a builder spawn on haiku is refused under agent-model-floor when the owner's haiku hold is scoped to "
+    "explorers", "deny", "agent-model-floor", tool="Agent", config=omw_word_hold("haiku-explorers-floor", "haiku", role="Explore"),
+    session="omw-haiku-explorers-floor", transcript=OMW_PLAIN, env=OMW_WORD_NOW, **role_input("builder", "haiku", "Fix the failing case."))
+omw_lets_through("control, a builder spawn on haiku is allowed under the owner's haiku hold that names no role",
+                 role_input("builder", "haiku", "Fix the failing case."), omw_word_hold("haiku-any-floor", "haiku"),
+                 "omw-haiku-any-floor", OMW_WORD_CALL, "agent-model-floor", transcript=OMW_PLAIN)
