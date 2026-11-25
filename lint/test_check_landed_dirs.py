@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.join(ROOT, "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 sys.path.insert(0, HERE)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+import check_landed_dirs as landed  # noqa: E402  the reader the form-feed cases call (lint/check_landed_dirs.py)
 FILES = ("landed-dirs.txt", "install.sh", "install.ps1")
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
@@ -36,6 +37,22 @@ def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
+FROZEN_LITERAL = re.compile(r"CONFIG_FROZEN_DIRS\s*=\s*\(.*?\n\)\n", re.DOTALL)  # the literal, its comments included
+
+
+def edit_frozen_literal(make):
+    """An edit that rewrites the CONFIG_FROZEN_DIRS literal in hooks/guard_frozen.py: `make(literal)` gives its new text."""
+    def edit(tree):
+        path = os.path.join(tree, "hooks", "guard_frozen.py")
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        m = FROZEN_LITERAL.search(text)
+        assert m, "the defect's anchor moved: no CONFIG_FROZEN_DIRS literal in hooks/guard_frozen.py"
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(text[:m.start()] + make(m.group(0)) + text[m.end():])
+    return edit
+
+
 def move_frozen_dirs_to_sibling(tree):
     """Cut the CONFIG_FROZEN_DIRS literal (its comments included) out of whichever hooks/guard*.py
     holds it, and write it to a new sibling module. The check must still find it there: a moved
@@ -44,7 +61,7 @@ def move_frozen_dirs_to_sibling(tree):
     for path in sorted(glob.glob(os.path.join(tree, "hooks", "guard*.py"))):
         with open(path, encoding="utf-8") as f:
             text = f.read()
-        m = re.search(r"CONFIG_FROZEN_DIRS\s*=\s*\(.*?\n\)\n", text, re.DOTALL)
+        m = FROZEN_LITERAL.search(text)
         if m:
             break
     else:
@@ -212,8 +229,90 @@ class CheckLandedDirsTests(unittest.TestCase):
                          "a helper in hooks/test_support/ passed the check, so the verdict widened: %s" % result.stdout)
         self.assertIn("cost_probe.py", result.stderr, "the refusal does not name the helper: %s" % result.stderr)
 
+    def test_a_commented_out_guard_entry_is_not_counted(self):
+        # Why: a commented-out os.path.normcase("...") line in CONFIG_FROZEN_DIRS is no frozen dir, so the check
+        # must not count it. A regex over the literal counts it; a read of the Python tuple does not.
+        result = run_in_copy(edit_file("hooks/guard_frozen.py", "CONFIG_FROZEN_DIRS = (\n",
+                                       'CONFIG_FROZEN_DIRS = (\n    # os.path.normcase("newdir"),\n'))
+        self.assertEqual(result.returncode, 0,
+                         "a commented-out entry was counted as a frozen dir: %s" % result.stderr)
 
-RECORD_PATH = os.path.join(ROOT, "docs", "decisions", "builders-cannot-edit-tests.md")
+    def test_an_unparseable_guard_source_is_refused_with_its_message(self):
+        # Why: a guard file the reader cannot parse must stop the check, not pass with the literal unread.
+        result = run_in_copy(add_file("hooks/guard_broken.py", "def (\n"))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("could not parse the guard source", result.stderr)
+
+    def test_a_missing_frozen_dirs_literal_is_refused_with_its_message(self):
+        # Why: with no literal there is nothing to compare the manifest against, so the check must refuse.
+        result = run_in_copy(edit_file("hooks/guard_frozen.py", "CONFIG_FROZEN_DIRS = (\n",
+                                       "CONFIG_FROZEN_DIRS_RENAMED = (\n"))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("could not find a CONFIG_FROZEN_DIRS = (...) literal to parse", result.stderr)
+
+    def test_a_frozen_dirs_value_that_is_not_a_tuple_is_refused_with_its_message(self):
+        # Why: the reader reads the entries of a tuple literal; a list has no tuple to read, so the check must refuse.
+        result = run_in_copy(edit_frozen_literal(lambda literal: 'CONFIG_FROZEN_DIRS = ["hooks"]\n'))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("CONFIG_FROZEN_DIRS is not a tuple literal", result.stderr)
+
+    def test_a_frozen_dirs_entry_that_is_not_normcase_is_refused_with_its_message(self):
+        # Why: a bare string entry is not the normcase form the guard matches on, so the reader must refuse it.
+        result = run_in_copy(edit_file("hooks/guard_frozen.py", 'os.path.normcase("lint"),', '"lint",'))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("has an entry that is not os.path.normcase", result.stderr)
+
+    def assert_refused_loudly(self, result, cause):
+        # A refusal is the check's own FAIL line, not a traceback from a crash.
+        self.assertEqual(result.returncode, 1, "%s passed the check: %s" % (cause, result.stdout))
+        self.assertIn("check_landed_dirs: FAIL", result.stderr, "%s was not refused with the check's message: %s"
+                      % (cause, result.stderr))
+        self.assertIn("CONFIG_FROZEN_DIRS", result.stderr, "the refusal does not name the frozen dirs: %s" % result.stderr)
+
+    def test_a_second_frozen_dirs_literal_is_refused_loudly(self):
+        # Why: two literals of one name leave the reader to pick one, and a guard that reads the other goes unchecked.
+        result = run_in_copy(edit_frozen_literal(lambda literal: literal + literal))
+        self.assert_refused_loudly(result, "a second CONFIG_FROZEN_DIRS literal")
+
+    def test_an_augmented_frozen_dirs_assignment_is_refused_loudly(self):
+        # Why: += changes the frozen set after the literal, and a reader that reads only the literal misses the change.
+        result = run_in_copy(edit_frozen_literal(
+            lambda literal: literal + 'CONFIG_FROZEN_DIRS += (os.path.normcase("newdir"),)\n'))
+        self.assert_refused_loudly(result, "a CONFIG_FROZEN_DIRS += after the literal")
+
+    def test_an_append_to_frozen_dirs_inside_an_if_is_refused_loudly(self):
+        # Why: an append under an if changes the frozen set on some platforms only, and the reader must not skip it.
+        result = run_in_copy(edit_frozen_literal(
+            lambda literal: literal + 'if os.name:\n    CONFIG_FROZEN_DIRS.append(os.path.normcase("newdir"))\n'))
+        self.assert_refused_loudly(result, "an append to CONFIG_FROZEN_DIRS inside an if")
+
+
+GUARD_LITERAL ='CONFIG_FROZEN_DIRS = (\n    os.path.normcase("hooks"),\n    os.path.normcase("lint"),\n)\n'
+
+
+class GuardTupleReadTests(unittest.TestCase):
+    """The reader finds the literal by a line number, so a character that ends a line for str.splitlines but not for the
+    parser must not move the body or the offset of the literal."""
+
+    def assert_reads_the_same_tuple(self, head, plain_head):
+        entries, body, _ = landed.find_guard_tuple(plain_head + GUARD_LITERAL, "CONFIG_FROZEN_DIRS")
+        text = head + GUARD_LITERAL
+        got_entries, got_body, start = landed.find_guard_tuple(text, "CONFIG_FROZEN_DIRS")
+        self.assertEqual(got_entries, entries, "the entries differ when the head holds %r" % head)
+        self.assertEqual(got_body, body, "the body differs when the head holds %r: %r" % (head, got_body))
+        self.assertEqual(text[start:start + len(GUARD_LITERAL)], GUARD_LITERAL,
+                         "the offset does not point at the literal when the head holds %r" % head)
+
+    def test_a_form_feed_before_the_literal_reads_the_same_tuple(self):
+        # Why: a form feed ends a line for str.splitlines but not for the parser, so the body and the offset shift.
+        self.assert_reads_the_same_tuple("x = 1\x0c\n", "x = 1\n")
+
+    def test_a_line_separator_in_a_comment_before_the_literal_reads_the_same_tuple(self):
+        # Why: U+2028 ends a line for str.splitlines but not for the parser, so the same shift follows.
+        self.assert_reads_the_same_tuple("# a b\n", "# a b\n")
+
+
+RECORD_PATH =os.path.join(ROOT, "docs", "decisions", "builders-cannot-edit-tests.md")
 HELPER_HOME_HEADING = "## Where a test-support helper lives"
 
 

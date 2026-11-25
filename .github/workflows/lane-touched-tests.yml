@@ -2,7 +2,8 @@ name: lane-touched-tests
 
 # A lane PR is a draft, and checks.yml skips every job on a draft (decision draft-until-reviewed), so a test that
 # fails on Windows or macOS alone first shows in the batch. This workflow runs only the test files a draft touches,
-# on Windows (item 400 a, owner, 2026-11-08 06:08 CST; macOS went off, owner, 2026-11-16 01:33 CST). Every job skips on a ready PR. It is not in checks.yml,
+# on both systems (item 400 a, owner, 2026-11-08 06:08 CST; the macOS leg is back for these runs only, owner, 2026-11-24
+# 22:09 CST). Every job skips on a ready PR. It is not in checks.yml,
 # not in all-jobs-passed and not a required check. The selector is .github/scripts/touched-tests.py: it names each
 # touched test it does not run, and exits non-zero on a diff it cannot read, and on an unguarded POSIX-only call that a touched
 # heavy suite adds.
@@ -35,6 +36,7 @@ jobs:
       any: ${{ steps.legs.outputs.any }}
       matrix: ${{ steps.legs.outputs.matrix }}
       commands_windows: ${{ steps.select.outputs.commands_windows }}
+      commands_macos: ${{ steps.select.outputs.commands_macos }}
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -95,16 +97,16 @@ jobs:
           esac
           python .github/scripts/touched-tests.py
 
-      # No macOS leg on a pull request (owner, 2026-11-16 01:33 CST, "turn off all mac runs for now"; consultant pick,
-      # 08:42 CST). The selector still lists the macOS tests; only the Windows legs go to the matrix, and `any` is true
-      # only when a Windows leg is left, so a macOS-only diff starts no `run` job.
-      - name: Keep the Windows legs
+      # The matrix keeps one leg per system the selector listed tests for: it leaves a system out when its list is empty,
+      # so a draft that touches no macOS-tested file starts no macOS runner. `any` is true when a leg is left. An entry
+      # for any other system is dropped: the run job has no step for it.
+      - name: Keep the legs this workflow runs
         id: legs
         shell: bash
         env:
           MATRIX: ${{ steps.select.outputs.matrix }}
         run: |
-          python -c 'import json, os; m = json.loads(os.environ["MATRIX"]); inc = [e for e in m["include"] if e["os"] == "windows-latest"]; open(os.environ["GITHUB_OUTPUT"], "a", newline="\n").write("matrix=" + json.dumps({"include": inc}) + "\nany=" + ("true" if inc else "false") + "\n")'
+          python -c 'import json, os; m = json.loads(os.environ["MATRIX"]); inc = [e for e in m["include"] if e["os"] in ("windows-latest", "macos-latest")]; open(os.environ["GITHUB_OUTPUT"], "a", newline="\n").write("matrix=" + json.dumps({"include": inc}) + "\nany=" + ("true" if inc else "false") + "\n")'
 
   run:
     name: run (${{ matrix.os }})
@@ -134,11 +136,59 @@ jobs:
 
       # Every file runs and keeps its exit code, so a red first file hides no other. A file with no runner here is red.
       - name: Run the touched tests
+        if: ${{ runner.os == 'Windows' }}
         shell: bash
         env:
           FILES: ${{ matrix.files }}
-          # The Windows map of path to interpreter: the matrix holds Windows legs only.
+          # The Windows map of path to interpreter.
           COMMANDS: ${{ needs.touched.outputs.commands_windows }}
+        run: |
+          set -u
+          # Each line is "path<TAB>cmd", cmd being the interpreter the file's checks.yml run line starts with (this
+          # system's selector map). buffer.write keeps the newlines LF on Windows.
+          list=$(python -c 'import json, os, sys; c = json.loads(os.environ["COMMANDS"]); sys.stdout.buffer.write(("".join(f + "\t" + c.get(f, "") + "\n" for f in json.loads(os.environ["FILES"]))).encode())') || { echo "cannot read the file list"; exit 1; }
+          [ -n "$list" ] || { echo "the file list is empty, but the selector said any=true"; exit 1; }
+          # The command is text from a workflow file, so only these fixed forms run, as an array and never through
+          # eval. Any other command is printed and the file is red.
+          pick_cmd() {
+            case "$1" in
+              sh|bash|node|python|python3) cmd=("$1") ;;
+              "node --test") cmd=(node --test) ;;
+              *) echo "no runner for the command '$1'"; return 1 ;;
+            esac
+          }
+          run_one() {
+            case "$1" in
+              mods/*.test.mjs|mods/*.test.js|mods/*/test_*.mjs|mods/*/check.mjs) pick_cmd "$2" && "${cmd[@]}" "$1" ;;
+              skills/plain-english-map/tests/*.test.mjs) pick_cmd "$2" && (cd skills/plain-english-map/tests && "${cmd[@]}" "${1##*/}") ;;
+              *.test.mjs|*.test.js|*/test_*.mjs) pick_cmd "$2" && "${cmd[@]}" "$1" ;;
+              test_*.mjs) pick_cmd "$2" && "${cmd[@]}" "$1" ;;
+              # 77 is a skip: on Windows the PowerShell step below runs it.
+              *.test.ps1) if [ "$RUNNER_OS" = Windows ]; then return 77; fi; echo "no PowerShell step on $RUNNER_OS"; return 1 ;;
+              *.py) pick_cmd "$2" && "${cmd[@]}" "$1" ;;
+              *.sh) pick_cmd "$2" && "${cmd[@]}" "$1" ;;
+              *) echo "no runner for $1"; return 1 ;;
+            esac
+          }
+          failed=0
+          while IFS=$'\t' read -r f c; do
+            echo "::group::$f"
+            # No stdin from the loop: a test that reads it would eat the rest of the list.
+            if run_one "$f" "$c" < /dev/null; then rc=0; else rc=$?; fi
+            echo "::endgroup::"
+            if [ "$rc" -eq 0 ]; then echo "PASS $f"; elif [ "$rc" -eq 77 ] && [ "${f%.test.ps1}" != "$f" ]; then echo "SKIP $f (runs in the PowerShell step)"; else echo "FAIL $f (exit $rc)"; failed=1; fi
+          done <<< "$list"
+          exit "$failed"
+
+      # The macOS twin of the step above: the same body, with the macOS command map. Each leg's step reads its own map,
+      # and a step gated to the other system never runs.
+      - name: Run the touched macOS tests
+        if: ${{ runner.os == 'macOS' }}
+        shell: bash
+        env:
+          FILES: ${{ matrix.files }}
+          # The macOS map of path to interpreter: this step runs only the files the selector listed for macOS.
+          COMMANDS: ${{ needs.touched.outputs.commands_macos }}
         run: |
           set -u
           # Each line is "path<TAB>cmd", cmd being the interpreter the file's checks.yml run line starts with (this

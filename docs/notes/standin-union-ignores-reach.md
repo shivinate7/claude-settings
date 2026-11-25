@@ -1,0 +1,1 @@
+- standin-union-ignores-reach: `product_calls` in `lint/check_standin_signatures.py` unions the keywords of every product call to a name, with no reachability. A stand-in on a path that never passes a keyword is still a finding. 3 of 6 sampled findings on main (sample not re-measured). Decision: standins-accept-callers-keywords. Seen: 2026-11-24 x1

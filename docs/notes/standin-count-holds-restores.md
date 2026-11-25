@@ -1,0 +1,1 @@
+- standin-count-holds-restores: the not-judged count includes restores of the original, such as `sweep.fn = real`, because `unresolved_assignment` checks the target and not the value. 10 of 25 assignment counts on main are restores (not re-measured). Decision: standins-accept-callers-keywords. Seen: 2026-11-24 x1
