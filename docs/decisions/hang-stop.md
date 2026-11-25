@@ -27,9 +27,9 @@ Ruling: only on a hang. A hang is no new output byte and no CPU advance in any p
 - Resume after a stop:
   - Lane lint: its pass cache keeps passed steps.
   - CI: the rerun of failed jobs that the merge tool already names.
-  - Mutation verdicts: cached across run attempts. Not built.
+  - Mutation verdicts: a rerun after a red or stopped step reuses the verdicts its earlier attempt saved (lane `mutate-verdicts-cached-ci`, the mutation verdict cache). A new push has a new run id and restores nothing. A verdict from other code is ruled out by its digest (`hooks/mutate_guard.py` `verdict_digest`). Unknown: whether the save runs when GitHub cuts a job at its cap (debt `mutate-verdict-save-at-cap`).
 
-State: decided. Built: the stop in `bin/verdict` (lane `verdict-hang-stop`), off unless `VERDICT_HANG_SECONDS` is set; lane `ci-job-hang-stop` (`bin/ci-job` reads a `HANG` line; pull request 3843, merged); the five-step wrap with its full-log switch (Scope above); and lane `code-caps-hang-stop` (the HANG line's one home, the 600 s default in `bin/ci-job`, the lane lint no-lift). Not built: lane `mutate-verdicts-cached-ci` (the mutation verdict cache), and note `hang-stop-poll-loop` (open).
+State: decided. Built: the stop in `bin/verdict` (lane `verdict-hang-stop`), off unless `VERDICT_HANG_SECONDS` is set; lane `ci-job-hang-stop` (`bin/ci-job` reads a `HANG` line; pull request 3843, merged); the five-step wrap with its full-log switch (Scope above); and lane `code-caps-hang-stop` (the HANG line's one home, the 600 s default in `bin/ci-job`, the lane lint no-lift); and lane `mutate-verdicts-cached-ci` (the mutation verdict cache: three steps per mutation shard job in `.github/workflows/checks.yml`). Not built: note `hang-stop-poll-loop` (open).
 
 Measure, 2026-11-23: in the 50 newest push runs of `checks` on main, 4 jobs ended at the 30-minute step cap with no red test, and 0 at a job cap.
 
@@ -40,7 +40,8 @@ Cost (rule `outcomes-mechanize-rules`; the log-size read is unmeasured):
 - Wake: min(the heartbeat, N / 4), at least 1 s. The heartbeat is `VERDICT_HEARTBEAT`, 120 s by default. At N = 600 the wake is 120 s. For N of 4 or less it is 1 s (test use only).
 - Log-size read: one per wake.
 - Process-table read: at most one per wake, only while the step is silent. It reads on the first silent wake, then once per N s of silence: at N = 600, one per 600 s. Pinned by `lint/test_verdict.py` `test_hang_stop_printing_child_makes_no_process_table_read` (no read while the child prints) and `test_hang_stop_silent_child_makes_a_process_table_read` (a read while silent).
+- Mutation verdict cache (lane `mutate-verdicts-cached-ci`): three steps per mutation shard job (make the folder, restore, save), one cache entry per job per attempt. Restore and save time unmeasured until the first CI run.
 
 Kind: process
 Home: bin/verdict
-Check: `lint/test_checks_step_scope.py` class `HangStopWrap` (CI values, 600), `lint/test_ci_job.py` class `HangStopDefault` (the 600 default), `lint/test_verdict.py` classes `FullLog` and `HangLineOneHome`, `merge/test_lane_lint.py` `test_a_hang_in_lane_lint_is_not_lifted_by_an_unknown_reason`
+Check: `lint/test_checks_step_scope.py` class `HangStopWrap` (CI values, 600), `lint/test_ci_job.py` class `HangStopDefault` (the 600 default), `lint/test_verdict.py` classes `FullLog` and `HangLineOneHome`, `merge/test_lane_lint.py` `test_a_hang_in_lane_lint_is_not_lifted_by_an_unknown_reason`, `lint/test_checks_step_scope.py` class `MutateVerdictCache` (the three cache steps per shard job), `hooks/test_mutate_shared.py` (the saved-verdict key, `verdict_digest`)

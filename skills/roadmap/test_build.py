@@ -4292,10 +4292,10 @@ class StaleDraftTable(UpkeepFixture):
         replies = {"refs/remotes/origin/garbled": "not a time\n", "refs/remotes/origin/naive": "2026-11-01T10:00:00\n"}
         real_git = build.git
 
-        def fake(repo, *args, stdin=None):
+        def fake(repo, *args, stdin=None, **kw):
             if args[:1] == ("log",) and args[-1] in replies:
                 return replies[args[-1]]
-            return real_git(repo, *args, stdin=stdin)
+            return real_git(repo, *args, stdin=stdin, **kw)
 
         with mock.patch.object(build, "git", fake):
             times, why = build.branch_commit_times(self.repo, ["good", "garbled", "naive"])
