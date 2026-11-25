@@ -1979,6 +1979,38 @@ class StaleCwdRecordTests(unittest.TestCase):
         self.assertFalse(delete, "trash_verdict deleted a trash folder that holds a bare repo with commits")
         self.assertEqual(reason, "dirty", "a trash folder holding a bare repo was kept, not as dirty: %s" % reason)
 
+    # The allowed side of the bare-repo check: a folder is a bare repo only with `HEAD`, `objects` and `refs` together.
+
+    def test_trash_folder_with_objects_and_refs_but_no_head_is_deleted_beside_such_a_record(self):
+        """A folder holding `objects/` and `refs/` but no `HEAD` file is no bare repo. The trash folder that holds it is
+        build output, so it is deleted as leftover trash."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-no-head")
+        trash = self.trash_from_build(wt)
+        dep = os.path.join(trash, "checkouts", "dep.git")
+        os.makedirs(os.path.join(dep, "objects"))
+        os.makedirs(os.path.join(dep, "refs"))
+        self.assertFalse(os.path.exists(os.path.join(dep, "HEAD")), "scope: the folder must hold no HEAD file")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertTrue(delete, "trash_verdict kept a trash folder whose objects and refs folders hold no HEAD: %s" % reason)
+        self.assertEqual(reason, "leftover trash")
+
+    def test_trash_folder_with_head_and_refs_but_no_objects_is_deleted_beside_such_a_record(self):
+        """A folder holding `HEAD` and `refs/` but no `objects/` folder is no bare repo either. The trash folder that
+        holds it is deleted as leftover trash."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-no-objects")
+        trash = self.trash_from_build(wt)
+        dep = os.path.join(trash, "checkouts", "dep.git")
+        write(os.path.join(dep, "HEAD"), "ref: refs/heads/main\n")
+        os.makedirs(os.path.join(dep, "refs"))
+        self.assertFalse(os.path.exists(os.path.join(dep, "objects")), "scope: the folder must hold no objects folder")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertTrue(delete, "trash_verdict kept a trash folder whose HEAD and refs hold no objects folder: %s" % reason)
+        self.assertEqual(reason, "leftover trash")
+
     def test_a_trash_folder_is_judged_on_its_own_lines_beside_a_sibling_from_the_same_name(self):
         """Case 2f for the trash sweep. Two trash folders come from one original name, `build`, as two reaps of one build
         folder make. The first holds a moved tracked file; the second holds only untracked output. The pathspec for the
