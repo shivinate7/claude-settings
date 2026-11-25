@@ -803,16 +803,17 @@ def scan_jobs(transcript, keep_waiting=False):
     (AGENT_WAITING_TEXT) does not close its agent. Each job's tuple then ends with three more items: the
     agent's description, the check-in calls of the session as (time, input text) pairs (read by ci_events,
     the one reader of check-ins; a check-in whose result was an error is not in it), and whether the agent
-    is waiting. The default call reads none of this, so a long call's scan costs what it did."""
+    is waiting. A resume newer than the agent's latest waiting notice clears that flag: the agent is awake again. The default call reads none of this, so a long call's scan costs what it did."""
     jobs, done, stops, notes, job_call, logs, began, agents = {}, {}, set(), {}, {}, {}, {}, set()
-    pauses, descs, waits, checkins = {}, {}, set(), {}
+    pauses, descs, waits, checkins = {}, {}, {}, {}  # waits: id -> record number of its latest waiting notice
     resumed, order = {}, 0  # resumed: id -> (record number, time) of its latest resume; done: id -> record number of its latest close
 
     def close(text):
         for tid in closed_by_notice(text, keep_waiting):
             done[tid] = order
         if keep_waiting:
-            waits.update(waiting_ids(text))
+            for tid in waiting_ids(text):
+                waits[tid] = order
     prev_stop, blocked = None, False
     with open(transcript, "rb") as f:
         for line in f:
@@ -900,7 +901,7 @@ def scan_jobs(transcript, keep_waiting=False):
     return ({k: (v, notes.get(job_call.get(k)) or "", logs.get(job_call.get(k)) or ((), None, ()),
                  resumed[k][1] if k in agents and k in resumed else began.get(k),
                  k in agents, pauses.get(job_call.get(k), 0))
-             + ((descs.get(k, ""), sent, k in waits) if keep_waiting else ())
+             + ((descs.get(k, ""), sent, k in waits and not (k in resumed and resumed[k][0] > waits[k])) if keep_waiting else ())
              for k, v in jobs.items() if k not in done or (k in resumed and done[k] < resumed[k][0])}, prev_stop)
 
 
@@ -1169,16 +1170,48 @@ TRANSCRIPT_AGENT_ID = re.compile(r"[\w-]+\Z")  # an id safe to put in a transcri
 TAIL_BYTES = 64 * 1024  # the first read of an agent transcript's end; it doubles to hold the last record
 TAIL_MAX = 32 * 1024 * 1024
 AGENT_REMEDY = "Stop it, then resume it by name, or send a fresh reviewer the prior report."
+AGENT_CHECKIN_AHEAD = 30  # minutes: the furthest ahead a check-in may be set and still count
 AGENT_CHECKIN_REMEDY = ("A background agent that runs this long needs one check-in (decision stall-watch). For each, set one "
-                        "one-time send_later check-in, at most 30 minutes ahead, whose text names its agent id, then stop. "
-                        "At the check-in, read the last records of its transcript, then stop it or tell the owner.")
+                        "one-time send_later check-in, at most %d minutes ahead, whose text names its agent id, then stop. "
+                        "At the check-in, read the last records of its transcript, then stop it or tell the owner."
+                        % AGENT_CHECKIN_AHEAD)
+
+
+def checkin_minutes_ahead(when, text):
+    """How many minutes ahead a check-in set at epoch seconds when asks to wake: the larger of its delay_minutes (a
+    number or a string of digits) and its `at` time (ISO-8601, an offset-less one read in the local_time clock's
+    offset) minus when. text is the check-in's input as JSON. None when it holds neither, or neither reads: a
+    check-in of another tool, or an unreadable value, is not judged here."""
+    try:
+        inp = json.loads(text)
+        waits = []
+        delay = inp.get("delay_minutes")
+        if isinstance(delay, str) and re.fullmatch(r"\d+(?:\.\d+)?", delay.strip()):
+            waits.append(float(delay))
+        elif isinstance(delay, (int, float)) and not isinstance(delay, bool):
+            waits.append(delay)
+        at = inp.get("at")
+        if isinstance(at, str) and when is not None:
+            import datetime
+            import local_time  # the one home of the clock, as in the guard's ci_wait_minutes
+            raw = at.strip()
+            target = datetime.datetime.fromisoformat(raw[:-1] + "+00:00" if raw[-1:] in ("Z", "z") else raw)
+            if target.tzinfo is None:
+                target = target.replace(tzinfo=local_time.clock().tzinfo)
+            waits.append((target.timestamp() - when) / 60)
+        return max(waits) if waits else None
+    except Exception:  # an input that does not read is not judged
+        return None
 
 
 def checked_in(agent, crossed, sent):
-    """True when a check-in made at or after crossed (epoch seconds) names the agent id as a whole token.
-    sent is the (time, input text) pairs of scan_jobs's keep_waiting read. A check-in with no readable
-    time never counts: it may be older than the crossing."""
+    """True when a check-in made at or after crossed (epoch seconds) names the agent id as a whole token and is set
+    at most AGENT_CHECKIN_AHEAD minutes ahead (its delay_minutes, or its `at` time against the call's time). sent is
+    the (time, input text) pairs of scan_jobs's keep_waiting read. A check-in with no readable time never counts:
+    it may be older than the crossing."""
     pat = re.compile(r"(?<![\w-])%s(?![\w-])" % re.escape(agent))
+    sent = [(when, text) for when, text in sent
+            if (checkin_minutes_ahead(when, text) or 0) <= AGENT_CHECKIN_AHEAD]  # one set too far ahead does not count
     return any(when is not None and when >= crossed and pat.search(text) for when, text in sent)
 
 
@@ -1254,8 +1287,11 @@ def stop():
         long_age = float(os.environ.get("STALL_WATCH_LONG") or AGENT_LONG)
         rows, quiet_shells, long_rows = [], {}, []  # quiet_shells: row index -> the output file of that shell job
         open_jobs, prev_stop = scan_jobs(call["transcript_path"], keep_waiting=True)
-        for job, (path, note, (named, cwd, unresolved), began, agent, pause, desc, sent, waiting) in open_jobs.items():
+
+        def read_job(job, spec):  # one job's rows; a raise here costs that job's rows only
+            path, note, (named, cwd, unresolved), began, agent, pause, desc, sent, waiting = spec
             until = " | until: " + note if note else ""
+            unread = " (launch time unread: the agent's age is not known, so the long-run check could not run)" if agent and began is None else ""
             real = path
             if path and base:
                 real = os.path.join(base, re.split(r"[\\/]", path)[-1])
@@ -1272,11 +1308,11 @@ def stop():
                     continue
             if st is None:
                 if prev_stop is not None and began is not None and began <= prev_stop:
-                    continue  # started before the previous Stop, which listed it
+                    return  # started before the previous Stop, which listed it
                 what = "transcript" if agent else "output file"
                 rows.append("%s: unknown, %s not found: %s%s%s" % (
-                    job, what, path or "(path not recorded)", until, " " + AGENT_REMEDY if agent else ""))
-                continue
+                    job, what, path or "(path not recorded)", until, (" " + AGENT_REMEDY if agent else "") + unread))
+                return
             idle = now - st.st_mtime
             if agent:  # a transcript has no named logs; one long tool call is not a stall
                 if not waiting and idle >= quiet and not (prev_stop is not None and now - idle + quiet <= prev_stop):
@@ -1286,8 +1322,11 @@ def stop():
                         busy = False
                     if not busy:
                         rows.append("%s: background agent, no activity for %ds: %s%s %s" % (
-                            job, idle, real, until, AGENT_REMEDY))
-                continue
+                            job, idle, real, until, AGENT_REMEDY + unread))
+                        return
+                if unread:  # its age is unknown, so the long-run test could not run: say so, once
+                    rows.append("%s: background agent,%s" % (job, unread.strip(" ")[1:-1]))
+                return
             watched = [p for p in named if os.path.isabs(p) or cwd]
             unwatched = list(unresolved) + [p for p in named if p not in watched]
             for mark in log_marks(watched, cwd).values():
@@ -1296,10 +1335,15 @@ def stop():
             job_quiet = quiet + pause  # a planned pause is silent by design, as in the hook's watcher
             if idle >= job_quiet:
                 if prev_stop is not None and now - idle + job_quiet <= prev_stop:
-                    continue  # its stall crossed before the previous Stop, which listed it
+                    return  # its stall crossed before the previous Stop, which listed it
                 miss = " (named log not watched, its directory is unknown: %s)" % ", ".join(unwatched) if unwatched else ""
                 quiet_shells[len(rows)] = real
                 rows.append("%s: no output for %ds: %s%s%s" % (job, idle, path, until, miss))
+        for job, spec in open_jobs.items():
+            try:
+                read_job(job, spec)
+            except Exception:  # one job that does not read never hides the rows of the others
+                rows.append("%s: unread, the check could not read this job; stop it or tell the owner" % job)
         if long_rows:
             reason = " ".join(long_rows) + " " + AGENT_CHECKIN_REMEDY
             out["decision"] = "block"
