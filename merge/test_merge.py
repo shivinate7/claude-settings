@@ -2009,11 +2009,11 @@ class ClaudeMdFlag(Env):
     def unreadable(self, fail):
         """Patch merge.sh so the PR-paths read fails: `fail(args)` returns (rc, text) or raises. -> the list of args it saw."""
         real_sh, seen = merge.sh, []
-        def stub(args, cwd=None, input=None, env=None, stdout_only=False):
+        def stub(args, cwd=None, input=None, env=None, stdout_only=False, **kw):  # kw: other sh calls of the run pass more keywords (boot_stamp passes timeout on macOS); the real sh takes them
             if "diff" in args and any("..." in a for a in args):
                 seen.append(args)
                 return fail(args)
-            return real_sh(args, cwd=cwd, input=input, env=env, stdout_only=stdout_only)
+            return real_sh(args, cwd=cwd, input=input, env=env, stdout_only=stdout_only, **kw)
         patch = unittest.mock.patch.object(merge, "sh", stub)
         patch.start(); self.addCleanup(patch.stop)
         return seen
