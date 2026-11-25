@@ -1110,6 +1110,7 @@ class PushSkipWiring(unittest.TestCase):
 OLDER = "1" * 40  # the head of an older green push run: the base that a newer run which is red, skipped or still going must not hide
 NEWER = "2" * 40  # the head of a newer push run
 TOP = "6" * 40  # the head of the newest push run of a fixture, newer than NEWER and OLDER
+LATEST = "2026-11-12T12:00:00Z"  # created after LATE, so a run with it is the newest run of a fixture
 
 
 def push_run(id_, head, conclusion="success", status="completed", created_at=EARLY, path=RUN_PATH, event="push", branch="main"):
@@ -1193,6 +1194,22 @@ class ProvenBase(LiveHead):
                 self.assert_base(base, "", "a completed push run that ended %s is newer than the base, so main is not known green" % conclusion)
                 twin, _ = self.base_on([push_run(1, OLDER, created_at=EARLY)], jobs={1: full_run_jobs()})
                 self.assert_base(twin, OLDER, "the control: without the %s run, the older green run is the base" % conclusion)
+
+    # A superseded run (the shared test in clear_rule, one home for "superseded"): cancelled before any job started, with a newer run of its
+    # file and group on the page. This run (GITHUB_RUN_ID 4) is the newer run, and it is in the page, in progress.
+    def test_a_cancelled_push_run_with_no_job_that_this_run_replaced_is_passed_over_for_the_green_below(self):
+        runs = [push_run(4, TOP, conclusion=None, status="in_progress", created_at=LATEST), push_run(3, NEWER, conclusion="cancelled", created_at=LATE),
+                push_run(1, OLDER, created_at=EARLY)]
+        base, _ = self.base_on(runs, jobs={1: full_run_jobs(), 3: []}, extra_env={"GITHUB_RUN_ID": "4"})
+        self.assert_base(base, OLDER, "a cancelled push run that no job started in, and that run 4 replaced, is passed over: the green run 1 below is the base")
+
+    def test_control_a_cancelled_push_run_whose_job_started_is_not_passed_over(self):
+        """Control, no base on the old code too: a job that started makes the cancel a real cancel, so the walk stops at run 3."""
+        started = dict(job_row("checks", "cancelled", steps=[step("Run")]), started_at=EARLY)
+        runs = [push_run(4, TOP, conclusion=None, status="in_progress", created_at=LATEST), push_run(3, NEWER, conclusion="cancelled", created_at=LATE),
+                push_run(1, OLDER, created_at=EARLY)]
+        base, _ = self.base_on(runs, jobs={1: full_run_jobs(), 3: [started]}, extra_env={"GITHUB_RUN_ID": "4"})
+        self.assert_base(base, "", "a cancelled push run whose job started is not replaced: the walk stops there, so the push has no base")
 
     def test_an_older_queued_or_in_progress_push_run_is_passed_over_for_the_green_below(self):
         # Consultant's pick, 10:55 CST Nov 24 2026: a candidate that is not completed is passed over with no read, so the green run
