@@ -349,6 +349,22 @@ jobs:
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_pace_numbers.py
 
+      - name: Case runner suite
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 hooks/test_case_runner.py
+
+      - name: Zero-case runs suite
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_zero_case_runs.py
+
+      - name: Suites have main suite
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_suites_have_main.py
+
+      - name: Suites have main check
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        run: python3 lint/check_suites_have_main.py
+
       - name: Guard outcome claims fixture suite
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_guard_outcome.py

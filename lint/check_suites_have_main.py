@@ -64,18 +64,17 @@ def _is_main_guard(node):
         and any(isinstance(o, ast.Constant) and o.value == "__main__" for o in operands)
 
 
-def _reached_calls(nodes):
-    """Calls that run when these statements run: not inside a nested def, class or lambda, and not in the
+def _reached_nodes(nodes):
+    """Nodes that run when these statements run: not inside a nested def, class or lambda, and not in the
     body of an `if False:`/`if 0:` (its else branch still runs)."""
     for node in nodes:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
             continue
         if isinstance(node, ast.If) and isinstance(node.test, ast.Constant) and not node.test.value:
-            yield from _reached_calls(node.orelse)
+            yield from _reached_nodes(node.orelse)
             continue
-        if isinstance(node, ast.Call):
-            yield node
-        yield from _reached_calls(ast.iter_child_nodes(node))
+        yield node
+        yield from _reached_nodes(ast.iter_child_nodes(node))
 
 
 def _is_runner_call(func, bare):
@@ -95,18 +94,19 @@ def _is_runner_call(func, bare):
 
 def _calls_main(tree):
     """True when the `if __name__ == "__main__":` block runs a unittest runner: directly, or through a
-    module-level function that block calls (a function nothing calls, or `if False:`, never runs)."""
+    module-level function that block calls, or names without calling (a case list handed to a runner). A
+    function nothing calls or names, or `if False:`, never runs."""
     bare = _unittest_main_names(tree)
     functions = {n.name: n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
     bodies = [[stmt for n in tree.body if _is_main_guard(n) for stmt in n.body]]
     seen = set()
-    for body in bodies:  # bodies grows as called functions are found
-        for call in _reached_calls(body):
-            if _is_runner_call(call.func, bare):
+    for body in bodies:  # bodies grows as called or named functions are found
+        for node in _reached_nodes(body):
+            if isinstance(node, ast.Call) and _is_runner_call(node.func, bare):
                 return True
-            if isinstance(call.func, ast.Name) and call.func.id in functions and call.func.id not in seen:
-                seen.add(call.func.id)
-                bodies.append(functions[call.func.id].body)
+            if isinstance(node, ast.Name) and node.id in functions and node.id not in seen:
+                seen.add(node.id)
+                bodies.append(functions[node.id].body)
     return False
 
 
