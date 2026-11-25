@@ -350,6 +350,14 @@ class CensusFindings(unittest.TestCase):
         self.assertNotIn("Traceback", out, out)
         self.assertEqual(code, 1, out)
 
+    def test_a_failing_run_closes_with_the_bad_count_and_the_total_mutants(self):
+        guard_rows = [mutant("guard clean: anchor present once", "return x > 1", "plain"), (MALFORMED_GUARD_LABEL, "return x > 1")]
+        sweep_rows = [sweep_row(CLEAN_LABEL, CLEAN_OLD), sweep_row(CLEAN_THREE_LABEL, "def unlock(stale):"),
+                      sweep_row(STALE_LABEL, STALE_OLD)]
+        code, out = self.run_main(sweep_rows, guard_rows)
+        self.assertEqual(out.splitlines()[-1:], ["mutant anchor census failed: 2 of 5 mutants have a bad row or anchor"], out)
+        self.assertEqual(code, 1, out)
+
 
 if __name__ == "__main__":
     unittest.main()
