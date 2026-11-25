@@ -1213,7 +1213,7 @@ class DoneNamesModelsTests(unittest.TestCase):
     def check_unset_spawn_takes_file_pin(self, role):
         import report_guard  # noqa: E402  MODEL_FAMILIES, the names a Done item may give (one home)
         pin = self.file_pin(role)
-        self.assertEqual(pin, "haiku", "agents/%s.md pins %r, not the haiku this case expects" % (role, pin))
+        self.assertIn(pin, report_guard.MODEL_FAMILIES, "agents/%s.md pins %r, which is no model family" % (role, pin))
         wrong = next(f for f in report_guard.MODEL_FAMILIES if f != pin)
         spawn = {"subagent_type": role, "prompt": "Round 1 of 3"}
 
@@ -1227,11 +1227,13 @@ class DoneNamesModelsTests(unittest.TestCase):
                              % (role, pin, wrong))
         self.assertIn("'%s %s' matches no %s spawn, which ran %s" % (role, wrong, role, pin), out["reason"])
 
-    def test_dm_green_unset_reviewer_takes_file_pin(self):
-        self.check_unset_spawn_takes_file_pin("reviewer")
-
-    def test_dm_green_unset_test_author_takes_file_pin(self):
-        self.check_unset_spawn_takes_file_pin("test-author")
+    def test_dm_green_unset_spawn_takes_file_pin_for_every_named_role(self):
+        # Every role in NAMED_ROLES, read from the constant: an unset spawn runs its agent file's pin, which is
+        # sonnet for the builder and haiku for the other three.
+        import report_guard  # noqa: E402  NAMED_ROLES, the roles the check reads (one home)
+        for role in sorted(report_guard.NAMED_ROLES):
+            with self.subTest(role=role):
+                self.check_unset_spawn_takes_file_pin(role)
 
     def test_dm_false_alarm_running_reviewer_absent_from_done_passes(self):
         # A reviewer still running is not a finished claim: Done names the test-author and the builder only.
@@ -1308,16 +1310,19 @@ class DoneNamesModelsTests(unittest.TestCase):
     REVIEWER_R3 = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 3 of 3"}
     ROUND1_NO_MODEL = {"subagent_type": "reviewer", "prompt": "Round 1 of 3"}  # runs its file pin, haiku
 
-    def turn_records(self, earlier=(), window=()):
+    def turn_records(self, earlier=(), window=(), report=None):
         """The turn's records: `earlier` spawns from before the owner's second message, then `window` spawns
         after it. Each spawn carries its tool_use id and a real result, as a finished spawn does. With no
-        earlier spawn there is no second message: the window is the whole transcript."""
+        earlier spawn there is no second message: the window is the whole transcript. `report`, when given,
+        is a report the session posted between the two groups, in place of the owner's second message."""
         records = [human("do the task")]
         n = 0
         for spawn in earlier:
             records += keyed_spawn(spawn, n)
             n += 1
-        if earlier:
+        if report is not None:
+            records.append(assistant_text(report))
+        elif earlier:
             records.append(human("the owner's next message"))
         for spawn in window:
             records += keyed_spawn(spawn, n)
@@ -1389,18 +1394,116 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIsNotNone(out, "Done named builder opus against a window builder that ran sonnet, and passed")
         self.assertIn("'builder opus' matches no builder spawn, which ran sonnet", out["reason"])
 
-    def test_dm_limit_earlier_spawn_model_passes(self):
-        # Accepted limit: a Done model name is judged against every spawn in the transcript, not the turn's
-        # window alone. The earlier sonnet reviewer lets "reviewer sonnet" pass, though the window's reviewer ran haiku.
+    def test_dm_green_no_report_between_earlier_reviewer_counts_passes(self):
+        # No report sits between the two spawns, so the window is since the start and the earlier sonnet reviewer
+        # counts: "reviewer sonnet" passes. A report between them drops it (the red cases above).
         records = self.turn_records(earlier=[self.REVIEWER_SONNET_EARLY], window=[self.REVIEWER_HAIKU])
         out = self.stop(records, "> **Done** BUILT the guard, PR #5 (reviewer sonnet)\n> **Next** Unstarted: none")
         self.assertIsNone(out, out and out["reason"])
 
-    def test_dm_limit_earlier_builder_spawn_model_passes(self):
-        # Accepted limit, as above: the earlier sonnet builder lets "builder sonnet" pass, though the
-        # window's builder ran opus.
+    def test_dm_green_no_report_between_earlier_builder_counts_passes(self):
+        # As above: the earlier sonnet builder counts, since no report sits between it and the window's opus builder.
         records = self.turn_records(earlier=[self.BUILDER_SONNET], window=[self.BUILDER_OPUS])
         out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none")
+        self.assertIsNone(out, out and out["reason"])
+
+    # The window after the session's previous report: a named model must match a spawn made since that report.
+    PRIOR_BUILDER_REPORT = "> **Done** BUILT the guard, PR #4 (builder sonnet)\n> **Next** Unstarted: none"
+    PRIOR_TEST_AUTHOR_REPORT = "> **Done** BUILT the cases, PR #4 (test-author sonnet)\n> **Next** Unstarted: none"
+    PRIOR_RECORD_WRITER_REPORT = ("> **Done** RECORDED the record, PR #4 (record-writer sonnet)\n"
+                                  "> **Next** Unstarted: none")
+    TEST_AUTHOR_EARLY_SONNET = {"subagent_type": "test-author", "model": "sonnet", "prompt": "write the cases"}
+    RECORD_WRITER_EARLY_SONNET = {"subagent_type": "record-writer", "model": "sonnet", "prompt": "write the record"}
+    # No model field: the spawn runs the record-writer agent file's pin, haiku.
+    RECORD_WRITER_WINDOW = {"subagent_type": "record-writer", "prompt": "write the record"}
+    BUILDER_HAIKU = {"subagent_type": "builder", "model": "haiku", "prompt": "Round 2 of 3"}
+    PREFIXED_TEST_AUTHOR = {"subagent_type": "cs-build:test-author", "model": "haiku", "prompt": "write the cases"}
+
+    @staticmethod
+    def window_models(records):
+        """The spawn models the guard reads from the records after the fixture's last report, else from all of them.
+        A window case asserts this scope before its Done line (P7): the subject is only judged within it."""
+        import report_guard  # noqa: E402  spawn_models, the one reader of spawns (one home)
+        texts = [i for i, rec in enumerate(records)
+                 if rec.get("type") == "assistant" and rec["message"]["content"][0].get("type") == "text"]
+        start = texts[-1] + 1 if texts else 0
+        return {role: sorted(models) for role, models in report_guard.spawn_models(records[start:]).items()}
+
+    def test_dm_red_test_author_sonnet_before_report_blocks(self):
+        # An early sonnet test-author sits before the session's report. The window after it ran haiku, so Done's
+        # "test-author sonnet" matches no spawn since the report: refused.
+        records = self.turn_records(earlier=[self.TEST_AUTHOR_EARLY_SONNET], window=[self.TEST_AUTHOR_HAIKU],
+                                    report=self.PRIOR_TEST_AUTHOR_REPORT)
+        self.assertEqual(self.window_models(records), {"test-author": ["haiku"]})
+        out = self.stop(records, "> **Done** BUILT the cases, PR #5 (test-author sonnet)\n> **Next** Unstarted: none")
+        self.assertIsNotNone(out, "Done named test-author sonnet, which no spawn since the report ran, and passed")
+        self.assertIn("'test-author sonnet' matches no test-author spawn, which ran haiku", out["reason"])
+
+    def test_dm_green_test_author_haiku_after_report_passes(self):
+        # Control for the case above: the same transcript, with Done naming the window's haiku test-author.
+        records = self.turn_records(earlier=[self.TEST_AUTHOR_EARLY_SONNET], window=[self.TEST_AUTHOR_HAIKU],
+                                    report=self.PRIOR_TEST_AUTHOR_REPORT)
+        out = self.stop(records, "> **Done** BUILT the cases, PR #5 (test-author haiku)\n> **Next** Unstarted: none")
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_red_record_writer_sonnet_before_report_blocks(self):
+        # A record-writer with no model field runs its agent file's pin, haiku.
+        records = self.turn_records(earlier=[self.RECORD_WRITER_EARLY_SONNET], window=[self.RECORD_WRITER_WINDOW],
+                                    report=self.PRIOR_RECORD_WRITER_REPORT)
+        self.assertEqual(self.window_models(records), {"record-writer": ["haiku"]})
+        out = self.stop(records, "> **Done** RECORDED the record, PR #5 (record-writer sonnet)\n"
+                                 "> **Next** Unstarted: none")
+        self.assertIsNotNone(out, "Done named record-writer sonnet, which no spawn since the report ran, and passed")
+        self.assertIn("'record-writer sonnet' matches no record-writer spawn, which ran haiku", out["reason"])
+
+    def test_dm_green_record_writer_haiku_after_report_passes(self):
+        # Control for the case above: the same transcript, with Done naming the window's haiku record-writer.
+        records = self.turn_records(earlier=[self.RECORD_WRITER_EARLY_SONNET], window=[self.RECORD_WRITER_WINDOW],
+                                    report=self.PRIOR_RECORD_WRITER_REPORT)
+        out = self.stop(records, "> **Done** RECORDED the record, PR #5 (record-writer haiku)\n"
+                                 "> **Next** Unstarted: none")
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_green_two_window_builders_either_model_passes(self):
+        # Control: two builders in the window, on sonnet and opus. Either name matches a spawn since the report.
+        records = self.turn_records(window=[self.BUILDER_SONNET, self.BUILDER_OPUS], report=self.PRIOR_BUILDER_REPORT)
+        self.assertEqual(self.window_models(records), {"builder": ["opus", "sonnet"]})
+        for model in ("sonnet", "opus"):
+            with self.subTest(model=model):
+                out = self.stop(records,
+                                "> **Done** BUILT the guard, PR #5 (builder %s)\n> **Next** Unstarted: none" % model)
+                self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_red_unresolved_window_spawn_beside_resolved_haiku_blocks(self):
+        # An unresolved builder in the window sits beside a resolved haiku one. Done names sonnet, which no resolved
+        # window spawn ran: refused. The unresolved spawn must not switch the check off.
+        folder = self.unpinned_agents()
+        self.assertEqual(self.file_pin("builder", folder), "", "fixture error: the builder fixture pins a model")
+        records = self.turn_records(window=[self.BUILDER_NO_MODEL, self.BUILDER_HAIKU])
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none",
+                        agent_model=None, agents_dir=folder)
+        self.assertIsNotNone(out, "Done named builder sonnet, which no resolved window spawn ran, and passed")
+        self.assertIn("'builder sonnet' matches no builder spawn, which ran haiku", out["reason"])
+
+    def test_dm_green_unresolved_window_spawn_beside_haiku_names_haiku_passes(self):
+        # Control for the case above: the same fixture, with Done naming the resolved haiku builder.
+        folder = self.unpinned_agents()
+        records = self.turn_records(window=[self.BUILDER_NO_MODEL, self.BUILDER_HAIKU])
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder haiku)\n> **Next** Unstarted: none",
+                        agent_model=None, agents_dir=folder)
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_red_prefixed_role_names_wrong_model_blocks(self):
+        # A subagent_type with a plugin prefix is compared by its last part, so its haiku spawn is the test-author's.
+        records = self.turn_records(window=[self.PREFIXED_TEST_AUTHOR])
+        out = self.stop(records, "> **Done** BUILT the cases, PR #5 (test-author sonnet)\n> **Next** Unstarted: none")
+        self.assertIsNotNone(out, "Done named test-author sonnet against a prefixed haiku spawn, and passed")
+        self.assertIn("'test-author sonnet' matches no test-author spawn, which ran haiku", out["reason"])
+
+    def test_dm_green_prefixed_role_names_its_model_passes(self):
+        # Control for the case above: the same prefixed spawn, with Done naming its haiku model.
+        records = self.turn_records(window=[self.PREFIXED_TEST_AUTHOR])
+        out = self.stop(records, "> **Done** BUILT the cases, PR #5 (test-author haiku)\n> **Next** Unstarted: none")
         self.assertIsNone(out, out and out["reason"])
 
 
