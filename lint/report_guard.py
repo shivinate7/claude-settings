@@ -1649,8 +1649,10 @@ def question_problem(records, turn, text, hook):
     uses, sends = _turn_acts(records, turn, acks)
     undelivered = undelivered_tool_use_ids(records)
     queued, confirmed = _queued_to(records, uses, sends, writer) if writer else (set(), set())
-    # A failed send is no send, except one that failed because the writer is inactive (inactive_tool_use_ids), as on the key path.
-    failed = failed_tool_use_ids(records) - inactive_tool_use_ids(records)
+    # A failed send with no delivery text is no send, except one that failed because the writer is inactive
+    # (inactive_tool_use_ids), as on the key path. A failed result that still reports delivery keeps main's verdict.
+    failed = (failed_tool_use_ids(records) - inactive_tool_use_ids(records)
+              - delivered_tool_use_ids(records, include_failed=True))
     if writer and any(writer in t and (u.get("id") in confirmed or u.get("id") not in undelivered | failed)
                       for u, t in zip(uses, sends)):
         return "", ""

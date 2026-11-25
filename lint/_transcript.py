@@ -413,12 +413,13 @@ def result_text(block):
     return body if isinstance(body, str) else ""
 
 
-def delivered_tool_use_ids(records):
+def delivered_tool_use_ids(records, include_failed=False):
     """The tool_use ids of sends that reached their session, with no failure by `failed_tool_use_ids`: a
     tool_result whose text parses as the cloud send_message body {"status": "delivered"}, or a desktop result
     whose text holds DESKTOP_DELIVERED. Only the result counts, never the send's input. A queued or undelivered
-    desktop result, and any other shape, fails closed."""
-    failed = failed_tool_use_ids(records)
+    desktop result, and any other shape, fails closed. `include_failed` also reads a failed send whose text reports
+    delivery, so a caller can tell an error with no delivery text from one that carries it."""
+    failed = set() if include_failed else failed_tool_use_ids(records)
     delivered = set()
     for r in records:
         if r.get("type") != "user":
