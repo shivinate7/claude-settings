@@ -17,7 +17,7 @@ Consultant's picks from round 1 review, not owner rulings:
 Consultant's picks of 03:08 and 07:20 CST Nov 25 2026, not owner rulings, undoable:
 
 - Option c: each act gets its own dirty and live-process check before it reads a gone record as absent.
-- Trash folder: uncommitted work is a tracked file the rename moved, or a staged change. An untracked file inside it is build output (decision `build-dirs-reaped-at-agent-end`).
+- Trash folder: uncommitted work is a tracked file the rename moved, a staged change, or any nested repo (a `.git` entry, or a bare repo dir: `HEAD`, `objects`, `refs`). No remote is read. An untracked file inside it is build output (decision `build-dirs-reaped-at-agent-end`).
 - Descendants: the listener's own pid and its descendants are not a live process. A trash folder has no such exception.
 
 ## Scope as built
@@ -29,7 +29,7 @@ The answer is off by default: `worktree_live_session(target, absent_is_out=False
 - `decide_worktree` in `janitor/sweep.py`. Its callers: the sweep's per-tree judge in `sweep_repo` (every sweep run, the session-end agent rule included), `decide_agent_end_worktree` (agent-end reap), and `remove_held_tree` in `merge/merge.py` (the merge tool's removal of the tree that holds the merged branch).
 - `worktree_remove_subject` in `hooks/guard_core.py`, which decides `git worktree remove`. It keeps dirty and locked trees before its live read. A process in the tree refuses whatever the record read says.
 - `decide_listener` in `janitor/sweep.py`, the orphaned TCP listener reap, which stops the listener. It keeps the checkout on any uncommitted line (untracked files included), on a process inside other than the listener and its own descendants, and on an unknown read. Only then does the record read as absent.
-- `trash_verdict` in `janitor/sweep.py`, read before `reap_trash` deletes a folder. It keeps the folder on tracked uncommitted work, on a process inside, and on an unknown read. Only then does the record read as absent.
+- `trash_verdict` in `janitor/sweep.py`, read before `reap_trash` deletes a folder. It keeps the folder on tracked uncommitted work or a nested repo, on a process inside, and on an unknown read. Only then does the record read as absent.
 
 These callers stay on the default. A session record whose folder is gone still keeps the target there:
 
@@ -53,7 +53,7 @@ From the code, not measured: a record whose leaf was moved or renamed while its 
 - In `decide_worktree`: the dirty, locked, unpushed and unmerged checks, and the process check. A finished agent's marked processes may be stopped first (see "A finished agent's tree" in `when-a-worktree-may-be-removed`).
 - In `worktree_remove_subject`: the dirty and locked checks, and the process check.
 - In `decide_listener`: the orphan, dirty, process, live-session and owner checks.
-- In `trash_verdict`: the tracked-work, live-session and process checks.
+- In `trash_verdict`: the tracked-work, nested-repo, live-session and process checks.
 
 Kind: process
 Home: janitor/sweep.py
