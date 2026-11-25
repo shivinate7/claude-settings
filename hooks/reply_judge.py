@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""At Stop, a model (Haiku) reads every reply with text. It judges the reply against thirteen rules on every fifth Stop and on every Stop whose reply carries an Input Needed label, the words "blocked on", a Markdown table, a GitHub search total, a cost ranking or a claim about main, and against two rules on every other Stop. It never refuses. A finding on one of the eleven older rules comes back as a note on the next turn and writes one guard.log line; a finding on one of the two newer rules writes the line and prints nothing.
+"""At Stop, a model (Haiku) reads every reply with text. It judges the reply against thirteen rules on every fifth Stop and on every Stop whose reply carries an Input Needed label, the words "blocked on", a Markdown table, a GitHub search total, a cost ranking or a claim about main, and against two rules on every other Stop. It never refuses. A finding on one of the eleven older rules comes back as a note on the next turn and writes one guard.log line; a finding on one of the two newer rules writes one line per finding and prints nothing.
 
 It is a command hook, not a `type: prompt` hook, because a prompt hook cannot exit on a field
 in code. This hook does: `stop_hook_active` true means this Stop is already a rewrite, so it
@@ -7,14 +7,20 @@ exits 0 at once and never calls the model.
 
 The model call is `decision_watch.invoke_model`, the one home for it: Haiku at effort xhigh,
 `--safe-mode`, no tools, and an empty config dir and scratch cwd, so the child cannot fire this
-hook again. This file passes its own accepted answer, `{"ok": true|false}`.
+hook again. This file passes its own accepted answer, `{"ok": true|false}`; any other key rides along unchecked.
+
+The answer has two fields. `ok` and `reason` judge the older rules, and only that `reason` is ever printed in the note.
+`new_rules` is a list of {"rule": <id>, "reason": <text>}, one item per finding on a newer rule (roles-findings-are-debts-or-notes,
+parallelism-keep-going, both CLAUDE.md anchors). Each valid item is one guard.log line and is never printed. An item that is
+not a dict, or whose rule is not a newer rule's id, is ignored, and a `new_rules` that is not a list is ignored; neither
+changes the older verdict.
 
 Sampling: the older rules run on Stop n of a session (counting only Stops that carry a reply) when (n - 1) % 5 == 0, or when
 a trigger below holds. Every other Stop with a reply still makes its one model call, with a prompt that holds only the two
-newer rules (roles-finding-has-a-home, parallelism-wait-names-its-event). A Stop makes one call whichever prompt it sends,
+newer rules (roles-findings-are-debts-or-notes, parallelism-keep-going), and its `ok` and `reason` are not read. A Stop makes one call whichever prompt it sends,
 never two. An empty reply makes no call. The count is a file per session under the state folder.
 
-Log only: a finding on a newer rule appends one guard.log line and prints no note, so the owner reads the log before the
+Log only: a finding on a newer rule appends one guard.log line and prints no note, whichever prompt the Stop sent, so the owner reads the log before the
 rules interrupt a turn. Cost: one model call per Stop, one log append per finding, no new process beyond that call, no timer.
 The log's named reader is the owner at his review.
 
@@ -45,8 +51,8 @@ count with no REST confirmation is flagged. Cost: no new process start, no new f
 over the reply and runs before the model module loads; a Stop that holds the trigger words sends the older
 rules' prompt, and every other Stop sends the two newer rules' prompt.
 
-A finding writes one line to guard.log through `guard_core.record` (decision `noted`; rule = the
-first judged rule id the reason names, else `reply-judge`; matched = `stop=<n> <reason>`). The
+A finding writes one line to guard.log through `guard_core.record` (decision `noted`; for the older reason, rule =
+the first older rule id it names, else `reply-judge`; for a `new_rules` item, rule = its id; matched = `stop=<n> <reason>`). The
 advisor reads the older rules' lines at each cull; the owner reads the two newer rules' lines at his review.
 guard_core loads on a finding, and on a judged Stop whose Why yours line
 cites a route id a row holds (route_match.surface reads it). A failed write is swallowed.
@@ -54,7 +60,8 @@ cites a route id a row holds (route_match.surface reads it). A failed write is s
 Fail open. Any model error, timeout or odd answer prints one line on stderr, exits 0, and
 refuses nothing. A finding never refuses: the hook runs async, and a finding on an older rule prints
 `{"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": NOTE}}` on stdout, which the
-session reads as a note on the next turn. A finding on a newer rule prints nothing.
+session reads as a note on the next turn. A finding on a newer rule prints nothing. An older `reason` that names a newer
+rule's id is logged and not printed, so no newer rule's text reaches the note.
 """
 import hashlib
 import json
@@ -130,8 +137,8 @@ JUDGED_RULES = ("output-start-with-point", "style-cut-narration",
                 "style-limits-kept-silently", "style-question-form",
                 "verification-counts-from-rest", "measure-before-priority",
                 "verification-report-unknown-reads",
-                "roles-finding-has-a-home", "parallelism-wait-names-its-event")
-NEW_RULES = JUDGED_RULES[-2:]  # judged on every Stop; a finding is a log line and no note
+                "roles-findings-are-debts-or-notes", "parallelism-keep-going")
+NEW_RULES = JUDGED_RULES[-2:]  # CLAUDE.md anchors, judged on every Stop; a finding is a log line and no note
 OLDER_RULES = JUDGED_RULES[:-2]
 JUDGE_RULE = "reply-judge"  # the guard.log rule when the reason names none of JUDGED_RULES
 REPLY_MAX = 12000  # the prompt rides stdin, so no argv cap; the clip bounds cost and latency only (unmeasured)
@@ -226,15 +233,26 @@ INSTRUCTIONS_NEW = (
     "Never flag a wait on named agents or background work the reply says it started. "
 )
 
+# The answer shape each prompt asks for. `reason` names an older rule only; each finding on a newer rule is its own
+# item in `new_rules`, so the printed note never carries a newer rule's text.
+NEW_RULES_FIELD = ("new_rules is a list with one item per finding on a newer rule: "
+                   "{\"rule\": \"<newer rule id>\", \"reason\": \"<the fix, one line>\"}, a rule id and a short reason; "
+                   "use [] when none.")
 INSTRUCTIONS_TAIL = (
-    "Flag only on a clear breach; when unsure answer {\"ok\": true}. "
-    "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
+    "Flag only on a clear breach; when unsure answer {\"ok\": true, \"new_rules\": []}. "
+    "Reply JSON only, two fields: {\"ok\": true|false, \"reason\": \"<older rule id and the fix, one line; omit when ok>\", "
+    "\"new_rules\": [...]}. ok and reason judge the older rules only and never name a newer rule. " + NEW_RULES_FIELD
+)
+INSTRUCTIONS_TAIL_NEW_ONLY = (
+    "Flag only on a clear breach; when unsure answer {\"ok\": true, \"new_rules\": []}. "
+    "Reply JSON only, ok always true here: {\"ok\": true, \"new_rules\": [...]}. " + NEW_RULES_FIELD
 )
 
 # The prompt of a Stop that runs the older rules, and the prompt of a Stop that runs only the newer two.
 INSTRUCTIONS = ("Judge the final reply below against thirteen rules. " + INSTRUCTIONS_OLDER + INSTRUCTIONS_NEW
                 + INSTRUCTIONS_TAIL)
-INSTRUCTIONS_NEW_ONLY = "Judge the final reply below against two rules. " + INSTRUCTIONS_NEW + INSTRUCTIONS_TAIL
+INSTRUCTIONS_NEW_ONLY = ("Judge the final reply below against two rules. " + INSTRUCTIONS_NEW
+                         + INSTRUCTIONS_TAIL_NEW_ONLY)
 
 
 ROUTE_ROWS_MAX = 30  # bounds the prompt when one act holds many rows (unmeasured)
@@ -379,16 +397,38 @@ def has_input_needed(reply):
     return not EMPTY_ITEM.match(" ".join(item))
 
 
-def log_finding(session_id, stop_n, reason):
-    """Write one guard.log line for a finding. Never raises."""
+def log_finding(session_id, stop_n, rule, reason):
+    """Write one guard.log line for a finding under `rule`. Never raises."""
     try:
         import guard_core  # lazy: a Stop with no finding loads no guard
-        found = [(reason.find(r), r) for r in JUDGED_RULES if r in reason]
-        rule = min(found)[1] if found else JUDGE_RULE
         guard_core.set_log_session(session_id)
         guard_core.record("Stop", "noted", rule, "stop=%d %s" % (stop_n, " ".join(reason.split())))
     except Exception:
         pass
+
+
+def older_rule_in(reason):
+    """The first older rule id the reason names, else JUDGE_RULE."""
+    found = [(reason.find(r), r) for r in OLDER_RULES if r in reason]
+    return min(found)[1] if found else JUDGE_RULE
+
+
+def new_rule_items(verdict):
+    """The (rule, reason) pairs of the answer's `new_rules` list that are well formed: a dict whose rule is a newer
+    rule's id. Any other item is dropped, and a field that is not a list gives none; neither touches the older
+    verdict. A valid item with no usable reason keeps a plain default, so its finding is still logged."""
+    items = verdict.get("new_rules")
+    if not isinstance(items, list):
+        return []
+    found = []
+    for item in items:
+        if not isinstance(item, dict) or item.get("rule") not in NEW_RULES:
+            continue
+        reason = item.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            reason = "the reply breaks this rule."
+        found.append((item["rule"], reason))
+    return found
 
 
 def main():
@@ -414,16 +454,19 @@ def main():
     if error:
         print("reply judge failed open: %s" % " ".join(error.split()), file=sys.stderr)
         return 0
-    if verdict.get("ok") is False:
+    session_id = hook.get("session_id")
+    if older and verdict.get("ok") is False:
         reason = verdict.get("reason")
         if not isinstance(reason, str) or not reason.strip():
             reason = "reply judge: the reply breaks a style rule."
-        log_finding(hook.get("session_id"), stop_n, reason)
-        # A finding on a newer rule is log only. A Stop with the older prompt still prints its note when the
-        # reason names an older rule, or names no judged rule.
-        if not older or (any(r in reason for r in NEW_RULES) and not any(r in reason for r in OLDER_RULES)):
-            return 0
-        print(json.dumps({"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": reason}}))
+        log_finding(session_id, stop_n, older_rule_in(reason), reason)
+        # The note carries the older reason alone. A reason that names a newer rule is logged and not printed,
+        # so no newer rule's text reaches the session.
+        if not any(r in reason for r in NEW_RULES):
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": reason}}))
+    # Each newer-rule item is one log line and is never printed, on a Stop of either prompt.
+    for rule, reason in new_rule_items(verdict):
+        log_finding(session_id, stop_n, rule, reason)
     return 0
 
 
