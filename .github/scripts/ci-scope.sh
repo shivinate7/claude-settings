@@ -125,7 +125,7 @@ if [ -n "$files" ]; then
       # bin/rm: the shim imports hooks/guard_rm_var.py (hooks/* above); it runs on posix jobs.
       bin/rm|lint/test_rm_shim.py) on="$on $X code " ;;
       # The CI alarm's events and clear rule: GUARD_READ_FILES (hooks/mutate_guard.py) lists them, so the guard suite reads them;
-      # merge/test_merge.py reads both, and the Windows merge job runs it.
+      # merge/merge.py reads both, and merge/test_merge.py imports it, so it sets checks_windows_merge, which runs that suite.
       actions/ci-alarm/events.json|actions/ci-alarm/clear_rule.py) on="$on $M code guard " ;;
       # Linux `checks` job only: the lints and opt-in templates.
       actions/*|githooks/*|testing/*|lint/*|.github/dependabot.yml) on="$on code " ;;
