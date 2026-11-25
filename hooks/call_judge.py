@@ -64,7 +64,7 @@ if HERE not in sys.path:
 # building-allow-list-is-the-constant). Cost: importing guard.py for it measured about 120 ms per Agent spawn;
 # shared_names is standard library only and adds about 2 ms.
 from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402
-from shared_names import DATA_TOOL  # noqa: E402  stdlib only: the one home of the tool name
+from shared_names import DATA_TOOL, SETTINGS_REPO  # noqa: E402  stdlib only: the one home of the tool name and the settings repo
 
 OK_SHAPE = {"ok": (True, False)}
 SPAWN_RULE, QUESTION_RULE = "spawn-judge", "question-judge"
@@ -198,8 +198,10 @@ WIDENING_TEMPLATE = (
     "This call sets options. An option that widens what a shared tool accepts (a second accepted form, an allow-list "
     "entry, a per-repo exception) must carry `%s: true`, the JSON boolean true, not the string \"true\". Block an unmarked widening option, and name its option key in "
     "the reason. An option that only names a repo, or changes a repo to fit the shared tool, is not widening. "
-    "Widening means a shared tool is made so that one repo's differing form passes. "
-    "Never flag a change to the shared tool that every repo gets alike, with no repo named as its reason. A marked "
+    "Widening means a shared tool is made so that the differing form of a repo other than %s passes. "
+    "Never flag a change to the shared tool that every repo gets alike, with no repo named as its reason. "
+    "Also never flag a change that names only %s, the tool's home, as where it applies, unless it lets the "
+    "differing form of a repo other than %s pass. A marked "
     "option passes this rule. When unsure, allow."
 )
 
@@ -207,7 +209,7 @@ WIDENING_TEMPLATE = (
 def widening_rule():
     """The widening rule's text, with the mark's key from question_form.WIDENS_KEY."""
     import question_form
-    return WIDENING_TEMPLATE % question_form.WIDENS_KEY
+    return WIDENING_TEMPLATE % (question_form.WIDENS_KEY, SETTINGS_REPO, SETTINGS_REPO, SETTINGS_REPO)
 
 
 def __getattr__(name):  # PEP 562: the module constant WIDENING_RULE costs no import until it is read
