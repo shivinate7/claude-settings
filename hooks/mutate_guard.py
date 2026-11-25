@@ -3534,9 +3534,17 @@ MUTATIONS = [
     # ---- compaction-audit (decision precompact-handoff, item 16): one mutant per arm the rule needs. Each is
     # judged by test_handoff_wave2.py part 4 (target "audit"), so its required name is one of that suite's checks.
     ("compaction-audit: the refusal is never printed",
-     '            refuse(tool, "deny", "compaction-audit", COMPACTION_AUDIT_REASON % pending, pending)',
+     '            refuse(tool, "deny", "compaction-audit", COMPACTION_AUDIT_REASON % pending + note, pending)',
      '            pass',
      "audit", "after the read, a Bash call is refused by compaction-audit"),
+    ("compaction-audit: the audit helper allows any command that names the helper, so a chained or copied call passes",
+     '    return tool == "Bash" and isinstance(command, str) and command == reread_check.audit_helper_command(handoff)',
+     '    return tool == "Bash" and isinstance(command, str) and "precompact_handoff.py" in command',
+     "audit", "the helper command with a chained rm stays refused"),
+    ("compaction-audit: the refusal drops the session's transcript path, so an Audit: brief cannot name it",
+     "COMPACTION_AUDIT_REASON % pending + note",
+     "COMPACTION_AUDIT_REASON % pending",
+     "audit", "the refusal holds the session's transcript path"),
     ("compaction-audit: the Audit: spawn does not clear the audit flag",
      "        judge(payload)\n        audit_flag_clear_after_allow(payload)",
      "        judge(payload)\n        pass",
