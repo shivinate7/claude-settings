@@ -5,7 +5,7 @@
 The STE lint is a plain-prose lint. The writer gets a rewrite only where the rewrite keeps the meaning.
 Where the lint cannot judge meaning, it nudges and never refuses.
 
-Owner, 2026-11-02 13:22 CST: drop Simplified Technical English (STE) as a named writing standard, everywhere. Write plainly only. The one standard is rule `output-write-in-ste` in `CLAUDE.md`: plain writing, with one term per meaning and no filler. The lint keeps its current checks and names for now. Renaming the lint, its CI step and its shared action is a separate follow-up.
+Owner, 2026-11-02 13:22 CST: drop Simplified Technical English (STE) as a named writing standard, everywhere. Write plainly only. The one standard is rule `output-write-in-ste` (anchor `rule:output-write-in-ste`) in `CLAUDE.md`: write plainly, with short sentences, one term per meaning and no filler. The lint keeps its current checks and names for now. Renaming the lint, its CI step and its shared action is a separate follow-up.
 
 Owner: a lint rule either refuses or does not exist. A rule nobody can see is not a rule. The six advisory codes below are the one exception. `RULES` in `lint/ste_lint.py` is the home.
 

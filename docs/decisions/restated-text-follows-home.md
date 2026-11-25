@@ -4,7 +4,7 @@
 
 Owner, 2026-11-25 10:02 CST: "how have you built a way to ensure that if rulings change, they're automatically updating in the briefs and/or utilizing a pointer system so that way staleness never occurs".
 
-Owner, 2026-11-25 10:25 CST: "this might be huge so ensure you send an opus plan agent too and a refuter on this", and "i assume it will largely be haiku workflow work".
+Owner, 2026-11-25 10:25 CST: "this might be huge so ensure you send an opus plan agent too and a refuter onthis", and "i assume it will largely be haiku workflow work".
 
 The goal had no home until this record. The answer is a pointer, not a copy: text that restates a rule names the rule's id, and a check or a judge reads the live rule. Nothing here is built yet. The record cites filed with this record are text only.
 
@@ -16,7 +16,7 @@ The mistake: a ruling changed, and the text that restates it to sessions and age
 
 Two incidents, 2026-11-25:
 
-- The standing brief lines in `hooks/agent_brief.py` carry no tie to the records they come from. A change to a record cannot reach them.
+- No check ties the standing brief lines in `hooks/agent_brief.py` to the records they come from. A change to a record cannot reach them.
 - A judge prompt in `hooks/reply_judge.py` (the questions-go-to-owner text) may still tell sessions to take a pick. The prompt holds no consult wording. The cause is not confirmed.
 
 ## The design (planned; not built)
