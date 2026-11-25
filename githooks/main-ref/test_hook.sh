@@ -202,4 +202,4 @@ c="$(fresh_clone "$src" chk-origin-current)"; git -C "$c" switch -q -c away; git
 arm_copy "$c" "$main_hook"
 t ok "--check: no local main, current copy exits 0 against origin/main" ckdir "$c"
 
-cd "$repo"; rm -rf "$tmp"; exit $bad
+cd "$repo" || exit 1; rm -rf "$tmp"; exit $bad
