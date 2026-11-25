@@ -343,6 +343,21 @@ for _role in ("claude", "general-purpose", "builder", "reviewer", "test-author",
               "Planner"):
     add("ceiling: Agent %s with model opus and no standing grant is denied" % _role, "deny", CEILING,
         tool="Agent", prompt="do it", model="opus", subagent_type=_role)
+# Fable needs the owner's grant like Opus (rule roles-sonnet-is-the-ceiling, decision agent-model-cap). The
+# ceiling reads only the word opus, so a fable spawn with no grant passes it today (note fable-passes-opus-ceiling).
+# Each red names the spawn the Opus ceiling refuses under agent-model-cap. Each control is green on the old code too.
+# Failure class: a false allow (a fable spawn passes the ceiling with no grant). Case labels carry `fable ceiling:`.
+for _model in ("fable", "claude-fable-5-2"):
+    for _role in ("builder", "general-purpose"):
+        add("fable ceiling: Agent %s with model %s and no grant is denied under agent-model-cap" % (_role, _model),
+            "deny", CEILING, tool="Agent", prompt="do it", model=_model, subagent_type=_role)
+add("fable ceiling: Workflow builder agent() on fable with no grant is denied under agent-model-cap", "deny", CEILING,
+    tool="Workflow", script=_step_flow("'Fix the failing case.'", "agentType: 'builder', model: 'fable'"))
+for _role in ("builder", "general-purpose"):
+    add("fable ceiling: control, Agent %s with model sonnet is allowed" % _role, "allow",
+        tool="Agent", prompt="do it", model="sonnet", subagent_type=_role)
+add("fable ceiling: control, Workflow builder agent() on sonnet is allowed", "allow",
+    tool="Workflow", script=_step_flow("'Fix the failing case.'", "agentType: 'builder', model: 'sonnet'"))
 add("ceiling: Agent Plan with model opus is allowed (standing grant)", "allow",
     tool="Agent", prompt="Design the plan.", model="opus", subagent_type="Plan")
 add("ceiling: Task Plan with model claude-opus-5-5 is allowed (standing grant)", "allow",
