@@ -127,7 +127,7 @@ unless the file is a Haiku role. It also fails an `agents/*.md` body that states
 - Not his typed turn: a seed brief with a non-human `turnOrigin`, and a compaction summary (`_owner_text`).
 - The Haiku floor's plain text match stays (owner, 2026-11-18 19:03 CST; `owner_names_model`).
 
-Cost, as the builder measured it: no model named, zero calls and zero file reads. A named model: one tail read, one Haiku call, one write or delete. Per spawn: one open of the pass file (`held_model`). Per Stop: one open (`model_line_problem`).
+Cost, as the builder measured it: with no model named, no model call and no file read. With a named model: a tail read, a Haiku call, and a write or a delete. Per spawn: an open of the pass file (`held_model`). Per Stop: an open (`model_line_problem`).
 
 Not built:
 - A judge at each new owner message and each report, and the non-blocking fallback: a spawn after a hold ends is rewritten to its role's row, not paused. Owner approval 12:18 CST Nov 25.
