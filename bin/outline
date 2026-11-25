@@ -1,14 +1,23 @@
 #!/usr/bin/env python3
-# outline FILE [SYMBOL]: read a long file by section. It prints one line per unit, `<first>-<last> <kind> <name>`, in
-# file order, so a reader opens only the range it needs. With SYMBOL it prints the one line of the unit with that name.
-# Units: Python (top-level class, function, method, constant of more than 5 lines), Markdown (heading), a YAML workflow (job,
-# step), shell (function). It reads FILE once and starts no child process, writes no file and keeps no log.
-# Names: Python and shell nest with dots (Outer.run.inner); a step is jobs.<id>.<name>; a heading is its own text.
-# A SYMBOL is an exact name, else a name's last dotted parts (`value` for Outer.value); two or more matches are ambiguous.
-# Ranges: Python as ast gives them (a decorator belongs to its def). Markdown, YAML and shell end on the line before
-# the next unit of the same or a higher level, so a blank line before it belongs to the earlier unit.
-# Exit 0: the outline or the symbol's line. 1: no such symbol, or an ambiguous one (each candidate is printed). 2: a
-# file this tool does not read or cannot read, or a wrong call (one line says which).
+"""usage: outline FILE [SYMBOL]
+       outline -h | --help
+
+Read a long file by section. It prints one line per unit, `<first>-<last> <kind> <name>`, in file order, so a reader
+opens only the range it needs. With SYMBOL it prints the one line of the unit with that name.
+Units: Python (class, function, method, constant of more than 5 lines), Markdown (heading), a YAML workflow (job,
+step), shell (function). It reads FILE once and starts no child process, writes no file and keeps no log.
+Names: Python and shell nest with dots (Outer.run.inner); a step is jobs.<id>.<name>; a heading is its own text.
+A SYMBOL with no dot matches each unit whose last name part it is, so a function and a method of one name are two
+candidates. A dotted SYMBOL is an exact name, else a name's last dotted parts. Two or more matches are ambiguous.
+Python lists a class in a module, a class, or an if, try, with, for or while of either; it does not list a class
+inside a def (that class's methods are listed).
+Ranges: Python as ast gives them (a decorator belongs to its def). Markdown, YAML and shell end on the line before
+the next unit of the same or a higher level, so a blank line before it belongs to the earlier unit. Lines are
+counted by newline only, as sed counts them: a form feed or U+2028 inside a line is no break.
+Exit 0: the outline, the symbol's line, or this help. 1: no such symbol, or an ambiguous one (each candidate is
+printed). 2: a file this tool does not read or cannot read (including a YAML file indented with a tab), or a wrong
+call (one line says which).
+"""
 import ast
 import os
 import re
@@ -24,6 +33,15 @@ class Refusal(Exception):
 
 def unit(first, last, kind, name):
     return (first, last, kind, name)
+
+
+def split_lines(text):
+    """The lines of `text`, broken at newlines only. str.splitlines also breaks at a form feed, U+2028 and a lone CR, so
+    its line numbers would not match sed's."""
+    lines = [line[:-1] if line.endswith("\r") else line for line in text.split("\n")]
+    if lines and lines[-1] == "":
+        lines.pop()
+    return lines
 
 
 def last_content_line(lines):
@@ -48,15 +66,15 @@ def py_units(source):
         raise Refusal("cannot parse as Python: %s" % err)
     units = []
 
-    def walk(body, scope, in_class, top, direct):
+    def walk(body, scope, in_class, top, in_def):
         for node in body:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 is_class = isinstance(node, ast.ClassDef)
                 first, last = py_span(node)
                 kind = "class" if is_class else ("method" if in_class else "function")
-                if not is_class or direct:  # a class inside a class, a def or an if sits in its parent's range; its methods are listed
+                if not is_class or not in_def:  # a class inside a def sits in that def's range; its methods are listed
                     units.append(unit(first, last, kind, ".".join(scope + [node.name])))
-                walk(node.body, scope + [node.name], is_class, False, False)
+                walk(node.body, scope + [node.name], is_class, False, in_def or not is_class)
             elif top and isinstance(node, (ast.Assign, ast.AnnAssign)):
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
                 names = [t.id for t in targets if isinstance(t, ast.Name) and CONSTANT.match(t.id)]
@@ -67,11 +85,11 @@ def py_units(source):
                 for field in ("body", "orelse", "finalbody"):
                     inner = getattr(node, field, None)
                     if isinstance(inner, list):
-                        walk(inner, scope, in_class, top, False)
+                        walk(inner, scope, in_class, top, in_def)
                 for handler in getattr(node, "handlers", []):
-                    walk(handler.body, scope, in_class, top, False)
+                    walk(handler.body, scope, in_class, top, in_def)
 
-    walk(tree.body, [], False, True, True)
+    walk(tree.body, [], False, True, False)
     return units
 
 
@@ -198,6 +216,9 @@ def step_rows(masked, steps_at, stop):
 
 def yaml_units(lines):
     masked = yaml_structure(lines)
+    for number, text in enumerate(masked, 1):
+        if re.match(r" *\t", text):
+            raise Refusal("cannot read YAML: line %d is indented with a tab, and YAML indents with spaces" % number)
     count = len(lines)
     end_of_file = last_content_line(lines)
     jobs_at = next((i for i, text in enumerate(masked) if re.match(r"^jobs:[ \t]*$", text)), None)
@@ -278,22 +299,44 @@ def shell_code(lines):
     return out
 
 
+SHELL_TOKEN = re.compile(r";;&|;;|;&|[A-Za-z_]\w*|\S")
+ARM_END = (";;", ";&", ";;&")
+COMMAND_START = (None, ";", "&", "|", "(", "{", ")", "then", "do", "else", "elif") + ARM_END
+
+
 def shell_body_end(code, row, rest):
     """The last line of the `{ }` or `( )` body that starts in `rest`, the text after the header on line `row`.
-    None: it never closes."""
-    opener, depth, chunk = None, 0, rest
+    None: it never closes. In a `( )` body a case pattern's `)` closes nothing, so `case`, `in`, `;;` and `esac` are
+    tracked: the `)` after `in` or after an arm's end is a pattern's, with an optional `(` before it."""
+    opener, depth, cases, awaiting_in, pattern = None, 0, 0, 0, False
     for index in range(row, len(code)):
-        for char in chunk:
+        prev = None
+        for token in SHELL_TOKEN.findall(rest if index == row else code[index]):
             if opener is None:
-                if char in "{(":
-                    opener, depth = char, 1
-                elif char.strip():
+                if token not in ("{", "("):
                     return row + 1  # the body is no group, so the header line is the unit
+                opener, depth = token, 1
             else:
-                depth += (char == opener) - (char == ("}" if opener == "{" else ")"))
-                if depth == 0:
-                    return index + 1
-        chunk = code[index + 1] if index + 1 < len(code) else ""
+                if opener == "(":
+                    if token == "case" and prev in COMMAND_START:
+                        cases, awaiting_in = cases + 1, awaiting_in + 1
+                    elif token == "in" and awaiting_in:
+                        awaiting_in, pattern = awaiting_in - 1, True
+                    elif token == "esac" and cases and prev in COMMAND_START:
+                        cases, pattern = cases - 1, False
+                    elif token in ARM_END and cases:
+                        pattern = True
+                    elif pattern and token in ("(", ")"):
+                        pattern = token == "("
+                        prev = token
+                        continue
+                if token == opener:
+                    depth += 1
+                elif token == ("}" if opener == "{" else ")"):
+                    depth -= 1
+                    if depth == 0:
+                        return index + 1
+            prev = token
     return None
 
 
@@ -359,11 +402,13 @@ def outline(path):
         raise Refusal("not read: %s is not a .py, .md, .yml, .yaml or .sh file, or a script with a python or shell #! line" % path)
     if kind == "python":
         return py_units(text)
-    lines = text.splitlines()
+    lines = split_lines(text)
     return {"markdown": md_units, "yaml": yaml_units, "shell": shell_units}[kind](lines)
 
 
 def pick(units, symbol):
+    if "." not in symbol:  # a bare name is each unit it ends: a function and a method of one name are both candidates
+        return [u for u in units if u[3] == symbol or u[3].endswith("." + symbol)]
     exact = [u for u in units if u[3] == symbol]
     return exact or [u for u in units if u[3].endswith("." + symbol)]
 
@@ -373,6 +418,9 @@ def show(found):
 
 
 def main(argv):
+    if argv and argv[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0
     if not 1 <= len(argv) <= 2:
         print("usage: outline FILE [SYMBOL]")
         return 2
