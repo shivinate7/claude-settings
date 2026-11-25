@@ -208,17 +208,22 @@ class ConfigFile(unittest.TestCase):
         self.assertTrue(any(judged(found) for found in arrays.values()), "no array of .github/stamp.json holds more than %d strings" % LIMIT)
 
     def test_the_merge_lists_stay_lists_of_names(self):
-        """The merge tool refuses a config whose readyChecks, lintSuites or keepBranches is not a list of non-empty strings."""
-        merge = json.loads(read_config())["merge"]
-        for key in ("readyChecks", "lintSuites", "keepBranches"):
+        """The merge tool's own rule (parse_config in merge/merge.py): readyChecks is absent or a non-empty list of non-empty strings;
+        lintSuites and keepBranches, absent or empty, list nothing, and otherwise hold non-empty strings."""
+        merge = json.loads(read_config()).get("merge", {})
+        for key, may_be_empty in (("readyChecks", False), ("lintSuites", True), ("keepBranches", True)):
             with self.subTest(list=key):
-                items = merge[key]
+                items = merge.get(key, [] if may_be_empty else None)
+                if items is None:
+                    continue
                 self.assertIsInstance(items, list)
-                self.assertTrue(items, "merge.%s is empty" % key)
+                self.assertTrue(items or may_be_empty, "merge.%s is empty" % key)
                 self.assertTrue(all(isinstance(item, str) and item.strip() for item in items), "merge.%s holds an entry that is no name" % key)
 
     def test_ready_checks_has_one_name_per_line(self):
-        entries = self.arrays()["merge.readyChecks"]
+        arrays = self.arrays()
+        self.assertIn("merge.readyChecks", arrays, ".github/stamp.json holds no merge.readyChecks array, so nothing was judged")
+        entries = arrays["merge.readyChecks"]
         self.assertTrue(judged(entries), "merge.readyChecks holds %d names, too few to be judged" % len(entries))
         shared = sharing(entries)
         if shared:
