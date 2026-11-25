@@ -3100,9 +3100,13 @@ MUTATIONS = [
      'if False:',
      "override", "owner-model-word: a held sonnet does not lift the Opus ceiling for a spawn with no role"),
     ("owner-model-word: the role hold skips the ceiling for a named role, so a round-2 reviewer on sonnet walks past",
-     'if not hold_covers_role(hold, role) or (hold.get("role") is None and hold_exempt(spawn, role, rounds)):',
-     'if not hold_covers_role(hold, role) or hold.get("role") is not None:',
+     'or (hold.get("role") is None and hold_exempt(spawn, role, rounds))):',
+     'or hold.get("role") is not None):',
      "guard", "owner-model-word: a round-2 reviewer spawn on sonnet is refused under agent-role-model when the owner's haiku hold names reviewer"),
+    ("owner-model-word: the role hold reads an unjudged keyword Opus file as a ceiling, so `opus 2h` refuses a sonnet role spawn",
+     'if (not hold.get("judged") or not hold_covers_role(hold, role)',
+     'if (not hold_covers_role(hold, role)',
+     "guard", "owner-model-word: a keyword Opus override (opus 2h) refuses"),
     # THE VETO AND THE TAKE (decision owner-override). never_lifted names the acts an override may not lift, and
     # override.take reads the one-act override. A mutant that lifts a never-lifted act, or reads no override, must go red.
     ("never-lifted: a shell kill of pid 1 is liftable, so an override reaches it",
