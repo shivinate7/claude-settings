@@ -52,11 +52,18 @@ def _arm():
     sys.meta_path.insert(0, _UnittestHook())
 
 
+def _is_home(path):
+    """True for this home's own file and for a copy of it: a sitecustomize.py that sits beside a case_times.py.
+    A copy that the chain ran would chain back to this one, so no copy is ever run from here."""
+    real = os.path.realpath(path)
+    return real == OWN or os.path.isfile(os.path.join(os.path.dirname(real), "case_times.py"))
+
+
 def _chain():
     """Run the next sitecustomize.py on sys.path, the one Python would have run without this file."""
     for entry in sys.path:
         candidate = os.path.join(entry or os.curdir, "sitecustomize.py")
-        if os.path.isfile(candidate) and os.path.realpath(candidate) != OWN:
+        if os.path.isfile(candidate) and not _is_home(candidate):
             with open(candidate, "rb") as f:
                 code = compile(f.read(), candidate, "exec")
             exec(code, {"__name__": "sitecustomize", "__file__": candidate})

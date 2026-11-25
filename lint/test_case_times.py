@@ -550,6 +550,50 @@ class Chain(unittest.TestCase):
         self.assertTrue(os.path.exists(mark), "the sitecustomize after case_times on PYTHONPATH did not run")
 
 
+class TwoHomes(unittest.TestCase):
+    def test_two_copies_of_the_home_chain_once(self):
+        folder = case_folder(self)
+        write(folder, "fixture_plain.py", PLAIN)
+        # Two distinct copies of the home on PYTHONPATH, then a real sitecustomize after them. The copies are the
+        # case's input: it needs two files, and only a copy makes the second one.
+        copies = []
+        for name in ("home_a", "home_b"):
+            copy = os.path.join(folder, name)
+            os.makedirs(copy)
+            for file_name in ("sitecustomize.py", "case_times.py"):
+                shutil.copy(os.path.join(HOME, file_name), copy)
+            copies.append(copy)
+        nxt = os.path.join(folder, "next")
+        os.makedirs(nxt)
+        write(nxt, "sitecustomize.py",
+              'import os\nwith open(os.environ["CHAIN_MARK"], "w", encoding="utf-8") as f:\n'
+              '    f.write("next ran")\n')
+        pythonpath = os.pathsep.join(copies + [nxt])
+        mark = os.path.join(folder, "chain.mark")
+        unarmed = run_module(folder, "fixture_plain", armed=False, report=True, pythonpath=pythonpath,
+                             extra={"CHAIN_MARK": mark})
+        self.assertEqual(result_line(unarmed), "RESULT ran=1 failures=0 errors=0 skipped=0",
+                         "two copies of the home on PYTHONPATH: the unarmed child did not run its one case; "
+                         "exit %d, stderr tail: %s" % (unarmed.returncode, unarmed.stderr[-300:]))
+        self.assertTrue(os.path.exists(mark), "two copies of the home on PYTHONPATH: the chain did not reach the "
+                                              "sitecustomize after them (unarmed); stderr tail: %s"
+                        % unarmed.stderr[-300:])
+        mark_armed = os.path.join(folder, "chain_armed.mark")
+        armed = run_module(folder, "fixture_plain", report=True, pythonpath=pythonpath,
+                           extra={"CHAIN_MARK": mark_armed})
+        self.assertEqual(site_file(armed), os.path.realpath(os.path.join(copies[0], "sitecustomize.py")),
+                         "two copies of the home on PYTHONPATH: the first copy did not load (SITE_FILE %r); "
+                         "stderr tail: %s" % (site_file(armed), armed.stderr[-300:]))
+        self.assertEqual(armed.returncode, unarmed.returncode, "the armed run exited %d, the unarmed %d"
+                         % (armed.returncode, unarmed.returncode))
+        self.assertEqual(result_line(armed), result_line(unarmed),
+                         "the armed run's outcome differs from the unarmed run's")
+        self.assertIsNotNone(rows_of(folder), "the armed run wrote no case-times file")
+        self.assertTrue(os.path.exists(mark_armed), "two copies of the home on PYTHONPATH: the chain did not reach "
+                                                    "the sitecustomize after them (armed); stderr tail: %s"
+                        % armed.stderr[-300:])
+
+
 class Cost(unittest.TestCase):
     def test_no_child_and_one_file(self):
         folder = case_folder(self)
