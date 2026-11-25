@@ -2005,6 +2005,85 @@ class UnstartedItemsTests(unittest.TestCase):
                            "measured conflict in lint/report_guard.py", [self.BUILDER])
         self.assertIsNone(out, "control: a measured conflict in a file is refused: %r" % (out,))
 
+    def test_un_red_pr_wait_worded_must_first_or_before_blocks(self):
+        # Catches: a wait on a PR worded "must merge first", "must land first" or "must land before it starts" names
+        # no file or symbol, and the turn passes.
+        self.assert_refused_for_shared_file([
+            (self.DONE + "> **Next** Unstarted: lint-stub, PR #3916 must merge first", "PR #3916 must merge first"),
+            (self.DONE + "> **Next** Unstarted: lint-stub, (PR #3916 must land first)", "(PR #3916 must land first)"),
+            (self.DONE + "> **Next** Unstarted: lint-stub, PR #3916 must land before it starts",
+             "PR #3916 must land before it starts"),
+        ])
+
+    def test_un_red_pr_wait_worded_blocks_or_blocker_or_batch_first_blocks(self):
+        # Catches: a wait on a PR worded "blocks it" or "is the blocker", or on the batch worded "merges first", names
+        # no file or symbol, and the turn passes.
+        self.assert_refused_for_shared_file([
+            (self.DONE + "> **Next** Unstarted: lint-stub, PR #3916 blocks it", "PR #3916 blocks it"),
+            (self.DONE + "> **Next** Unstarted: lint-stub, PR #3916 is the blocker", "PR #3916 is the blocker"),
+            (self.DONE + "> **Next** Unstarted: lint-stub, the batch merges first", "the batch merges first"),
+        ])
+
+    def test_un_control_pr_waits_worded_on_or_blocked_by_stay_refused(self):
+        # Control: a wait on a PR, worded "waits on" or "blocked by", names no file, so it stays refused.
+        self.assert_refused_for_shared_file([
+            (self.DONE + "> **Next** Unstarted: lint-stub, waits on PR #3916 to merge",
+             "control: waits on PR #3916 to merge"),
+            (self.DONE + "> **Next** Unstarted: lint-stub, blocked by PR #3916", "control: blocked by PR #3916"),
+        ])
+
+    def test_un_control_pr_context_owner_brake_and_file_waits_stay_green(self):
+        # Control: a PR named for context, a wait on the owner or the load brake, or a wait that names a file, stays
+        # green.
+        self.assert_passes_unstarted([
+            (self.DONE + "> **Next** Unstarted: lint-stub, not briefed yet", "control: not briefed yet"),
+            (self.DONE + "> **Next** Unstarted: lint-stub, waits for the owner's answer",
+             "control: waits for the owner's answer"),
+            (self.DONE + "> **Next** Unstarted: lint-stub, waits on the load brake; PR #3916 merged",
+             "control: a brake wait with PR #3916 merged for context"),
+            (self.DONE + "> **Next** Unstarted: lint-stub, PR #3916 awaits review", "control: PR #3916 awaits review"),
+            (self.DONE + "> **Next** Unstarted: lint-stub, builds on the delete rule in docs/decisions/x.md, "
+             "which PR 3916 rewrites", "control: a named file, with PR 3916 for context"),
+        ])
+
+    def test_un_false_alarm_wait_on_merge_tool_or_owner_ruling_passes(self):
+        # Catches: "merge" in a wait on the merge tool's ruling, or on a decision about the merge rule, reads as
+        # a merge wait with no file, so the turn is refused.
+        self.assert_passes_unstarted([
+            (self.DONE + "> **Next** Unstarted: lint-stub, waits for the merge tool's ruling",
+             "a wait on the merge tool's ruling"),
+            (self.DONE + "> **Next** Unstarted: lint-stub, waits on the owner's ruling about the merge rule",
+             "a wait on the owner's ruling about the merge rule"),
+        ])
+
+    def test_un_false_alarm_code_need_named_by_symbol_without_code_word_passes(self):
+        # Catches: a need for a PR's helper, named by its symbol with no "code:" before it, is refused, though the item
+        # names the symbol it builds on.
+        self.assert_passes_unstarted([
+            (self.DONE + "> **Next** Unstarted: lint-stub needs PR #3916's helper `reap_refs`",
+             "a need for PR #3916's helper named by its symbol"),
+        ])
+
+    def test_un_false_alarm_owner_answer_on_a_pr_scope_passes(self):
+        # Catches: a wait for the owner's answer on a PR's scope reads as a wait on the PR, so the turn is refused.
+        self.assert_passes_unstarted([
+            (self.DONE + "> **Next** Unstarted: lint-stub waits for the owner's answer on PR #3916's scope",
+             "a wait for the owner's answer on a PR's scope"),
+        ])
+
+    def test_un_remedy_names_the_code_need_and_conflict_forms_and_no_real_pr_or_file(self):
+        # Catches: the refusal names neither form the writer may use, so the writer cannot tell what to add, or it names
+        # a real PR or file.
+        out = self.verdict(self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge", [self.BUILDER])
+        self.assertIsNotNone(out, "the turn passed")
+        self.assertEqual(out["decision"], "block", "%r" % (out,))
+        self.assertIn("needs PR #N's code: `symbol`", out["reason"],
+                      "the refusal does not name the code need form: %r" % (out["reason"],))
+        self.assertIn("measured conflict in <file>", out["reason"],
+                      "the refusal does not name the measured conflict form: %r" % (out["reason"],))
+        self.assertNotRegex(out["reason"], r"#\d|\b[\w-]+\.[A-Za-z]{1,9}\b|/",
+                            "the refusal names a real PR or file: %r" % (out["reason"],))
+
 
 class NoResendTests(unittest.TestCase):
     """A report guard never makes a session send its whole report twice (roadmap c101)."""
