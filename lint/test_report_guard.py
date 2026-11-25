@@ -5237,13 +5237,15 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         with open(self.record, encoding="utf-8") as f:
             return [json.loads(line) for line in f if line.strip()]
 
-    def stop(self, repo, reply=None, answer=None, model_fail=False, records=None, to_writer=False, config=None):
+    def stop(self, repo, reply=None, answer=None, model_fail=False, records=None, to_writer=False, config=None, session=None):
         if records is None:
             # A question reaches the page writer in its own turn, so `to_writer` adds that send before the reply.
             sent = [*self.writer_read(self.WRITER), *self.send(session_id=self.WRITER)] if to_writer else []
             records = [human("decide"), *sent, assistant_text(reply)]
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False, "cwd": repo}
+        if session is not None:  # the session whose Stop this is: its guard.log line carries the id
+            hook["session_id"] = session
         overrides = {"CJ_ANSWER": answer or tcj.ALLOW}
         if model_fail:
             overrides["CJ_MODEL_FAIL"] = "1"
@@ -5425,8 +5427,11 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
     ID_AND_DATE = "decisions/github-apps-keep-access (2026-10-28)"
     TWO_QUESTIONS = "Should the GitHub apps keep their access to claude-settings?\nDo you want the CI cap raised?"
 
-    def judged(self, reason):
-        return json.dumps({"ok": False, "reason": reason})
+    def judged(self, reason, question=None):
+        body = {"ok": False, "reason": reason}
+        if question is not None:  # the number of the question the judge matched, counting from 1
+            body["question"] = question
+        return json.dumps(body)
 
     def verdict(self, reply, reason, repo=None, config=None):
         """The past-ruling refusal of `reply` when the stub judge refuses with `reason`. The verdict is asserted first, so a
@@ -5462,9 +5467,10 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         self.assertNotIn("take a pick", reason.lower(), "the judge's order reached the refusal: %r" % reason)
         self.assertNotIn("drop this question", reason.lower(), "the judge's order reached the refusal: %r" % reason)
 
-    def test_refusal_keeps_the_one_sentence_of_the_judge_reason(self):
+    def test_refusal_says_what_the_listed_ruling_decides(self):
         reason = self.verdict(RELAY, self.ORDER_REASON)
-        self.assertIn(self.DECIDES, reason, "the sentence of what the ruling decides is lost: %r" % reason)
+        self.assertIn(tcj.RULING_CORE, reason,
+                      "the sentence of what the listed ruling decides is not its own line's sentence: %r" % reason)
 
     def test_two_questions_refusal_names_one_of_them(self):
         reason = self.verdict(self.TWO_QUESTIONS, self.NO_DATE_REASON)
@@ -5539,6 +5545,84 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         config = tempfile.mkdtemp(dir=_ISOLATION["dir"])
         self.stop(self.ci, DONE_ONLY, config=config)
         self.assertFalse(os.path.exists(os.path.join(config, "guard.log")), "a Stop with nothing to refuse wrote guard.log")
+
+    # The Stop path reads the one text window the judge saw, the Based on (ruling) lines of each question, and the listed
+    # ruling's own date and sentence. The cases below pin each of those reads.
+    # The unit with no question mark asks for a word without offering a pick, so the departs-from guard stays quiet.
+    PICK_BESIDE_NAMED = ("> **Input Needed**\n> - Tell me whether the CI cap stays at 2x.\n"
+                         "> - Should the GitHub apps keep their access to claude-settings?\n"
+                         "Based on (ruling): github-apps-keep-access says revisit only if the apps get bloated.")
+    NAMED_ALONE = ("> **Input Needed**\n> - Should the GitHub apps keep their access to claude-settings?\n"
+                   "Based on (ruling): github-apps-keep-access says revisit only if the apps get bloated.")
+    JUDGED_FIRST = ("> **Input Needed** Should the GitHub apps keep their access to claude-settings?\n"
+                    "Based on (ruling): github-apps-keep-access says revisit only if the apps get bloated.\n"
+                    "> **Input Needed** Should the Renovate app keep its access to claude-settings?")
+    PAD = "Background line about the audit, read by no one. " * 150
+    OUT_OF_WINDOW = ("> **Input Needed** Should the Renovate app keep its access to claude-settings?\n" + PAD + "\n"
+                     "> **Input Needed** Should the GitHub apps keep their access to claude-settings?\n"
+                     "Based on (ruling): github-apps-keep-access says revisit only if the apps get bloated.")
+    BULLET_BASED = ("> **Input Needed** Should the GitHub apps keep their access to claude-settings?\n"
+                    "- Based on (ruling): github-apps-keep-access says revisit only if the apps get bloated.")
+    SESSION = "stopsess01"
+
+    def test_unit_without_a_question_mark_beside_a_named_one_is_refused(self):
+        # A question with no question mark is a unit of its own. The neighbour's Based on (ruling) line does not cover it.
+        out, _ = self.stop(self.decided, self.PICK_BESIDE_NAMED, answer=self.judged(self.NO_DATE_REASON), to_writer=True)
+        self.assertEqual(out.get("decision"), "block",
+                         "the pick with no question mark passed beside a question that names the ruling: %r" % out)
+
+    def test_neighbour_alone_passes(self):
+        # Control: the question that names the ruling, with no pick beside it, passes.
+        out, _ = self.stop(self.decided, self.NAMED_ALONE, answer=self.judged(self.NO_DATE_REASON), to_writer=True)
+        self.assertEqual(out, {}, "a question that names the listed ruling was refused: %r" % out)
+
+    def test_judged_question_one_that_names_the_ruling_passes_beside_another(self):
+        # The judge matched question 1, which names the ruling. Question 2 names none and is not the one judged.
+        out, _ = self.stop(self.decided, self.JUDGED_FIRST, answer=self.judged(self.NO_DATE_REASON, question=1),
+                           to_writer=True)
+        self.assertEqual(out, {}, "the judge matched question 1, which names the ruling, yet the reply was refused: %r" % out)
+
+    def test_question_the_judge_never_saw_is_not_refused(self):
+        # A question outside the text window the judge was given is never refused, even when the judge's number is 1.
+        out, _ = self.stop(self.decided, self.OUT_OF_WINDOW, answer=self.judged(self.NO_DATE_REASON, question=1),
+                           to_writer=True)
+        self.assertEqual(out, {}, "a question outside the text the judge saw was refused: %r" % out)
+
+    def test_refusal_gives_the_rulings_own_date_not_a_later_one(self):
+        # The listed line has a later date after the ruling's own; the refusal shows the ruling's own date.
+        repo = tcj.make_repo("relay-two-dates", decisions={tcj.APPS_SLUG: tcj.TWO_DATE_RULING})
+        reason = self.verdict(RELAY, self.NO_DATE_REASON, repo=repo)
+        self.assertIn(self.ID_AND_DATE, reason, "the refusal does not give the ruling's own date: %r" % reason)
+
+    def test_refusal_drops_a_skip_order_the_phrase_list_lacks(self):
+        # An order in words the phrase list lacks never reaches the refusal text.
+        reason = self.verdict(RELAY, self.NO_DATE_REASON + " Skip the question and take the default answer.")
+        self.assertNotIn("skip the question", reason.lower(), "the judge's order reached the refusal: %r" % reason)
+        self.assertNotIn("default answer", reason.lower(), "the judge's order reached the refusal: %r" % reason)
+
+    def test_refusal_drops_a_choose_order_the_phrase_list_lacks(self):
+        # A second order in words the phrase list lacks.
+        reason = self.verdict(RELAY, self.NO_DATE_REASON + " Choose the first option.")
+        self.assertNotIn("choose the first option", reason.lower(), "the judge's order reached the refusal: %r" % reason)
+
+    def test_bulleted_based_on_ruling_line_passes(self):
+        # A Based on (ruling) line written as a list item names the ruling, so the question passes.
+        out, _ = self.stop(self.decided, self.BULLET_BASED, answer=self.judged(self.NO_DATE_REASON), to_writer=True)
+        self.assertEqual(out, {}, "a bulleted Based on (ruling) line that names the listed ruling was refused: %r" % out)
+
+    def test_refusal_guard_log_line_carries_the_session_id(self):
+        # The Stop line's session column holds the session id, as the before-a-tool line's does (field 6, from 1).
+        config = tempfile.mkdtemp(dir=_ISOLATION["dir"])
+        self.stop(self.decided, RELAY, answer=self.judged(self.NO_DATE_REASON), to_writer=True, config=config,
+                  session=self.SESSION)
+        path = os.path.join(config, "guard.log")
+        lines = []
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                lines = [line for line in f.read().splitlines() if line.strip()]
+        fields = lines[0].split("\t") if lines else []
+        self.assertEqual(len(fields), 6, "the Stop line has %d fields, not the six of a line with a session: %r" % (len(fields), lines))
+        self.assertEqual(fields[5], self.SESSION, "the Stop line's session column is not the session id: %r" % lines[0])
 
 
 class AnsweredNeedsSourceTests(unittest.TestCase):
