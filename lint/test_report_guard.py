@@ -1162,7 +1162,10 @@ class DoneNamesModelsTests(unittest.TestCase):
             "> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer sonnet)\n> **Next** Unstarted: none",
             [self.BUILDER, self.REVIEWER_R2]))
 
-    def test_dm_green_round3_builder_opus(self):
+    def test_dm_green_owner_override_builder_opus(self):
+        # An owner-override run, not the normal path: only the owner's timed Opus override (`opus builders 2h`)
+        # lets this round-3 builder run on Opus. The report check reads the spawn that ran, not model policy, so a
+        # Done line that names that Opus spawn passes.
         self.assertIsNone(self.verdict(
             "> **Done** BUILT the guard, PR #5 (builder opus)\n> **Next** Unstarted: none",
             [{"subagent_type": "builder", "model": "opus", "prompt": "Round 3 of 3"}]))

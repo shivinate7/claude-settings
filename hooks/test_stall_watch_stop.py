@@ -2062,6 +2062,83 @@ def A13b_checkin_before_the_crossing_another_id_or_an_error_does_not_clear_the_b
 
 
 @case
+def A13c_checkin_made_before_the_crossing_that_fires_after_it_clears_the_block():
+    """A13c. the same 31-min agent with a send_later check-in made at minute 29, before the crossing at minute 30,
+    whose delay_minutes is 30: it fires at minute 59, after the crossing and 28 min ahead of the Stop, so it counts
+    and the Stop prints no block"""
+    aid = agent_id(53)
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("n1"), 10)
+    rc, out, err = run_stop(transcript(stamped(launch, 1860) + agent_checkin(120, aid, delay=30),
+                                       agents=[spec], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect('"decision"' not in out,
+                       f"a check-in made at minute 29 that fires at minute 59 left a block of agent {aid}: {out[:200]!r}")
+    return problems
+
+
+@case
+def A13d_checkin_made_before_the_crossing_with_an_at_after_it_clears_the_block():
+    """A13d. the agent of A13c with a send_later check-in made at minute 29, before the crossing, whose `at` is
+    minute 45 (UTC, with its offset): it fires after the crossing and 14 min ahead of the Stop, so it counts and
+    the Stop prints no block"""
+    aid = agent_id(54)
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("n2"), 10)
+    rc, out, err = run_stop(transcript(stamped(launch, 1860) + agent_checkin(120, aid, at_time=at_text(120, 16)),
+                                       agents=[spec], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect('"decision"' not in out,
+                       f"a check-in made at minute 29 whose at is minute 45 left a block of agent {aid}: {out[:200]!r}")
+    return problems
+
+
+@case
+def A13e_checkin_made_before_the_crossing_that_does_not_fire_in_the_window_still_blocks():
+    """A13e. controls for A13c and A13d, each a check-in made before the crossing that still blocks: one that fires
+    before the crossing (made at minute 10 with delay 5, it fires at minute 15); one made at minute 29 that fires
+    more than 30 min ahead of the Stop, by delay_minutes 180 and by an `at` 180 min after its call; and one made at
+    minute 29 with delay 30 that names another agent"""
+    aid, other = agent_id(55), agent_id(56)
+    variants = (("a check-in made at minute 10 that fires at minute 15", agent_checkin(1260, aid, delay=5)),
+                ("a check-in made at minute 29 with delay_minutes 180", agent_checkin(120, aid, delay=180)),
+                ("a check-in made at minute 29 whose at is 180 min after the call",
+                 agent_checkin(120, aid, at_time=at_text(120, 180))),
+                ("a check-in made at minute 29 with delay 30 that names another agent",
+                 agent_checkin(120, other, delay=30)))
+    problems = []
+    for label, extra in variants:
+        folder = new_dir()
+        launch, spec = background_agent(folder, aid, agent_step("n3"), 10)
+        rc, out, err = run_stop(transcript(stamped(launch, 1860) + extra, agents=[spec], folder=folder))
+        problems += expect(rc == 0, f"{label}: exit {rc}, want 0: {err.strip()[:200]}")
+        problems += [f"{label}: {p}" for p in agent_block(out, aid)]
+    return problems
+
+
+@case
+def A13f_checkin_set_at_minute_29_with_delay_180_does_not_clear_the_block_when_the_stop_is_at_minute_180():
+    """A13f. a background agent launched 180 min before the Stop, still writing, with a send_later check-in made at
+    minute 29, before the crossing at minute 30, whose delay_minutes is 180 or whose `at` is 180 min after its call. It
+    fires at minute 209, 29 min after the Stop at minute 180, so a Stop that reads the fire time alone lets it count.
+    The remedy limits the delay set, 30 minutes at most, so the check-in does not count: the Stop still blocks and
+    names the agent"""
+    aid = agent_id(57)
+    variants = (("delay_minutes 180", agent_checkin(9060, aid, delay=180)),
+                ("an at 180 minutes after the call", agent_checkin(9060, aid, at_time=at_text(9060, 180))))
+    problems = []
+    for label, extra in variants:
+        folder = new_dir()
+        launch, spec = background_agent(folder, aid, agent_step("n4"), 10)
+        rc, out, err = run_stop(transcript(stamped(launch, 10800) + extra, agents=[spec], folder=folder))
+        problems += expect(rc == 0, f"{label}: exit {rc}, want 0: {err.strip()[:200]}")
+        problems += expect(aid in block_text(out),
+                           f"a check-in set at minute 29 with {label} cleared the block of agent {aid} at minute 180, "
+                           f"though the remedy allows 30 minutes ahead at most: {out[:200]!r}")
+    return problems
+
+
+@case
 def A14_waiting_agent_quiet_for_10_min_at_15_min_gets_no_quiet_row():
     """A14. a background agent launched 15 min before the Stop, quiet for 10 min, whose completed notice says it
     is waiting on its own background work: no quiet row, since a waiting agent is silent by design. Control: a
