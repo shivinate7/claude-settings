@@ -4,22 +4,37 @@
 
 Owner, 2026-10-12: a SubagentStart hook injects the standing rules, so a brief need not retype them. `hooks/agent_brief.py` prints `additionalContext` with the lines below. The standing line bans three things only. It holds no reset ban (owner, 14:12 CST 2026-11-23: "yes drop the line then"), so the brief agrees with decision `agent-worktree-discard-is-noted`, where an agent may undo commits inside its own agent-owned worktree. Lane pick, not the owner's: only the reset verb left the line.
 
-- Never run git stash, git checkout <path>, or git restore.
-- push only with `git push origin HEAD:<branch>`;
-- no gh call unless the brief names it;
-- the role's scope;
-- the report cap and label order;
-- the commit trailer;
-- no record path in a commit message except the `Drops-lines:` trailer;
-- before it ends, a writer stops each server it started, by the `$!` from the same call or through the harness.
+The hook prints these lines, in this order. A line marked every type goes to every agent type. A line marked writing types only goes to every type outside the read-only set: reviewer, Explore, Plan, claude-code-guide, design-reviewer and refuter. An unknown type writes. Type names match ignoring case.
 
-- The scope line varies by agent type: builder, test-author, reviewer, Explore, record-writer. An unknown type gets a general line. The type is the text after the last `:`, so `my-plugin:reviewer` counts as `reviewer`. The builder scope line says `A mutant goes to a test-author.` Owner ruling, 2026-11-08 17:19 CST (waiting-page item 447 a): mutants are test content.
-- Readers (reviewer, Explore, Plan, claude-code-guide) get five lines: they never commit or push, so no push, trailer, record-path or server line. Writers and the general case get all nine.
+- (every type) Standing rules for this agent:
+- (every type) Never run git stash, git checkout <path>, or git restore.
+- (writing types only) Push only with: git push origin HEAD:<branch>.
+- (every type) Make no gh call unless your brief names it.
+- (every type) The scope line. Each type below has its own line. A type with no line of its own gets the general line.
+  - builder: Scope: builder. Never edit tests or test config. A mutant goes to a test-author. Report a test change you need.
+  - test-author: Scope: test-author. Edit tests and test config only. Never edit product code.
+  - reviewer: Scope: reviewer. Never edit, write, stage, commit, or push. Read and run checks only.
+  - Explore: Scope: Explore. Never edit. Read and search only.
+  - record-writer: Scope: record-writer. Edit Markdown (*.md) files only. Report any other change needed.
+  - designer: Scope: designer. Edit files in the repo's design folder only. Report any other change needed. Your brief names your designer kind: blind, informed or directed. In a blind designer, never read the current screen, its code, its screenshots, its mockups, or the repo's design spec and tokens.
+  - design-reviewer: Scope: design-reviewer. Never edit, write, stage, commit, or push. Read and render only.
+  - refuter: Scope: refuter. Never edit, write, stage, commit, or push. Read only.
+  - general, for Plan, claude-code-guide and an unknown type: Scope: do only what your brief names. A builder never edits tests; a test-author never edits product code; a reviewer and Explore never edit; a record-writer edits Markdown only.
+- (every type) Report in 25 lines or fewer unless the brief sets a cap. Order: Done, Deviations, Input Needed, Next.
+- (writing types only) End each commit message with: Co-Authored-By: <model> <noreply@anthropic.com>
+- (writing types only) Name no record path in a commit message. The only exception is the Drops-lines: trailer.
+- (writing types only) Before each commit, run git diff --cached --stat; if it names a file you did not change this round, commit nothing and report it (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees).
+- (writing types only) Before you end, stop each server you started, by the $! from the same call or through the harness.
+- (every type, when this repo's layout reads) First note rule: a new or edited note is its own file, the note folder then <slug>.md, one line `- <slug>: <text>`. The slug is the file name, within the length MAX in lint/check_record_slugs.py sets, and not digits only. Second note rule: the old notes file takes deletes only: add no line to it and edit none.
+- (every type, when .github/stamp.json sets cite.form) Cite a record in this repo's form, one form per record kind, joined by commas. Any other wrapper around a slug stays dead text.
+
+- The type is the text after the last `:`, so `my-plugin:reviewer` counts as `reviewer`. The builder scope line says `A mutant goes to a test-author.` Owner ruling, 2026-11-08 17:19 CST (waiting-page item 447 a): mutants are test content.
+- Readers (the six read-only types above) get the five every-type lines, plus the note and cite lines when they apply. They never commit or push, so they get no push, trailer, record-path, diff or server line. Writers and the general case get all ten fixed lines, plus the note and cite lines when they apply.
 - The hook is advisory. On an internal error it prints no context, writes one `agent_brief:` line to stderr, and exits 0.
 
 Why: a brief that forgot one line let an agent stash, or push in the wrong form. `additionalContext` on SubagentStart lands in the agent's context before its first prompt.
 
-Protected by `hooks/test_agent_brief.py`, run in `checks`, `checks-macos` and `checks-windows-rest`, with a REQUIRED entry in `lint/test_windows_split.py`.
+Protected by `hooks/test_agent_brief.py`, run in `checks-hooks`, `checks-macos` and `checks-windows-rest`, with a REQUIRED entry in `lint/test_windows_split.py`.
 
 Kind: build
 Plan: docs/decisions/agents-get-standing-rules.md#the-ruling (all)
