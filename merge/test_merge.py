@@ -61,8 +61,11 @@ os.environ.update(LC_ALL="C", GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os
                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
 # CI sets none of these and a cloud session sets all three. A cloud session's values would make every `--confirm` case below meet the
 # merge-role check and make a role writer write the live session's role file. A case that needs one sets it (CloudSession.cloud).
-for _name in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_SESSION_ID", "CS_SESSION_ROLE"):
+for _name in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CS_SESSION_ROLE"):
     os.environ.pop(_name, None)  # the local role reads (a launcher run sets the last two) must not leak into a case
+# The config folder is one that does not exist, under this run's folder: no session record is read, as on CI, and the real
+# ~/.claude is never read. A case that needs a record sets its own folder.
+os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(run_folder(), "config")
 
 def windows_slice(x):
     """Mark a test or a leaf class as Windows-specific. MERGE_TESTS=windows-slice runs only these.
@@ -2982,6 +2985,21 @@ class CutBranchTree(Env):
 
     def test_clean_merged_tree_is_removed_with_its_branch(self):
         self.assert_clean_tree_removed(self.merged_feat())
+
+    def test_clean_merged_tree_is_removed_beside_a_record_whose_folder_is_gone(self):
+        """A session record whose folder was removed stands in no tree (owner, 20:53 CST 11-24, 2026): the clean merged
+        tree goes with its branch, as it does with no record at all."""
+        gone = os.path.join(self.t, "gone-session", "wt")
+        os.makedirs(gone)
+        os.rmdir(gone)
+        os.rmdir(os.path.dirname(gone))
+        cfg = os.path.join(self.t, "cfg")
+        os.makedirs(os.path.join(cfg, "sessions"))
+        record = {"pid": os.getpid(), "startedAt": hook_guard._process_start_ms(os.getpid()), "cwd": gone}
+        with open(os.path.join(cfg, "sessions", "gone-record.json"), "w", encoding="utf-8") as handle:
+            json.dump(record, handle)
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
+            self.assert_clean_tree_removed(self.merged_feat())
 
     def test_clean_merged_tree_is_removed_when_merged_is_the_pr_head(self):
         # Production passes the PR head sha (merge.py `cut_branch(root, branch, sha)`), not origin/main.
