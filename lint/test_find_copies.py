@@ -306,6 +306,7 @@ class RunFolderSweepTest(unittest.TestCase):
 # The climb cases' pids. Each is fake: the parent reader and the liveness read are faked, so no real process decides a verdict.
 # CLIMB_INIT is pid 1: a readable chain that reaches it ends without the owner, the control for a case that holds nothing.
 CLIMB_OWNER, CLIMB_HOLDER, CLIMB_LIVE_PARENT, CLIMB_ENDED, CLIMB_INIT = 7000000, 7000001, 7000002, 7000003, 1
+CLIMB_CYCLE_A, CLIMB_CYCLE_B, CLIMB_REUSED = 7000004, 7000005, 7000006  # a two-pid parent loop, and a pid number a live unrelated process now holds
 
 
 class DescendsFromTest(unittest.TestCase):
@@ -379,6 +380,52 @@ class DescendsFromTest(unittest.TestCase):
         control, held = self.held_verdicts(CLIMB_OWNER)  # CLIMB_OWNER is not alive: the owner has ended
         self.assertFalse(control, "positive control: a readable chain that reaches init without the owner holds no folder")
         self.assertTrue(held, "a live unreadable holder under a dead owner holds the folder when its climb ends at an ended ancestor")
+
+    def test_a_dead_owners_folder_is_not_held_by_a_pid_in_a_parent_loop(self):
+        """A live unreadable pid whose parent chain loops, A -> B -> A, never reaches the folder's dead owner: the chain has no
+        ancestor outside the loop, so no owner sits above it. The climb reads the loop as unknown and keeps the folder."""
+        tool, sweep, parents = self.fake_climb(alive={CLIMB_HOLDER})
+        folder = os.path.join(RUN_FOLDER, "parent-loop", "%d-%s" % (CLIMB_OWNER, "a" * 32))
+        with mock.patch.object(sweep, "processes_in", return_value=([], [CLIMB_HOLDER])), \
+                mock.patch.object(tool, "kernel_thread", return_value=False):
+            parents[CLIMB_HOLDER] = CLIMB_OWNER
+            control = tool.held_by_live_process(folder)
+            parents[CLIMB_HOLDER] = CLIMB_CYCLE_A
+            parents[CLIMB_CYCLE_A] = CLIMB_CYCLE_B
+            parents[CLIMB_CYCLE_B] = CLIMB_CYCLE_A
+            held = tool.held_by_live_process(folder)
+        self.assertTrue(control, "positive control: a live holder whose parent is the dead owner holds the folder")
+        self.assertIn(CLIMB_CYCLE_B, self.asked, "scope: the climb never walked the loop, so the case proves nothing")
+        self.assertFalse(held, "a dead owner's folder is not held by a live unreadable pid whose parent chain loops without the owner")
+
+    def test_a_live_unreadable_pid_under_a_live_parent_holds_a_dead_owners_folder(self):
+        tool, sweep, parents = self.fake_climb(alive={CLIMB_HOLDER, CLIMB_LIVE_PARENT})
+        folder = os.path.join(RUN_FOLDER, "live-chain", "%d-%s" % (CLIMB_OWNER, "b" * 32))
+        parents[CLIMB_HOLDER] = CLIMB_LIVE_PARENT
+        parents[CLIMB_LIVE_PARENT] = CLIMB_OWNER
+        with mock.patch.object(sweep, "processes_in", return_value=([], [CLIMB_HOLDER])), \
+                mock.patch.object(tool, "kernel_thread", return_value=False):
+            held = tool.held_by_live_process(folder)
+        self.assertIn(CLIMB_LIVE_PARENT, self.asked, "scope: the climb never reached the live parent, so the case proves nothing")
+        self.assertTrue(held, "a live unreadable pid whose readable chain reaches the owner holds the owner's folder")
+
+    def test_an_unrelated_live_pid_whose_parent_number_is_reused_holds_nothing(self):
+        tool, sweep, parents = self.fake_climb(alive={CLIMB_HOLDER, CLIMB_REUSED})
+        folder = os.path.join(RUN_FOLDER, "reused", "%d-%s" % (CLIMB_OWNER, "c" * 32))
+        parents[CLIMB_HOLDER] = CLIMB_REUSED  # the holder's parent number now belongs to a live process that is no relative
+        parents[CLIMB_REUSED] = CLIMB_INIT  # that process's readable chain reaches init without the owner
+        with mock.patch.object(sweep, "processes_in", return_value=([], [CLIMB_HOLDER])), \
+                mock.patch.object(tool, "kernel_thread", return_value=False):
+            held = tool.held_by_live_process(folder)
+        self.assertIn(CLIMB_REUSED, self.asked, "scope: the climb never reached the reused number, so the case proves nothing")
+        self.assertFalse(held, "a readable chain through a reused pid number that reaches init without the owner holds no folder")
+
+    def test_the_tool_own_pid_working_in_a_folder_holds_it(self):
+        tool, sweep, _ = self.fake_climb(alive=set())
+        folder = os.path.join(RUN_FOLDER, "own-cwd", "%d-%s" % (CLIMB_OWNER, "d" * 32))
+        with mock.patch.object(sweep, "processes_in", return_value=([os.getpid()], [])):
+            held = tool.held_by_live_process(folder)
+        self.assertTrue(held, "the tool's own process working in a folder holds it, whatever the folder's owner")
 
 
 class FindCopiesTest(unittest.TestCase):
