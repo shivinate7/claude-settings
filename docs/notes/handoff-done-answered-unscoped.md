@@ -1,0 +1,1 @@
+- handoff-done-answered-unscoped: the audit brief's DONE line (hooks/precompact_handoff.py:556) says "answered" with no scope. An open PR whose review comment was answered could be listed DONE and leave the handoff. Scoping "answered" to questions and feedback ids would close it. Decision `precompact-handoff` (the handoff rewrite record). Seen: 2026-11-24 x1
