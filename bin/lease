@@ -1,0 +1,10 @@
+#!/usr/bin/env python3
+# Launcher for the lease tool: take, give, lift or show a named lease held in git. No lease logic lives here; hooks/lease.py is the one home.
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
+import lease  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(lease.main())

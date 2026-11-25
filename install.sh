@@ -1000,7 +1000,7 @@ stage_file() {
 stage_guard_set() {
   sg_dir="$2/guard.d/$INSTALL_ID_VALUE"
   mkdir -p "$sg_dir" || return 1
-  for gf in "$1"/guard.py "$1"/guard_*.py "$1"/shared_names.py "$1"/git_reads.py "$1"/question_form.py "$1"/own_session.py "$1"/precompact_handoff.py "$1"/merge_options.py "$1"/override.py "$1"/_nowindow.py "$1"/proc_env.py "$1"/reread_check.py "$1"/call_judge.py "$1"/decision_watch.py "$1"/feedback_guard.py "$1"/local_time.py "$1"/ruling_home.py "$1"/route_match.py "$1"/reply_judge.py "$1"/stall_watch.py "$1"/agent_brief.py "$1"/mail.py "$1"/ci_wait_cap.py "$1"/ci_wake.py "$1"/required_check.py "$1"/session_role.py "$1"/answered_claims.py "$1"/ci_wait_cap.json "$1"/route_rows.json "$1"/precompact_handoff_prompt.md "$1"/wait_common.py; do
+  for gf in "$1"/guard.py "$1"/guard_*.py "$1"/shared_names.py "$1"/git_reads.py "$1"/question_form.py "$1"/own_session.py "$1"/precompact_handoff.py "$1"/merge_options.py "$1"/override.py "$1"/_nowindow.py "$1"/proc_env.py "$1"/reread_check.py "$1"/call_judge.py "$1"/decision_watch.py "$1"/feedback_guard.py "$1"/local_time.py "$1"/ruling_home.py "$1"/route_match.py "$1"/reply_judge.py "$1"/stall_watch.py "$1"/agent_brief.py "$1"/mail.py "$1"/ci_wait_cap.py "$1"/ci_wake.py "$1"/required_check.py "$1"/session_role.py "$1"/lease.py "$1"/answered_claims.py "$1"/ci_wait_cap.json "$1"/route_rows.json "$1"/precompact_handoff_prompt.md "$1"/wait_common.py; do
     [ -f "$gf" ] || continue
     stage_file "$gf" "$sg_dir/$(basename "$gf")" || return 1
   done
