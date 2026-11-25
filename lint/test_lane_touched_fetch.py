@@ -13,6 +13,9 @@ The macOS leg runs only the macOS test files a draft PR touches. The cases read 
 lint/workflow_steps.py and run the script text of the `legs` step and of the run steps, with the selector's own output
 writer (.github/scripts/touched-tests.py, write_outputs) as the fixture. No case matches the workflow's words.
 
+The run job's whole `if:`, each job's and step's `continue-on-error`, and the Windows `*.test.ps1)` arm are pinned too. Each of
+those cases also runs its check on an in-memory mutant of the workflow text, so the check is shown to catch its defect.
+
     python3 lint/test_lane_touched_fetch.py
 """
 import importlib.util
@@ -40,7 +43,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "testing"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 import tracked_tree  # noqa: E402  test-temp-standard: teardown removes the run folder (testing/tracked_tree.py)
-from workflow_steps import drop_comment, job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
+from workflow_steps import disables, drop_comment, job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
 
 RUN_FOLDER = None  # set by setUpModule
 
@@ -65,10 +68,10 @@ IF_VALUES = {
 }
 # The lines of the two run steps that are meant to differ, stripped. The Windows step keeps the PowerShell arm and its comment;
 # the macOS step must not have them, and RunBodies pins that.
-MEANT_TO_DIFFER = (
-    "# 77 is a skip: on Windows the PowerShell step below runs it.",
-    '*.test.ps1) if [ "$RUNNER_OS" = Windows ]; then return 77; fi; echo "no PowerShell step on $RUNNER_OS"; return 1 ;;',
-)
+PS1_ARM = '*.test.ps1) if [ "$RUNNER_OS" = Windows ]; then return 77; fi; echo "no PowerShell step on $RUNNER_OS"; return 1 ;;'
+MEANT_TO_DIFFER = ("# 77 is a skip: on Windows the PowerShell step below runs it.", PS1_ARM)
+# The run job's whole `if:`, squashed. A literal false or a negation of it skips every leg, and no test goes red.
+RUN_JOB_IF = "github.event.pull_request.draft&&needs.touched.outputs.any=='true'"
 
 
 def setUpModule():
@@ -249,15 +252,25 @@ def named_run_step(text, name):
     return next((s for s in step_blocks(job_block(text, "run")) if step_key(s, "name") == name), None)
 
 
+def gate_problem(what, raw, want):
+    """None when the `if:` value `raw` is `${{ want }}` whole, else the one cause for `what`. `want` is squashed."""
+    expr = re.fullmatch(r"\$\{\{(.*)\}\}", drop_comment(raw or "").strip())
+    if expr is None:
+        return "%s has no ${{ }} if: value" % what
+    if squash(expr.group(1)) != want:
+        return "%s gates on %r, want %r" % (what, squash(expr.group(1)), want)
+    return None
+
+
 def if_problem(step, want):
     """None when the step's whole `if:` is `${{ want }}`, else the one cause. `want` is squashed."""
-    name = step_key(step, "name")
-    expr = re.fullmatch(r"\$\{\{(.*)\}\}", drop_comment(step_key(step, "if") or "").strip())
-    if expr is None:
-        return "the step %r has no ${{ }} if: value" % name
-    if squash(expr.group(1)) != want:
-        return "the step %r gates on %r, want %r" % (name, squash(expr.group(1)), want)
-    return None
+    return gate_problem("the step %r" % step_key(step, "name"), step_key(step, "if"), want)
+
+
+def run_job_if_problem(text):
+    """None when the run job's whole `if:` is RUN_JOB_IF, else the one cause."""
+    m = re.search(r"^    if:(.*)$", job_block(text, "run") or "", re.M)
+    return gate_problem("the run job", m.group(1) if m else None, RUN_JOB_IF)
 
 
 def body_lines(body):
@@ -303,6 +316,43 @@ def ps1_arms(body):
     """The code lines of a run body that hold a `*.test.ps1)` case arm. Unanchored, as an arm may follow a `;;` on its line;
     quoted and commented text is masked first, so a string or a comment that names one is no arm."""
     return [ln for ln in code_lines(body) if re.search(r"\*\.test\.ps1\s*\)", ln)]
+
+
+def mutate_block(text, block, old, new):
+    """`text` with `old` replaced once inside `block`, the raw text of one step or job that `text` holds once. In memory:
+    the workflow file is read, never written. A stale `old` raises, so no case passes on a mutant that did not apply."""
+    if text.count(block) != 1 or block.count(old) != 1:
+        raise AssertionError("the mutant's text is not in the workflow once: %r" % old)
+    return text.replace(block, block.replace(old, new, 1), 1)
+
+
+def windows_arm_problem(text):
+    """None when the Windows run step keeps its `*.test.ps1)` arm, else the one cause."""
+    step = named_run_step(text, WINDOWS_STEP)
+    if step is None:
+        return "no run step is named %r" % WINDOWS_STEP
+    if not ps1_arms(run_body(step) or ""):
+        return "the Windows run step has no `*.test.ps1)` arm, so a PowerShell file fails there instead of skipping"
+    return None
+
+
+def continue_on_error_problem(text):
+    """None when no run step and not the run job can let its failure pass, else the one cause."""
+    job = job_block(text, "run") or ""
+    own = re.search(r"^    continue-on-error:(.*)$", job, re.M)
+    if own and disables("continue-on-error", own.group(1)):
+        return "the run job has continue-on-error: true, so its failure cannot fail the pull request"
+    for step in step_blocks(job):
+        if disables("continue-on-error", step_key(step, "continue-on-error") or ""):
+            return "the run step %r has continue-on-error: true, so its failure cannot fail the pull request" % step_key(step, "name")
+    return None
+
+
+def run_body_lines(text, name):
+    """body_lines of the named run step's run text, or None when the step or its run text is absent."""
+    step = named_run_step(text, name)
+    body = run_body(step) if step is not None else None
+    return None if body is None else body_lines(body)
 
 
 class LaneCheckoutDepth(unittest.TestCase):
@@ -526,6 +576,96 @@ class ArmScanner(unittest.TestCase):
     def test_arm_text_inside_a_multi_line_string_is_not_an_arm(self):
         self.assertEqual(ps1_arms('echo "first\n*.test.ps1) return 1 ;;\nlast"\n'), [],
                          "arm text inside a multi-line quoted string reads as an arm")
+
+
+class WindowsPs1Arm(unittest.TestCase):
+    """The Windows run step keeps its `*.test.ps1)` arm: the arm returns 77, the skip that the PowerShell step then runs."""
+
+    def test_the_windows_run_step_keeps_its_ps1_arm(self):
+        text = read_lane()
+        problem = windows_arm_problem(text)
+        self.assertIsNone(problem, problem)
+        mutated = mutate_block(text, named_run_step(text, WINDOWS_STEP), PS1_ARM, "")
+        self.assertIsNotNone(windows_arm_problem(mutated), "the check passed a Windows run step with its arm deleted")
+
+
+class ContinueOnErrorAbsent(unittest.TestCase):
+    """No run step and not the run job lets its failure pass: `continue-on-error: true` would turn a red test green."""
+
+    def test_no_run_step_and_not_the_run_job_carries_continue_on_error(self):
+        text = read_lane()
+        problem = continue_on_error_problem(text)
+        self.assertIsNone(problem, problem)
+        step = named_run_step(text, WINDOWS_STEP)
+        job = job_block(text, "run")
+        on_step = mutate_block(text, step, "        shell: bash\n", "        shell: bash\n        continue-on-error: true\n")
+        on_job = mutate_block(text, job, "    runs-on: ${{ matrix.os }}\n", "    runs-on: ${{ matrix.os }}\n    continue-on-error: true\n")
+        for where, mutated in (("on a run step", on_step), ("on the run job", on_job)):
+            with self.subTest(where=where):
+                self.assertIsNotNone(continue_on_error_problem(mutated), f"the check passed continue-on-error: true {where}")
+        off = mutate_block(text, step, "        shell: bash\n", "        shell: bash\n        continue-on-error: false\n")
+        self.assertIsNone(continue_on_error_problem(off), "the check refused continue-on-error: false, which fails nothing")
+
+
+class RunJobIfPinned(unittest.TestCase):
+    """The run job's whole `if:` is pinned. A literal false or a negation skips every leg, and no test goes red."""
+
+    def test_the_run_job_if_is_the_pinned_value_and_a_false_or_a_negation_fails(self):
+        text = read_lane()
+        problem = run_job_if_problem(text)
+        self.assertIsNone(problem, problem)
+        job = job_block(text, "run")
+        line = re.search(r"^    if: .*$", job, re.M).group(0)
+        for value in ("${{ false }}",
+                      "${{ !(github.event.pull_request.draft && needs.touched.outputs.any == 'true') }}",
+                      "${{ !github.event.pull_request.draft && needs.touched.outputs.any == 'true' }}"):
+            with self.subTest(value=value):
+                mutated = mutate_block(text, job, line, "    if: " + value)
+                self.assertIsNotNone(run_job_if_problem(mutated), f"the check passed the run job if: {value}")
+
+
+class BodyCompareIgnoresComments(unittest.TestCase):
+    """The body compare skips comment-only and blank lines. A `#` inside quotes is text (code_lines), so a line it opens counts."""
+
+    def test_comment_and_blank_lines_are_no_difference_and_commands_are(self):
+        text = read_lane()
+        mac = run_body_lines(text, MACOS_STEP)
+        self.assertEqual(run_body_lines(text, WINDOWS_STEP), mac, "the Windows and macOS run bodies differ on the real file")
+        win = named_run_step(text, WINDOWS_STEP)
+        with self.subTest("a comment-only line and a blank line"):
+            edited = mutate_block(text, win, "          set -u\n", "          set -u\n          # don't add a rule here\n\n")
+            self.assertEqual(run_body_lines(edited, WINDOWS_STEP), mac,
+                             "a comment-only or blank line in the Windows run body fails the body compare")
+        with self.subTest("a command edit"):
+            edited = mutate_block(text, win, "          set -u\n", "          set -e\n")
+            self.assertNotEqual(run_body_lines(edited, WINDOWS_STEP), mac,
+                                "a command edit in the Windows run body passes the body compare")
+        with self.subTest("a # line inside a multi-line string"):
+            self.assertEqual(body_lines('echo "first\n# second\nlast"\n'), ['echo "first', "# second", 'last"'],
+                             "a # line inside a multi-line string is dropped as a comment")
+
+
+class IfCompareCaseInsensitive(unittest.TestCase):
+    """GitHub compares a string in `if:` case-insensitively, so 'macos' gates the same step as 'macOS'. The compare stays
+    whole, so a negation of either spelling still fails."""
+
+    def test_the_macos_if_compare_ignores_case_and_rejects_a_negation(self):
+        text = read_lane()
+        step = named_run_step(text, MACOS_STEP)
+        self.assertIsNotNone(step, f"no run step is named {MACOS_STEP!r}")
+        problem = if_problem(step, IF_VALUES[MACOS_STEP])
+        self.assertIsNone(problem, problem)
+        line = "        if: ${{ runner.os == 'macOS' }}"
+        for value in ("runner.os == 'macos'", "runner.os == 'MACOS'"):
+            with self.subTest(value=value):
+                edited = mutate_block(text, step, line, "        if: ${{ %s }}" % value)
+                self.assertIsNone(if_problem(named_run_step(edited, MACOS_STEP), IF_VALUES[MACOS_STEP]),
+                                  f"the check refused {value!r}, which GitHub compares as the macOS value")
+        for value in ("!(runner.os == 'macos')", "!(runner.os == 'macOS')"):
+            with self.subTest(value=value):
+                edited = mutate_block(text, step, line, "        if: ${{ %s }}" % value)
+                self.assertIsNotNone(if_problem(named_run_step(edited, MACOS_STEP), IF_VALUES[MACOS_STEP]),
+                                     f"the check passed the negation {value!r}")
 
 
 if __name__ == "__main__":
