@@ -159,6 +159,11 @@ empty folder left, and git still listing the worktree.
 The sweep keeps any subject that it cannot read. An unreadable session record,
 a `git worktree list` that fails, or a `git status` that fails each mean keep.
 
+A session record whose folder is gone stands in no tree, for a removal that the
+dirty, locked and unmerged keeps also guard (owner, 20:53 CST Nov 24 2026). The
+orphaned-listener reap and the trash sweep still keep such a record. The decision
+`session-record-gone-folder` has the scope.
+
 ## Orphaned TCP listeners
 
 The sweep also finds a TCP listener whose current directory sits inside a

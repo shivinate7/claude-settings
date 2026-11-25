@@ -4,7 +4,7 @@
 
 Four idle limits. 30 min: agent-end reap. 1 h: unattended `--confirm`, a merged tree. 4 h: session-end agent rule. 24 h: unattended `--confirm`, a pushed tree that is not merged. Pushed is enough (HEAD need not be merged) for the agent-end reap and the `agent-*` rule only. A dirty tree is never reaped.
 
-Four routes remove a worktree. One is the unattended `--confirm` run. Two remove a tree under `.claude/worktrees/agent-*` without both of its conditions: the agent-end reap and the session-end sweep's agent rule. No route runs a remover a repo supplies (decisions `the-janitor-is-one-machine-wide-sweep` and `uniform-over-variants`, owner 2026-10-27 12:51 CDT). The merge tool also removes the worktree that holds the branch it merged (owner, 2026-10-25, step c44). It calls the sweep's `--fast` judgment with `--attended` for that one tree, so there is no idle wait. The tree goes when it is clean and its HEAD is in the merged head. No lock, session or process may hold it, and it may not be the caller's cwd. A failed read keeps the tree, except one process whose cwd cannot be read: it is out of scope, not inside.
+Four routes remove a worktree. One is the unattended `--confirm` run. Two remove a tree under `.claude/worktrees/agent-*` without both of its conditions: the agent-end reap and the session-end sweep's agent rule. No route runs a remover a repo supplies (decisions `the-janitor-is-one-machine-wide-sweep` and `uniform-over-variants`, owner 2026-10-27 12:51 CDT). The merge tool also removes the worktree that holds the branch it merged (owner, 2026-10-25, step c44). It calls the sweep's `--fast` judgment with `--attended` for that one tree, so there is no idle wait. The tree goes when it is clean and its HEAD is in the merged head. No lock, live session or process may hold it, and it may not be the caller's cwd. A session record whose folder is gone holds nothing here (decision `session-record-gone-folder`). A failed read keeps the tree, except one process whose cwd cannot be read: it is out of scope, not inside.
 
 ### Idle limits, side by side
 
@@ -60,7 +60,7 @@ A worktree is removed only when all of these hold. A read that cannot tell keeps
 - It is idle 30 min or more.
 - It is clean: no uncommitted and no untracked file.
 - It is pushed and unlocked, or it is locked by this session's host and the agent is proven finished (next section).
-- No live session uses it (read 2 of the reaper, `agent-end-reap-stops-what-a-finished-agent-left`), and no process has a cwd inside it.
+- No live session uses it (read 2 of the reaper, `agent-end-reap-stops-what-a-finished-agent-left`), and no process has a cwd inside it. A session record whose folder is gone stands in no tree (decision `session-record-gone-folder`, for the scope).
 
 #### A finished agent's tree
 
@@ -99,7 +99,7 @@ Session start warns when more than 50 agent worktrees exist. An agent leaves its
 Owner ruling, 2026-10-14: the session-end sweep (`sweep.py --confirm`, no `--attended`) removes a finished agent's worktree. It runs in the repository whose session ended, and no other (owner ruling `watchers-sessionend-250a`, one repo at SessionEnd, machine-wide only in the daily job; confirmed by `own-828-a-sessionend-this-repo-only`, this repo only at session end, 2026-11-14 19:57:58 CST; the janitor decision `the-janitor-is-one-machine-wide-sweep`, "Two triggers", says the same). The check is `SweepsOnlyTheEndingSessionsRepository` in `janitor/test_session_end_sweep.py`. The daily job's run of the same command covers every repo. The rule ADDS to the removals of the unattended run. It never narrows them. It removes a tree only when all of these hold:
 
 - Its path is `<repo>/.claude/worktrees/agent-*`, a branch or a detached HEAD.
-- It is clean, unlocked, and idle 4 hours. No live session and no process has a cwd inside it.
+- It is clean, unlocked, and idle 4 hours. No live session and no process has a cwd inside it. A session record whose folder is gone stands in no tree (decision `session-record-gone-folder`, for the scope).
 - Its tip is on GitHub, read after the run's fetch (see Safe work). Two reads must both pass: `git ls-remote --heads` read now lists a head that holds HEAD (owner ruling 2026-10-14: the read is live, never a local `origin/*` ref alone; a listed head the clone lacks is dropped), and `git branch -r --contains HEAD` is not empty.
 
 A read that fails or cannot tell keeps the tree. The report line names its path and the reason `unreadable-subject`. The sweep runs no script the repo supplies, whatever its `package.json` defines.
