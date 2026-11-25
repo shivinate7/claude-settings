@@ -71,73 +71,102 @@ MUTATE_GUARD = os.path.join(HERE, "..", "hooks", "mutate_guard.py")
 
 
 GUARD_READS = "GUARD_READ_FILES"
+GUARD_FOLDERS = "GUARD_READ_FOLDERS"
+# The file each GUARD_READ_FOLDERS folder is checked by: one the guard suite reads, so the copy of its folder reaches a suite that
+# loads it. lint/rule_audit.py: mutate_guard.py imports it at run time (rule_audit._section_dir). janitor/sweep.py: lay_out_guard_reads
+# says the simulator refusal imports it. skills/waiting-page/splice.py: tests/guard/s25539-page-stale.py reads it.
+# testing/tracked_tree.py: mutate_guard.py lays out the guard copies through it.
+GUARD_FOLDER_FILE = {
+    "lint": "lint/rule_audit.py",
+    "janitor": "janitor/sweep.py",
+    "skills": "skills/waiting-page/splice.py",
+    "testing": "testing/tracked_tree.py",
+}
 # The list methods that change a list, and the dunder names that do the same when called by name. A call to any other method
 # (.index, .count) reads the list and changes nothing.
 GUARD_MUTATORS = frozenset(("append", "extend", "insert", "remove", "pop", "clear", "sort", "reverse",
                             "__setitem__", "__delitem__", "__iadd__"))
 
 
-def _is_guard_name(node):
-    return isinstance(node, ast.Name) and node.id == GUARD_READS
+def _is_guard_name(node, name=GUARD_READS):
+    return isinstance(node, ast.Name) and node.id == name
 
 
-def _guard_reads_binds(stmt):
-    """True when the top-level statement `stmt` is the one plain assignment of GUARD_READ_FILES."""
-    return isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and _is_guard_name(stmt.targets[0])
+def _guard_reads_binds(stmt, name=GUARD_READS):
+    """True when the top-level statement `stmt` is the one plain assignment of `name`."""
+    return isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and _is_guard_name(stmt.targets[0], name)
 
 
-def _guard_reads_change(stmt):
-    """-> how the top-level statement `stmt` rebinds or mutates GUARD_READ_FILES, or '' when it does neither. A def or class
+def _guard_reads_change(stmt, name=GUARD_READS):
+    """-> how the top-level statement `stmt` rebinds or mutates `name`, or '' when it does neither. A def or class
     body counts too: a later call can rebind the name through it."""
     for node in ast.walk(stmt):
-        if isinstance(node, ast.AugAssign) and _is_guard_name(node.target):
+        if isinstance(node, ast.AugAssign) and _is_guard_name(node.target, name):
             return "changed by +="
-        if isinstance(node, ast.AnnAssign) and _is_guard_name(node.target):
+        if isinstance(node, ast.AnnAssign) and _is_guard_name(node.target, name):
             return "annotated"
-        if _is_guard_name(node) and not isinstance(node.ctx, ast.Load):
+        if _is_guard_name(node, name) and not isinstance(node.ctx, ast.Load):
             return "rebound"
-        if isinstance(node, ast.Subscript) and not isinstance(node.ctx, ast.Load) and _is_guard_name(node.value):
+        if isinstance(node, ast.Subscript) and not isinstance(node.ctx, ast.Load) and _is_guard_name(node.value, name):
             return "changed by an item store"
-        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and _is_guard_name(node.func.value)
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and _is_guard_name(node.func.value, name)
                 and node.func.attr in GUARD_MUTATORS):
             return "mutated by .%s()" % node.func.attr
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == GUARD_READS:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == name:
             return "rebound by a def or class"
-        if isinstance(node, ast.alias) and (node.asname or node.name).split(".")[0] == GUARD_READS:
+        if isinstance(node, ast.alias) and (node.asname or node.name).split(".")[0] == name:
             return "rebound by an import"
     return ""
+
+
+def _guard_binding(name):
+    """-> the one plain assignment of `name` in hooks/mutate_guard.py, read whole: a non-empty tuple or list literal, and no other
+    top-level statement that rebinds or mutates the name. Each failure names its line."""
+    with open(MUTATE_GUARD, encoding="utf-8") as f:
+        tree = ast.parse(f.read(), filename=MUTATE_GUARD)
+    bound = None
+    for stmt in tree.body:
+        if _guard_reads_binds(stmt, name):
+            if bound is not None:
+                raise AssertionError(f"{MUTATE_GUARD} line {stmt.lineno}: {name} is assigned a second time, "
+                                     "so the reader cannot read it whole")
+            bound = stmt
+            continue
+        how = _guard_reads_change(stmt, name)
+        if how:
+            raise AssertionError(f"{MUTATE_GUARD} line {stmt.lineno}: {name} is {how}, "
+                                 "so the reader cannot read it whole")
+    if bound is None:
+        raise AssertionError(f"{MUTATE_GUARD}: no plain assignment of {name}")
+    if not isinstance(bound.value, (ast.Tuple, ast.List)) or not bound.value.elts:
+        raise AssertionError(f"{MUTATE_GUARD} line {bound.lineno}: {name} is not a non-empty tuple or list literal")
+    return bound
 
 
 def guard_read_files():
     """-> the paths GUARD_READ_FILES names in hooks/mutate_guard.py, as git names them ('/' between parts). The reader reads the
     name whole or fails, and each failure names its line: one plain assignment of a non-empty tuple or list of os.path.join
     calls on string literals, and no other top-level statement that rebinds or mutates the name."""
-    with open(MUTATE_GUARD, encoding="utf-8") as f:
-        tree = ast.parse(f.read(), filename=MUTATE_GUARD)
-    bound = None
-    for stmt in tree.body:
-        if _guard_reads_binds(stmt):
-            if bound is not None:
-                raise AssertionError(f"{MUTATE_GUARD} line {stmt.lineno}: GUARD_READ_FILES is assigned a second time, "
-                                     "so the reader cannot read it whole")
-            bound = stmt
-            continue
-        how = _guard_reads_change(stmt)
-        if how:
-            raise AssertionError(f"{MUTATE_GUARD} line {stmt.lineno}: GUARD_READ_FILES is {how}, "
-                                 "so the reader cannot read it whole")
-    if bound is None:
-        raise AssertionError(f"{MUTATE_GUARD}: no plain assignment of GUARD_READ_FILES")
-    if not isinstance(bound.value, (ast.Tuple, ast.List)) or not bound.value.elts:
-        raise AssertionError(f"{MUTATE_GUARD} line {bound.lineno}: GUARD_READ_FILES is not a non-empty tuple or list literal")
     paths = []
-    for elt in bound.value.elts:
+    for elt in _guard_binding(GUARD_READS).value.elts:
         parts = [a.value for a in getattr(elt, "args", []) if isinstance(a, ast.Constant) and isinstance(a.value, str)]
         if not (isinstance(elt, ast.Call) and parts and len(parts) == len(elt.args)):
             raise AssertionError(f"{MUTATE_GUARD} line {elt.lineno}: GUARD_READ_FILES entry is not os.path.join of string "
                                  f"literals: {ast.unparse(elt)}")
         paths.append("/".join(parts))
     return paths
+
+
+def guard_read_folders():
+    """-> the folders GUARD_READ_FOLDERS names in hooks/mutate_guard.py: a non-empty tuple or list of string literals, read whole
+    as guard_read_files reads its list."""
+    folders = []
+    for elt in _guard_binding(GUARD_FOLDERS).value.elts:
+        if not (isinstance(elt, ast.Constant) and isinstance(elt.value, str)):
+            raise AssertionError(f"{MUTATE_GUARD} line {elt.lineno}: GUARD_READ_FOLDERS entry is not a string literal: "
+                                 f"{ast.unparse(elt)}")
+        folders.append(elt.value)
+    return folders
 
 
 def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref="", green=None,
@@ -396,6 +425,31 @@ class Scope(FlagAsserts, unittest.TestCase):
         for p in paths:
             with self.subTest(path=p):
                 self.assertFlags(run([p], existing=[p]), want_true=["guard"])
+
+    # Every folder GUARD_READ_FOLDERS (hooks/mutate_guard.py) names is copied whole into each guard copy, so an edit to a file under
+    # one changes what the guard suite reads. The folders come from the constant; each folder's file is GUARD_FOLDER_FILE's, a file
+    # the guard suite reads, edited in place (`existing`). Named failure: an edit under a folder sets no `guard`, so the suite that
+    # reads the folder skips the change.
+    def test_an_edit_under_each_guard_read_folder_turns_on_the_guard_suite(self):
+        folders = guard_read_folders()
+        self.assertEqual(sorted(folders), sorted(GUARD_FOLDER_FILE), "GUARD_READ_FOLDERS and GUARD_FOLDER_FILE name other folders")
+        for folder in folders:
+            p = GUARD_FOLDER_FILE[folder]
+            with self.subTest(folder=folder, path=p):
+                self.assertTrue(p.startswith(folder + "/") and os.path.isfile(os.path.join(HERE, "..", p)),
+                                f"GUARD_FOLDER_FILE names {p} for {folder}/, which is not an existing file under it")
+                got = run([p], existing=[p])
+                self.assertEqual(got["guard"], "true", f"{folder}/: an edit to {p} sets guard {got['guard']}")
+
+    # actions/ci-alarm/events.json and clear_rule.py: the Windows merge slice (checks-windows-merge, flag checks_windows_merge) runs
+    # merge/test_merge.py on windows-latest. That suite reads events.json (test_base_events_are_the_keys_of_the_events_file) and runs
+    # clear_rule through merge.py (load_clear_rule). So an edit to either sets checks_windows_merge. Named failure: the Windows slice
+    # skips an edit to a file it tests. The Linux runs of the same files (the `checks` job and checks-merge-git) carry `code` already.
+    def test_a_ci_alarm_file_edit_turns_on_the_windows_merge_slice(self):
+        for p in ("actions/ci-alarm/events.json", "actions/ci-alarm/clear_rule.py"):
+            with self.subTest(path=p):
+                got = run([p], existing=[p])
+                self.assertEqual(got["checks_windows_merge"], "true", f"{p} sets checks_windows_merge {got['checks_windows_merge']}")
 
     def test_a_merge_change_leaves_a_job_that_never_runs_merge_suites_off(self):
         got = run(["merge/merge.py"])
@@ -870,6 +924,16 @@ class GuardReadsReader(unittest.TestCase):
             self.reads_of("append call", 'GUARD_READ_FILES = [os.path.join("bin", "sim-lease")]\n'
                           'GUARD_READ_FILES.append(os.path.join("janitor", "sweep.py"))\n')
         self.assertIn(" line 2: ", str(cm.exception))
+
+    # GUARD_MUTATORS (above) names each call that changes a list. The reader fails each one called on GUARD_READ_FILES. The fixture
+    # is a bare call: the reader parses it and never runs it. Named failure: the reader reads a call with a listed name as a read,
+    # so a change by that method passes unseen.
+    def test_every_guard_mutator_called_on_the_read_list_fails_the_reader(self):
+        for name in sorted(GUARD_MUTATORS):
+            with self.subTest(method=name):
+                text = 'GUARD_READ_FILES = [os.path.join("bin", "sim-lease")]\nGUARD_READ_FILES.%s()\n' % name
+                with self.assertRaises(AssertionError, msg="GUARD_READ_FILES.%s() reads whole, so the change passes unseen" % name):
+                    self.reads_of("mutator " + name, text)
 
 
 # A records-only push after a fully green head. GREEN_HEAD names the
