@@ -2014,7 +2014,7 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.assertIsNone(out, out and out["reason"])
 
     def test_rw_red_rewrite_keeps_an_unsourced_answered_line_is_refused_again(self):
-        # Red then pass. With the report marker set, the rewrite is judged again, so a line that says
+        # With the report marker set, the rewrite is judged again, so a line that says
         # "answered" with no source is refused again. Without the marker the same line stays quiet
         # (test_an_green_stop_hook_active_stays_quiet). A sourced line in the same rewrite passes.
         self.missing_report_block()
@@ -2180,7 +2180,7 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
 
     def refuse_sonnet(self):
         """Stop 1, not a rewrite: the turn's record-writer haiku spawn, then the report naming record-writer sonnet. That
-        Stop blocks for the wrong name, and the rewrite that follows reads the same session."""
+        Stop refuses for the wrong name, and the rewrite that follows reads the same session."""
         out = self.run_hook(self.refused_turn([], spawn=self.RW_SPAWN) + [assistant_text(self.RW_SONNET)], False)
         self.assertIsNotNone(out, "the report naming record-writer sonnet, which the turn never ran, was not refused")
         self.assertEqual(out["decision"], "block")
@@ -2203,7 +2203,8 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
                          "the feedback record after a refused report cut the window the correction is judged against")
 
     def test_rw_record_writer_wrong_name_after_refusal_blocks(self):
-        # Red today: the refusal wrote no marker, so the rewrite is quiet and the correction naming sonnet passes.
+        # The refusal writes the report marker, so the rewrite is judged. Without the marker, the correction naming
+        # sonnet would pass.
         self.refuse_sonnet()
         records = self.correction_records(self.RW_SONNET)
         self.assertEqual(self.window_of(records, self.RW_SONNET), self.RW_WINDOW,
