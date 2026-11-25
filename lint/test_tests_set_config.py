@@ -488,6 +488,18 @@ class TestsSetConfig(unittest.TestCase):
                         "the incident's import-time pop, with a set only in a case's patch.dict, is not one problem named for %s: %r"
                         % (INCIDENT_PATH, found))
 
+    def test_test_file_under_a_dot_folder_is_not_scanned(self):
+        found = checker().problems(tree_of({"test_case.py": POP_NEVER_SET, ".claude/worktrees/x/test_a.py": POP_NEVER_SET}))
+        self.assertTrue(any(problem.startswith("test_case.py:") for problem in found),
+                        "the scan did not name the test file outside a dot folder: %r" % found)
+        self.assertEqual(len(found), 1, "a test file under a dot folder is named as a problem: %r" % found)
+
+    def test_test_file_under_a_skip_dir_is_not_scanned(self):
+        found = checker().problems(tree_of({"test_case.py": POP_NEVER_SET, "node_modules/pkg/test_a.py": POP_NEVER_SET}))
+        self.assertTrue(any(problem.startswith("test_case.py:") for problem in found),
+                        "the scan did not name the test file outside node_modules: %r" % found)
+        self.assertEqual(len(found), 1, "a test file under node_modules is named as a problem: %r" % found)
+
     def test_repo_has_no_problems_now(self):
         found = checker().problems(ROOT)
         self.assertEqual(found, [], "a test file of this repo pops CLAUDE_CONFIG_DIR at import and never sets it again: %r" % found)
