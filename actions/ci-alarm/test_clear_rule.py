@@ -65,6 +65,19 @@ class ClearRuleJobs(unittest.TestCase):
         self.assertTrue(clear_rule.clears(self.R, self.N, PUSH, text),
                         "a one-line if: that names only pull_request leaves the job out, so the skipped job does not block the clear")
 
+    def test_a_windows_shard_with_the_daily_only_if_stays_needed_for_the_clear(self):
+        # Ruling (owner, 21:19 CST Nov 24 2026): a Windows shard's job-level if is daily only (a schedule and a dispatch), with no `==`
+        # clause. The clear reads it as needed, so a skipped shard in a push run blocks the clear: a Linux push never clears a red daily
+        # shard. Control, green on the old code by design (the reader keeps a job whose if has no `==` clause); its guard is the mutant
+        # run in the commit, not this case's red.
+        name = "checks-windows-guard-2"
+        text = workflow(("checks", [RUNS_ON, *STEPS]),
+                        (name, [RUNS_ON, "if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && "
+                                "needs.scope.outputs.records_only_skip != 'true' }}", *STEPS]))
+        R, N = runs(name)
+        self.assertFalse(clear_rule.clears(R, N, PUSH, text),
+                         "a daily-only shard skipped in a push run must stay needed, so the push run does not clear the red daily")
+
     def test_a_job_name_shared_by_two_jobs_keeps_the_job_needed(self):
         # `pq` has no name:, so its name is its key. `other` is named pq and its if: names pull_request only. The name maps to two jobs,
         # so it maps to no job and pq stays needed. Named failure: a name: match beats a key match, so `other` decides and pq is left out.
