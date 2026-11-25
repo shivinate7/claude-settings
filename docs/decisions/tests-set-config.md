@@ -23,7 +23,7 @@ Check: `lint/check_tests_set_config.py` parses each `test_*.py` under the repo, 
 - Clean: no import-time removal, or none after the last import-time set. A set in `setUpModule()` clears every removal in the file.
 - Not judged: a removal inside a function, a `patch.dict` block, or `if __name__ == "__main__":`. A set inside one test method, or inside `patch.dict`, does not clear an import-time removal.
 
-Cost: one `ast` parse per `test_*.py` under the repo, per run. A module that a module-level `from <module> import <name>` names beside the file or in `lint/` is parsed at most once per run, however many names it gives. Measured on this repo on 2026-11-25: 2.0-2.2 s, 3 runs. No log, no timer, no long-lived process.
+Cost: one `ast` parse per `test_*.py` under the repo, per run. A module that a module-level `from <module> import <name>` names beside the file or in `lint/` is parsed at most once per run, however many names it gives. Measured on this repo on 2026-11-25: 2.0-2.2 s per run. No log, no timer, no long-lived process.
 
 Limits:
 
