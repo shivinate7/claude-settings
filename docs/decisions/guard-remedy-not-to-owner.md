@@ -57,15 +57,37 @@ Text: `UNSTARTED_REASON`. It applies when the turn ran a builder.
 Text: `UNSTARTED_FILE_REASON`. It applies when an Unstarted item waits on another lane's merge, PR or landing and names neither a code need nor a measured conflict. A shared file alone is no reason to wait.
 
 - Start the lane now. It settles a conflict at its merge of main. This is the consultant's reading, not the owner's words (see Source below).
-- An item may wait on a PR only in one of two forms. A code need: "needs PR #<n>'s code: `symbol`", with the symbol in backticks. A measured conflict: "measured conflict in <file>" or "merge-tree shows a conflict in <file>", naming the file.
-- A code need with no symbol, "measured" with no file, and a wait that names only a shared file are refused. A file named after "measured conflict in" is never "e.g.", "i.e.", "and/or" or a number pair like "3679/3680".
-- A wait that names no PR word passes: the owner's grant or ruling, a test only the owner can run, the load brake, and a lane not briefed yet. A PR word in the item (PR, merge, landing, or "#<n>") needs one of the two forms above, even beside those.
+- A bare "Unstarted:" line owns the bullets under it, and each top-level bullet is one item.
+- Otherwise the item is the rest of its "Unstarted:" line, its wrapped lines and its indented sub-bullets, up to a blank line, a bold report label or a sibling bullet.
+- Within an item, a comma, a semicolon or a sentence end starts a new item only when the clause has a waiting word, and one to three words before it that are not a pronoun (it, its, they, their, them, which, both, he, she, these, those).
+- A leading also, and, plus, then, that or this is skipped before that test.
+- Any other clause joins the item before it.
+- An item that begins with "none" or "nothing" takes no clause, so each later clause starts its own item.
+- The waiting words are wait, await, need, blocked, block, until, till, after, once, when, behind, before, first, follow, pending, depend, hold, held, gated and stuck, with any ending for wait and await.
+- The PR words are PR, PRs, pull request, pull requests, merge, merges, merged, merging, land, lands, landed, landing, and "#" followed by digits.
+- A hyphen ends a word here, so "pr-reader" and "checkin-cancel-on-merge" hold PR words.
+- A PR word is judged only beside a waiting word in the same item.
+- An item with no PR word passes, whatever it waits on: the owner's grant or ruling, a test only the owner can run, the load brake, or a lane not briefed yet.
+- An item with a PR word and no waiting word passes.
+- An item with a PR word and a waiting word passes only when the same item holds one of the two accepted wordings, and the owner, the load brake or a test only the owner can run does not exempt it.
+- Accepted wording one: "needs PR #<n>'s code: `symbol`", with the symbol in backticks.
+- The code reads "needs", then "code:", then a backticked name, with no backtick or semicolon between them.
+- The name is no symbol when it is a common word, a build file name such as Makefile, or a name with a source suffix from the code's short list (such as .py or .md).
+- Accepted wording two: "measured conflict in <file>" or "merge-tree shows a conflict in <file>", naming the file.
+- The code also takes "measured conflicts in" and "measured a conflict in", and the file is any file name after the phrase in the same item.
+- No other phrasing of a measured conflict counts.
+- A code need with no symbol, a measured conflict with no file, and a wait that names only a shared file are refused.
 - "Unstarted: none" passes, even when it adds "all merged". "none" in bold or in parentheses, and "nothing", read the same way.
-- The item runs to the end of its wrapped lines and its sub-bullets. Bullets under a bare "Unstarted:" line are its items.
-- Source: owner, 2026-11-25 10:47 CST, "fix this", on the guard accepting a wait on PR N whenever an item named a shared file. On 2026-11-23 11:40 CST the owner asked whether such waits went against the parallelism mandate. That was a question, not a ruling.
+- Open false alarms and holes in this check: debt `unstarted-pr-word-false-alarm`, and the notes `unstarted-pr-wait-no-word-passes`, `unstarted-joined-wait-passes`, `unstarted-code-need-split` and `unstarted-phrase-and-suffix-gaps`.
+- Source: owner, 2026-11-25 10:47 CST, "fix this", on the guard accepting a wait on PR N whenever an item named a shared file.
+- On 2026-11-23 11:40 CST the owner asked whether such waits went against the parallelism mandate. That was a question, not a ruling.
 - On 2026-11-24 10:30 CST the owner asked why only two check-in waits ran. (Reported, not quoted.)
-- Reading, not the owner's words (consultant, 2026-11-25): a lane starts at once and settles a conflict at its merge of main, and it waits on a PR only when it needs that PR's code or a measured conflict. "A shared file blocks two writers" was the consultant's own summary. Lanes bring main in only on conflict (decision `merge-needs-current-base`, rule d; owner, 2026-11-17 14:20 CST).
-- Mistake it stops: the consultant held about fifteen items behind open PRs for a day on a file-only wait that no owner ruling states. Harm: lanes that could start did not. Risk kind: named incident. Measured by a plan agent, 2026-11-25 (reported, unchecked here): 18 to 22 percent of merges of main since 2026-11-18 had a conflict.
+- Reading, not the owner's words (consultant, 2026-11-25): a lane starts at once and settles a conflict at its merge of main, and it waits on a PR only when it needs that PR's code or a measured conflict.
+- "A shared file blocks two writers" was the consultant's own summary.
+- Lanes bring main in only on conflict (decision `merge-needs-current-base`, rule d; owner, 2026-11-17 14:20 CST).
+- Mistake it stops: the consultant held about fifteen items behind open PRs for a day on a file-only wait that no owner ruling states.
+- Harm: lanes that could start did not.
+- Risk kind: named incident. A plan agent measured 18 to 22 percent of merges of main since 2026-11-18 as conflicted, on 2026-11-25 (reported, unchecked here).
 
 ### Answered guard (any reply)
 

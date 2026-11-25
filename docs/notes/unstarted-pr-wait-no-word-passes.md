@@ -1,0 +1,1 @@
+- unstarted-pr-wait-no-word-passes: a PR wait with no waiting word passes the Unstarted wait check, such as "lane-x: dependent on PR #3916" or "starts at PR #3916's merge"; main refuses each, since main judges a PR word alone (decision `guard-remedy-not-to-owner`, the Unstarted guard). Seen: 2026-11-25 x1

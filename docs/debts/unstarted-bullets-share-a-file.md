@@ -1,6 +1,0 @@
-# The Unstarted wait check lets one bullet's code need or measured conflict cover the others
-
-- **What.** The Unstarted wait check joins every bullet under one bare `Unstarted:` line into one item. One bullet with a code need or a measured conflict then passes every other bullet in that item, including a bullet that waits on a merge or PR with neither. The decision says each bullet is its own item.
-- **Where.** The defect is live on main at `lint/report_guard.py:1167-1250`: `_unstarted_item` joins the bullets, and `_checkable_wait` tests the joined text. `unstarted_problem` calls both. The code came with PR #3684 (the Unstarted shared-file check), merged. Rule `reports-name-unstarted-items` (a report names each unstarted item) is the rule it enforces.
-- **Decision.** `guard-remedy-not-to-owner`, a Stop refusal's steps live in its record, not in chat. Its Unstarted section, on main at `docs/decisions/guard-remedy-not-to-owner.md:50-69`, says each bullet is its own item.
-- **Retire.** Closed when the check tests each bullet on its own, so a bullet with neither a code need nor a measured conflict is refused even when a sibling bullet has one, and `lint/test_report_guard.py` holds that case and it passes.

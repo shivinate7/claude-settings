@@ -1,0 +1,1 @@
+- unstarted-code-need-split: "needs PR #3916's code: `Sweep.reap_refs`, sweep calls it once PR 3916 merges" is refused, though its code need sits in the clause before the wait, and the refusal then says the item names no code need; main refuses it too (decision `guard-remedy-not-to-owner`, the Unstarted guard). Seen: 2026-11-25 x1

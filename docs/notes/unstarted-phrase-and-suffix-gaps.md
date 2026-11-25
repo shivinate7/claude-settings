@@ -1,0 +1,1 @@
+- unstarted-phrase-and-suffix-gaps: the measured-conflict phrase is a closed list, so "conflicts measured in <file>" is refused here though main passes it; the short source-suffix list lacks tmpl, cmd, vue and mod, so "needs PR #3916's code: `page.vue`" passes as a symbol, as it does on main (decision `guard-remedy-not-to-owner`, the Unstarted guard). Seen: 2026-11-25 x1
