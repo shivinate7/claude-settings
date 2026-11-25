@@ -133,6 +133,21 @@ LONE_QUOTE_IN_COMMENT = ("import os\n\n# Don't keep this line: the pop below is 
                          "def test_a():\n    assert True\n")
 
 
+COMPREHENSION_SWEEP = ("import os\n\nfor n in [n for n in os.environ if n.startswith('CLAUDE_')]:\n    os.environ.pop(n, None)\n\n\n"
+                       "def test_a():\n    assert True\n")
+DICT_COPY_SWEEP = "import os\n\nfor n in dict(os.environ):\n    del os.environ[n]\n\n\ndef test_a():\n    assert True\n"
+FILTER_SWEEP = "import os\n\nfor n in filter(None, os.environ):\n    os.environ.pop(n, None)\n\n\ndef test_a():\n    assert True\n"
+GENERATOR_SWEEP = ("import os\n\nfor n in (k for k in os.environ.keys()):\n    os.environ.pop(n, None)\n\n\n"
+                   "def test_a():\n    assert True\n")
+COPY_SWEEP_CONTROL = ("import os\n\nenv = dict(os.environ)\nfor n in list(env):\n    env.pop(n, None)\n\n\n"
+                      "def test_a():\n    assert True\n")
+READ_ONLY_COMPREHENSION_CONTROL = ("import os\n\nfor n in [k for k in os.environ if k.startswith('CLAUDE_')]:\n    _seen = os.environ[n]\n\n\n"
+                                   "def test_a():\n    assert True\n")
+COMPREHENSION_SWEEP_THEN_SET = ("import os\n\nfor n in [n for n in os.environ if n.startswith('CLAUDE_')]:\n    os.environ.pop(n, None)\n"
+                                "os.environ['CLAUDE_CONFIG_DIR'] = '/tmp/config'\n\n\ndef test_a():\n    assert True\n")
+LOOP_OVER_NAME_STRING_CONTROL = ("import os\n\nfor n in ['os.environ']:\n    os.environ.pop(n, None)\n\n\ndef test_a():\n    assert True\n")
+
+
 def tree_of(files):
     """A fresh folder under the run folder, holding each file of `files`: a dict of a path under the folder to source. A path's
     folders are made first."""
@@ -346,6 +361,42 @@ class TestsSetConfig(unittest.TestCase):
         found = problems_of(SORTED_SWEEP)
         self.assertTrue(len(found) == 1 and found[0].startswith("test_case.py:"),
                         "an import-time sweep of sorted(os.environ) that pops each name is not one problem: %r" % found)
+
+    def test_comprehension_sweep_of_environ_is_a_problem(self):
+        found = problems_of(COMPREHENSION_SWEEP)
+        self.assertTrue(len(found) == 1 and found[0].startswith("test_case.py:"),
+                        "an import-time loop over a comprehension of os.environ that pops each name is not one problem: %r" % found)
+
+    def test_dict_copy_sweep_of_environ_is_a_problem(self):
+        found = problems_of(DICT_COPY_SWEEP)
+        self.assertTrue(len(found) == 1 and found[0].startswith("test_case.py:"),
+                        "an import-time loop over dict(os.environ) that deletes each name from os.environ is not one problem: %r" % found)
+
+    def test_filter_sweep_of_environ_is_a_problem(self):
+        found = problems_of(FILTER_SWEEP)
+        self.assertTrue(len(found) == 1 and found[0].startswith("test_case.py:"),
+                        "an import-time loop over filter(None, os.environ) that pops each name is not one problem: %r" % found)
+
+    def test_generator_sweep_of_environ_keys_is_a_problem(self):
+        found = problems_of(GENERATOR_SWEEP)
+        self.assertTrue(len(found) == 1 and found[0].startswith("test_case.py:"),
+                        "an import-time loop over a generator of os.environ.keys() that pops each name is not one problem: %r" % found)
+
+    def test_loop_over_a_copy_of_environ_that_pops_the_copy_is_clean(self):
+        self.assertEqual(problems_of(COPY_SWEEP_CONTROL), [],
+                         "a loop over a copy of os.environ that pops from the copy is named as a problem")
+
+    def test_read_only_comprehension_over_environ_is_clean(self):
+        self.assertEqual(problems_of(READ_ONLY_COMPREHENSION_CONTROL), [],
+                         "an import-time loop over a comprehension of os.environ that only reads each name is named as a problem")
+
+    def test_comprehension_sweep_then_set_is_clean(self):
+        self.assertEqual(problems_of(COMPREHENSION_SWEEP_THEN_SET), [],
+                         "a comprehension sweep that an import-time set of CLAUDE_CONFIG_DIR follows is named as a problem")
+
+    def test_loop_over_a_string_that_names_environ_is_clean(self):
+        self.assertEqual(problems_of(LOOP_OVER_NAME_STRING_CONTROL), [],
+                         "a loop over a list of strings that spell os.environ is read as a sweep of os.environ")
 
     def test_patch_dict_clear_at_import_is_a_problem(self):
         found = problems_of(PATCH_DICT_CLEAR)
