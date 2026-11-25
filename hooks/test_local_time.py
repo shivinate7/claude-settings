@@ -3419,6 +3419,22 @@ def case_model_word_compaction_summary_is_not_the_owners():
           "read %r" % (got,))
 
 
+def case_model_word_seed_brief_writes_no_model_hold():
+    """A seed brief (turnOrigin host_synthetic) is the session that started it speaking, not the owner. Its words name fable
+    and the judge answers yes, and no model hold is written. The control is the same words typed by the owner, which write
+    the fable hold. CLAUDE_CODE_REMOTE_SESSION_ID is unset, so the cloud session's seed check does not run."""
+    seed = transcript_file([raw_turn("Run the builder on fable.", turnOrigin="host_synthetic")])
+    cfg, _, _, _ = opus_type("Run the builder on fable.", answer={"ok": True, "model": "fable"}, head=model_head(),
+                             transcript=seed)
+    check("model word: a seed brief (turnOrigin host_synthetic) that names fable writes no model hold on a yes",
+          hold_json(cfg) is None, "pass file %r" % (hold_json(cfg),))
+    typed = transcript_file([raw_turn("Run the builder on fable.")])
+    cfg, _, _, _ = opus_type("Run the builder on fable.", answer={"ok": True, "model": "fable"}, head=model_head(),
+                             transcript=typed)
+    check("model word: control, the same words typed by the owner write the fable hold on a yes",
+          (hold_json(cfg) or {}).get("model") == "fable", "pass file %r" % (hold_json(cfg),))
+
+
 def case_raising_case_does_not_stop_the_run():
     """A case that raises does not stop the run: the case after it still runs, and main returns 1 with a summary."""
     g = globals()
@@ -3647,6 +3663,7 @@ def suite_cases():
         case_model_word_seed_brief_turn_is_not_the_owners,
         case_model_word_human_turn_origin_still_counts,
         case_model_word_compaction_summary_is_not_the_owners,
+        case_model_word_seed_brief_writes_no_model_hold,
         case_raising_case_does_not_stop_the_run,
         case_system_exit_in_a_case_is_a_failed_case,
         case_cost_tests,
