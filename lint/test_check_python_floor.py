@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cases for lint/check_python_floor.py. Run: python3 lint/test_check_python_floor.py
 
-The Python floor for hooks/ and lint/ is 3.9 (README.md, lint/ste_lint.py). CI runs 3.11, so a 3.10+ call
+The Python floor for hooks/ and lint/ is 3.9 (README.md, lint/ste_lint.py). CI runs 3.15, so a 3.10+ call
 passes CI and crashes a guard on a 3.9 install, where the guard fails open. The check runs vermin
 (-t=3.9-) over the product files of hooks/ and lint/.
 
@@ -40,7 +40,7 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lin
 
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
-# The incident: a 3.10 call. CI runs 3.11 and passed it; a 3.9 guard crashed on it and failed open.
+# The incident: a 3.10 call. CI runs 3.15 and passed it; a 3.9 guard crashed on it and failed open.
 IGLOB = 'import glob\n\nFILES = glob.iglob("*.py", root_dir=".")\n'
 SYS_NAMES = "import sys\n\nNAMES = sorted(sys.stdlib_module_names)\n"  # a 3.10 attribute, not a call
 TOML_PLAIN = "try:\n    import tomllib\nexcept ImportError:\n    tomllib = None\n"  # 3.11, no marker
