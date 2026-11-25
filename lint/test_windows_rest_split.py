@@ -2,8 +2,9 @@
 """Pins for the Windows rest split and the Windows full shards on a ready pull request (R62, step ci-linux-windows-once).
 
 checks-windows-rest runs in two or three parallel jobs, each capped at a provisional 60 minutes, and all-jobs-passed and
-ci-done need every one of them. The Windows full shards run on a ready pull request, so the batch PR run carries them, and a
-draft pull request runs none. No held shard is dropped, and each rest command runs in one job.
+ci-done need every one of them. Since the Nov 24 cut (owner, 21:19 CST Nov 24 2026) the held Windows shards start on a schedule
+and a dispatch only: a ready pull request starts none of them, and its base jobs run the Windows slice. No held shard is dropped,
+and each rest command runs in one job.
 
     python3 lint/test_windows_rest_split.py
 """
@@ -17,6 +18,7 @@ from test_windows_split import (CHECKS, RECORDS_ONLY_CONDITION, SPEC_JOBS, SUITE
                                 condition_problem, job_if_without_records, spec_conditioned, suite_names)
 from all_jobs_passed_rules import needs_of  # noqa: E402  the one home of the needs reader
 from test_windows_split import SUITE_FLAG, WINDOWS_GUARD_JOBS, WINDOWS_MERGE_JOBS, eval_with  # noqa: E402  the one home of the merge and rest flags, the shard families and the flag evaluator
+from test_windows_split import GUARD_JOB, GUARD_SLICE, SHARD_CMD, SLICE, key, shard_base  # noqa: E402  the one home of the step keys, the slice commands and the shard bases
 from workflow_steps import job_block  # noqa: E402  the one home of the job parser
 
 REST_PREFIX = "checks-windows-rest"
@@ -34,6 +36,20 @@ def if_with_condition(raw, value, event, flag, draft=False):
     if:, which GitHub reads as success(). eval_if sets every scope output to one value, so records_only_skip is pinned first."""
     pinned = (raw if raw is not None else "success()").replace("needs.scope.outputs.records_only_skip", repr(value))
     return eval_if(pinned, event, flag, draft=draft)
+
+
+def open_events(name, st):
+    """The events run step `st` of job `name` runs on with the records-only condition open, read after the Nov 24 cut (owner, 21:19 CST
+    Nov 24 2026). A base job's Windows slice runs on a ready pull request alone. A base job's full shard-1 step runs on a push, a schedule
+    and a dispatch, never on a ready pull request. Every other step keeps all four events: a shard job past the first gates its start at
+    the job level, which the held-shard case pins."""
+    if name in (GUARD_JOB, "checks-windows-merge"):
+        k = key(st)
+        if k in (SLICE, GUARD_SLICE):
+            return ("pull_request",)
+        if k == SHARD_CMD[name]:
+            return ("push", "schedule", "workflow_dispatch")
+    return SKIP_EVENTS
 
 
 class WindowsRestSplit(unittest.TestCase):
@@ -70,12 +86,16 @@ class WindowsRestSplit(unittest.TestCase):
         for name in HELD_SHARDS:
             self.assertIn(name, self.jobs, f"{name} is missing: the Windows full shards are held, not dropped")
 
-    def test_each_held_windows_full_shard_runs_on_a_ready_pull_request(self):
+    # The Nov 24 cut (owner, 21:19 CST Nov 24 2026): the held shards start on a schedule and a dispatch, and a ready pull request starts
+    # none of them. Named failure: a held shard still starts on a ready pull request, so the daily-only shape is not in checks.yml.
+    def test_each_held_windows_full_shard_runs_on_the_daily_and_not_on_a_ready_pull_request(self):
         for name in HELD_SHARDS:
             expr = self.jobs.get(name, {}).get("if")
-            self.assertIsNotNone(expr, f"{name} has no job-level if, so it cannot be held to a ready pull request")
-            self.assertTrue(eval_if(job_if_without_records(expr), "pull_request", "true", draft=False),
-                            f"{name} does not run on a ready pull request: if {expr}")
+            self.assertIsNotNone(expr, f"{name} has no job-level if, so it cannot be held to the daily shape")
+            body = job_if_without_records(expr)
+            for event in ("schedule", "workflow_dispatch"):
+                self.assertTrue(eval_if(body, event, "true", draft=False), f"{name} does not run on a {event}: if {expr}")
+            self.assertFalse(eval_if(body, "pull_request", "true", draft=False), f"{name} starts on a ready pull request: if {expr}")
 
     def test_a_draft_pull_request_runs_no_held_windows_full_shard(self):
         for name in HELD_SHARDS:
@@ -150,14 +170,16 @@ class RecordsOnlySkipCondition(unittest.TestCase):
                            if if_with_condition(st.get("if"), "true", ev, fl, draft=dr)]
                 self.assertEqual(runs_on, [], f"{name} / {label} still runs with records_only_skip true: {runs_on}")
 
-    # The control: with the condition open, each step runs as it does today on a ready pull request, a push, a schedule and a dispatch.
+    # The control: with the condition open, each step runs on the events open_events gives it. The Nov 24 cut (owner, 21:19 CST Nov 24 2026)
+    # moves the base jobs' full shard-1 step off a ready pull request and leaves its Windows slice on that event alone. Named failure: a full
+    # Windows step runs on a ready pull request, or a slice runs on a push, a schedule or a dispatch.
     def test_each_conditioned_run_step_still_runs_when_the_condition_is_open(self):
         for name, st in self.conditioned_steps():
             label = st.get("name") or st["run"]
             with self.subTest(job=name, step=label):
-                skipped = [ev for ev in ("push", "schedule", "workflow_dispatch", "pull_request")
-                           if not if_with_condition(st.get("if"), "false", ev, "true")]
-                self.assertEqual(skipped, [], f"{name} / {label} does not run with the condition open on: {skipped}")
+                runs_on = [ev for ev in SKIP_EVENTS if if_with_condition(st.get("if"), "false", ev, "true")]
+                self.assertEqual(sorted(runs_on), sorted(open_events(name, st)),
+                                 f"{name} / {label} runs with the condition open on {runs_on}")
 
 
 # Each merge and rest suite step reads its job's own scope flag, the step-level gate the gated
@@ -199,8 +221,10 @@ class MergeAndRestScopeFlags(unittest.TestCase):
                     runs = runs_flagged(job, st, {"records_only_skip": "false", flag: "false"}, default="true")
                     self.assertFalse(runs, f"{name} / {label} runs on a ready pull_request with {flag} false: if {st.get('if')}")
 
-    def test_with_its_flag_alone_true_a_ready_pull_request_runs_each_suite_step(self):
-        # Named failure: a suite step needs a second flag as well, so its job's own flag alone does not run it.
+    # The Nov 24 cut (owner, 21:19 CST Nov 24 2026): a ready pull_request starts no daily-only shard (checks-windows-merge-2 to -10), so its
+    # flag alone runs nothing there. The base job's full shard-1 step is off on a ready pull_request, and its Windows slice runs with the
+    # flag alone. Named failure: a daily-only shard or a full Windows step runs on a ready pull_request with only its flag set.
+    def test_with_its_flag_alone_true_a_ready_pull_request_runs_each_suite_step_it_gates(self):
         for name, flag in SUITE_FLAG.items():
             self.assertIn(name, self.jobs, f"{name} is not a job in checks.yml, so its flag gates nothing")
             job = self.jobs[name]
@@ -208,7 +232,10 @@ class MergeAndRestScopeFlags(unittest.TestCase):
                 label = st.get("name") or st["run"]
                 with self.subTest(job=name, step=label):
                     runs = runs_flagged(job, st, {"records_only_skip": "false", flag: "true"}, default="false")
-                    self.assertTrue(runs, f"{name} / {label} does not run on a ready pull_request with only {flag} true: if {st.get('if')}")
+                    if shard_base(name) or key(st) == SHARD_CMD.get(name):
+                        self.assertFalse(runs, f"{name} / {label} runs on a ready pull_request with only {flag} true: if {st.get('if')}")
+                    else:
+                        self.assertTrue(runs, f"{name} / {label} does not run on a ready pull_request with only {flag} true: if {st.get('if')}")
 
 
 if __name__ == "__main__":
