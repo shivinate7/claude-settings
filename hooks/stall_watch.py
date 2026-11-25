@@ -791,7 +791,8 @@ def parse_time(text):
 def scan_jobs(transcript, keep_waiting=False):
     """Return ({job id: (output path or None, until note or '', (named logs, cwd, unresolved logs),
     start time or None, is an agent, seconds of its planned pause)}, previous Stop time or None) for every job with no terminal task notice and no TaskStop
-    result. A job is a shell (toolUseResult backgroundTaskId) or a background agent (toolUseResult
+    result, unless an agent was resumed after that close (a user record whose toolUseResult.resumedAgentId names it):
+    a resume reopens it, and its start time is then its latest resume. A job is a shell (toolUseResult backgroundTaskId) or a background agent (toolUseResult
     isAsync true, status async_launched, agentId; its path is the launch's outputFile). The
     note and the named logs come from the call that started the job, matched by tool_use_id. The
     previous Stop is the timestamp of the newest stop_hook_summary record the harness wrote after a
@@ -803,18 +804,21 @@ def scan_jobs(transcript, keep_waiting=False):
     agent's description, the check-in calls of the session as (time, input text) pairs (read by ci_events,
     the one reader of check-ins; a check-in whose result was an error is not in it), and whether the agent
     is waiting. The default call reads none of this, so a long call's scan costs what it did."""
-    jobs, done, stops, notes, job_call, logs, began, agents = {}, set(), set(), {}, {}, {}, {}, set()
+    jobs, done, stops, notes, job_call, logs, began, agents = {}, {}, set(), {}, {}, {}, {}, set()
     pauses, descs, waits, checkins = {}, {}, set(), {}
+    resumed, order = {}, 0  # resumed: id -> (record number, time) of its latest resume; done: id -> record number of its latest close
 
     def close(text):
-        done.update(closed_by_notice(text, keep_waiting))
+        for tid in closed_by_notice(text, keep_waiting):
+            done[tid] = order
         if keep_waiting:
             waits.update(waiting_ids(text))
     prev_stop, blocked = None, False
     with open(transcript, "rb") as f:
         for line in f:
-            if not any(k in line for k in (b"backgroundTaskId", b"TaskStop", b"Successfully stopped", b"until:", b"tool_use", b"stop_hook_summary", b"async_launched", RESTART_REMINDER.encode()) + NOTICE_KEY):
+            if not any(k in line for k in (b"backgroundTaskId", b"TaskStop", b"Successfully stopped", b"until:", b"tool_use", b"stop_hook_summary", b"async_launched", b"resumedAgentId", RESTART_REMINDER.encode()) + NOTICE_KEY):
                 continue
+            order += 1
             try:
                 rec = json.loads(line)
                 kind = rec.get("type")
@@ -842,6 +846,8 @@ def scan_jobs(transcript, keep_waiting=False):
                 continue
             tur = rec.get("toolUseResult")
             jid = None
+            if kind == "user" and isinstance(tur, dict) and isinstance(tur.get("resumedAgentId"), str):
+                resumed[tur["resumedAgentId"]] = (order, when)  # a resume reopens an agent that a notice or a TaskStop closed
             if isinstance(tur, dict) and isinstance(tur.get("backgroundTaskId"), str):
                 jid = tur["backgroundTaskId"]
                 m = RESULT_PATH.search(text)
@@ -878,7 +884,8 @@ def scan_jobs(transcript, keep_waiting=False):
                 if isinstance(content, list):  # only the result of a TaskStop call of this session
                     for b in content:
                         if isinstance(b, dict) and b.get("type") == "tool_result" and isinstance(b.get("tool_use_id"), str) and b["tool_use_id"] in stops:
-                            done.update(stopped_ids(b.get("content")))
+                            for tid in stopped_ids(b.get("content")):
+                                done[tid] = order
             if keep_waiting and any(k in line for k in CHECKIN_KEYS):
                 try:
                     for ev in ci_events(rec):
@@ -889,10 +896,12 @@ def scan_jobs(transcript, keep_waiting=False):
                 except Exception:  # a record ci_events cannot read holds no check-in
                     pass
     sent = sorted(checkins.values(), key=lambda c: c[0] or 0)
-    return ({k: (v, notes.get(job_call.get(k)) or "", logs.get(job_call.get(k)) or ((), None, ()), began.get(k),
-                k in agents, pauses.get(job_call.get(k), 0))
+    # A job is closed only by a notice or a TaskStop newer than its latest resume. An agent's age counts from that resume.
+    return ({k: (v, notes.get(job_call.get(k)) or "", logs.get(job_call.get(k)) or ((), None, ()),
+                 resumed[k][1] if k in agents and k in resumed else began.get(k),
+                 k in agents, pauses.get(job_call.get(k), 0))
              + ((descs.get(k, ""), sent, k in waits) if keep_waiting else ())
-             for k, v in jobs.items() if k not in done}, prev_stop)
+             for k, v in jobs.items() if k not in done or (k in resumed and done[k] < resumed[k][0])}, prev_stop)
 
 
 def closed_by_notice(text, keep_waiting=False):
