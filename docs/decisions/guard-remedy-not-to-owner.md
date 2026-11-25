@@ -54,14 +54,18 @@ Text: `UNSTARTED_REASON`. It applies when the turn ran a builder.
 - Next holds an "Unstarted:" line. Name each queued item with every question answered that you left unstarted, with its reason.
 - If none, write "Unstarted: none".
 
-Text: `UNSTARTED_FILE_REASON`. It applies when an Unstarted item waits on another lane's merge, PR or landing and names no code need and no measured conflict. A shared file alone is no reason to wait.
+Text: `UNSTARTED_FILE_REASON`. It applies when an Unstarted item waits on another lane's merge, PR or landing and names neither a code need nor a measured conflict. A shared file alone is no reason to wait.
 
-- Start the lane now. A lane starts at once and settles a conflict at its merge of main.
+- Start the lane now. It settles a conflict at its merge of main. This is the consultant's reading, not the owner's words (see Source below).
 - An item may wait on a PR only in one of two forms. A code need: "needs PR #<n>'s code: `symbol`", with the symbol in backticks. A measured conflict: "measured conflict in <file>" or "merge-tree shows a conflict in <file>", naming the file.
-- A code need with no symbol, "measured" with no file, and a wait that names only a shared file are refused.
-- These waits name no PR word, so they pass: the owner's grant or ruling, a test only the owner can run, the load brake, and a lane not briefed yet.
-- "Unstarted: none" needs no file, even when it adds "all merged". "none" in bold or in parentheses, and "nothing", read the same way.
+- A code need with no symbol, "measured" with no file, and a wait that names only a shared file are refused. A file named after "measured conflict in" is never "e.g.", "i.e.", "and/or" or a number pair like "3679/3680".
+- A wait that names no PR word passes: the owner's grant or ruling, a test only the owner can run, the load brake, and a lane not briefed yet. A PR word in the item (PR, merge, landing, or "#<n>") needs one of the two forms above, even beside those.
+- "Unstarted: none" passes, even when it adds "all merged". "none" in bold or in parentheses, and "nothing", read the same way.
 - The item runs to the end of its wrapped lines and its sub-bullets. Bullets under a bare "Unstarted:" line are its items.
+- Source: owner, 2026-11-25 10:47 CST, "fix this", on the guard accepting a wait on PR N whenever an item named a shared file. On 2026-11-23 11:40 CST the owner asked whether such waits went against the parallelism mandate. That was a question, not a ruling.
+- On 2026-11-24 10:30 CST the owner asked why only two check-in waits ran. (Reported, not quoted.)
+- Reading, not the owner's words (consultant, 2026-11-25): a lane starts at once and settles a conflict at its merge of main, and it waits on a PR only when it needs that PR's code or a measured conflict. "A shared file blocks two writers" was the consultant's own summary. Lanes bring main in only on conflict (decision `merge-needs-current-base`, rule d; owner, 2026-11-17 14:20 CST).
+- Mistake it stops: the consultant held about fifteen items behind open PRs for a day on a file-only wait that no owner ruling states. Harm: lanes that could start did not. Risk kind: named incident. Measured by a plan agent, 2026-11-25 (reported, unchecked here): 18 to 22 percent of merges of main since 2026-11-18 had a conflict.
 
 ### Answered guard (any reply)
 
