@@ -381,9 +381,20 @@ class DescendsFromTest(unittest.TestCase):
         self.assertFalse(control, "positive control: a readable chain that reaches init without the owner holds no folder")
         self.assertTrue(held, "a live unreadable holder under a dead owner holds the folder when its climb ends at an ended ancestor")
 
-    def test_a_dead_owners_folder_is_not_held_by_a_pid_in_a_parent_loop(self):
-        """A live unreadable pid whose parent chain loops, A -> B -> A, never reaches the folder's dead owner: the chain has no
-        ancestor outside the loop, so no owner sits above it. The climb reads the loop as unknown and keeps the folder."""
+    def test_a_parent_loop_reads_unknown_not_false(self):
+        """A live unreadable pid whose parent chain loops, A -> B -> A, reads None. A revisited pid is a stale parent number on
+        Windows, so the loop is no proof that the folder's owner is not above it: the read stays unknown, and never False."""
+        tool, sweep, parents = self.fake_climb(alive={CLIMB_HOLDER})
+        parents[CLIMB_HOLDER] = CLIMB_CYCLE_A
+        parents[CLIMB_CYCLE_A] = CLIMB_CYCLE_B
+        parents[CLIMB_CYCLE_B] = CLIMB_CYCLE_A
+        descends = tool._descends_from(sweep, CLIMB_HOLDER, CLIMB_OWNER)
+        self.assertIn(CLIMB_CYCLE_B, self.asked, "scope: the climb never walked the loop, so the case proves nothing")
+        self.assertIsNone(descends, "a parent chain that revisits a pid reads None (unknown), not False")
+
+    def test_a_dead_owners_folder_is_kept_when_a_pid_in_a_parent_loop_holds_it(self):
+        """A live unreadable pid whose parent chain loops reads unknown, so it keeps the folder of a dead owner: the loop may be
+        stale parent numbers, and the owner may sit above it. The folder goes only when a readable chain proves no owner above."""
         tool, sweep, parents = self.fake_climb(alive={CLIMB_HOLDER})
         folder = os.path.join(RUN_FOLDER, "parent-loop", "%d-%s" % (CLIMB_OWNER, "a" * 32))
         with mock.patch.object(sweep, "processes_in", return_value=([], [CLIMB_HOLDER])), \
@@ -396,7 +407,7 @@ class DescendsFromTest(unittest.TestCase):
             held = tool.held_by_live_process(folder)
         self.assertTrue(control, "positive control: a live holder whose parent is the dead owner holds the folder")
         self.assertIn(CLIMB_CYCLE_B, self.asked, "scope: the climb never walked the loop, so the case proves nothing")
-        self.assertFalse(held, "a dead owner's folder is not held by a live unreadable pid whose parent chain loops without the owner")
+        self.assertTrue(held, "a live unreadable pid whose parent chain loops keeps a dead owner's folder: the read is unknown, not no-owner")
 
     def test_a_live_unreadable_pid_under_a_live_parent_holds_a_dead_owners_folder(self):
         tool, sweep, parents = self.fake_climb(alive={CLIMB_HOLDER, CLIMB_LIVE_PARENT})
