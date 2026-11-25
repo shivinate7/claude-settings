@@ -639,6 +639,19 @@ add("builder-test: a test step moved within checks.yml is allowed", "allow", too
 add("builder-test: a test step's if: changed to another condition is allowed", "allow", tool="Edit",
     file_path=WF, old_string=TEST_IF,
     new_string=TEST_IF.replace("runner.os == 'Linux'", "github.event_name == 'push'"), **B)
+# A mutant step runs a file of mutant rows (hooks/mutants/<rule-slug>.py), so it is a test run too: deleting it, or
+# making it ignore failure, leaves that file's rows unrun. A step that runs hooks/mutants_x.py is a near miss.
+MUTANT_STEP = "      - name: Mutant step\n        run: python3 hooks/mutants/aa-first.py\n"
+MUTANT_STEP_CONTINUE = ("      - name: Mutant step\n        continue-on-error: true\n"
+                        "        run: python3 hooks/mutants/aa-first.py\n")
+MUTANT_X_STEP = "      - name: Mutant step near miss\n        run: python3 hooks/mutants_x.py\n"
+add("builder-test: a mutant step running hooks/mutants/aa-first.py is refused when deleted", "deny", rule=BT,
+    tool="Edit", file_path=WF, old_string=LINT + MUTANT_STEP, new_string=LINT, carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error added under the mutant step is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + MUTANT_STEP, new_string=LINT + MUTANT_STEP_CONTINUE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: a mutant step near miss running hooks/mutants_x.py is allowed when deleted", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + MUTANT_X_STEP, new_string=LINT, **B)
 
 # A test run keeps its test when its interpreter flag (-u, -X utf8), its ./ path or its shell flag (bash -x)
 # changes, and when its step moves to another job. Removing a test run drops its test, and a flag that
