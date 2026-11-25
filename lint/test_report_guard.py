@@ -1830,6 +1830,96 @@ class UnstartedItemsTests(unittest.TestCase):
             (self.DONE + "> **Next** Unstarted: lint-stub waits on your ruling on QAG", "a wait on the owner's ruling on QAG"),
         ])
 
+    def test_un_green_sub_bullet_code_need_belongs_to_its_wait_item(self):
+        # Catches: a sub-bullet is judged as its own item, so the wait above it is refused. The item runs to its sub-bullets.
+        self.assert_passes_unstarted([
+            (self.DONE + "> **Next**\n> - Unstarted: lint-stub waits on PR #3916\n"
+             ">   - needs PR #3916's code: `Sweep.reap_refs`",
+             "a sub-bullet that names the code need of a wait on PR #3916"),
+        ])
+
+    def test_un_green_sub_bullet_measured_conflict_belongs_to_its_wait_item(self):
+        # Catches: a sub-bullet that names a measured conflict is judged alone, so the wait above it is refused.
+        self.assert_passes_unstarted([
+            (self.DONE + "> **Next**\n> - Unstarted: lint-stub waits on PR #3916\n"
+             ">   - measured conflict in lint/x.py",
+             "a sub-bullet that names a measured conflict in a file"),
+        ])
+
+    def test_un_red_comma_joined_clauses_are_not_one_unit(self):
+        self.assert_refused_for_shared_file([
+            # Catches: a comma joins a code need to a file-only wait, so the code need clears the wait beside it.
+            (self.DONE + "> **Next** Unstarted: lint-stub (needs PR #3916's code: `reap_refs`), bin-x (waits on PR #3680; "
+             "both edit lint/x.py)",
+             "a file-only wait joined by a comma to another item's code need"),
+            # Catches: a comma joins a wait on a PR to a code need, so the code need clears the wait beside it.
+            (self.DONE + "> **Next** Unstarted: lint-stub needs PR #3916's code: `reap_refs`, bin-x waits on PR #3680 "
+             "to merge",
+             "a PR wait joined by a comma to another item's code need"),
+        ])
+
+    def test_un_red_also_clause_after_a_code_need_is_a_new_item(self):
+        self.assert_refused_for_shared_file([
+            # Catches: a clause led by "also" continues the code need before it, so the wait after it passes.
+            (self.DONE + "> **Next** Unstarted: lint-stub needs PR #3916's code: `reap_refs`; also bin-x waits on PR #3680",
+             "a wait led by also after a code need"),
+        ])
+
+    def test_un_red_that_or_this_clause_after_a_code_need_is_a_new_item(self):
+        self.assert_refused_for_shared_file([
+            # Catches: a clause led by "that" continues the code need before it, so the wait after it passes.
+            (self.DONE + "> **Next** Unstarted: lint-stub needs PR #3916's code: `reap_refs`; that bin-x waits on PR #3680 "
+             "to merge",
+             "a wait led by that after a code need"),
+            # Catches: a clause led by "this" continues the code need before it, so the wait after it passes.
+            (self.DONE + "> **Next** Unstarted: lint-stub needs PR #3916's code: `reap_refs`; this bin-x waits on PR #3680 "
+             "to merge",
+             "a wait led by this after a code need"),
+        ])
+
+    def test_un_red_none_then_comma_does_not_clear_the_wait_after_it(self):
+        self.assert_refused_for_shared_file([
+            # Catches: "none" before a comma clears the clause after it, so a wait on a PR passes the turn.
+            (self.DONE + "> **Next** Unstarted: none, lint-stub waits on PR #3679 to merge",
+             "none followed by a comma, then a wait on a PR"),
+        ])
+
+    def test_un_green_i_measured_conflict_after_a_wait_passes(self):
+        # Catches: "I measured a conflict in a file" after a PR wait is not read as the measured conflict, so it is refused.
+        self.assert_passes_unstarted([
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge; I measured a conflict in lint/x.py",
+             "a measured conflict in lint/x.py, after a wait on a PR"),
+        ])
+
+    def test_un_green_merge_tree_conflict_after_a_wait_passes(self):
+        # Catches: "git merge-tree shows a conflict in a file" after a PR wait is not read as a conflict, so it is refused.
+        self.assert_passes_unstarted([
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge; git merge-tree shows a conflict in "
+             "lint/x.py",
+             "a git merge-tree conflict in lint/x.py, after a wait on a PR"),
+        ])
+
+    def test_un_green_controls_for_the_wait_rules_pass(self):
+        # Controls: these pass on the branch head and must still pass after the fix.
+        self.assert_passes_unstarted([
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3916 to merge; it needs PR #3916's code: "
+             "`Sweep.reap_refs`",
+             "a wait on a PR, then the code it needs by name"),
+            (self.DONE + "> **Next** Unstarted: docs lane, not briefed yet; PR #3916 merged",
+             "a lane not briefed yet, then a PR named for context"),
+            (self.DONE + "> **Next** Unstarted: lint-stub needs PR #3916's code: `reap_refs`, which the sweep calls",
+             "a comma inside one item's reason"),
+            (self.DONE + "> **Next** Unstarted: none", "a bare none"),
+        ])
+
+    def test_un_control_top_level_sibling_bullet_is_its_own_item(self):
+        # Control: a sibling bullet at the same indent is its own item, so its code need does not clear the wait above it.
+        self.assert_refused_for_shared_file([
+            (self.DONE + "> **Next**\n> - Unstarted: lint-stub waits on PR #3916\n"
+             "> - bin-x needs PR #3916's code: `Sweep.reap_refs`",
+             "a sibling bullet's code need does not clear the wait above it"),
+        ])
+
 
 class NoResendTests(unittest.TestCase):
     """A report guard never makes a session send its whole report twice (roadmap c101)."""
