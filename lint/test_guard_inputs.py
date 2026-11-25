@@ -6,13 +6,14 @@ GuardInputsList proves: (a) every path in TRACED_READS matches a glob, and each 
 constant in hooks/test_guard.py and tests/guard/*.py that equals a tracked repo file, or an os.path.join of constants that
 does, matches a glob; (c) every module that hooks/guard.py or hooks/test_guard.py imports, at any depth, matches a glob; (d) every
 glob names at least one tracked file. GuardReadsTurnGuardOn proves that each file the guard suite reads under a GUARD_READ_FOLDERS
-folder sets the `guard` flag on its own edit, that each file the guard suite reads which sets no `code` sets `checks_guard` (the fixture
-shards' flag), and that a lint/ file or a doc the suite does not read leaves them off.
+folder sets the `guard` flag on its own edit, that each file the guard suite reads (truly_read_paths: the import walk, TRACED_READS and
+GUARD_READ_FILES) sets `guard` and `checks_guard` (the fixture shards' flag) on its own edit, and that a lint/ file or a doc the suite
+does not read leaves them off.
 
 Cost of this test: one `git ls-files` process per run (a walk of the tree where .git is absent, as in a git archive copy), one
 read of the list, and an ast parse of hooks/test_guard.py, tests/guard/*.py and the import closure of the two guard entry points.
-GuardReadsTurnGuardOn runs the scope script once per file it covers (25 today), once per truly read file for checks_guard (29 today), and
-once for each of its two controls. Each run builds a scratch
+GuardReadsTurnGuardOn runs the scope script once per file it covers (25 today), once per truly read file (207 today), and once for each
+of its two controls. Each run builds a scratch
 git repo (about a dozen git commands), then runs the script under bash, which makes its own git reads. No clock, no sleep.
 
 Run with:  python3 lint/test_guard_inputs.py -v
@@ -539,9 +540,9 @@ def guard_read_paths():
 
 
 def truly_read_paths():
-    """-> the repo files the guard suite truly reads, sorted: guard_read_paths() and GUARD_READ_FILES (hooks/mutate_guard.py), the two
-    sets the guard flag's rule names (decision guard-reads-turn-guard-on)."""
-    return sorted(set(guard_read_paths()) | set(test_ci_scope.guard_read_files()))
+    """-> the repo files the guard suite truly reads, sorted: guard_read_paths(), GUARD_READ_FILES (hooks/mutate_guard.py) and
+    TRACED_READS, the three sets the guard flag's rule names (decision guard-reads-turn-guard-on)."""
+    return sorted(set(guard_read_paths()) | set(test_ci_scope.guard_read_files()) | set(TRACED_READS))
 
 
 class GuardReadsTurnGuardOn(unittest.TestCase):
@@ -568,21 +569,21 @@ class GuardReadsTurnGuardOn(unittest.TestCase):
         self.assertEqual(got["guard"], "false", f"an edit to {p}, which the guard suite does not read, sets guard {got['guard']}")
 
     # The fixture shards run hooks/test_guard.py, which reads each file of truly_read_paths(), and checks.yml gates them on checks_guard
-    # (code and guard both). So a file that sets no `code` on its own edit must set checks_guard, or no shard runs the read. The set is
-    # derived: a file that gains `code` leaves it. Named failure: an edit to such a file sets guard but not checks_guard, so the fixture
-    # shard that reads it is skipped.
+    # (code and guard both). A file with no `code` sets checks_guard only through its own arm in ci-scope.sh. So each file of the set
+    # sets both `guard` and `checks_guard` on its own edit, with or without code. One assert lists every file that misses either.
+    # Named failure: an edit to a file the guard suite reads leaves guard or checks_guard off, so the suite or the fixture shard that
+    # reads it does not run.
     @unittest.skipUnless(BASH, "bash not on PATH")
-    def test_an_edit_to_each_guard_read_file_without_code_turns_on_checks_guard(self):
+    def test_an_edit_to_each_file_the_guard_suite_reads_turns_on_guard_and_checks_guard(self):
         paths = truly_read_paths()
         self.assertTrue(paths, "no file the guard suite reads")
+        missing = []
         for p in paths:
             got = test_ci_scope.run([p], existing=[p])
-            if got["code"] == "true":
-                continue
-            with self.subTest(path=p):
-                self.assertEqual(got.get("checks_guard"), "true",
-                                 f"an edit to {p}, which the guard suite reads and which sets no code, leaves checks_guard "
-                                 f"{got.get('checks_guard')}, so the fixture shard that reads it does not run")
+            if got.get("guard") != "true" or got.get("checks_guard") != "true":
+                missing.append(f"{p} (guard {got.get('guard')}, checks_guard {got.get('checks_guard')})")
+        self.assertEqual(missing, [], f"an edit alone to each of these files, which the guard suite reads, does not set both guard "
+                                      f"and checks_guard: {missing}")
 
     # The control: a doc the guard suite does not read sets no code, and must leave checks_guard off. Without it, a rule that turned
     # checks_guard on for every file without code would pass the case above. Named failure: checks_guard turns on for a file the guard
