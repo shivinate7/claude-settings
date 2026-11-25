@@ -8,7 +8,7 @@ A held skill edit never holds up real work. Owner, 22:21 CST 2026-11-24, typed i
 
 - A held skill edit never holds up real work.
 - The real change (records, hooks, code, brief templates) is built now.
-- Each change lists, in its PR body, the skill text it leaves stale.
+- Each change lists the skill text it leaves stale.
 - That skill text is updated afterwards, where the two overlap.
 
 Kind: process
