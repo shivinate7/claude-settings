@@ -1150,8 +1150,9 @@ def worktree_live_session_absent_folder_case():
 
 
 def worktree_live_session_removed_parent_case():
-    """With the opt-in, a record whose cwd sits under a removed folder (`<removed>/a/b`) stands in no
-    tree, so the answer is False. Scope first: the cwd and its parent are absent, the target a folder."""
+    """With the opt-in, a record whose cwd sits under a removed folder (`<removed>/a/b`) reads None: a removed
+    parent cannot be told from a missing mount, so the read is unknown and the removal stays refused. Scope
+    first: the cwd and its parent are absent, the target a folder."""
     guard = _load_guard_module()
     gone = _removed_folder("stale-parent-gone")
     cwd = os.path.join(gone, "a", "b")
@@ -1164,10 +1165,10 @@ def worktree_live_session_removed_parent_case():
         got, accepted = _stale_answer(guard, tree)
     finally:
         shutil.rmtree(tree, ignore_errors=True)
-    if got is not False:
-        return False, ("a record under a removed folder reads as %r, not False: the removed folder is "
-                       "taken as unreadable%s" % (got, _opt_in_note(accepted)))
-    return True, "a record under a removed folder stands in no tree"
+    if got is not None:
+        return False, ("a record under a removed folder reads as %r, not None: the missing parent is "
+                       "read as a removed folder%s" % (got, _opt_in_note(accepted)))
+    return True, "a record under a removed folder stays unknown (None) with the opt-in"
 
 
 def worktree_live_session_permission_denied_case():
