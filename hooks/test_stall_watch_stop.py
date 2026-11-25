@@ -4982,6 +4982,49 @@ def S30_leading_pause_is_quiet_time_at_stop():
     return problems
 
 
+def gh_reads(records, stop_hook_active=False):
+    """The gh calls one Stop makes on records, and what it printed. run_stop runs the Stop with the stub gh answering
+    open, so each read returns and a second read in the same Stop still runs. The count is the growth of the stub's
+    log, so a call that reached no stub is not counted. Returns (calls, rc, out, err)."""
+    before = len(stub_calls(GH_STUB_LOG))
+    rc, out, err = run_stop(transcript(records), gh_answer="open", stop_hook_active=stop_hook_active)
+    return len(stub_calls(GH_STUB_LOG)) - before, rc, out, err
+
+
+@case
+def CI131_pr_state_read_costs_one_gh_call_only_when_it_decides():
+    """CI131. cost: the Stop's read of a numbered CI wait's PR state is one gh call, made only when the read can decide
+    the Stop. A covered wait with its check-in set makes one call, at full size too. Zero calls under stop_hook_active,
+    when the transcript already closed the wait, for a bare or branch-named wait, and with no wait. Each leg runs the
+    Stop through run_stop with the stub gh answering open. Scope first: the zero legs that name a wait print what they
+    are about (a block or the cancel line), so a zero cannot come from a Stop that skipped the CI check"""
+    if os.name != "posix":
+        raise Skip("needs sh for the gh stub, which this host lacks")
+    problems = []
+    recs, _ = cron_set(RET_A)
+    calls, rc, out, err = gh_reads([ready()] + recs)
+    problems += expect(rc == 0, f"covered numbered wait: exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect(calls == 1, f"covered numbered wait with its check-in set: {calls} gh calls, want 1")
+    calls, rc, out, err = gh_reads([ready()] + recs, stop_hook_active=True)
+    problems += expect(calls == 0, f"under stop_hook_active: {calls} gh calls, want 0")
+    problems += expect(out.strip() == "", f"under stop_hook_active: printed {out[:120]!r}, want nothing")
+    calls, rc, out, err = gh_reads([ready()] + recs + [gh_merge()])
+    problems += expect(RET_A in out, f"transcript closed the wait: no cancel line names the check-in, printed {out[:120]!r}")
+    problems += expect(calls == 0, f"transcript closed the wait: {calls} gh calls, want 0")
+    for label, command in (("bare wait", "gh pr ready"), ("branch-named wait", "gh pr ready feature-x")):
+        calls, rc, out, err = gh_reads([ready(command=command)])
+        problems += expect("marked ready" in out, f"{label}: no block printed, so the zero is not measured: {out[:120]!r}")
+        problems += expect(calls == 0, f"{label}: {calls} gh calls, want 0")
+    calls, rc, out, err = gh_reads([prompt("start")])
+    problems += expect(calls == 0, f"no wait: {calls} gh calls, want 0")
+    big = [prompt("start")] + [assistant_text("step %d" % n) for n in range(2000)]
+    for i in range(30):
+        big += [ready(str(1000 + i)), gh_merge(str(1000 + i))]
+    calls, rc, out, err = gh_reads(big + [ready()] + recs)
+    problems += expect(calls == 1, f"full size, 30 closed waits then a covered wait: {calls} gh calls, want 1")
+    return problems
+
+
 @case
 def CI132_a_gh_call_of_the_check_reaches_the_stub():
     """CI132. hygiene: a Stop that reads a numbered wait's PR state makes one gh call, and that call reaches the stub
