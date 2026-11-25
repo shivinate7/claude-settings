@@ -3,7 +3,7 @@
 
 Usage:
   lease take NAME [--holder ID] [--roster TEXT] [--repo-dir D] [--remote R]
-  lease give back NAME [--holder ID] [--repo-dir D] [--remote R]   (`give NAME` does the same)
+  lease give back NAME [--holder ID] [--repo-dir D] [--remote R]   (`give NAME` does the same; `give back` alone is a usage error)
   lease lift NAME [--repo-dir D] [--remote R]
   lease show NAME [--repo-dir D] [--remote R]
 
@@ -23,10 +23,12 @@ Holder: --holder, else holder_id() of the caller's environment (`session_X` for 
 CLAUDE_CODE_SESSION_ID). A caller with no id cannot take or give back.
 Exit codes: 0 done (take: taken or own; give: given or free; lift: lifted or free; show), 1 refused (held, not-holder),
 2 UNKNOWN (a read or push that failed or ran past its time) or a bad argument. A read that fails is UNKNOWN, never free.
-Cost: holds() and read() start git for `ls-remote`, one `fetch` of the ref and one `log` on a sha not seen before in this
-process; a sha seen before costs the `ls-remote` alone. A commit never changes, so the sha-to-record cache is safe. The ref's own sha is
-never cached. The fetch stores the tip in the repo's own ref refs/lease-read/NAME, and the `log` reads the record from that ref, so a
-record is always the tip the fetch got, never an older sha the `ls-remote` saw. No timer, no process left running, no other file written.
+Cost: holds() and read() start git for `ls-remote`, one `fetch` of the ref (once more when that fetch fails) and one `log` on a sha not
+seen before in this process; a sha seen before costs the `ls-remote` alone. A commit never changes, so the sha-to-record cache is safe. The
+ref's own sha is never cached. The fetch stores the tip in the repo's own ref refs/lease-read/NAME and writes no remote-tracking ref, and the
+`log` reads the record from that ref, so a record is always the tip the fetch got, never an older sha the `ls-remote` saw. A take, give back
+or lift starts git for `remote get-url`, `mktree`, `commit-tree` and `push` (a take also for `config`); the push goes to the remote's URL, so it writes no remote-tracking
+ref. No timer, no process left running, no other file written.
 """
 import argparse
 import os
@@ -45,6 +47,7 @@ PUSH_TIMEOUT_S = 30
 REF_PREFIX = "refs/heads/lease/"
 LOCAL_ENV = "CLAUDE_CODE_SESSION_ID"
 READ_REF_PREFIX = "refs/lease-read/"
+FETCH_TRIES = 2  # a read's fetch and its one retry
 HOLDER_MAX = 200
 GIT_ENV = {"GIT_TERMINAL_PROMPT": "0"}  # a credential prompt would hang until the time runs out
 GIT_IDENT = ["-c", "user.name=lease", "-c", "user.email=lease@localhost"]
@@ -119,7 +122,11 @@ def read(repo, remote, name, budget_s=READ_BUDGET_S):
     if key not in _records:
         ref = ref_of(name)
         local = READ_REF_PREFIX + name
-        code, out, err = _git(repo, ["fetch", "-q", "--no-write-fetch-head", remote, "+%s:%s" % (ref, local)], deadline - time.monotonic())
+        for _ in range(FETCH_TRIES):  # one lost ref-lock race must not read as Unknown: fetch once more, within the read's budget
+            code, out, err = _git(repo, ["fetch", "-q", "--no-write-fetch-head", "--refmap=", remote, "+%s:%s" % (ref, local)],
+                                  deadline - time.monotonic())
+            if not code:
+                break
         if code:
             raise Unknown("cannot fetch %s from %s: %s" % (ref, remote, err or out))
         code, out, err = _git(repo, ["log", "-1", "--format=%H%n%B", local], deadline - time.monotonic())
@@ -149,13 +156,15 @@ def _push_record(repo, remote, name, expected, message):
     -> (code, push output, sha of the record commit). The output of the push is kept for the caller."""
     ref = ref_of(name)
     deadline = time.monotonic() + PUSH_TIMEOUT_S
+    code, url, _ = _git(repo, ["remote", "get-url", "--push", remote], PUSH_TIMEOUT_S)
+    target = url if code == 0 and url else remote  # a push to the URL, not the remote's name, writes no remote-tracking ref
     code, tree, err = _git(repo, ["mktree"], PUSH_TIMEOUT_S, input="")
     if code:
         raise Unknown("cannot make the lease tree: " + err)
     code, sha, err = _git(repo, [*GIT_IDENT, "commit-tree", tree, "-m", message], deadline - time.monotonic())
     if code:
         raise Unknown("cannot make the lease commit: " + err)
-    code, out, err = _git(repo, ["push", "-q", "--force-with-lease=%s:%s" % (ref, expected), remote, "%s:%s" % (sha, ref)],
+    code, out, err = _git(repo, ["push", "-q", "--force-with-lease=%s:%s" % (ref, expected), target, "%s:%s" % (sha, ref)],
                           deadline - time.monotonic())
     return code, (out + "\n" + err).strip(), sha
 
@@ -265,8 +274,8 @@ def main(argv=None):
     p.add_argument("--remote", default="origin")
     args = p.parse_args(argv)
     words = args.words
-    if len(words) == 3 and words[:2] == ["give", "back"]:
-        words = ["give", words[2]]  # `give back NAME` is `give NAME`
+    if words[:2] == ["give", "back"]:
+        words = ["give", *words[2:]]  # `give back NAME` is `give NAME`; `give back` alone has no NAME
     if len(words) != 2 or words[0] not in ("take", "give", "lift", "show"):
         p.error("say take NAME, give back NAME, lift NAME or show NAME")
     args.verb, args.name = words
