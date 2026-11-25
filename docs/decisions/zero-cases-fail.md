@@ -26,14 +26,14 @@ CI stays green while a suite tests nothing. CI runs most steps without `bin/verd
 - The 11 hand runners call it: `hooks/test_agent_brief.py`, `test_config_watch.py`, `test_config_watch_fast_exit.py`, `test_feedback_inbox.py`, `test_guard_load_os.py`, `test_page_link_check.py`, `test_reply_judge.py`, `test_rm_prompt_answer.py`, `test_shared_names.py`, `test_waiting_export.py`, `test_wrappers.py`.
 - The four mods collectors fail on `results.length === 0`: `mods/token-weather`, `mods/session-board`, `mods/decision-watch`, `mods/plain-diff`.
 - `lint/check_suites_have_main.py`, the checker. It reads each `test_*.py` as a syntax tree. `ALLOWED` is empty.
-- `make_variant` in `lint/test_zero_case_runs.py` writes the copy of a mods file. `rewrite_variant.cjs` runs it under node with TypeScript's scanner, so it finds code, not text.
+- `make_variant` (`lint/test_zero_case_runs.py` `make_variant`) writes the copy of a mods file. Its rewriter (`lint/test_zero_case_runs.py` `REWRITER`) runs under node with TypeScript's scanner, so it changes code and never text.
 - Tests: `hooks/test_case_runner.py` (3 cases); `lint/test_zero_case_runs.py` (the 11 runners with their case lists emptied; the 4 collectors with every awaited `test(` statement disabled; 7 cases for the copy's code-only edits); `lint/test_suites_have_main.py` (4 fixture cases and 1 run over the repo).
 
 ## Cost
 
 - Checker: one walk of the repo tree, which skips `.git`, `node_modules`, `__pycache__` and `.claude/worktrees`. Then one open and one `ast` parse per `test_*.py`. It writes no file and starts no timer. Run time: unmeasured.
 - Zero-case checks: a length test on a list or a results array. No read and no process.
-- `lint/test_zero_case_runs.py` starts 11 runner processes. Each copy of a mods file takes two `node` starts (rewrite, then run), and the 7 rewriter cases take one each. Each rewrite loads `typescript.js` (size and time unmeasured). Every process has a 300 s limit.
+- `lint/test_zero_case_runs.py` starts 11 runner processes, two `node` starts per mods file, and one `node` start per rewriter case (not pinned: no test counts these starts). Each rewrite loads `typescript.js` (size and time unmeasured). Every process has a 300 s limit.
 
 ## Limits
 
