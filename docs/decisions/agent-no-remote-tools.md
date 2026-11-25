@@ -41,9 +41,9 @@ Lane picks the owner may reverse:
 
 ## Cost
 
-- One guard process start per MCP tool call in every session (the matcher above).
-- One settings.json read per agent MCP call that is not on the remote server. A second read happens only when the first copy cannot be read.
-- A refused call appends one line to `guard.log` (`refuse` in hooks/guard_core.py). An allowed call writes nothing.
+- One guard process start per MCP tool call in every session, from the matcher above; this cost is unpinned.
+- One settings.json read per agent MCP call that is not on the remote server, and a second only when the first copy cannot be read; this cost is unpinned.
+- A refused call appends one line to `guard.log` (`refuse` in hooks/guard_core.py), and an allowed call writes nothing; this cost is unpinned.
 
 Kind: process
 Home: hooks/guard.py
