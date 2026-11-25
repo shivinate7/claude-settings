@@ -16,7 +16,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `outcomes-tests-are-statements` | A failing test is a claim, not law. | [`CLAUDE.md`](../CLAUDE.md) |
 | `outcomes-grant-covers-named-act` | My grant covers the act it names, never a variant. | [`CLAUDE.md`](../CLAUDE.md) |
 | `outcomes-mechanize-rules` | Once ready, turn each rule below into a hook or check. | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-pick-mode-from-request` | Pick the session's role from my request: coordinator for a standing build, else lane (`session-tiers`, the session roles). | [`CLAUDE.md`](../CLAUDE.md) |
+| `roles-pick-mode-from-request` | Pick the hats the session wears from my request: coordinator for a standing build, else lane (`session-tiers`, the session roles). | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-solo-reviews-logic-diffs-only` | In a run with one lane, a fresh reviewer reads the diff before merge only when it touches a rule's behaviour, a guard's or check's verdict, or program logic. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-solo-grows-switch-to-orchestrate` | A lane may grow to a coordinator. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-orchestrator-never-builds` | A lane builds a short list of edits itself when nothing can run in parallel, whoever started it. | [`CLAUDE.md`](../CLAUDE.md) |
