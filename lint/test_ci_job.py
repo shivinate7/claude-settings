@@ -40,6 +40,8 @@ RerunCache: a rerun at the same key runs no passing step and prints PASS (cached
 ScopeLint: --lint with a base reads each needs.scope.outputs flag from the repo's .github/scripts/ci-scope.sh, the script CI's scope
   job runs, on the diff to the base. A step gated on a false flag is skipped. A flag the script does not give, or a script that
   fails, leaves its step to run, and the log says UNKNOWN scope.
+LintListedSuites: merge.lintSuites in .github/stamp.json names checks.yml steps. --lint runs a listed step the change reaches and takes its
+  verdict; a listed name the workflow lacks is a FAIL that names it; an unlisted, absent or empty list keeps the old read.
   ScopeLint also covers a suite step lint cannot select (`sh hooks/test_*.sh`, `node lint/test_*.mjs`, `python3 skills/**/test_*.py`):
   when its flag is on for the change, --lint runs a picked or touched python suite and FAILs on its failure; any other such suite
   prints one `not run` line that names it and says it runs in CI (also in another job), and only a change to its own file or to the
@@ -5204,6 +5206,264 @@ class ScopeLint(Job):
 
     def test_a_suite_line_in_a_multi_line_run_block_with_other_commands_is_still_a_suite_step(self):  # the control
         self.assert_suite_step_reads_unknown("echo prep\nsh hooks/test_install_src.sh")
+
+
+class LintListedSuites(Job):
+    """`merge.lintSuites` in the repo's .github/stamp.json: each entry names a checks.yml step, read as merge.readyChecks reads its names
+    (a bare name is a step of job checks; `<job>:<step>` names a step of that job). --lint runs a listed step the change reaches, and that
+    run's verdict is the step's. A listed step the change does not reach prints only the not-run line an unreached suite prints. An unlisted suite, an
+    absent list and an empty list keep the old read. A listed name the workflow lacks is a FAIL that names it. The suites are tiny stand-ins
+    at the paths their steps name; the real-file case reads the repo's own list and resolves each name against checks.yml."""
+
+    SCOPE = ScopeLint.SCOPE
+    SCOPE_ENV = ScopeLint.SCOPE_ENV
+    PROBE = ScopeLint.PROBE
+    PROBE_SRC = ScopeLint.PROBE_SRC
+    # ScopeLint's fixture helpers, borrowed (one home): a subclass would also run its cases under this class.
+    write = ScopeLint.write
+    real_script = ScopeLint.real_script
+    commit_base = ScopeLint.commit_base
+    lane = ScopeLint.lane
+    flags_of_script = ScopeLint.flags_of_script
+    assert_code_on = ScopeLint.assert_code_on
+    ran = ScopeLint.ran
+    assert_not_run_in_ci = ScopeLint.assert_not_run_in_ci
+    assert_unknown_names = ScopeLint.assert_unknown_names
+
+    CONFIG_FILE = os.path.join(HERE, "..", ".github", "stamp.json")
+    CODE_IF = "${{ needs.scope.outputs.code == 'true' }}"
+    NODE = ("lint/test_listed.mjs", "import { writeFileSync } from 'node:fs';\nwriteFileSync('ran-listed-node.txt', '');\n")
+    BASH = ("lint/test_listed.sh", "touch ran-listed-bash.txt\nexit 1\n")  # a marker, then a failure
+    NODE_STEP = step("Listed scanner suite", "node lint/test_listed.mjs", **{"if": CODE_IF})
+    BASH_STEP = step("Listed shell suite", "bash lint/test_listed.sh", **{"if": CODE_IF})
+    OTHER_STEP = step("Other scanner suite", "node lint/test_listed.mjs", **{"if": CODE_IF})  # a step of job other
+    REAL_LISTED = ("Opt-in CI template fixture suites", "checks-rest:Scanner trap lint", "checks-rest:Record stamp engine fixture suite",
+                   "checks-rest:Record stamp action fixture suite", "shell-macos:Shell syntax check, install.sh")  # the repo's own list must name these
+
+    def job_call(self, *steps, **keys):
+        """The run's environment without the scope script's variables, as ScopeLint's runs have it."""
+        argv, env = Job.job_call(self, *steps, **keys)
+        return argv, {k: v for k, v in env.items() if k not in self.SCOPE_ENV}
+
+    @staticmethod
+    def declare(names):
+        """The repo's .github/stamp.json as a dict: merge.lintSuites names `names`."""
+        return {"merge": {"lintSuites": names}}
+
+    MAC_STEP = step("Listed macos suite", "node lint/test_listed.mjs", **{"if": CODE_IF})  # a listed step of job macos-listed
+    MAC_JOB = [("macos-listed", "macos-latest", [MAC_STEP])]
+    MAC_LIST = ["macos-listed:Listed macos suite"]
+
+    @staticmethod
+    def as_platform(name):
+        """The launch of a run whose ci-job reads sys.platform as `name`: the launcher sets it before ci-job runs in this process, the seam
+        that FIND_EVERY_TOOL and REFUSE_SYMLINKS use for the tool lookup and os.symlink."""
+        return ("-c", launcher("import sys\nsys.platform = %r" % (name,)))
+
+    def base(self, declared=None, raw=None):
+        """main holds the scope script, the lint step's file, the two suites, and .github/stamp.json: `declared` as JSON, or `raw` as its
+        text when the file is not JSON. Neither given: no stamp file."""
+        files = {SuiteSteps.LINT_FILE[0]: SuiteSteps.LINT_FILE[1], self.NODE[0]: self.NODE[1], self.BASH[0]: self.BASH[1]}
+        if raw is not None:
+            files[".github/stamp.json"] = raw
+        elif declared is not None:
+            files[".github/stamp.json"] = json.dumps(declared)
+        self.write(files)
+        self.commit_base(self.real_script())
+
+    def lint(self, *steps, other=None, args=("--lint", "--base", "main"), env=None, extra=(), launch=()):
+        """A run of job checks, the job a bare name in the list is a step of."""
+        return self.run_job(*steps, args=args, env=env, job="checks", other=other, extra=extra, launch=launch)
+
+    def test_a_listed_node_step_the_change_reaches_runs_and_passes(self):
+        """Red now: the list names the step and the change touches its suite, so the suite runs and its PASS is the step's verdict."""
+        self.base(self.declare(["Listed scanner suite"]))
+        self.lane({self.NODE[0]: self.NODE[1] + "// changed\n"})
+        self.assert_code_on("a change to the listed node suite")
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, self.NODE_STEP)
+        self.assertTrue(self.ran("listed-node"), "--lint did not run the listed node step the change reaches\n" + out)
+        self.assertEqual((rc, by_step(lines).get("Listed scanner suite")), (0, "PASS"), out)
+
+    def test_a_listed_shell_step_the_change_reaches_that_fails_makes_lint_fail(self):
+        """Red now: the listed bash suite runs and fails, so lint reads FAIL on a line that names it and exits 1."""
+        self.base(self.declare(["Listed shell suite"]))
+        self.lane({self.BASH[0]: self.BASH[1] + "# changed\n"})
+        self.assert_code_on("a change to the listed bash suite")
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, self.BASH_STEP)
+        self.assertTrue(self.ran("listed-bash"), "--lint did not run the listed bash step the change reaches\n" + out)
+        self.assertEqual((rc, by_step(lines).get("Listed shell suite")), (1, "FAIL"), out)
+
+    def test_a_listed_name_the_workflow_lacks_fails_lint_and_names_it(self):
+        """Red now: a listed name that no step of checks has is one FAIL line naming it, and lint exits 1."""
+        self.base(self.declare(["No such scanner step"]))
+        self.lane({"hooks/guard.py": "x = 1\n"})
+        self.assert_code_on("a hooks/guard.py change")
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP)
+        self.assertTrue([ln for ln in lines if ln.startswith("FAIL") and "No such scanner step" in ln],
+                        "--lint printed no FAIL line naming the listed step the workflow lacks\n" + out)
+        self.assertEqual(rc, 1, "--lint did not exit 1 for a listed name the workflow lacks\n" + out)
+
+    def test_a_listed_step_whose_tool_is_missing_reads_unknown_and_names_the_tool(self):
+        """Red now: `node` is a stub that exits 127, so the listed step reads unknown, never PASS, and its line names node. The old read's
+        unknown line names the suite and no tool."""
+        self.base(self.declare(["Listed scanner suite"]))
+        self.lane({self.NODE[0]: self.NODE[1] + "// changed\n"})
+        self.assert_code_on("a change to the listed node suite")
+        env = self.stub_path(node='touch stub-node-ran.txt\necho "node: command not found" >&2\nexit 127\n')
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, self.NODE_STEP, env=env)
+        self.assertTrue(os.path.exists(os.path.join(self.root, "stub-node-ran.txt")),
+                        "the stub node did not run, so the step never reached its missing tool\n" + out)
+        self.assertEqual((rc, by_step(lines).get("Listed scanner suite")), (2, "unknown"), out)
+        named = [ln for ln in lines if "Listed scanner suite" in ln]
+        self.assertTrue(named and "node" in named[0], "the listed step's unknown line does not name the missing tool node\n" + out)
+
+    def test_the_plan_shows_a_listed_step_the_change_reaches_as_would_run(self):
+        """Red now: --plan shows the listed step the change reaches as `would run`, and runs nothing."""
+        self.base(self.declare(["Listed scanner suite"]))
+        self.lane({self.NODE[0]: self.NODE[1] + "// changed\n"})
+        self.assert_code_on("a change to the listed node suite")
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, self.NODE_STEP, args=("--lint", "--base", "main", "--plan"))
+        self.assertFalse(self.ran("listed-node"), "--plan ran the listed node step\n" + out)
+        self.assertTrue(any(ln.startswith("would run") and "Listed scanner suite" in ln for ln in lines),
+                        "--plan does not show the listed step the change reaches as would run\n" + out)
+
+    def test_a_qualified_listed_step_of_another_job_runs_when_the_change_reaches_it(self):
+        """Red now: `other:<step>` names the step of job other; the change reaches its suite, so that step runs and passes here."""
+        self.base(self.declare(["other:Other scanner suite"]))
+        self.lane({self.NODE[0]: self.NODE[1] + "// changed\n"})
+        self.assert_code_on("a change to the listed node suite")
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, other=[self.OTHER_STEP])
+        self.assertTrue(self.ran("listed-node"), "--lint did not run the step of job other that the list names, though the change reaches it\n" + out)
+        self.assertTrue(any(ln.startswith("PASS") and "Other scanner suite" in ln for ln in lines),
+                        "--lint printed no PASS line for the qualified listed step of job other\n" + out)
+
+    def test_this_repo_lists_its_non_python_suites_and_each_name_is_a_checks_step(self):
+        """Red now: .github/stamp.json has no merge.lintSuites. With the list, each entry resolves to a step of checks.yml, read as
+        merge.readyChecks reads its names (merge.ready_job_groups), and the five suites are all named."""
+        with open(self.CONFIG_FILE, encoding="utf-8") as f:
+            listed = (json.load(f).get("merge") or {}).get("lintSuites")
+        self.assertTrue(isinstance(listed, list) and listed,
+                        "merge.lintSuites is absent or empty in .github/stamp.json, so lane lint runs no listed suite")
+        self.assertEqual([n for n in self.REAL_LISTED if n not in listed], [],
+                         "merge.lintSuites does not name these suites' checks.yml steps")
+        sys.path.append(os.path.join(HERE, "..", "merge"))  # append: no module of the merge dir shadows one this suite imports
+        import merge  # noqa: E402  the one home of the naming form (merge.ready_job_groups)
+        with open(CHECKS, encoding="utf-8") as f:
+            text = f.read()
+        for job, entries in merge.ready_job_groups(listed).items():
+            block = job_block(text, job)
+            self.assertIsNotNone(block, "merge.lintSuites names job %r, which checks.yml does not have" % job)
+            names = [step_key(st, "name") for st in step_blocks(block)]
+            missing = [bare for _, bare in entries if bare not in names]
+            self.assertEqual(missing, [], "merge.lintSuites names steps that job %r lacks" % job)
+
+    def test_a_listed_step_the_change_does_not_reach_prints_only_its_not_run_line(self):
+        """Control, green now: a listed step the change does not reach is not run, and its one line is the not-run line an unreached suite prints."""
+        self.base(self.declare(["Listed scanner suite"]))
+        self.lane({"hooks/guard.py": "x = 1\n"})
+        self.assert_code_on("a hooks/guard.py change")
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, self.NODE_STEP)
+        self.assert_not_run_in_ci(rc, lines, "listed-node", "lint/test_listed.mjs", out)
+        self.assertEqual(len([ln for ln in lines if "Listed scanner suite" in ln]), 1,
+                         "the listed step prints more than its one line\n" + out)
+
+    def test_an_unlisted_shell_suite_the_change_reaches_keeps_its_unknown_line(self):
+        """Control, green now: a shell suite the list does not name keeps the unknown line of the old read, since the change touches it."""
+        self.base(self.declare(["Listed scanner suite"]))
+        self.lane({self.BASH[0]: self.BASH[1] + "# changed\n"})
+        self.assert_code_on("a change to the unlisted bash suite")
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, self.BASH_STEP, self.NODE_STEP)  # the listed name must resolve to a step
+        self.assert_unknown_names(rc, lines, "listed-bash", "lint/test_listed.sh", out)
+
+    def test_an_absent_file_keeps_the_unknown_line_for_a_reached_node_step(self):
+        """Control, green now: with no .github/stamp.json, the reached node suite reads unknown, as the old read does."""
+        self.base(None)
+        self.lane({self.NODE[0]: self.NODE[1] + "// changed\n"})
+        self.assert_code_on("a change to the node suite")
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, self.NODE_STEP)
+        self.assert_unknown_names(rc, lines, "listed-node", "lint/test_listed.mjs", out)
+
+    def test_an_empty_list_keeps_the_unknown_line_for_a_reached_node_step(self):
+        """Control, green now: an empty merge.lintSuites changes nothing, so the reached node suite reads unknown."""
+        self.base(self.declare([]))
+        self.lane({self.NODE[0]: self.NODE[1] + "// changed\n"})
+        self.assert_code_on("a change to the node suite")
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, self.NODE_STEP)
+        self.assert_unknown_names(rc, lines, "listed-node", "lint/test_listed.mjs", out)
+
+    def test_a_listed_step_on_a_runner_this_os_cannot_stand_in_for_reads_one_unknown_line_naming_it(self):
+        """Red now: the list names a step of a macos-latest job, the change reaches its suite, and this run reads Linux (sys.platform
+        forced to linux). The step is not run here, so one unknown line names it and says `not run`, and the run exits 2 as an unknown
+        does. Today the step reads as an unlisted one does: a line that names the suite file, not the step."""
+        self.base(self.declare(self.MAC_LIST))
+        self.lane({self.NODE[0]: self.NODE[1] + "// changed\n"})
+        self.assert_code_on("a change to the listed node suite")
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, extra=self.MAC_JOB, launch=self.as_platform("linux"))
+        named = [ln for ln in lines if ln.startswith("unknown") and "Listed macos suite" in ln]
+        self.assertEqual(len(named), 1, "--lint printed no one unknown line that names the listed macos step, which this run cannot run\n" + out)
+        self.assertRegex(named[0], r"\bnot run\b", "the unknown line for the listed macos step does not say it was not run here\n" + out)  # \b: "cannot run" holds "not run"
+        self.assertFalse(self.ran("listed-node"), "--lint ran the listed macos step on linux\n" + out)
+        self.assertEqual(rc, 2, "--lint named the listed macos step on an unknown line and must exit 2 (exit %d)\n%s" % (rc, out))
+
+    def test_a_listed_step_on_a_runner_this_os_can_stand_in_for_runs_and_passes(self):
+        """Control, green now: the same list and change on a run whose sys.platform reads darwin: the listed macos step runs, and its PASS
+        is the step's verdict. A line that prints the unknown whatever the platform fails this."""
+        self.base(self.declare(self.MAC_LIST))
+        self.lane({self.NODE[0]: self.NODE[1] + "// changed\n"})
+        self.assert_code_on("a change to the listed node suite")
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, extra=self.MAC_JOB, launch=self.as_platform("darwin"))
+        self.assertTrue(self.ran("listed-node"), "--lint did not run the listed macos step on darwin, where it can run\n" + out)
+        self.assertTrue([ln for ln in lines if ln.startswith("PASS") and "Listed macos suite" in ln],
+                        "--lint printed no PASS line for the listed macos step it ran on darwin\n" + out)
+        self.assertEqual(rc, 0, "--lint did not exit 0 with the listed macos step passing on darwin (exit %d)\n%s" % (rc, out))
+
+    def test_an_unparseable_merge_config_reads_one_unknown_line_naming_it(self):
+        """Red now: .github/stamp.json is not JSON, so lint_suites reads it as no list and prints nothing, a silent `no list`. One unknown
+        line must name the file. The change touches no suite, so the only line that can name the file is this one."""
+        self.base(raw='{"merge": {"lintSuites": ["Listed scanner suite"]\n')
+        self.lane({"hooks/guard.py": "x = 1\n"})
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP)
+        named = [ln for ln in lines if "stamp.json" in ln]
+        self.assertEqual(len(named), 1, "--lint printed %d line(s) that name .github/stamp.json for a file that is not JSON, want one\n%s" % (len(named), out))
+        self.assertTrue(named[0].startswith("unknown"), "the line that names .github/stamp.json for a file that is not JSON does not read unknown\n" + out)
+
+    def test_a_lintsuites_that_is_not_a_list_reads_one_unknown_line_naming_the_file(self):
+        """Control, green now: a merge.lintSuites that is no list already reads one unknown line that names .github/stamp.json."""
+        self.base(self.declare("checks"))
+        self.lane({"hooks/guard.py": "x = 1\n"})
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP)
+        named = [ln for ln in lines if "stamp.json" in ln]
+        self.assertEqual(len(named), 1, "--lint printed %d line(s) that name .github/stamp.json for a lintSuites that is not a list, want one\n%s" % (len(named), out))
+        self.assertTrue(named[0].startswith("unknown"), "the line for a lintSuites that is not a list does not read unknown\n" + out)
+
+    def test_no_merge_config_prints_no_line_about_the_list(self):
+        """Control, green now: with no .github/stamp.json no line names the file, so other repos see no change."""
+        self.base(None)
+        self.lane({"hooks/guard.py": "x = 1\n"})
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP)
+        self.assertEqual([ln for ln in lines if "stamp.json" in ln], [], "--lint names .github/stamp.json though the repo has none\n" + out)
+        self.assertEqual(rc, 0, "--lint with no stamp file and a passing step must exit 0 (exit %d)\n%s" % (rc, out))
+
+    def test_a_merge_config_with_no_lintsuites_key_prints_no_line_about_the_list(self):
+        """Control, green now: a stamp file with no merge.lintSuites key is no list, so no line names it."""
+        self.base({"merge": {}})
+        self.lane({"hooks/guard.py": "x = 1\n"})
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP)
+        self.assertEqual([ln for ln in lines if "stamp.json" in ln], [], "--lint names .github/stamp.json though the file has no lintSuites key\n" + out)
+        self.assertEqual(rc, 0, "--lint with no lintSuites key and a passing step must exit 0 (exit %d)\n%s" % (rc, out))
+
+    def test_a_listed_suite_whose_marker_names_the_changed_file_is_reached_and_runs(self):
+        """Green now: a listed node suite whose `_UNDER_TEST:-` line names a repo path as its subject is reached when the change touches only
+        that subject, not the suite's own file. --lint runs the suite, and its PASS is the step's verdict."""
+        marked = "// SUBJECT_UNDER_TEST:-$REPO_ROOT/lint/test_listed_subject.mjs}\n" + self.NODE[1]
+        self.write({SuiteSteps.LINT_FILE[0]: SuiteSteps.LINT_FILE[1], self.NODE[0]: marked, "lint/test_listed_subject.mjs": "// subject\n",
+                    ".github/stamp.json": json.dumps(self.declare(["Listed scanner suite"]))})
+        self.commit_base(self.real_script())
+        self.lane({"lint/test_listed_subject.mjs": "// subject, changed\n"})
+        self.assert_code_on("a change to the subject file the listed node suite names")
+        rc, lines, out = self.lint(SuiteSteps.LINT_STEP, self.NODE_STEP)
+        self.assertTrue(self.ran("listed-node"), "--lint did not run the listed node suite whose marker names the changed file\n" + out)
+        self.assertEqual((rc, by_step(lines).get("Listed scanner suite")), (0, "PASS"), out)
 
 
 BIN_CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
