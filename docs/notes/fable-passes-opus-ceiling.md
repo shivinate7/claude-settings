@@ -1,1 +1,0 @@
-- fable-passes-opus-ceiling: Fable passes the Opus ceiling: `opus_without_grant` (hooks/guard.py) reads only the word opus. On the Opus rows (refuter, designer) the role row passes Fable too, and the round-1 review saw it pass there. Rows below opus refuse it. The owner decides whether Fable needs his grant. Seen: 2026-11-25 x1

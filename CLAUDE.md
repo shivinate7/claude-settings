@@ -21,7 +21,7 @@ agent runs its role's model and effort from `agent-model-cap`, the model-per-rol
 the ceiling, except Plan, the built-in advisor (`advisorModel`), the designer, the design reviewer,
 and the refuter, which run Opus. A builder's third try runs Sonnet at high effort (`roles-third-round-steps-up`, owner item 893). An Explore whose brief's first non-blank line carries the audit marker `Audit:` may run Sonnet or Opus. Any other agent runs Opus or fable, or any
 model above Sonnet, only on my grant for the spawn I name, or by override: `opus 2h` for a time,
-`opus builders 2h` for one role.<!-- rule:roles-sonnet-is-the-ceiling --> After a Plan agent returns, a refuter gets
+`opus builders 2h` for one role. Those lift Opus only.<!-- rule:roles-sonnet-is-the-ceiling --> After a Plan agent returns, a refuter gets
 the task brief and the plan, word for word, and nothing else. It tries to refute the plan's premises and find a
 simpler route. A clash goes to the session that spawned the refuter, and to me when it stakes a rule, money or an act that cannot be
 undone (decision `plan-refuter`).<!-- rule:roles-plan-gets-refuter --> When a task is Opus-shaped (long-horizon, whole-codebase, or many-hour

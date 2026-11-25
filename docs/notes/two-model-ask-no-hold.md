@@ -1,0 +1,1 @@
+- two-model-ask-no-hold: The model judge answers no to a prompt that names two or more models as the choice (call_judge MODEL_ASK_PROMPT), so grant_model_ask writes no hold for "opus for the judges, sonnet for the rest". Read from the prompt text; the judge answer was not run. Decision agent-model-cap. Seen: 2026-11-25 x1
