@@ -13,7 +13,7 @@ Mistake: `merge/test_merge.py:65` pops `CLAUDE_CONFIG_DIR` at import, in a loop 
 
 Harm: a test passes or fails by what the owner's live config holds. A case that writes config may write to the owner's real `~/.claude`.
 
-Helper: `isolated_config(run)` in `lint/_test_temp.py`, under the run folder standard (decision `test-temp-standard`). It sets `CLAUDE_CONFIG_DIR` to a fresh folder under the run folder and yields that folder. On exit, also when the block raises, it restores the old value, or removes the variable when none was set. It sets neither `HOME` nor `USERPROFILE`. It is opt-in: a case calls it. No test file outside `lint/test_test_temp.py` calls it yet.
+Helper: `lint/_test_temp.py` `isolated_config(run)`, under the run folder standard (decision `test-temp-standard`). `lint/_test_temp.py` `isolated_config` sets `CLAUDE_CONFIG_DIR` to a fresh folder under the run folder, and yields that folder. On exit, also when the block raises, `lint/_test_temp.py` `isolated_config` restores the old value, or removes the variable when none was set. `lint/_test_temp.py` `isolated_config` sets neither `HOME` nor `USERPROFILE`. It is opt-in. `lint/test_test_temp.py` `IsolatedConfig` is the only caller so far.
 
 Check: `lint/check_tests_set_config.py` parses each `test_*.py` under the repo. It flags a file that pops or deletes `CLAUDE_CONFIG_DIR` at import and never sets it. It also flags a file that does not parse.
 
@@ -29,7 +29,7 @@ Limits:
 - A name counts only as a string literal, or as a loop variable over a literal. A pop through a constant is not judged. `os.unsetenv` is not judged.
 - The check is not in CI or in `merge.readyChecks` yet. `merge/test_merge.py` must set the variable first. Its case `test_repo_names_the_incident_file` expects that file as a finding, so the case fails once the file is fixed. Re-point it then.
 
-Kind: build
+Kind: process
 Home: lint/check_tests_set_config.py
 Done check: `lint/test_tests_set_config.py` (the check's cases) and `lint/test_test_temp.py` (the helper's cases).
 Source: builder run on `merge/test_merge.py`, 2026-11-24. No owner ruling.
