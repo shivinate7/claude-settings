@@ -1,21 +1,24 @@
 """Cases for isolated_config(run) in lint/_test_temp.py: CLAUDE_CONFIG_DIR points at a fresh folder under the run folder while the
 block runs, is put back after it (also when the block raises), and HOME and USERPROFILE stay as they were.
 
-TEST_TEMP_UNDER_TEST, a path from the repo root, names a stand-in module to run these cases against: lint/_test_temp_stub_test.py
-changes nothing, and lint/_test_temp_leaky_stub_test.py never puts anything back. The red runs use them. Unset, the cases run
-against lint/_test_temp.py.
+--stand-in PATH, a path from the repo root, names a stand-in module to run these cases against: lint/_test_temp_stub_test.py
+changes nothing, and lint/_test_temp_leaky_stub_test.py never puts anything back. The red runs use them. Without it, the cases run
+against lint/_test_temp.py. The caller's environment is never read: a stray value there changes nothing.
 
-Run: python3 -m unittest discover -s lint -p test_test_temp.py
+Run: python3 lint/test_test_temp.py [--stand-in PATH]
 """
 import atexit
 import importlib.util
 import os
 import shutil
+import sys
 import unittest
+from unittest import mock
 
 import _test_temp
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+STAND_IN = None  # the __main__ block sets it from --stand-in; the caller's environment is never read
 RUN = _test_temp.run_folder()  # this run's one folder (test-temp-standard); removed when the process exits
 atexit.register(shutil.rmtree, RUN, True)
 VAR = "CLAUDE_CONFIG_DIR"
@@ -23,11 +26,10 @@ PRIOR = "/prior/config/the/block/must/restore"  # what a caller sets before the 
 
 
 def isolated_config_under_test():
-    """The isolated_config the cases drive: the stand-in named by TEST_TEMP_UNDER_TEST, else the one in lint/_test_temp.py."""
-    path = os.environ.get("TEST_TEMP_UNDER_TEST")
-    if not path:
+    """The isolated_config the cases drive: the stand-in named by --stand-in, else the one in lint/_test_temp.py."""
+    if not STAND_IN:
         return _test_temp.isolated_config
-    spec = importlib.util.spec_from_file_location("test_temp_under_test", os.path.join(ROOT, path))
+    spec = importlib.util.spec_from_file_location("test_temp_under_test", os.path.join(ROOT, STAND_IN))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.isolated_config
@@ -99,6 +101,20 @@ class IsolatedConfig(unittest.TestCase):
             pass
         self.assertNotEqual(first, second, "two blocks gave the same folder, so one block's files reach the next")
 
+    def test_stray_stand_in_in_the_environment_changes_nothing(self):
+        put(PRIOR)
+        with mock.patch.dict(os.environ, {"TEST_TEMP_UNDER_TEST": "lint/_test_temp_stub_test.py"}):
+            with isolated_config_under_test()(RUN):
+                self.assertTrue(under(os.environ.get(VAR) or "", RUN),
+                                "a stand-in named in the caller's environment changes what the suite tests: CLAUDE_CONFIG_DIR is %r inside the block"
+                                % os.environ.get(VAR))
+
 
 if __name__ == "__main__":
+    if "--stand-in" in sys.argv:  # this suite's own entry point sets its stand-in; unittest never sees the flag
+        at = sys.argv.index("--stand-in")
+        if at + 1 == len(sys.argv):
+            sys.exit("--stand-in needs a path from the repo root")
+        STAND_IN = sys.argv[at + 1]
+        del sys.argv[at:at + 2]
     unittest.main()

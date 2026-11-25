@@ -8,17 +8,18 @@ method, or inside a patch.dict call, does not clear it: the other cases still ru
 Each problem is a string that starts with the test file's path under root, then a colon. A file that does not parse is a problem too:
 it is not clean.
 
-TESTS_SET_CONFIG_UNDER_TEST, a path from the repo root, names a stand-in checker to run these cases against:
-lint/tests_set_config_stub_test.py finds nothing, and lint/tests_set_config_flags_all_stub_test.py flags every test file. The red
-runs use them. Unset, the cases run against lint/check_tests_set_config.py.
+--stand-in PATH, a path from the repo root, names a stand-in checker to run these cases against: lint/tests_set_config_stub_test.py
+finds nothing, and lint/tests_set_config_flags_all_stub_test.py flags every test file. The red runs use them. Without it, the cases
+run against lint/check_tests_set_config.py. The caller's environment is never read: a stray value there changes nothing.
 
-Run: python3 -m unittest discover -s lint -p test_tests_set_config.py
+Run: python3 lint/test_tests_set_config.py [--stand-in PATH]
 """
 import ast
 import atexit
 import importlib.util
 import os
 import shutil
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -26,6 +27,7 @@ from unittest import mock
 import _test_temp
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+STAND_IN = None  # the __main__ block sets it from --stand-in; the caller's environment is never read
 RUN = _test_temp.run_folder()  # this run's one folder (test-temp-standard); removed when the process exits
 atexit.register(shutil.rmtree, RUN, True)
 INCIDENT_PATH = "merge/test_merge_incident.py"  # a fixture path: the file is written under the run folder, never read from the repo
@@ -95,6 +97,27 @@ ANNOTATED_NAME_POP = ("import os\n\nVAR: str = 'CLAUDE_CONFIG_DIR'\nos.environ.p
                       "def test_a():\n    assert True\n")
 SHARED_NAME_POP = ("import os\n\nfrom shared_names import CONFIG_VAR\n\nos.environ.pop(CONFIG_VAR, None)\n\n\n"
                    "def test_a():\n    assert True\n")
+PREFIX_SWEEP = ("import os\n\nfor _name in list(os.environ):\n    if _name.startswith('CLAUDE_'):\n        os.environ.pop(_name, None)\n\n\n"
+                "def test_a():\n    assert True\n")
+PREFIX_SWEEP_THEN_SET = ("import os\n\nfor _name in list(os.environ):\n    if _name.startswith('CLAUDE_'):\n        os.environ.pop(_name, None)\n"
+                         "os.environ['CLAUDE_CONFIG_DIR'] = '/tmp/config'\n\n\ndef test_a():\n    assert True\n")
+PREFIX_SWEEP_OTHER_PREFIX = ("import os\n\nfor _name in list(os.environ):\n    if _name.startswith('AWS_'):\n        os.environ.pop(_name, None)\n\n\n"
+                             "def test_a():\n    assert True\n")
+DICT_KEY_LOOP = ("import os\n\nGONE = {'CLAUDE_CONFIG_DIR': None, 'CLAUDE_CODE_REMOTE': None}\nfor _name in GONE:\n"
+                 "    os.environ.pop(_name, None)\n\n\ndef test_a():\n    assert True\n")
+DICT_KEY_LOOP_THEN_SET = ("import os\n\nGONE = {'CLAUDE_CONFIG_DIR': None, 'CLAUDE_CODE_REMOTE': None}\nfor _name in GONE:\n"
+                          "    os.environ.pop(_name, None)\nos.environ['CLAUDE_CONFIG_DIR'] = '/tmp/config'\n\n\n"
+                          "def test_a():\n    assert True\n")
+PATCH_DICT_CLEAR = ("import os\nfrom unittest import mock\n\nmock.patch.dict(os.environ, {'PATH': '/usr/bin'}, clear=True).start()\n\n\n"
+                    "def test_a():\n    assert True\n")
+PATCH_DICT_CLEAR_THEN_SET = ("import os\nfrom unittest import mock\n\nmock.patch.dict(os.environ, {'PATH': '/usr/bin'}, clear=True).start()\n"
+                             "os.environ['CLAUDE_CONFIG_DIR'] = '/tmp/config'\n\n\ndef test_a():\n    assert True\n")
+OPENERS_IN_STRINGS = ("import os\n\nOPEN = \"/*\"\nTAG, PATHS = \"#\", \"//\"; os.environ.pop('CLAUDE_CONFIG_DIR', None)\n\n\n"
+                      "def test_a():\n    assert True\n")
+MULTILINE_TEXT_HOLDS_POP = ("import os\n\nNOTE = \"\"\"\nos.environ.pop('CLAUDE_CONFIG_DIR', None)\n\"\"\"\n\n\n"
+                            "def test_a():\n    assert True\n")
+LONE_QUOTE_IN_COMMENT = ("import os\n\n# Don't keep this line: the pop below is the real one\nos.environ.pop('CLAUDE_CONFIG_DIR', None)\n\n\n"
+                         "def test_a():\n    assert True\n")
 
 
 def tree_of(files):
@@ -110,8 +133,8 @@ def tree_of(files):
 
 
 def checker():
-    """The checker the cases drive: the stand-in named by TESTS_SET_CONFIG_UNDER_TEST, else lint/check_tests_set_config.py."""
-    path = os.environ.get("TESTS_SET_CONFIG_UNDER_TEST") or os.path.join("lint", "check_tests_set_config.py")
+    """The checker the cases drive: the stand-in named by --stand-in, else lint/check_tests_set_config.py."""
+    path = STAND_IN or os.path.join("lint", "check_tests_set_config.py")
     spec = importlib.util.spec_from_file_location("check_tests_set_config_under_test", os.path.join(ROOT, path))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -273,6 +296,58 @@ class TestsSetConfig(unittest.TestCase):
         times = parsed.count("shared_names.py")
         self.assertLessEqual(times, 1, "shared_names.py is parsed %d times in one run, where one parse per module would do" % times)
 
+    def test_prefix_sweep_of_the_config_var_is_a_problem(self):
+        found = problems_of(PREFIX_SWEEP)
+        self.assertTrue(len(found) == 1 and found[0].startswith("test_case.py:"),
+                        "an import-time loop that pops each CLAUDE_ name, CLAUDE_CONFIG_DIR among them, is not one problem: %r" % found)
+
+    def test_prefix_sweep_then_set_is_clean(self):
+        self.assertEqual(problems_of(PREFIX_SWEEP_THEN_SET), [],
+                         "a prefix sweep that an import-time set of CLAUDE_CONFIG_DIR follows is named as a problem")
+
+    def test_prefix_sweep_the_check_cannot_evaluate_is_flagged(self):
+        found = problems_of(PREFIX_SWEEP_OTHER_PREFIX)
+        self.assertTrue(len(found) == 1 and found[0].startswith("test_case.py:"),
+                        "an import-time sweep by an AWS_ prefix is not flagged, though the check does not evaluate prefixes: %r" % found)
+
+    def test_loop_over_dict_keys_that_pops_the_config_var_is_a_problem(self):
+        found = problems_of(DICT_KEY_LOOP)
+        self.assertTrue(len(found) == 1 and found[0].startswith("test_case.py:"),
+                        "an import-time loop over a dict's keys that pops CLAUDE_CONFIG_DIR is not one problem: %r" % found)
+
+    def test_loop_over_dict_keys_then_set_is_clean(self):
+        self.assertEqual(problems_of(DICT_KEY_LOOP_THEN_SET), [],
+                         "a dict-key loop pop that an import-time set of CLAUDE_CONFIG_DIR follows is named as a problem")
+
+    def test_patch_dict_clear_at_import_is_a_problem(self):
+        found = problems_of(PATCH_DICT_CLEAR)
+        self.assertTrue(len(found) == 1 and found[0].startswith("test_case.py:"),
+                        "an import-time patch.dict(os.environ, ..., clear=True).start() drops CLAUDE_CONFIG_DIR, yet is not one problem: %r" % found)
+
+    def test_patch_dict_clear_then_set_is_clean(self):
+        self.assertEqual(problems_of(PATCH_DICT_CLEAR_THEN_SET), [],
+                         "a clearing patch.dict at import that an import-time set of CLAUDE_CONFIG_DIR follows is named as a problem")
+
+    def test_comment_openers_inside_strings_do_not_hide_a_pop(self):
+        found = problems_of(OPENERS_IN_STRINGS)
+        self.assertTrue(len(found) == 1 and found[0].startswith("test_case.py:"),
+                        "a pop after a string that holds #, // or /* is not one problem: %r" % found)
+
+    def test_pop_text_in_a_multi_line_string_is_clean(self):
+        self.assertEqual(problems_of(MULTILINE_TEXT_HOLDS_POP), [],
+                         "a pop written inside a multi-line string is read as a real pop")
+
+    def test_lone_quote_in_a_comment_does_not_hide_a_pop(self):
+        found = problems_of(LONE_QUOTE_IN_COMMENT)
+        self.assertTrue(len(found) == 1 and found[0].startswith("test_case.py:"),
+                        "a pop after a comment with a lone quote is not one problem: %r" % found)
+
+    def test_stray_stand_in_in_the_environment_changes_nothing(self):
+        with mock.patch.dict(os.environ, {"TESTS_SET_CONFIG_UNDER_TEST": "lint/tests_set_config_stub_test.py"}):
+            found = problems_of(POP_NEVER_SET)
+        self.assertTrue(len(found) == 1 and found[0].startswith("test_case.py:"),
+                        "a stand-in named in the caller's environment changes what the suite tests: %r" % found)
+
     def test_incident_shape_is_named_at_its_path(self):
         found = checker().problems(tree_of({INCIDENT_PATH: INCIDENT_SHAPE}))
         self.assertTrue(len(found) == 1 and found[0].startswith(INCIDENT_PATH + ":"),
@@ -285,4 +360,10 @@ class TestsSetConfig(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    if "--stand-in" in sys.argv:  # this suite's own entry point sets its stand-in; unittest never sees the flag
+        at = sys.argv.index("--stand-in")
+        if at + 1 == len(sys.argv):
+            sys.exit("--stand-in needs a path from the repo root")
+        STAND_IN = sys.argv[at + 1]
+        del sys.argv[at:at + 2]
     unittest.main()

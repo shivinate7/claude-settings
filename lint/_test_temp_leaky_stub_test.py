@@ -1,7 +1,7 @@
 """A stand-in for isolated_config() in lint/_test_temp.py that points CLAUDE_CONFIG_DIR and HOME at a fresh folder under the run
 folder and never puts either back.
 
-lint/test_test_temp.py runs against it through TEST_TEMP_UNDER_TEST. Its restore cases and its HOME case then fail on their
+lint/test_test_temp.py runs against it with --stand-in lint/_test_temp_leaky_stub_test.py. Its restore cases and its HOME case then fail on their
 asserts: a behavioural red, not a missing name.
 """
 import contextlib

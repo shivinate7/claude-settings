@@ -1,6 +1,6 @@
 """A stand-in for lint/check_tests_set_config.py that flags every test_*.py under root.
 
-lint/test_tests_set_config.py runs against it through TESTS_SET_CONFIG_UNDER_TEST. Each clean case then fails on its assert: a
+lint/test_tests_set_config.py runs against it with --stand-in lint/tests_set_config_flags_all_stub_test.py. Each clean case then fails on its assert: a
 behavioural red (the checker over-flags), not a missing module.
 """
 import os
