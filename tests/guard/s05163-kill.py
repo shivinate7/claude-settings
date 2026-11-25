@@ -383,6 +383,18 @@ tag_case("kill: a job under a PPID-1 stub that holds this session's id, the job 
          job=True, carries="did not start")
 tag_case("kill: a job under a PPID-1 stub, neither holding a session id, stays refused", "deny",
          holder=stranded_job(["env", "-u", TAG]), job=True, carries="did not start")
+# THE KNOWN LIMIT (debt kill-tag-platform-binary-blind). On macOS the environment of an Apple platform
+# binary is hidden from the read, so a stranded `/bin/sleep` that holds this session's id reads as
+# foreign and is refused. That fails closed. The python-job cases above do not reach the limit.
+LIMIT_LABEL = ("kill: a stranded Apple platform binary holding this session's id is refused on macOS "
+               "(known limit, debt kill-tag-platform-binary-blind)")
+if sys.platform == "darwin":
+    tag_case(LIMIT_LABEL, "deny", holder=stranded_job(["env", TAG + "=" + SUB_SESSION],
+                                                      command=["/bin/sleep", "300"]),
+             job=True, carries="did not start")
+else:
+    skip_case(LIMIT_LABEL, "the Apple platform binary's hidden environment is a macOS read, so this "
+                           "limit is not reached on this host")
 
 sh("kill: a pid list made by pgrep", "kill $(pgrep -f node)", "deny", "machine-wide-kill",
    cwd=NOGIT)
