@@ -406,8 +406,8 @@ def rewrite_check(payload):
     audit's DONE or STALE list names may go. An audit reply the transcript cannot give leaves the baseline and the
     live jobs, and no token may go. It stays quiet while the audit agent itself runs. A state file with no usable
     baseline passes and clears the flag, with one line on stderr. A pass clears the flag. A block stamps the flag with
-    the handoff's hash, and a Stop with stop_hook_active true on that same text passes. So it blocks once per distinct
-    handoff text, with no cap while the text changes. Reads no PR state.
+    the handoff's hash, and a Stop with stop_hook_active true on that same text passes. So it blocks once per Stop
+    chain: a Stop without stop_hook_active judges the text again, and a changed text blocks again. Reads no PR state.
     Never raises."""
     try:
         sid = payload["session_id"]
