@@ -316,5 +316,50 @@ class RedRunStopCases(RedRunFixture):
         self.stop_while_running("int", signal.SIGINT)
 
 
+def read_text(path):
+    with open(path, encoding="utf-8", newline="") as handle:
+        return handle.read()
+
+
+class RedRunTrackedCopyCases(RedRunFixture):
+    """A run_in_copy-shaped case runs to a verdict in a copy of a commit. Its copy has no .git, so tracked_tree must list it
+    by the manifest the export wrote (testing/tracked_tree.py, ManifestCases in lint/test_tracked_tree.py)."""
+
+    # The probe runs in the copy. It lists the copy's probe/ folder with the helper and fails on an assert if the list is wrong.
+    PROBE = (
+        "import os, sys\n"
+        "ROOT = os.path.dirname(os.path.abspath(__file__))\n"
+        "sys.path.insert(0, os.path.join(ROOT, 'testing'))\n"
+        "import tracked_tree\n"
+        "got = tracked_tree.tracked('probe')\n"
+        "want = ['data.txt', 'mod.py']\n"
+        "if got != want:\n"
+        "    print('FAIL: the copy lists probe/ as %s, want %s' % (got, want))\n"
+        "    sys.exit(1)\n"
+        "print('probe lists %s' % got)\n"
+    )
+
+    def helper_commit(self):
+        """Commit the probe, and the helper and its two imports read from this checkout at run time. A copy is stated here:
+        the probe runs the same helper and export name this checkout runs, and no test file is copied."""
+        commit(self.repo, self.env, {
+            "testing/tracked_tree.py": read_text(os.path.join(HERE, "..", "testing", "tracked_tree.py")),
+            "hooks/_nowindow.py": read_text(os.path.join(HERE, "..", "hooks", "_nowindow.py")),
+            "hooks/tree_export.py": read_text(os.path.join(HERE, "..", "hooks", "tree_export.py")),
+            "run_probe.py": self.PROBE,
+            "probe/data.txt": "data\n",
+            "probe/mod.py": "x = 1\n",
+        }, "probe: the helper and a folder to list")
+        return git(self.repo, self.env, "rev-parse", "HEAD").strip()
+
+    def test_a_run_in_copy_shaped_probe_runs_to_a_verdict_in_a_copy_of_the_commit(self):
+        sha = self.helper_commit()
+        _, out = self.red_run(sha, "--", sys.executable, "run_probe.py")
+        classes = verdict_classes(out)
+        self.assertEqual(len(classes), 1, "the run printed %d verdict lines, want 1: %s" % (len(classes), out.strip()[-200:]))
+        self.assertIn(classes[0], ("pass", "assert"),
+                      "the probe ended as %s in its copy: %s" % (classes[0], " | ".join(out.strip().splitlines()[-3:])))
+
+
 if __name__ == "__main__":
     unittest.main()
