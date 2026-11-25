@@ -253,8 +253,8 @@ role_opus_refuse("role-model: a role with no row on opus is denied under agent-m
                "scout", "opus", "Look around.")
 role_opus_refuse("role-model: reviewer on opus with Round 3 of 3 is denied under agent-model-cap (item 127)",
                "reviewer", "opus", "Round 3 of 3. Re-check the diff.")
-# Standing grants stay allowed on Opus (rule 9d): Plan and the design reviewer. A builder's third round has no grant
-# (ruling own-round3-builder-sonnet, owner 00:04 CST 2026-11-16), so its Opus spawn is refused like any builder's.
+# Standing grants stay allowed on Opus (rule 9d): Plan and the design reviewer. A builder's third round has no grant,
+# so its Opus spawn is refused like any builder's.
 role_model_allow("role-model: Plan on opus is allowed (standing grant)", "Plan", "opus", "Plan the change.")
 role_model_allow("role-model: design-reviewer on opus is allowed (standing grant)", "design-reviewer", "opus",
                  "Review the mockup.")
@@ -393,8 +393,8 @@ workflow_allow("role-model: Workflow builder on sonnet with a variable brief is 
 # H3: a refusal for a brief the scan cannot read names the remedy that makes it readable, a literal string. One
 # constant holds the words, so each refusal of a variable brief carries the same remedy.
 BRIEF_LITERAL_REMEDY = "write the brief as a literal string so the marker is readable"
-# A builder on Opus gets no grant from a readable brief, so its refusal names no literal-brief remedy (ruling
-# own-round3-builder-sonnet, owner 00:04 CST 2026-11-16): the remedy would tell the builder that a marker lifts it.
+# A builder on Opus gets no grant from a readable brief, so its refusal names no literal-brief remedy: the remedy
+# would tell the builder that a marker lifts it.
 workflow_refuse("role-model: Workflow builder on opus with a variable brief is denied and names no literal-brief remedy",
                 "const brief = 'Fix the failing case.';\n"
                 + _step_flow("brief", "agentType: 'builder', model: 'opus'"),
@@ -602,8 +602,8 @@ def role_opus_role_lift_check():
 
 
 def role_opus_builder_third_try_lift_check():
-    """A builder's third try on Opus has no standing grant (ruling own-round3-builder-sonnet, owner 00:04 CST
-    2026-11-16): it is refused with no override, and `opus builders 2h` lifts it like any other builder spawn."""
+    """A builder's third try on Opus has no standing grant: it is refused with no override, and `opus builders 2h`
+    lifts it like any other builder spawn."""
     config, session = ov_config("role-opus-third"), "role-opus-third"
     third = {"prompt": "Round 3 of 3. Finish the fix.", "model": "opus", "subagent_type": "builder"}
 

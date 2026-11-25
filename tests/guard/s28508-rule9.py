@@ -252,8 +252,8 @@ for _name, _verdict, _script in (
 add("floor step-up: Workflow reviewer Round 3 on opus is denied under agent-model-cap", "deny",
     "agent-model-cap", tool="Workflow",
     script=_step_flow("'Round 3 of 3. Re-check.'", "agentType: 'reviewer', model: 'opus'"))
-# A builder's third try on Opus has no grant (ruling own-round3-builder-sonnet, owner 00:04 CST 2026-11-16): the
-# Workflow call is refused as any builder on Opus is. Each brief form keeps its own case.
+# A builder's third try on Opus has no grant: the Workflow call is refused as any builder on Opus is. Each brief
+# form keeps its own case.
 add("floor step-up: Workflow builder Try 3 on opus is denied under agent-model-cap", "deny",
     "agent-model-cap", tool="Workflow",
     script=_step_flow('"Try 3 of 3. Finish the fix."', 'agentType: "builder", model: "opus"'))
@@ -325,8 +325,8 @@ add("floor step-up: reviewer with Round 2 of 3 and the guard marker, no model, k
 # ---- Rule 9, the Opus ceiling (decision agent-model-cap). An Agent or Task spawn that sets model opus is
 # refused under `agent-model-cap`, unless a standing grant covers it: Plan, the designer, the design reviewer, and an
 # Explore whose brief carries the Audit: marker. A builder has no grant at any round, so a Round or Try marker never
-# earns Opus (ruling own-round3-builder-sonnet, owner 00:04 CST 2026-11-16). An owner override lifts the refusal. A reviewer's last step-up is a per-spawn word, so it is refused too. The floor and the step-up
-# deny first, so the middle step-up on opus above stays a deny. The deny cases stay in the floor and step-up blocks,
+# earns Opus. An owner override lifts the refusal. A reviewer's last step-up is a per-spawn word, so it is refused too.
+# The floor and the step-up deny first, so the middle step-up on opus above stays a deny. The deny cases stay in the floor and step-up blocks,
 # and the sonnet and haiku controls sit there too: floor_hit and step_up_hit judge them as before.
 # Failure classes: a false allow (an Opus spawn of any spelling or role passes unasked, or a marker
 # the role does not own earns the grant), a false refusal (a standing grant, a Sonnet spawn, or text that
@@ -378,9 +378,9 @@ for _role, _brief in (
     add("ceiling: Agent %s on opus with the brief %r is denied" % (_role, _brief[:24]), "deny", CEILING,
         tool="Agent", prompt=_brief, model="opus", subagent_type=_role)
 # A brief may open with a role word before the marker, wrap the marker in markup, or put it on a later line. A builder
-# on Opus is refused in every one of these forms, since no builder marker grants Opus (ruling own-round3-builder-sonnet,
-# owner 00:04 CST 2026-11-16). The reviewer step-up cases keep the marker scan under test. Failure class: a false allow
-# (a builder on Opus passes because a role word, markup or a line position reads as a grant).
+# on Opus is refused in every one of these forms, since no builder marker grants Opus. The reviewer step-up cases keep
+# the marker scan under test. Failure class: a false allow (a builder on Opus passes because a role word, markup or a
+# line position reads as a grant).
 FIRST_LINE_BRIEF = "Builder, Round 3 of 3. Lane c204 fix the marker scan.\nFiles: hooks/guard.py."
 add("first-line marker: builder on opus with a role word before Round 3 of 3 on line one is denied under agent-model-cap",
     "deny", CEILING, tool="Agent", prompt=FIRST_LINE_BRIEF, model="opus", subagent_type="builder")
