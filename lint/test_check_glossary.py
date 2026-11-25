@@ -26,6 +26,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+import diff_moves  # noqa: E402  the one home of a moved line (lint/diff_moves.py)
 MODULE = os.environ.get("GLOSSARY_UNDER_TEST") or os.path.join(HERE, "check_glossary.py")
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
@@ -889,6 +890,55 @@ class MovedLineTests(Fixture):
         code, out = self.edit({"hooks/x.sh": base}, {"hooks/x.sh": after}, "hooks/x.sh")
         self.assertEqual(code, 1, "a token deleted in another hunk of the same file excused a new word in this hunk\n" + out)
         self.assertIn("hooks/x.sh:2", out, "the new word in the second hunk was not flagged\n" + out)
+
+    def test_exact_copy_in_a_new_file_and_a_reflow_share_one_deleted_line(self):
+        reflow = "    bundle|\\\n    keep|\\\n    tree)\n"
+        code, out = self.split({"hooks/x.sh": self.ARM + "echo kept\n"}, {"hooks/y.sh": self.ARM},
+                               keep=reflow + "echo kept\n", source="hooks/x.sh")
+        flagged = [row for row in out.splitlines() if row.startswith(("hooks/x.sh:", "hooks/y.sh:"))]
+        self.assertEqual(code, 1, "one deleted line excused its reflow in hooks/x.sh and its exact copy in hooks/y.sh\n" + out)
+        self.assertEqual(len(flagged), 1, "one deleted line excused two added copies of its words, so the check flagged none of them\n" + out)
+
+
+class ReflowBudgetTests(unittest.TestCase):
+    """One deleted occurrence excuses one added occurrence (lint/diff_moves.py). An exact copy is an occurrence too:
+    it uses up the deleted line's tokens, so a reflow beside it cannot take the same word again. The unit cases
+    call diff_moves; the last case reads the same diff text through the check's own patch_lines."""
+
+    # Deleted "- workstream x"; the exact copy and a reflow of the same word are added beside a context line.
+    ONE_WORD = ("diff --git a/hooks/x.sh b/hooks/x.sh\n--- a/hooks/x.sh\n+++ b/hooks/x.sh\n"
+                "@@ -1,2 +1,3 @@\n-- workstream x\n keep\n+- workstream x\n+- workstream\n")
+
+    def takes(self, diff, added):
+        """take_move for each added text, in order, over the deleted lines of `diff` (every file is scanned)."""
+        left = diff_moves.deleted_texts(diff, lambda old: True)
+        return [diff_moves.take_move(left, text, 1) for text in added]
+
+    def test_one_deleted_occurrence_excuses_one_added_line(self):
+        got = self.takes(self.ONE_WORD, ["- workstream x", "- workstream"])
+        self.assertEqual(got, [True, False],
+                         "one deleted `workstream` excused two added lines: the exact copy used no token of its deleted line, "
+                         "so the reflow took the same token again")
+
+    def test_patch_lines_checks_the_reflow_the_deleted_word_already_excused(self):
+        out, unknown = load_check().patch_lines(self.ONE_WORD)
+        self.assertEqual(unknown, [], "fixture state: the diff header names no path")
+        self.assertIn("hooks/x.sh", out, "fixture state: the scanned file is not in the check's result")
+        self.assertEqual(len(out["hooks/x.sh"]), 1,
+                         "the check let the reflow through: one deleted `workstream` excused the exact copy and the reflow beside it")
+
+    def test_two_deleted_and_two_added_occurrences_are_all_excused(self):
+        diff = ("diff --git a/hooks/x.sh b/hooks/x.sh\n--- a/hooks/x.sh\n+++ b/hooks/x.sh\n"
+                "@@ -1,2 +1,2 @@\n-- workstream x\n-- workstream y\n+- workstream x\n+- workstream\n")
+        self.assertEqual(self.takes(diff, ["- workstream x", "- workstream"]), [True, True],
+                         "two deleted `workstream` occurrences did not excuse two added ones")
+
+    def test_pure_reflow_of_a_three_item_list_stays_excused(self):
+        diff = ("diff --git a/hooks/x.py b/hooks/x.py\n--- a/hooks/x.py\n+++ b/hooks/x.py\n"
+                "@@ -1 +1,5 @@\n-from tools import (bundle, keep, tree)\n"
+                "+from tools import (\n+    bundle,\n+    keep,\n+    tree,\n+)\n")
+        self.assertEqual(self.takes(diff, ["from tools import (", "    bundle,", "    keep,", "    tree,", ")"]), [True] * 5,
+                         "a reflow of a three-item list counted as added: each name was on the deleted line")
 
 
 class UncommittedTests(Fixture):
