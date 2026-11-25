@@ -23,9 +23,16 @@ What is exempt.
 How it splits sentences.
 - It calls `split_sentences` in `lint/ste_lint.py`, the one splitter. It builds no second one.
 - That splitter keeps "e.g.", "i.e.", a version number and a file name such as merge.py whole.
-  The check also keeps a month abbreviation before a day number whole, as in "Nov. 25", which the splitter breaks today.
-  It also keeps a stop inside an inline code span whole.
-  The check does both itself, so the pins that child repos hold on `lint/ste_lint.py` do not move.
+  The check does the following itself, so the pins that child repos hold on `lint/ste_lint.py` do not move.
+  A stop inside an inline code span is no sentence end.
+  A month abbreviation before a day number is no sentence end, as in "Nov. 25".
+  It covers Jan, Feb, Mar, Apr, Jun, Jul, Aug, Sep, Sept, Oct, Nov and Dec, not May.
+  The splitter alone breaks such a dot today.
+  The dot in etc. or No. ends a sentence when a capital word follows it.
+  A stop inside a quote is no sentence end, except one right before the closing mark.
+  A quote pairs only within one line.
+  A straight quote pairs when its opening mark follows no word character and its closing mark is not followed by a word character; a curly pair needs no such check.
+  A line with a triple-backtick code span that closes on the same line opens no fence.
 
 Why: the repo's practice is one entry per line, sorted, in one home (decision `one-layout-every-repo`).
 A ruling kept on one long line breaks that practice: two lanes that add a sentence to it add the same line, and git reports a conflict.
@@ -35,12 +42,18 @@ Decision `lanes-run-no-full-ci-job` held its ruling as one long line, which also
 Mistake it guards: a lane adds a sentence to a long ruling line, and the next lane that does the same cannot merge without a hand fix.
 
 Named limits.
-- A record that ships with old long lines keeps them until a lane touches a line.
-  The check never rewrites an old line.
-- A list item of two sentences, or an `Owner: "..."` line with a quote of several sentences, is refused.
-  Split it, with the quote marks open across the lines.
-- The check judges sentence count by the STE splitter, with the stops inside an inline code span hidden.
-  A stop inside a quote that spans several lines still ends a sentence.
+- The check judges only lines a branch adds or edits, so a record keeps its old long lines until a lane touches them.
+- Counted 2026-11-25, 2,130 existing lines in 235 of 269 decision records would be refused if added fresh.
+- None is refused today.
+- This lane rewrites `docs/decisions/lanes-run-no-full-ci-job.md`, so an open PR that edits that file will conflict with it.
+- A list item of two sentences is refused, so split it into one sentence per line.
+- A quote of several sentences on one line is not refused, since its inner stops are no sentence end.
+- A quote that runs past its line pairs on no line, so each stop in it ends a sentence.
+- A double quote inside a code span can pair with a lone one outside it, which hides the stops between them.
+- A curly closing quote with no opening mark on its line is ignored.
+- The abbreviations p.m., Inc. and et al. before a capital word count as one sentence, so a sentence after them is missed.
+- An ellipsis followed by a lowercase word splits the text in two.
+- A No. before a capital word always ends a sentence, so a name such as No. Smith counts as two.
 
 Cost: no process, timer or file added.
 In diff mode `added_line_numbers` in `check_record_slugs.py` runs one `git show` of head for each decision record the branch touches, one more at the merge base for each that it edits or renames, and one `git merge-base` when any exists (unmeasured, not pinned by a test).
