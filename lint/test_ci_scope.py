@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -62,6 +63,81 @@ def git(cwd, *a):
 
 GUARD_INPUTS_REL = ".github/guard-inputs.txt"  # the one list of guard inputs (ci-scope.sh's windows_guard reads it)
 REAL_GUARD_INPUTS = "real"  # run()'s guard_inputs default: the repo's own list is copied into the base when the repo has one
+
+
+# hooks/mutate_guard.py names the files the guard suite reads beside its hooks folder (GUARD_READ_FILES). The case that checks
+# them reads that list from the module with ast, never a copy: importing the module loads the guard family.
+MUTATE_GUARD = os.path.join(HERE, "..", "hooks", "mutate_guard.py")
+
+
+GUARD_READS = "GUARD_READ_FILES"
+# The list methods that change a list, and the dunder names that do the same when called by name. A call to any other method
+# (.index, .count) reads the list and changes nothing.
+GUARD_MUTATORS = frozenset(("append", "extend", "insert", "remove", "pop", "clear", "sort", "reverse",
+                            "__setitem__", "__delitem__", "__iadd__"))
+
+
+def _is_guard_name(node):
+    return isinstance(node, ast.Name) and node.id == GUARD_READS
+
+
+def _guard_reads_binds(stmt):
+    """True when the top-level statement `stmt` is the one plain assignment of GUARD_READ_FILES."""
+    return isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and _is_guard_name(stmt.targets[0])
+
+
+def _guard_reads_change(stmt):
+    """-> how the top-level statement `stmt` rebinds or mutates GUARD_READ_FILES, or '' when it does neither. A def or class
+    body counts too: a later call can rebind the name through it."""
+    for node in ast.walk(stmt):
+        if isinstance(node, ast.AugAssign) and _is_guard_name(node.target):
+            return "changed by +="
+        if isinstance(node, ast.AnnAssign) and _is_guard_name(node.target):
+            return "annotated"
+        if _is_guard_name(node) and not isinstance(node.ctx, ast.Load):
+            return "rebound"
+        if isinstance(node, ast.Subscript) and not isinstance(node.ctx, ast.Load) and _is_guard_name(node.value):
+            return "changed by an item store"
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and _is_guard_name(node.func.value)
+                and node.func.attr in GUARD_MUTATORS):
+            return "mutated by .%s()" % node.func.attr
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == GUARD_READS:
+            return "rebound by a def or class"
+        if isinstance(node, ast.alias) and (node.asname or node.name).split(".")[0] == GUARD_READS:
+            return "rebound by an import"
+    return ""
+
+
+def guard_read_files():
+    """-> the paths GUARD_READ_FILES names in hooks/mutate_guard.py, as git names them ('/' between parts). The reader reads the
+    name whole or fails, and each failure names its line: one plain assignment of a non-empty tuple or list of os.path.join
+    calls on string literals, and no other top-level statement that rebinds or mutates the name."""
+    with open(MUTATE_GUARD, encoding="utf-8") as f:
+        tree = ast.parse(f.read(), filename=MUTATE_GUARD)
+    bound = None
+    for stmt in tree.body:
+        if _guard_reads_binds(stmt):
+            if bound is not None:
+                raise AssertionError(f"{MUTATE_GUARD} line {stmt.lineno}: GUARD_READ_FILES is assigned a second time, "
+                                     "so the reader cannot read it whole")
+            bound = stmt
+            continue
+        how = _guard_reads_change(stmt)
+        if how:
+            raise AssertionError(f"{MUTATE_GUARD} line {stmt.lineno}: GUARD_READ_FILES is {how}, "
+                                 "so the reader cannot read it whole")
+    if bound is None:
+        raise AssertionError(f"{MUTATE_GUARD}: no plain assignment of GUARD_READ_FILES")
+    if not isinstance(bound.value, (ast.Tuple, ast.List)) or not bound.value.elts:
+        raise AssertionError(f"{MUTATE_GUARD} line {bound.lineno}: GUARD_READ_FILES is not a non-empty tuple or list literal")
+    paths = []
+    for elt in bound.value.elts:
+        parts = [a.value for a in getattr(elt, "args", []) if isinstance(a, ast.Constant) and isinstance(a.value, str)]
+        if not (isinstance(elt, ast.Call) and parts and len(parts) == len(elt.args)):
+            raise AssertionError(f"{MUTATE_GUARD} line {elt.lineno}: GUARD_READ_FILES entry is not os.path.join of string "
+                                 f"literals: {ast.unparse(elt)}")
+        paths.append("/".join(parts))
+    return paths
 
 
 def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref="", green=None,
@@ -307,6 +383,19 @@ class Scope(FlagAsserts, unittest.TestCase):
         for p in ("hooks/test_guard.py", "hooks/mutate_guard.py"):
             with self.subTest(path=p):
                 self.assertFlags(run([p]), want_true=["guard"])
+
+    # Every file the guard suite reads beside its hooks folder (GUARD_READ_FILES, hooks/mutate_guard.py) turns `guard` on, so an
+    # edit to it runs the guard suite. Each path is an edit (`existing`): a new file under a landed dir sets `guard` through
+    # the landed-dirs rule, which would pass for the wrong reason. Named failure: a listed path sets no `guard`, so the suite
+    # that reads it skips the change.
+    def test_every_guard_read_file_turns_on_the_guard_suite(self):
+        paths = guard_read_files()
+        self.assertTrue(paths, "GUARD_READ_FILES: no path read from hooks/mutate_guard.py")
+        for p in paths:
+            self.assertTrue(os.path.isfile(os.path.join(HERE, "..", p)), f"GUARD_READ_FILES names {p}, which is not a file")
+        for p in paths:
+            with self.subTest(path=p):
+                self.assertFlags(run([p], existing=[p]), want_true=["guard"])
 
     def test_a_merge_change_leaves_a_job_that_never_runs_merge_suites_off(self):
         got = run(["merge/merge.py"])
@@ -593,11 +682,18 @@ class Scope(FlagAsserts, unittest.TestCase):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
 
     # bin/sim-test and its suite run in the shell-macos job only, like bin/ios-ship. The suite runs the real bin/sim-lease
-    # beside the script, so an edit to bin/sim-lease turns the same job on.
+    # beside the script, so an edit to bin/sim-lease turns the same job on. bin/sim-lease is also a guard input, pinned apart
+    # below, so these two keep the exact set.
     def test_sim_test_edit_turns_on_only_the_macos_shell_job(self):
-        for p in ("bin/sim-test", "lint/test_sim_test.sh", "bin/sim-lease"):
+        for p in ("bin/sim-test", "lint/test_sim_test.sh"):
             with self.subTest(path=p):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
+
+    # bin/sim-lease is in GUARD_READ_FILES, so the guard suite reads it and an edit also sets `guard`. Otherwise the flags
+    # of the two paths above. Named failure: without the guard arm the set lacks `guard`, and the guard suite skips a change
+    # to the lease it reads.
+    def test_sim_lease_edit_turns_on_the_macos_shell_job_and_guard(self):
+        self.assertEqual(self.true_set(run(["bin/sim-lease"], existing=["bin/sim-lease"])), {"shell_macos", "code", "guard"})
 
     # bin/duo-fold and its suite run in the shell-macos job only, like bin/sim-test (bash 3.2 on macOS).
     # Named failure: without the arm, bin/duo-fold turns every flag on, and the suite turns on `code` alone.
@@ -701,6 +797,79 @@ class Scope(FlagAsserts, unittest.TestCase):
         self.assertFlags(got, want_false=["code", "shoot"])
         self.assertIn("checks_guard", got, got)
         self.assertEqual(got["checks_guard"], "false", f"checks_guard: {got}")
+
+
+# guard_read_files reads GUARD_READ_FILES whole or fails. Each source is written to the run folder and read through
+# MUTATE_GUARD, the path the reader opens by default. A source passed as an argument would be a TypeError on a reader
+# that takes none: a crash, not the assert these cases name.
+class GuardReadsReader(unittest.TestCase):
+    OK = [
+        ("tuple", 'GUARD_READ_FILES = (os.path.join("bin", "sim-lease"),)\n', ["bin/sim-lease"]),
+        ("list", 'GUARD_READ_FILES = [os.path.join("merge", "merge.py")]\n', ["merge/merge.py"]),
+        ("four entries", "GUARD_READ_FILES = (\n"
+         '    os.path.join("bin", "sim-lease"),\n'
+         '    os.path.join("merge", "merge.py"),\n'
+         '    os.path.join("actions", "ci-alarm", "events.json"),\n'
+         '    os.path.join("actions", "ci-alarm", "clear_rule.py"),\n)\n',
+         ["bin/sim-lease", "merge/merge.py", "actions/ci-alarm/events.json", "actions/ci-alarm/clear_rule.py"]),
+    ]
+    # (form, source, the line the failure names or None). The reader cannot read each of these whole, so it must raise.
+    FAIL = [
+        ("augmented assignment", 'GUARD_READ_FILES = (os.path.join("bin", "sim-lease"),)\n'
+         'GUARD_READ_FILES += (os.path.join("janitor", "sweep.py"),)\n', 2),
+        ("second assignment", 'GUARD_READ_FILES = (os.path.join("bin", "sim-lease"),)\n'
+         'GUARD_READ_FILES = (os.path.join("janitor", "sweep.py"),)\n', 2),
+        ("annotated assignment", 'GUARD_READ_FILES: tuple = (os.path.join("bin", "sim-lease"),)\n', 1),
+        ("append call", 'GUARD_READ_FILES = [os.path.join("bin", "sim-lease")]\n'
+         'GUARD_READ_FILES.append(os.path.join("janitor", "sweep.py"))\n', 2),
+        ("extend call", 'GUARD_READ_FILES = [os.path.join("bin", "sim-lease")]\n'
+         'GUARD_READ_FILES.extend([os.path.join("janitor", "sweep.py")])\n', 2),
+        ("extend in a def body", 'GUARD_READ_FILES = [os.path.join("bin", "sim-lease")]\n'
+         'def add_sweep():\n    GUARD_READ_FILES.extend([os.path.join("janitor", "sweep.py")])\n', 2),
+        ("rebind in an if", 'GUARD_READ_FILES = (os.path.join("bin", "sim-lease"),)\n'
+         'if True:\n    GUARD_READ_FILES = (os.path.join("janitor", "sweep.py"),)\n', 2),
+        ("item store", 'GUARD_READ_FILES = [os.path.join("bin", "sim-lease")]\n'
+         'GUARD_READ_FILES[0] = os.path.join("janitor", "sweep.py")\n', 2),
+        ("empty tuple", "GUARD_READ_FILES = ()\n", 1),
+        ("empty list", "GUARD_READ_FILES = []\n", 1),
+        ("no assignment", "OTHER = 1\n", None),
+    ]
+
+    def reads_of(self, form, text):
+        """-> guard_read_files() on `text`, which is written to the run folder and read through MUTATE_GUARD."""
+        path = os.path.join(RUN_DIR, form.replace(" ", "-") + ".py")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        with mock.patch.object(sys.modules[__name__], "MUTATE_GUARD", path):
+            return guard_read_files()
+
+    def test_a_tuple_or_list_reads_whole(self):
+        for form, text, want in self.OK:
+            with self.subTest(form=form):
+                self.assertEqual(self.reads_of(form, text), want)
+
+    def test_every_other_form_fails_and_names_its_line(self):
+        for form, text, line in self.FAIL:
+            with self.subTest(form=form):
+                try:
+                    got = self.reads_of(form, text)
+                except AssertionError as e:
+                    if line is not None:
+                        self.assertIn(" line %d: " % line, str(e))
+                else:
+                    self.fail("%s: the reader read %s and did not fail" % (form, got))
+
+    def test_a_read_only_call_reads_whole_and_a_mutating_call_fails(self):
+        # .index and .count read the list and change nothing, so the reader reads it whole. .append changes it, so it fails.
+        for name in ("index", "count"):
+            with self.subTest(call=name):
+                text = ('GUARD_READ_FILES = [os.path.join("bin", "sim-lease")]\n'
+                        'GUARD_READ_FILES.%s(os.path.join("bin", "sim-lease"))\n' % name)
+                self.assertEqual(self.reads_of("read only " + name, text), ["bin/sim-lease"])
+        with self.assertRaises(AssertionError) as cm:
+            self.reads_of("append call", 'GUARD_READ_FILES = [os.path.join("bin", "sim-lease")]\n'
+                          'GUARD_READ_FILES.append(os.path.join("janitor", "sweep.py"))\n')
+        self.assertIn(" line 2: ", str(cm.exception))
 
 
 # A records-only push after a fully green head. GREEN_HEAD names the

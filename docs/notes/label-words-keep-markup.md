@@ -1,0 +1,1 @@
+- label-words-keep-markup: Markup stays in a label's first words (`_first_words`, hooks/question_form.py), so a refused line can show "Done**". Seen: 2026-11-25 x1
