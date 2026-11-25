@@ -4,6 +4,9 @@
 Decision agents-get-standing-rules. Prints `hookSpecificOutput` with `hookEventName` "SubagentStart" and
 `additionalContext` (Claude Code hooks reference). The scope line varies by `agent_type` from
 the hook input; an unknown or missing type gets the general scope text.
+Each standing line is a `Standing(slug, text)`: the text, with the slug of the record that holds its ruling. The slug
+sits beside the text in this file, so a change to either shows in one diff; lint/compliance_probes.py `probe_aligned`
+reads each `Standing(...)` call as a unit that cites its record. A `Standing` is a str, so build() prints the text as is.
 Advisory, fail-open by design: on any error it prints one stderr line and exits 0, so a defect here never
 stops an agent from starting.
 """
@@ -18,48 +21,65 @@ except Exception as e:  # fail open, as the docstring says: READ_ONLY and SCOPE 
     print(f"agent_brief: {e}", file=sys.stderr)
     sys.exit(0)
 
+class Standing(str):
+    """A standing line: the text, and `slug`, the record that holds the ruling behind it."""
+
+    def __new__(cls, slug, text):
+        line = super().__new__(cls, text)
+        line.slug = slug
+        return line
+
+
 # The reset ban names the flags the guard refuses, read from its constant at load, so the brief and the guard agree.
 # Its own try block: when guard_shared_tree fails to load, the brief drops only this line (RESET_BAN is None).
 try:
     from guard_shared_tree import RESET_DISCARD_FLAGS  # noqa: E402  the one home of the reset flags that discard work
-    RESET_BAN = ("- Outside your own agent worktree (a folder under .claude/worktrees), never run git reset with one of the flags %s, "
-                 "git checkout of a path, or git restore." % "/".join(RESET_DISCARD_FLAGS))
+    RESET_BAN = Standing("agent-worktree-discard-is-noted",
+                         "- Outside your own agent worktree (a folder under .claude/worktrees), never run git reset with one of the flags %s, "
+                         "git checkout of a path, or git restore." % "/".join(RESET_DISCARD_FLAGS))
 except Exception as e:
     print(f"agent_brief: reset line not built: {e}", file=sys.stderr)
     RESET_BAN = None
 
-# Each line carries a flag: True = every type, False = only types that commit and push.
+# Each line carries a flag: True = every type, False = only types that commit and push. A line with no record of its own
+# names agents-get-standing-rules, the record that lists every line.
 COMMON = [
-    (True, "Standing rules for this agent:"),
-    (True, "- Never run git stash."),
+    (True, Standing("agents-get-standing-rules", "Standing rules for this agent:")),
+    (True, Standing("stash-stack-is-a-shared-subject", "- Never run git stash.")),
     (True, RESET_BAN),
-    (False, "- Push only with: git push origin HEAD:<branch>."),
-    (True, "- Make no gh call unless your brief names it."),
-    (True, "- {scope}"),
-    (True, "- Report in 25 lines or fewer unless the brief sets a cap. Order: Done, Deviations, Input Needed, Next."),
-    (False, "- End each commit message with: Co-Authored-By: <model> <noreply@anthropic.com>"),
-    (False, "- Name no record path in a commit message. The only exception is the Drops-lines: trailer."),
-    (False, "- Before each commit, run `git diff --cached --stat`; if it names a file you did not change this round, commit nothing and report it (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees)."),
-    (False, "- Commit the test evidence your work made this round (a test-result bundle) in your worktree. Never leave it untracked there. If your scope does not cover the file, report its path instead."),
-    (False, "- Before you end, stop each server you started, by the $! from the same call or through the harness."),
+    (False, Standing("plain-push-asks", "- Push only with: git push origin HEAD:<branch>.")),
+    (True, Standing("agents-get-standing-rules", "- Make no gh call unless your brief names it.")),
+    (True, Standing("agents-get-standing-rules", "- {scope}")),
+    (True, Standing("agents-get-standing-rules", "- Report in 25 lines or fewer unless the brief sets a cap. Order: Done, Deviations, Input Needed, Next.")),
+    (False, Standing("agents-get-standing-rules", "- End each commit message with: Co-Authored-By: <model> <noreply@anthropic.com>")),
+    (False, Standing("silent-undo-check-design", "- Name no record path in a commit message. The only exception is the Drops-lines: trailer.")),
+    (False, Standing("lanes-start-in-tool-worktrees", "- Before each commit, run `git diff --cached --stat`; if it names a file you did not change this round, commit nothing and report it (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees).")),
+    (False, Standing("agents-get-standing-rules", "- Commit the test evidence your work made this round (a test-result bundle) in your worktree. Never leave it untracked there. If your scope does not cover the file, report its path instead.")),
+    (False, Standing("agents-get-standing-rules", "- Before you end, stop each server you started, by the $! from the same call or through the harness.")),
 ]
 READ_ONLY = {"reviewer", "Explore", "Plan", "claude-code-guide", "design-reviewer", REFUTER_ROLE}
 
 SCOPE = {
-    "builder": "Scope: builder. Never edit tests or test config. A mutant goes to a test-author. Report a test change you need.",
-    "test-author": "Scope: test-author. Edit tests and test config only. Never edit product code.",
-    "reviewer": "Scope: reviewer. Never edit, write, stage, commit, or push. Read and run checks only.",
-    "Explore": "Scope: Explore. Never edit. Read and search only.",
-    "record-writer": "Scope: record-writer. Edit Markdown (*.md) files only. Report any other change needed.",
-    "designer": ("Scope: designer. Edit files in the repo's design folder only. Report any other change needed. "
-                 "Your brief names your designer kind: blind, informed or directed. In a blind designer, never read "
-                 "the current screen, its code, its screenshots, its mockups, or the repo's design spec and tokens."),
-    "design-reviewer": "Scope: design-reviewer. Never edit, write, stage, commit, or push. Read and render only.",
-    REFUTER_ROLE: "Scope: refuter. Never edit, write, stage, commit, or push. Read only.",
+    "builder": Standing("builders-cannot-edit-tests", "Scope: builder. Never edit tests or test config. A mutant goes to a test-author. Report a test change you need."),
+    "test-author": Standing("builders-cannot-edit-tests", "Scope: test-author. Edit tests and test config only. Never edit product code."),
+    "reviewer": Standing("agents-get-standing-rules", "Scope: reviewer. Never edit, write, stage, commit, or push. Read and run checks only."),
+    "Explore": Standing("agents-get-standing-rules", "Scope: Explore. Never edit. Read and search only."),
+    "record-writer": Standing("builders-cannot-edit-tests", "Scope: record-writer. Edit Markdown (*.md) files only. Report any other change needed."),
+    "designer": Standing("design-agents", ("Scope: designer. Edit files in the repo's design folder only. Report any other change needed. "
+                                           "Your brief names your designer kind: blind, informed or directed. In a blind designer, never read "
+                                           "the current screen, its code, its screenshots, its mockups, or the repo's design spec and tokens.")),
+    "design-reviewer": Standing("design-agents", "Scope: design-reviewer. Never edit, write, stage, commit, or push. Read and render only."),
+    REFUTER_ROLE: Standing("plan-refuter", "Scope: refuter. Never edit, write, stage, commit, or push. Read only."),
 }
-GENERAL = ("Scope: do only what your brief names. A builder never edits tests; "
-           "a test-author never edits product code; a reviewer and Explore never edit; "
-           "a record-writer edits Markdown only.")
+GENERAL = Standing("agents-get-standing-rules", ("Scope: do only what your brief names. A builder never edits tests; "
+                                                  "a test-author never edits product code; a reviewer and Explore never edit; "
+                                                  "a record-writer edits Markdown only."))
+
+
+def brief_entries():
+    """(slug, text) of each standing line: every COMMON entry, every SCOPE value, then GENERAL. The "- {scope}" entry
+    keeps its placeholder. A reset line that did not load (None) is left out, as build() leaves it out."""
+    return [(t.slug, str(t)) for t in [t for _, t in COMMON if t is not None] + list(SCOPE.values()) + [GENERAL]]
 
 
 def cite_form(cwd):
