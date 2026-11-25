@@ -3256,6 +3256,7 @@ def case_raising_case_does_not_stop_the_run():
         return None
 
     def raiser():
+        """the stub that raises"""
         raise RuntimeError("stub case raised on purpose")
 
     def record():
@@ -3283,6 +3284,36 @@ def case_raising_case_does_not_stop_the_run():
     check("a run with a raising case returns 1 and prints the summary",
           rc == 1 and "1 failed" in out.getvalue(),
           "main returned %r; main raised %s" % (rc, raised or "nothing"))
+    check("the FAIL line names the case that raised",
+          "FAIL the stub that raises" in out.getvalue().splitlines(),
+          "no such FAIL line; main raised %s" % (raised or "nothing"))
+
+
+def case_system_exit_in_a_case_is_a_failed_case():
+    """A case that raises SystemExit fails by name, and the cases after it still run (run_cases)."""
+    # The stub list runs in a child, so an exit that escapes run_cases ends the child, never this suite.
+    stub = r'''
+import sys
+sys.path.insert(0, %r)
+import case_runner_test as cr
+def first():
+    return None
+def exits():
+    """the stub that exits"""
+    raise SystemExit(0)
+def marked():
+    print("MARKER the case after the exit ran")
+sys.exit(cr.run_cases([first, exits, marked]))
+''' % HERE
+    proc = subprocess.run([sys.executable, "-c", stub], capture_output=True, text=True, timeout=120)
+    lines = proc.stdout.splitlines()
+    seen = "child exited %r; output %r" % (proc.returncode, proc.stdout[-300:])
+    check("a case that raises SystemExit: the case after it still runs",
+          "MARKER the case after the exit ran" in lines, seen)
+    check("a case that raises SystemExit: it is a FAIL line that names it",
+          "FAIL the stub that exits" in lines, seen)
+    check("a case that raises SystemExit: the run returns 1 and prints the summary",
+          proc.returncode == 1 and " 1 failed," in proc.stdout, seen)
 
 
 def case_cli_agent_old_flag():
@@ -3297,8 +3328,9 @@ def case_cost_tests():
     return ["the CostTests class has a failing case (its report is above)"]
 
 
-def main():
-    cases = [
+def suite_cases():
+    """The cases main() runs, in order. Built on each call, so a stub in a case's globals is seen."""
+    return [
         case_table_in_process,
         case_pointer_constant,
         case_real_clock,
@@ -3425,10 +3457,14 @@ def main():
         case_override_ask_off_in_the_reason_grants_once,
         case_override_ask_judge_kill_keeps_the_inbox_capture,
         case_raising_case_does_not_stop_the_run,
+        case_system_exit_in_a_case_is_a_failed_case,
         case_cost_tests,
     ]
+
+
+def main():
     try:
-        run_cases(cases, failures=FAILED, echo_pass=False)
+        run_cases(suite_cases(), failures=FAILED, echo_pass=False)
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
     if FAILED:
