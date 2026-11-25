@@ -1571,16 +1571,52 @@ class StaleCwdRecordTests(unittest.TestCase):
         self.assertEqual(reason, "leftover trash")
 
     def test_trash_folder_is_kept_for_uncommitted_work_beside_such_a_record(self):
-        """Case 2 for the trash sweep. A file that git does not ignore sits in the folder, so the keep names it `dirty`."""
+        """Case 2 for the trash sweep. A tracked file that the rename moved away from the build name is uncommitted
+        work: git lists it as deleted under the original name, so the keep names it `dirty`. Decision
+        `build-dirs-reaped-at-agent-end` deletes an untracked build folder by name, so only tracked work counts."""
         self.assert_record_stands_nowhere()
         wt = self.new_worktree("trash-dirty")
-        trash = self.trash_from_build(wt)
-        write(os.path.join(trash, "notes.txt"), "uncommitted\n")
+        build = os.path.join(wt, "native", "build")
+        write(os.path.join(build, "keep.txt"), "tracked\n")
+        self.assertEqual(run_vcs(wt, "add", "-f", os.path.join("native", "build", "keep.txt")).returncode, 0,
+                         "scope: the build file must be tracked")
+        self.assertEqual(run_vcs(wt, *IDENT, "commit", "-q", "-m", "track a build file").returncode, 0,
+                         "scope: the build file must be committed")
+        trash = sweep.trash_name(build)
+        os.rename(build, trash)
+        self.assertTrue(os.path.isfile(os.path.join(trash, "keep.txt")), "scope: the tracked file must move to the trash name")
         self.assertTrue(sweep.git_reads.porcelain(trash), "scope: the folder must hold uncommitted work")
         with mock.patch.object(sweep, "processes_in", return_value=([], [])):
             delete, reason = sweep.trash_verdict(trash)
         self.assertFalse(delete)
-        self.assertEqual(reason, "dirty", "the trash sweep kept a folder with uncommitted work, but the reason does not name it")
+        self.assertEqual(reason, "dirty", "the trash sweep kept a folder with a moved tracked file, but the reason does not name it")
+
+    def test_trash_folder_is_kept_for_a_staged_file_beside_such_a_record(self):
+        """Case 2b for the trash sweep. A file staged under the trash name is uncommitted work, so the keep names it `dirty`."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-staged")
+        trash = self.trash_from_build(wt)
+        staged = os.path.join(trash, "staged.txt")
+        write(staged, "staged\n")
+        self.assertEqual(run_vcs(wt, "add", "-f", staged).returncode, 0, "scope: the file must be staged")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertFalse(delete)
+        self.assertEqual(reason, "dirty", "the trash sweep kept a folder with a staged file, but the reason does not name it")
+
+    def test_trash_folder_with_only_an_untracked_file_is_deleted_beside_such_a_record(self):
+        """Case 2c, a control for the trash sweep. An untracked file in the folder is build output: decision
+        `build-dirs-reaped-at-agent-end` deletes a build folder by name whatever it holds, so the gone record must not
+        keep it. The old code deletes it too."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-untracked")
+        trash = self.trash_from_build(wt)
+        write(os.path.join(trash, "notes.txt"), "untracked\n")
+        self.assertTrue(sweep.git_reads.porcelain(trash), "scope: the folder must hold an untracked file")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertTrue(delete, "trash_verdict kept a build folder for an untracked file: %s" % reason)
+        self.assertEqual(reason, "leftover trash")
 
     def test_trash_folder_is_kept_for_a_process_inside_beside_such_a_record(self):
         """Case 3. An empty trash folder reads clean, so the process is the only cause, and the keep names its pid."""
