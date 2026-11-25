@@ -12,6 +12,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$HERE/../../lint/_test_git.sh"  # test-run signing opt-out
 RUN_SH="$HERE/run.sh"
 STAMP_JS="$HERE/stamp.mjs"
+# Subject marker, read by bin/ci-job so a change to stamp.mjs reaches this suite: ${SUBJECT_UNDER_TEST:-$REPO_ROOT/actions/stamp/stamp.mjs}
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 

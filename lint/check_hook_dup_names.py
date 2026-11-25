@@ -36,7 +36,7 @@ import _guard_sections  # noqa: E402  the one home of how a section file's heade
 NAME = "check_hook_dup_names"
 ALLOW = "lint/hook_dup_names_allow.json"
 SECTION_DIR = "tests/guard"
-# The runner binds these at hooks/test_guard.py:259 (FAMILY) and :265 (TEMP_DIR) and each section
+# The runner binds these as FAMILY and TEMP_DIR in hooks/test_guard.py and each section
 # sets them, so they are not a clash. The runner exports no constant for them.
 RUNNER_NAMES = frozenset({"FAMILY", "TEMP_DIR"})
 

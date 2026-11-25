@@ -10,7 +10,6 @@ FAMILY = "scratchpad-message"
 SCRATCH_RULE = "scratchpad-commit-msg-owner"  # the rule id the refusal prints: the lane slug
 SCRATCH_REMEDY = ("-F -",)                    # the refusal names the heredoc form as a way to pass a message
 SCRATCH_AGENT = "9f3c1a7e5b2d4c8f6"           # an agent's id on its payload
-NO_LINK_HERE = "this host gives no symlink, so the link case does not run here"
 
 
 def scratch_refuse(name, command, cwd=NOGIT, session=FAKE_SESSION, agent_id=SCRATCH_AGENT,
@@ -110,10 +109,10 @@ else:
     scratch_refuse("scratchpad-message: an agent's commit -F through a variable set in the same command is refused",
                  "S=" + SCRATCH_DIR + "; " + VCS + " commit -F $S/commit_msg.txt")
 # A variable whose value holds `~` is no literal to the guard, so the file it names is unread and the call is
-# refused. The file is clean and sits outside every scratchpad. No rule id is pinned: the case fails only when
-# such a call is let through.
-scratch_refuse("scratchpad-message: an agent's commit -F through a variable holding ~ is refused, by any rule",
-             "S=" + slash(TILDE_DIR) + "; " + VCS + " commit -F $S/commit_msg.txt", rule=None, carries=())
+# refused by cite-by-id, the rule that reads the unreadable message file. The file is clean and sits outside every
+# scratchpad.
+scratch_refuse("scratchpad-message: an agent's commit -F through a variable holding ~ is refused by cite-by-id",
+             "S=" + slash(TILDE_DIR) + "; " + VCS + " commit -F $S/commit_msg.txt", rule="cite-by-id", carries=())
 scratch_refuse("scratchpad-message: an agent's commit -F after pushd into its scratchpad is refused",
              "pushd " + SCRATCH_DIR + " && " + VCS + " commit -F commit_msg.txt")
 scratch_refuse("scratchpad-message: an agent's commit -C . -F after cd into its scratchpad is refused",

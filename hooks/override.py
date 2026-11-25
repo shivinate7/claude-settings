@@ -776,11 +776,17 @@ def _take_opus(session_id, spawn_role, at):
     return OPUS_LIFTED
 
 
-def remote_session_id():
-    """The session record id (session_<x>) the env names as cse_<x>, or None when the env is unset or of another shape."""
-    remote = os.environ.get(LANE_ENV) or ""
+def session_id_in(env):
+    """The session record id (session_<x>) that the mapping `env` names as cse_<x>, or None when it is unset or of another shape.
+    A separate function from `remote_session_id`, which the check fuzz calls with a hook input as its one argument."""
+    remote = env.get(LANE_ENV) or ""
     rest = remote[len(LANE_ENV_PREFIX):] if remote.startswith(LANE_ENV_PREFIX) else ""
     return LANE_PREFIX + rest if rest else None
+
+
+def remote_session_id():
+    """The session record id (session_<x>) the env names as cse_<x>, or None when the env is unset or of another shape."""
+    return session_id_in(os.environ)
 
 
 def _lane_id(session_id):

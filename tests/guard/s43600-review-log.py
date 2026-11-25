@@ -230,9 +230,9 @@ rvw_gh_pr_comment("review-log-form: a Bash gh pr comment whose body does not ope
 # ---- review-log-sha: a body that parses names shas that must resolve in the call's checkout.
 rvw_add("review-log-sha: a record whose Head is a made-up sha is refused", "deny", rvw_body(head=RVW_UNKNOWN),
         rule=RVW_SHA)
-# No rule is named here: this case reads the remedy, so a rule rename fails only the cases that name it.
+# This case reads the remedy; the rule that refuses it is pinned too, as in the case above.
 rvw_add("review-log-sha: the refusal for a made-up Head tells the reader to fetch", "deny",
-        rvw_body(head=RVW_UNKNOWN), carries="fetch")
+        rvw_body(head=RVW_UNKNOWN), rule=RVW_SHA, carries="fetch")
 rvw_gh_api_comment("review-log-sha: a Bash gh api call that posts a log with a made-up Head is refused", "deny",
                    rvw_body(head=RVW_UNKNOWN), rule=RVW_SHA)
 rvw_add("review-log-sha: a record whose Fix check sha is made up is refused", "deny", rvw_body(fix=RVW_UNKNOWN),

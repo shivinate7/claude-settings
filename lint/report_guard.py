@@ -3362,7 +3362,8 @@ def write_marker(hook, idx):
 # A relayed question (spec past-rulings): a coordinator puts a lane's question in its reply, under Input Needed or as
 # a prose line that ends in `?`, so neither check in hooks/call_judge.py sees it. This Stop hook checks it, SYNC, with
 # the same candidates and the same item 8 as the question judge, and one more rule: option keys (question-keys).
-# Cost: one git process and one Sonnet call (60 s) on a Stop whose reply asks something; none on any other Stop.
+# Cost: one git process and one Sonnet call (60 s) on a Stop whose reply asks something; none on any other Stop. A
+# refusal adds one guard.log line.
 RELAY_RULE_REASON = owner_line("Past-ruling guard (rule past-ruling)", "%s")
 UNVETTED_REASON = owner_line(
     "Unvetted guard (rule past-ruling)",
@@ -3383,11 +3384,61 @@ LIST_ITEM = re.compile(r"^[ ]{0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)")
 
 
 def prose_questions(text):
-    """The reply's own prose lines that hold a sentence ending in `?`, outside fenced code, indented code and code
-    spans. A blockquote line counts. Indented code opens after a blank line or another code line, as in CommonMark;
-    inside a list an indented line is list text, never code."""
+    """The reply's own prose lines that hold a sentence ending in `?` (see prose_question_lines)."""
+    return [body for _, body in prose_question_lines(text)]
+
+
+def input_needed_item_starts(text):
+    """Line numbers (from 0) where an Input Needed item starts, whether or not it holds a `?`: the text after the label,
+    the first line under it, a list item, a bold lead, and a line after a blank line. A Based on line never starts one,
+    and a line outside Input Needed starts none. A pick that asks with no `?` is a question of its own."""
+    _hooks_on_path()
+    import question_form
+    found, inside, first, blank = [], False, False, True
+    for number, line in enumerate(text.splitlines()):
+        inner = QUOTE_PREFIX.sub("", line, count=1)
+        body = inner.strip()
+        label = LABEL_RE.match(body)
+        name = label.group(1).strip().rstrip(":").strip() if label else None
+        if name in LABEL_ORDER:
+            inside, first, blank = name == "Input Needed", True, False
+            if inside and body[label.end():].strip(" :*_"):
+                found.append(number)
+                first = False
+            continue
+        if not body or not inside:
+            blank = not body
+            continue
+        starts = first or blank or bool(LIST_ITEM.match(inner)) or bool(label)
+        if starts and not question_form.is_based_line(inner):
+            found.append(number)
+        first = blank = False
+    return found
+
+
+def relay_questions(whole, asked):
+    """The questions of `whole` that the judge was given in `asked`, one piece each with its own Based on lines
+    (question_form.split_questions). With an Input Needed item the judge read the tail of `whole`, so that tail is cut;
+    else it read the prose question lines, so a question line that is not in `asked` is left out."""
+    _hooks_on_path()
+    import question_form
+    if has_input_needed(whole):
+        starts = [n for n, _ in prose_question_lines(asked)] + input_needed_item_starts(asked)
+        return question_form.split_questions(asked, starts)
+    pieces = question_form.split_questions(whole, [n for n, _ in prose_question_lines(whole)])
+
+    def seen(piece):  # asked_text puts an Unvetted marker that follows a question's sentence on a line of its own
+        first = QUOTE_PREFIX.sub("", (piece.splitlines() or [""])[0], count=1).strip()
+        return UNVETTED_AFTER_SENTENCE.sub(r"\1\n", first).split("\n")[0] in asked
+    return [p for p in pieces if seen(p)]
+
+
+def prose_question_lines(text):
+    """(line number from 0, line) of the reply's own prose lines that hold a sentence ending in `?`, outside fenced
+    code, indented code and code spans. A blockquote line counts. Indented code opens after a blank line or another
+    code line, as in CommonMark; inside a list an indented line is list text, never code."""
     found, fenced, code_ok, in_list = [], False, True, False
-    for line in text.splitlines():
+    for number, line in enumerate(text.splitlines()):
         inner = QUOTE_PREFIX.sub("", line, count=1)
         body = inner.strip()
         if body.startswith("```"):
@@ -3407,7 +3458,7 @@ def prose_questions(text):
         elif not indented:
             in_list = False
         if SENTENCE_QUESTION.search(CODE_SPAN.sub("", body)):
-            found.append(body)
+            found.append((number, body))
     return found
 
 
@@ -3448,8 +3499,10 @@ def cannot_run(asked, why):
     return "" if question_form.has_unvetted(asked) else UNVETTED_REASON % why
 
 
-def past_ruling_problem(asked, cwd):
-    """The refusal text for asked text that a past ruling settles, or that could not be checked, else ''."""
+def past_ruling_problem(asked, cwd, whole=None, session=None):
+    """The refusal text for asked text that a past ruling may decide, or that could not be checked, else ''.
+    `whole` is the full text the question sits in (its Based on lines need not end in `?`); `asked` when none.
+    `session` is the hook's session id, which the guard.log line carries."""
     _hooks_on_path()
     import question_form
     candidates, unknown = question_form.past_rulings(asked, repo_root(cwd) or cwd or os.getcwd())
@@ -3459,11 +3512,13 @@ def past_ruling_problem(asked, cwd):
         return cannot_run(asked, "; ".join(unreadable))
     import call_judge  # the one home of item 8, its model and its time limit
     import decision_watch
+    units = relay_questions(whole or asked, asked)  # cut once: the judge reads them under labels, and the refusal counts them
     prompt = ("Review this text, which a session sends the owner and which asks him something:\n<<<\n" + asked
               + "\n>>>\nJudge only item 8 below. Answer {\"ok\": true} at once when no listed ruling settles what "
               "it asks.\n8. " + call_judge.PAST_RULING_ITEM + "\nReply JSON only: {\"ok\": true} or {\"ok\": false, "
-              "\"reason\": \"<the listed id, the ruling's date, and what it decides, one line>\"}."
-              + question_form.candidates_block(candidates, unknown))
+              "\"item\": 8, \"reason\": \"<the listed id, the ruling's date, and what it decides, one line>\", "
+              "\"questions\": [\"<label>\", ...]}."
+              + question_form.candidates_block(candidates, unknown, units))
     verdict, error = decision_watch.invoke_model(prompt, model=call_judge.PAST_RULING_MODEL,
                                                  timeout=call_judge.PAST_RULING_TIMEOUT,
                                                  shape=call_judge.OK_SHAPE, effort=None)
@@ -3472,14 +3527,25 @@ def past_ruling_problem(asked, cwd):
     if verdict.get("ok") is not False:
         return ""
     reason = verdict.get("reason")
-    reason = reason.strip() if isinstance(reason, str) and reason.strip() else "a past ruling settles this."
-    if question_form.ruling_cite(reason, question_form.candidate_ids(candidates), strict=True) != "cited":
+    reason = reason.strip() if isinstance(reason, str) and reason.strip() else ""
+    ids = question_form.candidate_ids(candidates)
+    if question_form.ruling_cite(reason, ids, strict=True) != "cited":
         return cannot_run(asked, "the review cited a record that was not in the list")
-    if session_wording(reason):
-        # The judge's reason holds an order to the session. The owner reads it in chat, so only the ruling id stays.
-        cited = [i for i in question_form.candidate_ids(candidates) if i in reason or i.split("/", 1)[-1] in reason]
-        reason = "a past ruling settles this (%s)." % ", ".join(cited[:3]) if cited else "a past ruling settles this."
-    return RELAY_RULE_REASON % reason
+    # A listed ruling named in a unit's own Based on (ruling) line passes that unit by code, whatever the judge answered;
+    # the judge's labels only narrow which units are refused.
+    text = question_form.past_ruling_text(reason, ids, candidates, units, verdict.get("questions"), whole or asked)
+    if not text:
+        return ""
+    try:
+        # Cost: one appended guard.log line per refusal, no new file and no process. Reader: the guard cull
+        # (lint/guard_log_report.py), which weighs the false alarms of rule past-ruling. A log that cannot be
+        # written never turns the refusal into an Unvetted one.
+        import guard_core
+        guard_core.set_log_session(session)
+        guard_core.record("Stop", "deny", question_form.PAST_RULING_RULE, "")
+    except Exception as exc:
+        print("past-ruling log line not written: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+    return RELAY_RULE_REASON % text
 
 
 def since_last_message(after):
@@ -3521,7 +3587,7 @@ def question_keys_problem(after, text):
     return KEYS_REASON % clash if clash else ""
 
 
-def relay_reasons(after, text, cwd):
+def relay_reasons(after, text, cwd, session=None):
     """Refusals for the questions the reply relays to the owner, read from every assistant text since the last
     human message. An error in the option-key check allows, with one stderr line. An error in the past-ruling check
     is a check that could not run, so it refuses as Unvetted."""
@@ -3531,10 +3597,11 @@ def relay_reasons(after, text, cwd):
     except Exception as exc:
         print("question-keys check failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
     try:
-        asked = asked_text("\n\n".join(earlier_replies(since_last_message(after), text) + [text]))
+        whole = "\n\n".join(earlier_replies(since_last_message(after), text) + [text])
+        asked = asked_text(whole)
         if asked:
             try:
-                reasons.append(past_ruling_problem(asked, cwd))
+                reasons.append(past_ruling_problem(asked, cwd, whole, session))
             except Exception as exc:
                 print("past-ruling check failed: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
                 reasons.append(cannot_run(asked, "the check failed with " + type(exc).__name__))
@@ -3549,7 +3616,7 @@ def rewrite_relay(hook):
     try:
         path = hook.get("transcript_path")
         records = read_transcript(path) if path and os.path.exists(path) else []
-        return relay_reasons(records_after_last_human(records), last_reply(hook), hook.get("cwd"))
+        return relay_reasons(records_after_last_human(records), last_reply(hook), hook.get("cwd"), hook.get("session_id"))
     except Exception as exc:
         print("relay check on a rewrite failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
         return []
@@ -3768,7 +3835,7 @@ def main():
     note = " ".join(filter(None, [note, hand_note, review_note]))
     relay = []
     if last_human_idx is not None:  # a transcript with no human message never ran the relay and answered checks
-        relay = relay_reasons(after, text, hook.get("cwd"))
+        relay = relay_reasons(after, text, hook.get("cwd"), hook.get("session_id"))
         try:
             relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
         except Exception:
