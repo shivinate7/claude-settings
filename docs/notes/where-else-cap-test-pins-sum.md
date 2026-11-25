@@ -1,0 +1,1 @@
+- where-else-cap-test-pins-sum: test_a_reply_past_the_places_cap_prints_the_cap_and_a_count_line in merge/test_merge.py (line 27137 on main) pins the sum, not the bucket (PR 3854, merged; reviewer's words, unverified). Seen: 2026-11-24 x1

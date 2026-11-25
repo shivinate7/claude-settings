@@ -193,17 +193,32 @@ def list_problems(old, cfg, files, moved=None):
     return out
 
 
+class Command(list):
+    """A command line that remembers how much of it launches the tool. Adding arguments keeps that, so execute can ask the
+    launcher alone for its version."""
+
+    def __init__(self, items, launcher):
+        super().__init__(items)
+        self.launcher = launcher
+
+    def __add__(self, other):
+        return Command(list(self) + list(other), self.launcher)
+
+
 def tool(std, name):
     version = std["tools"][name]
     if os.environ.get("CODE_CHECK_TOOLS") == "path":
+        # A tool on PATH needs no fetch: it starts or raises FileNotFoundError, so a plain list, which execute never probes.
         return {"shellcheck-py": ["shellcheck"], "typescript": ["tsc"], "@astrojs/check": ["astro-check"]}.get(name, [name])
-    if name == "typescript":
-        return ["npx", "--yes", "-p", "typescript@" + version, "tsc"]
-    if name == "@astrojs/check":
-        return ["npx", "--yes", "-p", "@astrojs/check@" + version, "-p", "typescript@" + std["tools"]["typescript"], "astro-check"]
-    if name == "shellcheck-py":
-        return ["pipx", "run", "--spec", "shellcheck-py==" + version, "shellcheck"]
-    return ["pipx", "run", "%s==%s" % (name, version)]
+    elif name == "typescript":
+        launch = ["npx", "--yes", "-p", "typescript@" + version, "tsc"]
+    elif name == "@astrojs/check":
+        launch = ["npx", "--yes", "-p", "@astrojs/check@" + version, "-p", "typescript@" + std["tools"]["typescript"], "astro-check"]
+    elif name == "shellcheck-py":
+        launch = ["pipx", "run", "--spec", "shellcheck-py==" + version, "shellcheck"]
+    else:
+        launch = ["pipx", "run", "%s==%s" % (name, version)]
+    return Command(launch, len(launch))
 
 
 def run_ruff(ctx):
@@ -300,11 +315,19 @@ RUNNERS = {"ruff": run_ruff, "mypy": run_mypy, "shellcheck": run_shellcheck, "ts
 def execute(name, cmd, root, keep=None):
     """Runs each command; a nonzero exit is a problem. keep (lines -> the lines that are problems) narrows the
     stdout of a tool whose other findings are out of scope (it also gets stderr, for its no-output message); with
-    keep, an exit with no kept line passes."""
+    keep, an exit with no kept line passes. A tool that exits nonzero with nothing on stdout is asked `--version`: one
+    that cannot answer never started (pipx or npx with no route to the index), so it reads `could not start`, which
+    ci-job reads as unknown; one that answers started, and its failure, stderr alone included, is a problem. A tool
+    that printed diagnostics on stdout started, so it is not asked."""
     cmds = cmd if cmd and isinstance(cmd[0], list) else [cmd]
     for c in cmds:
         try:
             p = sh(c, root)
+            if p.returncode and not p.stdout.strip() and isinstance(c, Command):
+                probe = sh(list(c[:c.launcher]) + ["--version"], root)
+                if probe.returncode:
+                    said = [x.strip() for x in (probe.stderr + probe.stdout).splitlines() if x.strip()]
+                    return ["%s could not start: %s" % (name, said[0][:300] if said else "--version exited %d" % probe.returncode)]
         except FileNotFoundError as e:
             return ["%s could not start: %s" % (name, e)]
         if p.returncode:
