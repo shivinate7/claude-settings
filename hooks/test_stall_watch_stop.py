@@ -2964,6 +2964,54 @@ def A19i_real_harness_note_on_a_finished_notice_does_not_keep_the_agent_open():
     return problems
 
 
+@case
+def A19j_real_waiting_notice_whose_summary_holds_an_opening_result_tag_keeps_the_agent_open():
+    """A19j. a real waiting notice whose agent description holds a literal <result> tag: the summary reads 'Agent "fix
+    <result> parse" is waiting on its own background work'. The agent stays open: says_waiting is true for the notice,
+    closed_by_notice(keep_waiting=True) holds no id, and waiting_ids holds it. Fails on the current tree: the first
+    <result> cuts the summary before its closing tag, so the notice reads as finished. Scope first: the tag and the
+    phrase are in the summary, and the summary ends with the phrase"""
+    mod = load_module("stall_watch_a19j")
+    aid = agent_id(122)
+    summary = 'Agent "fix <result> parse" ' + WAITING
+    rec = notice(aid, "completed", summary=summary, note=REAL_NOTE, result=INTERIM)
+    text = rec["message"]["content"]
+    problems = scope_problems(mod)
+    problems += expect(("<summary>%s</summary>" % summary) in text and "<result>" in summary and summary.endswith(WAITING),
+                       f"scope: the summary does not hold the opening result tag and end with the phrase: {text!r}")
+    segment = text.split(mod.TASK_NOTIFICATION_TAG)[1] if mod.TASK_NOTIFICATION_TAG else text  # what closed_by_notice reads
+    problems += expect(mod.says_waiting(segment),
+                       f"says_waiting is false for a real waiting notice whose summary holds <result>: {segment[:300]!r}")
+    closed = mod.closed_by_notice(text, keep_waiting=True)
+    problems += expect(aid not in closed, f"closed_by_notice(keep_waiting=True) closes {aid}, whose notice says it is waiting: {closed}")
+    problems += expect(aid in mod.waiting_ids(text), f"waiting_ids is {mod.waiting_ids(text)}, does not hold {aid}")
+    return problems
+
+
+@case
+def A19k_real_waiting_notice_whose_summary_holds_a_closing_summary_tag_keeps_the_agent_open():
+    """A19k. a real waiting notice whose agent description holds a literal </summary> tag: the summary reads 'Agent "fix
+    </summary> parse" is waiting on its own background work'. The agent stays open: says_waiting is true for the notice,
+    closed_by_notice(keep_waiting=True) holds no id, and waiting_ids holds it. Fails on the current tree: the lazy summary
+    match stops at the description's closing tag, so the notice reads as finished. Scope first: the closing tag and the
+    phrase are in the summary, and the summary ends with the phrase"""
+    mod = load_module("stall_watch_a19k")
+    aid = agent_id(123)
+    summary = 'Agent "fix </summary> parse" ' + WAITING
+    rec = notice(aid, "completed", summary=summary, note=REAL_NOTE, result=INTERIM)
+    text = rec["message"]["content"]
+    problems = scope_problems(mod)
+    problems += expect(("<summary>%s</summary>" % summary) in text and "</summary>" in summary and summary.endswith(WAITING),
+                       f"scope: the summary does not hold the closing summary tag and end with the phrase: {text!r}")
+    segment = text.split(mod.TASK_NOTIFICATION_TAG)[1] if mod.TASK_NOTIFICATION_TAG else text  # what closed_by_notice reads
+    problems += expect(mod.says_waiting(segment),
+                       f"says_waiting is false for a real waiting notice whose summary holds </summary>: {segment[:300]!r}")
+    closed = mod.closed_by_notice(text, keep_waiting=True)
+    problems += expect(aid not in closed, f"closed_by_notice(keep_waiting=True) closes {aid}, whose notice says it is waiting: {closed}")
+    problems += expect(aid in mod.waiting_ids(text), f"waiting_ids is {mod.waiting_ids(text)}, does not hold {aid}")
+    return problems
+
+
 # ---- The CI-wait check of this mode (decision ci-wait-reads-run-status, "The fallback") ----
 # A wait opens at the newest ready call and closes at a green or cancelled verdict, or a merge or close of its own
 # PR. A wait that a bare ready call opens (no PR number) closes at a merge or close of any PR. A red verdict keeps
