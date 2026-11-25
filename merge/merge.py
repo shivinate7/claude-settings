@@ -306,6 +306,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import ruled_store  # noqa: E402  the one reader of the ruling store (lint/ruled_store.py)
 import stale_cites  # noqa: E402  the one home of the rule dirs (lint/stale_cites.py); the lint dir is on sys.path from the records import above
+import check_tool_pins  # noqa: E402  the one home of the per-machine tool-pin read (lint/check_tool_pins.py); the ready run calls machine_rows
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 
 class Stop(Exception):
@@ -5671,6 +5672,43 @@ def merge_base_in(wt, base, branch):
                    + (f" The abort said: {' '.join(aborted.split())[:200]}" if aborted.strip() else ""))
     return git(wt, "rev-parse", "HEAD")[1]
 
+READY_PINS_BUDGET = 20  # seconds all the ready run's version reads share (check_tool_pins.machine_rows)
+
+def head_tool_pins(root, info):
+    """The `.tool-versions` text on the head of the pull request, or None when the head holds none or cannot be read here. A head this checkout
+    lacks is fetched once, by its branch, so the read has a commit to show: a ref update only, no worktree, nothing pushed."""
+    head = info["head"]
+    if git(root, "cat-file", "-e", f"{head}^{{commit}}")[0]:
+        git(root, "fetch", "-q", "origin", f"+refs/heads/{info['branch']}:refs/remotes/origin/{info['branch']}")
+    c, text = git(root, "show", f"{head}:{check_tool_pins.PIN_FILE}")
+    return None if c else text
+
+def ready_tool_pins(root, n, info):
+    """The tool-pins read of the ready run (decision tool-pins): the head's `.tool-versions` against the tools on this machine, before any fetch of
+    the base, worktree, check or push. A tool behind its pin, one that cannot be read and a pin file that cannot be read raise Stop with
+    the fix lines, so the pull request stays a draft and nothing is pushed. A tool at or ahead of its pin goes on. A cloud session warns with the same
+    lines and goes on: its sandbox tools are the image's, and CI judges them. No pin file on the head: nothing runs.
+    Cost: one `git cat-file` and one `git show` (plus one fetch when the head is not local), then one version command per pin inside the
+    merge tool's own process; no file written."""
+    text = head_tool_pins(root, info)
+    if text is None:
+        return
+    try:
+        rows = check_tool_pins.machine_rows(f"{info['branch']}:{check_tool_pins.PIN_FILE}", READY_PINS_BUDGET, text=text)
+    except (OSError, check_tool_pins.PinFileError) as e:
+        problems = [f"tool-pins: unknown: {e}"]
+    else:
+        problems = [line for line in map(check_tool_pins.behind_line, rows) if line]
+    if not problems:
+        return
+    if os.environ.get("CLAUDE_CODE_REMOTE") == "true":
+        say(f"merge: warning, the tools on this session do not meet the pins of #{n} {PINS_CITE}; a cloud session goes on and CI judges them:", *problems)
+        return
+    raise Stop(f"the tools on this machine do not meet the pins in {check_tool_pins.PIN_FILE} on the head of #{n}, so it stays a draft and nothing was pushed {PINS_CITE}. "
+               "Bring each tool up to its pin (the owner runs the fix), then run --ready again:\n" + "\n".join(problems))
+
+PINS_CITE = "(decision tool-pins)"
+
 def draft_step(root, cfg, n, host, info, merge_main=False):
     """`merge <pr> --confirm` on a draft: rebuild the records page on the head, push it, mark the pull request ready, and
     stop. So the branch is final at ready, and the ready confirm pushes nothing (decision records-index-at-merge).
@@ -5679,6 +5717,7 @@ def draft_step(root, cfg, n, host, info, merge_main=False):
     Takes no lock, claims no number and merges no pull request: a claim stays at the ready confirm.
     A repo that declares merge.readyChecks also runs them first, on the tree the step would push, before any push and before the
     ready mark, on every path (the ready checks, decision lanes-run-no-full-ci-job). One ci-job run per job, in one worktree."""
+    ready_tool_pins(root, n, info)  # first: a machine behind the pins refuses before any read of the host, fetch of the base or worktree
     base = info["base"]
     red = head_check_red(host.head_state(n, info["head"]))  # a head that will not merge never goes ready; before any push
     if red:

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prints "checkout <toplevel> on <branch>, <n> dirty files" on start, resume, compact, clear and fork, after one origin fetch per checkout. It prints the grant lines first, so a killed hook delivers them. On resume it says when the recorded worktree is gone. Names the clone to cd to when the checkout is the live pin. Also warns on: core.worktree set in the shared git config; global rules that differ from this checkout; the claude-settings clone off main or behind origin; the default branch or local main behind or off origin; more than 50 agent worktrees; a check or fetch that could not run; a waiting page or grant file that differs from main's; a disarmed or unknown SessionEnd sweep. Prints the caution level, or says it is unknown.
+# Prints "checkout <toplevel> on <branch>, <n> dirty files" on start, resume, compact, clear and fork, after one origin fetch per checkout. It prints the grant lines first, so a killed hook delivers them. On resume it says when the recorded worktree is gone. Names the clone to cd to when the checkout is the live pin. Also warns on: core.worktree set in the shared git config; global rules that differ from this checkout; the claude-settings clone off main or behind origin; the default branch or local main behind or off origin; more than 50 agent worktrees; a check or fetch that could not run; a waiting page or grant file that differs from main's; a disarmed or unknown SessionEnd sweep; on startup, a tool behind its pin in .tool-versions (with the fix). Prints the caution level, or says it is unknown.
 # In a git tree it also patches the platform's Stop-hook script once so its unpushed nudge skips a merged branch; it says so when the patch is not applied.
 # Outside a git tree or without git, prints only the tier line. Always exits 0, nothing on stderr.
 
@@ -517,6 +517,22 @@ if [ -n "$d" ] && [ -f "$d/lint/layout.py" ]; then
     printf '%s\n' "$caution_text" | sed 's/^/repo /'
   else
     printf 'repo caution: unknown, the level could not be read\n'
+  fi
+fi
+
+# The repo's tool pins (decision tool-pins): on a fresh start a tool behind its pin prints one line with this machine's fix, so a new
+# device learns it before a run fails on it. lint/check_tool_pins.py --behind is the one home; the line says the owner runs the fix.
+# A tool at or ahead of its pin prints nothing; one that cannot be read prints an unknown line. Startup only, never a cloud session, and
+# a checkout with no .tool-versions starts nothing. The checker's reads share CS_TOOL_PINS_BUDGET seconds (default 5, under the hook's
+# 10). Cost: at startup in a repo with a pin file, one python start plus one version command per pin; no network, no file written,
+# no timer, no process kept. A failure is silent.
+if [ "$source" = "startup" ] && [ "${CLAUDE_CODE_REMOTE:-}" != "true" ] && [ -f "$toplevel/.tool-versions" ] \
+   && command -v python3 >/dev/null 2>&1; then
+  tp_script="$d/lint/check_tool_pins.py"
+  [ -n "$d" ] && [ -f "$tp_script" ] || tp_script="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/../lint/check_tool_pins.py"
+  if [ -f "$tp_script" ]; then
+    tp_lines=$(python3 "$tp_script" --behind "$toplevel" 2>/dev/null | grep -v '^ok ')
+    [ -n "$tp_lines" ] && printf '%s\n' "$tp_lines"
   fi
 fi
 
