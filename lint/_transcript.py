@@ -11,7 +11,9 @@ import json
 import os
 import re
 
-SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
+SEND_TOOLS = ("mcp__claude-code-remote__send_message", "mcp__ccd_session_mgmt__send_message", "SendMessage")
+# The text a desktop send's tool result holds when the message reached its session. "queued" and "undelivered" differ here.
+DESKTOP_DELIVERED = "(delivery: delivered;"
 CLAUDE_ARTIFACTS_DB = "mcp__claude-artifacts__db_"  # the claude-artifacts page db tools; the verb is the tool name's tail, never an input action
 # The tool-name prefixes of the page db tools, for `name.startswith(ARTIFACT_DATA)`. read_artifact is no db tool, so it never matches.
 ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData", CLAUDE_ARTIFACTS_DB)
@@ -291,10 +293,27 @@ def head_moved_since(cwd, base):
         return None
 
 
+# The sender id in the opening tag of a desktop peer message's text.
+CROSS_SESSION_FROM = re.compile(r"<cross-session-message\s[^>]*?\bfrom=\"([^\"]+)\"")
+
+
+def _record_text(rec):
+    content = (rec.get("message") or {}).get("content")
+    if isinstance(content, list):
+        content = "".join(b.get("text", "") for b in content if isinstance(b, dict))
+    return content if isinstance(content, str) else ""
+
+
 def peer_sender(rec):
-    """The id of the session that sent a peer message record (origin.fromSession), else None."""
+    """The id of the session that sent a peer message record, else None. A cloud record names it in
+    origin.fromSession; a desktop record names it in the `from` attribute of its cross-session-message tag."""
     origin = rec.get("origin")
-    found = origin.get("fromSession") if _is_peer(origin) else None
+    if not _is_peer(origin):
+        return None
+    found = origin.get("fromSession")
+    if not (isinstance(found, str) and found):
+        match = CROSS_SESSION_FROM.search(_record_text(rec))
+        found = match.group(1) if match else None
     return found if isinstance(found, str) and found else None
 
 
@@ -393,9 +412,10 @@ def result_text(block):
 
 
 def delivered_tool_use_ids(records):
-    """The tool_use ids of sends that reached their session: a tool_result whose text parses as the cloud
-    send_message success body {"status": "delivered"}, and no failure by `failed_tool_use_ids`. Only that cloud
-    body counts: the local SendMessage success shape is not measured, so it fails closed."""
+    """The tool_use ids of sends that reached their session, with no failure by `failed_tool_use_ids`: a
+    tool_result whose text parses as the cloud send_message body {"status": "delivered"}, or a desktop result
+    whose text holds DESKTOP_DELIVERED. Only the result counts, never the send's input. A queued or undelivered
+    desktop result, and any other shape, fails closed."""
     failed = failed_tool_use_ids(records)
     delivered = set()
     for r in records:
@@ -405,8 +425,12 @@ def delivered_tool_use_ids(records):
             use_id = b.get("tool_use_id")
             if not isinstance(use_id, str) or use_id in failed:
                 continue
+            text = result_text(b)
+            if DESKTOP_DELIVERED in text:
+                delivered.add(use_id)
+                continue
             try:
-                body = json.loads(result_text(b))
+                body = json.loads(text)
             except ValueError:
                 continue
             if isinstance(body, dict) and body.get("status") == "delivered":
