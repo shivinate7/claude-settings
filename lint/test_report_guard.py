@@ -183,6 +183,29 @@ def compact_summary():
             "message": {"role": "user", "content": "This session is being continued from a previous conversation."}}
 
 
+def data_flow_records():
+    """The data-flow-records record the session writes for its tool-event snapshot. Its keys are a real record's, with
+    the ids and names fixed. It is no system and no isMeta record, so a reader that skips only those reads it as text."""
+    return {"type": "data-flow-records", "v": 1, "sessionId": "fixture-session",
+            "records": [{"tool_name": "ModLoaded", "event_id": "event_fixture"}], "snapshot": True}
+
+
+def environment_attachment():
+    """The environment attachment the session writes for its working folder. Its keys are a real record's, with the
+    paths fixed. It is no system and no isMeta record."""
+    return {"type": "attachment", "isSidechain": False, "parentUuid": "fixture-parent",
+            "attachment": {"type": "environment", "snapshot": {"workingDirectory": "/fixture/work",
+                                                               "isWorktree": False, "isGitRepo": False,
+                                                               "platform": "darwin"}}}
+
+
+def queue_operation():
+    """The queue-operation record the harness writes when it enqueues a message. Its keys are a real record's, with the
+    text fixed. It is no system and no isMeta record."""
+    return {"type": "queue-operation", "operation": "enqueue", "timestamp": "2026-01-01T00:00:00.000Z",
+            "sessionId": "fixture-session", "content": "fixture queued text"}
+
+
 def write_transcript(records, tmpdir, name="transcript.jsonl"):
     path = os.path.join(tmpdir, name)
     with open(path, "w", encoding="utf-8") as f:
@@ -1310,11 +1333,12 @@ class DoneNamesModelsTests(unittest.TestCase):
     REVIEWER_R3 = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 3 of 3"}
     ROUND1_NO_MODEL = {"subagent_type": "reviewer", "prompt": "Round 1 of 3"}  # runs its file pin, haiku
 
-    def turn_records(self, earlier=(), window=(), report=None):
+    def turn_records(self, earlier=(), window=(), report=None, owner_after_report=False):
         """The turn's records: `earlier` spawns from before the owner's second message, then `window` spawns
         after it. Each spawn carries its tool_use id and a real result, as a finished spawn does. With no
         earlier spawn there is no second message: the window is the whole transcript. `report`, when given,
-        is a report the session posted between the two groups, in place of the owner's second message."""
+        is a report the session posted between the two groups, in place of the owner's second message, unless
+        `owner_after_report` keeps that message after the report too (a turn that ends with its report)."""
         records = [human("do the task")]
         n = 0
         for spawn in earlier:
@@ -1322,6 +1346,8 @@ class DoneNamesModelsTests(unittest.TestCase):
             n += 1
         if report is not None:
             records.append(assistant_text(report))
+            if owner_after_report:
+                records.append(human("the owner's next message"))
         elif earlier:
             records.append(human("the owner's next message"))
         for spawn in window:
@@ -1393,6 +1419,20 @@ class DoneNamesModelsTests(unittest.TestCase):
                         agent_model=None, agents_dir=folder)
         self.assertIsNotNone(out, "Done named builder opus against a window builder that ran sonnet, and passed")
         self.assertIn("'builder opus' matches no builder spawn, which ran sonnet", out["reason"])
+
+    def test_dm_limit_earlier_spawn_model_passes(self):
+        # Accepted limit: a Done model name is judged against every spawn in the transcript, not the turn's
+        # window alone. The earlier sonnet reviewer lets "reviewer sonnet" pass, though the window's reviewer ran haiku.
+        records = self.turn_records(earlier=[self.REVIEWER_SONNET_EARLY], window=[self.REVIEWER_HAIKU])
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (reviewer sonnet)\n> **Next** Unstarted: none")
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_limit_earlier_builder_spawn_model_passes(self):
+        # Accepted limit, as above: the earlier sonnet builder lets "builder sonnet" pass, though the
+        # window's builder ran opus.
+        records = self.turn_records(earlier=[self.BUILDER_SONNET], window=[self.BUILDER_OPUS])
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none")
+        self.assertIsNone(out, out and out["reason"])
 
     def test_dm_green_no_report_between_earlier_reviewer_counts_passes(self):
         # No report sits between the two spawns, so the window is since the start and the earlier sonnet reviewer
@@ -1474,16 +1514,15 @@ class DoneNamesModelsTests(unittest.TestCase):
                                 "> **Done** BUILT the guard, PR #5 (builder %s)\n> **Next** Unstarted: none" % model)
                 self.assertIsNone(out, out and out["reason"])
 
-    def test_dm_red_unresolved_window_spawn_beside_resolved_haiku_blocks(self):
-        # An unresolved builder in the window sits beside a resolved haiku one. Done names sonnet, which no resolved
-        # window spawn ran: refused. The unresolved spawn must not switch the check off.
+    def test_dm_green_unresolved_window_spawn_never_refuses_a_named_model(self):
+        # An unresolved window spawn ('') never refuses a named model, since it may have run the named model. Done's
+        # "builder sonnet", beside a resolved haiku builder in the window, passes.
         folder = self.unpinned_agents()
         self.assertEqual(self.file_pin("builder", folder), "", "fixture error: the builder fixture pins a model")
         records = self.turn_records(window=[self.BUILDER_NO_MODEL, self.BUILDER_HAIKU])
         out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none",
                         agent_model=None, agents_dir=folder)
-        self.assertIsNotNone(out, "Done named builder sonnet, which no resolved window spawn ran, and passed")
-        self.assertIn("'builder sonnet' matches no builder spawn, which ran haiku", out["reason"])
+        self.assertIsNone(out, out and out["reason"])
 
     def test_dm_green_unresolved_window_spawn_beside_haiku_names_haiku_passes(self):
         # Control for the case above: the same fixture, with Done naming the resolved haiku builder.
@@ -1505,6 +1544,67 @@ class DoneNamesModelsTests(unittest.TestCase):
         records = self.turn_records(window=[self.PREFIXED_TEST_AUTHOR])
         out = self.stop(records, "> **Done** BUILT the cases, PR #5 (test-author haiku)\n> **Next** Unstarted: none")
         self.assertIsNone(out, out and out["reason"])
+
+    # The window after a report. Turn 1's builder ran opus and reported; the owner's next message starts turn 2.
+    PRIOR_BUILDER_OPUS_REPORT = "> **Done** BUILT the guard, PR #4 (builder opus)\n> **Next** Unstarted: none"
+    BOTH_ROLES_DONE = "> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer sonnet)\n> **Next** Unstarted: none"
+
+    def two_turn_records(self, window):
+        """Turn 1 ran a builder opus and reported; the owner's next message starts turn 2, whose spawns are `window`."""
+        return self.turn_records(earlier=[self.BUILDER_OPUS], window=window,
+                                 report=self.PRIOR_BUILDER_OPUS_REPORT, owner_after_report=True)
+
+    def test_dm_red_builder_idle_this_window_named_model_blocks(self):
+        # Turn 2's only spawn is a reviewer sonnet, so the window holds no builder. Done names builder sonnet, which no
+        # builder spawn in the transcript ran (turn 1's opus is the only one): refused.
+        records = self.two_turn_records([self.REVIEWER_R2])
+        self.assertEqual(self.window_models(records), {"reviewer": ["sonnet"]})
+        out = self.stop(records, self.BOTH_ROLES_DONE)
+        self.assertIsNotNone(out, "Done named builder sonnet, which no builder spawn in the transcript ran, and passed")
+        self.assertIn("'builder sonnet' matches no builder spawn, which ran opus", out["reason"])
+
+    def test_dm_green_window_reviewer_named_after_report_passes(self):
+        # Control for the case above: the same two turns, with Done naming the window's reviewer, sonnet, alone.
+        records = self.two_turn_records([self.REVIEWER_R2])
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (reviewer sonnet)\n> **Next** Unstarted: none")
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_green_window_builder_named_both_models_passes(self):
+        # Turn 1's builder ran opus; turn 2's ran sonnet. Done names both: each is a model the builder ran in the
+        # transcript, and sonnet is the window's, so the Done item is true and passes.
+        records = self.two_turn_records([self.BUILDER_SONNET])
+        self.assertEqual(self.window_models(records), {"builder": ["sonnet"]})
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder opus, builder sonnet)\n"
+                                 "> **Next** Unstarted: none")
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_red_window_builder_named_only_earlier_model_blocks(self):
+        # Control for the case above: Done names only the opus run, which no window spawn ran. The window holds
+        # sonnet alone, so the opus name is refused.
+        records = self.two_turn_records([self.BUILDER_SONNET])
+        self.assertEqual(self.window_models(records), {"builder": ["sonnet"]})
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder opus)\n> **Next** Unstarted: none")
+        self.assertIsNotNone(out, "Done named builder opus, which no window builder ran, and passed")
+        self.assertIn("'builder opus' matches no builder spawn, which ran sonnet", out["reason"])
+
+    def test_dm_red_builder_run_before_compaction_blocks(self):
+        # A builder ran sonnet, then the session compacted: the boundary and its summary come after it. Done names
+        # builder opus, which no builder spawn in the transcript ran: refused. The report carries the compaction's
+        # Recovered and Handoff lines, so the only refusal left is the model name.
+        records = [human("do the task")] + keyed_spawn(self.BUILDER_SONNET, 0) + [compact_boundary(), compact_summary()]
+        self.assertEqual(self.window_models(records), {"builder": ["sonnet"]})
+        reply = ("> **Done** BUILT the guard, PR #5 (builder opus)\n> **Deviations**\n> - Recovered: none\n"
+                 "> - Handoff gave: none\n> **Next** Unstarted: none")
+        out = self.stop(records, reply)
+        self.assertIsNotNone(out, "Done named builder opus, which no builder spawn ran, and passed after a compaction")
+        self.assertIn("'builder opus' matches no builder spawn, which ran sonnet", out["reason"])
+
+    def test_dm_red_builder_run_without_compaction_blocks(self):
+        # Control for the case above: the same builder and Done line, with no compaction between them.
+        records = [human("do the task")] + keyed_spawn(self.BUILDER_SONNET, 0)
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder opus)\n> **Next** Unstarted: none")
+        self.assertIsNotNone(out, "Done named builder opus, which no builder spawn ran, and passed")
+        self.assertIn("'builder opus' matches no builder spawn, which ran sonnet", out["reason"])
 
 
 class UnstartedItemsTests(unittest.TestCase):
@@ -1544,6 +1644,15 @@ class UnstartedItemsTests(unittest.TestCase):
                 out = self.verdict(reply, [self.BUILDER])
                 self.assertEqual(out["decision"], "block")
                 self.assertIn("Unstarted guard", out["reason"])
+
+    def test_un_red_prefixed_builder_turn_without_line_blocks(self):
+        # A plugin-prefixed builder spawn is a builder spawn, so its turn needs the Unstarted line. Control: the plain
+        # builder in test_un_red_builder_turn_without_line_blocks, with the same reply.
+        prefixed = {"subagent_type": "cs-build:builder", "model": "sonnet", "prompt": "build it"}
+        out = self.verdict(self.DONE + "> **Next** merge the batch", [prefixed])
+        self.assertIsNotNone(out, "a cs-build:builder turn with no Unstarted line passed")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("Unstarted guard", out["reason"])
 
     def test_un_green_line_forms_pass(self):
         rows = [
@@ -1965,13 +2074,14 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         return {"type": "system", "subtype": "stop_hook_summary", "hookErrors": ["Stop hook: send the report now."],
                 "hasOutput": True, "level": "suggestion"}
 
-    def refused_turn(self, reports, spawn=None):
+    def refused_turn(self, reports, spawn=None, between=()):
         """The turn's records: a spawn (test-author haiku by default), then each of `reports` (a report the Stop hook
-        refused), each followed by the summary and the feedback record. The caller appends the correction."""
+        refused), each followed by the summary, the `between` records the harness may write, and the feedback record.
+        The caller appends the correction."""
         records = [human("do the task"), tool_use_msg("Agent", spawn or self.TEST_AUTHOR), tool_result_msg(),
                    tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg()]
         for report in reports:
-            records += [assistant_text(report), self.summary_record(), self.feedback_record()]
+            records += [assistant_text(report), self.summary_record(), *between, self.feedback_record()]
         return records
 
     @staticmethod
@@ -2017,6 +2127,21 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.assertEqual(self.window_of(records, self.SONNET_NAMED), {}, "a spawn sits after the owner's message")
         out = self.run_hook(records, True)
         self.assertIsNone(out, out and out["reason"])
+
+    def test_rw_after_refusal_records_between_summary_and_feedback_still_refused(self):
+        # The data-flow, attachment and queue records the harness writes sit between the refused report's summary and
+        # its feedback. None is a system or isMeta record, so the refused report reads as unrefused, and the feedback
+        # cuts the window after it. Control: test_rw_after_refusal_feedback_is_no_window_cut_blocks, the same refusal
+        # with no record in between, is refused.
+        self.missing_report_block()
+        between = [data_flow_records(), environment_attachment(), queue_operation()]
+        records = self.refused_turn([self.REFUSED_SONNET], between=between) + [assistant_text(self.SONNET_NAMED)]
+        self.assertEqual(self.window_of(records, self.SONNET_NAMED), {"test-author": ["haiku"]},
+                         "a record between the refused report's summary and its feedback cut the window, so its "
+                         "haiku spawn is out of it")
+        out = self.run_hook(records, True)
+        self.assertIsNotNone(out, "the correction named test-author sonnet, which no spawn in its window ran, and passed")
+        self.assertIn(self.WRONG_NAME, out["reason"])
 
     def test_rw_after_refusal_twice_wrong_name_blocks(self):
         # Two refused reports, each followed by its feedback record: neither is a window cut, so the window still holds
