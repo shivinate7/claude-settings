@@ -1,1 +1,0 @@
-- handoff-refuse-per-text-no-cap: rewrite_check (hooks/reread_check.py:417-425) refuses once per distinct handoff text. Nothing caps the refusals while the text keeps changing. Decision `precompact-handoff` (the handoff rewrite record). Seen: 2026-11-24 x1

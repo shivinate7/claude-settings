@@ -39,7 +39,7 @@ result, is no marker. The transcript is
 path. It reports three lists in 40 lines or fewer, one item per line, each with one backticked
 token: MISSING (rulings, facts and work in the transcript that the handoff lacks), STALE
 (handoff lines the transcript replaced) and DONE (handoff lines whose work landed on main,
-or the item is answered, closed or withdrawn). Then rewrite the handoff whole (step 4) from
+or whose question or feedback id is answered, closed or withdrawn). Then rewrite the handoff whole (step 4) from
 that report. One agent per compaction, never per Stop
 checkpoint.
 
