@@ -1627,6 +1627,84 @@ class StaleCwdRecordTests(unittest.TestCase):
         self.assertTrue(delete, "trash_verdict kept a build folder for an untracked file: %s" % reason)
         self.assertEqual(reason, "leftover trash")
 
+    def test_trash_folder_is_kept_for_a_nested_repo_with_uncommitted_work_beside_such_a_record(self):
+        """Case 2d for the trash sweep. A nested git repo inside the renamed folder holds work the parent repo cannot
+        see: the parent lists the whole folder as one `??` line, and the dirty read skips those. The keep names the
+        folder `dirty` whatever the record says."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-nested-repo")
+        trash = self.trash_from_build(wt)
+        inner = os.path.join(trash, "inner")
+        os.makedirs(inner)
+        self.assertEqual(run_vcs(inner, "init", "-q").returncode, 0, "scope: the nested folder must be a git repo")
+        write(os.path.join(inner, "work.txt"), "uncommitted\n")
+        self.assertTrue(os.path.isdir(os.path.join(inner, ".git")), "scope: the nested repo must hold a .git folder")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertFalse(delete, "trash_verdict deleted a trash folder that holds a nested git repo with uncommitted work")
+        self.assertEqual(reason, "dirty", "a trash folder with a nested git repo was kept, but not as dirty: %s" % reason)
+
+    def test_trash_folder_is_kept_for_a_linked_worktree_pointer_beside_such_a_record(self):
+        """Case 2e for the trash sweep. A linked worktree keeps its checkout under a `.git` FILE, a pointer to the main
+        repo's worktree data. The checkout is work the parent repo cannot see, so the keep names the folder `dirty`
+        whatever the record says. The pointer's target need not exist: the check reads the file's presence."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-nested-pointer")
+        trash = self.trash_from_build(wt)
+        linked = os.path.join(trash, "linked")
+        write(os.path.join(linked, ".git"), "gitdir: %s\n" % os.path.join(self.base, "main-repo", ".git", "worktrees", "linked"))
+        write(os.path.join(linked, "work.txt"), "uncommitted\n")
+        self.assertTrue(os.path.isfile(os.path.join(linked, ".git")), "scope: the nested .git must be a file")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertFalse(delete, "trash_verdict deleted a trash folder that holds a linked worktree's .git pointer")
+        self.assertEqual(reason, "dirty", "a trash folder with a linked worktree pointer was kept, but not as dirty: %s" % reason)
+
+    def test_a_trash_folder_is_judged_on_its_own_lines_beside_a_sibling_from_the_same_name(self):
+        """Case 2f for the trash sweep. Two trash folders come from one original name, `build`, as two reaps of one build
+        folder make. The first holds a moved tracked file; the second holds only untracked output. The pathspec for the
+        original name also reads the first folder's tracked deletion, so the second read dirty and was kept. Each folder
+        is judged on its own lines: the second is deleted."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-twins")
+        build = os.path.join(wt, "native", "build")
+        write(os.path.join(build, "keep.txt"), "tracked\n")
+        self.assertEqual(run_vcs(wt, "add", "-f", os.path.join("native", "build", "keep.txt")).returncode, 0,
+                         "scope: the build file must be tracked")
+        self.assertEqual(run_vcs(wt, *IDENT, "commit", "-q", "-m", "track a build file").returncode, 0,
+                         "scope: the build file must be committed")
+        first = sweep.trash_name(build)
+        os.rename(build, first)
+        second = sweep.trash_name(build)
+        write(os.path.join(second, "notes.txt"), "untracked\n")
+        self.assertNotEqual(first, second, "scope: two reaps must name two trash folders")
+        self.assertEqual(sweep.untrash_name(os.path.basename(first)), sweep.untrash_name(os.path.basename(second)),
+                         "scope: both trash folders must come from one original name")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            first_delete, first_reason = sweep.trash_verdict(first)
+            delete, reason = sweep.trash_verdict(second)
+        self.assertFalse(first_delete, "scope: the first folder must be kept for its moved tracked file")
+        self.assertEqual(first_reason, "dirty", "scope: the first folder must read dirty from its moved tracked file")
+        self.assertTrue(delete, "the second trash folder was kept for its sibling's tracked deletion: %s" % reason)
+        self.assertEqual(reason, "leftover trash", "the second trash folder was not judged as leftover trash: %s" % reason)
+
+    def test_trash_folder_with_only_untracked_output_in_nested_folders_is_deleted_beside_such_a_record(self):
+        """Case 2g, a control for the nested-repo keeps. The folder holds untracked output in subfolders, a `.github`
+        folder and a `.gitignore` file. None of them is a git repo, and the folder has no `.git` entry, so the gone
+        record must not keep it."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-nested-output")
+        trash = self.trash_from_build(wt)
+        write(os.path.join(trash, "out", "deep", "log.txt"), "untracked\n")
+        write(os.path.join(trash, ".github", "ci.yml"), "name: ci\n")
+        write(os.path.join(trash, ".gitignore"), "*.o\n")
+        self.assertFalse(os.path.exists(os.path.join(trash, ".git")), "scope: the folder must hold no .git entry")
+        self.assertTrue(sweep.git_reads.porcelain(trash), "scope: the folder must hold untracked output")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertTrue(delete, "trash_verdict kept a build folder for untracked output in nested folders: %s" % reason)
+        self.assertEqual(reason, "leftover trash")
+
     def test_trash_folder_is_kept_for_a_process_inside_beside_such_a_record(self):
         """Case 3. An empty trash folder reads clean, so the process is the only cause, and the keep names its pid."""
         self.assert_record_stands_nowhere()
