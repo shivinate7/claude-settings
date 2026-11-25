@@ -1605,19 +1605,21 @@ def _replied_after(records, use_id, sender):
 def _queued_to(records, uses, sends, writer):
     """(queued, confirmed): the ids of this turn's non-failed queued desktop sends to `writer`, and those among them that
     count. A queued send says only that the target holds the message and has not run it, so it counts only when the same
-    turn also made a one-time check-in that did not fail (`uses` is the turn's, so an earlier turn's check-in is no
-    cover), or a later record is a message from the writer. Cost: one pass over the records, only for a queued send."""
+    turn also made a one-time check-in that did not fail after that send (`uses` is the turn's, in order, so an earlier
+    turn's check-in and one set before the send are no cover), or a later record is a message from the writer.
+    Cost: one pass over the records, only for a queued send."""
     queued = queued_tool_use_ids(records)
-    sent = {u.get("id") for u, t in zip(uses, sends) if writer in t and u.get("id") in queued}
-    if not sent:
+    at = {u.get("id"): n for n, (u, t) in enumerate(zip(uses, sends)) if writer in t and u.get("id") in queued}
+    if not at:
         return set(), set()
     failed = failed_tool_use_ids(records)
-    checkin = any(_one_time_checkin(u, failed) for u in uses)
-    return sent, {i for i in sent if checkin or _replied_after(records, i, writer)}
+    last_checkin = max((n for n, u in enumerate(uses) if _one_time_checkin(u, failed)), default=-1)
+    return set(at), {i for i, n in at.items() if n < last_checkin or _replied_after(records, i, writer)}
 
 
 QUEUED_FACT = ("its send was only queued, and a queued send counts once the same turn also sets a one-time check-in "
-               "to verify, by reading the target session, that the message reached it")
+               "after it (a CronCreate check-in needs recurring false) to verify, by reading the target session, "
+               "that the message reached it")
 
 
 def question_problem(records, turn, text, hook):
@@ -1647,7 +1649,9 @@ def question_problem(records, turn, text, hook):
     uses, sends = _turn_acts(records, turn, acks)
     undelivered = undelivered_tool_use_ids(records)
     queued, confirmed = _queued_to(records, uses, sends, writer) if writer else (set(), set())
-    if writer and any(writer in t and (u.get("id") not in undelivered or u.get("id") in confirmed)
+    # A failed send is no send, except one that failed because the writer is inactive (inactive_tool_use_ids), as on the key path.
+    failed = failed_tool_use_ids(records) - inactive_tool_use_ids(records)
+    if writer and any(writer in t and (u.get("id") in confirmed or u.get("id") not in undelivered | failed)
                       for u, t in zip(uses, sends)):
         return "", ""
     _hooks_on_path()
