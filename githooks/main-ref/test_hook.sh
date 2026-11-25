@@ -7,7 +7,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 # One run folder per run, from the one home of the test-temp standard (lint/_test_temp.py).
 repo="$(cd "$here/../.." && pwd)"
 tmp="$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import _test_temp; print(_test_temp.run_folder())' "$repo/lint")" || { echo "FAIL setup: no run folder"; exit 1; }
-trap 'rm -rf "$tmp"' EXIT
+trap 'cd "$repo"; rm -rf "$tmp"' EXIT
 errf="$tmp/stderr"
 cd "$tmp" || exit 1
 export GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
@@ -202,4 +202,4 @@ c="$(fresh_clone "$src" chk-origin-current)"; git -C "$c" switch -q -c away; git
 arm_copy "$c" "$main_hook"
 t ok "--check: no local main, current copy exits 0 against origin/main" ckdir "$c"
 
-rm -rf "$tmp"; exit $bad
+cd "$repo" || exit 1; rm -rf "$tmp"; exit $bad
