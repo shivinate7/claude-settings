@@ -728,6 +728,26 @@ jobs:
           git archive "origin/$BASE_REF" $(git ls-tree --name-only "origin/$BASE_REF" lint hooks) | tar -x -C "$scratch"
           (cd "$scratch" && python3 lint/check_debt_retire.py --repo "$OLDPWD" --upstream "origin/$BASE_REF" --head "$HEAD_SHA")
 
+      - name: Stable readers fixture suite
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_check_stable_readers.py
+
+      # The merge tool is installed from branch stable, which lags main, so its readers must read this tree as main's readers do (decision stable-branch).
+      # Stable's copy of the code runs on this tree. This tree's script drives it, because stable may not hold the script yet.
+      # A change that only edits a reader passes while stable reads the data as it stands the way the changed reader does. It is red when the changed reader
+      # reads the existing data differently from stable, or when stable already misreads it: land that reader alone, move stable, then land the data that needs it.
+      # Cost per run: one git archive and tar, then three python starts (a probe of each tree's readers, and the stable records generator), plus one temporary worktree
+      # and one generator run when this pull request changed the records page. Measured on this repo: 2.8 s, or 7.8 s with the page proof (n=1 each, a laptop).
+      - name: Stable readers accept this tree
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+          git archive origin/stable merge lint hooks actions | tar -x -C "$scratch"
+          python3 lint/check_stable_readers.py --stable-tree "$scratch" --head-tree "$PWD" --base-ref "origin/$BASE_REF"
+
       - name: Comment narration fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_comment_narration.py
