@@ -11,7 +11,7 @@ covers ambiguity only for guard and audit targets. A sweep row (MUTATIONS and SO
 time) names its target in SOURCES; its anchor is matched in that one file by `find_anchor`. A merge of main into a lane can move an
 anchor. This read covers every anchor in one pass, in about a second, and names each bad one.
 
-Prints `PASS mutant anchor census: N mutants` and exits 0, or one `FAIL` line per bad mutant, naming its label, its target and the
+Prints `PASS mutant anchor census: N mutants` and exits 0, or one `FAIL` line per bad mutant (a row with too few fields counts) and a closing count line, naming its label, its target and the
 file or folder searched, and exits 1. It does not check the required-case name or the mutant file names: the mutation run does.
 Cost: one read of each target file and of the guard modules; the sweep module is imported once. No suite, no child process, no file written.
 """
@@ -28,6 +28,17 @@ import mutate_shared  # noqa: E402
 import mutate_sweep  # noqa: E402  imported by this name, so the table and file map are read from the one module object
 
 SWEEP_TABLE = "janitor/mutate_sweep.py"  # the file a sweep finding names: the table the row sits in
+GUARD_TABLE = "hooks/mutate_guard.py"  # the file a guard finding names: the table the row sits in
+ROW_FIELDS = 3  # both tables need a label, an anchor and a replacement or target before the census can read a row
+
+
+def malformed_row(entry, index, table_file):
+    """-> a `FAIL ...` line when `entry` has too few fields to read, else None. It names the row's label, or `row N` (0-based) when
+    the row has none, and the table, so one short row does not stop the read of the others."""
+    if len(entry) >= ROW_FIELDS:
+        return None
+    name = "%s (row %d)" % (entry[0], index) if entry else "row %d" % index
+    return "FAIL malformed row, %d fields where %d are needed, in %s: %s" % (len(entry), ROW_FIELDS, table_file, name)
 
 # A mutant of these targets is anchored across the guard modules (mutate_guard.main), so no target file names it.
 GUARD_FAMILY = ("guard", "audit")
@@ -39,7 +50,11 @@ def findings(mutations=None, targets=None, hooks=HOOKS):
     table = mutate_guard.MUTATIONS if mutations is None else mutations
     targets = mutate_guard.TARGETS if targets is None else targets
     bad = []
-    for entry in table:
+    for index, entry in enumerate(table):
+        short = malformed_row(entry, index, GUARD_TABLE)
+        if short:
+            bad.append(short)
+            continue
         label, old, _new, target, _required, _only_on = mutate_guard.mutation_parts(entry)
         if target not in targets:
             bad.append("FAIL unknown mutation target %r: %s" % (target, label))
@@ -66,7 +81,11 @@ def sweep_findings(mutations=None, sources=None):
     table = mutate_sweep.MUTATIONS if mutations is None else mutations
     sources = mutate_sweep.SOURCES if sources is None else sources
     bad = []
-    for entry in table:
+    for index, entry in enumerate(table):
+        short = malformed_row(entry, index, SWEEP_TABLE)
+        if short:
+            bad.append(short)
+            continue
         label, target, old = entry[0], entry[1], entry[2]
         if target not in sources:
             bad.append("FAIL unknown mutation target %r in %s: %s" % (target, SWEEP_TABLE, label))
@@ -87,7 +106,7 @@ def main() -> int:
     for line in bad:
         print(line)
     if bad:
-        print("FAIL mutant anchor census: %d of %d mutants have a stale or ambiguous anchor" % (len(bad), total))
+        print("mutant anchor census failed: %d of %d mutants have a bad row or anchor" % (len(bad), total))
         return 1
     print("PASS mutant anchor census: %d mutants" % total)
     return 0
