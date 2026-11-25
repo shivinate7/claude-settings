@@ -1972,6 +1972,22 @@ def A11e_waiting_text_has_one_home_in_shared_names():
 
 
 @case
+def A11f_agent_at_exactly_the_limit_blocks_and_one_second_short_does_not():
+    """A11f. a background agent launched exactly LONG_AGE (1800 s) before the Stop, still writing: the Stop blocks
+    and names it, since its age has reached the limit. Control: an agent launched 1799 s before is named in no block"""
+    at_limit, short = agent_id(81), agent_id(82)
+    folder = new_dir()
+    l_lim, s_lim = background_agent(folder, at_limit, agent_step("f1"), 10)
+    l_short, s_short = background_agent(folder, short, agent_step("f2"), 10)
+    recs = stamped(l_lim, LONG_AGE) + stamped(l_short, LONG_AGE - 1)
+    rc, out, err = run_stop(transcript(recs, agents=[s_lim, s_short], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += agent_block(out, at_limit)
+    problems += expect(short not in block_text(out), f"control: the 1799-s agent {short} is named in a block")
+    return problems
+
+
+@case
 def A12_waiting_notice_keeps_the_agent_open_and_blocks_at_31_min():
     """A12. a background agent launched 31 min before the Stop, whose completed notice says it is waiting on its
     own background work: the agent stays open, and the Stop blocks and names it. Control: a second agent,
