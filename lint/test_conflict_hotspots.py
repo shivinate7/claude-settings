@@ -8,10 +8,12 @@ into a branch, and a merge on main whose second parent is a branch) and replays 
 `git merge-tree --write-tree --name-only`. The contract the cases hold, which the builder prints exactly:
 
     base: <name> <sha9>           the first line: the base the run read and its commit, the first 9 hex digits
+    since: <cutoff>               the second line: local midnight of the --since date, `YYYY-MM-DD 00:00 <offset>`
     merges replayed: N            every merge the script replayed, an unknown one too
     merges conflicted: M
     merges unknown: U             a replay whose read failed (git exit other than 0 or 1): counted as replayed, never as clean
-    conflict rate: R%             conflicted / replayed in percent, one decimal place; 0.0% when nothing was replayed
+    conflict rate: R%             conflicted / replayed in percent, one decimal place; 0.0% when nothing was replayed.
+                                  When U is above 0 the line reads `conflict rate: R% (a lower bound: U merge(s) unknown)`
     merges not replayed: K (octopus O, off base B)
     <count> <path>               one row per conflicted file: count descending, then path ascending; the path is
                                   unquoted and printed as UTF-8
@@ -35,28 +37,34 @@ Options. Without the flags below the output above is unchanged. The base line an
                                   main, a merge of two branches, and a merge with no main parent. They appear in no
                                   line, `merges not replayed` included.
     --list                        after the file rows, one line per conflicted merge: `merge <sha9> <paths>`, the merge
-                                  commit and the files git names, so a reader can check one by hand.
-    --since DATE                  YYYY-MM-DD and no other form, a real calendar date. Any other value is refused.
-    --top N                       N below 1 is refused.
+                                  commit and the files git names, so a reader can check one by hand. After those, one
+                                  line per unknown merge: `unknown <sha9>`.
+    --since DATE                  YYYY-MM-DD and no other form, a real calendar date. Any other value is refused. The cut is
+                                  the local midnight of DATE. A year git misreads (1960, 2100) still counts by its true date.
+    --top N                       N below 1 is refused, and so is a value that is not a whole number: one line, exit 1.
 
 Summary lines start with a letter, rows with a digit, the cost line with `cost`, caveat lines with `caveat: `. Exit
 codes: 0 for a report (zero merges included); 1 for a bad argument (--since, --top) or any other failure, one line;
 2 for a git too old for `merge-tree --write-tree`, with one line of output that names merge-tree, --write-tree or 2.38;
-3 for a history cut at depth (a shallow clone). Exit 3 is one line: `history is cut at depth ...; counts are a lower
-bound`, and no report follows it. The contract had no exit code for unknown, so 3 is pinned here.
+3 for a history cut at depth (a shallow clone): one line, `history is cut at depth ...; counts are a lower bound`, and
+no report follows it. Also 3 for a report whose merges unknown is above 0: the report prints in full, and the rate line
+carries the lower bound. A read that could not run is never a clean count.
 
 Git and temp contract: the script runs git by its name on PATH, one merge-tree per replay. Its object folder is a
 fresh folder under TMPDIR (GIT_OBJECT_DIRECTORY). The script makes no clone. It removes that folder before
 it exits, also when KeyboardInterrupt stops the run. It writes nothing into the repo it reads.
 
-Fixtures are built with plain git under the run folder (lint/_test_temp.py). Every commit and merge has a fixed date,
-and the cases never read the clock. Each case holds one scenario: the one-merge and clean fixtures, the two-kind and
+Fixtures are built with plain git under the run folder (lint/_test_temp.py). Every commit and merge has a fixed date.
+The cases that read a date cut pin the zone and the run's clock with `pinned()` (TZ and GIT_TEST_DATE_NOW), so the
+clock never decides a verdict. Each case holds one scenario: the one-merge and clean fixtures, the two-kind and
 ranking fixture (`selection`), the tie fixture, the rename/delete fixture, the non-ASCII fixture, the old-only fixture
 (zeros), the missing-blob fixture (unknown), the exposure fixture (`exposure`), the into-branches fixtures
 (`into_branches`, `pr_parent`, a branch merge whose parent reaches main only through a PR, and `into_first_parent`, a
 branch merge whose first parent is on main's line), the remote fixture (`remote_behind`, a remote main that the local
-main misses), and the clones (`clone_of`, shallow with depth 1, or whole). A git shim on PATH logs or fails the
-merge-tree calls.
+main misses), the clones (`clone_of`, shallow with depth 1, or whole), the since-day fixture (`since_day`, merges at
+23:30 the day before and at 01:00 on the day), the two-year fixture (`two_years`, a merge dated 2025 and one dated
+2026), and the stash-only fixture (`stash_only`, a merge that only refs/stash reaches). A git shim on PATH logs or
+fails the merge-tree calls.
 """
 import collections
 import json
@@ -80,6 +88,15 @@ SINCE = "2026-11-18"
 DAY1 = "2026-11-19T10:00:00+0000"
 DAY2 = "2026-11-20T10:00:00+0000"
 OLD = "2026-11-10T10:00:00+0000"  # before SINCE: a merge this old is not replayed
+# The zone and clock pins. ZONE is a POSIX zone, UTC-5 with no daylight saving, so the cut and the fixture dates read the
+# same on any day. Each clock is an epoch: a run at its local time of day, 12:00 (after 01:00, before 23:30) or 00:00.
+ZONE = "EST5"
+NOON_LOCAL = "1795626000"  # noon in ZONE: after 01:00 and before 23:30, the run times the cases need
+MIDNIGHT_LOCAL = "1795582800"  # midnight in ZONE
+EARLY_LOCAL = "2026-11-16T10:00:00-0500"
+BEFORE_DAY_2330 = "2026-11-17T23:30:00-0500"  # the day before SINCE, late: a cut at UTC midnight would count it
+ON_DAY_0100 = "2026-11-18T01:00:00-0500"  # SINCE, early: a cut at the run's clock time drops it
+YEAR_OLD = "2025-06-01T10:00:00+0000"  # a 2025 date: git reads a --since of 1960 or 2100 as the current year
 # The variables that point git at a repo or an object folder. A caller's value would send each git call elsewhere.
 STRIP = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
          "GIT_COMMON_DIR")
@@ -433,6 +450,59 @@ def clone_of(fx, name, depth=None):
     return dest
 
 
+def since_day(name):
+    """Two conflicting merges, each of a branch into main. A is dated 23:30 on the day before SINCE, B 01:00 on SINCE, both
+    in ZONE. Under the run's clock at noon, --since SINCE must count B and not A. A cut at UTC midnight would count A."""
+    fx = Fixture(name)
+    fx.write("a.txt", "one\n")
+    fx.write("b.txt", "one\n")
+    fx.commit("c0", EARLY_LOCAL)
+    fx.branch("f", "main")
+    fx.branch("g", "main")
+    fx.edit("f", {"a.txt": "f\n"}, "f1", EARLY_LOCAL)
+    fx.edit("g", {"b.txt": "g\n"}, "g1", EARLY_LOCAL)
+    fx.edit("main", {"a.txt": "m\n"}, "m1", EARLY_LOCAL)
+    fx.merge("f", "main", BEFORE_DAY_2330, conflict=True, resolve={"a.txt": "fa\n"})
+    fx.edit("main", {"b.txt": "m2\n"}, "m2", EARLY_LOCAL)
+    fx.merge("g", "main", ON_DAY_0100, conflict=True, resolve={"b.txt": "gb\n"})
+    return fx
+
+
+def two_years(name):
+    """Two conflicting merges of main into a branch: one dated 2025, one on DAY2. git reads --since of 1960 or 2100 as
+    January 1 of the current year, at the run's time of day: a 1960 count loses the 2025 merge, and a 2100 count keeps
+    the 2026 one. A count by the true date is 2 for 1960, 0 for 2100, and 2 for 2025."""
+    fx = Fixture(name)
+    fx.write("a.txt", "one\n")
+    fx.commit("c0", YEAR_OLD)
+    fx.branch("f", "main")
+    fx.edit("f", {"a.txt": "feature\n"}, "f1", YEAR_OLD)
+    fx.edit("main", {"a.txt": "main\n"}, "m1", YEAR_OLD)
+    fx.merge("f", "main", YEAR_OLD, conflict=True, resolve={"a.txt": "old\n"})
+    fx.branch("g", "main")
+    fx.edit("g", {"a.txt": "g\n"}, "g1", DAY1)
+    fx.edit("main", {"a.txt": "m2\n"}, "m2", DAY1)
+    fx.merge("g", "main", DAY2, conflict=True, resolve={"a.txt": "new\n"})
+    return fx
+
+
+def stash_only(name):
+    """A conflicting merge that only refs/stash reaches. commit-tree joins main's tip (the first parent) with branch f's
+    tip, and update-ref points refs/stash at it. No branch holds it, and no merge of main has it as a parent."""
+    fx = Fixture(name)
+    fx.write("a.txt", "one\n")
+    fx.commit("c0", DAY1)
+    fx.branch("f", "main")
+    fx.edit("f", {"a.txt": "feature\n"}, "f1", DAY1)
+    fx.edit("main", {"a.txt": "main\n"}, "m1", DAY1)
+    m1 = fx.git("rev-parse", "main").stdout.strip()
+    f1 = fx.git("rev-parse", "f").stdout.strip()
+    tree = fx.git("rev-parse", "main^{tree}").stdout.strip()
+    sha = fx.git("commit-tree", tree, "-p", m1, "-p", f1, "-m", "stash-like merge", date=DAY2).stdout.strip()
+    fx.git("update-ref", "refs/stash", sha)
+    return fx, sha
+
+
 Run = collections.namedtuple("Run", "rc out err scratch log")
 
 
@@ -449,9 +519,15 @@ def make_shim(mode, log):
     return folder
 
 
-def run_hotspots(repo, shim=None, top="10", since=SINCE, flags=(), base="main"):
+def pinned(clock):
+    """The environment that pins the run's zone and clock, for the cases whose cut depends on the time of day."""
+    return {"TZ": ZONE, "GIT_TEST_DATE_NOW": clock}
+
+
+def run_hotspots(repo, shim=None, top="10", since=SINCE, flags=(), base="main", extra_env=None):
     """Run the script on `repo`, with TMPDIR a fresh empty folder under the run folder, and the extra `flags` after the
-    fixed arguments. base=None leaves --base off, so the default base applies. Returns a Run."""
+    fixed arguments. base=None leaves --base off, so the default base applies. extra_env sets variables for this run
+    only (pinned() gives the zone and clock). Returns a Run."""
     if not os.path.isfile(MODULE):
         raise AssertionError("lint/conflict_hotspots.py is not built")
     scratch = tempfile.mkdtemp(prefix="scratch-", dir=RUN)
@@ -459,6 +535,7 @@ def run_hotspots(repo, shim=None, top="10", since=SINCE, flags=(), base="main"):
     env = base_env(RUN)
     env["TMPDIR"] = scratch
     env["PYTHONIOENCODING"] = "utf-8"
+    env.update(extra_env or {})
     if shim:
         env["PATH"] = make_shim(shim, log) + os.pathsep + os.environ.get("PATH", "")
     cmd = [sys.executable, MODULE, "--since", since] + (["--base", base] if base else [])
@@ -603,9 +680,12 @@ class ConflictHotspotsCases(unittest.TestCase):
         fx = missing_blob("missing")
         self.assertEqual(len(fx.merges()), 1, "fixture holds one merge")
         r = run_hotspots(fx.path)
-        self.assertEqual(r.rc, 0, "exit code (stderr: %s)" % r.err)
-        self.assert_summary(r.out, 1, 0, 1, "0.0%")
+        self.assert_same(field(r.out, "merges replayed"), "1", "merges replayed: the unread merge is replayed")
+        self.assert_same(field(r.out, "merges conflicted"), "0", "merges conflicted: an unread merge is not a conflict")
+        self.assert_same(field(r.out, "merges unknown"), "1", "merges unknown: the unread merge is unknown")
         self.assertEqual(rows(r.out), [], "file rows: the unread merge is not clean")
+        self.assertIn("a lower bound", field(r.out, "conflict rate") or "",
+                      "conflict rate line: says it is a lower bound while a merge is unknown")
 
     def test_top_limits_the_file_rows(self):
         fx = selection("top")
@@ -875,6 +955,125 @@ class ConflictHotspotsCases(unittest.TestCase):
         self.assertFalse(any(line.startswith("merge " + p[:9] + " ") for line in lines),
                          "--list: the clean merge is not listed")
         self.assertEqual(r.rc, 0, "exit code with --list (stderr: %s)" % r.err)
+
+    def assert_stash_scope(self, fx, sha):
+        """Scope before subject (P7): only refs/stash reaches the merge, and its first parent is on main."""
+        reached = fx.git("for-each-ref", "--contains", sha, "--format=%(refname)").stdout.split()
+        self.assert_same(reached, ["refs/stash"], "scope: only refs/stash reaches the merge")
+        on_main = fx.git("merge-base", "--is-ancestor", sha + "^1", "main", check=False).returncode
+        self.assert_same(on_main, 0, "scope: the merge's first parent is on main")
+
+    def test_stash_only_merge_is_not_replayed(self):
+        fx, sha = stash_only("stash-count")
+        self.assert_stash_scope(fx, sha)
+        r = run_hotspots(fx.path)
+        self.assert_same(field(r.out, "merges replayed"), "0",
+                         "merges replayed: a merge that only refs/stash reaches is not replayed")
+
+    def test_stash_only_merge_has_no_list_line(self):
+        fx, sha = stash_only("stash-list")
+        self.assert_stash_scope(fx, sha)
+        r = run_hotspots(fx.path, flags=["--list"])
+        self.assertFalse(any(line.startswith("merge " + sha[:9] + " ") for line in r.out.splitlines()),
+                         "--list: a merge that only refs/stash reaches has no `merge` line (stdout: %r)" % r.out)
+
+    def assert_since_day_scope(self, fx):
+        """Scope before subject (P7): merge A is committed at 23:30 on the day before SINCE, merge B at 01:00 on SINCE."""
+        a = fx.git("log", "-1", "--format=%ci", "f").stdout.strip()
+        b = fx.git("log", "-1", "--format=%ci", "g").stdout.strip()
+        self.assert_same(a, "2026-11-17 23:30:00 -0500", "scope: merge A is committed at 23:30 on the day before SINCE")
+        self.assert_same(b, "2026-11-18 01:00:00 -0500", "scope: merge B is committed at 01:00 on SINCE")
+
+    def assert_two_years_scope(self, fx):
+        """Scope before subject (P7): the merge on f is dated in 2025, the merge on g is dated DAY2."""
+        a = fx.git("log", "-1", "--format=%ci", "f").stdout.strip()
+        b = fx.git("log", "-1", "--format=%ci", "g").stdout.strip()
+        self.assert_same(a, "2025-06-01 10:00:00 +0000", "scope: the 2025 merge is committed on 2025-06-01")
+        self.assert_same(b, "2026-11-20 10:00:00 +0000", "scope: the 2026 merge is committed on DAY2")
+
+    def test_since_day_counts_the_merge_committed_at_0100_on_that_day(self):
+        fx = since_day("since-day")
+        self.assertEqual(len(fx.merges()), 2, "fixture merge count")
+        self.assert_since_day_scope(fx)
+        r = run_hotspots(fx.path, extra_env=pinned(NOON_LOCAL))
+        self.assertEqual(r.rc, 0, "exit code (stderr: %s)" % r.err)
+        self.assert_same(field(r.out, "merges replayed"), "1",
+                         "merges replayed: --since D drops the 01:00 merge on D when the run is after 01:00, "
+                         "because the cut is the run's clock time, not local midnight")
+
+    def test_since_day_control_lists_the_0100_merge_at_local_midnight(self):
+        fx = since_day("since-day-midnight")
+        self.assert_since_day_scope(fx)
+        sha_b = fx.git("rev-parse", "g").stdout.strip()
+        r = run_hotspots(fx.path, flags=["--list"], extra_env=pinned(MIDNIGHT_LOCAL))
+        self.assertIn("merge " + sha_b[:9] + " b.txt", r.out.splitlines(),
+                      "--list: the 01:00 merge on the day is listed when the cut is local midnight (stdout: %r)" % r.out)
+
+    def test_since_day_control_does_not_list_the_2330_merge_the_day_before(self):
+        fx = since_day("since-day-before")
+        self.assert_since_day_scope(fx)
+        sha_a = fx.git("rev-parse", "f").stdout.strip()
+        r = run_hotspots(fx.path, flags=["--list"], extra_env=pinned(MIDNIGHT_LOCAL))
+        self.assertFalse(any(line.startswith("merge " + sha_a[:9] + " ") for line in r.out.splitlines()),
+                         "--list: the 23:30 merge on the day before is not listed (stdout: %r)" % r.out)
+
+    def test_since_line_names_local_midnight_of_the_day(self):
+        fx = since_day("since-line")
+        self.assert_since_day_scope(fx)
+        r = run_hotspots(fx.path, extra_env=pinned(NOON_LOCAL))
+        self.assert_same(field(r.out, "since"), "2026-11-18 00:00 -0500",
+                         "since line: the local midnight of the --since day is printed (no since line prints today)")
+
+    def test_since_1960_counts_the_2025_merge_by_its_true_date(self):
+        fx = two_years("years-1960")
+        self.assertEqual(len(fx.merges()), 2, "fixture merge count")
+        self.assert_two_years_scope(fx)
+        r = run_hotspots(fx.path, since="1960-01-01", extra_env=pinned(NOON_LOCAL))
+        self.assert_same(field(r.out, "merges replayed"), "2",
+                         "merges replayed: --since 1960-01-01 counts by the true date; git reads it as 2026-01-01")
+
+    def test_since_2100_counts_no_merge_by_its_true_date(self):
+        fx = two_years("years-2100")
+        self.assert_two_years_scope(fx)
+        r = run_hotspots(fx.path, since="2100-01-01", extra_env=pinned(NOON_LOCAL))
+        self.assert_same(field(r.out, "merges replayed"), "0",
+                         "merges replayed: --since 2100-01-01 counts by the true date; git reads it as 2026-01-01")
+
+    def test_since_2025_control_counts_both_merges(self):
+        fx = two_years("years-2025")
+        self.assert_two_years_scope(fx)
+        r = run_hotspots(fx.path, since="2025-01-01", extra_env=pinned(NOON_LOCAL))
+        self.assert_same(field(r.out, "merges replayed"), "2", "merges replayed: --since 2025-01-01 is read correctly")
+
+    def test_unknown_merge_exits_three_not_zero(self):
+        fx = missing_blob("unknown-exit")
+        r = run_hotspots(fx.path)
+        self.assertEqual(r.rc, 3, "exit code 3: a report with a merge unknown; a read that could not run is never clean "
+                                  "(stderr: %s)" % r.err)
+
+    def test_list_names_each_unknown_merge_by_sha9(self):
+        fx = missing_blob("unknown-list")
+        sha = fx.git("rev-parse", "f").stdout.strip()
+        r = run_hotspots(fx.path, flags=["--list"])
+        self.assertIn("unknown " + sha[:9], r.out.splitlines(),
+                      "--list: an `unknown <sha9>` line for the merge git could not read (stdout: %r)" % r.out)
+
+    def test_rate_line_has_no_lower_bound_when_nothing_is_unknown(self):
+        fx = single_conflict("no-unknown-rate")
+        r = run_hotspots(fx.path)
+        self.assert_same(field(r.out, "conflict rate"), "100.0%",
+                         "control: with no merge unknown, the rate line has no lower-bound note")
+
+    def test_top_not_a_number_exits_one(self):
+        fx = single_conflict("top-abc")
+        r = run_hotspots(fx.path, top="abc")
+        self.assertEqual(r.rc, 1, "exit code 1 for --top abc, a bad argument (argparse exits 2) (stderr: %s)" % r.err)
+
+    def test_top_not_a_number_prints_one_line(self):
+        fx = single_conflict("top-abc-line")
+        r = run_hotspots(fx.path, top="abc")
+        self.assertEqual(len(output_lines(r)), 1,
+                         "--top abc: one line of output, not argparse's usage (stdout+stderr: %r)" % output_lines(r))
 
 
 if __name__ == "__main__":
