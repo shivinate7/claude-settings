@@ -9,6 +9,7 @@ so a lane's new module reaches its fixtures before its first commit. A listed fi
 the checkout is left out: the fixture sees what the checkout holds. Suites (test_*, *_test.py,
 *.test.*) stay out: a fixture runs modules, and the suites are the largest files.
 A folder git cannot list, or that lists nothing, raises: an empty fixture would pass for the wrong reason.
+A root with no .git (an exported copy, from bin/red-run) lists by the manifest its export wrote at the root.
 
     import tracked_tree
     tracked_tree.copy_tracked(tree, "lint", "hooks")        # tree/lint/..., tree/hooks/...
@@ -24,6 +25,7 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+import tree_export  # noqa: E402  names the manifest an export writes (hooks/tree_export.py, MANIFEST)
 
 
 def is_suite(name):
@@ -36,9 +38,37 @@ def tracked(folder, root=REPO):
     return list(_listing(folder.strip("/"), root))
 
 
+def _manifest_name():
+    """The name of the manifest an export writes at its root (hooks/tree_export.py, MANIFEST). Read here, never copied."""
+    name = getattr(tree_export, "MANIFEST", None)
+    if not name:
+        raise RuntimeError("hooks/tree_export.py names no MANIFEST, so a tree with no .git cannot be listed")
+    return name
+
+
+def _manifest_listing(folder, root):
+    """The set `_listing` gives, read from the export's manifest: one repo-relative path per line, at the root of an exported copy."""
+    name = _manifest_name()
+    path = os.path.join(root, name)
+    if not os.path.isfile(path):
+        raise RuntimeError("%s has no .git and no %s, so nothing lists the files under %s/" % (root, name, folder))
+    with open(path, encoding="utf-8", newline="") as f:
+        paths = f.read().split("\n")
+    names = set()
+    for path in paths:
+        if path.startswith(folder + "/") and not is_suite(path) and os.path.isfile(os.path.join(root, *path.split("/"))):
+            names.add(path[len(folder) + 1:])
+    if not names:
+        raise RuntimeError("the manifest %s lists no file under %s/ in %s" % (name, folder, root))
+    return tuple(sorted(names))
+
+
 @functools.lru_cache(maxsize=None)
 def _listing(folder, root):
-    """One git call per folder and root in a run: a suite builds hundreds of fixtures from one checkout."""
+    """One git call per folder and root in a run: a suite builds hundreds of fixtures from one checkout.
+    A root with no .git is an exported copy (bin/red-run's), and lists by the manifest its export wrote."""
+    if not os.path.lexists(os.path.join(root, ".git")):
+        return _manifest_listing(folder, root)
     done = _nowindow.run(["git", "-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard",
                           "--", folder + "/"], capture_output=True)
     if done.returncode != 0:

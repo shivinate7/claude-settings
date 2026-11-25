@@ -5,6 +5,7 @@ testing/TrackedTree.ps1. Each case builds a throwaway git repo and asks a helper
 Red cases: a new module a lane has not yet added, an ignored file, a suite, a file gone from the
 checkout, a folder git lists nothing in, and a root that is no repo. The shell and PowerShell helpers
 must copy the same set as the Python one. pwsh missing skips the PowerShell case here and fails it in CI.
+ManifestCases: an exported copy (no .git) lists by the manifest its export wrote at its root.
 Run: python3 lint/test_tracked_tree.py
 """
 import os
@@ -19,9 +20,11 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 TESTING = os.path.join(HERE, "..", "testing")
 sys.path.insert(0, TESTING)
 import tracked_tree  # noqa: E402
+import tree_export  # noqa: E402  the export whose manifest ManifestCases list (hooks/tree_export.py)
 
 ENV = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t",
            GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
@@ -199,6 +202,136 @@ class RmTree(unittest.TestCase):
             tracked_tree.clear_readonly(os.unlink, path, None)
         tracked_tree.rm_tree(self.tree)
         self.assertFalse(os.path.exists(self.tree))
+
+
+MANIFEST_NAME = ".tree-export-paths"  # pinned here; hooks/tree_export.py MANIFEST must hold the same name (ManifestCases pins it)
+GIT_STATE = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES")
+CLEAN = {  # the one commit ManifestCases exports: a space, a non-ASCII name, a nested folder, a suite, a plain module
+    "lint/check_a.py": "import shared\n",
+    "lint/shared.py": "X = 1\n",
+    "lint/data/kinds.json": "{}\n",
+    "lint/test_check_a.py": "suite\n",
+    "lint/with space.py": "Z = 3\n",
+    "lint/café.py": "W = 4\n",
+}
+RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
+CLEAN_REPO = None  # the fixture repo of CLEAN, built in setUpModule
+CLEAN_SHA = None
+
+
+def write(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+
+
+def git_clean(root, *args):
+    """One git call in the ManifestCases fixture. A nonzero exit raises: a broken fixture is an error, not a red case."""
+    env = {key: value for key, value in ENV.items() if key not in GIT_STATE}
+    done = subprocess.run(["git", "-C", root, *args], capture_output=True, env=env)
+    if done.returncode != 0:
+        raise RuntimeError("git %s failed: %s" % (args[0], done.stderr.decode(errors="replace").strip()))
+    return done.stdout.decode("utf-8").strip()
+
+
+def setUpModule():
+    global RUN_FOLDER, CLEAN_REPO, CLEAN_SHA
+    RUN_FOLDER = _test_temp.run_folder()
+    CLEAN_REPO = os.path.join(RUN_FOLDER, "clean")
+    os.makedirs(CLEAN_REPO)
+    for rel, text in CLEAN.items():
+        write(os.path.join(CLEAN_REPO, *rel.split("/")), text)
+    git_clean(CLEAN_REPO, "init", "-q")
+    git_clean(CLEAN_REPO, "add", "-A")
+    git_clean(CLEAN_REPO, "commit", "-q", "-m", "Track the clean fixture")
+    CLEAN_SHA = git_clean(CLEAN_REPO, "rev-parse", "HEAD")
+
+
+def tearDownModule():
+    tracked_tree.rm_tree(RUN_FOLDER)  # test-temp-standard: teardown removes the run folder
+
+
+class ManifestCases(unittest.TestCase):
+    """An exported copy has no .git. Its root's manifest lists it, and a root with neither fails loudly and names both."""
+
+    def setUp(self):
+        self.case = tempfile.mkdtemp(dir=RUN_FOLDER)  # one folder per case, under this run's folder
+        tracked_tree._listing.cache_clear()
+        self.addCleanup(tracked_tree._listing.cache_clear)
+
+    def export(self, name):
+        """Export CLEAN_SHA into a fresh folder. Scope first: the copy holds no .git in it or above, so a case reads the copy."""
+        dest = os.path.join(self.case, name)
+        os.makedirs(dest)
+        error = tree_export.export_tree(CLEAN_REPO, CLEAN_SHA, dest)
+        self.assertIsNone(error, "the export of the clean fixture failed: %s" % error)
+        folder = os.path.realpath(dest)
+        while True:
+            self.assertFalse(os.path.lexists(os.path.join(folder, ".git")), "a .git sits in or above the copy, at %s" % folder)
+            parent = os.path.dirname(folder)
+            if parent == folder:
+                return dest
+            folder = parent
+
+    def listed(self, call, what):
+        """The helper's answer, or a FAIL that names the cause: the helper raised on a copy it should list."""
+        try:
+            return call()
+        except RuntimeError as exc:
+            self.fail("tracked_tree could not list %s: %s" % (what, exc))
+
+    def test_tracked_lists_an_exported_copy_as_the_checkout_at_the_sha_lists_it(self):
+        dest = self.export("listing")
+        want = tracked_tree.tracked("lint", CLEAN_REPO)
+        got = self.listed(lambda: tracked_tree.tracked("lint", dest), "the exported copy's lint/")
+        self.assertEqual(got, want, "the exported copy lists %s, the checkout at the sha lists %s" % (got, want))
+
+    def test_copy_tracked_copies_into_an_exported_copy_the_paths_the_checkout_copies(self):
+        dest = self.export("copying")
+        want = tracked_tree.copy_tracked(os.path.join(self.case, "want"), "lint", root=CLEAN_REPO)
+        got = self.listed(lambda: tracked_tree.copy_tracked(os.path.join(self.case, "got"), "lint", root=dest),
+                          "the exported copy's lint/")
+        self.assertEqual(got, want, "the exported copy copies %s, the checkout copies %s" % (got, want))
+
+    def test_read_tracked_reads_from_an_exported_copy_the_text_the_checkout_reads(self):
+        dest = self.export("reading")
+        want = tracked_tree.read_tracked("lint", root=CLEAN_REPO)
+        got = self.listed(lambda: tracked_tree.read_tracked("lint", root=dest), "the exported copy's lint/")
+        self.assertEqual(got, want, "the exported copy reads other text than the checkout at the sha")
+
+    def test_the_export_writes_the_manifest_at_the_copy_root_and_copy_tracked_does_not_take_it(self):
+        dest = self.export("manifest")
+        self.assertTrue(os.path.isfile(os.path.join(dest, MANIFEST_NAME)), "the export wrote no %s at the copy root" % MANIFEST_NAME)
+        copied = self.listed(lambda: tracked_tree.copy_tracked(os.path.join(self.case, "again"), "lint", root=dest),
+                             "the exported copy's lint/")
+        self.assertNotIn(MANIFEST_NAME, [os.path.basename(path) for path in copied], "the manifest is a copied file: %s" % copied)
+
+    def test_a_root_with_no_git_and_no_manifest_fails_loudly_and_names_both(self):
+        plain = os.path.join(self.case, "plain")
+        write(os.path.join(plain, "lint", "check_a.py"), "X = 1\n")
+        with self.assertRaises(RuntimeError) as caught:
+            tracked_tree.tracked("lint", plain)
+        message = str(caught.exception)
+        self.assertIn(".git", message, "the error names no .git folder: %s" % message)
+        self.assertIn(MANIFEST_NAME, message, "the error names no %s manifest: %s" % (MANIFEST_NAME, message))
+
+    def test_a_hand_written_manifest_lists_its_paths_in_a_tree_with_no_git(self):
+        tree = os.path.join(self.case, "hand")
+        for rel in ("lint/check_a.py", "lint/shared.py", "lint/data/kinds.json", "lint/test_check_a.py"):
+            write(os.path.join(tree, *rel.split("/")), "x\n")
+        write(os.path.join(tree, MANIFEST_NAME),
+              "lint/check_a.py\nlint/shared.py\nlint/data/kinds.json\nlint/test_check_a.py\nlint/gone.py\n")
+        got = self.listed(lambda: tracked_tree.tracked("lint", tree), "a tree with a manifest and no .git")
+        self.assertEqual(got, ["check_a.py", "data/kinds.json", "shared.py"],
+                         "the manifest's lint/ paths list as %s" % got)
+
+    def test_a_manifest_with_no_file_under_the_folder_fails_and_names_the_manifest(self):
+        tree = os.path.join(self.case, "empty")
+        write(os.path.join(tree, "hooks", "a.py"), "x\n")
+        write(os.path.join(tree, MANIFEST_NAME), "hooks/a.py\n")
+        with self.assertRaises(RuntimeError) as caught:
+            tracked_tree.tracked("lint", tree)
+        self.assertIn(MANIFEST_NAME, str(caught.exception), "the error for a manifest with no lint/ file names no manifest")
 
 
 if __name__ == "__main__":
