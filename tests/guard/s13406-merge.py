@@ -1365,12 +1365,12 @@ record_refuse("a lone quote inside a string does not hide a push to roadmap",
               'echo "it\'s" && ' + VCS + " push origin roadmap", LANE_TRANSCRIPT)
 record_refuse("a lone quote in a comment does not hide a push to roadmap on the next line",
               "echo done # it's\n" + VCS + " push origin roadmap", LANE_TRANSCRIPT)
-# A forced push to roadmap is denied by force-push, the earlier rule (rule 4 in guard.py). It is not pinned to a
-# rule name, so this rule may come before or after it. Either way the push is refused, with or without a proof.
+# A forced push to roadmap is denied by force-push, the earlier rule (rule 4 in guard.py). The case pins that rule, so
+# a change that moves roadmap-one-writer ahead of it shows as a rule mismatch. Either way the push is refused.
 sh("roadmap-one-writer: a lane's forced push to roadmap is refused, by force-push, the earlier rule",
-   VCS + " push -f origin roadmap", "deny", transcript=LANE_TRANSCRIPT, env=ROLE_ENV, cwd=PUSHFEAT)
+   VCS + " push -f origin roadmap", "deny", rule="force-push", transcript=LANE_TRANSCRIPT, env=ROLE_ENV, cwd=PUSHFEAT)
 sh("roadmap-one-writer: a triage session's forced push to roadmap is still refused, the proof lifts only this rule",
-   VCS + " push -f origin roadmap", "deny", transcript=TRIAGE_TRANSCRIPT, env=ROLE_ENV, cwd=PUSHFEAT)
+   VCS + " push -f origin roadmap", "deny", rule="force-push", transcript=TRIAGE_TRANSCRIPT, env=ROLE_ENV, cwd=PUSHFEAT)
 # A record with no proof: no get_session, a tag set after it, no session id outside the cloud, or no transcript.
 record_refuse("a session with no get_session record is refused a push to roadmap",
               VCS + " push origin roadmap", role_path("no-record"))
