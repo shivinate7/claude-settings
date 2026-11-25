@@ -87,6 +87,8 @@ def parse_text(text, path):
     """Returns (pins, commands, matchers, fixes): pins is a list of (tool, version, line number); commands maps tool to its
     read commands, in file order; matchers maps tool to its compiled `# match:` regex; fixes maps (tool, platform) to its
     `# fix:` command. `path` only names the file in a refusal."""
+    if text.startswith("\ufeff"):  # a byte-order mark at the start is not part of the first tool name (`parse` drops it as it reads)
+        text = text[1:]
     pins, commands, matchers, fixes = [], {}, {}, {}
     lines = text.splitlines()
     for number, raw in enumerate(lines, 1):

@@ -5674,36 +5674,55 @@ def merge_base_in(wt, base, branch):
 
 READY_PINS_BUDGET = 20  # seconds all the ready run's version reads share (check_tool_pins.machine_rows)
 
-def head_tool_pins(root, info):
-    """The `.tool-versions` text on the head of the pull request, or None when the head holds none or cannot be read here. A head this checkout
-    lacks is fetched once, by its branch, so the read has a commit to show: a ref update only, no worktree, nothing pushed."""
-    head = info["head"]
+def head_tool_pins(root, info, n):
+    """(text, fault): the `.tool-versions` text on the head of the pull request, or (None, None) when the head holds no such file. A read that
+    fails is not "no file": it gives (None, fault), fault being one `tool-pins: unknown: ...` line that names the file and the git call that failed.
+    A head this checkout lacks is fetched once, by its branch, so the read has a commit to show: a ref update only, no worktree, nothing pushed."""
+    head, pin = info["head"], check_tool_pins.PIN_FILE
     if git(root, "cat-file", "-e", f"{head}^{{commit}}")[0]:
-        git(root, "fetch", "-q", "origin", f"+refs/heads/{info['branch']}:refs/remotes/origin/{info['branch']}")
-    c, text = git(root, "show", f"{head}:{check_tool_pins.PIN_FILE}")
-    return None if c else text
+        c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{info['branch']}:refs/remotes/origin/{info['branch']}")
+        if c:
+            return None, f"tool-pins: unknown: the fetch of the head of #{n} failed, so {pin} was not read: {' '.join(out.split())[:200]}"
+    c, listed = git(root, "ls-tree", "--name-only", head, "--", pin)
+    if c:
+        return None, f"tool-pins: unknown: git ls-tree of {pin} on the head of #{n} failed, so the file was not read: {' '.join(listed.split())[:200]}"
+    if pin not in listed.split("\n"):
+        return None, None
+    c, text = git(root, "show", f"{head}:{pin}")
+    if c:
+        return None, f"tool-pins: unknown: git show of {pin} on the head of #{n} failed, so the file was not read: {' '.join(text.split())[:200]}"
+    return text, None
 
 def ready_tool_pins(root, n, info):
     """The tool-pins read of the ready run (decision tool-pins): the head's `.tool-versions` against the tools on this machine, before any fetch of
-    the base, worktree, check or push. A tool behind its pin, one that cannot be read and a pin file that cannot be read raise Stop with
-    the fix lines, so the pull request stays a draft and nothing is pushed. A tool at or ahead of its pin goes on. A cloud session warns with the same
-    lines and goes on: its sandbox tools are the image's, and CI judges them. No pin file on the head: nothing runs.
-    Cost: one `git cat-file` and one `git show` (plus one fetch when the head is not local), then one version command per pin inside the
+    the base, worktree, check or push. A tool behind its pin or one that cannot be read raises Stop with the fix lines; so does a pin file that
+    cannot be read from the head or cannot be read as pins, with the file's fault and no word about upgrading a tool. The pull request stays a draft and
+    nothing is pushed. A tool at or ahead of its pin goes on. A cloud session warns with the same lines and goes on: its sandbox tools are the
+    image's, and CI judges them. No pin file on the head: nothing runs.
+    Cost: one `git cat-file`, one `git ls-tree` and one `git show` (plus one fetch when the head is not local), then one version command per pin inside the
     merge tool's own process; no file written."""
-    text = head_tool_pins(root, info)
-    if text is None:
+    text, fault = head_tool_pins(root, info, n)
+    file_fault = fault is not None
+    if text is not None:
+        try:
+            rows = check_tool_pins.machine_rows(f"{info['branch']}:{check_tool_pins.PIN_FILE}", READY_PINS_BUDGET, text=text)
+        except (OSError, check_tool_pins.PinFileError) as e:
+            fault, file_fault = f"tool-pins: unknown: {e}", True
+        else:
+            problems = [line for line in map(check_tool_pins.behind_line, rows) if line]
+    if file_fault:
+        problems = [fault]
+    elif text is None:
         return
-    try:
-        rows = check_tool_pins.machine_rows(f"{info['branch']}:{check_tool_pins.PIN_FILE}", READY_PINS_BUDGET, text=text)
-    except (OSError, check_tool_pins.PinFileError) as e:
-        problems = [f"tool-pins: unknown: {e}"]
-    else:
-        problems = [line for line in map(check_tool_pins.behind_line, rows) if line]
     if not problems:
         return
     if os.environ.get("CLAUDE_CODE_REMOTE") == "true":
-        say(f"merge: warning, the tools on this session do not meet the pins of #{n} {PINS_CITE}; a cloud session goes on and CI judges them:", *problems)
+        what = "the pin file of" if file_fault else "the tools on this session do not meet the pins of"
+        say(f"merge: warning, {what} #{n} {PINS_CITE}; a cloud session goes on and CI judges them:", *problems)
         return
+    if file_fault:
+        raise Stop(f"the pin file {check_tool_pins.PIN_FILE} on the head of #{n} could not be read as pins, so it stays a draft and nothing was pushed {PINS_CITE}. "
+                   "Fix the file or the read, then run --ready again:\n" + "\n".join(problems))
     raise Stop(f"the tools on this machine do not meet the pins in {check_tool_pins.PIN_FILE} on the head of #{n}, so it stays a draft and nothing was pushed {PINS_CITE}. "
                "Bring each tool up to its pin (the owner runs the fix), then run --ready again:\n" + "\n".join(problems))
 
