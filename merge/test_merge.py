@@ -14880,7 +14880,10 @@ class RedMainBrake(Env):
 
     def assert_rerun_remedy(self, text, run_id):
         """The way out for a cancelled run is its own failed-only re-run, `gh run rerun <id> --failed`: it re-runs the failed and cancelled jobs, keeps the passed
-        ones, and tests the run's own commit. The plain form (every job again, passed ones too) is not named."""
+        ones, and tests the run's own commit. The plain form (every job again, passed ones too) is not named.
+        Ruling (owner, chat, relayed by the Sim Manager session): 12:25 CST Nov 25, 2026, "has ci failures/resumptions correct made it so only what failed is retried etc
+        like time efficiency", is the basis for `--failed`. 12:31 CST Nov 25, 2026, "shouldnt a cancelled run still say what already passed/failed to allow for some more
+        grnaularity?", is the basis for the job counts the cancelled segment prints. A run with no failed or cancelled job gets the plain rerun: see the case that names it."""
         self.assertIn(f"gh run rerun {run_id} --failed", text, f"the cancelled run {run_id} is not named with its failed-only re-run, `gh run rerun {run_id} --failed`")
         self.assertNotRegex(text, rf"gh run rerun {run_id}\b(?! --failed)", "the cancelled run's re-run is named without --failed, which re-runs the passed jobs too")
         self.assertIn("own commit", text, "the remedy does not say the re-run tests the run's own commit")
@@ -14895,9 +14898,11 @@ class RedMainBrake(Env):
         """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): the red verdict merges, so its cancelled-run remedy is no refusal text."""
         rc, out, before = self.go(*self.cancelled_beside_red())
         self.merged_onto_red(rc, out, "checks")
-        self.assertNotIn(f"gh run rerun {self.CAN_RED}", out, "the red run gets no re-run remedy: only a cancelled run does")
+        self.assertIn(f"{merge.RERUN_REMEDY} {self.CAN_CANCELLED} --failed", out, "the cancelled run beside the red run is not named with its failed-only re-run")
+        self.assertNotIn(f"{merge.RERUN_REMEDY} {self.CAN_RED}", out, "the red run gets no re-run remedy: only a cancelled run does")
 
     def test_a_lone_cancelled_newest_run_is_unknown_and_names_its_rerun(self):
+        """Ruling, owner chat, 12:25 CST and 12:31 CST Nov 25, 2026 (relayed by the Sim Manager session): the cancelled run's way out is its failed-only re-run (assert_rerun_remedy)."""
         rc, out, before = self.go(*self.lone_cancelled())
         self.refused(rc, out, before)
         self.assertIn("UNKNOWN", out)
@@ -14905,6 +14910,7 @@ class RedMainBrake(Env):
         self.assert_rerun_remedy(out, self.CAN_CANCELLED)
 
     def test_base_verdict_names_the_rerun_of_the_cancelled_run_beside_a_red_run(self):
+        """Ruling, owner chat, 12:25 CST and 12:31 CST Nov 25, 2026 (relayed by the Sim Manager session): the cancelled run's way out is its failed-only re-run (assert_rerun_remedy)."""
         runs, jobs = self.cancelled_beside_red()
         self.host = MainRunsHost(self.co, self.other, runs, jobs)
         verdict, detail = merge.base_verdict(self.co, self.host, "main")
@@ -14913,11 +14919,22 @@ class RedMainBrake(Env):
         self.assert_rerun_remedy(detail, self.CAN_CANCELLED)
 
     def test_base_verdict_names_the_rerun_of_a_lone_cancelled_run(self):
+        """Ruling, owner chat, 12:25 CST and 12:31 CST Nov 25, 2026 (relayed by the Sim Manager session): the cancelled run's way out is its failed-only re-run (assert_rerun_remedy)."""
         runs, jobs = self.lone_cancelled()
         self.host = MainRunsHost(self.co, self.other, runs, jobs)
         verdict, detail = merge.base_verdict(self.co, self.host, "main")
         self.assertEqual(verdict, "unknown", detail)
         self.assert_rerun_remedy(detail, self.CAN_CANCELLED)
+
+    def test_a_lone_cancelled_run_with_no_job_names_the_plain_rerun_not_the_failed_only_one(self):
+        """Ruling, owner chat, 12:25 CST and 12:31 CST Nov 25, 2026 (relayed by the Sim Manager session): `--failed` re-runs only the failed and cancelled jobs.
+        A run cancelled before any job started has neither, and GitHub may refuse a failed-only re-run of it, so its remedy is the plain rerun."""
+        runs, jobs = self.lone_cancelled(jobs=[])
+        self.host = MainRunsHost(self.co, self.other, runs, jobs)
+        verdict, detail = merge.base_verdict(self.co, self.host, "main")
+        self.assertEqual(verdict, "unknown", detail)
+        self.assertRegex(detail, re.escape(f"{merge.RERUN_REMEDY} {self.CAN_CANCELLED}") + r"(?! --failed)",
+                         "the cancelled run with no job is not named with the plain rerun `gh run rerun <id>`: the remedy names --failed, which GitHub may refuse on a run with no failed or cancelled job:\n" + detail)
 
     def test_the_preview_line_names_the_rerun_beside_a_red_run(self):
         """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): the preview line beside a red run refuses nothing."""
@@ -14927,9 +14944,12 @@ class RedMainBrake(Env):
         line = [l for l in out.splitlines() if l.strip().startswith("main run:")]
         self.assertEqual(len(line), 1, out)
         self.assertIn("red", line[0])
+        self.assertTrue(merge.RERUN_REMEDY, "RERUN_REMEDY is blank, so the preview line names no re-run command")
+        self.assertIn(f"{merge.RERUN_REMEDY} {self.CAN_CANCELLED} --failed", line[0], "the preview line beside a red run does not name the cancelled run's failed-only re-run")
         self.assertNotIn("--confirm refuses it", line[0], "a red main is no refusal (ruling Q5 v)")
 
     def test_the_preview_line_names_the_rerun_of_a_lone_cancelled_run(self):
+        """Ruling, owner chat, 12:25 CST and 12:31 CST Nov 25, 2026 (relayed by the Sim Manager session): the cancelled run's way out is its failed-only re-run (assert_rerun_remedy)."""
         rc, out, before = self.go(*self.lone_cancelled(), confirm=False)
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.refs(), before)
@@ -14940,7 +14960,8 @@ class RedMainBrake(Env):
 
     def test_the_preview_refuses_a_red_base_beside_a_cancelled_run_even_with_its_revert_proven(self):
         """Decision no-merge-onto-red-main: a merged revert would lift the red, but a cancelled run beside it reads UNKNOWN, so the base refuses.
-        The preview says confirm refuses it unless --base-red-ok, and confirm refuses it as UNKNOWN."""
+        The preview says confirm refuses it unless --base-red-ok, and confirm refuses it as UNKNOWN.
+        Ruling, owner chat, 12:25 CST and 12:31 CST Nov 25, 2026 (relayed by the Sim Manager session): the cancelled run's way out is its failed-only re-run (assert_rerun_remedy)."""
         B = self.land_breaking_merge()
         A = sh(self.other, "git", "rev-parse", f"{B}^1")
         R, M = self.land_revert(2651, B)
