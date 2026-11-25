@@ -36,13 +36,14 @@ CI stays green while a suite tests nothing. CI runs most steps without `bin/verd
 
 - Checker: one walk of the repo tree, which skips `.git`, `node_modules`, `__pycache__` and `.claude/worktrees`. Then one open and one `ast` parse per `test_*.py`. It writes no file and starts no timer. Run time: unmeasured.
 - Zero-case checks: a length test on a list or a results array. No read and no process.
-- `lint/test_zero_case_runs.py` starts 11 runner processes, two `node` starts per mods file, and one `node` start per rewriter case (not pinned: no test counts these starts). Each rewrite loads `typescript.js` (size and time unmeasured). Every process has a 300 s limit.
+- `lint/test_zero_case_runs.py` starts 12 runner processes: the 11 hand runners in `RUNNERS`, and `hooks/test_config_watch.py` again under `MUTATE_ONLY` (`FilterMatchingNoCase`). It also starts two `node` processes per mods file, and one `node` start per rewriter case (not pinned: no test counts these starts). Each rewrite loads `typescript.js` (size and time unmeasured). Every process has a 300 s limit.
 
 ## Limits
 
 - The checker judges per file, not per TestCase class: a file with two classes where `run_class` covers one passes.
 - A name reference counts as reached: `print(run)` passes, though `run` never runs.
 - Not recognised, so false alarms: `ut.main()` after `import unittest as ut`, and a runner held in a name or a module-level list (`runner = unittest.TextTestRunner()`, then `runner.run(...)`). Only `TextTestRunner(...).run(...)` counts. `ALLOWED` clears a file with a reason.
+- An aliased import (`from x import run_cases as rc`) with a bare `rc(...)` call is not flagged: the checker matches the name `run_cases` only.
 - The checker reads the syntax tree, not the flow. Only a top-level `__main__` block counts: a `__main__` block nested in an `if` or `try` is not read, so its runner is flagged. A base whose name ends in `TestCase` counts. A TestCase that comes from an imported base with another name is not seen.
 - A suite that loses some but not all cases is not caught. A count compare is a later lane.
 - The exit-1 check covers the 11 hand runners, the four mods collectors, and the callers of `run_cases` from `hooks/case_runner_test.py`. Of the 49 `hooks/test_*.py` files with no `no_cases_exit` call (`grep -L`, this commit), those callers are guarded by `run_cases`; the rest are not checked.
