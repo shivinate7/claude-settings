@@ -156,6 +156,9 @@ if PIN_LINKED:
         tool="Write", cwd=NOGIT, file_path=STAMPED_GUARD, content="# rewritten\n")
     sh("frozen: sed -i on a hook in the stamped tree the pin links to",
        "sed -i '' s/a/b/ " + STAMPED_GUARD, "deny", "frozen-path", cwd=NOGIT)
+else:
+    skip_case("frozen: Write of a hook in the stamped tree the pin links to", NO_LINK_HERE)
+    skip_case("frozen: sed -i on a hook in the stamped tree the pin links to", NO_LINK_HERE)
 sh("frozen: sed -i on the live pinned checkout's CLAUDE.md", "sed -i '' s/a/b/ " + LIVE_CLAUDEMD,
    "deny", "frozen-path", cwd=NOGIT)
 sh("frozen: a redirect onto the live pinned checkout's CLAUDE.md", "echo rules > " + LIVE_CLAUDEMD,
@@ -401,6 +404,9 @@ if SYM_MADE:
         tool="Edit", cwd=NOGIT, config=os.path.join(SYMFROZEN, "cfg"),
         file_path=slash(SYM_CFG_HOOK), old_string="# stand-in",
         new_string="# rewritten by a session")
+else:
+    skip_case("frozen: the live path stays frozen even though it is a real symlink into the clone "
+              "[resolve-branch proof]", NO_LINK_HERE)
 # THE CLONE PATH BEHIND THAT SYMLINK STAYS EDITABLE (decision recovery-independent-of-state, "the clone is not frozen"): the literal-path check must not freeze the clone
 # just because a symlink elsewhere happens to point at it.
 add("frozen: the clone file the symlink points at is still editable directly",
@@ -437,6 +443,9 @@ if SYM_SKILL_MADE:
         tool="Edit", cwd=NOGIT, config=os.path.join(SYMFROZEN, "cfg"),
         file_path=slash(SYM_CFG_SKILL_MD), old_string="# stand-in",
         new_string="# rewritten by a session")
+else:
+    skip_case("frozen: a shipped skill's SKILL.md stays frozen through the directory symlink into the "
+              "clone [resolve-branch proof]", NO_LINK_HERE)
 add("frozen: a user's own, unshipped skill directory is allowed", "allow", tool="Edit",
     cwd=NOGIT, config=os.path.join(SYMFROZEN, "cfg"), file_path=SYM_CFG_OWN_SKILL_MD,
     old_string="# stand-in", new_string="# rewritten by hand")
