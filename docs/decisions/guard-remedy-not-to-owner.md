@@ -150,10 +150,10 @@ Text: `past_ruling_text` in `hooks/question_form.py`, wrapped by `RELAY_RULE_REA
 - A question passes when its `Based on (ruling): <id>` line names the ruling the refusal cites, by its full id or its bare slug (the id's last part, after the last `/` or after `ruled:`). A Based on (ruling) line passes only its own question, also when that question has no question mark. Code reads that line (`question_form.named_rulings`) on both paths: the Stop check (`lint/report_guard.py`) and the check before a question box or page write (`hooks/call_judge.py`). The model judges first; the code allow then overrides its refusal. The judge's list only narrows which unnamed units are refused; a unit whose own Based on (ruling) line names the ruling passes whatever the list says. A mention of the id anywhere else in the text does not pass.
 - The remedy line reads `Based on (ruling): <id> (<time>), may be stale: <why>`.
 - The Stop-path refusal appends one `guard.log` line, rule `past-ruling`, with the session id. Cost: at most one line per refusal, no new file, no process. Reader: the guard cull (the `guard_log_report` script in `lint/`).
-- Control: a question with no `Based on (ruling)` line that names the ruling is still refused once.
+- Control: a question with no `Based on (ruling)` line that names the cited ruling is refused when the judge cites the ruling and its list is missing, empty, bad or names the question; a rewrite that keeps it is refused again.
 - Owner, 10:36 and 10:42 CST 2026-11-24: a hook that cites a past ruling must not stop a question that updates that ruling; it carries a "may be stale" note; "forbids is too strong a word".
 - Incident, 22:31 CST 2026-11-24: a session dropped five owner questions after a refusal that gave only a ruling id.
-- Open: the guard still refuses once. Whether that refusal should be a note only is asked of the owner (00:43 CST 2026-11-25). Not ruled.
+- Open: the guard still refuses, and refuses again on a rewrite that keeps the question. Whether that refusal should be a note only is asked of the owner (00:43 CST 2026-11-25). Not ruled.
 
 ### Unvetted guard (any reply with a question)
 

@@ -6,4 +6,4 @@
 
 **Decision.** `guard-remedy-not-to-owner` (the past-ruling guard).
 
-**Retire.** Retired when the judge's omission rate is measured, or the fallback changes so that an omitted covered unit is refused.
+**Retire.** Retired when the fallback refuses an omitted covered unit, or when the omission rate is measured and the owner accepts it.
