@@ -7,7 +7,8 @@ exits 0 at once and never calls the model.
 
 The model call is `decision_watch.invoke_model`, the one home for it: Haiku at effort xhigh,
 `--safe-mode`, no tools, and an empty config dir and scratch cwd, so the child cannot fire this
-hook again. This file passes its own accepted answer, `{"ok": true|false}`; any other key rides along unchecked.
+hook again. This file passes its own accepted answer, `{"ok": true|false}`; any other key rides along unchecked. A Stop that sends only the two newer rules accepts an answer with no `ok`, since
+it reads none; the prompt with the older rules still needs `ok`.
 
 The answer has two fields. `ok` and `reason` judge the older rules, and only that `reason` is ever printed in the note.
 `new_rules` is a list of {"rule": <id>, "reason": <text>}, one item per finding on a newer rule (roles-findings-are-debts-or-notes,
@@ -52,7 +53,7 @@ over the reply and runs before the model module loads; a Stop that holds the tri
 rules' prompt, and every other Stop sends the two newer rules' prompt.
 
 A finding writes one line to guard.log through `guard_core.record` (decision `noted`; for the older reason, rule =
-the first older rule id it names, else `reply-judge`; for a `new_rules` item, rule = its id; matched = `stop=<n> <reason>`). The
+the first older rule id it names, else the first newer rule id it names, else `reply-judge`; for a `new_rules` item, rule = its id; matched = `stop=<n> <reason>`). The
 advisor reads the older rules' lines at each cull; the owner reads the two newer rules' lines at his review.
 guard_core loads on a finding, and on a judged Stop whose Why yours line
 cites a route id a row holds (route_match.surface reads it). A failed write is swallowed.
@@ -86,6 +87,9 @@ WIDENS_LABEL_SENTENCE = ("Also flag an option that widens a shared tool offered 
                          + (", the words \"%s\". " % WIDENS_TEXT if WIDENS_TEXT else ". "))
 
 OK_SHAPE = {"ok": (True, False)}
+# The newer-rules-only prompt reads no `ok`, so an answer that leaves it out still counts: its `new_rules` items are
+# the finding. The older prompt keeps OK_SHAPE and still needs `ok`.
+OK_SHAPE_NEW_ONLY = {"ok": (True, False, None)}
 MODEL_TIMEOUT = 20  # the Stop entry allows 25
 SAMPLE_EVERY = 5  # the judge runs on Stops 1, 6, 11 of a session
 COUNT_SUB = "reply-judge"  # <config dir>/state/reply-judge/<sha256 of session_id>.count
@@ -407,10 +411,14 @@ def log_finding(session_id, stop_n, rule, reason):
         pass
 
 
-def older_rule_in(reason):
-    """The first older rule id the reason names, else JUDGE_RULE."""
-    found = [(reason.find(r), r) for r in OLDER_RULES if r in reason]
-    return min(found)[1] if found else JUDGE_RULE
+def rule_in(reason):
+    """The guard.log rule of an older reason: the first older rule id it names, else the first newer rule id it
+    names, else JUDGE_RULE. A newer id keys its own line, so a per-rule read finds it."""
+    for rules in (OLDER_RULES, NEW_RULES):
+        found = [(reason.find(r), r) for r in rules if r in reason]
+        if found:
+            return min(found)[1]
+    return JUDGE_RULE
 
 
 def new_rule_items(verdict):
@@ -448,7 +456,8 @@ def main():
         # guard.log append per finding; no process beyond the call; no timer. The log's named reader is the
         # owner, at his review of the two newer rules' lines.
         verdict, error = decision_watch.invoke_model(
-            build_prompt(reply, older), timeout=MODEL_TIMEOUT, shape=OK_SHAPE)
+            build_prompt(reply, older), timeout=MODEL_TIMEOUT,
+            shape=OK_SHAPE if older else OK_SHAPE_NEW_ONLY)
     except Exception as exc:
         error, verdict = "%s: %s" % (type(exc).__name__, exc), None
     if error:
@@ -459,7 +468,7 @@ def main():
         reason = verdict.get("reason")
         if not isinstance(reason, str) or not reason.strip():
             reason = "reply judge: the reply breaks a style rule."
-        log_finding(session_id, stop_n, older_rule_in(reason), reason)
+        log_finding(session_id, stop_n, rule_in(reason), reason)
         # The note carries the older reason alone. A reason that names a newer rule is logged and not printed,
         # so no newer rule's text reaches the session.
         if not any(r in reason for r in NEW_RULES):
