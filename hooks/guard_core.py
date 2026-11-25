@@ -2056,15 +2056,16 @@ def worktree_remove_subject(args, where: str):
         return False
     # The dirty and lock keeps above guard this removal, so a record whose folder is gone stands in no tree.
     live = worktree_live_session(target, absent_is_out=True)
-    if live is None:
-        return None
     if live:
         return False
-    # A record that stands in no tree does not mean no process does: a session can outlive its folder.
+    # A record that stands in no tree, or cannot be read, does not mean no process does: a session can outlive
+    # its folder. A process in the tree refuses whatever the records say.
     standing = _process_stands_in(target)
-    if standing is None:
+    if standing:
+        return False
+    if live is None or standing is None:
         return None
-    return not standing
+    return True
 
 
 # `git worktree prune` deletes no files at all: it drops the ADMINISTRATIVE RECORD of a worktree
