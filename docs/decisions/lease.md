@@ -1,0 +1,17 @@
+# Leases
+
+## The ruling
+
+Owner rulings, 2026-11-24 US Central. Status: draft. The lease tool is not built; each line below says so until its PR merges.
+
+- **One lease family** (owner, 20:36 CST, as recorded by the Sim Manager session; his own words on the local-file carve-out: "you think a duo only exists on this mac"). Every lease lives in git, in one family of branches on the repo's own remote, `lease/<name>`. One tool serves them all. The words are take, give back and lift. There is no local-file carve-out. Not built.
+- **Triage is a lease** (owner, 11:16 CST): "triage can only be taken by one session at any given time it's kind of a lock in that sense *per repo* but rly when that lock is taken it can even be a subagent making a change on a roadmap branch". And: "literally a subagent itself can/should be able to adopt the hat if the lock is free for it if that makes sense, and if theres a whole triage sesion frankly that sesions subagents shd be able to work ont he page too". The lease is `lease/triage`. Its holder may be a session or an agent. The holder's own agents work under it. Not built.
+- **The triage lease has no expiry** (owner, 21:01 CST: "this is fine given i can lift it myself too"). It ends on give back, on roster removal, or on the owner's lift. Not built.
+- **The roster lists local sessions too** (owner, 22:35 CST, on the option "widen the roster to list local sessions"; he asked for local and cloud sessions to be aligned: "aligning local and cloud sessions"). Roster removal then ends a local holder as it ends a cloud holder. Not built: the roster id form accepts only cloud session ids (`hooks/own_session.py`).
+- **The owner lifts any lease** (owner, 15:14 CST): "this needs to be liftable by me btw as in let's say a dead session is somehow occupying the lock i the owner need to be able to lift the lock if/when possible". A lift works when the holder is dead, the record is unreadable, or the tool is broken. It has three forms (owner, 22:35 CST: "so this + change the code that builds a page too"; "you can change page code rn, i was just saying no active claude-settings triage session at this time"): a typed override followed by the tool's lift, a plain delete of the lease branch on GitHub, and a button on the page. Not built.
+- **The lease replaces the tier file** (owner, 19:43 CST, option A, as recorded by the Sim Manager session). The triage lease is the proof for roadmap and page writes, in the app, the terminal and the cloud alike. The tier file is the role file that `hooks/session_role.py` writes. It also proves a local batch runner's merge. Owner, 22:35 CST, on the option "a lease proves the local merge right too, and the file goes entirely": "this is pretty much right. note that merges/ci/lint are the scope of the consultant above you, so it's a message to it." So a lease proves the local merge right too, and the role file goes entirely. The merge part is the consultant's to order. Not built.
+- **Unknown reads refuse.** A lease read that fails or runs out of time is unknown. A guard that needs the lease then refuses, and an override lifts the refusal.
+- **Cost.** One remote read per guarded act: a push to the record branch, or a Stop check that needs the page writer. No timer, no long-lived process, no local file. Unmeasured until the tool is built; a test will count the git starts.
+
+Kind: process
+Home: hooks/lease.py
