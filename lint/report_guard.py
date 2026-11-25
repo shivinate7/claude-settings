@@ -190,7 +190,7 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
-    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, inactive_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender, tool_verb, undelivered_tool_use_ids,
+    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, failed_tool_use_ids, inactive_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender, queued_tool_use_ids, tool_verb, undelivered_tool_use_ids,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 import _clause  # noqa: E402
@@ -256,7 +256,7 @@ def _hooks_on_path():
 
 
 _hooks_on_path()
-from shared_names import CONSULTANT_TAG, LANE_TAG  # noqa: E402  the one home of the lane and consultant tags, shared with hooks/guard.py
+from shared_names import CI_CHECKIN_TOOLS, CONSULTANT_TAG, LANE_TAG  # noqa: E402  the one home of the lane, consultant and check-in names, shared with hooks/guard.py
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
@@ -1582,6 +1582,44 @@ def _turn_acts(records, turn, acks):
     return uses, [send_targets(u) for u in uses]
 
 
+def _one_time_checkin(use, failed):
+    """True for a check-in call (CI_CHECKIN_TOOLS) that did not fail and fires once. CronCreate repeats unless its
+    `recurring` input is false (the tool's default is true); another check-in tool is one-shot unless `recurring` is true."""
+    name = str(use.get("name", "")).rsplit("__", 1)[-1]
+    inp = use.get("input")
+    if name not in CI_CHECKIN_TOOLS or use.get("id") in failed or not isinstance(inp, dict):
+        return False
+    return inp.get("recurring") is False or (name != "CronCreate" and inp.get("recurring") is not True)
+
+
+def _replied_after(records, use_id, sender):
+    """True when a record after the tool call `use_id` is a peer message from `sender`."""
+    seen = False
+    for rec in records:
+        if seen and peer_sender(rec) == sender:
+            return True
+        seen = seen or any(u.get("id") == use_id for u in tool_uses(rec))
+    return False
+
+
+def _queued_to(records, uses, sends, writer):
+    """(queued, confirmed): the ids of this turn's non-failed queued desktop sends to `writer`, and those among them that
+    count. A queued send says only that the target holds the message and has not run it, so it counts only when the same
+    turn also made a one-time check-in that did not fail (`uses` is the turn's, so an earlier turn's check-in is no
+    cover), or a later record is a message from the writer. Cost: one pass over the records, only for a queued send."""
+    queued = queued_tool_use_ids(records)
+    sent = {u.get("id") for u, t in zip(uses, sends) if writer in t and u.get("id") in queued}
+    if not sent:
+        return set(), set()
+    failed = failed_tool_use_ids(records)
+    checkin = any(_one_time_checkin(u, failed) for u in uses)
+    return sent, {i for i in sent if checkin or _replied_after(records, i, writer)}
+
+
+QUEUED_FACT = ("its send was only queued, and a queued send counts once the same turn also sets a one-time check-in "
+               "to verify, by reading the target session, that the message reached it")
+
+
 def question_problem(records, turn, text, hook):
     """(refusal, note) for a reply whose Input Needed item asks the owner a question (a pick or a "?"
     sentence), judged on `turn`, the records after the last incoming message (questions-reach-page). The
@@ -1608,7 +1646,9 @@ def question_problem(records, turn, text, hook):
     acks = {writer: {writer}} if writer else {}
     uses, sends = _turn_acts(records, turn, acks)
     undelivered = undelivered_tool_use_ids(records)
-    if writer and any(writer in t and u.get("id") not in undelivered for u, t in zip(uses, sends)):
+    queued, confirmed = _queued_to(records, uses, sends, writer) if writer else (set(), set())
+    if writer and any(writer in t and (u.get("id") not in undelivered or u.get("id") in confirmed)
+                      for u, t in zip(uses, sends)):
         return "", ""
     _hooks_on_path()
     from override import remote_session_id
@@ -1633,7 +1673,8 @@ def question_problem(records, turn, text, hook):
             # Only the cloud body {"status":"delivered"} counts; the local SendMessage success shape is not measured.
             # A send that failed with session_inactive also meets the duty: no live writer exists to take it, and
             # the report names the failed send. Any other failure, and no send at all, still refuse.
-            delivered = delivered_tool_use_ids(records) | inactive_tool_use_ids(records)
+            queued, confirmed = _queued_to(records, uses, sends, writer)
+            delivered = delivered_tool_use_ids(records) | inactive_tool_use_ids(records) | confirmed
             if any(writer in t and u.get("id") in delivered for u, t in zip(uses, sends)):
                 return "", ""
     page = layout.waiting_page(root) if root else "unknown"
@@ -1646,8 +1687,9 @@ def question_problem(records, turn, text, hook):
     if here is None:
         # No page: the question is asked in the reply or the box, so the box counts.
         return "", ("" if any(u.get("name") == ASK_TOOL for u in uses) else NO_PAGE_NOTE)
-    return OWNER_REFUSAL % (("the page writer is session " + writer) if writer else
-                            "the page writer is not known to this session; the waiting page is " + page), ""
+    who = ("the page writer is session " + writer) if writer else (
+        "the page writer is not known to this session; the waiting page is " + page)
+    return OWNER_REFUSAL % (who + "; " + QUEUED_FACT if queued else who), ""
 
 
 # rewrite-cite-predates-ruling: a sentence that says a decision was rewritten for a ruling. See the module docstring.

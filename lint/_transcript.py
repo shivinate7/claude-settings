@@ -15,6 +15,7 @@ SEND_TOOLS = ("mcp__claude-code-remote__send_message", "mcp__ccd_session_mgmt__s
 # A desktop send's tool result ends with "(delivery: <state>; message_id: ...)". The state is delivered, queued or undelivered.
 DESKTOP_DELIVERY = "(delivery: "
 DESKTOP_DELIVERED = DESKTOP_DELIVERY + "delivered;"  # the state that means the message reached its session
+DESKTOP_QUEUED = DESKTOP_DELIVERY + "queued;"  # the state that means its session holds the message and has not run it
 CLAUDE_ARTIFACTS_DB = "mcp__claude-artifacts__db_"  # the claude-artifacts page db tools; the verb is the tool name's tail, never an input action
 # The tool-name prefixes of the page db tools, for `name.startswith(ARTIFACT_DATA)`. read_artifact is no db tool, so it never matches.
 ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData", CLAUDE_ARTIFACTS_DB)
@@ -452,6 +453,20 @@ def undelivered_tool_use_ids(records):
             if isinstance(b.get("tool_use_id"), str) and DESKTOP_DELIVERY in text and DESKTOP_DELIVERED not in text:
                 undelivered.add(b["tool_use_id"])
     return undelivered
+
+
+def queued_tool_use_ids(records):
+    """The tool_use ids of desktop sends whose result carries the queued state and is no failure (by
+    `failed_tool_use_ids`). Only the result counts, never the send's input."""
+    failed = failed_tool_use_ids(records)
+    queued = set()
+    for r in records:
+        if r.get("type") != "user":
+            continue
+        queued.update(b["tool_use_id"] for b in tool_results(r)
+                      if isinstance(b.get("tool_use_id"), str) and b["tool_use_id"] not in failed
+                      and DESKTOP_QUEUED in result_text(b))
+    return queued
 
 
 def inactive_tool_use_ids(records):

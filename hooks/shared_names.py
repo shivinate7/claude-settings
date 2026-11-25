@@ -33,6 +33,10 @@ REMOTE_OUTWARD_TOOLS = tuple(REMOTE_SERVER + "__" + short for short in (
     "unsubscribe_pr_activity", "add_repo", "register_repo_root", "confirm_repository_trust",
     "request_computer_folder"))
 
+# The tools that set a check-in: a scheduled wake the session sets for itself. The one home: hooks/stall_watch.py reads
+# a CI-wait check-in from it, and lint/report_guard.py reads the check-in that confirms a queued desktop send.
+CI_CHECKIN_TOOLS = ("send_later", "create_trigger", "CronCreate", "ScheduleWakeup")
+
 # A prompt that starts with one of these is a notice from a tool or an agent, never the owner.
 TASK_NOTIFICATION_TAG = "<task-notification>"
 # An agent hand-back (CLI 2.1.316 text), bare or after a frame line: the plain one or the

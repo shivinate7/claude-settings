@@ -163,8 +163,9 @@ except ImportError:  # without it a heredoc body may name a log: at worst a stal
     def strip_heredoc_bodies(cmd, shells_only=False) -> str:
         return cmd
 try:
-    from shared_names import TASK_NOTIFICATION_TAG  # the one home of the notice tag
-except ImportError:  # without the tag no notice can close a job, so Stop prints nothing
+    from shared_names import CI_CHECKIN_TOOLS, TASK_NOTIFICATION_TAG  # the one home of the notice tag and the check-in tools
+except ImportError:  # without the tag no notice can close a job, so Stop prints nothing; without the tools no check-in is seen
+    CI_CHECKIN_TOOLS = ()
     TASK_NOTIFICATION_TAG = None
 # The pre-filter's bytes key: the tag's bare name, so a line with the name in any form passes.
 NOTICE_KEY = (TASK_NOTIFICATION_TAG.strip("<>").encode(),) if TASK_NOTIFICATION_TAG else ()
@@ -902,7 +903,6 @@ def stopped_ids(content):
 CI_VERDICT = re.compile(r"^CI (?:finished )?(green|red|cancelled|unknown|none) on \S", re.M)
 CI_KEYS = (b"ready", b"pull_request", b"merge", b"send_later", b"create_trigger", b"CronCreate",
            b"ScheduleWakeup", b"CI ", b"close", b'"is_error":true', b'"is_error": true')
-CI_CHECKIN_TOOLS = ("send_later", "create_trigger", "CronCreate", "ScheduleWakeup")
 CI_SEGMENT = re.compile(r"[;&|\n]+")
 PR_NUMBER = re.compile(r"[0-9]+\Z")
 PR_URL = re.compile(r"/pull/([0-9]+)")
