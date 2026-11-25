@@ -135,11 +135,15 @@ LT_BATCH_WRONG = lt_config("batchwrong", {LT_SID + ".json": lt_role(LT_SID, "bat
 LT_BATCH_NULL = lt_config("batchnull", {LT_SID + ".json": json.dumps({"session": LT_SID, "role": "batch-runner", "repo": None})})
 LT_IDS = {"CLAUDE_CODE_SESSION_ID": LT_SID}
 
-# CONTROLS, green on the builder's head: an own triage or coordinator file refuses, an own batch-runner file for this repo passes.
+# An own triage file refuses the confirm. A triage session's right is its own pull request only, and that proof is not built,
+# so the guard's repo proof stays refused for it.
 add("local-tier: a local confirm with an own triage file is refused", "deny", rule="merge-confirm-repo",
     tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env=LT_IDS, config=LT_TRIAGE)
-add("local-tier: a local confirm with an own coordinator file is refused", "deny", rule="merge-confirm-repo",
-    tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env=LT_IDS, config=LT_COORD)
+# An own coordinator file for this repo passes the guard's repo proof: a coordinator merges its own pull request. The rulings
+# are own-everyone-merges and decision standing-merge-grant, line 5. The merge tool, not this guard, proves that the pull request
+# is the session's own; that half is not tested here.
+add("local-tier: a local confirm with an own coordinator file for this repo is allowed", "allow",
+    tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env=LT_IDS, config=LT_COORD, silent=True)
 add("local-tier: a local confirm with an own batch-runner file for this repo is allowed", "allow",
     tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env=LT_IDS, config=LT_BATCH, silent=True)
 add("local-tier: an own batch-runner file that names another repo refuses the confirm", "deny", rule="merge-confirm-repo",
@@ -149,6 +153,19 @@ add("local-tier: an own batch-runner file with a null repo refuses the confirm",
 # CONTROL, green on the old code: the lane tier is a cloud tier only, so an own lane file for this repo refuses a local confirm.
 add("local-tier: an own lane file for this repo refuses a local confirm", "deny", rule="merge-confirm-repo",
     tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env=LT_IDS, config=LT_LANE)
+# CONTROLS: the coordinator's allow keeps the repo match. A coordinator file for another repo, a null repo, a malformed file and a
+# role the role list does not hold (a consultant file) all still refuse the confirm.
+LT_COORD_WRONG = lt_config("coordwrong", {LT_SID + ".json": lt_role(LT_SID, "coordinator", repo="x/y")})
+LT_COORD_NULL = lt_config("coordnull", {LT_SID + ".json": json.dumps({"session": LT_SID, "role": "coordinator", "repo": None})})
+LT_CONSULTANT = lt_config("consultant", {LT_SID + ".json": lt_role(LT_SID, "consultant")})
+add("local-tier: an own coordinator file that names another repo refuses the confirm", "deny", rule="merge-confirm-repo",
+    tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env=LT_IDS, config=LT_COORD_WRONG)
+add("local-tier: an own coordinator file with a null repo refuses the confirm", "deny", rule="merge-confirm-repo",
+    tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env=LT_IDS, config=LT_COORD_NULL)
+add("local-tier: an own consultant file refuses the confirm, since the role list does not hold consultant", "deny",
+    rule="merge-confirm-repo", tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env=LT_IDS, config=LT_CONSULTANT)
+add("local-tier: a malformed own role file refuses the confirm", "deny", rule="merge-confirm-repo",
+    tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env=LT_IDS, config=LT_BADJSON)
 
 # RED on the builder's head: no own file, so the confirm is today's behaviour and is allowed, though another session's file lingers.
 add("local-tier: another session's lingering file does not refuse a session with no own file", "allow",
