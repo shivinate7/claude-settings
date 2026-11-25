@@ -14,19 +14,21 @@
   Main shows no red, because its push runs skip the Windows merge shards (PR 3777 body).
   That is unmeasured on Nov 25.
 - **Where.** The failing step is `drop_worktree` in `merge/merge.py` (read from code).
-  It ignores the return codes of `git worktree unlock` and `git worktree remove --force`.
-  Then it runs `shutil.rmtree(tmp, ignore_errors=True)`, so a failed removal is silent (read from code).
+  It ignores the return codes of `git worktree unlock` and `git worktree prune`.
+  It reads the return code of `git worktree remove --force`, then runs `shutil.rmtree(tmp, ignore_errors=True)`.
+  When that removal was refused on a tree that was there, or the folder stays, it prints one line naming the tree, git's exit code and git's first output line, and returns False.
+  A tree already gone prints nothing and returns True (`test_dropping_a_tree_that_is_already_gone_prints_no_line_and_returns_true` in `merge/test_merge.py`).
   Candidate causes, all unmeasured: read-only pack and object files that rmtree skips; an open handle from a scanner; a short-name or case difference in the temp path, so `sweep_dead_trees` skips the tree; `pid_alive` reads alive when `OpenProcess` is refused.
   The hold check is `held_by_live_process` and `_descends_from` in `merge/merge.py`. The process reader is `janitor/sweep.py`.
   The climb came in with commit d638056337 (Nov 20).
-  The loop fix in `_descends_from` returns False when its walk revisits a pid. `DescendsFromTest` in `lint/test_find_copies.py` pins it, with one red case and three controls.
+  The loop fix in `_descends_from` returns None (unknown) when its walk revisits a pid, so a looped parent chain holds the folder. `test_a_parent_loop_stops_at_its_first_revisit` in class `DescendsFromTest` in `lint/test_find_copies.py` pins that exit.
   The loop fix explains no Nov 21 failure and retires nothing here.
   The Windows-only case `test_a_real_exited_merge_pid_on_windows_has_its_tree_removed` in `StaleMergeTrees` reads real processes. It has never run. Its first run is CI's Windows job.
   The Linux pins in `lint/test_find_copies.py` fake `_parent_pid` and `pid_alive`, so they prove the reading only on fakes.
 - **Decision.** `leftover-temp-reap`, the nearest decision (a folder stays when its holder cannot be read; Windows checks cwd only).
   No decision names the merge tool's holder check.
 - **Retire.** This debt stays open. It closes only when all three show.
-  1. A Windows red run shows the real cause. The cheapest first step is a Windows run that prints the return code of the `git worktree remove` call and whether the folder still exists. A local Windows session or CI can run it (see Ruling).
+  1. A Windows red run shows the real cause. On a failed removal, `drop_worktree` on the head already prints git's exit code and whether the folder stays. Still owed: a Windows run where a dead pid's tree is held, so that print fires. The Windows-only case has never run. A local Windows session or CI can run it (see Ruling).
   2. The fix for that cause, with a Linux case that is red on origin/main and green after the fix. The held cases still pass: a live, unreadable grandchild of a dead owner keeps its folder (review F1 on PR 3777, head dd56d6ef). The first fix, an ended ancestor reads False, was reverted because it let the sweep delete that folder.
   3. The Windows case test_a_real_exited_merge_pid_on_windows_has_its_tree_removed is green on a checks-windows-merge job of a PR run. The close cites that run with a Retire-run line.
 

@@ -1,0 +1,1 @@
+- drop-refused-tree-reports-gone: a removal git refused on a present tree that rmtree then cleared prints "could not remove" and returns False, though the tree is gone.
