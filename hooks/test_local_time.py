@@ -1296,7 +1296,7 @@ class JudgeStub:
 
 
 def opus_type(prompt, answer=None, error=None, at=OV_NOW, transcript=None, remote=None, extra=None, cfg=None,
-              override=None, drop_judge=False, via_main=False):
+              override=None, drop_judge=False, via_main=False, head=None):
     """The owner types `prompt` into the prompt hook's grant, with the model stood in. Returns (config dir, judge
     calls, stdout, stderr). The grant's files and guard.log land in the config dir, a new one unless `cfg` names it.
     `transcript` is the payload's transcript_path (no key when None). `remote` is CLAUDE_CODE_REMOTE_SESSION_ID for
@@ -1339,7 +1339,7 @@ def opus_type(prompt, answer=None, error=None, at=OV_NOW, transcript=None, remot
             call_judge.override_ask = real_judge
         else:
             vars(call_judge).pop("override_ask", None)
-    return cfg, judge_calls(stub.calls), out.getvalue(), err.getvalue()
+    return cfg, judge_calls(stub.calls, head), out.getvalue(), err.getvalue()
 
 
 def call_judge_module():
@@ -2181,12 +2181,13 @@ EXCLUDED_RECORDS = (
 )
 
 
-def judge_calls(calls):
-    """The calls that are the yes/no judge's: each prompt starts with call_judge.OPUS_ASK_PROMPT. A scope read's model call
-    carries another prompt, so it is left out."""
+def judge_calls(calls, head=None):
+    """The calls that are a yes/no judge's: each prompt starts with `head`, call_judge.OPUS_ASK_PROMPT when None. A scope
+    read's model call carries another prompt, so it is left out."""
     hooks_modules()
     import call_judge
-    return [call for call in calls if call[0].startswith(call_judge.OPUS_ASK_PROMPT)]
+    head = call_judge.OPUS_ASK_PROMPT if head is None else head
+    return [call for call in calls if call[0].startswith(head)]
 
 
 class JudgeRecorder:
@@ -3243,6 +3244,181 @@ class CostTests(unittest.TestCase):
                         "a granted plain override writes its grant file; got %r" % (run["files"],))
 
 
+# MODEL WORD (decision agent-model-cap, the owner's model name). A typed turn that names sonnet, haiku, fable or opus is
+# judged once by a model. A yes holds that model for the session: the Opus pass file (state/override/opus/<session>.json)
+# carries it in `model`, and a plain ask with no length carries `end` "report", so the hold ends at the session's next
+# report, or at `until` (2 h after it was set). The judge's prompt starts with call_judge.MODEL_ASK_PROMPT; these cases
+# stand in decision_watch.invoke_model, so no model runs. A missing name matches no call, so a case fails by its assert.
+def model_head():
+    """The head of the model word judge's prompt, as call_judge.MODEL_ASK_PROMPT names it."""
+    return getattr(call_judge_module(), "MODEL_ASK_PROMPT", "\x00no model word judge")
+
+
+def hold_json(cfg, session=OV_SESSION):
+    """The parsed Opus pass file of the session, where a model hold lives, or None when it is missing or unreadable."""
+    try:
+        with open(os.path.join(cfg, "state", "override", "opus", session + ".json"), encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def raw_turn(content, **keys):
+    """One owner turn as a transcript line, with extra record keys such as turnOrigin or isCompactSummary."""
+    rec = {"type": "user", "message": {"role": "user", "content": content}}
+    rec.update(keys)
+    return json.dumps(rec)
+
+
+def case_model_word_names_reach_the_judge():
+    for name, prompt in (("sonnet", "Use sonnet for the audit."), ("haiku", "Run the audit on haiku."),
+                         ("fable", "Try fable for the fix.")):
+        cfg, calls, _, _ = opus_type(prompt, answer={"ok": True, "model": name}, head=model_head())
+        check("model word: %s: the prompt reaches the model judge once" % name, len(calls) == 1,
+              "model judge calls %d" % len(calls))
+        held = hold_json(cfg)
+        check("model word: %s: a yes holds %s in the pass file" % (name, name),
+              held is not None and held.get("model") == name, "pass file %r" % (held,))
+
+
+def case_model_word_no_model_name_makes_no_judge_call():
+    cfg, calls, _, _ = opus_type("Run the model audit.", answer={"ok": True, "model": "sonnet"}, head=model_head())
+    check("model word: control, a prompt that names no model makes no model judge call", calls == [],
+          "model judge calls %d" % len(calls))
+    check("model word: control, a prompt that names no model writes no hold", hold_json(cfg) is None,
+          "pass file %r" % (hold_json(cfg),))
+
+
+def case_model_word_quoted_reply_reaches_no_judge():
+    quoted = "<!-- reply 3 -->\n> Use opus for the audit.\n> Done."
+    cfg, calls, _, _ = opus_type(quoted, answer={"ok": True, "model": "opus"})
+    check("model word: a reply quote that names opus makes no judge call", calls == [],
+          "judge calls %d" % len(calls))
+    check("model word: a reply quote that names opus writes no Opus hold", opus_override(cfg) is None,
+          "got %r" % (opus_override(cfg),))
+    cfg, calls, _, _ = opus_type(quoted.replace("opus", "sonnet"), answer={"ok": True, "model": "sonnet"},
+                                 head=model_head())
+    check("model word: control, a reply quote that names sonnet makes no model judge call", calls == [],
+          "model judge calls %d" % len(calls))
+    check("model word: control, a reply quote that names sonnet writes no hold", hold_json(cfg) is None,
+          "pass file %r" % (hold_json(cfg),))
+
+
+def case_model_word_yes_for_sonnet_moves_the_hold():
+    cfg, _, _, _ = opus_type("send opus judges", answer={"ok": True})
+    check("model word: setup, `send opus judges` holds Opus for every role",
+          opus_override(cfg) is not None and opus_override(cfg)[2] is None, "got %r" % (opus_override(cfg),))
+    _, calls, _, _ = opus_type("Use sonnet for the audit.", answer={"ok": True, "model": "sonnet"}, cfg=cfg,
+                               head=model_head())
+    check("model word: a sonnet ask while Opus is held reaches the model judge once", len(calls) == 1,
+          "model judge calls %d" % len(calls))
+    held = hold_json(cfg)
+    check("model word: a judge yes for sonnet while Opus is held moves the hold to sonnet",
+          held is not None and held.get("model") == "sonnet", "pass file %r" % (held,))
+
+
+def case_model_word_judge_no_keeps_the_hold():
+    cfg, _, _, _ = opus_type("send opus judges", answer={"ok": True})
+    opus_type("Use sonnet for the audit.", answer={"ok": False}, cfg=cfg, head=model_head())
+    check("model word: control, a judge no for sonnet keeps the Opus hold",
+          opus_override(cfg) is not None and (hold_json(cfg) or {}).get("model") in (None, "opus"),
+          "got %r; pass file %r" % (opus_override(cfg), hold_json(cfg)))
+
+
+def case_model_word_judge_error_clears_the_hold():
+    cfg, _, _, _ = opus_type("send opus judges", answer={"ok": True})
+    opus_type("Use sonnet instead.", answer=None, error="timed out after 20 s", cfg=cfg, head=model_head())
+    check("model word: a judge error after `use sonnet instead` clears the held Opus",
+          opus_override(cfg) is None and hold_json(cfg) is None,
+          "got %r; pass file %r" % (opus_override(cfg), hold_json(cfg)))
+
+
+def case_model_word_haiku_judge_error_holds_nothing():
+    cfg, _, _, _ = opus_type("Run the model audit on haiku.", answer=None, error="timed out after 20 s",
+                             head=model_head())
+    check("model word: a judge error on a haiku prompt writes no hold, and the text match stays in the guard",
+          hold_json(cfg) is None, "pass file %r" % (hold_json(cfg),))
+
+
+def case_model_word_no_opus_clears_without_a_judge():
+    cfg, _, _, _ = opus_type("send opus judges", answer={"ok": True})
+    check("model word: setup, Opus is held before `no opus`", opus_override(cfg) is not None,
+          "got %r" % (opus_override(cfg),))
+    _, calls, _, _ = opus_type("no opus", answer={"ok": True}, cfg=cfg)
+    check("model word: `no opus` makes no judge call", calls == [], "judge calls %d" % len(calls))
+    check("model word: `no opus` clears the held Opus", opus_override(cfg) is None,
+          "got %r" % (opus_override(cfg),))
+
+
+def case_model_word_no_sonnet_clears_without_a_judge():
+    cfg, _, _, _ = opus_type("Use sonnet for the audit.", answer={"ok": True, "model": "sonnet"}, head=model_head())
+    check("model word: setup, a yes holds sonnet", (hold_json(cfg) or {}).get("model") == "sonnet",
+          "pass file %r" % (hold_json(cfg),))
+    _, calls, _, _ = opus_type("no sonnet", answer={"ok": True, "model": "sonnet"}, cfg=cfg, head=model_head())
+    check("model word: `no sonnet` makes no model judge call", calls == [], "model judge calls %d" % len(calls))
+    check("model word: `no sonnet` clears the held sonnet", hold_json(cfg) is None, "pass file %r" % (hold_json(cfg),))
+
+
+def case_model_word_opus_off_is_a_control():
+    cfg, _, _, _ = opus_type("send opus judges", answer={"ok": True})
+    _, calls, _, _ = opus_type("opus off", answer={"ok": True}, cfg=cfg)
+    check("model word: control, `opus off` clears the held Opus with no judge call",
+          calls == [] and opus_override(cfg) is None, "judge calls %d; got %r" % (len(calls), opus_override(cfg)))
+
+
+def case_model_word_keyword_forms_are_controls():
+    cfg, calls, _, _ = opus_type("opus 2h", answer={"ok": True})
+    got = opus_override(cfg)
+    check("model word: control, `opus 2h` makes no judge call", calls == [], "judge calls %d" % len(calls))
+    check("model word: control, `opus 2h` holds every role for 2 h, as on main",
+          got is not None and got[2] is None and abs((got[1] - (OV_NOW + timedelta(hours=2))).total_seconds()) <= 1,
+          "got %r" % (got,))
+    cfg, calls, _, _ = opus_type("opus builders 2h", answer={"ok": True})
+    got = opus_override(cfg)
+    check("model word: control, `opus builders 2h` holds the builder role for 2 h, as on main",
+          calls == [] and got is not None and got[2] == "builder", "judge calls %d; got %r" % (len(calls), got))
+
+
+def case_model_word_plain_ask_holds_until_the_report():
+    cfg, _, _, _ = opus_type("send opus judges", answer={"ok": True})
+    held = hold_json(cfg)
+    check("model word: a plain Opus ask with no length ends at the session's next report",
+          held is not None and held.get("end") == "report", "pass file %r" % (held,))
+    until = None
+    try:
+        until = datetime.fromisoformat(str((held or {}).get("until")).replace("Z", "+00:00"))
+        until = until if until.tzinfo else until.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        pass  # no pass file, or no readable `until`: the assert below names it
+    check("model word: a plain Opus ask with no length also ends 2 h after it was set",
+          until is not None and abs((until - (OV_NOW + timedelta(hours=2))).total_seconds()) <= 1,
+          "until %r" % (until,))
+
+
+def case_model_word_seed_brief_turn_is_not_the_owners():
+    override, _ = hooks_modules()
+    text = "Background (from the session that started this one): Run the model audit on sonnet."
+    got = override.latest_owner_text(transcript_file([raw_turn(text, turnOrigin="host_synthetic")]))
+    check("model word: a seed brief with turnOrigin host_synthetic is not the owner's last turn", got is None,
+          "read %r" % (got,))
+
+
+def case_model_word_human_turn_origin_still_counts():
+    override, _ = hooks_modules()
+    text = "Run the model audit on sonnet."
+    got = override.latest_owner_text(transcript_file([raw_turn(text, turnOrigin="human")]))
+    check("model word: control, a turn with turnOrigin human is the owner's last turn", got == text, "read %r" % (got,))
+
+
+def case_model_word_compaction_summary_is_not_the_owners():
+    override, _ = hooks_modules()
+    text = "Summary of earlier turns: the owner asked for a model audit on sonnet."
+    got = override.latest_owner_text(transcript_file([raw_turn(text, isCompactSummary=True)]))
+    check("model word: a compaction summary (isCompactSummary) is not the owner's last turn", got is None,
+          "read %r" % (got,))
+
+
 def case_raising_case_does_not_stop_the_run():
     """A case that raises does not stop the run: the case after it still runs, and main returns 1 with a summary."""
     g = globals()
@@ -3456,6 +3632,21 @@ def suite_cases():
         case_override_ask_plain_one_act_logs_its_words_once,
         case_override_ask_off_in_the_reason_grants_once,
         case_override_ask_judge_kill_keeps_the_inbox_capture,
+        case_model_word_names_reach_the_judge,
+        case_model_word_no_model_name_makes_no_judge_call,
+        case_model_word_quoted_reply_reaches_no_judge,
+        case_model_word_yes_for_sonnet_moves_the_hold,
+        case_model_word_judge_no_keeps_the_hold,
+        case_model_word_judge_error_clears_the_hold,
+        case_model_word_haiku_judge_error_holds_nothing,
+        case_model_word_no_opus_clears_without_a_judge,
+        case_model_word_no_sonnet_clears_without_a_judge,
+        case_model_word_opus_off_is_a_control,
+        case_model_word_keyword_forms_are_controls,
+        case_model_word_plain_ask_holds_until_the_report,
+        case_model_word_seed_brief_turn_is_not_the_owners,
+        case_model_word_human_turn_origin_still_counts,
+        case_model_word_compaction_summary_is_not_the_owners,
         case_raising_case_does_not_stop_the_run,
         case_system_exit_in_a_case_is_a_failed_case,
         case_cost_tests,
