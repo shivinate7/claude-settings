@@ -293,6 +293,49 @@ class WorkflowShape(unittest.TestCase):
         self.assertIn("github.repository", steps[0], "the script step does not pass the repo")
 
 
+def failures_of_workflow_case(case, text):
+    """The messages of the failures and errors one WorkflowShape case gives when the workflow is `text`. The case runs as
+    written, so a defect injected into `text` meets the same check the real workflow meets."""
+    with mock.patch.object(WorkflowShape, "text", lambda self: text):
+        result = unittest.TestResult()
+        WorkflowShape(case).run(result)
+    return [tb for _, tb in result.failures + result.errors]
+
+
+def inject(text, anchor, insert):
+    """`text` with `insert` placed before `anchor`. The anchor must occur once, so the defect lands where it is meant."""
+    assert text.count(anchor) == 1, "the defect's anchor is not unique: %r" % anchor
+    return text.replace(anchor, insert + anchor, 1)
+
+
+class ConcurrencyBlockDefects(unittest.TestCase):
+    """Each defect is injected into the real workflow text, and the concurrency case of WorkflowShape must fail it."""
+    CASE = "test_concurrency_group_is_the_workflow_name_and_pr_number"
+
+    def test_a_job_level_concurrency_beside_the_top_one_fails_the_check(self):
+        # Why: a job's own group runs beside the workflow's, so a cancel in it is one the top-level read never sees.
+        text = inject(read_text(WORKFLOW), "    runs-on: ubuntu-latest\n",
+                      "    concurrency:\n      group: other-group\n      cancel-in-progress: true\n")
+        failures = failures_of_workflow_case(self.CASE, text)
+        self.assertTrue(any("concurrency blocks" in f for f in failures),
+                        "a job-level concurrency beside the top one passed the check: %s" % failures)
+
+    def test_a_second_top_level_concurrency_block_fails_the_check(self):
+        # Why: two top-level keys of one name read as one block to a reader that takes the first, so the second must fail.
+        text = inject(read_text(WORKFLOW), "\njobs:\n",
+                      "\nconcurrency:\n  group: other-group\n  cancel-in-progress: true\n")
+        failures = failures_of_workflow_case(self.CASE, text)
+        self.assertTrue(any("concurrency blocks" in f for f in failures),
+                        "a second top-level concurrency block passed the check: %s" % failures)
+
+    def test_an_extra_key_under_concurrency_fails_the_check(self):
+        # Why: the group case says an extra key fails it; a key the workflow does not emit changes the group's behaviour.
+        text = inject(read_text(WORKFLOW), "  cancel-in-progress: false\n", "  queue: max\n")
+        failures = failures_of_workflow_case(self.CASE, text)
+        self.assertTrue(any("beyond group and cancel-in-progress" in f for f in failures),
+                        "an extra key under concurrency passed the check: %s" % failures)
+
+
 class ScriptCase(unittest.TestCase):
     def module(self):
         self.assertTrue(os.path.isfile(SCRIPT), "the script .github/scripts/cancel_closed_pr_runs.py is absent")
