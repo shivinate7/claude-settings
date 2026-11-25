@@ -11,6 +11,9 @@ the family for the guard runner. A skipped case is left out of its group, since 
 flagged when its `s` is at least FLAG_RATIO times its group's median and at least FLAG_FLOOR_S seconds. A group
 under MIN_GROUP cases is not judged. The flags print with the largest excess over the median first.
 
+It prints `read: <path>` for each row file it read, then `missing: <job>` for each job named in the env
+CASE_TIMES_JOBS (comma-separated) that has no `<job>.jsonl` file.
+
 When a read fails, or no row is found, it prints `unknown` and says why. It never prints "nothing flagged"
 for a read that did not happen.
 
@@ -30,15 +33,15 @@ KEYS = ("suite", "group", "case", "s", "outcome")
 
 
 def read_rows(folder):
-    """Every row under `folder`. Raises ValueError with the file and line when a row cannot be read."""
+    """(rows, paths of the files read) under `folder`. Raises ValueError with the file and line when a row cannot be read."""
     rows = []
-    found = False
+    paths = []
     for root, _dirs, files in os.walk(folder):
         for name in sorted(files):
             if not name.endswith(".jsonl"):
                 continue
-            found = True
             path = os.path.join(root, name)
+            paths.append(path)
             with open(path, encoding="utf-8") as f:
                 for number, line in enumerate(f, 1):
                     if not line.strip():
@@ -51,11 +54,18 @@ def read_rows(folder):
                             or isinstance(row["s"], bool) or not isinstance(row["s"], (int, float)):
                         raise ValueError("%s line %d is not a case row" % (path, number))
                     rows.append(row)
-    if not found:
+    if not paths:
         raise ValueError("no .jsonl row file under %s" % folder)
     if not rows:
         raise ValueError("the row files under %s hold no rows" % folder)
-    return rows
+    return rows, paths
+
+
+def missing_jobs(paths):
+    """The jobs named in env CASE_TIMES_JOBS (comma-separated) that have no `<job>.jsonl` among `paths`."""
+    have = {os.path.basename(path) for path in paths}
+    named = [job.strip() for job in os.environ.get("CASE_TIMES_JOBS", "").split(",")]
+    return [job for job in named if job and job + ".jsonl" not in have]
 
 
 def flagged(rows):
@@ -90,10 +100,14 @@ def main(argv=None):
             return 0
         folder = os.path.join(temp, "case-times")
     try:
-        rows = read_rows(folder)
+        rows, paths = read_rows(folder)
     except (OSError, ValueError) as error:
         print("unknown: could not read the case times: %s" % error)
         return 0
+    for path in paths:
+        print("read: %s" % path)
+    for job in missing_jobs(paths):
+        print("missing: %s" % job)
     found, judged = flagged(rows)
     print("%d cases read, %d groups judged (flag: at least %gx the group median and at least %g s)"
           % (len(rows), judged, FLAG_RATIO, FLAG_FLOOR_S))
