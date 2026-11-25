@@ -1,0 +1,1 @@
+- time-pinned-reindent-counts-new: `--check --base` counts a re-indented old sleep or assert as new, because the move reader matches the exact line text, indentation included (lint/diff_moves.py `take_move`). By design: the line is touched. Seen: 2026-11-24 x1
