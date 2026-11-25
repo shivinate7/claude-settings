@@ -56,6 +56,9 @@ SCAN_REPOS = [
     {"id": 555004, "full_name": DELTA},
     {"id": 555005, "full_name": SELF},
 ]
+MOVED = "shivinate7/alpha-moved-example"  # ALPHA's name after a rename: a by-name read of ALPHA answers with this
+DOT_OR_DASH = ["../..", "./.", "a/..", "../x", ".../x", "-a/b", "a/-b"]  # a dot-only segment or a leading dash
+KEPT = ["a-b/c.d", "a/.github", "a/b", "a_b/c-d"]  # names the segment rule must still accept
 
 
 def setUpModule():
@@ -248,6 +251,42 @@ class EverySubcommand(unittest.TestCase):
                 self.assertEqual(read(path), text, "a refused subcommand changed the list")
 
 
+class NameSegments(unittest.TestCase):
+    """The name rule: a dot-only segment or a leading dash is refused with exit 2 and never reaches GitHub."""
+
+    def test_add_refuses_a_dot_only_or_leading_dash_name_and_writes_nothing(self):
+        for name in DOT_OR_DASH:
+            with self.subTest(name=name):
+                path = fixture(EMPTY)
+                before = read(path)
+                # `--` keeps argparse from reading a leading dash as an option, so the reader's own check must refuse it.
+                code, out, err = run_reader(self, ["--file", path, "add", "--", name, "2026-01-06"], NoFetch())
+                self.assertEqual(code, 2, "%s was not refused: %r" % (name, err))
+                self.assertIn(name, err, "the refusal does not name %s: %r" % (name, err))
+                self.assertEqual(read(path), before, "%s was written to the list" % name)
+
+    def test_a_file_line_with_a_dot_only_or_leading_dash_name_is_refused_before_any_read(self):
+        for name in DOT_OR_DASH:
+            with self.subTest(name=name):
+                fake = ByName({})
+                code, out, err = run_reader(self, ["--file", fixture("%s 2026-01-05\n" % name), "list", "--active"], fake)
+                self.assertEqual(code, 2, "%s on a file line was not refused: %r" % (name, err))
+                self.assertRegex(err, r"\bline 1\b", "the refusal does not name line 1: %r" % err)
+                self.assertEqual(out, "", "%s printed a line" % name)
+                self.assertEqual(fake.calls, [], "%s reached GitHub: %r" % (name, fake.calls))
+
+    def test_names_the_segment_rule_must_keep_are_still_accepted(self):
+        text = "".join("%s 2026-01-05\n" % name for name in KEPT)
+        code, out, err = run_reader(self, ["--file", fixture(text), "list"], NoFetch())
+        self.assertEqual((code, out), (0, "".join("%s\n" % name for name in KEPT)), err)
+        for name in KEPT:
+            with self.subTest(name=name):
+                path = fixture(EMPTY)
+                code, out, err = run_reader(self, ["--file", path, "add", name, "2026-01-06"], NoFetch())
+                self.assertEqual(code, 0, err)
+                self.assertIn("%s 2026-01-06" % name, read(path).splitlines())
+
+
 class ListActive(unittest.TestCase):
     def test_drops_an_archived_child(self):
         fake = ByName({ALPHA: repo(555001, ALPHA), BETA: repo(555002, BETA),
@@ -271,6 +310,24 @@ class ListActive(unittest.TestCase):
         self.assertEqual(out, "%s\n%s\n" % (ALPHA, GAMMA), "the readable children were not all listed")
         self.assertEqual(err.splitlines(), ["unknown: %s" % BETA], err)
         self.assertEqual(code, 3)
+
+    def test_a_by_name_answer_under_another_name_is_a_rename_and_is_unknown(self):
+        # GitHub redirects a renamed child's old name to the new one. An answer under another name is not this child's.
+        fake = ByName({ALPHA: repo(555001, MOVED), BETA: repo(555002, BETA), GAMMA: repo(555003, GAMMA)})
+        code, out, err = run_reader(self, ["--file", fixture(ACTIVE), "list", "--active"], fake)
+        self.assertTrue(fake.calls, "the fixture never reached the reader")
+        self.assertEqual(out, "%s\n%s\n" % (BETA, GAMMA), "a renamed child was listed, or a readable one was not: %r" % out)
+        self.assertEqual(err.splitlines(), ["unknown: %s" % ALPHA], err)
+        self.assertEqual(code, 3, "a renamed child did not make the exit code 3")
+
+    def test_exit_3_names_every_unreadable_child_and_a_caller_must_read_the_exit_code(self):
+        # Exit 3 still prints the readable actives, so a caller that ignores the exit code under-counts.
+        fake = ByName({ALPHA: repo(555001, ALPHA), BETA: 404, GAMMA: 500})
+        code, out, err = run_reader(self, ["--file", fixture(ACTIVE), "list", "--active"], fake)
+        self.assertTrue(fake.calls, "the fixture never reached the reader")
+        self.assertEqual(out, "%s\n" % ALPHA, "stdout does not hold only the readable actives: %r" % out)
+        self.assertEqual(err.splitlines(), ["unknown: %s" % BETA, "unknown: %s" % GAMMA], err)
+        self.assertEqual(code, 3, err)
 
     def test_asks_github_by_name(self):
         fake = ByName({ALPHA: repo(555001, ALPHA), BETA: repo(555002, BETA), GAMMA: repo(555003, GAMMA)})
@@ -329,6 +386,17 @@ class AddCommand(unittest.TestCase):
         code, out, err = run_reader(self, ["--file", path, "add", BETA], NoFetch())
         self.assertEqual(code, 2, err)
         self.assertEqual(read(path), before, "a refused add changed the list")
+
+    def test_refuses_a_duplicate_that_differs_only_in_letter_case_and_names_the_existing_entry(self):
+        for name in ("Shivinate7/alpha-example", "shivinate7/Alpha-Example", "SHIVINATE7/ALPHA-EXAMPLE"):
+            with self.subTest(name=name):
+                path = fixture(ORDERED)
+                before = read(path)
+                code, out, err = run_reader(self, ["--file", path, "add", name, "2026-02-01"], NoFetch())
+                self.assertEqual(code, 2, "a duplicate in another letter case was not refused: %r" % err)
+                self.assertEqual(len(err.strip().splitlines()), 1, "the refusal is not one line: %r" % err)
+                self.assertIn(ALPHA.casefold(), err.casefold(), "the refusal does not name the existing entry: %r" % err)
+                self.assertEqual(read(path), before, "a refused add changed the list")
 
     def test_refuses_claude_settings_in_any_letter_case(self):
         for name in (SELF, "Shivinate7/claude-settings", "SHIVINATE7/CLAUDE-SETTINGS", "shivinate7/Claude-Settings"):
