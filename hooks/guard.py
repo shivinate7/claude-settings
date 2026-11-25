@@ -4841,6 +4841,7 @@ def step_up_reason(prompt: str, role, model, rounds=None) -> str:
 # for a spawn with no model, one read of the agent files. No process starts and no file is written, except the one
 # `agent-role-model-unread` log line when a read fails.
 ROLE_MODEL_RANK = ("haiku", "sonnet", "opus")
+EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")  # the words an effort cell or an `effort:` key can hold
 ROLE_TABLE_FILE = "agent-model-cap.md"   # inside the record folder that lint/layout.py names
 ROLE_TABLE_MAX = 256 * 1024
 ROLE_WORD = re.compile(r"[A-Za-z][A-Za-z-]*$")
@@ -4916,13 +4917,15 @@ def record_branch_of(root):
         return DEFAULT_RECORD_BRANCH
 
 
-def role_model_table(pointer_root):
-    """{role: first word of its Model cell} read from the pointer checkout's decision record, or None when the
-    record is missing, not text, or holds no row. The one reader of the table."""
+def _role_rows(pointer_root):
+    """[(role, model word, effort cell)] for each role of each role row of the record, in file order, or None when the
+    record cannot be read. A row names roles in its first cell and a ranked model in its second; a row that names
+    neither is left out. The effort cell is the third cell as written ("" when the row has none). The one parser of the
+    role rows, shared by role_model_table and role_effort_table."""
     text = _role_record_text(pointer_root)
     if text is None:
         return None
-    table = {}
+    rows = []
     for line in text.splitlines():
         if not line.lstrip().startswith("|"):
             continue
@@ -4933,8 +4936,27 @@ def role_model_table(pointer_root):
         word = ROLE_FIRST_WORD.match(cells[1].replace("`", ""))
         if not all(ROLE_WORD.match(name) for name in names) or not word or word.group(1).lower() not in ROLE_MODEL_RANK:
             continue
-        for name in names:
-            table.setdefault(name, word.group(1).lower())
+        rows.extend((name, word.group(1).lower(), cells[2] if len(cells) > 2 else "") for name in names)
+    return rows
+
+
+def role_model_table(pointer_root):
+    """{role: first word of its Model cell} read from the pointer checkout's decision record, or None when the
+    record is missing, not text, or holds no row. The one reader of the table."""
+    table = {}
+    for name, model, _ in _role_rows(pointer_root) or ():
+        table.setdefault(name, model)
+    return table or None
+
+
+def role_effort_table(pointer_root):
+    """{role: first word of its Effort cell, lowercase} for the roles of role_model_table, the first row for a role
+    winning, or None when the record cannot be read or holds no row. A cell with no word gives "". The word may be no
+    effort level (`model default`, `n/a`): EFFORT_LEVELS says which are."""
+    table = {}
+    for name, _, effort in _role_rows(pointer_root) or ():
+        word = ROLE_FIRST_WORD.match(effort.replace("`", ""))
+        table.setdefault(name, word.group(1).lower() if word else "")
     return table or None
 
 

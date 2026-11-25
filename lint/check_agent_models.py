@@ -14,7 +14,8 @@ Exits 1 and names each file that sets a Haiku model, each agent file whose `mode
 family than its role's row in the role table (pin_row_problem), each agent body that states the agent's own
 model in fixed text or gives a report header a model slot with no line that names the source (body_problems),
 each agent file with no `model:` pin, or an empty one (pin_missing_problem: it would run on the session model; skill files
-carry no pin and are exempt), each agent file that can reach the claude-code-remote server (session_tools_problem: frontmatter
+carry no pin and are exempt), each agent file whose `effort:` differs from the first word of its role's Effort cell, or has
+none while the row names an effort level (pin_effort_problem; a row whose cell is no level, such as `model default`, is not compared), each agent file that can reach the claude-code-remote server (session_tools_problem: frontmatter
 `disallowedTools` must name the whole server, or `tools` must be an allow-list with no entry for it), and the model record
 docs/decisions/agent-model-cap.md when its `lane` row's effort cell does not start
 with the guard's LANE_EFFORT.
@@ -92,6 +93,24 @@ def pin_row_problem(text: str, table) -> str:
         return ""
     return "model pin %r does not equal the role table's row %r for role %r (the pin must name the row's model)" % (
         pin, row, name)
+
+
+def pin_effort_problem(text: str, effort_table) -> str:
+    """Why the file's `effort:` differs from its role's row, or "" when it matches, the role has no row, or the row
+    names no effort level (`model default`, `n/a`). The role is matched as in pin_row_problem. A file with no usable
+    `effort:` value fails against a row that names a level."""
+    keys = _guard.frontmatter_keys(frontmatter(text) or [])
+    effort, name = scalar(keys.get("effort", "")), scalar(keys.get("name", ""))
+    role = _guard.role_name(effort_table, name) if effort_table and name else None
+    row = effort_table.get(role) if role else None
+    if row not in _guard.EFFORT_LEVELS:
+        return ""
+    if not effort:
+        return "frontmatter has no `effort:` value, or an empty one (every agent file with a row carries its row's effort)"
+    if effort == row:
+        return ""
+    return "effort %r does not equal the role table's effort %r for role %r (the file must name the row's effort)" % (
+        effort, row, name)
 
 
 def pin_missing_problem(text: str) -> str:
@@ -216,6 +235,7 @@ def main(argv) -> int:
     )
     bad = 0
     table = _guard.role_model_table(ROOT)  # None when unread: role_list_problems reports that, this rule stands down
+    effort_table = _guard.role_effort_table(ROOT)  # None when unread: the effort rule stands down the same way
     for path in files:
         with open(path, encoding="utf-8-sig") as handle:
             text = handle.read()
@@ -231,7 +251,8 @@ def main(argv) -> int:
             print("%s: frontmatter sets a model below Sonnet. Sonnet is the floor." % path)
             bad = 1
         elif os.path.basename(os.path.dirname(path)) == "agents":
-            for problem in (pin_missing_problem(text), pin_row_problem(text, table), session_tools_problem(text)):
+            for problem in (pin_missing_problem(text), pin_row_problem(text, table), pin_effort_problem(text, effort_table),
+                            session_tools_problem(text)):
                 if problem:
                     print("%s: %s." % (path, problem))
                     bad = 1
