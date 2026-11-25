@@ -139,6 +139,7 @@ def pd_case(label, name, stamp, data, want, fragment="", action="set", note=Fals
 
 
 # The deny cases read the checker's answer, so they run only where the checker can render.
+NO_NODE_CHROMIUM = "no node with playwright and Chromium on this host, so the checker's deny case does not run here"
 if PD_NEEDS_NODE:
     pd_case("a focus the mockup does not draw is denied, with the page's sentence", "focus", PD_PAGE,
             pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#fill", "state": "full",
@@ -156,6 +157,12 @@ if PD_NEEDS_NODE:
             pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#fill", "state": "full",
                               "file": PD_FILE}]),
             "deny", fragment="shows nothing the focus names", action="update")
+else:
+    for _pd_label in ("a focus the mockup does not draw is denied, with the page's sentence",
+                      "a state the mockup does not draw is denied, with the page's sentence",
+                      "a strip mockup below the picture floor is denied, naming option A",
+                      "an update that carries a missed picture is denied, with the page's sentence"):
+        skip_case("page-item-design: " + _pd_label, NO_NODE_CHROMIUM)
 
 pd_case("a good picture, focus #vol and state full, is allowed", "good", PD_PAGE, pd_item(), "allow")
 pd_case("a picture whose mockup slug is missing is allowed: the page warns in the frame", "missing", PD_PAGE,

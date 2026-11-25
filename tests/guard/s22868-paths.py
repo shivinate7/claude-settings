@@ -42,6 +42,9 @@ AUTHOR_RED = [
 ]
 for _name, _change in AUTHOR_RED:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
+        skip_case("author-diff: commit with a %s change is allowed and logged" % _name, NO_LINK_HERE)
+        skip_case("author-diff: push with a %s change is allowed and logged" % _name, NO_LINK_HERE)
+        skip_case("author-diff: stop with a %s change is allowed and logged" % _name, NO_LINK_HERE)
         continue
     _paths_repo = diff_repo("a-" + _name, _change)
     sh("author-diff: commit with a %s change is allowed and logged" % _name, COMMIT, "allow",

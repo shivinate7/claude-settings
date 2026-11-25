@@ -8,6 +8,7 @@ Modes:
   reason, logged to guard.log. `override <n>[m|h]` and `override off` mean that only as the whole prompt.
   A plain typed ask that holds the word `override` may grant one too, after a model call
   (decision owner-override; hooks/override.py). It prints one more line.
+  When the session's folder is gone, it also prints a line that says so.
 - --agent: At SubagentStart, gives the agent the time in US Central as context.
 - --page-note: After an ArtifactData read of one waiting-page answer, saves the owner's note on it to the session's inbox, like a chat message (decision owner-feedback-inbox). It prints no time line.
 
@@ -54,6 +55,7 @@ and the pagenotes file.
 import json
 import os
 import re
+import stat
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -404,6 +406,33 @@ def mail_lines(raw):
         print(text)
 
 
+def cwd_gone_line(raw):
+    """Prints one line when the payload's cwd no longer exists: the session's worktree was removed under it.
+    A regular file is no folder a session stands in, so it counts as gone. A newline in the path shows as a
+    backslash n, so the path cannot split the line. One stat, no child, no file. Any other stat error (a refused search, a bad path) means the check cannot
+    tell, so it prints nothing. The remedy text is guard.py's SESSION_HOME_REASON, imported only here so a turn
+    with a present cwd loads no guard."""
+    try:
+        cwd = json.loads(raw.decode("utf-8")).get("cwd")
+    except (ValueError, AttributeError):
+        return
+    if not isinstance(cwd, str) or not cwd:
+        return
+    try:
+        if stat.S_ISDIR(os.stat(cwd).st_mode):
+            return
+    except (FileNotFoundError, NotADirectoryError):
+        pass
+    except (OSError, ValueError):
+        return
+    cwd = cwd.replace("\n", "\\n")
+    try:
+        from guard import SESSION_HOME_REASON  # the remedy has one home; this hook holds no copy
+        print("Session folder gone: %s. %s" % (cwd, SESSION_HOME_REASON))
+    except Exception:  # the folder is known gone, so the line still goes out, with no remedy words of its own
+        print("Session folder gone: %s." % cwd)
+
+
 OLD_FLAG_ENDS = "2026-11-09"
 # Printed after the time line only, never in the capture stamp. The helper is bin/now-central.
 NOW_CENTRAL_POINTER = " Later times: run ~/.claude/bin/now-central, never from memory."
@@ -430,6 +459,10 @@ def main(argv):
                 capture(raw, stamp[len("Local time: "):])
             except Exception as e:  # a capture error never stops the grant
                 print("local_time: capture: %s" % e, file=sys.stderr)
+            try:
+                cwd_gone_line(raw)
+            except Exception as e:  # a print error here (a path stdout cannot encode) never skips the later lines
+                print("local_time: cwd gone: %s" % e, file=sys.stderr)
             grant_override(raw, now)
             mail_lines(raw)
     except Exception as e:  # advisory hook: fail open; one stderr line shows in --debug

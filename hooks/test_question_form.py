@@ -2977,15 +2977,6 @@ def case_press_link_label_is_a_string():
 
 
 # ------------------------------------------------------------------ a press link that is not a list; a partial edit of the Why yours line
-#
-# Each case below is also a pytest test (the test_ wrappers after it). A check the case records as failed fails
-# its test, by the check's name, so one runner and main() judge the same cases.
-
-def _judged(case):
-    """Run one case under pytest: each check it records as failed fails the test, by the check's name."""
-    before = len(FAILED)
-    case()
-    assert len(FAILED) == before, "; ".join(FAILED[before:])
 
 
 def case_press_link_links_not_a_list_on_a_step():
@@ -3041,34 +3032,6 @@ def case_task_str_replace_prose_label_passes():
     page('a str_replace that changes prose the "Why yours:" label to the label passes', "str_replace",
          {"collection": "items", "doc_id": DOC, "field": "context",
           "old_str": 'the "Why yours:" label', "new_str": "the label"}, None)
-
-
-def test_press_link_links_true_or_a_number_on_a_step_is_no_link():
-    _judged(case_press_link_links_not_a_list_on_a_step)
-
-
-def test_press_link_links_true_or_a_number_on_an_option_is_no_link():
-    _judged(case_press_link_links_not_a_list_on_an_option)
-
-
-def test_task_str_replace_removing_only_the_label_is_refused():
-    _judged(case_task_str_replace_removes_only_the_label)
-
-
-def test_str_replace_blank_prose_line_in_a_decision_passes():
-    _judged(case_str_replace_blank_prose_line_passes)
-
-
-def test_task_str_replace_rewording_the_reason_passes():
-    _judged(case_task_str_replace_rewords_the_reason)
-
-
-def test_task_str_replace_renaming_the_label_is_refused():
-    _judged(case_task_str_replace_renames_the_label)
-
-
-def test_task_str_replace_prose_label_mention_passes():
-    _judged(case_task_str_replace_prose_label_passes)
 
 
 def case_item_stray_field_refused_from_a_record_branch_checkout():
