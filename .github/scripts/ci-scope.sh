@@ -93,8 +93,10 @@ if [ -n "$files" ]; then
       # bin/ios-ship: macOS only. Its suite runs in the shell-macos job, under /bin/bash 3.2.
       bin/ios-ship|lint/test_ios_ship.sh) on="$on $S code " ;;
       # bin/sim-test: macOS only, like bin/ios-ship. Its suite runs in the shell-macos job, and runs the real bin/sim-lease
-      # beside the script, so an edit to bin/sim-lease turns the same job on.
-      bin/sim-test|lint/test_sim_test.sh|bin/sim-lease) on="$on $S code " ;;
+      # beside the script, so an edit to bin/sim-lease turns the same job on. bin/sim-lease is also a guard-suite read file
+      # (GUARD_READ_FILES in hooks/mutate_guard.py), so it sets `guard` too.
+      bin/sim-test|lint/test_sim_test.sh) on="$on $S code " ;;
+      bin/sim-lease) on="$on $S code guard " ;;
       # bin/duo-fold: macOS only (bash 3.2 script for the iPhone Duo). Its suite runs in the shell-macos job.
       bin/duo-fold|lint/test_duo_fold.sh) on="$on $S code " ;;
       # bin/shoot: its suite installs Playwright and Chromium, so only these paths run it.
@@ -122,6 +124,8 @@ if [ -n "$files" ]; then
       .gitignore) on="$on $W $X mods code " ;;
       # bin/rm: the shim imports hooks/guard_rm_var.py (hooks/* above); it runs on posix jobs.
       bin/rm|lint/test_rm_shim.py) on="$on $X code " ;;
+      # The CI alarm's events and clear rule: GUARD_READ_FILES (hooks/mutate_guard.py) lists them, so the guard suite reads them.
+      actions/ci-alarm/events.json|actions/ci-alarm/clear_rule.py) on="$on code guard " ;;
       # Linux `checks` job only: the lints and opt-in templates.
       actions/*|githooks/*|testing/*|lint/*|.github/dependabot.yml) on="$on code " ;;
       # Map skill .md files: its tests read them, so this arm turns on `mods` before the *.md arm.
