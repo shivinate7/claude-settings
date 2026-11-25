@@ -1256,27 +1256,55 @@ def _checkable_wait(item):
     return any(_names_a_file(m.group(1)) for m in _MEASURED_CONFLICT_RE.finditer(item))
 
 
-# A clause led by a pronoun or a reason phrase continues the item before it; any other clause after a `;` is an
-# item of its own.
-_CONTINUES_RE = re.compile(r"[\s*(]*(?:it|its|they|this|that|which|both|also|measured|merge-tree)\b", re.I)
+# An item is a short lane name, then what it waits on: `bin-x waits on PR #3680`, `docs lane needs ...`. A clause
+# after a comma, `;` or sentence end starts a new item only in that shape. A reason, a measured conflict, a file or
+# a pronoun clause ("which ...", "it needs ...", "both touch ...") has no lane name before its waiting word, or has
+# a long one, so it stays with the item it explains. A connective ahead of a name ("also bin-x waits") is no part of
+# the name; ahead of a waiting word ("that needs ...") the clause has no name and continues.
+_CLAUSE_END_RE = re.compile(r"[;,]|\.(?=\s)")
+_LEAD_RE = re.compile(r"[\s*(]*(?:(?:also|and|plus|then|that|this)\s+)?", re.I)
+_PRONOUNS = frozenset(("it", "its", "they", "their", "them", "which", "both", "he", "she", "these", "those"))
+_NAME_WORDS = 3
+
+
+def _starts_item(clause):
+    clause = clause[_LEAD_RE.match(clause).end():]
+    wait = _UNSTARTED_WAIT_WORD_RE.search(clause)
+    if not wait:
+        return False
+    name = re.findall(r"[\w#./-]+", clause[:wait.start()])
+    return 1 <= len(name) <= _NAME_WORDS and name[0].lower() not in _PRONOUNS
 
 
 def _unstarted_units(item):
-    """The Unstarted item split into the waits it holds: a bullet is one, and a `;` clause that is not a
-    continuation is one. Each is judged alone."""
+    """The Unstarted item split into the items it holds, each judged alone. A top-level bullet is one item, with
+    its wrapped lines and deeper sub-bullets. Within it a clause that starts an item is one, and any other clause
+    joins the item before it. A `none` item takes no clause, so nothing after it hides behind it."""
+    lines = item.split("\n")
+    top = None
+    groups = [[]]
+    for line in lines:
+        bullet = _BULLET_RE.match(line)
+        if bullet and not lines[0].strip():
+            if top is None:
+                top = len(bullet.group(1))
+            if len(bullet.group(1)) <= top:
+                groups.append([])
+        groups[-1].append(line)
     units = []
-    for line in item.split("\n"):
-        if _BULLET_RE.match(line) or not units:
-            units.append([])
-        units[-1].append(line)
-    out = []
-    for unit in units:
-        for clause in "\n".join(unit).split(";"):
-            if out and _CONTINUES_RE.match(clause):
-                out[-1] += ";" + clause
+    for group in groups:
+        text = "\n".join(group)
+        masked = re.sub(r"`[^`\n]*`", lambda m: re.sub(r"[;,.]", "_", m.group(0)), text)
+        start = 0
+        first = True
+        for end in [m.end() for m in _CLAUSE_END_RE.finditer(masked)] + [len(text)]:
+            clause, start = text[start:end], end
+            if first or _UNSTARTED_NONE_RE.match(units[-1]) or _starts_item(clause):
+                units.append(clause)
             else:
-                out.append(clause)
-    return out
+                units[-1] += clause
+            first = False
+    return units
 
 
 def _is_lane_wait(unit):
