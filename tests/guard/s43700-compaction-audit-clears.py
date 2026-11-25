@@ -5,12 +5,16 @@ FAMILY = "compaction-audit"
 # with "the handoff audit is still owed". The crash these cases hold: a spawn in a repo with a pointer checkout reaches
 # guard_core.layout_module() through role_model_check, and a lint folder with no lint/layout.py raises there.
 CA_SID = "5d1e8c4a-0000-4000-8000-00000000a0a1"   # the main session in these cases
+# The session's transcript path, as the payload carries it (ca_call sends it). The rule compares strings: an Audit: brief
+# clears the flag only when it names this path. Relative, as in hooks/test_handoff_wave2.py (SESSION_TRANSCRIPT).
+CA_TRANSCRIPT = "transcript-%s.jsonl" % CA_SID
 CA_AUDIT = {"description": "audit", "subagent_type": "Explore", "model": "sonnet",
-            "prompt": "Audit: check the handoff against the repo."}
+            "prompt": "Audit: check the handoff against the repo. Transcript: " + CA_TRANSCRIPT}
+CA_AUDIT_NO_PATH = dict(CA_AUDIT, prompt="Audit: check the handoff against the repo.")   # the stray brief the path rule refuses
 CA_NOT_AUDIT = {"description": "review", "subagent_type": "Explore", "model": "sonnet",
                 "prompt": "Review the diff."}
 CA_BUILDER_AUDIT = {"description": "audit", "subagent_type": "builder", "model": "sonnet",
-                    "prompt": "Audit: check the handoff against the repo."}
+                    "prompt": "Audit: check the handoff against the repo. Transcript: " + CA_TRANSCRIPT}
 CA_BASH = {"command": "echo hi"}
 CA_HANDOFF = "# Handoff\n"
 
@@ -59,7 +63,8 @@ def ca_hook(folder, mode, payload, cfg):
 
 def ca_call(folder, cfg, tool, tool_input):
     """One call through the copy's guard.py, from a folder that is not a git tree, in session CA_SID."""
-    payload = {"tool_name": tool, "tool_input": tool_input, "cwd": NOGIT, "session_id": CA_SID}
+    payload = {"tool_name": tool, "tool_input": tool_input, "cwd": NOGIT, "session_id": CA_SID,
+               "transcript_path": CA_TRANSCRIPT}
     return subprocess.run([sys.executable, os.path.join(folder, "hooks", "guard.py")], input=json.dumps(payload),
                           capture_output=True, text=True, env=ca_env(cfg), timeout=120)
 
@@ -174,6 +179,28 @@ def ca_later_refusal_check():
     return True, "an Audit: spawn that a later rule refuses clears nothing; the next call is refused"
 
 
+def ca_pathless_refused_check():
+    """An Audit: brief that names no transcript path is refused by compaction-audit and clears nothing: the flag stays,
+    and the next call is refused. The same brief with the path (CA_AUDIT) is the control, which clears the flag. On the
+    unchanged guard the stray brief clears the flag, so this check is the red."""
+    folder = ca_copy("intact", drop_layout=False)
+    cfg = ca_config("intact-cfg", None)
+    flag, why = ca_owed(folder, cfg)
+    if why:
+        return False, why
+    bare = _decision(ca_call(folder, cfg, "Agent", CA_AUDIT_NO_PATH))
+    why = ov_want(bare[0], bare[1], "deny", "compaction-audit")
+    if why:
+        return False, "the Audit: brief with no transcript path was not refused by compaction-audit: %s" % why
+    if not os.path.isfile(flag):
+        return False, "the Audit: brief with no transcript path cleared the audit flag"
+    spawn = _decision(ca_call(folder, cfg, "Agent", CA_AUDIT))
+    why = ov_want(spawn[0], spawn[1], "allow", "compaction-audit")
+    if why:
+        return False, "the Audit: brief that names the transcript path was not let through: %s" % why
+    return True, "an Audit: brief with no transcript path clears nothing; the brief that names the path clears the flag"
+
+
 # LOG_CHECKS_EXTRA joined at section 40805, so this section joins LOG_CHECKS directly, and sets each label's family
 # on LOG_FAMILY (as sections 43400 and 43421 do).
 CA_CHECKS = (
@@ -187,6 +214,8 @@ CA_CHECKS = (
      ca_refused_clears_nothing_check),
     ("compaction-audit: an Audit: spawn that a later rule refuses clears nothing, and the next call is refused",
      ca_later_refusal_check),
+    ("compaction-audit: an Audit: brief that names no transcript path is refused and clears nothing; the brief with the path clears",
+     ca_pathless_refused_check),
 )
 LOG_CHECKS = LOG_CHECKS + CA_CHECKS
 for _label, _check in CA_CHECKS:

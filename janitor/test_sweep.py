@@ -26,6 +26,7 @@ import hashlib
 import io
 import json
 import os
+import random
 import shlex
 import shutil
 import signal
@@ -3819,6 +3820,120 @@ class ParallelPreviewTests(unittest.TestCase):
         finally:
             undo()
         return state["peak"]
+
+
+class _StepClock:
+    """A `time.time` stand-in. Each read returns the current value, then moves on by STEP, so the
+    gap between two reads is STEP. A frozen clock has STEP 0."""
+
+    def __init__(self, start, step):
+        self.now = start
+        self.step = step
+
+    def __call__(self):
+        value = self.now
+        self.now += self.step
+        return value
+
+
+class SweepOrderTests(unittest.TestCase):
+    """`_oldest_idle_first` ranks trees by idle time, and each tree's idle is read off the clock
+    during the ranking. Trees that tie, or sit less than a second apart, must come back in one
+    order, whichever tree is read first and whatever the clock does between the reads. Fixed
+    mtimes and a stepping clock make every idle exact, so no case reads the real time."""
+
+    FIXED = 1900000000.0  # an absolute epoch: every mtime and every clock value counts from it
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, self.run, True)
+
+    def _tree(self, name, idle):
+        """A real repository whose git admin files were last touched IDLE seconds before FIXED."""
+        path = os.path.join(self.run, name)
+        make_repo(path, {"f.txt": name + "\n"})
+        _age_admin_files(path, idle, at=self.FIXED)
+        return path
+
+    def _assert_idles(self, paths, expected):
+        """Scope: the fixture's idle reads, at the fixed clock, are the ones a case assumes."""
+        for path, want in zip(paths, expected):
+            got = sweep.worktree_idle_seconds(path, now=self.FIXED)
+            self.assertIsNotNone(got, "scope: %s has no idle read" % os.path.basename(path))
+            self.assertAlmostEqual(got, want, places=5,
+                                   msg="scope: %s idles %s, not %s" % (os.path.basename(path), got, want))
+
+    def _order(self, paths, clock):
+        """Names, in the order `_oldest_idle_first` gives PATHS while `time.time` is CLOCK."""
+        with mock.patch("time.time", clock):
+            out = sweep._oldest_idle_first([{"path": path} for path in paths])
+        return tuple(os.path.basename(entry["path"]) for entry in out)
+
+    def test_equal_idle_trees_come_back_in_path_order_for_every_input_order(self):
+        names = ["tie-c", "tie-a", "tie-d", "tie-b"]
+        paths = [self._tree(name, 3600) for name in names]
+        self._assert_idles(paths, [3600] * len(paths))
+        inputs, outputs = set(), set()
+        for seed in range(20):
+            shuffled = list(paths)
+            random.Random(seed).shuffle(shuffled)
+            inputs.add(tuple(os.path.basename(path) for path in shuffled))
+            outputs.add(self._order(shuffled, _StepClock(self.FIXED, 0)))
+        self.assertGreater(len(inputs), 1, "scope: the 20 shuffles gave one input order, so no tie was tested")
+        self.assertEqual(outputs, {tuple(sorted(names))},
+                         "trees with equal idle did not come back in path order: %d orders, for example %s"
+                         % (len(outputs), sorted(outputs)[0]))
+
+    def test_trees_less_than_a_second_apart_come_back_in_one_order(self):
+        splits = []
+        for number, gap in enumerate((0, 0.001, 0.06, 0.4)):
+            a = self._tree("gap%d-a" % number, 3600)
+            b = self._tree("gap%d-b" % number, 3600 - gap)
+            self._assert_idles([a, b], [3600, 3600 - gap])
+            first_seen = {}  # each order, with the first clock step and read that gave it
+            for step in (0, 0.001, -0.001, 0.25, 0.8, -0.8):
+                for read in ((a, b), (b, a)):
+                    order = self._order(read, _StepClock(self.FIXED, step))
+                    first_seen.setdefault(order, "clock step %s, %s read first"
+                                          % (step, os.path.basename(read[0])))
+            if len(first_seen) > 1:
+                splits.append("gap %s s: " % gap + "; ".join(
+                    "%s first at %s" % (" then ".join(order), where) for order, where in first_seen.items()))
+        self.assertEqual(splits, [],
+                         "trees less than a second apart came back in more than one order: " + " | ".join(splits))
+
+    def test_control_tree_idle_ten_minutes_sorts_before_one_idle_one_minute(self):
+        one = self._tree("ctl-one-minute", 60)
+        ten = self._tree("ctl-ten-minutes", 600)
+        self._assert_idles([one, ten], [60, 600])
+        self.assertEqual(self._order([one, ten], _StepClock(self.FIXED, 0)),
+                         ("ctl-ten-minutes", "ctl-one-minute"),
+                         "the longer-idle tree did not sort first")
+
+    def test_control_tree_with_unreadable_idle_sorts_last(self):
+        known = self._tree("ctl-known", 600)
+        plain = os.path.join(self.run, "ctl-not-a-repo")
+        os.makedirs(plain)
+        self.assertIsNone(sweep.worktree_idle_seconds(plain, now=self.FIXED),
+                          "scope: a folder that is not a repository reads an idle")
+        self.assertEqual(self._order([plain, known], _StepClock(self.FIXED, 0)),
+                         ("ctl-known", "ctl-not-a-repo"),
+                         "the tree with no readable idle did not sort last")
+
+    def test_an_unreadable_idle_sorts_last_past_a_fresh_tree_with_a_smaller_path(self):
+        fresh = self._tree("ctl-fresh", 0)
+        plain = os.path.join(self.run, "a-not-a-repo")
+        os.makedirs(plain)
+        self._assert_idles([fresh], [0])
+        self.assertIsNone(sweep.worktree_idle_seconds(plain, now=self.FIXED),
+                          "scope: a folder that is not a repository reads an idle")
+        self.assertEqual(self._order([plain, fresh], _StepClock(self.FIXED, 0)),
+                         ("ctl-fresh", "a-not-a-repo"),
+                         "the tree with no readable idle sorted ahead of a fresh tree with a smaller path")
+
+    def test_control_no_trees_gives_an_empty_order(self):
+        self.assertEqual(list(sweep._oldest_idle_first([])), [],
+                         "an empty input did not give an empty order")
 
 
 # --------------------------------------------------------------------------- the purge
@@ -7828,10 +7943,11 @@ def _norm_path(path):
     return os.path.normcase(os.path.realpath(path))
 
 
-def _age_admin_files(path, seconds):
-    """Make a worktree's own git admin files `seconds` old, so the strict idle rule reads it quiet."""
+def _age_admin_files(path, seconds, at=None):
+    """Make a worktree's own git admin files `seconds` old, so the strict idle rule reads it quiet.
+    AT is the epoch the age counts back from. None counts from the real clock now."""
     admin = run_vcs(path, "rev-parse", "--absolute-git-dir").stdout.strip()
-    then = time.time() - seconds
+    then = (time.time() if at is None else at) - seconds
     for name in ("index", "HEAD", os.path.join("logs", "HEAD")):
         target = os.path.join(admin, name)
         if os.path.exists(target):
