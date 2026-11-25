@@ -24,7 +24,7 @@ the hook prints one JSON object on stdout and exits 0:
 - The staged-diff line holds `git diff --cached --stat`. It appears once for each type that
   commits (builder, test-author, record-writer, designer and any other type) and never for a
   read-only type. Decision lanes-start-in-tool-worktrees.
-- The commit-evidence line (`Commit test evidence ...`) appears once, word for word, in the brief of each writer
+- The commit-evidence line (`Commit the test evidence ...`) appears once, word for word, in the brief of each writer
   role: builder, test-author, record-writer and designer, and of a general or missing type, which the hook treats
   as a writer. No read-only type gets it.
 - A plugin-namespaced type (`my-plugin:builder`) gets the scope of its bare name. The match ignores
@@ -123,9 +123,9 @@ READER_RULES = [
 # The commit-evidence line goes to every writer: the four writer roles, and a general or missing type, which the hook
 # treats as a writer. Its place in the brief is not pinned here: line_set_check leaves it out, and the commit-evidence
 # cases below pin its text and its readers.
-COMMIT_EVIDENCE_LINE = ("- Commit test evidence (a test-result bundle, a kept red run) in your worktree. "
-                        "Never leave it untracked there.")
-EVIDENCE_KEYS = ("Commit test evidence", "Never leave it untracked")  # stable fragments: a line of any wording that holds one counts
+COMMIT_EVIDENCE_LINE = ("- Commit the test evidence your work made this round (a test-result bundle) in your worktree. "
+                        "Never leave it untracked there. If your scope does not cover the file, report its path instead.")
+EVIDENCE_KEYS = ("Commit the test evidence", "Never leave it untracked")  # stable fragments: a line of any wording that holds one counts
 # (label, agent type) for each writer. A missing type is MISSING: payload() then leaves agent_type out of the JSON.
 EVIDENCE_WRITERS = [
     ("builder", "builder"),
@@ -410,8 +410,8 @@ for _t in ["my-plugin:reviewer", "ns:Explore"]:
         line_set_check(READER_RULES))
 
 
-# COMMIT EVIDENCE: a writer commits its test evidence in its own worktree and never leaves it untracked there. The line
-# goes to every writer once per brief. A read-only role never commits, so it never gets the line.
+# COMMIT EVIDENCE: a writer commits the test evidence its work made in its own worktree and never leaves it untracked
+# there. The line goes to every writer once per brief. A read-only role never commits, so it never gets the line.
 def evidence_lines(text):
     """The lines of the brief that hold a commit-evidence fragment, whatever their wording."""
     return [line for line in text.split("\n") if any(key in line for key in EVIDENCE_KEYS)]
