@@ -3164,13 +3164,42 @@ def _own_trash_lines(parent: str, base: str, original: str, lines):
     return mine
 
 
+def _nested_repo_holds_work(repo: str):
+    """True when the repo at REPO has an uncommitted path or a HEAD commit no remote head holds, False when it
+    is clean and every commit is on its remote (a clone: build output), None when git cannot say."""
+    lines = git_reads.porcelain(repo)
+    if lines is None:
+        return None
+    if lines:
+        return True
+    pushed = fully_pushed(repo)
+    return None if pushed is None else not pushed
+
+
+def _nested_repos_hold_work(path: str):
+    """True when a repo under the trash folder PATH holds work, False when each one is a clean clone of its
+    remote, None when one cannot be read. A `.git` file or link is a pointer git cannot judge here, so it is
+    work, as it was before a clone could read clean. The walk follows no link and skips each `.git` folder."""
+    unreadable = []
+    verdicts = []
+    for dirpath, dirnames, filenames in os.walk(path, followlinks=False, onerror=unreadable.append):
+        if ".git" in filenames or (".git" in dirnames and is_link(os.path.join(dirpath, ".git"))):
+            return True
+        if ".git" in dirnames:
+            dirnames.remove(".git")
+            verdicts.append(_nested_repo_holds_work(dirpath))
+    if True in verdicts:
+        return True
+    return None if unreadable or None in verdicts else False
+
+
 def trash_dirty(path: str):
     """True when the trash folder PATH holds work, False when it holds none, None when git cannot say.
     The reap renames a build folder whole and deletes it whatever it holds (decision
     build-dirs-reaped-at-agent-end), so an untracked path under the trash name is build output, not work.
     What is work is a path git tracks: a staged or changed file, or a tracked file the rename moved away
-    from the build name (listed as deleted there), judged on this folder's own lines only. A `.git` folder
-    or file anywhere inside is work too: the parent repo cannot see it. The read is limited to the trash
+    from the build name (listed as deleted there), judged on this folder's own lines only. A nested repo is
+    work too, since the parent repo cannot see it, unless it is a clean clone with every commit on its remote. The read is limited to the trash
     name and the name it had before the rename."""
     parent, base = os.path.split(os.path.normpath(path))
     original = untrash_name(base)
@@ -3182,6 +3211,8 @@ def trash_dirty(path: str):
     if lines is not None and any(line[:2] != "??" for line in lines):
         return True
     nested = has_nested_git(path)
+    if nested:
+        nested = _nested_repos_hold_work(path)
     if nested:
         return True
     return None if lines is None or nested is None else False
