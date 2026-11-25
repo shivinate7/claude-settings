@@ -75,7 +75,7 @@ def install_path(*parts):
 
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 from own_session import _CREATED_ID as SESSION_ID  # noqa: E402  the one home of the session id shape
-from shared_names import GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN  # noqa: E402  the one home of the gh logins
+from shared_names import GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN, SETTINGS_REPO  # noqa: E402  the one home of the gh logins
 
 PASS = ("", "")
 FORM_RULE, STAKE_RULE = "question-form", "owner-judge"
@@ -354,17 +354,19 @@ def _write_data(entry, cwd=""):
 # chat box the mark is the words below in an option's label or description, and such an option's label
 # never carries (Recommended). Read at the same ArtifactData call.
 WIDENS_TEXT = "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo"
-WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts, so that one repo's "
-                 "differing form passes: the owner ruled that "
+WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts, so that the differing "
+                 "form of a repo other than " + SETTINGS_REPO + " passes: the owner ruled that "
                  "a repo changes to fit a shared tool, never the tool to fit a repo. A change to the shared tool "
-                 "that every repo gets alike, with no repo named as its reason, is not widening. Make `recommended` (or `pick`, "
+                 "that every repo gets alike, with no repo named as its reason, is not widening. A change that "
+                 "names only " + SETTINGS_REPO + " as where it applies does not widen. Make `recommended` (or `pick`, "
                  "its old name, where the item still uses it) an option where the repo changes to match the "
                  "shared format. When every option widens, add an option that does not widen and "
                  "recommend that one.")
-CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool accepts, so that one repo's "
-                      "differing form passes: the owner ruled that a "
+CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool accepts, so that the differing "
+                      "form of a repo other than " + SETTINGS_REPO + " passes: the owner ruled that a "
                       "repo changes to fit a shared tool, never the tool to fit a repo. A change to the shared tool "
-                      "that every repo gets alike, with no repo named as its reason, is not widening. Recommend an option "
+                      "that every repo gets alike, with no repo named as its reason, is not widening. A change that "
+                      "names only " + SETTINGS_REPO + " as where it applies does not widen. Recommend an option "
                       "where the repo changes to match the shared format, and give the widening option no "
                       "(Recommended) label.")
 # Older sessions still write these words in chat; the mark keeps refusing them. No card, rule text or
