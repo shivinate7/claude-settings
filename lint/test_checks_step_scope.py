@@ -575,9 +575,9 @@ TRANSITIVE_ALLOWED = {
     "hooks/test_mutate_ci.py": (["test_guard.py"], "strace, round 1 review: no open of skills/impeccable at run time"),
     "lint/check_unknown_reads_contract.py": (["test_guard.py"], "strace, round 1 review: no open of skills/impeccable at run time"),
 }
-# A shell or JS line that runs or reads something. A line without one (a case pattern, a comment) names no read. A command word is
-# not a part of a path: the `sh` of merge/install_from_main.sh is an extension.
-INVOKE = re.compile(r"(?<![\w./-])(python3?|node|bash|sh|source|cat|readFileSync|readFile|spawnSync|spawn|execFileSync|execFile|exec)(?![\w./-])")
+# A shell or JS line that runs or reads something. A line without one (a case pattern, a comment) names no read. The `sh` after a dot
+# is a file extension (merge/install_from_main.sh), not the command.
+INVOKE = re.compile(r"\b(python3?|node|bash|source|cat|readFileSync|readFile|spawnSync|spawn|execFileSync|execFile|exec)\b|(?<!\.)\bsh\b")
 
 
 def read_repo(rel):
