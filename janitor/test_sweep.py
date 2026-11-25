@@ -1341,6 +1341,82 @@ class WorktreeDecisionTests(unittest.TestCase):
         self.assertEqual(decision["reason"], "unreadable-subject")
 
 
+class StaleCwdRecordTests(unittest.TestCase):
+    """A session record whose folder is gone stands in no tree, for a removal that the dirty, locked and unmerged keeps
+    also guard (owner, 20:53 CST 11-24, 2026). Only the removal verdicts opt in. The orphan-process reap and
+    `trash_verdict` have no dirty check and act at once, so beside such a record they keep their old answer. This class
+    has its own config folder, so its record reaches no other class's read."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.base = tempfile.mkdtemp(prefix="stale-cwd-", dir=_test_temp.run_folder())
+        cls.cfg = os.path.join(cls.base, "cfg")
+        cls.env = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cls.cfg})
+        cls.env.start()
+        cls.root = os.path.join(cls.base, "stale-repo")
+        make_repo(cls.root, {"f.txt": "base\n"})
+        give_remote(cls.root)
+        cls.removable = os.path.join(cls.base, "wt-stale-removable")
+        run_vcs(cls.root, "worktree", "add", "-q", cls.removable, "-b", "lane-stale-removable")
+        # The record's cwd: a folder made and then removed, so the session's folder is gone.
+        cls.gone = os.path.join(cls.base, "gone-session", "wt")
+        os.makedirs(cls.gone)
+        os.rmdir(cls.gone)
+        os.rmdir(os.path.dirname(cls.gone))
+        # A LIVE record: this test process's own pid and its real start time. Only its folder is gone.
+        write(os.path.join(cls.cfg, "sessions", "stale-cwd-record.json"),
+              json.dumps({"pid": os.getpid(), "startedAt": this_process_start_ms(), "cwd": cls.gone}))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.env.stop()
+        shutil.rmtree(cls.base, ignore_errors=True)
+
+    def entry_for(self, path):
+        entries = sweep.parse_worktree_list(self.root)
+        self.assertTrue(entries, "worktree list must not be empty")
+        target = os.path.normcase(os.path.realpath(path))
+        for entry in entries:
+            if os.path.normcase(os.path.realpath(entry["path"])) == target:
+                return entry
+        self.fail("no worktree-list entry found for %r" % path)
+
+    def assert_record_stands_nowhere(self):
+        """Scope first: the record's folder is absent, so a verdict can only come from the record."""
+        self.assertFalse(os.path.exists(self.gone), "scope: the record's folder must be absent")
+        self.assertTrue(os.path.isdir(self.removable), "scope: the clean tree must be a folder")
+
+    def test_clean_merged_tree_is_reaped_beside_a_record_whose_folder_is_gone(self):
+        self.assert_record_stands_nowhere()
+        decision = sweep.decide_worktree(self.root, self.entry_for(self.removable), attended=True)
+        self.assertEqual(decision["reason"], "removable",
+                         "a clean merged tree was kept, so a record whose folder is gone still stands in it")
+        self.assertEqual(decision["action"], "reap")
+
+    def test_orphaned_listener_stays_kept_beside_such_a_record(self):
+        """The orphan-process reap stops a process and has no dirty check. Both its orphan and its owner reads say yes,
+        so only the session read can keep it: a removed folder must not reach that read."""
+        self.assert_record_stands_nowhere()
+        entry = {"pid": os.getpid(), "port": 1, "cwd": self.removable, "checkout": self.removable}
+        with mock.patch.object(sweep, "is_orphan", return_value=True), \
+                mock.patch.object(sweep, "is_current_user_process", return_value=True):
+            decision = sweep.decide_listener(entry)
+        self.assertEqual(decision["reason"], "unreadable-subject",
+                         "the orphan reap opted in to a record whose folder is gone; it must keep the listener")
+        self.assertEqual(decision["action"], "keep")
+
+    def test_trash_folder_stays_kept_beside_such_a_record(self):
+        """`trash_verdict` deletes a folder with no dirty check. Beside a record whose folder is gone it keeps the
+        folder as unreadable, as before."""
+        self.assert_record_stands_nowhere()
+        folder = os.path.join(self.base, "trash-leftover")
+        os.makedirs(folder)
+        delete, reason = sweep.trash_verdict(folder)
+        self.assertEqual(reason, "unreadable-subject",
+                         "trash_verdict opted in to a record whose folder is gone; it must keep the folder")
+        self.assertFalse(delete)
+
+
 class StaleAgentLockTests(unittest.TestCase):
     """A claude agent lock (`claude agent agent-<id> (pid N start <UTC date>)`) is stale when its
     pid is dead, or alive with another start time. A stale lock no longer keeps the worktree; the
