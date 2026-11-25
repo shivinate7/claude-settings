@@ -877,7 +877,8 @@ def case_two_new_entries_and_no_older_reason_log_two_lines_and_print_nothing():
 
 
 def case_malformed_new_field_prints_nothing_and_logs_nothing_for_it():
-    # Control on the head: the head ignores `new_rules`, so these halves pin the malformed handling as it stands.
+    # A malformed `new_rules` (a non-list, or an entry with an unknown id and no rule key) drops only that field:
+    # the older reason on the same answer still prints and logs, and the bad entry prints and logs nothing.
     shapes = (
         ("not a list", two_field_answer(False, BLOCK_REASON, NEW_FINDING_RULE + ": " + BAD_ENTRY)),
         ("unknown id and no rule key", two_field_answer(False, BLOCK_REASON, [new_entry("not-a-rule-anchor", BAD_ENTRY),
@@ -914,7 +915,7 @@ def case_new_rules_only_answer_without_ok_still_logs_its_line():
 
 
 def case_new_rules_only_answer_with_ok_still_logs_its_line():
-    # Control: the same entry with `ok` true logs its line, as it does on the head.
+    # Control for the case above: the same entry with `ok` true. The line is logged whether or not `ok` is present.
     config = sample_config("with-ok-new-rules")
     run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 1: the full prompt, sampled
     answer = json.dumps({"ok": True, "new_rules": [new_entry(NEW_WAIT_RULE, "the wait names no event; name what it waits for.")]})
@@ -1057,6 +1058,22 @@ def case_skipped_stop_is_silent():
     check("skip: Stop 2 makes one model call, for the new rules only", new_rules_only(skipped), skipped.calls)
     check("skip: Stop 2 prints nothing on stdout", skipped.out.strip() == "", skipped.out)
     check("skip: Stop 2 prints nothing on stderr", skipped.err.strip() == "", skipped.err)
+
+
+# --------------------------------------------------------------------------- every-reply: a skipped Stop's failed verdict
+# A Stop the older rules skip sends the new rules only. Its answer may say `ok` false with a reason, but the older rules
+# did not judge this reply, so nothing prints and nothing logs. The gate is `if older and verdict.get("ok") is False:`
+# in hooks/reply_judge.py; without `older and`, Stop 2 prints the reason, and this case goes red.
+
+def case_skipped_stop_with_ok_false_and_a_reason_prints_nothing():
+    config = sample_config("skip-ok-false")
+    run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 1, sampled
+    skipped = run_hook(MARK, answer=FINDING_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 2: new rules only
+    check("skip, ok false: Stop 2 exit 0", skipped.code == 0, skipped.code)
+    check("skip, ok false: Stop 2 makes one model call, for the new rules only", new_rules_only(skipped), skipped.calls)
+    check("skip, ok false: Stop 2 prints nothing on stdout", skipped.out.strip() == "", skipped.out)
+    check("skip, ok false: Stop 2 logs no line, since the older rules did not judge it",
+          guard_rules(config) == [], guard_rules(config))
 
 
 # --------------------------------------------------------------------------- case 10
@@ -2924,6 +2941,7 @@ CASES = (
     case_child_cannot_retrigger_hook,
     case_settings_reply_judge_is_async_and_report_guard_is_not,
     table_sampling,
+    case_skipped_stop_with_ok_false_and_a_reason_prints_nothing,
     case_sessions_keep_separate_counters,
     case_damaged_counter_fails_open,
     case_counter_write_failure_never_blocks,
