@@ -866,5 +866,33 @@ class PermissionsAllow(unittest.TestCase):
         self.assertFalse(held, "ArtifactComments is on permissions.allow, but it posts visible text and must stay asking")
 
 
+# The guard judges an agent's call to any MCP tool (rule agent-no-mcp-tools), so the guard entry's matcher must see every
+# MCP tool. start_session is the one exception: StartSessionNotPreToolUse keeps it off every PreToolUse matcher.
+MCP_TOOLS = (
+    "mcp__computer-use__app_click",
+    "mcp__rea__list_names",
+    "mcp__Claude_Browser__navigate",
+    "mcp__claude-code-remote__create_session",
+    "mcp__an-unlisted-server__any_tool",
+)
+
+
+class McpToolMatcher(unittest.TestCase):
+    def test_guard_matcher_covers_every_mcp_tool(self):
+        matchers = guard_matchers()
+        self.assertTrue(matchers, "no guard.py entry in settings.json PreToolUse")
+        for tool in MCP_TOOLS:
+            with self.subTest(tool=tool):
+                self.assertTrue(any(pre_tool_covers(matcher, tool) for matcher in matchers),
+                                "no guard matcher covers %s, so an agent's call to it is never judged" % tool)
+
+    def test_guard_matcher_still_leaves_start_session_out(self):
+        # A control for the exception: the guard entry's matcher must not cover start_session.
+        for matcher in guard_matchers():
+            with self.subTest(matcher=matcher):
+                self.assertFalse(pre_tool_covers(matcher, START_SESSION),
+                                 "the guard matcher %r covers %s" % (matcher, START_SESSION))
+
+
 if __name__ == "__main__":
     unittest.main()
