@@ -18,7 +18,9 @@ in the test file, where X is the product's module name: the stand-in is the thir
 `obj.method` whose def is unique in the file, a lambda, or `Class()` for a class with `__call__`. Such a stand-in
 is a finding when it lacks a keyword the product passes, unless it takes `**kwargs`, or when it takes fewer
 positional parameters than the largest call passes, unless it takes `*args`. A bound method's `self` does not
-count. Anything else (a Mock, an imported name, a call result, a patch of a name the product does not define as a
+count. A patch of the product module the check cannot resolve (`patch.object(*target)` in any paired file,
+`patch("X.name")`, `patch.multiple(X, name=...)`, `new_callable=`) is counted as not judged, with no finding.
+Anything else (a Mock, an imported name, a call result, a patch of a name the product does not define as a
 literal) is counted, not judged; a patch of a literal name the product does not define is out of scope.
 
 Prints one `test_X.py:LINE` line per finding, with the remedy, and one `N stand-ins not judged` line when N is
@@ -91,13 +93,36 @@ def module_aliases(tree, stem):
     return names
 
 
-def is_patch_object(call):
+def is_patch_ref(node):
+    return (isinstance(node, ast.Attribute) and node.attr == "patch") or (isinstance(node, ast.Name) and node.id == "patch")
+
+
+def is_patch_object(call, attr="object"):
+    """True for `patch.<attr>(...)`; attr None means a plain `patch(...)`."""
     func = call.func
-    if not (isinstance(func, ast.Attribute) and func.attr == "object"):
-        return False
-    owner = func.value
-    return (isinstance(owner, ast.Attribute) and owner.attr == "patch") or (
-        isinstance(owner, ast.Name) and owner.id == "patch")
+    if attr is None:
+        return is_patch_ref(func)
+    return isinstance(func, ast.Attribute) and func.attr == attr and is_patch_ref(func.value)
+
+
+def unresolved_form(call, stem, targets, defined):
+    """True when call patches the product module in a form this check cannot resolve to one literal name.
+
+    A starred patch.object(*target) hides its module, so any paired test file counts it. A string target
+    `patch("stem.name")` and `patch.multiple(stem, name=...)` name the module but not a single stand-in
+    expression the check can judge. Only a name the product defines counts, as for a literal patch.object."""
+    if is_patch_object(call) and call.args and isinstance(call.args[0], ast.Starred):
+        return True
+    if is_patch_object(call, None) and call.args:
+        target = call.args[0]
+        if isinstance(target, ast.Constant) and isinstance(target.value, str) and target.value.startswith(stem + "."):
+            return target.value[len(stem) + 1:] in defined
+    if is_patch_object(call, "multiple") and call.args:
+        target = call.args[0]
+        names_module = (isinstance(target, ast.Name) and target.id in targets) or (
+            isinstance(target, ast.Constant) and target.value == stem)
+        return names_module and any(kw.arg is None or kw.arg in defined for kw in call.keywords)
+    return False
 
 
 def standin_expr(call):
@@ -194,6 +219,8 @@ def check_standins(product_path, test_paths):
         targets = module_aliases(tree, stem)
         sites = []
         collect_sites(tree, [tree], targets, sites)
+        not_judged += sum(1 for node in ast.walk(tree) if isinstance(node, ast.Call)
+                          and unresolved_form(node, stem, targets, defined))
         for call, scopes in sites:
             literal = call.args[1] if len(call.args) > 1 else None
             if isinstance(literal, ast.Constant) and isinstance(literal.value, str):
@@ -205,6 +232,8 @@ def check_standins(product_path, test_paths):
                 continue
             expr = standin_expr(call)
             if expr is None:
+                if any(kw.arg == "new_callable" for kw in call.keywords):
+                    not_judged += 1
                 continue
             got = judge.callable_of(expr, scopes)
             if got is None:
