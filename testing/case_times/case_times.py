@@ -68,9 +68,23 @@ def _flush():
         sys.stderr.write("case_times: could not append %s: %s\n" % (path, error))
 
 
+def _import_failure_suite(test):
+    """The file of the module the loader could not import, when the case's id names a module whose file is under the
+    latched cwd. Else the literal import-failure. The loader's own file is never a suite."""
+    name = getattr(test, "_testMethodName", None) or ""
+    base = _LATCH["cwd"]
+    if base is not None and all(part.isidentifier() for part in name.split(".")):
+        path = name.replace(".", "/") + ".py"
+        if os.path.isfile(os.path.join(base, path)):
+            return path
+    return "import-failure"
+
+
 def _suite_of(test):
     """The test file's path relative to the cwd latched at arm time, with forward slashes. It never reads the live
     cwd, which a test may have removed or moved."""
+    if type(test).__name__ == "_FailedTest" and type(test).__module__ == "unittest.loader":
+        return _import_failure_suite(test)
     module = sys.modules.get(type(test).__module__)
     path = getattr(module, "__file__", None) or type(test).__module__
     base = _LATCH["cwd"]

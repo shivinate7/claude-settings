@@ -310,6 +310,17 @@ class Outer(unittest.TestCase):
 '''
 
 
+# A test module whose import fails on a module that is not there: the loader gives its failure a _FailedTest case.
+IMPORT_FAILS = '''import fixture_missing_dependency_for_case_times  # noqa: F401  the import fails on purpose
+import unittest
+
+
+class Never(unittest.TestCase):
+    def test_never_runs(self):
+        self.assertTrue(True)
+'''
+
+
 def setUpModule():
     global RUN
     RUN = _test_temp.run_folder()
@@ -632,6 +643,37 @@ class NestedRuns(unittest.TestCase):
         outer = {row.get("case"): row.get("s") for row in rows if (row.get("case") or "").startswith("Outer.")}
         self.assertEqual(outer, {"Outer.test_a_runs_inner": 0.75, "Outer.test_b_runs_inner": 0.25},
                          "the outer rows do not hold the time of the inner case they run: %s" % outer)
+
+
+class ImportFailure(unittest.TestCase):
+    def assert_failed_import_row(self, module, folder, want_suite):
+        unarmed = run_module(folder, module, armed=False, report=True)
+        self.assertEqual(result_line(unarmed), "RESULT ran=1 failures=0 errors=1 skipped=0",
+                         "the unarmed control run did not report one import error: %r" % unarmed.stderr[-300:])
+        armed = run_module(folder, module, report=True)
+        scope_ok(self, armed)
+        self.assertEqual(armed.returncode, unarmed.returncode, "the armed run exited %d, the unarmed %d"
+                         % (armed.returncode, unarmed.returncode))
+        self.assertEqual(result_line(armed), result_line(unarmed),
+                         "the armed run's outcome differs from the unarmed run's")
+        rows = rows_of(folder)
+        self.assertIsNotNone(rows, "the armed run wrote no case-times file")
+        failed = [row for row in rows if row.get("case") == "_FailedTest." + module]
+        self.assertEqual(len(failed), 1, "the import failure has %d rows, want one: %s" % (len(failed), rows))
+        self.assertEqual(failed[0].get("suite"), want_suite,
+                         "the import failure's row is named for %r, want %r: the loader's own file is not a suite"
+                         % (failed[0].get("suite"), want_suite))
+        self.assertEqual(failed[0].get("group"), want_suite, "the import failure's group is %r, want %r"
+                         % (failed[0].get("group"), want_suite))
+
+    def test_named_by_the_failed_modules_own_file(self):
+        folder = case_folder(self)
+        write(folder, "fixture_import_fails.py", IMPORT_FAILS)
+        self.assert_failed_import_row("fixture_import_fails", folder, "fixture_import_fails.py")
+
+    def test_no_file_is_named_import_failure(self):
+        folder = case_folder(self)
+        self.assert_failed_import_row("fixture_no_such_module", folder, "import-failure")
 
 
 class RowFails(unittest.TestCase):
