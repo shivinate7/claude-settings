@@ -24,6 +24,8 @@ import _test_temp  # noqa: E402  the one home of the run folder and its sweep (l
 
 TIMEOUT = 300  # seconds for one runner; a hang guard well above a runner's run
 CASE_LISTS = ("CASES", "RED_CASES", "GENERAL_CASES", "BAD_CASES")
+# A runner that builds its list inside main() (hooks/test_wrappers.py) is emptied by a builder that returns [].
+CASE_BUILDERS = ("build_cases",)
 # Not listed: hooks/test_guard.py, whose cases come from section files on disk and not from a case list,
 # and lint/check_guardset_lists.py, which with no case names runs hooks/test_install_src.sh whole.
 RUNNERS = [
@@ -53,8 +55,11 @@ for name in %r:
     if hasattr(mod, name):
         value = getattr(mod, name)
         setattr(mod, name, type(value)())
+for name in %r:
+    if hasattr(mod, name):
+        setattr(mod, name, lambda: [])
 sys.exit(mod.main())
-''' % (CASE_LISTS,)
+''' % (CASE_LISTS, CASE_BUILDERS)
 
 
 def setUpModule():

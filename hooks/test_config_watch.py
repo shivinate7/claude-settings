@@ -26,6 +26,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 GUARD = os.path.join(HERE, "guard.py")
 sys.path.insert(0, HERE)
 from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup
+import case_runner_test  # noqa: E402  the one zero-case check for a hand runner (hooks/case_runner_test.py)
 
 
 # Git Bash by full path, never a bare "bash" (hooks/git_bash.py says why). `to_bash_path` below builds the
@@ -704,6 +705,8 @@ def sweep_session_check():
 
 
 def main() -> int:
+    if case_runner_test.no_cases_exit(CASES, "test_config_watch"):
+        return 1
     print("config_watch cases, %d in all" % len(CASES))
     print()
     failed = 0

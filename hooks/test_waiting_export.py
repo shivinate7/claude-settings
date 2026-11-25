@@ -30,6 +30,7 @@ REPO = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+import case_runner_test  # noqa: E402  the one zero-case check for a hand runner (hooks/case_runner_test.py)
 sys.path.insert(0, HERE)
 
 ROOT = _test_temp.run_folder()
@@ -882,6 +883,8 @@ def run_case(case):
 
 
 def main():
+    if case_runner_test.no_cases_exit(CASES, "test_waiting_export"):
+        return 1
     try:
         for case in CASES:
             run_case(case)

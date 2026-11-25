@@ -25,6 +25,7 @@ import test_waiting_export as twe  # noqa: E402  the shared fixtures and run_sto
 from shared_names import MACHINE_TAGS, TASK_NOTIFICATION_TAG  # noqa: E402  the machine notice tags, one home
 import layout  # noqa: E402  the registry and the waiting page id (lint/layout.py)
 import report_guard as RG  # noqa: E402  the one home of the correction tail, CORRECTION_TAIL (lint/report_guard.py)
+import case_runner_test  # noqa: E402  the one zero-case check for a hand runner (hooks/case_runner_test.py)
 
 LINK = "https://claude.ai/artifact/"  # the link form the reason names
 CODE_URL = "https://claude.ai/code/artifact/" + twe.PAGE_ID  # the same artifact, the other URL form
@@ -344,6 +345,8 @@ CASES = (
 
 
 def main():
+    if case_runner_test.no_cases_exit(CASES, "test_page_link_check"):
+        return 1
     try:
         for case in CASES:
             twe.run_case(case)

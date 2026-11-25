@@ -9,9 +9,21 @@ class Skip(Exception):
     """A case raises it when this host cannot run the case. It prints as SKIP and never fails the run."""
 
 
+def no_cases_exit(cases, runner):
+    """Return 1 and print a line saying no cases ran when a runner's case list is empty, else None.
+    A runner calls it first, so a list emptied by mistake fails the run. A skipped case is a case that
+    ran, so a list of skips is not empty."""
+    if cases:
+        return None
+    print(f"{runner} FAIL: no cases ran, so nothing was checked")
+    return 1
+
+
 def run_cases(cases):
     """Run each case function. A case returns a list of problems, empty for a pass. Return 1 when
-    any case failed, else 0."""
+    any case failed, or when there are no cases, else 0."""
+    if no_cases_exit(cases, "run_cases"):
+        return 1
     failed = skipped = 0
     for fn in cases:
         name = (fn.__doc__ or fn.__name__).strip()

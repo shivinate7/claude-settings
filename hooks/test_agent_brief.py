@@ -50,6 +50,7 @@ import guard_core  # noqa: E402  the one home of the refuter role's name (REFUTE
 from tool_lists_test import tokens, unread_list  # noqa: E402  the one reader of tool lists (hooks/tool_lists_test.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # appended: a module already in sys.modules wins
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+import case_runner_test  # noqa: E402  the one zero-case check for a hand runner (hooks/case_runner_test.py)
 
 CWD = "/tmp/agent-brief-test"
 MISSING = object()  # payload() leaves agent_type out of the JSON when this is passed
@@ -1120,6 +1121,8 @@ def main():
 
 
 def run_cases():
+    if case_runner_test.no_cases_exit(CASES, "test_agent_brief"):
+        return 1
     failed = 0
     for case in CASES:
         note = dispatch(case)

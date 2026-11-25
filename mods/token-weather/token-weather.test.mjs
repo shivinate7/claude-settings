@@ -105,4 +105,4 @@ await test('rawMaxTokens missing or 0: no NaN or Infinity in the band', async ()
 const failed = r1.filter(r => r.startsWith('FAIL')).length
 console.log(r1.join('\n'))
 console.log(`token-weather context band: ${r1.length - failed} pass, ${failed} fail of ${r1.length}`)
-if (failed) process.exitCode = 1
+if (failed || r1.length === 0) process.exitCode = 1

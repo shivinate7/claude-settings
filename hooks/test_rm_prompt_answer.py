@@ -39,6 +39,8 @@ import os
 import subprocess
 import sys
 
+import case_runner_test  # noqa: E402  the one zero-case check for a hand runner (hooks/case_runner_test.py)
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.environ.get("RM_PROMPT_ANSWER_UNDER_TEST") or os.path.join(HERE, "rm_prompt_answer.py")
 
@@ -316,6 +318,8 @@ def check(case):
 
 
 def main():
+    if case_runner_test.no_cases_exit(CASES, "test_rm_prompt_answer"):
+        return 1
     failed = 0
     for case in CASES:
         ok, note = check(case)
