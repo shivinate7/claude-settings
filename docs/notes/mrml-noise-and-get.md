@@ -1,1 +1,1 @@
-- mrml-noise-and-get: (#2492) a red verdict may list a re-run that does not clear it (noise); base_state reads r["event"] where r.get("event") would match the line above.
+- mrml-noise-and-get: (#2492) a red verdict may list a re-run that does not clear it (noise); `judge` in `actions/ci-alarm/clear_rule.py` reads r["event"] where r.get("event") would match the line above.

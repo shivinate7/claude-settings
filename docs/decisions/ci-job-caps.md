@@ -95,7 +95,7 @@ Window: each row names its own. A row marked "window of 2026-11-05" or "window o
 ## How to measure again
 
 1. List completed runs of `checks.yml` with `gh run list --workflow checks.yml --status completed`, and read each run's jobs with `gh run view <id> --json jobs`. Per job, take the newest 30 green runs in which the job ran a CI step. A job that runs a slice on pull_request counts only its other runs.
-2. For each job, take minutes with `job_minutes` in `merge/merge.py` and the cap with `job_caps` in the same file. Do not write a second reader.
+2. For each job, take minutes with `job_minutes` in `actions/ci-alarm/clear_rule.py` and the cap with `job_caps` in `merge/merge.py`. Do not write a second reader.
 3. A cap end is a run whose job minutes reach the cap, whose conclusion is cancelled or failure, and with no failed test step.
 4. Per-step times come from the GitHub API job steps (`started_at` and `completed_at`).
 5. A run cancelled before its cap by another act, such as a newer push or a batch rebuild, is left out of the sample, and the record names it.
