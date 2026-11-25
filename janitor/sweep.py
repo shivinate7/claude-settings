@@ -652,9 +652,9 @@ def prime_pushed(root: str, entries):
 
 
 def _local_ref_tips(path: str):
-    """The commit SHAs of every local branch and of refs/stash in PATH, or None when git could not tell.
+    """The commit SHAs of every local branch in PATH, or None when git could not tell.
     One `for-each-ref`; a detached HEAD is not a ref and `fully_pushed` reads it apart."""
-    answer = git_reads._git(path, "for-each-ref", "--format=%(objectname)", "refs/heads", "refs/stash")
+    answer = git_reads._git(path, "for-each-ref", "--format=%(objectname)", "refs/heads")
     if answer is None or answer.returncode != 0:
         return None
     return answer.stdout.split()
@@ -666,8 +666,8 @@ def fully_pushed(path: str, every_ref: bool = False):
     or rev-list failed. A live SHA missing locally is dropped, not unreadable. Every reap needs it, not only a
     stale agent lock: a lane always commits, and a detached HEAD has no branch to tombstone.
     HEAD is read now; `prime_pushed` may already have settled that commit this run.
-    EVERY_REF adds each local branch and refs/stash to HEAD, in the same ls-remote and rev-list: a nested clone
-    in a trash folder holds work on a side branch or in a stash, which a HEAD read does not see."""
+    EVERY_REF adds each local branch to HEAD, in the same ls-remote and rev-list: a nested clone
+    in a trash folder holds work on a side branch, which a HEAD read does not see."""
     live = _live_remote_heads(path)
     if live is None:
         return None
@@ -3182,13 +3182,18 @@ def _own_trash_lines(parent: str, base: str, original: str, lines):
 
 
 def _nested_repo_holds_work(repo: str):
-    """True when the repo at REPO has an uncommitted path or a commit no remote head holds, on HEAD, any local
-    branch or refs/stash, False when it is clean and every commit is on its remote (a clone: build output), None
-    when git cannot say."""
+    """True when the repo at REPO has an uncommitted path, any stash entry (local-only work by nature, so
+    never tested against a remote), or a commit no remote head holds on HEAD or any local branch, False when it
+    is clean and every commit is on its remote (a clone: build output), None when git cannot say."""
     lines = git_reads.porcelain(repo)
     if lines is None:
         return None
     if lines:
+        return True
+    stash = git_reads._git(repo, "rev-parse", "--verify", "--quiet", "refs/stash")
+    if stash is None or stash.returncode not in (0, 1):
+        return None
+    if stash.returncode == 0:
         return True
     pushed = fully_pushed(repo, every_ref=True)
     return None if pushed is None else not pushed
