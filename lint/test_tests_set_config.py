@@ -160,6 +160,16 @@ POP_IN_PATCH_DICT_AT_IMPORT = ("import os\nfrom unittest import mock\n\n"
                                "    os.environ.pop('CLAUDE_CONFIG_DIR', None)\n\n\ndef test_a():\n    assert True\n")
 
 
+COMPREHENSION_STATEMENT_POP = ("import os\n\n[os.environ.pop(k, None) for k in ('CLAUDE_CODE_REMOTE', 'CLAUDE_CONFIG_DIR')]\n\n\n"
+                               "def test_a():\n    assert True\n")
+COMPREHENSION_STATEMENT_SWEEP = ("import os\n\n[os.environ.pop(k, None) for k in list(os.environ)]\n\n\n"
+                                 "def test_a():\n    assert True\n")
+COMPREHENSION_STATEMENT_POP_THEN_SET = ("import os\n\n[os.environ.pop(k, None) for k in ('CLAUDE_CODE_REMOTE', 'CLAUDE_CONFIG_DIR')]\n"
+                                        "os.environ['CLAUDE_CONFIG_DIR'] = '/tmp/config'\n\n\ndef test_a():\n    assert True\n")
+COMPREHENSION_STATEMENT_READ_ONLY = ("import os\n\nNAMES = ('CLAUDE_CODE_REMOTE', 'CLAUDE_CONFIG_DIR')\n[os.environ.get(k) for k in NAMES]\n\n\n"
+                                     "def test_a():\n    assert True\n")
+
+
 def tree_of(files):
     """A fresh folder under the run folder, holding each file of `files`: a dict of a path under the folder to source. A path's
     folders are made first."""
@@ -499,6 +509,24 @@ class TestsSetConfig(unittest.TestCase):
         self.assertTrue(any(problem.startswith("test_case.py:") for problem in found),
                         "the scan did not name the test file outside node_modules: %r" % found)
         self.assertEqual(len(found), 1, "a test file under node_modules is named as a problem: %r" % found)
+
+    def test_comprehension_statement_that_pops_the_config_var_is_a_problem(self):
+        found = problems_of(COMPREHENSION_STATEMENT_POP)
+        self.assertTrue(len(found) == 1 and found[0].startswith("test_case.py:"),
+                        "a comprehension statement that pops CLAUDE_CONFIG_DIR at import is not one problem named for its file: %r" % found)
+
+    def test_comprehension_statement_sweep_is_a_problem_that_says_sweep(self):
+        found = problems_of(COMPREHENSION_STATEMENT_SWEEP)
+        self.assertEqual(len(found), 1, "a comprehension statement that pops each name of os.environ at import is not one problem: %r" % found)
+        self.assertIn("sweep", found[0], "the message for a comprehension statement that sweeps os.environ does not say it is a sweep: %r" % found)
+
+    def test_comprehension_statement_pop_then_set_is_clean(self):
+        self.assertEqual(problems_of(COMPREHENSION_STATEMENT_POP_THEN_SET), [],
+                         "a comprehension statement that pops CLAUDE_CONFIG_DIR, followed by an import-time set of it, is named as a problem")
+
+    def test_read_only_comprehension_statement_is_clean(self):
+        self.assertEqual(problems_of(COMPREHENSION_STATEMENT_READ_ONLY), [],
+                         "a comprehension statement that only reads os.environ for names that include CLAUDE_CONFIG_DIR is named as a problem")
 
     def test_repo_has_no_problems_now(self):
         found = checker().problems(ROOT)
