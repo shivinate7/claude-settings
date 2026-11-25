@@ -112,6 +112,19 @@ PATCH_DICT_CLEAR = ("import os\nfrom unittest import mock\n\nmock.patch.dict(os.
                     "def test_a():\n    assert True\n")
 PATCH_DICT_CLEAR_THEN_SET = ("import os\nfrom unittest import mock\n\nmock.patch.dict(os.environ, {'PATH': '/usr/bin'}, clear=True).start()\n"
                              "os.environ['CLAUDE_CONFIG_DIR'] = '/tmp/config'\n\n\ndef test_a():\n    assert True\n")
+PATCH_DICT_CLEAR_FALSE = ("import os\nfrom unittest import mock\n\nmock.patch.dict(os.environ, {'PATH': '/usr/bin'}, clear=False).start()\n\n\n"
+                          "def test_a():\n    assert True\n")
+PATCH_DICT_NO_CLEAR = ("import os\nfrom unittest import mock\n\nmock.patch.dict(os.environ, {'PATH': '/usr/bin'}).start()\n\n\n"
+                       "def test_a():\n    assert True\n")
+PATCH_DICT_CLEAR_SETS_VAR = ("import os\nfrom unittest import mock\n\n"
+                             "mock.patch.dict(os.environ, {'CLAUDE_CONFIG_DIR': '/tmp/config'}, clear=True).start()\n\n\n"
+                             "def test_a():\n    assert True\n")
+ITEMS_SWEEP_TUPLE = ("import os\n\nfor _name, _value in os.environ.items():\n    os.environ.pop(_name, None)\n\n\n"
+                     "def test_a():\n    assert True\n")
+KEYS_SWEEP = ("import os\n\nfor _name in os.environ.keys():\n    os.environ.pop(_name, None)\n\n\n"
+              "def test_a():\n    assert True\n")
+SORTED_SWEEP = ("import os\n\nfor _name in sorted(os.environ):\n    os.environ.pop(_name, None)\n\n\n"
+                "def test_a():\n    assert True\n")
 OPENERS_IN_STRINGS = ("import os\n\nOPEN = \"/*\"\nTAG, PATHS = \"#\", \"//\"; os.environ.pop('CLAUDE_CONFIG_DIR', None)\n\n\n"
                       "def test_a():\n    assert True\n")
 MULTILINE_TEXT_HOLDS_POP = ("import os\n\nNOTE = \"\"\"\nos.environ.pop('CLAUDE_CONFIG_DIR', None)\n\"\"\"\n\n\n"
@@ -319,6 +332,21 @@ class TestsSetConfig(unittest.TestCase):
         self.assertEqual(problems_of(DICT_KEY_LOOP_THEN_SET), [],
                          "a dict-key loop pop that an import-time set of CLAUDE_CONFIG_DIR follows is named as a problem")
 
+    def test_items_sweep_with_tuple_target_is_a_problem(self):
+        found = problems_of(ITEMS_SWEEP_TUPLE)
+        self.assertTrue(len(found) == 1 and found[0].startswith("test_case.py:"),
+                        "an import-time sweep of os.environ.items() that pops the first name of a tuple target is not one problem: %r" % found)
+
+    def test_keys_sweep_is_a_problem(self):
+        found = problems_of(KEYS_SWEEP)
+        self.assertTrue(len(found) == 1 and found[0].startswith("test_case.py:"),
+                        "an import-time sweep of os.environ.keys() that pops each name is not one problem: %r" % found)
+
+    def test_sorted_environ_sweep_is_a_problem(self):
+        found = problems_of(SORTED_SWEEP)
+        self.assertTrue(len(found) == 1 and found[0].startswith("test_case.py:"),
+                        "an import-time sweep of sorted(os.environ) that pops each name is not one problem: %r" % found)
+
     def test_patch_dict_clear_at_import_is_a_problem(self):
         found = problems_of(PATCH_DICT_CLEAR)
         self.assertTrue(len(found) == 1 and found[0].startswith("test_case.py:"),
@@ -327,6 +355,18 @@ class TestsSetConfig(unittest.TestCase):
     def test_patch_dict_clear_then_set_is_clean(self):
         self.assertEqual(problems_of(PATCH_DICT_CLEAR_THEN_SET), [],
                          "a clearing patch.dict at import that an import-time set of CLAUDE_CONFIG_DIR follows is named as a problem")
+
+    def test_patch_dict_clear_false_is_not_a_clear(self):
+        self.assertEqual(problems_of(PATCH_DICT_CLEAR_FALSE), [],
+                         "an import-time patch.dict(os.environ, ..., clear=False).start() is read as a clear of CLAUDE_CONFIG_DIR")
+
+    def test_patch_dict_without_clear_is_not_a_clear(self):
+        self.assertEqual(problems_of(PATCH_DICT_NO_CLEAR), [],
+                         "an import-time patch.dict(os.environ, ...).start() with no clear argument is read as a clear of CLAUDE_CONFIG_DIR")
+
+    def test_clearing_patch_dict_that_sets_the_var_is_not_a_removal(self):
+        self.assertEqual(problems_of(PATCH_DICT_CLEAR_SETS_VAR), [],
+                         "an import-time clearing patch.dict whose values set CLAUDE_CONFIG_DIR is read as a removal of it")
 
     def test_comment_openers_inside_strings_do_not_hide_a_pop(self):
         found = problems_of(OPENERS_IN_STRINGS)
