@@ -2108,6 +2108,15 @@ class ReadyPassLine(unittest.TestCase):
         self.assertEqual(lines.count(hot), 1, "a kept line that the FAIL excerpt also holds prints %d times, not once: %r"
                          % (lines.count(hot), r.stdout))
 
+    def test_a_final_ready_pass_line_with_no_newline_prints(self):
+        """The run's last output is the ready-pass line, with no newline after it. bin/verdict keeps the unfinished last line of the log
+        (the carry) and prints it after its PASS line, as it prints a kept line that ends in a newline."""
+        r = run(fifty_lines_with() + "import sys\nsys.stdout.write(%r)\nsys.stdout.flush()\n" % self.READY)
+        lines = self.pass_lines(r)
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(lines[1:], [self.READY], "a PASS drops a ready-pass line that is the run's last output, with no newline after it: %r"
+                         % r.stdout)
+
     def test_kept_forms_are_fixed_prefixes_of_both_merge_formats(self):
         kept = getattr(load_verdict_module(), "READY_PASS_KEPT", None)
         self.assertIsNotNone(kept, "bin/verdict holds no READY_PASS_KEPT constant, so no ready-pass line is kept")
