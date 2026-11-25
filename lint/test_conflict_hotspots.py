@@ -11,9 +11,21 @@ into a branch, and a merge on main whose second parent is a branch) and replays 
     merges conflicted: M
     merges unknown: U             a replay whose read failed (git exit 128): counted as replayed, never as clean
     conflict rate: R%             conflicted / replayed in percent, one decimal place; 0.0% when nothing was replayed
+    merges not replayed: K (octopus O, off base B)
     <count> <path>               one row per conflicted file: count descending, then path ascending; the path is
                                   unquoted and printed as UTF-8
     cost: merge-trees N, wall S s N is the merge-tree process starts; S is wall seconds
+
+Two opt-in flags. Without them the output above is unchanged.
+
+    --exposure                    each row reads `<conflicts>/<exposure> <path>`, not `<count> <path>`. Exposure is
+                                  the replayed merges where both sides changed the file: it differs from the merge
+                                  base on each parent. A file no merge conflicts on is no row at any exposure, so the
+                                  rows are the same set as without the flag: no row reads `0/N`.
+    --into-branches               the filter runs before every count: only merges of main into a branch count, a
+                                  merge off main's first-parent line with one parent on it. A PR merge into main, a
+                                  merge of two branches, and a merge with no main parent are dropped; they appear in
+                                  no line, `merges not replayed` included.
 
 Summary lines start with a letter, rows with a digit, the cost line with `cost`. Exit 0 for a report (zero merges
 included). Exit 2 for a git too old for `merge-tree --write-tree`, with one line of output that names merge-tree,
@@ -26,7 +38,9 @@ it exits, also when KeyboardInterrupt stops the run. It writes nothing into the 
 Fixtures are built with plain git under the run folder (lint/_test_temp.py). Every commit and merge has a fixed date,
 and the cases never read the clock. Each case holds one scenario: the one-merge and clean fixtures, the two-kind and
 ranking fixture (`selection`), the tie fixture, the rename/delete fixture, the non-ASCII fixture, the old-only fixture
-(zeros), and the missing-blob fixture (unknown). A git shim on PATH logs or fails the merge-tree calls.
+(zeros), the missing-blob fixture (unknown), the exposure fixture (`exposure`), and the two into-branches fixtures
+(`into_branches`, and `pr_parent`, a branch merge whose parent reaches main only through a PR). A git shim on PATH
+logs or fails the merge-tree calls.
 """
 import collections
 import json
@@ -284,6 +298,75 @@ def missing_blob(name):
     return fx
 
 
+def exposure(name):
+    """Five merges of main into a branch, each replayed. f.txt changes on both sides in merges 1 to 3 and conflicts only
+    in merge 2, so its row is 1/3. Merge 4 changes g.txt on both sides and merges clean: g.txt has exposure 1 and no
+    conflict, so it is no row. Merge 5 changes f.txt on main's side only, so it adds no exposure to f.txt."""
+    fx = Fixture(name)
+    fx.write("f.txt", "1\n2\n3\n4\n5\n")
+    fx.write("g.txt", "x1\nx2\nx3\n")
+    fx.commit("c0", DAY1)
+    fx.branch("b1", "main")
+    fx.edit("b1", {"f.txt": "A\n2\n3\n4\n5\n"}, "b1", DAY1)
+    fx.edit("main", {"f.txt": "1\n2\n3\n4\nE\n"}, "m1", DAY1)
+    fx.merge("b1", "main", DAY2)
+    fx.branch("b2", "main")
+    fx.edit("b2", {"f.txt": "1\n2\nC\n4\nE\n"}, "b2", DAY1)
+    fx.edit("main", {"f.txt": "1\n2\nD\n4\nE\n"}, "m2", DAY1)
+    fx.merge("b2", "main", DAY2, conflict=True, resolve={"f.txt": "1\n2\nmerged\n4\nE\n"})
+    fx.branch("b3", "main")
+    fx.edit("b3", {"f.txt": "A\n2\nD\n4\nE\n"}, "b3", DAY1)
+    fx.edit("main", {"f.txt": "1\n2\nD\nF\nE\n"}, "m3", DAY1)
+    fx.merge("b3", "main", DAY2)
+    fx.branch("b4", "main")
+    fx.edit("b4", {"g.txt": "y1\nx2\nx3\n"}, "b4", DAY1)
+    fx.edit("main", {"g.txt": "x1\nx2\ny3\n"}, "m4", DAY1)
+    fx.merge("b4", "main", DAY2)
+    fx.branch("b5", "main")
+    fx.edit("b5", {"h.txt": "h\n"}, "b5", DAY1)
+    fx.edit("main", {"f.txt": "1\nB\nD\nF\nE\n"}, "m5", DAY1)
+    fx.merge("b5", "main", DAY2)
+    return fx
+
+
+def into_branches(name):
+    """A PR merge of f into main (conflicts on a.txt), a merge of main into g (conflicts on b.txt), and a merge of x and
+    y, which touches no main history. --into-branches keeps only the second: replayed 1, its b.txt conflict the only
+    row. Without the flag the first two are replayed, and the third is off base."""
+    fx = Fixture(name)
+    fx.write("a.txt", "one\n")
+    fx.write("b.txt", "one\n")
+    fx.commit("c0", DAY1)
+    for branch in ("f", "g", "x", "y"):
+        fx.branch(branch, "main")
+    fx.edit("f", {"a.txt": "f-a\n"}, "f1", DAY1)
+    fx.edit("g", {"b.txt": "g-b\n"}, "g1", DAY1)
+    fx.edit("x", {"x.txt": "x\n"}, "x1", DAY1)
+    fx.edit("y", {"y.txt": "y\n"}, "y1", DAY1)
+    fx.edit("main", {"a.txt": "m-a\n"}, "m1", DAY1)
+    fx.merge("main", "f", DAY2, conflict=True, resolve={"a.txt": "merged-a\n"})
+    fx.edit("main", {"b.txt": "m-b\n"}, "m2", DAY2)
+    fx.merge("g", "main", DAY2, conflict=True, resolve={"b.txt": "merged-b\n"})
+    fx.merge("x", "y", DAY2)
+    return fx
+
+
+def pr_parent(name):
+    """A PR merge of f into main, then a merge of f into g. The merge of g reaches f's tip only through the PR's second
+    parent: f's tip is not on main's first-parent line, and no parent of the merge is main, so the filter drops it."""
+    fx = Fixture(name)
+    fx.write("a.txt", "one\n")
+    fx.commit("c0", DAY1)
+    fx.branch("f", "main")
+    fx.branch("g", "main")
+    fx.edit("f", {"f.txt": "feature\n"}, "f1", DAY1)
+    fx.edit("g", {"g.txt": "g\n"}, "g1", DAY1)
+    fx.edit("main", {"a.txt": "m\n"}, "m1", DAY1)
+    fx.merge("main", "f", DAY2)
+    fx.merge("g", "f", DAY2)
+    return fx
+
+
 Run = collections.namedtuple("Run", "rc out err scratch log")
 
 
@@ -300,8 +383,9 @@ def make_shim(mode, log):
     return folder
 
 
-def run_hotspots(repo, shim=None, top="10", since=SINCE):
-    """Run the script on `repo`, with TMPDIR a fresh empty folder under the run folder. Returns a Run."""
+def run_hotspots(repo, shim=None, top="10", since=SINCE, flags=()):
+    """Run the script on `repo`, with TMPDIR a fresh empty folder under the run folder, and the extra `flags` after the
+    fixed arguments. Returns a Run."""
     if not os.path.isfile(MODULE):
         raise AssertionError("lint/conflict_hotspots.py is not built")
     scratch = tempfile.mkdtemp(prefix="scratch-", dir=RUN)
@@ -311,7 +395,7 @@ def run_hotspots(repo, shim=None, top="10", since=SINCE):
     env["PYTHONIOENCODING"] = "utf-8"
     if shim:
         env["PATH"] = make_shim(shim, log) + os.pathsep + os.environ.get("PATH", "")
-    cmd = [sys.executable, MODULE, "--since", since, "--base", "main", "--top", top, "--repo", repo]
+    cmd = [sys.executable, MODULE, "--since", since, "--base", "main", "--top", top, "--repo", repo] + list(flags)
     p = subprocess.run(cmd, cwd=RUN, env=env, capture_output=True, timeout=120)
     return Run(p.returncode, p.stdout.decode("utf-8", "replace"), p.stderr.decode("utf-8", "replace"), scratch, log)
 
@@ -331,6 +415,16 @@ def rows(out):
         head, _, rest = line.partition(" ")
         if head.isdigit() and rest:
             found.append((int(head), rest))
+    return found
+
+
+def exposure_rows(out):
+    """[(conflicts, exposure, path)] for each `<conflicts>/<exposure> <path>` row, in printed order."""
+    found = []
+    for line in out.splitlines():
+        m = re.fullmatch(r"(\d+)/(\d+) (.+)", line)
+        if m:
+            found.append((int(m.group(1)), int(m.group(2)), m.group(3)))
     return found
 
 
@@ -488,6 +582,54 @@ class ConflictHotspotsCases(unittest.TestCase):
         self.assertEqual(len(lines), 1, "output lines: one line for a too-old git")
         self.assertTrue(any(k in lines[0] for k in ("merge-tree", "--write-tree", "2.38")),
                         "the line names the cause: %r" % lines[0])
+
+    def test_without_exposure_flag_rows_keep_the_conflict_count(self):
+        fx = exposure("exposure-off")
+        self.assertEqual(len(fx.merges()), 5, "fixture merge count")
+        r = run_hotspots(fx.path)
+        self.assertEqual(r.rc, 0, "exit code (stderr: %s)" % r.err)
+        self.assert_summary(r.out, 5, 1, 0, "20.0%")
+        self.assertEqual(rows(r.out), [(1, "f.txt")], "file rows without --exposure: the count alone")
+
+    def test_exposure_flag_reads_conflicts_over_both_sides_merges(self):
+        fx = exposure("exposure-on")
+        self.assertEqual(len(fx.merges()), 5, "fixture merge count")
+        r = run_hotspots(fx.path, flags=["--exposure"])
+        self.assertEqual(exposure_rows(r.out), [(1, 3, "f.txt")],
+                         "--exposure rows: conflicts over both-sides merges, and no row for a file with no conflict "
+                         "(stderr: %s)" % r.err)
+        self.assertEqual(r.rc, 0, "exit code with --exposure (stderr: %s)" % r.err)
+
+    def test_without_into_branches_flag_both_merge_kinds_count(self):
+        fx = into_branches("into-off")
+        self.assertEqual(len(fx.merges()), 3, "fixture merge count")
+        r = run_hotspots(fx.path)
+        self.assertEqual(r.rc, 0, "exit code (stderr: %s)" % r.err)
+        self.assert_summary(r.out, 2, 2, 0, "100.0%")
+        self.assertEqual(field(r.out, "merges not replayed"), "1 (octopus 0, off base 1)", "merges not replayed line")
+        self.assertEqual(rows(r.out), [(1, "a.txt"), (1, "b.txt")], "file rows: both conflicts")
+
+    def test_into_branches_flag_counts_only_main_merged_into_a_branch(self):
+        fx = into_branches("into-on")
+        self.assertEqual(len(fx.merges()), 3, "fixture merge count")
+        r = run_hotspots(fx.path, flags=["--into-branches"])
+        self.assertEqual(field(r.out, "merges replayed"), "1",
+                         "merges replayed with --into-branches: the PR merge into main is dropped")
+        self.assertEqual(r.rc, 0, "exit code with --into-branches (stderr: %s)" % r.err)
+        self.assertEqual(rows(r.out), [(1, "b.txt")], "file rows with --into-branches: the merge of main into g only")
+
+    def test_into_branches_flag_leaves_dropped_merges_out_of_not_replayed(self):
+        fx = into_branches("into-skip")
+        r = run_hotspots(fx.path, flags=["--into-branches"])
+        self.assertEqual(field(r.out, "merges not replayed"), "0 (octopus 0, off base 0)",
+                         "merges not replayed with --into-branches: the merge of x and y is dropped, not counted")
+
+    def test_into_branches_flag_drops_a_branch_merge_with_only_a_pr_parent(self):
+        fx = pr_parent("into-pr-parent")
+        self.assertEqual(len(fx.merges()), 2, "fixture merge count")
+        r = run_hotspots(fx.path, flags=["--into-branches"])
+        self.assert_summary(r.out, 0, 0, 0, "0.0%")
+        self.assertEqual(r.rc, 0, "exit code with --into-branches (stderr: %s)" % r.err)
 
     def test_green_control_git_merge_tree_on_the_fixtures(self):
         """Runs without the script: the fixtures hold the conflicts the cases count."""
