@@ -385,12 +385,17 @@ def page_run(rid, conclusion, event=PUSH, name="checks", path=WF_CHECKS, status=
             "run_attempt": attempt, "head_sha": f"{rid:040x}", "html_url": f"https://example.invalid/runs/{rid}"}
 
 
-def job_row(name, conclusion, status="completed", minutes=None):
-    """A job as the jobs API lists it. `minutes` sets its start and end, the two times a cap is judged on."""
+def job_row(name, conclusion, status="completed", minutes=None, runner_id=None, steps=None):
+    """A job as the jobs API lists it. `minutes` sets its start and end, the two times a cap is judged on. `runner_id` and `steps` are the two
+    fields job_started reads: a job that ran has a runner, and a job a cancel replaced has runner 0 and no steps."""
     row = {"name": name, "status": status, "conclusion": conclusion, "html_url": f"https://example.invalid/jobs/{name}"}
     if minutes is not None:
         row["started_at"] = START.strftime(TIME_FMT)
         row["completed_at"] = (START + timedelta(minutes=minutes)).strftime(TIME_FMT)
+    if runner_id is not None:
+        row["runner_id"] = runner_id
+    if steps is not None:
+        row["steps"] = steps
     return row
 
 
@@ -595,11 +600,30 @@ class RedMainJudge(unittest.TestCase):
         self.assertEqual(self.judge_fixed([page_run(4, None, status="in_progress"), page_run(3, "cancelled"), page_run(1, "success")], jobs),
                          ("unknown", []), "a failed jobs read of a cancelled run gives a green verdict below it")
 
+    def test_fixed_a_cancelled_run_whose_runner_took_a_job_and_died_at_setup_is_not_replaced(self):
+        """A job that had a runner and no steps ran: its cancelled run is a real cancel, so the verdict is unknown, not the green run below."""
+        jobs = {3: [job_row("checks", "cancelled", minutes=2, runner_id=4242, steps=[])], 1: [job_row("scope", "success"), job_row("checks", "success")]}
+        self.assertEqual(self.judge_fixed([page_run(4, None, status="in_progress"), page_run(3, "cancelled"), page_run(1, "success")], jobs), ("unknown", []),
+                         "a cancelled run whose job has a runner is passed over as replaced")
+
     def test_control_the_scripted_host_reads_a_red_job_red_through_base_state(self):
         """Control, green on the old code: the cases above compare with base_state, so base_state must show a red job red on this host."""
         verdict, red = base_judgment([page_run(2, "failure")], {2: [job_row("checks", "failure")]})
         self.assertEqual(verdict, "red")
         self.assertEqual(red, [(2, ["checks"])])
+
+
+class SupersededJobStarted(unittest.TestCase):
+    """job_started, the one home of "a job ran" that superseded_run asks. A job a cancel replaced has runner 0 and no steps; a job with a runner ran, though it has no steps."""
+
+    def test_a_job_with_a_runner_and_no_steps_is_started(self):
+        self.assertTrue(clear_rule.job_started(job_row("checks", "cancelled", minutes=2, runner_id=4242, steps=[])),
+                        "a job with runner 4242 and no steps is judged not started, so the run it is in reads as replaced")
+
+    def test_control_a_job_with_runner_zero_and_no_steps_is_not_started(self):
+        """Control: a job a cancel replaced keeps the cancel time as started_at, but has runner 0 and no steps, so it did not start."""
+        self.assertFalse(clear_rule.job_started(job_row("checks", "cancelled", minutes=2, runner_id=0, steps=[])),
+                         "a job with runner 0 and no steps is judged started, so the run it is in reads as a real cancel")
 
 
 if __name__ == "__main__":

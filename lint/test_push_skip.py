@@ -1211,6 +1211,22 @@ class ProvenBase(LiveHead):
         base, _ = self.base_on(runs, jobs={1: full_run_jobs(), 3: [started]}, extra_env={"GITHUB_RUN_ID": "4"})
         self.assert_base(base, "", "a cancelled push run whose job started is not replaced: the walk stops there, so the push has no base")
 
+    def test_a_cancelled_push_run_whose_runner_took_a_job_and_died_at_setup_is_not_passed_over(self):
+        """A job with a runner and no steps ran: its cancelled run is a real cancel, so the walk stops there and the push has no base."""
+        started = dict(job_row("checks", "cancelled", steps=[]), started_at=EARLY, runner_id=4242)
+        runs = [push_run(4, TOP, conclusion=None, status="in_progress", created_at=LATEST), push_run(3, NEWER, conclusion="cancelled", created_at=LATE),
+                push_run(1, OLDER, created_at=EARLY)]
+        base, _ = self.base_on(runs, jobs={1: full_run_jobs(), 3: [started]}, extra_env={"GITHUB_RUN_ID": "4"})
+        self.assert_base(base, "", "a cancelled push run whose runner took a job is not replaced: the walk stops there, so the push has no base")
+
+    def test_control_a_cancelled_push_run_whose_job_has_runner_zero_is_passed_over(self):
+        """Control: a job a cancel replaced has runner 0 and no steps, and did not start, so run 4 replaces run 3 and the green run 1 is the base."""
+        replaced = dict(job_row("checks", "cancelled", steps=[]), started_at=EARLY, runner_id=0)
+        runs = [push_run(4, TOP, conclusion=None, status="in_progress", created_at=LATEST), push_run(3, NEWER, conclusion="cancelled", created_at=LATE),
+                push_run(1, OLDER, created_at=EARLY)]
+        base, _ = self.base_on(runs, jobs={1: full_run_jobs(), 3: [replaced]}, extra_env={"GITHUB_RUN_ID": "4"})
+        self.assert_base(base, OLDER, "a cancelled push run whose job has runner 0 and no steps is replaced by run 4: the green run 1 below is the base")
+
     def test_an_older_queued_or_in_progress_push_run_is_passed_over_for_the_green_below(self):
         # Consultant's pick, 10:55 CST Nov 24 2026: a candidate that is not completed is passed over with no read, so the green run
         # below it is the base. This run is 3, so run 2 is an older candidate. The control is the same run completed red: it stops the walk.
