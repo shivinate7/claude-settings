@@ -18,6 +18,7 @@
 #   checks_windows_rest_2 repeats checks_windows_rest's value (R62). checks-windows-rest-2 reads it in its suite steps, as checks-windows-rest reads checks_windows_rest; the merge shards read checks_windows_merge. A ready pull request runs a merge or rest suite step only with its flag set; the scheduled and dispatched runs run them all (a push skips every Windows shard).
 #   windows_guard (the checks-windows-guard shards): a path that matches a glob of .github/guard-inputs.txt, an added file under a landed dir, or a change to this script, the workflow or that list; read in its own pass over the diff, so a .md input counts, and a path the table names nowhere does not set it.
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event; false on a records-only skip.
+# tool_pins is set apart too: true on a schedule, on a dispatch, and on a diff that touches .tool-versions or lint/check_tool_pins.py (or its suite); false on a records-only skip.
 # Everything is true on schedule and dispatch, on a push with no proven base, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. A push with a proven base (BASE_SHA: a full sha that is an
 # ancestor of HEAD, not HEAD) reads base..HEAD like a pull request (decision push-skip-on-proven-tree). Inputs (env): EVENT,
@@ -312,6 +313,24 @@ case "${EVENT:-}" in
 esac
 [ "$skip" = true ] && v=false
 echo "mutation_report=$v" >> "$GITHUB_OUTPUT"
+# tool_pins: the `Tool pins (this runner)` step of the checks, checks-windows and checks-macos jobs (decision tool-pins). Outside ALL: it is true on a
+# schedule and a dispatch, which judge the runner's tools every day, and on a pull request or push whose diff moves a pin or the checker. A change to
+# this script or the workflow, an unreadable diff and a records-only skip leave it false.
+tool_pins=false
+case "${EVENT:-}" in
+  schedule|workflow_dispatch) tool_pins=true ;;
+  *)
+    while IFS= read -r f; do
+      case "$f" in
+        .tool-versions) tool_pins=true ;;
+        lint/check_tool_pins.py) tool_pins=true ;;
+        lint/test_check_tool_pins.py) tool_pins=true ;;
+      esac
+    done <<< "$files"
+    ;;
+esac
+[ "$skip" = true ] && tool_pins=false
+echo "tool_pins=$tool_pins" >> "$GITHUB_OUTPUT"
 # records_only_skip: true exactly when the skip above forced the 14 flags off; checks.yml reads it in job-level `if:` to skip the test jobs themselves.
 echo "records_only_skip=$skip" >> "$GITHUB_OUTPUT"
 # skip_comment_delta: a skip whose delta holds a comment-only code file. Its changed text is what the lint steps read, so the `checks` job starts on it.

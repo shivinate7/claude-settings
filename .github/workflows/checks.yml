@@ -138,6 +138,7 @@ jobs:
       sweep: ${{ steps.scope.outputs.sweep }}
       shoot: ${{ steps.scope.outputs.shoot }}
       mutation_report: ${{ steps.scope.outputs.mutation_report }}
+      tool_pins: ${{ steps.scope.outputs.tool_pins }}
       windows_guard: ${{ steps.scope.outputs.windows_guard }}
       records_only_skip: ${{ steps.scope.outputs.records_only_skip }}
       skip_comment_delta: ${{ steps.scope.outputs.skip_comment_delta }}
@@ -420,6 +421,11 @@ jobs:
       - name: Checks step scope suite
         if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_checks_step_scope.py
+
+      # Judges this runner's tools against .tool-versions (decision tool-pins): on the daily run and a dispatch, and on a pull request that moves a pin or the checker.
+      - name: Tool pins (this runner)
+        if: ${{ !cancelled() && needs.scope.outputs.tool_pins == 'true' }}
+        run: python3 lint/check_tool_pins.py
 
       - name: Guard inputs list fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
@@ -2194,6 +2200,10 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: bash actions/stamp/test_action.sh
 
+      - name: Tool pins (this runner)
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.tool_pins == 'true' }}
+        run: python3 lint/check_tool_pins.py
+
       - name: Mod and map-skill tests
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.mods == 'true' }}
         shell: bash
@@ -2395,6 +2405,10 @@ jobs:
         shell: bash
         timeout-minutes: 3
         run: sh hooks/test_install_src.sh caseF1 caseG1
+
+      - name: Tool pins (this runner)
+        if: ${{ (needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.tool_pins == 'true' }}
+        run: python lint/check_tool_pins.py
 
       - name: Mod and map-skill tests
         if: ${{ (needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.mods == 'true' }}

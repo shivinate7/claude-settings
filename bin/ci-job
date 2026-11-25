@@ -74,7 +74,10 @@
 # in one line, because a run that skipped the pull-request steps read as a pass. With no origin/main, one unknown
 # line names each pull-request step it skips, and each such lint step (its if: reads true on a pull-request run) prints
 # unknown, not skipped. A lint CI step whose if: reads false on a pull-request run (it runs only off one) prints
-# skipped and does not fail. A --lint run in which no lint CI step and no picked suite CI step ran prints one unknown line and exits 2, never 0. A lane runs `merge --lane-lint <pr>`, which runs this mode, before it
+# skipped and does not fail. A --lint run of a checkout with a root .tool-versions also runs `lint/check_tool_pins.py --local` once (decision
+# tool-pins): a tool that misses its pin, or cannot be read, prints one `unknown` line and exits 2, so the merge waits for the pull request's own CI
+# run; a match prints nothing. The workflow's strict `Tool pins (this runner)` step is that read's CI twin and is not run here. --step starts no checker.
+# A --lint run in which no lint CI step and no picked suite CI step ran prints one unknown line and exits 2, never 0. A lane runs `merge --lane-lint <pr>`, which runs this mode, before it
 # joins a batch. Use it with a job such as checks.
 # Workflow: the one file in .github/workflows/ at the git top level of the current folder that holds the job
 # (checks.yml, check.yml, any name), unless --workflow names one. No file, or more than one, is unknown.
@@ -404,6 +407,9 @@ def missing_in_log(log, start, script):
     return sorted(set(found))
 
 
+TOOL_PINS_CHECKER = "lint/check_tool_pins.py"
+TOOL_PINS_FILE = ".tool-versions"
+TOOL_PINS_LIMIT = 120  # seconds the checker may run (one 30 s read per pinned tool) before it reads unknown
 LINT_CMD = re.compile(r"(?:python3 (?:lint|actions)/[\w./-]+\.py|bin/ste-changed|pipx run [\w.-]+==[\w.]+)"
                       r"(?: [^|&;`<>]*)?")
 INSTALL_CMD = re.compile(r"(?:npm ci|(?:pnpm|yarn) install --(?:frozen-lockfile|immutable)|(?:python3 -m )?pip install(?: -[-\w]+)* -r [^\s|&;`<>$()]+"
@@ -519,7 +525,12 @@ def is_lint(step):
     if known_action(step):
         return True
     lines = run_lines(step)
-    return bool(lines) and all(lint_line(ln) for ln in lines)
+    return bool(lines) and all(lint_line(ln) for ln in lines) and not runs_tool_pins(lines)
+
+
+def runs_tool_pins(lines):
+    """True when a run: line starts the tool-pins checker: CI's strict step, which a lane lint replaces with its own --local read (read_tool_pins)."""
+    return any(TOOL_PINS_CHECKER in ln for ln in lines)
 
 
 def lint_line(ln):
@@ -537,6 +548,27 @@ def is_install(step):
     """True when the step's whole run: is install commands: a lockfile install or a framework's type generation."""
     lines = run_lines(step)
     return bool(lines) and all(INSTALL_CMD.fullmatch(ln) for ln in lines)
+
+
+def read_tool_pins(top):
+    """None when this checkout pins no tools or the machine's tools match; else the one `unknown` line for the lane lint. The checker runs once, with
+    --local: its exit 0 is a match, 3 a mismatch, 1 an unknown read or a refused file. Any other exit, a hang or a start failure reads unknown too, since a
+    read that could not run proves nothing (decision tool-pins)."""
+    checker = os.path.join(top, TOOL_PINS_CHECKER)
+    if not os.path.exists(os.path.join(top, TOOL_PINS_FILE)) or not os.path.exists(checker):
+        return None
+    tail = "this lane lint is no proof, so the merge waits for the pull request's own CI run"
+    try:
+        done = _nowindow.run([sys.executable, checker, "--local"], cwd=top, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                             stdin=subprocess.DEVNULL, timeout=TOOL_PINS_LIMIT)
+    except subprocess.TimeoutExpired:
+        return "unknown         tool pins: %s ran past %d s and was stopped; %s" % (TOOL_PINS_CHECKER, TOOL_PINS_LIMIT, tail)
+    except OSError as e:
+        return "unknown         tool pins: %s did not start (%s); %s" % (TOOL_PINS_CHECKER, e, tail)
+    if done.returncode == 0:
+        return None
+    said = "; ".join(ln.strip() for ln in (done.stdout + done.stderr).splitlines() if ln.strip() and not ln.rstrip().endswith(": matched")) or "exit %d with no message" % done.returncode
+    return "unknown         tool pins: %s; %s" % (said, tail)
 
 
 def pin_notes(log, start):
@@ -803,7 +835,7 @@ CARRY_MARK, CARRY_STATE = "(carried) ", "PASS (carried)"  # a carried step's lin
 CARRY_BLOCKERS = ("hooks/mutate_guard.py", "bin/ci-job", ".github/stamp.json")  # a delta that touches one never carries: the selector, this runner, the ready-checks list; the workflow and ci-scope.sh set every scope flag, which carry_delta_read reads
 CARRY_RECORDS = "docs/records.md"  # a delta of this one file carries every suite step: its pass reads no other record (ci-scope.sh's records-only skip names it too)
 CARRY_MEMO = {}  # (top, saved head, saved tree, tree) -> {picked: the delta's picked suites, None when it forbids any carry; changed: its paths; flags: its scope flags once read}; one read per run
-SCOPE_APART = {"windows_guard", "mutation_report", "records_only_skip", "skip_comment_delta"}  # ci-scope.sh outputs that an unmapped path does not set: carry_delta_read leaves them out of its read of every flag on
+SCOPE_APART = {"windows_guard", "mutation_report", "records_only_skip", "skip_comment_delta", "tool_pins"}  # ci-scope.sh outputs that an unmapped path does not set: carry_delta_read leaves them out of its read of every flag on
 CACHE_FILES, CACHE_DAYS = 300, 7
 VOLATILE_ENV = {"GITHUB_WORKSPACE", "VERDICT_LOG", "CI_JOB_LINT_WORKERS", "CI_JOB_NO_CACHE", "PWD", "OLDPWD", "SHLVL", "_", "COLUMNS", "LINES",
                "CLAUDE_CODE_SESSION_ID", "CLAUDE_PID", "TRACEPARENT", "CCR_SPAWN_TIMESTAMP_MS"}  # a variable that differs between runs and changes no step's result; GITHUB_WORKSPACE repeats the repo path, which the key holds once
@@ -1564,6 +1596,7 @@ def main(argv, sibling=False, ran_suites=None):
             if lint and not kind[n - 1]:
                 print("%-15s %s: --lint runs only lint and install steps; %s" % (
                     "not run", name, "this is an action (uses: %s)" % uses(step) if uses(step) else
+                    "this is CI's own read of the runner's tools; the lane lint reads this machine's with --local, below" if runs_tool_pins(run_lines(step)) else
                     "this is a suite the diff does not pick%s" % ("" if base else " (no base to read a diff)") if suites[n - 1]
                     else "its run: is neither a lint nor an install command"))
                 continue
@@ -1626,6 +1659,11 @@ def main(argv, sibling=False, ran_suites=None):
         tally["unknown"] += not sibling  # a sibling job whose picked suite step CI's own if: skips proved nothing, and read nothing
         print("%-15s no lint CI step %s: %d of the job's %d steps are lint CI steps, and each one is skipped, not run, or unknown" % (
             "unknown", "would run" if dry else "ran", sum(k == "lint" for k in kind), len(steps)))
+    if lint and not sibling and not dry:  # one read of this machine's tools per lint run, never one per job a sibling pass reads
+        pins = read_tool_pins(top)
+        if pins:
+            print(pins)
+            tally["unknown"] += 1
     code = 1 if tally["FAIL"] else 2 if tally["unknown"] else 0
     if lint:
         if picked is None and elsewhere and not any(suites):

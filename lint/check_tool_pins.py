@@ -8,7 +8,8 @@ check compares the tools of the machine it runs on with that file alone.
 
 One line per pin: `<tool> <version>`. Blank lines are skipped. A comment sits on its own line: actions/setup-python
 reads this file with a strict pattern, so a comment after a pin is refused. `# read: <tool> = <command>` gives a tool
-a version command other than `<tool> --version`; the command takes shell-style quoting and runs with no shell.
+a version command other than `<tool> --version`; the command takes shell-style quoting and runs with no shell. A tool
+may have several `# read:` lines: they are tried in order, and the first that runs and prints a version wins.
 `# match: <tool> = <regex>` names the version for a tool: the regex has one group, and the group is the version.
 Both words are case-insensitive. The check runs each command once and takes the first dotted number in its output
 (a bare number only when there is no dotted one); a token with a slash or backslash is a path and never holds the version.
@@ -16,8 +17,11 @@ It compares the version to the pin at the precision the pin states: `3.15` accep
 `3` accepts 3.2.1. A pre-release (3.15.0rc1) matches only a pin that states it. No tool is named here, so a new
 tool is one more line in the file.
 
-Exit 1 on a mismatch, on a refused file, or on a file that holds no pin. A tool that cannot be found or read prints `unknown` and exits 1. With
-`--local` a mismatch is a note and exit 0, for a machine that runs a different tool version than CI.
+A program that resolves under a `WindowsApps` folder is the Store's app alias, not an install, so it counts as not found.
+
+Exit 1 on a mismatch, on a refused file, or on a file that holds no pin; a mismatch line starts `FAIL`. A tool that cannot be
+found or read prints `unknown` and exits 1. With `--local` a mismatch is a note and the exit is 3, for a machine that runs
+a different tool version than CI: 0 is a match, 3 a mismatch, 1 an unknown or a refused file (unknown wins over a mismatch).
 """
 import argparse
 import os
@@ -28,6 +32,7 @@ import subprocess
 import sys
 
 PIN_FILE = ".tool-versions"
+LOCAL_MISMATCH = 3  # `--local` on a mismatch: lane lint tells it from a match (0) and an unknown (1)
 RUN_TIMEOUT = 30  # a version command that takes longer is hung, so its tool reads as unknown
 # A release (`3.15.0`) and an optional pre-release (`rc1`, `a2`, `dev1`, `.dev1`); the pre-release ends at a word edge,
 # so a hash such as `a1b2c3` is not one.
@@ -54,7 +59,7 @@ def repo_root(start):
 
 def parse(path):
     """Returns (pins, commands, matchers): pins is a list of (tool, version, line number); commands maps tool to its
-    read command; matchers maps tool to its compiled `# match:` regex."""
+    read commands, in file order; matchers maps tool to its compiled `# match:` regex."""
     pins, commands, matchers = [], {}, {}
     try:
         with open(path, encoding="utf-8-sig") as f:
@@ -70,7 +75,7 @@ def parse(path):
             if read:
                 if "\x00" in read.group(2):
                     raise PinFileError("%s line %d: the read command holds a NUL byte" % (path, number))
-                commands[read.group(1)] = read.group(2).strip()
+                commands.setdefault(read.group(1), []).append(read.group(2).strip())
                 continue
             match = MATCH_LINE.match(line)
             if match:
@@ -108,14 +113,25 @@ def run_version_command(command):
     if os.name == "nt":  # a non-POSIX split keeps the quote marks
         words = [w[1:-1] if len(w) > 1 and w[0] == w[-1] and w[0] in "\"'" else w for w in words]
     program = shutil.which(words[0]) if words else None  # `which` resolves a Windows .cmd shim by PATHEXT
-    if program is None:
+    if program is None or "windowsapps" in re.split(r"[\\/]", program.lower()):
         return None
     try:
+        # nowindow: other repos run this file alone, so hooks/_nowindow.py is not beside it; a version command runs in a CI or terminal console
         proc = subprocess.run([program] + words[1:], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                               stderr=subprocess.STDOUT, text=True, errors="replace", timeout=RUN_TIMEOUT)
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return None
     return proc.stdout if proc.returncode == 0 else None
+
+
+def read_tool(commands, matcher):
+    """The version from the first command that runs and prints one, or None when none does."""
+    for command in commands:
+        output = run_version_command(command)
+        number = read_version(output, matcher) if output is not None else None
+        if number is not None:
+            return number
+    return None
 
 
 def read_version(output, matcher=None):
@@ -174,18 +190,19 @@ def main(argv=None):
 
     mismatches = unknowns = 0
     for tool, pin, _ in pins:
-        output = run_version_command(commands.get(tool, tool + " --version"))
-        number = read_version(output, matchers.get(tool)) if output is not None else None
+        number = read_tool(commands.get(tool, [tool + " --version"]), matchers.get(tool))
         if number is None:
             print("tool-pins: %s unknown: its version command did not run or printed no version" % tool)
             unknowns += 1
         elif matches(pin, number):
             print("tool-pins: %s pinned %s, found %s: matched" % (tool, pin, number))
         else:
-            print("tool-pins: %s pinned %s, found %s; move the pin or the tool" % (tool, pin, number))
+            print("%stool-pins: %s pinned %s, found %s; move the pin or the tool" % ("" if args.local else "FAIL ", tool, pin, number))
             mismatches += 1
-    if unknowns or (mismatches and not args.local):
+    if unknowns:
         return 1
+    if mismatches:
+        return LOCAL_MISMATCH if args.local else 1
     return 0
 
 
