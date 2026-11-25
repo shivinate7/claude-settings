@@ -370,7 +370,7 @@ RUN_OUTCOMES = RUN_GREEN, RUN_NO_VERDICT, RUN_CARRIED, RUN_FIRST_RED, RUN_NEW_BR
 CLEAR_RULE_NO_EVIDENCE = "workflow_dispatch"  # an event that carries no push-skip evidence: clear_rule.empty_without_evidence then asks only whether a suite ran
 
 def load_clear_rule():
-    """The module of actions/ci-alarm/clear_rule.py, beside events.json: the one home of the failed-run clear and the empty-run rule, which the CI alarm calls too. Loaded when asked, not at the top, as the records generator is not: a copy of this file alone still loads."""
+    """The module of actions/ci-alarm/clear_rule.py, beside events.json: the one home of the failed-run clear, the empty-run rule and the judgment of main's runs (`judge`, `red_jobs`), which the CI alarm calls too. Loaded when asked, not at the top, as the records generator is not: a copy of this file alone still loads."""
     if os.path.dirname(ALARM_EVENTS) not in sys.path:
         sys.path.insert(0, os.path.dirname(ALARM_EVENTS))
     import clear_rule
@@ -1748,8 +1748,7 @@ class Host:
             raise Stop(f"merge.requiredChecks pins {', '.join(self.required)}, but the ruleset or branch protection of {self.base} requires {', '.join(held)} {PIN_CITE}. "
                        'Set merge.requiredChecks to "protection" so the protection list is the one source.')
 
-    # A check run's conclusion, and a commit status's state, to the bucket the tool judges. A run that is not completed is pending. Any other value is a fail.
-    CONCLUSION_BUCKET = {"success": "pass", "neutral": "skipping", "skipped": "skipping", "cancelled": "cancel"}
+    # A check run's conclusion (clear_rule.CONCLUSION_BUCKET), and a commit status's state, to the bucket the tool judges. A run that is not completed is pending. Any other value is a fail.
     STATE_BUCKET = {"success": "pass", "pending": "pending"}
 
     def checks(self, n, warn=True, sha=None):
@@ -1830,27 +1829,28 @@ class Host:
         return keep
 
     def run_row(self, r, link):
-        """A check run, or an Actions job (the same fields), as the row `buckets` judges."""
-        bucket = "pending" if r["status"] != "completed" else self.CONCLUSION_BUCKET.get(r.get("conclusion"), "fail")
-        return {"name": r["name"], "bucket": bucket, "link": link, "startedAt": r.get("started_at"), "completedAt": r.get("completed_at")}
+        """A check run, or an Actions job (the same fields), as the row `buckets` judges (clear_rule.run_row, the one home)."""
+        return load_clear_rule().run_row(r, link)
+
+    def cap_minutes(self):
+        """-> {job id or name: timeout-minutes} from the workflow files of this checkout, for the cap a job is judged against. {} when none is readable: the cap is advice, never a stop."""
+        try:
+            flow = workflow_dir(self.cwd)
+            return job_caps(p.read_text(encoding="utf-8") for p in sorted(flow.glob("*.y*ml"))) if flow else {}
+        except (OSError, ValueError):
+            return {}
 
     def buckets(self, rows, warn=True, sha=None):
         """-> {name: [(bucket, link), ...]} of check rows, a cancel that ran its full cap turned into the timeout bucket. See checks.
         With `sha`, the red rows an older run left behind are dropped after that judgment (see `superseded`), so a timeout is told from a cancel."""
-        try:
-            flow = workflow_dir(self.cwd)
-            caps = job_caps(p.read_text(encoding="utf-8") for p in sorted(flow.glob("*.y*ml"))) if flow else {}
-        except (OSError, ValueError):  # the warning is advice: with no readable workflow there is no cap to judge against
-            caps = {}
+        caps, clear_rule = self.cap_minutes(), load_clear_rule()
         items = []
         for d in rows:
-            bucket, link, cap, used = d["bucket"], d.get("link") or "", caps.get(d["name"]), job_minutes(d)
-            if cap and used is not None:
-                if bucket == "cancel" and used >= cap:
-                    bucket = f"timed out at its {cap}-minute cap; re-cap or split"
-                elif warn and used > 0.7 * cap and (d["name"], link) not in self.warned:
-                    self.warned.add((d["name"], link))
-                    say(f"job {d['name']}: {round(used)} of {cap} min; raise the cap from measured runs, or split its slowest suite")
+            link, cap, used = d.get("link") or "", caps.get(d["name"]), clear_rule.job_minutes(d)
+            bucket = clear_rule.capped(d["bucket"], cap, used)
+            if bucket == d["bucket"] and warn and cap and used is not None and used > 0.7 * cap and (d["name"], link) not in self.warned:
+                self.warned.add((d["name"], link))
+                say(f"job {d['name']}: {round(used)} of {cap} min; raise the cap from measured runs, or split its slowest suite")
             items.append((d, bucket))
         got = {}
         for d, bucket in (self.superseded(items, sha) if sha else items):
@@ -1921,161 +1921,84 @@ class Host:
 
     def base_state(self, base, flows):
         """-> (verdict, detail) for the red-main check (decision no-merge-onto-red-main): green, red, or unknown.
-        Judged: per workflow file in `flows` (the paths on the base) and per event group (BASE_EVENTS maps an event to its group; an event
-        not in it is never judged), the newest completed run on `base`, or a re-run in flight (not completed, `run_attempt` above 1) when one is newer: it
-        makes the verdict unknown, never green, since the older run under it is the one being re-run. A dispatch clears an older failed push (one group). A failed run R
-        with at least one red job is cleared by a run N of the same file and another group only when N is newer than R, is the newest completed
-        run of its own group, concluded success, and every job name in R's jobs that may run in N is in N's jobs, compared exactly, each entry with
-        conclusion success (a skipped job is no pass). So a green nightly that ran other jobs never clears a failed push. A job of R is left out of
-        that need (clear_rule.clears, the one home of the rule, which the CI alarm calls too) when it is not red in R and its job-level `if:` has a
-        top-level `&&` conjunct `github.event_name == 'X'` with X not N's event: it cannot run in N, as `all-jobs-passed` and `ci-done`, which are
-        pull_request-only, never run in a push or schedule run. So a newer green push run clears a red nightly. A red job is never left out; a test inside
-        `||`, a `!=`, an `if:` that cannot be parsed, and a job name that maps to no job of the file all keep the job needed. The file is read at N's head
-        (`contents/<path>`, ref = N's head_sha): one read per such N, cached, none for a cancelled R; a failed read is unknown. An R with no red job (no jobs, all passed,
-        cancelled or skipped jobs only) is never cleared by the failed-run rule; an unknown R stays unknown, except a cancelled R with jobs (below). N's jobs are read only
-        when R has a red job or is cancelled with no red job, and such an N exists (one read each, cached); a failed read is unknown. A newer first-attempt run still going waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
-        Red: a job whose bucket is a fail, or one gh adds later (classify). A cancelled or skipped job is not red, nor one timed out at its cap.
-        A run that did not succeed with no red job: a timed-out job explains it; else a cancelled run R is unknown, never swapped for an older
-        run (the twin rule of judge_runs would reach across commits here), unless a run N clears it. R is then on a commit older than the base's
-        head, since runs on the base are made at its head. N clears it when it is such a candidate (as above) on another head than R's, every job
-        R ran (not skipped) is in N by exact name with every entry of that name success, and every job R skipped is in N. An R with no jobs stays
-        unknown. Any other run that did not succeed is red (a broken workflow file runs no job).
+        The judgment is clear_rule.judge, the one home of the selection (which runs of the base decide, what clears a red run, what makes a job red, which run broke the base, what an
+        empty run is); the CI alarm calls the same file. Here: one page of the base's runs read from GitHub (`flows` are the workflow paths on the base), the jobs and the workflow file
+        at a run's head read when the judgment asks (one read each; a failed read is unknown, with GitHub's own words), and the verdict's words. One page of runs, never every page: the
+        base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A newest-first walk of the push group's green runs costs one jobs read each,
+        down to the first that is not empty.
         A cancelled run with no red job that nothing clears keeps its line, in the unknown detail and beside a red verdict. It is named with `gh run rerun <id>` only when its
         `head_sha` is the head_sha of the newest run on the page read (any status, any event in BASE_EVENTS, from the unfiltered list): runs on the base start at its head, and a re-run tests the run's own commit. Never named for a run with a red job or a re-run in flight.
-        An empty run is no verdict (clear_rule.empty_without_evidence, the one home): a completed success run of the push group (push and dispatch) that ran no check, and carries
-        no evidence that a green integration run covered its tree. The newest run of the group that is not empty is the group's verdict, so an older red run stays red; a page with no run of the
-        group that is not empty keeps the newest run. A schedule run is judged as it is.
         A red verdict's detail also holds breaking_line's segment for each red run judged (one per file and group), the head group's first: the first red run with a green parent, as a re-run to try (a first red) or as the breaking merge (red again on its re-run).
-        One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A newest-first walk of the push group's
-        green runs costs one jobs read each, down to the first that is not empty (the newest, when it ran a suite). A failed read is unknown.
         A red verdict also leaves `self.base_facts` for revert_proven, as data the prose cannot carry: `blamed` (the full head shas of the breaking merges), `red` (red runs judged),
         `others` (red entries without a run, cancelled runs and re-runs in flight beside the red), `head` (the head sha of the newest run read) and `red_heads` (the head sha of each red run judged), `red_ids` (the id of each red run judged) and `red_jobs` (per red run, the names of its red jobs; empty for a run that ended red with no red job). Every other verdict leaves it None."""
         self.base_facts = None  # a red verdict sets it below; any other verdict, and any stop, leaves it None
         if self.required == "none":  # a repo with "none" runs no CI, so the base's runs are not read, whatever they hold (decision private-repos-no-ci)
             return "green", ""
+        failed = []  # the stop of the first failed read: the judgment sees None and ends unknown, and the detail is that stop's words
+
+        def jobs_of(r):
+            try:
+                return self.pages(f"actions/runs/{r['id']}/jobs", "jobs")
+            except Stop as e:
+                failed.append(e)
+
+        def text_of(n):  # the workflow file at n's head; a failed or empty read is a stop, never a text
+            path, ref = n["path"].split("@")[0], n.get("head_sha")
+            try:
+                c, out = self.api(f"contents/{path}", "-H", "Accept: application/vnd.github.raw+json", fields={"ref": ref})
+            except Stop as e:
+                failed.append(e)
+                return None
+            if c or not out:
+                failed.append(Stop(f"reading {path} at {str(ref)[:9]} from GitHub failed, so the clear is unknown (decision no-merge-onto-red-main): {out}"))
+                return None
+            return out
+
+        def where(r):
+            return f"run {r['id']} of {r['name']} at {str(r.get('head_sha'))[:9]} ({r.get('html_url')})"
         try:
             clear_rule = load_clear_rule()
             c, out = self.api("actions/runs", fields={"branch": base, "per_page": MAIN_RUNS_READ})
             if c:
                 raise Stop(out)
-            judged = [r for r in json.loads(out)["workflow_runs"] if (r["status"] == "completed" or (r.get("run_attempt") or 1) > 1)
-                    and r["event"] in self.BASE_EVENTS and r["name"] not in self.ignore and r["path"].split("@")[0] in flows]
-            red, unknown, read = [], [], {}
-            red_runs = []  # the runs behind `red`, one per file and group: each starts its own walk to the breaking run
-            red_names = {}  # run id -> the names of that run's red jobs, which red_line prints and base_facts keeps
-            cancelled = []  # the cancelled runs with no red job that no run cleared: unknown alone, and named beside a red verdict, with their re-run when they are on the base's head
-            base_head = next((r.get("head_sha") for r in json.loads(out)["workflow_runs"] if r["event"] in self.BASE_EVENTS), None)  # the newest run on the page starts at the base's head
-
-            def jobs_of(r):  # a run's jobs, read once per call
-                if r["id"] not in read:
-                    read[r["id"]] = self.pages(f"actions/runs/{r['id']}/jobs", "jobs")
-                return read[r["id"]]
-            rule_events = clear_rule.rule_events()
-
-            def empty(r):  # a green run of the push group that ran no suite and carries no evidence: no verdict (clear_rule.empty_without_evidence); one jobs read, cached
-                return r["conclusion"] == "success" and r["event"] in rule_events and clear_rule.empty_without_evidence(jobs_of(r), r["event"])
-            newest, settled = {}, set()  # per (file, group): the newest run, but never an empty one while an older run of the group is not; with none, the newest run
-            for r in judged:  # newest first
-                key = (r["path"], self.BASE_EVENTS[r["event"]])
-                if key in settled:
-                    continue
-                newest.setdefault(key, r)
-                if not empty(r):
-                    newest[key] = r
-                    settled.add(key)
-            age = {r["id"]: i for i, r in enumerate(judged)}  # `judged` is newest first
-
-            texts = {}
-
-            def text_of(n):  # the workflow file at n's head, read once; a failed or empty read is a Stop, never a text
-                key = (n["path"].split("@")[0], n.get("head_sha"))
-                if key not in texts:
-                    c, out = self.api(f"contents/{key[0]}", "-H", "Accept: application/vnd.github.raw+json", fields={"ref": key[1]})
-                    if c or not out:
-                        raise Stop(f"reading {key[0]} at {str(key[1])[:9]} from GitHub failed, so the clear is unknown (decision no-merge-onto-red-main): {out}")
-                    texts[key] = out
-                return texts[key]
-
-            def cleared(r, cancelled=False):
-                """True when a newer, newest-of-its-group, successful run of another group of r's file passed what r needs. Call it only for an r with a red job,
-                or, with `cancelled`, for an r cancelled with no red job: the run must then also be on another head than r's, pass every job r ran
-                (not skipped) and contain every job r skipped. A failed r is judged by clear_rule: red_stays first (no file read), then clears, with the workflow file at n's head."""
-                names = {j["name"] for j in jobs_of(r)}
-                need = {j["name"] for j in jobs_of(r) if j.get("conclusion") != "skipped"} if cancelled else names
-                for n in newest.values():
-                    if (not names or n["path"].split("@")[0] != r["path"].split("@")[0] or self.BASE_EVENTS[n["event"]] == self.BASE_EVENTS[r["event"]]
-                            or age[n["id"]] >= age[r["id"]] or n["conclusion"] != "success"
-                            or (cancelled and (not r.get("head_sha") or n.get("head_sha") == r["head_sha"]))):
-                        continue
-                    if not cancelled:
-                        if clear_rule.red_stays(jobs_of(r), jobs_of(n)):
-                            continue  # a certain red: no workflow read, so a failed read cannot turn it into unknown
-                        if clear_rule.clears(jobs_of(r), jobs_of(n), n["event"], text_of(n)):
-                            return True
-                        continue
-                    theirs = {}
-                    for j in jobs_of(n):
-                        theirs.setdefault(j["name"], []).append(j.get("conclusion") if j.get("status") == "completed" else None)
-                    if all(theirs.get(x) and all(c == "success" for c in theirs[x]) for x in need) and all(x in theirs for x in names):
-                        return True
-                return False
-            for r in newest.values():
-                if r["status"] != "completed":  # a re-run in flight: its jobs are mid-change, so none are read
-                    unknown.append(f"run {r['id']} of {r['name']} {RERUN_IN_FLIGHT} (attempt {r['run_attempt']}, {r['status']}) at {str(r.get('head_sha'))[:9]} ({r.get('html_url')})")
-                    continue
-                if r["conclusion"] in ("success", "skipped", "neutral"):
-                    continue
-                got, jobs, names = self.red_jobs(jobs_of(r))
-                where = f"run {r['id']} of {r['name']} at {str(r.get('head_sha'))[:9]} ({r.get('html_url')})"
-                if jobs:
-                    if not cleared(r):
-                        red.append(f"{where}: " + "; ".join(jobs))
-                        red_runs.append(r)
-                        red_names[r["id"]] = names
-                elif any(b.startswith("timed out") for rows in got.values() for b, _ in rows):
-                    continue
-                elif r["conclusion"] == "cancelled":
-                    if not cleared(r, cancelled=True):
-                        cancelled.append(f"{where} {CANCELLED_NO_RED}" + (f". `{RERUN_REMEDY} {r['id']}` re-runs that run's own commit, which is the base's head"
-                                                                        if r.get("head_sha") and r["head_sha"] == base_head else ""))
-                else:
-                    red.append(f"{where} ended {r['conclusion']} with no red job")
-                    red_runs.append(r)
-                    red_names[r["id"]] = []
-            # One walk per red group (red_runs holds one run per file and group): a red nightly or a red run of another file never hides the
-            # push run that broke the base. The head group (push, dispatch) goes first, so its breaking merge or re-run leads the detail red_base reads.
-            order = sorted(red_runs, key=lambda r: (self.BASE_EVENTS[r["event"]] != self.BASE_EVENTS["push"], age[r["id"]]))
-            blame = [s for s in (self.breaking_line(judged, r) for r in order) if s]
-            blamed = [first["head_sha"] for first in (self.breaking_run(judged, r)[0] for r in order) if first and first.get("head_sha") and self.blames(first)]  # full shas, as data: the detail prose holds nine characters
+            judgment = clear_rule.judge(json.loads(out)["workflow_runs"], flows, self.ignore, self.cap_minutes(), jobs_of, text_of)
+            if failed:
+                raise failed[0]
+            if judgment.verdict == "unknown" and not (judgment.unknown or judgment.cancelled):  # a read gave None with no stop recorded: never a green
+                raise Stop("a read of the base's jobs or workflow file failed, so the verdict is unknown (decision no-merge-onto-red-main)")
+            red = [f"{where(e.run)}: " + "; ".join(e.lines) if e.lines else f"{where(e.run)} ended {e.run['conclusion']} with no red job" for e in judgment.red]
+            unknown = [f"run {r['id']} of {r['name']} {RERUN_IN_FLIGHT} (attempt {r['run_attempt']}, {r['status']}) at {str(r.get('head_sha'))[:9]} ({r.get('html_url')})" for r in judgment.unknown]
+            cancelled = [f"{where(r)} {CANCELLED_NO_RED}" + (f". `{RERUN_REMEDY} {r['id']}` re-runs that run's own commit, which is the base's head"
+                                                             if r.get("head_sha") and r["head_sha"] == judgment.base_head else "") for r in judgment.cancelled]
+            blame = [s for s in (self.breaking_line(judgment.judged, r) for r in judgment.order) if s]
         except (Stop, ValueError, KeyError, TypeError, AttributeError, ImportError) as e:
             return "unknown", " ".join(str(e).split())
         if red:
-            self.base_facts = {"blamed": blamed, "red": len(red_runs), "others": len(red) - len(red_runs) + len(cancelled) + len(unknown), "head": base_head,
-                               "red_heads": [r.get("head_sha") for r in red_runs], "red_ids": [r["id"] for r in red_runs], "red_jobs": [red_names[r["id"]] for r in red_runs]}
+            self.base_facts = {"blamed": judgment.blamed, "red": len(red), "others": len(cancelled) + len(unknown), "head": judgment.base_head,
+                               "red_heads": [e.run.get("head_sha") for e in judgment.red], "red_ids": [e.run["id"] for e in judgment.red], "red_jobs": [e.names for e in judgment.red]}
             return "red", " | ".join(red + blame + cancelled)
         return ("unknown", " | ".join(unknown + cancelled)) if unknown or cancelled else ("green", "")
 
     def red_jobs(self, job_rows):
-        """-> (got, red, names) for the jobs of one finished run: `got` is buckets' {job: [(bucket, link)]}; `red` the classify lines of its red jobs (a job cancelled or timed out at its
-        cap is not red, and "no check ran" is no job); `names` the red jobs' names, sorted. The one home of what makes a job of a main run red: base_state and main_run_verdict both read it."""
-        got = self.buckets([self.run_row(j, j.get("html_url")) for j in job_rows], warn=False)
-        steps = {k: v for k, rows in got.items() if (v := [x for x in rows if x[0] != "cancel" and not x[0].startswith("timed out")])}
-        red = [j for j in self.classify(steps, [], self.ignore)[0] if "no check ran" not in j]
-        return got, red, sorted(k for k, rows in steps.items() if any(b not in ("pass", "skipping", "pending") for b, _ in rows))
+        """-> (got, red, names) for the jobs of one finished run, as clear_rule.red_jobs judges them against this checkout's caps and ignore list: `got` is the buckets' {job: [(bucket, link)]}; `red` the lines of its red jobs; `names` the red jobs' names, sorted.
+        The one home of what makes a job of a main run red is clear_rule: base_state and main_run_verdict both read it."""
+        return load_clear_rule().red_jobs(job_rows, self.cap_minutes(), self.ignore)
 
     def breaking_line(self, judged, newest_red):
         """The breaking merge of a red base (decision no-merge-onto-red-main, the revert route), read from the page base_state already read: -> a detail
-        segment, or None. `judged` is newest first. From `newest_red`, walk the runs of its workflow file and event group, newest first, past every red run
-        to the first green one; the oldest red run before it is the first red run with a green parent. A cancelled, skipped or neutral run proves nothing
-        and is stepped over; a run not completed (a re-run in flight) stops the walk with a segment that says the breaking run is unknown. With no green parent on the page (a lone red run, or a page that is red to its end) nothing is named.
+        segment, or None. `judged` is newest first. The first red run with a green parent is clear_rule.breaking_run's walk from `newest_red`; a run not completed (a re-run in flight)
+        stops the walk with a segment that says the breaking run is unknown. With no green parent on the page (a lone red run, or a page that is red to its end) nothing is named.
         A first red (`run_attempt` 1) is not blamed: its segment names `gh run rerun <id> --failed`, and red_base puts that before the reason flag, because a
         flaky run is the likelier cause. Red again on a re-run (`run_attempt` above 1), the segment names the run's commit and its pull request, read from
         the number in the head commit's first line: `Merge pull request #N` for a merge commit, `(#N)` last for a squash. A schedule run names neither, and its first-red text promises no blame: it tests the head at run time."""
-        first, stop = self.breaking_run(judged, newest_red)
-        if stop or first is None:
-            return stop
+        clear_rule = load_clear_rule()
+        first, going = clear_rule.breaking_run(judged, newest_red)
+        if going:
+            return f"the run that broke the base is unknown: run {going['id']} (attempt {going.get('run_attempt')}) is still going, so the walk to the first red run after a green one stops there. Run again once it ends"
+        if first is None:
+            return None
         sha = str(first.get("head_sha"))[:9]
-        if not self.blames(first):
+        if not clear_rule.blames(first):
             if (first.get("run_attempt") or 1) <= 1:
                 return (f"run {first['id']} is the first red run after a green one, at {sha}: `{RERUN_REMEDY} {first['id']} --failed` re-runs its failed jobs, "
                         + ("and as a schedule run it is never blamed on a commit, even if that re-run is red again" if first["event"] == "schedule"
@@ -2084,30 +2007,6 @@ class Host:
         head = (first.get("head_commit") or {}).get("message") or first.get("display_title") or ""
         n = pull_number_in_title(head.splitlines()[0] if head else "")
         return f"{BREAKING_MERGE} commit {sha} (run {first['id']}, red again on its re-run), " + (f"pull request #{n}" if n else "no pull request number in its message")
-
-    def breaking_run(self, judged, newest_red):
-        """-> (run, stop): the first red run with a green parent that breaking_line's walk finds, as the run itself so a caller reads its full sha as data.
-        (None, None) when none is known; (None, text) when a run still going stops the walk."""
-        key = (newest_red["path"], self.BASE_EVENTS[newest_red["event"]])
-        first = None
-        for r in judged[judged.index(newest_red):]:
-            if (r["path"], self.BASE_EVENTS[r["event"]]) != key:
-                continue
-            if r["status"] != "completed":  # an older run still going (a re-run in flight): the run under it may be red or green, so no run is blamed
-                return None, f"the run that broke the base is unknown: run {r['id']} (attempt {r.get('run_attempt')}) is still going, so the walk to the first red run after a green one stops there. Run again once it ends"
-            if r["conclusion"] == "success":
-                break
-            if r["conclusion"] not in ("skipped", "neutral", "cancelled"):
-                first = r
-        else:
-            return None, None  # no green parent on the page: the breaking run is not known
-        return first, None
-
-    @staticmethod
-    def blames(first):
-        """True when the breaking run `first` names its commit as the breaking merge: red again on a re-run, and not a schedule run (a nightly tests the
-        base's head at run time, not the commit that started it, so that commit is no suspect). The one home of that test: breaking_line and base_state's blamed list both ask it."""
-        return (first.get("run_attempt") or 1) > 1 and first["event"] != "schedule"
 
     @staticmethod
     def settle(red, pending, r_red, r_pending):
@@ -2861,14 +2760,6 @@ def host_default_branch(root):
         return name
     except (ValueError, KeyError, TypeError) as e:
         raise Stop(f"the default branch cannot be read from gh: {e}")
-
-def job_minutes(row):
-    """Minutes a check row ran, from startedAt to completedAt. None when either is missing or the job has not finished (gh gives a pending one the zero time)."""
-    try:
-        a, b = (datetime.datetime.fromisoformat(row[k].replace("Z", "+00:00")) for k in ("startedAt", "completedAt"))
-    except (KeyError, AttributeError, ValueError):
-        return None
-    return (b - a).total_seconds() / 60 if b > a else None
 
 def workflow_dir(start):
     """The `.github/workflows` of the checkout that holds `start` (the working directory when None): the nearest one up the tree, so a run from a subfolder reads the repo root's.
@@ -5186,7 +5077,7 @@ def main_run_verdict(host, sha, base=MAIN_RUN_BASE):
             return line(RUN_CARRIED, f"run {now['id']} is red with the checks and tests run {before['id']} already had (checks {', '.join(names) or 'none named'}), so it adds no new red{not_re_run}{why}")
         new_shown = ", ".join(new_tests[:RED_TESTS_SHOWN]) + (f" and {len(new_tests) - RED_TESTS_SHOWN} more" if len(new_tests) > RED_TESTS_SHOWN else "")
         fresh = f"new red checks {', '.join(new_names) or 'none named (the run ended red with no red job)'}; new failing tests {new_shown or 'none named'}{why}"
-        if not host.blames(now):
+        if not clear_rule.blames(now):
             return line(RUN_FIRST_RED, f"run {now['id']}: {fresh}. Nothing is blamed until it is red again on a re-run: `{RERUN_REMEDY} {now['id']} --failed` re-runs its failed jobs")
         number = pull_number_in_title(message.splitlines()[0] if message else "")
         return line(RUN_NEW_BREAK, f"run {now['id']}: {fresh}, red again on its re-run (attempt {attempt}). {BREAKING_MERGE} commit {sha9}, "
@@ -5493,15 +5384,59 @@ def ready_job_groups(checks):
         groups.setdefault(m.group(1) if m else "checks", []).append((entry, m.group(2) if m else entry))
     return groups
 
+def base_read_phrases(wt, base, failing, body=None):
+    """-> {declared name: the base phrase of its failing row} for `failing`, a list of (declared name, job, bare step name) of ready checks that FAILed in the tree `wt`.
+    The one home of the base read: each check runs once, alone (`--step`), through ci_job_run in one detached worktree of the merge base of HEAD in `wt` and origin/`base`
+    (add_worktree), which is dropped on every path. The tip of the base is not read: a checkout behind it would blame the change for what the base gained since. The worktree has the repo's history, so a check that reads git sees what it sees on the base. It never touches `wt`: no checkout, no index write.
+    The phrase is `passes on <sha9>: this change broke it`, `also fails on <sha9>` (the sha9 of the merge base), or `base not read: <reason>`, the last for a base that is absent, a base
+    with no merge base (`git merge-base` empty or non-zero: no copy is made), a copy that cannot be made, and a run that is unknown (a crash, a timeout, no line for the check). It never guesses: only a PASS or a FAIL line of the check itself names the base. The phrase lifts nothing; the caller keeps the row a fail.
+    ci-job's rerun cache serves a passing base (the same merge base commit in another tree hits); a fail is not saved, so it runs again.
+    Cost: a base with no failing check costs nothing. Otherwise one `git rev-parse`, one `git merge-base`, one worktree add and remove, and one ci-job run per failing check."""
+    if not failing:
+        return {}
+    c, sha = git(wt, "rev-parse", "--verify", "-q", f"origin/{base}^{{commit}}")
+    if c or not sha:
+        return {declared: f"base not read: origin/{base} is absent" for declared, _, _ in failing}
+    c, sha = git(wt, "merge-base", "HEAD", f"origin/{base}")
+    if c or not sha:
+        return {declared: f"base not read: HEAD and origin/{base} share no merge base" for declared, _, _ in failing}
+    tmp = copy = None
+    phrases = {}
+    try:
+        try:
+            tmp, copy = add_worktree(wt, sha)
+        except (Stop, OSError, subprocess.SubprocessError) as e:
+            return {declared: f"base not read: no copy of {sha[:9]} ({' '.join(str(e).split())[:120]})" for declared, _, _ in failing}
+        for declared, job, bare in failing:
+            raw = []
+            try:
+                state = ci_job_run(copy, job, "--pinned", "--step", bare, "--base", f"origin/{base}", raw=raw, pr_body=body)[0]
+                verdict, _, detail = step_verdicts(raw, [bare], state)[0]
+            except (Stop, OSError, subprocess.SubprocessError) as e:
+                verdict, detail = "unknown", str(e)
+            if verdict == "pass":
+                phrases[declared] = f"passes on {sha[:9]}: this change broke it"
+            elif verdict == "fail":
+                phrases[declared] = f"also fails on {sha[:9]}"
+            else:
+                phrases[declared] = f"base not read: {' '.join(detail.split())[:120] or 'ci-job gave no verdict'}"
+    finally:
+        if tmp:
+            try:
+                drop_worktree(wt, tmp, copy)
+            except (OSError, subprocess.SubprocessError):
+                shutil.rmtree(tmp, ignore_errors=True)
+    return phrases
+
 def pre_ready_rows(wt, n, base, checks, pre, body=None):
     """The pre-ready run: one ci-job run per job of `merge.readyChecks` `checks` in the tree `wt` (ready_job_groups), then, when `pre` is (root, host, info), the debt-close lint
     and the open-PR clash of the PR's head info["head"] (the lint reads it through `wt`'s git), each once. Prints one verdict line per check, `pass NAME`, `skip NAME: why` (a listed action step this tool cannot run, step_skip; counted only when another listed step passes), `fail NAME: why` or `unknown NAME: why`, all before any
-    refusal; NAME is the declared entry.
+    refusal; NAME is the declared entry. A `fail` line also names its base read, `fail NAME (passes on <sha9>: this change broke it): why`, `(also fails on <sha9>)` or `(base not read: <reason>)` (base_read_phrases); the row stays a fail whatever it says.
     -> (rows, (state, lines, log)): rows of (verdict, name, detail), and the jobs' ci_job_run answers combined: state fail over unknown over pass, lines and log joined.
     Each job's steps are read from that job's own lines, so a step name two jobs hold reads only its own job.
     Each job's run gets the PR body (info["body"], else `body`, which a run with no `pre` passes) as PR_BODY, which the records-and-rules step (actions/claude-md-cites, a ready check by name) reads; with no body it reads unknown when it finds a gap.
     Cost of the six cheap checks (Hook catalog check, Retired names, Silent undo check, Ruling kind check, the Skill model rows and Project-ops roles fixture suites), measured through bin/ci-job on one machine, one run each: 1.4 s, 3.9 s, 2.4 s, 0.3 s, 7.1 s and 14.9 s, 30.0 s in all, no run past 20 s (the Glossary fixture suite, 112.4 s, is left out of the list). The Code check step (actions/code-check/code_check.py, ruff, mypy, ShellCheck and the comment check) is listed too: 13.6 s with the pinned tools cached, 0.2 s on a cached rerun (one local run, 14:33 CST Nov 24 2026); a first run on a machine with no cached tools is unmeasured. It joins the checks job's one ci-job run as one more step; it needs pipx, and with pipx absent it reads unknown. A machine with pipx but no cached tools and no network reads fail, not unknown: code_check.py names only a missing pipx or npx as "could not start". They join the checks job's one ci-job run, so they add no ci-job start; each step is one bin/verdict start and one shell, as every named step is. The silent-undo and ruling-kind steps read the base and head sha ci-job sets, the catalog step reads GITHUB_BASE_REF. No gh call and no GitHub read (merge/test_lane_lint.py test_six_cheap_checks_share_one_ci_job_start_and_read_no_github).
-    Cost: one ci-job run per job (a ready check that names a local action adds no run of its own: its three probe steps are three bin/verdict starts and shells inside that run, a git diff, and one live GitHub read per Facts claim, which reads unknown when it fails), one debt-close lint (a scratch worktree and one Retire test run per closed debt), one cross_measure; no file but ci-job's log and the temporary worktrees."""
+    Cost: one ci-job run per job (a ready check that names a local action adds no run of its own: its three probe steps are three bin/verdict starts and shells inside that run, a git diff, and one live GitHub read per Facts claim, which reads unknown when it fails), one debt-close lint (a scratch worktree and one Retire test run per closed debt), one cross_measure; for failing checks only, one worktree of the base and one more ci-job run per failing check (base_read_phrases), none for a pass; no file but ci-job's log and the temporary worktrees."""
     rows, states, lines, log, held = [], [], [], [], []  # held: each job's ci-job state and rows before a skip is read
     for job, group in ready_job_groups(checks).items():
         raw = []
@@ -5521,10 +5456,12 @@ def pre_ready_rows(wt, n, base, checks, pre, body=None):
     if any(v == "skip" for v, _, _ in rows) and not any(v == "pass" for v, _, _ in rows):  # every listed step is unrunnable: nothing ran, so nothing passed
         states, rows = [s_ for s_, _ in held], [r for _, job_rows in held for r in job_rows]
     state = "fail" if "fail" in states else "unknown" if "unknown" in states else "pass"
+    where = {declared: (job, bare) for job, group in ready_job_groups(checks).items() for declared, bare in group}
+    based = base_read_phrases(wt, base, [(name, *where[name]) for v, name, _ in rows if v == "fail" and name in where], pre[2].get("body") if pre else body)  # a failing row names its base; the row stays fail
     if pre:
         root, host, info, *act = pre  # a fourth item False is the read-only run (fast_checks): an idle red clash is read, never drafted
         rows += [debt_verdict(wt, base, host, info), clash_verdict(root, n, base, host, info, draft_idle=act[0] if act else True)]
-    say(*[f"{v} {name}" + (f": {d}" if d else "") for v, name, d in rows])
+    say(*[f"{v} {name}" + (f" ({based[name]})" if v == "fail" and name in based else "") + (f": {d}" if d else "") for v, name, d in rows])
     return rows, (state, lines, log)
 
 def run_ready_checks(wt, n, base, checks, remedy="Fix it on the branch, push, and run --confirm again.", pre=None):

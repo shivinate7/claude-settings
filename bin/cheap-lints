@@ -13,7 +13,10 @@
 # Output: one `pass|fail|unknown NAME` line per check, then one summary line. Exit 0 all pass, 1 any fail, 2 any unknown. A read that
 # cannot run (no checkout, a copy with no hooks/, a bad call, no readyChecks declared) prints `unknown cheap-lints: <why>` and exits 2,
 # never 1: no list is no proof, never a pass. Report an exit 2 as unknown.
-# Cost: one bin/ci-job run per job of the list (one process per check), one ci-job log; no worktree, no push, no timer.
+# A check that FAILs also reads the base, the merge base of HEAD and origin/<base> (merge.base_read_phrases), not the base's tip: its row says `(passes on <sha9>: this change broke it)`, `(also fails on <sha9>)`
+# or `(base not read: <reason>)`, the last also when HEAD and origin/<base> share no merge base. The row stays `fail` and the exit stays 1.
+# Cost: one bin/ci-job run per job of the list (one process per check), one ci-job log; no push, no timer. Only a failing check adds a temporary
+# worktree of the merge base and one git merge-base, and one more ci-job run of that check; a passing check adds none.
 # Windows: bin\cheap-lints.cmd. Checkout: this file's clone, else the one the global CLAUDE.md names (as bin/ste-changed).
 import json, os, re, sys
 

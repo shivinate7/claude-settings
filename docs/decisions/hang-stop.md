@@ -12,7 +12,7 @@ Ruling: only on a hang. A hang is no new output byte and no CPU advance in any p
 
 - Limit on every platform: a silent step that keeps starting short processes (a poll loop) is not stopped and falls back to its cap. On Linux, reaped children's CPU counts as work (`hooks/_nowindow.py` `tree_cpu`). On macOS, where that CPU cannot be read (no `/proc`), a process under the step that was not in the baseline sample also counts as work.
 - macOS gap: `bin/verdict` `hang_check`, through the `_nowindow.reaped_readable()` branch, can read a hang when a child that used CPU has exited and the parent sleeps. A healthy suite quiet for N seconds in that shape would stop. No stretch of the five suites has that shape, by reading; unmeasured.
-- A step that has finished is never a hang: `exited` is checked, and `hang_stop` checks again before it stops.
+- A child that has finished and waits only to be reaped is never a hang: `bin/verdict` reads that from `exited` (where Python has `os.waitid`) or from `zombie_row`, the child's own state in the process sample. `hang_stop` checks again before it stops.
 - Silence is measured on the monotonic clock, so a sleep or a clock change is not silence.
 - N: 600 s, the first value, for the five wrapped steps. It is 2 x the longest silent gap that does not end on a dot row, rounded up. That gap, 291.1 s, is the longest of 150 jobs in 10 green push runs; it fell in the merge tool git-half fixture suite. The record gives no gap per wrapped step: unmeasured. The two macOS steps do not run on push. N is at least 300 s. CPU half unmeasured: logs cannot show CPU advance.
 - One home: the wait loop of `bin/verdict`. Off unless the env var `VERDICT_HANG_SECONDS` is set. The five steps in Scope set it to 600 as a literal in `.github/workflows/checks.yml`, not from that home. `lint/test_checks_step_scope.py` about line 1443 pins 600 for the three Linux steps and at least 300 for the two macOS steps. A value that is not a whole number turns the stop off and prints one line. The HANG line's words, its pattern (`HANG_LINE`), exit code 124 and the 600 s default (`HANG_SECONDS_DEFAULT`) have one home, `hooks/_nowindow.py`. `bin/verdict` prints the line; `bin/ci-job` and the merge tool read it.
@@ -27,9 +27,9 @@ Ruling: only on a hang. A hang is no new output byte and no CPU advance in any p
 - Resume after a stop:
   - Lane lint: its pass cache keeps passed steps.
   - CI: the rerun of failed jobs that the merge tool already names.
-  - Mutation verdicts: cached across run attempts. Not built.
+  - Mutation verdicts: a rerun after a red or stopped step reuses the verdicts its earlier attempt saved (lane `mutate-verdicts-cached-ci`, the mutation verdict cache). A new push has a new run id and restores nothing. A verdict from other code is ruled out by its digest (`hooks/mutate_guard.py` `verdict_digest`). Unknown: whether the save runs when GitHub cuts a job at its cap (debt `mutate-verdict-save-at-cap`).
 
-State: decided. Built: the stop in `bin/verdict` (lane `verdict-hang-stop`), off unless `VERDICT_HANG_SECONDS` is set; lane `ci-job-hang-stop` (`bin/ci-job` reads a `HANG` line; pull request 3843, merged); the five-step wrap with its full-log switch (Scope above); and lane `code-caps-hang-stop` (the HANG line's one home, the 600 s default in `bin/ci-job`, the lane lint no-lift). Not built: lane `mutate-verdicts-cached-ci` (the mutation verdict cache), and note `hang-stop-poll-loop` (open).
+State: decided. Built: the stop in `bin/verdict` (lane `verdict-hang-stop`), off unless `VERDICT_HANG_SECONDS` is set; lane `ci-job-hang-stop` (`bin/ci-job` reads a `HANG` line; pull request 3843, merged); the five-step wrap with its full-log switch (Scope above); and lane `code-caps-hang-stop` (the HANG line's one home, the 600 s default in `bin/ci-job`, the lane lint no-lift); and lane `mutate-verdicts-cached-ci` (the mutation verdict cache: three steps per mutation shard job in `.github/workflows/checks.yml`). Not built: note `hang-stop-poll-loop` (open).
 
 Measure, 2026-11-23: in the 50 newest push runs of `checks` on main, 4 jobs ended at the 30-minute step cap with no red test, and 0 at a job cap.
 
@@ -40,7 +40,8 @@ Cost (rule `outcomes-mechanize-rules`; the log-size read is unmeasured):
 - Wake: min(the heartbeat, N / 4), at least 1 s. The heartbeat is `VERDICT_HEARTBEAT`, 120 s by default. At N = 600 the wake is 120 s. For N of 4 or less it is 1 s (test use only).
 - Log-size read: one per wake.
 - Process-table read: at most one per wake, only while the step is silent. It reads on the first silent wake, then once per N s of silence: at N = 600, one per 600 s. Pinned by `lint/test_verdict.py` `test_hang_stop_printing_child_makes_no_process_table_read` (no read while the child prints) and `test_hang_stop_silent_child_makes_a_process_table_read` (a read while silent).
+- Mutation verdict cache (lane `mutate-verdicts-cached-ci`): three steps per mutation shard job (make the folder, restore, save), one cache entry per job per attempt. Restore and save time unmeasured until the first CI run.
 
 Kind: process
 Home: bin/verdict
-Check: `lint/test_checks_step_scope.py` class `HangStopWrap` (CI values, 600), `lint/test_ci_job.py` class `HangStopDefault` (the 600 default), `lint/test_verdict.py` classes `FullLog` and `HangLineOneHome`, `merge/test_lane_lint.py` `test_a_hang_in_lane_lint_is_not_lifted_by_an_unknown_reason`
+Check: `lint/test_checks_step_scope.py` class `HangStopWrap` (CI values, 600), `lint/test_ci_job.py` class `HangStopDefault` (the 600 default), `lint/test_verdict.py` classes `FullLog` and `HangLineOneHome`, `merge/test_lane_lint.py` `test_a_hang_in_lane_lint_is_not_lifted_by_an_unknown_reason`, `lint/test_checks_step_scope.py` class `MutateVerdictCache` (the three cache steps per shard job), `hooks/test_mutate_shared.py` (the saved-verdict key, `verdict_digest`)
