@@ -112,8 +112,9 @@ jobs:
     needs: touched
     if: ${{ github.event.pull_request.draft && needs.touched.outputs.any == 'true' }}
     # The macOS leg runs on the label in the repository variable MAC_RUNS_ON when the pull request is from this repository, and on
-    # macos-latest when the variable is unset or empty. A fork's pull request is always hosted: the repository is public, and a
-    # fork's code must never run on the owner's Mac. The Windows leg never reads the variable.
+    # macos-latest when the variable is unset or empty. This keeps an unmodified fork copy of the workflow on the hosted runner; it is
+    # not the guard, since a fork's own copy can name the Mac's label. The guard is the repository's Actions setting that holds every
+    # outside contributor's run for a maintainer (decision mac-runner-try). The Windows leg never reads the variable.
     runs-on: ${{ (matrix.os == 'macos-latest' && github.event.pull_request.head.repo.full_name == github.repository && vars.MAC_RUNS_ON) || matrix.os }}
     timeout-minutes: 30   # interim stopgap (decision ci-job-caps): both systems ended at the old 10 min cap with no red step (macOS 10.3 min twice, run 43493592401; Windows 10.2 and 10.1 min cap-end jobs, runs 43505306735 and 43510710739); Windows green 7.7 min, macOS green 5.7 min
     # One entry per system that has tests to run: the selector leaves a system out when its list is empty.
