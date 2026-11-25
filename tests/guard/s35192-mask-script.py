@@ -147,7 +147,7 @@ LOG_CHECKS_EXTRA.append(("mask_script: normal scripts with escaped quotes keep t
 # same decide() call the main loop uses.
 RM_VAR_SLOW_CMD = 'a=$(' * 2000 + '; rm -rf "${a:?}"/x'
 _slow_at = len(CASES)
-add("rm-var: 2000 unclosed $( spans are judged in under 2 s", "deny", cwd=NOGIT,
+add("rm-var: 2000 unclosed $( spans are judged in under 2 s", "deny", "env-file", cwd=NOGIT,
     command=RM_VAR_SLOW_CMD)
 RM_VAR_SLOW_CASE = CASES[_slow_at]
 del CASES[_slow_at:]
