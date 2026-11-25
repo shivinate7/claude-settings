@@ -14,14 +14,19 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # a runner other than `python agent_brief.py` still finds guard_core
 try:
     from guard_core import REFUTER_ROLE  # noqa: E402  the one home of the refuter role's name
-    import guard_shared_tree  # noqa: E402  the one home of the reset flags that discard work
 except Exception as e:  # fail open, as the docstring says: READ_ONLY and SCOPE need the name, so stop here with exit 0
     print(f"agent_brief: {e}", file=sys.stderr)
     sys.exit(0)
 
 # The reset ban names the flags the guard refuses, read from its constant at load, so the brief and the guard agree.
-RESET_BAN = ("- Outside your own worktree, never run git reset with one of the flags %s, git checkout of a path, or git restore."
-             % "/".join(guard_shared_tree.RESET_DISCARD_FLAGS))
+# Its own try block: when guard_shared_tree fails to load, the brief drops only this line (RESET_BAN is None).
+try:
+    from guard_shared_tree import RESET_DISCARD_FLAGS  # noqa: E402  the one home of the reset flags that discard work
+    RESET_BAN = ("- Outside your own agent worktree (a folder under .claude/worktrees), never run git reset with one of the flags %s, "
+                 "git checkout of a path, or git restore." % "/".join(RESET_DISCARD_FLAGS))
+except Exception as e:
+    print(f"agent_brief: reset line not built: {e}", file=sys.stderr)
+    RESET_BAN = None
 
 # Each line carries a flag: True = every type, False = only types that commit and push.
 COMMON = [
@@ -90,7 +95,7 @@ def note_rules(cwd):
 def build(agent_type, form=None, notes=()):
     key = agent_type.lower() if isinstance(agent_type, str) else agent_type  # the match ignores case
     writes = key not in {t.lower() for t in READ_ONLY}
-    lines = [t for always, t in COMMON if always or writes]
+    lines = [t for always, t in COMMON if (always or writes) and t is not None]  # a reset line that did not load is None
     text = "\n".join(lines).format(scope=next((v for k, v in SCOPE.items() if k.lower() == key), GENERAL))
     for rule in notes:  # appended after format(): a rule may hold braces
         text += "\n- " + rule
