@@ -91,8 +91,11 @@ def group_rows(suite, median, names, outlier_name=None, outlier_s=None, group=No
     return rows
 
 
-def run_reader(folder):
-    env = {k: v for k, v in os.environ.items() if k not in ("CASE_TIMES", "PYTHONPATH")}
+def run_reader(folder, jobs=None):
+    """Runs the reader on one folder. `jobs` is the comma-separated job names the run expects, in env CASE_TIMES_JOBS."""
+    env = {k: v for k, v in os.environ.items() if k not in ("CASE_TIMES", "PYTHONPATH", "CASE_TIMES_JOBS")}
+    if jobs is not None:
+        env["CASE_TIMES_JOBS"] = jobs
     return subprocess.run([sys.executable, READER, "--dir", folder], env=env, capture_output=True, text=True,
                           encoding="utf-8", errors="replace", timeout=RUN_TIMEOUT)
 
@@ -190,8 +193,47 @@ class Flags(unittest.TestCase):
         self.assertIn("unknown", none.stdout.lower(), "an empty folder did not print unknown: %r" % none.stdout[-200:])
 
 
+class JobFiles(unittest.TestCase):
+    """The report names the job files it read, one line each: `read: <path>`. A job the run expects (env
+    CASE_TIMES_JOBS, comma-separated) with no `<job>.jsonl` under the folder is listed as `missing: <job>`."""
+
+    def test_prints_each_job_file_read(self):
+        decisive_control(self)
+        folder = fresh(self)
+        write_job(folder, "checks-a", [row("lint/fixture_read_a.py", "lint/fixture_read_a.py", "T.read_a", 0.5)])
+        write_job(folder, "checks-b", [row("lint/fixture_read_b.py", "lint/fixture_read_b.py", "T.read_b", 0.5)])
+        result = run_reader(folder)
+        lines = result.stdout.splitlines()
+        for job in ("checks-a", "checks-b"):
+            path = os.path.join(folder, job + ".jsonl")
+            self.assertIn("read: " + path, lines,
+                          "the report did not print the job file it read as 'read: <path>' on its own line: %r"
+                          % result.stdout[-300:])
+
+    def test_named_job_without_a_file_is_listed_missing(self):
+        decisive_control(self)
+        folder = fresh(self)
+        write_job(folder, "checks-a", [row("lint/fixture_named_a.py", "lint/fixture_named_a.py", "T.named_a", 0.5)])
+        result = run_reader(folder, jobs="checks-a,nightly")
+        self.assertEqual(result.returncode, 0, "the reader exits %d, want 0: %s"
+                         % (result.returncode, result.stderr[-300:]))
+        lines = result.stdout.splitlines()
+        self.assertIn("missing: nightly", lines,
+                      "a named job with no file was not listed as 'missing: <job>': %r" % result.stdout[-300:])
+        self.assertNotIn("missing: checks-a", lines, "a named job with a file was listed as missing")
+
+
 class Literal(unittest.TestCase):
     """The flag thresholds by literal value: 10 times the group median, and 1.0 s. No constant is read here."""
+
+    def test_floor_near_one_second_not_flagged(self):
+        decisive_control(self)
+        folder = fresh(self)
+        # median 0.09 s, probe 0.99 s: 11 times the median, which the ratio alone flags; only the 1.0 s floor keeps it out
+        write_job(folder, "floor_edge", group_rows("lint/fixture_floor_edge.py", 0.09, NORMAL, "floor_edge_probe", 0.99))
+        result = run_reader(folder)
+        self.assertNotIn("floor_edge_probe", result.stdout,
+                         "a case at 0.99 s (11 times its group median) was flagged: the 1.0 s floor did not hold")
 
     def test_nine_point_nine_times_not_flagged(self):
         decisive_control(self)
