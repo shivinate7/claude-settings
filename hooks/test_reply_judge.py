@@ -1420,6 +1420,20 @@ def case_prompt_defines_widening_as_other_than_the_settings_repo():
           % (SETTINGS_REPO.lower(), sentences))
 
 
+def case_prompt_bounds_the_settings_repo_never_flag():
+    # The never-flag sentence for the settings repo is bounded: one sentence holds the repo value, a never-flag word,
+    # 'unless' and 'other than', so a change that lets another repo's differing form pass is still flagged.
+    run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
+    sentences = rule_sentences(run, WIDENS_ASK)
+    holds = [s for s in sentences if ("never flag" in s or "not widen" in s) and SETTINGS_REPO.lower() in s]
+    closest = max(holds or [""], key=lambda s: sum(w in s for w in ("unless", "other than")))
+    missing = [w for w in ("unless", "other than") if w not in closest]
+    check("prompt: one sentence holds the settings repo value, 'never flag' or 'not widen', 'unless' and 'other than'",
+          has_pin(sentences, ("never flag", "not widen"), (SETTINGS_REPO.lower(),), ("unless",), ("other than",)),
+          "missing words in the never-flag sentence for the settings repo: %s; rule sentences: %s"
+          % (", ".join(repr(w) for w in missing) or "none, the words are in two sentences", sentences))
+
+
 # Roadmap c135, item 31's shape: options that can all be done together, asked as pick-one. The prompt
 # flags it and says to ask it as a multi-select item (`multi: true`). Options that exclude each other,
 # such as now or later, stay a pick-one question.
@@ -2551,6 +2565,7 @@ CASES = (
     case_prompt_says_widening_is_a_form_that_passes_one_repos_variant,
     case_prompt_never_flags_a_change_that_names_only_the_settings_repo,
     case_prompt_defines_widening_as_other_than_the_settings_repo,
+    case_prompt_bounds_the_settings_repo_never_flag,
     case_widens_finding_logs_its_rule,
     case_prompt_flags_a_pick_one_question_whose_options_could_combine,
     case_route_cite_carries_cited_same_act_and_alternate_rows,
