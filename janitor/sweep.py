@@ -1814,10 +1814,12 @@ def decide_listener(entry: dict):
     "reap"|"keep", "reason"}. ENTRY is one of `find_swept_listeners`'s own results, already
     matched to a checkout this sweep covers.
 
-    Reapable only when ALL three of these answer a confirmed yes, in this order: orphaned; no
-    live Claude session has a cwd in the same checkout (git_reads.py's own tested oracle, reused
-    verbatim, never re-derived here); owned by the current user. Any `None` along the way
-    means keep, reported as `unreadable-subject`."""
+    Reapable only when ALL of these answer a confirmed yes, in this order: orphaned; the checkout
+    holds no uncommitted work; no process but the listener (or its own descendants) has a cwd in
+    it; no live Claude session has a cwd in the same checkout (git_reads.py's own tested oracle,
+    reused verbatim, never re-derived here); owned by the current user. Because the dirty and
+    process checks run first, a session record whose folder is gone reads as not in the checkout
+    (`absent_is_out`). Any `None` along the way means keep, reported as `unreadable-subject`."""
     pid = entry["pid"]
     base = dict(entry, command=process_command(pid))
 
@@ -1827,7 +1829,19 @@ def decide_listener(entry: dict):
     if not orphan:
         return {**base, "action": "keep", "reason": "not-orphaned"}
 
-    live = git_reads.worktree_live_session(entry["checkout"])
+    dirty = read_dirty(entry["checkout"])
+    if dirty is None:
+        return {**base, "action": "keep", "reason": "unreadable-subject"}
+    if dirty:
+        return {**base, "action": "keep", "reason": "dirty"}
+    inside, _unreadable = processes_in(entry["checkout"])
+    if inside is None:
+        return {**base, "action": "keep", "reason": "unreadable-subject"}
+    others = _pids_but_listener(inside, pid)
+    if others:
+        return {**base, "action": "keep", "reason": process_inside_reason(others)}
+
+    live = git_reads.worktree_live_session(entry["checkout"], absent_is_out=True)
     if live is None:
         return {**base, "action": "keep", "reason": "unreadable-subject"}
     if live:
@@ -2450,6 +2464,36 @@ def processes_in(path: str):
     return inside, unreadable
 
 
+def read_dirty(where: str, pathspecs=()):
+    """The `git status --porcelain` lines of WHERE (limited to PATHSPECS), or None when they cannot be read (a read
+    that raises included)."""
+    try:
+        return git_reads.porcelain(where, pathspecs)
+    except Exception:
+        return None
+
+
+def process_inside_reason(pids) -> str:
+    return "process-inside: pid %s" % ", ".join(str(p) for p in sorted(pids))
+
+
+def _descends_from(pid: int, ancestor: int) -> bool:
+    """True when ANCESTOR is on PID's parent chain. A parent that cannot be read ends the climb: not a descendant."""
+    current = pid
+    for _ in range(MAX_CLIMB):
+        current = _parent_pid(current)
+        if current is None or current <= 0:
+            return False
+        if current == ancestor:
+            return True
+    return False
+
+
+def _pids_but_listener(inside, listener_pid: int):
+    """INSIDE without the listener and its own descendants: the processes that still keep the checkout."""
+    return [p for p in inside if p != listener_pid and not _descends_from(p, listener_pid)]
+
+
 # ------------------------------------------------------------------ acting on a reapable listener
 #
 # Reached only from `sweep_repo`'s own `if confirm and decision["action"] == "reap":` check,
@@ -3065,19 +3109,45 @@ def scan_worktree(wt: str, names, stop_at=None):
     return builds, trash
 
 
+def untrash_name(basename: str):
+    """The folder name a reap renamed to BASENAME, or None when BASENAME is no trash name."""
+    return basename.rsplit(".reap-trash-", 1)[0] if is_trash_name(basename) else None
+
+
+def trash_dirty(path: str):
+    """True when the trash folder PATH holds work, False when it holds none, None when git cannot say.
+    The reap renames a build folder whole and deletes it whatever it holds (decision
+    build-dirs-reaped-at-agent-end), so an untracked path under the trash name is build output, not work.
+    What is work is a path git tracks: a staged or changed file, or a tracked file the rename moved away
+    from the build name (listed as deleted there). The read is limited to the trash name and the name it
+    had before the rename."""
+    parent, base = os.path.split(os.path.normpath(path))
+    original = untrash_name(base)
+    if original is None:
+        return None
+    lines = read_dirty(parent, (base, original))
+    if lines is None:
+        return None
+    return any(line[:2] != "??" for line in lines)
+
+
 def trash_verdict(path: str):
-    """`(delete, reason)` for one trash folder. Keep on a live session, a process inside, or any
-    read that cannot tell."""
+    """`(delete, reason)` for one trash folder. Keep on uncommitted work, a live session, a process
+    inside, or any read that cannot tell. Because the dirty and process checks run here, a session
+    record whose folder is gone reads as not in the folder (`absent_is_out`)."""
     if is_link(path) or not os.path.isdir(path):
         return False, "not a real folder"
-    live = git_reads.worktree_live_session(path)
+    dirty = trash_dirty(path)
     inside, _ = processes_in(path)
-    if live is None or inside is None:
+    live = git_reads.worktree_live_session(path, absent_is_out=True)
+    if dirty is None or live is None or inside is None:
         return False, "unreadable-subject"
+    if dirty:
+        return False, "dirty"
     if live:
         return False, "live-session"
     if inside:
-        return False, "process-inside: pid %s" % ", ".join(str(p) for p in sorted(inside))
+        return False, process_inside_reason(inside)
     return True, "leftover trash"
 
 
