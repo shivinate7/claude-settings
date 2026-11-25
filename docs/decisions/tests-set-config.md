@@ -15,15 +15,15 @@ Harm: a test passes or fails by what the owner's live config holds. A case that 
 
 Helper: `lint/_test_temp.py` `isolated_config(run)`, under the run folder standard (decision `test-temp-standard`). `lint/_test_temp.py` `isolated_config` sets `CLAUDE_CONFIG_DIR` to a fresh folder under the run folder, and yields that folder. On exit, also when the block raises, `lint/_test_temp.py` `isolated_config` restores the old value, or removes the variable when none was set. `lint/_test_temp.py` `isolated_config` sets neither `HOME` nor `USERPROFILE`. It is opt-in. `lint/test_test_temp.py` `IsolatedConfig` is the only caller so far.
 
-Check: `lint/check_tests_set_config.py` parses each `test_*.py` under the repo and reads its import-time statements in source order. It flags a file that does not parse, and a file with a removal of `CLAUDE_CONFIG_DIR` at import that no import-time set follows.
+Check: `lint/check_tests_set_config.py` parses each `test_*.py` under the repo, skipping dot folders, `node_modules` and `__pycache__`, and reads its import-time statements in source order. It flags a file that does not parse, and a file with a removal of `CLAUDE_CONFIG_DIR` at import that no import-time set follows.
 
-- Removal: `os.environ.pop(...)`, `del os.environ[...]`, or `os.environ.clear()` with no arguments. The receiver is `os.environ`, a bare `environ`, or a name bound to either. The name is the string, a name bound to it, a name that a module-level `from <module> import <name>` brings in when that module binds it to the string at top level, or a loop variable over a literal or module-level tuple that holds it.
-- Set: an `os.environ` assignment, annotated assignment, `update` or `setdefault` that names the variable; an `os.putenv` that names it; or a call at import to a module function that does one of these. It counts when it runs at import: at module level, or in an `if`, `for`, `while`, `try` or `with` block. It does not count under a constant-false `if` such as `if False:`, or in a `with patch.dict` block.
+- Removal: `os.environ.pop(...)`, `del os.environ[...]`, or `os.environ.clear()` with no arguments, as a whole statement. The receiver is any `.environ` attribute (in practice `os.environ`), a bare `environ`, or a name bound to one. The name is the string, a name bound to it (annotated or not), a name that a module-level `from <module> import <name>` brings in when that module, beside the file or in `lint/`, binds it to the string at top level, or a loop variable over a literal or module-level tuple that holds it.
+- Set: at import, any of these names the variable. An `os.environ` subscript or annotated assignment. `os.environ |= {...}`. `update` or `setdefault` on `os.environ`, through a dict display, a `dict(...)` call, a `**{...}` argument, a keyword, or a name bound at top level to one of these. An `os.putenv`. `patch.dict(os.environ, ...).start()`. `enter_context(isolated_config(...))`. A call to a module function that does one of these, whatever the order of the defs, so a helper that calls a later-defined helper counts. Import time is the module body and the blocks in it (`if`, `for`, `while`, `try`, `with`, class). A set does not count under a constant-false `if` such as `if False:`, under `if __name__ == "__main__":`, or in a `with patch.dict` block.
 - Flagged: an import-time removal with no import-time set after it.
 - Clean: no import-time removal, or none after the last import-time set. A set in `setUpModule()` clears every removal in the file.
 - Not judged: a removal inside a function or a `patch.dict` block. A set inside one test method, or inside `patch.dict`, does not clear an import-time removal.
 
-Cost: one `ast` parse per `test_*.py` under the repo, per run, and one more for each name a module-level `from <module> import <name>` takes from a module beside the file or in `lint/`. No log, no timer, no long-lived process.
+Cost: one `ast` parse per `test_*.py` under the repo, per run. A module that a module-level `from <module> import <name>` names beside the file or in `lint/` is parsed at most once per run, however many names it gives. Measured on this repo on 2026-11-25: 8.2 s before the once-per-module read, 2.4 s after. No log, no timer, no long-lived process.
 
 Limits:
 
@@ -31,12 +31,10 @@ Limits:
 - A removal inside an assignment, such as `x = os.environ.pop(...)` at import. Only a bare `pop` or `clear()` statement, or a `del`, counts.
 - A name read as an attribute, such as `_consts.CONFIG_VAR`, or a name bound inside a module-level `try` or `if`. Names come only from top-level assignments and `from` imports.
 - `os.unsetenv`: not judged. It also leaves `os.environ` unchanged, so a case that reads `os.environ` still sees the value.
-- `os.putenv` counts as a set, but it also leaves `os.environ` unchanged. A `pop` then a `putenv` is clean, and `os.environ.get` returns None.
-- A set made by a function imported from another module. The file is flagged, though the set runs at import.
-- A helper that calls a helper defined after it. The helper is not seen as a set, so its import-time call is flagged.
+- `os.putenv` counts as a set, but it leaves `os.environ` unchanged. A `pop` then a `putenv` is clean, yet `os.environ.get` still returns None.
+- A set made by a function imported from another module. The file stays flagged, though the set runs at import.
+- A bare `isolated_config(...)` call that nothing enters does not count. The file stays flagged.
 - The check is not in CI or in `merge.readyChecks` yet. `merge/test_merge.py` must set the variable first. The case `test_repo_names_the_incident_file` in `lint/test_tests_set_config.py` expects that file as a finding, so the case fails once the file is fixed. Re-point it then.
-- Known false alarms, until the next commit on this branch fixes them. Each form below is not read as a set, so the file is flagged though it sets the variable at import: `os.environ.update(...)` with a dict held in a name (a literal dict or a keyword argument is read); `os.environ |= {...}`; `patch.dict(...).start()`; and `stack.enter_context(isolated_config(...))`.
-- Run time: about 9-14 s on this repo, because an imported module is parsed once per importing file (reviewer measure, 589 parses over 225 files, 2026-11-25).
 
 Kind: process
 Home: lint/check_tests_set_config.py
