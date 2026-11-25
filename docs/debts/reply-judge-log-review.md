@@ -10,7 +10,7 @@ python3 ~/.claude/lint/guard_log_report.py --between 2026-11-25T12:11:00-06:00 2
 python3 ~/.claude/lint/guard_log_report.py --between 2026-11-25T12:11:00-06:00 2026-11-27T23:59:59-06:00 --rule reply-judge
 ```
 
-A reason that names an older and a newer rule id is keyed under the older id, so the commands above miss it. This grep finds every line that names a newer id:
+A reason that names an older and a newer rule id is keyed under the older id, so the commands above miss it. The owner's review therefore undercounts mixed findings; each finding on a newer rule alone has its own line under that rule id. This grep finds each line whose logged reason, cut at 120 characters, still names a newer id; an id past the cut is not in the log:
 
 ```
 grep -E 'roles-findings-are-debts-or-notes|parallelism-keep-going' ~/.claude/guard.log
