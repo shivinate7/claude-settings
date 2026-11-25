@@ -430,7 +430,43 @@ class Own(unittest.TestCase):
         self.assertTrue(True)
 '''
 
-# An async case: its asyncSetUp seconds are fixture time, apart from the case's own seconds.
+# A case that leaves a frame open on a test object with no id(). The flush cannot name that object, so it must not lose
+# the rows of the cases around it.
+LEAK_ODD = '''import unittest
+
+
+class Anon(object):
+    pass
+
+
+class Odd(unittest.TestCase):
+    def test_a_leaves_anon_frame_open(self):
+        unittest.TestResult().startTest(Anon())
+
+    def test_b_plain(self):
+        self.assertTrue(True)
+
+    def test_c_plain(self):
+        self.assertTrue(True)
+'''
+
+# Two results hold a frame for one test object. The case's own frame is on the runner's result. It opens a second frame
+# for itself on another result and never stops it, so the runner's stop comes while that frame is still open.
+TWO_RESULTS = '''import unittest
+
+
+class Twice(unittest.TestCase):
+    def test_a_opens_a_frame_on_another_result(self):
+        other = unittest.TestResult()
+        other.startTest(self)
+        other.addSkip(self, "on the other result")
+
+    def test_b_plain(self):
+        self.assertTrue(True)
+'''
+
+# Async cases: asyncSetUp and asyncTearDown seconds are fixture time, apart from the case's own seconds. Each class is
+# run alone by its own module name, so one class's case does not run in another's file.
 ASYNC = '''import time
 import unittest
 
@@ -438,6 +474,14 @@ import unittest
 class Async(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         time.sleep(0.5)
+
+    async def test_case(self):
+        time.sleep(0.25)
+
+
+class AsyncTeardown(unittest.IsolatedAsyncioTestCase):
+    async def asyncTearDown(self):
+        time.sleep(0.125)
 
     async def test_case(self):
         time.sleep(0.25)
@@ -931,6 +975,9 @@ class OpenFrame(unittest.TestCase):
         scope_ok(self, armed)
         self.assertEqual(result_line(armed), result_line(unarmed),
                          "the armed run's outcome differs from the unarmed run's")
+        self.assertNotIn("Traceback", armed.stderr,
+                         "the armed run raised at exit, so the flush may have lost rows: stderr tail %r"
+                         % armed.stderr[-300:])
         rows = rows_of(folder) or []
         for case, outcome in cases:
             got = [row for row in rows if row.get("case") == case]
@@ -964,6 +1011,19 @@ class OpenFrame(unittest.TestCase):
                                [("Own.test_a_opens_a_frame_on_the_runner_result", "pass"),
                                 ("Own.test_b_plain", "pass"), ("Own.test_c_plain", "pass")],
                                "Own.test_a_opens_a_frame_on_the_runner_result")
+
+    def test_leaked_frame_with_no_id_keeps_the_other_rows(self):
+        folder = case_folder(self)
+        write(folder, "fixture_leak_odd.py", LEAK_ODD)
+        self.assert_open_frame("fixture_leak_odd", folder, "RESULT ran=3 failures=0 errors=0 skipped=0",
+                               [("Odd.test_b_plain", "pass"), ("Odd.test_c_plain", "pass")], "Anon")
+
+    def test_outcome_is_read_from_the_matching_result(self):
+        folder = case_folder(self)
+        write(folder, "fixture_two_results.py", TWO_RESULTS)
+        self.assert_open_frame("fixture_two_results", folder, "RESULT ran=2 failures=0 errors=0 skipped=0",
+                               [("Twice.test_a_opens_a_frame_on_another_result", "pass")],
+                               "Twice.test_a_opens_a_frame_on_another_result")
 
 
 class ArmWithoutCallSetUp(unittest.TestCase):
@@ -1002,25 +1062,35 @@ class ArmWithoutCallSetUp(unittest.TestCase):
 
 
 class AsyncFixture(unittest.TestCase):
-    def test_async_setup_seconds_land_in_fixture_s(self):
-        folder = case_folder(self)
-        write(folder, "fixture_async.py", ASYNC)
-        unarmed = run_module(folder, "fixture_async", armed=False, report=True)
+    def assert_async_row(self, folder, module, case, fixture_s, s, owner):
+        """The unarmed control passes the one case of module. The armed run keeps one row for case, holding fixture_s
+        and s. owner names the fixture call those fixture seconds come from."""
+        unarmed = run_module(folder, module, armed=False, report=True)
         self.assertEqual(result_line(unarmed), "RESULT ran=1 failures=0 errors=0 skipped=0",
                          "the unarmed control run did not pass its one case: %r" % unarmed.stderr[-300:])
-        armed = run_module(folder, "fixture_async", report=True)
+        armed = run_module(folder, module, report=True)
         scope_ok(self, armed)
         self.assertEqual(result_line(armed), result_line(unarmed),
                          "the armed run's outcome differs from the unarmed run's")
         rows = rows_of(folder)
         self.assertIsNotNone(rows, "the armed run wrote no case-times file")
-        timed = [row for row in rows if row.get("case") == "Async.test_case"]
-        self.assertEqual(len(timed), 1, "Async.test_case has %d rows, want one" % len(timed))
-        self.assertEqual(timed[0].get("fixture_s"), 0.5,
-                         "Async.test_case fixture_s is %r, want 0.5: its asyncSetUp seconds belong in fixture_s"
-                         % timed[0].get("fixture_s"))
-        self.assertEqual(timed[0].get("s"), 0.25, "Async.test_case s is %r, want its own 0.25"
-                         % timed[0].get("s"))
+        timed = [row for row in rows if row.get("case") == case]
+        self.assertEqual(len(timed), 1, "%s has %d rows, want one" % (case, len(timed)))
+        self.assertEqual(timed[0].get("fixture_s"), fixture_s,
+                         "%s fixture_s is %r, want %r: its %s seconds belong in fixture_s"
+                         % (case, timed[0].get("fixture_s"), fixture_s, owner))
+        self.assertEqual(timed[0].get("s"), s, "%s s is %r, want its own %r" % (case, timed[0].get("s"), s))
+
+    def test_async_setup_seconds_land_in_fixture_s(self):
+        folder = case_folder(self)
+        write(folder, "fixture_async.py", ASYNC)
+        self.assert_async_row(folder, "fixture_async.Async", "Async.test_case", 0.5, 0.25, "asyncSetUp")
+
+    def test_async_teardown_seconds_land_in_fixture_s(self):
+        folder = case_folder(self)
+        write(folder, "fixture_async.py", ASYNC)
+        self.assert_async_row(folder, "fixture_async.AsyncTeardown", "AsyncTeardown.test_case", 0.125, 0.25,
+                              "asyncTearDown")
 
 
 class SetupTraceback(unittest.TestCase):
