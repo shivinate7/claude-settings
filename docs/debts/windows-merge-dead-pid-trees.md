@@ -2,7 +2,7 @@
 
 - **What.** On Windows the merge tool can keep a dead run's merge checkout.
   The cause is unmeasured.
-  CI run 44874786597, a run of PR 3678 on Nov 21, 2026, had 8 failing cases: 6 in the Windows job merge-3 and 2 in merge-4.
+  CI run 44874786597, a run of PR 3678 on Nov 21, 2026, had 8 failing cases (total unverified here). Its failed jobs were `checks`, `checks-windows-merge-2` and `checks-windows-merge-3`; `checks-windows-merge-4` passed (read from the run's job list). The case count per job is unverified.
   No case failed on Nov 22 or Nov 24.
   The failures are unexplained.
   The cause this debt first named is a holder check that climbs an ended ancestor.
@@ -13,7 +13,7 @@
   The count on the owner's PC is unmeasured.
   Main shows no red, because its push runs skip the Windows merge shards (PR 3777 body).
   That is unmeasured on Nov 25.
-- **Where.** The failing step is `drop_worktree` in `merge/merge.py` (read from code).
+- **Where.** The removal step is `drop_worktree` in `merge/merge.py`, which `sweep_dead_trees` calls only for a tree that no live process holds (read from code). Two candidate causes below skip it: the short-name or case difference, and `pid_alive`.
   It ignores the return codes of `git worktree unlock` and `git worktree prune`.
   It reads the return code of `git worktree remove --force`, then runs `shutil.rmtree(tmp, ignore_errors=True)`.
   When that removal was refused on a tree that was there, or the folder stays, it prints one line naming the tree, git's exit code and git's first output line, and returns False.
@@ -28,7 +28,7 @@
 - **Decision.** `leftover-temp-reap`, the nearest decision (a folder stays when its holder cannot be read; Windows checks cwd only).
   No decision names the merge tool's holder check.
 - **Retire.** This debt stays open. It closes only when all three show.
-  1. A Windows red run shows the real cause. On a failed removal, `drop_worktree` on the head already prints git's exit code and whether the folder stays. Still owed: a Windows run where a dead pid's tree is held, so that print fires. The Windows-only case has never run. A local Windows session or CI can run it (see Ruling).
+  1. A Windows red run shows the real cause. `drop_worktree` prints one line when git refuses the removal of a tree that is there, or when the folder stays. `sweep_dead_trees` calls it only for a tree that no live process holds, so a held tree prints nothing. Still owed: a Windows run where a dead pid's unheld tree is refused or stays, so that line prints. The Windows-only case has never run. A local Windows session or CI can run it (see Ruling).
   2. The fix for that cause, with a Linux case that is red on origin/main and green after the fix. The held cases still pass: a live, unreadable grandchild of a dead owner keeps its folder (review F1 on PR 3777, head dd56d6ef). The first fix, an ended ancestor reads False, was reverted because it let the sweep delete that folder.
   3. The Windows case test_a_real_exited_merge_pid_on_windows_has_its_tree_removed is green on a checks-windows-merge job of a PR run. The close cites that run with a Retire-run line.
 
