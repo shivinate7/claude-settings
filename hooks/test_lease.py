@@ -57,6 +57,22 @@ exec "$REAL_GIT" "$@"
 '''
 COUNT_SHIM = '#!/bin/sh\necho start >> "$COUNT_LOG"\nexec "$REAL_GIT" "$@"\n'
 SLOW_SHIM = "#!/bin/sh\nexec sleep 20\n"
+# FLAKY_FETCH_SHIM logs each git start as `start SUBCOMMAND`. It fails the fetches up to the FAIL_FETCHES-th with git's own
+# ref-lock message, so FAIL_FETCHES=1 is one lost race and FAIL_FETCHES=99 is a dead remote. Each failed fetch logs `failed fetch`.
+FLAKY_FETCH_SHIM = r'''#!/bin/sh
+echo "start $1" >> "$COUNT_LOG"
+case " $* " in
+  *" fetch "*)
+    fetches=$(grep -c "^start fetch$" "$COUNT_LOG")
+    if [ "$fetches" -le "$FAIL_FETCHES" ]; then
+      echo "failed fetch" >> "$COUNT_LOG"
+      echo "error: cannot lock ref 'refs/lease-read/triage': fixture lost the ref-lock race" >&2
+      exit 1
+    fi
+    ;;
+esac
+exec "$REAL_GIT" "$@"
+'''
 # MOVE_ON_FETCH_SHIM moves the ref on the remote just before the first fetch, so the ls-remote has already read the old sha.
 MOVE_ON_FETCH_SHIM = r'''#!/bin/sh
 case " $* " in
@@ -118,12 +134,22 @@ def write_shim(folder, text):
     return folder
 
 
+def read_log(log):
+    """The text a shim logged so far, or '' when it logged nothing."""
+    if not os.path.isfile(log):
+        return ""
+    with open(log, encoding="utf-8") as handle:
+        return handle.read()
+
+
 def count_starts(log):
     """How many git starts the COUNT_SHIM logged so far."""
-    if not os.path.isfile(log):
-        return 0
-    with open(log, encoding="utf-8") as handle:
-        return handle.read().count("start")
+    return read_log(log).count("start")
+
+
+def count_fetches(log):
+    """How many fetch starts the FLAKY_FETCH_SHIM logged so far."""
+    return read_log(log).count("start fetch")
 
 
 class LeaseBase(unittest.TestCase):
@@ -163,6 +189,11 @@ class LeaseCase(LeaseBase):
 
     def ref_message(self):
         return git(self.remote, "log", "-1", "--format=%B", "refs/heads/lease/" + NAME).stdout
+
+    def tracking_refs(self, path):
+        """The remote-tracking refs under refs/remotes/ in the clone at `path` that name this case's lease branch."""
+        names = git(path, "for-each-ref", "--format=%(refname)", "refs/remotes/").stdout.split()
+        return [name for name in names if name.endswith("/lease/" + NAME)]
 
     def make_record(self, message):
         """Make a record commit with this message, push it to the remote under a fixture branch, and return its sha. A fixture."""
@@ -417,6 +448,42 @@ class LeaseReadUnknownTest(LeaseCase):
             return  # Unknown refuses: an allowed answer
         self.assertFalse(held, "a holds read whose ref moved before its fetch passed the old holder")
 
+    @unittest.skipIf(os.name == "nt", "the flaky git is a POSIX shell shim on PATH")
+    def test_a_read_whose_first_fetch_fails_once_returns_the_record(self):
+        self.need()
+        lease.take(self.repo, "origin", NAME, ALPHA)
+        log = os.path.join(self.base, "starts.log")
+        env = self.shim_env(FLAKY_FETCH_SHIM, COUNT_LOG=log, FAIL_FETCHES="1")
+        record = None
+        unknown = None
+        with mock.patch.dict(os.environ, env):
+            try:
+                record = lease.read(self.repo, "origin", NAME)
+            except lease.Unknown as err:
+                unknown = err
+        self.assertIn("failed fetch", read_log(log), "control: the first fetch never failed, so no retry was tested")
+        self.assertIsNone(unknown, "a read whose first fetch failed once raised Unknown instead of retrying: %s" % unknown)
+        self.assertEqual(record.fields.get("holder"), ALPHA, "a read whose first fetch failed once did not return the record")
+        fetches = count_fetches(log)
+        self.assertLessEqual(fetches, 2, "a read whose first fetch failed once started fetch %d times: more than one extra fetch" % fetches)
+
+    @unittest.skipIf(os.name == "nt", "the flaky git is a POSIX shell shim on PATH")
+    def test_a_read_whose_every_fetch_fails_raises_unknown_after_at_most_one_retry(self):
+        self.need()
+        lease.take(self.repo, "origin", NAME, ALPHA)
+        log = os.path.join(self.base, "starts.log")
+        env = self.shim_env(FLAKY_FETCH_SHIM, COUNT_LOG=log, FAIL_FETCHES="99")
+        unknown = None
+        with mock.patch.dict(os.environ, env):
+            try:
+                lease.read(self.repo, "origin", NAME)
+            except lease.Unknown as err:
+                unknown = err
+        self.assertIn("failed fetch", read_log(log), "control: no fetch failed, so the read never reached the fetch")
+        self.assertIsNotNone(unknown, "a read whose every fetch failed did not raise Unknown")
+        fetches = count_fetches(log)
+        self.assertLessEqual(fetches, 2, "a read whose every fetch failed started fetch %d times: more than one extra fetch" % fetches)
+
 
 class LeaseReadBudgetTest(LeaseCase):
     def test_the_default_budget_is_a_number_at_most_fifteen_seconds(self):
@@ -590,6 +657,31 @@ class LeaseReadCost(LeaseCase):
         self.assertLessEqual(second, 2, "a second holds call for the same sha started git %d times" % second)
 
 
+class LeaseRefsWrittenTest(LeaseCase):
+    """Which refs the lease calls write in a clone: a read writes its local ref and no remote-tracking ref, and a take's push
+    writes no remote-tracking ref in the taker's clone."""
+
+    def test_a_read_writes_its_local_ref_and_no_remote_tracking_ref(self):
+        self.need()
+        other = self.clone("other")
+        lease.take(other, "origin", NAME, ALPHA)  # in another clone, so the refs this clone ends with are the read's own
+        self.assertEqual(self.tracking_refs(self.repo), [], "control: the clone had a remote-tracking ref for the lease before the read")
+        record = lease.read(self.repo, "origin", NAME)
+        self.assertIsNotNone(record, "control: the read found no record")
+        self.assertTrue(git(self.repo, "rev-parse", "-q", "--verify", "refs/lease-read/" + NAME, check=False).stdout.strip(),
+                        "control: the read left no refs/lease-read/%s ref" % NAME)
+        self.assertFalse(os.path.exists(os.path.join(self.repo, ".git", "FETCH_HEAD")), "control: the read wrote FETCH_HEAD")
+        tracking = self.tracking_refs(self.repo)
+        self.assertEqual(tracking, [], "a read wrote a remote-tracking ref for the lease in the clone it read from")
+
+    def test_a_take_writes_no_remote_tracking_ref_in_the_takers_clone(self):
+        self.need()
+        taken = lease.take(self.repo, "origin", NAME, ALPHA)
+        self.assertEqual(taken.status, "taken", "control: the take did not take the lease")
+        tracking = self.tracking_refs(self.repo)
+        self.assertEqual(tracking, [], "a take's push wrote a remote-tracking ref for the lease in the taker's clone")
+
+
 class LeaseCommandTest(LeaseCase):
     def test_take_exits_0_when_taken_and_again_when_it_is_the_holders_own(self):
         self.need()
@@ -640,6 +732,21 @@ class LeaseCommandTest(LeaseCase):
         run = self.command("show", NAME)
         self.assertEqual(run.returncode, 0, "show did not exit 0: " + run.stdout + run.stderr)
         self.assertIn(ALPHA, run.stdout + run.stderr, "show did not name the holder")
+
+    def test_give_back_with_no_name_is_a_usage_error(self):
+        self.need()
+        run = self.command("give", "back", "--holder", ALPHA)
+        text = run.stdout + run.stderr
+        self.assertEqual(run.returncode, 2, "give back with no NAME did not exit 2 as a usage error: " + text)
+        self.assertIn("usage", run.stderr, "give back with no NAME printed no usage line")
+        self.assertNotIn("lease back", run.stdout, "give back with no NAME read back as a lease name")
+
+    def test_give_back_with_no_name_never_gives_back_a_lease_named_back(self):
+        self.need()
+        lease.take(self.repo, "origin", "back", ALPHA)
+        self.assertTrue(lease.holds(self.repo, "origin", "back", ALPHA), "control: the holder does not hold the lease named back")
+        self.command("give", "back", "--holder", ALPHA)
+        self.assertTrue(lease.holds(self.repo, "origin", "back", ALPHA), "give back with no NAME released the lease named back")
 
 
 if __name__ == "__main__":
