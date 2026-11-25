@@ -2441,7 +2441,7 @@ def case_over_limit_file_edit_shrink_passes_grow_refused():
 # --------------------------------------------------------------------------- part 8
 # A Read clears the reread flag only when its range counts: at most READ_CAP_TOKENS = 25000 tokens and at most
 # 2000 lines (the Read default when no limit is given). The hook cannot see what a Read returned, so a range over
-# the cap counts nothing. An agent's rewrite of the handoff sets the same flag (decision precompact-handoff, item 9).
+# the cap counts nothing. An agent's rewrite of the handoff sets no read flag: the read is owed after a compaction only.
 
 READ_CAP_TOKENS = 25000
 
@@ -2543,9 +2543,9 @@ def case_range_over_2000_lines_counts_nothing():
         c.cleanup()
 
 
-def case_agent_write_sets_read_flag():
-    """An agent's Write of the session's handoff sets the reread flag. The main session's next Bash call is refused
-    by handoff-unread, and the refusal says an agent rewrote the handoff. The agent's write sets no audit flag."""
+def case_agent_write_sets_no_read_flag():
+    """An agent's Write of the session's handoff sets no read flag, and the session's next call is not refused:
+    the read is owed after a compaction only. The agent's write sets no audit flag."""
     c = Case("agent-write-flag")
     try:
         put_bytes(c.handoff(SID), handoff_text(600).encode("utf-8"))
@@ -2555,22 +2555,19 @@ def case_agent_write_sets_read_flag():
         if not step("the agent's Write is allowed", allowed_why(write_handoff(c, rewritten, agent_id=AGENT_ID))):
             return
         put_bytes(c.handoff(SID), rewritten.encode("utf-8"))
-        got = guard_call(c, SID, "Bash", BASH)
-        if not step("the main session's Bash call is refused by handoff-unread after the agent's write",
-                    refused_by(got, HANDOFF_RULE)):
-            return
-        step("the refusal says an agent rewrote the handoff",
-             "" if "agent" in got[1].lower() and "rewrote" in got[1].lower()
-             else "the refusal does not say an agent rewrote it: %r" % got[1][:120])
+        step("the agent's write sets no reread flag",
+             "" if not flag_set(c, SID) else "the agent's write set the reread flag")
+        step("the main session's next Bash call is allowed after the agent's write",
+             allowed_why(guard_call(c, SID, "Bash", BASH)))
         step("the agent's write sets no audit flag",
              "" if not os.path.isfile(audit_flag(c, SID)) else "the audit flag is set after the agent's write")
     finally:
         c.cleanup()
 
 
-def case_agent_edit_sets_read_flag():
-    """An agent's Edit of the session's handoff sets the reread flag, as its Write does: the main session's next
-    Bash call is refused by handoff-unread, and the refusal says an agent rewrote the handoff."""
+def case_agent_edit_sets_no_read_flag():
+    """An agent's Edit of the session's handoff sets no read flag, and the session's next call is not refused:
+    the read is owed after a compaction only."""
     c = Case("agent-edit-flag")
     try:
         put_bytes(c.handoff(SID), handoff_text(600).encode("utf-8"))
@@ -2580,20 +2577,17 @@ def case_agent_edit_sets_read_flag():
         if not step("the agent's Edit is allowed", allowed_why(edit_handoff(c, old, new, agent_id=AGENT_ID))):
             return
         put_bytes(c.handoff(SID), handoff_text(600).replace(old, new, 1).encode("utf-8"))
-        got = guard_call(c, SID, "Bash", BASH)
-        if not step("the main session's Bash call is refused by handoff-unread after the agent's edit",
-                    refused_by(got, HANDOFF_RULE)):
-            return
-        step("the refusal says an agent rewrote the handoff",
-             "" if "agent" in got[1].lower() and "rewrote" in got[1].lower()
-             else "the refusal does not say an agent rewrote it: %r" % got[1][:120])
+        step("the agent's edit sets no reread flag",
+             "" if not flag_set(c, SID) else "the agent's edit set the reread flag")
+        step("the main session's Bash call is allowed after the agent's edit",
+             allowed_why(guard_call(c, SID, "Bash", BASH)))
     finally:
         c.cleanup()
 
 
-def case_agent_multiedit_sets_read_flag():
-    """An agent's MultiEdit of the session's handoff sets the reread flag, as its Edit does: the main session's next
-    Bash call is refused by handoff-unread, and the refusal says an agent rewrote the handoff."""
+def case_agent_multiedit_sets_no_read_flag():
+    """An agent's MultiEdit of the session's handoff sets no read flag, and the session's next call is not refused:
+    the read is owed after a compaction only."""
     c = Case("agent-multiedit-flag")
     try:
         put_bytes(c.handoff(SID), handoff_text(600).encode("utf-8"))
@@ -2605,13 +2599,10 @@ def case_agent_multiedit_sets_read_flag():
                     allowed_why(multi_edit_handoff(c, edits, agent_id=AGENT_ID))):
             return
         put_bytes(c.handoff(SID), handoff_text(600).replace(old, new, 1).encode("utf-8"))
-        got = guard_call(c, SID, "Bash", BASH)
-        if not step("the main session's Bash call is refused by handoff-unread after the agent's MultiEdit",
-                    refused_by(got, HANDOFF_RULE)):
-            return
-        step("the refusal says an agent rewrote the handoff",
-             "" if "agent" in got[1].lower() and "rewrote" in got[1].lower()
-             else "the refusal does not say an agent rewrote it: %r" % got[1][:120])
+        step("the agent's MultiEdit sets no reread flag",
+             "" if not flag_set(c, SID) else "the agent's MultiEdit set the reread flag")
+        step("the main session's Bash call is allowed after the agent's MultiEdit",
+             allowed_why(guard_call(c, SID, "Bash", BASH)))
     finally:
         c.cleanup()
 
@@ -2630,35 +2621,6 @@ def case_main_write_sets_no_flag():
         step("the main session's Write sets no audit flag",
              "" if not os.path.isfile(audit_flag(c, SID)) else "the main session's Write set the audit flag")
         step("the main session's Bash call is allowed after its own Write",
-             allowed_why(guard_call(c, SID, "Bash", BASH)))
-    finally:
-        c.cleanup()
-
-
-def case_agent_rewrite_partial_read_keeps_flag_whole_read_clears():
-    """After an agent's rewrite sets the flag, a partial Read (lines 1-10 of 20) keeps it set, and a whole Read
-    (no offset, no limit) clears it. The same range rule as a compaction's flag."""
-    c = Case("agent-partial-whole")
-    try:
-        put_bytes(c.handoff(SID), handoff_text(600).encode("utf-8"))
-        rewritten = handoff_text(700)
-        if not step("the agent's Write is allowed", allowed_why(write_handoff(c, rewritten, agent_id=AGENT_ID))):
-            return
-        put_bytes(c.handoff(SID), rewritten.encode("utf-8"))
-        if not step("the agent's rewrite sets the reread flag",
-                    "" if flag_set(c, SID) else "the agent's rewrite did not set the reread flag"):
-            return
-        partial = read_range(c, SID, c.handoff(SID), offset=1, limit=10)
-        if not step("the partial Read exits 0", exit_why(partial)):
-            return
-        step("after the partial Read (lines 1-10 of 20) the reread flag is still set",
-             "" if flag_set(c, SID) else "the partial Read cleared the reread flag")
-        whole = read_range(c, SID, c.handoff(SID))
-        if not step("the whole Read exits 0", exit_why(whole)):
-            return
-        step("after the whole Read the reread flag is cleared",
-             "" if not flag_set(c, SID) else "the whole Read did not clear the reread flag")
-        step("the main session's Bash call is allowed after the whole Read",
              allowed_why(guard_call(c, SID, "Bash", BASH)))
     finally:
         c.cleanup()
@@ -3486,17 +3448,16 @@ def main() -> int:
     case_over_limit_file_write_shrink_passes_grow_refused()
     case_over_limit_file_edit_shrink_passes_grow_refused()
 
-    print("Part 8: an agent's rewrite sets the reread flag, and a Read counts only within the cap (hooks/reread_check.py)")
+    print("Part 8: a Read counts only within the cap, and an agent's rewrite sets no read flag (hooks/reread_check.py)")
     case_plain_read_over_cap_keeps_flag()
     case_range_over_cap_counts_nothing()
     case_pages_under_cap_clear_flag()
     case_plain_read_past_2000_lines_keeps_flag()
     case_range_over_2000_lines_counts_nothing()
-    case_agent_write_sets_read_flag()
-    case_agent_edit_sets_read_flag()
-    case_agent_multiedit_sets_read_flag()
+    case_agent_write_sets_no_read_flag()
+    case_agent_edit_sets_no_read_flag()
+    case_agent_multiedit_sets_no_read_flag()
     case_main_write_sets_no_flag()
-    case_agent_rewrite_partial_read_keeps_flag_whole_read_clears()
 
     print("Part 9: the handoff check costs no open of the handoff on a call with no flag (hooks/guard.py, hooks/reread_check.py)")
     case_no_flag_call_opens_no_handoff()
