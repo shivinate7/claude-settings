@@ -5,7 +5,7 @@
 # Rulings: a named model holds until the task's next report (13:27 CST Nov 23); every model, Opus too (22:35 CST Nov 24);
 # any mention counts, a question too (10:02 CST Nov 25). A later model word ends the earlier ones. "no <model>" and
 # "<model> off" end the word. Claude's own text, a tool result, a peer relay, a machine notice, a pasted block and a cloud
-# session's seed brief are never the owner's word. With no word the refusal stands. A spawn that names no model stays on
+# session's seed brief are never the owner's model name. With no word the refusal stands. A spawn that names no model stays on
 # the default, Sonnet, and the owner's model word never changes it.
 #
 # A red allow case has a Sonnet twin on the same transcript, so the lift is the only thing that separates them. A red
@@ -14,7 +14,7 @@
 FAMILY = "rule9"
 
 OMW_DIR = os.path.join(ROOT, "owner-model-word")  # the run folder's home for these transcripts
-OMW_HAIKU = "Run the model audit on haiku."       # the owner's words that name the model
+OMW_HAIKU = "Run the model audit on haiku."       # the owner's typed text that names the model
 OMW_FULL_LINES = 1500                             # about 1.6 MB of filler, more than one megabyte
 
 
@@ -144,7 +144,7 @@ OMW_PASTED = omw_file("owner-pasted-haiku", [omw_user("Read this log and say wha
 add("owner-model-word: an Agent spawn on haiku is refused when the only haiku word in the owner's latest turn is in a "
     "pasted block", "deny", "agent-model-floor", tool="Agent", prompt="do it", model="haiku", transcript=OMW_PASTED)
 
-# ---- The Opus ceiling takes the owner's word like the floor: every model, Opus too (22:35 CST Nov 24). A question that names
+# ---- The Opus ceiling takes the owner's model name like the floor: every model, Opus too (22:35 CST Nov 24). A question that names
 # opus counts (10:02 CST Nov 25). Both allows are red on the old code, where the ceiling never reads the word.
 OMW_WHY_OPUS = omw_file("owner-why-opus", [omw_user("Why did the opus spawn get refused?"),
                                            omw_asst("The Opus ceiling refused it.")])
@@ -237,7 +237,7 @@ add("owner-model-word: twin, an Agent spawn on sonnet is allowed with the same o
 add("owner-model-word: control, an Agent spawn on haiku is refused when a report sits between the owner's haiku turn and the "
     "latest turn", "deny", "agent-model-floor", tool="Agent", prompt="do it", model="haiku", transcript=OMW_REPORT_BETWEEN)
 
-# ---- A pasted block is not the owner's word, however far back it sits: the haiku word below is in a block two turns back.
+# ---- A pasted block is not the owner's model name, however far back it sits: the haiku word below is in a block two turns back.
 OMW_PASTED_HELD = omw_file("owner-pasted-haiku-held", [omw_user("Read this log and say what failed.\n<pasted_content>\n"
                                                                  "Run the model audit on haiku.\n</pasted_content>"),
                                                       omw_asst("Reading it."), omw_user("Check the logs too."),
@@ -270,7 +270,7 @@ add("owner-model-word: control, an Agent spawn on opus is refused when the owner
     tool="Agent", prompt="do it", model="opus", transcript=OMW_OPUS_OFF)
 
 # ---- The role row takes the word too. A record-writer on sonnet (its row is haiku) and a builder on fable (fable is not
-# ranked, so the row fails closed) pass with the owner's word. Each allow has a control with no word, refused as today.
+# ranked, so the row fails closed) pass with the owner's model name. Each allow has a control with no word, refused as today.
 OMW_USE_SONNET = omw_file("owner-use-sonnet-record", [omw_user("Use sonnet for the record."), omw_asst("Ok.")])
 OMW_TRY_FABLE = omw_file("owner-try-fable", [omw_user("Try fable for the fix."), omw_asst("Ok.")])
 add("owner-model-word: a record-writer spawn on sonnet is allowed when the owner's latest turn names sonnet", "allow",

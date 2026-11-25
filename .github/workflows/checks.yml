@@ -293,6 +293,10 @@ jobs:
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard_handoff.py
 
+      - name: Stop-hook model line suite
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_report_guard_model_line.py
+
       - name: Clause parser suite
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_clause.py
