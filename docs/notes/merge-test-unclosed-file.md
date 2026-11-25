@@ -1,0 +1,1 @@
+- merge-test-unclosed-file: reviewer's report (PR 3861, open): a file is left unclosed in merge/test_merge.py near line 4048. On main that test (test_acquire_hold_expire_release_unlock) opens no file, so the anchor is unclear; unverified. Seen: 2026-11-24 x1

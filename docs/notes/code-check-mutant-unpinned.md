@@ -1,0 +1,1 @@
+- code-check-mutant-unpinned: the probe-condition mutant in execute (actions/code-check/code_check.py, about line 326 on the PR 3859 branch) is unpinned by any test (PR 3859, open; reviewer's report, unverified). Seen: 2026-11-24 x1

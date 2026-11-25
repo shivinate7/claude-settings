@@ -513,6 +513,118 @@ def needs_npx(test):
     return run
 
 
+def fetch_fails(message):
+    """A stand-in body for a tool that cannot be fetched: every call, --version included, exits 1 with the message on stderr only,
+    as pipx or npx does with no route to the index."""
+    return 'echo "%s" >&2\nexit 1' % message
+
+
+def started_fails_on_stderr(message):
+    """A stand-in body for a tool that started: --version exits 0, and the check exits 1 with the message on stderr and nothing on stdout."""
+    return 'case "$*" in *--version*) exit 0 ;; esac\necho "%s" >&2\nexit 1' % message
+
+
+def finding(line):
+    """A stand-in body for a tool that ran and reported one finding: --version exits 0, and the check prints that line and exits 1."""
+    return 'case "$*" in *--version*) exit 0 ;; esac\necho "%s"\nexit 1' % line
+
+
+CLEAN_RUN = "exit 0"
+
+
+def stand_in_path(pipx=None, npx=None):
+    """-> (PATH, calls file). The PATH holds a pipx and an npx stand-in, then git, which the runner reads the tree with; no real pipx
+    or npx is on it. Each stand-in answers a call by the tool the call names: pipx and npx map a tool (ruff, mypy, shellcheck-py for
+    pipx; typescript for npx) to its sh body, and a call that names no mapped tool exits 0 silently. Every call is appended to the
+    calls file, so a case can show that the tool was asked for at all."""
+    folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+    calls = os.path.join(folder, "calls.txt")
+    for shim, tools in (("pipx", pipx or {}), ("npx", npx or {})):
+        arms = "".join("*%s==*|*%s@*) %s ;;\n" % (tool, tool, body) for tool, body in tools.items())
+        path = os.path.join(folder, shim)
+        with open(path, "w", newline="\n") as f:
+            f.write('#!/bin/sh\necho "%s $*" >> "%s"\ncase "$*" in\n%s*) exit 0 ;;\nesac\n' % (shim, calls, arms))
+        os.chmod(path, 0o755)
+    return os.pathsep.join([folder, path_with("git")]), calls
+
+
+def asked(calls):
+    """What the stand-ins were asked, one call a line; empty when no stand-in ran."""
+    if not os.path.exists(calls):
+        return ""
+    with open(calls, encoding="utf-8") as f:
+        return f.read()
+
+
+class CodeCheckCouldNotStart(unittest.TestCase):
+    """A pinned tool that cannot be fetched (pipx or npx with no route to the index) reads `could not start`, the marker ci-job reads
+    as unknown, and never `found problems`. A tool that started keeps its FAIL whatever it printed, and a tool that ran and found
+    something still fails the check when another tool could not start. Each case shows its tool was asked for first."""
+
+    def test_ruff_that_cannot_be_fetched_reads_could_not_start(self):
+        path, calls = stand_in_path(pipx={"ruff": fetch_fails("Could not fetch index")})
+        rc, out = check({".code-check.json": config([]), "a.py": GOOD_PY}, path_tools=False, PATH=path)
+        self.assertIn("ruff==", asked(calls), "pipx was never asked for ruff, so the case proves nothing: " + out)
+        self.assertIn("ruff could not start: ", out, out)
+        self.assertNotIn("found problems", out, out)
+        self.assertNotEqual(rc, 0, out)
+
+    def test_mypy_that_cannot_be_fetched_reads_could_not_start(self):
+        path, calls = stand_in_path(pipx={"ruff": CLEAN_RUN, "mypy": fetch_fails("ERROR: no route to the index")})
+        rc, out = check({".code-check.json": config(["a.py"]), "a.py": GOOD_PY}, path_tools=False, PATH=path)
+        self.assertIn("mypy==", asked(calls), "pipx was never asked for mypy, so the case proves nothing: " + out)
+        self.assertIn("mypy could not start: ", out, out)
+        self.assertNotIn("found problems", out, out)
+        self.assertNotEqual(rc, 0, out)
+
+    def test_shellcheck_that_cannot_be_fetched_reads_could_not_start(self):
+        path, calls = stand_in_path(pipx={"shellcheck-py": fetch_fails("Connection refused")})
+        rc, out = check({".code-check.json": config([]), "a.sh": "#!/bin/sh\necho hi\n"}, path_tools=False, PATH=path)
+        self.assertIn("shellcheck-py==", asked(calls), "pipx was never asked for shellcheck, so the case proves nothing: " + out)
+        self.assertIn("shellcheck could not start: ", out, out)
+        self.assertNotIn("found problems", out, out)
+        self.assertNotEqual(rc, 0, out)
+
+    def test_typescript_that_npx_cannot_fetch_reads_could_not_start(self):
+        path, calls = stand_in_path(npx={"typescript": fetch_fails("npm ERR! network request failed")})
+        rc, out = check({".code-check.json": config([]), "lib.mjs": "export const a = 1;\n"}, path_tools=False, PATH=path)
+        self.assertIn("typescript@", asked(calls), "npx was never asked for typescript, so the case proves nothing: " + out)
+        self.assertIn("mjs-imports could not start: ", out, out)
+        self.assertNotIn("found problems", out, out)
+        self.assertNotEqual(rc, 0, out)
+
+    def test_a_ruff_finding_from_a_started_tool_is_red(self):  # control: a tool that ran and found a problem still fails
+        path, calls = stand_in_path(pipx={"ruff": finding("a.py:1:8: F401 'os' imported but unused")})
+        rc, out = check({".code-check.json": config([]), "a.py": "import os\n"}, path_tools=False, PATH=path)
+        self.assertIn("ruff==", asked(calls), out)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("ruff found problems", out, out)
+        self.assertIn("F401", out, out)
+
+    def test_a_started_tool_that_fails_on_stderr_only_is_still_red(self):  # control: --version passes, so the tool started
+        path, calls = stand_in_path(pipx={"ruff": started_fails_on_stderr("error: invalid configuration")})
+        rc, out = check({".code-check.json": config([]), "a.py": GOOD_PY}, path_tools=False, PATH=path)
+        self.assertIn("ruff==", asked(calls), out)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("ruff found problems", out, out)
+        self.assertNotIn("could not start", out, out)
+
+    def test_a_clean_ruff_through_pipx_is_green(self):  # control
+        path, calls = stand_in_path(pipx={"ruff": CLEAN_RUN})
+        rc, out = check({".code-check.json": config([]), "a.py": GOOD_PY}, path_tools=False, PATH=path)
+        self.assertIn("ruff==", asked(calls), out)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("ruff pass", out, out)
+
+    def test_a_tool_that_cannot_start_does_not_hide_another_tools_finding(self):  # control: one miss does not drop the other finding
+        path, calls = stand_in_path(pipx={"ruff": fetch_fails("Could not fetch index"),
+                                          "mypy": finding("a.py:1: error: Incompatible return value type [return-value]")})
+        rc, out = check({".code-check.json": config(["a.py"]), "a.py": GOOD_PY}, path_tools=False, PATH=path)
+        self.assertIn("mypy==", asked(calls), out)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("mypy found problems", out, out)
+
+
 class CommentCheck(unittest.TestCase):
     def assertSkipped(self, out):
         rows = [r for r in out.splitlines() if "comment check: skipped" in r]

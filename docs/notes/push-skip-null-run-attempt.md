@@ -1,0 +1,1 @@
+- push-skip-null-run-attempt: no test in lint/test_push_skip.py sets run_attempt to null, so the null case is unpinned (PR 3853, merged; checked by search on main). Seen: 2026-11-24 x1

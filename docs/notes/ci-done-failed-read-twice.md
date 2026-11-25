@@ -1,0 +1,1 @@
+- ci-done-failed-read-twice: when the gh comments read fails, actions/ci-done-comment/comment.sh (lines 24-25 on main) leaves `announced` empty, so a red job posts a second time (pre-existing; read by hand, not run). Seen: 2026-11-24 x1

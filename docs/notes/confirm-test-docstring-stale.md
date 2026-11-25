@@ -1,0 +1,1 @@
+- confirm-test-docstring-stale: reviewer's report (PR 3863, open): the docstring of test_a_setup_lane_head_whose_stamp_says_none_takes_the_lint_with_no_draft_run in merge/test_merge.py is stale; unverified. Seen: 2026-11-24 x1
