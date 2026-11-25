@@ -307,7 +307,7 @@ from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the req
 import ruled_store  # noqa: E402  the one reader of the ruling store (lint/ruled_store.py)
 import stale_cites  # noqa: E402  the one home of the rule dirs (lint/stale_cites.py); the lint dir is on sys.path from the records import above
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
-from guard_merge import LOCAL_ROLE_TIERS  # noqa: E402  the one home of the roles a local role file may name (hooks/guard_merge.py)
+from guard_merge import LOCAL_ROLE_TIERS  # noqa: E402  glossary-ok: the guard's own name; the one home of the roles a local role file may name (hooks/guard_merge.py)
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -7942,7 +7942,7 @@ LANE_ROLE = "lane"  # a lane's merge role: its role record also names its step, 
 STANDING_ROLE = "standing"  # ruling own-tiny-fixes-b: a coordinator, triage or the consultant merges its own pull request (decision session-tiers)
 MERGE_ROLES = {"batch-runner", LANE_ROLE, STANDING_ROLE}  # the tiers that may run `merge <pr> --confirm` in a cloud session; the standing one only past standing_refusal, the lane one only on its own pull request
 LANE_MERGE_REPO = "shivinate7/claude-settings"  # the one repo whose pull requests a lane merges itself; the lane role covers it alone
-LOCAL_MERGE_ROLES = set(LOCAL_ROLE_TIERS)  # the roles a local session's role file may name; the lane role is a cloud role only
+LOCAL_MERGE_ROLES = set(LOCAL_ROLE_TIERS)  # glossary-ok: the guard's own name; the roles a local session's role file may name; the lane role is a cloud role only
 LOCAL_STANDING_ROLE = "coordinator"  # the one local role that merges as a standing session: its record reads STANDING_ROLE, past the same checks and for the repo its file names
 
 
