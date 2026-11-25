@@ -2,9 +2,9 @@
 
 ## The ruling
 
-Owner, 2026-10-12: a SubagentStart hook injects the standing rules, so a brief need not retype them. `hooks/agent_brief.py` prints `additionalContext` with:
+Owner, 2026-10-12: a SubagentStart hook injects the standing rules, so a brief need not retype them. `hooks/agent_brief.py` prints `additionalContext` with the lines below. The standing line bans three things only; the reset ban went by owner ruling, 14:12 CST 2026-11-23.
 
-- no `git stash`, `git reset`, `git checkout <path>` or `git restore`;
+- Never run git stash, git checkout <path>, or git restore.
 - push only with `git push origin HEAD:<branch>`;
 - no gh call unless the brief names it;
 - the role's scope;
@@ -23,4 +23,4 @@ Protected by `hooks/test_agent_brief.py`, run in `checks`, `checks-macos` and `c
 
 Kind: build
 Plan: docs/decisions/agents-get-standing-rules.md#the-ruling (all)
-Home: hooks/agent_brief.py
+Home: hooks/agent_brief.py, the COMMON list
