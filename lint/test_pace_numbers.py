@@ -5,13 +5,16 @@ Form under test: `python3 lint/pace_numbers.py --transcript FILE --between START
 - A span starts at an Agent (or Task) tool_use record's timestamp. A refused spawn (a tool_result with
   is_error and no toolUseResult.agentId) starts no span.
 - The agent's task-id is the agentId in its launch result (toolUseResult.agentId).
+- A foreground launch (a result with agentId and no isAsync) ends its span at the result's time.
 - A span ends at the first task-notification with that task-id and status completed, failed or killed. A
-  notice counts as text in a user record's content or a queue-operation's content. Text in a tool_result, a
-  blob copy (no timestamp) or an attachment never counts.
+  notice counts as text in a user record's content, a queue-operation's content or a queued_command attachment's
+  prompt. Text in a tool_result, a blob copy (no timestamp) or a compaction summary (a user record with
+  isCompactSummary) never counts. One notice logged in several carriers is one notice, and its edge is its first copy.
 - A notice whose task-id matches no spawn (a background shell command) is ignored.
 - A SendMessage to the agent's id, sent after its span closed, reopens the span at the send's time.
   A send while the span is open changes nothing. A send whose result failed (is_error, or toolUseResult
-  success false) reopens nothing.
+  success false) reopens nothing. A distinct end notice with no send since the span closed extends the span to
+  that notice's first copy.
 - A span is clipped to the window. An agent with no end notice in the file runs to END. An end notice
   after END clips the span to END and does not make the agent still running.
 - A window time with no UTC offset exits 2 with an argument error that names the window time, and prints
@@ -22,9 +25,11 @@ Form under test: `python3 lint/pace_numbers.py --transcript FILE --between START
 - The covered span runs from the earliest to the latest timestamped record. A window minute outside it is not
   idle. The second line then ends with ` (transcript covers from <ISO> on; <N> min before it not counted)` when
   the window starts before the span, or ` (transcript covers until <ISO>; <N> min after it not counted)` when it
-  ends after it. <ISO> is the span's edge in the window's offset, such as 2026-11-25T04:00:00-06:00.
+  ends after it. <ISO> is the span's edge in the window's offset, such as 2026-11-25T04:00:00-06:00. A coverage
+  note prints only for an overhang of one minute or more; its minute count is the floor of the overhang.
 - A window with no minute in common with the covered span, touching it at one instant included, prints one
-  `unknown: <reason>` line and exits 0. So does an unreadable file, or an empty one.
+  `unknown: <reason>` line and exits 0. So does an unreadable file, an empty one, or one whose bytes are not
+  UTF-8; such a read prints no traceback.
 
 Each case runs the reader as a subprocess and compares its stdout. No case imports the reader, so a
 missing reader fails on an assert, not on an import.
@@ -63,9 +68,9 @@ def at(hm, day=DAY):
 
 
 def window_arg(hm):
-    """A window bound in -06:00 for the UTC instant `hm` on DAY."""
-    hours, minutes = (int(x) for x in hm.split(":")[:2])
-    return "%sT%02d:%02d:00-06:00" % (DAY, hours - CENTRAL_OFFSET_HOURS, minutes)
+    """A window bound in -06:00 for the UTC instant `hm` on DAY, written HH:MM or HH:MM:SS."""
+    hours, minutes, seconds = (int(x) for x in (hm.split(":") + ["0"])[:3])
+    return "%sT%02d:%02d:%02d-06:00" % (DAY, hours - CENTRAL_OFFSET_HOURS, minutes, seconds)
 
 
 def agent_id(n):
@@ -115,12 +120,19 @@ def spawn(ts, use_id, name="Agent"):
                           "prompt": "synthetic prompt", "run_in_background": True}}]}}
 
 
-def launched(ts, use_id, aid):
+def launched(ts, use_id, aid, foreground=False):
+    """A spawn's launch result. A background launch carries isAsync and the async status. A foreground one carries
+    only the agent id, with no isAsync key, as the reviewer's probe gives it (the real transcript holds none)."""
+    if foreground:
+        text, result = "synthetic foreground result", {"agentId": aid}
+    else:
+        text = "Async agent launched successfully.\nagentId: %s" % aid
+        result = {"isAsync": True, "status": "async_launched", "agentId": aid}
     return {"type": "user", "timestamp": ts, "isSidechain": False,
             "message": {"role": "user", "content": [{
                 "type": "tool_result", "tool_use_id": use_id,
-                "content": [{"type": "text", "text": "Async agent launched successfully.\nagentId: %s" % aid}]}]},
-            "toolUseResult": {"isAsync": True, "status": "async_launched", "agentId": aid}}
+                "content": [{"type": "text", "text": text}]}]},
+            "toolUseResult": result}
 
 
 def refused(ts, use_id):
@@ -138,10 +150,10 @@ def send(ts, to, use_id):
                           "message": "synthetic follow-up text"}}]}}
 
 
-def notice(task_id, tool_use_id, status="completed"):
+def notice(task_id, tool_use_id, status="completed", summary="synthetic summary"):
     status_tag = "<status>%s</status>\n" % status if status else ""
     return ("<task-notification>\n<task-id>%s</task-id>\n<tool-use-id>%s</tool-use-id>\n%s"
-            "<summary>synthetic summary</summary>\n</task-notification>" % (task_id, tool_use_id, status_tag))
+            "<summary>%s</summary>\n</task-notification>" % (task_id, tool_use_id, status_tag, summary))
 
 
 def send_failed(ts, use_id):
@@ -171,9 +183,9 @@ def user_text(ts, text):
             "message": {"role": "user", "content": text}}
 
 
-def end(queue_hm, copy_hm, aid, tool_use_id, status="completed"):
-    """One stop's notice as the transcript logs it: a queue-operation, then a user copy a minute later."""
-    text = notice(aid, tool_use_id, status)
+def end(queue_hm, copy_hm, aid, tool_use_id, status="completed", summary="synthetic summary"):
+    """One stop's notice as the transcript logs it: a queue-operation, then a user copy (copy_hm, a little later)."""
+    text = notice(aid, tool_use_id, status, summary)
     return [queued(at(queue_hm), text), user_text(at(copy_hm), text)]
 
 
@@ -195,19 +207,36 @@ def snapshot(ts):
                            "systemPrompt": ["synthetic system prompt that names <task-notification> tags"]}}
 
 
+def attachment_notice(ts, text):
+    """A notice queued as a queued_command attachment, the shape the real transcript gives it: its text is in prompt."""
+    return {"type": "attachment", "timestamp": ts, "isSidechain": False,
+            "attachment": {"type": "queued_command", "commandMode": "task-notification",
+                           "origin": {"kind": "task-notification"}, "prompt": text}}
+
+
+def compaction_summary(ts, text):
+    """A resumed session's summary of earlier turns: a user record flagged isCompactSummary."""
+    return {"type": "user", "timestamp": ts, "isSidechain": False, "isCompactSummary": True,
+            "message": {"role": "user", "content": text}}
+
+
 def plain(ts, text="synthetic text"):
     return user_text(ts, text)
 
 
-def write_transcript(folder, records, runs_to=None):
+def write_transcript(folder, records, runs_to=None, tail_bytes=None):
     """The fixture file. runs_to, an HH:MM UTC time, adds one plain record stamped there, so the file's covered
-    span reaches it and a window ending there lies inside the span."""
+    span reaches it and a window ending there lies inside the span. tail_bytes, raw bytes, is appended after the
+    records, for a file whose last bytes are not UTF-8."""
     if runs_to:
         records = list(records) + [plain(at(runs_to))]
     path = os.path.join(folder, "transcript.jsonl")
     with open(path, "w", encoding="utf-8") as f:
         for rec in records:
             f.write(json.dumps(rec) + "\n")
+    if tail_bytes is not None:
+        with open(path, "ab") as f:
+            f.write(tail_bytes)
     return path
 
 
@@ -463,6 +492,122 @@ class PaceNumbersTests(unittest.TestCase):
         errors = [line for line in proc.stderr.splitlines() if ": error: " in line]
         self.assertEqual(len(errors), 1, "one argument error line is printed")
         self.assertIn("window time needs a UTC offset", errors[0], "the error names the window time")
+
+    def test_foreground_agent_span_ends_at_its_result(self):
+        path = write_transcript(self.folder, flat(
+            spawn(at("10:00"), "t1"), launched(at("10:05"), "t1", agent_id(1), foreground=True),
+        ), runs_to="10:10")
+        # Scope first: the one launch result carries the agent id and no isAsync key.
+        results = [rec for rec in _transcript.read_transcript(path) if isinstance(rec.get("toolUseResult"), dict)]
+        self.assertEqual(len(results), 1, "the fixture holds one launch result")
+        self.assertEqual(sorted(results[0]["toolUseResult"]), ["agentId"], "a foreground launch has no isAsync key")
+        self.assertEqual(covered_span(path), (at("10:00"), at("10:10")), "the fixture's covered span")
+        self.expect(path, "10:00", "10:10", expected_lines(agents=1, most=1, idle=5),
+                    cause="a foreground agent's span runs past its result to the window end")
+
+    def test_second_end_notice_without_a_send_extends_the_span(self):
+        path = write_transcript(self.folder, flat(
+            spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
+            end("10:02", "10:03", agent_id(1), "n1", summary="synthetic first stop"),
+            end("10:06", "10:07", agent_id(1), "n2", summary="synthetic second stop"),
+        ), runs_to="10:10")
+        # Scope first: two distinct stops, each logged twice, and no send between them.
+        records = _transcript.read_transcript(path)
+        self.assertEqual(sum(1 for rec in records if rec.get("type") == "queue-operation"), 2,
+                         "the fixture holds two queued stops")
+        names = [use.get("name") for rec in records for use in _transcript.tool_uses(rec)]
+        self.assertEqual(names, ["Agent"], "no send sits between the two stops")
+        self.assertEqual(covered_span(path), (at("10:00"), at("10:10")), "the fixture's covered span")
+        self.expect(path, "10:00", "10:10", expected_lines(agents=1, most=1, idle=4),
+                    cause="a second stop with no send since the first is ignored, so the span ends at the first")
+
+    def test_attachment_only_notice_ends_a_span(self):
+        text = notice(agent_id(1), "n1")
+        path = write_transcript(self.folder, flat(
+            spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
+            attachment_notice(at("10:05"), text),
+        ), runs_to="10:10")
+        # Scope first: the attachment is the stop's only carrier.
+        carriers = [rec.get("type") for rec in _transcript.read_transcript(path)
+                    if "<task-notification>" in json.dumps(rec)]
+        self.assertEqual(carriers, ["attachment"], "the only carrier of the stop is the attachment")
+        self.assertEqual(covered_span(path), (at("10:00"), at("10:10")), "the fixture's covered span")
+        self.expect(path, "10:00", "10:10", expected_lines(agents=1, most=1, idle=5),
+                    cause="a stop carried only by an attachment does not end its span")
+
+    def test_notice_in_queue_user_and_attachment_counts_once(self):
+        # A green guard: one stop in all three carriers ends the span once, at its first copy.
+        text = notice(agent_id(1), "n1")
+        path = write_transcript(self.folder, flat(
+            spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
+            queued(at("10:05"), text), user_text(at("10:06"), text), attachment_notice(at("10:07"), text),
+        ), runs_to="10:10")
+        carriers = sorted(rec.get("type") for rec in _transcript.read_transcript(path)
+                          if "<task-notification>" in json.dumps(rec))
+        self.assertEqual(carriers, ["attachment", "queue-operation", "user"], "the scope: one stop in three carriers")
+        self.assertEqual(covered_span(path), (at("10:00"), at("10:10")), "the fixture's covered span")
+        self.expect(path, "10:00", "10:10", expected_lines(agents=1, most=1, idle=5),
+                    cause="one stop in three carriers does not end its span once, at its first copy")
+
+    def test_compaction_summary_quote_does_not_end_a_resumed_span(self):
+        earlier = notice(agent_id(1), "n1", summary="synthetic first stop")
+        path = write_transcript(self.folder, flat(
+            spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
+            end("10:02", "10:02:30", agent_id(1), "n1", summary="synthetic first stop"),
+            send(at("10:03"), agent_id(1), "s1"),
+            compaction_summary(at("10:04"), "synthetic summary of earlier turns:\n" + earlier),
+            end("10:08", "10:08:30", agent_id(1), "n2", summary="synthetic second stop"),
+        ), runs_to="10:10")
+        # Scope first: the summary is the only compaction record, and it quotes a stop.
+        summaries = [rec for rec in _transcript.read_transcript(path) if rec.get("isCompactSummary") is True]
+        self.assertEqual(len(summaries), 1, "the fixture holds one compaction summary record")
+        self.assertIn("<task-notification>", summaries[0]["message"]["content"], "the summary quotes a stop")
+        self.assertEqual(covered_span(path), (at("10:00"), at("10:10")), "the fixture's covered span")
+        self.expect(path, "10:00", "10:10", expected_lines(agents=1, most=1, idle=3),
+                    cause="a compaction summary that quotes an earlier stop ends the resumed span")
+
+    def test_invalid_utf8_at_the_end_prints_one_unknown_line(self):
+        path = write_transcript(self.folder, flat(
+            spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
+            end("10:05", "10:06", agent_id(1), "n1"),
+        ), runs_to="10:10", tail_bytes=b"\xff\xfe partial record\n")
+        # Scope first: the file's bytes do not decode as UTF-8.
+        with open(path, "rb") as f:
+            raw = f.read()
+        try:
+            raw.decode("utf-8")
+        except UnicodeDecodeError:
+            pass
+        else:
+            self.fail("scope: the fixture must end in bytes that are not UTF-8")
+        proc = run_reader(path, "10:00", "10:10")
+        self.assertNotIn("Traceback", proc.stderr,
+                         "invalid UTF-8 at the transcript's end ends in a traceback, not an unknown line")
+        self.assertEqual(proc.returncode, 0, "an unknown read exits with a code other than 0")
+        lines = proc.stdout.splitlines()
+        self.assertEqual(len(lines), 1, "an unknown read prints more than one line")
+        self.assertTrue(lines[0].startswith("unknown: "), "the line does not start with 'unknown: '")
+
+    def test_overhang_under_one_minute_prints_no_note(self):
+        path = write_transcript(self.folder, flat(
+            spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
+            end("10:05:20", "10:06:20", agent_id(1), "n1"),
+        ), runs_to="10:09:30")
+        self.assertEqual(covered_span(path), (at("10:00"), at("10:09:30")), "the fixture's covered span")
+        # The 30 s overhang floors to 0 min, and idle is 250 s or 280 s either way: both print 4.
+        self.expect(path, "10:00", "10:10", expected_lines(agents=1, most=1, idle=4),
+                    cause="an overhang under one minute prints a 'not counted' note")
+
+    def test_overhang_of_61_seconds_prints_one_minute_note(self):
+        # A green guard at the boundary: a 61 s overhang floors to 1 min and keeps its note.
+        path = write_transcript(self.folder, flat(
+            spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
+            end("10:02", "10:02:30", agent_id(1), "n1"),
+        ), runs_to="10:08:59")
+        self.assertEqual(covered_span(path), (at("10:00"), at("10:08:59")), "the fixture's covered span")
+        self.expect(path, "10:00", "10:10",
+                    expected_lines(agents=1, most=1, idle=6, note=after_note("10:08:59", 1)),
+                    cause="a 61 s overhang does not print its one-minute note")
 
 
 class PaceNumbersFixtureControlTests(unittest.TestCase):
