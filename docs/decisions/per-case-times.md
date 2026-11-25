@@ -16,12 +16,12 @@ A suite total hides a slow case, and so does a slowest-25 list. A case that shou
 
 - Recording arms only when env `CASE_TIMES=1` and `RUNNER_TEMP` is set. `testing/case_times/sitecustomize.py` arms a process at its start when its folder is on `PYTHONPATH`. Unarmed, it writes nothing.
 - A row has `suite`, `group`, `case`, `s`, `fixture_s` and `outcome` (`pass`, `fail` or `skip`). `s` is the case's own seconds. `fixture_s` is the seconds of its setUp and tearDown (and, for an IsolatedAsyncioTestCase, of its asyncSetUp and asyncTearDown), apart from `s`. Each armed process holds its rows in memory and appends them once, at exit, to `RUNNER_TEMP/case-times/<GITHUB_JOB>.jsonl` (`local` when no job name is set). A process with no rows writes no file.
-- unittest: one row per test method, timed from its start to its stop. A method's subTests make one row. `group` is the suite. setUp and tearDown are timed by wrapping unittest's private `_callSetUp` and `_callTearDown` on TestCase. When `unittest.async_case` loads, the same wrap goes on IsolatedAsyncioTestCase, so its asyncSetUp and asyncTearDown seconds are fixture time too. The arm itself imports no asyncio (see Limits).
-- A case that starts inside another open case gets no row. The outer case's row holds that time.
-- A frame that a case leaves open is dropped when the case it sits under stops. That stop writes one `case_times:` stderr line that names the dropped case. The case it sits under keeps its row, and later cases keep theirs.
+- unittest: one row per test method, timed from its start to its stop. A method's subTests make one row. `group` is the suite. setUp and tearDown are timed by wrapping unittest's private `_callSetUp` and `_callTearDown` on TestCase. When `unittest.async_case` loads, the same wrap goes on IsolatedAsyncioTestCase, so its asyncSetUp and asyncTearDown seconds are fixture time too. The arm itself imports no asyncio, and `ArmImports.test_armed_import_unittest_loads_no_asyncio` checks it.
+- A case that starts inside another open case gets no row. When the outer case stops, it drops the rows kept since its own start, and the outer case's row holds that time.
+- A frame that a case leaves open is dropped when the case it sits under stops. The case it sits under keeps its row, and later cases keep theirs. A frame opened outside any case stays open to exit and drops no rows. At exit, one `case_times:` stderr line names each dropped frame and each frame still open.
 - An import failure is named for the failed module's file when that file is in the cwd latched at arm time, else `import-failure`.
 - A row that cannot be kept writes one stderr line and changes no result.
-- A class whose `_callSetUp` or `_callTearDown` cannot be read (a Python that renamed one) runs both calls unwrapped. Its cases still run, their setUp and tearDown seconds stay in `s`, and one `case_times:` stderr line says so.
+- A class whose `_callSetUp` or `_callTearDown` is missing or cannot be read (a Python that renamed one) runs only that call unwrapped. Its armed outcome matches its unarmed one, that call's seconds stay in `s`, and one `case_times:` stderr line names it. The other call is still wrapped.
 - `case_times.py` sets `__unittest = True`, so unittest leaves its frames out of a traceback. An armed setUp error prints the same traceback as an unarmed one.
 - Two copies of the home on `PYTHONPATH` do not recurse.
 - Guard runner (`hooks/test_guard.py`): one row per case and per log check. `suite` is `hooks/test_guard.py`, `group` is the case's family, and a log check's `case` starts with `log: `. `fixture_s` is the time of lazy fixture blocks, taken out of `s`.
@@ -40,7 +40,7 @@ Cost (rule `outcomes-mechanize-rules`): the recording runs only in armed Python 
 
 Check: `lint/test_case_times.py`: `Cost.test_no_child_and_one_file`, `Cost.test_unarmed_child_one_import_no_file`, `Unarmed.test_no_env_writes_no_file`, `Unarmed.test_no_unittest_import_writes_no_file`, `Children.test_suite_child_writes_no_row`, `Children.test_mutation_child_writes_no_row`, `Records.test_one_row_per_case_with_outcome`, `GuardRows.test_one_row_per_case_fixture_netted`, `Chain.test_next_sitecustomize_still_runs`. `lint/test_case_times_report.py`: `Flags.test_ten_times_median_over_floor_flagged`, `Flags.test_under_floor_not_flagged`, `Flags.test_small_group_not_judged`, `Flags.test_bad_file_unknown_exit_zero`.
 
-Checks for the facts above: `lint/test_case_times.py`: `FixtureTime.test_setup_and_teardown_land_in_fixture_s`, `NestedRuns.test_inner_case_keeps_no_row_of_its_own`, `ImportFailure.test_named_by_the_failed_modules_own_file`, `ImportFailure.test_no_file_is_named_import_failure`, `TwoHomes.test_two_copies_of_the_home_chain_once`, `RowFails.test_a_row_that_cannot_be_kept_writes_one_stderr_line`, `OpenFrame.test_open_frame_at_flush_keeps_later_rows_and_names_it`, `ArmWithoutCallSetUp.test_missing_call_setup_still_starts_and_runs`, `AsyncFixture.test_async_setup_seconds_land_in_fixture_s`, `SetupTraceback.test_setup_error_traceback_matches_unarmed`. `lint/test_case_times_report.py`: `JobFiles.test_prints_each_job_file_read`, `JobFiles.test_named_job_without_a_file_is_listed_missing`, `Literal.test_fixture_time_counts_toward_the_flag`, `Literal.test_skipped_rows_left_out_of_the_median`.
+Checks for the facts above: `lint/test_case_times.py`: `FixtureTime.test_setup_and_teardown_land_in_fixture_s`, `NestedRuns.test_inner_case_keeps_no_row_of_its_own`, `ImportFailure.test_named_by_the_failed_modules_own_file`, `ImportFailure.test_no_file_is_named_import_failure`, `TwoHomes.test_two_copies_of_the_home_chain_once`, `RowFails.test_a_row_that_cannot_be_kept_writes_one_stderr_line`, `OpenFrame.test_open_frame_at_flush_keeps_later_rows_and_names_it`, `ArmWithoutCallSetUp.test_missing_call_setup_still_starts_and_runs`, `AsyncFixture.test_async_setup_seconds_land_in_fixture_s`, `SetupTraceback.test_setup_error_traceback_matches_unarmed`, `ArmWithoutCallSetUp.test_deleted_call_setup_writes_one_line_naming_it`, `OpenFrame.test_frame_opened_outside_any_case_keeps_rows`, `OpenFrame.test_case_frame_on_runner_result_keeps_its_row`, `ArmImports.test_armed_import_unittest_loads_no_asyncio`. `lint/test_case_times_report.py`: `JobFiles.test_prints_each_job_file_read`, `JobFiles.test_named_job_without_a_file_is_listed_missing`, `Literal.test_fixture_time_counts_toward_the_flag`, `Literal.test_skipped_rows_left_out_of_the_median`.
 
 ## Consultant picks
 
@@ -56,12 +56,13 @@ Picks by the consultant. The owner may reverse any of them.
 
 - The CI workflow hunk. It sets `CASE_TIMES=1`, `RUNNER_TEMP` and `PYTHONPATH` for the jobs, and uploads the job files. It waits on the open PRs that hold the workflow. Until it lands, no CI job sets `CASE_TIMES=1`.
 - The 14-day retention. It is a workflow setting, not yet set.
-- The two lint test files run in CI only when a PR touches them (`.github/workflows/lane-touched-tests.yml`).
+- The two lint test files run in CI only when a draft PR touches them (`.github/workflows/lane-touched-tests.yml`).
 
 ## Limits
 
 - 35% of test files (hand, node, shell and PowerShell runners) get no row. Counted 2026-11-24: about 87 of 246.
 - Private unittest methods (`_callSetUp`, `_callTearDown`) carry the fixture timing, on TestCase and IsolatedAsyncioTestCase. Checked on Python 3.15.2 and 3.12.14. Python 3.9 is unmeasured (see Unmeasured).
+- No case proves `_callTearDown` stays wrapped when `_callSetUp` is gone.
 - Matrix legs share `GITHUB_JOB`, so their job files would collide. Open: no fix yet.
 
 ## Unmeasured
