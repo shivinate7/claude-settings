@@ -2018,7 +2018,8 @@ def _process_stands_in(target: str):
     """True when a live process has its cwd at or under TARGET, False when none does, None when the process
     read failed. The one reader is the janitor's `sweep.processes_in`, imported lazily because sweep.py
     imports git_reads and the guard only on a call that needs it (the same route as `sim_boot_refusal`).
-    A missing janitor beside this file or a failed enumeration is unknown: the caller keeps today's refusal."""
+    A missing janitor beside this file or a failed enumeration is unknown: the caller refuses the remove, because
+    a guard that cannot run its read refuses (decision guard-hooks-fail-closed)."""
     try:
         janitor = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "janitor")
         if janitor not in sys.path:
@@ -2063,7 +2064,9 @@ def worktree_remove_subject(args, where: str):
     standing = _process_stands_in(target)
     if standing:
         return False
-    if live is None or standing is None:
+    if standing is None:
+        return False
+    if live is None:
         return None
     return True
 
