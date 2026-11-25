@@ -1474,6 +1474,23 @@ def case_widening_rule_defines_widening_as_other_than_the_settings_repo():
           % (SETTINGS_REPO.lower(), sentences))
 
 
+def case_widening_rule_bounds_the_settings_repo_never_flag():
+    # The never-flag sentence for the settings repo is bounded: one sentence holds the repo value, a never-flag word,
+    # 'unless' and 'other than', so a change that lets another repo's differing form pass is still flagged.
+    r = run_hook(page_input("set", good_page_item()), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    sentences = widening_sentences(prompt)
+    check("widening slot: the judged prompt carries the widening slot after the question-format prompt",
+          bool(sentences), prompt[:200])
+    holds = [s for s in sentences if ("never flag" in s or "not widen" in s) and SETTINGS_REPO.lower() in s]
+    closest = max(holds or [""], key=lambda s: sum(w in s for w in ("unless", "other than")))
+    missing = [w for w in ("unless", "other than") if w not in closest]
+    check("widening: one sentence holds the settings repo value, 'never flag' or 'not widen', 'unless' and 'other than'",
+          widening_pin(sentences, ("never flag", "not widen"), (SETTINGS_REPO.lower(),), ("unless",), ("other than",)),
+          "missing words in the never-flag sentence for the settings repo: %s; widening sentences: %s"
+          % (", ".join(repr(w) for w in missing) or "none, the words are in two sentences", sentences))
+
+
 def case_fail_open():
     for label, inp, kwargs in (
         ("a model failure on a spawn", spawn_input("builder", model="sonnet"), {"model_fail": True}),
@@ -1909,6 +1926,7 @@ def main():
                  case_widening_rule_says_widening_is_a_form_that_passes_one_repos_variant,
                  case_widening_rule_never_flags_a_change_that_names_only_the_settings_repo,
                  case_widening_rule_defines_widening_as_other_than_the_settings_repo,
+                 case_widening_rule_bounds_the_settings_repo_never_flag,
                  case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
