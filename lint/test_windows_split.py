@@ -2873,6 +2873,15 @@ class ReadyPullShards(unittest.TestCase):
         keys = [key(st) for st in jobs["checks-windows-merge"]["steps"]]
         self.assertEqual(keys.count(SLICE), 1, f"checks-windows-merge runs {SLICE!r} {keys.count(SLICE)} times, want 1")
 
+    def test_each_windows_slice_host_job_keeps_a_timeout_cap(self):
+        # Named failure: a base job that hosts a Windows slice has no timeout-minutes number, so a hung slice runs to the runner's limit.
+        # The value is not pinned: the stopgap cap moves under ci-job-caps.
+        jobs = windows_jobs(self.text)
+        for name in (GUARD_JOB, "checks-windows-merge"):
+            self.assertIn(name, jobs, f"no {name} job")
+            m = re.search(r"^    timeout-minutes:\s*(\d+)", job_block(self.text, name) or "", re.M)
+            self.assertIsNotNone(m, f"{name} hosts a Windows slice and has no timeout-minutes cap")
+
     def test_the_windows_slice_env_is_set_once_on_a_step_of_each_windows_base_job_and_nowhere_else(self):
         # Named failure: a windows-slice value is set on a job, on the workflow, on a shard, or on a second step, so a run carries it twice.
         # It reads the parsed step envs, and counts the mentions outside comments, so a comment cannot satisfy it.
