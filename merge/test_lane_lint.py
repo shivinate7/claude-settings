@@ -4106,6 +4106,7 @@ SCAFFOLD_READY = "checks-rest:project-ops skill scaffold suite"  # the scaffold 
 SCAFFOLD_STEP = "project-ops skill scaffold suite"  # the same step's bare name, as checks.yml names it
 ACTION_READY = "Rules and records move together"  # a listed action step of job checks (uses: $/actions/claude-md-cites): a tool that cannot run an action prints it as not run
 ACTION_NOT_RUN = "--step named it, but it did not run (not run locally): an action (uses: $/actions/claude-md-cites); CI runs it"  # bin/ci-job's detail for that step on a tool that cannot run it
+CODE_CHECK_READY = "Code check"  # the checks-job step that runs code_check.py (uses: $/actions/code-check): ruff, mypy, ShellCheck, tsc and the comment check
 READY_WITH_ACTION = DECLARED_READY + [ACTION_READY]
 REAL_MERGE_CONFIG = os.path.join(os.path.dirname(HERE), ".github", "stamp.json")  # merge.readyChecks lives here
 # The six CI-only checks a draft's ready run must read, so no CI rerun is paid to a cheap check. Each is one step of job checks, found by the script its run: line calls.
@@ -5233,6 +5234,16 @@ class PreReadyDeclared(unittest.TestCase):
     def test_pre_ready_the_declared_list_names_the_scaffold_suite_under_checks_rest(self):
         self.assertIn(SCAFFOLD_READY, self.declared(), "merge.readyChecks does not name the scaffold suite as %r, so the pre-ready run does not read it" % SCAFFOLD_READY)
         self.assert_ci_job_reads(SCAFFOLD_READY)
+
+    def test_pre_ready_the_declared_list_names_the_code_check_step_ci_job_reads(self):
+        """The code-check step is a ready check, so a ruff error or a pinned tool's bug fails the draft's ready run, not CI after the draft goes ready."""
+        with open(CHECKS_YML, encoding="utf-8") as f:
+            block = job_block(f.read(), "checks")
+        steps = [st for st in step_blocks(block) if step_key(st, "name") == CODE_CHECK_READY]
+        self.assertEqual(len(steps), 1, "scope: checks.yml job checks holds %d steps named %r, not one" % (len(steps), CODE_CHECK_READY))
+        self.assertEqual(step_key(steps[0], "uses"), "$/actions/code-check", "scope: the %r step is not the local code-check action" % CODE_CHECK_READY)
+        self.assertIn(CODE_CHECK_READY, self.declared(), "merge.readyChecks does not name %r, so the ready run never runs the code check" % CODE_CHECK_READY)
+        self.assert_ci_job_reads(CODE_CHECK_READY)
 
     def test_pre_ready_the_declared_list_names_the_six_cheap_checks_by_their_workflow_step(self):
         """Each of the six CI-only checks is named in merge.readyChecks under the step name checks.yml gives the step that runs its script, and bin/ci-job reads that name."""
