@@ -14,14 +14,20 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # a runner other than `python agent_brief.py` still finds guard_core
 try:
     from guard_core import REFUTER_ROLE  # noqa: E402  the one home of the refuter role's name
+    import guard_shared_tree  # noqa: E402  the one home of the reset flags that discard work
 except Exception as e:  # fail open, as the docstring says: READ_ONLY and SCOPE need the name, so stop here with exit 0
     print(f"agent_brief: {e}", file=sys.stderr)
     sys.exit(0)
 
+# The reset ban names the flags the guard refuses, read from its constant at load, so the brief and the guard agree.
+RESET_BAN = ("- Outside your own worktree, never run git reset with one of the flags %s, git checkout of a path, or git restore."
+             % "/".join(guard_shared_tree.RESET_DISCARD_FLAGS))
+
 # Each line carries a flag: True = every type, False = only types that commit and push.
 COMMON = [
     (True, "Standing rules for this agent:"),
-    (True, "- Never run git stash, git checkout <path>, or git restore."),
+    (True, "- Never run git stash."),
+    (True, RESET_BAN),
     (False, "- Push only with: git push origin HEAD:<branch>."),
     (True, "- Make no gh call unless your brief names it."),
     (True, "- {scope}"),
