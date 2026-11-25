@@ -579,6 +579,8 @@ sh("bare-merge: a cd into a subfolder of a repo with a merge block denies",
 if LINKS_MADE:
     sh("bare-merge: a cwd that is a symlink into a subfolder of the repo denies",
        "gh pr merge 12", "deny", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPLINK, **_BARE_GUARD)
+else:
+    skip_case("bare-merge: a cwd that is a symlink into a subfolder of the repo denies", NO_LINK_HERE)
 # building-scanner-respects-strings: text in the call's own arguments hides no merge.
 sh("bare-merge: comment openers inside a quoted argument hide no merge",
    'gh pr merge 3 --subject "fix // x # y /* z */"', "deny", BARE_MERGE, cwd=STAMPREPO, **_BARE_GUARD)
