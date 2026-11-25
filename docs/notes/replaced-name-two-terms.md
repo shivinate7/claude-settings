@@ -1,0 +1,1 @@
+- replaced-name-two-terms: The code names one thing two ways: `superseded_run` with `RUN_SUPERSEDED`, and `replaced_in_span` with `replaced_note`. `GLOSSARY.md` has neither name.
