@@ -143,10 +143,17 @@ Text: `refusal_reason`. Decision `refusals-reach-the-owner` (a refused tool reac
 
 ### Past-ruling guard (any reply with a question)
 
-Text: `RELAY_RULE_REASON`. Rule `past-ruling` (a question that a past ruling already settles).
+Text: `past_ruling_text` in `hooks/question_form.py`, wrapped by `RELAY_RULE_REASON` on the Stop path. Rule `past-ruling` (a question that a past ruling may decide).
 
-- Drop the question if the ruling settles it.
-- Or add a `Based on (ruling): <id>` line that names that ruling and says why the owner is asked again. Use the id that the refusal names. The refusal gives the id, its date, and what it decides. When the judge's reason holds wording that tells the session what to do (`session_wording`), the refusal keeps the verdict and the id and drops that text.
+- The refusal never says a ruling settles a question. It gives the ruling id, its time from the listed ruling line (`time unknown` when there is none), what the ruling decides (from the judge's reason, with any sentence that tells the session what to do left out), the words "may be stale", and the remedy line. It says "one of the questions" when the reply holds more than one. It does not yet name which one.
+- The refusal never tells the session to take a pick or to drop the question.
+- A question passes when its `Based on (ruling): <id>` line names the ruling the refusal cites, by id or slug. Code reads that line (`question_form.named_rulings`) on both paths: the Stop check (`lint/report_guard.py`) and the check before a question box or page write (`hooks/call_judge.py`). The model judges first; the code allow then overrides its refusal. A mention of the id anywhere else in the text does not pass.
+- The remedy line reads `Based on (ruling): <id> (<time>), may be stale: <why>`.
+- The Stop-path refusal appends one `guard.log` line, rule `past-ruling`. Cost: one line per refusal, no file, no process. Reader: the guard cull (`lint/guard_log_report.py`).
+- Control: a question with no `Based on (ruling)` line that names the ruling is still refused once.
+- Owner, 10:36 and 10:42 CST 2026-11-24: a hook that cites a past ruling must not stop a question that updates that ruling; it carries a "may be stale" note; "forbids is too strong a word".
+- Incident, 22:31 CST 2026-11-24: a session dropped five owner questions after a refusal that gave only a ruling id.
+- Open: the guard still refuses once. Whether that refusal should be a note only is asked of the owner (00:43 CST 2026-11-25). Not ruled.
 
 ### Unvetted guard (any reply with a question)
 
