@@ -926,6 +926,11 @@ add("brief-destructive-git: a forbidding word, a span, a closing paren, then a r
     subagent_type="builder", model="sonnet")
 add("brief-destructive-git: control, a forbidding word over two spans joined by or is allowed", "allow", tool="Agent",
     prompt="Never run `git stash` or `git reset --hard origin/main`.", subagent_type="builder", model="sonnet")
+# "and" and "nor" join two spans as "or" does: with no comma between them, the negator covers the second span too.
+add("brief-destructive-git: control, a forbidding word over two spans joined by and is allowed", "allow", tool="Agent",
+    prompt="Never run `git stash` and `git reset --hard origin/main`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: control, a forbidding word over two spans joined by nor is allowed", "allow", tool="Agent",
+    prompt="Never run `git stash` nor `git reset --hard origin/main`.", subagent_type="builder", model="sonnet")
 # Control: plain words with no backtick span name no command, so the scan has nothing to read and allows the brief.
 add("brief-destructive-git: control, plain no rebase and no force words with no span are allowed", "allow", tool="Agent",
     prompt="Do the check with no rebase, no force, then report.", subagent_type="builder", model="sonnet")
