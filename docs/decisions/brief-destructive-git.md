@@ -14,16 +14,16 @@ Rule `brief-destructive-git` in `hooks/guard.py` refuses an Agent, Task or Workf
   - a read-only role, from `READ_ONLY` in `hooks/agent_brief.py`, plugin prefix stripped; a missing module judges every role (fail closed)
   - a segment whose `git -C` or `cd` target is under any session scratchpad (coordinator ruling, 2026-11-08 11:42 CST: mirror the shell guard's scratchpad allow)
   - a line with `Must deny:` or `Add a case:` before the span (case data)
-  - a prohibition: a negator in the same clause, within 4 words before the span; `avoid` and `without` only as the word right before it; emphasis marks stripped
+  - a prohibition: the clause before the span ends in a negator and a run verb ("Never run", "Do not use", "You cannot run"), or in `avoid`, `without` or `no`; a span it covers must be a list of git commands; emphasis marks stripped
   - each later span of a prohibition list, where a comma joins two spans ("Never run `a`, `b`, or `c`.")
   - a heading with a negator then a run verb within 2 words ("Never run:") covers its bullet run, across blank lines and into a fence under it
-  - a backtick span whose own text holds a negator in its clause before its first git word
-  - a backtick span followed directly by "-free"
-  - a backtick span reported as done: "ran" is the word right before it, or "had run" or "has run" are the two words right before it
+  - a backtick span that is, whole, a negator, a run verb and a list of git commands (items joined only by commas, or, and, nor; one final period)
+  - a backtick span of `git` and one subcommand word, followed directly by "-free"
+  - a backtick span reported as done: the clause before it is, whole, an optional article, one to three words naming who acted, and "ran", "had run" or "has run"; a clause that opens with a condition or instruction word (if, once, then, now, make, ensure) or holds "you" is no report
 - The override lifts it (`owner-override`).
 - Accepted limits, in `docs/debts/notes.md`. A `$ ` line under "Never run:" is denied. Gerund prohibitions ("avoid running", "instead of") are denied. An earlier negated sentence on a heading line covers an order list. An unread Workflow prompt passes. A list with an aside between spans is denied at the later span. The window crosses a colon. A `~~~` fence is not read. A case-data marker exempts the rest of its line. Claude is unlikely to write these forms by mistake (`guard-guards-mistakes-only`).
 - By design, not a limit: an order with no backticks passes here and meets the shell guard at run time.
-- Known limit: any other wording that only names the act stays refused. A report worded with "ran" is read as a report, never as an order.
+- Each pass above is a whole-shape match, so a pass never reads one word and skips the rest of the span or clause. Known limits, each refused as an order: any other wording that only names the act; a prohibition with words between the negator and the run verb ("Never, under any circumstance, run"); a prohibited span with a shell joiner or a plain word list that is not git commands (`cd x && git reset --hard`). A negator outside the span that negates another act ("Do not hesitate to" then a span) is now refused too.
 - Cost: pure text work inside the guard call already running. No process start, no file written.
 
 Protected by the `rule9` test family under `tests/guard/` (80 `brief-destructive-git:` cases and 2 override checks, counted 2026-11-25), red before the rule landed, and one mutant in `hooks/mutate_guard.py`.

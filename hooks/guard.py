@@ -457,11 +457,12 @@ Other tools, in `judge` order:
                        discard of a working tree (`shared_tree_match`): a backtick span, a fenced line or a line led
                        by `$ `. Each is cut with `split_segments`, so the verb list has one home. Passes: a span
                        whose `git -C` or `cd` target is under a session scratchpad; a line with `Must deny:` or
-                       `Add a case:` before the span; a span with never, do not, don't or no in its own clause
-                       (no `;`, `.` or `,` between) within 4 words before it; a span whose own text holds such a
-                       negator in its clause before its first `git` word (`Never run git stash, git restore`); a
-                       span followed directly by `-free`; a span right after `ran`, `had run` or `has run`. Prose
-                       with no span is not read. A writing role only: the read-only roles in `READ_ONLY`
+                       `Add a case:` before the span; a span of git commands (a list joined by commas, or, and, nor) whose clause
+                       before it ends in a negator that governs a run verb (`Never run`, `Do not use`, `You cannot
+                       run`), or in avoid, without or no; a span that is whole a negator, a run verb and such a list
+                       (`Never run git stash, git restore`); a span of `git` and one subcommand followed directly
+                       by `-free`; a span right after a report (`The lane ran`, `had run`, `has run`) whose clause
+                       is only a who and the verb. Any other shape is refused as an order. Prose with no span is not read. A writing role only: the read-only roles in `READ_ONLY`
                        (hooks/agent_brief.py) pass. An override lifts it. (brief-destructive-git)
   lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose `effort` field is not
                        exactly `medium` (LANE_EFFORT), or whose prompt's first non-blank line does not
@@ -4647,11 +4648,16 @@ def prior_work_agent_hit(tool: str, tool_input) -> bool:
 # before it (a prohibition); and a part under a negating heading. A negating heading is a line that ends with ":" once
 # `*`, `_` and a leading bullet are stripped, and holds a negator with a run verb within 2 words after it ("Never run:",
 # "Do not run any of these:"). Its cover holds across blank lines, over a fence opened under it, and over bullets nested
-# under it; it ends at the next prose line that is no bullet, or at a bullet no deeper than a bullet heading. Three more
-# passes read only a backtick span, each for a span that reports or forbids and is no order: a segment whose own text holds a
-# negator in its clause before its first `git` word (the same `_brief_prohibits`, so "Never mind, git reset" stays an
-# order, its comma ending the clause); a span followed directly by "-free"; and a span right after "ran", "had run" or
-# "has run". Any other way of naming a command stays refused. A Workflow
+# under it; it ends at the next prose line that is no bullet, or at a bullet no deeper than a bullet heading. Each pass that
+# reads a backtick span as a prohibition or a report matches the WHOLE shape, never one word: a pass that read one word and
+# skipped the rest of the span would let a later order through ("Never run `git stash then run git reset --hard`").
+# Whatever fits no shape whole is refused as on a plain order. The shapes: (1) a prohibition covers a span only when the
+# span is a list of git commands (`_brief_git_list`) and the clause before it ends in a negator that governs a run verb
+# (`_brief_prohibits`), so "Do not forget to run `...`" is no prohibition; (2) a span that holds its own negator is the
+# negator, a run verb and such a list, and nothing else (`_brief_own_negator`); (3) "-free" frees a span of `git` and one
+# subcommand, since a flag in the span shows an order is named; (4) a report is a clause of an optional article, one to
+# three words naming who acted, and "ran", "had run" or "has run", read only when no word makes it a condition or an
+# instruction ("If the tests ran", "Then ran") (`_brief_reports`). A Workflow
 # script is read through `_brief_spawns`, which counts each agent() call whatever its model. Cost: pure text work inside
 # the one guard call. No process, no file.
 try:
@@ -4667,7 +4673,16 @@ BRIEF_DESTRUCTIVE_NOT = re.compile(r"\b(?:do|must|should|can)\s+not\b", re.IGNOR
 BRIEF_DESTRUCTIVE_LIST_COMMA = re.compile(r"\x00\s*,\s*(?:(?:and|or|nor)\s+)*(?=\x00|$)", re.IGNORECASE)
 BRIEF_DESTRUCTIVE_BULLET = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
 BRIEF_DESTRUCTIVE_FREE = re.compile(r"-free\b")   # `git stash`-free: the span names what the aside leaves out
-BRIEF_DESTRUCTIVE_GIT_WORD = re.compile(r"\bgit\b")
+BRIEF_DESTRUCTIVE_FREE_SPAN = re.compile(r"git\s+[a-z][a-z-]*")   # only `git` and a subcommand: a flag or path shows an order
+BRIEF_DESTRUCTIVE_OWN_NEGATOR = re.compile(r"(?:never|do\s+not|don't)\s+(?:run|use|call)\s+", re.IGNORECASE)
+BRIEF_DESTRUCTIVE_ITEM_JOIN = re.compile(r"\s*,\s*(?:(?:and|or|nor)\s+)?|\s+(?:and|or|nor)\s+", re.IGNORECASE)
+BRIEF_DESTRUCTIVE_ITEM_WORD = re.compile(r"[^\s;&|()`$]+")   # a shell joiner or substitution is no part of a listed command
+BRIEF_DESTRUCTIVE_REPORT = re.compile(
+    r"(?:(?:a|an|the|one|another)\s+)?[\w'-]+(?:\s+[\w'-]+){0,2}\s+(?:ran|had\s+run|has\s+run)", re.IGNORECASE)
+# a clause that opens with one of these is a condition or an instruction, so its "ran" reads as a slip for "run"
+BRIEF_DESTRUCTIVE_NOT_REPORT = frozenset((
+    "if", "once", "when", "after", "before", "unless", "until", "then", "now", "and", "so", "please", "ensure", "make",
+    "be", "you", "we", "first", "next", "also", "later", "finally", "just", "always", "again", "still", "run"))
 BRIEF_DESTRUCTIVE_SKIP = ("branch-delete", "worktree-remove", "worktree-prune")
 BRIEF_DESTRUCTIVE_REASON = (
     "The brief orders a command that throws away work in a checkout other sessions share, and no step puts it back. "
@@ -4724,8 +4739,9 @@ def _brief_commands(prompt: str):
 
 
 def _brief_prohibits(before: str) -> bool:
-    """True when a negator sits in the same clause as the command, within 4 words before it; "avoid" and "without"
-    count only as the word directly before it."""
+    """True when the clause before the command ends in a prohibition: a negator and a run verb, or "avoid", "without" or
+    "no" as the last word. A negator with other words between it and the verb ("Do not forget to run") is none, since it
+    negates something else."""
     # an earlier span reads as one word, so "Never run `a` or `b`" keeps its negation for `b`
     # a comma after a span, with only "or"/"and" before the next span, continues the list and drops the earlier spans
     # from the negator's window; a comma before plain words ends the clause
@@ -4734,22 +4750,51 @@ def _brief_prohibits(before: str) -> bool:
     spans = BRIEF_DESTRUCTIVE_SPAN.sub("\x00", before.replace("\x00", " "))
     listed = BRIEF_DESTRUCTIVE_LIST_COMMA.sub("", spans)
     words = _brief_words(re.split(r"[;.,]", listed)[-1])
-    return any(word in BRIEF_DESTRUCTIVE_NEGATORS for word in words[-4:]) \
-        or bool(words) and words[-1] in BRIEF_DESTRUCTIVE_NEXT_TO
+    while words and words[-1] in ("\x00", "and", "or", "nor"):
+        words.pop()   # the glue of a list of spans; the negator is read before it
+    if words[-1:] and words[-1] in BRIEF_DESTRUCTIVE_NEXT_TO + ("no",):
+        return True
+    return len(words) >= 2 and words[-1] in BRIEF_DESTRUCTIVE_RUN_VERBS and words[-2] in BRIEF_DESTRUCTIVE_NEGATORS
 
 
-def _brief_reports(before: str, after: str) -> bool:
-    """True for a span that reports an act and orders none: "-free" follows it, or "ran", "had run" or "has run" is
-    the word or two words right before it."""
-    words = _brief_words(before)
-    return bool(BRIEF_DESTRUCTIVE_FREE.match(after)) or words[-1:] == ["ran"] \
-        or words[-2:] in (["had", "run"], ["has", "run"])
+def _brief_git_item(item: str) -> bool:
+    """True for one listed command: `git` first, then words that hold no shell joiner and no second `git` (a bare or
+    pathed word, so a later order cannot hide in the item)."""
+    words = item.split()
+    return len(words) >= 2 and words[0].lower() == "git" and all(
+        BRIEF_DESTRUCTIVE_ITEM_WORD.fullmatch(w)
+        and re.split(r"[\\/]", w)[-1].strip(".,:;!?").lower() not in ("git", "git.exe") for w in words[1:])
 
 
-def _brief_own_negator(segment: str) -> bool:
-    """True when a negator sits in the same clause as the segment's first `git` word, before it, inside the span itself."""
-    git = BRIEF_DESTRUCTIVE_GIT_WORD.search(segment)
-    return bool(git) and _brief_prohibits(segment[:git.start()])
+def _brief_git_list(text: str) -> bool:
+    """True when `text` is only a list of git commands: each item starts with `git`, items are joined by commas, "or",
+    "and" or "nor", and one final period may end it. Any other word between or after the items breaks the shape."""
+    text = text.strip()
+    if text.endswith("."):
+        text = text[:-1].rstrip()
+    return bool(text) and all(_brief_git_item(item) for item in BRIEF_DESTRUCTIVE_ITEM_JOIN.split(text))
+
+
+def _brief_reports(command: str, before: str, after: str) -> bool:
+    """True for a span that reports an act and orders none: "-free" follows a span of `git` and one subcommand, or the
+    clause before the span is a who and "ran", "had run" or "has run", and nothing that makes it a condition."""
+    if BRIEF_DESTRUCTIVE_FREE.match(after):
+        return bool(BRIEF_DESTRUCTIVE_FREE_SPAN.fullmatch(command.strip()))
+    bullet = BRIEF_DESTRUCTIVE_BULLET.match(before)
+    clause = re.sub(r"[*_]", "", re.split(r"[.!?;:]", before[bullet.end():] if bullet else before)[-1]).strip()
+    if "`" in clause or not BRIEF_DESTRUCTIVE_REPORT.fullmatch(clause):
+        return False
+    words = clause.lower().replace("\u2019", "'").split()
+    return words[0] not in BRIEF_DESTRUCTIVE_NOT_REPORT and "you" not in words
+
+
+def _brief_own_negator(command: str) -> bool:
+    """True when the whole span is a negator that governs a run verb ("Never run", "Do not use"), then a list of git
+    commands. A span with any other word, such as "then run", is an order and falls through."""
+    bullet = BRIEF_DESTRUCTIVE_BULLET.match(command)
+    text = (command[bullet.end():] if bullet else command).replace("\u2019", "'").replace("*", "")
+    negator = BRIEF_DESTRUCTIVE_OWN_NEGATOR.match(text.strip())
+    return bool(negator) and _brief_git_list(text.strip()[negator.end():])
 
 
 def _brief_target(segment: str, moved):
@@ -4787,17 +4832,18 @@ def brief_destructive_hit(tool: str, tool_input) -> str:
         if not isinstance(prompt, str) or role in read_only:
             continue
         for command, before, after, covered in _brief_commands(prompt):
-            if covered or BRIEF_DESTRUCTIVE_CASE_DATA.search(before) or _brief_prohibits(before):
+            if covered or BRIEF_DESTRUCTIVE_CASE_DATA.search(before):
                 continue
             span = after is not None
-            if span and _brief_reports(before, after):
+            if _brief_prohibits(before) and (not span or _brief_git_list(command)):
+                continue
+            if span and (_brief_reports(command, before, after) or _brief_own_negator(command)):
                 continue
             moved = None
             for segment in split_segments(command):
                 target, moved = _brief_target(segment, moved)
                 match = shared_tree_match(segment) if segment.strip() else None
                 if match and match[1] not in BRIEF_DESTRUCTIVE_SKIP \
-                        and not (span and _brief_own_negator(segment)) \
                         and not (target is not None and in_any_session_scratchpad(shell_abs(target, None) or target)):
                     return command
     return ""
