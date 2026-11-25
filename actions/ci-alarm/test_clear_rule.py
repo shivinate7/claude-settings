@@ -3,13 +3,20 @@
 
 Run: python3 actions/ci-alarm/test_clear_rule.py. Stdlib unittest. Each case builds its workflow text in memory; no file is read or written.
 """
+import contextlib
 import json
 import os
+import pathlib
 import sys
 import unittest
+from datetime import datetime, timedelta, timezone
+from unittest import mock
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 import clear_rule  # noqa: E402  the one home of the failed-run clear, beside this file
+sys.path.insert(0, os.path.join(HERE, "..", "..", "merge"))
+import merge  # noqa: E402  the merge tool's Host: RedMainJudge checks the home against its real base_state
 
 PUSH = "push"
 RUNS_ON = "runs-on: ubuntu-latest"
@@ -349,6 +356,192 @@ class EmptyRun(unittest.TestCase):
             events = json.load(f)
         self.assertEqual(clear_rule.rule_events(), sorted(e for e, g in events.items() if g == events["push"]))
         self.assertNotIn("schedule", clear_rule.rule_events())
+
+
+WF_CHECKS = ".github/workflows/checks.yml"
+WF_LINKS = ".github/workflows/links.yml"
+FLOWS = {WF_CHECKS, WF_LINKS}
+CHECKS_TEXT = workflow(("checks", [RUNS_ON, *STEPS]))  # the file at every head: no job has an if:, so no job of a red run is left out
+TIME_FMT = "%Y-%m-%dT%H:%M:%SZ"
+START = datetime(2026, 11, 24, 10, 0, tzinfo=timezone.utc)  # a fixed start: a job's minutes come from its rows, never from the clock
+
+
+def page_run(rid, conclusion, event=PUSH, name="checks", path=WF_CHECKS, status="completed", attempt=1):
+    """A run as the runs API lists it. Its head is its id as 40 hex digits, so each run has its own commit."""
+    return {"id": rid, "name": name, "path": path, "event": event, "status": status, "conclusion": conclusion,
+            "run_attempt": attempt, "head_sha": f"{rid:040x}", "html_url": f"https://example.invalid/runs/{rid}"}
+
+
+def job_row(name, conclusion, status="completed", minutes=None):
+    """A job as the jobs API lists it. `minutes` sets its start and end, the two times a cap is judged on."""
+    row = {"name": name, "status": status, "conclusion": conclusion, "html_url": f"https://example.invalid/jobs/{name}"}
+    if minutes is not None:
+        row["started_at"] = START.strftime(TIME_FMT)
+        row["completed_at"] = (START + timedelta(minutes=minutes)).strftime(TIME_FMT)
+    return row
+
+
+@contextlib.contextmanager
+def caps_read_as(caps):
+    """Host.buckets reads each job's cap from the checkout's workflow files. Here the checkout's caps are `caps`, the same dict the home takes."""
+    with mock.patch.object(merge, "workflow_dir", return_value=pathlib.Path(HERE)), mock.patch.object(merge, "job_caps", return_value=caps):
+        yield
+
+
+class ScriptedHost(merge.Host):
+    """The real Host.base_state and Host.red_jobs over scripted REST: `page` is the runs list the API returns, `jobs` maps a run id to its job rows,
+    and every workflow file reads as CHECKS_TEXT. Nothing is fetched."""
+    def __init__(self, page, jobs):
+        self.required, self.ignore, self.cwd, self.warned = "protection", {}, HERE, set()
+        self.base_facts = None
+        self.page, self.jobs = page, jobs
+
+    def api(self, rel, *extra, method="GET", fields=None, **kw):
+        if rel == "actions/runs":
+            return 0, json.dumps({"workflow_runs": self.page})
+        if rel.startswith("contents/"):
+            return 0, CHECKS_TEXT
+        raise AssertionError(f"the scripted host has no read for {rel}")
+
+    def pages(self, rel, key=None, fields=None, **kw):
+        return self.jobs[int(rel.split("/")[2])]
+
+
+def base_judgment(page, jobs, caps=None):
+    """base_state's verdict and red runs on a scripted host: (verdict, [(run id, red job names)]). This is the oracle the home is checked against."""
+    host = ScriptedHost(page, jobs)
+    with caps_read_as(caps or {}):
+        verdict, _detail = host.base_state("main", FLOWS)
+    facts = host.base_facts or {"red_ids": [], "red_jobs": []}
+    return verdict, [(rid, list(names)) for rid, names in zip(facts["red_ids"], facts["red_jobs"])]
+
+
+class RedMainJudge(unittest.TestCase):
+    """The red-main judgment moves from merge.py base_state into clear_rule.judge_main (decision no-merge-onto-red-main). Each case runs one page
+    through base_state on the real Host (ScriptedHost) and through the home; the verdict and the red runs must agree. A missing home is an
+    assert, so each case is red on the old code for the one cause: there is no home yet."""
+
+    def judge_home(self):
+        judge = getattr(clear_rule, "judge_main", None)
+        self.assertTrue(callable(judge), "clear_rule has no judge_main: base_state still judges main in merge.py")
+        return judge
+
+    def judge_fixed(self, page, jobs, caps=None):
+        """The home's (verdict, [(run id, red job names)]) for a page, read from clear_rule alone. The fixed cases pin their answer by hand, never base_state."""
+        verdict, red = self.judge_home()(page, FLOWS, set(), caps or {}, lambda r: jobs.get(r["id"]), lambda r: CHECKS_TEXT)
+        return verdict, [(rid, list(names)) for rid, names in red]
+
+    def assert_same_judgment(self, page, jobs, caps=None):
+        judge = self.judge_home()
+        verdict, red = judge(page, FLOWS, set(), caps or {}, lambda r: jobs.get(r["id"]), lambda r: CHECKS_TEXT)
+        self.assertEqual((verdict, [(rid, list(names)) for rid, names in red]), base_judgment(page, jobs, caps),
+                         "judge_main gives a different verdict or red runs than base_state on the same page")
+
+    def test_a_newest_completed_run_that_passed_judges_as_base_state_does(self):
+        self.assert_same_judgment([page_run(2, "success")], {2: [job_row("scope", "success"), job_row("checks", "success")]})
+
+    def test_a_red_job_in_the_newest_run_judges_as_base_state_does(self):
+        self.assert_same_judgment([page_run(2, "failure")], {2: [job_row("scope", "success"), job_row("checks", "failure")]})
+
+    def test_a_failed_run_with_no_red_job_judges_as_base_state_does(self):
+        self.assert_same_judgment([page_run(2, "failure")], {2: [job_row("scope", "success")]})
+
+    def test_an_unfinished_first_attempt_is_passed_over_for_the_older_run(self):
+        self.assert_same_judgment([page_run(3, None, status="in_progress"), page_run(2, "success")],
+                                  {3: [job_row("checks", None, status="in_progress")], 2: [job_row("checks", "success")]})
+
+    def test_a_re_run_in_flight_judges_as_base_state_does(self):
+        self.assert_same_judgment([page_run(3, None, status="in_progress", attempt=2), page_run(2, "success")],
+                                  {3: [job_row("checks", None, status="in_progress")], 2: [job_row("checks", "success")]})
+
+    def test_a_cancelled_run_with_no_red_job_judges_as_base_state_does(self):
+        self.assert_same_judgment([page_run(3, "cancelled"), page_run(2, "success")],
+                                  {3: [job_row("scope", "success"), job_row("checks", "cancelled")],
+                                   2: [job_row("scope", "success"), job_row("checks", "success")]})
+
+    def test_a_cancelled_run_cleared_by_a_newer_run_of_another_group_judges_as_base_state_does(self):
+        self.assert_same_judgment([page_run(4, "success", event="schedule"), page_run(3, "cancelled")],
+                                  {4: [job_row("scope", "success"), job_row("checks", "success")],
+                                   3: [job_row("scope", "success"), job_row("checks", "cancelled")]})
+
+    def test_an_empty_push_run_is_passed_over_for_the_older_red_run(self):
+        self.assert_same_judgment([page_run(3, "success"), page_run(2, "failure")],
+                                  {3: [job_row("scope", "success")], 2: [job_row("scope", "success"), job_row("checks", "failure")]})
+
+    def test_a_push_run_proven_by_push_skip_counts_green_over_an_older_red_run(self):
+        self.assert_same_judgment([page_run(3, "success"), page_run(2, "failure")],
+                                  {3: [job_row("push-skip", "success"), job_row("scope", "skipped"), job_row("checks", "skipped")],
+                                   2: [job_row("checks", "failure")]})
+
+    def test_a_red_run_of_one_workflow_file_is_not_hidden_by_a_newer_green_run_of_another(self):
+        self.assert_same_judgment([page_run(4, "success", name="links", path=WF_LINKS), page_run(3, "failure"), page_run(2, "success")],
+                                  {4: [job_row("checks", "success")],
+                                   3: [job_row("scope", "success"), job_row("checks", "failure")],
+                                   2: [job_row("scope", "success"), job_row("checks", "success")]})
+
+    def test_a_newer_push_run_that_skipped_the_red_schedule_job_does_not_clear_it(self):
+        self.assert_same_judgment([page_run(3, "success", event=PUSH), page_run(2, "failure", event="schedule")],
+                                  {3: [job_row("scope", "success"), job_row("checks", "skipped")],
+                                   2: [job_row("scope", "success"), job_row("checks", "failure")]})
+
+    def test_a_newer_push_run_that_passed_the_red_schedule_jobs_clears_it(self):
+        self.assert_same_judgment([page_run(3, "success", event=PUSH), page_run(2, "failure", event="schedule")],
+                                  {3: [job_row("scope", "success"), job_row("checks", "success")],
+                                   2: [job_row("scope", "success"), job_row("checks", "failure")]})
+
+    def test_an_empty_page_judges_as_base_state_does(self):
+        self.assert_same_judgment([], {})
+
+    def test_a_full_page_of_green_runs_judges_as_base_state_does(self):
+        page = [page_run(rid, "success") for rid in range(merge.MAIN_RUNS_READ, 0, -1)]
+        self.assert_same_judgment(page, {rid: [job_row("scope", "success"), job_row("checks", "success")] for rid in range(1, merge.MAIN_RUNS_READ + 1)})
+
+    def test_a_cancelled_run_whose_job_hit_its_cap_judges_as_base_state_does_with_the_cap(self):
+        jobs = {2: [job_row("scope", "success"), job_row("checks-macos", "cancelled", minutes=30)]}
+        self.assert_same_judgment([page_run(2, "cancelled")], jobs, caps={"checks-macos": 20})
+
+    def test_the_same_cancelled_run_with_no_cap_judges_as_base_state_does(self):
+        jobs = {2: [job_row("scope", "success"), job_row("checks-macos", "cancelled", minutes=30)]}
+        self.assert_same_judgment([page_run(2, "cancelled")], jobs)
+
+    def test_the_red_job_names_are_the_names_host_red_jobs_gives(self):
+        judge_names = getattr(clear_rule, "red_job_names", None)
+        self.assertTrue(callable(judge_names), "clear_rule has no red_job_names: Host.red_jobs still decides which jobs are red in merge.py")
+        rows = [job_row("passes", "success"), job_row("neutral", "neutral"), job_row("skipped", "skipped"), job_row("fails", "failure"),
+                job_row("timed-out", "timed_out"), job_row("cancelled", "cancelled"), job_row("cap", "cancelled", minutes=30),
+                job_row("running", None, status="in_progress")]
+        caps = {"cap": 20}
+        with caps_read_as(caps):
+            _got, _red, want = ScriptedHost([], {}).red_jobs(rows)
+        self.assertEqual(judge_names(rows, caps), want, "red_job_names and Host.red_jobs name different red jobs")
+
+    def test_fixed_a_newest_run_that_passed_judges_green_with_no_red_run(self):
+        self.assertEqual(self.judge_fixed([page_run(2, "success")], {2: [job_row("scope", "success"), job_row("checks", "success")]}),
+                         ("green", []), "a newest run that passed is not green with no red run")
+
+    def test_fixed_a_red_job_in_the_newest_run_judges_red_with_that_job_named(self):
+        self.assertEqual(self.judge_fixed([page_run(2, "failure")], {2: [job_row("scope", "success"), job_row("checks", "failure")]}),
+                         ("red", [(2, ["checks"])]), "a red job in the newest run is not red, named by that job")
+
+    def test_fixed_a_cancelled_run_with_no_red_job_judges_unknown_with_no_red_run(self):
+        self.assertEqual(self.judge_fixed([page_run(2, "cancelled")], {2: [job_row("scope", "success"), job_row("checks", "cancelled")]}),
+                         ("unknown", []), "a cancelled run with no red job is not unknown with no red run")
+
+    def test_fixed_a_re_run_in_flight_above_an_older_green_run_judges_unknown(self):
+        self.assertEqual(self.judge_fixed([page_run(3, None, status="in_progress", attempt=2), page_run(2, "success")],
+                                          {3: [job_row("checks", None, status="in_progress")], 2: [job_row("checks", "success")]}),
+                         ("unknown", []), "a re-run in flight above a green run does not make main unknown")
+
+    def test_fixed_an_empty_green_push_run_above_an_older_red_push_run_leaves_that_red_run_standing(self):
+        self.assertEqual(self.judge_fixed([page_run(3, "success"), page_run(2, "failure")],
+                                          {3: [job_row("scope", "success")], 2: [job_row("scope", "success"), job_row("checks", "failure")]}),
+                         ("red", [(2, ["checks"])]), "an empty green push run hides the older red push run")
+
+    def test_control_the_scripted_host_reads_a_red_job_red_through_base_state(self):
+        """Control, green on the old code: the cases above compare with base_state, so base_state must show a red job red on this host."""
+        verdict, red = base_judgment([page_run(2, "failure")], {2: [job_row("checks", "failure")]})
+        self.assertEqual(verdict, "red")
+        self.assertEqual(red, [(2, ["checks"])])
 
 
 if __name__ == "__main__":
