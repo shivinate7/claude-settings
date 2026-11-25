@@ -553,7 +553,7 @@ def audit_brief(session_id, transcript):
         "- MISSING: rulings, open PRs, running jobs and agents, questions owed, and work in the transcript that the "
         "handoff lacks.",
         "- STALE: handoff lines the transcript replaced.",
-        "- DONE: handoff lines whose work landed on main.",
+        "- DONE: handoff lines whose work landed on main, or the item is answered, closed or withdrawn.",
         "",
     ])
 

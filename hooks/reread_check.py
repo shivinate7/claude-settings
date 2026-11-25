@@ -49,6 +49,7 @@ Never exits 2: bad stdin, a failed import of the sibling precompact_handoff, and
 other failure exit 0. Importing this module never exits: without the sibling,
 `unread_handoff` and `audit_pending` return "".
 """
+import hashlib
 import importlib
 import json
 import os
@@ -312,7 +313,10 @@ def audit_reason(handoff):
 
 # The spawn tools. guard.SPAWN_TOOLS names the same two; this file cannot import the guard, which imports it.
 SPAWN_NAMES = ("Agent", "Task")
-_HEADING = re.compile(r"^[\s#*_>`-]*(MISSING|STALE|DONE)[\s:*_`]*$")
+# A heading is MISSING, STALE or DONE in any case, then an optional count or title, then a colon with items after it, or
+# nothing: `MISSING`, `Missing items:`, `MISSING (2):`, `missing: `#12` open`.
+_HEADING = re.compile(r"^[\s#*_>`-]*(MISSING|STALE|DONE)\b(?:\s*\(\d+\)|\s+[A-Za-z][A-Za-z ]{0,30}?)?[\s*_`]*"
+                      r"(?::[\s*_]*(?P<inline>.*)|[\s:*_`]*)$", re.IGNORECASE)
 _TICKS = re.compile(r"`([^`\n]+)`")
 
 
@@ -327,14 +331,16 @@ def _text(content):
 
 
 def parse_audit(text):
-    """{heading: [backticked tokens]} for the audit's reply: a line that is only MISSING, STALE or DONE starts a
-    list, and each token in backticks on the lines after it joins that list. None when the text has no heading."""
+    """{heading: [backticked tokens]} for the audit's reply: a line that is a MISSING, STALE or DONE heading (see
+    _HEADING) starts a list, and each token in backticks after it, on the heading line or the lines below, joins that
+    list. None when the text has no heading."""
     lists, cur = {}, None
     for line in text.splitlines():
         found = _HEADING.match(line)
         if found:
-            cur = found.group(1)
+            cur = found.group(1).upper()
             lists.setdefault(cur, [])
+            lists[cur] += [t.strip() for t in _TICKS.findall(found.group("inline") or "") if t.strip()]
         elif cur:
             lists[cur] += [t.strip() for t in _TICKS.findall(line) if t.strip()]
     return lists or None
@@ -397,7 +403,8 @@ def rewrite_check(payload):
     tokens the audit's MISSING list names, and the jobs and agents that still run (stall_watch.scan_jobs). A token the
     audit's DONE or STALE list names may go. An audit reply the transcript cannot give leaves the baseline and the
     live jobs, and no token may go. It stays quiet while the audit agent itself runs. A state file with no usable
-    baseline passes and clears the flag, with one line on stderr. A pass clears the flag. Reads no PR state.
+    baseline passes and clears the flag, with one line on stderr. A pass clears the flag. A block stamps the flag with the handoff's hash, and a Stop with stop_hook_active true on
+    that same text passes: one block per chain. Reads no PR state.
     Never raises."""
     try:
         sid = payload["session_id"]
@@ -407,6 +414,14 @@ def rewrite_check(payload):
                 text = f.read()
         except OSError:
             return ""
+        seen = "blocked:" + hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
+        if payload.get("stop_hook_active"):
+            try:
+                with open(flag, "r", encoding="utf-8") as f:
+                    if f.read() == seen:
+                        return ""   # one block per chain: this handoff is the one the last block judged
+            except OSError:
+                pass
         try:
             with open(ph.state_path(sid), "r", encoding="utf-8") as f:
                 state = json.load(f)
@@ -439,6 +454,8 @@ def rewrite_check(payload):
         if not lacking:
             os.remove(flag)
             return ""
+        with open(flag, "w", encoding="utf-8") as f:
+            f.write(seen)
         shown = "; ".join("`%s` (%s)" % pair for pair in lacking[:REWRITE_SHOWN])
         more = " and %d more" % (len(lacking) - REWRITE_SHOWN) if len(lacking) > REWRITE_SHOWN else ""
         why_none = "" if parsed else " (the audit's reply could not be read, so none may go on its account)"
@@ -525,8 +542,7 @@ def main():
                     "now, then continue. (decision precompact-handoff)" % ph.handoff_path(sid))}))
             elif not payload.get("stop_hook_active") and audit_pending(payload):
                 print(json.dumps({"decision": "block", "reason": audit_reason(ph.handoff_path(sid))}))
-            elif (not payload.get("stop_hook_active") and not from_agent(payload)
-                  and os.path.isfile(ph.rewrite_flag_path(sid))):
+            elif not from_agent(payload) and os.path.isfile(ph.rewrite_flag_path(sid)):
                 reason = rewrite_check(payload)
                 if reason:
                     print(json.dumps({"decision": "block", "reason": reason}))
