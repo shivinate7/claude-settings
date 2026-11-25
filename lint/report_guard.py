@@ -3278,7 +3278,7 @@ def _marker_path(hook):
 
 
 def rewrite_problems(hook):
-    """Reasons for the rewrite that follows a missing-report block, or []. The marker is
+    """Reasons for the rewrite that follows a missing-report or a wrong-model block, or []. The marker is
     consumed before any check, so a second rewrite finds none and stays quiet. It holds the
     index of the turn's human record, so the spawns are read from the same turn whether or not
     the hook's feedback record counts as human. Fails open on any error."""
@@ -3920,7 +3920,9 @@ def main():
         reasons.append(refusal)
     if reasons:
         reason = " ".join(reasons) + " (rule reports-order-of-labels)"
-        if not shape_ok:
+        # A model refusal leaves the same marker as a missing report: the harness's feedback record then counts as the
+        # last human message, so only the marker lets the correction's rewrite read this turn's spawns.
+        if not shape_ok or models:
             write_marker(hook, last_human_idx)
         finish({"decision": "block", "reason": reason}, missing_report=not shape_ok)
     else:
