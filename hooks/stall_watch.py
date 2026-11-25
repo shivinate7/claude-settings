@@ -1170,7 +1170,7 @@ TRANSCRIPT_AGENT_ID = re.compile(r"[\w-]+\Z")  # an id safe to put in a transcri
 TAIL_BYTES = 64 * 1024  # the first read of an agent transcript's end; it doubles to hold the last record
 TAIL_MAX = 32 * 1024 * 1024
 AGENT_REMEDY = "Stop it, then resume it by name, or send a fresh reviewer the prior report."
-AGENT_CHECKIN_AHEAD = 30  # minutes: the furthest ahead a check-in may be set and still count
+AGENT_CHECKIN_AHEAD = 30  # minutes: the longest delay a check-in may be set with and still count
 AGENT_CHECKIN_REMEDY = ("A background agent that runs this long needs one check-in (decision stall-watch). For each, set one "
                         "one-time send_later check-in, at most %d minutes ahead, whose text names its agent id, then stop. "
                         "At the check-in, read the last records of its transcript, then stop it or tell the owner."
@@ -1212,14 +1212,20 @@ def checkin_minutes_ahead(when, text):
 
 
 def checked_in(agent, crossed, sent):
-    """True when a check-in made at or after crossed (epoch seconds) names the agent id as a whole token and is set
-    at most AGENT_CHECKIN_AHEAD minutes ahead (its delay_minutes, or its `at` time against the call's time). sent is
-    the (time, input text) pairs of scan_jobs's keep_waiting read. A check-in with no readable time never counts:
-    it may be older than the crossing."""
+    """True when a check-in names the agent id as a whole token, was set at most AGENT_CHECKIN_AHEAD minutes ahead,
+    and fires at or after crossed (epoch seconds). Its fire time is its call time plus its minutes ahead (its
+    delay_minutes, or its `at` time), so a check-in made before the crossing that fires after it counts, and one
+    that fired before it does not. sent is the (time, input text) pairs of scan_jobs's keep_waiting read. A check-in
+    with no readable time never counts: it may be older than the crossing."""
     pat = re.compile(r"(?<![\w-])%s(?![\w-])" % re.escape(agent))
-    sent = [(when, text) for when, text in sent
-            if (checkin_minutes_ahead(when, text) or 0) <= AGENT_CHECKIN_AHEAD]  # one set too far ahead does not count
-    return any(when is not None and when >= crossed and pat.search(text) for when, text in sent)
+    for when, text in sent:
+        if when is None or not pat.search(text):
+            continue
+        ahead = checkin_minutes_ahead(when, text) or 0  # a check-in with no reading fires at its call time
+        fire = when + ahead * 60
+        if ahead <= AGENT_CHECKIN_AHEAD and fire >= crossed:  # a delay over the limit never counts, however late the Stop
+            return True
+    return False
 
 
 def agent_transcripts(session, agent, output):
