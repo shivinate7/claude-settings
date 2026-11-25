@@ -3235,6 +3235,107 @@ def case_f3_closed_feedback_done_may_be_dropped():
         c2.cleanup()
 
 
+def parse_audit_run(c, text):
+    """parse_audit of `text`, run as the hook loads it: scratch copies of reread_check.py, precompact_handoff.py and
+    shared_names.py in one dir. Returns (parsed, why): why names the one cause when the run itself fails."""
+    d = c.dir("parse_audit")
+    for src, name in ((READ_CHECK, "reread_check.py"), (PRECOMPACT, "precompact_handoff.py"),
+                      (os.path.join(HERE, "shared_names.py"), "shared_names.py")):
+        shutil.copy(src, os.path.join(d, name))
+    code = "import json, sys; import reread_check as r; print(json.dumps(r.parse_audit(sys.stdin.read())))"
+    proc = subprocess.run([sys.executable, "-c", code], cwd=d, input=text, capture_output=True, text=True,
+                          env=c.env(), timeout=120)
+    if proc.returncode != 0:
+        return None, "parse_audit did not run: rc=%r err=%r" % (proc.returncode, tail(proc.stderr))
+    return json.loads(proc.stdout.strip() or "null"), ""
+
+
+def case_n1_prose_line_is_not_a_heading():
+    """N1: a prose line that only starts with a heading word is no heading. In the reply MISSING, a token, then the prose
+    line "Done reading the transcript", then a token, the prose line starts no DONE list, so the second token stays under
+    MISSING. Red on the heading parser, whose DONE heading takes any words after the word."""
+    c = Case("n1-prose")
+    try:
+        parsed, why = parse_audit_run(c, "MISSING\n- `#3900`\nDone reading the transcript\n- `#3901`\n")
+        if not step("N1: parse_audit runs on the reply", why):
+            return
+        missing = (parsed or {}).get("MISSING", [])
+        step("N1: the prose line `Done reading the transcript` is no heading, so `#3901` stays under MISSING; "
+             "MISSING is %r, parsed %r" % (missing, parsed),
+             "" if "#3901" in missing else "`#3901` is not under MISSING")
+    finally:
+        c.cleanup()
+
+
+def case_n2_heading_count_with_words_is_a_heading():
+    """N2: the heading `MISSING (2 items):` is a heading, so its tokens go under MISSING. Red on the heading parser, whose
+    count takes digits only, so the line starts no list and `#3900` and `#3901` are never required."""
+    c = Case("n2-count-words")
+    try:
+        parsed, why = parse_audit_run(c, "MISSING (2 items):\n- `#3900`\n- `#3901`\n")
+        if not step("N2: parse_audit runs on the reply", why):
+            return
+        missing = (parsed or {}).get("MISSING", [])
+        step("N2: the heading `MISSING (2 items):` starts the MISSING list, so `#3900` and `#3901` are under MISSING; "
+             "MISSING is %r, parsed %r" % (missing, parsed),
+             "" if ("#3900" in missing and "#3901" in missing) else "the tokens are not under MISSING")
+    finally:
+        c.cleanup()
+
+
+def case_n3_f1_spellings_and_fence_lines_are_controls():
+    """N3, green controls: the five F1 heading spellings still start the MISSING list, and a code-fence line is no heading.
+    The fence lines "```" and "```text" parse to no list. A fence line under a MISSING heading starts no list of its
+    own, so the token after it stays under MISSING. Green on the current heading parser."""
+    row = "- `#3900` open PR with no line in the handoff"
+    spellings = (("MISSING items:", row), ("MISSING (2):", row), ("Missing", row), ("missing", row),
+                 ("MISSING: `#3900` open PR with no line in the handoff", None))
+    c = Case("n3-controls")
+    try:
+        for heading, body in spellings:
+            reply = "\n".join([heading] + ([body] if body else []) + [""])
+            parsed, why = parse_audit_run(c, reply)
+            if not step("N3: parse_audit runs on the heading %r" % heading, why):
+                continue
+            step("N3: the heading %r still starts the MISSING list, so `#3900` is under MISSING; parsed %r"
+                 % (heading, parsed),
+                 "" if "#3900" in (parsed or {}).get("MISSING", []) else "`#3900` is not under MISSING")
+        for fence in ("```", "```text"):
+            parsed, why = parse_audit_run(c, fence + "\n")
+            if not step("N3: parse_audit runs on the fence line %r" % fence, why):
+                continue
+            step("N3: the code-fence line %r is no heading, so the reply has no list; parsed %r" % (fence, parsed),
+                 "" if parsed is None else "parsed %r" % (parsed,))
+        parsed, why = parse_audit_run(c, "MISSING\n```\n- `#3900`\n```\n")
+        if step("N3: parse_audit runs on a fence under a MISSING heading", why):
+            step("N3: a fence line under a MISSING heading starts no list, so `#3900` stays under MISSING; parsed %r"
+                 % (parsed,),
+                 "" if "#3900" in (parsed or {}).get("MISSING", []) else "`#3900` is not under MISSING")
+    finally:
+        c.cleanup()
+
+
+def case_n4_differing_rewrite_is_blocked_again():
+    """N4: a rewrite whose text differs from the blocked text, and still drops the audit's MISSING PR, is blocked again at a
+    Stop with stop_hook_active true. The block stamps the flag with the blocked text's hash, so only an unchanged text
+    passes that Stop. Green on the current check. Red under the mutant `seen = "blocked:"`, which passes every Stop
+    that follows a block."""
+    c = Case("n4-differs")
+    try:
+        f = rewrite_flow(c, SID, without(KEPT, PR_MISSING), chained=True)
+        if not step("the compaction, the read and the audit spawn run, and the spawn is allowed", flow_why(f)):
+            return
+        step("N4: the Stop before the audit spawn blocks for the audit", audit_block_why(f["first"]))
+        step("N4: a rewrite that drops the audit's MISSING PR %s is refused at the Stop after the audit" % PR_MISSING,
+             rewrite_block_why(f["stop"], PR_MISSING))
+        put(c.handoff(SID), handoff_with(without(KEPT, PR_MISSING)) + "Reworded: the same open items, said again.\n")
+        step("N4: a rewrite that differs from the blocked text and still drops %s is blocked again at a Stop with "
+             "stop_hook_active true" % PR_MISSING,
+             rewrite_block_why(stop_at(c, SID, active=True), PR_MISSING))
+    finally:
+        c.cleanup()
+
+
 def case_f6_missing_handoff_passes_and_keeps_flag():
     """F6, pinned as it is, green: with the handoff file gone at Stop, Stop passes and the rewrite flag stays set. The
     rewrite cannot be read, so it is not judged, and the flag waits for a Stop that can read it."""
@@ -3382,6 +3483,10 @@ def main() -> int:
     case_f1_heading_spellings_start_the_list()
     case_f2_rewrite_after_earlier_block_is_judged()
     case_f3_closed_feedback_done_may_be_dropped()
+    case_n1_prose_line_is_not_a_heading()
+    case_n2_heading_count_with_words_is_a_heading()
+    case_n3_f1_spellings_and_fence_lines_are_controls()
+    case_n4_differing_rewrite_is_blocked_again()
     case_f6_missing_handoff_passes_and_keeps_flag()
 
     if FAILED:
