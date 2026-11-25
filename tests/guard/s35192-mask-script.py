@@ -304,6 +304,10 @@ LOG_CHECKS_EXTRA.append(("rm-var: 4000 bindings and 4000 flagged deletes scale l
 # the midpoint of the two.
 RM_WORK_N = 50
 RM_WORK_BOUND = 3
+RM_WORK_NAME = "rm-var: counted segment reads and rewrites for 50 and 100 bindings grow at most 3x"
+# A worktree segment with a variable: the early exit in hand_made_worktree_hit does not skip it, so
+# the reads counter must move. A dead counter reads 0 here, and the case fails on that alone.
+RM_WORK_WORKTREE = "W=wt; git worktree add $W/x"
 
 
 def judge_work(command, cwd):
@@ -335,9 +339,14 @@ def rm_var_work_case():
     small, big = RM_WORK_N, 2 * RM_WORK_N
     got_s, why_s, reads_s, rew_s = judge_work(rm_var_linear_cmd(small), NOGIT)
     got_b, why_b, reads_b, rew_b = judge_work(rm_var_linear_cmd(big), NOGIT)
+    _, _, live_reads, _ = judge_work(RM_WORK_WORKTREE, NOGIT)
     for got, why in ((got_s, why_s), (got_b, why_b)):
         if got != "deny" or "rm-var-unguarded" not in why:
             return False, "judged %s, not the expected deny by rm-var-unguarded" % got
+    if rew_s < 1:
+        return False, "no rewrite counted for %d bindings: the rewrites counter is not wired" % small
+    if live_reads < 1:
+        return False, "no read counted on a worktree segment: the reads counter is not wired"
     if reads_b > RM_WORK_BOUND * reads_s:
         return False, ("segments read grew from %d to %d for %d to %d bindings, over %dx"
                        % (reads_s, reads_b, small, big, RM_WORK_BOUND))
@@ -348,8 +357,7 @@ def rm_var_work_case():
                   % (reads_s, reads_b, rew_s, rew_b, small, big))
 
 
-LOG_CHECKS_EXTRA.append(("rm-var: 50 and 100 bindings with flagged deletes do linear work, counted",
-                         rm_var_work_case))
+LOG_CHECKS_EXTRA.append((RM_WORK_NAME, rm_var_work_case))
 
 
 # The 64000-binding limit: one delete after 64000 bindings, judged in CPU time of judge, whose
