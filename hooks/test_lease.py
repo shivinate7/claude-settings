@@ -681,6 +681,64 @@ class LeaseRefsWrittenTest(LeaseCase):
         tracking = self.tracking_refs(self.repo)
         self.assertEqual(tracking, [], "a take's push wrote a remote-tracking ref for the lease in the taker's clone")
 
+    def without_get_url(self):
+        """Patch lease's git helper so `remote get-url` fails, and a push goes by remote name: the path that writes a tracking ref.
+        -> the patch. self.get_url_hits lists each get-url call it turned away, so a case can show the fault path ran."""
+        real = lease._git
+        self.get_url_hits = []
+        hits = self.get_url_hits
+
+        def fail_get_url(repo, args, timeout, input=None):
+            if list(args[:2]) == ["remote", "get-url"]:
+                hits.append(repo)
+                return 2, "", "forced failure: get-url is off for this case"
+            return real(repo, args, timeout, input)
+
+        return mock.patch.object(lease, "_git", new=fail_get_url)
+
+    def test_a_take_with_no_get_url_writes_no_remote_tracking_ref_in_the_takers_clone(self):
+        self.need()
+        with self.without_get_url():
+            taken = lease.take(self.repo, "origin", NAME, ALPHA)
+        self.assertTrue(self.get_url_hits, "control: the take asked for no push URL, so its push did not go by remote name")
+        self.assertEqual(taken.status, "taken", "control: the take did not take the lease with get-url failing")
+        self.assertEqual(self.tracking_refs(self.repo), [],
+                         "a take whose push went by remote name wrote a remote-tracking ref for the lease in the taker's clone")
+
+    def test_a_remote_tracking_ref_made_before_a_take_keeps_its_old_value(self):
+        self.need()
+        old = self.make_record("lease %s\nholder: %s\nrepo: fixture\ntaken: 2026-11-24T00:00:00Z" % (NAME, BETA))
+        git(self.repo, "update-ref", "refs/remotes/origin/lease/" + NAME, old)
+        self.assertEqual(self.tracking_refs(self.repo), ["refs/remotes/origin/lease/" + NAME],
+                         "control: the remote-tracking ref was not there before the take")
+        taken = lease.take(self.repo, "origin", NAME, ALPHA)
+        self.assertEqual(taken.status, "taken", "control: the take did not take the lease")
+        now = git(self.repo, "rev-parse", "-q", "--verify", "refs/remotes/origin/lease/" + NAME, check=False).stdout.strip()
+        self.assertNotEqual(now, "", "a take deleted the remote-tracking ref that was there before it")
+        self.assertEqual(now, old, "a take moved the remote-tracking ref that was there before it")
+
+    def test_a_give_back_with_no_get_url_writes_no_remote_tracking_ref_in_the_givers_clone(self):
+        self.need()
+        lease.take(self.clone("other"), "origin", NAME, ALPHA)  # the holder takes in another clone, so this clone has no ref before the give
+        self.assertEqual(self.tracking_refs(self.repo), [], "control: the giver's clone had a remote-tracking ref for the lease before the give")
+        with self.without_get_url():
+            status = lease.give(self.repo, "origin", NAME, ALPHA)
+        self.assertTrue(self.get_url_hits, "control: the give asked for no push URL, so its push did not go by remote name")
+        self.assertEqual(status, "given", "control: the holder's give back was not given with get-url failing")
+        self.assertEqual(self.tracking_refs(self.repo), [],
+                         "a give back whose push went by remote name wrote a remote-tracking ref for the lease in the giver's clone")
+
+    def test_a_lift_with_no_get_url_writes_no_remote_tracking_ref_in_the_lifters_clone(self):
+        self.need()
+        lease.take(self.clone("other"), "origin", NAME, ALPHA)  # the holder takes in another clone, so this clone has no ref before the lift
+        self.assertEqual(self.tracking_refs(self.repo), [], "control: the lifter's clone had a remote-tracking ref for the lease before the lift")
+        with self.without_get_url():
+            status = lease.lift(self.repo, "origin", NAME)
+        self.assertTrue(self.get_url_hits, "control: the lift asked for no push URL, so its push did not go by remote name")
+        self.assertEqual(status, "lifted", "control: the lift did not lift the lease with get-url failing")
+        self.assertEqual(self.tracking_refs(self.repo), [],
+                         "a lift whose push went by remote name wrote a remote-tracking ref for the lease in the lifter's clone")
+
 
 class LeaseCommandTest(LeaseCase):
     def test_take_exits_0_when_taken_and_again_when_it_is_the_holders_own(self):
