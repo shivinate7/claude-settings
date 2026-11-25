@@ -983,17 +983,19 @@ def has_source(rest):
 SYMBOL_WORD = re.compile(r"([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)(?:\(\))?\Z")  # a name, or a dotted Class.method
 FILE_WORD = re.compile(r"/|\.(?:py|mjs|cjs|js|ts|sh|md|json|ya?ml|toml|txt|cfg|ini|html|css)\Z")  # a word that is a file, not Class.method
 CITE_VERBS = ("read", "test")  # the words that open a cite, never a name
+ARTICLES = ("a", "an", "the")  # a word before a bare word that makes it prose, not a name
 CITE_TOKEN = re.compile(r"([^\s,;]+)([\s,;]*)")  # a word and the separator after it
 
 
 def leading_names(tokens):
     """({path index: [names]}, {token indices of those names and the `and` / `in` words around them}) for each name that sits before its
-    path: `NAME in PATH`, or `NAME and NAME in PATH`. A name here is a symbol word that is no cite verb, `in` or `and`."""
+    path: `NAME in PATH`, or `NAME and NAME in PATH`. A name here is a symbol word that is no cite verb, `in` or `and`. An article
+    (a, an, the) directly before the first name makes the whole chain prose: the article governs the list, so no name of it leads."""
     def is_name(word):
         return bool(SYMBOL_WORD.match(word)) and word not in CITE_VERBS + ("in", "and") and not FILE_WORD.search(word)
-    led, covered = {}, set()
+    led, covered, prose = {}, set(), set()
     for start in range(len(tokens)):
-        if start in covered or not is_name(tokens[start][0]):
+        if start in covered or start in prose or not is_name(tokens[start][0]):
             continue
         names, at = [start], start
         while at + 2 < len(tokens) and tokens[at + 1][0] == "and" and is_name(tokens[at + 2][0]):
@@ -1001,6 +1003,9 @@ def leading_names(tokens):
             names.append(at)
         path = at + 2
         if path < len(tokens) and tokens[at + 1][0] == "in" and SOURCE.match(tokens[path][0]) and not is_name(tokens[path][0]):
+            if start and tokens[start - 1][0].lower() in ARTICLES:
+                prose.update(names)
+                continue
             led[path] = [SYMBOL_WORD.match(tokens[n][0]).group(1) for n in names]
             covered.update(range(start, path))
     return led, covered
@@ -1011,7 +1016,8 @@ def cite_targets(kind, rest):
     word as written (it may carry a `:N-M` line range, which belongs to that path); `symbols` is the list of names a `path::name` gives, or
     the names that follow the path (`path ALPHA, beta`; a dotted `Class.method` is one name), else empty. A name followed by a space and
     more lower-case words is prose, not a symbol. A name before its path (`NAME in PATH`, `NAME and NAME in PATH`) is a symbol of that
-    path, unless an earlier path of the cite already owns it. Empty for any other kind."""
+    path, unless an earlier path of the cite already owns it, or an article (a, an, the) stands directly before the first name: then the words are
+    prose and the cite shows the file top. Empty for any other kind."""
     if kind == "test":
         node = TEST_CITE.match(rest)
         return [(node.group(1), rest, [rest.rsplit("::", 1)[-1]])] if node else []
