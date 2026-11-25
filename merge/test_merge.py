@@ -15034,6 +15034,18 @@ class RedMainBrake(Env):
         for pr in (2651, 2652):
             self.assertNotIn(f"#{pr}", detail, f"the verdict blames #{pr}, a later red run on top of the breaking merge")
 
+    def test_a_red_main_detail_names_a_replaced_commit_in_the_span_of_its_breaking_merge(self):
+        """Breaking merge 903 is red again on its re-run. Run 902 below it was cancelled and replaced, and run 901 is green. The span runs from 901's
+        commit up to 903's, so the detail names 902's commit too and says that run was replaced."""
+        runs = [self.merge_run(903, "failure", 2650, run_attempt=2), self.merge_run(902, "cancelled", 2649), self.merge_run(901, "success", 2648)]
+        jobs = {903: [main_job("scope", "success"), main_job("checks", "failure", 20)], 902: [], 901: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        rc, out, before = self.go(runs, jobs)
+        self.merged_onto_red(rc, out, "checks")
+        detail = self.red_detail()
+        self.assertIn(self.sha_of(903)[:9], detail, "the detail does not name the breaking merge commit, run 903's")
+        self.assertIn(self.sha_of(902)[:9], detail, "the detail names no commit for run 902, which was replaced inside the span of breaking merge 903:\n" + detail)
+        self.assertIn("replaced", detail, "the detail does not say that a replaced run's commit is in the span:\n" + detail)
+
     def test_a_red_main_blames_the_breaking_run_deep_in_a_full_page_of_fifty(self):
         """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): the red main merges; the blame is the verdict's detail."""
         # a full page, newest first: 1060 to 1041 are red, and 1041 is red again on its re-run; its parent 1040 is green, and the rest are green
@@ -16238,6 +16250,27 @@ class MainRunVerdict(Env):
                                              job_logs={9101: self.FLAKY_LOG, 9102: self.FLAKY_LOG, 9103: self.NEW_LOG})
         self.assertIn("test_new", text, "the stacked break names no new failing test:\n" + text)
         self.assertNotIn(self.OLD_SHA[:9], line, "the stacked break names the old merge:\n" + line)
+
+    def test_a_breaking_merge_names_a_replaced_commit_in_its_span(self):
+        """Run 1003 broke main, red again on its re-run. Run 1002 below it was cancelled and replaced, and run 1001 is green. The span runs from 1001's
+        commit up to 1003's, so the line names 1002's commit too and says that run was replaced."""
+        runs = [main_run(self.LATER, "failure", sha=self.LATER_SHA, run_attempt=2), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [main_job("scope", "success"), self.red_job("checks", 9102)], self.NOW: [],
+                self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        _rc, text, _word, line = self.judged(self.NEW_BREAK, self.LATER_SHA, runs, jobs, job_logs={9102: self.NEW_LOG})
+        self.assertIn(self.NEW_SHA[:9], line, "the breaking merge names no commit of the run replaced inside its span:\n" + text)
+        self.assertIn("replaced", line, "the breaking merge does not say that a replaced run's commit is in its span:\n" + line)
+
+    def test_control_a_breaking_merge_names_no_commit_beside_its_own_when_the_green_run_is_next(self):
+        runs = [main_run(self.LATER, "failure", sha=self.LATER_SHA, run_attempt=2), main_run(self.NOW, "success", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [main_job("scope", "success"), self.red_job("checks", 9102)],
+                self.NOW: [main_job("scope", "success"), main_job("checks", "success", 20)],
+                self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        _rc, text, _word, line = self.judged(self.NEW_BREAK, self.LATER_SHA, runs, jobs, job_logs={9102: self.NEW_LOG})
+        self.assertIn(self.LATER_SHA[:9], line, "the breaking merge names no commit of its own:\n" + text)
+        self.assertNotIn(self.NEW_SHA[:9], line, "the breaking merge names the green run's commit, which is not in its span:\n" + line)
 
     def test_a_red_job_whose_log_names_no_test_is_first_red(self):
         """A step timeout or runner fault ends a job red and names no test (run 14673 in the audit). A new red job is a first red all the same."""

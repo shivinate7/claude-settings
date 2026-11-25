@@ -620,6 +620,20 @@ class RedMainJudge(unittest.TestCase):
         page = [page_run(3, None, event="push", status="in_progress"), page_run(2, "cancelled", event="workflow_dispatch"), page_run(1, "success", event="push")]
         self.assertEqual(self.judge_fixed(page, jobs), ("unknown", []), "a cancelled dispatch run is passed over for a newer push run above it")
 
+    def test_fixed_a_breaking_merge_blames_every_commit_in_its_span_including_a_replaced_run(self):
+        """The span of a breaking merge runs from the commit of the green run below it up to the red run's commit, so a run replaced inside it is named too."""
+        page = [page_run(3, "failure", attempt=2), page_run(2, "cancelled"), page_run(1, "success")]
+        jobs = {3: [job_row("scope", "success"), job_row("checks", "failure")], 2: [], 1: [job_row("scope", "success"), job_row("checks", "success")]}
+        blamed = clear_rule.judge(page, FLOWS, set(), {}, lambda r: jobs.get(r["id"]), lambda r: CHECKS_TEXT).blamed
+        self.assertCountEqual(blamed, [page[0]["head_sha"], page[1]["head_sha"]],
+                              "the blame names the red run's commit alone, not the commit of the replaced run in its span")
+
+    def test_control_a_breaking_merge_blames_only_its_own_commit_when_the_green_run_is_next(self):
+        page = [page_run(3, "failure", attempt=2), page_run(2, "success")]
+        jobs = {3: [job_row("scope", "success"), job_row("checks", "failure")], 2: [job_row("scope", "success"), job_row("checks", "success")]}
+        blamed = clear_rule.judge(page, FLOWS, set(), {}, lambda r: jobs.get(r["id"]), lambda r: CHECKS_TEXT).blamed
+        self.assertEqual(blamed, [page[0]["head_sha"]], "the blame names a commit beyond the red run's own, with the green run next to it")
+
     def test_control_the_scripted_host_reads_a_red_job_red_through_base_state(self):
         """Control, green on the old code: the cases above compare with base_state, so base_state must show a red job red on this host."""
         verdict, red = base_judgment([page_run(2, "failure")], {2: [job_row("checks", "failure")]})
