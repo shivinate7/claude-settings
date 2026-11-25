@@ -980,53 +980,103 @@ def has_source(rest):
     return any(SOURCE.match(word.rstrip(".")) for word in re.split(r"[\s,;]+", rest) if word)
 
 
-def backing_path(kind, rest):
-    """The file a `read` or `test` backing points at, or None for any other kind."""
+SYMBOL_WORD = re.compile(r"([A-Za-z_]\w*)(?:\(\))?\Z")
+
+
+def cite_targets(kind, rest):
+    """[(path, word, symbol)] for each file a `read` or `test` backing points at, in the order the cite names them. `word` is the path
+    word as written (it may carry a `:N-M` line range); `symbol` is the name a `path::name` or a following bare word gives, else None.
+    Empty for any other kind."""
     if kind == "test":
         node = TEST_CITE.match(rest)
-        return node.group(1) if node else None
-    if kind == "read":
-        word = next((w.rstrip(".") for w in re.split(r"[\s,;]+", rest) if SOURCE.match(w.rstrip("."))), None)
-        return re.split(r"::?\d*", word, maxsplit=1)[0] if word else None
-    return None
+        return [(node.group(1), rest, rest.rsplit("::", 1)[-1])] if node else []
+    if kind != "read":
+        return []
+    words = [w.rstrip(".") for w in re.split(r"[\s,;]+", rest) if w]
+    found = []
+    for index, word in enumerate(words):
+        if not SOURCE.match(word):
+            continue
+        named = re.findall(r"::(\w+)", word)
+        after = SYMBOL_WORD.match(words[index + 1]) if index + 1 < len(words) else None
+        symbol = named[-1] if named else (after.group(1) if after else None)
+        found.append((re.split(r"::?\d*", word, maxsplit=1)[0], word, symbol))
+    return found
+
+
+def backing_path(kind, rest):
+    """The first file a `read` or `test` backing points at, or None for any other kind."""
+    targets = cite_targets(kind, rest)
+    return targets[0][0] if targets else None
 
 
 def defined_line(text, name):
-    """The first line where `name` is a def or class in the Python `text`, found through the AST so a comment, a docstring or a string
-    that names it is never the answer. 0 when the text parses and defines no such name; None when it is not Python."""
+    """The first line where `name` is a def or class in the Python `text`, or a module-level assignment (a constant), found through the AST
+    so a comment, a docstring or a string that names it is never the answer. 0 when the text parses and defines no such name; None when
+    it is not Python."""
     try:
         tree = ast.parse(text)
     except (SyntaxError, ValueError):
         return None
     kinds = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-    return min((n.lineno for n in ast.walk(tree) if isinstance(n, kinds) and n.name == name), default=0)
+    lines = [n.lineno for n in ast.walk(tree) if isinstance(n, kinds) and n.name == name]
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        else:
+            continue
+        bound = [t for target in targets for t in (target.elts if isinstance(target, ast.Tuple) else [target])]
+        if any(isinstance(t, ast.Name) and t.id == name for t in bound):
+            lines.append(node.lineno)
+    return min(lines, default=0)
+
+
+def excerpt_rows(kind, text, symbol, limit, row_chars, anchor_in):
+    """The numbered rows of one file's `text` that one cite target points at. `anchor_in` is the text searched for a line number."""
+    rows = text.replace("\r\n", "\n").split("\n")
+    first, last = 1, limit
+    anchor = re.search(r"[\w./@+~-]:(\d+)(?:-(\d+))?\b", anchor_in) if kind == "read" else None
+    if anchor:
+        first = int(anchor.group(1))
+        last = max(int(anchor.group(2) or first), first)
+    elif symbol:
+        line = defined_line("\n".join(rows), symbol)
+        if line is None and kind == "test":  # not Python: the first row that names it
+            line = next((n for n, row in enumerate(rows, 1) if re.search(r"\b%s\b" % re.escape(symbol), row)), 0)
+        first = line or 1
+        last = first + limit - 1
+    first = max(first, 1)
+    last = min(last, first + limit - 1, len(rows))
+    cut = (lambda row: cut_row(row, row_chars)) if row_chars else (lambda row: row)
+    return "\n".join("%d: %s" % (n, cut(rows[n - 1])) for n in range(first, last + 1))
 
 
 def cited_excerpt(cite, text, limit=40, row_chars=None):
     """The numbered lines of a backing file's `text` that `cite` points at, at most `limit`: a `read path:N` or
-    `path:N-M` gives those lines, a `test path::name` gives the lines from where `name` is defined, and any other
-    cite with a backing path gives the top of the file. A cite with no backing path gives None. A prose judge sends
-    this beside the line, so the model reads what the line cites. With `row_chars`, each row is cut to that many
-    characters with the cut marker (cut_row); a row is whole otherwise."""
+    `path:N-M` gives those lines, and a `read path name`, `read path::name` or `test path::name` gives the lines from where `name`
+    is defined (a def, a class, a method or a module-level assignment), up to `limit` rows from there. A name the file does not define,
+    a file that is not Python, and any other cite with a backing path give the top of the file. A cite with no backing path gives None.
+    `text` is one file's text, read for the cite's first path; or a {path: text} mapping, which gives one block per cited path found in
+    it, each opened by a `== path` row and capped at `limit` rows (a cite of one path gives that block bare). A prose judge sends this
+    beside the line, so the model reads what the line cites. With `row_chars`, each row is cut to that many characters with the cut
+    marker (cut_row); a row is whole otherwise."""
     kind, rest = cite_kind(cite)
-    if backing_path(kind, rest) is None:
+    targets = cite_targets(kind, rest)
+    if not targets:
         return None
-    rows = text.replace("\r\n", "\n").split("\n")
-    first, last = 1, limit
-    anchor = re.search(r"[\w./@+~-]:(\d+)(?:-(\d+))?\b", rest) if kind == "read" else None
-    if anchor:
-        first = int(anchor.group(1))
-        last = int(anchor.group(2) or first)
-    elif kind == "test" and TEST_CITE.match(rest):
-        name = rest.rsplit("::", 1)[-1]
-        line = defined_line(text.replace("\r\n", "\n"), name)
-        if line is None:  # not Python: the first row that names it
-            line = next((n for n, row in enumerate(rows, 1) if re.search(r"\b%s\b" % re.escape(name), row)), 0)
-        first = line or 1
-    first = max(first, 1)
-    last = min(max(last, first), first + limit - 1, len(rows))
-    cut = (lambda row: cut_row(row, row_chars)) if row_chars else (lambda row: row)
-    return "\n".join("%d: %s" % (n, cut(rows[n - 1])) for n in range(first, last + 1))
+    if isinstance(text, str):
+        return excerpt_rows(kind, text, targets[0][2], limit, row_chars, rest)
+    blocks = {}
+    for path, word, symbol in targets:
+        if path in text and path not in blocks:
+            blocks[path] = excerpt_rows(kind, text[path], symbol, limit, row_chars, word)
+    if not blocks:
+        return None
+    if len({t[0] for t in targets}) < 2:
+        return next(iter(blocks.values()))
+    return "\n".join("== %s\n%s" % block for block in blocks.items())
 
 
 def backed_lines(texts, changed):
