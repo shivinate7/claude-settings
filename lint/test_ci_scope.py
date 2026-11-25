@@ -2636,5 +2636,45 @@ class PushDiffFromProvenBase(FlagAsserts, unittest.TestCase):
         self.assertFlags(run(self.CODE, event="pull_request", proven=True), want_true=["checks_windows_merge", "code"])
 
 
+@unittest.skipUnless(BASH, "bash not on PATH")
+class ToolPinsScope(unittest.TestCase):
+    """The tool_pins output. A pull request's run judges the pins only when that pull request moves a pin or the checker
+    (decision tool-pins, the 11:05 CST Nov 25 ruling). A schedule and a dispatch judge them on every run. The all-on paths and
+    an unreadable diff keep it off, as they keep every other pull-request flag off or on by their own rule."""
+
+    PIN_PATHS = [".tool-versions", "lint/check_tool_pins.py", "lint/test_check_tool_pins.py"]
+
+    def tool_pins(self, paths, **keys):
+        got = run(paths, **keys)
+        self.assertIn("tool_pins", got, "the scope script writes no tool_pins output: %s" % got)
+        return got["tool_pins"]
+
+    def test_a_pull_request_that_moves_a_pin_or_the_checker_turns_it_on(self):
+        for p in self.PIN_PATHS:
+            with self.subTest(path=p):
+                self.assertEqual(self.tool_pins([p], event="pull_request"), "true",
+                                 "a pull request that touches %s must turn tool_pins on" % p)
+
+    def test_a_schedule_and_a_dispatch_turn_it_on_for_a_docs_only_diff(self):
+        for ev in ("schedule", "workflow_dispatch"):
+            with self.subTest(event=ev):
+                self.assertEqual(self.tool_pins(["README.md"], event=ev), "true",
+                                 "a %s run must judge the pins even when the diff touches no pin" % ev)
+
+    def test_the_all_on_paths_keep_it_off(self):
+        for p in (".github/workflows/checks.yml", ".github/scripts/ci-scope.sh"):
+            with self.subTest(path=p):
+                self.assertEqual(self.tool_pins([p]), "false", "a diff touching %s turns every flag on, not tool_pins" % p)
+        self.assertEqual(self.tool_pins(["README.md"], event="push", base=""), "false",
+                         "a push with no proven base turns every flag on, not tool_pins")
+        self.assertEqual(self.tool_pins(["README.md"], base="f" * 40), "false",
+                         "an unreadable diff turns every flag on, not tool_pins")
+
+    def test_an_unrelated_diff_keeps_it_off(self):
+        for p in ("merge/merge.py", "README.md"):
+            with self.subTest(path=p):
+                self.assertEqual(self.tool_pins([p]), "false", "a diff that touches no pin or the checker must keep tool_pins off")
+
+
 if __name__ == "__main__":
     unittest.main()
