@@ -112,7 +112,7 @@ def lr_installed_audit_check():
 
     def call(tool, tool_input):
         payload = {"tool_name": tool, "tool_input": tool_input, "cwd": NOGIT, "session_id": LR_CASE_SID}
-        return subprocess.run([sys.executable, os.path.join(hooks, "guard.py")], input=json.dumps(payload),
+        return subprocess.run(guard_start(os.path.join(hooks, "guard.py")), input=json.dumps(payload),
                               capture_output=True, text=True, env=env, timeout=120)
 
     hook("--post-compact", {"session_id": LR_CASE_SID})

@@ -52,7 +52,7 @@ def _run_copy(folder, command, name, pythonpath=None):
     """One Bash call through the copy's guard.py, with a config folder of its own. The script's own folder
     is on the path, so the sibling imports resolve there."""
     payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": NOGIT})
-    return subprocess.run([sys.executable, os.path.join(folder, "guard.py")], input=payload,
+    return subprocess.run(guard_start(os.path.join(folder, "guard.py")), input=payload,
                           capture_output=True, text=True, env=_copy_env(name, pythonpath), timeout=120)
 
 

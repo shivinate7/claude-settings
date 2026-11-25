@@ -1702,11 +1702,11 @@ def stop_pair_case():
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
     body = {"hook_event_name": "SubagentStop", "cwd": repo, "agent_id": "bld1", "agent_type": "builder"}
     problems = []
-    first = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True,
+    first = subprocess.run(guard_start(GUARD), input=json.dumps(body), capture_output=True,
                            text=True, env=env, timeout=120)
     if read_decision(first.stdout)[0] != "deny":
         problems.append("first stop: expected a block, got %r" % first.stdout.strip()[:80])
-    second = subprocess.run([sys.executable, GUARD], input=json.dumps(dict(body, stop_hook_active=True)),
+    second = subprocess.run(guard_start(GUARD), input=json.dumps(dict(body, stop_hook_active=True)),
                             capture_output=True, text=True, env=env, timeout=120)
     if second.stdout.strip():
         problems.append("second stop: expected a silent allow, got %r" % second.stdout.strip()[:80])

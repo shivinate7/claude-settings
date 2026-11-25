@@ -25,7 +25,7 @@ def _session_log_run(folder, body, extra_env=None):
     env["CLAUDE_CONFIG_DIR"] = folder
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env.update(extra_env or {})
-    return subprocess.run([sys.executable, GUARD], input=body, capture_output=True, text=True,
+    return subprocess.run(guard_start(GUARD), input=body, capture_output=True, text=True,
                           env=env, timeout=60)
 
 

@@ -100,7 +100,7 @@ def stale_record_forced_remove_quiet_case():
     payload = {"tool_name": "Bash", "tool_input": {"command": VCS + " worktree remove --force " + slash(WTCLEAN)},
                "cwd": WTMAIN}
     try:
-        result = subprocess.run([sys.executable, GUARD], input=json.dumps(payload), capture_output=True,
+        result = subprocess.run(guard_start(GUARD), input=json.dumps(payload), capture_output=True,
                                 text=True, env=env, timeout=60)
         if result.returncode != 0:
             return False, "guard exited %d" % result.returncode
@@ -140,7 +140,7 @@ def _remove_decision(cfg, target, guard=None):
     env["CLAUDE_CONFIG_DIR"] = cfg
     payload = {"tool_name": "Bash", "tool_input": {"command": VCS + " worktree remove " + slash(target)},
                "cwd": WTMAIN}
-    result = subprocess.run([sys.executable, guard or GUARD], input=json.dumps(payload), capture_output=True,
+    result = subprocess.run(guard_start(guard or GUARD), input=json.dumps(payload), capture_output=True,
                             text=True, env=env, timeout=60)
     if result.returncode != 0:
         return "guard exit %d" % result.returncode, result.stderr.strip()[-160:]
@@ -164,7 +164,7 @@ def stale_record_parent_gone_forced_remove_noted_case():
     env["CLAUDE_CONFIG_DIR"] = cfg
     payload = {"tool_name": "Bash", "tool_input": {"command": VCS + " worktree remove --force " + slash(WTCLEAN)},
                "cwd": WTMAIN}
-    result = subprocess.run([sys.executable, GUARD], input=json.dumps(payload), capture_output=True,
+    result = subprocess.run(guard_start(GUARD), input=json.dumps(payload), capture_output=True,
                             text=True, env=env, timeout=60)
     if result.returncode != 0:
         return False, "guard exited %d" % result.returncode
