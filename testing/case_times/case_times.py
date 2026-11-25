@@ -6,8 +6,9 @@ go to RUNNER_TEMP/case-times/GITHUB_JOB.jsonl once, at exit, in one append. A pr
 writes no file.
 
 A row has the keys suite, group, case, s, fixture_s and outcome (pass, fail or skip). `s` is the case's own
-seconds and `fixture_s` the seconds its fixtures took, apart from it. unittest rows have group equal to suite,
-and a test method's subTests are one row, timed from the method's start to its stop.
+seconds and `fixture_s` the seconds its fixtures took, apart from it. unittest rows have group equal to suite:
+a test method is one row, timed from its start to its stop, its setUp and tearDown seconds are its fixture_s,
+and `s` is the rest. A test method's subTests are one row.
 
 The clock is time.perf_counter, read through the time module at each call, so a test can patch it.
 
@@ -132,7 +133,7 @@ def patch_result(cls):
     real_start, real_stop = cls.startTest, cls.stopTest
 
     def startTest(self, test):
-        frame = {"test": test, "result": self, "base": _tally(self), "t0": time.perf_counter()}
+        frame = {"test": test, "result": self, "base": _tally(self), "t0": time.perf_counter(), "fixture": 0.0}
         real_start(self, test)
         _OPEN.append(frame)
 
@@ -144,7 +145,8 @@ def patch_result(cls):
                 failed, skipped = _tally(frame["result"])
                 base_failed, base_skipped = frame["base"]
                 outcome = "fail" if failed > base_failed else "skip" if skipped > base_skipped else "pass"
-                record(_suite_of(test), _suite_of(test), _case_of(test), took, 0.0, outcome)
+                fixture = frame["fixture"]
+                record(_suite_of(test), _suite_of(test), _case_of(test), took - fixture, fixture, outcome)
         except Exception as error:  # a row that cannot be kept must never abort the run or the result
             sys.stderr.write("case_times: no row for %s: %s\n" % (test.id(), error))
         return real_stop(self, test)
@@ -152,3 +154,39 @@ def patch_result(cls):
     cls.startTest = startTest
     cls.stopTest = stopTest
     cls._case_times_patched = True
+
+
+def _add_fixture(test, seconds):
+    """Add seconds to the fixture time of this test's open frame, so they stay out of its own time."""
+    for frame in reversed(_OPEN):
+        if frame["test"] is test:
+            frame["fixture"] += seconds
+            return
+
+
+def patch_case():
+    """Wrap TestCase's setUp and tearDown calls so their seconds go to fixture_s, not s. The wrapper only times the
+    call: its result and any exception pass through unchanged."""
+    import unittest.case
+    cls = unittest.case.TestCase
+    if getattr(cls, "_case_times_fixture_patched", False):
+        return
+    real_setup, real_teardown = cls._callSetUp, cls._callTearDown
+
+    def _callSetUp(self):
+        t0 = time.perf_counter()
+        try:
+            return real_setup(self)
+        finally:
+            _add_fixture(self, time.perf_counter() - t0)
+
+    def _callTearDown(self):
+        t0 = time.perf_counter()
+        try:
+            return real_teardown(self)
+        finally:
+            _add_fixture(self, time.perf_counter() - t0)
+
+    cls._callSetUp = _callSetUp
+    cls._callTearDown = _callTearDown
+    cls._case_times_fixture_patched = True

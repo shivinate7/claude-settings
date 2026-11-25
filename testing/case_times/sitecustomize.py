@@ -33,6 +33,7 @@ class _UnittestHook(object):
             os.environ.pop("CASE_TIMES", None)
             import case_times
             case_times.patch_result(module.TestResult)
+            case_times.patch_case()
 
         spec.loader.exec_module = exec_module
         return spec

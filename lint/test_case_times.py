@@ -321,6 +321,23 @@ class Never(unittest.TestCase):
 '''
 
 
+# A case with a setUp and a tearDown: their seconds are fixture time, apart from the case's own seconds.
+TIMED = '''import time
+import unittest
+
+
+class Timed(unittest.TestCase):
+    def setUp(self):
+        time.sleep(0.5)
+
+    def tearDown(self):
+        time.sleep(0.125)
+
+    def test_case(self):
+        time.sleep(0.25)
+'''
+
+
 def setUpModule():
     global RUN
     RUN = _test_temp.run_folder()
@@ -674,6 +691,29 @@ class ImportFailure(unittest.TestCase):
     def test_no_file_is_named_import_failure(self):
         folder = case_folder(self)
         self.assert_failed_import_row("fixture_no_such_module", folder, "import-failure")
+
+
+class FixtureTime(unittest.TestCase):
+    def test_setup_and_teardown_land_in_fixture_s(self):
+        folder = case_folder(self)
+        write(folder, "fixture_timed.py", TIMED)
+        unarmed = run_module(folder, "fixture_timed", armed=False, report=True)
+        self.assertEqual(result_line(unarmed), "RESULT ran=1 failures=0 errors=0 skipped=0",
+                         "the unarmed control run did not pass its one case: %r" % unarmed.stderr[-300:])
+        armed = run_module(folder, "fixture_timed", report=True)
+        scope_ok(self, armed)
+        self.assertEqual(armed.returncode, unarmed.returncode, "the armed run exited %d, the unarmed %d"
+                         % (armed.returncode, unarmed.returncode))
+        self.assertEqual(result_line(armed), result_line(unarmed),
+                         "the armed run's outcome differs from the unarmed run's")
+        rows = rows_of(folder)
+        self.assertIsNotNone(rows, "the armed run wrote no case-times file")
+        timed = [row for row in rows if row.get("case") == "Timed.test_case"]
+        self.assertEqual(len(timed), 1, "Timed.test_case has %d rows, want one" % len(timed))
+        self.assertEqual(timed[0].get("s"), 0.25, "Timed.test_case s is %r, want its own 0.25: its setUp and tearDown "
+                                                  "(0.625 s) belong in fixture_s, not in s" % timed[0].get("s"))
+        self.assertEqual(timed[0].get("fixture_s"), 0.625, "Timed.test_case fixture_s is %r, want 0.625 (setUp 0.5 s, "
+                                                           "tearDown 0.125 s)" % timed[0].get("fixture_s"))
 
 
 class RowFails(unittest.TestCase):
