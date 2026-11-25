@@ -7,40 +7,56 @@ The script ranks the files that merges conflict on. It finds each merge of two h
 into a branch, and a merge on main whose second parent is a branch) and replays it with
 `git merge-tree --write-tree --name-only`. The contract the cases hold, which the builder prints exactly:
 
+    base: <name> <sha9>           the first line: the base the run read and its commit, the first 9 hex digits
     merges replayed: N            every merge the script replayed, an unknown one too
     merges conflicted: M
-    merges unknown: U             a replay whose read failed (git exit 128): counted as replayed, never as clean
+    merges unknown: U             a replay whose read failed (git exit other than 0 or 1): counted as replayed, never as clean
     conflict rate: R%             conflicted / replayed in percent, one decimal place; 0.0% when nothing was replayed
     merges not replayed: K (octopus O, off base B)
     <count> <path>               one row per conflicted file: count descending, then path ascending; the path is
                                   unquoted and printed as UTF-8
     cost: merge-trees N, wall S s N is the merge-tree process starts; S is wall seconds
+    caveat: <text>                three lines after the cost line, in this order: a replay is what git finds now, not
+                                  what the author resolved; squash and rebase merges leave no merge commit, so they are
+                                  absent; refs walked: all
 
-Two opt-in flags. Without them the output above is unchanged.
+Options. Without the flags below the output above is unchanged. The base line and the caveats always print.
 
+    --base NAME                   the ref whose history a merge must touch. Default: origin/main when
+                                  refs/remotes/origin/main exists, else main. The base line names the one read.
     --exposure                    each row reads `<conflicts>/<exposure> <path>`, not `<count> <path>`. Exposure is
                                   the replayed merges where both sides changed the file: it differs from the merge
                                   base on each parent. A file no merge conflicts on is no row at any exposure, so the
                                   rows are the same set as without the flag: no row reads `0/N`.
-    --into-branches               the filter runs before every count: only merges of main into a branch count, a
-                                  merge off main's first-parent line with one parent on it. A PR merge into main, a
-                                  merge of two branches, and a merge with no main parent are dropped; they appear in
-                                  no line, `merges not replayed` included.
+    --into-branches               the filter runs before every count: only a merge of the base INTO a branch counts.
+                                  Its first parent is the branch, off the base's first-parent line, and its second
+                                  parent is on that line. A merge whose first parent is on the line (a branch merged
+                                  into main, or any merge off a main-line commit) is dropped, as are a PR merge into
+                                  main, a merge of two branches, and a merge with no main parent. They appear in no
+                                  line, `merges not replayed` included.
+    --list                        after the file rows, one line per conflicted merge: `merge <sha9> <paths>`, the merge
+                                  commit and the files git names, so a reader can check one by hand.
+    --since DATE                  YYYY-MM-DD and no other form, a real calendar date. Any other value is refused.
+    --top N                       N below 1 is refused.
 
-Summary lines start with a letter, rows with a digit, the cost line with `cost`. Exit 0 for a report (zero merges
-included). Exit 2 for a git too old for `merge-tree --write-tree`, with one line of output that names merge-tree,
---write-tree or 2.38.
+Summary lines start with a letter, rows with a digit, the cost line with `cost`, caveat lines with `caveat: `. Exit
+codes: 0 for a report (zero merges included); 1 for a bad argument (--since, --top) or any other failure, one line;
+2 for a git too old for `merge-tree --write-tree`, with one line of output that names merge-tree, --write-tree or 2.38;
+3 for a history cut at depth (a shallow clone). Exit 3 is one line: `history is cut at depth ...; counts are a lower
+bound`, and no report follows it. The contract had no exit code for unknown, so 3 is pinned here.
 
 Git and temp contract: the script runs git by its name on PATH, one merge-tree per replay. Its object folder is a
-fresh folder under TMPDIR (GIT_OBJECT_DIRECTORY, or a scratch clone whose cwd sits there). It removes that folder before
+fresh folder under TMPDIR (GIT_OBJECT_DIRECTORY). The script makes no clone. It removes that folder before
 it exits, also when KeyboardInterrupt stops the run. It writes nothing into the repo it reads.
 
 Fixtures are built with plain git under the run folder (lint/_test_temp.py). Every commit and merge has a fixed date,
 and the cases never read the clock. Each case holds one scenario: the one-merge and clean fixtures, the two-kind and
 ranking fixture (`selection`), the tie fixture, the rename/delete fixture, the non-ASCII fixture, the old-only fixture
-(zeros), the missing-blob fixture (unknown), the exposure fixture (`exposure`), and the two into-branches fixtures
-(`into_branches`, and `pr_parent`, a branch merge whose parent reaches main only through a PR). A git shim on PATH
-logs or fails the merge-tree calls.
+(zeros), the missing-blob fixture (unknown), the exposure fixture (`exposure`), the into-branches fixtures
+(`into_branches`, `pr_parent`, a branch merge whose parent reaches main only through a PR, and `into_first_parent`, a
+branch merge whose first parent is on main's line), the remote fixture (`remote_behind`, a remote main that the local
+main misses), and the clones (`clone_of`, shallow with depth 1, or whole). A git shim on PATH logs or fails the
+merge-tree calls.
 """
 import collections
 import json
@@ -367,6 +383,56 @@ def pr_parent(name):
     return fx
 
 
+def into_first_parent(name):
+    """Two merges, one of each first parent. Mg merges main into g: its first parent g1 is off main's line, its second
+    m1 is on it, and it conflicts on b.txt. Mh merges f into h, where h starts at main's tip m1: its first parent is on
+    main's line, its second is the branch f, and it conflicts on a.txt. --into-branches keeps Mg only. Before the
+    first-parent rule, the old filter counted Mh too."""
+    fx = Fixture(name)
+    fx.write("a.txt", "one\n")
+    fx.write("b.txt", "one\n")
+    fx.commit("c0", DAY1)
+    fx.branch("f", "main")
+    fx.branch("g", "main")
+    fx.edit("f", {"a.txt": "f-a\n"}, "f1", DAY1)
+    fx.edit("g", {"b.txt": "g-b\n"}, "g1", DAY1)
+    fx.edit("main", {"a.txt": "m-a\n", "b.txt": "m-b\n"}, "m1", DAY1)
+    fx.merge("g", "main", DAY2, conflict=True, resolve={"b.txt": "merged-b\n"})
+    fx.branch("h", "main")
+    fx.merge("h", "f", DAY2, conflict=True, resolve={"a.txt": "merged-a\n"})
+    return fx
+
+
+def remote_behind(name):
+    """A merge of main into f, conflicting on a.txt, with origin/main set to m1, main's tip before the merge. The local
+    main is then set back to c0, so it misses both parents of the merge. Only the default base reaches the merge.
+    Returns the fixture and m1. The remote is a name in this fixture; nothing is pushed or fetched."""
+    fx = Fixture(name)
+    fx.write("a.txt", "one\n")
+    fx.commit("c0", DAY1)
+    c0 = fx.git("rev-parse", "main").stdout.strip()
+    fx.branch("f", "main")
+    fx.edit("f", {"a.txt": "feature\n"}, "f1", DAY1)
+    fx.edit("main", {"a.txt": "main\n"}, "m1", DAY1)
+    m1 = fx.git("rev-parse", "main").stdout.strip()
+    fx.merge("f", "main", DAY2, conflict=True)
+    fx.git("remote", "add", "origin", os.path.join(RUN, name + "-remote"))
+    fx.git("update-ref", "refs/remotes/origin/main", m1)
+    fx.git("update-ref", "refs/heads/main", c0)
+    return fx, m1
+
+
+def clone_of(fx, name, depth=None):
+    """A clone of `fx`, checked out on its branch f, made from file:// so that --depth is honoured. Returns the path.
+    With depth, the clone holds only the tip commits up to that depth, and reads as shallow."""
+    dest = os.path.join(RUN, name + "-clone")
+    cmd = ["git", "clone", "-q", "-b", "f"] + (["--depth", str(depth)] if depth else []) + ["file://" + fx.path, dest]
+    p = subprocess.run(cmd, env=fixture_env(RUN, DAY2), capture_output=True, text=True, encoding="utf-8")
+    if p.returncode:
+        raise RuntimeError("fixture clone failed (%d): %s" % (p.returncode, p.stderr.strip()))
+    return dest
+
+
 Run = collections.namedtuple("Run", "rc out err scratch log")
 
 
@@ -383,9 +449,9 @@ def make_shim(mode, log):
     return folder
 
 
-def run_hotspots(repo, shim=None, top="10", since=SINCE, flags=()):
+def run_hotspots(repo, shim=None, top="10", since=SINCE, flags=(), base="main"):
     """Run the script on `repo`, with TMPDIR a fresh empty folder under the run folder, and the extra `flags` after the
-    fixed arguments. Returns a Run."""
+    fixed arguments. base=None leaves --base off, so the default base applies. Returns a Run."""
     if not os.path.isfile(MODULE):
         raise AssertionError("lint/conflict_hotspots.py is not built")
     scratch = tempfile.mkdtemp(prefix="scratch-", dir=RUN)
@@ -395,7 +461,8 @@ def run_hotspots(repo, shim=None, top="10", since=SINCE, flags=()):
     env["PYTHONIOENCODING"] = "utf-8"
     if shim:
         env["PATH"] = make_shim(shim, log) + os.pathsep + os.environ.get("PATH", "")
-    cmd = [sys.executable, MODULE, "--since", since, "--base", "main", "--top", top, "--repo", repo] + list(flags)
+    cmd = [sys.executable, MODULE, "--since", since] + (["--base", base] if base else [])
+    cmd += ["--top", top, "--repo", repo] + list(flags)
     p = subprocess.run(cmd, cwd=RUN, env=env, capture_output=True, timeout=120)
     return Run(p.returncode, p.stdout.decode("utf-8", "replace"), p.stderr.decode("utf-8", "replace"), scratch, log)
 
@@ -434,6 +501,16 @@ def cost(out):
     return (int(m.group(1)), m.group(2)) if m else None
 
 
+def caveats(out):
+    """The lines that start `caveat: `, in printed order."""
+    return [line for line in out.splitlines() if line.startswith("caveat: ")]
+
+
+def output_lines(r):
+    """The non-blank lines of a run's stdout and stderr together: the one line a refusal prints."""
+    return [line for line in (r.out + r.err).splitlines() if line.strip()]
+
+
 def read_log(log):
     if not os.path.isfile(log):
         return []
@@ -460,6 +537,10 @@ class ConflictHotspotsCases(unittest.TestCase):
         self.assertEqual(field(out, "merges conflicted"), str(conflicted), "merges conflicted line")
         self.assertEqual(field(out, "merges unknown"), str(unknown), "merges unknown line")
         self.assertEqual(field(out, "conflict rate"), rate, "conflict rate line")
+
+    def assert_same(self, got, want, cause):
+        """assertEqual that keeps the cause. On Python 3.15 unittest drops the message of a text or list assertEqual."""
+        self.assertTrue(got == want, "%s: got %r, want %r" % (cause, got, want))
 
     def test_known_conflict_lists_one_file_with_count_one(self):
         fx = single_conflict("known")
@@ -646,6 +727,154 @@ class ConflictHotspotsCases(unittest.TestCase):
         p = subprocess.run(["git", "-C", gone.path, "merge-tree", "--write-tree", "--name-only", "f^1", "f^2"],
                            env=fixture_env(RUN, DAY2), capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(p.returncode, 128, "a dropped blob: git merge-tree exits 128")
+
+    def test_since_must_be_a_real_iso_date_and_is_refused_with_one_line(self):
+        fx = single_conflict("since-bad")
+        for value in ("foo", "2026-13-45", "2026-02-30", "11/18/2026"):
+            with self.subTest(since=value):
+                r = run_hotspots(fx.path, since=value)
+                self.assertEqual(r.rc, 1, "--since %s: exit code 1, a bad argument (stderr: %s)" % (value, r.err))
+                self.assertEqual(len(output_lines(r)), 1, "--since %s: one line of output" % value)
+                self.assertIsNone(field(r.out, "merges replayed"), "--since %s: no count line is printed" % value)
+
+    def test_header_names_the_base_read_and_its_first_nine_hex_digits(self):
+        fx = single_conflict("header-base")
+        sha = fx.git("rev-parse", "main").stdout.strip()
+        r = run_hotspots(fx.path)
+        self.assertEqual(r.rc, 0, "exit code (stderr: %s)" % r.err)
+        self.assert_same(r.out.splitlines()[0], "base: main " + sha[:9], "first line: the base read and its commit")
+
+    def test_default_base_is_the_remote_main_when_a_remote_ref_exists(self):
+        fx, m1 = remote_behind("remote-count")
+        self.assert_same(fx.git("rev-parse", "refs/remotes/origin/main").stdout.strip(), m1,
+                         "fixture: origin/main is set to m1")
+        r = run_hotspots(fx.path, base=None)
+        self.assertEqual(r.rc, 0, "exit code (stderr: %s)" % r.err)
+        self.assert_same(field(r.out, "merges replayed"), "1",
+                         "merges replayed with the default base: origin/main holds the merge, local main does not")
+
+    def test_default_header_names_origin_main_and_its_commit(self):
+        fx, m1 = remote_behind("remote-header")
+        r = run_hotspots(fx.path, base=None)
+        self.assertEqual(r.rc, 0, "exit code (stderr: %s)" % r.err)
+        self.assert_same(r.out.splitlines()[0], "base: origin/main " + m1[:9], "first line: origin/main and its commit")
+
+    def test_default_header_names_main_when_no_remote_ref_exists(self):
+        fx = single_conflict("no-remote-header")
+        sha = fx.git("rev-parse", "main").stdout.strip()
+        r = run_hotspots(fx.path, base=None)
+        self.assertEqual(r.rc, 0, "exit code (stderr: %s)" % r.err)
+        self.assert_same(r.out.splitlines()[0], "base: main " + sha[:9], "first line: main and its commit")
+
+    def test_default_base_without_a_remote_still_counts_local_main(self):
+        fx = single_conflict("no-remote-count")
+        self.assert_same(fx.git("remote").stdout.strip(), "", "fixture: no remote is set")
+        r = run_hotspots(fx.path, base=None)
+        self.assertEqual(r.rc, 0, "exit code (stderr: %s)" % r.err)
+        self.assert_same(field(r.out, "merges replayed"), "1", "merges replayed with no remote: local main is the base")
+
+    def test_shallow_clone_prints_one_cut_line_and_exits_three(self):
+        fx = single_conflict("shallow")
+        clone = clone_of(fx, "shallow", depth=1)
+        p = subprocess.run(["git", "-C", clone, "rev-parse", "--is-shallow-repository"],
+                           env=fixture_env(RUN, DAY2), capture_output=True, text=True, encoding="utf-8")
+        self.assert_same(p.stdout.strip(), "true", "scope: the clone is shallow")
+        r = run_hotspots(clone, base="f")
+        self.assertEqual(r.rc, 3, "exit code 3, the code for unknown: the history is cut at depth (stderr: %s)" % r.err)
+        lines = output_lines(r)
+        self.assertEqual(len(lines), 1, "one line of output: the cut line, and no report")
+        self.assertIn("cut at depth", lines[0], "the line says the history is cut at depth")
+        self.assertIn("lower bound", lines[0], "the line says the counts are a lower bound")
+
+    def test_whole_clone_prints_no_cut_line(self):
+        fx = single_conflict("whole")
+        clone = clone_of(fx, "whole")
+        r = run_hotspots(clone, base="f")
+        self.assertEqual(r.rc, 0, "exit code (stderr: %s)" % r.err)
+        self.assert_same(field(r.out, "merges replayed"), "1", "merges replayed in a whole clone")
+        self.assertNotIn("cut at depth", r.out, "no line says the history is cut, in a whole clone")
+
+    def test_into_branches_drops_a_merge_whose_first_parent_is_on_main_line(self):
+        fx = into_first_parent("into-first")
+        self.assertEqual(len(fx.merges()), 2, "fixture merge count")
+        trunk = fx.git("rev-list", "--first-parent", "main").stdout.split()
+        self.assertNotIn(fx.git("rev-parse", "g^1").stdout.strip(), trunk, "scope: g's first parent is off main's line")
+        self.assertIn(fx.git("rev-parse", "g^2").stdout.strip(), trunk, "scope: g's second parent is on main's line")
+        self.assertIn(fx.git("rev-parse", "h^1").stdout.strip(), trunk, "scope: h's first parent is on main's line")
+        self.assertNotIn(fx.git("rev-parse", "h").stdout.strip(), trunk, "scope: the merge h is off main's line")
+        r = run_hotspots(fx.path, flags=["--into-branches"])
+        self.assertEqual(r.rc, 0, "exit code with --into-branches (stderr: %s)" % r.err)
+        self.assert_same(field(r.out, "merges replayed"), "1",
+                         "merges replayed with --into-branches: the merge whose first parent is on main's line is dropped")
+        self.assert_same(rows(r.out), [(1, "b.txt")], "file rows with --into-branches: the merge of main into g only")
+
+    def test_top_below_one_is_refused_with_one_line(self):
+        fx = single_conflict("top-low")
+        for value in ("0", "-1"):
+            with self.subTest(top=value):
+                r = run_hotspots(fx.path, top=value)
+                self.assertEqual(r.rc, 1, "--top %s: exit code 1, a bad argument (stderr: %s)" % (value, r.err))
+                self.assertEqual(len(output_lines(r)), 1, "--top %s: one line of output" % value)
+                self.assert_same(rows(r.out), [], "--top %s: no file rows" % value)
+
+    def test_output_ends_with_three_caveat_lines_after_the_cost_line(self):
+        fx = single_conflict("caveat-end")
+        r = run_hotspots(fx.path)
+        self.assertEqual(r.rc, 0, "exit code (stderr: %s)" % r.err)
+        lines = r.out.splitlines()
+        cost_at = [i for i, line in enumerate(lines) if line.startswith("cost: ")]
+        self.assertEqual(len(cost_at), 1, "the cost line prints once")
+        tail = lines[cost_at[0] + 1:]
+        self.assertEqual(len(tail), 3, "three lines after the cost line, the caveats (tail: %r)" % tail)
+        self.assert_same(caveats(r.out), tail, "each line after the cost line is a caveat line")
+
+    def test_caveat_says_a_replay_is_what_git_finds_now_not_what_the_author_resolved(self):
+        fx = single_conflict("caveat-replay")
+        r = run_hotspots(fx.path)
+        self.assertEqual(r.rc, 0, "exit code (stderr: %s)" % r.err)
+        self.assertTrue(any("replay" in c and "resolv" in c for c in caveats(r.out)),
+                        "a caveat line says the replay is not what the author resolved (caveats: %r)" % caveats(r.out))
+
+    def test_caveat_says_squash_and_rebase_merges_are_absent(self):
+        fx = single_conflict("caveat-squash")
+        r = run_hotspots(fx.path)
+        self.assertEqual(r.rc, 0, "exit code (stderr: %s)" % r.err)
+        self.assertTrue(any("squash" in c and "rebase" in c for c in caveats(r.out)),
+                        "a caveat line says squash and rebase merges are absent (caveats: %r)" % caveats(r.out))
+
+    def test_caveat_says_refs_walked_all(self):
+        fx = single_conflict("caveat-refs")
+        r = run_hotspots(fx.path)
+        self.assertEqual(r.rc, 0, "exit code (stderr: %s)" % r.err)
+        self.assertTrue(any("refs walked: all" in c for c in caveats(r.out)),
+                        "a caveat line says refs walked: all (caveats: %r)" % caveats(r.out))
+
+    def test_list_flag_prints_each_conflicted_merge_with_its_sha9_and_files(self):
+        fx = selection("list-on")
+        mf = fx.git("rev-parse", "f").stdout.strip()
+        q = fx.git("rev-parse", "main").stdout.strip()
+        r = run_hotspots(fx.path, flags=["--list"])
+        lines = r.out.splitlines()
+        mf_lines = [line for line in lines if line.startswith("merge " + mf[:9] + " ")]
+        q_lines = [line for line in lines if line.startswith("merge " + q[:9] + " ")]
+        self.assertTrue(mf_lines and "z.txt" in mf_lines[0],
+                        "--list: a `merge <sha9> <paths>` line for the merge of main into f, with z.txt (stdout: %r)"
+                        % r.out)
+        self.assertTrue(q_lines and "a.txt" in q_lines[0] and "z.txt" in q_lines[0],
+                        "--list: a `merge <sha9> <paths>` line for the last merge, with a.txt and z.txt (stdout: %r)"
+                        % r.out)
+        self.assertEqual(r.rc, 0, "exit code with --list (stderr: %s)" % r.err)
+
+    def test_list_flag_leaves_out_the_clean_merge(self):
+        fx = selection("list-clean")
+        p = fx.git("rev-parse", "main~2").stdout.strip()
+        r = run_hotspots(fx.path, flags=["--list"])
+        lines = r.out.splitlines()
+        self.assertTrue(any(line.startswith("merge ") for line in lines),
+                        "--list prints merge lines (stdout: %r)" % r.out)
+        self.assertFalse(any(line.startswith("merge " + p[:9] + " ") for line in lines),
+                         "--list: the clean merge is not listed")
+        self.assertEqual(r.rc, 0, "exit code with --list (stderr: %s)" % r.err)
 
 
 if __name__ == "__main__":
