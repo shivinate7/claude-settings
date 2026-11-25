@@ -539,8 +539,13 @@ class ReadLineOrderTests(ToolPinsCase):
         self.assertEqual(rc, 0, "a first read that prints no version must fall to the next read: exit %d: %s" % (rc, out))
 
     def test_a_tool_whose_every_read_fails_reads_unknown(self):
+        # The checker's PATH is an empty folder. The host's python3 and python would answer both reads, so the case hides them.
+        os.makedirs(self.bin, exist_ok=True)
+        for name in ("python3", "python"):
+            self.assertIsNone(shutil.which(name, path=self.bin),
+                              "the PATH this case gives the checker must hide the host's %s, or its read would succeed" % name)
         local = self.write(self.PY_READS)
-        rc, out = self.run_check("--file", local)
+        rc, out = self.run_check("--file", local, extra_env={"PATH": self.bin})
         self.assertEqual(rc, 1, "a tool whose every read fails must read unknown and exit 1: exit %d: %s" % (rc, out))
         self.assertIn("python", out, "the unknown line must name the tool: %s" % out)
 
