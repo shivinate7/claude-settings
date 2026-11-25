@@ -42,11 +42,40 @@ RUNNER = r'''
 import os
 import sys
 import time
-import unittest
 
 site = sys.modules.get("sitecustomize")
 site_file = getattr(site, "__file__", None) if site is not None else None
 print("SITE_FILE", os.path.realpath(site_file) if site_file else "none")
+if "absent" in sys.argv[2:]:  # TestCase._callSetUp absent on the class, as a Python that renamed it would have it
+    import importlib.machinery
+
+    class Absent(object):
+        def __init__(self, function):
+            self.function = function
+
+        def __get__(self, obj, owner=None):
+            if obj is None:
+                raise AttributeError("type object 'TestCase' has no attribute '_callSetUp'")
+            return self.function.__get__(obj, owner)
+
+    class Finder(object):
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname != "unittest.case":
+                return None
+            spec = importlib.machinery.PathFinder.find_spec(fullname, path)
+            if spec is None or spec.loader is None:
+                return None
+            load = spec.loader.exec_module
+
+            def exec_module(module):
+                load(module)
+                module.TestCase._callSetUp = Absent(module.TestCase._callSetUp)
+
+            spec.loader.exec_module = exec_module
+            return spec
+
+    sys.meta_path.insert(0, Finder())  # before the arm's hook, so the absence is in place when the arm reads it
+import unittest
 sys.path.insert(0, os.environ["PROBE_DIR"])
 import cost_probe  # noqa: E402
 
@@ -66,6 +95,11 @@ else:
     result = unittest.TextTestRunner(stream=quiet, verbosity=0).run(suite)
 if "report" in sys.argv[2:]:
     print("RESULT ran=%d failures=%d errors=%d skipped=%d" % (result.testsRun, len(result.failures), len(result.errors), len(result.skipped)))
+if "tracebacks" in sys.argv[2:]:
+    for test, text in result.errors:
+        print("TRACEBACK-BEGIN")
+        print(text, end="")
+        print("TRACEBACK-END")
 '''
 
 RECORDS = '''import os
@@ -353,53 +387,6 @@ class Leak(unittest.TestCase):
         self.assertTrue(True)
 '''
 
-# Makes TestCase._callSetUp absent from the class, as a Python that renamed it would: class access raises, and each
-# instance still runs its setUp, so the suite runs the same. The finder makes the absence after unittest.case loads,
-# which is before the arm reads the attribute.
-ABSENT_RUNNER = '''import importlib.machinery
-import os
-import sys
-
-site = sys.modules.get("sitecustomize")
-print("SITE_FILE", os.path.realpath(site.__file__) if site is not None and getattr(site, "__file__", None) else "none")
-
-
-class Absent(object):
-    def __init__(self, function):
-        self.function = function
-
-    def __get__(self, obj, owner=None):
-        if obj is None:
-            raise AttributeError("type object 'TestCase' has no attribute '_callSetUp'")
-        return self.function.__get__(obj, owner)
-
-
-class Finder(object):
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname != "unittest.case":
-            return None
-        spec = importlib.machinery.PathFinder.find_spec(fullname, path)
-        if spec is None or spec.loader is None:
-            return None
-        load = spec.loader.exec_module
-
-        def exec_module(module):
-            load(module)
-            module.TestCase._callSetUp = Absent(module.TestCase._callSetUp)
-
-        spec.loader.exec_module = exec_module
-        return spec
-
-
-sys.meta_path.insert(0, Finder())
-import unittest  # noqa: E402
-
-suite = unittest.defaultTestLoader.loadTestsFromName("fixture_plain")
-result = unittest.TextTestRunner(stream=open(os.devnull, "w"), verbosity=0).run(suite)
-print("RESULT ran=%d failures=%d errors=%d skipped=%d"
-      % (result.testsRun, len(result.failures), len(result.errors), len(result.skipped)))
-'''
-
 # An async case: its asyncSetUp seconds are fixture time, apart from the case's own seconds.
 ASYNC = '''import time
 import unittest
@@ -423,23 +410,6 @@ class SetupError(unittest.TestCase):
 
     def test_case(self):
         self.assertTrue(True)
-'''
-
-# Prints the traceback text of each error between markers, so the armed and unarmed texts can be compared.
-TRACEBACK_RUNNER = '''import os
-import sys
-
-site = sys.modules.get("sitecustomize")
-print("SITE_FILE", os.path.realpath(site.__file__) if site is not None and getattr(site, "__file__", None) else "none")
-import unittest  # noqa: E402
-
-suite = unittest.defaultTestLoader.loadTestsFromName("fixture_setup_error")
-result = unittest.TestResult()
-suite.run(result)
-for test, text in result.errors:
-    print("TRACEBACK-BEGIN")
-    print(text, end="")
-    print("TRACEBACK-END")
 '''
 
 
@@ -483,8 +453,8 @@ def run_py(folder, argv, armed=True, pythonpath=HOME, extra=None):
                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=RUN_TIMEOUT)
 
 
-def run_module(folder, module, armed=True, count=False, extra=None, pythonpath=HOME, report=False):
-    options = (["count"] if count else []) + (["report"] if report else [])
+def run_module(folder, module, armed=True, count=False, extra=None, pythonpath=HOME, report=False, flags=()):
+    options = (["count"] if count else []) + (["report"] if report else []) + list(flags)
     argv = [os.path.join(RUN, "runner.py"), module] + options
     return run_py(folder, argv, armed=armed, pythonpath=pythonpath, extra=extra)
 
@@ -926,13 +896,12 @@ class OpenFrame(unittest.TestCase):
 class ArmWithoutCallSetUp(unittest.TestCase):
     def test_missing_call_setup_still_starts_and_runs(self):
         folder = case_folder(self)
-        write(folder, "fixture_plain.py", PLAIN)
-        write(folder, "absent_runner.py", ABSENT_RUNNER)
-        unarmed = run_py(folder, ["absent_runner.py"], armed=False)
+        write(folder, "fixture_child.py", CHILD)
+        unarmed = run_module(folder, "fixture_child", armed=False, report=True, flags=("absent",))
         self.assertEqual(result_line(unarmed), "RESULT ran=1 failures=0 errors=0 skipped=0",
                          "the unarmed control run did not pass its one case with TestCase._callSetUp absent: %r"
                          % unarmed.stderr[-300:])
-        armed = run_py(folder, ["absent_runner.py"])
+        armed = run_module(folder, "fixture_child", report=True, flags=("absent",))
         scope_ok(self, armed)
         self.assertEqual(armed.returncode, 0,
                          "the armed run exited %d, want 0: with TestCase._callSetUp absent the arm broke the Python "
@@ -970,13 +939,12 @@ class SetupTraceback(unittest.TestCase):
     def test_setup_error_traceback_matches_unarmed(self):
         folder = case_folder(self)
         write(folder, "fixture_setup_error.py", SETUP_ERROR)
-        write(folder, "traceback_runner.py", TRACEBACK_RUNNER)
-        unarmed = run_py(folder, ["traceback_runner.py"], armed=False)
+        unarmed = run_module(folder, "fixture_setup_error", armed=False, flags=("tracebacks",))
         unarmed_text = traceback_text(unarmed)
         self.assertIsNotNone(unarmed_text, "the unarmed run printed no setUp error traceback; stdout tail: %r"
                              % unarmed.stdout[-300:])
         self.assertIn("in setUp", unarmed_text, "the unarmed control traceback has no setUp frame: %r" % unarmed_text)
-        armed = run_py(folder, ["traceback_runner.py"])
+        armed = run_module(folder, "fixture_setup_error", flags=("tracebacks",))
         scope_ok(self, armed)
         armed_text = traceback_text(armed)
         self.assertIsNotNone(armed_text, "the armed run printed no setUp error traceback; stdout tail: %r"
