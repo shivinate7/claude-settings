@@ -31,7 +31,7 @@ TASK_ID = re.compile(r"<task-id>\s*([^<\s]+)\s*</task-id>")
 STATUS = re.compile(r"<status>\s*([^<\s]+)\s*</status>")
 
 
-def stamp(rec):
+def record_time(rec):
     value = rec.get("timestamp")
     return _transcript.parse_utc_timestamp(value) if isinstance(value, str) else None
 
@@ -57,7 +57,7 @@ def launches(records):
     """(spawn time by tool_use id, agent id by tool_use id). A refused spawn has no agent id, so it has no span."""
     spawned, agent_of = {}, {}
     for rec in records:
-        when = stamp(rec)
+        when = record_time(rec)
         if when is None:
             continue
         for use in _transcript.tool_uses(rec):
@@ -77,7 +77,7 @@ def agent_events(records, starts):
     failed = _transcript.failed_tool_use_ids(records)
     events = {agent: [] for agent in starts}
     for rec in records:
-        when = stamp(rec)
+        when = record_time(rec)
         if when is None:
             continue
         for use in _transcript.tool_uses(rec):
@@ -160,7 +160,7 @@ def main(argv):
     if not records:
         print("unknown: the transcript holds no record")
         return 0
-    if not any(begin <= (stamp(r) or float("-inf")) <= finish for r in records):
+    if not any(begin <= (record_time(r) or float("-inf")) <= finish for r in records):
         print("unknown: the transcript holds no record in the window")
         return 0
     agents, most, still, idle = numbers(records, begin, finish)
