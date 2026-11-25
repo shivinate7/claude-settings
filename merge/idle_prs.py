@@ -10,9 +10,9 @@ The age is judged on GitHub's clock (host.server_now(): the Date header of a Git
 It imports nothing from merge.py, which loads it. The caller passes `errors` (merge.Stop and the like) and `routes` (merge.DRAFT_ROUTES).
 
 A failed read is unknown: that PR is left alone and the line says unknown. A failed list read drafts nothing.
-Cost (merge.Host, one page of each list, merge.requiredChecks not "none"): one open-pulls read per sweep. Per non-draft PR in the sweep: 1 `gh run list` (the host memoizes it, so head_state's run_state and the red branch read it again for nothing)
+Cost (merge.Host, one page of each list, merge.requiredChecks neither "none" nor "first-proof"): one open-pulls read per sweep. Per non-draft PR in the sweep: 1 `gh run list` (the host memoizes it, so head_state's run_state and the red branch read it again for nothing)
 and the 2 page reads of head_state's checks() (check-runs and statuses, one more call per extra page), 3 calls in all. head_state also reads the base's required names (the ruleset, and the classic protection when no ruleset names any),
-once for each base a run, read again after each comment, since a POST clears the host's memo. Under "none" head_state reads nothing: 1 call. In the clash, each counted clash with a non-draft PR costs the same 3 calls (head_state reads the run list; a red head reads it no more).
+once for each base a run, read again after each comment, since a POST clears the host's memo. Under "none" or "first-proof" head_state reads nothing: 1 call. In the clash, each counted clash with a non-draft PR costs the same 3 calls (head_state reads the run list; a red head reads it no more).
 One `gh pr ready --undo` and one comment POST per drafted PR. No file is written, no timer, no process is kept.
 A PR a person readies again with no push, that goes red and idle again, is drafted again and gets a second comment: no comment is read
 to stop it, since that read would cost a call on every drafted PR. A new head always gets its own comment.
