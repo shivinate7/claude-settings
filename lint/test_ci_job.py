@@ -5259,6 +5259,86 @@ class CarryUnmappedDelta(unittest.TestCase):
         self.assertEqual(self.carried(MAPPED_FLAGS), {"hooks/test_tidy.py"}, "a mapped delta no longer carries the selector's suite")
 
 
+class ToolPinsLane(Job):
+    """Under --lint, a checkout with a root .tool-versions gets one run of its checker with --local (decision tool-pins). A
+    mismatch or an unknown read prints one line that starts unknown and names the tool, and the run is no pass. Matching tools
+    print no extra line. A checkout with no .tool-versions starts no checker, and --step (the ready run) starts nothing new.
+    The checker in the checkout is the real one behind a line that logs each run's arguments, so a case counts the runs."""
+
+    LOG_RUN = "import sys\nopen('checker-runs.txt', 'a', encoding='utf-8').write(' '.join(sys.argv[1:]) + '\\n')\n"
+    LINT_STEP = step("lint", "python3 lint/check_a.py")
+    ARGS = ("--lint", "--base", "HEAD")
+
+    def checkout(self, pins):
+        """A committed checkout: one lint script, the checker behind its run log, and the pin file when `pins` is not None."""
+        with open(os.path.join(HERE, "check_tool_pins.py"), encoding="utf-8") as f:
+            checker = self.LOG_RUN + f.read()
+        files = {"lint/check_a.py": "print('lint ok')\n", "lint/check_tool_pins.py": checker}
+        if pins is not None:
+            files[".tool-versions"] = pins
+        for rel, text in files.items():
+            path = os.path.join(self.root, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(text)
+        self.git("add", "-A")
+        self.git("commit", "-qm", "base")
+
+    def pinned_tool(self, output):
+        """PATH with a fake `pinprobe` first: each run logs its name to pinprobe-runs.txt, then prints `output`."""
+        return self.stub_path(pinprobe="echo pinprobe >> pinprobe-runs.txt\necho '%s'" % output)
+
+    def file_lines(self, name):
+        try:
+            with open(os.path.join(self.root, name), encoding="utf-8") as f:
+                return f.read().splitlines()
+        except OSError:
+            return []
+
+    def lines_naming(self, lines, word, tool):
+        return [ln for ln in lines if ln.startswith(word) and tool in ln]
+
+    def test_a_checkout_with_pins_runs_the_checker_once_with_local(self):
+        self.checkout("pinprobe 4.2\n")
+        rc, lines, out = self.run_job(self.LINT_STEP, args=self.ARGS, env=self.pinned_tool("pinprobe 4.2.7"))
+        self.assertEqual(self.file_lines("checker-runs.txt"), ["--local"],
+                         "under --lint the checker must run once, with --local: %s" % out)
+        self.assertEqual(self.file_lines("pinprobe-runs.txt"), ["pinprobe"],
+                         "the checker must run the pinned tool's version command once: %s" % out)
+
+    def test_matching_tools_print_no_extra_line_and_the_verdict_is_as_before(self):
+        self.checkout("pinprobe 4.2\n")
+        rc, lines, out = self.run_job(self.LINT_STEP, args=self.ARGS, env=self.pinned_tool("pinprobe 4.2.7"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
+        self.assertEqual([ln for ln in lines if "pinprobe" in ln or "tool-pins" in ln], [], "a match prints no extra line: %s" % out)
+
+    def test_a_mismatch_prints_one_unknown_line_naming_the_tool_and_is_no_pass(self):
+        self.checkout("pinprobe 4.2\n")
+        rc, lines, out = self.run_job(self.LINT_STEP, args=self.ARGS, env=self.pinned_tool("pinprobe 4.1.0"))
+        self.assertEqual(len(self.lines_naming(lines, "unknown", "pinprobe")), 1,
+                         "a mismatch must print one line that starts unknown and names the tool: %s" % out)
+        self.assertNotEqual(rc, 0, "a mismatch is no proof, so the run must not exit 0: %s" % out)
+
+    def test_an_unknown_read_prints_one_unknown_line_naming_the_tool_and_is_no_pass(self):
+        self.checkout("pinprobe-absent 1.0\n")
+        rc, lines, out = self.run_job(self.LINT_STEP, args=self.ARGS)
+        self.assertEqual(len(self.lines_naming(lines, "unknown", "pinprobe-absent")), 1,
+                         "an unknown read must print one line that starts unknown and names the tool: %s" % out)
+        self.assertNotEqual(rc, 0, "an unknown read is no proof, so the run must not exit 0: %s" % out)
+
+    def test_a_checkout_with_no_tool_versions_starts_no_checker(self):
+        self.checkout(None)
+        rc, lines, out = self.run_job(self.LINT_STEP, args=self.ARGS)
+        self.assertEqual(self.file_lines("checker-runs.txt"), [], "with no .tool-versions no checker may start: %s" % out)
+        self.assertEqual(rc, 0, out)
+
+    def test_the_ready_run_with_step_starts_no_checker(self):
+        self.checkout("pinprobe 4.2\n")
+        rc, lines, out = self.run_job(self.LINT_STEP, args=("--step", "lint"), env=self.pinned_tool("pinprobe 4.1.0"))
+        self.assertEqual(self.file_lines("checker-runs.txt"), [], "--step (the ready run) must start no checker: %s" % out)
+        self.assertEqual([ln for ln in lines if "pinprobe" in ln or "tool-pins" in ln], [], "--step prints no tool-pins line: %s" % out)
+
+
 if __name__ == "__main__":
     try:
         unittest.main()
