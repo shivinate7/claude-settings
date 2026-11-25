@@ -16,6 +16,7 @@ Incident: at 12:05 CST on Nov 15, 2026 the REST core budget of the shared token 
 - **Read kinds.** A bulk read is a list read of the whole repo: `merge --reviewed`'s open pull request list and repo-wide comment read, `merge --audit-prs`, and any caller that passes `bulk=True` or runs inside `bulk_reads`. It is refused, with no call, when remaining is under a tenth of the limit. The refusal names remaining, limit and the reset time in Central time. A missing or unreadable header never refuses. A merge-path read (the pull request, its head's checks, the protection, the claim, the merge) and every write are never refused: a merge that is under way must finish.
 - **The memo and its bypass.** A GET is kept for the run, keyed on its route and query. A repeat is no call. Any write through `Host.api` clears the memo. A bulk read is always sent and is never kept, so it reads fresh. A read that waits for something to change passes `memo=False`: `read_pr` (the poll of `wait_pushed_head`, which waits for the head to move after a push) and the two pull request reads around the merge call. A poll that read the memo would see the old head until its deadline. `protection_names` holds its answer in the same memo, a 404 included, so a run reads the ruleset and the branch protection once. `Host.runs` holds each head's `gh run list` in the same memo, so `superseded`, `head_state` and `run_state` read a head's run list once. A failed run list read is not kept. A merge under the lock (`confirm`) turns the memo off (`Host.use_memo`): it reads each state fresh, because a rate wait or a rival run can change it between two reads.
 - **Attribution.** `Host` counts each `gh` call by method and route template (`pulls/{n}/files`), retries included. `merge --audit-prs` prints the counts.
+- **Output stream.** A `gh` call that exits 0 gives its caller stdout alone (`stdout_only` in `sh()`, used by `Host.gh`, the lock call, `host_default_branch` and `run_gh` in `skills/project-ops/scripts/protect.py`). A failed call keeps both streams, so the tool's own refusal text still reaches the caller. gh 2.105.0 prints a stderr hint with exit 0 on some reads in an agent session (`AI_AGENT` and `CLAUDECODE` set), and a joined read parsed that hint as JSON. Mistake, Nov 24, 2026: every merge-tool PR read read unknown, and the `records-page-ready` guard refused every ready mark. The reads followed an ordinary Homebrew upgrade of gh by the owner at 15:32 CST. Tests: `GhStderrHint`, `GhStderrHintLock`.
 
 `merge --reviewed` reads each head's check runs, statuses and workflow run list once: the lint step's `rollup_green` and the CI state (`head_state`) take the same reads through the memo. A head whose check rows link two runs reads its run list once too.
 
@@ -33,7 +34,7 @@ No new process. No file and no temp file. No extra call: the budget comes from t
 - GraphQL. A cloud session refuses it (HTTP 403), and this tool sends none.
 - A change to `hooks/ci_wake.py`. Its back-off is the owner's ruling (`ci-wait-reads-run-status`).
 
-Tests: classes `GhApiBudget`, `AuditPrs`, `ReviewedList` and `RepoDirFlag` in `merge/test_merge.py`.
+Tests: classes `GhApiBudget`, `AuditPrs`, `ReviewedList`, `RepoDirFlag`, `GhStderrHint` and `GhStderrHintLock` in `merge/test_merge.py`.
 
 Kind: process
 Home: merge/merge.py
