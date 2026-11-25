@@ -15669,6 +15669,26 @@ class RedMainBrake(Env):
         rc, out, _ = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
         self.merged(rc, out)
 
+    def test_a_revert_of_the_breaking_merge_lifts_a_red_main_past_a_replaced_run_above_it(self):
+        """Red on the old code: run 904, cancelled and replaced by run 905, sits above breaking merge 903, so the blame names two commits, and
+        revert_proven, which needs exactly one blamed commit, refuses the lift. Fixed: the blame is 903's commit alone and the revert of 903 lifts the red main."""
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        C = self.commit_on_main("Lane 2652 lands on main", "lane-2652.txt")  # run 904's commit: cancelled before any job started, replaced by run 905
+        D = self.commit_on_main("Lane 2653 lands on main", "lane-2653.txt")  # run 905's commit: red again on its re-run
+        R, M = self.land_revert(2651, B)
+        self.assert_first_parent_chain(M, D, C, B, A)
+        self.assert_revert_on_main(B, R, M)
+        run906, jobs906 = self.merge_run_of(906, M, 2651)
+        runs = [run906, main_run(905, "failure", sha=D, run_attempt=2), main_run(904, "cancelled", sha=C),
+                main_run(903, "failure", sha=B, run_attempt=2, message="Merge pull request #2650 from o/lane-2650"), main_run(902, "success", sha=A, message="base files")]
+        jobs = {906: jobs906, 905: [main_job("scope", "success"), main_job("checks", "failure", 20)], 904: [],
+                903: [main_job("scope", "success"), main_job("checks", "failure", 20)], 902: self.RAN_PUSH}
+        rc, out, _ = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.assertEqual(rc, 0, "the merge was refused:\n" + out)
+        self.assertFalse(printed(out, "main is RED"), "the revert of breaking merge 903 does not lift the red main: the blame names replaced run 904's commit "
+                                 "with 903's, and revert_proven needs exactly one blamed commit:\n" + out)
+
     def test_a_merge_titled_as_a_revert_onto_a_red_main_merges_when_it_reverts_nothing(self):
         """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): a PR may merge onto a red main; a title that reverts nothing does not refuse it."""
         # class 2: the lane's own commit has a revert's title, but main's breaking merge is not reverted by anything: a title proves nothing
