@@ -125,14 +125,28 @@ def ast_method_span(path, class_name, method):
     return span(node_named(node_named(tree.body, ast.ClassDef, class_name).body, ast.FunctionDef, method))
 
 
-def ast_class_lines(path):
-    """Each top-level class of the file as `<first>-<last> class <name>`, in file order, by ast."""
-    tree = ast.parse(read(path))
-    lines = []
-    for node in tree.body:
+def unit_classes(body):
+    """The classes of a body that the tool lists, in file order: a class, or one under an if, try, with, for or while
+    at the same level. A def holds none, since a class inside a def is not a unit. A class's own body is not searched:
+    the classes in it have dotted names, and the caller compares dotless names only."""
+    found = []
+    for node in body:
         if isinstance(node, ast.ClassDef):
-            first, last = span(node)
-            lines.append("%d-%d class %s" % (first, last, node.name))
+            found.append(node)
+        elif not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for field in ("body", "orelse", "finalbody"):
+                found += unit_classes(getattr(node, field, None) or [])
+            for handler in getattr(node, "handlers", []):
+                found += unit_classes(handler.body)
+    return found
+
+
+def ast_class_lines(path):
+    """Each class the tool lists as a unit, as `<first>-<last> class <name>`, in file order, by ast (see unit_classes)."""
+    lines = []
+    for node in unit_classes(ast.parse(read(path)).body):
+        first, last = span(node)
+        lines.append("%d-%d class %s" % (first, last, node.name))
     return lines
 
 
@@ -720,8 +734,8 @@ class RealFiles(unittest.TestCase):
         got = [line for line in unit_lines(out)
                if line.split(" ", 2)[1] == "class" and "." not in line.split(" ", 2)[2]]
         want = ast_class_lines(TEST_MERGE)
-        self.assertGreater(len(want), 0, "ast finds no top-level class in merge/test_merge.py: the oracle is empty")
-        self.assertEqual(got, want, "the class lines of merge/test_merge.py differ from ast's top-level classes")
+        self.assertGreater(len(want), 0, "ast finds no unit class in merge/test_merge.py: the oracle is empty")
+        self.assertEqual(got, want, "the class lines of merge/test_merge.py differ from ast's unit classes (module-level, under if/try)")
 
 
 class OneCall(unittest.TestCase):
