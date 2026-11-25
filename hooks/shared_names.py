@@ -35,6 +35,9 @@ REMOTE_OUTWARD_TOOLS = tuple(REMOTE_SERVER + "__" + short for short in (
 
 # A prompt that starts with one of these is a notice from a tool or an agent, never the owner.
 TASK_NOTIFICATION_TAG = "<task-notification>"
+# The words of the completed notice for a background agent that ended its turn while its own background
+# work still runs (seen in CLI 2.1.330). The Stop check keeps such an agent open (hooks/stall_watch.py).
+AGENT_WAITING_TEXT = "is waiting on its own background work"
 # An agent hand-back (CLI 2.1.316 text), bare or after a frame line: the plain one or the
 # mid-turn one. The tag name ends at `>` or whitespace.
 _HAND_BACK_TAGS = tuple("<agent-message" + end for end in "> \t\n\r")

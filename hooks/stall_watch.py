@@ -119,7 +119,9 @@ Stop: stall_watch.py --stop
   stderr. Two ps reads 1.5 s apart, only when a quiet shell job has such a process. The job shell's own time
   does not count. A listed job whose named log has an unknown directory says so: that log is not watched.
   Seams: STALL_WATCH_NOW (epoch seconds), STALL_WATCH_OUTPUT_BASE (replaces the folder of each
-  output path, keeps the file name), STALL_WATCH_QUIET (the age in seconds).
+  output path, keeps the file name), STALL_WATCH_QUIET (the age in seconds), STALL_WATCH_LONG (the age in
+  seconds, AGENT_LONG by default, at which a background agent blocks the Stop until a one-time check-in
+  that names its id is set after that age; a waiting notice (AGENT_WAITING_TEXT) leaves the agent open).
   A listed job shows the `until:` note from the description of the call that started it (Bash or
   PowerShell), read by guard_stream.until_note. The guard refuses a background server with no note.
 
@@ -166,10 +168,15 @@ try:
     from shared_names import TASK_NOTIFICATION_TAG  # the one home of the notice tag
 except ImportError:  # without the tag no notice can close a job, so Stop prints nothing
     TASK_NOTIFICATION_TAG = None
+try:
+    from shared_names import AGENT_WAITING_TEXT  # the one home of the waiting notice's text
+except ImportError:  # without the text no notice says waiting: an agent's notice closes it, as before
+    AGENT_WAITING_TEXT = None
 # The pre-filter's bytes key: the tag's bare name, so a line with the name in any form passes.
 NOTICE_KEY = (TASK_NOTIFICATION_TAG.strip("<>").encode(),) if TASK_NOTIFICATION_TAG else ()
 
 DEFAULT_QUIET = 300
+AGENT_LONG = 1800  # seconds a background agent may run before Stop demands a check-in; STALL_WATCH_LONG overrides
 STALL_EXIT = 3
 TAIL_LINES = 20
 TOOL_TIMEOUT = 5  # seconds for each ps or lsof call, so the report cannot hang
@@ -781,7 +788,7 @@ def parse_time(text):
     return whole + (float("0." + m.group(7)) if m.group(7) else 0.0)
 
 
-def scan_jobs(transcript):
+def scan_jobs(transcript, keep_waiting=False):
     """Return ({job id: (output path or None, until note or '', (named logs, cwd, unresolved logs),
     start time or None, is an agent, seconds of its planned pause)}, previous Stop time or None) for every job with no terminal task notice and no TaskStop
     result. A job is a shell (toolUseResult backgroundTaskId) or a background agent (toolUseResult
@@ -790,9 +797,19 @@ def scan_jobs(transcript):
     previous Stop is the timestamp of the newest stop_hook_summary record the harness wrote after a
     Stop run that this check ran in (see below); None when there is none or its timestamp is unreadable.
     A Stop that a hook blocked is followed by a run with stop_hook_active true, where stop() prints
-    nothing: the summary of that run lists nothing, so it is not a Stop."""
+    nothing: the summary of that run lists nothing, so it is not a Stop.
+    keep_waiting (the Stop check only) changes two things. A completed notice that carries the waiting text
+    (AGENT_WAITING_TEXT) does not close its agent. Each job's tuple then ends with three more items: the
+    agent's description, the check-in calls of the session as (time, input text) pairs (read by ci_events,
+    the one reader of check-ins; a check-in whose result was an error is not in it), and whether the agent
+    is waiting. The default call reads none of this, so a long call's scan costs what it did."""
     jobs, done, stops, notes, job_call, logs, began, agents = {}, set(), set(), {}, {}, {}, {}, set()
-    pauses = {}
+    pauses, descs, waits, checkins = {}, {}, set(), {}
+
+    def close(text):
+        done.update(closed_by_notice(text, keep_waiting))
+        if keep_waiting:
+            waits.update(waiting_ids(text))
     prev_stop, blocked = None, False
     with open(transcript, "rb") as f:
         for line in f:
@@ -811,13 +828,13 @@ def scan_jobs(transcript):
                 if kind == "queue-operation":  # a queued notice that the transcript holds only as an enqueue record
                     queued = rec.get("content")
                     if rec.get("operation") == "enqueue" and isinstance(queued, str):
-                        done.update(closed_by_notice(queued))
+                        close(queued)
                     continue
                 if kind == "attachment":  # a completion notice that arrives as a queued command
                     att = rec.get("attachment")
                     notice = att.get("prompt") if isinstance(att, dict) else None
                     if isinstance(notice, str):
-                        done.update(closed_by_notice(notice))
+                        close(notice)
                     continue
                 content = rec["message"]["content"]
                 text = text_of(content)
@@ -835,6 +852,8 @@ def scan_jobs(transcript):
                 out = tur.get("outputFile")
                 jobs.setdefault(jid, out if isinstance(out, str) else None)
                 agents.add(jid)
+                if keep_waiting and isinstance(tur.get("description"), str):
+                    descs.setdefault(jid, tur["description"])
             if jid is not None:
                 began.setdefault(jid, when)
                 if isinstance(content, list):
@@ -855,21 +874,33 @@ def scan_jobs(transcript):
                              and b.get("type") == "tool_use" and b.get("name") == "TaskStop"
                              and isinstance(b.get("id"), str))
             elif kind == "user":
-                done.update(closed_by_notice(text))
+                close(text)
                 if isinstance(content, list):  # only the result of a TaskStop call of this session
                     for b in content:
                         if isinstance(b, dict) and b.get("type") == "tool_result" and isinstance(b.get("tool_use_id"), str) and b["tool_use_id"] in stops:
                             done.update(stopped_ids(b.get("content")))
+            if keep_waiting and any(k in line for k in CHECKIN_KEYS):
+                try:
+                    for ev in ci_events(rec):
+                        if ev[0] == "checkin":
+                            checkins[ev[1]] = (when, ev[2])
+                        elif ev[0] == "failed":
+                            checkins.pop(ev[1], None)  # an error result voids the check-in it answers
+                except Exception:  # a record ci_events cannot read holds no check-in
+                    pass
+    sent = sorted(checkins.values(), key=lambda c: c[0] or 0)
     return ({k: (v, notes.get(job_call.get(k)) or "", logs.get(job_call.get(k)) or ((), None, ()), began.get(k),
                 k in agents, pauses.get(job_call.get(k), 0))
+             + ((descs.get(k, ""), sent, k in waits) if keep_waiting else ())
              for k, v in jobs.items() if k not in done}, prev_stop)
 
 
-def closed_by_notice(text):
+def closed_by_notice(text, keep_waiting=False):
     """The ids that text closes. A <task-notification> block with a terminal status closes its <task-id>.
     A terminal block with no <task-id> is a restart notice: it closes each '(task <id>)' it names. A
     reminder that says the background tasks 'are now stopped' closes each '(task <id>)' after that text.
-    A non-terminal status closes nothing. Each test is a substring check before any regex, because the
+    A non-terminal status closes nothing. With keep_waiting, a terminal notice that carries the waiting text
+    (AGENT_WAITING_TEXT) closes nothing: the agent ended its turn but its own background work runs. Each test is a substring check before any regex, because the
     scan runs on every tool call."""
     ids = []
     if RESTART_REMINDER in text:
@@ -879,10 +910,24 @@ def closed_by_notice(text):
     for note in text.split(TASK_NOTIFICATION_TAG)[1:]:
         tid, st = TASK_ID.search(note), TASK_STATUS.search(note)
         if st and st.group(1).strip().lower() in TERMINAL:
+            if keep_waiting and AGENT_WAITING_TEXT and AGENT_WAITING_TEXT in note:
+                continue
             if tid:
                 ids.append(tid.group(1).strip())
             else:
                 ids += RESTART_TASK.findall(note)
+    return ids
+
+
+def waiting_ids(text):
+    """The ids of the agents whose terminal notice in text carries the waiting text (see closed_by_notice)."""
+    if not (TASK_NOTIFICATION_TAG and AGENT_WAITING_TEXT) or AGENT_WAITING_TEXT not in text:
+        return []
+    ids = []
+    for note in text.split(TASK_NOTIFICATION_TAG)[1:]:
+        tid, st = TASK_ID.search(note), TASK_STATUS.search(note)
+        if tid and st and st.group(1).strip().lower() in TERMINAL and AGENT_WAITING_TEXT in note:
+            ids.append(tid.group(1).strip())
     return ids
 
 
@@ -903,6 +948,8 @@ CI_VERDICT = re.compile(r"^CI (?:finished )?(green|red|cancelled|unknown|none) o
 CI_KEYS = (b"ready", b"pull_request", b"merge", b"send_later", b"create_trigger", b"CronCreate",
            b"ScheduleWakeup", b"CI ", b"close", b'"is_error":true', b'"is_error": true')
 CI_CHECKIN_TOOLS = ("send_later", "create_trigger", "CronCreate", "ScheduleWakeup")
+# The bytes that mark a line as a possible check-in call or an error result, for scan_jobs's keep_waiting read.
+CHECKIN_KEYS = tuple(t.encode() for t in CI_CHECKIN_TOOLS) + (b'"is_error":true', b'"is_error": true')
 CI_SEGMENT = re.compile(r"[;&|\n]+")
 PR_NUMBER = re.compile(r"[0-9]+\Z")
 PR_URL = re.compile(r"/pull/([0-9]+)")
@@ -1003,7 +1050,7 @@ def refused_result(block):
 
 
 def ci_events(rec):
-    """The CI-wait events one transcript record holds, in order: ('ready', pr, call id), ('checkin', call id),
+    """The CI-wait events one transcript record holds, in order: ('ready', pr, call id), ('checkin', call id, input text),
     ('failed', call id, refused), ('merge', pr), ('mergeany',), ('verdict', word). A user or queued message holds a
     verdict line; only an assistant call holds the rest. A tool result is no message, so a verdict it prints
     is not one, but its error flag voids the check-in it answers. refused is true when the error text is a
@@ -1032,7 +1079,7 @@ def ci_events(rec):
         name, inp = str(b.get("name")), b["input"]
         tool = name.rsplit("__", 1)[-1]
         if tool in CI_CHECKIN_TOOLS:
-            events.append(("checkin", b.get("id")))
+            events.append(("checkin", b.get("id"), json.dumps(inp, ensure_ascii=False)))
         elif tool == "merge_pull_request":
             if inp.get("pullNumber"):
                 events.append(("merge", str(inp["pullNumber"])))
@@ -1113,6 +1160,17 @@ TRANSCRIPT_AGENT_ID = re.compile(r"[\w-]+\Z")  # an id safe to put in a transcri
 TAIL_BYTES = 64 * 1024  # the first read of an agent transcript's end; it doubles to hold the last record
 TAIL_MAX = 32 * 1024 * 1024
 AGENT_REMEDY = "Stop it, then resume it by name, or send a fresh reviewer the prior report."
+AGENT_CHECKIN_REMEDY = ("A background agent that runs this long needs one check-in (decision stall-watch). For each, set one "
+                        "one-time send_later check-in, at most 30 minutes ahead, whose text names its agent id, then stop. "
+                        "At the check-in, read the last records of its transcript, then stop it or tell the owner.")
+
+
+def checked_in(agent, crossed, sent):
+    """True when a check-in made at or after crossed (epoch seconds) names the agent id as a whole token.
+    sent is the (time, input text) pairs of scan_jobs's keep_waiting read. A check-in with no readable
+    time never counts: it may be older than the crossing."""
+    pat = re.compile(r"(?<![\w-])%s(?![\w-])" % re.escape(agent))
+    return any(when is not None and when >= crossed and pat.search(text) for when, text in sent)
 
 
 def agent_transcripts(session, agent, output):
@@ -1184,13 +1242,18 @@ def stop():
         now = float(os.environ.get("STALL_WATCH_NOW") or time.time())
         quiet = float(os.environ.get("STALL_WATCH_QUIET") or DEFAULT_QUIET)
         base = os.environ.get("STALL_WATCH_OUTPUT_BASE")
-        rows, quiet_shells = [], {}  # quiet_shells: row index -> the output file of that shell job
-        open_jobs, prev_stop = scan_jobs(call["transcript_path"])
-        for job, (path, note, (named, cwd, unresolved), began, agent, pause) in open_jobs.items():
+        long_age = float(os.environ.get("STALL_WATCH_LONG") or AGENT_LONG)
+        rows, quiet_shells, long_rows = [], {}, []  # quiet_shells: row index -> the output file of that shell job
+        open_jobs, prev_stop = scan_jobs(call["transcript_path"], keep_waiting=True)
+        for job, (path, note, (named, cwd, unresolved), began, agent, pause, desc, sent, waiting) in open_jobs.items():
             until = " | until: " + note if note else ""
             real = path
             if path and base:
                 real = os.path.join(base, re.split(r"[\\/]", path)[-1])
+            if agent and began is not None and now - began >= long_age and not checked_in(job, began + long_age, sent):
+                long_rows.append('Agent "%s" (%s) has run %d min and has not finished%s.' % (
+                    desc or "no description", job, (now - began) // 60,
+                    "; it " + AGENT_WAITING_TEXT if waiting and AGENT_WAITING_TEXT else ""))
             st = None
             for real in (agent_transcripts(call["transcript_path"], job, real) if agent else [real]):
                 try:
@@ -1207,7 +1270,7 @@ def stop():
                 continue
             idle = now - st.st_mtime
             if agent:  # a transcript has no named logs; one long tool call is not a stall
-                if idle >= quiet and not (prev_stop is not None and now - idle + quiet <= prev_stop):
+                if not waiting and idle >= quiet and not (prev_stop is not None and now - idle + quiet <= prev_stop):
                     try:
                         busy = open_call(real, st.st_size)
                     except OSError:
@@ -1228,6 +1291,10 @@ def stop():
                 miss = " (named log not watched, its directory is unknown: %s)" % ", ".join(unwatched) if unwatched else ""
                 quiet_shells[len(rows)] = real
                 rows.append("%s: no output for %ds: %s%s%s" % (job, idle, path, until, miss))
+        if long_rows:
+            reason = " ".join(long_rows) + " " + AGENT_CHECKIN_REMEDY
+            out["decision"] = "block"
+            out["reason"] = (out["reason"] + " " + reason) if "reason" in out else reason
         busy = busy_outputs(list(quiet_shells.values()))  # a job whose process tree burns CPU is not quiet
         rows = [r for i, r in enumerate(rows) if quiet_shells.get(i) not in busy]
         if rows:
