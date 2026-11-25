@@ -421,9 +421,11 @@ EXPORT_IF = "needs.scope.outputs.shoot == 'true'"
 WAITING_PAGE_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs skills/waiting-page/tests/test_check_designs.mjs'
 WAITING_PAGE_JOB = "checks-waiting-page"
 ROADMAP_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/roadmap/tests/page.test.mjs'
+# The opt-in fixtureless family runs the guard runner in its own job, on the guard flag as the checks-guard shards are.
+FIXTURELESS_JOB = "checks-fixtureless"
 # The scope flag each job skips on when the flag is not its own name.
 FLAG_OF = {GUARD_JOB: "guard", MUTATE_JOB: "guard", SHOOT_JOB: "shoot", "checks-macos-b": "checks_macos",
-           **{name: "checks_guard" for name in LINUX_GUARD_JOBS[1:]}}
+           **{name: "checks_guard" for name in LINUX_GUARD_JOBS[1:]}, FIXTURELESS_JOB: "checks_guard"}
 FLAG_OF[WAITING_PAGE_JOB] = "shoot"
 FLAG_OF.update({name: "guard" for name in MUTATE_JOBS})
 # The lint jobs run on every PR with no scope condition: the Linux jobs, read from their one home CHECKS_SUITE_JOBS.
@@ -1369,22 +1371,37 @@ LINUX_GUARD = "python3 hooks/test_guard.py"
 LINUX_GUARD_IF = "needs.scope.outputs.checks_guard == 'true'"
 LINUX_GUARD_ENV = {"NODE_PATH": "${{ github.workspace }}/.github/shoot/node_modules", "GUARD_CHROMIUM": '"1"'}
 PLAYWRIGHT_USES = "$/actions/playwright-setup"
+# The fixtureless family's one job sets this variable on its guard step, and no shard does.
+FAMILY_VAR = "GUARD_FAMILY"
+FAMILY_VALUE = "fixtureless"
+
+
+def linux_guard_family_jobs(text):
+    """The jobs with a step whose env sets GUARD_FAMILY. The Linux split counts the one such job beside the shards."""
+    return sorted(n for n, j in all_jobs(text).items() if any(FAMILY_VAR in (st.get("env") or {}) for st in j["steps"]))
 
 
 def linux_guard_split_problems(text):
-    """The Linux guard split: the guard suite runs in exactly the LINUX_GUARD_SHARD jobs, one shard each, and in no other Linux
-    job. Each shard step is pinned by pin_problems. A job-level GUARD_SHARD reaches every step of its job, so job_env_problems
-    flags it; a workflow-level one is hardening_problems' to flag."""
-    problems = job_env_problems(text, tuple(LINUX_GUARD_SHARD))
+    """The Linux guard split: the guard suite runs in exactly the LINUX_GUARD_SHARD jobs, one shard each, plus the one job that sets
+    GUARD_FAMILY=fixtureless, and in no other Linux job. Each shard step is pinned by pin_problems, and so is the family step, with
+    the family value in place of a shard value. A job-level GUARD_SHARD reaches every step of its job, so job_env_problems flags it;
+    a workflow-level one is hardening_problems' to flag."""
+    family = linux_guard_family_jobs(text)
+    problems = job_env_problems(text, tuple(LINUX_GUARD_SHARD) + tuple(family))
     linux = [n for n, j in all_jobs(text).items() if (j["os"] or "").startswith("ubuntu")]
     homes = split_homes(text, linux, LINUX_GUARD)
     names = sorted(job for job, _ in homes)
-    if names != sorted(LINUX_GUARD_SHARD):
-        problems.append(f"{LINUX_GUARD!r} runs in {names}, want one shard in each of {sorted(LINUX_GUARD_SHARD)}")
+    if len(family) != 1:
+        problems.append(f"{FAMILY_VAR} is set in {family}, want one job: the fixtureless family")
+    want = sorted(list(LINUX_GUARD_SHARD) + family)
+    if names != want:
+        problems.append(f"{LINUX_GUARD!r} runs in {names}, want one shard in each of {sorted(LINUX_GUARD_SHARD)} and the family job {family}")
     for job, st in homes:
         if job in LINUX_GUARD_SHARD:
             problems += pin_problems(job, st, LINUX_GUARD, LINUX_GUARD_IF, None,
                                      {**LINUX_GUARD_ENV, "GUARD_SHARD": LINUX_GUARD_SHARD[job]})
+        elif job in family:
+            problems += pin_problems(job, st, LINUX_GUARD, LINUX_GUARD_IF, None, {**LINUX_GUARD_ENV, FAMILY_VAR: FAMILY_VALUE})
     return problems
 
 
@@ -1935,13 +1952,21 @@ def linux_guard_shard(value, if_=LINUX_GUARD_IF, shell=None, env=None):
     return (LINUX_GUARD, if_, shell, {**LINUX_GUARD_ENV, "GUARD_SHARD": value, **(env or {})})
 
 
-def linux_guard_doc(a=None, b=None, extra=None):
+def linux_guard_family_step():
+    """The fixtureless family's guard step for split_doc: the suite with GUARD_FAMILY=fixtureless and no shard value."""
+    return (LINUX_GUARD, LINUX_GUARD_IF, None, {**LINUX_GUARD_ENV, FAMILY_VAR: FAMILY_VALUE})
+
+
+def linux_guard_doc(a=None, b=None, extra=None, family=True):
     """checks.yml text for the planned Linux guard split: every LINUX_GUARD_JOBS shard runs its GUARD_SHARD value from
-    LINUX_GUARD_SHARD. The step lists a and b replace checks-guard's and checks-guard-2's steps, and extra jobs are added as given."""
+    LINUX_GUARD_SHARD, and the family job (FIXTURELESS_JOB) runs the family step unless family is False. The step lists a and b
+    replace checks-guard's and checks-guard-2's steps, and extra jobs are added as given."""
     jobs = {name: ("ubuntu-latest", [linux_guard_shard(LINUX_GUARD_SHARD[name])]) for name in LINUX_GUARD_JOBS}
     jobs["checks-guard"] = ("ubuntu-latest", [linux_guard_shard(LINUX_GUARD_SHARD["checks-guard"])] if a is None else a)
     if b is not None:
         jobs["checks-guard-2"] = ("ubuntu-latest", b)
+    if family:
+        jobs[FIXTURELESS_JOB] = ("ubuntu-latest", [linux_guard_family_step()])
     return split_doc({**jobs, **(extra or {})})
 
 
@@ -2137,9 +2162,11 @@ class SplitJobs(unittest.TestCase):
                 self.assertTrue([p for p in check(text) if "check_unknown_reads_contract" in p], label)
 
     def test_the_linux_guard_runs_in_its_counted_shard_jobs(self):
-        # Named failure: the guard suite runs in one Linux job, or in more or fewer than LINUX_GUARD_JOBS, or in neither, so its cases
-        # do not each run once.
+        # The guard runner's homes are the counted shard jobs plus the one job that sets GUARD_FAMILY=fixtureless (the fixtureless
+        # family). Named failure: the guard suite runs in one Linux job, in a shard missing, in a sixth job, in a second
+        # family job, or in neither, so its cases do not each run once.
         self.assertEqual(linux_guard_split_problems(self.text), [], PUSH_RULING)
+        self.assertEqual(linux_guard_family_jobs(self.text), [FIXTURELESS_JOB], "want one family job, the fixtureless one")
 
     def test_the_linux_guard_shards_install_playwright(self):
         # Named failure: a guard shard job has no Playwright install, so the guard's checker has no browser to render with.
@@ -2153,8 +2180,12 @@ class SplitJobs(unittest.TestCase):
             "the second shard missing": split_doc({"checks-guard": ("ubuntu-latest", [linux_guard_shard(first)])}),
             "the second shard's value dropped": linux_guard_doc(b=[(LINUX_GUARD, LINUX_GUARD_IF, None, dict(LINUX_GUARD_ENV))]),
             "both shards carry the first value": linux_guard_doc(b=[linux_guard_shard(first)]),
-            "a fifth Linux job runs the guard": linux_guard_doc(
+            "a sixth Linux job runs the guard": linux_guard_doc(
                 extra={f"checks-guard-{len(LINUX_GUARD_JOBS) + 1}": ("ubuntu-latest", [linux_guard_shard(first)])}),
+            "the family job removed": linux_guard_doc(family=False),
+            "a second family job": linux_guard_doc(extra={"checks-fixtureless-2": ("ubuntu-latest", [linux_guard_family_step()])}),
+            "the family job's if changed": linux_guard_doc(extra={FIXTURELESS_JOB: ("ubuntu-latest", [(
+                LINUX_GUARD, "needs.scope.outputs.checks_macos == 'true'", None, {**LINUX_GUARD_ENV, FAMILY_VAR: FAMILY_VALUE})])}),
             "the guard in neither shard job": linux_guard_doc(a=[], b=[]),
             "no job at all": "jobs:\n",
             "GUARD_SHARD in a job's env": linux_guard_doc().replace(
