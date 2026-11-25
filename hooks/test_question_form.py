@@ -90,6 +90,7 @@ import route_match  # noqa: E402  the rows-file reader; the task-why cases count
 import test_refusal_note as hook_base  # noqa: E402  the route-row fixture (one home), with its own run folder
 atexit.register(shutil.rmtree, hook_base.RUN, ignore_errors=True)  # that folder is not this module's, so it goes here
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
+from shared_names import SETTINGS_REPO  # noqa: E402  the one home of the settings repo's name (hooks/shared_names.py)
 
 try:
     import question_form
@@ -4014,6 +4015,20 @@ def case_widens_reason_no_longer_leaves_recommended_out():
           "does not widen" in flat.lower(), flat)
 
 
+def case_widens_reasons_name_the_settings_repo_as_other_than_widening():
+    # The settings repo is the shared tool's home: a change that names only it is not widening. Each refusal reason
+    # says so: a repo's differing form widens the tool only for a repo other than the settings repo.
+    for name in ("WIDENS_REASON", "CHAT_WIDENS_REASON"):
+        text = getattr(question_form, name, None)
+        if text is None:
+            check("widens reasons: question_form.%s is there" % name, False, MISSING)
+            continue
+        flat = re.sub(r"\s+", " ", text).lower()
+        missing = [word for word in ("other than", SETTINGS_REPO.lower()) if word not in flat]
+        check("widens reasons: question_form.%s holds 'other than' and the settings repo value" % name,
+              not missing, "missing words: %s" % ", ".join(repr(word) for word in missing))
+
+
 def main():
     for case in (case_recommend_base_passes, case_recommend_missing_or_unknown_is_refused,
                  case_legacy_pick_is_the_recommendation, case_why_is_required, case_waiting_on_line_is_required,
@@ -4024,6 +4039,7 @@ def main():
                  case_recommended_list_is_the_multi_form, case_recommend_exemptions_pass,
                  case_recommend_applies_to_a_port_and_a_set_without_kind, case_five_real_forms,
                  case_five_real_forms_as_written, case_widens_reason_no_longer_leaves_recommended_out,
+                 case_widens_reasons_name_the_settings_repo_as_other_than_widening,
                  case_item_92, case_item_51_stray_field, case_item_n_text_is_refused,
                  case_item_n_other_non_numbers_are_refused, case_item_n_number_passes, case_item_n_absent,
                  case_item_n_batch_and_file_path, case_item_n_posted_text_names_the_item,

@@ -39,6 +39,8 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "lint"))
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
+sys.path.insert(0, HERE)
+from shared_names import SETTINGS_REPO  # noqa: E402  the one home of the settings repo's name (hooks/shared_names.py)
 
 MODULE_PATH = os.environ.get("REPLY_JUDGE_UNDER_TEST") or os.path.join(HERE, "reply_judge.py")
 SETTINGS_PATH = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(REPO_ROOT, "settings.json")
@@ -1397,6 +1399,27 @@ def case_prompt_says_widening_is_a_form_that_passes_one_repos_variant():
           sentences)
 
 
+# The settings repo is the shared tool's home, so a change that names only it is never widening. One sentence of the
+# prompt's rule says so with the repo's name, and the sentence that defines widening names the repo as the one other
+# than which a repo's differing form passes.
+def case_prompt_never_flags_a_change_that_names_only_the_settings_repo():
+    run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
+    sentences = rule_sentences(run, WIDENS_ASK)
+    check("prompt: one sentence holds the settings repo value and a never-flag word ('never flag' or 'not widen')",
+          has_pin(sentences, ("never flag", "not widen"), (SETTINGS_REPO.lower(),)),
+          "missing words in one sentence: 'never flag' or 'not widen', with %r; rule sentences: %s"
+          % (SETTINGS_REPO.lower(), sentences))
+
+
+def case_prompt_defines_widening_as_other_than_the_settings_repo():
+    run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
+    sentences = rule_sentences(run, WIDENS_ASK)
+    check("prompt: the sentence defining widening holds 'other than' and the settings repo value",
+          has_pin(sentences, ("widen",), ("other than",), (SETTINGS_REPO.lower(),)),
+          "missing words in one sentence: 'widen', 'other than', with %r; rule sentences: %s"
+          % (SETTINGS_REPO.lower(), sentences))
+
+
 # Roadmap c135, item 31's shape: options that can all be done together, asked as pick-one. The prompt
 # flags it and says to ask it as a multi-select item (`multi: true`). Options that exclude each other,
 # such as now or later, stay a pick-one question.
@@ -2526,6 +2549,8 @@ CASES = (
     case_prompt_flags_a_recommended_option_that_widens,
     case_prompt_spares_a_tool_wide_change_with_no_repo_named,
     case_prompt_says_widening_is_a_form_that_passes_one_repos_variant,
+    case_prompt_never_flags_a_change_that_names_only_the_settings_repo,
+    case_prompt_defines_widening_as_other_than_the_settings_repo,
     case_widens_finding_logs_its_rule,
     case_prompt_flags_a_pick_one_question_whose_options_could_combine,
     case_route_cite_carries_cited_same_act_and_alternate_rows,
