@@ -2079,6 +2079,22 @@ class ReadyPassLine(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         self.assertEqual(lines[1:], [self.LONG], "a kept line well inside a chunk does not print whole: %r" % (lines[1:],))
 
+    def test_a_fail_keeps_the_ready_pass_line_of_a_run_that_exits_1(self):
+        """A passing `merge N --ready` run can print its ready-pass line and then exit 1. In merge/merge.py, draft_step on the default
+        branch runs the ready checks (run_ready_checks, about line 5489, prints the pass line), then raises Stop(READY_CLAIM_STOP_FMT)
+        when the head holds a Record-claim commit (about line 5681). That stop's remedy says to mark the pull request ready by hand and
+        run --confirm. main catches every Stop and returns 1 (about line 8652). hooks/guard_merge.py _ready_pass_shas (about line 2345)
+        reads the pass line from a bare run's result text and never reads its exit code, so the guard accepts the line and allows the
+        ready mark. Under verdict this run reads FAIL, so verdict keeps the line beside its FAIL output, as it does beside a PASS."""
+        r = run(fifty_lines_with(self.READY) + "import sys\nprint('FAIL boom')\nsys.exit(1)\n")
+        lines = r.stdout.splitlines()
+        self.assertEqual(r.returncode, 1)
+        self.assertTrue(lines and lines[0].startswith("FAIL ") and " rc=1 " in lines[0],
+                        "a run that exits 1 does not lead with its FAIL line: %r" % r.stdout)
+        self.assertIn("FAIL boom", lines, "a FAIL drops its normal excerpt: %r" % r.stdout)
+        self.assertEqual(lines.count(self.READY), 1, "a FAIL drops the merge tool's ready-pass line, so the ready mark the stop names is "
+                         "refused, though a bare run allows it: %r" % r.stdout)
+
     def test_kept_forms_are_fixed_prefixes_of_both_merge_formats(self):
         kept = getattr(load_verdict_module(), "READY_PASS_KEPT", None)
         self.assertIsNotNone(kept, "bin/verdict holds no READY_PASS_KEPT constant, so no ready-pass line is kept")
