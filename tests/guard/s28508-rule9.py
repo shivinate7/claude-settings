@@ -830,9 +830,9 @@ add("brief-destructive-git: known limit, a sentence saying a guard asks for a re
     BRIEF_DESTRUCTIVE, tool="Agent",
     prompt="The shell guard asks for `git reset --hard origin/main` before the lane starts.",
     subagent_type="builder", model="sonnet")
-# The own-negator check reads one negator and then skips the whole span, so a joiner inside the span lets an order through.
-# The "-free" check skips the span whatever it holds. Each deny below is an order the rule must refuse. Each control is a
-# shape the rule must keep allowing, in its whole-shape form.
+# The own-negator check skips a span only when it is a negator and a list of git commands, so a joiner and an order after
+# the negator still refuse. The "-free" check skips only a span of git and one subcommand. Each deny below is an order the
+# rule must refuse. Each control is a shape the rule must keep allowing, in its whole-shape form.
 add("brief-destructive-git: a forbidding span joined to a reset order by then is denied", "deny",
     BRIEF_DESTRUCTIVE, tool="Agent", prompt="Never run `git stash then run git reset --hard origin/main`.",
     subagent_type="builder", model="sonnet")
@@ -921,7 +921,8 @@ add("brief-destructive-git: Without a span, a colon, then a reset span is denied
 add("brief-destructive-git: control, plain no rebase and no force words with no span are allowed", "allow", tool="Agent",
     prompt="Do the check with no rebase, no force, then report.", subagent_type="builder", model="sonnet")
 # Pins for three forms the brief scan must refuse: a negator inside a span that joins a reset order, a span after "you ran",
-# and a span after "ran" inside a longer phrase. A mutant row in hooks/mutate_guard.py kills each one.
+# and a span after "ran" inside a longer phrase. The own-negator pin has a mutant row in hooks/mutate_guard.py; the other
+# two have none.
 add("brief-destructive-git: a span that opens with Never run, then a joiner and a reset order, is denied", "deny",
     BRIEF_DESTRUCTIVE, tool="Agent", prompt="`Never run git stash then run git reset --hard origin/main`",
     subagent_type="builder", model="sonnet")
