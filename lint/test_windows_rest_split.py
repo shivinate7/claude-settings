@@ -224,7 +224,7 @@ class MergeAndRestScopeFlags(unittest.TestCase):
     # The Nov 24 cut (owner, 21:19 CST Nov 24 2026): a ready pull_request starts no daily-only shard (checks-windows-merge-2 to -10), so its
     # flag alone runs nothing there. The base job's full shard-1 step is off on a ready pull_request, and its Windows slice runs with the
     # flag alone. Named failure: a daily-only shard or a full Windows step runs on a ready pull_request with only its flag set.
-    def test_with_its_flag_alone_true_a_ready_pull_request_runs_each_suite_step_it_gates(self):
+    def test_with_its_flag_alone_true_a_ready_pull_request_runs_the_slice_and_no_shard(self):
         for name, flag in SUITE_FLAG.items():
             self.assertIn(name, self.jobs, f"{name} is not a job in checks.yml, so its flag gates nothing")
             job = self.jobs[name]
