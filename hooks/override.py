@@ -346,7 +346,7 @@ def _file_role(roles):
 
 
 def _transcript_module():
-    """lint/_transcript.py, imported on demand: the one home of what a transcript record and an app note are."""
+    """lint/_transcript.py, imported on demand: the one home of what a transcript record and an app block are."""
     from guard_core import lint_dir  # lazy: the one home of where lint/ is
     lint = lint_dir()
     if lint not in sys.path:
@@ -357,12 +357,12 @@ def _transcript_module():
 
 def _text_of(rec):
     """The owner text of one transcript record (lint/_transcript.py owner_text), or None. The text is what follows the
-    app notes at its start (_typed), the same words _typed gives for the prompt that the record holds."""
+    app blocks at its start (_typed), the same words _typed gives for the prompt that the record holds."""
     return _transcript_module().owner_text(rec, NOTICE_TAGS, app_notes=FIRED_TASK)
 
 
 def _typed(prompt):
-    """The prompt less the app notes at its start (lint/_transcript.py strip_app_notes): the desktop app puts a note ahead
+    """The prompt less the app blocks at its start (lint/_transcript.py strip_app_notes): the desktop app puts a block ahead
     of the owner's typed words, and those words are the owner's as if the note were absent. A fired task's block stays.
     The prompt as given when it is no string or the helper cannot load: a plain `override 15m` still grants."""
     if not isinstance(prompt, str):
@@ -609,12 +609,13 @@ def grant(session_id, prompt, at, defer=True, transcript=None, source=None):
     counts (_keyword_line) when the first-word form of the prompt grants nothing, and only for an owner-typed prompt:
     the plain asks' gates (_owner_ask) refuse a notice, a fired task, an agent's `source`, and in a cloud session the
     seed brief, which its coordinator wrote. Only the line route reads the transcript."""
-    got = _grant_first_word(session_id, _typed(prompt), at, defer)
+    typed = _typed(prompt)
+    got = _grant_first_word(session_id, typed, at, defer)
     if got is None:
-        line = _keyword_line(prompt)
-        if line is not None and line != (prompt.strip() if isinstance(prompt, str) else None):
+        line = _keyword_line(typed)
+        if line is not None and line != (typed.strip() if isinstance(typed, str) else None):
             try:
-                gated = _owner_ask(prompt, source, transcript, lambda text: True)
+                gated = _owner_ask(typed, source, transcript, lambda text: True)
             except Exception as exc:  # a gate that cannot run grants nothing
                 print("override: prose line grants nothing: %s" % " ".join(str(exc).split()), file=sys.stderr)
                 return None

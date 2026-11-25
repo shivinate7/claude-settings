@@ -64,16 +64,18 @@ def is_incoming(rec):
     return False
 
 
-# One app note: a whole <system-reminder> block (no opener inside it) that a blank line closes. The desktop app puts its
-# linked-sessions note ahead of the owner's typed words this way. An unclosed block, or one with no blank line after it,
-# is not one.
-APP_NOTE = re.compile(r"\s*<system-reminder>(?:(?!<system-reminder>).)*?</system-reminder>[ \t]*(?:\r?\n[ \t]*){2,}", re.S)
+# One app block: a whole <system-reminder> block (no opener inside it) that a blank line closes, or that one newline
+# separates from the next block that opens right after it. The desktop app puts its linked-sessions block ahead of the
+# owner's typed words this way, and may chain a second block after one newline. An unclosed block, or one that nothing
+# separates from other text, is not one.
+APP_NOTE = re.compile(r"\s*<system-reminder>(?:(?!<system-reminder>).)*?</system-reminder>[ \t]*"
+                      r"(?:(?:\r?\n[ \t]*){2,}|\r?\n[ \t]*(?=<system-reminder>))", re.S)
 
 
 def strip_app_notes(text, keep=None):
-    """`text` without the app notes (APP_NOTE) at its start, so what is left is the words the owner typed after them; ""
-    when nothing is left. A note that the compiled regex `keep` matches at its start is a task's, not the app's, and
-    stays with everything after it. Other frames (a peer message, a relay frame, a task notice) are never stripped."""
+    """`text` without the app blocks (APP_NOTE) at its start, chained or not, so what is left is the words the owner
+    typed after them; "" when nothing is left. A block that the compiled regex `keep` matches at its start is a task's,
+    not the app's, and stays with everything after it. Other frames (a peer message, a relay frame, a task notice) are never stripped."""
     while True:
         note = APP_NOTE.match(text)
         if note is None or (keep is not None and keep.match(text.lstrip())):
@@ -88,7 +90,7 @@ def owner_text(rec, notice_tags=(), app_notes=None):
     (an owner message typed while the session runs; its text is attachment.prompt) with no peer
     origin. Text that starts with one of `notice_tags` (shared_names.MACHINE_TAGS) is a machine
     notice, never the owner's: the notice queued while a task runs is a queued_command too.
-    A caller that passes `app_notes`, a compiled regex, reads the text after the app notes at its start (strip_app_notes,
+    A caller that passes `app_notes`, a compiled regex, reads the text after the app blocks at its start (strip_app_notes,
     which `app_notes` guards); a record that holds nothing else is no owner message.
     """
     if rec.get("type") == "user":
