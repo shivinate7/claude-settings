@@ -9,6 +9,9 @@ Run from the repository root:
 
     python3 hooks/test_checks_never_raise.py
 
+`--exit-cases` runs only the exit cases of main() and the PATH check of sweep_proof, with the self-test, the sweep
+proof, the fuzz, the fixture proof and the annotation proof stubbed (EXIT_STUBS). The PATH check stubs only the sweep itself.
+
 Standard library only. The checks are read from the dispatch in hooks/guard.py: each call that
 `judge_shell` and `judge` make, and each hook-module function that those callees call through an
 attribute (`question_form.page_item_hit`, for one). A call that resolves to no hook function fails
@@ -133,6 +136,7 @@ with open(EXTRAS, "w", encoding="utf-8") as handle:
 with open(TRANSCRIPT, "w", encoding="utf-8") as handle:
     handle.write('{"type": "user", "message": {"role": "user", "content": "hello"}}\n')
 open(EMPTY_TRANSCRIPT, "w", encoding="utf-8").close()
+HOST_PATH = os.environ["PATH"]   # sweep_proof runs the sweep on it; the fuzz runs on NO_TOOLS
 os.environ["CLAUDE_CONFIG_DIR"] = CONFIG
 os.environ["PATH"] = NO_TOOLS
 os.environ[ROOT_ENV] = ROOT_PID
@@ -535,7 +539,14 @@ def sweep_proof():
         os.makedirs(folder)
     os.utime(old, (now - 2 * 24 * 60 * 60, now - 2 * 24 * 60 * 60))
     os.utime(new, (now, now))
-    _test_temp.sweep(temp_root, own, now=now)
+    # held() asks lsof, which is on the host PATH, whether a live process holds a folder. Under the empty PATH it reads
+    # "held" and keeps the old sibling, so only this sweep runs on the host PATH.
+    before = os.environ["PATH"]
+    os.environ["PATH"] = HOST_PATH
+    try:
+        _test_temp.sweep(temp_root, own, now=now)
+    finally:
+        os.environ["PATH"] = before
     ok = not os.path.exists(old) and os.path.exists(new) and os.path.exists(own)
     print("sweep: %s (an old sibling %s, a new sibling %s, the own folder %s)"
           % ("ok" if ok else "FAILED", "removed" if not os.path.exists(old) else "KEPT",
@@ -962,12 +973,109 @@ def quoted_data_property():
     print("quoted-data: %d seeded draws and %d scope checks, %d failing rows" % (QUOTED_COUNT, 2 * len(QUOTED_REFUSE), failing))
     return failing
 
+EXIT_STUBS = ("self_test", "sweep_proof", "run_checks", "quoted_data_property", "fixture_proof", "annotation_proof")
+# (case, the self-test passes, the sweep passes, sweep reached, fuzz runs, the fuzz reports a failing row, exit code):
+# the exit of main(), one row each
+EXIT_CASES = (
+    ("a failed self-test stops the run", False, True, False, False, False, 1),
+    ("a failed sweep is counted and the fuzz still runs", True, False, True, True, False, 1),
+    ("a clean self-test and sweep run the fuzz and exit 0", True, True, True, True, False, 0),
+    ("a failing fuzz row is counted and the run exits 1", True, True, True, True, True, 1),
+)
+
+
+class _SweepRaises(Exception):
+    """The error the sweep stub raises, so path_restore_proof catches that error and no other."""
+
+
+def path_restore_proof():
+    """Return the problems of sweep_proof's PATH restore: PATH must be NO_TOOLS after the sweep returns and after it raises.
+
+    The sweep itself is stubbed, since the real one asks lsof which folders are held. sweep_proof runs its sweep on
+    HOST_PATH, so each stub call must see HOST_PATH, and the stub is called once per case.
+    """
+    problems = []
+    seen = []
+
+    def sweep_returns(temp_root, own, now=None):
+        seen.append(os.environ["PATH"])
+
+    def sweep_raises(temp_root, own, now=None):
+        seen.append(os.environ["PATH"])
+        raise _SweepRaises()
+
+    real_sweep = _test_temp.sweep
+    try:
+        for label, stub in (("the sweep returns", sweep_returns), ("the sweep raises", sweep_raises)):
+            del seen[:]
+            _test_temp.sweep = stub
+            os.environ["PATH"] = NO_TOOLS
+            shutil.rmtree(os.path.join(RUN, "sweep"), ignore_errors=True)   # sweep_proof makes its folders; a stub keeps them
+            with contextlib.redirect_stdout(io.StringIO()):
+                try:
+                    sweep_proof()
+                except _SweepRaises:
+                    pass
+            if len(seen) != 1 or seen[0] != HOST_PATH:
+                problems.append("%s: the sweep was not called once, on the host PATH (%d calls)" % (label, len(seen)))
+            if os.environ["PATH"] != NO_TOOLS:
+                problems.append("%s: PATH is not the empty-tools PATH after sweep_proof returns" % label)
+    finally:
+        _test_temp.sweep = real_sweep
+        os.environ["PATH"] = NO_TOOLS
+        shutil.rmtree(RUN, ignore_errors=True)   # the run folder ends here, as main() ends it
+    return problems
+
+
+def exit_proof():
+    """True when each EXIT_CASES row holds and sweep_proof restores PATH, with the self-test, the sweep proof, the fuzz and
+    the fixture and annotation proofs stubbed (EXIT_STUBS).
+
+    The fixture and annotation proofs read the run folder, which main() removes when it ends, so they are stubbed too.
+    A row's fuzz stub returns one failing row when the row says so, so the exit code then depends on the self-test, the
+    sweep and the failing fuzz rows alone. A miss prints one FAIL line that names its cause.
+    """
+    failing = []
+    saved = {name: globals()[name] for name in EXIT_STUBS}
+    try:
+        for case, self_ok, sweep_ok, want_sweep, want_fuzz, fuzz_fails, want_rc in EXIT_CASES:
+            seen = {"sweep": 0, "fuzz": 0}
+
+            def sweep_stub():
+                seen["sweep"] += 1
+                return sweep_ok
+
+            def fuzz_stub(*args, **kwargs):
+                seen["fuzz"] += 1
+                failing_row = ("exit case", 1, 1, ["Bash"], ("exit case input", "Bash", "a failing row the exit case reports"))
+                return [failing_row] if fuzz_fails else []
+
+            globals().update(self_test=lambda: self_ok, sweep_proof=sweep_stub, run_checks=fuzz_stub,
+                             quoted_data_property=lambda: 0, fixture_proof=lambda: [], annotation_proof=lambda: [])
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc = main()
+            if (seen["sweep"] > 0) != want_sweep:
+                failing.append("%s: the sweep proof %s" % (case, "did not run" if want_sweep else "ran after a failed self-test"))
+            if (seen["fuzz"] > 0) != want_fuzz:
+                failing.append("%s: the fuzz %s" % (case, "did not run" if want_fuzz else "ran after a failed self-test"))
+            if rc != want_rc:
+                failing.append("%s: exit code %d, want %d" % (case, rc, want_rc))
+    finally:
+        globals().update(saved)
+    failing.extend("path restore: " + problem for problem in path_restore_proof())
+    for problem in failing:
+        print("FAIL exit: %s" % problem)
+    print("exit cases: %s (%d cases, the fuzz stubbed)" % ("FAILED" if failing else "ok", len(EXIT_CASES)))
+    return not failing
+
+
 def main():
     started = time.monotonic()
     try:
         with pinned_env(SHAPES[0][1]):
-            if not (self_test() and sweep_proof()):
-                return 1
+            if not self_test():
+                return 1   # a broken harness proves nothing, so the run stops here
+            sweep_ok = sweep_proof()   # a failed sweep is counted at the end; the fuzz still shows its rows
         problems = fixture_proof()
         for problem in problems:
             print("FAIL fixture: %s" % problem)   # the fuzz still runs, so each family's own rows show too
@@ -1019,10 +1127,14 @@ def main():
                  failing, elapsed))
         print("not fuzzed directly: %s" % ", ".join("%s.%s (%s)" % (key[0], key[1], why)
                                                   for key, why in sorted(outside.items())))
-        return 1 if failing or problems else 0
+        return 1 if failing or problems or not sweep_ok else 0
     finally:
         shutil.rmtree(RUN, ignore_errors=True)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    if "--exit-cases" in sys.argv[1:]:
+        sys.exit(0 if exit_proof() else 1)
+    code = main()   # the exit cases run after main(): main() removes the run folder that the real fixture proofs read
+    exit_ok = exit_proof()
+    sys.exit(code if exit_ok else 1)
