@@ -2171,11 +2171,29 @@ class Host:
         c, out = self.gh(["pr", "ready", str(n), "--undo", *self._repo_args()], self.cwd, idempotent=True)
         return (False, out) if c else (True, "")
 
+    def main_merge_of(self, base, head):
+        """-> the oid of the merge commit on `base` whose second parent is `head` (this run's merge landed), False when `base` holds none, None when the read failed.
+        A lost or refused merge reply with the pull request still OPEN may have landed (the Nov 25 2026 outage: HTTP 405 and 502, merge commit on main). The one home of that read.
+        Cost: one `git fetch` of `base`, then one `git rev-list` of its newest 50 first-parent merges, no gh call, once per call; never cached, since `base` moves. A failed fetch or read is None: unknown, never merged."""
+        root = self.cwd or "."
+        ref = f"refs/remotes/origin/{base}"
+        c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:{ref}")
+        if c:
+            return None
+        c, out = git(root, "rev-list", "--parents", "--merges", "--first-parent", "--max-count=50", ref)
+        if c:
+            return None
+        for line in out.splitlines():
+            oid, *parents = line.split()
+            if len(parents) > 1 and parents[1] == head:
+                return oid
+        return False
+
     def merge(self, n, method, sha):
         """`PUT pulls/<n>/merge` with `sha`, so GitHub refuses (409) a head that moved. `self.commit_message`, when set, is the merge commit's message. Never --admin, never --delete-branch (cut_branch does that).
         -> (merge commit oid or None, message). The reply is never trusted: after any reply the PR state is read.
-        MERGED at head `sha` is this run's merge. merge_commit_sha proves nothing alone: GitHub sets it on an open pull request too. MERGED at another head is not: Stop, no revert. An unreadable state,
-        or OPEN after a reply lost to the network, is a NetStop (no revert). Only a proven refusal returns None (revert)."""
+        MERGED at head `sha` is this run's merge. merge_commit_sha proves nothing alone: GitHub sets it on an open pull request too. MERGED at another head is not: Stop, no revert. OPEN with a merge commit on the base whose second parent is `sha` is this run's merge too (main_merge_of). An unreadable state,
+        or OPEN after a reply lost to the network, or OPEN with the base unread, is a NetStop (no revert). Only a proven refusal returns None (revert)."""
         say(f"merge: merging #{n} ...")  # the merge call can block
         # The old `gh pr merge` (no --admin) refused a BLOCKED or BEHIND pull request itself. The REST PUT does not: a token that may bypass branch
         # protection merges it. So read the pull request right before the PUT; blocked or behind is a proven refusal, and no PUT is sent. Clean, unstable and the rest go on.
@@ -2187,13 +2205,16 @@ class Host:
         if state_now == "BEHIND" or (state_now == "BLOCKED" and not self.pending_lifted):  # GitHub reads a pending required check as BLOCKED: that one cause goes on to the PUT, and GitHub refuses it or not
             return None, (f"#{n} reads {state_now}: its base rules are not met or its branch is behind the base {GRANT_CITE}. gh's merge refuses it the same way, so no merge call was sent."
                           + (" " + HEAL_BLOCKED if state_now == "BLOCKED" and self.required == "none" else ""))  # under none the tool read no protection, so the text names the cause itself
-        def merged_at_sha():  # a lost reply may still have merged: True when the PR reads merged at this run's head, False when it reads open, None when unread or merged elsewhere
+        def merged_at_sha():  # a lost reply may still have merged: True when the PR reads merged at this run's head or reads open while main holds its merge, False when it reads open and main does not, None when unread or merged elsewhere
             c4, v = self.api(f"pulls/{n}", memo=False)
             try:
                 d = json.loads(v) if not c4 else None
                 if d["merged"]:
                     return True if d["head"]["sha"] == sha else None  # merged at another head is not this run's merge: no resend
-                return False if d["state"].upper() == "OPEN" else None
+                if d["state"].upper() != "OPEN":
+                    return None
+                held = self.main_merge_of(taken, sha)  # the PR reads OPEN, yet the merge may sit on main: resend only when it does not
+                return None if held is None else bool(held)
             except (ValueError, KeyError, TypeError, AttributeError):
                 return None
         lost = False
@@ -2214,6 +2235,13 @@ class Host:
             if head == sha:
                 return oid, ""
             raise Stop(f"#{n} is merged at {str(head)[:9]}, not at the proven head {sha[:9]}: not this run's merge. Nothing was reverted {REFUSED_CITE}.\n{out}")
+        if state == "OPEN":
+            held = self.main_merge_of(taken, sha)
+            if held:
+                return held, ""  # main holds this head's merge though the pull request still reads OPEN: merged, no claim revert
+            if held is None:
+                raise NetStop(f"the merge call of #{n} did not merge it by the pull request's read, and main cannot be read to tell whether the merge landed. Nothing was reverted. Check {taken} for the merge of #{n}: "
+                              f"if it is there, do the after-merge steps by hand; if not, run again {REFUSED_CITE}.\n{out}")
         if lost:
             raise NetStop(f"network error on the merge call of #{n}, and the pull request is not merged. Nothing was reverted. Run again {REFUSED_CITE}.\n{out}")
         if not c:  # exit 0 and still OPEN: not a refusal (a queued merge, or a lagging read). The claim stays.
