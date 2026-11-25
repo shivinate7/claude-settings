@@ -13,6 +13,13 @@ GUARD_FAMILY=<name> runs only one family of cases (FAMILIES, at the top of this 
 name, or a filter that matches no case, fails the run. GUARD_TIMING=1 prints what each fixture
 block cost.
 
+Rule matching is exact. A deny or ask case passes only when the rule its reason prints (the text before the reason's
+first ": ") is the case's rule, and a deny or ask case that names no rule fails. GUARD_RULE_EXACT=report is the
+non-failing read: it fails no rule check, so a case whose rule does not match still passes or fails on its verdict
+alone. Both modes print a rule-mismatch line for each case whose printed rule is not its rule, a rule-unset line for each
+deny or ask case that names no rule, and a rule-total line. GUARD_RULE_EXACT=exact is the default; any other value
+stops the run before a case runs.
+
 GUARD_HEARTBEAT=<seconds> sets the quiet time after which the run prints a progress line to stderr,
 and appends it to STALL_WATCH_BEAT when that is set (default 60; a number above 0). A run that prints
 nothing for minutes is cut by the stall watch. A malformed value stops the run before a case runs.
@@ -215,6 +222,11 @@ if GUARD_FAMILY and GUARD_FAMILY not in FAMILIES:
 # An opt-in family runs only when GUARD_FAMILY names it. An unfiltered run and every shard skip it, with one SKIP row
 # that gives the command which runs it, so its minutes of checks are never paid by a run that did not ask for them.
 OPT_IN = {"fixtureless": "GUARD_FAMILY=fixtureless python3 hooks/test_guard.py"}
+# Unset or exact: a deny or ask case passes only when its printed rule (the text before the reason's first ": ") is its
+# rule, and a case with no rule fails. report: the same report lines print, and no rule check fails a case.
+RULE_EXACT_MODES = ("", "report", "exact")
+RULE_EXACT = os.environ.get("GUARD_RULE_EXACT", "")
+RULE_FAILS = RULE_EXACT != "report"
 
 
 # The progress beat (decision stall-watch: a quiet tool owes a line at least every 120 s). The quiet clock
@@ -661,12 +673,16 @@ NAME_NUMBER_LABEL = "sections: a section file named for another number than its 
 LATE_APPEND_LABEL = "sections: a log check appended after the join stops the run before any case"
 
 
-def section_child_run(folder):
-    """This runner, in a child process, on the section files of `folder`, under the family that builds no fixture.
+def section_child_run(folder, family="load-brake", extra_env=None):
+    """This runner, in a child process, on the section files of `folder`, under `family` (the family that builds no
+    fixture, unless a check names another) and with `extra_env` set on top of the runner's own environment.
     -> (rc, output), rc None when it does not end in 300 s. The child leads its own process group: a sleep that
     its import starts (OWNED) would hold a pipe open, so the output goes to a file, and the group ends with the child."""
     env = {k: v for k, v in os.environ.items() if not k.startswith(("GUARD_", "MUTATE_ONLY"))}
-    env.update(GUARD_FAMILY="load-brake", GUARD_SECTION_DIR=folder)
+    env.update(GUARD_SECTION_DIR=folder)
+    if family:
+        env["GUARD_FAMILY"] = family
+    env.update(extra_env or {})
     posix = os.name != "nt"
     log = os.path.join(folder, "child-output.txt")
     with open(log, "w", encoding="utf-8") as out:
@@ -783,6 +799,18 @@ LOG_RULE_FAMILY = (
     ("liveness: worktree_live_session answers None on an unreadable", "branch-worktree"),
     ("liveness: worktree_live_session matches two", "branch-worktree"),
     ("liveness: worktree_live_session answers None when", "branch-worktree"),
+    ("liveness: worktree_live_session answers False for a live record whose folder was removed",
+     "branch-worktree"),
+    ("liveness: worktree_live_session answers None for a record whose cwd sits under a removed folder",
+     "branch-worktree"),
+    ("liveness: worktree_live_session answers None for permission denied", "branch-worktree"),
+    ("liveness: worktree_live_session answers None for an absent target", "branch-worktree"),
+    ("liveness: worktree_live_session answers None for a removed record folder without",
+     "branch-worktree"),
+    ("liveness: worktree_live_session answers None for a record whose parent folder is also absent",
+     "branch-worktree"),
+    ("liveness: worktree_live_session answers False for a record whose parent folder exists",
+     "branch-worktree"),
     ("liveness: session_is_live reads an implied", "branch-worktree"),
     ("liveness: process_start_ms reads a repeated-hour start (01:30 CDT)", "kill"),
     ("liveness: process_start_ms reads a repeated-hour start (01:30 CST)", "kill"),
@@ -852,10 +880,39 @@ if _UNNAMED or _BAD_LOG:
 SKIP = "skip"
 
 
+def printed_rule(reason):
+    """The rule a printed reason leads with: the text before its first ": ", or "(none)" when it has no ": "."""
+    head, sep, _ = reason.partition(": ")
+    return " ".join(head.split()) if sep else "(none)"
+
+
+RULE_EXACT_SEEN = {"rule": 0, "mismatch": 0, "mismatch_right": 0, "unset": 0}
+
+
+def rule_exact_report(case, got, reason):
+    """GUARD_RULE_EXACT=report: one line for a case whose printed rule is not its wanted rule, and one for a deny or ask
+    case that names no rule. The verdict was decided before this runs, and it is not changed here."""
+    if case["rule"]:
+        RULE_EXACT_SEEN["rule"] += 1
+        printed = printed_rule(reason)
+        if printed != case["rule"]:
+            right = got == case["expected"]
+            RULE_EXACT_SEEN["mismatch"] += 1
+            RULE_EXACT_SEEN["mismatch_right"] += int(right)
+            say("rule-mismatch\t%s\t%s\t%s\t%s\t%s\t%s" % (
+                case["family"], case["name"], case["rule"], printed, got, case["expected"]))
+    elif case["expected"] in ("deny", "ask"):
+        RULE_EXACT_SEEN["unset"] += 1
+        say("rule-unset\t%s\t%s\t%s" % (case["family"], case["name"], case["expected"]))
+
+
 def run_cases():
     mode = os.environ.get("GUARD_TESTS", "")
     if mode not in GUARD_TESTS_MODES:
         say("GUARD_TESTS=%r: want unset, 'windows-slice' or 'macos-slice'. Nothing ran." % mode)
+        return 2
+    if RULE_EXACT not in RULE_EXACT_MODES:
+        say("GUARD_RULE_EXACT=%r: want unset, 'report' or 'exact'. Nothing ran." % RULE_EXACT)
         return 2
     problems = macos_arm_problems()
     if problems:
@@ -901,14 +958,18 @@ def run_cases():
         beat("case %d of %d, before it runs" % (ran, len(cases)))
         got, reason = decide(case)
         beat("case %d of %d, after it ran" % (ran, len(cases)))
+        rule_exact_report(case, got, reason)
         ok = got == case["expected"]
         note = ""
         if ok and case.get("silent") and reason:
             ok = False
             note = "  (an allow that must be silent printed: %s)" % reason[:90]
-        elif ok and case["rule"] and case["rule"] not in reason:
+        elif ok and RULE_FAILS and got != "allow" and not case["rule"]:
             ok = False
-            note = "  (the reason does not name rule %r: %s)" % (case["rule"], reason[:90])
+            note = "  (no rule is named for this %s: add rule= to the case)" % got
+        elif ok and RULE_FAILS and case["rule"] and printed_rule(reason) != case["rule"]:
+            ok = False
+            note = "  (the reason prints rule %r, not %r: %s)" % (printed_rule(reason), case["rule"], reason[:90])
         elif ok and case["carries"] and [f for f in case["carries"] if not carried(f, reason)]:
             ok = False
             note = "  (the reason does not carry %r: %s)" % (
@@ -926,6 +987,9 @@ def run_cases():
         failed += 0 if ok else 1
         say("%s  %-6s(want %-6s)  [%-11s] %s%s" % (
             "PASS" if ok else "FAIL", got, case["expected"], case["tool"], case["name"], note))
+    say("rule-total\t%d mismatches in %d cases with a rule, %d of them on a verdict that was right; "
+        "%d deny or ask cases name no rule" % (RULE_EXACT_SEEN["mismatch"], RULE_EXACT_SEEN["rule"],
+                                              RULE_EXACT_SEEN["mismatch_right"], RULE_EXACT_SEEN["unset"]))
     if any((not only or only in label) and check not in FIXTURELESS_CHECKS for label, check in logs):
         materialize_all()  # a log check names its fixtures in its own code, not in a case's fields
     for label, checker in logs:

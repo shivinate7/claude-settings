@@ -18,10 +18,21 @@ except Exception as e:  # fail open, as the docstring says: READ_ONLY and SCOPE 
     print(f"agent_brief: {e}", file=sys.stderr)
     sys.exit(0)
 
+# The reset ban names the flags the guard refuses, read from its constant at load, so the brief and the guard agree.
+# Its own try block: when guard_shared_tree fails to load, the brief drops only this line (RESET_BAN is None).
+try:
+    from guard_shared_tree import RESET_DISCARD_FLAGS  # noqa: E402  the one home of the reset flags that discard work
+    RESET_BAN = ("- Outside your own agent worktree (a folder under .claude/worktrees), never run git reset with one of the flags %s, "
+                 "git checkout of a path, or git restore." % "/".join(RESET_DISCARD_FLAGS))
+except Exception as e:
+    print(f"agent_brief: reset line not built: {e}", file=sys.stderr)
+    RESET_BAN = None
+
 # Each line carries a flag: True = every type, False = only types that commit and push.
 COMMON = [
     (True, "Standing rules for this agent:"),
-    (True, "- Never run git stash, git reset, git checkout <path>, or git restore."),
+    (True, "- Never run git stash."),
+    (True, RESET_BAN),
     (False, "- Push only with: git push origin HEAD:<branch>."),
     (True, "- Make no gh call unless your brief names it."),
     (True, "- {scope}"),
@@ -29,6 +40,7 @@ COMMON = [
     (False, "- End each commit message with: Co-Authored-By: <model> <noreply@anthropic.com>"),
     (False, "- Name no record path in a commit message. The only exception is the Drops-lines: trailer."),
     (False, "- Before each commit, run `git diff --cached --stat`; if it names a file you did not change this round, commit nothing and report it (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees)."),
+    (False, "- Commit the test evidence your work made this round (a test-result bundle) in your worktree. Never leave it untracked there. If your scope does not cover the file, report its path instead."),
     (False, "- Before you end, stop each server you started, by the $! from the same call or through the harness."),
 ]
 READ_ONLY = {"reviewer", "Explore", "Plan", "claude-code-guide", "design-reviewer", REFUTER_ROLE}
@@ -84,7 +96,7 @@ def note_rules(cwd):
 def build(agent_type, form=None, notes=()):
     key = agent_type.lower() if isinstance(agent_type, str) else agent_type  # the match ignores case
     writes = key not in {t.lower() for t in READ_ONLY}
-    lines = [t for always, t in COMMON if always or writes]
+    lines = [t for always, t in COMMON if (always or writes) and t is not None]  # a reset line that did not load is None
     text = "\n".join(lines).format(scope=next((v for k, v in SCOPE.items() if k.lower() == key), GENERAL))
     for rule in notes:  # appended after format(): a rule may hold braces
         text += "\n- " + rule

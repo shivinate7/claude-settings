@@ -57,7 +57,7 @@ sh("merge-role-proof: a lane marks a lane PR ready when its head is a prefix of 
    env_path=lane_ready_path(LANE_READY_PREFIX), config=LT_EMPTY)
 # A pull request read that cannot run is refused, whatever rule names it: the guard fails closed.
 sh("merge-role-proof: a lane marks a lane PR ready when the pull request read fails is refused",
-   LANE_READY_NOW, "deny", cwd=LANE_REPO, env=LANE_READY_ENV, transcript=role_path("lane-step"),
+   LANE_READY_NOW, "deny", rule="merge-role-proof", cwd=LANE_REPO, env=LANE_READY_ENV, transcript=role_path("lane-step"),
    env_path=lane_ready_path(LANE_READY_BROKEN), config=LT_EMPTY)
 # The step must prove itself: no --step is refused, and so is a --step the lane's record does not carry, even when the head is that branch.
 sh("merge-role-proof: a lane marks a lane PR ready with no --step is refused",

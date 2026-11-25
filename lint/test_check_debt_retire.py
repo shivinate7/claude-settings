@@ -679,9 +679,12 @@ class CiStepRunsMainCopy(Case):
     MAIN_LAYOUT = "# main's layout module\n"
     PR = "# the PR head's classifier: passes every close\n"
     PR_LAYOUT = "# the PR head's layout module\n"
+    # Only the classifier's own call is counted: a shim on the runner's PATH (the rm wrapper in ~/.claude/bin) also runs python3.
     STAND_IN = ("#!/bin/sh\n"
-                "printf 'GH_REPO=%s\\n' \"${GH_REPO-<unset>}\" >> \"$STAND_IN_ENV\"\n"
                 "for arg in \"$@\"; do\n"
+                "  case \"$arg\" in\n"
+                "    lint/check_debt_retire.py) printf 'GH_REPO=%s\\n' \"${GH_REPO-<unset>}\" >> \"$STAND_IN_ENV\" ;;\n"
+                "  esac\n"
                 "  case \"$arg\" in\n"
                 "    *.py) mkdir -p \"$STAND_IN_KEPT\" && cp -R \"$(dirname \"$arg\")/.\" \"$STAND_IN_KEPT/\" ;;\n"
                 "  esac\n"

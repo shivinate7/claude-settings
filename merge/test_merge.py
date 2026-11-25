@@ -61,8 +61,11 @@ os.environ.update(LC_ALL="C", GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os
                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
 # CI sets none of these and a cloud session sets all three. A cloud session's values would make every `--confirm` case below meet the
 # merge-role check and make a role writer write the live session's role file. A case that needs one sets it (CloudSession.cloud).
-for _name in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_SESSION_ID", "CS_SESSION_ROLE"):
+for _name in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CS_SESSION_ROLE"):
     os.environ.pop(_name, None)  # the local role reads (a launcher run sets the last two) must not leak into a case
+# The config folder is one that does not exist, under this run's folder: no session record is read, as on CI, and the real
+# ~/.claude is never read. A case that needs a record sets its own folder.
+os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(run_folder(), "config")
 
 def windows_slice(x):
     """Mark a test or a leaf class as Windows-specific. MERGE_TESTS=windows-slice runs only these.
@@ -2009,11 +2012,11 @@ class ClaudeMdFlag(Env):
     def unreadable(self, fail):
         """Patch merge.sh so the PR-paths read fails: `fail(args)` returns (rc, text) or raises. -> the list of args it saw."""
         real_sh, seen = merge.sh, []
-        def stub(args, cwd=None, input=None, env=None, stdout_only=False):
+        def stub(args, cwd=None, input=None, env=None, stdout_only=False, **kw):  # kw: other sh calls of the run pass more keywords (boot_stamp passes timeout on macOS); the real sh takes them
             if "diff" in args and any("..." in a for a in args):
                 seen.append(args)
                 return fail(args)
-            return real_sh(args, cwd=cwd, input=input, env=env, stdout_only=stdout_only)
+            return real_sh(args, cwd=cwd, input=input, env=env, stdout_only=stdout_only, **kw)
         patch = unittest.mock.patch.object(merge, "sh", stub)
         patch.start(); self.addCleanup(patch.stop)
         return seen
@@ -2982,6 +2985,41 @@ class CutBranchTree(Env):
 
     def test_clean_merged_tree_is_removed_with_its_branch(self):
         self.assert_clean_tree_removed(self.merged_feat())
+
+    def record_at(self, cwd):
+        """A live session record whose cwd is CWD, in this case's own config folder. -> the patch that points
+        CLAUDE_CONFIG_DIR there."""
+        cfg = os.path.join(self.t, "cfg")
+        os.makedirs(os.path.join(cfg, "sessions"))
+        record = {"pid": os.getpid(), "startedAt": hook_guard._process_start_ms(os.getpid()), "cwd": cwd}
+        with open(os.path.join(cfg, "sessions", "gone-record.json"), "w", encoding="utf-8") as handle:
+            json.dump(record, handle)
+        return unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg})
+
+    def test_clean_merged_tree_is_removed_beside_a_record_whose_folder_is_gone(self):
+        """A session record whose folder was removed stands in no tree (owner, 20:53 CST 11-24, 2026): the clean merged
+        tree goes with its branch, as it does with no record at all. The folder's parent stays: a missing parent reads
+        unknown (`_folder_is_gone`), so only the leaf is absent here."""
+        gone = os.path.join(self.t, "gone-session", "wt")
+        os.makedirs(gone)
+        os.rmdir(gone)
+        self.assertFalse(os.path.exists(gone), "scope: the record's folder must be absent")
+        self.assertTrue(os.path.isdir(os.path.dirname(gone)), "scope: the record's parent folder must stay")
+        with self.record_at(gone):
+            self.assert_clean_tree_removed(self.merged_feat())
+
+    def test_clean_merged_tree_is_kept_beside_a_record_whose_parent_folder_is_gone(self):
+        """With the record's parent gone too, the read is unknown, not gone: the tree stays, and its one kept line says
+        the read failed. The sibling of the case above."""
+        gone = os.path.join(self.t, "gone-session", "wt")
+        os.makedirs(gone)
+        os.rmdir(gone)
+        os.rmdir(os.path.dirname(gone))
+        self.assertFalse(os.path.exists(os.path.dirname(gone)), "scope: the record's parent folder must be absent")
+        with self.record_at(gone):
+            self.worktree()
+            out = self.cut(self.merged_feat())
+        self.assertKept(out, "a read on it failed")
 
     def test_clean_merged_tree_is_removed_when_merged_is_the_pr_head(self):
         # Production passes the PR head sha (merge.py `cut_branch(root, branch, sha)`), not origin/main.
@@ -5183,9 +5221,9 @@ class GhHalf(Env):
         """The fetch of main after the claim push fails with `msg`. -> (rc, out)."""
         real_git, real_push = merge.git, merge.push_branch
         pushed = []
-        def push(wt, branch):
+        def push(wt, branch, **kw):
             pushed.append(branch)
-            return real_push(wt, branch)
+            return real_push(wt, branch, **kw)
         def git_fails(cwd, *a, input=None):
             if pushed and a[:2] == ("fetch", "-q") and a[-1] == "+refs/heads/main:refs/remotes/origin/main":
                 return 1, msg
@@ -5316,8 +5354,8 @@ class GhHalf(Env):
         -> (rc, out, the claim's sha on origin)."""
         real_sh, real_git, real_push = merge.sh, merge.git, merge.push_branch
         claimed = []
-        def push(wt, branch):
-            r = real_push(wt, branch)
+        def push(wt, branch, **kw):
+            r = real_push(wt, branch, **kw)
             claimed.append(self.head(branch))
             return r
         def sh_answer(args, *a, **k):
@@ -8887,7 +8925,7 @@ class StampEnv(unittest.TestCase):
     def test_the_stamp_child_never_sees_the_runners_ref(self):
         # On a push to main the runner sets GITHUB_REF=refs/heads/main. stamp would read it as the worktree's branch.
         seen = {}
-        def fake(args, cwd=None, input=None, env=None, stdout_only=False):  # canned: a stamp call's reply is "" either way
+        def fake(args, cwd=None, input=None, env=None, stdout_only=False, **_):  # canned: a stamp call's reply is "" either way
             seen.update(env or {"__none__": "1"})
             return 0, ""
         with unittest.mock.patch.dict(os.environ, {"GITHUB_REF": "refs/heads/main", "GITHUB_BASE_REF": "main"}), \
@@ -9006,10 +9044,10 @@ class MemoKeyRead(Env):
     def test_a_timeout_on_the_memo_key_read_refuses_as_unknown(self):
         real_sh = merge.sh
 
-        def slow(args, cwd=None, input=None, env=None, stdout_only=False):
+        def slow(args, cwd=None, input=None, env=None, stdout_only=False, **kw):
             if "rev-parse" in args:
                 raise subprocess.TimeoutExpired(args, 1)
-            return real_sh(args, cwd=cwd, input=input, env=env, stdout_only=stdout_only)
+            return real_sh(args, cwd=cwd, input=input, env=env, stdout_only=stdout_only, **kw)
         with unittest.mock.patch.object(merge, "sh", slow):
             with self.assertRaises(merge.Stop) as cm:
                 merge.undo_check(self.co, "origin/main")
@@ -9639,7 +9677,7 @@ class MethodSafeRetry(unittest.TestCase):
 
     def test_acquire_takes_the_lock_when_the_ref_post_landed_with_a_lost_reply(self):  # a resend would read "already exists" as another run's lock
         state = {"ref": None}
-        def sh(args, cwd=None, input=None, env=None, stdout_only=False):  # canned replies carry no stderr text, so the keyword changes nothing
+        def sh(args, cwd=None, input=None, env=None, stdout_only=False, **_):  # canned replies carry no stderr text, so the keywords change nothing
             a = " ".join(args)
             if "git/ref/heads/merge-lock/" in a:
                 return (0, state["ref"]) if state["ref"] else (1, "gh: Not Found (HTTP 404)")
@@ -9664,7 +9702,7 @@ class MethodSafeRetry(unittest.TestCase):
             base = {"number": 7, "head": {"sha": head, "ref": "feat"}, "base": {"ref": "main"}, "state": "open", "merged": False, "mergeable": True,
                     "mergeable_state": "clean", "merge_commit_sha": None}
             return json.dumps({**base, **d})
-        def sh(args, cwd=None, input=None, env=None, stdout_only=False):  # canned replies carry no stderr text, so the keyword changes nothing
+        def sh(args, cwd=None, input=None, env=None, stdout_only=False, **_):  # canned replies carry no stderr text, so the keywords change nothing
             a = " ".join(args)
             if "-X PUT" in a:
                 puts.append(a)
@@ -9713,7 +9751,7 @@ class MethodSafeRetry(unittest.TestCase):
     def take_with_ref_reads(self, ref_reads):
         """GhLock.acquire where the ref POST answers a 502 and the ref reads `ref_reads` (each a (code, text), the last repeats). -> (ref POSTs, result or the stop raised)."""
         posts, reads = [], []
-        def sh(args, cwd=None, input=None, env=None, stdout_only=False):  # canned replies carry no stderr text, so the keyword changes nothing
+        def sh(args, cwd=None, input=None, env=None, stdout_only=False, **_):  # canned replies carry no stderr text, so the keywords change nothing
             a = " ".join(args)
             if "git/ref/heads/merge-lock/" in a:
                 reads.append(a)
@@ -9769,7 +9807,7 @@ class MethodSafeRetry(unittest.TestCase):
 
     def test_host_gh_sends_a_put_merge_once_on_a_502(self):
         calls = []
-        def sh(args, cwd=None, input=None, env=None, stdout_only=False):  # canned replies carry no stderr text, so the keyword changes nothing
+        def sh(args, cwd=None, input=None, env=None, stdout_only=False, **_):  # canned replies carry no stderr text, so the keywords change nothing
             calls.append(args)
             return 1, self.ERR
         host = merge.Host(required=["checks"], base="main", minute=60, now=lambda: 1000.0, pause=self.pauses.append)
@@ -9786,7 +9824,7 @@ class MethodSafeRetry(unittest.TestCase):
 
     def test_acquire_resends_the_lock_commit_post_after_a_502(self):  # the real call in GhLock.acquire: a commit no ref names, idempotent by design
         posts = []
-        def sh(args, cwd=None, input=None, env=None, stdout_only=False):  # canned replies carry no stderr text, so the keyword changes nothing
+        def sh(args, cwd=None, input=None, env=None, stdout_only=False, **_):  # canned replies carry no stderr text, so the keywords change nothing
             a = " ".join(args)
             if "git/ref/heads/merge-lock/" in a:
                 return 1, "gh: Not Found (HTTP 404)"
@@ -9808,7 +9846,7 @@ class MethodSafeRetry(unittest.TestCase):
     def test_a_patch_flagged_idempotent_on_host_api_is_resent_after_a_502(self):  # a PATCH that sets a value: a resend writes the same value
         seq = [(1, self.ERR), (0, "{}")]
         calls = []
-        def sh(args, cwd=None, input=None, env=None, stdout_only=False):  # canned replies carry no stderr text, so the keyword changes nothing
+        def sh(args, cwd=None, input=None, env=None, stdout_only=False, **_):  # canned replies carry no stderr text, so the keywords change nothing
             calls.append(args)
             return seq[min(len(calls), len(seq)) - 1]
         host = merge.Host(required=["checks"], base="main", minute=60, now=lambda: 1000.0, pause=self.pauses.append)
@@ -9823,7 +9861,7 @@ class MethodSafeRetry(unittest.TestCase):
 
     def test_host_gh_still_retries_a_get_on_a_502(self):
         calls = []
-        def sh(args, cwd=None, input=None, env=None, stdout_only=False):  # canned replies carry no stderr text, so the keyword changes nothing
+        def sh(args, cwd=None, input=None, env=None, stdout_only=False, **_):  # canned replies carry no stderr text, so the keywords change nothing
             calls.append(args)
             return 1, self.ERR
         host = merge.Host(required=["checks"], base="main", minute=60, now=lambda: 1000.0, pause=self.pauses.append)
@@ -9849,7 +9887,7 @@ class RateLimitWait(unittest.TestCase):
     def replies(self, *seq):
         """Patch merge.sh so each gh call answers the next of `seq` (the last repeats). Counts them in self.calls."""
         self.calls = 0
-        def sh(args, cwd=None, input=None, env=None, stdout_only=False):  # canned replies carry no stderr text, so the keyword changes nothing
+        def sh(args, cwd=None, input=None, env=None, stdout_only=False, **_):  # canned replies carry no stderr text, so the keywords change nothing
             self.calls += 1
             return seq[min(self.calls, len(seq)) - 1]
         p = unittest.mock.patch.object(merge, "sh", sh)
@@ -10080,7 +10118,7 @@ class GhLockReadRetry(unittest.TestCase):
     def run_read(self, replies):
         """The ref reads answer `replies` in order, the last repeats. -> the read's result. self.reads and self.pauses count the calls."""
         seq, self.reads, self.pauses = list(replies), 0, []
-        def fake_sh(args, cwd=None, input=None, env=None, stdout_only=False):  # canned replies carry no stderr text, so the keyword changes nothing
+        def fake_sh(args, cwd=None, input=None, env=None, stdout_only=False, **_):  # canned replies carry no stderr text, so the keywords change nothing
             args = without_include(args)
             if args[:2] == ["gh", "api"] and "/git/ref/heads/merge-lock/" in args[2]:
                 self.reads += 1
@@ -12905,7 +12943,7 @@ class GhLockRateRetry(unittest.TestCase):
     def test_a_lock_commit_rate_limit_that_lasts_20_minutes_is_waited_out_and_the_lock_is_taken(self):  # no person has to run it again
         clock = Clock(self.NOW)
         over = self.NOW + 20 * 60
-        def limited(args, cwd=None, input=None, env=None, stdout_only=False):
+        def limited(args, cwd=None, input=None, env=None, stdout_only=False, **_):
             if self.step_of(args) == "lock-commit-post" and clock.now() < over:
                 return 1, RATE_API_SECONDARY_403  # a secondary limit that gives no reset time
             return self.fake_sh(args, cwd, input, env, stdout_only)
@@ -13357,14 +13395,14 @@ class GitLockExtendsForRateWaits(Env):
         self.token = self.glock.acquire("main", ttl)
         self.gh_calls, self.gh, self.cmds, self.lose_push = 0, [(0, "[]")], [], False  # cmds: every non-gh command after the take
         real = merge.sh
-        def fake_sh(args, cwd=None, input=None, env=None, stdout_only=False):
+        def fake_sh(args, cwd=None, input=None, env=None, stdout_only=False, **kw):
             if args[0] != "gh":
                 self.cmds.append(list(args))
                 if self.lose_push and "push" in args and not args[-1].startswith(":"):  # the next ref update lands on origin, and its reply is lost
                     self.lose_push = False
-                    real(args, cwd=cwd, input=input, env=env, stdout_only=stdout_only)
+                    real(args, cwd=cwd, input=input, env=env, stdout_only=stdout_only, **kw)
                     return 128, NET_HOST
-                return real(args, cwd=cwd, input=input, env=env, stdout_only=stdout_only)
+                return real(args, cwd=cwd, input=input, env=env, stdout_only=stdout_only, **kw)
             self.gh_calls += 1
             return self.gh[min(self.gh_calls, len(self.gh)) - 1]
         p = unittest.mock.patch.object(merge, "sh", fake_sh)
@@ -16334,7 +16372,7 @@ class RulesReadNetwork(unittest.TestCase):
 
     def net_down(self):
         """Every gh call fails with a network text, as a dropped connection does."""
-        return unittest.mock.patch.object(merge, "sh", lambda argv, cwd=None, stdout_only=False: (1, NET_DEADLINE))
+        return unittest.mock.patch.object(merge, "sh", lambda argv, cwd=None, stdout_only=False, **_: (1, NET_DEADLINE))
 
     def test_a_network_error_on_the_rules_read_is_a_net_stop_out_of_protection_names(self):
         with self.net_down():

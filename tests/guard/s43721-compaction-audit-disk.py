@@ -87,7 +87,8 @@ def cd_run(folder, cfg, spec, tool, tool_input, tag, remote=False):
         env["CLAUDE_CODE_REMOTE"] = "true"
     for name in ("TMPDIR", "TEMP", "TMP"):
         env[name] = temp
-    body = {"tool_name": tool, "tool_input": tool_input, "cwd": NOGIT, "session_id": CA_SID}
+    body = {"tool_name": tool, "tool_input": tool_input, "cwd": NOGIT, "session_id": CA_SID,
+            "transcript_path": CA_TRANSCRIPT}
     run = subprocess.run([sys.executable, "-c", LB_PROBE, os.path.join(folder, "hooks", "guard.py"), side_file,
                           json.dumps(spec)],
                          input=json.dumps(body), capture_output=True, text=True, env=env,
@@ -171,6 +172,25 @@ def cd_spawn_allowed_check(name, reading, label):
     if problem:
         return False, "the Audit: spawn was not allowed while the audit is owed, %s: %s" % (label, problem)
     return True, "the Audit: spawn is allowed while the audit is owed, %s" % label
+
+
+def cd_pathless_refused_check(name, reading, label):
+    """An owed Audit: brief that names no transcript path is refused by compaction-audit under `reading`, and the audit
+    stays owed. The brief with the path (CA_AUDIT) clears it, as cd_spawn_clears_check holds. On the unchanged guard
+    the stray brief clears the flag, so this check is the red."""
+    folder, cfg, flag, why = cd_owed(name)
+    if why:
+        return False, why
+    decision, reason, _side, why = cd_call(folder, cfg, reading, "Agent", CA_AUDIT_NO_PATH, name)
+    if why:
+        return False, why
+    problem = ov_want(decision, reason, "deny", "compaction-audit")
+    if problem:
+        return False, ("the Audit: brief with no transcript path was not refused by compaction-audit, %s: %s"
+                       % (label, problem))
+    if not os.path.isfile(flag):
+        return False, "the Audit: brief with no transcript path cleared the audit flag, %s" % label
+    return True, "the Audit: brief with no transcript path is refused and the audit stays owed, %s" % label
 
 
 def cd_spawn_clears_check(name, reading, label):
@@ -396,6 +416,8 @@ CD_CHECKS = (
                               cd_sweep_root(CD_WIN_DQ_BS) + ";rm -rf /tmp/claude-disk-cleanup/run-2", "wdqsemi")),
     ("compaction-audit: the cloud disk-full refusal shows the sweep with a double-quoted --root, so a Windows shell keeps its backslashes",
      cd_remedy_check),
+    ("compaction-audit: an owed audit with an Audit: brief that names no transcript path is refused and stays owed, at memory over 95%",
+     lambda: cd_pathless_refused_check("spawn-mem-pathless", CD_MEMORY_FULL, "at memory 96% and a fine disk")),
     ("compaction-audit: an owed audit at memory over 95% and a fine disk lets the Audit: spawn through",
      lambda: cd_spawn_allowed_check("spawn-mem-allowed", CD_MEMORY_FULL, "at memory 96% and a fine disk")),
     ("compaction-audit: an Audit: spawn that passes at memory over 95% clears the audit flag",
