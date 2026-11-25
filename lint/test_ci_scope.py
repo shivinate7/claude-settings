@@ -1581,13 +1581,37 @@ class _IfParser:
         return self.env.get(tok, "")
 
 
-def if_env(outs, event, results=None):
-    """The names an if: reads: the event, the pull request's draft flag, each scope output of the run, and each job's result.
-    The scope job succeeded unless `results` says otherwise. A name the env does not hold reads as empty."""
+def if_env(outs, event, results=None, nightly_skip=""):
+    """The names an if: reads: the event, the pull request's draft flag, each scope output of the run, each job's result, and the
+    skip output of nightly-skip as the reading job sees it (`nightly_skip`). The scope job succeeded unless `results` says otherwise.
+    A name the env does not hold reads as empty."""
     env = {"github.event_name": event, "github.event.pull_request.draft": False if event == "pull_request" else None}
     env.update({f"needs.scope.outputs.{name}": value for name, value in outs.items()})
     env.update({f"needs.{job}.result": result for job, result in {"scope": "success", **(results or {})}.items()})
+    env[f"needs.{split.NIGHTLY_SKIP_JOB}.outputs.skip"] = nightly_skip
     return env
+
+
+def job_needs(text, job):
+    """The jobs `job` lists under needs:, inline (`needs: scope`, `needs: [a, b]`) or as a block list, in file order."""
+    block = job_block(text, job) or ""
+    m = re.search(r"^    needs:[ \t]*(.*)$", block, re.M)
+    if m is None:
+        return []
+    if m.group(1).strip():
+        return re.findall(r"[\w-]+", m.group(1))
+    names = []
+    for line in block[m.end():].split("\n")[1:]:
+        if not line.startswith("      - "):
+            break
+        names.append(line[len("      - "):].strip())
+    return names
+
+
+def visible_skip(text, job, nightly_skip):
+    """The nightly-skip output `job` reads: `nightly_skip` where the job lists nightly-skip under needs, else empty. GitHub's needs
+    context holds the outputs of the jobs a job lists and no others, so an unlisted reader sees no skip."""
+    return nightly_skip if split.NIGHTLY_SKIP_JOB in job_needs(text, job) else ""
 
 
 def job_names(text):
@@ -1605,22 +1629,28 @@ def job_if(text, job):
     return (wrapped.group(1) if wrapped else raw).strip()
 
 
-def job_runs(expr, outs, event, results=None):
+def job_runs(expr, outs, event, results=None, nightly_skip=""):
     """True when the job starts on this run: it has no job-level if, or its if: is true on the run's outputs and job results."""
-    return True if expr is None else _IfParser(expr, if_env(outs, event, results)).parse()
+    return True if expr is None else _IfParser(expr, if_env(outs, event, results, nightly_skip)).parse()
 
 
-def step_runs(raw, outs, event):
+def step_runs(raw, outs, event, nightly_skip=""):
     """True when a step whose if: is `raw` (with its ${{ }}) runs on this run. A step with no if: runs, as success() is its default."""
     if raw is None:
         return True
     wrapped = re.fullmatch(r"\$\{\{(.*)\}\}", raw.strip())
-    return _IfParser((wrapped.group(1) if wrapped else raw).strip(), if_env(outs, event)).parse()
+    return _IfParser((wrapped.group(1) if wrapped else raw).strip(), if_env(outs, event, nightly_skip=nightly_skip)).parse()
 
 
-def running_jobs(text, outs, event):
+def job_starts(text, job, outs, event, nightly_skip=""):
+    """True when `job` starts on this run. `nightly_skip` is the skip output a skipped daily sets; the job reads it only if it lists
+    nightly-skip under needs (visible_skip)."""
+    return job_runs(job_if(text, job), outs, event, nightly_skip=visible_skip(text, job, nightly_skip))
+
+
+def running_jobs(text, outs, event, nightly_skip=""):
     """The jobs of checks.yml that start on this run, sorted."""
-    return sorted(job for job in job_names(text) if job_runs(job_if(text, job), outs, event))
+    return sorted(job for job in job_names(text) if job_starts(text, job, outs, event, nightly_skip))
 
 
 def rollup_needs(text):
@@ -1937,16 +1967,37 @@ class SkippedDaily(unittest.TestCase):
         self.assertEqual(on, [], f"a skipped daily leaves these scope flags on: {on}")
         return outs
 
-    def running(self, text, job, outs, event="schedule"):
-        """The steps of `job` that run on this run, or [] when the job does not start."""
-        if not job_runs(job_if(text, job), outs, event):
+    def running(self, text, job, outs, nightly_skip):
+        """The steps of `job` that run on this run, or [] when the job does not start. `nightly_skip` is the skip output the run set."""
+        if not job_starts(text, job, outs, "schedule", nightly_skip):
             return []
-        return [st for st in step_blocks(job_block(text, job)) if step_runs(step_key(st, "if"), outs, event)]
+        seen = visible_skip(text, job, nightly_skip)
+        return [st for st in step_blocks(job_block(text, job)) if step_runs(step_key(st, "if"), outs, "schedule", seen)]
 
     def runs_test(self, st):
         """True when a step runs a test: a suite file (runs_suite), or a command line that TEST_RUN matches. A comment is no command."""
         lines = [line for line in (run_body(st) or "").split("\n") if line.strip() and not line.lstrip().startswith("#")]
         return runs_suite(st) or any(self.TEST_RUN.search(line) for line in lines)
+
+    # Named failure: a job starts on a skipped daily that the tool-pins read does not need. The started set is the two skip jobs and
+    # scope (they decide and read the skip), and the three pin jobs (decision tool-pins). Main starts only the skip jobs there, since its
+    # scope is off on a skipped daily. Every job's job-level if is read on the run's outputs and the skip output the run set.
+    def test_a_skipped_daily_starts_only_the_decision_jobs_and_the_tool_pins_jobs(self):
+        text = self.workflow()
+        outs = self.skipped_daily()
+        started = running_jobs(text, outs, "schedule", nightly_skip="true")
+        want = sorted(self.DECISION_JOBS + self.PIN_JOBS)
+        self.assertEqual(started, want, f"a skipped daily starts {sorted(set(started) - set(want))} beyond the tool-pins set, "
+                                        f"and misses {sorted(set(want) - set(started))}")
+
+    # Control: a plain daily starts the two macOS jobs, so the case above reads them as jobs the skip turns off, not as jobs that never start.
+    def test_control_a_plain_daily_starts_the_two_macos_jobs_the_skip_turns_off(self):
+        text = self.workflow()
+        outs = run([], event="schedule", nightly_skip="false")
+        started = running_jobs(text, outs, "schedule", nightly_skip="false")
+        for job in ("shell-macos", "checks-macos-b"):
+            with self.subTest(job=job):
+                self.assertIn(job, started, f"{job} does not start on a plain daily, so the skipped-daily case proves nothing about it")
 
     # Named failure: a job runs a test step on a skipped daily, so the suites the green daily proved run again. One subtest per job.
     def test_no_job_runs_a_test_step_on_a_skipped_daily(self):
@@ -1957,7 +2008,7 @@ class SkippedDaily(unittest.TestCase):
                 continue
             with self.subTest(job=job):
                 tests = [step_key(st, "name") or " ".join((run_body(st) or "").split())[:50]
-                         for st in self.running(text, job, outs) if self.runs_test(st)]
+                         for st in self.running(text, job, outs, "true") if self.runs_test(st)]
                 self.assertFalse(tests, f"{job} runs {len(tests)} test steps on a skipped daily, the first {tests[:3]}")
 
     # Named failure: a pin job does not start on a skipped daily, or starts without its Tool pins step. One subtest per pin job.
@@ -1967,9 +2018,9 @@ class SkippedDaily(unittest.TestCase):
         for job in self.PIN_JOBS:
             with self.subTest(job=job):
                 expr = job_if(text, job)
-                self.assertTrue(job_runs(expr, outs, "schedule"),
+                self.assertTrue(job_starts(text, job, outs, "schedule", "true"),
                                 f"{job} does not start on a skipped daily, so its Tool pins step does not run; its job-level if is {expr}")
-                names = [step_key(st, "name") for st in self.running(text, job, outs)]
+                names = [step_key(st, "name") for st in self.running(text, job, outs, "true")]
                 self.assertIn(self.TOOL_PINS, names, f"{job} starts on a skipped daily but its Tool pins step does not run: {names}")
 
     # Control: the plain daily starts each pin job with its Tool pins step, and checks-macos runs test steps, so the two cases above
@@ -1979,10 +2030,10 @@ class SkippedDaily(unittest.TestCase):
         outs = run([], event="schedule")
         for job in self.PIN_JOBS:
             with self.subTest(job=job):
-                names = [step_key(st, "name") for st in self.running(text, job, outs)]
+                names = [step_key(st, "name") for st in self.running(text, job, outs, "false")]
                 self.assertIn(self.TOOL_PINS, names, f"{job} does not run its Tool pins step on a plain daily: {names}")
         with self.subTest(job="checks-macos"):
-            tests = [st for st in self.running(text, "checks-macos", outs) if self.runs_test(st)]
+            tests = [st for st in self.running(text, "checks-macos", outs, "false") if self.runs_test(st)]
             self.assertTrue(tests, "checks-macos runs no test step on a plain daily, so the no-test case has no step to see")
 
 
