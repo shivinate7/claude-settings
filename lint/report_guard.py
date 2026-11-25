@@ -1047,12 +1047,18 @@ NAMED_ROLES = {"builder", "reviewer", "test-author", "record-writer"}
 SPAWN_TOOLS = {"Agent", "Task"}
 MODEL_FAMILIES = ("haiku", "sonnet", "opus", "fable")
 # A model names the roles just before it: "builder sonnet", "builder: sonnet", "builder (sonnet)",
-# and "builder and reviewer sonnet" all count.
-_ROLE = r"(?:builder|reviewer|test-author|record-writer)"
+# and "builder and reviewer sonnet" all count. A "fix check" or "fix verifier" is a reviewer's name too.
+_ROLE = r"(?:builder|reviewer|test-author|record-writer|fix[\s-]+check|fix[\s-]+verifier)"
 ROLE_MODEL_RE = re.compile(
     r"\b(" + _ROLE + r"(?:\s*(?:,|/|&|\band\b)\s*" + _ROLE + r")*)\s*[:(]?\s*(haiku|sonnet|opus|fable)\b",
     re.I)
 ROLE_RE = re.compile(_ROLE, re.I)
+
+
+def _named_role(word):
+    """The spawn role a Done word names: a fix check or fix verifier is a reviewer."""
+    word = word.lower()
+    return "reviewer" if word.startswith("fix") else word
 # A test hook: REPORT_GUARD_AGENTS_DIR points agent_pin at a fixture folder. Read once at import; unset or empty keeps the
 # repo's agents folder. Cost: one environment read per process start, no process, no file.
 AGENTS_DIR = os.environ.get("REPORT_GUARD_AGENTS_DIR") or os.path.join(HERE, "..", "agents")
@@ -1193,7 +1199,7 @@ def done_models_problem(text, spawned, every=None, window=None):
     if not spawned and not every:
         return ""
     done = " ".join(done_items(block_text(text, keep_indent=True)))
-    named = {(r.lower(), m.lower()) for roles, m in ROLE_MODEL_RE.findall(done)
+    named = {(_named_role(r), m.lower()) for roles, m in ROLE_MODEL_RE.findall(done)
              for r in ROLE_RE.findall(roles)}
     if not spawned and window is not None:
         named = {(r, m) for r, m in named if r in window}
