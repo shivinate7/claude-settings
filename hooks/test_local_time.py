@@ -1236,6 +1236,86 @@ def case_app_block_chain_controls_grant_nothing():
               "files %r; got %r" % (ov_pass_files(cfg), ov_pass(cfg)))
 
 
+# THE APP'S OTHER FRAMES ARE NOT THE OWNER'S. The desktop app sends a <side-sessions-event> frame after an app block, and a
+# <ci-monitor-event> frame as a user record of its own. The words in either are the app's, so an override line, a model word
+# or an Opus word inside one is never the owner's. Each frame copies the shape of a real one, with harmless text.
+
+def side_frame(body=""):
+    """A <side-sessions-event> frame as the app sends it: the element holds the app's text. `body` goes before the closing tag."""
+    return "<side-sessions-event>The sessions you started have finished; their notes are above." + body + "</side-sessions-event>"
+
+
+def ci_monitor_frame(body=""):
+    """A <ci-monitor-event> frame as the app sends it: the bare tag at the start of the record, then the app's text. A real
+    frame has no closing tag. `body` is the text after the tag."""
+    return "<ci-monitor-event>\n\"Auto-fix pull requests\" is watching a fixture PR." + body
+
+
+def case_side_frame_after_app_block_is_not_the_owners_turn():
+    """an earlier owner turn naming haiku, then a record of an app block and a side-sessions frame: the reader skips the frame
+    record and returns the owner's earlier words, so the model name still holds. The control is the earlier turn alone."""
+    override, _ = hooks_modules()
+    import guard  # the model-name reader (hooks/guard.py owner_names_model), loaded as test_start_check loads it
+    earlier = "use haiku for the explorer agents"
+    alone = transcript_file([owner_turn(earlier)])
+    check("override: control: an earlier owner turn alone is the latest owner text",
+          override.latest_owner_text(alone) == earlier, "got %r" % (override.latest_owner_text(alone),))
+    check("owner names model: control: an earlier owner turn naming haiku alone names the model",
+          guard.owner_names_model({"transcript_path": alone}, "claude-haiku-5-5"), "latest owner text %r" % (earlier,))
+    frame_record = transcript_record("user", [{"type": "text", "text": app_block() + "\n\n" + side_frame()}])
+    path = transcript_file([owner_turn(earlier), frame_record])
+    got = override.latest_owner_text(path)
+    check("override: an earlier owner turn, then an app block and a side-sessions frame: the reader skips the frame record",
+          got == earlier, "got %r" % (got,))
+    check("owner names model: an earlier owner turn naming haiku, then an app block and a side-sessions frame: names the model",
+          guard.owner_names_model({"transcript_path": path}, "claude-haiku-5-5"), "latest owner text %r" % (got,))
+
+
+def case_override_line_in_side_frame_grants_nothing():
+    """an override line inside a side-sessions-event frame, bare and after an app block: grants nothing"""
+    for name, prompt in (("a bare side-sessions frame", side_frame("\noverride 15m\n")),
+                         ("a side-sessions frame after an app block", app_block() + "\n\n" + side_frame("\noverride 15m\n"))):
+        cfg = ov_cfg()
+        proc = ov_type(cfg, prompt)
+        check("override: %s holding `override 15m` on its own line: the hook exits 0" % name,
+              proc is not None and proc.returncode == 0,
+              "rc=%s stderr %r" % (proc and proc.returncode, proc and proc.stderr.strip()[-120:]))
+        check("override: %s holding `override 15m` on its own line: grants nothing" % name, not ov_pass_files(cfg),
+              "files %r; got %r" % (ov_pass_files(cfg), ov_pass(cfg)))
+
+
+def case_ci_monitor_frame_grants_nothing_and_never_asks_the_judge():
+    """a bare ci-monitor-event frame holding `override 15m` on its own line grants nothing; the same frame holding
+    `send opus judges` never reaches the Opus judge and writes no Opus override"""
+    cfg = ov_cfg()
+    proc = ov_type(cfg, ci_monitor_frame("\noverride 15m"))
+    check("override: a bare ci-monitor-event frame holding `override 15m` on its own line: the hook exits 0",
+          proc is not None and proc.returncode == 0,
+          "rc=%s stderr %r" % (proc and proc.returncode, proc and proc.stderr.strip()[-120:]))
+    check("override: a bare ci-monitor-event frame holding `override 15m` on its own line: grants nothing",
+          not ov_pass_files(cfg), "files %r; got %r" % (ov_pass_files(cfg), ov_pass(cfg)))
+    cfg, calls, _, _ = opus_type(ci_monitor_frame("\nsend opus judges"), answer={"ok": True})
+    check("opus ask: a bare ci-monitor-event frame holding `send opus judges` never asks the judge", calls == [],
+          "judge calls %d" % len(calls))
+    check("opus ask: a bare ci-monitor-event frame holding `send opus judges` writes no Opus override",
+          opus_override(cfg) is None, "files %r" % (ov_files(cfg),))
+
+
+def case_app_block_crlf_and_trailing_space_still_grant():
+    """an app block then `override 15m` with CRLF line ends, and the block then trailing spaces before the blank line: each writes
+    a 15-minute override. The controls for the frame cases: the strip still reads the typed words after a block."""
+    for name, prompt in (("CRLF line ends after the block", app_block() + "\r\n\r\noverride 15m\r\n"),
+                         ("trailing spaces after the block", app_block() + "   \n\noverride 15m")):
+        cfg = ov_cfg()
+        proc = ov_type(cfg, prompt)
+        check("override: control: %s, then `override 15m`: the hook exits 0" % name,
+              proc is not None and proc.returncode == 0,
+              "rc=%s stderr %r" % (proc and proc.returncode, proc and proc.stderr.strip()[-120:]))
+        got = ov_pass(cfg)
+        check("override: control: %s, then `override 15m`: writes a 15-minute override" % name,
+              ends_after(got, "timed", timedelta(minutes=15)), "got %r; files %r" % (got, ov_pass_files(cfg)))
+
+
 # THE GUARD'S MERGE-CONFIRM REFUSAL (decision merge-confirm-repo, decision owner-override). A local coordinator's own role file
 # names no batch runner, so the guard denies `merge <pr> --confirm` under merge-confirm-repo. That rule is not never-lifted, so a live
 # override lifts it. The guard keys the override by the payload's session_id, the key the prompt hook writes it under.
@@ -3763,6 +3843,10 @@ def suite_cases():
         case_override_after_chained_app_blocks_timed,
         case_override_after_app_block_then_prose_line,
         case_app_block_chain_controls_grant_nothing,
+        case_side_frame_after_app_block_is_not_the_owners_turn,
+        case_override_line_in_side_frame_grants_nothing,
+        case_ci_monitor_frame_grants_nothing_and_never_asks_the_judge,
+        case_app_block_crlf_and_trailing_space_still_grant,
         case_coordinator_merge_confirm_is_lifted_by_a_live_override,
         case_guard_reads_the_override_under_the_payload_session_id,
         case_raising_case_does_not_stop_the_run,
