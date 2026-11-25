@@ -909,23 +909,24 @@ def scan_jobs(transcript, keep_waiting=False):
 
 
 def notice_summary(note):
-    """The notice's summary text, or None. It runs from the first <summary> to the last </summary> that is followed,
+    """The notice's summary text, or None. It runs from the first <summary> to the first </summary> that is followed,
     after white space, by a note, a result or the end of the notice, so a description that holds a literal summary or
-    result tag stays inside it. One find pass: a pattern that backtracks is quadratic on many unclosed openers."""
+    result tag not followed so stays inside it, and a tag quoted later in the result cannot move the end. A description
+    that holds a closing tag followed by a note tag, a result tag or the notice end ends the summary early (known miss).
+    One find pass: a pattern that backtracks is quadratic on many unclosed openers."""
     start = note.find(SUMMARY_OPEN)
     if start < 0:
         return None
     start += len(SUMMARY_OPEN)
-    end = None
     at = note.find(SUMMARY_CLOSE, start)
     while at >= 0:
         after = at + len(SUMMARY_CLOSE)
         while after < len(note) and note[after].isspace():
             after += 1
         if after == len(note) or note.startswith(SUMMARY_FOLLOWERS, after):
-            end = at
+            return note[start:at]
         at = note.find(SUMMARY_CLOSE, at + len(SUMMARY_CLOSE))
-    return None if end is None else note[start:end]
+    return None
 
 
 def says_waiting(note):
