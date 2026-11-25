@@ -5,7 +5,7 @@ a listed module renamed off the list is red, a shrink against --main (current ma
 Swift, .entitlements and zsh files have rows and zsh skips ShellCheck, web app data and image files have rows, archive, sheet, model and node config files have rows, an excluded folder is not scanned, an .astro type error is red and a clean Astro project green, and the
 standard's table is whole (every layer runs or has a one-line reason). The comment check reads only added
 lines; with no base it is skipped with a reason, and with a base outside the clone it is unknown, never red.
-Every package.json and package-lock.json in the repo states the typescript version lint/code_check_standard.json pins, exactly.
+Every package.json and package-lock.json in the repo states the typescript version lint/code_check_standard.json pins, exactly, and no overrides or resolutions entry names typescript at another version.
 A .mjs file's broken or extensionless relative import, and TS-only syntax in it, is red; its builtin, bare, JSON, .cjs and type-error imports, a JSDoc type, and npm notice lines on stderr are not; a .js or .cjs file is not checked, and a clean .mjs with no tsc on PATH is red.
 The tools run from PATH (CODE_CHECK_TOOLS=path), so ruff, mypy, shellcheck (the --pins specs, via pipx) and
 astro-check (the tools/ lockfile, via npm ci, bin on PATH) must be installed. Without astro-check the Astro tests
@@ -35,6 +35,8 @@ REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
 # Where a package file may state typescript. The walk skips node_modules and other checkouts' files (.claude);
 # .github stays in, since .github/shoot is tracked.
 PIN_KEYS = ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies")
+# npm overrides and resolutions force a version with no dependency entry, so the case reads them too.
+OVERRIDE_KEYS = ("overrides", "resolutions")
 PIN_SKIP = ("node_modules", ".git", ".claude")
 
 
@@ -59,6 +61,25 @@ def stated_typescript(path):
             stated.append(packages["node_modules/typescript"]["version"])
         return stated
     return [doc[k]["typescript"] for k in PIN_KEYS if "typescript" in doc.get(k, {})]
+
+
+def overridden_typescript(path):
+    """Each typescript key under a package file's overrides or resolutions, at any depth, as (dotted key path, value). A nested object can name typescript too."""
+    with open(path, encoding="utf-8") as f:
+        doc = json.load(f)
+    found = []
+
+    def walk(node, where):
+        if not isinstance(node, dict):
+            return
+        for key, value in node.items():
+            if key == "typescript":
+                found.append((".".join(where + [key]), value))
+            walk(value, where + [key])
+
+    for section in OVERRIDE_KEYS:
+        walk(doc.get(section, {}), [section])
+    return found
 
 
 def git(cwd, *a):
@@ -355,6 +376,8 @@ class CodeCheck(unittest.TestCase):
         stated = {f: stated_typescript(os.path.join(REPO, f)) for f in files}
         self.assertTrue(any(stated.values()), "no package file states typescript")
         mismatches = [f + " states typescript " + v for f, vs in stated.items() for v in vs if v != TS_PIN]
+        overridden = {f: overridden_typescript(os.path.join(REPO, f)) for f in files}
+        mismatches += [f + " pins " + key + " to " + json.dumps(v) for f, found in overridden.items() for key, v in found if v != TS_PIN]
         self.assertEqual(mismatches, [], "every typescript pin must be exactly lint/code_check_standard.json's " + TS_PIN)
 
     def test_agreeing_tools_package_files_state_the_standard_typescript(self):
