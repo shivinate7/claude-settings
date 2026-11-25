@@ -9,11 +9,42 @@ the deleted copy too. The diff must be a unified diff of the whole change, delet
 
 A move into an untracked file has no diff, so it is no move: the file is read whole and stays checked.
 
+A reflow is a move too: a list line the diff only re-breaks, the same words now one per line. An added line is a
+reflow when every token in it is a token of the lines that the same hunk deletes. A token is a run of characters
+between whitespace, bars, commas, parentheses or backslashes, so `bundle|\\` and `bundle_old,` each hold one token.
+A line with no token (a lone `)`) holds no word, so a hunk that deletes anything excuses it. The hunk is the unit:
+the same file and the same `@@` block. A token deleted in another file or in another hunk excuses nothing, so a
+reflow cannot hide a new word beside an old one. Each
+deleted token excuses at most one added token. A caller opts in by passing `take_move` the number of the hunk it
+is reading, counted from 1 over every `@@` row of the diff, in the order `deleted_texts` counts them; with no hunk
+number a line is a move only when its whole text was deleted. One budget serves both: an exact copy spends the
+tokens of the deleted line it matches, in the hunk that deleted it, and a reflow spends the tokens it holds. So a
+reflow and an exact copy, in any file, cannot both take the same deleted word. An exact copy of a line whose
+tokens a reflow already spent is no move.
+
 Readers of a diff that use this home: check_comment_narration.added_lines and check_glossary.patch_lines.
 Cost: one pass over a diff text the caller already holds. No process, no file.
 """
 import ast
+import re
 from collections import Counter
+
+TOKEN_GAPS = re.compile(r"[\s|,()\\]+")  # what separates one token from the next, see the docstring
+
+
+def tokens(text):
+    """The tokens of one line, as the module docstring defines them."""
+    return [t for t in TOKEN_GAPS.split(text) if t]
+
+
+class Deleted:
+    """What a diff deletes: `lines`, a dict of each deleted text to the list of hunk numbers that deleted a copy
+    of it, and `hunks`, a dict of hunk number to a Counter of the tokens that hunk has left to excuse (a hunk
+    that deletes nothing has no entry)."""
+
+    def __init__(self):
+        self.lines = {}
+        self.hunks = {}
 
 
 def unquote(name):
@@ -27,12 +58,12 @@ def unquote(name):
 
 
 def deleted_texts(diff, scanned):
-    """A Counter of each deleted line's text, without its `-`, over each file of `diff` that `scanned` accepts.
+    """A `Deleted` of each deleted line's text, without its `-`, over each file of `diff` that `scanned` accepts.
 
     `scanned(path)` takes the file's old path, as the repo names it, and says whether the calling check reads
     that file. A `--- ` row is a file header only between `diff --git` and the first `@@`. Past that, it is a
     deleted line that starts with `--`."""
-    left, header, keep = Counter(), False, False
+    left, header, keep, hunk = Deleted(), False, False, 0
     for row in diff.split("\n"):
         if row.startswith("diff --git "):
             header, keep = True, False
@@ -41,14 +72,30 @@ def deleted_texts(diff, scanned):
             keep = bool(old) and old != "/dev/null" and scanned(old[2:] if old.startswith("a/") else old)
         elif row.startswith("@@"):
             header = False
+            hunk += 1
         elif not header and keep and row.startswith("-"):
-            left[row[1:]] += 1
+            left.lines.setdefault(row[1:], []).append(hunk)
+            left.hunks.setdefault(hunk, Counter()).update(tokens(row[1:]))
     return left
 
 
-def take_move(left, text):
-    """True when `left` still holds a deleted copy of the added line `text`, and uses that copy up."""
-    if left[text] > 0:
-        left[text] -= 1
-        return True
-    return False
+def spend(pool, need):
+    """True when `pool` holds every token of `need`, and takes them out of it."""
+    if any(pool[t] < n for t, n in need.items()):
+        return False
+    pool.subtract(need)
+    return True
+
+
+def take_move(left, text, hunk=None):
+    """True when `left` still holds a deleted copy of the added line `text`, and uses that copy up.
+
+    An exact copy spends its own tokens from the hunk that deleted it. With a `hunk` number, a line that is a
+    reflow of what that hunk deletes is a move too (module docstring), and spends the tokens it holds."""
+    need = Counter(tokens(text))
+    for origin in left.lines.get(text, ()):
+        if spend(left.hunks[origin], need):
+            left.lines[text].remove(origin)
+            return True
+    pool = left.hunks.get(hunk)
+    return pool is not None and spend(pool, need)

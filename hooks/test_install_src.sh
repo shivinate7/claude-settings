@@ -4767,8 +4767,15 @@ line_has_name() {  # $1 a line, $2 a file name: true when the name is a whole to
   printf '%s\n' "$1" | tr -c '[:alnum:]_.-' '\n' | grep -Fx -- "$2" >/dev/null
 }
 
+# A list line may span lines: a backslash at a line's end continues it, as ci-scope.sh's case arms do. awk joins
+# each continued run into one line first, so the address reads the arm's whole logical line, whatever its layout.
+# awk is the one reader here: testing/bash_case.py returns each arm's patterns, not its body, so it cannot tell
+# the guard-set arm from the other arm that also names question_form.py.
+logical_lines() {  # $1 file -> its lines, each backslash-continued run joined into one line
+  awk 'BEGIN { buf = "" } /\\$/ { buf = buf substr($0, 1, length($0) - 1); next } { print buf $0; buf = "" }' "$1"
+}
 listed_in() {  # $1 file, $2 sed address of the one list line, $3 label, $4 module
-  lines=$(sed -n "$2" "$1")
+  lines=$(logical_lines "$1" | sed -n "$2")
   if [ "$(printf '%s\n' "$lines" | grep -c .)" -ne 1 ]; then bad "$name" "$4: $3 is not one list line"; nmiss=$((nmiss + 1)); return; fi
   if ! line_has_name "$lines" "$4"; then
     bad "$name" "$4 is not in $3"; nmiss=$((nmiss + 1))

@@ -677,14 +677,15 @@ def added():
 def patch_lines(diff):
     """({path: set of added line numbers}, unknowns) for each file `diff` adds or edits, renames followed.
 
-    A line the same diff deletes, with the same text, is a move and not added (diff_moves). A move into an
+    A line the same diff deletes, with the same text, is a move and not added, and so is a reflow of the lines
+    its own hunk deletes (diff_moves). A move into an
     untracked file has no diff, so it is no move: added_lines reads that file whole.
 
     A `+++ ` header that yields no path is an unknown, never a skip. `+++ /dev/null` is no unknown: it heads a
     delete, which git prints before the create of a type change. A `+++ ` row is a header only between
     `diff --git` and the first `@@`: past that, it is an added line that starts with `++`."""
     left = diff_moves.deleted_texts(diff, lambda old: not old.startswith(SKIP_CODE))
-    out, unknown, path, header, line = {}, [], None, False, 0
+    out, unknown, path, header, line, hunk = {}, [], None, False, 0, 0
     for row in diff.split("\n"):
         if row.startswith("diff --git "):
             path, header = None, True
@@ -696,11 +697,12 @@ def patch_lines(diff):
                 unknown.append("the diff header '%s' names no path" % row[:80])
         elif row.startswith("@@"):
             header = False
+            hunk += 1
             m = re.match(r"@@ -\S+ \+(\d+)(?:,(\d+))? @@", row)
             if m:
                 line = int(m.group(1))
         elif not header and row.startswith("+"):
-            moved = diff_moves.take_move(left, row[1:])
+            moved = diff_moves.take_move(left, row[1:], hunk)
             if path and not moved:
                 out[path].add(line)
             line += 1
