@@ -45,17 +45,17 @@ LISTS = re.compile(r"^MODEL_FAMILIES\s*=\s*[(\[]", re.M)  # a literal copy of th
 MODEL_LIST = ("haiku", "sonnet", "opus", "fable")
 WORD = re.compile(r"haiku|sonnet|opus|fable")
 OWNER_TZ = timezone(timedelta(hours=-6))  # the owner's Central clock in these fixtures, a fixed offset
-HOLD_AT = datetime(2026, 11, 25, 10, 0, tzinfo=OWNER_TZ)  # when the owner's word was judged: the hold's `at`
+HOLD_AT = datetime(2026, 11, 25, 10, 0, tzinfo=OWNER_TZ)  # the instant the owner's model ask was judged: the hold's `at`
 
 
-def stamp(minutes):
+def instant(minutes):
     """The transcript timestamp `minutes` after HOLD_AT. Arithmetic on a fixed instant: no clock is read."""
     return (HOLD_AT + timedelta(minutes=minutes)).isoformat()
 
 
 def timed(record, minutes):
     """The record with its transcript timestamp, the instant the reader compares with a hold's `at`."""
-    record["timestamp"] = stamp(minutes)
+    record["timestamp"] = instant(minutes)
     return record
 
 
@@ -80,7 +80,7 @@ class ModelLineFixture(unittest.TestCase):
     def hold(self, session, model, end="report"):
         """The judged yes for `model`, written to the session's Opus pass file as the judge's yes writes it: `model`, `at`,
         and `end` "report" for a plain ask. `until` is far ahead, so only the report can end the hold in these cases."""
-        body = {"kind": "opus", "until": "2099-01-01T00:00:00+00:00", "role": None, "model": model, "at": stamp(0)}
+        body = {"kind": "opus", "until": "2099-01-01T00:00:00+00:00", "role": None, "model": model, "at": instant(0)}
         if end:
             body["end"] = end
         path = os.path.join(self.cfg, "state", "override", "opus", session + ".json")

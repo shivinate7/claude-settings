@@ -1,9 +1,9 @@
 # section 43720
 # The owner's model word lifts a model refusal for an Agent, Task, Workflow or lane-start spawn: the model floor
 # (agent-model-floor, guard step 9), the role row (agent-role-model) and the Opus ceiling (agent-model-cap), and no other rule.
-# Rulings: a named model holds until the task's next report (13:27 CST Nov 23); every model, Opus too (22:35 CST Nov 24); a
-# judge, not a plain match, decides that the owner named a model (10:41 CST Nov 25); a turn-end line while a model is on
-# (10:02 CST Nov 25). Haiku keeps main's plain text match on the owner's latest typed turn (owner, 2026-11-18 19:03 CST).
+# Rulings: a named model holds until the task's next report; every model, Opus too; a judge, not a plain match, decides that
+# the owner named a model; a turn-end line while a model is on. Haiku keeps main's plain text match on the owner's latest
+# typed turn, as the agent-model-cap record sets it.
 # A judged yes for any model writes the hold to the Opus pass file (state/override/opus/<session>.json: `model`, and `end`
 # "report" for a plain ask), which ends at the session's next report or at `until`. Claude's own text, a tool result, a peer
 # relay, a machine notice, a pasted block, a seed brief (turnOrigin other than human) and a compaction summary are never the
@@ -147,8 +147,7 @@ add("owner-model-word: an Agent spawn on haiku is refused when the only haiku wo
     "pasted block", "deny", "agent-model-floor", tool="Agent", prompt="do it", model="haiku", transcript=OMW_PASTED)
 
 # ---- The Opus ceiling takes no typed word. Opus is lifted only by a judged hold (the hold section below) or by an override.
-# A question that names opus, and a turn that names it, are refused as on main (controls, 22:35 and 10:02 CST rulings
-# read with the judge's ruling of 10:41 CST Nov 25).
+# A question that names opus, and a turn that names it, are refused as on main (controls).
 OMW_WHY_OPUS = omw_file("owner-why-opus", [omw_user("Why did the opus spawn get refused?"),
                                            omw_asst("The Opus ceiling refused it.")])
 OMW_NAMES_OPUS = omw_file("owner-names-opus", [omw_user("Run the model audit on opus."), omw_asst("Running it.")])
@@ -273,9 +272,9 @@ OMW_NOW_ENV = {"LOCAL_TIME_NOW": ov_clock(60)}  # the guard's clock, a minute af
 OMW_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 
 
-def omw_at(record, stamp):
-    """The record with the transcript timestamp `stamp`: the instant the reader compares with a hold's `at`."""
-    record["timestamp"] = stamp
+def omw_at(record, when):
+    """The record with the transcript timestamp `when`: the instant the reader compares with a hold's `at`."""
+    record["timestamp"] = when
     return record
 
 
