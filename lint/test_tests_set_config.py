@@ -1,6 +1,6 @@
 """Cases for lint/check_tests_set_config.py: problems(root) names each test_*.py under root that pops, deletes or clears CLAUDE_CONFIG_DIR
-from the environment and never sets it, so its cases read the real ~/.claude. The incident: merge/test_merge.py pops it at import,
-and its cases that need it set it only inside their own patch.dict.
+from the environment at import and never sets it again, so its cases read the real ~/.claude. A module that pops it at import and
+sets it only inside a case's own patch.dict is one such file.
 
 Only a module-level pop, del or os.environ.clear() counts: it runs at import and reaches every case. A pop inside one test method is that case's own choice,
 so it is clean. The last module-level removal is cleared only by a set at module level after it, by a set in setUpModule(), or by a set in a function the module calls at import; a set under `if False:` does not clear it. A set in a test
@@ -19,7 +19,6 @@ import atexit
 import importlib.util
 import os
 import shutil
-import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -29,11 +28,16 @@ import _test_temp
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUN = _test_temp.run_folder()  # this run's one folder (test-temp-standard); removed when the process exits
 atexit.register(shutil.rmtree, RUN, True)
-MERGE_TEST = "merge/test_merge.py"  # the incident's file: the checker must name it on this repo
+INCIDENT_PATH = "merge/test_merge_incident.py"  # a fixture path: the file is written under the run folder, never read from the repo
+# The smallest shape the check must name: a module-level loop pop over names that include CLAUDE_CONFIG_DIR, with no set after it, and
+# a case that sets the variable only inside its own patch.dict.
+INCIDENT_SHAPE = ("import os\nfrom unittest import mock\n\nfor _name in ('CLAUDE_CODE_REMOTE', 'CLAUDE_CONFIG_DIR'):\n"
+                  "    os.environ.pop(_name, None)\n\n\ndef test_a():\n    with mock.patch.dict(os.environ, {'CLAUDE_CONFIG_DIR': '/tmp/config'}):\n"
+                  "        assert True\n")
 
 POP_NEVER_SET = ("import os\n\nos.environ.pop('CLAUDE_CONFIG_DIR', None)\n\n\ndef test_a():\n    assert True\n")
 LOOP_POP = ("import os\n\nfor _name in ('CLAUDE_CODE_REMOTE', 'CLAUDE_CONFIG_DIR'):\n    os.environ.pop(_name, None)\n\n\n"
-            "def test_a():\n    assert True\n")  # the form merge/test_merge.py uses
+            "def test_a():\n    assert True\n")
 DEL_NEVER_SET = ("import os\n\ndel os.environ['CLAUDE_CONFIG_DIR']\n\n\ndef test_a():\n    assert True\n")
 POP_THEN_SET = ("import os\n\nos.environ.pop('CLAUDE_CONFIG_DIR', None)\nos.environ['CLAUDE_CONFIG_DIR'] = '/tmp/config'\n\n\n"
                 "def test_a():\n    assert True\n")
@@ -94,10 +98,13 @@ SHARED_NAME_POP = ("import os\n\nfrom shared_names import CONFIG_VAR\n\nos.envir
 
 
 def tree_of(files):
-    """A fresh folder under the run folder, holding each file of `files`: a dict of file name to source."""
+    """A fresh folder under the run folder, holding each file of `files`: a dict of a path under the folder to source. A path's
+    folders are made first."""
     folder = tempfile.mkdtemp(prefix="tree-", dir=RUN)
     for name, source in files.items():
-        with open(os.path.join(folder, name), "w", encoding="utf-8") as handle:
+        path = os.path.join(folder, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
             handle.write(source)
     return folder
 
@@ -266,13 +273,15 @@ class TestsSetConfig(unittest.TestCase):
         times = parsed.count("shared_names.py")
         self.assertLessEqual(times, 1, "shared_names.py is parsed %d times in one run, where one parse per module would do" % times)
 
-    def test_repo_names_the_incident_file(self):
+    def test_incident_shape_is_named_at_its_path(self):
+        found = checker().problems(tree_of({INCIDENT_PATH: INCIDENT_SHAPE}))
+        self.assertTrue(len(found) == 1 and found[0].startswith(INCIDENT_PATH + ":"),
+                        "the incident's import-time pop, with a set only in a case's patch.dict, is not one problem named for %s: %r"
+                        % (INCIDENT_PATH, found))
+
+    def test_repo_has_no_problems_now(self):
         found = checker().problems(ROOT)
-        print("\nproblems on this repo (%d):" % len(found), file=sys.stderr)
-        for line in found:
-            print("  " + line, file=sys.stderr)
-        self.assertTrue(any(line.startswith(MERGE_TEST + ":") for line in found),
-                        "%s pops CLAUDE_CONFIG_DIR at import and is not among the repo's findings: %r" % (MERGE_TEST, found))
+        self.assertEqual(found, [], "a test file of this repo pops CLAUDE_CONFIG_DIR at import and never sets it again: %r" % found)
 
 
 if __name__ == "__main__":
